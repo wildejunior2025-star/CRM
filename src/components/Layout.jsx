@@ -1,4 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
+import { useTheme } from '../hooks/useTheme'
+import ThemeToggle from './ThemeToggle'
 import './Layout.css'
 
 const links = [
@@ -9,6 +11,8 @@ const links = [
 ]
 
 export default function Layout() {
+  const { theme, toggleTheme } = useTheme()
+
   return (
     <div className="layout">
       <aside className="sidebar">
@@ -27,6 +31,9 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
+        <div className="sidebar-footer">
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        </div>
       </aside>
       <main className="content">
         <Outlet />

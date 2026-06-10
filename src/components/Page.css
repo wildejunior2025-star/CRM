@@ -18,15 +18,22 @@
   padding: 10px 16px;
   font-weight: 600;
   cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease,
+    opacity 120ms ease;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn-primary {
   background: var(--primary);
-  color: #fff;
+  color: var(--primary-contrast);
 }
 
-.btn-primary:hover {
-  background: var(--primary-dark);
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
 }
 
 .btn-secondary {
@@ -35,9 +42,18 @@
   border: 1px solid var(--border);
 }
 
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--primary);
+}
+
 .btn-danger {
   background: var(--danger);
   color: #fff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  filter: brightness(0.92);
 }
 
 .btn-sm {
@@ -51,6 +67,8 @@
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 20px;
+  box-shadow: var(--shadow-sm);
+  transition: background-color 160ms ease, border-color 160ms ease;
 }
 
 .data-table {
@@ -58,6 +76,8 @@
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  transition: background-color 160ms ease, border-color 160ms ease;
 }
 
 .data-table table th,
@@ -102,6 +122,7 @@
   max-width: 480px;
   max-height: 90vh;
   overflow-y: auto;
+  box-shadow: var(--shadow-md);
 }
 
 .modal h2 {
@@ -139,6 +160,13 @@
   border-radius: 6px;
   background: var(--bg);
   color: var(--text);
+  transition: border-color 120ms ease, background-color 160ms ease;
+}
+
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus {
+  border-color: var(--primary);
 }
 
 .modal-actions {
@@ -162,6 +190,12 @@
   border-radius: 6px;
   background: var(--surface);
   color: var(--text);
+  transition: border-color 120ms ease, background-color 160ms ease;
+}
+
+.toolbar input:focus,
+.toolbar select:focus {
+  border-color: var(--primary);
 }
 
 .badge {
@@ -173,17 +207,17 @@
 }
 
 .badge-success {
-  background: rgba(22, 163, 74, 0.12);
+  background: var(--success-bg);
   color: var(--success);
 }
 
 .badge-danger {
-  background: rgba(220, 38, 38, 0.12);
+  background: var(--danger-bg);
   color: var(--danger);
 }
 
 .badge-warning {
-  background: rgba(217, 119, 6, 0.12);
+  background: var(--warning-bg);
   color: var(--warning);
 }
 
