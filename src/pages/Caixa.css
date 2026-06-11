@@ -1,0 +1,44 @@
+.caixa-table-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 24px 0 8px;
+}
+
+.caixa-table-title:first-of-type {
+  margin-top: 0;
+}
+
+.caixa-amount-col {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.caixa-info-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+}
+
+.caixa-info-card .label {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.caixa-info-card .value-sm {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.caixa-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.caixa-esperado {
+  margin: 0 0 16px;
+  font-size: 14px;
+  color: var(--text-muted);
+}

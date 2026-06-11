@@ -7,6 +7,7 @@ import './Layout.css'
 const links = [
   { to: '/', label: 'Dashboard', end: true, roles: ['admin', 'vendedor'] },
   { to: '/vendas', label: 'Vendas', roles: ['admin', 'vendedor'] },
+  { to: '/caixa', label: 'Caixa', roles: ['admin', 'vendedor'] },
   { to: '/financeiro', label: 'Financeiro', roles: ['admin'] },
   { to: '/relatorios', label: 'Relatórios', roles: ['admin', 'vendedor'] },
   { to: '/clientes', label: 'Clientes', roles: ['admin', 'vendedor'] },

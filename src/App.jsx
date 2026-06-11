@@ -10,6 +10,7 @@ import Clientes from './pages/Clientes'
 import Produtos from './pages/Produtos'
 import Estoque from './pages/Estoque'
 import Vendas from './pages/Vendas'
+import Caixa from './pages/Caixa'
 import Financeiro from './pages/Financeiro'
 import Relatorios from './pages/Relatorios'
 import Usuarios from './pages/Usuarios'
@@ -35,6 +36,7 @@ export default function App() {
             <Route index element={<Dashboard />} />
             <Route path="clientes" element={<Clientes />} />
             <Route path="vendas" element={<Vendas />} />
+            <Route path="caixa" element={<Caixa />} />
             <Route path="relatorios" element={<Relatorios />} />
             <Route
               path="produtos"
