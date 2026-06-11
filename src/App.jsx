@@ -9,6 +9,7 @@ import Produtos from './pages/Produtos'
 import Estoque from './pages/Estoque'
 import Vendas from './pages/Vendas'
 import Financeiro from './pages/Financeiro'
+import Relatorios from './pages/Relatorios'
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
             <Route path="estoque" element={<Estoque />} />
             <Route path="vendas" element={<Vendas />} />
             <Route path="financeiro" element={<Financeiro />} />
+            <Route path="relatorios" element={<Relatorios />} />
           </Route>
         </Routes>
       </BrowserRouter>

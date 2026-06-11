@@ -8,6 +8,7 @@ const links = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/vendas', label: 'Vendas' },
   { to: '/financeiro', label: 'Financeiro' },
+  { to: '/relatorios', label: 'Relatórios' },
   { to: '/clientes', label: 'Clientes' },
   { to: '/produtos', label: 'Produtos' },
   { to: '/estoque', label: 'Estoque' },
