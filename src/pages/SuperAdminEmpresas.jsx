@@ -39,6 +39,9 @@ export default function SuperAdminEmpresas() {
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(emptyForm)
 
+  const [inviteLink, setInviteLink] = useState(null)
+  const [inviteCopiado, setInviteCopiado] = useState(false)
+
   async function loadAll() {
     setLoading(true)
     setError(null)
@@ -59,13 +62,18 @@ export default function SuperAdminEmpresas() {
       counts[p.empresa_id] = (counts[p.empresa_id] ?? 0) + 1
     }
     setUsuariosPorEmpresa(counts)
-
     setLoading(false)
   }
 
   useEffect(() => {
     loadAll()
   }, [])
+
+  function openNew() {
+    setEditingId(null)
+    setForm(emptyForm)
+    setShowModal(true)
+  }
 
   function openEdit(empresa) {
     setEditingId(empresa.id)
@@ -98,15 +106,31 @@ export default function SuperAdminEmpresas() {
       observacoes: form.observacoes || null,
     }
 
-    const { error } = await supabase.from('empresas').update(payload).eq('id', editingId)
+    if (editingId) {
+      const { error } = await supabase.from('empresas').update(payload).eq('id', editingId)
+      if (error) { setError(error.message); return }
+      setShowModal(false)
+      await loadAll()
+    } else {
+      const { data, error } = await supabase
+        .from('empresas')
+        .insert({ ...payload, status: 'trial', trial_fim: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) })
+        .select('id')
+        .single()
 
-    if (error) {
-      setError(error.message)
-      return
+      if (error) { setError(error.message); return }
+
+      setShowModal(false)
+      await loadAll()
+      setInviteLink(`${window.location.origin}/cadastro-admin/${data.id}`)
     }
+  }
 
-    setShowModal(false)
-    await loadAll()
+  async function copiarLink() {
+    if (!inviteLink) return
+    await navigator.clipboard.writeText(inviteLink)
+    setInviteCopiado(true)
+    setTimeout(() => setInviteCopiado(false), 2000)
   }
 
   async function handleStatus(empresa, novoStatus) {
@@ -135,12 +159,7 @@ export default function SuperAdminEmpresas() {
     })
 
     setSavingId(null)
-
-    if (error) {
-      setError(error.message)
-      return
-    }
-
+    if (error) { setError(error.message); return }
     await loadAll()
   }
 
@@ -148,9 +167,32 @@ export default function SuperAdminEmpresas() {
     <div>
       <div className="page-header">
         <h1>Empresas</h1>
+        <button className="btn btn-primary" onClick={openNew}>
+          Nova empresa
+        </button>
       </div>
 
       {error && <p className="error-text">{error}</p>}
+
+      {inviteLink && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <p style={{ margin: '0 0 8px', fontWeight: 600 }}>Empresa criada! Envie este link para o administrador criar a conta de acesso:</p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              readOnly
+              value={inviteLink}
+              onFocus={(e) => e.target.select()}
+              style={{ flex: 1, padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }}
+            />
+            <button type="button" className="btn btn-secondary btn-sm" onClick={copiarLink}>
+              {inviteCopiado ? 'Copiado!' : 'Copiar'}
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setInviteLink(null)}>
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="data-table">
         {loading ? (
@@ -197,6 +239,12 @@ export default function SuperAdminEmpresas() {
                       </button>
                       <button
                         className="btn btn-secondary btn-sm"
+                        onClick={() => setInviteLink(`${window.location.origin}/cadastro-admin/${emp.id}`)}
+                      >
+                        Link admin
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
                         disabled={savingId === emp.id}
                         onClick={() => handleStatus(emp, 'ativo')}
                       >
@@ -228,22 +276,17 @@ export default function SuperAdminEmpresas() {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Editar empresa</h2>
+            <h2>{editingId ? 'Editar empresa' : 'Nova empresa'}</h2>
             <form onSubmit={handleSubmit}>
               <div className="form-grid">
                 <div className="form-field full">
-                  <label>Nome</label>
+                  <label>Nome da empresa</label>
                   <input name="nome" value={form.nome} onChange={handleChange} required />
                 </div>
 
                 <div className="form-field full">
                   <label>E-mail de contato</label>
-                  <input
-                    type="email"
-                    name="email_contato"
-                    value={form.email_contato}
-                    onChange={handleChange}
-                  />
+                  <input type="email" name="email_contato" value={form.email_contato} onChange={handleChange} />
                 </div>
 
                 <div className="form-field">
@@ -263,24 +306,16 @@ export default function SuperAdminEmpresas() {
                   />
                 </div>
 
-                <div className="form-field">
-                  <label>Vencimento</label>
-                  <input
-                    type="date"
-                    name="vencimento"
-                    value={form.vencimento ?? ''}
-                    onChange={handleChange}
-                  />
-                </div>
+                {editingId && (
+                  <div className="form-field">
+                    <label>Vencimento</label>
+                    <input type="date" name="vencimento" value={form.vencimento ?? ''} onChange={handleChange} />
+                  </div>
+                )}
 
                 <div className="form-field full">
                   <label>Observações</label>
-                  <textarea
-                    name="observacoes"
-                    value={form.observacoes}
-                    onChange={handleChange}
-                    rows={3}
-                  />
+                  <textarea name="observacoes" value={form.observacoes} onChange={handleChange} rows={3} />
                 </div>
               </div>
 
@@ -289,7 +324,7 @@ export default function SuperAdminEmpresas() {
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary">
-                  Salvar
+                  {editingId ? 'Salvar' : 'Criar empresa'}
                 </button>
               </div>
             </form>

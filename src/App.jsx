@@ -20,6 +20,7 @@ import PortalCatalogo from './pages/PortalCatalogo'
 import PortalPedidos from './pages/PortalPedidos'
 import PortalFiado from './pages/PortalFiado'
 import SuperAdminEmpresas from './pages/SuperAdminEmpresas'
+import CadastroAdmin from './pages/CadastroAdmin'
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/cadastro" element={<Cadastro />} />
           <Route path="/cadastro-cliente/:empresaId" element={<CadastroCliente />} />
+          <Route path="/cadastro-admin/:empresaId" element={<CadastroAdmin />} />
 
           <Route
             element={
