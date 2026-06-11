@@ -131,7 +131,7 @@ export default function SuperAdminEmpresas() {
     setError(null)
 
     const { data, error } = await supabase.functions.invoke('impersonate-empresa', {
-      body: { empresa_id: emp.id },
+      body: { empresa_id: emp.id, redirect_to: window.location.origin },
     })
 
     setSavingId(null)
