@@ -1,0 +1,29 @@
+.subscription-block {
+  max-width: 480px;
+  margin: 80px auto;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  box-shadow: var(--shadow-sm);
+}
+
+.subscription-block h1 {
+  font-size: 20px;
+  margin: 0 0 12px;
+}
+
+.subscription-block p {
+  color: var(--text-muted);
+  margin: 4px 0;
+}
+
+.subscription-banner {
+  background: var(--warning-bg);
+  color: var(--warning);
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}

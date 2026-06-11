@@ -3,8 +3,10 @@ import { AuthProvider } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 import PortalLayout from './components/PortalLayout'
+import SuperAdminLayout from './components/SuperAdminLayout'
 import Login from './pages/Login'
 import Cadastro from './pages/Cadastro'
+import CadastroCliente from './pages/CadastroCliente'
 import Dashboard from './pages/Dashboard'
 import Clientes from './pages/Clientes'
 import Produtos from './pages/Produtos'
@@ -17,6 +19,7 @@ import Usuarios from './pages/Usuarios'
 import PortalCatalogo from './pages/PortalCatalogo'
 import PortalPedidos from './pages/PortalPedidos'
 import PortalFiado from './pages/PortalFiado'
+import SuperAdminEmpresas from './pages/SuperAdminEmpresas'
 
 export default function App() {
   return (
@@ -25,6 +28,17 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/cadastro" element={<Cadastro />} />
+          <Route path="/cadastro-cliente/:empresaId" element={<CadastroCliente />} />
+
+          <Route
+            element={
+              <ProtectedRoute roles={['super_admin']}>
+                <SuperAdminLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route path="/super-admin" element={<SuperAdminEmpresas />} />
+          </Route>
 
           <Route
             element={

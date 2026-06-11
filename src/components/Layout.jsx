@@ -1,7 +1,8 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import { useTheme } from '../hooks/useTheme'
 import { useAuth } from '../hooks/useAuth'
 import ThemeToggle from './ThemeToggle'
+import SubscriptionGate from './SubscriptionGate'
 import './Layout.css'
 
 const links = [
@@ -55,7 +56,7 @@ export default function Layout() {
         </div>
       </aside>
       <main className="content">
-        <Outlet />
+        <SubscriptionGate />
       </main>
     </div>
   )

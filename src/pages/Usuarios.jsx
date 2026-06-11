@@ -11,12 +11,24 @@ const PERFIS = [
 ]
 
 export default function Usuarios() {
-  const { user, refreshProfile } = useAuth()
+  const { user, profile, refreshProfile } = useAuth()
   const [perfis, setPerfis] = useState([])
   const [clientes, setClientes] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [savingId, setSavingId] = useState(null)
+  const [linkCopiado, setLinkCopiado] = useState(false)
+
+  const linkConvite = profile?.empresa_id
+    ? `${window.location.origin}/cadastro-cliente/${profile.empresa_id}`
+    : null
+
+  async function copiarLink() {
+    if (!linkConvite) return
+    await navigator.clipboard.writeText(linkConvite)
+    setLinkCopiado(true)
+    setTimeout(() => setLinkCopiado(false), 2000)
+  }
 
   async function loadAll() {
     setLoading(true)
@@ -92,6 +104,20 @@ export default function Usuarios() {
       </div>
 
       {error && <p className="error-text">{error}</p>}
+
+      {linkConvite && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="form-field">
+            <label>Link de cadastro para clientes</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input readOnly value={linkConvite} onFocus={(e) => e.target.select()} />
+              <button type="button" className="btn btn-secondary btn-sm" onClick={copiarLink}>
+                {linkCopiado ? 'Copiado!' : 'Copiar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="data-table">
         {loading ? (

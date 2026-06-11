@@ -5,14 +5,25 @@ import { AuthContext } from './authContextValue'
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
+  const [empresa, setEmpresa] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let active = true
 
+    async function loadEmpresa(empresaId) {
+      if (!empresaId) {
+        if (active) setEmpresa(null)
+        return
+      }
+      const { data } = await supabase.from('empresas').select('*').eq('id', empresaId).maybeSingle()
+      if (active) setEmpresa(data ?? null)
+    }
+
     async function loadProfile(userId) {
       const { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
       if (active) setProfile(data ?? null)
+      await loadEmpresa(data?.empresa_id ?? null)
     }
 
     supabase.auth.getSession().then(async ({ data }) => {
@@ -25,7 +36,10 @@ export function AuthProvider({ children }) {
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)
       if (newSession) loadProfile(newSession.user.id)
-      else setProfile(null)
+      else {
+        setProfile(null)
+        setEmpresa(null)
+      }
     })
 
     return () => {
@@ -39,11 +53,11 @@ export function AuthProvider({ children }) {
     return { error }
   }
 
-  async function signup(email, password, nome) {
+  async function signup(email, password, metadata) {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { nome } },
+      options: { data: metadata },
     })
     return { error }
   }
@@ -60,12 +74,24 @@ export function AuthProvider({ children }) {
       .eq('id', session.user.id)
       .maybeSingle()
     setProfile(data ?? null)
+
+    if (data?.empresa_id) {
+      const { data: empresaData } = await supabase
+        .from('empresas')
+        .select('*')
+        .eq('id', data.empresa_id)
+        .maybeSingle()
+      setEmpresa(empresaData ?? null)
+    } else {
+      setEmpresa(null)
+    }
   }
 
   const value = {
     session,
     user: session?.user ?? null,
     profile,
+    empresa,
     perfil: profile?.perfil ?? null,
     loading,
     login,

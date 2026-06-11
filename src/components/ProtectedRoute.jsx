@@ -19,7 +19,9 @@ export default function ProtectedRoute({ children, roles }) {
   }
 
   if (roles && !roles.includes(profile.perfil)) {
-    const home = profile.perfil === 'cliente' ? '/portal' : '/'
+    let home = '/'
+    if (profile.perfil === 'cliente') home = '/portal'
+    else if (profile.perfil === 'super_admin') home = '/super-admin'
     return <Navigate to={home} replace />
   }
 

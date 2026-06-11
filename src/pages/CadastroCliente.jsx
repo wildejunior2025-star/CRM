@@ -1,16 +1,16 @@
 import { useState } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import ThemeToggle from '../components/ThemeToggle'
 import './Login.css'
 
-export default function Cadastro() {
+export default function CadastroCliente() {
+  const { empresaId } = useParams()
   const { session, signup } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
 
-  const [nomeEmpresa, setNomeEmpresa] = useState('')
   const [nome, setNome] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -41,8 +41,8 @@ export default function Cadastro() {
     setLoading(true)
     const { error } = await signup(email, password, {
       nome,
-      tipo_cadastro: 'empresa',
-      nome_empresa: nomeEmpresa,
+      tipo_cadastro: 'cliente',
+      empresa_id: empresaId,
     })
     setLoading(false)
 
@@ -81,26 +81,13 @@ export default function Cadastro() {
           </span>
           <div>
             <h1>Depósito CRM</h1>
-            <p className="login-subtitle">Cadastre sua empresa e comece grátis</p>
+            <p className="login-subtitle">Crie sua conta de cliente</p>
           </div>
         </div>
 
         <form className="login-form" onSubmit={handleSubmit}>
           <div className="form-field">
-            <label htmlFor="nome-empresa">Nome da empresa</label>
-            <input
-              id="nome-empresa"
-              type="text"
-              placeholder="Ex: Depósito Boa Vista"
-              value={nomeEmpresa}
-              onChange={(e) => setNomeEmpresa(e.target.value)}
-              autoComplete="organization"
-              required
-            />
-          </div>
-
-          <div className="form-field">
-            <label htmlFor="nome">Seu nome</label>
+            <label htmlFor="nome">Nome</label>
             <input
               id="nome"
               type="text"
@@ -184,7 +171,7 @@ export default function Cadastro() {
                 Cadastrando...
               </>
             ) : (
-              'Criar empresa'
+              'Criar conta'
             )}
           </button>
         </form>
@@ -194,7 +181,7 @@ export default function Cadastro() {
         </p>
       </div>
 
-      <p className="login-footer">Depósito CRM &middot; Cadastro de empresas</p>
+      <p className="login-footer">Depósito CRM &middot; Cadastro de clientes</p>
     </div>
   )
 }
