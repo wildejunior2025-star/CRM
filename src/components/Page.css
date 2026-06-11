@@ -221,6 +221,17 @@
   color: var(--warning);
 }
 
+.badge-primary {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+
+.badge-neutral {
+  background: var(--bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
 .error-text {
   color: var(--danger);
   font-size: 13px;

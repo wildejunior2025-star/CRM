@@ -69,6 +69,34 @@ input, select, textarea, button {
   font-size: 14px;
 }
 
+.auth-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 13px;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.auth-loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: auth-spin 700ms linear infinite;
+}
+
+@keyframes auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 table {
   border-collapse: collapse;
   width: 100%;
