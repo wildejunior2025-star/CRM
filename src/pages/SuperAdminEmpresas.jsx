@@ -126,6 +126,24 @@ export default function SuperAdminEmpresas() {
     }
   }
 
+  async function acessarEmpresa(emp) {
+    setSavingId(emp.id)
+    setError(null)
+
+    const { data, error } = await supabase.functions.invoke('impersonate-empresa', {
+      body: { empresa_id: emp.id },
+    })
+
+    setSavingId(null)
+
+    if (error || !data?.link) {
+      setError(error?.message ?? data?.error ?? 'Erro ao gerar link de acesso')
+      return
+    }
+
+    window.open(data.link, '_blank')
+  }
+
   async function copiarLink() {
     if (!inviteLink) return
     await navigator.clipboard.writeText(inviteLink)
@@ -236,6 +254,13 @@ export default function SuperAdminEmpresas() {
                     <div className="caixa-actions">
                       <button className="btn btn-secondary btn-sm" onClick={() => openEdit(emp)}>
                         Editar
+                      </button>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        disabled={savingId === emp.id}
+                        onClick={() => acessarEmpresa(emp)}
+                      >
+                        {savingId === emp.id ? 'Aguarde...' : 'Acessar empresa'}
                       </button>
                       <button
                         className="btn btn-secondary btn-sm"
