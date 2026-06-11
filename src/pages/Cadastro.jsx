@@ -1,34 +1,53 @@
 import { useState } from 'react'
-import { Link, Navigate, useLocation } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import ThemeToggle from '../components/ThemeToggle'
 import './Login.css'
 
-export default function Login() {
-  const { session, login } = useAuth()
+export default function Cadastro() {
+  const { session, signup } = useAuth()
   const { theme, toggleTheme } = useTheme()
-  const location = useLocation()
+  const navigate = useNavigate()
+
+  const [nome, setNome] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState(null)
+  const [success, setSuccess] = useState(null)
   const [loading, setLoading] = useState(false)
 
   if (session) {
-    const from = location.state?.from?.pathname ?? '/'
-    return <Navigate to={from} replace />
+    return <Navigate to="/" replace />
   }
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError(null)
+    setSuccess(null)
+
+    if (password !== confirmPassword) {
+      setError('As senhas não conferem.')
+      return
+    }
+
+    if (password.length < 6) {
+      setError('A senha precisa ter pelo menos 6 caracteres.')
+      return
+    }
+
     setLoading(true)
-
-    const { error } = await login(email, password)
-
-    if (error) setError(error.message)
+    const { error } = await signup(email, password, nome)
     setLoading(false)
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+
+    setSuccess('Cadastro realizado! Você já pode entrar com seu e-mail e senha.')
+    setTimeout(() => navigate('/login'), 2000)
   }
 
   return (
@@ -57,11 +76,24 @@ export default function Login() {
           </span>
           <div>
             <h1>Depósito CRM</h1>
-            <p className="login-subtitle">Entre com sua conta para continuar</p>
+            <p className="login-subtitle">Crie sua conta de cliente</p>
           </div>
         </div>
 
         <form className="login-form" onSubmit={handleSubmit}>
+          <div className="form-field">
+            <label htmlFor="nome">Nome</label>
+            <input
+              id="nome"
+              type="text"
+              placeholder="Seu nome"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              autoComplete="name"
+              required
+            />
+          </div>
+
           <div className="form-field">
             <label htmlFor="email">E-mail</label>
             <input
@@ -77,56 +109,28 @@ export default function Login() {
 
           <div className="form-field">
             <label htmlFor="password">Senha</label>
-            <div className="login-password-wrapper">
-              <input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                required
-              />
-              <button
-                type="button"
-                className="login-password-toggle"
-                onClick={() => setShowPassword((prev) => !prev)}
-                aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-                tabIndex={-1}
-              >
-                {showPassword ? (
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
-                    <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
-                    <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
-                    <path d="M2 2l20 20" />
-                  </svg>
-                ) : (
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                )}
-              </button>
-            </div>
+            <input
+              id="password"
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              required
+            />
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="confirm-password">Confirmar senha</label>
+            <input
+              id="confirm-password"
+              type="password"
+              placeholder="••••••••"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
+              required
+            />
           </div>
 
           {error && (
@@ -149,24 +153,30 @@ export default function Login() {
             </div>
           )}
 
+          {success && (
+            <div className="login-error" role="status" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>
+              <span>{success}</span>
+            </div>
+          )}
+
           <button type="submit" className="btn btn-primary login-submit" disabled={loading}>
             {loading ? (
               <>
                 <span className="login-spinner" aria-hidden="true" />
-                Entrando...
+                Cadastrando...
               </>
             ) : (
-              'Entrar'
+              'Criar conta'
             )}
           </button>
         </form>
 
         <p className="login-footer">
-          É cliente e ainda não tem conta? <Link to="/cadastro">Criar conta</Link>
+          Já tem uma conta? <Link to="/login">Entrar</Link>
         </p>
       </div>
 
-      <p className="login-footer">Depósito CRM &middot; Acesso restrito a colaboradores</p>
+      <p className="login-footer">Depósito CRM &middot; Cadastro de clientes</p>
     </div>
   )
 }
