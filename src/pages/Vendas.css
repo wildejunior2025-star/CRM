@@ -1,0 +1,56 @@
+.modal-lg {
+  max-width: 720px;
+}
+
+.venda-itens-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 16px 0 8px;
+}
+
+.venda-itens {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.venda-item-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 110px 90px auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.venda-item-row select,
+.venda-item-row input {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  width: 100%;
+}
+
+.venda-item-subtotal {
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.venda-item-casco {
+  white-space: nowrap;
+}
+
+.venda-total {
+  margin-top: 16px;
+  text-align: right;
+  font-size: 16px;
+}
+
+@media (max-width: 720px) {
+  .venda-item-row {
+    grid-template-columns: 1fr;
+  }
+}

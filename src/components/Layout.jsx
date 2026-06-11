@@ -5,6 +5,7 @@ import './Layout.css'
 
 const links = [
   { to: '/', label: 'Dashboard', end: true },
+  { to: '/vendas', label: 'Vendas' },
   { to: '/clientes', label: 'Clientes' },
   { to: '/produtos', label: 'Produtos' },
   { to: '/estoque', label: 'Estoque' },

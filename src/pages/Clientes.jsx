@@ -1,15 +1,9 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { CONDICOES_PAGAMENTO } from '../lib/constants'
 import '../components/Page.css'
 
 const TIPOS = ['mercadinho', 'bar', 'restaurante', 'distribuidor', 'outro']
-const CONDICOES = [
-  { value: 'a_vista', label: 'À vista' },
-  { value: 'fiado', label: 'Fiado' },
-  { value: 'boleto_7d', label: 'Boleto 7 dias' },
-  { value: 'boleto_14d', label: 'Boleto 14 dias' },
-  { value: 'boleto_30d', label: 'Boleto 30 dias' },
-]
 const DIAS = ['segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado']
 
 const emptyForm = {
@@ -180,7 +174,7 @@ export default function Clientes() {
                   </td>
                   <td>{c.dia_visita || '-'}</td>
                   <td>
-                    {CONDICOES.find((o) => o.value === c.condicao_pagamento)
+                    {CONDICOES_PAGAMENTO.find((o) => o.value === c.condicao_pagamento)
                       ?.label || c.condicao_pagamento}
                   </td>
                   <td>
@@ -308,7 +302,7 @@ export default function Clientes() {
                     value={form.condicao_pagamento}
                     onChange={handleChange}
                   >
-                    {CONDICOES.map((o) => (
+                    {CONDICOES_PAGAMENTO.map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}
                       </option>
