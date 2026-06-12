@@ -3,6 +3,49 @@
   min-height: 100vh;
 }
 
+/* Quando o banner está ativo, empurra o layout inteiro para baixo */
+.layout-has-banner {
+  margin-top: 44px;
+}
+
+/* Banner de impersonação — fixo no topo, não afeta o flex layout */
+.impersonate-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  background: #f59e0b;
+  color: #1a1a1a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 600;
+  z-index: 500;
+}
+
+.impersonate-banner button {
+  background: rgba(0,0,0,0.15);
+  border: none;
+  color: #1a1a1a;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms;
+  flex-shrink: 0;
+}
+
+.impersonate-banner button:hover {
+  background: rgba(0,0,0,0.25);
+}
+
+/* ── Sidebar ── */
 .sidebar {
   width: 220px;
   flex-shrink: 0;
@@ -12,6 +55,7 @@
   border-right: 1px solid var(--border);
   padding: 20px 12px;
   transition: background-color 160ms ease, border-color 160ms ease;
+  z-index: 200;
 }
 
 .sidebar-title {
@@ -75,9 +119,126 @@
   width: 100%;
 }
 
+/* ── Content ── */
 .content {
   flex: 1;
   padding: 24px 32px;
   max-width: 100%;
   overflow-x: auto;
+  min-width: 0;
+}
+
+/* ── Mobile top bar (oculto no desktop) ── */
+.mobile-topbar {
+  display: none;
+}
+
+/* ── Overlay (oculto no desktop) ── */
+.sidebar-overlay {
+  display: none;
+}
+
+/* ══════════════════════════════════════════
+   RESPONSIVO — mobile (até 768px)
+══════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+  .layout {
+    flex-direction: column;
+  }
+
+  /* Top bar fixa no topo */
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px;
+    height: 56px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 150;
+    flex-shrink: 0;
+  }
+
+  .mobile-topbar-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Botão hamburguer */
+  .mobile-menu-btn {
+    background: none;
+    border: none;
+    color: var(--text);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .mobile-menu-btn:hover {
+    background: var(--surface-hover);
+  }
+
+  /* Sidebar vira drawer lateral */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100dvh;
+    width: 260px;
+    transform: translateX(-100%);
+    transition: transform 240ms ease, background-color 160ms ease;
+    padding-top: 16px;
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+  }
+
+  /* Sidebar e overlay no mobile descem quando o banner está ativo */
+  .layout-has-banner .sidebar {
+    top: 44px;
+    height: calc(100dvh - 44px);
+  }
+
+  /* Overlay escuro atrás do drawer */
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 199;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 240ms ease;
+  }
+
+  .sidebar-overlay.visible {
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  /* Conteúdo ocupa tudo, sem padding lateral excessivo */
+  .content {
+    padding: 16px;
+    flex: 1;
+  }
+
+  /* Links maiores para touch */
+  .sidebar-link {
+    padding: 13px 14px;
+    font-size: 15px;
+  }
 }

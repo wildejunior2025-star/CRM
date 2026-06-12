@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { BrandingProvider } from './context/BrandingContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 import PortalLayout from './components/PortalLayout'
@@ -16,21 +17,30 @@ import Caixa from './pages/Caixa'
 import Financeiro from './pages/Financeiro'
 import Relatorios from './pages/Relatorios'
 import Usuarios from './pages/Usuarios'
-import PortalCatalogo from './pages/PortalCatalogo'
+import PortalHome from './pages/PortalHome'
+import PortalLoja from './pages/PortalLoja'
 import PortalPedidos from './pages/PortalPedidos'
 import PortalFiado from './pages/PortalFiado'
 import SuperAdminEmpresas from './pages/SuperAdminEmpresas'
+import SuperAdminClientes from './pages/SuperAdminClientes'
+import SuperAdminComissoes from './pages/SuperAdminComissoes'
 import CadastroAdmin from './pages/CadastroAdmin'
+import CadastroVendedor from './pages/CadastroVendedor'
 
 export default function App() {
   return (
+    <BrandingProvider>
     <AuthProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/cadastro" element={<Cadastro />} />
+          {/* Cadastro de cliente livre (sem empresa) */}
+          <Route path="/cadastro-cliente" element={<CadastroCliente />} />
+          {/* Cadastro de cliente via convite de empresa (link antigo ainda funciona) */}
           <Route path="/cadastro-cliente/:empresaId" element={<CadastroCliente />} />
           <Route path="/cadastro-admin/:empresaId" element={<CadastroAdmin />} />
+          <Route path="/cadastro-vendedor/:empresaId" element={<CadastroVendedor />} />
 
           <Route
             element={
@@ -40,6 +50,8 @@ export default function App() {
             }
           >
             <Route path="/super-admin" element={<SuperAdminEmpresas />} />
+            <Route path="/super-admin/clientes" element={<SuperAdminClientes />} />
+            <Route path="/super-admin/comissoes" element={<SuperAdminComissoes />} />
           </Route>
 
           <Route
@@ -56,35 +68,19 @@ export default function App() {
             <Route path="relatorios" element={<Relatorios />} />
             <Route
               path="produtos"
-              element={
-                <ProtectedRoute roles={['admin']}>
-                  <Produtos />
-                </ProtectedRoute>
-              }
+              element={<ProtectedRoute roles={['admin']}><Produtos /></ProtectedRoute>}
             />
             <Route
               path="estoque"
-              element={
-                <ProtectedRoute roles={['admin']}>
-                  <Estoque />
-                </ProtectedRoute>
-              }
+              element={<ProtectedRoute roles={['admin']}><Estoque /></ProtectedRoute>}
             />
             <Route
               path="financeiro"
-              element={
-                <ProtectedRoute roles={['admin']}>
-                  <Financeiro />
-                </ProtectedRoute>
-              }
+              element={<ProtectedRoute roles={['admin']}><Financeiro /></ProtectedRoute>}
             />
             <Route
               path="usuarios"
-              element={
-                <ProtectedRoute roles={['admin']}>
-                  <Usuarios />
-                </ProtectedRoute>
-              }
+              element={<ProtectedRoute roles={['admin']}><Usuarios /></ProtectedRoute>}
             />
           </Route>
 
@@ -96,12 +92,14 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route index element={<PortalCatalogo />} />
+            <Route index element={<PortalHome />} />
+            <Route path="loja/:empresaId" element={<PortalLoja />} />
             <Route path="pedidos" element={<PortalPedidos />} />
             <Route path="fiado" element={<PortalFiado />} />
           </Route>
         </Routes>
       </BrowserRouter>
     </AuthProvider>
+    </BrandingProvider>
   )
 }

@@ -41,13 +41,12 @@ export default function Caixa() {
     setLoading(true)
     setError(null)
 
+    const caixaAtivaQuery = isAdmin
+      ? supabase.from('caixas').select('*').eq('status', 'aberto').order('aberto_em', { ascending: false }).limit(1)
+      : supabase.from('caixas').select('*').eq('aberto_por', user.id).eq('status', 'aberto').limit(1)
+
     const [caixaRes, historicoRes, usuariosRes] = await Promise.all([
-      supabase
-        .from('caixas')
-        .select('*')
-        .eq('aberto_por', user.id)
-        .eq('status', 'aberto')
-        .maybeSingle(),
+      caixaAtivaQuery,
       supabase.from('caixas').select('*').order('aberto_em', { ascending: false }).limit(20),
       isAdmin ? supabase.from('profiles').select('id, nome, email') : Promise.resolve({ data: [] }),
     ])
@@ -55,7 +54,7 @@ export default function Caixa() {
     const firstError = caixaRes.error || historicoRes.error || usuariosRes.error
     if (firstError) setError(firstError.message)
 
-    setCaixaAtual(caixaRes.data ?? null)
+    setCaixaAtual(caixaRes.data?.[0] ?? null)
     setHistorico(historicoRes.data ?? [])
     setUsuarios(usuariosRes.data ?? [])
 

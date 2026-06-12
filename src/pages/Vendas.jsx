@@ -21,6 +21,10 @@ export default function Vendas() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [statusFiltro, setStatusFiltro] = useState('')
+  const [dataInicio, setDataInicio] = useState('')
+  const [dataFim, setDataFim] = useState('')
+  const [pagina, setPagina] = useState(1)
+  const POR_PAGINA = 20
 
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -177,7 +181,16 @@ export default function Vendas() {
     else setDetalheItens(data ?? [])
   }
 
-  const filtered = vendas.filter((v) => !statusFiltro || v.status === statusFiltro)
+  const filtered = vendas.filter((v) => {
+    if (statusFiltro && v.status !== statusFiltro) return false
+    if (dataInicio && v.created_at < dataInicio) return false
+    if (dataFim && v.created_at > dataFim + 'T23:59:59') return false
+    return true
+  })
+
+  const totalPaginas = Math.ceil(filtered.length / POR_PAGINA)
+  const paginaAtual = Math.min(pagina, totalPaginas || 1)
+  const visiveis = filtered.slice((paginaAtual - 1) * POR_PAGINA, paginaAtual * POR_PAGINA)
 
   return (
     <div>
@@ -189,7 +202,7 @@ export default function Vendas() {
       </div>
 
       <div className="toolbar">
-        <select value={statusFiltro} onChange={(e) => setStatusFiltro(e.target.value)}>
+        <select value={statusFiltro} onChange={(e) => { setStatusFiltro(e.target.value); setPagina(1) }}>
           <option value="">Todos os status</option>
           {STATUS_VENDA.map((s) => (
             <option key={s.value} value={s.value}>
@@ -197,6 +210,23 @@ export default function Vendas() {
             </option>
           ))}
         </select>
+        <input
+          type="date"
+          value={dataInicio}
+          onChange={(e) => { setDataInicio(e.target.value); setPagina(1) }}
+          title="Data início"
+        />
+        <input
+          type="date"
+          value={dataFim}
+          onChange={(e) => { setDataFim(e.target.value); setPagina(1) }}
+          title="Data fim"
+        />
+        {(dataInicio || dataFim) && (
+          <button className="btn btn-secondary btn-sm" onClick={() => { setDataInicio(''); setDataFim(''); setPagina(1) }}>
+            Limpar datas
+          </button>
+        )}
       </div>
 
       {error && <p className="error-text">{error}</p>}
@@ -207,6 +237,7 @@ export default function Vendas() {
         ) : filtered.length === 0 ? (
           <div className="empty-state">Nenhuma venda encontrada.</div>
         ) : (
+          <>
           <table>
             <thead>
               <tr>
@@ -219,7 +250,7 @@ export default function Vendas() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((v) => (
+              {visiveis.map((v) => (
                 <tr key={v.id}>
                   <td>{new Date(v.created_at).toLocaleString('pt-BR')}</td>
                   <td>{v.clientes?.nome ?? '-'}</td>
@@ -258,6 +289,18 @@ export default function Vendas() {
               ))}
             </tbody>
           </table>
+          {totalPaginas > 1 && (
+            <div className="pagination">
+              <button className="btn btn-secondary btn-sm" disabled={paginaAtual === 1} onClick={() => setPagina(p => p - 1)}>
+                Anterior
+              </button>
+              <span className="pagination-info">{paginaAtual} / {totalPaginas}</span>
+              <button className="btn btn-secondary btn-sm" disabled={paginaAtual === totalPaginas} onClick={() => setPagina(p => p + 1)}>
+                Próxima
+              </button>
+            </div>
+          )}
+          </>
         )}
       </div>
 

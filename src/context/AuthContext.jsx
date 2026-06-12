@@ -63,7 +63,17 @@ export function AuthProvider({ children }) {
   }
 
   async function logout() {
+    localStorage.removeItem('crm_superadmin_backup')
     await supabase.auth.signOut()
+  }
+
+  async function voltarSuperAdmin() {
+    const raw = localStorage.getItem('crm_superadmin_backup')
+    if (!raw) return false
+    localStorage.removeItem('crm_superadmin_backup')
+    const { access_token, refresh_token } = JSON.parse(raw)
+    const { error } = await supabase.auth.setSession({ access_token, refresh_token })
+    return !error
   }
 
   async function refreshProfile() {
@@ -98,6 +108,7 @@ export function AuthProvider({ children }) {
     signup,
     logout,
     refreshProfile,
+    voltarSuperAdmin,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

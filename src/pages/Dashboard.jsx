@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import '../components/Page.css'
 
@@ -92,32 +93,32 @@ export default function Dashboard() {
       {error && <p className="error-text">{error}</p>}
 
       <div className="dashboard-grid">
-        <div className="card dashboard-card">
+        <Link to="/vendas" className="card dashboard-card dashboard-card-link">
           <div className="label">Vendas hoje</div>
           <div className="value">{loading ? '-' : `R$ ${stats.vendasHoje.toFixed(2)}`}</div>
-        </div>
-        <div className="card dashboard-card">
+        </Link>
+        <Link to="/financeiro" className="card dashboard-card dashboard-card-link">
           <div className="label">Fiado em aberto</div>
           <div className="value">
             {loading ? '-' : `R$ ${stats.totalFiadoAberto.toFixed(2)}`}
           </div>
-        </div>
-        <div className="card dashboard-card">
+        </Link>
+        <Link to="/clientes" className="card dashboard-card dashboard-card-link">
           <div className="label">Clientes ativos</div>
           <div className="value">{loading ? '-' : stats.clientesAtivos}</div>
-        </div>
-        <div className="card dashboard-card">
+        </Link>
+        <Link to="/produtos" className="card dashboard-card dashboard-card-link">
           <div className="label">Produtos ativos</div>
           <div className="value">{loading ? '-' : stats.produtosAtivos}</div>
-        </div>
-        <div className="card dashboard-card">
+        </Link>
+        <Link to="/estoque" className="card dashboard-card dashboard-card-link">
           <div className="label">Itens com estoque baixo</div>
           <div className="value">{loading ? '-' : stats.estoqueBaixo}</div>
-        </div>
-        <div className="card dashboard-card">
+        </Link>
+        <Link to="/estoque" className="card dashboard-card dashboard-card-link">
           <div className="label">Clientes com cascos pendentes</div>
           <div className="value">{loading ? '-' : stats.cascosPendentes}</div>
-        </div>
+        </Link>
       </div>
     </div>
   )

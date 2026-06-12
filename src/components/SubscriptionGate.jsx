@@ -5,7 +5,8 @@ import './SubscriptionGate.css'
 export default function SubscriptionGate() {
   const { profile, empresa } = useAuth()
 
-  if (profile?.perfil === 'super_admin') {
+  // Super admin e clientes do marketplace (empresa_id=null) passam direto
+  if (profile?.perfil === 'super_admin' || profile?.perfil === 'cliente') {
     return <Outlet />
   }
 

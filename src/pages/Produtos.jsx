@@ -2,20 +2,11 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import '../components/Page.css'
 
-const CATEGORIAS = [
-  'cerveja',
-  'refrigerante',
-  'agua',
-  'energetico',
-  'destilado',
-  'suco',
-  'outros',
-]
 const EMBALAGENS = ['unidade', 'lata', 'garrafa', 'caixa', 'fardo']
 
 const emptyForm = {
   nome: '',
-  categoria: 'cerveja',
+  categoria: '',
   embalagem: 'caixa',
   unidades_por_caixa: 1,
   controla_casco: false,
@@ -27,6 +18,7 @@ const emptyForm = {
 
 export default function Produtos() {
   const [produtos, setProdutos] = useState([])
+  const [categorias, setCategorias] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
@@ -35,6 +27,19 @@ export default function Produtos() {
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
+
+  const [showCategModal, setShowCategModal] = useState(false)
+  const [novaCategoria, setNovaCategoria] = useState('')
+  const [savingCateg, setSavingCateg] = useState(false)
+  const [categError, setCategError] = useState(null)
+
+  async function loadCategorias() {
+    const { data } = await supabase
+      .from('categorias')
+      .select('id, nome')
+      .order('nome', { ascending: true })
+    setCategorias(data ?? [])
+  }
 
   async function loadProdutos() {
     setLoading(true)
@@ -51,11 +56,32 @@ export default function Produtos() {
 
   useEffect(() => {
     loadProdutos()
+    loadCategorias()
   }, [])
+
+  async function handleSaveCategoria(e) {
+    e.preventDefault()
+    const nome = novaCategoria.trim()
+    if (!nome) return
+    setSavingCateg(true)
+    setCategError(null)
+    const { error } = await supabase.from('categorias').insert({ nome })
+    setSavingCateg(false)
+    if (error) { setCategError(error.message); return }
+    setNovaCategoria('')
+    loadCategorias()
+  }
+
+  async function handleDeleteCategoria(id) {
+    if (!confirm('Excluir esta categoria?')) return
+    const { error } = await supabase.from('categorias').delete().eq('id', id)
+    if (error) { setCategError(error.message); return }
+    loadCategorias()
+  }
 
   function openNew() {
     setEditingId(null)
-    setForm(emptyForm)
+    setForm({ ...emptyForm, categoria: categorias[0]?.nome ?? '' })
     setShowModal(true)
   }
 
@@ -63,7 +89,7 @@ export default function Produtos() {
     setEditingId(produto.id)
     setForm({
       nome: produto.nome ?? '',
-      categoria: produto.categoria ?? 'cerveja',
+      categoria: produto.categoria ?? categorias[0]?.nome ?? '',
       embalagem: produto.embalagem ?? 'caixa',
       unidades_por_caixa: produto.unidades_por_caixa ?? 1,
       controla_casco: produto.controla_casco ?? false,
@@ -129,9 +155,14 @@ export default function Produtos() {
     <div>
       <div className="page-header">
         <h1>Produtos</h1>
-        <button className="btn btn-primary" onClick={openNew}>
-          + Novo produto
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className="btn btn-secondary" onClick={() => { setCategError(null); setShowCategModal(true) }}>
+            + Nova categoria
+          </button>
+          <button className="btn btn-primary" onClick={openNew}>
+            + Novo produto
+          </button>
+        </div>
       </div>
 
       <div className="toolbar">
@@ -145,9 +176,9 @@ export default function Produtos() {
           onChange={(e) => setCategoriaFiltro(e.target.value)}
         >
           <option value="">Todas as categorias</option>
-          {CATEGORIAS.map((c) => (
-            <option key={c} value={c}>
-              {c}
+          {categorias.map((c) => (
+            <option key={c.id} value={c.nome}>
+              {c.nome}
             </option>
           ))}
         </select>
@@ -239,10 +270,12 @@ export default function Produtos() {
                     name="categoria"
                     value={form.categoria}
                     onChange={handleChange}
+                    required
                   >
-                    {CATEGORIAS.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
+                    <option value="">Selecione...</option>
+                    {categorias.map((c) => (
+                      <option key={c.id} value={c.nome}>
+                        {c.nome}
                       </option>
                     ))}
                   </select>
@@ -350,6 +383,59 @@ export default function Produtos() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showCategModal && (
+        <div className="modal-overlay" onClick={() => setShowCategModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Categorias</h2>
+
+            <form onSubmit={handleSaveCategoria} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+              <input
+                placeholder="Nome da nova categoria"
+                value={novaCategoria}
+                onChange={(e) => setNovaCategoria(e.target.value)}
+                style={{ flex: 1 }}
+                required
+              />
+              <button type="submit" className="btn btn-primary" disabled={savingCateg}>
+                {savingCateg ? 'Salvando...' : 'Adicionar'}
+              </button>
+            </form>
+
+            {categError && <p className="error-text">{categError}</p>}
+
+            <div className="data-table">
+              {categorias.length === 0 ? (
+                <div className="empty-state">Nenhuma categoria cadastrada.</div>
+              ) : (
+                <table>
+                  <tbody>
+                    {categorias.map((c) => (
+                      <tr key={c.id}>
+                        <td>{c.nome}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button
+                            className="btn btn-danger btn-sm"
+                            onClick={() => handleDeleteCategoria(c.id)}
+                          >
+                            Excluir
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setShowCategModal(false)}>
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}

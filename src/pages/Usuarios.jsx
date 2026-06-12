@@ -18,16 +18,31 @@ export default function Usuarios() {
   const [error, setError] = useState(null)
   const [savingId, setSavingId] = useState(null)
   const [linkCopiado, setLinkCopiado] = useState(false)
+  const [busca, setBusca] = useState('')
+  const [pagina, setPagina] = useState(1)
+  const POR_PAGINA = 15
 
-  const linkConvite = profile?.empresa_id
+  const linkCliente = profile?.empresa_id
     ? `${window.location.origin}/cadastro-cliente/${profile.empresa_id}`
     : null
+  const linkVendedor = profile?.empresa_id
+    ? `${window.location.origin}/cadastro-vendedor/${profile.empresa_id}`
+    : null
+
+  const [linkVendedorCopiado, setLinkVendedorCopiado] = useState(false)
 
   async function copiarLink() {
-    if (!linkConvite) return
-    await navigator.clipboard.writeText(linkConvite)
+    if (!linkCliente) return
+    await navigator.clipboard.writeText(linkCliente)
     setLinkCopiado(true)
     setTimeout(() => setLinkCopiado(false), 2000)
+  }
+
+  async function copiarLinkVendedor() {
+    if (!linkVendedor) return
+    await navigator.clipboard.writeText(linkVendedor)
+    setLinkVendedorCopiado(true)
+    setTimeout(() => setLinkVendedorCopiado(false), 2000)
   }
 
   async function loadAll() {
@@ -97,6 +112,15 @@ export default function Usuarios() {
     if (profile.id === user?.id) await refreshProfile()
   }
 
+  const perfisFiltered = perfis.filter((p) => {
+    const term = busca.trim().toLowerCase()
+    if (!term) return true
+    return p.nome?.toLowerCase().includes(term) || p.email?.toLowerCase().includes(term)
+  })
+  const totalPaginasUsr = Math.ceil(perfisFiltered.length / POR_PAGINA)
+  const paginaUsr = Math.min(pagina, totalPaginasUsr || 1)
+  const perfisVisiveis = perfisFiltered.slice((paginaUsr - 1) * POR_PAGINA, paginaUsr * POR_PAGINA)
+
   return (
     <div>
       <div className="page-header">
@@ -105,26 +129,48 @@ export default function Usuarios() {
 
       {error && <p className="error-text">{error}</p>}
 
-      {linkConvite && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="form-field">
-            <label>Link de cadastro para clientes</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input readOnly value={linkConvite} onFocus={(e) => e.target.select()} />
-              <button type="button" className="btn btn-secondary btn-sm" onClick={copiarLink}>
-                {linkCopiado ? 'Copiado!' : 'Copiar'}
-              </button>
+      {(linkCliente || linkVendedor) && (
+        <div className="card" style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {linkCliente && (
+            <div className="form-field" style={{ marginBottom: 0 }}>
+              <label>Link de cadastro para clientes</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input readOnly value={linkCliente} onFocus={(e) => e.target.select()} />
+                <button type="button" className="btn btn-secondary btn-sm" onClick={copiarLink}>
+                  {linkCopiado ? 'Copiado!' : 'Copiar'}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
+          {linkVendedor && (
+            <div className="form-field" style={{ marginBottom: 0 }}>
+              <label>Link de cadastro para vendedores</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input readOnly value={linkVendedor} onFocus={(e) => e.target.select()} />
+                <button type="button" className="btn btn-secondary btn-sm" onClick={copiarLinkVendedor}>
+                  {linkVendedorCopiado ? 'Copiado!' : 'Copiar'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      <div className="toolbar">
+        <input
+          placeholder="Buscar por nome ou e-mail..."
+          value={busca}
+          onChange={(e) => { setBusca(e.target.value); setPagina(1) }}
+        />
+      </div>
 
       <div className="data-table">
         {loading ? (
           <div className="empty-state">Carregando...</div>
-        ) : perfis.length === 0 ? (
+        ) : perfisFiltered.length === 0 ? (
           <div className="empty-state">Nenhum usuário encontrado.</div>
         ) : (
+          <>
           <table>
             <thead>
               <tr>
@@ -135,7 +181,7 @@ export default function Usuarios() {
               </tr>
             </thead>
             <tbody>
-              {perfis.map((p) => (
+              {perfisVisiveis.map((p) => (
                 <tr key={p.id}>
                   <td>{p.nome ?? '-'}</td>
                   <td>{p.email ?? '-'}</td>
@@ -174,6 +220,18 @@ export default function Usuarios() {
               ))}
             </tbody>
           </table>
+          {totalPaginasUsr > 1 && (
+            <div className="pagination">
+              <button className="btn btn-secondary btn-sm" disabled={paginaUsr === 1} onClick={() => setPagina(p => p - 1)}>
+                Anterior
+              </button>
+              <span className="pagination-info">{paginaUsr} / {totalPaginasUsr}</span>
+              <button className="btn btn-secondary btn-sm" disabled={paginaUsr === totalPaginasUsr} onClick={() => setPagina(p => p + 1)}>
+                Próxima
+              </button>
+            </div>
+          )}
+          </>
         )}
       </div>
     </div>

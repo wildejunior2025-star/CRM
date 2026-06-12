@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { FORMAS_RECEBIMENTO } from '../lib/constants'
-import '../components/Page.css'
+import './PortalLoja.css'
 import './Portal.css'
 
 const FORMA_BADGE = {
-  dinheiro: 'badge-success',
-  pix: 'badge-primary',
-  transferencia: 'badge-warning',
-  cartao: 'badge-neutral',
+  dinheiro: { bg: 'var(--success-bg)', color: 'var(--success)' },
+  pix: { bg: 'var(--primary-bg)', color: 'var(--primary)' },
+  transferencia: { bg: 'var(--warning-bg)', color: 'var(--warning)' },
+  cartao: { bg: 'var(--bg)', color: 'var(--text-muted)' },
 }
 
 export default function PortalFiado() {
@@ -19,98 +19,106 @@ export default function PortalFiado() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  async function loadAll() {
-    setLoading(true)
-    setError(null)
-
-    if (!profile?.cliente_id) {
-      setLoading(false)
-      return
-    }
-
-    const [saldoRes, pagamentosRes] = await Promise.all([
-      supabase
-        .from('clientes_saldo_fiado')
-        .select('saldo_fiado')
-        .eq('cliente_id', profile.cliente_id)
-        .maybeSingle(),
-      supabase
-        .from('pagamentos')
-        .select('*')
-        .eq('cliente_id', profile.cliente_id)
-        .order('created_at', { ascending: false }),
-    ])
-
-    const firstError = saldoRes.error || pagamentosRes.error
-    if (firstError) setError(firstError.message)
-
-    setSaldo(Number(saldoRes.data?.saldo_fiado ?? 0))
-    setPagamentos(pagamentosRes.data ?? [])
-    setLoading(false)
-  }
-
   useEffect(() => {
-    loadAll()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    async function load() {
+      if (!profile?.cliente_id) { setLoading(false); return }
+
+      const [saldoRes, pagamentosRes] = await Promise.all([
+        supabase
+          .from('clientes_saldo_fiado')
+          .select('saldo_fiado')
+          .eq('cliente_id', profile.cliente_id)
+          .maybeSingle(),
+        supabase
+          .from('pagamentos')
+          .select('*')
+          .eq('cliente_id', profile.cliente_id)
+          .order('created_at', { ascending: false }),
+      ])
+
+      const err = saldoRes.error || pagamentosRes.error
+      if (err) setError(err.message)
+      setSaldo(Number(saldoRes.data?.saldo_fiado ?? 0))
+      setPagamentos(pagamentosRes.data ?? [])
+      setLoading(false)
+    }
+    load()
   }, [profile?.cliente_id])
 
+  if (loading) {
+    return (
+      <div className="loja-loading">
+        <div className="loja-spinner" />
+        <p>Carregando...</p>
+      </div>
+    )
+  }
+
+  if (!profile?.cliente_id) {
+    return (
+      <div className="portal-section">
+        <div className="portal-empty">
+          <div className="portal-empty-icon">🔗</div>
+          <p>Cadastro não vinculado</p>
+          <span>Fale com o depósito para liberar sua conta.</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div>
-      <div className="page-header">
-        <h1>Meu fiado</h1>
+    <div className="portal-section">
+      {error && <div className="loja-aviso loja-aviso-erro">{error}</div>}
+
+      {/* Card de saldo */}
+      <div className={`portal-saldo-card ${saldo > 0.009 ? 'portal-saldo-card-aberto' : 'portal-saldo-card-zero'}`}>
+        <span className="portal-saldo-label">Saldo em aberto</span>
+        <span className="portal-saldo-valor">
+          R$ {saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+        </span>
+        <span className="portal-saldo-sub">
+          {saldo > 0.009 ? 'Há valores a pagar' : 'Tudo em dia!'}
+        </span>
       </div>
 
-      {!loading && !profile?.cliente_id && (
-        <p className="error-text">
-          Seu cadastro ainda não foi vinculado a um cliente. Entre em contato com o depósito.
-        </p>
-      )}
+      <h2 className="portal-section-title" style={{ marginTop: 24 }}>Histórico de pagamentos</h2>
 
-      {error && <p className="error-text">{error}</p>}
+      {pagamentos.length === 0 ? (
+        <div className="portal-empty">
+          <div className="portal-empty-icon">✅</div>
+          <p>Nenhum pagamento registrado.</p>
+        </div>
+      ) : (
+        <div className="portal-pagamentos-lista">
+          {pagamentos.map(p => {
+            const cores = FORMA_BADGE[p.forma_pagamento] ?? FORMA_BADGE.cartao
+            const forma = FORMAS_RECEBIMENTO.find(f => f.value === p.forma_pagamento)?.label ?? p.forma_pagamento
+            const data = new Date(p.created_at)
 
-      {profile?.cliente_id && (
-        <div className="card dashboard-card" style={{ marginBottom: 24, maxWidth: 320 }}>
-          <div className="label">Saldo em aberto</div>
-          <div className={`portal-saldo ${saldo > 0.009 ? 'portal-saldo-aberto' : 'portal-saldo-zero'}`}>
-            R$ {saldo.toFixed(2)}
-          </div>
+            return (
+              <div key={p.id} className="portal-pagamento-item">
+                <div className="portal-pagamento-left">
+                  <span className="portal-pagamento-data">
+                    {data.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: '2-digit' })}
+                  </span>
+                  <span
+                    className="portal-pagamento-forma"
+                    style={{ background: cores.bg, color: cores.color }}
+                  >
+                    {forma}
+                  </span>
+                  {p.observacao && (
+                    <span className="portal-pagamento-obs">{p.observacao}</span>
+                  )}
+                </div>
+                <span className="portal-pagamento-valor">
+                  R$ {Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            )
+          })}
         </div>
       )}
-
-      <h2 className="portal-table-title">Histórico de pagamentos</h2>
-      <div className="data-table">
-        {loading ? (
-          <div className="empty-state">Carregando...</div>
-        ) : pagamentos.length === 0 ? (
-          <div className="empty-state">Nenhum pagamento registrado.</div>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Data</th>
-                <th>Forma</th>
-                <th className="portal-amount-col">Valor</th>
-                <th>Observação</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pagamentos.map((p) => (
-                <tr key={p.id}>
-                  <td>{new Date(p.created_at).toLocaleString('pt-BR')}</td>
-                  <td>
-                    <span className={`badge ${FORMA_BADGE[p.forma_pagamento] ?? 'badge-neutral'}`}>
-                      {FORMAS_RECEBIMENTO.find((f) => f.value === p.forma_pagamento)?.label ||
-                        p.forma_pagamento}
-                    </span>
-                  </td>
-                  <td className="portal-amount-col">R$ {Number(p.valor).toFixed(2)}</td>
-                  <td>{p.observacao ?? '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import '../components/Page.css'
 import './SuperAdminEmpresas.css'
@@ -24,6 +24,10 @@ const emptyForm = {
   email_contato: '',
   plano: 'padrao',
   valor_mensalidade: '',
+  taxa_plataforma: '5',
+  cor_primaria: '#863bff',
+  logo_url: '',
+  dominio_personalizado: '',
   vencimento: '',
   observacoes: '',
 }
@@ -41,6 +45,13 @@ export default function SuperAdminEmpresas() {
 
   const [inviteLink, setInviteLink] = useState(null)
   const [inviteCopiado, setInviteCopiado] = useState(false)
+  const [openMenuId, setOpenMenuId] = useState(null)
+  const menuRef = useRef(null)
+
+  // Edição inline de taxa
+  const [editandoTaxaId, setEditandoTaxaId] = useState(null)
+  const [taxaTemp, setTaxaTemp] = useState('')
+  const taxaInputRef = useRef(null)
 
   async function loadAll() {
     setLoading(true)
@@ -82,6 +93,10 @@ export default function SuperAdminEmpresas() {
       email_contato: empresa.email_contato ?? '',
       plano: empresa.plano ?? 'padrao',
       valor_mensalidade: empresa.valor_mensalidade ?? '',
+      taxa_plataforma: empresa.taxa_plataforma ?? '5',
+      cor_primaria: empresa.cor_primaria ?? '#863bff',
+      logo_url: empresa.logo_url ?? '',
+      dominio_personalizado: empresa.dominio_personalizado ?? '',
       vencimento: empresa.vencimento ?? '',
       observacoes: empresa.observacoes ?? '',
     })
@@ -102,6 +117,10 @@ export default function SuperAdminEmpresas() {
       email_contato: form.email_contato || null,
       plano: form.plano,
       valor_mensalidade: form.valor_mensalidade === '' ? 0 : Number(form.valor_mensalidade),
+      taxa_plataforma: form.taxa_plataforma === '' ? 5 : Number(form.taxa_plataforma),
+      cor_primaria: form.cor_primaria || null,
+      logo_url: form.logo_url || null,
+      dominio_personalizado: form.dominio_personalizado || null,
       vencimento: form.vencimento || null,
       observacoes: form.observacoes || null,
     }
@@ -130,6 +149,15 @@ export default function SuperAdminEmpresas() {
     setSavingId(emp.id)
     setError(null)
 
+    // Salva sessão atual antes de impersonar — o magic link sobrescreve o localStorage
+    const { data: { session: currentSession } } = await supabase.auth.getSession()
+    if (currentSession) {
+      localStorage.setItem('crm_superadmin_backup', JSON.stringify({
+        access_token: currentSession.access_token,
+        refresh_token: currentSession.refresh_token,
+      }))
+    }
+
     const { data, error } = await supabase.functions.invoke('impersonate-empresa', {
       body: { empresa_id: emp.id, redirect_to: window.location.origin },
     })
@@ -137,18 +165,50 @@ export default function SuperAdminEmpresas() {
     setSavingId(null)
 
     if (error || !data?.link) {
+      localStorage.removeItem('crm_superadmin_backup')
       setError(error?.message ?? data?.error ?? 'Erro ao gerar link de acesso')
       return
     }
 
-    window.open(data.link, '_blank')
+    window.location.href = data.link
   }
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setOpenMenuId(null)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
 
   async function copiarLink() {
     if (!inviteLink) return
     await navigator.clipboard.writeText(inviteLink)
     setInviteCopiado(true)
     setTimeout(() => setInviteCopiado(false), 2000)
+  }
+
+  function abrirEditTaxa(emp) {
+    setEditandoTaxaId(emp.id)
+    setTaxaTemp(String(Number(emp.taxa_plataforma ?? 5)))
+    setTimeout(() => taxaInputRef.current?.select(), 30)
+  }
+
+  async function salvarTaxa(empresaId) {
+    const valor = parseFloat(taxaTemp)
+    if (isNaN(valor) || valor < 0 || valor > 100) {
+      setEditandoTaxaId(null)
+      return
+    }
+    setSavingId(empresaId)
+    const { error } = await supabase
+      .from('empresas')
+      .update({ taxa_plataforma: valor })
+      .eq('id', empresaId)
+    setSavingId(null)
+    setEditandoTaxaId(null)
+    if (error) { setError(error.message); return }
+    setEmpresas(prev => prev.map(e => e.id === empresaId ? { ...e, taxa_plataforma: valor } : e))
   }
 
   async function handleStatus(empresa, novoStatus) {
@@ -227,6 +287,7 @@ export default function SuperAdminEmpresas() {
                 <th className="caixa-amount-col">Mensalidade</th>
                 <th>Status</th>
                 <th>Vencimento / Trial</th>
+                <th className="caixa-amount-col">Taxa %</th>
                 <th>Usuários</th>
                 <th>Ações</th>
               </tr>
@@ -234,7 +295,17 @@ export default function SuperAdminEmpresas() {
             <tbody>
               {empresas.map((emp) => (
                 <tr key={emp.id}>
-                  <td>{emp.nome}</td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {emp.cor_primaria && (
+                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: emp.cor_primaria, flexShrink: 0, display: 'inline-block' }} title={emp.cor_primaria} />
+                      )}
+                      {emp.nome}
+                      {emp.dominio_personalizado && (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 2 }}>🌐</span>
+                      )}
+                    </div>
+                  </td>
                   <td>{emp.email_contato || '-'}</td>
                   <td>{emp.plano}</td>
                   <td className="caixa-amount-col">
@@ -249,9 +320,60 @@ export default function SuperAdminEmpresas() {
                     </span>
                   </td>
                   <td>{emp.vencimento || emp.trial_fim || '-'}</td>
+                  <td className="caixa-amount-col">
+                    {editandoTaxaId === emp.id ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input
+                          ref={taxaInputRef}
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          max="100"
+                          value={taxaTemp}
+                          onChange={e => setTaxaTemp(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') salvarTaxa(emp.id)
+                            if (e.key === 'Escape') setEditandoTaxaId(null)
+                          }}
+                          onBlur={() => salvarTaxa(emp.id)}
+                          style={{
+                            width: 60,
+                            padding: '4px 6px',
+                            borderRadius: 6,
+                            border: '1.5px solid var(--primary)',
+                            background: 'var(--bg)',
+                            color: 'var(--text)',
+                            fontSize: 13,
+                            textAlign: 'right',
+                          }}
+                        />
+                        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>%</span>
+                      </div>
+                    ) : (
+                      <button
+                        title="Clique para editar a taxa"
+                        onClick={() => abrirEditTaxa(emp)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: 'var(--primary)',
+                          fontWeight: 700,
+                          fontSize: 14,
+                          padding: '2px 6px',
+                          borderRadius: 6,
+                          transition: 'background 120ms',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--primary-bg)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                      >
+                        {Number(emp.taxa_plataforma ?? 5).toFixed(1)}%
+                      </button>
+                    )}
+                  </td>
                   <td>{usuariosPorEmpresa[emp.id] ?? 0}</td>
                   <td>
-                    <div className="caixa-actions">
+                    <div className="empresa-table-actions">
                       <button className="btn btn-secondary btn-sm" onClick={() => openEdit(emp)}>
                         Editar
                       </button>
@@ -260,35 +382,32 @@ export default function SuperAdminEmpresas() {
                         disabled={savingId === emp.id}
                         onClick={() => acessarEmpresa(emp)}
                       >
-                        {savingId === emp.id ? 'Aguarde...' : 'Acessar empresa'}
+                        {savingId === emp.id ? 'Aguarde...' : 'Acessar'}
                       </button>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => setInviteLink(`${window.location.origin}/cadastro-admin/${emp.id}`)}
-                      >
-                        Link admin
-                      </button>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        disabled={savingId === emp.id}
-                        onClick={() => handleStatus(emp, 'ativo')}
-                      >
-                        Marcar pagamento
-                      </button>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        disabled={savingId === emp.id}
-                        onClick={() => handleStatus(emp, 'suspenso')}
-                      >
-                        Suspender
-                      </button>
-                      <button
-                        className="btn btn-danger btn-sm"
-                        disabled={savingId === emp.id}
-                        onClick={() => handleStatus(emp, 'cancelado')}
-                      >
-                        Cancelar
-                      </button>
+                      <div className="empresa-dropdown" ref={openMenuId === emp.id ? menuRef : null}>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => setOpenMenuId(openMenuId === emp.id ? null : emp.id)}
+                        >
+                          Mais ▾
+                        </button>
+                        {openMenuId === emp.id && (
+                          <div className="empresa-dropdown-menu">
+                            <button onClick={() => { setInviteLink(`${window.location.origin}/cadastro-admin/${emp.id}`); setOpenMenuId(null) }}>
+                              Link admin
+                            </button>
+                            <button disabled={savingId === emp.id} onClick={() => { handleStatus(emp, 'ativo'); setOpenMenuId(null) }}>
+                              Marcar pagamento
+                            </button>
+                            <button disabled={savingId === emp.id} onClick={() => { handleStatus(emp, 'suspenso'); setOpenMenuId(null) }}>
+                              Suspender
+                            </button>
+                            <button className="danger" disabled={savingId === emp.id} onClick={() => { handleStatus(emp, 'cancelado'); setOpenMenuId(null) }}>
+                              Cancelar assinatura
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -331,12 +450,65 @@ export default function SuperAdminEmpresas() {
                   />
                 </div>
 
+                <div className="form-field">
+                  <label>Taxa plataforma (%)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="100"
+                    name="taxa_plataforma"
+                    value={form.taxa_plataforma}
+                    onChange={handleChange}
+                    placeholder="5"
+                  />
+                </div>
+
                 {editingId && (
                   <div className="form-field">
                     <label>Vencimento</label>
                     <input type="date" name="vencimento" value={form.vencimento ?? ''} onChange={handleChange} />
                   </div>
                 )}
+
+                <div className="form-field full">
+                  <label>Domínio personalizado do app</label>
+                  <input
+                    name="dominio_personalizado"
+                    value={form.dominio_personalizado}
+                    onChange={handleChange}
+                    placeholder="pedidos.nomeda loja.com.br"
+                  />
+                </div>
+
+                <div className="form-field">
+                  <label>Cor principal do app</label>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="color"
+                      value={form.cor_primaria || '#863bff'}
+                      onChange={e => setForm(p => ({ ...p, cor_primaria: e.target.value }))}
+                      style={{ width: 40, height: 36, padding: 2, borderRadius: 6, border: '1.5px solid var(--border)', cursor: 'pointer' }}
+                    />
+                    <input
+                      name="cor_primaria"
+                      value={form.cor_primaria}
+                      onChange={handleChange}
+                      placeholder="#863bff"
+                      style={{ flex: 1 }}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-field">
+                  <label>URL da logo</label>
+                  <input
+                    name="logo_url"
+                    value={form.logo_url}
+                    onChange={handleChange}
+                    placeholder="https://..."
+                  />
+                </div>
 
                 <div className="form-field full">
                   <label>Observações</label>

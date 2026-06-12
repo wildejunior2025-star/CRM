@@ -1,65 +1,259 @@
-.portal-table-title {
-  font-size: 14px;
-  font-weight: 600;
+/* ── Seção genérica ── */
+.portal-section {
+  width: 100%;
+}
+
+.portal-section-title {
+  font-size: 15px;
+  font-weight: 700;
   color: var(--text-muted);
-  margin: 24px 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 12px;
 }
 
-.portal-table-title:first-of-type {
-  margin-top: 0;
+/* ── Estado vazio ── */
+.portal-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 48px 24px;
+  color: var(--text-muted);
 }
 
-.portal-success {
-  color: var(--success);
-  background: var(--success-bg);
-  padding: 8px 12px;
-  border-radius: 8px;
-  margin-bottom: 16px;
+.portal-empty-icon {
+  font-size: 40px;
+  margin-bottom: 4px;
 }
 
-.portal-amount-col {
-  text-align: right;
-  white-space: nowrap;
+.portal-empty p {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
 }
 
-.portal-qty-input {
-  width: 70px;
+.portal-empty span {
+  font-size: 14px;
 }
 
-.portal-cart {
-  max-width: 420px;
+/* ── Lista de pedidos ── */
+.portal-pedidos-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.portal-cart-list {
-  list-style: none;
-  padding: 0;
-  margin: 12px 0;
+.portal-pedido-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms, box-shadow 120ms;
+  width: 100%;
 }
 
-.portal-cart-list li {
-  padding: 4px 0;
+.portal-pedido-card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 2px 12px rgba(134,59,255,0.12);
+}
+
+.portal-pedido-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.portal-pedido-data {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.portal-pedido-dia {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: capitalize;
+}
+
+.portal-pedido-hora {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.portal-pedido-status {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.portal-pedido-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.portal-pedido-forma {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.portal-pedido-total {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--primary);
+}
+
+.portal-pedido-obs {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+  font-style: italic;
+}
+
+.portal-pedido-ver {
+  font-size: 12px;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* ── Detalhe de item no drawer ── */
+.portal-detalhe-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
   border-bottom: 1px solid var(--border);
 }
 
-.portal-cart-list li:last-child {
+.portal-detalhe-item:last-child {
   border-bottom: none;
 }
 
-.portal-total {
-  margin-top: 16px;
-  text-align: right;
-  font-size: 16px;
+.portal-detalhe-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
 
-.portal-saldo {
-  font-size: 28px;
+/* ── Saldo / conta ── */
+.portal-saldo-card {
+  border-radius: 16px;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.portal-saldo-card-zero {
+  background: var(--success-bg);
+  border: 2px solid var(--success);
+}
+
+.portal-saldo-card-aberto {
+  background: var(--danger-bg);
+  border: 2px solid var(--danger);
+}
+
+.portal-saldo-label {
+  font-size: 13px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
 }
 
-.portal-saldo-zero {
+.portal-saldo-valor {
+  font-size: 36px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.portal-saldo-card-zero .portal-saldo-valor {
   color: var(--success);
 }
 
-.portal-saldo-aberto {
+.portal-saldo-card-aberto .portal-saldo-valor {
   color: var(--danger);
+}
+
+.portal-saldo-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ── Lista de pagamentos ── */
+.portal-pagamentos-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.portal-pagamento-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.portal-pagamento-item:last-child {
+  border-bottom: none;
+}
+
+.portal-pagamento-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.portal-pagamento-data {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+.portal-pagamento-forma {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  align-self: flex-start;
+}
+
+.portal-pagamento-obs {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.portal-pagamento-valor {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--success);
+  white-space: nowrap;
 }

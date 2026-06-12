@@ -3,3 +3,52 @@
   flex-wrap: wrap;
   gap: 6px;
 }
+
+.empresa-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.empresa-dropdown-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 180px;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  overflow: hidden;
+}
+
+.empresa-dropdown-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 100ms;
+}
+
+.empresa-dropdown-menu button:last-child {
+  border-bottom: none;
+}
+
+.empresa-dropdown-menu button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.empresa-dropdown-menu button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.empresa-dropdown-menu button.danger {
+  color: var(--danger);
+}

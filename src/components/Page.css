@@ -253,3 +253,105 @@
   font-size: 28px;
   font-weight: 700;
 }
+
+a.dashboard-card-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+a.dashboard-card-link:hover {
+  border-color: var(--primary);
+  transform: translateY(-2px);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 0 4px;
+}
+
+.pagination-info {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ══════════════════════════════════════════
+   RESPONSIVO — mobile
+══════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+  .page-header h1 {
+    font-size: 18px;
+  }
+
+  /* Tabelas com scroll horizontal */
+  .data-table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .data-table table {
+    min-width: 500px;
+  }
+
+  .data-table table th,
+  .data-table table td {
+    padding: 8px 10px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  /* Modal ocupa tela inteira no mobile */
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal,
+  .modal.modal-lg {
+    width: 100%;
+    max-width: 100%;
+    max-height: 90dvh;
+    border-radius: 16px 16px 0 0;
+    overflow-y: auto;
+  }
+
+  /* Form grid vira coluna única */
+  .form-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .form-field.full {
+    grid-column: 1;
+  }
+
+  /* Toolbar responsiva */
+  .toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .toolbar input,
+  .toolbar select {
+    width: 100%;
+  }
+
+  /* Cards do dashboard */
+  .dashboard-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .dashboard-card .value {
+    font-size: 22px;
+  }
+
+  /* Ações de botões em linhas de tabela */
+  .caixa-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}

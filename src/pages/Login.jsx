@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { Link, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
+import { useBranding } from '../context/BrandingContext'
 import ThemeToggle from '../components/ThemeToggle'
 import './Login.css'
 
 export default function Login() {
   const { session, login } = useAuth()
   const { theme, toggleTheme } = useTheme()
+  const { empresaParceira } = useBranding()
   const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -39,25 +41,26 @@ export default function Login() {
 
       <div className="login-card">
         <div className="login-brand">
-          <span className="login-logo" aria-hidden="true">
-            <svg
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M8 2h8" />
-              <path d="M9 2v6.5a2 2 0 0 1-.4 1.2L4.6 16a3 3 0 0 0 2.4 5h10a3 3 0 0 0 2.4-5l-4-6.3A2 2 0 0 1 15 8.5V2" />
-              <path d="M6 14h12" />
-            </svg>
-          </span>
+          {empresaParceira?.logo_url ? (
+            <img
+              src={empresaParceira.logo_url}
+              alt={empresaParceira.nome}
+              style={{ height: 48, width: 48, objectFit: 'contain', borderRadius: 10 }}
+            />
+          ) : (
+            <span className="login-logo" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 2h8" />
+                <path d="M9 2v6.5a2 2 0 0 1-.4 1.2L4.6 16a3 3 0 0 0 2.4 5h10a3 3 0 0 0 2.4-5l-4-6.3A2 2 0 0 1 15 8.5V2" />
+                <path d="M6 14h12" />
+              </svg>
+            </span>
+          )}
           <div>
-            <h1>Depósito CRM</h1>
-            <p className="login-subtitle">Entre com sua conta para continuar</p>
+            <h1>{empresaParceira?.nome ?? 'Depósito CRM'}</h1>
+            <p className="login-subtitle">
+              {empresaParceira ? 'Acesse sua conta para fazer pedidos' : 'Entre com sua conta para continuar'}
+            </p>
           </div>
         </div>
 
@@ -161,9 +164,33 @@ export default function Login() {
           </button>
         </form>
 
-        <p className="login-footer">
-          É cliente e ainda não tem conta? <Link to="/cadastro">Criar conta</Link>
-        </p>
+        {empresaParceira ? (
+          /* Domínio exclusivo de loja → só cria conta de cliente */
+          <p className="login-footer">
+            Ainda não tem conta? <Link to="/cadastro-cliente">Criar conta</Link>
+          </p>
+        ) : (
+          /* Domínio principal → dois tipos de cadastro */
+          <div className="login-cadastro-opcoes">
+            <p className="login-cadastro-label">Ainda não tem conta?</p>
+            <div className="login-cadastro-btns">
+              <Link to="/cadastro-cliente" className="login-cadastro-btn">
+                <span className="login-cadastro-icon">🛒</span>
+                <span>
+                  <strong>Sou cliente</strong>
+                  <small>Quero fazer pedidos</small>
+                </span>
+              </Link>
+              <Link to="/cadastro" className="login-cadastro-btn">
+                <span className="login-cadastro-icon">🏪</span>
+                <span>
+                  <strong>Sou empresa</strong>
+                  <small>Quero usar o CRM</small>
+                </span>
+              </Link>
+            </div>
+          </div>
+        )}
       </div>
 
       <p className="login-footer">Depósito CRM &middot; Acesso restrito a colaboradores</p>
