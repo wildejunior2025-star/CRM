@@ -209,16 +209,27 @@
   transition: border-color 120ms, background 120ms, box-shadow 120ms;
 }
 
-.login-cadastro-btn:hover {
+.login-cadastro-btn:focus-visible {
+  outline: none;
   border-color: var(--primary);
-  background: var(--primary-bg);
   box-shadow: 0 0 0 3px var(--primary-ring);
 }
 
+.login-cadastro-btn:hover {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+
 .login-cadastro-icon {
-  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--primary-bg);
+  color: var(--primary);
   flex-shrink: 0;
-  line-height: 1;
 }
 
 .login-cadastro-btn > span:last-child {

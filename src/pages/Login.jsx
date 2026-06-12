@@ -175,14 +175,24 @@ export default function Login() {
             <p className="login-cadastro-label">Ainda não tem conta?</p>
             <div className="login-cadastro-btns">
               <Link to="/cadastro-cliente" className="login-cadastro-btn">
-                <span className="login-cadastro-icon">🛒</span>
+                <span className="login-cadastro-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/>
+                    <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>
+                  </svg>
+                </span>
                 <span>
                   <strong>Sou cliente</strong>
                   <small>Quero fazer pedidos</small>
                 </span>
               </Link>
               <Link to="/cadastro" className="login-cadastro-btn">
-                <span className="login-cadastro-icon">🏪</span>
+                <span className="login-cadastro-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                    <polyline points="9 22 9 12 15 12 15 22"/>
+                  </svg>
+                </span>
                 <span>
                   <strong>Sou empresa</strong>
                   <small>Quero usar o CRM</small>

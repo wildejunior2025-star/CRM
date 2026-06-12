@@ -248,4 +248,20 @@
     padding: 13px 14px;
     font-size: 15px;
   }
+
+  /* Ocultar rótulo de texto no theme toggle da topbar mobile */
+  .mobile-topbar .theme-toggle-label {
+    display: none;
+  }
+
+  /* Theme toggle na topbar mobile: compacto, só ícone */
+  .mobile-topbar .theme-toggle {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 50%;
+    justify-content: center;
+    gap: 0;
+    flex-shrink: 0;
+  }
 }

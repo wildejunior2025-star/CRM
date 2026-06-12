@@ -233,9 +233,25 @@ export default function Vendas() {
 
       <div className="data-table">
         {loading ? (
-          <div className="empty-state">Carregando...</div>
+          <div className="empty-state">
+            <div className="empty-state-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+              </svg>
+            </div>
+            <strong>Carregando vendas...</strong>
+          </div>
         ) : filtered.length === 0 ? (
-          <div className="empty-state">Nenhuma venda encontrada.</div>
+          <div className="empty-state">
+            <div className="empty-state-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
+                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+              </svg>
+            </div>
+            <strong>Nenhuma venda encontrada</strong>
+            <p>{statusFiltro || dataInicio || dataFim ? 'Tente ajustar os filtros.' : 'Clique em "+ Nova venda" para registrar.'}</p>
+          </div>
         ) : (
           <>
           <table>

@@ -95,29 +95,45 @@ export default function Dashboard() {
       <div className="dashboard-grid">
         <Link to="/vendas" className="card dashboard-card dashboard-card-link">
           <div className="label">Vendas hoje</div>
-          <div className="value">{loading ? '-' : `R$ ${stats.vendasHoje.toFixed(2)}`}</div>
+          {loading
+            ? <span className="value-loading" aria-hidden="true" />
+            : <div className="value">{`R$ ${stats.vendasHoje.toFixed(2)}`}</div>
+          }
         </Link>
         <Link to="/financeiro" className="card dashboard-card dashboard-card-link">
           <div className="label">Fiado em aberto</div>
-          <div className="value">
-            {loading ? '-' : `R$ ${stats.totalFiadoAberto.toFixed(2)}`}
-          </div>
+          {loading
+            ? <span className="value-loading" aria-hidden="true" />
+            : <div className="value">{`R$ ${stats.totalFiadoAberto.toFixed(2)}`}</div>
+          }
         </Link>
         <Link to="/clientes" className="card dashboard-card dashboard-card-link">
           <div className="label">Clientes ativos</div>
-          <div className="value">{loading ? '-' : stats.clientesAtivos}</div>
+          {loading
+            ? <span className="value-loading" aria-hidden="true" />
+            : <div className="value">{stats.clientesAtivos}</div>
+          }
         </Link>
         <Link to="/produtos" className="card dashboard-card dashboard-card-link">
           <div className="label">Produtos ativos</div>
-          <div className="value">{loading ? '-' : stats.produtosAtivos}</div>
+          {loading
+            ? <span className="value-loading" aria-hidden="true" />
+            : <div className="value">{stats.produtosAtivos}</div>
+          }
         </Link>
         <Link to="/estoque" className="card dashboard-card dashboard-card-link">
-          <div className="label">Itens com estoque baixo</div>
-          <div className="value">{loading ? '-' : stats.estoqueBaixo}</div>
+          <div className="label">Estoque baixo</div>
+          {loading
+            ? <span className="value-loading" aria-hidden="true" />
+            : <div className="value">{stats.estoqueBaixo}</div>
+          }
         </Link>
         <Link to="/estoque" className="card dashboard-card dashboard-card-link">
-          <div className="label">Clientes com cascos pendentes</div>
-          <div className="value">{loading ? '-' : stats.cascosPendentes}</div>
+          <div className="label">Cascos pendentes</div>
+          {loading
+            ? <span className="value-loading" aria-hidden="true" />
+            : <div className="value">{stats.cascosPendentes}</div>
+          }
         </Link>
       </div>
     </div>

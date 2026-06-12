@@ -41,7 +41,7 @@ export default function ThemeToggle({ theme, onToggle }) {
           </svg>
         )}
       </span>
-      <span>{isDark ? 'Modo escuro' : 'Modo claro'}</span>
+      <span className="theme-toggle-label">{isDark ? 'Modo escuro' : 'Modo claro'}</span>
     </button>
   )
 }

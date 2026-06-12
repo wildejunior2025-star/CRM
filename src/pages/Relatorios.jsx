@@ -266,15 +266,24 @@ export default function Relatorios() {
       <div className="dashboard-grid" style={{ marginBottom: 24 }}>
         <div className="card dashboard-card">
           <div className="label">Total vendido no período</div>
-          <div className="value">{loading ? '-' : `R$ ${totalVendido.toFixed(2)}`}</div>
+          {loading
+            ? <span className="value-loading" aria-hidden="true" />
+            : <div className="value">{`R$ ${totalVendido.toFixed(2)}`}</div>
+          }
         </div>
         <div className="card dashboard-card">
           <div className="label">Quantidade de vendas</div>
-          <div className="value">{loading ? '-' : qtdVendas}</div>
+          {loading
+            ? <span className="value-loading" aria-hidden="true" />
+            : <div className="value">{qtdVendas}</div>
+          }
         </div>
         <div className="card dashboard-card">
           <div className="label">Ticket médio</div>
-          <div className="value">{loading ? '-' : `R$ ${ticketMedio.toFixed(2)}`}</div>
+          {loading
+            ? <span className="value-loading" aria-hidden="true" />
+            : <div className="value">{`R$ ${ticketMedio.toFixed(2)}`}</div>
+          }
         </div>
       </div>
 
