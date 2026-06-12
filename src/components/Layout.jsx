@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 import ThemeToggle from './ThemeToggle'
 import SubscriptionGate from './SubscriptionGate'
 import InstallPWA from './InstallPWA'
+import NotificationBell from './NotificationBell'
 import './Layout.css'
 
 const links = [
@@ -63,7 +64,10 @@ export default function Layout() {
           <HamburgerIcon />
         </button>
         <span className="mobile-topbar-title">{empresa?.nome || 'CRM'}</span>
-        <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <NotificationBell />
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        </div>
       </div>
 
       {/* Overlay escuro */}
@@ -89,6 +93,10 @@ export default function Layout() {
           ))}
         </nav>
         <div className="sidebar-footer">
+          <div className="sidebar-notif-row">
+            <NotificationBell />
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          </div>
           {user && (
             <div className="sidebar-user">
               <span className="sidebar-user-email" title={user.email}>
@@ -99,7 +107,6 @@ export default function Layout() {
               </button>
             </div>
           )}
-          <ThemeToggle theme={theme} onToggle={toggleTheme} />
         </div>
       </aside>
 
