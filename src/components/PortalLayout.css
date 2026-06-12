@@ -1,3 +1,20 @@
+/* ── Tema azul exclusivo do portal do cliente ── */
+.portal-root {
+  --primary:          #2563eb;
+  --primary-hover:    #1d4ed8;
+  --primary-bg:       rgba(37, 99, 235, 0.10);
+  --primary-ring:     rgba(37, 99, 235, 0.30);
+  --primary-contrast: #ffffff;
+}
+
+[data-theme="dark"] .portal-root {
+  --primary:          #3b82f6;
+  --primary-hover:    #2563eb;
+  --primary-bg:       rgba(59, 130, 246, 0.15);
+  --primary-ring:     rgba(59, 130, 246, 0.35);
+  --primary-contrast: #ffffff;
+}
+
 .portal-root {
   display: flex;
   flex-direction: column;

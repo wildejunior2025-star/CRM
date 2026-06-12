@@ -78,7 +78,7 @@
 
 .home-loja-card:hover {
   border-color: var(--primary);
-  box-shadow: 0 2px 16px rgba(134,59,255,0.12);
+  box-shadow: 0 2px 16px var(--primary-ring);
 }
 
 .home-loja-icon {
