@@ -261,3 +261,117 @@
     right: 12px;
   }
 }
+
+/* ── Tela de escolha de tipo ── */
+.login-tipo-botoes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.login-tipo-btn {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  text-decoration: none;
+  color: var(--text);
+  transition: border-color 150ms, background 150ms, box-shadow 150ms;
+}
+
+.login-tipo-btn:hover {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+.login-tipo-btn:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+.login-tipo-btn > div {
+  flex: 1;
+}
+
+.login-tipo-btn strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.login-tipo-btn span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ícone principal do botão de tipo */
+.login-tipo-btn > svg:first-child {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+/* chevron à direita */
+.login-tipo-btn > svg:last-child {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Cor azul para o card de cliente */
+.login-card-cliente {
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-bg: rgba(37, 99, 235, 0.10);
+  --primary-ring: rgba(37, 99, 235, 0.30);
+}
+
+/* ── Separador "Não tem conta?" ── */
+.login-separador {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.login-separador::before,
+.login-separador::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Botão voltar dentro do formulário ── */
+.login-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 4px;
+  text-decoration: none;
+  transition: color 120ms;
+}
+
+.login-back-btn:hover {
+  color: var(--text);
+}
+
+.login-back-btn svg {
+  flex-shrink: 0;
+}

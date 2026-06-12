@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, Navigate, useLocation } from 'react-router-dom'
+import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { useBranding } from '../context/BrandingContext'
@@ -11,6 +11,9 @@ export default function Login() {
   const { theme, toggleTheme } = useTheme()
   const { empresaParceira } = useBranding()
   const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const tipo = searchParams.get('tipo') // null | 'cliente' | 'empresa'
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -33,34 +36,142 @@ export default function Login() {
     setLoading(false)
   }
 
+  const brandLogo = empresaParceira?.logo_url ? (
+    <img
+      src={empresaParceira.logo_url}
+      alt={empresaParceira.nome}
+      style={{ height: 48, width: 48, objectFit: 'contain', borderRadius: 10 }}
+    />
+  ) : (
+    <span className="login-logo" aria-hidden="true">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8 2h8" />
+        <path d="M9 2v6.5a2 2 0 0 1-.4 1.2L4.6 16a3 3 0 0 0 2.4 5h10a3 3 0 0 0 2.4-5l-4-6.3A2 2 0 0 1 15 8.5V2" />
+        <path d="M6 14h12" />
+      </svg>
+    </span>
+  )
+
+  // Tela de escolha — só exibida quando não há ?tipo= e não é domínio exclusivo de loja
+  if (!tipo && !empresaParceira) {
+    return (
+      <div className="login-page">
+        <div className="login-theme-toggle">
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        </div>
+
+        <div className="login-card">
+          <div className="login-brand">
+            {brandLogo}
+            <div>
+              <h1>Depósito CRM</h1>
+              <p className="login-subtitle">Como você quer entrar?</p>
+            </div>
+          </div>
+
+          <div className="login-tipo-botoes">
+            <Link to="/login?tipo=cliente" className="login-tipo-btn login-tipo-cliente">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="8" r="4" />
+                <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+              </svg>
+              <div>
+                <strong>Área do Cliente</strong>
+                <span>Acompanhe pedidos e fiado</span>
+              </div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </Link>
+
+            <Link to="/login?tipo=empresa" className="login-tipo-btn login-tipo-empresa">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="2" y="7" width="20" height="15" rx="2" />
+                <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+                <line x1="12" y1="12" x2="12" y2="12.01" />
+                <path d="M8 12h.01M16 12h.01" />
+              </svg>
+              <div>
+                <strong>Área da Empresa</strong>
+                <span>Sistema de gestão</span>
+              </div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </Link>
+          </div>
+
+          <div className="login-separador">
+            <span>Não tem conta?</span>
+          </div>
+
+          <div className="login-cadastro-btns">
+            <Link to="/cadastro" className="login-cadastro-btn">
+              <span className="login-cadastro-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="7" width="20" height="15" rx="2" />
+                  <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+                </svg>
+              </span>
+              <span>
+                <strong>Sou empresa</strong>
+                <small>Quero usar o CRM</small>
+              </span>
+            </Link>
+            <Link to="/cadastro-cliente" className="login-cadastro-btn">
+              <span className="login-cadastro-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+                </svg>
+              </span>
+              <span>
+                <strong>Sou cliente</strong>
+                <small>Quero fazer pedidos</small>
+              </span>
+            </Link>
+          </div>
+        </div>
+
+        <p className="login-footer">Depósito CRM &middot; Acesso restrito</p>
+      </div>
+    )
+  }
+
+  // Formulário de login — exibido quando há ?tipo= ou em domínio exclusivo de loja
+  const isCliente = tipo === 'cliente' || !!empresaParceira
+  const cardClass = `login-card${isCliente ? ' login-card-cliente' : ''}`
+  const titulo = empresaParceira?.nome
+    ? empresaParceira.nome
+    : isCliente
+      ? 'Área do Cliente'
+      : 'Área da Empresa'
+  const subtitulo = isCliente
+    ? 'Entre com seu e-mail e senha'
+    : 'Entre com seu e-mail e senha'
+
   return (
     <div className="login-page">
       <div className="login-theme-toggle">
         <ThemeToggle theme={theme} onToggle={toggleTheme} />
       </div>
 
-      <div className="login-card">
+      <div className={cardClass}>
+        {/* Botão voltar — só aparece quando veio de ?tipo= (não em domínio de loja) */}
+        {tipo && !empresaParceira && (
+          <Link to="/login" className="login-back-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+            Voltar
+          </Link>
+        )}
+
         <div className="login-brand">
-          {empresaParceira?.logo_url ? (
-            <img
-              src={empresaParceira.logo_url}
-              alt={empresaParceira.nome}
-              style={{ height: 48, width: 48, objectFit: 'contain', borderRadius: 10 }}
-            />
-          ) : (
-            <span className="login-logo" aria-hidden="true">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M8 2h8" />
-                <path d="M9 2v6.5a2 2 0 0 1-.4 1.2L4.6 16a3 3 0 0 0 2.4 5h10a3 3 0 0 0 2.4-5l-4-6.3A2 2 0 0 1 15 8.5V2" />
-                <path d="M6 14h12" />
-              </svg>
-            </span>
-          )}
+          {brandLogo}
           <div>
-            <h1>{empresaParceira?.nome ?? 'Depósito CRM'}</h1>
-            <p className="login-subtitle">
-              {empresaParceira ? 'Acesse sua conta para fazer pedidos' : 'Entre com sua conta para continuar'}
-            </p>
+            <h1>{titulo}</h1>
+            <p className="login-subtitle">{subtitulo}</p>
           </div>
         </div>
 
@@ -98,32 +209,14 @@ export default function Login() {
                 tabIndex={-1}
               >
                 {showPassword ? (
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
                     <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
                     <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
                     <path d="M2 2l20 20" />
                   </svg>
                 ) : (
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
                     <circle cx="12" cy="12" r="3" />
                   </svg>
@@ -134,16 +227,7 @@ export default function Login() {
 
           {error && (
             <div className="login-error" role="alert">
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
                 <line x1="12" y1="8" x2="12" y2="12" />
                 <line x1="12" y1="16" x2="12.01" y2="16" />
@@ -170,40 +254,14 @@ export default function Login() {
             Ainda não tem conta? <Link to="/cadastro-cliente">Criar conta</Link>
           </p>
         ) : (
-          /* Domínio principal → dois tipos de cadastro */
-          <div className="login-cadastro-opcoes">
-            <p className="login-cadastro-label">Ainda não tem conta?</p>
-            <div className="login-cadastro-btns">
-              <Link to="/cadastro-cliente" className="login-cadastro-btn">
-                <span className="login-cadastro-icon" aria-hidden="true">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/>
-                    <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>
-                  </svg>
-                </span>
-                <span>
-                  <strong>Sou cliente</strong>
-                  <small>Quero fazer pedidos</small>
-                </span>
-              </Link>
-              <Link to="/cadastro" className="login-cadastro-btn">
-                <span className="login-cadastro-icon" aria-hidden="true">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                    <polyline points="9 22 9 12 15 12 15 22"/>
-                  </svg>
-                </span>
-                <span>
-                  <strong>Sou empresa</strong>
-                  <small>Quero usar o CRM</small>
-                </span>
-              </Link>
-            </div>
-          </div>
+          /* Veio de ?tipo= → link de volta para escolha */
+          <p className="login-footer" style={{ textAlign: 'center' }}>
+            <Link to="/login">Escolher outro tipo de acesso</Link>
+          </p>
         )}
       </div>
 
-      <p className="login-footer">Depósito CRM &middot; Acesso restrito a colaboradores</p>
+      <p className="login-footer">Depósito CRM &middot; Acesso restrito</p>
     </div>
   )
 }
