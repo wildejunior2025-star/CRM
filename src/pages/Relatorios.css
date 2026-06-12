@@ -45,25 +45,62 @@
   width: auto;
 }
 
+.rel-print-header {
+  display: none;
+  margin-bottom: 24px;
+}
+.rel-print-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.rel-print-header p {
+  font-size: 12px;
+  color: #666;
+  margin: 2px 0;
+}
+
 @media print {
+  /* Esconde tudo que não é conteúdo */
   .sidebar,
+  .sidebar-overlay,
+  .mobile-topbar,
+  .impersonate-banner,
+  .subscription-banner,
+  .notif-wrap,
+  .install-pwa-banner,
   .page-header .btn,
-  .toolbar .btn,
-  .rel-section-header .btn {
-    display: none !important;
-  }
+  .toolbar,
+  .rel-section-header .btn,
+  .btn-secondary[onClick] { display: none !important; }
 
-  .layout {
-    display: block;
-  }
+  /* Mostra o header de impressão */
+  .rel-print-header { display: block !important; }
 
+  /* Reset do layout */
+  .layout { display: block !important; }
   .content {
-    padding: 0;
+    padding: 16px 24px !important;
+    margin: 0 !important;
+    max-width: 100% !important;
   }
 
-  .data-table,
-  .card {
-    box-shadow: none;
-    border: 1px solid #ccc;
+  /* Cores para impressão */
+  body { background: #fff !important; color: #000 !important; }
+  .card, .data-table {
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+    break-inside: avoid;
   }
+  .dashboard-grid { break-inside: avoid; }
+
+  /* Tabelas */
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 11px; }
+  th { background: #f5f5f5 !important; color: #000 !important; }
+  .badge { border: 1px solid #aaa; background: transparent !important; color: #000 !important; }
+
+  /* Quebra de página */
+  h2.rel-table-title { margin-top: 20px; }
+  .data-table { page-break-inside: avoid; }
 }
