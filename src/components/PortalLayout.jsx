@@ -52,12 +52,14 @@ export default function PortalLayout() {
   return (
     <div className="portal-root">
       {temBackupSuperAdmin && (
-        <div className="impersonate-banner">
-          <span>Visualizando cliente: <strong>{clienteNome}</strong></span>
-          <button onClick={handleVoltarSuperAdmin}>← Voltar ao Super Admin</button>
-        </div>
+        <button className="impersonate-fab" onClick={handleVoltarSuperAdmin} title={`Voltar ao Super Admin (${clienteNome})`}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 12H5M12 5l-7 7 7 7"/>
+          </svg>
+          <span>Admin</span>
+        </button>
       )}
-      <header className="portal-header" style={temBackupSuperAdmin ? { top: 44 } : undefined}>
+      <header className="portal-header">
         <div className="portal-header-brand">
           {empresaParceira?.logo_url ? (
             <img

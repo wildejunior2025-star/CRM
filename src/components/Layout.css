@@ -3,46 +3,33 @@
   min-height: 100vh;
 }
 
-/* Quando o banner está ativo, empurra o layout inteiro para baixo */
-.layout-has-banner {
-  margin-top: 44px;
-}
-
-/* Banner de impersonação — fixo no topo, não afeta o flex layout */
-.impersonate-banner {
+/* ── Botão flutuante de impersonação (super admin) ── */
+.impersonate-fab {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 44px;
-  background: #f59e0b;
-  color: #1a1a1a;
+  bottom: 24px;
+  right: 24px;
+  z-index: 500;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 16px;
-  font-size: 13px;
-  font-weight: 600;
-  z-index: 500;
-}
-
-.impersonate-banner button {
-  background: rgba(0,0,0,0.15);
-  border: none;
+  gap: 6px;
+  padding: 9px 14px 9px 12px;
+  background: #f59e0b;
   color: #1a1a1a;
-  font-weight: 700;
+  border: none;
+  border-radius: 999px;
   font-size: 12px;
-  padding: 6px 12px;
-  border-radius: 6px;
+  font-weight: 800;
   cursor: pointer;
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.5);
+  transition: transform 120ms, box-shadow 120ms, background 120ms;
+  letter-spacing: 0.01em;
   white-space: nowrap;
-  transition: background 120ms;
-  flex-shrink: 0;
 }
 
-.impersonate-banner button:hover {
-  background: rgba(0,0,0,0.25);
+.impersonate-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.6);
+  background: #fbbf24;
 }
 
 /* ── Sidebar ── */
@@ -212,12 +199,6 @@
   .sidebar.open {
     transform: translateX(0);
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
-  }
-
-  /* Sidebar e overlay no mobile descem quando o banner está ativo */
-  .layout-has-banner .sidebar {
-    top: 44px;
-    height: calc(100dvh - 44px);
   }
 
   /* Overlay escuro atrás do drawer */
