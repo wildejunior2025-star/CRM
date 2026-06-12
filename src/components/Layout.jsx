@@ -17,6 +17,7 @@ const links = [
   { to: '/clientes', label: 'Clientes', roles: ['admin', 'vendedor'] },
   { to: '/produtos', label: 'Produtos', roles: ['admin'] },
   { to: '/estoque', label: 'Estoque', roles: ['admin'] },
+  { to: '/minha-loja', label: 'Minha Loja', roles: ['admin'] },
   { to: '/usuarios', label: 'Usuários', roles: ['admin'] },
 ]
 

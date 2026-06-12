@@ -27,7 +27,7 @@ export default function PortalLoja() {
     async function load() {
       setLoading(true)
       const [empRes, prodRes] = await Promise.all([
-        supabase.from('empresas').select('id, nome').eq('id', empresaId).maybeSingle(),
+        supabase.from('empresas').select('id, nome, banner_url, logo_url, descricao').eq('id', empresaId).maybeSingle(),
         supabase.from('estoque_catalogo').select('*').eq('empresa_id', empresaId).order('categoria').order('nome'),
       ])
       if (empRes.error || prodRes.error) setError((empRes.error || prodRes.error).message)
@@ -109,6 +109,12 @@ export default function PortalLoja() {
           <span className="loja-store-sub">Catálogo de produtos</span>
         </div>
       </div>
+
+      {empresa?.banner_url && (
+        <div className="loja-empresa-banner">
+          <img src={empresa.banner_url} alt={empresa.nome} />
+        </div>
+      )}
 
       {pedidoFeito && (
         <div className="loja-sucesso">

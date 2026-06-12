@@ -38,7 +38,7 @@ export default function PortalHome() {
     async function load() {
       const { data } = await supabase
         .from('empresas')
-        .select('id, nome, email_contato, status, created_at')
+        .select('id, nome, email_contato, status, created_at, banner_url, logo_url, descricao')
         .in('status', ['trial', 'ativo', 'atrasado'])
         .order('nome')
       setEmpresas(data ?? [])
@@ -82,21 +82,24 @@ export default function PortalHome() {
       ) : (
         <div className="home-lista">
           {filtradas.map(emp => (
-            <button
-              key={emp.id}
-              className="home-loja-card"
-              onClick={() => navigate(`/portal/loja/${emp.id}`)}
-            >
-              <div className="home-loja-icon">
-                <IconLoja />
+            <button key={emp.id} className="home-loja-card" onClick={() => navigate(`/portal/loja/${emp.id}`)}>
+              <div className="home-loja-banner">
+                {emp.banner_url
+                  ? <img src={emp.banner_url} alt="" />
+                  : <div className="home-loja-banner-placeholder" />
+                }
+                <div className="home-loja-logo-wrap">
+                  {emp.logo_url
+                    ? <img src={emp.logo_url} alt={emp.nome} className="home-loja-logo-img" />
+                    : <div className="home-loja-logo-placeholder"><IconLoja /></div>
+                  }
+                </div>
               </div>
               <div className="home-loja-info">
                 <span className="home-loja-nome">{emp.nome}</span>
-                {emp.email_contato && (
-                  <span className="home-loja-sub">{emp.email_contato}</span>
-                )}
+                {emp.descricao && <span className="home-loja-descricao">{emp.descricao}</span>}
               </div>
-              <IconSeta />
+              <div className="home-loja-arrow"><IconSeta /></div>
             </button>
           ))}
         </div>

@@ -26,6 +26,7 @@ import SuperAdminClientes from './pages/SuperAdminClientes'
 import SuperAdminComissoes from './pages/SuperAdminComissoes'
 import CadastroAdmin from './pages/CadastroAdmin'
 import CadastroVendedor from './pages/CadastroVendedor'
+import MinhaLoja from './pages/MinhaLoja'
 
 export default function App() {
   return (
@@ -77,6 +78,10 @@ export default function App() {
             <Route
               path="financeiro"
               element={<ProtectedRoute roles={['admin']}><Financeiro /></ProtectedRoute>}
+            />
+            <Route
+              path="minha-loja"
+              element={<ProtectedRoute roles={['admin']}><MinhaLoja /></ProtectedRoute>}
             />
             <Route
               path="usuarios"
