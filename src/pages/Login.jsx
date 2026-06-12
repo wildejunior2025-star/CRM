@@ -133,8 +133,8 @@ export default function Login() {
                 </svg>
               </span>
               <span>
-                <strong>Sou empresa</strong>
-                <small>Quero usar o CRM</small>
+                <strong>Quero ser empresa</strong>
+                <small>Cadastrar no CRM</small>
               </span>
             </Link>
             <Link to="/cadastro-cliente" className="login-cadastro-btn">
@@ -145,8 +145,8 @@ export default function Login() {
                 </svg>
               </span>
               <span>
-                <strong>Sou cliente</strong>
-                <small>Quero fazer pedidos</small>
+                <strong>Quero ser cliente</strong>
+                <small>Criar conta grátis</small>
               </span>
             </Link>
           </div>
