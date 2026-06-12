@@ -27,6 +27,7 @@ import SuperAdminComissoes from './pages/SuperAdminComissoes'
 import CadastroAdmin from './pages/CadastroAdmin'
 import CadastroVendedor from './pages/CadastroVendedor'
 import MinhaLoja from './pages/MinhaLoja'
+import ResetPassword from './pages/ResetPassword'
 
 export default function App() {
   return (
@@ -35,6 +36,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/cadastro" element={<Cadastro />} />
           {/* Cadastro de cliente livre (sem empresa) */}
           <Route path="/cadastro-cliente" element={<CadastroCliente />} />

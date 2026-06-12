@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { useBranding } from '../context/BrandingContext'
+import { supabase } from '../lib/supabaseClient'
 import ThemeToggle from '../components/ThemeToggle'
 import './Login.css'
 
@@ -19,6 +20,24 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
+
+  const [modoRecuperar, setModoRecuperar] = useState(false)
+  const [recuperarEmail, setRecuperarEmail] = useState('')
+  const [recuperarLoading, setRecuperarLoading] = useState(false)
+  const [recuperarEnviado, setRecuperarEnviado] = useState(false)
+  const [recuperarErro, setRecuperarErro] = useState(null)
+
+  async function handleRecuperar(e) {
+    e.preventDefault()
+    setRecuperarLoading(true)
+    setRecuperarErro(null)
+    const { error } = await supabase.auth.resetPasswordForEmail(recuperarEmail, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    })
+    setRecuperarLoading(false)
+    if (error) { setRecuperarErro(error.message); return }
+    setRecuperarEnviado(true)
+  }
 
   if (session) {
     const from = location.state?.from?.pathname ?? '/'
@@ -175,78 +194,118 @@ export default function Login() {
           </div>
         </div>
 
-        <form className="login-form" onSubmit={handleSubmit}>
-          <div className="form-field">
-            <label htmlFor="email">E-mail</label>
-            <input
-              id="email"
-              type="email"
-              placeholder="voce@exemplo.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-              required
-            />
-          </div>
-
-          <div className="form-field">
-            <label htmlFor="password">Senha</label>
-            <div className="login-password-wrapper">
+        {modoRecuperar ? (
+          <form className="login-form" onSubmit={handleRecuperar}>
+            <p className="login-recuperar-info">
+              Digite seu e-mail e enviaremos um link para redefinir sua senha.
+            </p>
+            <div className="form-field">
+              <label htmlFor="rec-email">E-mail</label>
               <input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
+                id="rec-email"
+                type="email"
+                placeholder="voce@exemplo.com"
+                value={recuperarEmail}
+                onChange={e => setRecuperarEmail(e.target.value)}
+                autoComplete="email"
                 required
               />
-              <button
-                type="button"
-                className="login-password-toggle"
-                onClick={() => setShowPassword((prev) => !prev)}
-                aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-                tabIndex={-1}
-              >
-                {showPassword ? (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
-                    <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
-                    <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
-                    <path d="M2 2l20 20" />
-                  </svg>
-                ) : (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                )}
-              </button>
             </div>
-          </div>
 
-          {error && (
-            <div className="login-error" role="alert">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              <span>{error}</span>
-            </div>
-          )}
-
-          <button type="submit" className="btn btn-primary login-submit" disabled={loading}>
-            {loading ? (
-              <>
-                <span className="login-spinner" aria-hidden="true" />
-                Entrando...
-              </>
-            ) : (
-              'Entrar'
+            {recuperarErro && (
+              <div className="login-error" role="alert">
+                <span>{recuperarErro}</span>
+              </div>
             )}
-          </button>
-        </form>
+
+            {recuperarEnviado ? (
+              <div className="login-error" role="status" style={{ background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid var(--success)' }}>
+                Link enviado! Verifique sua caixa de entrada (e o spam).
+              </div>
+            ) : (
+              <button type="submit" className="btn btn-primary login-submit" disabled={recuperarLoading}>
+                {recuperarLoading ? <><span className="login-spinner" aria-hidden="true" />Enviando...</> : 'Enviar link'}
+              </button>
+            )}
+
+            <button type="button" className="login-back-btn" style={{ alignSelf: 'center', marginTop: 4 }} onClick={() => { setModoRecuperar(false); setRecuperarEnviado(false); setRecuperarErro(null) }}>
+              ← Voltar ao login
+            </button>
+          </form>
+        ) : (
+          <form className="login-form" onSubmit={handleSubmit}>
+            <div className="form-field">
+              <label htmlFor="email">E-mail</label>
+              <input
+                id="email"
+                type="email"
+                placeholder="voce@exemplo.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                required
+              />
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="password">
+                <span>Senha</span>
+                <button type="button" className="login-esqueci" onClick={() => { setModoRecuperar(true); setRecuperarEmail(email) }}>
+                  Esqueci minha senha
+                </button>
+              </label>
+              <div className="login-password-wrapper">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  required
+                />
+                <button
+                  type="button"
+                  className="login-password-toggle"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+                      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+                      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+                      <path d="M2 2l20 20" />
+                    </svg>
+                  ) : (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {error && (
+              <div className="login-error" role="alert">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                <span>{error}</span>
+              </div>
+            )}
+
+            <button type="submit" className="btn btn-primary login-submit" disabled={loading}>
+              {loading ? (
+                <><span className="login-spinner" aria-hidden="true" />Entrando...</>
+              ) : 'Entrar'}
+            </button>
+          </form>
+        )}
 
         {empresaParceira ? (
           /* Domínio exclusivo de loja → só cria conta de cliente */

@@ -47,11 +47,16 @@ export default function Cadastro() {
     setLoading(false)
 
     if (error) {
-      setError(error.message)
+      const msg = error.message ?? ''
+      if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('already been registered')) {
+        setError('Este e-mail já tem uma conta. Faça login ou recupere sua senha clicando em "Esqueci minha senha" na tela de login.')
+      } else {
+        setError(msg)
+      }
       return
     }
 
-    setSuccess('Cadastro realizado! Verifique seu e-mail para confirmar a conta e poder entrar.')
+    setSuccess('Cadastro realizado! Você já pode entrar com seu e-mail e senha.')
     setTimeout(() => navigate('/login'), 2500)
   }
 
