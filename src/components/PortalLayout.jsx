@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
@@ -9,16 +10,26 @@ import './PortalLayout.css'
 export default function PortalLayout() {
   const { theme, toggleTheme } = useTheme()
   const { empresaParceira } = useBranding()
-  const { voltarSuperAdmin: voltarAuth } = useAuth()
+  const { voltarSuperAdmin: voltarAuth, session } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
 
-  const temBackupSuperAdmin = !!localStorage.getItem('crm_superadmin_backup')
-  const clienteNome = localStorage.getItem('crm_superadmin_cliente_nome') || 'cliente'
+  const [temBackupSuperAdmin, setTemBackupSuperAdmin] = useState(
+    () => !!localStorage.getItem('crm_superadmin_backup')
+  )
+  const [clienteNome, setClienteNome] = useState(
+    () => localStorage.getItem('crm_superadmin_cliente_nome') || 'cliente'
+  )
+
+  useEffect(() => {
+    setTemBackupSuperAdmin(!!localStorage.getItem('crm_superadmin_backup'))
+    setClienteNome(localStorage.getItem('crm_superadmin_cliente_nome') || 'cliente')
+  }, [session])
 
   async function handleVoltarSuperAdmin() {
     const ok = await voltarAuth()
     localStorage.removeItem('crm_superadmin_cliente_nome')
+    setTemBackupSuperAdmin(false)
     if (ok) navigate('/super-admin/clientes')
   }
 
