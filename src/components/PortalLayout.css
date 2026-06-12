@@ -22,6 +22,43 @@
   background: var(--bg);
 }
 
+/* ── Banner de impersonação (super admin) ── */
+.impersonate-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  background: #f59e0b;
+  color: #1a1a1a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 600;
+  z-index: 500;
+}
+
+.impersonate-banner button {
+  background: rgba(0, 0, 0, 0.15);
+  border: none;
+  color: #1a1a1a;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms;
+  flex-shrink: 0;
+}
+
+.impersonate-banner button:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
 /* ── Header ── */
 .portal-header {
   position: sticky;

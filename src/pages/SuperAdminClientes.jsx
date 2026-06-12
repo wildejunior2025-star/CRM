@@ -8,6 +8,7 @@ export default function SuperAdminClientes() {
   const [error, setError] = useState(null)
   const [busca, setBusca] = useState('')
   const [bloqueandoId, setBloqueandoId] = useState(null)
+  const [acessandoId, setAcessandoId] = useState(null)
 
   async function load() {
     setLoading(true)
@@ -39,6 +40,35 @@ export default function SuperAdminClientes() {
     setBloqueandoId(null)
     if (error) { alert(error.message); return }
     setClientes(prev => prev.map(c => c.id === cliente.id ? { ...c, ativo: novoAtivo } : c))
+  }
+
+  async function acessarCliente(cliente) {
+    setAcessandoId(cliente.id)
+    setError(null)
+
+    const { data: { session: currentSession } } = await supabase.auth.getSession()
+    if (currentSession) {
+      localStorage.setItem('crm_superadmin_backup', JSON.stringify({
+        access_token: currentSession.access_token,
+        refresh_token: currentSession.refresh_token,
+      }))
+      localStorage.setItem('crm_superadmin_cliente_nome', cliente.nome || cliente.email || 'Cliente')
+    }
+
+    const { data, error } = await supabase.functions.invoke('impersonate-user', {
+      body: { user_id: cliente.id, redirect_to: `${window.location.origin}/portal` },
+    })
+
+    setAcessandoId(null)
+
+    if (error || !data?.link) {
+      localStorage.removeItem('crm_superadmin_backup')
+      localStorage.removeItem('crm_superadmin_cliente_nome')
+      setError(error?.message ?? data?.error ?? 'Erro ao gerar acesso')
+      return
+    }
+
+    window.location.href = data.link
   }
 
   const clientesFiltrados = clientes.filter(c => {
@@ -91,6 +121,7 @@ export default function SuperAdminClientes() {
                 <th>Cadastro</th>
                 <th>Status</th>
                 <th>Ações</th>
+              <th></th>
               </tr>
             </thead>
             <tbody>
@@ -115,6 +146,15 @@ export default function SuperAdminClientes() {
                       {bloqueandoId === c.id
                         ? 'Aguarde...'
                         : c.ativo !== false ? 'Bloquear' : 'Desbloquear'}
+                    </button>
+                  </td>
+                  <td>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      disabled={acessandoId === c.id}
+                      onClick={() => acessarCliente(c)}
+                    >
+                      {acessandoId === c.id ? 'Acessando...' : 'Entrar como'}
                     </button>
                   </td>
                 </tr>

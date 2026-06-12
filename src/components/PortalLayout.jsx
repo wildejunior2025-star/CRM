@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { useBranding } from '../context/BrandingContext'
@@ -9,7 +9,18 @@ import './PortalLayout.css'
 export default function PortalLayout() {
   const { theme, toggleTheme } = useTheme()
   const { empresaParceira } = useBranding()
+  const { voltarSuperAdmin: voltarAuth } = useAuth()
   const location = useLocation()
+  const navigate = useNavigate()
+
+  const temBackupSuperAdmin = !!localStorage.getItem('crm_superadmin_backup')
+  const clienteNome = localStorage.getItem('crm_superadmin_cliente_nome') || 'cliente'
+
+  async function handleVoltarSuperAdmin() {
+    const ok = await voltarAuth()
+    localStorage.removeItem('crm_superadmin_cliente_nome')
+    if (ok) navigate('/super-admin/clientes')
+  }
 
   // Nav dinâmica: no domínio exclusivo da loja, "Lojas" vira "Catálogo" e aponta pro catálogo dela
   const navLinks = empresaParceira
@@ -29,7 +40,13 @@ export default function PortalLayout() {
 
   return (
     <div className="portal-root">
-      <header className="portal-header">
+      {temBackupSuperAdmin && (
+        <div className="impersonate-banner">
+          <span>Visualizando cliente: <strong>{clienteNome}</strong></span>
+          <button onClick={handleVoltarSuperAdmin}>← Voltar ao Super Admin</button>
+        </div>
+      )}
+      <header className="portal-header" style={temBackupSuperAdmin ? { top: 44 } : undefined}>
         <div className="portal-header-brand">
           {empresaParceira?.logo_url ? (
             <img
