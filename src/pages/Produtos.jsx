@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 
 const EMBALAGENS = ['unidade', 'lata', 'garrafa', 'caixa', 'fardo']
@@ -14,9 +15,14 @@ const emptyForm = {
   preco_venda: 0,
   estoque_minimo: 0,
   ativo: true,
+  foto_url: '',
+  descricao: '',
 }
 
 export default function Produtos() {
+  const { profile } = useAuth()
+  const fileInputRef = useRef(null)
+
   const [produtos, setProdutos] = useState([])
   const [categorias, setCategorias] = useState([])
   const [loading, setLoading] = useState(true)
@@ -27,6 +33,7 @@ export default function Produtos() {
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [uploadingFoto, setUploadingFoto] = useState(false)
 
   const [showCategModal, setShowCategModal] = useState(false)
   const [novaCategoria, setNovaCategoria] = useState('')
@@ -97,6 +104,8 @@ export default function Produtos() {
       preco_venda: produto.preco_venda ?? 0,
       estoque_minimo: produto.estoque_minimo ?? 0,
       ativo: produto.ativo ?? true,
+      foto_url: produto.foto_url ?? '',
+      descricao: produto.descricao ?? '',
     })
     setShowModal(true)
   }
@@ -107,6 +116,30 @@ export default function Produtos() {
       ...prev,
       [name]: type === 'checkbox' ? checked : value,
     }))
+  }
+
+  async function handleFotoChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!profile?.empresa_id) { setError('Empresa não identificada para upload.'); return }
+
+    setUploadingFoto(true)
+    setError(null)
+
+    const path = `${profile.empresa_id}/${Date.now()}_${file.name}`
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('produto-fotos')
+      .upload(path, file, { upsert: true })
+
+    setUploadingFoto(false)
+
+    if (uploadError) { setError(`Erro no upload: ${uploadError.message}`); return }
+
+    const { data: urlData } = supabase.storage
+      .from('produto-fotos')
+      .getPublicUrl(uploadData.path)
+
+    setForm(prev => ({ ...prev, foto_url: urlData.publicUrl }))
   }
 
   async function handleSubmit(e) {
@@ -262,6 +295,44 @@ export default function Produtos() {
                     onChange={handleChange}
                     required
                   />
+                </div>
+
+                <div className="form-field full">
+                  <label>Descrição (aparece no portal do cliente)</label>
+                  <textarea
+                    name="descricao"
+                    value={form.descricao}
+                    onChange={handleChange}
+                    rows={2}
+                    placeholder="Ex: Cerveja gelada, 350ml, sabor original..."
+                    style={{ resize: 'vertical', minHeight: 56 }}
+                  />
+                </div>
+
+                <div className="form-field full">
+                  <label>Foto do produto</label>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={handleFotoChange}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingFoto}
+                  >
+                    {uploadingFoto ? 'Enviando...' : 'Escolher foto'}
+                  </button>
+                  {form.foto_url && (
+                    <img
+                      src={form.foto_url}
+                      alt="Preview"
+                      style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 8, marginTop: 8 }}
+                    />
+                  )}
                 </div>
 
                 <div className="form-field">

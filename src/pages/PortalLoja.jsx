@@ -143,16 +143,33 @@ export default function PortalLoja() {
 
             return (
               <div key={p.produto_id} className={`loja-card${semEstoque ? ' indisponivel' : ''}`}>
+                {/* Foto do produto */}
+                {p.foto_url ? (
+                  <div className="loja-card-img">
+                    <img src={p.foto_url} alt={p.nome} loading="lazy" />
+                  </div>
+                ) : (
+                  <div className="loja-card-img loja-card-img-placeholder">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+                      <polyline points="21 15 16 10 5 21"/>
+                    </svg>
+                  </div>
+                )}
+
                 <div className={`loja-badge ${semEstoque ? 'loja-badge-off' : 'loja-badge-on'}`}>
                   {semEstoque ? 'Indisponível' : `${saldo} un.`}
                 </div>
+
                 <div className="loja-card-body">
                   <p className="loja-card-nome">{p.nome}</p>
+                  {p.descricao && <p className="loja-card-descricao">{p.descricao}</p>}
                   <p className="loja-card-sub">{p.embalagem}{p.unidades_por_caixa > 1 ? ` · ${p.unidades_por_caixa} un.` : ''}</p>
                   <p className="loja-card-preco">
                     R$ {Number(p.preco_venda).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </p>
                 </div>
+
                 <div className="loja-card-acao">
                   {qtd === 0 ? (
                     <button className="loja-btn-add" disabled={semEstoque} onClick={() => addOne(p.produto_id)}>
