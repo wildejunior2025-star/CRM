@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { CONDICOES_PAGAMENTO } from '../lib/constants'
+import ClienteHistorico from './ClienteHistorico'
 import '../components/Page.css'
 
 const TIPOS = ['mercadinho', 'bar', 'restaurante', 'distribuidor', 'outro']
@@ -30,6 +31,7 @@ export default function Clientes() {
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [historicoCliente, setHistoricoCliente] = useState(null)
 
   async function loadClientes() {
     setLoading(true)
@@ -189,6 +191,12 @@ export default function Clientes() {
                   <td>
                     <button
                       className="btn btn-secondary btn-sm"
+                      onClick={() => setHistoricoCliente(c)}
+                    >
+                      Histórico
+                    </button>{' '}
+                    <button
+                      className="btn btn-secondary btn-sm"
                       onClick={() => openEdit(c)}
                     >
                       Editar
@@ -206,6 +214,13 @@ export default function Clientes() {
           </table>
         )}
       </div>
+
+      {historicoCliente && (
+        <ClienteHistorico
+          cliente={historicoCliente}
+          onClose={() => setHistoricoCliente(null)}
+        />
+      )}
 
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
