@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { CONDICOES_PAGAMENTO, STATUS_VENDA } from '../lib/constants'
-import { sendWhatsApp } from '../lib/whatsapp'
+import { sendWhatsApp, notificarEstoqueBaixo } from '../lib/whatsapp'
 import '../components/Page.css'
 import './Vendas.css'
 
@@ -161,6 +161,7 @@ export default function Vendas() {
 
     setShowModal(false)
     loadAll()
+    notificarEstoqueBaixo()
   }
 
   async function handleCancelar(venda) {

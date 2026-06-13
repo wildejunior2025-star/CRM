@@ -55,6 +55,8 @@ const FORM_DEFAULTS = {
   ativo:         false,
   notif_pedido:  true,
   notif_fiado:   true,
+  notif_estoque: false,
+  admin_phone:   '',
   msg_pedido:    DEFAULT_MSG_PEDIDO,
   msg_fiado:     DEFAULT_MSG_FIADO,
 }
@@ -89,6 +91,8 @@ export default function WhatsAppConfig() {
           ativo:         data.ativo         ?? false,
           notif_pedido:  data.notif_pedido  ?? true,
           notif_fiado:   data.notif_fiado   ?? true,
+          notif_estoque: data.notif_estoque ?? false,
+          admin_phone:   data.admin_phone   ?? '',
           msg_pedido:    data.msg_pedido     ?? DEFAULT_MSG_PEDIDO,
           msg_fiado:     data.msg_fiado      ?? DEFAULT_MSG_FIADO,
         })
@@ -293,6 +297,32 @@ export default function WhatsAppConfig() {
                 <small>Habilita o botão de cobrança na página Financeiro.</small>
               </div>
             </label>
+
+            <label className="wa-checkbox-row">
+              <input
+                type="checkbox"
+                checked={form.notif_estoque}
+                onChange={(e) => setField('notif_estoque', e.target.checked)}
+              />
+              <div className="wa-checkbox-text">
+                <span>Receber alerta de estoque baixo no WhatsApp</span>
+                <small>Envia mensagem no seu número quando um produto precisar de reposição.</small>
+              </div>
+            </label>
+
+            {form.notif_estoque && (
+              <div className="wa-input-group">
+                <label htmlFor="wa-admin-phone">Seu número para receber alertas</label>
+                <input
+                  id="wa-admin-phone"
+                  type="tel"
+                  placeholder="84999999999"
+                  value={form.admin_phone}
+                  onChange={(e) => setField('admin_phone', e.target.value)}
+                />
+                <span className="wa-hint">DDD + número, sem espaços ou traços. Ex: 84998180774</span>
+              </div>
+            )}
           </div>
         </div>
 
