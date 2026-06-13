@@ -7,6 +7,20 @@
   font-weight: 600;
   color: var(--text-muted);
   margin: 16px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.venda-desconto-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.venda-preco-readonly {
+  background: var(--bg-hover, rgba(0,0,0,.05)) !important;
+  color: var(--text-muted) !important;
+  cursor: not-allowed !important;
 }
 
 .venda-itens {

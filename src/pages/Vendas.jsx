@@ -12,7 +12,7 @@ const STATUS_BADGE = {
 }
 
 function emptyItem() {
-  return { produto_id: '', quantidade: 1, preco_unitario: 0 }
+  return { produto_id: '', quantidade: 1 }
 }
 
 export default function Vendas() {
@@ -86,15 +86,7 @@ export default function Vendas() {
 
   function handleItemChange(index, field, value) {
     setItens((prev) =>
-      prev.map((item, i) => {
-        if (i !== index) return item
-        const next = { ...item, [field]: value }
-        if (field === 'produto_id') {
-          const produto = produtos.find((p) => p.id === value)
-          next.preco_unitario = produto?.preco_venda ?? 0
-        }
-        return next
-      })
+      prev.map((item, i) => (i !== index ? item : { ...item, [field]: value }))
     )
   }
 
@@ -106,12 +98,29 @@ export default function Vendas() {
     setItens((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const total = itens.reduce(
-    (sum, item) => sum + (Number(item.quantidade) || 0) * (Number(item.preco_unitario) || 0),
-    0
-  )
-
   const clienteSelecionado = clientes.find((c) => c.id === clienteId)
+
+  // Total base (sem desconto) para verificar o mínimo
+  const totalBase = itens.reduce((sum, item) => {
+    const produto = produtos.find((p) => p.id === item.produto_id)
+    return sum + (Number(item.quantidade) || 0) * (produto?.preco_venda || 0)
+  }, 0)
+
+  const descPct = Number(clienteSelecionado?.desconto_percentual) || 0
+  const descMin = Number(clienteSelecionado?.desconto_minimo_pedido) || 0
+  const descontoAtivo = descPct > 0 && (descMin === 0 || totalBase >= descMin)
+  const fatorDesconto = descontoAtivo ? (1 - descPct / 100) : 1
+
+  // Itens enriquecidos com preço calculado (read-only)
+  const itensComPreco = itens.map((item) => {
+    const produto = produtos.find((p) => p.id === item.produto_id)
+    const preco = (produto?.preco_venda ?? 0) * fatorDesconto
+    const subtotal = (Number(item.quantidade) || 0) * preco
+    return { ...item, preco_unitario: preco, subtotal }
+  })
+
+  const total = itensComPreco.reduce((sum, item) => sum + item.subtotal, 0)
+
   const limiteExcedido =
     formaPagamento !== 'a_vista' &&
     clienteSelecionado &&
@@ -122,7 +131,7 @@ export default function Vendas() {
     e.preventDefault()
     setFormError(null)
 
-    const itensValidos = itens.filter(
+    const itensValidos = itensComPreco.filter(
       (item) => item.produto_id && Number(item.quantidade) > 0
     )
 
@@ -376,12 +385,22 @@ export default function Vendas() {
                 </div>
               </div>
 
-              <h3 className="venda-itens-title">Itens</h3>
+              <h3 className="venda-itens-title">
+                Itens
+                {descontoAtivo && (
+                  <span className="badge badge-success venda-desconto-badge">
+                    {descPct}% de desconto aplicado
+                  </span>
+                )}
+                {descPct > 0 && !descontoAtivo && descMin > 0 && (
+                  <span className="badge badge-warning venda-desconto-badge">
+                    Desconto de {descPct}% a partir de R$ {descMin.toFixed(2)}
+                  </span>
+                )}
+              </h3>
               <div className="venda-itens">
-                {itens.map((item, index) => {
+                {itensComPreco.map((item, index) => {
                   const produto = produtos.find((p) => p.id === item.produto_id)
-                  const subtotal =
-                    (Number(item.quantidade) || 0) * (Number(item.preco_unitario) || 0)
                   return (
                     <div className="venda-item-row" key={index}>
                       <select
@@ -407,16 +426,12 @@ export default function Vendas() {
                       />
                       <input
                         type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="Preço unit."
-                        value={item.preco_unitario}
-                        onChange={(e) =>
-                          handleItemChange(index, 'preco_unitario', e.target.value)
-                        }
-                        required
+                        value={item.preco_unitario.toFixed(2)}
+                        readOnly
+                        className="venda-preco-readonly"
+                        title="Preço definido pelo sistema"
                       />
-                      <span className="venda-item-subtotal">R$ {subtotal.toFixed(2)}</span>
+                      <span className="venda-item-subtotal">R$ {item.subtotal.toFixed(2)}</span>
                       {produto?.controla_casco && (
                         <span className="badge badge-warning venda-item-casco">casco</span>
                       )}

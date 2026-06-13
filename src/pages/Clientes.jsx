@@ -18,6 +18,8 @@ const emptyForm = {
   dia_visita: '',
   condicao_pagamento: 'a_vista',
   limite_credito: 0,
+  desconto_percentual: 0,
+  desconto_minimo_pedido: 0,
   observacoes: '',
   ativo: true,
 }
@@ -69,6 +71,8 @@ export default function Clientes() {
       dia_visita: cliente.dia_visita ?? '',
       condicao_pagamento: cliente.condicao_pagamento ?? 'a_vista',
       limite_credito: cliente.limite_credito ?? 0,
+      desconto_percentual: cliente.desconto_percentual ?? 0,
+      desconto_minimo_pedido: cliente.desconto_minimo_pedido ?? 0,
       observacoes: cliente.observacoes ?? '',
       ativo: cliente.ativo ?? true,
     })
@@ -91,6 +95,8 @@ export default function Clientes() {
     const payload = {
       ...form,
       limite_credito: Number(form.limite_credito) || 0,
+      desconto_percentual: Number(form.desconto_percentual) || 0,
+      desconto_minimo_pedido: Number(form.desconto_minimo_pedido) || 0,
     }
 
     const { error } = editingId
@@ -334,6 +340,33 @@ export default function Clientes() {
                     name="limite_credito"
                     value={form.limite_credito}
                     onChange={handleChange}
+                  />
+                </div>
+
+                <div className="form-field">
+                  <label>Desconto autorizado (%)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    name="desconto_percentual"
+                    value={form.desconto_percentual}
+                    onChange={handleChange}
+                    placeholder="0 = sem desconto"
+                  />
+                </div>
+
+                <div className="form-field">
+                  <label>Pedido mínimo para desconto (R$)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="desconto_minimo_pedido"
+                    value={form.desconto_minimo_pedido}
+                    onChange={handleChange}
+                    placeholder="0 = sempre aplica"
                   />
                 </div>
 
