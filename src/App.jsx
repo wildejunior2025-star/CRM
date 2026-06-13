@@ -88,7 +88,7 @@ export default function App() {
             />
             <Route
               path="whatsapp"
-              element={<ProtectedRoute roles={['admin']}><WhatsAppConfig /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'super_admin']}><WhatsAppConfig /></ProtectedRoute>}
             />
             <Route
               path="usuarios"
