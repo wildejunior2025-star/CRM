@@ -11,6 +11,17 @@ serve(async (req) => {
     return new Response("ok", { headers: corsHeaders })
   }
 
+  // URL e chave global vêm de variáveis de ambiente (configuradas pelo super_admin)
+  const apiBase = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$/, "")
+  const apiKey  = Deno.env.get("EVOLUTION_API_KEY") ?? ""
+
+  if (!apiBase || !apiKey) {
+    return new Response(
+      JSON.stringify({ error: "Evolution API não configurada. Contate o suporte." }),
+      { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    )
+  }
+
   try {
     const authHeader = req.headers.get("Authorization")
     if (!authHeader) {
@@ -58,30 +69,26 @@ serve(async (req) => {
       })
     }
 
-    // Service role para buscar config sem restrição de RLS
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     )
 
-    const { data: config, error: configError } = await supabaseAdmin
+    const { data: config } = await supabaseAdmin
       .from("whatsapp_config")
-      .select("api_url, api_key, instance_name, ativo")
+      .select("instance_name, ativo")
       .eq("empresa_id", targetEmpresaId)
       .eq("ativo", true)
       .single()
 
-    if (configError || !config) {
+    if (!config) {
       return new Response(JSON.stringify({ error: "WhatsApp não configurado para esta empresa" }), {
         status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" }
       })
     }
 
-    if (!config.api_url || !config.api_key || !config.instance_name) {
-      return new Response(JSON.stringify({ error: "Configuração WhatsApp incompleta" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
-      })
-    }
+    // instance_name salvo no banco; fallback para nome padrão SaaS
+    const instanceName = config.instance_name || `empresa_${targetEmpresaId}`
 
     // Sanitiza telefone: remove não-dígitos e garante DDI 55 (Brasil)
     let cleanPhone = phone.replace(/\D/g, "")
@@ -92,14 +99,13 @@ serve(async (req) => {
       })
     }
 
-    const apiBase = config.api_url.replace(/\/$/, "")
-    const evoUrl = `${apiBase}/message/sendText/${config.instance_name}`
+    const evoUrl = `${apiBase}/message/sendText/${instanceName}`
 
     const evoRes = await fetch(evoUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "apikey": config.api_key,
+        "apikey": apiKey,
       },
       body: JSON.stringify({ number: cleanPhone, text: message }),
     })
