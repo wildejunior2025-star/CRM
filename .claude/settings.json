@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__jina__search_web",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_pages",
+      "PowerShell(Get-Process -Name \"chrome\" -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Id 29196 -Force)",
+      "PowerShell(\"Processo MCP Chrome encerrado\")",
+      "PowerShell(\"Aguardado\")",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_screenshot",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_snapshot",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__click",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__fill",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__wait_for",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__evaluate_script"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\wilde junior\\.cache\\chrome-devtools-mcp\\chrome-profile"
+    ]
+  }
+}
