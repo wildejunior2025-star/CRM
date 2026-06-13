@@ -28,6 +28,7 @@ import CadastroAdmin from './pages/CadastroAdmin'
 import CadastroVendedor from './pages/CadastroVendedor'
 import MinhaLoja from './pages/MinhaLoja'
 import ResetPassword from './pages/ResetPassword'
+import WhatsAppConfig from './pages/WhatsAppConfig'
 
 export default function App() {
   return (
@@ -86,6 +87,10 @@ export default function App() {
               element={<ProtectedRoute roles={['admin']}><MinhaLoja /></ProtectedRoute>}
             />
             <Route
+              path="whatsapp"
+              element={<ProtectedRoute roles={['admin']}><WhatsAppConfig /></ProtectedRoute>}
+            />
+            <Route
               path="usuarios"
               element={<ProtectedRoute roles={['admin']}><Usuarios /></ProtectedRoute>}
             />
@@ -94,7 +99,7 @@ export default function App() {
           <Route
             path="/portal"
             element={
-              <ProtectedRoute roles={['cliente']}>
+              <ProtectedRoute>
                 <PortalLayout />
               </ProtectedRoute>
             }

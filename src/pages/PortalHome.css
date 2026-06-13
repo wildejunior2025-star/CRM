@@ -1,176 +1,266 @@
-.home-root {
+/* ── PortalHome — iFood-style store listing ── */
+
+.ph-root {
   width: 100%;
 }
 
-.home-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  padding: 80px 24px;
-  color: var(--text-muted);
-}
-
-.home-spinner {
-  width: 36px;
-  height: 36px;
-  border: 3px solid var(--border);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: home-spin 0.7s linear infinite;
-}
-
-@keyframes home-spin { to { transform: rotate(360deg); } }
-
 /* ── Busca ── */
-.home-search-wrap {
+.ph-search-wrap {
   position: relative;
   margin-bottom: 20px;
 }
 
-.home-search-icon {
+.ph-search-icon {
   position: absolute;
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-muted);
   pointer-events: none;
+  display: flex;
+  align-items: center;
 }
 
-.home-search {
+.ph-search {
   width: 100%;
-  padding: 12px 12px 12px 38px;
+  padding: 11px 12px 11px 38px;
   border: 1.5px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
   color: var(--text);
-  font-size: 15px;
+  font-size: 14px;
   box-sizing: border-box;
-  transition: border-color 120ms;
+  transition: border-color 120ms, box-shadow 120ms;
 }
 
-.home-search:focus {
+.ph-search::placeholder {
+  color: var(--text-muted);
+}
+
+.ph-search:focus {
   outline: none;
   border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
 }
 
-/* ── Lista de lojas ── */
-.home-lista {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* ── Título da seção ── */
+.ph-section-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 16px;
+  letter-spacing: -0.01em;
 }
 
-.home-loja-card {
+/* ── Grid ── */
+.ph-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 480px) {
+  .ph-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 720px) {
+  .ph-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .ph-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* ── Card ── */
+.ph-card {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
   background: var(--surface);
   border: 1.5px solid var(--border);
-  border-radius: 14px;
-  padding: 0;
-  overflow: hidden;
+  border-radius: 12px;
+  padding: 12px;
   text-align: left;
   cursor: pointer;
-  transition: border-color 120ms, box-shadow 120ms;
+  transition: border-color 140ms, box-shadow 140ms, transform 140ms;
   width: 100%;
+  box-sizing: border-box;
+  /* reset button styles */
+  font-family: inherit;
+  color: inherit;
 }
 
-.home-loja-card:hover {
+.ph-card:hover {
   border-color: var(--primary);
-  box-shadow: 0 2px 16px var(--primary-ring);
+  box-shadow: 0 2px 12px var(--primary-ring);
+  transform: translateY(-1px);
 }
 
-.home-loja-banner {
-  position: relative;
-  width: 100%;
-  height: 100px;
-  background: var(--primary-bg);
-  overflow: hidden;
+.ph-card:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.ph-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ── Logo quadrada ── */
+.ph-card-logo {
   flex-shrink: 0;
-}
-
-.home-loja-banner img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.home-loja-banner-placeholder {
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(135deg, var(--primary-bg) 0%, var(--primary-ring) 100%);
-}
-
-.home-loja-logo-wrap {
-  position: absolute;
-  bottom: -20px;
-  left: 14px;
-  width: 44px;
-  height: 44px;
+  width: 64px;
+  height: 64px;
   border-radius: 12px;
-  border: 3px solid var(--surface);
   overflow: hidden;
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  background: var(--primary-bg);
 }
 
-.home-loja-logo-img {
+.ph-card-logo-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
 
-.home-loja-logo-placeholder {
+.ph-card-logo-placeholder {
   width: 100%;
   height: 100%;
-  background: var(--primary-bg);
-  color: var(--primary);
   display: flex;
   align-items: center;
   justify-content: center;
+  color: var(--primary);
 }
 
-.home-loja-info {
-  padding: 28px 14px 12px;
+/* ── Corpo do card ── */
+.ph-card-body {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 0;
 }
 
-.home-loja-nome {
-  font-size: 16px;
+.ph-card-nome {
+  font-size: 13px;
   font-weight: 700;
   color: var(--text);
+  margin: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.3;
 }
 
-.home-loja-descricao {
-  font-size: 13px;
+.ph-card-desc {
+  font-size: 11px;
   color: var(--text-muted);
+  margin: 0;
   line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  white-space: normal;
 }
 
-.home-loja-arrow {
-  padding: 0 14px 12px;
-  color: var(--text-muted);
+/* ── Status pill ── */
+.ph-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+  margin-top: 2px;
+  width: fit-content;
+}
+
+.ph-pill::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.8;
+}
+
+.pill-open {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.pill-warn {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+/* ── Skeleton loading ── */
+.ph-card--skeleton {
+  pointer-events: none;
+  cursor: default;
+}
+
+.ph-skeleton-box {
+  background: var(--border);
+  border-radius: 12px;
+  animation: ph-pulse 1.4s ease-in-out infinite;
+}
+
+.ph-skeleton-line {
+  display: block;
+  background: var(--border);
+  border-radius: 4px;
+  animation: ph-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ph-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+/* ── Estado vazio ── */
+.ph-empty {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 56px 24px;
+  text-align: center;
 }
 
-.home-empty {
-  text-align: center;
-  padding: 48px 24px;
+.ph-empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.ph-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.ph-empty-sub {
+  font-size: 13px;
   color: var(--text-muted);
+  margin: 0;
 }

@@ -73,6 +73,12 @@
   gap: 10px;
 }
 
+.portal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .portal-header-logo {
   width: 32px;
   height: 32px;

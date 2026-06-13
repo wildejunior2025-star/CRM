@@ -18,6 +18,7 @@ const links = [
   { to: '/produtos', label: 'Produtos', roles: ['admin'] },
   { to: '/estoque', label: 'Estoque', roles: ['admin'] },
   { to: '/minha-loja', label: 'Minha Loja', roles: ['admin'] },
+  { to: '/whatsapp', label: 'WhatsApp', roles: ['admin'] },
   { to: '/usuarios', label: 'Usuários', roles: ['admin'] },
 ]
 

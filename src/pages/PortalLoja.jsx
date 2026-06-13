@@ -8,7 +8,7 @@ import './PortalLoja.css'
 export default function PortalLoja() {
   const { empresaId } = useParams()
   const navigate = useNavigate()
-  const { profile } = useAuth()
+  useAuth()
   const { empresaParceira } = useBranding()
   const dominioExclusivo = !!empresaParceira
 
@@ -16,6 +16,7 @@ export default function PortalLoja() {
   const [produtos, setProdutos] = useState([])
   const [carrinho, setCarrinho] = useState({})
   const [categoriaAtiva, setCategoriaAtiva] = useState('Todos')
+  const [busca, setBusca] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [enviando, setEnviando] = useState(false)
@@ -58,9 +59,33 @@ export default function PortalLoja() {
 
   /* ── Categorias ── */
   const categorias = ['Todos', ...new Set(produtos.map(p => p.categoria).filter(Boolean))]
-  const produtosFiltrados = categoriaAtiva === 'Todos'
-    ? produtos
-    : produtos.filter(p => p.categoria === categoriaAtiva)
+
+  /* ── Filtro ── */
+  const produtosFiltrados = produtos.filter(p => {
+    const matchCategoria = categoriaAtiva === 'Todos' || p.categoria === categoriaAtiva
+    const termo = busca.trim().toLowerCase()
+    const matchBusca = !termo
+      || p.nome?.toLowerCase().includes(termo)
+      || p.descricao?.toLowerCase().includes(termo)
+    return matchCategoria && matchBusca
+  })
+
+  /* ── Agrupamento por categoria para renderização ── */
+  const categoriasDeProdutos = categorias.filter(c => c !== 'Todos')
+  const secoes = categoriaAtiva === 'Todos'
+    ? categoriasDeProdutos
+        .map(cat => ({
+          nome: cat,
+          produtos: produtosFiltrados.filter(p => p.categoria === cat),
+        }))
+        .filter(s => s.produtos.length > 0)
+    : [{
+        nome: categoriaAtiva,
+        produtos: produtosFiltrados,
+      }].filter(s => s.produtos.length > 0)
+
+  // Produtos sem categoria agrupados numa seção extra
+  const semCategoria = produtosFiltrados.filter(p => !p.categoria)
 
   /* ── Confirmar ── */
   async function handleConfirmar() {
@@ -81,7 +106,24 @@ export default function PortalLoja() {
     setCarrinhoAberto(false)
     setPedidoFeito(true)
     setTimeout(() => setPedidoFeito(false), 4000)
-    // Recarrega estoque
+
+    // Tentar enviar WhatsApp de confirmação (silencioso — não bloqueia se falhar)
+    try {
+      const { data: clienteData } = await supabase
+        .from('clientes')
+        .select('nome, telefone')
+        .limit(1)
+        .single()
+      if (clienteData?.telefone) {
+        const { sendWhatsApp } = await import('../lib/whatsapp')
+        await sendWhatsApp({
+          phone: clienteData.telefone,
+          message: `Olá ${clienteData.nome ?? 'cliente'}! Seu pedido foi recebido com sucesso. Em breve entraremos em contato para confirmar a entrega.`,
+          empresaId: empresaId,
+        })
+      }
+    } catch { /* silencioso */ }
+
     const { data } = await supabase.from('estoque_catalogo').select('*').eq('empresa_id', empresaId).order('categoria').order('nome')
     setProdutos(data ?? [])
   }
@@ -89,130 +131,166 @@ export default function PortalLoja() {
   if (loading) return (
     <div className="loja-loading">
       <div className="loja-spinner" />
-      <p>Carregando catálogo...</p>
+      <p>Carregando cardápio...</p>
     </div>
   )
 
   return (
     <div className="loja-root">
-      {/* Cabeçalho da loja */}
-      <div className="loja-store-header">
+      {/* ── Banner hero full-bleed ── */}
+      <div className="loja-hero">
+        {empresa?.banner_url
+          ? <img className="loja-hero-img" src={empresa.banner_url} alt={empresa?.nome} />
+          : <div className="loja-hero-placeholder" />
+        }
         {!dominioExclusivo && (
-          <button className="loja-back-btn" onClick={() => navigate('/portal')}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <button className="loja-back-btn" onClick={() => navigate('/portal')} aria-label="Voltar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 18l-6-6 6-6"/>
             </svg>
           </button>
         )}
-        <div className="loja-store-info">
-          <h2 className="loja-store-nome">{empresa?.nome ?? 'Loja'}</h2>
-          <span className="loja-store-sub">Catálogo de produtos</span>
+      </div>
+
+      {/* ── Store identity ── */}
+      <div className="loja-identity">
+        <div className="loja-identity-logo">
+          {empresa?.logo_url
+            ? <img src={empresa.logo_url} alt={empresa?.nome} />
+            : (
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <path d="M16 10a4 4 0 0 1-8 0"/>
+              </svg>
+            )
+          }
+        </div>
+        <div className="loja-identity-info">
+          <h1 className="loja-identity-nome">{empresa?.nome ?? 'Loja'}</h1>
+          <span className="loja-identity-sub">Catálogo de produtos</span>
         </div>
       </div>
 
-      {empresa?.banner_url && (
-        <div className="loja-empresa-banner">
-          <img src={empresa.banner_url} alt={empresa.nome} />
-        </div>
-      )}
-
+      {/* ── Feedbacks ── */}
       {pedidoFeito && (
         <div className="loja-sucesso">
-          <span>✓</span> Pedido enviado! Veja em <strong>Pedidos</strong>.
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          Pedido enviado! Veja em <strong>Pedidos</strong>.
         </div>
       )}
-
       {error && <div className="loja-aviso loja-aviso-erro">{error}</div>}
 
-      {/* Filtro por categoria */}
-      <div className="loja-categorias">
-        {categorias.map(cat => (
-          <button
-            key={cat}
-            className={`loja-cat-pill${categoriaAtiva === cat ? ' active' : ''}`}
-            onClick={() => setCategoriaAtiva(cat)}
-          >
-            {cat}
+      {/* ── Busca ── */}
+      <div className="loja-search-wrap">
+        <svg className="loja-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input
+          className="loja-search-input"
+          type="search"
+          placeholder="Buscar no cardápio..."
+          value={busca}
+          onChange={e => setBusca(e.target.value)}
+        />
+        {busca && (
+          <button className="loja-search-clear" onClick={() => setBusca('')} aria-label="Limpar busca">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
           </button>
-        ))}
+        )}
       </div>
 
-      {/* Grid de produtos */}
-      {produtosFiltrados.length === 0 ? (
-        <div className="loja-empty">Nenhum produto nesta categoria.</div>
-      ) : (
-        <div className="loja-grid">
-          {produtosFiltrados.map(p => {
-            const saldo = Number(p.quantidade_atual ?? 0)
-            const semEstoque = saldo <= 0
-            const qtd = carrinho[p.produto_id] ?? 0
-
-            return (
-              <div key={p.produto_id} className={`loja-card${semEstoque ? ' indisponivel' : ''}`}>
-                {/* Foto do produto */}
-                {p.foto_url ? (
-                  <div className="loja-card-img">
-                    <img src={p.foto_url} alt={p.nome} loading="lazy" />
-                  </div>
-                ) : (
-                  <div className="loja-card-img loja-card-img-placeholder">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
-                      <polyline points="21 15 16 10 5 21"/>
-                    </svg>
-                  </div>
-                )}
-
-                <div className={`loja-badge ${semEstoque ? 'loja-badge-off' : 'loja-badge-on'}`}>
-                  {semEstoque ? 'Indisponível' : `${saldo} un.`}
-                </div>
-
-                <div className="loja-card-body">
-                  <p className="loja-card-nome">{p.nome}</p>
-                  {p.descricao && <p className="loja-card-descricao">{p.descricao}</p>}
-                  <p className="loja-card-sub">{p.embalagem}{p.unidades_por_caixa > 1 ? ` · ${p.unidades_por_caixa} un.` : ''}</p>
-                  <p className="loja-card-preco">
-                    R$ {Number(p.preco_venda).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                  </p>
-                </div>
-
-                <div className="loja-card-acao">
-                  {qtd === 0 ? (
-                    <button className="loja-btn-add" disabled={semEstoque} onClick={() => addOne(p.produto_id)}>
-                      + Adicionar
-                    </button>
-                  ) : (
-                    <div className="loja-qty-ctrl">
-                      <button className="loja-qty-btn" onClick={() => removeOne(p.produto_id)}>−</button>
-                      <span className="loja-qty-val">{qtd}</span>
-                      <button className="loja-qty-btn" disabled={qtd >= saldo} onClick={() => addOne(p.produto_id)}>+</button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )
-          })}
+      {/* ── Categorias pills sticky ── */}
+      <div className="loja-categorias-sticky">
+        <div className="loja-categorias">
+          {categorias.map(cat => (
+            <button
+              key={cat}
+              className={`loja-cat-pill${categoriaAtiva === cat ? ' active' : ''}`}
+              onClick={() => setCategoriaAtiva(cat)}
+            >
+              {cat}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
-      {/* Barra flutuante do carrinho */}
+      {/* ── Conteúdo de produtos ── */}
+      <div className="loja-catalogo">
+        {produtosFiltrados.length === 0 ? (
+          <div className="loja-empty">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <p>Nenhum produto encontrado.</p>
+            {busca && <span>Tente outro termo de busca.</span>}
+          </div>
+        ) : (
+          <>
+            {secoes.map(secao => (
+              <section key={secao.nome} className="loja-secao">
+                <h3 className="loja-secao-titulo">{secao.nome}</h3>
+                <div className="loja-lista">
+                  {secao.produtos.map(p => (
+                    <ProdutoCard
+                      key={p.produto_id}
+                      produto={p}
+                      qtd={carrinho[p.produto_id] ?? 0}
+                      onAdd={addOne}
+                      onRemove={removeOne}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            {semCategoria.length > 0 && (
+              <section className="loja-secao">
+                <h3 className="loja-secao-titulo">Outros</h3>
+                <div className="loja-lista">
+                  {semCategoria.map(p => (
+                    <ProdutoCard
+                      key={p.produto_id}
+                      produto={p}
+                      qtd={carrinho[p.produto_id] ?? 0}
+                      onAdd={addOne}
+                      onRemove={removeOne}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* ── Barra flutuante da sacola ── */}
       {totalItens > 0 && (
         <button className="loja-cart-bar" onClick={() => setCarrinhoAberto(true)}>
           <span className="loja-cart-badge">{totalItens}</span>
-          <span>Ver sacola</span>
+          <span className="loja-cart-label">Ver sacola</span>
           <span className="loja-cart-total">
             R$ {totalValor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
           </span>
         </button>
       )}
 
-      {/* Drawer da sacola */}
+      {/* ── Drawer da sacola ── */}
       {carrinhoAberto && (
         <div className="loja-drawer-overlay" onClick={() => setCarrinhoAberto(false)}>
           <div className="loja-drawer" onClick={e => e.stopPropagation()}>
+            <div className="loja-drawer-handle" />
             <div className="loja-drawer-header">
               <h2>Sua sacola</h2>
-              <button className="loja-drawer-close" onClick={() => setCarrinhoAberto(false)}>✕</button>
+              <button className="loja-drawer-close" onClick={() => setCarrinhoAberto(false)} aria-label="Fechar sacola">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
             </div>
 
             <div className="loja-drawer-itens">
@@ -220,7 +298,9 @@ export default function PortalLoja() {
                 <div key={produto.produto_id} className="loja-drawer-item">
                   <div className="loja-drawer-item-info">
                     <span className="loja-drawer-item-nome">{produto.nome}</span>
-                    <span className="loja-drawer-item-sub">R$ {Number(produto.preco_venda).toFixed(2)} cada</span>
+                    <span className="loja-drawer-item-sub">
+                      R$ {Number(produto.preco_venda).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} cada
+                    </span>
                   </div>
                   <div className="loja-qty-ctrl">
                     <button className="loja-qty-btn" onClick={() => removeOne(produto.produto_id)}>−</button>
@@ -228,7 +308,7 @@ export default function PortalLoja() {
                     <button className="loja-qty-btn" onClick={() => addOne(produto.produto_id)}>+</button>
                   </div>
                   <span className="loja-drawer-item-total">
-                    R$ {(qtd * Number(produto.preco_venda)).toFixed(2)}
+                    R$ {(qtd * Number(produto.preco_venda)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </span>
                 </div>
               ))}
@@ -239,14 +319,102 @@ export default function PortalLoja() {
               <strong>R$ {totalValor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
             </div>
 
-            {error && <div className="loja-aviso loja-aviso-erro" style={{ margin: '0 20px 12px' }}>{error}</div>}
+            {error && (
+              <div className="loja-aviso loja-aviso-erro" style={{ margin: '0 20px 12px' }}>
+                {error}
+              </div>
+            )}
 
             <button className="loja-btn-confirmar" onClick={handleConfirmar} disabled={enviando}>
-              {enviando ? 'Enviando...' : 'Confirmar pedido'}
+              {enviando
+                ? (
+                  <>
+                    <span className="loja-btn-spinner" />
+                    Enviando...
+                  </>
+                )
+                : 'Confirmar pedido'
+              }
             </button>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/* ── Card de produto horizontal (iFood style) ── */
+function ProdutoCard({ produto: p, qtd, onAdd, onRemove }) {
+  const saldo = Number(p.quantidade_atual ?? 0)
+  const semEstoque = saldo <= 0
+
+  return (
+    <div className={`loja-card${semEstoque ? ' indisponivel' : ''}`}>
+      {/* Info à esquerda */}
+      <div className="loja-card-info">
+        <p className="loja-card-nome">{p.nome}</p>
+        {p.descricao && (
+          <p className="loja-card-descricao">{p.descricao}</p>
+        )}
+        <p className="loja-card-meta">
+          {[p.embalagem, p.unidades_por_caixa > 1 ? `${p.unidades_por_caixa} un.` : null]
+            .filter(Boolean)
+            .join(' · ')}
+        </p>
+        <p className="loja-card-preco">
+          R$ {Number(p.preco_venda).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+        </p>
+      </div>
+
+      {/* Imagem à direita com controle sobreposto */}
+      <div className="loja-card-img-wrap">
+        {semEstoque && <span className="loja-card-off-badge">Indisponível</span>}
+
+        {p.foto_url
+          ? <img className="loja-card-img" src={p.foto_url} alt={p.nome} loading="lazy" />
+          : (
+            <div className="loja-card-img loja-card-img-placeholder">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <polyline points="21 15 16 10 5 21"/>
+              </svg>
+            </div>
+          )
+        }
+
+        {/* Controle de quantidade sobre a imagem */}
+        {qtd === 0
+          ? (
+            <button
+              className="loja-add-btn"
+              disabled={semEstoque}
+              onClick={() => onAdd(p.produto_id)}
+              aria-label={`Adicionar ${p.nome}`}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
+          )
+          : (
+            <div className="loja-qty-overlay">
+              <button
+                className="loja-qty-mini-btn"
+                onClick={() => onRemove(p.produto_id)}
+                aria-label="Remover um"
+              >−</button>
+              <span className="loja-qty-mini-val">{qtd}</span>
+              <button
+                className="loja-qty-mini-btn"
+                disabled={qtd >= saldo}
+                onClick={() => onAdd(p.produto_id)}
+                aria-label="Adicionar um"
+              >+</button>
+            </div>
+          )
+        }
+      </div>
     </div>
   )
 }

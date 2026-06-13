@@ -39,3 +39,23 @@
 .fin-historico-cliente {
   font-weight: 700;
 }
+
+/* ── Botão WhatsApp na tabela de fiado ── */
+.wa-btn {
+  background: #25d366;
+  color: #fff;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 32px;
+}
+
+.wa-btn:hover:not(:disabled) {
+  background: #1da851;
+}
+
+.wa-btn:disabled {
+  opacity: 0.55;
+}

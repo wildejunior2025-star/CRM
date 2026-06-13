@@ -40,6 +40,7 @@ export default function Login() {
   }
 
   if (session) {
+    if (tipo === 'cliente') return <Navigate to="/portal" replace />
     const from = location.state?.from?.pathname ?? '/'
     return <Navigate to={from} replace />
   }
@@ -51,38 +52,7 @@ export default function Login() {
 
     const { error } = await login(email, password)
 
-    if (error) {
-      setError(error.message)
-      setLoading(false)
-      return
-    }
-
-    if (tipo) {
-      const { data: { session: s } } = await supabase.auth.getSession()
-      if (s) {
-        const { data: prof } = await supabase
-          .from('profiles')
-          .select('perfil')
-          .eq('id', s.user.id)
-          .maybeSingle()
-
-        if (prof) {
-          if (tipo === 'cliente' && prof.perfil !== 'cliente') {
-            await supabase.auth.signOut()
-            setError('Este e-mail pertence a uma conta de empresa. Use a "Área da Empresa" para entrar.')
-            setLoading(false)
-            return
-          }
-          if (tipo === 'empresa' && prof.perfil === 'cliente') {
-            await supabase.auth.signOut()
-            setError('Este e-mail pertence a uma conta de cliente. Use a "Área do Cliente" para entrar.')
-            setLoading(false)
-            return
-          }
-        }
-      }
-    }
-
+    if (error) setError(error.message)
     setLoading(false)
   }
 

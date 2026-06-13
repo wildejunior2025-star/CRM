@@ -20,7 +20,7 @@ export default function CadastroCliente() {
   const [loading, setLoading] = useState(false)
 
   if (session) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/portal" replace />
   }
 
   async function handleSubmit(e) {
@@ -57,7 +57,7 @@ export default function CadastroCliente() {
     }
 
     setSuccess('Cadastro realizado! Você já pode entrar com seu e-mail e senha.')
-    setTimeout(() => navigate('/login'), 2500)
+    setTimeout(() => navigate('/login?tipo=cliente'), 2500)
   }
 
   return (

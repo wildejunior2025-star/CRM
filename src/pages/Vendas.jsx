@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { CONDICOES_PAGAMENTO, STATUS_VENDA } from '../lib/constants'
+import { sendWhatsApp } from '../lib/whatsapp'
 import '../components/Page.css'
 import './Vendas.css'
 
@@ -37,17 +38,21 @@ export default function Vendas() {
   const [detalheVenda, setDetalheVenda] = useState(null)
   const [detalheItens, setDetalheItens] = useState([])
 
+  const [waConfig, setWaConfig] = useState(null)
+  const [sendingWa, setSendingWa] = useState(null)
+
   async function loadAll() {
     setLoading(true)
     setError(null)
 
-    const [vendasRes, clientesRes, produtosRes] = await Promise.all([
+    const [vendasRes, clientesRes, produtosRes, waRes] = await Promise.all([
       supabase
         .from('vendas')
-        .select('*, clientes(nome)')
+        .select('*, clientes(nome, telefone)')
         .order('created_at', { ascending: false }),
       supabase.from('clientes').select('*').eq('ativo', true).order('nome'),
       supabase.from('produtos').select('*').eq('ativo', true).order('nome'),
+      supabase.from('whatsapp_config').select('ativo, notif_pedido, msg_pedido').maybeSingle(),
     ])
 
     const firstError = vendasRes.error || clientesRes.error || produtosRes.error
@@ -56,6 +61,7 @@ export default function Vendas() {
     setVendas(vendasRes.data ?? [])
     setClientes(clientesRes.data ?? [])
     setProdutos(produtosRes.data ?? [])
+    if (!waRes.error && waRes.data) setWaConfig(waRes.data)
     setLoading(false)
   }
 
@@ -166,8 +172,20 @@ export default function Vendas() {
 
   async function handleStatusChange(venda, status) {
     const { error } = await supabase.from('vendas').update({ status }).eq('id', venda.id)
-    if (error) setError(error.message)
-    else loadAll()
+    if (error) { setError(error.message); return }
+
+    // Disparar WhatsApp de confirmação ao marcar como entregue
+    if (status === 'entregue' && waConfig?.ativo && venda.clientes?.telefone) {
+      setSendingWa(venda.id)
+      sendWhatsApp({
+        phone: venda.clientes.telefone,
+        message: `Olá ${venda.clientes.nome}! Seu pedido foi entregue. Obrigado pela preferência!`,
+      })
+        .catch(() => {})
+        .finally(() => setSendingWa(null))
+    }
+
+    loadAll()
   }
 
   async function openDetalhe(venda) {
@@ -289,8 +307,9 @@ export default function Vendas() {
                         <button
                           className="btn btn-secondary btn-sm"
                           onClick={() => handleStatusChange(v, 'entregue')}
+                          disabled={sendingWa === v.id}
                         >
-                          Marcar entregue
+                          {sendingWa === v.id ? 'Enviando...' : 'Marcar entregue'}
                         </button>{' '}
                         <button
                           className="btn btn-danger btn-sm"
