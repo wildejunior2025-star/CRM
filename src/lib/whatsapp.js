@@ -27,30 +27,20 @@ export async function notificarEstoqueBaixo() {
 
     if (!config?.ativo || !config?.notif_estoque || !config?.admin_phone) return
 
-    const { data: produtos } = await supabase
-      .from('produtos')
-      .select('id, nome, estoque_minimo')
-      .eq('ativo', true)
-      .gt('estoque_minimo', 0)
-
-    if (!produtos?.length) return
-
     const { data: saldos } = await supabase
       .from('estoque_saldo')
-      .select('produto_id, saldo_atual')
-      .in('produto_id', produtos.map(p => p.id))
+      .select('nome, quantidade_atual, estoque_minimo')
+      .gt('estoque_minimo', 0)
 
-    const baixos = produtos.filter(p => {
-      const s = saldos?.find(s => s.produto_id === p.id)
-      return s && Number(s.saldo_atual) <= Number(p.estoque_minimo)
-    })
+    if (!saldos?.length) return
+
+    const baixos = saldos.filter(s => Number(s.quantidade_atual) <= Number(s.estoque_minimo))
 
     if (!baixos.length) return
 
-    const lista = baixos.map(p => {
-      const s = saldos.find(s => s.produto_id === p.id)
-      return `• ${p.nome}: ${Number(s.saldo_atual)} un (mínimo: ${p.estoque_minimo})`
-    }).join('\n')
+    const lista = baixos
+      .map(s => `• ${s.nome}: ${Number(s.quantidade_atual)} un (mínimo: ${s.estoque_minimo})`)
+      .join('\n')
 
     await sendWhatsApp({
       phone: config.admin_phone,
