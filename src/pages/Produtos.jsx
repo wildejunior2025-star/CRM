@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import React from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 
+const PAGE_SIZE = 50
+
+// eslint-disable-next-line no-unused-vars
 const EMBALAGENS = ['unidade', 'lata', 'garrafa', 'caixa', 'fardo']
 
 const emptyForm = {
@@ -13,14 +17,29 @@ const emptyForm = {
   controla_casco: false,
   preco_custo: 0,
   preco_venda: 0,
+  preco_app: 0,
+  faixas_preco: [],
   estoque_minimo: 0,
   ativo: true,
   foto_url: '',
   descricao: '',
 }
 
+const CATALOGO_BASE = 'https://vendamais-catalogo.pages.dev'
+
 export default function Produtos() {
-  const { profile } = useAuth()
+  const { profile, empresa } = useAuth()
+  const [copiadoLink, setCopiadoLink] = useState(false)
+
+  const slug = empresa?.slug ?? null
+  const linkCardapio = slug ? `${CATALOGO_BASE}/?loja=${slug}` : null
+
+  function copiarLink() {
+    if (!linkCardapio) return
+    navigator.clipboard.writeText(linkCardapio)
+    setCopiadoLink(true)
+    setTimeout(() => setCopiadoLink(false), 2000)
+  }
   const fileInputRef = useRef(null)
 
   const [produtos, setProdutos] = useState([])
@@ -29,6 +48,9 @@ export default function Produtos() {
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
   const [categoriaFiltro, setCategoriaFiltro] = useState('')
+  const [page, setPage] = useState(0)
+  const [total, setTotal] = useState(0)
+  const debounceRef = useRef(null)
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(emptyForm)
@@ -40,6 +62,12 @@ export default function Produtos() {
   const [savingCateg, setSavingCateg] = useState(false)
   const [categError, setCategError] = useState(null)
 
+  const [embalagens, setEmbalagens] = useState([])
+  const [showEmbalagensModal, setShowEmbalagensModal] = useState(false)
+  const [novaEmbalagem, setNovaEmbalagem] = useState('')
+  const [savingEmb, setSavingEmb] = useState(false)
+  const [embError, setEmbError] = useState(null)
+
   async function loadCategorias() {
     const { data } = await supabase
       .from('categorias')
@@ -48,31 +76,63 @@ export default function Produtos() {
     setCategorias(data ?? [])
   }
 
-  async function loadProdutos() {
+  async function loadEmbalagens() {
+    const { data } = await supabase
+      .from('embalagens')
+      .select('id, nome')
+      .order('nome', { ascending: true })
+    setEmbalagens(data ?? [])
+  }
+
+  const loadProdutos = useCallback(async (busca = '', categ = '', pg = 0) => {
     setLoading(true)
     setError(null)
-    const { data, error } = await supabase
+    let query = supabase
       .from('produtos')
-      .select('*')
+      .select('*', { count: 'exact' })
+      .order('categoria', { ascending: true })
       .order('nome', { ascending: true })
-
+      .range(pg * PAGE_SIZE, pg * PAGE_SIZE + PAGE_SIZE - 1)
+    if (busca.trim()) query = query.ilike('nome', `%${busca.trim()}%`)
+    if (categ) query = query.eq('categoria', categ)
+    const { data, error, count } = await query
     if (error) setError(error.message)
-    else setProdutos(data ?? [])
+    else { setProdutos(data ?? []); setTotal(count ?? 0) }
     setLoading(false)
+  }, [])
+
+  function handleSearch(val) {
+    setSearch(val)
+    setPage(0)
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => loadProdutos(val, categoriaFiltro, 0), 400)
+  }
+
+  function handleCategoria(val) {
+    setCategoriaFiltro(val)
+    setPage(0)
+    loadProdutos(search, val, 0)
+  }
+
+  function irParaPagina(pg) {
+    setPage(pg)
+    loadProdutos(search, categoriaFiltro, pg)
   }
 
   useEffect(() => {
-    loadProdutos()
+    loadProdutos('', '', 0)
     loadCategorias()
-  }, [])
+    loadEmbalagens()
+  }, [loadProdutos])
 
   async function handleSaveCategoria(e) {
     e.preventDefault()
     const nome = novaCategoria.trim()
     if (!nome) return
+    if (!profile?.empresa_id) { setCategError('Empresa não identificada.'); return }
     setSavingCateg(true)
     setCategError(null)
-    const { error } = await supabase.from('categorias').insert({ nome })
+    const { error } = await supabase.rpc('add_categoria', { p_nome: nome })
     setSavingCateg(false)
     if (error) { setCategError(error.message); return }
     setNovaCategoria('')
@@ -84,6 +144,26 @@ export default function Produtos() {
     const { error } = await supabase.from('categorias').delete().eq('id', id)
     if (error) { setCategError(error.message); return }
     loadCategorias()
+  }
+
+  async function handleAddEmbalagem(e) {
+    e.preventDefault()
+    const nome = novaEmbalagem.trim()
+    if (!nome) return
+    setSavingEmb(true)
+    setEmbError(null)
+    const { error } = await supabase.rpc('add_embalagem', { p_nome: nome })
+    setSavingEmb(false)
+    if (error) { setEmbError(error.message); return }
+    setNovaEmbalagem('')
+    loadEmbalagens()
+  }
+
+  async function handleDeleteEmbalagem(id) {
+    if (!confirm('Excluir esta embalagem?')) return
+    const { error } = await supabase.from('embalagens').delete().eq('id', id)
+    if (error) { setEmbError(error.message); return }
+    loadEmbalagens()
   }
 
   function openNew() {
@@ -102,6 +182,8 @@ export default function Produtos() {
       controla_casco: produto.controla_casco ?? false,
       preco_custo: produto.preco_custo ?? 0,
       preco_venda: produto.preco_venda ?? 0,
+      preco_app: produto.preco_app ?? 0,
+      faixas_preco: produto.faixas_preco ?? [],
       estoque_minimo: produto.estoque_minimo ?? 0,
       ativo: produto.ativo ?? true,
       foto_url: produto.foto_url ?? '',
@@ -152,7 +234,9 @@ export default function Produtos() {
       unidades_por_caixa: Number(form.unidades_por_caixa) || 1,
       preco_custo: Number(form.preco_custo) || 0,
       preco_venda: Number(form.preco_venda) || 0,
+      preco_app: Number(form.preco_app) || 0,
       estoque_minimo: Number(form.estoque_minimo) || 0,
+      faixas_preco: form.faixas_preco ?? [],
     }
 
     const { error } = editingId
@@ -167,22 +251,17 @@ export default function Produtos() {
     }
 
     setShowModal(false)
-    loadProdutos()
+    loadProdutos(search, categoriaFiltro, page)
   }
 
   async function handleDelete(id) {
     if (!confirm('Excluir este produto?')) return
     const { error } = await supabase.from('produtos').delete().eq('id', id)
     if (error) setError(error.message)
-    else loadProdutos()
+    else loadProdutos(search, categoriaFiltro, page)
   }
 
-  const filtered = produtos.filter((p) => {
-    const term = search.trim().toLowerCase()
-    const matchesSearch = !term || p.nome?.toLowerCase().includes(term)
-    const matchesCategoria = !categoriaFiltro || p.categoria === categoriaFiltro
-    return matchesSearch && matchesCategoria
-  })
+  const totalPaginas = Math.ceil(total / PAGE_SIZE)
 
   return (
     <div>
@@ -192,21 +271,53 @@ export default function Produtos() {
           <button className="btn btn-secondary" onClick={() => { setCategError(null); setShowCategModal(true) }}>
             + Nova categoria
           </button>
+          <button className="btn btn-secondary" onClick={() => { setEmbError(null); setShowEmbalagensModal(true) }}>
+            + Nova embalagem
+          </button>
           <button className="btn btn-primary" onClick={openNew}>
             + Novo produto
           </button>
         </div>
       </div>
 
+      {/* Banner link do cardápio */}
+      {linkCardapio && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '0.75rem',
+          background: 'var(--bg-secondary, #f9fafb)',
+          border: '1px solid var(--border, #e5e7eb)',
+          borderRadius: '10px', padding: '12px 16px', marginBottom: '1rem',
+          flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
+            🛒 Link do seu cardápio:
+          </span>
+          <span style={{
+            fontSize: 13, color: 'var(--text-muted, #6b7280)',
+            flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {linkCardapio}
+          </span>
+          <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
+            <button className="btn btn-secondary btn-sm" onClick={copiarLink}>
+              {copiadoLink ? '✓ Copiado!' : 'Copiar'}
+            </button>
+            <a href={linkCardapio} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm">
+              Abrir
+            </a>
+          </div>
+        </div>
+      )}
+
       <div className="toolbar">
         <input
           placeholder="Buscar por nome..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => handleSearch(e.target.value)}
         />
         <select
           value={categoriaFiltro}
-          onChange={(e) => setCategoriaFiltro(e.target.value)}
+          onChange={(e) => handleCategoria(e.target.value)}
         >
           <option value="">Todas as categorias</option>
           {categorias.map((c) => (
@@ -222,7 +333,7 @@ export default function Produtos() {
       <div className="data-table">
         {loading ? (
           <div className="empty-state">Carregando...</div>
-        ) : filtered.length === 0 ? (
+        ) : produtos.length === 0 ? (
           <div className="empty-state">Nenhum produto encontrado.</div>
         ) : (
           <table>
@@ -235,21 +346,58 @@ export default function Produtos() {
                 <th>Casco</th>
                 <th>Custo</th>
                 <th>Venda</th>
+                <th>Venda App</th>
                 <th>Estoque mín.</th>
                 <th>Status</th>
-                <th></th>
+                <th style={{ position: 'sticky', right: 0, background: 'var(--bg)' }}></th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((p) => (
-                <tr key={p.id}>
-                  <td>{p.nome}</td>
+              {produtos.map((p, idx) => {
+                const catAnterior = idx === 0 ? null : produtos[idx - 1].categoria
+                const mudouCategoria = p.categoria !== catAnterior
+                return (
+                  <React.Fragment key={p.id}>
+                    {mudouCategoria && (
+                      <tr>
+                        <td colSpan={11} style={{
+                          padding: '10px 12px 6px',
+                          fontWeight: 700,
+                          fontSize: 12,
+                          letterSpacing: '0.06em',
+                          textTransform: 'uppercase',
+                          color: 'var(--primary)',
+                          background: 'var(--primary-bg)',
+                          borderTop: idx !== 0 ? '2px solid var(--border)' : 'none',
+                        }}>
+                          {p.categoria || 'Sem categoria'}
+                        </td>
+                      </tr>
+                    )}
+                    <tr>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {p.foto_url ? (
+                        <img
+                          src={p.foto_url}
+                          alt={p.nome}
+                          style={{ width: 52, height: 52, borderRadius: 8, objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border)' }}
+                        />
+                      ) : (
+                        <div style={{ width: 52, height: 52, borderRadius: 8, background: 'var(--bg-hover)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 20 }}>
+                          📷
+                        </div>
+                      )}
+                      {p.nome}
+                    </div>
+                  </td>
                   <td>{p.categoria}</td>
                   <td>{p.embalagem}</td>
                   <td>{p.unidades_por_caixa}</td>
                   <td>{p.controla_casco ? 'Sim' : 'Não'}</td>
                   <td>R$ {Number(p.preco_custo).toFixed(2)}</td>
                   <td>R$ {Number(p.preco_venda).toFixed(2)}</td>
+                  <td>R$ {Number(p.preco_app || 0).toFixed(2)}</td>
                   <td>{p.estoque_minimo}</td>
                   <td>
                     <span
@@ -260,7 +408,7 @@ export default function Produtos() {
                       {p.ativo ? 'Ativo' : 'Inativo'}
                     </span>
                   </td>
-                  <td>
+                  <td style={{ position: 'sticky', right: 0, background: 'var(--surface)', boxShadow: '-4px 0 8px rgba(0,0,0,0.15)' }}>
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={() => openEdit(p)}
@@ -275,11 +423,27 @@ export default function Produtos() {
                     </button>
                   </td>
                 </tr>
-              ))}
+                  </React.Fragment>
+                )
+              })}
             </tbody>
           </table>
         )}
       </div>
+
+      {totalPaginas > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '16px 0' }}>
+          <button className="btn btn-secondary btn-sm" disabled={page === 0} onClick={() => irParaPagina(page - 1)}>
+            ← Anterior
+          </button>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} de {total} produtos
+          </span>
+          <button className="btn btn-secondary btn-sm" disabled={page + 1 >= totalPaginas} onClick={() => irParaPagina(page + 1)}>
+            Próximo →
+          </button>
+        </div>
+      )}
 
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
@@ -359,9 +523,10 @@ export default function Produtos() {
                     value={form.embalagem}
                     onChange={handleChange}
                   >
-                    {EMBALAGENS.map((e) => (
-                      <option key={e} value={e}>
-                        {e}
+                    <option value="">Selecione...</option>
+                    {embalagens.map((e) => (
+                      <option key={e.id} value={e.nome}>
+                        {e.nome}
                       </option>
                     ))}
                   </select>
@@ -391,7 +556,7 @@ export default function Produtos() {
                 </div>
 
                 <div className="form-field">
-                  <label>Preço de custo (R$)</label>
+                  <label style={{color:'#f97316'}}>Preço de custo (R$)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -403,7 +568,7 @@ export default function Produtos() {
                 </div>
 
                 <div className="form-field">
-                  <label>Preço de venda (R$)</label>
+                  <label style={{color:'#22c55e'}}>Preço Público (R$) <span style={{fontWeight:400, fontSize:'0.8em', color:'var(--text-muted)'}}>WhatsApp / link</span></label>
                   <input
                     type="number"
                     step="0.01"
@@ -412,6 +577,98 @@ export default function Produtos() {
                     value={form.preco_venda}
                     onChange={handleChange}
                   />
+                </div>
+
+                <div className="form-field">
+                  <label style={{color:'#a855f7'}}>Preço App (R$) <span style={{fontWeight:400, fontSize:'0.8em', color:'var(--text-muted)'}}>Venda Mais app</span></label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="preco_app"
+                    value={form.preco_app}
+                    onChange={handleChange}
+                  />
+                </div>
+
+                <div className="form-field full">
+                  <label>
+                    Preços por quantidade{' '}
+                    <span style={{ fontWeight: 400, fontSize: '0.85em', color: 'var(--text-muted)' }}>
+                      (opcional)
+                    </span>
+                  </label>
+
+                  {form.faixas_preco.length > 0 && (
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr auto',
+                      gap: '6px 8px',
+                      marginBottom: 8,
+                      alignItems: 'center',
+                    }}>
+                      <span style={{ fontSize: '0.8em', color: 'var(--text-muted)' }}>Qtd mínima</span>
+                      <span style={{ fontSize: '0.8em', color: 'var(--text-muted)' }}>Preço (R$)</span>
+                      <span />
+                      {form.faixas_preco.map((f, i) => (
+                        <React.Fragment key={i}>
+                          <input
+                            type="number"
+                            min="2"
+                            value={f.qtd_min}
+                            onChange={e => {
+                              const arr = [...form.faixas_preco]
+                              arr[i] = { ...arr[i], qtd_min: Number(e.target.value) }
+                              setForm(prev => ({ ...prev, faixas_preco: arr }))
+                            }}
+                            placeholder="Ex: 10"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={f.preco}
+                            onChange={e => {
+                              const arr = [...form.faixas_preco]
+                              arr[i] = { ...arr[i], preco: Number(e.target.value) }
+                              setForm(prev => ({ ...prev, faixas_preco: arr }))
+                            }}
+                            placeholder="Ex: 8.50"
+                          />
+                          <button
+                            type="button"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--danger, #e55)',
+                              cursor: 'pointer',
+                              fontSize: '1.1em',
+                              padding: '2px 6px',
+                              lineHeight: 1,
+                            }}
+                            onClick={() => {
+                              const arr = form.faixas_preco.filter((_, idx) => idx !== i)
+                              setForm(prev => ({ ...prev, faixas_preco: arr }))
+                            }}
+                            title="Remover faixa"
+                          >
+                            ✕
+                          </button>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setForm(prev => ({
+                      ...prev,
+                      faixas_preco: [...prev.faixas_preco, { qtd_min: '', preco: '' }],
+                    }))}
+                  >
+                    + Adicionar faixa de preço
+                  </button>
                 </div>
 
                 <div className="form-field">
@@ -504,6 +761,59 @@ export default function Produtos() {
 
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setShowCategModal(false)}>
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEmbalagensModal && (
+        <div className="modal-overlay" onClick={() => setShowEmbalagensModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Embalagens</h2>
+
+            <form onSubmit={handleAddEmbalagem} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+              <input
+                placeholder="Nome da nova embalagem"
+                value={novaEmbalagem}
+                onChange={(e) => setNovaEmbalagem(e.target.value)}
+                style={{ flex: 1 }}
+                required
+              />
+              <button type="submit" className="btn btn-primary" disabled={savingEmb}>
+                {savingEmb ? 'Salvando...' : 'Adicionar'}
+              </button>
+            </form>
+
+            {embError && <p className="error-text">{embError}</p>}
+
+            <div className="data-table">
+              {embalagens.length === 0 ? (
+                <div className="empty-state">Nenhuma embalagem cadastrada.</div>
+              ) : (
+                <table>
+                  <tbody>
+                    {embalagens.map((e) => (
+                      <tr key={e.id}>
+                        <td>{e.nome}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button
+                            className="btn btn-danger btn-sm"
+                            onClick={() => handleDeleteEmbalagem(e.id)}
+                          >
+                            Excluir
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setShowEmbalagensModal(false)}>
                 Fechar
               </button>
             </div>

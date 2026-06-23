@@ -1,9 +1,143 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { useAuth } from '../hooks/useAuth'
 import { CONDICOES_PAGAMENTO, STATUS_VENDA } from '../lib/constants'
 import { sendWhatsApp, notificarEstoqueBaixo } from '../lib/whatsapp'
 import '../components/Page.css'
 import './Vendas.css'
+
+function ClienteSearch({ clientes, value, onChange }) {
+  const [busca, setBusca] = useState('')
+  const [aberto, setAberto] = useState(false)
+
+  const selecionado = clientes.find((c) => c.id === value)
+
+  const filtrados = busca.trim()
+    ? clientes.filter((c) =>
+        c.nome.toLowerCase().includes(busca.toLowerCase()) ||
+        (c.telefone ?? '').includes(busca)
+      ).slice(0, 12)
+    : clientes.slice(0, 12)
+
+  function handleSelect(id) {
+    onChange(id)
+    setBusca('')
+    setAberto(false)
+  }
+
+  function handleFocus() {
+    setBusca('')
+    setAberto(true)
+  }
+
+  function handleBlur() {
+    setTimeout(() => setAberto(false), 150)
+  }
+
+  const displayValue = aberto ? busca : (selecionado ? selecionado.nome : '')
+
+  return (
+    <div className="produto-search-wrap">
+      <input
+        type="text"
+        placeholder="Buscar cliente..."
+        value={displayValue}
+        onChange={(e) => { setBusca(e.target.value); setAberto(true) }}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        autoComplete="off"
+      />
+      {aberto && filtrados.length > 0 && (
+        <div className="produto-search-dropdown">
+          {filtrados.map((c) => (
+            <div
+              key={c.id}
+              className="produto-search-option"
+              onMouseDown={() => handleSelect(c.id)}
+            >
+              <span>{c.nome}</span>
+              <span className="produto-search-emb">{c.telefone}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ProdutoSearch({ value, onChange }) {
+  const [busca, setBusca] = useState('')
+  const [aberto, setAberto] = useState(false)
+  const [resultados, setResultados] = useState([])
+  const [selecionado, setSelecionado] = useState(null)
+  const debounceRef = useRef(null)
+
+  useEffect(() => {
+    if (!value) { setSelecionado(null); return }
+    supabase.from('produtos').select('id, nome, embalagem, preco_venda, controla_casco, faixas_preco')
+      .eq('id', value).single().then(({ data }) => { if (data) setSelecionado(data) })
+  }, [value])
+
+  async function buscarProdutos(termo) {
+    let query = supabase.from('produtos')
+      .select('id, nome, embalagem, preco_venda, controla_casco, faixas_preco')
+      .eq('ativo', true).order('nome').limit(12)
+    if (termo.trim()) query = query.ilike('nome', `%${termo.trim()}%`)
+    const { data } = await query
+    setResultados(data ?? [])
+  }
+
+  function handleFocus() {
+    setBusca('')
+    setAberto(true)
+    buscarProdutos('')
+  }
+
+  function handleBlur() {
+    setTimeout(() => setAberto(false), 150)
+  }
+
+  function handleChange(e) {
+    const val = e.target.value
+    setBusca(val)
+    setAberto(true)
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => buscarProdutos(val), 300)
+  }
+
+  function handleSelect(prod) {
+    setSelecionado(prod)
+    onChange(prod.id, prod)
+    setBusca('')
+    setAberto(false)
+  }
+
+  const displayValue = aberto ? busca : (selecionado ? `${selecionado.nome} (${selecionado.embalagem ?? ''})` : '')
+
+  return (
+    <div className="produto-search-wrap">
+      <input
+        type="text"
+        placeholder="Buscar produto..."
+        value={displayValue}
+        onChange={handleChange}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        autoComplete="off"
+      />
+      {aberto && resultados.length > 0 && (
+        <div className="produto-search-dropdown">
+          {resultados.map((p) => (
+            <div key={p.id} className="produto-search-option" onMouseDown={() => handleSelect(p)}>
+              <span>{p.nome}</span>
+              <span className="produto-search-emb">{p.embalagem}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const STATUS_BADGE = {
   pedido: 'badge-warning',
@@ -16,9 +150,14 @@ function emptyItem() {
 }
 
 export default function Vendas() {
+  const { empresa } = useAuth()
+  const formasAtivas = empresa?.formas_pagamento?.length
+    ? CONDICOES_PAGAMENTO.filter(o => empresa.formas_pagamento.includes(o.value))
+    : CONDICOES_PAGAMENTO
+
   const [vendas, setVendas] = useState([])
   const [clientes, setClientes] = useState([])
-  const [produtos, setProdutos] = useState([])
+  const [produtosMap, setProdutosMap] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [statusFiltro, setStatusFiltro] = useState('')
@@ -51,7 +190,7 @@ export default function Vendas() {
         .select('*, clientes(nome, telefone)')
         .order('created_at', { ascending: false }),
       supabase.from('clientes').select('*').eq('ativo', true).order('nome'),
-      supabase.from('produtos').select('*').eq('ativo', true).order('nome'),
+      Promise.resolve({ data: [], error: null }),
       supabase.from('whatsapp_config').select('ativo, notif_pedido, msg_pedido').maybeSingle(),
     ])
 
@@ -60,7 +199,6 @@ export default function Vendas() {
 
     setVendas(vendasRes.data ?? [])
     setClientes(clientesRes.data ?? [])
-    setProdutos(produtosRes.data ?? [])
     if (!waRes.error && waRes.data) setWaConfig(waRes.data)
     setLoading(false)
   }
@@ -102,7 +240,7 @@ export default function Vendas() {
 
   // Total base (sem desconto) para verificar o mínimo
   const totalBase = itens.reduce((sum, item) => {
-    const produto = produtos.find((p) => p.id === item.produto_id)
+    const produto = produtosMap[item.produto_id]
     return sum + (Number(item.quantidade) || 0) * (produto?.preco_venda || 0)
   }, 0)
 
@@ -113,7 +251,7 @@ export default function Vendas() {
 
   // Itens enriquecidos com preço calculado (read-only)
   const itensComPreco = itens.map((item) => {
-    const produto = produtos.find((p) => p.id === item.produto_id)
+    const produto = produtosMap[item.produto_id]
     const preco = (produto?.preco_venda ?? 0) * fatorDesconto
     const subtotal = (Number(item.quantidade) || 0) * preco
     return { ...item, preco_unitario: preco, subtotal }
@@ -357,17 +495,11 @@ export default function Vendas() {
               <div className="form-grid">
                 <div className="form-field">
                   <label>Cliente</label>
-                  <select
+                  <ClienteSearch
+                    clientes={clientes}
                     value={clienteId}
-                    onChange={(e) => handleClienteChange(e.target.value)}
-                    required
-                  >
-                    {clientes.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.nome}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={handleClienteChange}
+                  />
                 </div>
 
                 <div className="form-field">
@@ -376,7 +508,7 @@ export default function Vendas() {
                     value={formaPagamento}
                     onChange={(e) => setFormaPagamento(e.target.value)}
                   >
-                    {CONDICOES_PAGAMENTO.map((o) => (
+                    {formasAtivas.map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}
                       </option>
@@ -400,21 +532,16 @@ export default function Vendas() {
               </h3>
               <div className="venda-itens">
                 {itensComPreco.map((item, index) => {
-                  const produto = produtos.find((p) => p.id === item.produto_id)
+                  const produto = produtosMap[item.produto_id]
                   return (
                     <div className="venda-item-row" key={index}>
-                      <select
+                      <ProdutoSearch
                         value={item.produto_id}
-                        onChange={(e) => handleItemChange(index, 'produto_id', e.target.value)}
-                        required
-                      >
-                        <option value="">Selecione um produto</option>
-                        {produtos.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.nome} ({p.embalagem})
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(id, prod) => {
+                          if (prod) setProdutosMap(prev => ({ ...prev, [id]: prod }))
+                          handleItemChange(index, 'produto_id', id)
+                        }}
+                      />
                       <input
                         type="number"
                         min="0.01"

@@ -190,10 +190,10 @@ export default function Dashboard() {
         return (
           <div className="card" style={{ marginTop: 24, padding: '18px 20px' }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-              ðŸ”— Seu link de indicaÃ§Ã£o
+              Seu link de indicação
             </div>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-              Compartilhe esse link. Quem se cadastrar pela sua indicaÃ§Ã£o entra na sua rede e vocÃª ganha comissÃ£o nas vendas deles.
+              Compartilhe esse link. Quem se cadastrar pela sua indicação entra na sua rede e você ganha comissão nas vendas deles.
             </p>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <div style={{
@@ -214,7 +214,7 @@ export default function Dashboard() {
                   color: '#fff', whiteSpace: 'nowrap', transition: 'background 200ms',
                 }}
               >
-                {copiado ? 'âœ“ Copiado!' : 'ðŸ“‹ Copiar link'}
+                {copiado ? '✔ Copiado!' : 'Copiar link'}
               </button>
             </div>
           </div>
