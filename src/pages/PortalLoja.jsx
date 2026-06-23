@@ -231,15 +231,18 @@ export default function PortalLoja() {
     if (!empresaId) return
     async function load() {
       setLoading(true)
-      const [empRes, prodRes] = await Promise.all([
-        supabase
-          .from('empresas')
-          .select('id, nome, banner_url, logo_url, descricao, taxa_entrega, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, aceita_delivery, delivery_ativo, last_heartbeat_at, cidade, latitude, longitude, raio_entrega_km')
-          .eq('id', empresaId)
-          .maybeSingle(),
-        supabase.from('estoque_catalogo').select('*', { count: 'exact' }).eq('empresa_id', empresaId).order('categoria').order('nome').range(0, 199),
-      ])
-      if (empRes.error || prodRes.error) setError((empRes.error || prodRes.error).message)
+      // Aceita tanto slug (ex: "deposito-da-gaby") quanto UUID
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(empresaId)
+      const baseQuery = supabase
+        .from('empresas')
+        .select('id, nome, slug, banner_url, logo_url, descricao, taxa_entrega, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, aceita_delivery, delivery_ativo, last_heartbeat_at, cidade, latitude, longitude, raio_entrega_km')
+      const empRes = await (isUuid ? baseQuery.eq('id', empresaId) : baseQuery.eq('slug', empresaId)).maybeSingle()
+      if (empRes.error) { setError(empRes.error.message); setLoading(false); return }
+      const resolvedId = empRes.data?.id ?? empresaId
+      const prodRes = await supabase
+        .from('estoque_catalogo').select('*', { count: 'exact' })
+        .eq('empresa_id', resolvedId).order('categoria').order('nome').range(0, 199)
+      if (prodRes.error) setError(prodRes.error.message)
       setEmpresa(empRes.data ?? null)
       setProdutos(prodRes.data ?? [])
       setTotalProdutos(prodRes.count ?? 0)
@@ -313,11 +316,12 @@ export default function PortalLoja() {
 
   /* ── Carregar mais produtos ── */
   async function carregarMais() {
+    if (!empresa?.id) return
     setCarregandoMais(true)
     const { data } = await supabase
       .from('estoque_catalogo')
       .select('*')
-      .eq('empresa_id', empresaId)
+      .eq('empresa_id', empresa.id)
       .order('categoria').order('nome')
       .range(produtos.length, produtos.length + 199)
     setProdutos(prev => [...prev, ...(data ?? [])])
@@ -424,7 +428,7 @@ export default function PortalLoja() {
         const { data } = await supabase.rpc('upsert_cliente_portal', {
           p_nome: form.nome.trim(),
           p_telefone: form.telefone.trim() || '',
-          p_empresa_id: empresaId,
+          p_empresa_id: empresa?.id ?? empresaId,
         })
         clienteId = data ?? null
       }
@@ -441,7 +445,7 @@ export default function PortalLoja() {
     const isRetirada = form.tipo_entrega === 'retirada'
 
     const pedidoBase = {
-      empresa_id:           empresaId,
+      empresa_id:           empresa?.id ?? empresaId,
       origem:               'app',
       user_id:              authUserId,
       cliente_id:           clienteId,
