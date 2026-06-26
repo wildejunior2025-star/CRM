@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useNavigate } from 'react-router-dom'
 import './PortalLoja.css'
@@ -49,6 +49,130 @@ const ICON_STATUS = {
   saiu_entrega: '🛵',
   entregue:     '🎉',
   cancelado:    '❌',
+}
+
+// ── Chat do cliente (app) com a loja ────────────────────────
+// Conversa por (empresa, user_id). RLS já garante que o cliente só vê as próprias.
+function ChatLojaApp({ userId, empresaId, clienteNome }) {
+  const [msgs, setMsgs] = useState([])
+  const [texto, setTexto] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [carregando, setCarregando] = useState(true)
+  const fimRef = useRef(null)
+
+  const carregar = useCallback(async () => {
+    if (!userId || !empresaId) return
+    const { data } = await supabase
+      .from('mensagens_chat')
+      .select('*')
+      .eq('canal', 'app')
+      .eq('cliente_ref', userId)
+      .eq('empresa_id', empresaId)
+      .order('created_at', { ascending: true })
+    setMsgs(data || [])
+    setCarregando(false)
+    const naoLidas = (data || []).filter(m => m.remetente === 'loja' && !m.lida_cliente).map(m => m.id)
+    if (naoLidas.length) {
+      await supabase.from('mensagens_chat').update({ lida_cliente: true }).in('id', naoLidas)
+    }
+  }, [userId, empresaId])
+
+  useEffect(() => {
+    carregar()
+    const ch = supabase
+      .channel(`chat_app_${empresaId}_${userId}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'mensagens_chat', filter: `cliente_ref=eq.${userId}` },
+        payload => {
+          const m = payload.new
+          if (!m || m.empresa_id !== empresaId || m.canal !== 'app') return
+          setMsgs(prev => payload.eventType === 'INSERT'
+            ? (prev.some(x => x.id === m.id) ? prev : [...prev, m])
+            : prev.map(x => x.id === m.id ? m : x))
+        })
+      .subscribe()
+    const poll = setInterval(carregar, 12000)
+    return () => { supabase.removeChannel(ch); clearInterval(poll) }
+  }, [carregar, empresaId, userId])
+
+  useEffect(() => { fimRef.current?.scrollIntoView({ block: 'end' }) }, [msgs.length])
+
+  async function enviar() {
+    const t = texto.trim()
+    if (!t || enviando) return
+    setEnviando(true)
+    const { data, error } = await supabase.from('mensagens_chat').insert({
+      empresa_id: empresaId, canal: 'app', cliente_ref: userId,
+      cliente_nome: clienteNome || null, remetente: 'cliente', texto: t, lida_cliente: true,
+    }).select().single()
+    setEnviando(false)
+    if (!error) {
+      setTexto('')
+      if (data) setMsgs(prev => prev.some(x => x.id === data.id) ? prev : [...prev, data])
+    }
+  }
+
+  return (
+    <div style={{ paddingTop: 14, borderTop: '1px solid var(--border)', marginTop: 14 }}>
+      <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+        Falar com a loja
+      </p>
+      <div style={{
+        display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto',
+        padding: 4, marginBottom: 8,
+      }}>
+        {carregando ? (
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: 12 }}>Carregando...</p>
+        ) : msgs.length === 0 ? (
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: 12 }}>
+            Alguma dúvida sobre o pedido? Mande uma mensagem para a loja.
+          </p>
+        ) : msgs.map(m => {
+          const daLoja = m.remetente === 'loja'
+          return (
+            <div key={m.id} style={{ display: 'flex', justifyContent: daLoja ? 'flex-start' : 'flex-end' }}>
+              <div style={{
+                maxWidth: '82%', padding: '7px 11px', borderRadius: 12, fontSize: 13.5, lineHeight: 1.35,
+                background: daLoja ? 'var(--surface-2, #f1f5f9)' : '#7c3aed',
+                color: daLoja ? 'var(--text)' : '#fff',
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}>
+                {m.texto}
+                <div style={{ fontSize: 9.5, opacity: .65, marginTop: 3, textAlign: 'right' }}>
+                  {new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+        <div ref={fimRef} />
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <textarea
+          value={texto}
+          onChange={e => setTexto(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar() } }}
+          placeholder="Escreva uma mensagem..."
+          rows={1}
+          style={{
+            flex: 1, resize: 'none', maxHeight: 90, padding: '9px 11px', borderRadius: 10,
+            border: '1px solid var(--border)', background: 'var(--bg, #fff)', color: 'var(--text)',
+            fontSize: 13.5, fontFamily: 'inherit',
+          }}
+        />
+        <button type="button" onClick={enviar} disabled={!texto.trim() || enviando}
+          style={{
+            flexShrink: 0, width: 42, borderRadius: 10, border: 'none', cursor: texto.trim() ? 'pointer' : 'default',
+            background: texto.trim() ? '#7c3aed' : 'var(--border)', color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  )
 }
 
 export default function PortalPedidos() {
@@ -340,6 +464,15 @@ export default function PortalPedidos() {
                   </p>
                   <p style={{ margin: 0, fontSize: 13, color: 'var(--text)' }}>{detalhe.observacoes}</p>
                 </div>
+              )}
+
+              {/* Conversa com a loja */}
+              {userId && detalhe.empresa_id && (
+                <ChatLojaApp
+                  userId={userId}
+                  empresaId={detalhe.empresa_id}
+                  clienteNome={detalhe.cliente_nome}
+                />
               )}
             </div>
 

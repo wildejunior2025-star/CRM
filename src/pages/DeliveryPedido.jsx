@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import './DeliveryPedido.css'
@@ -64,6 +64,111 @@ function paymLabel(forma) {
 function statusIndex(status) {
   if (status === 'cancelado') return -1
   return STATUS_STEPS.findIndex(s => s.key === status)
+}
+
+// ── Chat do cliente (loja online, sem login) com a loja ─────
+// Cliente identificado pelo telefone. Acesso via RPCs SECURITY DEFINER (0047).
+// Sem realtime para anon — usa polling.
+function ChatLojaOnline({ empresaId, telefone, nome }) {
+  const [msgs, setMsgs] = useState([])
+  const [texto, setTexto] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [carregando, setCarregando] = useState(true)
+  const fimRef = useRef(null)
+
+  const carregar = useCallback(async () => {
+    if (!empresaId || !telefone) return
+    const { data } = await supabase.rpc('listar_msgs_loja', {
+      p_empresa_id: empresaId, p_telefone: telefone,
+    })
+    setMsgs(data || [])
+    setCarregando(false)
+    // marca como lidas as mensagens que a loja enviou
+    if ((data || []).some(m => m.remetente === 'loja' && !m.lida_cliente)) {
+      await supabase.rpc('marcar_lidas_loja', { p_empresa_id: empresaId, p_telefone: telefone })
+    }
+  }, [empresaId, telefone])
+
+  useEffect(() => {
+    carregar()
+    const poll = setInterval(carregar, 8000)
+    return () => clearInterval(poll)
+  }, [carregar])
+
+  useEffect(() => { fimRef.current?.scrollIntoView({ block: 'end' }) }, [msgs.length])
+
+  async function enviar() {
+    const t = texto.trim()
+    if (!t || enviando) return
+    setEnviando(true)
+    const { data, error } = await supabase.rpc('enviar_msg_loja', {
+      p_empresa_id: empresaId, p_telefone: telefone, p_nome: nome || '', p_texto: t,
+    })
+    setEnviando(false)
+    if (!error) {
+      setTexto('')
+      if (data) setMsgs(prev => prev.some(x => x.id === data.id) ? prev : [...prev, data])
+    }
+  }
+
+  if (!telefone) return null
+
+  return (
+    <section className="dpd-card">
+      <h2 className="dpd-card-title">Falar com a loja</h2>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto', marginBottom: 10 }}>
+        {carregando ? (
+          <p style={{ fontSize: 13, color: '#94a3b8', textAlign: 'center', padding: 10 }}>Carregando...</p>
+        ) : msgs.length === 0 ? (
+          <p style={{ fontSize: 13, color: '#94a3b8', textAlign: 'center', padding: 10 }}>
+            Alguma dúvida sobre o pedido? Mande uma mensagem para a loja.
+          </p>
+        ) : msgs.map(m => {
+          const daLoja = m.remetente === 'loja'
+          return (
+            <div key={m.id} style={{ display: 'flex', justifyContent: daLoja ? 'flex-start' : 'flex-end' }}>
+              <div style={{
+                maxWidth: '82%', padding: '7px 11px', borderRadius: 12, fontSize: 13.5, lineHeight: 1.35,
+                background: daLoja ? '#f1f5f9' : '#7c3aed',
+                color: daLoja ? '#0f172a' : '#fff',
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}>
+                {m.texto}
+                <div style={{ fontSize: 9.5, opacity: .65, marginTop: 3, textAlign: 'right' }}>
+                  {new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+        <div ref={fimRef} />
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <textarea
+          value={texto}
+          onChange={e => setTexto(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar() } }}
+          placeholder="Escreva uma mensagem..."
+          rows={1}
+          style={{
+            flex: 1, resize: 'none', maxHeight: 90, padding: '9px 11px', borderRadius: 10,
+            border: '1px solid #e2e8f0', background: '#fff', color: '#0f172a',
+            fontSize: 13.5, fontFamily: 'inherit',
+          }}
+        />
+        <button type="button" onClick={enviar} disabled={!texto.trim() || enviando}
+          style={{
+            flexShrink: 0, width: 42, borderRadius: 10, border: 'none', cursor: texto.trim() ? 'pointer' : 'default',
+            background: texto.trim() ? '#7c3aed' : '#cbd5e1', color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+          </svg>
+        </button>
+      </div>
+    </section>
+  )
 }
 
 export default function DeliveryPedido() {
@@ -313,6 +418,15 @@ export default function DeliveryPedido() {
             <h2 className="dpd-card-title">Observações</h2>
             <p className="dpd-obs">{pedido.observacoes}</p>
           </section>
+        )}
+
+        {/* Conversa com a loja */}
+        {pedido.empresa_id && pedido.cliente_telefone && (
+          <ChatLojaOnline
+            empresaId={pedido.empresa_id}
+            telefone={pedido.cliente_telefone}
+            nome={pedido.cliente_nome}
+          />
         )}
 
         <p className="dpd-footer-note">

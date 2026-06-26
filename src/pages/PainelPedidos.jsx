@@ -1418,6 +1418,87 @@ function Coluna({ titulo, cor, count, vazio, children }) {
   )
 }
 
+// ── Conversa aberta (loja respondendo cliente) ──────────────
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel }) {
+  const fimRef = useRef(null)
+  useEffect(() => {
+    fimRef.current?.scrollIntoView({ block: 'end' })
+  }, [thread.msgs.length])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
+      {/* Cabeçalho da conversa */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 10, borderBottom: '1px solid var(--border, #2a2a3a)', marginBottom: 8 }}>
+        <button type="button" onClick={onVoltar} aria-label="Voltar"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', fontSize: 20, lineHeight: 1, padding: 0 }}>
+          ‹
+        </button>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {thread.cliente_nome || thread.cliente_ref || 'Cliente'}
+          </div>
+          <span style={{
+            fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 20,
+            background: thread.canal === 'app' ? '#f97316' : '#3b82f6', color: '#fff',
+          }}>{canalLabel}</span>
+        </div>
+      </div>
+
+      {/* Mensagens */}
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 2px' }}>
+        {thread.msgs.map(m => {
+          const daLoja = m.remetente === 'loja'
+          return (
+            <div key={m.id} style={{ display: 'flex', justifyContent: daLoja ? 'flex-end' : 'flex-start' }}>
+              <div style={{
+                maxWidth: '82%', padding: '7px 11px', borderRadius: 12, fontSize: 13.5, lineHeight: 1.35,
+                background: daLoja ? '#7c3aed' : 'var(--bg, #0f0f1a)',
+                color: daLoja ? '#fff' : 'var(--text)',
+                border: daLoja ? 'none' : '1px solid var(--border, #2a2a3a)',
+                borderBottomRightRadius: daLoja ? 3 : 12,
+                borderBottomLeftRadius: daLoja ? 12 : 3,
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}>
+                {m.texto}
+                <div style={{ fontSize: 9.5, opacity: .65, marginTop: 3, textAlign: 'right' }}>
+                  {new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+        <div ref={fimRef} />
+      </div>
+
+      {/* Caixa de resposta */}
+      <div style={{ display: 'flex', gap: 6, paddingTop: 8, borderTop: '1px solid var(--border, #2a2a3a)' }}>
+        <textarea
+          value={texto}
+          onChange={e => onTexto(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEnviar() } }}
+          placeholder="Escreva uma resposta..."
+          rows={1}
+          style={{
+            flex: 1, resize: 'none', maxHeight: 90, padding: '9px 11px', borderRadius: 10,
+            border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)',
+            color: 'var(--text)', fontSize: 13.5, fontFamily: 'inherit',
+          }}
+        />
+        <button type="button" onClick={onEnviar} disabled={!texto.trim() || enviando}
+          style={{
+            flexShrink: 0, width: 42, borderRadius: 10, border: 'none', cursor: texto.trim() ? 'pointer' : 'default',
+            background: texto.trim() ? '#7c3aed' : 'var(--border, #2a2a3a)', color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Componente principal ────────────────────────────────────
 export default function PainelPedidos() {
   const { empresa, logout } = useAuth()
@@ -2223,6 +2304,7 @@ export default function PainelPedidos() {
               {painelDireito === 'impressora' ? 'Impressora'
                 : painelDireito === 'pedidos' ? 'Pedidos finalizados'
                 : painelDireito === 'hoje' ? 'Concluídos hoje'
+                : painelDireito === 'chat' ? 'Mensagens'
                 : 'Catálogo'}
             </h3>
             <button type="button" onClick={() => setPainelDireito(null)} aria-label="Fechar"
@@ -2230,6 +2312,63 @@ export default function PainelPedidos() {
               ×
             </button>
           </div>
+
+          {/* Painel: Mensagens (chat App + Loja online) */}
+          {painelDireito === 'chat' && (
+            threadAberta ? (
+              <ChatConversa
+                thread={threadAberta}
+                texto={chatTexto}
+                onTexto={setChatTexto}
+                enviando={enviandoChat}
+                onEnviar={enviarChat}
+                onVoltar={() => setChatAberto(null)}
+                canalLabel={CANAL_LABEL[threadAberta.canal] ?? threadAberta.canal}
+              />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {chatThreads.length === 0 ? (
+                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px 12px', fontSize: 13 }}>
+                    Nenhuma conversa ainda.<br />
+                    Mensagens do app e da loja online aparecem aqui.
+                  </div>
+                ) : chatThreads.map(t => {
+                  const ultima = t.msgs[t.msgs.length - 1]
+                  const hora = new Date(ultima.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                  const canalLbl = CANAL_LABEL[t.canal] ?? t.canal
+                  return (
+                    <button key={t.key} type="button" onClick={() => abrirThread(t)}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left', cursor: 'pointer',
+                        border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '10px 12px',
+                        background: t.unread ? 'rgba(124,58,237,.08)' : 'transparent',
+                      }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {t.cliente_nome || t.cliente_ref || 'Cliente'}
+                        </span>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{hora}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 20, flexShrink: 0,
+                          background: t.canal === 'app' ? '#f97316' : '#3b82f6', color: '#fff',
+                        }}>{canalLbl}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                          {ultima.remetente === 'loja' ? 'Você: ' : ''}{ultima.texto}
+                        </span>
+                        {t.unread > 0 && (
+                          <span style={{ flexShrink: 0, minWidth: 18, height: 18, borderRadius: 9, background: '#7c3aed', color: '#fff', fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>
+                            {t.unread}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          )}
 
           {/* Painel: Impressora */}
           {painelDireito === 'impressora' && (
@@ -2532,6 +2671,7 @@ export default function PainelPedidos() {
             <button key={b.id} type="button" title={b.label}
               onClick={() => setPainelDireito(prev => prev === b.id ? null : b.id)}
               style={{
+                position: 'relative',
                 width: 44, height: 48, borderRadius: 10, cursor: 'pointer',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
                 border: `1px solid ${ativo ? 'var(--primary, #7c3aed)' : 'transparent'}`,
@@ -2540,6 +2680,13 @@ export default function PainelPedidos() {
               }}>
               {b.icon}
               <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '.02em' }}>{b.label}</span>
+              {b.id === 'chat' && chatNaoLidas > 0 && (
+                <span style={{
+                  position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8,
+                  background: '#dc2626', color: '#fff', fontSize: 10, fontWeight: 800,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px',
+                }}>{chatNaoLidas}</span>
+              )}
             </button>
           )
         })}
