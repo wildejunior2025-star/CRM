@@ -168,6 +168,39 @@ export default function Relatorios() {
     .sort((a, b) => b.subtotal - a.subtotal)
     .slice(0, 10)
 
+  // Curva ABC: classifica produtos pela contribuição acumulada no faturamento
+  const curvaABC = (() => {
+    const acc = {}
+    for (const item of itens) {
+      const key = item.produto_id
+      if (!acc[key]) acc[key] = { nome: item.produtos?.nome ?? '-', subtotal: 0, quantidade: 0 }
+      acc[key].subtotal += Number(item.subtotal)
+      acc[key].quantidade += Number(item.quantidade)
+    }
+    const lista = Object.values(acc).sort((a, b) => b.subtotal - a.subtotal)
+    const total = lista.reduce((s, p) => s + p.subtotal, 0)
+    const classes = { A: { qtd: 0, valor: 0 }, B: { qtd: 0, valor: 0 }, C: { qtd: 0, valor: 0 } }
+    let cum = 0
+    const items = lista.map((p) => {
+      cum += p.subtotal
+      const pctCum = total > 0 ? (cum / total) * 100 : 0
+      const classe = pctCum <= 80 ? 'A' : pctCum <= 95 ? 'B' : 'C'
+      classes[classe].qtd += 1
+      classes[classe].valor += p.subtotal
+      return { ...p, classe }
+    })
+    return { items, classes, total }
+  })()
+
+  function exportarCurvaABC() {
+    exportToCsv(`curva_abc_${dataInicio}_a_${dataFim}.csv`, [
+      { label: 'Classe', value: (p) => p.classe },
+      { label: 'Produto', value: (p) => p.nome },
+      { label: 'Quantidade', value: (p) => p.quantidade },
+      { label: 'Total vendido', value: (p) => p.subtotal.toFixed(2) },
+    ], curvaABC.items)
+  }
+
   function exportarVendas() {
     exportToCsv(`vendas_${dataInicio}_a_${dataFim}.csv`, [
       { label: 'Data', value: (v) => new Date(v.created_at).toLocaleString('pt-BR') },
@@ -427,6 +460,59 @@ export default function Relatorios() {
           </table>
         )}
       </div>
+
+      {/* Curva ABC */}
+      <div className="rel-section-header">
+        <h2 className="rel-table-title">Curva ABC de produtos</h2>
+        <button className="btn btn-secondary btn-sm" onClick={exportarCurvaABC} disabled={curvaABC.items.length === 0}>
+          Exportar CSV
+        </button>
+      </div>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 12px' }}>
+        Classe <strong>A</strong> = produtos que geram ~80% do faturamento (os que mais importam) ·
+        <strong> B</strong> = próximos 15% · <strong>C</strong> = últimos 5% (giro baixo).
+      </p>
+      {curvaABC.items.length === 0 ? (
+        <div className="empty-state">Sem dados no período.</div>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 14 }}>
+            {[['A', '#22c55e'], ['B', '#f59e0b'], ['C', '#ef4444']].map(([cl, cor]) => {
+              const c = curvaABC.classes[cl]
+              const pct = curvaABC.total > 0 ? Math.round((c.valor / curvaABC.total) * 100) : 0
+              return (
+                <div key={cl} style={{ border: `1px solid var(--border)`, borderLeft: `4px solid ${cor}`, borderRadius: 10, padding: 14 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15 }}>Classe {cl}</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>{c.qtd}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>produtos · {pct}% do faturamento</div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="rel-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Classe</th>
+                  <th>Produto</th>
+                  <th className="rel-amount-col">Qtd</th>
+                  <th className="rel-amount-col">Total vendido</th>
+                </tr>
+              </thead>
+              <tbody>
+                {curvaABC.items.slice(0, 30).map((p, i) => (
+                  <tr key={i}>
+                    <td><span style={{ fontWeight: 800, color: p.classe === 'A' ? '#22c55e' : p.classe === 'B' ? '#f59e0b' : '#ef4444' }}>{p.classe}</span></td>
+                    <td>{p.nome}</td>
+                    <td className="rel-amount-col">{p.quantidade}</td>
+                    <td className="rel-amount-col">R$ {p.subtotal.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
       <div className="rel-section-header">
         <h2 className="rel-table-title">Vendas detalhadas</h2>
