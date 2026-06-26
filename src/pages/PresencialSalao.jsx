@@ -147,14 +147,10 @@ export default function PresencialSalao() {
   }
 
   async function entregarItem(item) {
-    await supabase.from('comanda_itens').update({ status: 'entregue' }).eq('id', item.id)
-    await loadAll()
-  }
-
-  // Garçom livre "pega" uma mesa de autoatendimento (QR) → fica responsável por ela
-  async function pegarMesa(comanda, e) {
-    if (e) e.stopPropagation()
-    await supabase.from('comandas').update({ garcom_id: user?.id ?? null }).eq('id', comanda.id)
+    // registra QUEM entregou (quem clicou) — atribuição por entrega
+    await supabase.from('comanda_itens')
+      .update({ status: 'entregue', entregue_por: user?.id ?? null, entregue_at: new Date().toISOString() })
+      .eq('id', item.id)
     await loadAll()
   }
 
@@ -295,11 +291,7 @@ export default function PresencialSalao() {
                     👤 {garcons[c.garcom_id].split(' ')[0]}
                   </div>
                 ) : c ? (
-                  <button type="button" onClick={(ev) => pegarMesa(c, ev)}
-                    style={{ marginTop: 8, width: '100%', padding: '7px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12.5,
-                      border: 'none', background: prontos > 0 ? '#22c55e' : '#7c3aed', color: '#fff' }}>
-                    ✋ Pegar mesa
-                  </button>
+                  <div style={{ fontSize: 11.5, marginTop: 2, color: 'var(--text-muted)' }}>📱 Autoatendimento</div>
                 ) : null}
               </div>
             )
@@ -323,15 +315,8 @@ export default function PresencialSalao() {
                     👤 Atendido por {garcons[comandaSel.garcom_id]}
                   </div>
                 ) : comandaSel && !comandaSel.garcom_id ? (
-                  <div style={{ marginTop: 4 }}>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>
-                      📱 Pedido pelo QR (autoatendimento)
-                    </div>
-                    <button type="button" onClick={() => pegarMesa(comandaSel)}
-                      style={{ marginTop: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12.5,
-                        border: 'none', background: '#22c55e', color: '#fff' }}>
-                      ✋ Pegar esta mesa
-                    </button>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, marginTop: 2 }}>
+                    📱 Pedido pelo QR (autoatendimento)
                   </div>
                 ) : null}
               </div>
@@ -356,7 +341,8 @@ export default function PresencialSalao() {
                             <span>
                               {fmt(item.preco_unitario)} · {
                                 item.status === 'pronto' ? '🔔 pronto'
-                                : item.status === 'entregue' ? '🍽️ entregue'
+                                : item.status === 'entregue'
+                                  ? `🍽️ entregue${item.entregue_por && garcons[item.entregue_por] ? ' por ' + garcons[item.entregue_por].split(' ')[0] : ''}`
                                 : '⏳ preparando'
                               }
                             </span>

@@ -17,11 +17,13 @@ export default function PresencialHistorico() {
 
   const [comandas, setComandas] = useState([])
   const [garcons, setGarcons]   = useState({})  // { profile_id: nome }
+  const [entregas, setEntregas] = useState([])  // itens entregues hoje
   const [loading, setLoading]   = useState(true)
   const [aberta, setAberta]     = useState(null) // id da comanda expandida
 
   useEffect(() => {
     if (!empresaId) return
+    const inicioHoje = new Date(); inicioHoje.setHours(0, 0, 0, 0)
     Promise.all([
       supabase.from('comandas')
         .select('*, comanda_itens(*)')
@@ -30,12 +32,31 @@ export default function PresencialHistorico() {
         .order('fechada_at', { ascending: false })
         .limit(100),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
-    ]).then(([cs, gs]) => {
+      supabase.from('comanda_itens')
+        .select('entregue_por, preco_unitario, quantidade')
+        .eq('empresa_id', empresaId)
+        .eq('status', 'entregue')
+        .not('entregue_por', 'is', null)
+        .gte('entregue_at', inicioHoje.toISOString()),
+    ]).then(([cs, gs, es]) => {
       setComandas(cs.data ?? [])
       setGarcons(Object.fromEntries((gs.data ?? []).map(p => [p.id, p.nome])))
+      setEntregas(es.data ?? [])
       setLoading(false)
     })
   }, [empresaId])
+
+  // Ranking de entregas de hoje por garçom
+  const rankingEntregas = useMemo(() => {
+    const map = {}
+    for (const it of entregas) {
+      const k = it.entregue_por
+      if (!map[k]) map[k] = { id: k, qtd: 0, valor: 0 }
+      map[k].qtd += it.quantidade
+      map[k].valor += Number(it.preco_unitario) * it.quantidade
+    }
+    return Object.values(map).sort((a, b) => b.qtd - a.qtd)
+  }, [entregas])
 
   // Resumo de hoje
   const resumoHoje = useMemo(() => {
@@ -72,6 +93,23 @@ export default function PresencialHistorico() {
           <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--success)' }}>{fmt(resumoHoje.total)}</div>
         </div>
       </div>
+
+      {/* Ranking de entregas por garçom (hoje) */}
+      {rankingEntregas.length > 0 && (
+        <div className="card" style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>🏆 Entregas por garçom (hoje)</div>
+          {rankingEntregas.map((r, i) => (
+            <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < rankingEntregas.length - 1 ? '1px solid var(--border)' : 'none' }}>
+              <span style={{ fontSize: 16, width: 24, textAlign: 'center' }}>
+                {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`}
+              </span>
+              <span style={{ flex: 1, fontWeight: 600 }}>{garcons[r.id] ?? 'Garçom'}</span>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{r.qtd} {r.qtd === 1 ? 'item' : 'itens'}</span>
+              <strong style={{ minWidth: 90, textAlign: 'right' }}>{fmt(r.valor)}</strong>
+            </div>
+          ))}
+        </div>
+      )}
 
       {comandas.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>

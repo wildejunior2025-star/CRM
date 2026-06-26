@@ -43,7 +43,8 @@ Legenda: ✅ feito e testável · 🔨 em desenvolvimento · 🔜 próximo · �
 | 4.1 | Reservas | 💡 |
 | 4.2 | Fila de espera (aviso por WhatsApp) | 💡 |
 | 4.3 | Comissão por garçom | 💡 |
-| 4.4 | Relatórios de salão (giro de mesa, ticket médio, garçom, pico) | 💡 |
+| 4.3 | Atribuição de entrega por item (quem entregou cada prato) | ✅ |
+| 4.4 | Relatórios de salão — ranking de entregas/garçom hoje ✅; giro/ticket/pico 💡 | parcial |
 | 4.5 | Modo balcão/fast (comanda por senha) | 💡 |
 
 ---
