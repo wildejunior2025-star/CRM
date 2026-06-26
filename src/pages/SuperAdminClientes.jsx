@@ -16,7 +16,7 @@ export default function SuperAdminClientes() {
 
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, nome, email, ativo, created_at, empresa_id')
+      .select('id, nome, email, username, ativo, created_at, empresa_id')
       .eq('perfil', 'cliente')
       .not('email', 'ilike', '%@wpp.vendamais.app')
       .order('created_at', { ascending: false })
@@ -89,7 +89,7 @@ export default function SuperAdminClientes() {
 
   const clientesFiltrados = clientes.filter(c => {
     const q = busca.toLowerCase()
-    return !q || c.nome?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q)
+    return !q || c.nome?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q) || c.username?.toLowerCase().includes(q)
   })
 
   return (
@@ -133,6 +133,7 @@ export default function SuperAdminClientes() {
             <thead>
               <tr>
                 <th>Nome</th>
+                <th>Login</th>
                 <th>E-mail</th>
                 <th>Cadastro</th>
                 <th>Status</th>
@@ -144,6 +145,7 @@ export default function SuperAdminClientes() {
               {clientesFiltrados.map(c => (
                 <tr key={c.id} style={{ opacity: c.ativo === false ? 0.55 : 1 }}>
                   <td>{c.nome || '—'}</td>
+                  <td style={{ fontSize: 13 }}>{c.username ? `@${c.username}` : '—'}</td>
                   <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{c.email || '—'}</td>
                   <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>
                     {new Date(c.created_at).toLocaleDateString('pt-BR')}

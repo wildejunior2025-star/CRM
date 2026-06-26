@@ -766,6 +766,17 @@ const RIGHTBAR_BOTOES = [
       </svg>
     ),
   },
+  {
+    id: 'catalogo', label: 'Catálogo',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="3" y="3" width="7" height="7" rx="1"/>
+        <rect x="14" y="3" width="7" height="7" rx="1"/>
+        <rect x="14" y="14" width="7" height="7" rx="1"/>
+        <rect x="3" y="14" width="7" height="7" rx="1"/>
+      </svg>
+    ),
+  },
 ]
 
 // ── Componente principal ────────────────────────────────────
@@ -809,6 +820,11 @@ export default function PainelPedidos() {
   })
   const [historico, setHistorico] = useState([])
   const [loadingHist, setLoadingHist] = useState(false)
+  // Catálogo (pausar/ativar itens da loja online)
+  const [catalogo, setCatalogo] = useState([])
+  const [loadingCatalogo, setLoadingCatalogo] = useState(false)
+  const [buscaCatalogo, setBuscaCatalogo] = useState('')
+  const [pausandoId, setPausandoId] = useState(null)
   const [qzStatus, setQzStatus] = useState('idle') // idle | verificando | ok | sem-qz
   const [impressoras, setImpressoras] = useState([])
   const [impressoraPadrao, setImpressoraPadrao] = useState(null)
@@ -870,6 +886,39 @@ export default function PainelPedidos() {
   useEffect(() => {
     if (painelDireito === 'pedidos') carregarHistorico()
   }, [painelDireito, carregarHistorico])
+
+  // ── Catálogo: carrega os produtos da loja ───────────────────
+  const carregarCatalogo = useCallback(async () => {
+    if (!empresa) return
+    setLoadingCatalogo(true)
+    const { data } = await supabase
+      .from('produtos')
+      .select('id, nome, preco_venda, categoria, disponivel_delivery')
+      .eq('empresa_id', empresa.id)
+      .order('nome', { ascending: true })
+    setCatalogo(data || [])
+    setLoadingCatalogo(false)
+  }, [empresa])
+
+  useEffect(() => {
+    if (painelDireito === 'catalogo') carregarCatalogo()
+  }, [painelDireito, carregarCatalogo])
+
+  // Pausa/reativa um item — pausado some da loja online na hora.
+  async function togglePausarProduto(prod) {
+    const novo = !prod.disponivel_delivery
+    setPausandoId(prod.id)
+    setCatalogo(prev => prev.map(p => p.id === prod.id ? { ...p, disponivel_delivery: novo } : p))
+    const { error } = await supabase
+      .from('produtos')
+      .update({ disponivel_delivery: novo })
+      .eq('id', prod.id)
+    setPausandoId(null)
+    if (error) {
+      // reverte em caso de falha
+      setCatalogo(prev => prev.map(p => p.id === prod.id ? { ...p, disponivel_delivery: prod.disponivel_delivery } : p))
+    }
+  }
 
   async function detectarImpressoras() {
     setQzStatus('verificando')
@@ -1242,6 +1291,10 @@ export default function PainelPedidos() {
     )
   }
 
+  const catalogoFiltrado = catalogo.filter(p =>
+    !buscaCatalogo.trim() || p.nome?.toLowerCase().includes(buscaCatalogo.trim().toLowerCase())
+  )
+
   return (
     <div className="pp-root">
       {/* Header fixo */}
@@ -1366,7 +1419,7 @@ export default function PainelPedidos() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
-              {painelDireito === 'impressora' ? 'Impressora' : 'Pedidos finalizados'}
+              {painelDireito === 'impressora' ? 'Impressora' : painelDireito === 'pedidos' ? 'Pedidos finalizados' : 'Catálogo'}
             </h3>
             <button type="button" onClick={() => setPainelDireito(null)} aria-label="Fechar"
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 22, lineHeight: 1 }}>
@@ -1541,6 +1594,70 @@ export default function PainelPedidos() {
                 })}
               </div>
             )
+          )}
+
+          {/* Painel: Catálogo (pausar/ativar itens da loja online) */}
+          {painelDireito === 'catalogo' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
+                Pause um item quando ele acabar — ele <strong>some da loja online na hora</strong>. Reative quando voltar ao estoque.
+              </p>
+              <input
+                type="search"
+                value={buscaCatalogo}
+                onChange={e => setBuscaCatalogo(e.target.value)}
+                placeholder="Buscar produto..."
+                style={{
+                  width: '100%', padding: '8px 10px', borderRadius: 8,
+                  border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)',
+                  color: 'var(--text)', fontSize: 13,
+                }}
+              />
+              {loadingCatalogo ? (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 13 }}>Carregando...</div>
+              ) : catalogoFiltrado.length === 0 ? (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 13 }}>
+                  {buscaCatalogo ? 'Nenhum produto encontrado.' : 'Nenhum produto cadastrado.'}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {catalogoFiltrado.map(prod => {
+                    const pausado = prod.disponivel_delivery === false
+                    return (
+                      <div key={prod.id} style={{
+                        border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '10px 12px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                        opacity: pausado ? 0.6 : 1,
+                      }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {prod.nome}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            {fmt(prod.preco_venda)}{prod.categoria ? ` · ${prod.categoria}` : ''}
+                            {pausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => togglePausarProduto(prod)}
+                          disabled={pausandoId === prod.id}
+                          style={{
+                            flexShrink: 0, padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+                            fontWeight: 700, fontSize: 12, border: '1.5px solid',
+                            borderColor: pausado ? '#16a34a' : '#dc2626',
+                            background: pausado ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
+                            color: pausado ? '#16a34a' : '#dc2626',
+                          }}
+                        >
+                          {pausandoId === prod.id ? '...' : pausado ? 'Ativar' : 'Pausar'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           )}
         </aside>
       )}
