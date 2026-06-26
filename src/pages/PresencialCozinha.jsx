@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
+import { imprimirHtml, montarComandaCozinhaHtml } from '../utils/imprimirCupom'
 import '../components/Page.css'
 
 function tempoDesde(iso) {
@@ -84,8 +85,13 @@ export default function PresencialCozinha() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
           {porMesa.map(([mesa, lista]) => (
             <div key={mesa} style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-              <div style={{ background: 'var(--primary)', color: '#fff', padding: '10px 14px', fontWeight: 800 }}>
-                Mesa {mesa}
+              <div style={{ background: 'var(--primary)', color: '#fff', padding: '10px 14px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Mesa {mesa}</span>
+                <button type="button" title="Imprimir comanda"
+                  onClick={() => imprimirHtml(montarComandaCozinhaHtml({ numeroMesa: mesa, itens: lista }))}
+                  style={{ background: 'rgba(255,255,255,.2)', border: 'none', color: '#fff', borderRadius: 8, cursor: 'pointer', fontSize: 16, padding: '2px 8px' }}>
+                  🖨️
+                </button>
               </div>
               <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {lista.map(item => (

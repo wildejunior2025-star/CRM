@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
+import { imprimirHtml, montarContaPresencialHtml } from '../utils/imprimirCupom'
 import '../components/Page.css'
 
 const FORMAS = [
@@ -200,6 +201,15 @@ export default function PresencialSalao() {
   }
   function removePagamento(i) {
     setPagamentos(prev => prev.filter((_, idx) => idx !== i))
+  }
+
+  function imprimirConta() {
+    imprimirHtml(montarContaPresencialHtml({
+      numeroMesa: mesaSel?.numero,
+      itens: comandaSel?.comanda_itens ?? [],
+      subtotal: subtotalSel, taxa: taxaSel, total: totalSel,
+      formaPagamento: modoPag === 'unico' ? forma : 'Dividido',
+    }))
   }
 
   async function confirmarFechamento() {
@@ -504,8 +514,12 @@ export default function PresencialSalao() {
 
             <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
               <button type="button" onClick={() => setFechando(false)}
-                style={{ flex: '0 0 auto', padding: '0 16px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
+                style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
                 Voltar
+              </button>
+              <button type="button" onClick={imprimirConta} title="Imprimir conta"
+                style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
+                🖨️ Conta
               </button>
               <button type="button" onClick={confirmarFechamento} disabled={salvando || !podeReceber}
                 className="btn btn-primary" style={{ flex: 1, marginTop: 0, opacity: (salvando || !podeReceber) ? 0.5 : 1 }}>

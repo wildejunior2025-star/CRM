@@ -8,7 +8,7 @@ Legenda: ✅ feito · 🔨 em desenvolvimento · 🔜 próximo · 💡 planejado
 ## ⚙️ Operação (indispensável no dia a dia)
 | # | Item | Status |
 |---|------|--------|
-| O1 | Impressão automática de comanda/pedido (cozinha/balcão) | 🔜 |
+| O1 | Impressão (QZ Tray): delivery (auto), comanda na cozinha e conta do presencial | ✅ |
 | O2 | Gestão de entregas / tela do entregador (atribuir, saiu pra entrega, rota) | 🔜 |
 | O3 | Aceitar/recusar pedido de delivery + tempo de preparo + status pro cliente | 💡 |
 | O4 | Reservas e fila de mesa (presencial) com aviso no WhatsApp | 💡 |

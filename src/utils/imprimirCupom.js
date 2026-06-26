@@ -228,3 +228,98 @@ export async function imprimirCupom(pedido, empresa = {}) {
   }
   imprimirCupomNavegador(pedido, empresa)
 }
+
+// ──────────────── Impressão genérica de HTML (qualquer cupom) ────────────────
+async function imprimirHtmlViaQz(html, printerName) {
+  const qz = await qzConectar()
+  const larguraMm = larguraCupom() === '58mm' ? 58 : 80
+  const config = qz.configs.create(printerName, {
+    size: { width: larguraMm, height: null }, units: 'mm', margins: 0,
+    rasterize: true, colorType: 'blackwhite', scaleContent: true,
+  })
+  await qz.print(config, [{ type: 'pixel', format: 'html', flavor: 'plain', data: html }])
+}
+function imprimirHtmlNavegador(html) {
+  const iframe = document.createElement('iframe')
+  iframe.setAttribute('aria-hidden', 'true')
+  Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
+  document.body.appendChild(iframe)
+  const doc = iframe.contentWindow.document
+  doc.open(); doc.write(html); doc.close()
+  setTimeout(() => {
+    try { iframe.contentWindow.focus(); iframe.contentWindow.print() } catch { /* best-effort */ }
+    setTimeout(() => iframe.remove(), 1500)
+  }, 300)
+}
+export async function imprimirHtml(html) {
+  const printer = impressoraEscolhida()
+  if (printer) {
+    try { await imprimirHtmlViaQz(html, printer); return } catch { /* fallback */ }
+  }
+  imprimirHtmlNavegador(html)
+}
+
+// Comanda da COZINHA (sem preços, fonte grande) — "pedido sai na cozinha"
+export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = '' }) {
+  const largura = larguraCupom()
+  const hora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const linhas = itens.map(it => {
+    const q = it.quantidade ?? it.qtd ?? 1
+    return `<li><div class="it">${esc(q)}x ${esc(it.nome)}</div>${it.observacao ? `<div class="obs">▸ ${esc(it.observacao)}</div>` : ''}</li>`
+  }).join('')
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Cozinha Mesa ${esc(numeroMesa)}</title>
+<style>
+  @page { size: ${largura} auto; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body { width: ${largura}; padding: 4mm 3mm; font-family: 'Courier New', monospace; color: #000; }
+  .mesa { font-size: 22px; font-weight: 800; text-align: center; }
+  .hora { text-align: center; font-size: 12px; margin-bottom: 4px; }
+  hr { border: none; border-top: 2px dashed #000; margin: 6px 0; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { margin-bottom: 8px; }
+  .it { font-size: 18px; font-weight: 800; }
+  .obs { font-size: 14px; padding-left: 10px; }
+</style></head><body>
+  <div class="mesa">MESA ${esc(numeroMesa)}</div>
+  <div class="hora">${esc(hora)}</div>
+  <hr>
+  <ul>${linhas || '<li>—</li>'}</ul>
+  ${obsGeral ? `<hr><div class="obs">${esc(obsGeral)}</div>` : ''}
+  <div style="height:10mm"></div>
+</body></html>`
+}
+
+// Conta do PRESENCIAL (com preços, taxa e total)
+export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0, taxa = 0, total = 0, formaPagamento = '', empresa = {} }) {
+  const largura = larguraCupom()
+  const hora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const linhas = itens.map(it => {
+    const q = it.quantidade ?? it.qtd ?? 1
+    const sub = it.subtotal != null ? Number(it.subtotal) : q * Number(it.preco_unitario ?? it.preco ?? 0)
+    return `<li><div class="row"><span>${esc(q)}x ${esc(it.nome)}</span><span>${fmt(sub)}</span></div></li>`
+  }).join('')
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Conta Mesa ${esc(numeroMesa)}</title>
+<style>
+  @page { size: ${largura} auto; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body { width: ${largura}; padding: 4mm 3mm; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.35; color: #000; }
+  .center { text-align: center; } .b { font-weight: 700; } .lg { font-size: 16px; }
+  hr { border: none; border-top: 1px dashed #000; margin: 5px 0; }
+  .row { display: flex; justify-content: space-between; gap: 8px; }
+  ul { list-style: none; margin: 0; padding: 0; } li { margin-bottom: 2px; }
+</style></head><body>
+  <div class="center b lg">${esc(empresa.nome || 'Conta')}</div>
+  <hr>
+  <div class="b">MESA ${esc(numeroMesa)} - ${esc(hora)}</div>
+  <hr>
+  <ul>${linhas || '<li>—</li>'}</ul>
+  <hr>
+  <div class="row"><span>Subtotal</span><span>${fmt(subtotal)}</span></div>
+  ${Number(taxa) > 0 ? `<div class="row"><span>Taxa de serviço</span><span>${fmt(taxa)}</span></div>` : ''}
+  <div class="row b lg"><span>TOTAL</span><span>${fmt(total)}</span></div>
+  ${formaPagamento ? `<hr><div><span class="b">Pagamento:</span> ${esc(formaPagamento)}</div>` : ''}
+  <hr>
+  <div class="center">Obrigado pela preferencia!</div>
+  <div style="height:10mm"></div>
+</body></html>`
+}
