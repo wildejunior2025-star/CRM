@@ -18,6 +18,7 @@ export default function PresencialHistorico() {
   const [comandas, setComandas] = useState([])
   const [garcons, setGarcons]   = useState({})  // { profile_id: nome }
   const [entregas, setEntregas] = useState([])  // itens entregues hoje
+  const [comissaoPct, setComissaoPct] = useState(0)
   const [loading, setLoading]   = useState(true)
   const [aberta, setAberta]     = useState(null) // id da comanda expandida
 
@@ -38,13 +39,21 @@ export default function PresencialHistorico() {
         .eq('status', 'entregue')
         .not('entregue_por', 'is', null)
         .gte('entregue_at', inicioHoje.toISOString()),
-    ]).then(([cs, gs, es]) => {
+      supabase.from('empresas').select('comissao_garcom_pct').eq('id', empresaId).single(),
+    ]).then(([cs, gs, es, emp]) => {
       setComandas(cs.data ?? [])
       setGarcons(Object.fromEntries((gs.data ?? []).map(p => [p.id, p.nome])))
       setEntregas(es.data ?? [])
+      setComissaoPct(Number(emp.data?.comissao_garcom_pct ?? 0))
       setLoading(false)
     })
   }, [empresaId])
+
+  async function salvarComissao(v) {
+    const n = Math.max(0, Math.min(100, Number(v) || 0))
+    setComissaoPct(n)
+    await supabase.from('empresas').update({ comissao_garcom_pct: n }).eq('id', empresaId)
+  }
 
   // Ranking de entregas de hoje por garçom
   const rankingEntregas = useMemo(() => {
@@ -94,22 +103,44 @@ export default function PresencialHistorico() {
         </div>
       </div>
 
-      {/* Ranking de entregas por garçom (hoje) */}
-      {rankingEntregas.length > 0 && (
-        <div className="card" style={{ marginBottom: 18 }}>
-          <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>🏆 Entregas por garçom (hoje)</div>
-          {rankingEntregas.map((r, i) => (
-            <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < rankingEntregas.length - 1 ? '1px solid var(--border)' : 'none' }}>
-              <span style={{ fontSize: 16, width: 24, textAlign: 'center' }}>
-                {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`}
-              </span>
-              <span style={{ flex: 1, fontWeight: 600 }}>{garcons[r.id] ?? 'Garçom'}</span>
-              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{r.qtd} {r.qtd === 1 ? 'item' : 'itens'}</span>
-              <strong style={{ minWidth: 90, textAlign: 'right' }}>{fmt(r.valor)}</strong>
+      {/* Ranking de entregas por garçom (hoje) + comissão */}
+      {rankingEntregas.length > 0 && (() => {
+        const pctNum = Number(comissaoPct) || 0
+        const totalEntregue = rankingEntregas.reduce((s, r) => s + r.valor, 0)
+        const totalComissao = totalEntregue * pctNum / 100
+        return (
+          <div className="card" style={{ marginBottom: 18 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 14, fontWeight: 800 }}>🏆 Entregas por garçom (hoje)</div>
+              <label style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                Comissão do garçom
+                <input type="number" min="0" max="100" step="0.5" value={comissaoPct}
+                  onChange={e => setComissaoPct(e.target.value)} onBlur={e => salvarComissao(e.target.value)}
+                  style={{ width: 64, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
+                %
+              </label>
             </div>
-          ))}
-        </div>
-      )}
+            {rankingEntregas.map((r, i) => (
+              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < rankingEntregas.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                <span style={{ fontSize: 16, width: 24, textAlign: 'center' }}>
+                  {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`}
+                </span>
+                <span style={{ flex: 1, fontWeight: 600 }}>{garcons[r.id] ?? 'Garçom'}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{r.qtd} {r.qtd === 1 ? 'item' : 'itens'} · {fmt(r.valor)}</span>
+                {pctNum > 0 && (
+                  <strong style={{ minWidth: 84, textAlign: 'right', color: 'var(--success)' }}>{fmt(r.valor * pctNum / 100)}</strong>
+                )}
+              </div>
+            ))}
+            {pctNum > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, marginTop: 4, borderTop: '1px dashed var(--border)', fontWeight: 800 }}>
+                <span>Total de comissão ({pctNum}% sobre {fmt(totalEntregue)})</span>
+                <span style={{ color: 'var(--success)' }}>{fmt(totalComissao)}</span>
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {comandas.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
