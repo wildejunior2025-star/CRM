@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { getEnderecoAtivo } from '../utils/enderecoPortal'
 import './DeliveryCheckout.css'
+
+// Cliente lembrado no aparelho (Opção A — login sem senha)
+const LS_CLIENTE = 'lojaonline_cliente'
 
 const ESTADOS_BR = [
   { uf: 'AC', nome: 'Acre' },
@@ -93,6 +96,7 @@ function fmtTelefone(val) {
 const INITIAL_FORM = {
   nome: '',
   telefone: '',
+  email: '',
   cep: '',
   rua: '',
   numero: '',
@@ -153,6 +157,56 @@ export default function DeliveryCheckout() {
     }
     loadPerfil()
   }, [])
+
+  // Opção A — pré-preenche com o cliente lembrado neste aparelho
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LS_CLIENTE) || 'null')
+      if (saved && typeof saved === 'object') {
+        setForm(prev => ({
+          ...prev,
+          nome:        prev.nome        || saved.nome        || '',
+          telefone:    prev.telefone    || (saved.telefone ? fmtTelefone(saved.telefone) : ''),
+          email:       prev.email       || saved.email       || '',
+          cep:         prev.cep         || saved.cep         || '',
+          rua:         prev.rua         || saved.rua         || '',
+          numero:      prev.numero      || saved.numero      || '',
+          complemento: prev.complemento || saved.complemento || '',
+          estado:      prev.estado      || saved.estado      || '',
+          cidade:      prev.cidade      || saved.cidade      || '',
+          bairro:      prev.bairro      || saved.bairro      || '',
+        }))
+        if (saved.estado) carregarCidades(saved.estado, saved.cidade)
+      }
+    } catch { /* ignora */ }
+  }, [])
+
+  // Reconhece o cliente pelo telefone (recuperar em outro aparelho, sem senha)
+  const reconhecidoRef = useRef(false)
+  useEffect(() => {
+    const empId = state?.empresaId
+    const tel = form.telefone.replace(/\D/g, '')
+    if (!empId || tel.length < 10 || reconhecidoRef.current) return
+    const t = setTimeout(async () => {
+      const { data } = await supabase.rpc('buscar_cliente_loja', { p_empresa_id: empId, p_telefone: tel })
+      if (!data) return
+      reconhecidoRef.current = true
+      setForm(prev => ({
+        ...prev,
+        nome:        prev.nome.trim()        ? prev.nome        : (data.nome || ''),
+        email:       prev.email.trim()       ? prev.email       : (data.email || ''),
+        cep:         prev.cep.trim()         ? prev.cep         : (data.cep || ''),
+        rua:         prev.rua.trim()         ? prev.rua         : (data.endereco || ''),
+        numero:      prev.numero.trim()      ? prev.numero      : (data.numero || ''),
+        complemento: prev.complemento.trim() ? prev.complemento : (data.complemento || ''),
+        estado:      prev.estado             ? prev.estado      : (data.estado || ''),
+        cidade:      prev.cidade             ? prev.cidade      : (data.cidade || ''),
+        bairro:      prev.bairro.trim()      ? prev.bairro      : (data.bairro || ''),
+      }))
+      if (data.estado) carregarCidades(data.estado, data.cidade)
+    }, 700)
+    return () => clearTimeout(t)
+  }, [form.telefone, state])
 
   if (!state?.itens?.length) {
     return <Navigate to="/lojas" replace />
@@ -251,11 +305,31 @@ export default function DeliveryCheckout() {
 
     setEnviando(true)
 
+    // Cria/atualiza o cliente da loja (sem login, identificado pelo telefone)
+    let clienteId = null
+    try {
+      const { data: cid } = await supabase.rpc('upsert_cliente_loja', {
+        p_empresa_id:  empresaId,
+        p_nome:        form.nome.trim(),
+        p_telefone:    form.telefone,
+        p_email:       form.email.trim(),
+        p_cep:         form.cep,
+        p_endereco:    form.rua.trim(),
+        p_numero:      form.numero.trim(),
+        p_complemento: form.complemento.trim(),
+        p_bairro:      form.bairro.trim(),
+        p_cidade:      form.cidade,
+        p_estado:      form.estado,
+      })
+      clienteId = cid ?? null
+    } catch { /* não bloqueia o pedido */ }
+
     const { data, error } = await supabase
       .from('pedidos_delivery')
       .insert({
         empresa_id:           empresaId,
         user_id:              userId ?? null,
+        cliente_id:           clienteId,
         cliente_nome:         form.nome.trim(),
         cliente_telefone:     form.telefone,
         endereco_rua:         form.rua.trim(),
@@ -289,7 +363,14 @@ export default function DeliveryCheckout() {
 
     if (error) { setErroGlobal(error.message); return }
 
-    try { localStorage.removeItem(`sacola_${empresaId}`) } catch { /* ok */ }
+    try {
+      localStorage.removeItem(`sacola_${empresaId}`)
+      localStorage.setItem(LS_CLIENTE, JSON.stringify({
+        nome: form.nome.trim(), telefone: form.telefone, email: form.email.trim(),
+        cep: form.cep, rua: form.rua.trim(), numero: form.numero.trim(),
+        complemento: form.complemento.trim(), estado: form.estado, cidade: form.cidade, bairro: form.bairro.trim(),
+      }))
+    } catch { /* ok */ }
     navigate(`/pedido/${data.id}`, { replace: true })
   }
 
@@ -300,7 +381,7 @@ export default function DeliveryCheckout() {
           <button className="dco-back-btn" onClick={() => navigate(-1)} aria-label="Voltar">
             <IconArrowLeft />
           </button>
-          <span className="dco-logo">Venda<span className="dco-logo-plus">+</span></span>
+          <span className="dco-logo">FWC</span>
           <span className="dco-header-divider" />
           <div>
             <span className="dco-header-title">Checkout</span>
@@ -335,6 +416,16 @@ export default function DeliveryCheckout() {
                       onChange={e => set('telefone', fmtTelefone(e.target.value))}
                       inputMode="tel"
                       data-field-error={errors.telefone ? true : undefined}
+                    />
+                  </Field>
+                  <Field label="E-mail" hint="Opcional">
+                    <input
+                      className="dco-input"
+                      type="email"
+                      placeholder="voce@email.com"
+                      value={form.email}
+                      onChange={e => set('email', e.target.value)}
+                      inputMode="email"
                     />
                   </Field>
                 </div>

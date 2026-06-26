@@ -1,0 +1,491 @@
+/* ── DeliveryCheckout — order form ── */
+
+.dco-root {
+  min-height: 100vh;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.dco-root *, .dco-root *::before, .dco-root *::after {
+  box-sizing: border-box;
+}
+
+/* ── Header ── */
+.dco-header {
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.dco-header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dco-back-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #1e293b;
+  background: #1e293b;
+  color: #f1f5f9;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 140ms;
+}
+
+.dco-back-btn:hover {
+  background: #334155;
+}
+
+.dco-back-btn:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+}
+
+.dco-logo {
+  font-size: 20px;
+  font-weight: 800;
+  color: #f1f5f9;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.dco-logo-plus {
+  color: #7c3aed;
+}
+
+.dco-header-divider {
+  width: 1px;
+  height: 20px;
+  background: #1e293b;
+  flex-shrink: 0;
+}
+
+.dco-header-title {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  color: #f1f5f9;
+  line-height: 1.2;
+}
+
+.dco-header-sub {
+  display: block;
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 1px;
+}
+
+/* ── Main + form ── */
+.dco-main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 16px 100px;
+}
+
+.dco-form {
+  display: contents;
+}
+
+/* ── Layout 2 colunas em desktop ── */
+.dco-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+@media (min-width: 900px) {
+  .dco-layout {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 28px;
+  }
+
+  .dco-col-form {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .dco-col-aside {
+    width: 340px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 80px;
+  }
+}
+
+/* ── Seções ── */
+.dco-section {
+  background: #1e1b4b;
+  border: 1px solid #312e81;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.dco-section-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0 0 16px;
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.dco-optional {
+  font-size: 12px;
+  font-weight: 400;
+  color: #64748b;
+}
+
+/* ── Campo ── */
+.dco-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dco-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dco-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.dco-required {
+  color: #7c3aed;
+  margin-left: 2px;
+}
+
+.dco-input {
+  padding: 10px 12px;
+  background: #0f172a;
+  border: 1.5px solid #334155;
+  border-radius: 8px;
+  color: #f1f5f9;
+  font-size: 14px;
+  width: 100%;
+  transition: border-color 140ms, box-shadow 140ms;
+}
+
+.dco-input::placeholder {
+  color: #475569;
+}
+
+.dco-input:focus {
+  outline: none;
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2);
+}
+
+.dco-input--error {
+  border-color: #ef4444;
+}
+
+.dco-input--error:focus {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+}
+
+.dco-input--troco {
+  max-width: 200px;
+}
+
+.dco-field-error {
+  font-size: 12px;
+  color: #f87171;
+  margin-top: 2px;
+}
+
+.dco-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+  cursor: pointer;
+}
+
+.dco-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dco-select option {
+  background: #0f172a;
+  color: #f1f5f9;
+}
+
+.dco-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* ── Textarea ── */
+.dco-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  background: #0f172a;
+  border: 1.5px solid #334155;
+  border-radius: 8px;
+  color: #f1f5f9;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 80px;
+  transition: border-color 140ms, box-shadow 140ms;
+}
+
+.dco-textarea::placeholder {
+  color: #475569;
+}
+
+.dco-textarea:focus {
+  outline: none;
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2);
+}
+
+/* ── Pagamento ── */
+.dco-payment-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.dco-pay-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1.5px solid #334155;
+  background: #0f172a;
+  color: #94a3b8;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  transition: border-color 140ms, color 140ms, background 140ms;
+  position: relative;
+}
+
+.dco-pay-btn:hover {
+  border-color: #7c3aed;
+  color: #f1f5f9;
+}
+
+.dco-pay-btn--active {
+  border-color: #7c3aed;
+  background: rgba(124, 58, 237, 0.1);
+  color: #a78bfa;
+}
+
+.dco-pay-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #7c3aed;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+}
+
+/* ── Resumo ── */
+.dco-resumo {
+  background: #1e1b4b;
+  border: 1px solid #312e81;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.dco-resumo-itens {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.dco-resumo-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.dco-resumo-item-qty {
+  color: #7c3aed;
+  font-weight: 700;
+  min-width: 24px;
+  flex-shrink: 0;
+}
+
+.dco-resumo-item-nome {
+  color: #e2e8f0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dco-resumo-item-sub {
+  color: #94a3b8;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.dco-resumo-totais {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #1e293b;
+  margin-bottom: 16px;
+}
+
+.dco-resumo-linha {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.dco-resumo-total {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f1f5f9;
+  padding-top: 8px;
+  border-top: 1px solid #1e293b;
+  margin-top: 4px;
+}
+
+.dco-resumo-total strong {
+  color: #a78bfa;
+  font-size: 17px;
+}
+
+/* ── Botão submit ── */
+.dco-btn-submit {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  border: none;
+  background: #7c3aed;
+  color: #fff;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 140ms, transform 120ms;
+}
+
+.dco-btn-submit:hover:not(:disabled) {
+  background: #6d28d9;
+  transform: translateY(-1px);
+}
+
+.dco-btn-submit:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.dco-btn-submit:disabled {
+  background: #334155;
+  color: #64748b;
+  cursor: not-allowed;
+}
+
+.dco-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: dco-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes dco-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Erro global ── */
+.dco-erro-global {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 8px;
+  color: #fca5a5;
+  padding: 12px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.dco-erro-mobile {
+  display: none;
+}
+
+/* ── Mobile: botão fixo + resumo oculto ── */
+.dco-submit-mobile {
+  display: none;
+}
+
+@media (max-width: 899px) {
+  .dco-col-aside {
+    order: -1;
+  }
+
+  .dco-resumo .dco-btn-submit {
+    display: none;
+  }
+
+  .dco-resumo .dco-erro-global {
+    display: none;
+  }
+
+  .dco-erro-mobile {
+    display: block;
+    margin: 0 0 80px;
+  }
+
+  .dco-submit-mobile {
+    display: block;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 12px 16px 20px;
+    background: #0f172a;
+    border-top: 1px solid #1e293b;
+    z-index: 40;
+  }
+}

@@ -15,7 +15,7 @@
 
 .login-theme-toggle {
   position: absolute;
-  top: 20px;
+  top: calc(20px + env(safe-area-inset-top));
   right: 20px;
 }
 
@@ -190,6 +190,42 @@
   }
 }
 
+.login-ou {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.login-ou::before,
+.login-ou::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.login-google-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.login-google-btn:hover {
+  background: var(--hover-bg, rgba(128,128,128,0.08));
+  border-color: var(--text-muted);
+}
+
 .login-footer {
   margin: 0;
   font-size: 12px;
@@ -273,6 +309,29 @@
   line-height: 1.2;
 }
 
+/* ── Variante larga para formulários com muitos campos (ex: Cadastro de Cliente) ── */
+.login-card--wide {
+  max-width: 480px;
+}
+
+/* Grid de campos de endereço */
+.addr-row {
+  display: grid;
+  gap: 12px;
+}
+
+.addr-row--num-comp {
+  grid-template-columns: 90px 1fr;
+}
+
+.addr-row--bairro-cidade {
+  grid-template-columns: 1fr 1fr;
+}
+
+.addr-row--estado-cidade {
+  grid-template-columns: 140px 1fr;
+}
+
 @media (max-width: 480px) {
   .login-card {
     padding: 24px 20px;
@@ -281,6 +340,13 @@
   .login-theme-toggle {
     top: 12px;
     right: 12px;
+  }
+
+  /* Em mobile, empilhar os campos de endereço */
+  .addr-row--num-comp,
+  .addr-row--bairro-cidade,
+  .addr-row--estado-cidade {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -353,6 +419,16 @@
   --primary-hover: #1d4ed8;
   --primary-bg: rgba(37, 99, 235, 0.10);
   --primary-ring: rgba(37, 99, 235, 0.30);
+}
+
+/* Cor verde para o botão de Gestor de Pedidos */
+.login-tipo-gestor > svg:first-child {
+  color: #10b981;
+}
+.login-tipo-gestor:hover {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.08);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
 }
 
 /* ── Separador "Não tem conta?" ── */

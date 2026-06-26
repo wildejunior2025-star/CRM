@@ -14,12 +14,11 @@ export default function SuperAdminClientes() {
     setLoading(true)
     setError(null)
 
-    // Busca todos os profiles com perfil='cliente' e empresa_id=null (clientes do marketplace)
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, nome, email, ativo, created_at')
+      .select('id, nome, email, ativo, created_at, empresa_id')
       .eq('perfil', 'cliente')
-      .is('empresa_id', null)
+      .not('email', 'ilike', '%@wpp.vendamais.app')
       .order('created_at', { ascending: false })
 
     if (error) setError(error.message)
@@ -43,29 +42,46 @@ export default function SuperAdminClientes() {
   }
 
   async function acessarCliente(cliente) {
+    const nomeCliente = cliente.nome || cliente.email || 'Cliente'
     setAcessandoId(cliente.id)
     setError(null)
 
+    // Salva a sessão atual do super admin para poder voltar (mesma origem
+    // preserva o localStorage, e com ele o botão "Voltar ao Super Admin").
     const { data: { session: currentSession } } = await supabase.auth.getSession()
     if (currentSession) {
       localStorage.setItem('crm_superadmin_backup', JSON.stringify({
         access_token: currentSession.access_token,
         refresh_token: currentSession.refresh_token,
       }))
-      localStorage.setItem('crm_superadmin_cliente_nome', cliente.nome || cliente.email || 'Cliente')
     }
+    localStorage.setItem('crm_superadmin_cliente_nome', nomeCliente)
 
+    // Impersonação real: vira de fato o cliente (todas as telas do portal passam
+    // a mostrar os dados dele), via magic link gerado pela função impersonate-user.
     const { data, error } = await supabase.functions.invoke('impersonate-user', {
-      body: { user_id: cliente.id, redirect_to: `${window.location.origin}/portal` },
+      body: { user_id: cliente.id, redirect_to: window.location.origin },
     })
 
     setAcessandoId(null)
 
     if (error || !data?.link) {
       localStorage.removeItem('crm_superadmin_backup')
-      localStorage.removeItem('crm_superadmin_cliente_nome')
-      setError(error?.message ?? data?.error ?? 'Erro ao gerar acesso')
+      setError(error?.message ?? data?.error ?? 'Erro ao gerar acesso ao cliente')
       return
+    }
+
+    // Troca a sessão NA MESMA ABA com o token do magic link (verifyOtp), sem
+    // redirecionar para outra origem — assim o backup do super admin é preservado.
+    let tokenHash = null
+    try { tokenHash = new URL(data.link).searchParams.get('token') } catch { /* link inesperado */ }
+
+    if (tokenHash) {
+      const { error: vErr } = await supabase.auth.verifyOtp({ type: 'magiclink', token_hash: tokenHash })
+      if (!vErr) {
+        window.location.href = '/portal/indicacoes'
+        return
+      }
     }
 
     window.location.href = data.link
@@ -154,7 +170,7 @@ export default function SuperAdminClientes() {
                       disabled={acessandoId === c.id}
                       onClick={() => acessarCliente(c)}
                     >
-                      {acessandoId === c.id ? 'Acessando...' : 'Entrar como'}
+                      {acessandoId === c.id ? 'Entrando...' : 'Entrar como'}
                     </button>
                   </td>
                 </tr>

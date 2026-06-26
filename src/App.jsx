@@ -1,4 +1,46 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
+import { useEffect } from 'react'
+import { useAuth } from './hooks/useAuth'
+
+const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor']
+
+function HostnameRedirect() {
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const { profile, loading } = useAuth()
+  useEffect(() => {
+    if (loading) return
+    const h = window.location.hostname
+    const isPublic = PUBLIC_PREFIXES.some(p => pathname.startsWith(p))
+    if (isPublic) return
+    const perfil = profile?.perfil
+
+    if (h === 'app.fwcinter.com') {
+      // Domínio do app é exclusivo do cliente. Admin/vendedor de empresa que
+      // caírem aqui (ex.: impersonação por magic link) usam o CRM nas rotas raiz;
+      // super_admin vai para a área dele. Só o cliente (ou não logado) vai ao portal.
+      if (perfil === 'admin' || perfil === 'vendedor') return
+      if (perfil === 'super_admin') {
+        if (!pathname.startsWith('/super-admin')) navigate('/super-admin', { replace: true })
+        return
+      }
+      if (!pathname.startsWith('/portal')) navigate('/portal', { replace: true })
+    } else if (h === 'admin.fwcinter.com') {
+      // Admin/vendedor impersonado não pode ser forçado para /super-admin (geraria loop):
+      // usa o CRM da empresa nas rotas raiz.
+      if (perfil === 'admin' || perfil === 'vendedor') return
+      // "Entrar como cliente": a sessão vira cliente mas continua neste domínio
+      // (mesma origem preserva o backup p/ voltar). Deixa usar o /portal.
+      if (pathname.startsWith('/portal') && localStorage.getItem('crm_superadmin_backup')) return
+      if (!pathname.startsWith('/super-admin') && pathname !== '/login') {
+        navigate('/super-admin', { replace: true })
+      }
+    } else if (h === 'gestor.fwcinter.com' && !pathname.startsWith('/painel') && pathname !== '/login') {
+      navigate('/painel', { replace: true })
+    }
+  }, [pathname, navigate, profile, loading])
+  return null
+}
 import { AuthProvider } from './context/AuthContext'
 import { BrandingProvider } from './context/BrandingContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -20,25 +62,79 @@ import Usuarios from './pages/Usuarios'
 import PortalHome from './pages/PortalHome'
 import PortalLoja from './pages/PortalLoja'
 import PortalPedidos from './pages/PortalPedidos'
+import PortalPerfil from './pages/PortalPerfil'
 import PortalFiado from './pages/PortalFiado'
+import PortalIndicacoes from './pages/PortalIndicacoes'
+import SuperAdminDashboard from './pages/SuperAdminDashboard'
+import SuperAdminMLM from './pages/SuperAdminMLM'
 import SuperAdminEmpresas from './pages/SuperAdminEmpresas'
 import SuperAdminClientes from './pages/SuperAdminClientes'
 import SuperAdminComissoes from './pages/SuperAdminComissoes'
+import SuperAdminWhatsApp from './pages/SuperAdminWhatsApp'
+import SuperAdminConfig from './pages/SuperAdminConfig'
+import SuperAdminPagamentos from './pages/SuperAdminPagamentos'
+import SuperAdminRedeMapa from './pages/SuperAdminRedeMapa'
+import SuperAdminEmpresaRede from './pages/SuperAdminEmpresaRede'
+import SuperAdminFinanceiro from './pages/SuperAdminFinanceiro'
+import CadastroRef from './pages/CadastroRef'
 import CadastroAdmin from './pages/CadastroAdmin'
 import CadastroVendedor from './pages/CadastroVendedor'
 import MinhaLoja from './pages/MinhaLoja'
+import PedidosDelivery from './pages/PedidosDelivery'
+import PainelPedidos from './pages/PainelPedidos'
 import ResetPassword from './pages/ResetPassword'
 import WhatsAppConfig from './pages/WhatsAppConfig'
+import BotTeste from './pages/BotTeste'
+import DeliveryLojas from './pages/DeliveryLojas'
+import DeliveryLoja from './pages/DeliveryLoja'
+import DeliveryCheckout from './pages/DeliveryCheckout'
+import DeliveryPedido from './pages/DeliveryPedido'
+import RaioEntrega from './pages/RaioEntrega'
+import WhatsAppCreditos from './pages/WhatsAppCreditos'
+import Termos from './pages/Termos'
+import Privacidade from './pages/Privacidade'
 
 export default function App() {
+  // lojaonline.fwcinter.com — vitrine pública da loja (sem login).
+  // lojaonline.fwcinter.com/{slug} abre o catálogo daquela loja.
+  const isLojaOnline = typeof window !== 'undefined'
+    && window.location.hostname === 'lojaonline.fwcinter.com'
+
+  if (isLojaOnline) {
+    return (
+      <BrandingProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<DeliveryLojas />} />
+            <Route path="/lojas" element={<DeliveryLojas />} />
+            <Route path="/checkout" element={<DeliveryCheckout />} />
+            <Route path="/pedido/:id" element={<DeliveryPedido />} />
+            <Route path="/:slug" element={<DeliveryLoja />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+      </BrandingProvider>
+    )
+  }
+
   return (
     <BrandingProvider>
     <AuthProvider>
       <BrowserRouter>
+        <HostnameRedirect />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/cadastro" element={<Cadastro />} />
+          <Route path="/termos" element={<Termos />} />
+          <Route path="/privacidade" element={<Privacidade />} />
+          <Route path="/lojas" element={<DeliveryLojas />} />
+          <Route path="/loja/:id" element={<DeliveryLoja />} />
+          <Route path="/checkout" element={<DeliveryCheckout />} />
+          <Route path="/pedido/:id" element={<DeliveryPedido />} />
+          {/* Link de indicação unificado — pergunta "sou cliente ou loja" */}
+          <Route path="/entrar" element={<CadastroRef />} />
           {/* Cadastro de cliente livre (sem empresa) */}
           <Route path="/cadastro-cliente" element={<CadastroCliente />} />
           {/* Cadastro de cliente via convite de empresa (link antigo ainda funciona) */}
@@ -53,9 +149,17 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route path="/super-admin" element={<SuperAdminEmpresas />} />
+            <Route path="/super-admin" element={<SuperAdminDashboard />} />
+            <Route path="/super-admin/empresas" element={<SuperAdminEmpresas />} />
             <Route path="/super-admin/clientes" element={<SuperAdminClientes />} />
             <Route path="/super-admin/comissoes" element={<SuperAdminComissoes />} />
+            <Route path="/super-admin/whatsapp" element={<SuperAdminWhatsApp />} />
+            <Route path="/super-admin/mlm" element={<SuperAdminMLM />} />
+            <Route path="/super-admin/config" element={<SuperAdminConfig />} />
+            <Route path="/super-admin/pagamentos" element={<SuperAdminPagamentos />} />
+            <Route path="/super-admin/rede-mapa" element={<SuperAdminRedeMapa />} />
+            <Route path="/super-admin/empresa-rede" element={<SuperAdminEmpresaRede />} />
+            <Route path="/super-admin/financeiro" element={<SuperAdminFinanceiro />} />
           </Route>
 
           <Route
@@ -87,14 +191,40 @@ export default function App() {
               element={<ProtectedRoute roles={['admin']}><MinhaLoja /></ProtectedRoute>}
             />
             <Route
+              path="raio-entrega"
+              element={<ProtectedRoute roles={['admin']}><RaioEntrega /></ProtectedRoute>}
+            />
+            <Route
+              path="pedidos-delivery"
+              element={<ProtectedRoute roles={['admin']}><PedidosDelivery /></ProtectedRoute>}
+            />
+            <Route
               path="whatsapp"
               element={<ProtectedRoute roles={['admin', 'super_admin']}><WhatsAppConfig /></ProtectedRoute>}
+            />
+            <Route
+              path="whatsapp-creditos"
+              element={<ProtectedRoute roles={['admin']}><WhatsAppCreditos /></ProtectedRoute>}
+            />
+            <Route
+              path="bot-teste"
+              element={<ProtectedRoute roles={['admin', 'super_admin']}><BotTeste /></ProtectedRoute>}
             />
             <Route
               path="usuarios"
               element={<ProtectedRoute roles={['admin']}><Usuarios /></ProtectedRoute>}
             />
           </Route>
+
+          {/* Painel de pedidos delivery — tela autônoma, sem sidebar */}
+          <Route
+            path="/painel"
+            element={
+              <ProtectedRoute roles={['admin', 'super_admin']}>
+                <PainelPedidos />
+              </ProtectedRoute>
+            }
+          />
 
           <Route
             path="/portal"
@@ -107,7 +237,9 @@ export default function App() {
             <Route index element={<PortalHome />} />
             <Route path="loja/:empresaId" element={<PortalLoja />} />
             <Route path="pedidos" element={<PortalPedidos />} />
+            <Route path="perfil" element={<PortalPerfil />} />
             <Route path="fiado" element={<PortalFiado />} />
+            <Route path="indicacoes" element={<PortalIndicacoes />} />
           </Route>
         </Routes>
       </BrowserRouter>

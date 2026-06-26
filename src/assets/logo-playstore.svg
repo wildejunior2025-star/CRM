@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bgMain" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#8B5CF6"/>
+      <stop offset="55%" stop-color="#7C3AED"/>
+      <stop offset="100%" stop-color="#4C1D95"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="50%"  stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="18" flood-color="#3B0764" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- Fundo -->
+  <rect width="512" height="512" rx="110" fill="url(#bgMain)" filter="url(#shadow)"/>
+  <!-- Gloss -->
+  <rect width="512" height="260" rx="110" fill="url(#gloss)"/>
+
+  <!-- V grande centralizado -->
+  <polyline
+    points="96,120 256,390 416,120"
+    stroke="white"
+    stroke-width="58"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+    opacity="0.97"
+  />
+
+  <!-- + no canto superior direito integrado ao V -->
+  <!-- vertical -->
+  <line x1="416" y1="56"  x2="416" y2="184" stroke="#DDD6FE" stroke-width="46" stroke-linecap="round"/>
+  <!-- horizontal -->
+  <line x1="352" y1="120" x2="480" y2="120" stroke="#DDD6FE" stroke-width="46" stroke-linecap="round"/>
+
+  <!-- Ponto brilhante no cruzamento do + para dar profundidade -->
+  <circle cx="416" cy="120" r="26" fill="#EDE9FE" opacity="0.7"/>
+</svg>

@@ -1,0 +1,913 @@
+.pd-titulo-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Badge pulsante de pedidos aguardando */
+.pd-badge-pulsante {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  animation: pd-pulse 1.8s ease infinite;
+}
+
+@keyframes pd-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  50%       { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+}
+
+/* Toggle loja aberta/fechada */
+.pd-toggle-loja {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.pd-toggle-loja:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--surface-hover);
+}
+
+.pd-toggle-loja:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pd-toggle-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #9ca3af;
+  transition: background 160ms ease;
+}
+
+.pd-toggle-loja.aberta .pd-toggle-dot {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+
+.pd-toggle-loja.fechada .pd-toggle-dot {
+  background: #ef4444;
+}
+
+/* Abas */
+.pd-abas {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+
+.pd-aba {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  border-radius: 0;
+  transition: color 120ms ease, border-color 120ms ease;
+  white-space: nowrap;
+}
+
+.pd-aba:hover {
+  color: var(--text);
+}
+
+.pd-aba.ativa {
+  color: var(--primary);
+  font-weight: 600;
+  border-bottom-color: var(--primary);
+}
+
+.pd-aba-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Grid de cards */
+.pd-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+/* Card de pedido */
+.pd-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.pd-card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 4px 16px var(--primary-ring);
+}
+
+.pd-card-skeleton {
+  pointer-events: none;
+}
+
+.pd-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pd-card-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pd-numero {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.04em;
+}
+
+.pd-tempo {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Badge de status */
+.pd-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: var(--badge-bg);
+  color: var(--badge-cor);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Badge de pagamento */
+.pd-badge-pix {
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.pd-badge-dinheiro {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+[data-theme='dark'] .pd-badge-dinheiro {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.14);
+}
+
+.pd-badge-outro {
+  background: var(--bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.pd-troco {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Cliente */
+.pd-cliente {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pd-cliente-nome {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pd-cliente-tel {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.pd-endereco {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* Lista de itens */
+.pd-itens {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 0;
+}
+
+.pd-itens li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.pd-item-qtd {
+  font-weight: 700;
+  color: var(--primary);
+  min-width: 22px;
+  flex-shrink: 0;
+}
+
+.pd-item-nome {
+  flex: 1;
+  color: var(--text);
+}
+
+.pd-item-sub {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Totais */
+.pd-totais {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pd-totais-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pd-totais-total {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+  margin-top: 2px;
+}
+
+/* Pagamento */
+.pd-pagamento-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Observações */
+.pd-obs {
+  font-size: 13px;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 8px 10px;
+  line-height: 1.5;
+}
+
+.pd-obs-label {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* Ações */
+.pd-acoes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.pd-btn-confirmar {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1.5px solid rgba(16, 185, 129, 0.3);
+  flex: 1;
+}
+.pd-btn-confirmar:hover {
+  background: rgba(16, 185, 129, 0.22);
+  border-color: #10b981;
+}
+
+[data-theme='dark'] .pd-btn-confirmar {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.25);
+}
+[data-theme='dark'] .pd-btn-confirmar:hover {
+  background: rgba(52, 211, 153, 0.2);
+}
+
+.pd-btn-cancelar {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1.5px solid rgba(239, 68, 68, 0.25);
+}
+.pd-btn-cancelar:hover {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: #ef4444;
+}
+
+[data-theme='dark'] .pd-btn-cancelar {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(248, 113, 113, 0.22);
+}
+[data-theme='dark'] .pd-btn-cancelar:hover {
+  background: rgba(248, 113, 113, 0.18);
+}
+
+.pd-btn-preparo {
+  background: rgba(249, 115, 22, 0.1);
+  color: #f97316;
+  border: 1.5px solid rgba(249, 115, 22, 0.25);
+  flex: 1;
+}
+.pd-btn-preparo:hover {
+  background: rgba(249, 115, 22, 0.2);
+  border-color: #f97316;
+}
+
+[data-theme='dark'] .pd-btn-preparo {
+  color: #fb923c;
+  background: rgba(251, 146, 60, 0.12);
+  border-color: rgba(251, 146, 60, 0.25);
+}
+
+.pd-btn-entrega {
+  background: var(--primary-bg);
+  color: var(--primary);
+  border: 1.5px solid var(--primary-ring);
+  flex: 1;
+}
+.pd-btn-entrega:hover {
+  background: rgba(124, 58, 237, 0.18);
+  border-color: var(--primary);
+}
+
+.pd-btn-entregue {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1.5px solid rgba(16, 185, 129, 0.3);
+  flex: 1;
+}
+.pd-btn-entregue:hover {
+  background: rgba(16, 185, 129, 0.22);
+  border-color: #10b981;
+}
+
+[data-theme='dark'] .pd-btn-entregue {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.25);
+}
+
+/* ─── Timer regressivo ─── */
+.pd-timer {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+}
+
+.pd-timer-topo {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.pd-timer-tempo {
+  font-size: 18px;
+  font-weight: 800;
+  font-family: 'Courier New', monospace;
+  color: var(--text);
+  letter-spacing: 0.04em;
+  line-height: 1;
+  transition: color 300ms ease;
+}
+
+.pd-timer-tempo.critico {
+  color: #ef4444;
+  animation: pd-piscar 0.8s ease infinite;
+}
+
+@keyframes pd-piscar {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.55; }
+}
+
+.pd-timer-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.pd-timer-barra-bg {
+  height: 4px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.pd-timer-barra {
+  height: 100%;
+  background: #10b981;
+  border-radius: 4px;
+  transition: width 500ms linear, background 300ms ease;
+}
+
+.pd-timer-barra.critico {
+  background: #ef4444;
+}
+
+/* ─── Toggle (configs) ─── */
+.pd-toggle {
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  border: none;
+  background: var(--border);
+  cursor: pointer;
+  position: relative;
+  transition: background 160ms ease;
+  flex-shrink: 0;
+}
+
+.pd-toggle.ativo {
+  background: var(--primary);
+}
+
+.pd-toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: left 160ms ease;
+}
+
+.pd-toggle.ativo .pd-toggle-thumb {
+  left: 23px;
+}
+
+/* ─── Botao imprimir e cfg ─── */
+.pd-btn-imprimir {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 7px;
+  transition: border-color 120ms, color 120ms;
+}
+
+.pd-btn-imprimir:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.pd-btn-cfg {
+  font-size: 13px;
+  padding: 7px 12px;
+}
+
+/* ─── Modal de configuracoes ─── */
+.pd-modal-cfg {
+  max-width: 480px;
+}
+
+.pd-cfg-secao {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.pd-cfg-titulo {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.pd-cfg-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pd-cfg-item-nome {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.pd-cfg-item-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* ─── Toggle de visualização (cards / tabela) ─── */
+.pd-view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.pd-view-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border: none;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 120ms ease, color 120ms ease;
+  gap: 5px;
+}
+
+.pd-view-btn:first-child {
+  border-right: 1px solid var(--border);
+}
+
+.pd-view-btn.ativo {
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.pd-view-btn:hover:not(.ativo) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* ─── Tabela de pedidos ─── */
+.pd-tabela-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.pd-tabela {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.pd-tabela thead th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.pd-tabela tbody tr {
+  cursor: pointer;
+  transition: background 120ms ease;
+  border-bottom: 1px solid var(--border);
+}
+
+.pd-tabela tbody tr:last-child {
+  border-bottom: none;
+}
+
+.pd-tabela tbody tr:hover {
+  background: var(--surface-hover, rgba(0,0,0,0.03));
+}
+
+[data-theme='dark'] .pd-tabela tbody tr:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.pd-tabela td {
+  padding: 10px 14px;
+  vertical-align: middle;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.pd-tabela td.pd-td-cliente {
+  white-space: normal;
+  max-width: 180px;
+}
+
+.pd-tabela td.pd-td-itens {
+  color: var(--text-muted);
+  max-width: 200px;
+  white-space: normal;
+}
+
+.pd-tabela td.pd-td-total {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Drawer de detalhe ─── */
+.pd-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 200;
+}
+
+.pd-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 420px;
+  max-width: 100vw;
+  background: var(--card, var(--surface));
+  border-left: 1px solid var(--border);
+  z-index: 201;
+  overflow-y: auto;
+  padding: 24px;
+  transform: translateX(0);
+  transition: transform 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pd-drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pd-drawer-titulo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pd-drawer-numero {
+  font-size: 15px;
+  font-weight: 800;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+.pd-drawer-fechar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: border-color 120ms, color 120ms, background 120ms;
+}
+
+.pd-drawer-fechar:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-bg);
+}
+
+.pd-drawer-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0;
+}
+
+.pd-drawer-secao-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.pd-drawer-cliente-nome {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.pd-drawer-cliente-tel {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.pd-drawer-endereco {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.pd-drawer-data {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ─── Filtros de data ─── */
+.pd-filtros {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.pd-filtros-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pd-filtros-sep {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.pd-filtros input[type='date'] {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 120ms ease;
+}
+
+.pd-filtros input[type='date']:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+/* ─── Número do pedido na tabela ─── */
+.pd-tabela-num {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--primary);
+}
+
+/* ─── Rodapé da tabela de totais ─── */
+.pd-tabela-rodape {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.pd-tabela-rodape strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pd-tabela-rodape-count {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pd-tabela-rodape-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .pd-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pd-abas {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+  }
+
+  .pd-aba {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  .pd-drawer {
+    width: 100%;
+  }
+}

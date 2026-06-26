@@ -87,6 +87,32 @@ serve(async (req) => {
       })
     }
 
+    // Verifica e desconta créditos antes de enviar
+    const { data: empresaData, error: creditError } = await supabaseAdmin
+      .from("empresas")
+      .select("whatsapp_creditos")
+      .eq("id", targetEmpresaId)
+      .single()
+
+    if (creditError || !empresaData || empresaData.whatsapp_creditos <= 0) {
+      return new Response(
+        JSON.stringify({ error: "Créditos WhatsApp insuficientes. Contate o suporte para recarregar." }),
+        { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      )
+    }
+
+    // Desconta 1 crédito atomicamente via RPC (evita condição de corrida)
+    const { error: debitError } = await supabaseAdmin.rpc("descontar_credito_whatsapp", {
+      p_empresa_id: targetEmpresaId
+    })
+
+    if (debitError) {
+      return new Response(
+        JSON.stringify({ error: "Erro ao processar crédito." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      )
+    }
+
     // instance_name salvo no banco; fallback para nome padrão SaaS
     const instanceName = config.instance_name || `empresa_${targetEmpresaId}`
 

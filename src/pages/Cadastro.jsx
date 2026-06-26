@@ -18,6 +18,7 @@ export default function Cadastro() {
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [aceitouTermos, setAceitouTermos] = useState(false)
 
   if (session) {
     return <Navigate to="/" replace />
@@ -27,6 +28,11 @@ export default function Cadastro() {
     e.preventDefault()
     setError(null)
     setSuccess(null)
+
+    if (!aceitouTermos) {
+      setError('Você precisa ler e aceitar os Termos de Uso e a Política de Privacidade para continuar.')
+      return
+    }
 
     if (password !== confirmPassword) {
       setError('As senhas não conferem.')
@@ -182,7 +188,57 @@ export default function Cadastro() {
             </div>
           )}
 
-          <button type="submit" className="btn btn-primary login-submit" disabled={loading}>
+          {/* Bloco de termos */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, margin: '4px 0' }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <a
+                href="/termos"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                  background: 'var(--input-bg)', color: 'var(--text)',
+                  fontSize: 13, fontWeight: 600, textDecoration: 'none', cursor: 'pointer',
+                }}
+              >
+                📄 Termos de Uso
+              </a>
+              <a
+                href="/privacidade"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                  background: 'var(--input-bg)', color: 'var(--text)',
+                  fontSize: 13, fontWeight: 600, textDecoration: 'none', cursor: 'pointer',
+                }}
+              >
+                🔒 Privacidade
+              </a>
+            </div>
+            <label style={{
+              display: 'flex', alignItems: 'flex-start', gap: 10,
+              padding: '12px 14px', borderRadius: 8,
+              border: `1.5px solid ${aceitouTermos ? 'var(--primary)' : 'var(--border)'}`,
+              background: aceitouTermos ? 'var(--primary-bg, #f5f0ff)' : 'var(--input-bg)',
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}>
+              <input
+                type="checkbox"
+                checked={aceitouTermos}
+                onChange={e => { setAceitouTermos(e.target.checked); setError(null) }}
+                style={{ marginTop: 2, accentColor: 'var(--primary)', width: 16, height: 16, flexShrink: 0, cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--text)' }}>
+                Li e concordo com os <strong>Termos de Uso</strong> e a <strong>Política de Privacidade</strong> da plataforma FWC Inter.
+              </span>
+            </label>
+          </div>
+
+          <button type="submit" className="btn btn-primary login-submit" disabled={loading || !aceitouTermos}
+            style={{ opacity: !aceitouTermos ? 0.5 : 1 }}>
             {loading ? (
               <>
                 <span className="login-spinner" aria-hidden="true" />

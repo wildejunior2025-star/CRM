@@ -1,0 +1,548 @@
+/* ══════════════════════════════════════════
+   RaioEntrega — layout e componentes
+══════════════════════════════════════════ */
+
+.re-page {
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Cabeçalho ── */
+.re-header h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.re-header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* ── Mapa ── */
+.re-map-wrapper {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  height: 360px;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.re-map-empty {
+  text-align: center;
+  padding: 40px 24px;
+  color: var(--text-muted);
+}
+
+.re-map-empty-icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 14px;
+  opacity: 0.25;
+  color: var(--text-muted);
+}
+
+.re-map-empty-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.re-map-empty-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.re-map-empty-sub {
+  margin: 0 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ── Card ── */
+.re-card-title {
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* ── Grid de endereço ── */
+/*
+  Linha 1: CEP (só ele, ~160px)
+  Linha 2: Rua (flex: 1) + Número (~90px)
+  Linha 3: Bairro | Cidade | UF (3 col no desktop, 1 no mobile)
+*/
+.re-addr-grid {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 12px 16px;
+}
+
+.re-addr-cep {
+  grid-column: 1;
+}
+
+.re-addr-rua-num {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 90px;
+  gap: 12px;
+}
+
+.re-addr-row3 {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 72px;
+  gap: 12px;
+}
+
+/* Spinner de CEP dentro do input */
+.re-cep-wrap {
+  position: relative;
+}
+
+.re-cep-spinner {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: re-spin 0.7s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes re-spin {
+  to { transform: translateY(-50%) rotate(360deg); }
+}
+
+.re-err {
+  font-size: 12px;
+  color: var(--danger);
+  margin-top: 4px;
+  display: block;
+}
+
+/* ── Raio slider ── */
+.re-raio-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.re-raio-slider-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.re-raio-slider-wrap input[type='range'] {
+  width: 100%;
+  accent-color: var(--primary);
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.re-raio-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.re-raio-number {
+  width: 80px;
+  text-align: center;
+}
+
+.re-raio-unit {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.re-raio-badge {
+  flex-shrink: 0;
+  padding: 14px 18px;
+  background: var(--danger-bg);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: 10px;
+  text-align: center;
+  min-width: 72px;
+}
+
+.re-raio-badge-num {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--danger);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.re-raio-badge-label {
+  font-size: 10px;
+  color: var(--danger);
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-top: 2px;
+}
+
+.re-raio-hint {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ── Toggle delivery ── */
+.re-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.re-toggle-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.re-toggle-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.re-toggle-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.re-status-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: all 160ms;
+}
+
+.re-status-badge.active {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.re-status-badge.inactive {
+  background: var(--bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* Toggle switch */
+.re-switch {
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: background 160ms;
+}
+
+.re-switch.on  { background: var(--primary); }
+.re-switch.off { background: var(--border); }
+
+.re-switch-thumb {
+  position: absolute;
+  top: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: left 160ms;
+}
+
+.re-switch.on  .re-switch-thumb { left: 23px; }
+.re-switch.off .re-switch-thumb { left: 3px; }
+
+/* ── Modo de taxa (Taxa fixa / Por km) ── */
+.re-taxa-mode {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.re-taxa-btn {
+  flex: 1;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms, border-color 140ms, color 140ms;
+  background: var(--surface);
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.re-taxa-btn:hover:not(.selected) {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+
+.re-taxa-btn.selected {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-contrast);
+}
+
+.re-taxa-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ── Tabela de faixas por km ── */
+.re-faixas-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+  display: block;
+}
+
+.re-faixas-table {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Cabeçalho e linhas compartilham o mesmo grid */
+.re-faixas-header,
+.re-faixas-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 36px;
+  gap: 8px;
+  align-items: center;
+}
+
+.re-faixas-header {
+  padding: 0 2px;
+  margin-bottom: 2px;
+}
+
+.re-faixas-col-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.re-faixas-row input {
+  text-align: center;
+}
+
+.re-faixas-remove {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--danger-bg);
+  border: 1px solid color-mix(in srgb, var(--danger) 20%, transparent);
+  border-radius: 6px;
+  color: var(--danger);
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 120ms, border-color 120ms;
+  flex-shrink: 0;
+}
+
+.re-faixas-remove:hover {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.re-faixas-add {
+  margin-top: 4px;
+  padding: 8px 14px;
+  background: var(--primary-bg);
+  border: 1.5px dashed var(--primary);
+  border-radius: 8px;
+  color: var(--primary);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 120ms;
+  width: 100%;
+  text-align: center;
+}
+
+.re-faixas-add:hover {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.re-faixas-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+
+/* ── Tempo de entrega ── */
+.re-tempo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.re-tempo-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.re-tempo-input {
+  width: 72px;
+}
+
+/* ── Feedback (msg) ── */
+.re-msg {
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+.re-msg.success {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
+}
+
+.re-msg.error {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
+}
+
+/* ── Separador visual entre toggle e conteúdo ── */
+.re-delivery-body {
+  border-top: 1px solid var(--border);
+  margin-top: 20px;
+  padding-top: 20px;
+}
+
+/* ══════════════════════════════════════════
+   RESPONSIVO — mobile
+══════════════════════════════════════════ */
+@media (max-width: 600px) {
+
+  .re-map-wrapper {
+    height: 240px;
+    border-radius: 10px;
+  }
+
+  /* Endereço: tudo em coluna única */
+  .re-addr-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .re-addr-cep {
+    grid-column: 1;
+  }
+
+  .re-addr-rua-num {
+    grid-column: 1;
+    /* Rua ocupa toda a largura; Número abaixo */
+    grid-template-columns: 1fr;
+  }
+
+  .re-addr-row3 {
+    grid-column: 1;
+    /* Bairro linha inteira; Cidade + UF na segunda linha */
+    grid-template-columns: 1fr 56px;
+  }
+
+  /* Bairro ocupa linha inteira, Cidade e UF ficam juntos na segunda */
+  .re-addr-row3 > :nth-child(1) {
+    grid-column: 1 / -1;
+  }
+
+  .re-addr-row3 > :nth-child(2) {
+    grid-column: 1;
+  }
+
+  .re-addr-row3 > :nth-child(3) {
+    grid-column: 2;
+  }
+
+  /* Raio: badge fica abaixo do slider */
+  .re-raio-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .re-raio-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    min-width: 0;
+    border-radius: 8px;
+  }
+
+  .re-raio-badge-num {
+    font-size: 22px;
+  }
+
+  .re-raio-badge-label {
+    margin-top: 0;
+    font-size: 12px;
+  }
+
+  /* Faixas km: 3 colunas de dados + botão × */
+  .re-faixas-header,
+  .re-faixas-row {
+    grid-template-columns: 1fr 1fr 1fr 36px;
+    gap: 5px;
+  }
+
+  /* Toggle delivery: empilha em coluna se não couber */
+  .re-toggle-row {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  /* Tempo de entrega: pode quebrar */
+  .re-tempo-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}

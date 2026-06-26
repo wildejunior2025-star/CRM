@@ -1,0 +1,324 @@
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { supabase } from '../lib/supabaseClient'
+import './DeliveryPedido.css'
+
+const STATUS_STEPS = [
+  { key: 'aguardando',   label: 'Aguardando confirmação', icon: IconClock },
+  { key: 'confirmado',   label: 'Confirmado',             icon: IconCheck },
+  { key: 'em_preparo',   label: 'Em preparo',             icon: IconChef },
+  { key: 'saiu',         label: 'Saiu para entrega',      icon: IconMoto },
+  { key: 'entregue',     label: 'Entregue',               icon: IconParty },
+]
+
+function iconProps() {
+  return { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }
+}
+
+function IconClock() {
+  return <svg {...iconProps()}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
+}
+
+function IconCheck() {
+  return <svg {...iconProps()}><polyline points="20 6 9 17 4 12" /></svg>
+}
+
+function IconChef() {
+  return <svg {...iconProps()}><path d="M6 13.87A4 4 0 0 1 7.41 6a5.11 5.11 0 0 1 1.05-1.54 5 5 0 0 1 7.08 0A5.11 5.11 0 0 1 16.59 6 4 4 0 0 1 18 13.87V21H6v-7.13z" /><line x1="6" y1="17" x2="18" y2="17" /></svg>
+}
+
+function IconMoto() {
+  return <svg {...iconProps()}><circle cx="5" cy="17" r="3" /><circle cx="19" cy="17" r="3" /><path d="M8 17h8M5 14l2-7h8l3 7" /><path d="M13 7l1-4h3" /></svg>
+}
+
+function IconParty() {
+  return <svg {...iconProps()}><path d="M5.8 11.3 2 22l10.7-3.79" /><path d="M4 3h.01M22 8h.01M15 2h.01M22 20h.01M22 2l-2.24.75a2.9 2.9 0 0 0-1.96 3.12c.1.86-.57 1.63-1.45 1.63h-.38c-.86 0-1.6.6-1.76 1.44L14 10" /><path d="M22 13l-.82-.33c-.86-.34-1.82.2-1.98 1.11c-.11.7-.72 1.22-1.43 1.22H17" /><path d="M11 2l.33.82c.34.86-.2 1.82-1.11 1.98C9.52 4.9 9 5.5 9 6.2v.01" /><path d="M11 13c1.93 1.93 2.83 4.17 2 5-.83.83-3.07-.07-5-2-1.93-1.93-2.83-4.17-2-5 .83-.83 3.07.07 5 2z" /></svg>
+}
+
+function IconX() {
+  return <svg {...iconProps()}><path d="M18 6 6 18M6 6l12 12" /></svg>
+}
+
+function IconStore() {
+  return <svg {...iconProps()}><path d="M3 9l1-5h16l1 5" /><path d="M3 9h18v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9z" /><path d="M9 21V9m6 0v12" /></svg>
+}
+
+function IconRefresh() {
+  return <svg {...iconProps()} width={14} height={14}><path d="M21 2v6h-6" /><path d="M21 13a9 9 0 1 1-3-7.7L21 8" /></svg>
+}
+
+function fmt(n) {
+  return Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function shortId(uuid) {
+  return (uuid ?? '').slice(-8).toUpperCase()
+}
+
+function paymLabel(forma) {
+  if (forma === 'pix') return 'Pix'
+  if (forma === 'dinheiro') return 'Dinheiro'
+  return forma ?? '—'
+}
+
+function statusIndex(status) {
+  if (status === 'cancelado') return -1
+  return STATUS_STEPS.findIndex(s => s.key === status)
+}
+
+export default function DeliveryPedido() {
+  const { id } = useParams()
+  const navigate = useNavigate()
+  const [pedido, setPedido] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [lastUpdate, setLastUpdate] = useState(null)
+  const [pixCopied, setPixCopied] = useState(false)
+  const intervalRef = useRef(null)
+
+  const fetchPedido = async () => {
+    const { data } = await supabase
+      .from('pedidos_delivery')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle()
+    const next = data ?? null
+    if (next && (next.status === 'entregue' || next.status === 'cancelado')) {
+      clearInterval(intervalRef.current)
+    }
+    setPedido(next)
+    setLoading(false)
+    setLastUpdate(new Date())
+  }
+
+  useEffect(() => {
+    fetchPedido()
+    // Polling de fallback a cada 30s (para casos onde Realtime não estiver disponível)
+    intervalRef.current = setInterval(fetchPedido, 30_000)
+
+    // Realtime: atualiza instantaneamente quando o status muda no painel da loja
+    const channel = supabase
+      .channel(`pedido_track_${id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'pedidos_delivery',
+          filter: `id=eq.${id}`,
+        },
+        (payload) => {
+          const updated = payload.new
+          setPedido(prev => prev ? { ...prev, ...updated } : updated)
+          setLastUpdate(new Date())
+          if (updated.status === 'entregue' || updated.status === 'cancelado') {
+            clearInterval(intervalRef.current)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      clearInterval(intervalRef.current)
+      channel.unsubscribe()
+    }
+  }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleCopiarPix() {
+    if (!pedido?.pix_copia_cola) return
+    try {
+      await navigator.clipboard.writeText(pedido.pix_copia_cola)
+      setPixCopied(true)
+      setTimeout(() => setPixCopied(false), 3000)
+    } catch {
+      // Fallback para ambientes sem clipboard API
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="dpd-loading">
+        <div className="dpd-spinner" />
+        <p>Carregando pedido...</p>
+      </div>
+    )
+  }
+
+  if (!pedido) {
+    return (
+      <div className="dpd-loading">
+        <p style={{ color: '#94a3b8' }}>Pedido não encontrado.</p>
+        <button className="dpd-back-link" onClick={() => navigate('/lojas')}>
+          Ver lojas
+        </button>
+      </div>
+    )
+  }
+
+  const isCancelado = pedido.status === 'cancelado'
+  const activeIdx = statusIndex(pedido.status)
+  const itens = Array.isArray(pedido.itens) ? pedido.itens : []
+
+  return (
+    <div className="dpd-root">
+      <header className="dpd-header">
+        <div className="dpd-header-inner">
+          <button className="dpd-logo-btn" onClick={() => navigate('/lojas')}>
+            <span className="dpd-logo">FWC</span>
+          </button>
+          <div className="dpd-header-right">
+            <span className="dpd-pedido-id">Pedido #{shortId(pedido.id)}</span>
+            <button className="dpd-refresh-btn" onClick={fetchPedido} aria-label="Atualizar">
+              <IconRefresh />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="dpd-main">
+        {/* Timeline de status */}
+        {!isCancelado ? (
+          <section className="dpd-card dpd-card--timeline">
+            <h2 className="dpd-card-title">Status do pedido</h2>
+            <ol className="dpd-timeline" aria-label="Progresso do pedido">
+              {STATUS_STEPS.map((step, i) => {
+                const done = i < activeIdx
+                const current = i === activeIdx
+                const Icon = step.icon
+                return (
+                  <li key={step.key} className={`dpd-step${done ? ' dpd-step--done' : ''}${current ? ' dpd-step--current' : ''}`}>
+                    <div className="dpd-step-icon-wrap">
+                      <span className="dpd-step-icon">
+                        <Icon />
+                      </span>
+                      {i < STATUS_STEPS.length - 1 && (
+                        <span className={`dpd-step-line${done ? ' dpd-step-line--done' : ''}`} />
+                      )}
+                    </div>
+                    <span className="dpd-step-label">{step.label}</span>
+                  </li>
+                )
+              })}
+            </ol>
+            {lastUpdate && (
+              <p className="dpd-update-time">
+                Atualizado às {lastUpdate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+              </p>
+            )}
+          </section>
+        ) : (
+          <section className="dpd-card dpd-card--cancelado">
+            <div className="dpd-cancelado-icon">
+              <IconX />
+            </div>
+            <h2 className="dpd-cancelado-title">Pedido cancelado</h2>
+            {pedido.motivo_cancelamento && (
+              <p className="dpd-cancelado-motivo">{pedido.motivo_cancelamento}</p>
+            )}
+          </section>
+        )}
+
+        {/* Pix pendente */}
+        {pedido.forma_pagamento === 'pix' && pedido.pix_status === 'pendente' && !isCancelado && (
+          <section className="dpd-card dpd-card--pix">
+            {pedido.pix_qrcode ? (
+              <>
+                <h2 className="dpd-card-title">Pague com Pix</h2>
+                <div className="dpd-pix-qr-wrap">
+                  <img
+                    src={`data:image/png;base64,${pedido.pix_qrcode}`}
+                    alt="QR Code Pix"
+                    className="dpd-pix-qr-img"
+                  />
+                </div>
+                {pedido.pix_copia_cola && (
+                  <div className="dpd-pix-copia-wrap">
+                    <p className="dpd-pix-copia-label">Pix copia e cola</p>
+                    <div className="dpd-pix-copia-row">
+                      <span className="dpd-pix-copia-code">{pedido.pix_copia_cola}</span>
+                      <button
+                        className={`dpd-pix-copy-btn${pixCopied ? ' dpd-pix-copy-btn--done' : ''}`}
+                        onClick={handleCopiarPix}
+                        aria-label="Copiar código Pix"
+                      >
+                        {pixCopied ? 'Copiado!' : 'Copiar'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <p className="dpd-pix-aviso">Após o pagamento, o pedido será confirmado automaticamente.</p>
+              </>
+            ) : (
+              <div className="dpd-pix-qr-placeholder">
+                <IconStore />
+                <p className="dpd-pix-msg">QR Code Pix em breve</p>
+                <p className="dpd-pix-sub">O código de pagamento Pix será gerado em instantes.</p>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Resumo do pedido */}
+        <section className="dpd-card">
+          <h2 className="dpd-card-title">Resumo</h2>
+
+          {itens.length > 0 && (
+            <div className="dpd-itens">
+              {itens.map((item, i) => (
+                <div key={item.produto_id ?? i} className="dpd-item">
+                  <span className="dpd-item-qty">{item.quantidade}x</span>
+                  <span className="dpd-item-nome">{item.nome}</span>
+                  <span className="dpd-item-sub">R$ {fmt(item.subtotal)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="dpd-totais">
+            <div className="dpd-total-linha">
+              <span>Subtotal</span>
+              <span>R$ {fmt(pedido.subtotal)}</span>
+            </div>
+            <div className="dpd-total-linha">
+              <span>Taxa de entrega</span>
+              <span>{Number(pedido.taxa_entrega) === 0 ? 'Grátis' : `R$ ${fmt(pedido.taxa_entrega)}`}</span>
+            </div>
+            <div className="dpd-total-linha dpd-total-linha--total">
+              <span>Total</span>
+              <strong>R$ {fmt(pedido.total)}</strong>
+            </div>
+          </div>
+
+          <div className="dpd-pagamento">
+            <span className="dpd-pagamento-label">Pagamento</span>
+            <span className="dpd-pagamento-val">{paymLabel(pedido.forma_pagamento)}</span>
+            {pedido.troco_para && (
+              <span className="dpd-troco">Troco para R$ {fmt(pedido.troco_para)}</span>
+            )}
+          </div>
+        </section>
+
+        {/* Endereço */}
+        <section className="dpd-card">
+          <h2 className="dpd-card-title">Endereço de entrega</h2>
+          <address className="dpd-address">
+            {pedido.endereco_rua}{pedido.endereco_numero ? `, ${pedido.endereco_numero}` : ''}
+            {pedido.endereco_complemento && ` — ${pedido.endereco_complemento}`}
+            {pedido.endereco_bairro && <><br />{pedido.endereco_bairro}</>}
+            <br />{pedido.endereco_cidade}
+          </address>
+        </section>
+
+        {pedido.observacoes && (
+          <section className="dpd-card">
+            <h2 className="dpd-card-title">Observações</h2>
+            <p className="dpd-obs">{pedido.observacoes}</p>
+          </section>
+        )}
+
+        <p className="dpd-footer-note">
+          Guarde este link para acompanhar seu pedido. Esta página atualiza automaticamente.
+        </p>
+      </main>
+    </div>
+  )
+}

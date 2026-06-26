@@ -9,7 +9,9 @@ export default function NotificationBell() {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [alerts, setAlerts] = useState({ pedidos: [], estoque: [], fiado: [] })
+  const [dropdownStyle, setDropdownStyle] = useState({})
   const ref = useRef(null)
+  const btnRef = useRef(null)
 
   const total = alerts.pedidos.length + alerts.estoque.length + alerts.fiado.length
 
@@ -63,7 +65,18 @@ export default function NotificationBell() {
     <div className="notif-wrap" ref={ref}>
       <button
         className={`notif-btn${open ? ' active' : ''}`}
-        onClick={() => setOpen(o => !o)}
+        ref={btnRef}
+        onClick={() => {
+          if (!open && btnRef.current) {
+            const rect = btnRef.current.getBoundingClientRect()
+            const dropW = 320
+            let left = rect.right - dropW
+            if (left < 8) left = rect.left
+            if (left + dropW > window.innerWidth - 8) left = window.innerWidth - dropW - 8
+            setDropdownStyle({ top: rect.bottom + 8, left })
+          }
+          setOpen(o => !o)
+        }}
         aria-label="Notificações"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -74,7 +87,7 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="notif-dropdown">
+        <div className="notif-dropdown" style={dropdownStyle}>
           <div className="notif-header">
             <span>Alertas</span>
             <button className="notif-refresh" onClick={load} title="Atualizar">

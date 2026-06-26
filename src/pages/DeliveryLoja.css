@@ -1,0 +1,823 @@
+/* ── DeliveryLoja — store menu + cart ── */
+
+.dloja-root {
+  min-height: 100vh;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.dloja-root *, .dloja-root *::before, .dloja-root *::after {
+  box-sizing: border-box;
+}
+
+/* ── Loading ── */
+.dloja-loading {
+  min-height: 100vh;
+  background: #0f172a;
+  color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  font-size: 14px;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.dloja-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2.5px solid #1e293b;
+  border-top-color: #7c3aed;
+  border-radius: 50%;
+  animation: dloja-spin 0.7s linear infinite;
+}
+
+@keyframes dloja-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Header ── */
+.dloja-header {
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+}
+
+/* Banner (estilo iFood) */
+.dloja-banner {
+  position: relative;
+  width: 100%;
+  height: 160px;
+  background-color: #1e293b;
+  background-image: linear-gradient(135deg, #6d28d9 0%, #4f46e5 100%);
+  background-size: cover;
+  background-position: center;
+}
+
+.dloja-banner-btn {
+  position: absolute;
+  top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(15, 23, 42, 0.55);
+  color: #fff;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.dloja-banner-back { left: 12px; }
+.dloja-banner-cart { right: 12px; }
+.dloja-banner-cart .dloja-cart-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+}
+
+/* Cabeçalho da loja: logo + nome sobre o banner */
+.dloja-store-head {
+  max-width: 1100px;
+  margin: -34px auto 0;
+  padding: 0 16px 14px;
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  position: relative;
+}
+
+.dloja-store-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  background: #fff;
+  border: 3px solid #0f172a;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+.dloja-store-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.dloja-store-logo span {
+  font-size: 30px;
+  font-weight: 800;
+  color: #7c3aed;
+}
+
+.dloja-store-info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-bottom: 4px;
+  min-width: 0;
+}
+
+.dloja-store-nome {
+  font-size: 20px;
+  font-weight: 800;
+  color: #f1f5f9;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.dloja-header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dloja-logo {
+  font-size: 18px;
+  font-weight: 800;
+  color: #f1f5f9;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.dloja-logo-plus {
+  color: #7c3aed;
+}
+
+.dloja-header-sep {
+  width: 1px;
+  height: 18px;
+  background: #1e293b;
+  flex-shrink: 0;
+}
+
+.dloja-back-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #1e293b;
+  background: #1e293b;
+  color: #f1f5f9;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 140ms, border-color 140ms;
+}
+
+.dloja-back-btn:hover {
+  background: #334155;
+  border-color: #475569;
+}
+
+.dloja-back-btn:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+}
+
+.dloja-header-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dloja-header-nome {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dloja-status-badge {
+  padding: 2px 9px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.dloja-status--open {
+  background: rgba(22, 163, 74, 0.15);
+  color: #4ade80;
+}
+
+.dloja-status--closed {
+  background: rgba(51, 65, 85, 0.5);
+  color: #64748b;
+}
+
+.dloja-cart-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: none;
+  background: #7c3aed;
+  color: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 140ms;
+}
+
+.dloja-cart-btn:hover {
+  background: #6d28d9;
+}
+
+.dloja-cart-count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 99px;
+  background: #f1f5f9;
+  color: #7c3aed;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+/* ── Banner loja fechada ── */
+.dloja-closed-banner {
+  background: rgba(239, 68, 68, 0.1);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  text-align: center;
+  padding: 10px 16px;
+  font-size: 13px;
+}
+
+/* ── Main ── */
+.dloja-main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 16px 100px;
+}
+
+/* ── Seções por categoria ── */
+.dloja-section {
+  margin-bottom: 32px;
+}
+
+/* ── Barra de navegação de categorias ── */
+.dloja-cat-nav {
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  position: sticky;
+  top: 65px;
+  z-index: 90;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.dloja-cat-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.dloja-cat-nav-inner {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.dloja-cat-nav-btn {
+  flex-shrink: 0;
+  padding: 6px 16px;
+  border-radius: 99px;
+  border: 1.5px solid #1e293b;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 140ms;
+  white-space: nowrap;
+}
+
+.dloja-cat-nav-btn:hover {
+  background: #1e293b;
+  color: #f1f5f9;
+}
+
+.dloja-cat-nav-btn.ativo {
+  background: #7c3aed;
+  border-color: #7c3aed;
+  color: #fff;
+}
+
+.dloja-cat-nav-sep {
+  width: 1px;
+  background: #1e293b;
+  flex-shrink: 0;
+  margin: 4px 4px;
+}
+
+.dloja-cat-nav-btn--estoque {
+  border-color: #f59e0b;
+  color: #f59e0b;
+}
+
+.dloja-cat-nav-btn--estoque:hover {
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+}
+
+.dloja-cat-nav-btn--estoque.ativo {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  color: #0f172a;
+}
+
+.dloja-cat-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0 0 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #1e293b;
+  position: sticky;
+  top: 117px;
+  background: #0f172a;
+  z-index: 10;
+  letter-spacing: -0.01em;
+}
+
+/* ── Grid de produtos ── */
+.dloja-produtos {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 600px) {
+  .dloja-produtos {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 900px) {
+  .dloja-produtos {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* ── Card de produto ── */
+.dloja-prod-card {
+  background: #1e1b4b;
+  border: 1px solid #312e81;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 140ms;
+}
+
+.dloja-prod-card:hover {
+  border-color: #4c1d95;
+}
+
+.dloja-prod-foto {
+  width: 100%;
+  height: 130px;
+  overflow: hidden;
+  background: #1a1a3e;
+  flex-shrink: 0;
+}
+
+.dloja-prod-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.dloja-prod-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #4c1d95;
+}
+
+.dloja-prod-info {
+  padding: 12px 12px 8px;
+  flex: 1;
+}
+
+.dloja-prod-nome {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin: 0 0 4px;
+  line-height: 1.3;
+}
+
+.dloja-prod-desc {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0 0 8px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.dloja-prod-preco {
+  font-size: 15px;
+  font-weight: 700;
+  color: #a78bfa;
+  margin: 0;
+}
+
+.dloja-prod-acao {
+  padding: 0 12px 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ── Botão + ── */
+.dloja-btn-add {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: none;
+  background: #7c3aed;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 140ms, transform 120ms;
+}
+
+.dloja-btn-add:hover:not(:disabled) {
+  background: #6d28d9;
+  transform: scale(1.08);
+}
+
+.dloja-btn-add:disabled {
+  background: #334155;
+  color: #64748b;
+  cursor: not-allowed;
+}
+
+/* ── Controle de quantidade ── */
+.dloja-qty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dloja-qty--card {
+  gap: 4px;
+}
+
+.dloja-qty--card .dloja-qty-btn {
+  width: 36px;
+  height: 36px;
+}
+
+.dloja-qty--card .dloja-qty-val {
+  min-width: 28px;
+}
+
+.dloja-qty-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #f1f5f9;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 140ms, border-color 140ms;
+  flex-shrink: 0;
+}
+
+.dloja-qty-btn:hover:not(:disabled) {
+  background: #334155;
+  border-color: #475569;
+}
+
+.dloja-qty-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dloja-qty-btn--primary {
+  background: #7c3aed;
+  border-color: #7c3aed;
+  color: #fff;
+}
+
+.dloja-qty-btn--primary:hover:not(:disabled) {
+  background: #6d28d9;
+  border-color: #6d28d9;
+}
+
+.dloja-qty-val {
+  min-width: 22px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+/* ── Empty ── */
+.dloja-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 72px 24px;
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+}
+
+/* ── Barra flutuante do carrinho ── */
+.dloja-cart-bar {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 14px 20px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  z-index: 40;
+  box-shadow: 0 8px 24px rgba(124, 58, 237, 0.4);
+  transition: background 140ms, transform 140ms;
+  min-width: 280px;
+  max-width: calc(100vw - 32px);
+  justify-content: space-between;
+}
+
+.dloja-cart-bar:hover {
+  background: #6d28d9;
+  transform: translateX(-50%) translateY(-1px);
+}
+
+.dloja-cart-bar:active {
+  transform: translateX(-50%) translateY(0);
+}
+
+.dloja-cart-bar-badge {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 99px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dloja-cart-bar-total {
+  font-weight: 700;
+}
+
+/* ── Overlay + Drawer ── */
+.dloja-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+@media (min-width: 768px) {
+  .dloja-overlay {
+    align-items: stretch;
+  }
+}
+
+.dloja-drawer {
+  background: #0f172a;
+  border-left: 1px solid #1e293b;
+  border-top: 1px solid #1e293b;
+  width: 100%;
+  max-width: 420px;
+  max-height: 90vh;
+  border-radius: 20px 20px 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: dloja-drawer-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (min-width: 768px) {
+  .dloja-drawer {
+    max-height: 100vh;
+    border-radius: 0;
+    border-left: 1px solid #1e293b;
+    border-top: none;
+  }
+}
+
+@keyframes dloja-drawer-in {
+  from { transform: translateY(40px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.dloja-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.dloja-drawer-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0;
+}
+
+.dloja-drawer-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid #1e293b;
+  background: #1e293b;
+  color: #94a3b8;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 140ms;
+}
+
+.dloja-drawer-close:hover {
+  background: #334155;
+  color: #f1f5f9;
+}
+
+.dloja-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dloja-drawer-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.dloja-drawer-item:last-child {
+  border-bottom: none;
+}
+
+.dloja-drawer-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dloja-drawer-item-nome {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.dloja-drawer-item-preco {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.dloja-drawer-item-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dloja-drawer-item-sub {
+  font-size: 13px;
+  font-weight: 600;
+  color: #a78bfa;
+  margin-left: auto;
+}
+
+.dloja-drawer-item-del {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid #1e293b;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 140ms, color 140ms;
+}
+
+.dloja-drawer-item-del:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+/* ── Footer do drawer ── */
+.dloja-drawer-footer {
+  padding: 16px 20px 24px;
+  border-top: 1px solid #1e293b;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dloja-drawer-linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.dloja-drawer-total {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid #1e293b;
+}
+
+.dloja-drawer-total strong {
+  color: #a78bfa;
+  font-size: 17px;
+}
+
+.dloja-btn-finalizar {
+  margin-top: 8px;
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  border: none;
+  background: #7c3aed;
+  color: #fff;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 140ms, transform 120ms;
+}
+
+.dloja-btn-finalizar:hover:not(:disabled) {
+  background: #6d28d9;
+  transform: translateY(-1px);
+}
+
+.dloja-btn-finalizar:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.dloja-btn-finalizar:disabled {
+  background: #334155;
+  color: #64748b;
+  cursor: not-allowed;
+}

@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 500" width="1024" height="500">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e0a3c"/>
+      <stop offset="100%" style="stop-color:#4c1d95"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#a78bfa"/>
+      <stop offset="100%" style="stop-color:#e879f9"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="500" fill="url(#bg)"/>
+
+  <!-- Decorative circles -->
+  <circle cx="850" cy="100" r="220" fill="#7c3aed" opacity="0.2"/>
+  <circle cx="920" cy="440" r="160" fill="#a78bfa" opacity="0.15"/>
+  <circle cx="80" cy="420" r="130" fill="#4c1d95" opacity="0.4"/>
+
+  <!-- Left: icon mini -->
+  <g transform="translate(55, 100) scale(0.6)">
+    <rect width="260" height="260" rx="48" fill="#2e0a5e"/>
+    <path d="M80 80 Q80 40 130 40 Q180 40 180 80" stroke="#a78bfa" stroke-width="14" fill="none" stroke-linecap="round"/>
+    <rect x="30" y="80" width="200" height="150" rx="18" fill="#1e0a3c" stroke="#7c3aed" stroke-width="2"/>
+    <rect x="55" y="185" width="22" height="30" rx="4" fill="#7c3aed"/>
+    <rect x="88" y="165" width="22" height="50" rx="4" fill="#a78bfa"/>
+    <rect x="121" y="140" width="22" height="75" rx="4" fill="#e879f9"/>
+    <polyline points="55,183 88,163 121,138 155,115" stroke="#e879f9" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <polygon points="155,105 165,120 145,120" fill="#e879f9"/>
+  </g>
+
+  <!-- App name -->
+  <text x="340" y="220" font-family="Arial Black, Arial, sans-serif" font-size="110" font-weight="900" fill="white">Venda</text>
+  <text x="720" y="220" font-family="Arial Black, Arial, sans-serif" font-size="110" font-weight="900" fill="url(#accent)">+</text>
+
+  <!-- Tagline -->
+  <text x="340" y="275" font-family="Arial, sans-serif" font-size="28" fill="#c4b5fd" letter-spacing="1">Delivery + CRM para qualquer loja</text>
+
+  <!-- Feature pills -->
+  <g transform="translate(330, 310)">
+    <rect x="0" y="0" width="150" height="42" rx="21" fill="#2e0a5e" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="75" y="27" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#a78bfa">Delivery</text>
+
+    <rect x="165" y="0" width="130" height="42" rx="21" fill="#2e0a5e" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="230" y="27" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#a78bfa">Pix</text>
+
+    <rect x="310" y="0" width="110" height="42" rx="21" fill="#2e0a5e" stroke="#e879f9" stroke-width="1.5"/>
+    <text x="365" y="27" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#e879f9">CRM</text>
+
+    <rect x="435" y="0" width="170" height="42" rx="21" fill="#2e0a5e" stroke="#e879f9" stroke-width="1.5"/>
+    <text x="520" y="27" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#e879f9">Estoque</text>
+  </g>
+
+  <!-- Bottom accent line -->
+  <rect x="0" y="490" width="1024" height="10" fill="url(#accent)"/>
+</svg>

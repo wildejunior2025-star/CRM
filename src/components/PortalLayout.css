@@ -1,17 +1,17 @@
-/* ── Tema azul exclusivo do portal do cliente ── */
+/* ── Tema roxo exclusivo do portal do cliente ── */
 .portal-root {
-  --primary:          #2563eb;
-  --primary-hover:    #1d4ed8;
-  --primary-bg:       rgba(37, 99, 235, 0.10);
-  --primary-ring:     rgba(37, 99, 235, 0.30);
+  --primary:          #7c3aed;
+  --primary-hover:    #6d28d9;
+  --primary-bg:       rgba(124, 58, 237, 0.10);
+  --primary-ring:     rgba(124, 58, 237, 0.28);
   --primary-contrast: #ffffff;
 }
 
 [data-theme="dark"] .portal-root {
-  --primary:          #3b82f6;
-  --primary-hover:    #2563eb;
-  --primary-bg:       rgba(59, 130, 246, 0.15);
-  --primary-ring:     rgba(59, 130, 246, 0.35);
+  --primary:          #8b5cf6;
+  --primary-hover:    #7c3aed;
+  --primary-bg:       rgba(139, 92, 246, 0.15);
+  --primary-ring:     rgba(139, 92, 246, 0.32);
   --primary-contrast: #ffffff;
 }
 
@@ -59,11 +59,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
-  height: 56px;
+  padding: env(safe-area-inset-top) 16px 0;
+  height: calc(56px + env(safe-area-inset-top));
   background: var(--primary);
   color: #fff;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.15);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
   flex-shrink: 0;
 }
 
@@ -120,14 +120,93 @@
   background: rgba(255,255,255,0.3);
 }
 
+/* ── Chip de endereço no header ── */
+.portal-header-addr {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255,255,255,0.15);
+  border: none;
+  border-radius: 999px;
+  padding: 5px 10px 5px 8px;
+  color: rgba(255,255,255,0.9);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 120ms;
+  max-width: 150px;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.portal-header-addr:hover {
+  background: rgba(255,255,255,0.25);
+}
+
+.portal-header-addr-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ── Barra de endereço (abaixo do header) ── */
+.portal-endereco-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: rgba(124, 58, 237, 0.08);
+  border: none;
+  border-bottom: 1px solid rgba(124, 58, 237, 0.15);
+  padding: 7px 16px;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms;
+  flex-shrink: 0;
+}
+
+.portal-endereco-strip:hover {
+  background: rgba(124, 58, 237, 0.14);
+}
+
+.portal-endereco-strip-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-theme="dark"] .portal-endereco-strip {
+  background: rgba(139, 92, 246, 0.12);
+  border-bottom-color: rgba(139, 92, 246, 0.2);
+  color: #a78bfa;
+}
+
+[data-theme="dark"] .portal-endereco-strip:hover {
+  background: rgba(139, 92, 246, 0.2);
+}
+
 /* ── Content ── */
 .portal-content {
   flex: 1;
-  padding: 16px 16px 120px; /* bottom padding for fixed nav + cart bar */
-  max-width: 600px;
+  padding: 0 16px 120px;
+  max-width: 1024px;
   width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
+}
+
+@media (min-width: 768px) {
+  .portal-content {
+    padding: 24px 32px 120px;
+  }
 }
 
 /* ── Bottom nav ── */
@@ -136,7 +215,8 @@
   bottom: 0;
   left: 0;
   right: 0;
-  height: 60px;
+  height: calc(60px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
   background: var(--surface);
   border-top: 1px solid var(--border);
   display: flex;
@@ -168,4 +248,53 @@
 
 .portal-nav-item.active svg {
   transform: scale(1.1);
+}
+
+/* ── Sacola (botão, não NavLink) ── */
+.portal-nav-sacola {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.portal-nav-sacola-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.portal-nav-sacola-badge {
+  position: absolute;
+  top: -6px;
+  right: -9px;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  pointer-events: none;
+  /* borda fina para separar do ícone em fundos escuros */
+  box-shadow: 0 0 0 1.5px var(--surface);
+}
+
+.portal-nav-sacola svg {
+  transition: transform 120ms;
+}
+
+.portal-nav-sacola:hover svg {
+  transform: scale(1.1);
+}
+
+.portal-nav-sacola:active svg {
+  transform: scale(0.95);
 }

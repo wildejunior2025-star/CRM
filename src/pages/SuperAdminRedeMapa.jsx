@@ -199,7 +199,7 @@ export default function SuperAdminRedeMapa() {
         Indicados diretos · Pontos acumulados · N = nível na rede
       </div>
 
-      {/* Ãrea scrollÃ¡vel */}
+      {/* Área scrollável */}
       <div style={{
         overflowX: 'auto', overflowY: 'auto',
         padding: '24px 16px 40px',

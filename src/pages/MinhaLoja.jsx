@@ -10,6 +10,7 @@ export default function MinhaLoja() {
   const [nome, setNome] = useState('')
   const [descricao, setDescricao] = useState('')
   const [emailContato, setEmailContato] = useState('')
+  const [emailLogin, setEmailLogin] = useState('')
   const [bannerUrl, setBannerUrl] = useState('')
   const [logoUrl, setLogoUrl] = useState('')
 
@@ -27,6 +28,27 @@ export default function MinhaLoja() {
   const [copiado, setCopiado] = useState(false)
   const timerCopia = useRef(null)
 
+  const [senhaNova, setSenhaNova] = useState('')
+  const [senhaConfirm, setSenhaConfirm] = useState('')
+  const [salvandoSenha, setSalvandoSenha] = useState(false)
+  const [erroSenha, setErroSenha] = useState(null)
+  const [sucessoSenha, setSucessoSenha] = useState(false)
+
+  async function handleAlterarSenha(e) {
+    e.preventDefault()
+    setErroSenha(null)
+    if (senhaNova.length < 6) { setErroSenha('A senha deve ter pelo menos 6 caracteres.'); return }
+    if (senhaNova !== senhaConfirm) { setErroSenha('As senhas não coincidem.'); return }
+    setSalvandoSenha(true)
+    const { error } = await supabase.auth.updateUser({ password: senhaNova })
+    setSalvandoSenha(false)
+    if (error) { setErroSenha(error.message); return }
+    setSenhaNova('')
+    setSenhaConfirm('')
+    setSucessoSenha(true)
+    setTimeout(() => setSucessoSenha(false), 3000)
+  }
+
   useEffect(() => {
     if (!empresa) return
     setNome(empresa.nome ?? '')
@@ -38,7 +60,26 @@ export default function MinhaLoja() {
     setChavePix(empresa.chave_pix ?? '')
     setPixNome(empresa.pix_nome ?? '')
     setPixCidade(empresa.pix_cidade ?? '')
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user?.email) setEmailLogin(user.email)
+    })
   }, [empresa])
+
+  const [salvandoEmail, setSalvandoEmail] = useState(false)
+  const [erroEmail, setErroEmail] = useState(null)
+  const [sucessoEmail, setSucessoEmail] = useState(false)
+
+  async function handleAlterarEmail(e) {
+    e.preventDefault()
+    setErroEmail(null)
+    if (!emailLogin.includes('@')) { setErroEmail('E-mail inválido.'); return }
+    setSalvandoEmail(true)
+    const { error } = await supabase.auth.updateUser({ email: emailLogin })
+    setSalvandoEmail(false)
+    if (error) { setErroEmail(error.message); return }
+    setSucessoEmail(true)
+    setTimeout(() => setSucessoEmail(false), 5000)
+  }
 
   async function handleUploadBanner(e) {
     const file = e.target.files?.[0]
@@ -107,7 +148,7 @@ export default function MinhaLoja() {
 
   if (!empresa) return null
 
-  const linkCatalogo = `${window.location.origin}/portal/loja/${empresa.slug ?? empresa.id}`
+  const linkCatalogo = `https://lojaonline.fwcinter.com/${empresa.slug ?? empresa.id}`
 
   function copiarLink() {
     navigator.clipboard.writeText(linkCatalogo)
@@ -187,10 +228,6 @@ export default function MinhaLoja() {
             <div className="form-field full">
               <label>Nome da loja</label>
               <input value={nome} onChange={e => setNome(e.target.value)} required />
-            </div>
-            <div className="form-field full">
-              <label>E-mail de contato</label>
-              <input type="email" value={emailContato} onChange={e => setEmailContato(e.target.value)} />
             </div>
             <div className="form-field full">
               <label>Descrição pública</label>
@@ -396,6 +433,94 @@ export default function MinhaLoja() {
           disabled={salvando || uploadandoBanner || uploadandoLogo}
         >
           {salvando ? 'Salvando...' : 'Salvar'}
+        </button>
+      </form>
+
+      {/* Card de alteração de e-mail de login */}
+      <form onSubmit={handleAlterarEmail} style={{ marginTop: 16 }}>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>E-mail de acesso</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
+            Este é o e-mail usado para fazer login no sistema.
+          </p>
+
+          {erroEmail && (
+            <div style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid var(--danger)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 14 }}>
+              {erroEmail}
+            </div>
+          )}
+          {sucessoEmail && (
+            <div style={{ background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid var(--success)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 14 }}>
+              Confirmação enviada para o novo e-mail. Clique no link para confirmar a troca.
+            </div>
+          )}
+
+          <div className="form-grid">
+            <div className="form-field full">
+              <label>E-mail de login</label>
+              <input
+                type="email"
+                value={emailLogin}
+                onChange={e => setEmailLogin(e.target.value)}
+                placeholder="seu@email.com"
+                autoComplete="email"
+              />
+            </div>
+          </div>
+        </div>
+        <button type="submit" className="btn btn-primary" disabled={salvandoEmail} style={{ marginBottom: 16 }}>
+          {salvandoEmail ? 'Salvando...' : 'Salvar e-mail'}
+        </button>
+      </form>
+
+      {/* Card de alteração de senha */}
+      <form onSubmit={handleAlterarSenha} style={{ marginTop: 0 }}>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Alterar senha</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
+            Defina uma nova senha para acessar o sistema.
+          </p>
+
+          {erroSenha && (
+            <div style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid var(--danger)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 14 }}>
+              {erroSenha}
+            </div>
+          )}
+          {sucessoSenha && (
+            <div style={{ background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid var(--success)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 14 }}>
+              Senha alterada com sucesso!
+            </div>
+          )}
+
+          <div className="form-grid">
+            <div className="form-field">
+              <label>Nova senha</label>
+              <input
+                type="password"
+                value={senhaNova}
+                onChange={e => setSenhaNova(e.target.value)}
+                placeholder="Mínimo 6 caracteres"
+                autoComplete="new-password"
+              />
+            </div>
+            <div className="form-field">
+              <label>Confirmar nova senha</label>
+              <input
+                type="password"
+                value={senhaConfirm}
+                onChange={e => setSenhaConfirm(e.target.value)}
+                placeholder="Repita a nova senha"
+                autoComplete="new-password"
+              />
+            </div>
+          </div>
+        </div>
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={salvandoSenha}
+        >
+          {salvandoSenha ? 'Alterando...' : 'Alterar senha'}
         </button>
       </form>
     </div>

@@ -7,6 +7,10 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null)
   const [empresa, setEmpresa] = useState(null)
   const [loading, setLoading] = useState(true)
+  // true enquanto a busca do profile está em andamento. Diferencia
+  // "ainda carregando" de "não tem profile" (caso do login social Google,
+  // que só ganha profile ao finalizar o cadastro).
+  const [profileLoading, setProfileLoading] = useState(true)
 
   useEffect(() => {
     let active = true
@@ -21,15 +25,18 @@ export function AuthProvider({ children }) {
     }
 
     async function loadProfile(userId) {
+      if (active) setProfileLoading(true)
       const { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
       if (active) setProfile(data ?? null)
       await loadEmpresa(data?.empresa_id ?? null)
+      if (active) setProfileLoading(false)
     }
 
     supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return
       setSession(data.session)
       if (data.session) await loadProfile(data.session.user.id)
+      else if (active) setProfileLoading(false)
       if (active) setLoading(false)
     })
 
@@ -39,6 +46,7 @@ export function AuthProvider({ children }) {
       else {
         setProfile(null)
         setEmpresa(null)
+        setProfileLoading(false)
       }
     })
 
@@ -71,7 +79,14 @@ export function AuthProvider({ children }) {
     const raw = localStorage.getItem('crm_superadmin_backup')
     if (!raw) return false
     localStorage.removeItem('crm_superadmin_backup')
-    const { access_token, refresh_token } = JSON.parse(raw)
+    localStorage.removeItem('crm_view_as')
+
+    let parsed
+    try { parsed = JSON.parse(raw) } catch { return false }
+
+    if (parsed.mode === 'view_as') return true
+
+    const { access_token, refresh_token } = parsed
     const { error } = await supabase.auth.setSession({ access_token, refresh_token })
     return !error
   }
@@ -104,6 +119,7 @@ export function AuthProvider({ children }) {
     empresa,
     perfil: profile?.perfil ?? null,
     loading,
+    profileLoading,
     login,
     signup,
     logout,

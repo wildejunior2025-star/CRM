@@ -4,6 +4,74 @@
   width: 100%;
 }
 
+/* ── Barra de endereço clicável ── */
+.ph-endereco-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text);
+  transition: border-color 140ms, box-shadow 140ms;
+  box-sizing: border-box;
+}
+
+.ph-endereco-bar:hover {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+.ph-endereco-bar:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.ph-endereco-bar-pin {
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ph-endereco-bar-texto {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.ph-endereco-bar-texto strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.ph-endereco-bar-sub {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.ph-endereco-bar-placeholder {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.ph-endereco-bar-chevron {
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 /* ── Busca ── */
 .ph-search-wrap {
   position: relative;
@@ -56,7 +124,7 @@
 .ph-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 12px;
+  gap: 16px;
 }
 
 @media (min-width: 480px) {
@@ -205,6 +273,35 @@
   color: var(--warning);
 }
 
+.pill-closed {
+  background: rgba(239, 68, 68, 0.10);
+  color: #ef4444;
+}
+
+/* ── Loja fechada ── */
+.ph-card--fechada {
+  opacity: 0.65;
+}
+
+.ph-card-logo {
+  position: relative;
+}
+
+.ph-fechada-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: inherit;
+}
+
 /* ── Skeleton loading ── */
 .ph-card--skeleton {
   pointer-events: none;
@@ -227,6 +324,331 @@
 @keyframes ph-pulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.45; }
+}
+
+/* ── Histórico de endereços (iFood) ── */
+.ph-modal-hist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.ph-hist-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text);
+  transition: border-color 140ms, box-shadow 140ms;
+  box-sizing: border-box;
+}
+
+.ph-hist-item:hover {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+.ph-hist-item--ativo {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+.ph-hist-clock {
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ph-hist-item--ativo .ph-hist-clock {
+  color: var(--primary);
+}
+
+.ph-hist-texto {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ph-hist-linha1 {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ph-hist-linha2 {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ph-hist-check {
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ph-hist-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: 1.5px dashed var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 140ms, background 140ms;
+  box-sizing: border-box;
+}
+
+.ph-hist-add-btn:hover {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+
+/* Botão voltar para lista */
+.ph-modal-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 16px;
+  transition: color 120ms;
+}
+
+.ph-modal-back:hover {
+  color: var(--text);
+}
+
+/* ── Modal obrigatório de endereço ── */
+.ph-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  /* Bloqueia interação com o fundo */
+  pointer-events: all;
+}
+
+.ph-modal {
+  background: var(--card, var(--surface));
+  border-radius: 20px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 92dvh;
+  overflow-y: auto;
+  padding: 28px 24px 32px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  /* Scroll suave em mobile */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Ícone de localização */
+.ph-modal-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 18px;
+  flex-shrink: 0;
+}
+
+/* Título */
+.ph-modal-title {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+  margin: 0 0 8px;
+  text-align: center;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+/* Subtítulo */
+.ph-modal-subtitle {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 0 0 24px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* Formulário */
+.ph-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Campo individual */
+.ph-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* Linha de dois campos */
+.ph-modal-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* Label */
+.ph-modal-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+}
+
+.ph-modal-required {
+  color: var(--danger, #ef4444);
+  margin-left: 2px;
+}
+
+/* Input */
+.ph-modal-input {
+  padding: 11px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 140ms, box-shadow 140ms;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.ph-modal-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.ph-modal-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+/* Hint de busca de CEP */
+.ph-modal-cep-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Erro inline de campo */
+.ph-modal-field-error {
+  font-size: 12px;
+  color: var(--danger, #ef4444);
+  font-weight: 500;
+}
+
+/* Erro global do formulário */
+.ph-modal-error {
+  background: var(--danger-bg, rgba(239, 68, 68, 0.08));
+  color: var(--danger, #ef4444);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Botão confirmar */
+.ph-modal-btn {
+  width: 100%;
+  padding: 14px 20px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+  transition: background 140ms, transform 120ms, opacity 140ms;
+  letter-spacing: -0.01em;
+}
+
+.ph-modal-btn:hover:not(:disabled) {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+}
+
+.ph-modal-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.ph-modal-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Spinner do botão */
+.ph-modal-spinner {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: ph-spin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes ph-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ── Estado vazio ── */

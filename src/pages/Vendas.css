@@ -1,5 +1,22 @@
 .modal-lg {
-  max-width: 720px;
+  max-width: 900px;
+  width: 95vw;
+  font-size: 15px;
+}
+
+.modal-lg h2 {
+  font-size: 22px;
+}
+
+.modal-lg label {
+  font-size: 14px;
+}
+
+.modal-lg input,
+.modal-lg select,
+.modal-lg textarea {
+  font-size: 15px;
+  padding: 10px 13px;
 }
 
 .venda-itens-title {
@@ -45,6 +62,50 @@
   background: var(--bg);
   color: var(--text);
   width: 100%;
+}
+
+.produto-search-wrap {
+  position: relative;
+}
+
+.produto-search-dropdown {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  z-index: 200;
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 4px 16px rgba(0,0,0,.15);
+}
+
+.produto-search-option {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.produto-search-option:last-child {
+  border-bottom: none;
+}
+
+.produto-search-option:hover {
+  background: var(--bg-hover, rgba(0,0,0,.05));
+}
+
+.produto-search-emb {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .venda-item-subtotal {

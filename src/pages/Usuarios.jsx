@@ -10,6 +10,8 @@ const PERFIS = [
   { value: 'cliente', label: 'Cliente' },
 ]
 
+const emptyVendorForm = { nome: '', email: '', senha: '', telefone: '' }
+
 export default function Usuarios() {
   const { user, profile, refreshProfile } = useAuth()
   const [perfis, setPerfis] = useState([])
@@ -21,6 +23,13 @@ export default function Usuarios() {
   const [busca, setBusca] = useState('')
   const [pagina, setPagina] = useState(1)
   const POR_PAGINA = 15
+
+  // Modal "Novo Vendedor"
+  const [showVendorModal, setShowVendorModal] = useState(false)
+  const [vendorForm, setVendorForm] = useState(emptyVendorForm)
+  const [vendorError, setVendorError] = useState(null)
+  const [creatingVendor, setCreatingVendor] = useState(false)
+  const [mostrarSenha, setMostrarSenha] = useState(false)
 
   const linkCliente = profile?.empresa_id
     ? `${window.location.origin}/cadastro-cliente/${profile.empresa_id}`
@@ -112,6 +121,42 @@ export default function Usuarios() {
     if (profile.id === user?.id) await refreshProfile()
   }
 
+  async function handleCreateVendor(e) {
+    e.preventDefault()
+    setVendorError(null)
+
+    if (vendorForm.senha.length < 6) {
+      setVendorError('A senha deve ter no mínimo 6 caracteres.')
+      return
+    }
+
+    setCreatingVendor(true)
+
+    const { data: { session } } = await supabase.auth.getSession()
+    try {
+      const res = await fetch('https://ycytrsqdvrviihkqfvno.supabase.co/functions/v1/create-vendor', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ nome: vendorForm.nome, email: vendorForm.email, password: vendorForm.senha, telefone: vendorForm.telefone || undefined }),
+      })
+      const json = await res.json()
+      if (!json.ok) {
+        setVendorError(json.error ?? 'Erro desconhecido ao criar vendedor.')
+        return
+      }
+      setShowVendorModal(false)
+      setVendorForm(emptyVendorForm)
+      await loadAll()
+    } catch (err) {
+      setVendorError(String(err))
+    } finally {
+      setCreatingVendor(false)
+    }
+  }
+
   const perfisFiltered = perfis.filter((p) => {
     const term = busca.trim().toLowerCase()
     if (!term) return true
@@ -124,37 +169,17 @@ export default function Usuarios() {
   return (
     <div>
       <div className="page-header">
-        <h1>Usuários</h1>
+        <h1>Vendedores</h1>
+        <button
+          className="btn btn-primary"
+          onClick={() => { setVendorForm(emptyVendorForm); setVendorError(null); setShowVendorModal(true) }}
+        >
+          + Novo Vendedor
+        </button>
       </div>
 
       {error && <p className="error-text">{error}</p>}
 
-      {(linkCliente || linkVendedor) && (
-        <div className="card" style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {linkCliente && (
-            <div className="form-field" style={{ marginBottom: 0 }}>
-              <label>Link de cadastro para clientes</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input readOnly value={linkCliente} onFocus={(e) => e.target.select()} />
-                <button type="button" className="btn btn-secondary btn-sm" onClick={copiarLink}>
-                  {linkCopiado ? 'Copiado!' : 'Copiar'}
-                </button>
-              </div>
-            </div>
-          )}
-          {linkVendedor && (
-            <div className="form-field" style={{ marginBottom: 0 }}>
-              <label>Link de cadastro para vendedores</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input readOnly value={linkVendedor} onFocus={(e) => e.target.select()} />
-                <button type="button" className="btn btn-secondary btn-sm" onClick={copiarLinkVendedor}>
-                  {linkVendedorCopiado ? 'Copiado!' : 'Copiar'}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       <div className="toolbar">
         <input
@@ -234,6 +259,86 @@ export default function Usuarios() {
           </>
         )}
       </div>
+      {showVendorModal && (
+        <div className="modal-overlay" onClick={() => setShowVendorModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <h2>Novo Vendedor</h2>
+            <form onSubmit={handleCreateVendor}>
+              <div className="form-field">
+                <label>Nome</label>
+                <input
+                  required
+                  value={vendorForm.nome}
+                  onChange={(e) => setVendorForm((p) => ({ ...p, nome: e.target.value }))}
+                  placeholder="Nome completo"
+                />
+              </div>
+              <div className="form-field">
+                <label>E-mail</label>
+                <input
+                  required
+                  type="email"
+                  value={vendorForm.email}
+                  onChange={(e) => setVendorForm((p) => ({ ...p, email: e.target.value }))}
+                  placeholder="vendedor@exemplo.com"
+                />
+              </div>
+              <div className="form-field">
+                <label>Senha inicial</label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    required
+                    type={mostrarSenha ? 'text' : 'password'}
+                    minLength={6}
+                    value={vendorForm.senha}
+                    onChange={(e) => setVendorForm((p) => ({ ...p, senha: e.target.value }))}
+                    placeholder="Mínimo 6 caracteres"
+                    style={{ paddingRight: 44, width: '100%' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setMostrarSenha(v => !v)}
+                    style={{
+                      position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: 'var(--text-muted)', padding: 4, display: 'flex',
+                    }}
+                    tabIndex={-1}
+                  >
+                    {mostrarSenha ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
+                      </svg>
+                    ) : (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+              <div className="form-field">
+                <label>Telefone / WhatsApp <span style={{ fontWeight: 400, color: 'var(--text-muted, #888)' }}>(opcional)</span></label>
+                <input
+                  type="tel"
+                  value={vendorForm.telefone}
+                  onChange={(e) => setVendorForm((p) => ({ ...p, telefone: e.target.value }))}
+                  placeholder="(84) 99999-9999"
+                />
+              </div>
+              {vendorError && <p className="error-text">{vendorError}</p>}
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowVendorModal(false)}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={creatingVendor}>
+                  {creatingVendor ? 'Criando...' : 'Criar vendedor'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

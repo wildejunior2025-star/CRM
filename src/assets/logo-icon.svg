@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7C3AED"/>
+      <stop offset="100%" stop-color="#5B21B6"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Fundo arredondado (app icon style) -->
+  <rect width="100" height="100" rx="22" fill="url(#bg)"/>
+  <!-- Brilho sutil no topo -->
+  <rect width="100" height="50" rx="22" fill="url(#shine)"/>
+
+  <!-- V — duas barras grossas encontrando no centro-base -->
+  <polyline
+    points="18,22 50,76 82,22"
+    stroke="white"
+    stroke-width="13"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  />
+
+  <!-- + integrado no canto superior direito do V -->
+  <!-- vertical do + -->
+  <line x1="82" y1="10" x2="82" y2="34" stroke="#E9D5FF" stroke-width="8" stroke-linecap="round"/>
+  <!-- horizontal do + -->
+  <line x1="70" y1="22" x2="94" y2="22" stroke="#E9D5FF" stroke-width="8" stroke-linecap="round"/>
+</svg>

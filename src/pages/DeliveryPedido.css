@@ -1,0 +1,517 @@
+/* ── DeliveryPedido — order tracking ── */
+
+.dpd-root {
+  min-height: 100vh;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.dpd-root *, .dpd-root *::before, .dpd-root *::after {
+  box-sizing: border-box;
+}
+
+/* ── Loading ── */
+.dpd-loading {
+  min-height: 100vh;
+  background: #0f172a;
+  color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  font-size: 14px;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.dpd-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2.5px solid #1e293b;
+  border-top-color: #7c3aed;
+  border-radius: 50%;
+  animation: dpd-spin 0.7s linear infinite;
+}
+
+@keyframes dpd-spin {
+  to { transform: rotate(360deg); }
+}
+
+.dpd-back-link {
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: transparent;
+  color: #94a3b8;
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 140ms, color 140ms;
+}
+
+.dpd-back-link:hover {
+  border-color: #7c3aed;
+  color: #f1f5f9;
+}
+
+/* ── Header ── */
+.dpd-header {
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.dpd-header-inner {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dpd-logo-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.dpd-logo {
+  font-size: 20px;
+  font-weight: 800;
+  color: #f1f5f9;
+  letter-spacing: -0.03em;
+}
+
+.dpd-logo-plus {
+  color: #7c3aed;
+}
+
+.dpd-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dpd-pedido-id {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.dpd-refresh-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid #1e293b;
+  background: #1e293b;
+  color: #94a3b8;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 140ms, color 140ms;
+}
+
+.dpd-refresh-btn:hover {
+  background: #334155;
+  color: #f1f5f9;
+}
+
+/* ── Main ── */
+.dpd-main {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 24px 16px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Cards ── */
+.dpd-card {
+  background: #1e1b4b;
+  border: 1px solid #312e81;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.dpd-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0 0 16px;
+  letter-spacing: 0.01em;
+}
+
+/* ── Card cancelado ── */
+.dpd-card--cancelado {
+  background: rgba(239, 68, 68, 0.07);
+  border-color: rgba(239, 68, 68, 0.25);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+
+.dpd-cancelado-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.dpd-cancelado-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fca5a5;
+  margin: 0;
+}
+
+.dpd-cancelado-motivo {
+  font-size: 13px;
+  color: #94a3b8;
+  margin: 0;
+  max-width: 340px;
+}
+
+/* ── Timeline ── */
+.dpd-card--timeline {
+  padding-bottom: 16px;
+}
+
+.dpd-timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.dpd-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.dpd-step-icon-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.dpd-step-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 2px solid #334155;
+  background: #0f172a;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 200ms, background 200ms, color 200ms;
+  flex-shrink: 0;
+}
+
+.dpd-step--done .dpd-step-icon {
+  border-color: #16a34a;
+  background: rgba(22, 163, 74, 0.12);
+  color: #4ade80;
+}
+
+.dpd-step--current .dpd-step-icon {
+  border-color: #7c3aed;
+  background: rgba(124, 58, 237, 0.15);
+  color: #a78bfa;
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.15);
+  animation: dpd-pulse 2s ease-in-out infinite;
+}
+
+@keyframes dpd-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.15); }
+  50%       { box-shadow: 0 0 0 8px rgba(124, 58, 237, 0.08); }
+}
+
+.dpd-step-line {
+  width: 2px;
+  flex: 1;
+  min-height: 20px;
+  background: #1e293b;
+  margin: 4px 0;
+}
+
+.dpd-step-line--done {
+  background: #16a34a;
+}
+
+.dpd-step-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #475569;
+  padding: 10px 0;
+  line-height: 1.3;
+  padding-top: 11px;
+}
+
+.dpd-step--done .dpd-step-label {
+  color: #94a3b8;
+}
+
+.dpd-step--current .dpd-step-label {
+  color: #f1f5f9;
+  font-weight: 700;
+}
+
+.dpd-update-time {
+  font-size: 11px;
+  color: #475569;
+  margin: 12px 0 0;
+  text-align: right;
+}
+
+/* ── Pix ── */
+.dpd-card--pix {
+  text-align: center;
+}
+
+.dpd-pix-qr-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 0;
+  color: #7c3aed;
+}
+
+.dpd-pix-msg {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin: 0;
+}
+
+.dpd-pix-sub {
+  font-size: 12px;
+  color: #64748b;
+  margin: 0;
+  max-width: 260px;
+}
+
+/* QR Code real */
+.dpd-pix-qr-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 8px 0 16px;
+}
+
+.dpd-pix-qr-img {
+  width: 200px;
+  height: 200px;
+  border-radius: 12px;
+  border: 3px solid #7c3aed;
+  background: #fff;
+  display: block;
+}
+
+/* Copia e cola */
+.dpd-pix-copia-wrap {
+  text-align: left;
+  margin-bottom: 12px;
+}
+
+.dpd-pix-copia-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 6px;
+}
+
+.dpd-pix-copia-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.dpd-pix-copia-code {
+  flex: 1;
+  font-size: 11px;
+  color: #94a3b8;
+  word-break: break-all;
+  line-height: 1.4;
+  font-family: 'Courier New', monospace;
+}
+
+.dpd-pix-copy-btn {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: none;
+  background: #7c3aed;
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 140ms;
+  white-space: nowrap;
+}
+
+.dpd-pix-copy-btn:hover {
+  background: #6d28d9;
+}
+
+.dpd-pix-copy-btn--done {
+  background: #16a34a;
+}
+
+.dpd-pix-aviso {
+  font-size: 12px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* ── Itens do pedido ── */
+.dpd-itens {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.dpd-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.dpd-item-qty {
+  color: #7c3aed;
+  font-weight: 700;
+  min-width: 24px;
+  flex-shrink: 0;
+}
+
+.dpd-item-nome {
+  color: #e2e8f0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dpd-item-sub {
+  color: #94a3b8;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* ── Totais ── */
+.dpd-totais {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #1e293b;
+  margin-bottom: 16px;
+}
+
+.dpd-total-linha {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.dpd-total-linha--total {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f1f5f9;
+  padding-top: 8px;
+  border-top: 1px solid #1e293b;
+  margin-top: 4px;
+}
+
+.dpd-total-linha--total strong {
+  color: #a78bfa;
+  font-size: 17px;
+}
+
+/* ── Pagamento ── */
+.dpd-pagamento {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(124, 58, 237, 0.07);
+  border: 1px solid rgba(124, 58, 237, 0.15);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.dpd-pagamento-label {
+  font-size: 12px;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.dpd-pagamento-val {
+  font-size: 13px;
+  font-weight: 700;
+  color: #a78bfa;
+}
+
+.dpd-troco {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-left: auto;
+}
+
+/* ── Endereço ── */
+.dpd-address {
+  font-size: 13px;
+  color: #94a3b8;
+  line-height: 1.7;
+  font-style: normal;
+}
+
+/* ── Observações ── */
+.dpd-obs {
+  font-size: 13px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* ── Rodapé ── */
+.dpd-footer-note {
+  font-size: 12px;
+  color: #475569;
+  text-align: center;
+  margin: 0;
+  padding: 0 8px;
+  line-height: 1.6;
+}

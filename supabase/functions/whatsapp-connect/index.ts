@@ -6,6 +6,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 }
 
+function toInstanceName(empresaId: string) {
+  return "crm" + empresaId.replace(/-/g, "")
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
@@ -55,7 +59,7 @@ serve(async (req) => {
     }
 
     const empresaId    = profile.empresa_id
-    const instanceName = `empresa_${empresaId}`
+    const instanceName = toInstanceName(empresaId)
 
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
@@ -66,7 +70,7 @@ serve(async (req) => {
     const { action } = body
 
     // ─────────────────────────────────────────
-    // STATUS: retorna estado atual da instância
+    // STATUS
     // ─────────────────────────────────────────
     if (action === "status") {
       try {
@@ -74,20 +78,45 @@ serve(async (req) => {
           headers: { apikey: apiKey }
         })
         if (!res.ok) {
-          return new Response(JSON.stringify({ state: "not_found" }), {
+          // Tenta retornar o phone salvo no banco mesmo sem conexão ativa
+          const { data: cfg } = await supabaseAdmin
+            .from("whatsapp_config").select("connected_phone").eq("empresa_id", empresaId).single()
+          return new Response(JSON.stringify({ state: "not_found", phone: cfg?.connected_phone ?? null }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" }
           })
         }
         const data = await res.json()
         const state = data.instance?.state ?? "close"
-        const phone = data.instance?.ownerJid?.replace(/@s\.whatsapp\.net$/, "") ?? null
+        let phone: string | null = data.instance?.ownerJid?.replace(/@s\.whatsapp\.net$/, "") ?? null
 
-        // Quando conectado, garante ativo=true no banco
+        // Fallback: tenta fetchInstances se ownerJid não veio
+        if (!phone && state === "open") {
+          try {
+            const fetchRes = await fetch(`${apiBase}/instance/fetchInstances?instanceName=${instanceName}`, {
+              headers: { apikey: apiKey }
+            })
+            if (fetchRes.ok) {
+              const fetchData = await fetchRes.json()
+              const inst = Array.isArray(fetchData) ? fetchData[0] : fetchData
+              phone = inst?.owner?.replace(/@s\.whatsapp\.net$/, "")
+                ?? inst?.instance?.owner?.replace(/@s\.whatsapp\.net$/, "")
+                ?? null
+            }
+          } catch { /* ignora */ }
+        }
+
         if (state === "open") {
           await supabaseAdmin.from("whatsapp_config").upsert(
-            { empresa_id: empresaId, ativo: true, instance_name: instanceName },
+            { empresa_id: empresaId, ativo: true, instance_name: instanceName, ...(phone ? { connected_phone: phone } : {}) },
             { onConflict: "empresa_id" }
           )
+        }
+
+        // Se ainda não temos o phone, busca do banco
+        if (!phone) {
+          const { data: cfg } = await supabaseAdmin
+            .from("whatsapp_config").select("connected_phone").eq("empresa_id", empresaId).single()
+          phone = cfg?.connected_phone ?? null
         }
 
         return new Response(JSON.stringify({ state, phone }), {
@@ -101,29 +130,68 @@ serve(async (req) => {
     }
 
     // ─────────────────────────────────────────
-    // CONNECT: cria instância e retorna QR Code
+    // CONNECT: sempre recria a instância limpa
     // ─────────────────────────────────────────
     if (action === "connect") {
-      // Verifica se já está conectado
+      // Se já está conectado, retorna direto
       const stateRes = await fetch(`${apiBase}/instance/connectionState/${instanceName}`, {
         headers: { apikey: apiKey }
       })
       if (stateRes.ok) {
         const stateData = await stateRes.json()
         if (stateData.instance?.state === "open") {
-          const phone = stateData.instance?.ownerJid?.replace(/@s\.whatsapp\.net$/, "") ?? null
+          let phone: string | null = stateData.instance?.ownerJid?.replace(/@s\.whatsapp\.net$/, "") ?? null
+          if (!phone) {
+            try {
+              const fetchRes = await fetch(`${apiBase}/instance/fetchInstances?instanceName=${instanceName}`, {
+                headers: { apikey: apiKey }
+              })
+              if (fetchRes.ok) {
+                const fetchData = await fetchRes.json()
+                const inst = Array.isArray(fetchData) ? fetchData[0] : fetchData
+                phone = inst?.owner?.replace(/@s\.whatsapp\.net$/, "")
+                  ?? inst?.instance?.owner?.replace(/@s\.whatsapp\.net$/, "")
+                  ?? null
+              }
+            } catch { /* ignora */ }
+          }
           await supabaseAdmin.from("whatsapp_config").upsert(
-            { empresa_id: empresaId, ativo: true, instance_name: instanceName },
+            { empresa_id: empresaId, ativo: true, instance_name: instanceName, ...(phone ? { connected_phone: phone } : {}) },
             { onConflict: "empresa_id" }
           )
+          // Sempre reaplicar webhook (pode ter sido perdido se servidor reiniciou)
+          const supabaseUrl2 = Deno.env.get("SUPABASE_URL") ?? ""
+          const projectRef2 = supabaseUrl2.match(/https:\/\/([^.]+)/)?.[1] ?? ""
+          if (projectRef2) {
+            fetch(`${apiBase}/webhook/set/${instanceName}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey: apiKey },
+              body: JSON.stringify({
+                webhook: {
+                  enabled: true,
+                  url: `https://${projectRef2}.supabase.co/functions/v1/whatsapp-webhook?apikey=${Deno.env.get("SUPABASE_ANON_KEY") ?? ""}`,
+                  webhookByEvents: false,
+                  webhookBase64: false,
+                  events: ["MESSAGES_UPSERT"]
+                }
+              })
+            }).catch(() => {})
+          }
           return new Response(JSON.stringify({ connected: true, phone }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" }
           })
         }
+
+        // Instância existe mas não está conectada: deleta para recriar limpa
+        await fetch(`${apiBase}/instance/delete/${instanceName}`, {
+          method: "DELETE",
+          headers: { apikey: apiKey }
+        })
+        await new Promise(r => setTimeout(r, 1500))
       }
 
-      // Cria instância (ignora erro se já existir)
-      await fetch(`${apiBase}/instance/create`, {
+      // Cria instância do zero
+      const createRes = await fetch(`${apiBase}/instance/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: apiKey },
         body: JSON.stringify({
@@ -133,13 +201,49 @@ serve(async (req) => {
         })
       })
 
-      // Registra instance_name no banco
+      if (!createRes.ok) {
+        const errText = await createRes.text()
+        return new Response(
+          JSON.stringify({ error: `Erro ao criar instância (${createRes.status}): ${errText}` }),
+          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        )
+      }
+
+      const createData = await createRes.json()
+      const qrFromCreate = createData.qrcode?.base64 ?? createData.base64 ?? null
+
       await supabaseAdmin.from("whatsapp_config").upsert(
         { empresa_id: empresaId, instance_name: instanceName, ativo: false },
         { onConflict: "empresa_id" }
       )
 
-      // Busca QR Code
+      // Configura webhook automaticamente na nova instância
+      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
+      const projectRef = supabaseUrl.match(/https:\/\/([^.]+)/)?.[1] ?? ""
+      if (projectRef) {
+        await fetch(`${apiBase}/webhook/set/${instanceName}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: apiKey },
+          body: JSON.stringify({
+            webhook: {
+              enabled: true,
+              url: `https://${projectRef}.supabase.co/functions/v1/whatsapp-webhook?apikey=${Deno.env.get("SUPABASE_ANON_KEY") ?? ""}`,
+              webhookByEvents: false,
+              webhookBase64: false,
+              events: ["MESSAGES_UPSERT"]
+            }
+          })
+        })
+      }
+
+      if (qrFromCreate) {
+        return new Response(
+          JSON.stringify({ connected: false, qrcode: qrFromCreate }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        )
+      }
+
+      // Fallback: busca QR via /instance/connect
       const qrRes = await fetch(`${apiBase}/instance/connect/${instanceName}`, {
         headers: { apikey: apiKey }
       })
@@ -159,7 +263,7 @@ serve(async (req) => {
     }
 
     // ─────────────────────────────────────────
-    // DISCONNECT: desvincula o WhatsApp
+    // DISCONNECT
     // ─────────────────────────────────────────
     if (action === "disconnect") {
       await fetch(`${apiBase}/instance/logout/${instanceName}`, {
@@ -173,6 +277,30 @@ serve(async (req) => {
       )
 
       return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      })
+    }
+
+    // ─────────────────────────────────────────
+    // SEND MESSAGE
+    // ─────────────────────────────────────────
+    if (action === "send_message") {
+      const { phone, text } = body
+      if (!phone || !text) {
+        return new Response(JSON.stringify({ error: "phone e text obrigatórios" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+        })
+      }
+      const numero = String(phone).replace(/\D/g, "")
+      const numeroFull = numero.startsWith("55") ? numero : `55${numero}`
+
+      const res = await fetch(`${apiBase}/message/sendText/${instanceName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: apiKey },
+        body: JSON.stringify({ number: numeroFull, text }),
+      })
+      const data = await res.json().catch(() => ({}))
+      return new Response(JSON.stringify({ ok: res.ok, data }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" }
       })
     }

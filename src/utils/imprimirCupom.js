@@ -1,0 +1,230 @@
+// Impressão de cupom térmico.
+//
+// Dois modos:
+//  1) QZ Tray (recomendado): app grátis instalado no PC. Permite listar as
+//     impressoras, escolher qual usar e imprimir SILENCIOSO (sem janela).
+//  2) Fallback do navegador (window.print num iframe oculto): usado quando
+//     nenhuma impressora foi escolhida ou o QZ Tray não está rodando.
+
+const QZ_CDN = 'https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js'
+
+function fmt(v) {
+  return Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+}
+
+function painelConfig() {
+  try { return JSON.parse(localStorage.getItem('painelConfig') || '{}') }
+  catch { return {} }
+}
+
+function larguraCupom() {
+  return painelConfig().larguraCupom === '58mm' ? '58mm' : '80mm'
+}
+
+function impressoraEscolhida() {
+  return painelConfig().impressora || null
+}
+
+export function autoImprimirAtivo() {
+  return painelConfig().autoImprimir === true
+}
+
+function labelPagamento(pedido) {
+  const p = pedido.forma_pagamento || ''
+  if (p === 'pix') return pedido.pix_status === 'pago' ? 'PIX (pago)' : 'PIX'
+  if (p === 'dinheiro') return 'Dinheiro'
+  return p || '—'
+}
+
+export function montarCupomHtml(pedido, empresa = {}) {
+  const largura = larguraCupom()
+  const itens = Array.isArray(pedido.itens) ? pedido.itens : []
+  const isRetirada = (pedido.tipo_entrega || 'entrega') === 'retirada'
+  const endereco = [
+    pedido.endereco_rua,
+    pedido.endereco_numero,
+    pedido.endereco_complemento,
+    pedido.endereco_bairro,
+    pedido.endereco_cidade,
+  ].filter(Boolean).join(', ')
+  const numero = pedido.numero_pedido ?? String(pedido.id).slice(-4).toUpperCase()
+  const data = new Date(pedido.created_at || Date.now()).toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  })
+
+  // Configuração do cupom (escolhas da loja, salvas em painelConfig.cupom)
+  const c = painelConfig().cupom || {}
+  const fontePx = c.fonte === 'grande' ? 15 : 12
+  const lgPx = fontePx + 3
+  const showTel = c.telCliente !== false
+  const showEnd = c.endereco !== false
+  const showTaxa = c.taxa !== false
+  const showObs = c.obs !== false
+  const showCodigo = c.codigo !== false
+  const showTotalItens = c.totalItens === true
+  const totalItens = itens.reduce((s, it) => s + Number(it.qtd ?? it.quantidade ?? 1), 0)
+
+  const itensHtml = itens.map(item => {
+    const qtd = item.qtd ?? item.quantidade ?? 1
+    const sub = item.subtotal != null
+      ? Number(item.subtotal)
+      : qtd * Number(item.preco ?? item.preco_unitario ?? 0)
+    return `<li><div class="row"><span>${esc(qtd)}x ${esc(item.nome)}</span><span>${fmt(sub)}</span></div></li>`
+  }).join('')
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Pedido ${esc(numero)}</title>
+<style>
+  @page { size: ${largura} auto; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { width: ${largura}; padding: 4mm 3mm; font-family: 'Courier New', monospace; font-size: ${fontePx}px; line-height: 1.35; color: #000; }
+  .center { text-align: center; }
+  .b { font-weight: 700; }
+  .lg { font-size: ${lgPx}px; }
+  hr { border: none; border-top: 1px dashed #000; margin: 5px 0; }
+  .row { display: flex; justify-content: space-between; gap: 8px; }
+  .row span:last-child { white-space: nowrap; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { margin-bottom: 2px; }
+</style></head><body>
+  <div class="center b lg">${esc(empresa.nome || 'Pedido')}</div>
+  ${empresa.telefone ? `<div class="center">${esc(empresa.telefone)}</div>` : ''}
+  <hr>
+  <div class="row b"><span>PEDIDO #${esc(numero)}</span><span>${esc(data)}</span></div>
+  <div class="b">${isRetirada ? 'RETIRADA NA LOJA' : 'ENTREGA'}</div>
+  <hr>
+  <div><span class="b">Cliente:</span> ${esc(pedido.cliente_nome || '—')}</div>
+  ${pedido.cliente_telefone && showTel ? `<div><span class="b">Tel:</span> ${esc(pedido.cliente_telefone)}</div>` : ''}
+  ${!isRetirada && endereco && showEnd ? `<div><span class="b">End:</span> ${esc(endereco)}</div>` : ''}
+  <hr>
+  <ul>${itensHtml || '<li>—</li>'}</ul>
+  ${showTotalItens ? `<div class="row b"><span>Total de itens</span><span>${totalItens}</span></div>` : ''}
+  <hr>
+  ${pedido.subtotal != null ? `<div class="row"><span>Subtotal</span><span>${fmt(pedido.subtotal)}</span></div>` : ''}
+  ${!isRetirada && pedido.taxa_entrega != null && showTaxa ? `<div class="row"><span>Taxa entrega</span><span>${fmt(pedido.taxa_entrega)}</span></div>` : ''}
+  <div class="row b lg"><span>TOTAL</span><span>${fmt(pedido.total)}</span></div>
+  <hr>
+  <div><span class="b">Pagamento:</span> ${esc(labelPagamento(pedido))}</div>
+  ${pedido.forma_pagamento === 'dinheiro' && Number(pedido.troco_para) > 0 ? `<div>Troco para ${fmt(pedido.troco_para)}</div>` : ''}
+  ${pedido.observacoes && showObs ? `<div style="margin-top:4px"><span class="b">Obs:</span> ${esc(pedido.observacoes)}</div>` : ''}
+  ${pedido.codigo_entrega && showCodigo ? `<hr><div class="center b">Código de entrega: ${esc(pedido.codigo_entrega)}</div>` : ''}
+  <hr>
+  <div class="center">Obrigado pela preferência!</div>
+  <div style="height:10mm"></div>
+</body></html>`
+}
+
+// ───────────────────────────── QZ Tray ─────────────────────────────
+let _qzLoading = null
+
+function carregarQzLib() {
+  if (typeof window !== 'undefined' && window.qz) return Promise.resolve(window.qz)
+  if (_qzLoading) return _qzLoading
+  _qzLoading = new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = QZ_CDN
+    s.async = true
+    s.onload = () => resolve(window.qz)
+    s.onerror = () => { _qzLoading = null; reject(new Error('Falha ao carregar a biblioteca do QZ Tray')) }
+    document.head.appendChild(s)
+  })
+  return _qzLoading
+}
+
+async function qzConectar() {
+  const qz = await carregarQzLib()
+  if (!qz) throw new Error('QZ Tray indisponível')
+
+  // Promise nativa
+  if (qz.api?.setPromiseType) qz.api.setPromiseType(resolver => new Promise(resolver))
+  // Modo não assinado: resolve certificado/assinatura vazios (QZ pede "Permitir" uma vez)
+  if (qz.security?.setCertificatePromise) qz.security.setCertificatePromise(resolve => resolve())
+  if (qz.security?.setSignaturePromise) qz.security.setSignaturePromise(() => resolve => resolve())
+
+  if (!qz.websocket.isActive()) {
+    await qz.websocket.connect({ retries: 1, delay: 1 })
+  }
+  return qz
+}
+
+// Lista as impressoras instaladas no PC (precisa do QZ Tray rodando).
+// Retorna { printers: string[], padrao: string|null }
+export async function qzListarImpressoras() {
+  const qz = await qzConectar()
+  let printers = []
+  let padrao = null
+  try { printers = await qz.printers.find() } catch { printers = [] }
+  try { padrao = await qz.printers.getDefault() } catch { padrao = null }
+  if (!Array.isArray(printers)) printers = [printers].filter(Boolean)
+  return { printers, padrao }
+}
+
+// Indica se o QZ Tray está acessível (app rodando no PC).
+export async function qzDisponivel() {
+  try { await qzConectar(); return true }
+  catch { return false }
+}
+
+async function imprimirViaQz(pedido, empresa, printerName) {
+  const qz = await qzConectar()
+  const larguraMm = larguraCupom() === '58mm' ? 58 : 80
+  const config = qz.configs.create(printerName, {
+    size: { width: larguraMm, height: null },
+    units: 'mm',
+    margins: 0,
+    rasterize: true,
+    colorType: 'blackwhite',
+    scaleContent: true,
+  })
+  const data = [{ type: 'pixel', format: 'html', flavor: 'plain', data: montarCupomHtml(pedido, empresa) }]
+  await qz.print(config, data)
+}
+
+// ──────────────────── Fallback do navegador (iframe) ────────────────────
+function imprimirCupomNavegador(pedido, empresa = {}) {
+  const html = montarCupomHtml(pedido, empresa)
+
+  const iframe = document.createElement('iframe')
+  iframe.setAttribute('aria-hidden', 'true')
+  iframe.style.position = 'fixed'
+  iframe.style.right = '0'
+  iframe.style.bottom = '0'
+  iframe.style.width = '0'
+  iframe.style.height = '0'
+  iframe.style.border = '0'
+  document.body.appendChild(iframe)
+
+  const doc = iframe.contentWindow.document
+  doc.open()
+  doc.write(html)
+  doc.close()
+
+  setTimeout(() => {
+    try {
+      iframe.contentWindow.focus()
+      iframe.contentWindow.print()
+    } catch {
+      // ignora falhas de impressão (best-effort)
+    }
+    setTimeout(() => iframe.remove(), 1500)
+  }, 300)
+}
+
+// Imprime o cupom. Se houver impressora escolhida e o QZ Tray estiver rodando,
+// imprime direto nela (silencioso). Caso contrário, cai no diálogo do navegador.
+export async function imprimirCupom(pedido, empresa = {}) {
+  const printer = impressoraEscolhida()
+  if (printer) {
+    try {
+      await imprimirViaQz(pedido, empresa, printer)
+      return
+    } catch {
+      // QZ indisponível / falhou → usa o fallback do navegador
+    }
+  }
+  imprimirCupomNavegador(pedido, empresa)
+}

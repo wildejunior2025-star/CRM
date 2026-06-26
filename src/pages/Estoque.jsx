@@ -2,10 +2,54 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import '../components/Page.css'
 
-const MOTIVOS = {
+function ItemSearch({ items, value, onChange, placeholder = 'Buscar...' }) {
+  const [busca, setBusca] = useState('')
+  const [aberto, setAberto] = useState(false)
+  const selecionado = items.find((i) => i.id === value)
+  const filtrados = busca.trim()
+    ? items.filter((i) => i.nome.toLowerCase().includes(busca.toLowerCase())).slice(0, 12)
+    : items.slice(0, 12)
+  function handleSelect(id) { onChange(id); setBusca(''); setAberto(false) }
+  const displayValue = aberto ? busca : (selecionado?.nome ?? '')
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        type="text"
+        placeholder={placeholder}
+        value={displayValue}
+        onChange={(e) => { setBusca(e.target.value); setAberto(true) }}
+        onFocus={() => { setBusca(''); setAberto(true) }}
+        onBlur={() => setTimeout(() => setAberto(false), 150)}
+        autoComplete="off"
+        style={{ width: '100%' }}
+      />
+      {aberto && filtrados.length > 0 && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0,
+          background: 'var(--surface, #fff)', border: '1px solid var(--border)',
+          borderRadius: 6, zIndex: 200, maxHeight: 220, overflowY: 'auto',
+          boxShadow: '0 4px 16px rgba(0,0,0,.15)',
+        }}>
+          {filtrados.map((i) => (
+            <div key={i.id} onMouseDown={() => handleSelect(i.id)} style={{
+              padding: '8px 12px', cursor: 'pointer', fontSize: 14,
+              color: 'var(--text)', borderBottom: '1px solid var(--border)',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover,rgba(0,0,0,.05))'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              {i.nome}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const MOTIVOS_PADRAO = {
   entrada: ['compra', 'devolucao', 'ajuste_inventario'],
   saida: ['venda', 'perda', 'ajuste_inventario'],
-  ajuste: ['ajuste_inventario'],
 }
 
 export default function Estoque() {
@@ -36,6 +80,37 @@ export default function Estoque() {
   })
   const [savingCasco, setSavingCasco] = useState(false)
 
+  const [motivos, setMotivos] = useState(MOTIVOS_PADRAO)
+  const [showMotivosModal, setShowMotivosModal] = useState(false)
+  const [motivoTab, setMotivoTab] = useState('entrada')
+  const [novoMotivo, setNovoMotivo] = useState('')
+  const [savingMotivo, setSavingMotivo] = useState(false)
+
+  async function loadMotivos() {
+    const { data } = await supabase.from('motivos_estoque').select('tipo, nome').order('nome')
+    if (data && data.length > 0) {
+      setMotivos({
+        entrada: data.filter(m => m.tipo === 'entrada').map(m => m.nome),
+        saida: data.filter(m => m.tipo === 'saida').map(m => m.nome),
+      })
+    }
+  }
+
+  async function handleAddMotivo() {
+    const nome = novoMotivo.trim().toLowerCase()
+    if (!nome) return
+    setSavingMotivo(true)
+    await supabase.rpc('add_motivo_estoque', { p_tipo: motivoTab, p_nome: nome })
+    setNovoMotivo('')
+    await loadMotivos()
+    setSavingMotivo(false)
+  }
+
+  async function handleDeleteMotivo(tipo, nome) {
+    await supabase.from('motivos_estoque').delete().eq('tipo', tipo).eq('nome', nome)
+    await loadMotivos()
+  }
+
   async function loadAll() {
     setLoading(true)
     setError(null)
@@ -65,6 +140,7 @@ export default function Estoque() {
 
   useEffect(() => {
     loadAll()
+    loadMotivos()
   }, [])
 
   function openMovModal() {
@@ -83,7 +159,7 @@ export default function Estoque() {
     setMovForm((prev) => {
       const next = { ...prev, [name]: value }
       if (name === 'tipo') {
-        next.motivo = MOTIVOS[value][0]
+        next.motivo = (motivos[value] ?? MOTIVOS_PADRAO[value] ?? [])[0] ?? ''
       }
       return next
     })
@@ -159,10 +235,13 @@ export default function Estoque() {
     <div>
       <div className="page-header">
         <h1>Estoque</h1>
-        <div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-secondary" onClick={() => setShowMotivosModal(true)}>
+            Motivos
+          </button>
           <button className="btn btn-secondary" onClick={openCascoModal}>
             + Movimento de casco
-          </button>{' '}
+          </button>
           <button className="btn btn-primary" onClick={openMovModal}>
             + Movimento de estoque
           </button>
@@ -258,18 +337,12 @@ export default function Estoque() {
               <div className="form-grid">
                 <div className="form-field full">
                   <label>Produto</label>
-                  <select
-                    name="produto_id"
+                  <ItemSearch
+                    items={produtos}
                     value={movForm.produto_id}
-                    onChange={handleMovChange}
-                    required
-                  >
-                    {produtos.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.nome}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(id) => setMovForm((p) => ({ ...p, produto_id: id }))}
+                    placeholder="Buscar produto..."
+                  />
                 </div>
 
                 <div className="form-field">
@@ -288,7 +361,7 @@ export default function Estoque() {
                     value={movForm.motivo}
                     onChange={handleMovChange}
                   >
-                    {MOTIVOS[movForm.tipo].map((m) => (
+                    {(motivos[movForm.tipo] ?? MOTIVOS_PADRAO[movForm.tipo] ?? []).map((m) => (
                       <option key={m} value={m}>
                         {m}
                       </option>
@@ -333,6 +406,50 @@ export default function Estoque() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showMotivosModal && (
+        <div className="modal-overlay" onClick={() => setShowMotivosModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <h2>Motivos de movimentação</h2>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              {['entrada', 'saida'].map(t => (
+                <button
+                  key={t}
+                  className={`btn btn-sm ${motivoTab === t ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => { setMotivoTab(t); setNovoMotivo('') }}
+                >
+                  {t === 'entrada' ? 'Entrada' : 'Saída'}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <input
+                value={novoMotivo}
+                onChange={(e) => setNovoMotivo(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddMotivo())}
+                placeholder={`Novo motivo de ${motivoTab === 'entrada' ? 'entrada' : 'saída'}...`}
+                style={{ flex: 1 }}
+              />
+              <button className="btn btn-primary btn-sm" onClick={handleAddMotivo} disabled={savingMotivo || !novoMotivo.trim()}>
+                + Adicionar
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {(motivos[motivoTab] ?? []).map((m) => (
+                <div key={m} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-hover, rgba(0,0,0,.04))', borderRadius: 6 }}>
+                  <span style={{ fontSize: 14 }}>{m}</span>
+                  <button className="btn btn-danger btn-sm" onClick={() => handleDeleteMotivo(motivoTab, m)}>
+                    Remover
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setShowMotivosModal(false)}>Fechar</button>
+            </div>
           </div>
         </div>
       )}

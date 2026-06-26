@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
-const BrandingCtx = createContext({ empresaParceira: null, loadingBranding: false })
+const BrandingCtx = createContext({ empresaParceira: null, loadingBranding: false, plataformaLogoUrl: null })
 
-const MAIN_HOSTS = ['crm.wildejunior2025.workers.dev', 'localhost', '127.0.0.1']
+const MAIN_HOSTS = ['app.fwcinter.com', 'portal.fwcinter.com', 'admin.fwcinter.com', 'fwcinter.com', 'crm.wildejunior2025.workers.dev', 'localhost', '127.0.0.1']
 
 function hexToRgb(hex) {
   return {
@@ -32,6 +32,19 @@ function applyBranding(cor) {
 export function BrandingProvider({ children }) {
   const [empresaParceira, setEmpresaParceira] = useState(null)
   const [loadingBranding, setLoadingBranding] = useState(true)
+  const [plataformaLogoUrl, setPlataformaLogoUrl] = useState(null)
+
+  // Carrega logo da plataforma (sempre, independente do domínio)
+  useEffect(() => {
+    supabase
+      .from('configuracoes_plataforma')
+      .select('valor')
+      .eq('chave', 'logo_url')
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.valor) setPlataformaLogoUrl(data.valor)
+      })
+  }, [])
 
   useEffect(() => {
     const hostname = window.location.hostname
@@ -53,7 +66,7 @@ export function BrandingProvider({ children }) {
   }, [])
 
   return (
-    <BrandingCtx.Provider value={{ empresaParceira, loadingBranding }}>
+    <BrandingCtx.Provider value={{ empresaParceira, loadingBranding, plataformaLogoUrl }}>
       {children}
     </BrandingCtx.Provider>
   )

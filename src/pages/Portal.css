@@ -81,8 +81,22 @@
 
 .portal-pedido-data {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.portal-pedido-icon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.portal-pedido-loja {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
 }
 
 .portal-pedido-dia {
@@ -93,9 +107,25 @@
 }
 
 .portal-pedido-hora {
+  display: block;
   font-size: 12px;
   color: var(--text-muted);
 }
+
+.loja-btn-add {
+  padding: 12px 20px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 120ms;
+}
+
+.loja-btn-add:hover { background: var(--primary-hover); }
 
 .portal-pedido-status {
   padding: 4px 10px;

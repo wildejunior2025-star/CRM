@@ -22,6 +22,11 @@
   overflow: hidden;
 }
 
+.empresa-dropdown-menu.dropup {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
 .empresa-dropdown-menu button {
   display: block;
   width: 100%;

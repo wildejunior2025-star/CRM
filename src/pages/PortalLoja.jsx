@@ -20,7 +20,7 @@ async function geocodificar(endereco) {
   try {
     const q = encodeURIComponent(`${endereco}, Brasil`)
     const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, {
-      headers: { 'User-Agent': 'CRM-VendaMais/1.0' }
+      headers: { 'User-Agent': 'CRM-FWC/1.0' }
     })
     const data = await res.json()
     if (data?.[0]) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }

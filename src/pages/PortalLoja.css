@@ -8,8 +8,6 @@
 /* ── Root ── */
 .loja-root {
   width: 100%;
-  /* Cancela o padding-top do .portal-content */
-  margin-top: -16px;
 }
 
 /* ════════════════════════════════
@@ -25,16 +23,15 @@
   */
   width: 100vw;
   margin-left: calc(-50vw + 50%);
-  height: 200px;
+  height: 220px;
   overflow: hidden;
   background: var(--primary);
   flex-shrink: 0;
-  /* z-index baixo — a identity (logo) precisa ficar na frente */
   z-index: 0;
 }
 
-@media (min-width: 480px) {
-  .loja-hero { height: 260px; }
+@media (min-width: 768px) {
+  .loja-hero { height: 280px; }
 }
 
 .loja-hero-img {
@@ -275,7 +272,12 @@
 ════════════════════════════════ */
 .loja-catalogo {
   padding-top: 4px;
-  padding-bottom: 8px;
+  /*
+    Garante que o último card nunca fique sob o menu de navegação inferior
+    (60px) nem sob a barra flutuante da sacola (~72px acima do nav).
+    Usa 160px para cobrir ambos os casos com margem segura.
+  */
+  padding-bottom: 160px;
 }
 
 .loja-secao {
@@ -292,104 +294,111 @@
 }
 
 .loja-lista {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  border: 1.5px solid var(--border);
-  border-radius: 14px;
-  overflow: hidden;
-  background: var(--surface);
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 500px) {
+  .loja-lista { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (min-width: 800px) {
+  .loja-lista { grid-template-columns: repeat(3, 1fr); }
 }
 
 /* ════════════════════════════════
-   CARD HORIZONTAL (iFood style)
+   CARD — 2 colunas estilo referência
 ════════════════════════════════ */
 .loja-card {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 14px;
-  border-bottom: 1px solid var(--border);
+  align-items: stretch;
   background: var(--surface);
-  transition: background 120ms;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 140ms, box-shadow 140ms;
+  min-height: 130px;
 }
 
-.loja-card:last-child {
-  border-bottom: none;
+.loja-card:hover:not(.indisponivel) {
+  border-color: var(--primary);
+  box-shadow: 0 2px 12px var(--primary-ring);
 }
 
 .loja-card:not(.indisponivel):active {
-  background: var(--surface-hover);
+  opacity: 0.9;
 }
 
 .loja-card.indisponivel {
-  opacity: 0.55;
+  opacity: 0.50;
 }
 
-/* Info textual (flex 1) */
+/* Info textual (esquerda) */
 .loja-card-info {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  padding: 14px 12px;
+  gap: 0;
 }
 
 .loja-card-nome {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text);
-  margin: 0;
+  margin: 0 0 5px;
   line-height: 1.3;
 }
 
 .loja-card-descricao {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin: 0;
-  line-height: 1.45;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.loja-card-meta {
   font-size: 11px;
   color: var(--text-muted);
   margin: 0;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex: 1;
+}
+
+.loja-card-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin: 4px 0 0;
   font-weight: 500;
 }
 
 .loja-card-preco {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
   color: var(--primary);
-  margin: 4px 0 0;
+  margin: 10px 0 0;
   letter-spacing: -0.01em;
 }
 
-/* Imagem quadrada à direita */
+/* Imagem — lado direito, ocupa altura total do card */
 .loja-card-img-wrap {
   position: relative;
   flex-shrink: 0;
-  width: 96px;
-  height: 96px;
+  width: 110px;
+  align-self: stretch;
 }
 
 .loja-card-img {
-  width: 96px;
-  height: 96px;
+  width: 110px;
+  height: 100%;
   object-fit: cover;
-  border-radius: 12px;
   display: block;
   background: var(--surface-hover);
+  border-radius: 0;
 }
 
 .loja-card-img-placeholder {
-  width: 96px;
-  height: 96px;
-  border-radius: 12px;
+  width: 110px;
+  height: 100%;
   background: var(--surface-hover);
   display: flex;
   align-items: center;
@@ -418,8 +427,8 @@
 /* Botão "+" circular no canto inferior direito da imagem */
 .loja-add-btn {
   position: absolute;
-  bottom: -6px;
-  right: -6px;
+  bottom: 8px;
+  right: 8px;
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -451,8 +460,8 @@
 /* Controle − N + compacto quando qtd > 0 */
 .loja-qty-overlay {
   position: absolute;
-  bottom: -6px;
-  right: -6px;
+  bottom: 8px;
+  right: 8px;
   display: flex;
   align-items: center;
   background: var(--primary);
@@ -582,6 +591,20 @@
   background: var(--danger-bg);
   color: var(--danger);
   border-color: var(--danger);
+}
+
+.loja-aviso-fechada {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(239, 68, 68, 0.08);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 16px 12px;
 }
 
 @keyframes loja-fade-in {
@@ -881,19 +904,193 @@
 }
 
 /* ════════════════════════════════
+   CHECKOUT MODAL
+════════════════════════════════ */
+.loja-checkout {
+  max-height: 92dvh;
+}
+
+.loja-checkout-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.loja-checkout-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.loja-checkout-section h3 {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.loja-checkout-section label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.loja-checkout-section input,
+.loja-checkout-section textarea {
+  padding: 11px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 140ms, box-shadow 140ms;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.loja-checkout-section input:focus,
+.loja-checkout-section textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+.loja-checkout-section textarea {
+  resize: none;
+  min-height: 64px;
+}
+
+.loja-checkout-row {
+  display: flex;
+  gap: 10px;
+}
+
+.loja-checkout-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 2px 0;
+}
+
+.loja-checkout-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 2px;
+}
+
+.loja-checkout-total strong {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--primary);
+  letter-spacing: -0.02em;
+}
+
+/* Campo de formulário (label + input empilhados) */
+.loja-checkout-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* Ocupa toda a largura disponível no grid pai */
+.loja-checkout-field.full {
+  grid-column: 1 / -1;
+}
+
+.loja-checkout-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+  /* Exibe o conteúdo do label em linha (texto + asterisco) */
+  display: block;
+}
+
+.loja-checkout-field input {
+  padding: 11px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 140ms, box-shadow 140ms;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.loja-checkout-field input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+/* Mensagem de erro inline */
+.loja-erro {
+  background: var(--danger-bg, rgba(239, 68, 68, 0.08));
+  color: var(--danger, #ef4444);
+  border: 1px solid var(--danger, #ef4444);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.loja-checkout-payment-opts {
+  display: flex;
+  gap: 10px;
+}
+
+.loja-pay-opt {
+  flex: 1;
+  padding: 14px 8px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 140ms;
+  text-align: center;
+  font-family: inherit;
+}
+
+.loja-pay-opt.active {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+
+.loja-pay-opt:not(.active):hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* ════════════════════════════════
    RESPONSIVIDADE DESKTOP
 ════════════════════════════════ */
 @media (min-width: 600px) {
-  /* No desktop o portal-content tem max-width 600px centralizado.
-     O hero precisa quebrar pra fora do container — já feito com margin negativa. */
-  .loja-card-img-wrap {
-    width: 104px;
-    height: 104px;
-  }
-
-  .loja-card-img,
-  .loja-card-img-placeholder {
-    width: 104px;
-    height: 104px;
-  }
+  .loja-card-img-wrap { width: 120px; }
+  .loja-card-img      { width: 120px; }
+  .loja-card-img-placeholder { width: 120px; }
 }
+
+@keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }

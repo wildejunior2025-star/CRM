@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 100" fill="none">
+  <defs>
+    <radialGradient id="bg3" cx="35%" cy="30%" r="75%" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#3B1278"/>
+      <stop offset="45%"  stop-color="#1A0640"/>
+      <stop offset="100%" stop-color="#080112"/>
+    </radialGradient>
+    <radialGradient id="amb3" cx="60%" cy="80%" r="55%" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#7C3AED" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#7C3AED" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="vs3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#C084FC"/>
+    </linearGradient>
+    <linearGradient id="ps3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#F5F3FF"/>
+      <stop offset="100%" stop-color="#A855F7"/>
+    </linearGradient>
+    <filter id="gv3" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3.5"/>
+    </filter>
+    <filter id="gp3" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="4.5"/>
+    </filter>
+    <!-- Gradiente texto escuro — visível em qualquer fundo -->
+    <linearGradient id="text-dark" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="#3B0764"/>
+      <stop offset="50%"  stop-color="#6D28D9"/>
+      <stop offset="100%" stop-color="#A855F7"/>
+    </linearGradient>
+    <clipPath id="ic3">
+      <rect width="100" height="100" rx="22"/>
+    </clipPath>
+  </defs>
+
+  <!-- ÍCONE -->
+  <rect width="100" height="100" rx="22" fill="url(#bg3)"/>
+  <rect width="100" height="100" rx="22" fill="url(#amb3)" clip-path="url(#ic3)"/>
+  <rect x="0.5" y="0.5" width="99" height="99" rx="21.5"
+        fill="none" stroke="#7C3AED" stroke-opacity="0.3" stroke-width="1"/>
+
+  <!-- Glow V -->
+  <g filter="url(#gv3)" opacity="0.7">
+    <polyline points="20,29 50,76 80,29"
+      stroke="#C084FC" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+  <polyline points="20,29 50,76 80,29"
+    stroke="url(#vs3)" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- Glow + -->
+  <g filter="url(#gp3)" opacity="0.8">
+    <line x1="80" y1="14" x2="80" y2="44" stroke="#C084FC" stroke-width="7" stroke-linecap="round"/>
+    <line x1="65" y1="29" x2="95" y2="29" stroke="#C084FC" stroke-width="7" stroke-linecap="round"/>
+  </g>
+  <line x1="80" y1="14" x2="80" y2="44" stroke="url(#ps3)" stroke-width="5.5" stroke-linecap="round"/>
+  <line x1="65" y1="29" x2="95" y2="29" stroke="url(#ps3)" stroke-width="5.5" stroke-linecap="round"/>
+  <circle cx="80" cy="29" r="4" fill="#F5F3FF" opacity="0.95"/>
+  <circle cx="80" cy="29" r="2" fill="#FFFFFF"/>
+
+  <!-- WORDMARK — texto escuro, visível em fundo claro/transparente -->
+  <text
+    x="118" y="62"
+    font-family="'Inter', 'SF Pro Display', 'Segoe UI', Arial, sans-serif"
+    font-size="42"
+    font-weight="800"
+    fill="url(#text-dark)"
+    letter-spacing="-1.5"
+  >Venda Mais</text>
+
+  <text
+    x="119" y="80"
+    font-family="'Inter', 'Segoe UI', Arial, sans-serif"
+    font-size="12"
+    font-weight="500"
+    fill="#7C3AED"
+    letter-spacing="3.5"
+    opacity="0.7"
+  >VENDA COM INTELIGÊNCIA</text>
+</svg>

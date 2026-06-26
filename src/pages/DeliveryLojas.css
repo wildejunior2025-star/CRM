@@ -1,0 +1,301 @@
+/* ── DeliveryLojas — public store listing ── */
+
+.dl-root {
+  min-height: 100vh;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  box-sizing: border-box;
+}
+
+.dl-root *, .dl-root *::before, .dl-root *::after {
+  box-sizing: border-box;
+}
+
+/* ── Header ── */
+.dl-header {
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.dl-header-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dl-logo {
+  font-size: 22px;
+  font-weight: 800;
+  color: #f1f5f9;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.dl-logo-plus {
+  color: #7c3aed;
+}
+
+.dl-tagline {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+  padding-left: 12px;
+  border-left: 1px solid #1e293b;
+}
+
+/* ── Main ── */
+.dl-main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 28px 20px 60px;
+  min-width: 0;
+}
+
+/* ── Busca ── */
+.dl-search-wrap {
+  position: relative;
+  margin-bottom: 24px;
+}
+
+.dl-search-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #64748b;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+}
+
+.dl-search {
+  width: 100%;
+  padding: 12px 14px 12px 42px;
+  background: #1e293b;
+  border: 1.5px solid #334155;
+  border-radius: 12px;
+  color: #f1f5f9;
+  font-size: 14px;
+  transition: border-color 140ms, box-shadow 140ms;
+}
+
+.dl-search::placeholder {
+  color: #64748b;
+}
+
+.dl-search:focus {
+  outline: none;
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2);
+}
+
+/* ── Título da seção ── */
+.dl-section-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0 0 16px;
+  letter-spacing: -0.01em;
+}
+
+/* ── Grid ── */
+.dl-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 480px) {
+  .dl-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 768px) {
+  .dl-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1100px) {
+  .dl-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* ── Card ── */
+.dl-card {
+  background: #1e1b4b;
+  border: 1px solid #312e81;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  font-family: inherit;
+  color: inherit;
+  transition: border-color 140ms, transform 140ms, box-shadow 140ms;
+  width: 100%;
+}
+
+.dl-card:hover {
+  border-color: #7c3aed;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(124, 58, 237, 0.18);
+}
+
+.dl-card:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.dl-card:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+}
+
+/* ── Banner ── */
+.dl-card-banner {
+  position: relative;
+  width: 100%;
+  height: 140px;
+  background: #1a1a3e;
+  overflow: hidden;
+}
+
+.dl-card-banner-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.dl-card-banner-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #4c1d95;
+  background: #1e1b4b;
+}
+
+/* ── Badge aberto/fechado ── */
+.dl-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 3px 9px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.dl-badge--open {
+  background: rgba(22, 163, 74, 0.9);
+  color: #fff;
+}
+
+.dl-badge--closed {
+  background: rgba(51, 65, 85, 0.9);
+  color: #94a3b8;
+}
+
+/* ── Corpo do card ── */
+.dl-card-body {
+  padding: 12px 14px 14px;
+}
+
+.dl-card-nome {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0 0 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dl-card-cat {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 0 0 10px;
+}
+
+.dl-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dl-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* ── Skeleton ── */
+.dl-card--skeleton {
+  pointer-events: none;
+}
+
+.dl-skel {
+  background: #1e293b;
+  animation: dl-pulse 1.4s ease-in-out infinite;
+}
+
+.dl-card--skeleton .dl-card-banner {
+  background: #1e293b;
+  animation: dl-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes dl-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+/* ── Estado vazio ── */
+.dl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 72px 24px;
+  text-align: center;
+}
+
+.dl-empty-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  background: rgba(124, 58, 237, 0.12);
+  color: #7c3aed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.dl-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin: 0;
+}
+
+.dl-empty-sub {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+}

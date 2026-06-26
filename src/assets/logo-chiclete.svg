@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <!-- Fundo: dark premium com mesh gradient roxo profundo -->
+    <radialGradient id="bg-radial" cx="35%" cy="30%" r="75%" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#3B1278"/>
+      <stop offset="45%"  stop-color="#1A0640"/>
+      <stop offset="100%" stop-color="#080112"/>
+    </radialGradient>
+
+    <!-- Glow do V: blur para efeito neon -->
+    <filter id="glow-v" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="14" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <!-- Glow do +: bloom mais intenso -->
+    <filter id="glow-plus" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <!-- Gradiente no traço do V (branco quente → violeta luminoso) -->
+    <linearGradient id="v-stroke" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#FFFFFF"/>
+      <stop offset="50%"  stop-color="#E0CCFF"/>
+      <stop offset="100%" stop-color="#C084FC"/>
+    </linearGradient>
+
+    <!-- Gradiente no + (violeta elétrico → branco) -->
+    <linearGradient id="plus-stroke" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#F5F3FF"/>
+      <stop offset="100%" stop-color="#A855F7"/>
+    </linearGradient>
+
+    <!-- Brilho interno no topo do ícone (gloss sutil) -->
+    <radialGradient id="gloss-top" cx="40%" cy="18%" r="50%" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Brilho ambiente roxo no centro-baixo -->
+    <radialGradient id="ambient" cx="60%" cy="80%" r="45%" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#7C3AED" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#7C3AED" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Clip para arredondar tudo dentro do ícone -->
+    <clipPath id="icon-clip">
+      <rect width="512" height="512" rx="115"/>
+    </clipPath>
+  </defs>
+
+  <!-- ═══ FUNDO ═══ -->
+  <rect width="512" height="512" rx="115" fill="url(#bg-radial)"/>
+
+  <!-- Luz ambiente roxa vindo de baixo -->
+  <rect width="512" height="512" rx="115" fill="url(#ambient)" clip-path="url(#icon-clip)"/>
+
+  <!-- Gloss no topo -->
+  <rect width="512" height="512" rx="115" fill="url(#gloss-top)" clip-path="url(#icon-clip)"/>
+
+  <!-- Borda sutil (1px interna roxo translúcido) -->
+  <rect x="1" y="1" width="510" height="510" rx="114"
+        fill="none" stroke="#7C3AED" stroke-opacity="0.25" stroke-width="2"/>
+
+  <!-- ═══ CAMADA GLOW DO V (blur, atrás do V real) ═══ -->
+  <g filter="url(#glow-v)" opacity="0.6">
+    <polyline
+      points="105,148 256,384 407,148"
+      stroke="#C084FC"
+      stroke-width="52"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      fill="none"
+    />
+  </g>
+
+  <!-- ═══ V REAL (traço gradiente branco → violeta) ═══ -->
+  <polyline
+    points="105,148 256,384 407,148"
+    stroke="url(#v-stroke)"
+    stroke-width="44"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  />
+
+  <!-- ═══ CAMADA GLOW DO + (bloom intenso) ═══ -->
+  <g filter="url(#glow-plus)" opacity="0.8">
+    <!-- vertical -->
+    <line x1="407" y1="75"  x2="407" y2="221" stroke="#C084FC" stroke-width="36" stroke-linecap="round"/>
+    <!-- horizontal -->
+    <line x1="334" y1="148" x2="480" y2="148" stroke="#C084FC" stroke-width="36" stroke-linecap="round"/>
+  </g>
+
+  <!-- ═══ + REAL ═══ -->
+  <!-- vertical -->
+  <line x1="407" y1="75"  x2="407" y2="221"
+        stroke="url(#plus-stroke)" stroke-width="30" stroke-linecap="round"/>
+  <!-- horizontal -->
+  <line x1="334" y1="148" x2="480" y2="148"
+        stroke="url(#plus-stroke)" stroke-width="30" stroke-linecap="round"/>
+
+  <!-- Ponto de interseção do + (brilho central) -->
+  <circle cx="407" cy="148" r="20" fill="#F5F3FF" opacity="0.9"/>
+  <circle cx="407" cy="148" r="10" fill="#FFFFFF"/>
+</svg>

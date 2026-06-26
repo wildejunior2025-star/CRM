@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
@@ -58,7 +59,20 @@ export default function WhatsAppConfig() {
   const [saving,  setSaving]  = useState(false)
   const [saveMsg, setSaveMsg] = useState(null)
 
-  const pollRef = useRef(null)
+  // ── Créditos WhatsApp ──
+  const [creditos, setCreditos] = useState(null)
+
+  // ── Vendedor IA ──
+  const [iaAtivo,         setIaAtivo]         = useState(false)
+  const [iaNome,          setIaNome]          = useState('Assistente')
+  const [iaInstrucoes,    setIaInstrucoes]    = useState('')
+  const [savingIa,        setSavingIa]        = useState(false)
+  const [iaSaveMsg,       setIaSaveMsg]       = useState(null)
+  const [gerandoRoteiro,  setGerandoRoteiro]  = useState(false)
+  const [empresaData,     setEmpresaData]     = useState(null)
+
+  const pollRef    = useRef(null)
+  const qrRefRef   = useRef(null)
 
   useEffect(() => {
     if (!profile?.empresa_id) return
@@ -69,11 +83,14 @@ export default function WhatsAppConfig() {
 
   async function loadConfig() {
     setLoading(true)
-    const { data } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('empresa_id', profile.empresa_id)
-      .single()
+
+    const [{ data }, { data: empresa }, { data: produtos }] = await Promise.all([
+      supabase.from('whatsapp_config').select('*').eq('empresa_id', profile.empresa_id).single(),
+      supabase.from('empresas').select('*').eq('id', profile.empresa_id).single(),
+      supabase.from('produtos').select('nome, preco_venda, embalagem').eq('empresa_id', profile.empresa_id).eq('ativo', true).limit(20),
+    ])
+    if (empresa) setEmpresaData(empresa)
+
     if (data) {
       setForm({
         notif_pedido:  data.notif_pedido  ?? true,
@@ -83,22 +100,40 @@ export default function WhatsAppConfig() {
         msg_pedido:    data.msg_pedido    ?? DEFAULT_MSG_PEDIDO,
         msg_fiado:     data.msg_fiado     ?? DEFAULT_MSG_FIADO,
       })
+      setIaAtivo(data.ia_ativo ?? false)
+      setIaNome(data.ia_nome ?? 'Assistente')
+      setIaInstrucoes(data.ia_instrucoes ?? '')
+      // Carrega phone salvo no banco como fallback
+      if (data.connected_phone && !connPhone) {
+        setConnPhone(data.connected_phone)
+      }
     }
+
+    if (empresa) setCreditos(empresa.whatsapp_creditos ?? 0)
+
     setLoading(false)
   }
 
-  async function checkStatus() {
+  async function checkStatus(retry = true) {
     setConnStatus('loading')
     const { data, error } = await supabase.functions.invoke('whatsapp-connect', {
       body: { action: 'status' },
     })
-    if (error || !data || data.state === 'not_found' || data.state === 'error' || data.state === 'close') {
-      setConnStatus('disconnected')
-      return
-    }
-    if (data.state === 'open') {
+
+    if (data?.state === 'open') {
       setConnStatus('connected')
       setConnPhone(data.phone)
+      return
+    }
+
+    // Se deu erro ou estado transitório (close), tenta mais uma vez após 3s
+    if (retry && (error || !data || data.state === 'close' || data.state === 'error')) {
+      await new Promise(r => setTimeout(r, 3000))
+      return checkStatus(false)
+    }
+
+    if (data?.state === 'not_found') {
+      setConnStatus('disconnected')
     } else {
       setConnStatus('disconnected')
     }
@@ -106,6 +141,7 @@ export default function WhatsAppConfig() {
 
   function startPolling() {
     stopPolling()
+    // Verifica status a cada 4s para detectar quando conectar
     pollRef.current = setInterval(async () => {
       const { data } = await supabase.functions.invoke('whatsapp-connect', {
         body: { action: 'status' },
@@ -118,6 +154,22 @@ export default function WhatsAppConfig() {
         loadConfig()
       }
     }, 4000)
+
+    // Renova o QR a cada 25s (QR codes do WhatsApp expiram em ~30s)
+    qrRefRef.current = setInterval(async () => {
+      const { data } = await supabase.functions.invoke('whatsapp-connect', {
+        body: { action: 'connect' },
+      })
+      if (data?.connected) {
+        stopPolling()
+        setConnStatus('connected')
+        setConnPhone(data.phone)
+        setQrCode(null)
+        loadConfig()
+      } else if (data?.qrcode) {
+        setQrCode(data.qrcode)
+      }
+    }, 25000)
   }
 
   function stopPolling() {
@@ -125,9 +177,33 @@ export default function WhatsAppConfig() {
       clearInterval(pollRef.current)
       pollRef.current = null
     }
+    if (qrRefRef.current) {
+      clearInterval(qrRefRef.current)
+      qrRefRef.current = null
+    }
+  }
+
+  async function refreshQr() {
+    const { data } = await supabase.functions.invoke('whatsapp-connect', {
+      body: { action: 'connect' },
+    })
+    if (data?.connected) {
+      stopPolling()
+      setConnStatus('connected')
+      setConnPhone(data.phone)
+      setQrCode(null)
+      loadConfig()
+    } else if (data?.qrcode) {
+      setQrCode(data.qrcode)
+    }
   }
 
   async function handleConnect() {
+    const confirmado = window.confirm(
+      'Atenção: Se este WhatsApp já estiver conectado em outro computador, conectar novamente pode encerrar a sessão anterior.\n\nDeseja continuar?'
+    )
+    if (!confirmado) return
+
     setConnStatus('connecting')
     setConnError(null)
     setQrCode(null)
@@ -174,6 +250,31 @@ export default function WhatsAppConfig() {
     setSaveMsg(null)
   }
 
+  async function gerarRoteiro() {
+    setGerandoRoteiro(true)
+
+    // Só gera regras de comportamento — produtos, preços, taxa de entrega,
+    // horário e formas de pagamento já são injetados automaticamente pelo sistema.
+    const roteiro = [
+      `- Atenda sempre com simpatia e rapidez. Use emojis com moderação. 😊`,
+      `- Se o cliente pedir desconto, informe que não é possível sem autorização do responsável.`,
+      `- Para reclamações ou problemas com pedido: peça desculpas, acolha o cliente e diga que o responsável entrará em contato.`,
+      `- Se o cliente perguntar algo que você não sabe responder, diga: "Vou verificar com o responsável e retorno em breve! 😊"`,
+      `- Nunca invente informações que não estejam nos dados da loja.`,
+      ``,
+      `💡 Dicas do que você pode adicionar manualmente:`,
+      `- Promoções ativas (ex: "Compre 10 leve 12 até sexta-feira!")`,
+      `- Produtos em falta (ex: "Sabor Manga esgotado essa semana")`,
+      `- Regras específicas da loja (ex: "Não fazemos entregas fora da cidade X")`,
+      `- Tom de voz (ex: "Chame o cliente sempre pelo nome")`,
+    ].join('\n')
+
+    setIaInstrucoes(roteiro)
+    setIaSaveMsg({ type: 'success', text: 'Roteiro gerado! Revise e clique em Salvar roteiro.' })
+    setTimeout(() => setIaSaveMsg(null), 4000)
+    setGerandoRoteiro(false)
+  }
+
   async function handleSave(e) {
     e.preventDefault()
     if (!profile?.empresa_id) return
@@ -194,6 +295,39 @@ export default function WhatsAppConfig() {
     }
   }
 
+  async function handleToggleIa(novoValor) {
+    setIaAtivo(novoValor)
+    setSavingIa(true)
+    setIaSaveMsg(null)
+    const { error } = await supabase
+      .from('whatsapp_config')
+      .upsert({ empresa_id: profile.empresa_id, ia_ativo: novoValor }, { onConflict: 'empresa_id' })
+    setSavingIa(false)
+    if (error) {
+      setIaSaveMsg({ type: 'error', text: error.message })
+      setIaAtivo(!novoValor)
+    } else {
+      setIaSaveMsg({ type: 'success', text: novoValor ? 'Vendedor IA ativado.' : 'Vendedor IA desativado.' })
+      setTimeout(() => setIaSaveMsg(null), 2500)
+    }
+  }
+
+  async function handleSaveInstrucoes(e) {
+    e.preventDefault()
+    setSavingIa(true)
+    setIaSaveMsg(null)
+    const { error } = await supabase
+      .from('whatsapp_config')
+      .upsert({ empresa_id: profile.empresa_id, ia_nome: iaNome, ia_instrucoes: iaInstrucoes }, { onConflict: 'empresa_id' })
+    setSavingIa(false)
+    if (error) {
+      setIaSaveMsg({ type: 'error', text: error.message })
+    } else {
+      setIaSaveMsg({ type: 'success', text: 'Roteiro salvo com sucesso.' })
+      setTimeout(() => setIaSaveMsg(null), 2500)
+    }
+  }
+
   const isConnected   = connStatus === 'connected'
   const isConnecting  = connStatus === 'connecting'
   const isLoading     = connStatus === 'loading'
@@ -207,6 +341,50 @@ export default function WhatsAppConfig() {
         </span>
       </div>
 
+      {/* ── Seção Créditos WhatsApp ── */}
+      <Link to="/whatsapp-creditos" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+        <div className="wa-section" style={{ cursor: 'pointer', transition: 'opacity 120ms' }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+        >
+          <h2 className="wa-section-title" style={{ justifyContent: 'space-between' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="16"/>
+                <line x1="8" y1="12" x2="16" y2="12"/>
+              </svg>
+              Créditos WhatsApp
+            </span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M9 18l6-6-6-6"/>
+            </svg>
+          </h2>
+
+          {creditos === null ? (
+            <p className="wa-hint">Carregando saldo...</p>
+          ) : (
+            <div>
+              <p style={{ fontSize: 15, marginBottom: 8 }}>
+                Saldo: <strong>{creditos} mensagem{creditos !== 1 ? 's' : ''} disponíve{creditos !== 1 ? 'is' : 'l'}</strong>
+              </p>
+              {creditos === 0 && (
+                <div className="wa-test-result error" style={{ marginTop: 4 }}>
+                  <AlertIcon />
+                  Sem créditos. Mensagens bloqueadas. Clique para recarregar.
+                </div>
+              )}
+              {creditos > 0 && creditos < 10 && (
+                <div className="wa-test-result" style={{ marginTop: 4, color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d' }}>
+                  <AlertIcon />
+                  Saldo baixo! Clique para recarregar.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Link>
+
       {/* ── Seção Conexão ── */}
       <div className="wa-section">
         <h2 className="wa-section-title">
@@ -216,7 +394,7 @@ export default function WhatsAppConfig() {
 
         {isLoading && (
           <p className="wa-hint" style={{ textAlign: 'center', padding: '16px 0' }}>
-            Verificando conexão...
+            Verificando conexão com o servidor... aguarde.
           </p>
         )}
 
@@ -287,18 +465,141 @@ export default function WhatsAppConfig() {
               className="wa-qr-img"
             />
             <p className="wa-hint wa-qr-polling">
-              Aguardando leitura do QR Code...
+              Aguardando leitura do QR Code... (renova automaticamente)
             </p>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => { stopPolling(); setQrCode(null); setConnStatus('disconnected') }}
-            >
-              Cancelar
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={refreshQr}
+              >
+                Atualizar QR
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => { stopPolling(); setQrCode(null); setConnStatus('disconnected') }}
+              >
+                Cancelar
+              </button>
+            </div>
           </div>
         )}
       </div>
+
+      {/* ── Seção Vendedor IA ── */}
+      <div className="wa-section">
+        <h2 className="wa-section-title">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/>
+            <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+            <line x1="9" y1="9" x2="9.01" y2="9"/>
+            <line x1="15" y1="9" x2="15.01" y2="9"/>
+          </svg>
+          Vendedor IA
+        </h2>
+
+        <div className="wa-fields">
+          <label className="wa-checkbox-row">
+            <input
+              type="checkbox"
+              checked={iaAtivo}
+              disabled={savingIa}
+              onChange={(e) => handleToggleIa(e.target.checked)}
+            />
+            <div className="wa-checkbox-text">
+              <span>Ativar vendedor IA no WhatsApp</span>
+              <small>
+                Quando ativo, o CRM responde automaticamente mensagens recebidas no WhatsApp,
+                monta pedidos e atende clientes usando inteligência artificial.
+                Consome 1 crédito por resposta enviada.
+              </small>
+            </div>
+          </label>
+
+          {iaSaveMsg && (
+            <div className={`wa-test-result ${iaSaveMsg.type}`} style={{ marginTop: 8 }}>
+              {iaSaveMsg.type === 'success' ? <CheckIcon /> : <AlertIcon />}
+              {iaSaveMsg.text}
+            </div>
+          )}
+
+          <div className="wa-input-group" style={{ marginTop: 16 }}>
+            <label htmlFor="wa-ia-nome">Nome do vendedor IA</label>
+            <input
+              id="wa-ia-nome"
+              type="text"
+              maxLength={40}
+              placeholder="Ex: Ana, João, Assistente FWC..."
+              value={iaNome}
+              onChange={(e) => setIaNome(e.target.value)}
+            />
+            <span className="wa-hint">
+              Este é o nome com que a IA vai se apresentar para os clientes no WhatsApp.
+            </span>
+          </div>
+
+        </div>
+      </div>
+
+      {/* ── Seção Roteiro do Vendedor IA ── */}
+      <form onSubmit={handleSaveInstrucoes}>
+        <div className="wa-section">
+          <h2 className="wa-section-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+            </svg>
+            Roteiro do Vendedor IA
+          </h2>
+
+          <p className="wa-hint" style={{ marginBottom: 14 }}>
+            Escreva aqui as instruções personalizadas para o seu vendedor IA. Ele vai seguir este roteiro antes de responder qualquer cliente.
+            Pode incluir: tom de voz, promoções ativas, condições de pagamento, política de entrega, como lidar com objeções, etc.
+          </p>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={gerarRoteiro}
+              disabled={gerandoRoteiro}
+              style={{ fontSize: 13, padding: '6px 14px' }}
+            >
+              {gerandoRoteiro ? 'Gerando...' : '✨ Gerar roteiro automático'}
+            </button>
+          </div>
+
+          <div className="wa-input-group">
+            <textarea
+              rows={10}
+              value={iaInstrucoes}
+              onChange={(e) => setIaInstrucoes(e.target.value)}
+              placeholder={`Exemplos do que você pode escrever aqui:
+
+- Nosso prazo de entrega é de 1 dia útil para pedidos feitos até as 14h.
+- Aceitamos PIX, dinheiro e cartão na entrega.
+- Temos promoção essa semana: compre 2 caixas de cerveja e ganhe 10% de desconto.
+- Se o cliente perguntar sobre fiado, diga que o limite máximo é R$ 200.
+- Sempre ofereça o produto mais vendido da semana: [nome do produto].
+- Seja sempre animado e use emojis com moderação. 😊
+- Se o cliente reclamar de algo, peça desculpas e ofereça uma solução.`}
+            />
+          </div>
+
+          <div className="wa-form-actions" style={{ paddingTop: 12 }}>
+            {iaSaveMsg && (
+              <div className={`wa-test-result ${iaSaveMsg.type}`}>
+                {iaSaveMsg.type === 'success' ? <CheckIcon /> : <AlertIcon />}
+                {iaSaveMsg.text}
+              </div>
+            )}
+            <button type="submit" className="btn btn-primary" disabled={savingIa}>
+              {savingIa ? 'Salvando...' : 'Salvar roteiro'}
+            </button>
+          </div>
+        </div>
+      </form>
 
       {/* ── Seção Notificações ── */}
       <form onSubmit={handleSave}>
@@ -351,19 +652,17 @@ export default function WhatsAppConfig() {
                 </div>
               </label>
 
-              {form.notif_estoque && (
-                <div className="wa-input-group">
-                  <label htmlFor="wa-admin-phone">Seu número para receber alertas</label>
-                  <input
-                    id="wa-admin-phone"
-                    type="tel"
-                    placeholder="84999999999"
-                    value={form.admin_phone}
-                    onChange={(e) => setField('admin_phone', e.target.value)}
-                  />
-                  <span className="wa-hint">DDD + número, sem espaços. Ex: 84998180774</span>
-                </div>
-              )}
+              <div className="wa-input-group" style={{ marginTop: 12 }}>
+                <label htmlFor="wa-admin-phone">Número do responsável (alertas e reclamações)</label>
+                <input
+                  id="wa-admin-phone"
+                  type="tel"
+                  placeholder="84999999999"
+                  value={form.admin_phone}
+                  onChange={(e) => setField('admin_phone', e.target.value)}
+                />
+                <span className="wa-hint">DDD + número, sem espaços. Ex: 84998180774. Usado para alertas de estoque e quando o bot escalar um problema para humano.</span>
+              </div>
             </div>
           )}
         </div>

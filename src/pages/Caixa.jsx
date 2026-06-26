@@ -58,13 +58,13 @@ export default function Caixa() {
     setHistorico(historicoRes.data ?? [])
     setUsuarios(usuariosRes.data ?? [])
 
-    if (caixaRes.data) {
+    if (caixaRes.data?.[0]) {
       const [resumoRes, movimentosRes] = await Promise.all([
-        supabase.from('caixa_resumo').select('*').eq('caixa_id', caixaRes.data.id).maybeSingle(),
+        supabase.from('caixa_resumo').select('*').eq('caixa_id', caixaRes.data[0].id).maybeSingle(),
         supabase
           .from('caixa_movimentos')
           .select('*')
-          .eq('caixa_id', caixaRes.data.id)
+          .eq('caixa_id', caixaRes.data[0].id)
           .order('created_at', { ascending: false }),
       ])
       setResumo(resumoRes.data ?? null)

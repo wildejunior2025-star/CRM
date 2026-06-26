@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useTheme } from '../hooks/useTheme'
 import { useAuth } from '../hooks/useAuth'
+import { supabase } from '../lib/supabaseClient'
 import ThemeToggle from './ThemeToggle'
 import './Layout.css'
 
@@ -19,8 +20,20 @@ export default function SuperAdminLayout() {
   const { theme, toggleTheme } = useTheme()
   const { user, logout } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [nomePlataforma, setNomePlataforma] = useState('CRM · Super Admin')
 
   function closeMenu() { setMenuOpen(false) }
+
+  useEffect(() => {
+    supabase
+      .from('configuracoes_plataforma')
+      .select('valor')
+      .eq('chave', 'nome_plataforma')
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.valor) setNomePlataforma(`${data.valor} · Admin`)
+      })
+  }, [])
 
   return (
     <div className="layout">
@@ -29,7 +42,7 @@ export default function SuperAdminLayout() {
         <button className="mobile-menu-btn" onClick={() => setMenuOpen(true)} aria-label="Abrir menu">
           <HamburgerIcon />
         </button>
-        <span className="mobile-topbar-title">CRM · Super Admin</span>
+        <span className="mobile-topbar-title">{nomePlataforma}</span>
         <ThemeToggle theme={theme} onToggle={toggleTheme} />
       </div>
 
@@ -41,11 +54,18 @@ export default function SuperAdminLayout() {
 
       {/* Sidebar / drawer */}
       <aside className={`sidebar${menuOpen ? ' open' : ''}`}>
-        <div className="sidebar-title">Depósito CRM · Admin</div>
+        <div className="sidebar-title">{nomePlataforma}</div>
         <nav>
           <NavLink
             to="/super-admin"
             end
+            className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
+            onClick={closeMenu}
+          >
+            Dashboard
+          </NavLink>
+          <NavLink
+            to="/super-admin/empresas"
             className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
             onClick={closeMenu}
           >
@@ -64,6 +84,55 @@ export default function SuperAdminLayout() {
             onClick={closeMenu}
           >
             Comissões
+          </NavLink>
+          <NavLink
+            to="/super-admin/whatsapp"
+            className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
+            onClick={closeMenu}
+          >
+            WhatsApp IA
+          </NavLink>
+          <NavLink
+            to="/super-admin/mlm"
+            className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
+            onClick={closeMenu}
+          >
+            Rede MLM
+          </NavLink>
+          <NavLink
+            to="/super-admin/rede-mapa"
+            className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
+            onClick={closeMenu}
+          >
+            Mapa da Rede
+          </NavLink>
+          <NavLink
+            to="/super-admin/empresa-rede"
+            className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
+            onClick={closeMenu}
+          >
+            Rede de Lojas
+          </NavLink>
+          <NavLink
+            to="/super-admin/pagamentos"
+            className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
+            onClick={closeMenu}
+          >
+            Pagamentos
+          </NavLink>
+          <NavLink
+            to="/super-admin/financeiro"
+            className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
+            onClick={closeMenu}
+          >
+            Financeiro
+          </NavLink>
+          <NavLink
+            to="/super-admin/config"
+            className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
+            onClick={closeMenu}
+          >
+            Configurações
           </NavLink>
         </nav>
         <div className="sidebar-footer">

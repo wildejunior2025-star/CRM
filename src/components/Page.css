@@ -84,7 +84,8 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   box-shadow: var(--shadow-sm);
   transition: background-color 160ms ease, border-color 160ms ease;
 }
@@ -166,23 +167,23 @@
 .modal {
   background: var(--surface);
   border-radius: 12px;
-  padding: 24px;
+  padding: 28px 32px;
   width: 100%;
-  max-width: 480px;
+  max-width: 640px;
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: var(--shadow-md);
 }
 
 .modal h2 {
-  margin: 0 0 16px;
-  font-size: 18px;
+  margin: 0 0 20px;
+  font-size: 20px;
 }
 
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+  gap: 16px;
 }
 
 .form-grid .full {
@@ -196,7 +197,7 @@
 }
 
 .form-field label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-muted);
 }
@@ -204,7 +205,8 @@
 .form-field input,
 .form-field select,
 .form-field textarea {
-  padding: 8px 10px;
+  padding: 9px 12px;
+  font-size: 15px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
@@ -224,7 +226,7 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 20px;
+  margin-top: 24px;
 }
 
 .toolbar {
@@ -288,6 +290,10 @@
 .error-text {
   color: var(--danger);
   font-size: 13px;
+}
+
+@keyframes spin {
+  to { transform: translateY(-50%) rotate(360deg); }
 }
 
 /* ── Skeleton loader ── */

@@ -44,15 +44,13 @@
 
 /* Dropdown */
 .notif-dropdown {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  position: fixed;
   width: 320px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: var(--shadow-md);
-  z-index: 200;
+  z-index: 1000;
   overflow: hidden;
 }
 
@@ -152,12 +150,9 @@
   color: var(--text-muted);
 }
 
-/* Mobile: dropdown vai pra esquerda pra não sair da tela */
 @media (max-width: 768px) {
   .notif-dropdown {
-    right: auto;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 290px;
+    width: calc(100vw - 16px);
+    max-width: 320px;
   }
 }

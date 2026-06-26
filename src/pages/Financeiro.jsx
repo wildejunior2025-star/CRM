@@ -5,6 +5,26 @@ import { sendWhatsApp, formatWaMessage } from '../lib/whatsapp'
 import '../components/Page.css'
 import './Financeiro.css'
 
+const fmtBRL = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+const PERIODOS_DELIVERY = [
+  { label: 'Este mês',    valor: 'mes_atual' },
+  { label: 'Mês passado', valor: 'mes_passado' },
+  { label: 'Total',       valor: 'total' },
+]
+
+function getRangeDelivery(periodo) {
+  const now = new Date()
+  if (periodo === 'mes_atual')
+    return { start: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), end: null }
+  if (periodo === 'mes_passado')
+    return {
+      start: new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString(),
+      end:   new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
+    }
+  return { start: null, end: null }
+}
+
 const SALDO_ALTO_LIMITE = 100
 
 const FORMA_BADGE = {
@@ -20,6 +40,13 @@ function FormaBadge({ value }) {
 }
 
 export default function Financeiro() {
+  // ── Delivery / repasse ──
+  const [periodoD, setPeriodoD]     = useState('mes_atual')
+  const [pedidos, setPedidos]       = useState([])
+  const [taxaPct, setTaxaPct]       = useState(15)
+  const [loadingD, setLoadingD]     = useState(true)
+
+  // ── Fiado (existente) ──
   const [clientes, setClientes] = useState([])
   const [saldos, setSaldos] = useState([])
   const [pagamentos, setPagamentos] = useState([])
@@ -40,6 +67,27 @@ export default function Financeiro() {
   const [sendingWa, setSendingWa] = useState(null)
   const [waError, setWaError] = useState(null)
   const [waSuccess, setWaSuccess] = useState(null)
+
+  async function loadDelivery() {
+    setLoadingD(true)
+    const { start, end } = getRangeDelivery(periodoD)
+    let q = supabase
+      .from('pedidos_delivery')
+      .select('origem, total, forma_pagamento')
+      .neq('status', 'cancelado')
+    if (start) q = q.gte('created_at', start)
+    if (end)   q = q.lt('created_at', end)
+
+    const [pedRes, cfgRes] = await Promise.all([
+      q,
+      supabase.from('configuracoes_plataforma').select('valor').eq('chave', 'taxa_plataforma_pct').maybeSingle(),
+    ])
+    setPedidos(pedRes.data ?? [])
+    if (cfgRes.data?.valor) setTaxaPct(Number(cfgRes.data.valor))
+    setLoadingD(false)
+  }
+
+  useEffect(() => { loadDelivery() }, [periodoD])
 
   async function loadAll() {
     setLoading(true)
@@ -164,6 +212,25 @@ export default function Financeiro() {
     ? pagamentos.filter((p) => p.cliente_id === historicoCliente.id)
     : []
 
+  // ── Cálculos delivery ──
+  const pedWA  = pedidos.filter(p => p.origem === 'whatsapp')
+  const pedApp = pedidos.filter(p => p.origem === 'app')
+  const pedCat = pedidos.filter(p => !p.origem || p.origem === 'cardapio')
+
+  const volWA  = pedWA.reduce((s, p)  => s + Number(p.total || 0), 0)
+  const volApp = pedApp.reduce((s, p) => s + Number(p.total || 0), 0)
+  const volCat = pedCat.reduce((s, p) => s + Number(p.total || 0), 0)
+  const volTotal = volWA + volApp + volCat
+
+  // Repasse: PIX = plataforma segura e repassa 85% / Dinheiro+Cartão = loja já tem, deve 15%
+  const pedPix  = pedidos.filter(p => p.forma_pagamento === 'pix')
+  const pedCash = pedidos.filter(p => p.forma_pagamento !== 'pix')
+  const volPix  = pedPix.reduce((s, p)  => s + Number(p.total || 0), 0)
+  const volCash = pedCash.reduce((s, p) => s + Number(p.total || 0), 0)
+  const repPix    = volPix  * (1 - taxaPct / 100)  // plataforma repassa esse valor à loja
+  const debitoCash = volCash * (taxaPct / 100)       // loja deve esse valor à plataforma
+  const repLiquido = repPix - debitoCash
+
   return (
     <div>
       <div className="page-header">
@@ -177,6 +244,74 @@ export default function Financeiro() {
         </button>
       </div>
 
+      {/* ── FILTRO PERÍODO DELIVERY ── */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+        {PERIODOS_DELIVERY.map(p => (
+          <button key={p.valor} onClick={() => setPeriodoD(p.valor)} style={{
+            padding: '5px 14px', borderRadius: 20, border: '1px solid var(--border)', cursor: 'pointer',
+            fontWeight: 600, fontSize: 13,
+            background: periodoD === p.valor ? 'var(--primary)' : 'var(--card)',
+            color:      periodoD === p.valor ? '#fff' : 'var(--text)',
+          }}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── VENDAS POR CANAL ── */}
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
+        Vendas por canal
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 24 }}>
+        {[
+          { label: 'WhatsApp',   vol: volWA,  qtd: pedWA.length,  cor: '#25d366' },
+          { label: 'App / Portal', vol: volApp, qtd: pedApp.length, cor: '#f97316' },
+          { label: 'Catálogo',   vol: volCat, qtd: pedCat.length, cor: 'var(--primary)' },
+        ].map(({ label, vol, qtd, cor }) => (
+          <div key={label} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderLeft: `4px solid ${cor}`, borderRadius: 12, padding: '14px 16px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>{label}</div>
+            <div style={{ fontSize: 20, fontWeight: 900 }}>{fmtBRL(vol)}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{qtd} pedido{qtd !== 1 ? 's' : ''}</div>
+          </div>
+        ))}
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Total</div>
+          <div style={{ fontSize: 20, fontWeight: 900 }}>{fmtBRL(volTotal)}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{pedidos.length} pedido{pedidos.length !== 1 ? 's' : ''}</div>
+        </div>
+      </div>
+
+      {/* ── REPASSE ── */}
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
+        Repasse da plataforma
+      </div>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '4px 20px 0', marginBottom: 28 }}>
+        {/* PIX — plataforma repassa */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0', borderBottom: '1px solid var(--border)' }}>
+          <div>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Vendas no PIX</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>· plataforma repassa {100 - taxaPct}% ({fmtBRL(volPix)} em vendas)</span>
+          </div>
+          <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--success)' }}>+{fmtBRL(repPix)}</span>
+        </div>
+        {/* Dinheiro/Cartão — loja deve 15% */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0', borderBottom: '1px solid var(--border)' }}>
+          <div>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Débito dinheiro / cartão</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>· {taxaPct}% sobre {fmtBRL(volCash)} — descontado do repasse</span>
+          </div>
+          <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--danger)' }}>−{fmtBRL(debitoCash)}</span>
+        </div>
+        {/* Líquido */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0', fontWeight: 800 }}>
+          <span style={{ fontSize: 14 }}>= Repasse líquido</span>
+          <span style={{ fontSize: 18, color: repLiquido >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 900 }}>
+            {repLiquido < 0 ? '−' : ''}{fmtBRL(Math.abs(repLiquido))}
+          </span>
+        </div>
+      </div>
+
+      {/* ── FIADO (seção existente) ── */}
       <div className="dashboard-grid" style={{ marginBottom: 20 }}>
         <div className="card dashboard-card">
           <div className="label">Total fiado em aberto</div>

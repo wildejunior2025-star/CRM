@@ -4,7 +4,7 @@ import { CONDICOES_PAGAMENTO } from '../lib/constants'
 import ClienteHistorico from './ClienteHistorico'
 import '../components/Page.css'
 
-const TIPOS = ['mercadinho', 'bar', 'restaurante', 'distribuidor', 'outro']
+const TIPOS_PADRAO = ['mercadinho', 'bar', 'restaurante', 'distribuidor', 'outro']
 const DIAS = ['segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado']
 
 const emptyForm = {
@@ -35,6 +35,31 @@ export default function Clientes() {
   const [saving, setSaving] = useState(false)
   const [historicoCliente, setHistoricoCliente] = useState(null)
 
+  const [tipos, setTipos] = useState(TIPOS_PADRAO)
+  const [showTiposModal, setShowTiposModal] = useState(false)
+  const [novoTipo, setNovoTipo] = useState('')
+  const [savingTipo, setSavingTipo] = useState(false)
+
+  async function loadTipos() {
+    const { data } = await supabase.from('tipos_cliente').select('id, nome').order('nome')
+    if (data && data.length > 0) setTipos(data.map(t => t.nome))
+  }
+
+  async function handleAddTipo() {
+    const nome = novoTipo.trim().toLowerCase()
+    if (!nome) return
+    setSavingTipo(true)
+    await supabase.rpc('add_tipo_cliente', { p_nome: nome })
+    setNovoTipo('')
+    await loadTipos()
+    setSavingTipo(false)
+  }
+
+  async function handleDeleteTipo(nome) {
+    await supabase.from('tipos_cliente').delete().eq('nome', nome)
+    await loadTipos()
+  }
+
   async function loadClientes() {
     setLoading(true)
     setError(null)
@@ -50,6 +75,7 @@ export default function Clientes() {
 
   useEffect(() => {
     loadClientes()
+    loadTipos()
   }, [])
 
   function openNew() {
@@ -116,6 +142,8 @@ export default function Clientes() {
 
   async function handleDelete(id) {
     if (!confirm('Excluir este cliente?')) return
+    // Remove referências no carrinho antes de excluir o cliente
+    await supabase.from('whatsapp_carrinho').update({ cliente_id: null }).eq('cliente_id', id)
     const { error } = await supabase.from('clientes').delete().eq('id', id)
     if (error) setError(error.message)
     else loadClientes()
@@ -136,9 +164,14 @@ export default function Clientes() {
     <div>
       <div className="page-header">
         <h1>Clientes</h1>
-        <button className="btn btn-primary" onClick={openNew}>
-          + Novo cliente
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-secondary" onClick={() => setShowTiposModal(true)}>
+            Tipos de cliente
+          </button>
+          <button className="btn btn-primary" onClick={openNew}>
+            + Novo cliente
+          </button>
+        </div>
       </div>
 
       <div className="toolbar">
@@ -247,10 +280,8 @@ export default function Clientes() {
                 <div className="form-field">
                   <label>Tipo</label>
                   <select name="tipo" value={form.tipo} onChange={handleChange}>
-                    {TIPOS.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
+                    {tipos.map((t) => (
+                      <option key={t} value={t}>{t}</option>
                     ))}
                   </select>
                 </div>
@@ -408,6 +439,39 @@ export default function Clientes() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showTiposModal && (
+        <div className="modal-overlay" onClick={() => setShowTiposModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }}>
+            <h2>Tipos de cliente</h2>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <input
+                value={novoTipo}
+                onChange={(e) => setNovoTipo(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddTipo())}
+                placeholder="Ex: padaria, farmácia..."
+                style={{ flex: 1 }}
+              />
+              <button className="btn btn-primary btn-sm" onClick={handleAddTipo} disabled={savingTipo || !novoTipo.trim()}>
+                + Adicionar
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {tipos.map((t) => (
+                <div key={t} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-hover, rgba(0,0,0,.04))', borderRadius: 6 }}>
+                  <span style={{ fontSize: 14 }}>{t}</span>
+                  <button className="btn btn-danger btn-sm" onClick={() => handleDeleteTipo(t)}>
+                    Remover
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setShowTiposModal(false)}>Fechar</button>
+            </div>
           </div>
         </div>
       )}

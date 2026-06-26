@@ -25,14 +25,14 @@ const emptyForm = {
   descricao: '',
 }
 
-const CATALOGO_BASE = 'https://vendamais-catalogo.pages.dev'
+const CATALOGO_BASE = 'https://lojaonline.fwcinter.com'
 
 export default function Produtos() {
   const { profile, empresa } = useAuth()
   const [copiadoLink, setCopiadoLink] = useState(false)
 
   const slug = empresa?.slug ?? null
-  const linkCardapio = slug ? `${CATALOGO_BASE}/?loja=${slug}` : null
+  const linkCardapio = slug ? `${CATALOGO_BASE}/${slug}` : null
 
   function copiarLink() {
     if (!linkCardapio) return
@@ -580,7 +580,7 @@ export default function Produtos() {
                 </div>
 
                 <div className="form-field">
-                  <label style={{color:'#a855f7'}}>Preço App (R$) <span style={{fontWeight:400, fontSize:'0.8em', color:'var(--text-muted)'}}>Venda Mais app</span></label>
+                  <label style={{color:'#a855f7'}}>Preço App (R$) <span style={{fontWeight:400, fontSize:'0.8em', color:'var(--text-muted)'}}>FWC Inter app</span></label>
                   <input
                     type="number"
                     step="0.01"

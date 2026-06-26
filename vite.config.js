@@ -9,12 +9,13 @@ export default defineConfig({
     cloudflare(),
     VitePWA({
       registerType: 'autoUpdate',
+      injectRegister: null, // registramos manualmente em main.jsx (com checagem periódica)
       devOptions: { enabled: false },
       includeAssets: ['favicon.svg', 'pwa-192.svg', 'pwa-512.svg'],
       manifest: {
-        name: 'Depósito CRM',
-        short_name: 'CRM',
-        description: 'Sistema de gestão para depósitos de bebidas',
+        name: 'FWC Inter',
+        short_name: 'FWC Inter',
+        description: 'FWC Inter — tecnologia e soluções para o seu negócio',
         theme_color: '#863bff',
         background_color: '#1a1625',
         display: 'standalone',
@@ -52,6 +53,9 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2}'],
         navigateFallback: 'index.html',
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

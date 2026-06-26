@@ -59,6 +59,17 @@
   gap: 4px;
 }
 
+.sidebar-group-label {
+  display: block;
+  padding: 14px 12px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
 .sidebar-link {
   display: block;
   padding: 10px 12px;
@@ -77,6 +88,11 @@
 .sidebar-link.active {
   background: var(--primary);
   color: var(--primary-contrast);
+}
+
+.sidebar-sublink {
+  font-size: 13px;
+  padding: 8px 12px;
 }
 
 .sidebar-footer {

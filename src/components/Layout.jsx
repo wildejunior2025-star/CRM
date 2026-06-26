@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate, useMatch } from 'react-router-dom'
 import { useTheme } from '../hooks/useTheme'
 import { useAuth } from '../hooks/useAuth'
 import ThemeToggle from './ThemeToggle'
@@ -9,18 +9,43 @@ import NotificationBell from './NotificationBell'
 import './Layout.css'
 
 const links = [
-  { to: '/', label: 'Dashboard', end: true, roles: ['admin', 'vendedor'] },
+  { group: 'Operações' },
+  { to: '/', label: 'Dashboard', end: true, roles: ['admin'] },
   { to: '/vendas', label: 'Vendas', roles: ['admin', 'vendedor'] },
   { to: '/caixa', label: 'Caixa', roles: ['admin', 'vendedor'] },
-  { to: '/financeiro', label: 'Financeiro', roles: ['admin'] },
-  { to: '/relatorios', label: 'Relatórios', roles: ['admin', 'vendedor'] },
-  { to: '/clientes', label: 'Clientes', roles: ['admin', 'vendedor'] },
-  { to: '/produtos', label: 'Produtos', roles: ['admin'] },
+  { to: '/clientes', label: 'Clientes', roles: ['admin'] },
+  { to: '/usuarios', label: 'Vendedores', roles: ['admin'] },
+
+  { group: 'Catálogo' },
+  { to: '/produtos', label: 'Catálogo', roles: ['admin'] },
   { to: '/estoque', label: 'Estoque', roles: ['admin'] },
-  { to: '/minha-loja', label: 'Minha Loja', roles: ['admin'] },
+
+  { group: 'Delivery' },
+  {
+    to: '/minha-loja', label: 'Minha Loja', roles: ['admin'],
+    children: [
+      { to: '/raio-entrega', label: 'Raio de Entrega', roles: ['admin'] },
+    ],
+  },
+  { to: '/pedidos-delivery', label: 'Pedidos Delivery', roles: ['admin'] },
+
+  { group: 'Automação' },
   { to: '/whatsapp', label: 'WhatsApp', roles: ['admin', 'super_admin'] },
-  { to: '/usuarios', label: 'Usuários', roles: ['admin'] },
+  { to: '/whatsapp-creditos', label: 'Créditos Bot', roles: ['admin'] },
+  { to: '/bot-teste', label: 'Teste Bot', roles: ['admin', 'super_admin'] },
+
+  { group: 'Financeiro' },
+  { to: '/financeiro', label: 'Financeiro', roles: ['admin'] },
+  { to: '/relatorios', label: 'Relatórios', roles: ['admin'] },
 ]
+
+function ChevronDown({ size = 12 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 12 15 18 9"/>
+    </svg>
+  )
+}
 
 function HamburgerIcon() {
   return (
@@ -38,6 +63,15 @@ export default function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [expandidos, setExpandidos] = useState(() => new Set(['/minha-loja']))
+
+  function toggleExpandido(to) {
+    setExpandidos(prev => {
+      const next = new Set(prev)
+      next.has(to) ? next.delete(to) : next.add(to)
+      return next
+    })
+  }
 
   const temBackupSuperAdmin = !!localStorage.getItem('crm_superadmin_backup')
 
@@ -46,7 +80,7 @@ export default function Layout() {
     if (ok) navigate('/super-admin')
   }
 
-  const visibleLinks = links.filter((link) => link.roles.includes(profile?.perfil))
+  const visibleLinks = links.filter((link) => link.group || link.roles?.includes(profile?.perfil))
 
   function closeMenu() { setMenuOpen(false) }
 
@@ -83,17 +117,67 @@ export default function Layout() {
       <aside className={`sidebar${menuOpen ? ' open' : ''}`}>
         <div className="sidebar-title">{empresa?.nome || 'CRM'}</div>
         <nav>
-          {visibleLinks.map((link) => (
-            <NavLink
-              key={link.to}
-              to={link.to}
-              end={link.end}
-              className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
-              onClick={closeMenu}
-            >
-              {link.label}
-            </NavLink>
-          ))}
+          {visibleLinks.map((link, i) =>
+            link.group ? (
+              <span key={`g-${i}`} className="sidebar-group-label">{link.group}</span>
+            ) : link.children ? (
+              <div key={link.to}>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <NavLink
+                    to={link.to}
+                    end={link.end}
+                    className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
+                    onClick={closeMenu}
+                    style={{ flex: 1 }}
+                  >
+                    {link.label}
+                  </NavLink>
+                  <button
+                    type="button"
+                    onClick={() => toggleExpandido(link.to)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: 'var(--text-muted)', padding: '6px 8px',
+                      borderRadius: 6, display: 'flex', alignItems: 'center',
+                      transition: 'transform 150ms',
+                      transform: expandidos.has(link.to) ? 'rotate(0deg)' : 'rotate(-90deg)',
+                    }}
+                    aria-label="Expandir"
+                  >
+                    <ChevronDown size={12} />
+                  </button>
+                </div>
+                {expandidos.has(link.to) && (
+                  <div style={{ paddingLeft: 12 }}>
+                    {link.children
+                      .filter(c => c.roles?.includes(profile?.perfil))
+                      .map(child => (
+                        <NavLink
+                          key={child.to}
+                          to={child.to}
+                          className={({ isActive }) => isActive ? 'sidebar-link sidebar-sublink active' : 'sidebar-link sidebar-sublink'}
+                          onClick={closeMenu}
+                        >
+                          <span style={{ marginRight: 6, opacity: 0.5, fontSize: 10 }}>└</span>
+                          {child.label}
+                        </NavLink>
+                      ))
+                    }
+                  </div>
+                )}
+              </div>
+            ) : (
+              <NavLink
+                key={link.to}
+                to={link.to}
+                end={link.end}
+                className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
+                onClick={closeMenu}
+              >
+                {link.label}
+              </NavLink>
+            )
+          )}
         </nav>
         <div className="sidebar-footer">
           <div className="sidebar-notif-row">

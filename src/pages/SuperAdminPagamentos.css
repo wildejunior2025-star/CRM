@@ -1,0 +1,316 @@
+.pag-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.pag-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pag-card-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+}
+
+.pag-card-valor {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.pag-card-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.pag-abas {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+
+.pag-aba {
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color .15s, border-color .15s;
+}
+
+.pag-aba.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.pag-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pag-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pag-item-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pag-item-nome {
+  font-size: 16px;
+  font-weight: 700;
+  display: block;
+}
+
+.pag-item-tipo {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  display: block;
+}
+
+.pag-item-valor {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.pag-item-mid {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pag-badge {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.pag-item-data,
+.pag-item-forma {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.pag-item-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.pag-pix-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  flex-wrap: wrap;
+}
+
+.pag-pix-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pag-pix-chave {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+  word-break: break-all;
+}
+
+.pag-copy-btn {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s;
+}
+
+.pag-copy-btn:hover {
+  background: var(--primary-bg);
+}
+
+.pag-item-pago-em {
+  font-size: 12px;
+  color: #16a34a;
+  margin: 0;
+}
+
+.pag-item-acoes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.pag-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+/* ── Header com botões de ação ── */
+.pag-header {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pag-header-acoes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── Botão Pagar via PIX ── */
+.pag-pagar-btn {
+  background: linear-gradient(135deg, #16a34a, #15803d);
+  color: #fff;
+  border: none;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.pag-pagar-btn:hover {
+  opacity: .88;
+}
+
+/* ── Modal direto ── */
+.pag-direct-modal {
+  max-width: 460px;
+}
+
+/* ── Modal confirmar pagamento ── */
+.pag-confirm-modal {
+  max-width: 420px;
+}
+
+.pag-confirm-info {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.pag-confirm-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.pag-confirm-row-col {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pag-confirm-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  min-width: 70px;
+  white-space: nowrap;
+}
+
+.pag-confirm-val {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pag-confirm-valor {
+  font-size: 20px;
+  font-weight: 800;
+  color: #16a34a;
+}
+
+.pag-confirm-chave {
+  font-family: monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.pag-confirm-aviso {
+  font-size: 13px;
+  color: #b45309;
+  background: rgba(234,179,8,.1);
+  border: 1px solid rgba(234,179,8,.3);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 0 0 4px;
+}
+
+.pag-result {
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 8px;
+  word-break: break-word;
+}
+
+.pag-result-ok {
+  background: rgba(34,197,94,.12);
+  color: #15803d;
+  border: 1px solid rgba(34,197,94,.3);
+}
+
+.pag-result-err {
+  background: rgba(239,68,68,.1);
+  color: #dc2626;
+  border: 1px solid rgba(239,68,68,.25);
+}
+
+@media (max-width: 600px) {
+  .pag-cards {
+    grid-template-columns: 1fr;
+  }
+}

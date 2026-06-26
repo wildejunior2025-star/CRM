@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">FWC Inter</string>
+    <string name="title_activity_main">FWC Inter</string>
+    <string name="package_name">com.fwcinter.app</string>
+    <string name="custom_url_scheme">com.fwcinter.app</string>
+</resources>

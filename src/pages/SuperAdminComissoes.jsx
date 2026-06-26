@@ -10,6 +10,7 @@ export default function SuperAdminComissoes() {
   const [marcandoId, setMarcandoId] = useState(null)
   const [filtroEmpresa, setFiltroEmpresa] = useState('todas')
   const [filtroStatus, setFiltroStatus] = useState('todos')
+  const [filtroPeriodo, setFiltroPeriodo] = useState(new Date().toISOString().slice(0, 7))
 
   async function load() {
     setLoading(true)
@@ -77,6 +78,7 @@ export default function SuperAdminComissoes() {
   const comissoesFiltradas = comissoes.filter(c => {
     if (filtroEmpresa !== 'todas' && c.empresa_id !== filtroEmpresa) return false
     if (filtroStatus !== 'todos' && c.status !== filtroStatus) return false
+    if (filtroPeriodo && !c.created_at.startsWith(filtroPeriodo)) return false
     return true
   })
 
@@ -152,7 +154,13 @@ export default function SuperAdminComissoes() {
       )}
 
       {/* Filtros e lista detalhada */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="month"
+          value={filtroPeriodo}
+          onChange={e => setFiltroPeriodo(e.target.value)}
+          style={{ padding: '7px 10px', borderRadius: 8, border: '1.5px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13 }}
+        />
         <select
           value={filtroEmpresa}
           onChange={e => setFiltroEmpresa(e.target.value)}
@@ -169,6 +177,14 @@ export default function SuperAdminComissoes() {
           <option value="pendente">Pendente</option>
           <option value="pago">Pago</option>
         </select>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={() => setFiltroPeriodo('')}
+          style={{ opacity: filtroPeriodo ? 1 : 0.4 }}
+          title="Limpar filtro de período"
+        >
+          Limpar mês
+        </button>
         <span style={{ marginLeft: 'auto', alignSelf: 'center', fontSize: 13, color: 'var(--text-muted)' }}>
           {comissoesFiltradas.length} registro{comissoesFiltradas.length !== 1 ? 's' : ''}
         </span>
