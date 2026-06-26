@@ -19,7 +19,7 @@ Legenda: ✅ feito · 🔨 em desenvolvimento · 🔜 próximo · 💡 planejado
 |---|------|--------|
 | I1 | Resumo diário no WhatsApp do dono | ✅ (cron 22h + botão "Receber agora") |
 | I2 | Alertas automáticos (estoque baixo às 8h no WhatsApp) | ✅ |
-| I3 | Fechamento/relatório mensal em PDF | 💡 |
+| I3 | Fechamento/relatório mensal em PDF (Relatórios → Imprimir/PDF) | ✅ |
 | I4 | Curva ABC — produtos A/B/C por faturamento (em Relatórios) | ✅ |
 | I5 | Contas a pagar/receber + fluxo de caixa | 💡 |
 
