@@ -180,15 +180,16 @@ export default function Relatorios() {
     const lista = Object.values(acc).sort((a, b) => b.subtotal - a.subtotal)
     const total = lista.reduce((s, p) => s + p.subtotal, 0)
     const classes = { A: { qtd: 0, valor: 0 }, B: { qtd: 0, valor: 0 }, C: { qtd: 0, valor: 0 } }
+    const items = []
     let cum = 0
-    const items = lista.map((p) => {
+    for (const p of lista) {
       cum += p.subtotal
       const pctCum = total > 0 ? (cum / total) * 100 : 0
       const classe = pctCum <= 80 ? 'A' : pctCum <= 95 ? 'B' : 'C'
       classes[classe].qtd += 1
       classes[classe].valor += p.subtotal
-      return { ...p, classe }
-    })
+      items.push({ ...p, classe })
+    }
     return { items, classes, total }
   })()
 
