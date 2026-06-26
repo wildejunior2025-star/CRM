@@ -1,0 +1,113 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+
+const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" }
+const EVOLUTION_API_URL = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$/, "")
+const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY") ?? ""
+const INSTANCE = "crmadmin" // WhatsApp da plataforma envia pro lojista
+const OFFSET = 3            // BRT = UTC-3
+const fmt = (v: number) => "R$ " + Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })
+const validPed = (s: string) => !["cancelado", "aguardando_pagamento"].includes(s)
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
+  const json = (d: unknown, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { ...cors, "Content-Type": "application/json" } })
+  try {
+    if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) return json({ ok: false, error: "Evolution API não configurada" }, 503)
+    const sb = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "")
+
+    let empresaId: string | null = null
+    try { empresaId = (await req.json())?.empresa_id ?? null } catch { empresaId = null }
+
+    // Janela de "hoje" e "mês" em horário de Brasília
+    const nowUtc = new Date()
+    const brt = new Date(nowUtc.getTime() - OFFSET * 3600 * 1000)
+    const y = brt.getUTCFullYear(), mo = brt.getUTCMonth(), d = brt.getUTCDate()
+    const dayStart = new Date(Date.UTC(y, mo, d) + OFFSET * 3600 * 1000).toISOString()
+    const monthStart = new Date(Date.UTC(y, mo, 1) + OFFSET * 3600 * 1000).toISOString()
+    const dataBR = `${String(d).padStart(2, "0")}/${String(mo + 1).padStart(2, "0")}`
+
+    let q = sb.from("empresas").select("id, nome, telefone_contato, meta_faturamento_mensal, status")
+      .in("status", ["ativo", "trial", "atrasado"])
+    if (empresaId) q = q.eq("id", empresaId)
+    const { data: empresas } = await q
+
+    let enviadas = 0
+    for (const emp of (empresas ?? [])) {
+      const fone = (emp.telefone_contato ?? "").replace(/\D/g, "")
+      if (fone.length < 10) continue
+      try {
+        const [vMesRes, pMesRes, prodRes] = await Promise.all([
+          sb.from("vendas").select("id, total, observacoes, created_at").eq("empresa_id", emp.id).neq("status", "cancelado").gte("created_at", monthStart),
+          sb.from("pedidos_delivery").select("total, origem, status, itens, created_at").eq("empresa_id", emp.id).gte("created_at", monthStart),
+          sb.from("produtos").select("id, nome").eq("empresa_id", emp.id),
+        ])
+        const vMes = vMesRes.data ?? [], pMes = pMesRes.data ?? []
+        const nomes: Record<string, string> = {}; for (const p of (prodRes.data ?? [])) nomes[p.id] = p.nome
+
+        let fat = 0, fatMes = 0, n = 0
+        const canal: Record<string, number> = { "📱 App": 0, "💬 WhatsApp/Loja": 0, "🍽️ Presencial": 0, "🛒 Balcão": 0 }
+        const vendaIdsHoje: string[] = []
+        for (const v of vMes) {
+          const val = Number(v.total); fatMes += val
+          if (v.created_at >= dayStart) {
+            fat += val; n++; vendaIdsHoje.push(v.id)
+            if ((v.observacoes || "").startsWith("Presencial")) canal["🍽️ Presencial"] += val
+            else canal["🛒 Balcão"] += val
+          }
+        }
+        for (const p of pMes) {
+          if (!validPed(p.status)) continue
+          const val = Number(p.total); fatMes += val
+          if (p.created_at >= dayStart) {
+            fat += val; n++
+            if (p.origem === "app") canal["📱 App"] += val
+            else if (p.origem === "whatsapp" || p.origem === "cardapio") canal["💬 WhatsApp/Loja"] += val
+            else canal["🛒 Balcão"] += val
+          }
+        }
+
+        // top produto de hoje (venda_itens + itens do delivery)
+        const agg: Record<string, number> = {}
+        if (vendaIdsHoje.length) {
+          const { data: itens } = await sb.from("venda_itens").select("produto_id, subtotal").in("venda_id", vendaIdsHoje)
+          for (const it of (itens ?? [])) { const nm = nomes[it.produto_id] ?? "Produto"; agg[nm] = (agg[nm] || 0) + Number(it.subtotal) }
+        }
+        for (const p of pMes) {
+          if (!validPed(p.status) || p.created_at < dayStart) continue
+          for (const it of (Array.isArray(p.itens) ? p.itens : [])) {
+            const nm = it.nome ?? "Item"; agg[nm] = (agg[nm] || 0) + Number(it.subtotal ?? (it.preco_unitario || 0) * (it.quantidade || 1))
+          }
+        }
+        const top = Object.entries(agg).sort((a, b) => b[1] - a[1])[0]
+        const canalTop = Object.entries(canal).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])[0]
+        const ticket = n > 0 ? fat / n : 0
+        const meta = Number(emp.meta_faturamento_mensal ?? 0)
+        const metaPct = meta > 0 ? Math.min(100, Math.round((fatMes / meta) * 100)) : null
+
+        let msg = `🏪 *${emp.nome}* — Resumo de hoje (${dataBR})\n\n`
+        if (n === 0) {
+          msg += "Nenhuma venda registrada hoje ainda. 💤\n"
+        } else {
+          msg += `💰 Faturamento: *${fmt(fat)}*\n`
+          msg += `🧾 ${n} ${n === 1 ? "venda" : "vendas"} · 🎟️ Ticket ${fmt(ticket)}\n`
+          if (top) msg += `🏆 Mais vendido: ${top[0]}\n`
+          if (canalTop) msg += `📊 Canal campeão: ${canalTop[0]} (${fmt(canalTop[1])})\n`
+        }
+        if (metaPct != null) msg += `🎯 Meta do mês: ${metaPct}% (${fmt(fatMes)} de ${fmt(meta)})\n`
+        msg += `\n_FWC Inter_`
+
+        const num = fone.startsWith("55") ? fone : "55" + fone
+        const r = await fetch(`${EVOLUTION_API_URL}/message/sendText/${INSTANCE}`, {
+          method: "POST", headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+          body: JSON.stringify({ number: num, text: msg }),
+        })
+        if (r.ok) enviadas++
+        else console.error("envio falhou", emp.nome, await r.text())
+      } catch (e) { console.error("erro empresa", emp.id, String(e)) }
+    }
+    return json({ ok: true, enviadas })
+  } catch (e) {
+    return json({ ok: false, error: String(e) }, 500)
+  }
+})

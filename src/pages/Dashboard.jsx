@@ -103,7 +103,19 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [refToken, setRefToken] = useState(null)
   const [copiado, setCopiado] = useState(false)
+  const [enviandoResumo, setEnviandoResumo] = useState(false)
+  const [resumoMsg, setResumoMsg] = useState(null)
   const timerRef = useRef(null)
+
+  async function enviarResumo() {
+    setEnviandoResumo(true); setResumoMsg(null)
+    const { data, error } = await supabase.functions.invoke('resumo-diario', { body: { empresa_id: empresaId } })
+    setEnviandoResumo(false)
+    if (error || !data?.ok) { setResumoMsg({ tipo: 'erro', txt: 'Erro ao enviar: ' + (error?.message ?? data?.error ?? 'falhou') }); return }
+    setResumoMsg(data.enviadas > 0
+      ? { tipo: 'ok', txt: 'Resumo enviado no seu WhatsApp! 📲' }
+      : { tipo: 'aviso', txt: 'Não enviou — confira o telefone de contato da loja em Minha Loja.' })
+  }
 
   useEffect(() => {
     async function load() {
@@ -354,6 +366,21 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      <div className="card" style={{ marginTop: 24, padding: '18px 20px' }}>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>🤖 Resumo diário no WhatsApp</div>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+          Todo dia às 22h você recebe no WhatsApp o resumo da loja (faturamento, pedidos, top produto, meta). Quer testar agora?
+        </p>
+        <button onClick={enviarResumo} disabled={enviandoResumo} className="btn btn-primary">
+          {enviandoResumo ? 'Enviando...' : '📲 Receber resumo agora'}
+        </button>
+        {resumoMsg && (
+          <div style={{ marginTop: 10, fontSize: 13, color: resumoMsg.tipo === 'ok' ? 'var(--success)' : resumoMsg.tipo === 'aviso' ? '#f59e0b' : 'var(--danger)' }}>
+            {resumoMsg.txt}
+          </div>
+        )}
+      </div>
 
       <a href="https://github.com/wildejunior2025-star/CRM/releases/download/v1.0.0/Painel.de.Pedidos.Setup.1.0.0.exe" download className="card"
         style={{ marginTop: 24, padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 16, textDecoration: 'none', color: 'var(--text)', cursor: 'pointer' }}>
