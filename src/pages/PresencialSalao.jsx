@@ -151,6 +151,13 @@ export default function PresencialSalao() {
     await loadAll()
   }
 
+  // Garçom livre "pega" uma mesa de autoatendimento (QR) → fica responsável por ela
+  async function pegarMesa(comanda, e) {
+    if (e) e.stopPropagation()
+    await supabase.from('comandas').update({ garcom_id: user?.id ?? null }).eq('id', comanda.id)
+    await loadAll()
+  }
+
   async function salvarObs(item) {
     const texto = obsEdit[item.id]
     if (texto === undefined) return                 // não estava editando
@@ -264,7 +271,8 @@ export default function PresencialSalao() {
             const sub = subtotalDe(c)
             const prontos = c ? prontosDe(c) : 0
             return (
-              <button key={mesa.id} type="button" onClick={() => abrirMesa(mesa)}
+              <div key={mesa.id} role="button" tabIndex={0} onClick={() => abrirMesa(mesa)}
+                onKeyDown={ev => { if (ev.key === 'Enter') abrirMesa(mesa) }}
                 style={{
                   borderRadius: 12, padding: 14, cursor: 'pointer', textAlign: 'left', position: 'relative',
                   border: `2px solid ${prontos > 0 ? '#22c55e' : cor.border}`,
@@ -282,12 +290,18 @@ export default function PresencialSalao() {
                 {mesa.nome && <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{mesa.nome}</div>}
                 <div style={{ fontSize: 12, marginTop: 6, color: cor.border, fontWeight: 700 }}>{cor.label}</div>
                 {c && <div style={{ fontSize: 13, marginTop: 2, fontWeight: 700 }}>{fmt(sub)}</div>}
-                {c?.garcom_id && garcons[c.garcom_id] && (
+                {c?.garcom_id && garcons[c.garcom_id] ? (
                   <div style={{ fontSize: 11.5, marginTop: 2, color: 'var(--text-muted)' }}>
                     👤 {garcons[c.garcom_id].split(' ')[0]}
                   </div>
-                )}
-              </button>
+                ) : c ? (
+                  <button type="button" onClick={(ev) => pegarMesa(c, ev)}
+                    style={{ marginTop: 8, width: '100%', padding: '7px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12.5,
+                      border: 'none', background: prontos > 0 ? '#22c55e' : '#7c3aed', color: '#fff' }}>
+                    ✋ Pegar mesa
+                  </button>
+                ) : null}
+              </div>
             )
           })}
         </div>
@@ -309,8 +323,15 @@ export default function PresencialSalao() {
                     👤 Atendido por {garcons[comandaSel.garcom_id]}
                   </div>
                 ) : comandaSel && !comandaSel.garcom_id ? (
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, marginTop: 2 }}>
-                    📱 Pedido pelo QR (autoatendimento)
+                  <div style={{ marginTop: 4 }}>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>
+                      📱 Pedido pelo QR (autoatendimento)
+                    </div>
+                    <button type="button" onClick={() => pegarMesa(comandaSel)}
+                      style={{ marginTop: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12.5,
+                        border: 'none', background: '#22c55e', color: '#fff' }}>
+                      ✋ Pegar esta mesa
+                    </button>
                   </div>
                 ) : null}
               </div>
