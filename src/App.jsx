@@ -15,6 +15,12 @@ function HostnameRedirect() {
     if (isPublic) return
     const perfil = profile?.perfil
 
+    // Vendedor só usa o gestor de pedidos (/painel), em qualquer domínio
+    if (perfil === 'vendedor') {
+      if (!pathname.startsWith('/painel') && pathname !== '/login') navigate('/painel', { replace: true })
+      return
+    }
+
     if (h === 'app.fwcinter.com') {
       // Domínio do app é exclusivo do cliente. Admin/vendedor de empresa que
       // caírem aqui (ex.: impersonação por magic link) usam o CRM nas rotas raiz;
@@ -181,7 +187,7 @@ export default function App() {
 
           <Route
             element={
-              <ProtectedRoute roles={['admin', 'vendedor', 'garcom', 'cozinheiro']}>
+              <ProtectedRoute roles={['admin', 'garcom', 'cozinheiro']}>
                 <Layout />
               </ProtectedRoute>
             }
@@ -221,7 +227,7 @@ export default function App() {
             />
             <Route
               path="presencial/salao"
-              element={<ProtectedRoute roles={['admin', 'vendedor', 'garcom']}><PresencialSalao /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'garcom']}><PresencialSalao /></ProtectedRoute>}
             />
             <Route
               path="presencial/cozinha"
@@ -253,11 +259,11 @@ export default function App() {
             />
           </Route>
 
-          {/* Painel de pedidos delivery — tela autônoma, sem sidebar */}
+          {/* Gestor de pedidos — tela autônoma, sem sidebar (vendedor fica só aqui) */}
           <Route
             path="/painel"
             element={
-              <ProtectedRoute roles={['admin', 'super_admin']}>
+              <ProtectedRoute roles={['admin', 'super_admin', 'vendedor']}>
                 <PainelPedidos />
               </ProtectedRoute>
             }

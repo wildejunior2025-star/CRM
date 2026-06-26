@@ -24,8 +24,8 @@ const links = [
       { to: '/presencial/mesas', label: 'Mesas', roles: ['admin'] },
     ],
   },
-  // Garçom/atendente (vendedor) veem o Salão; a Cozinha é só do cozinheiro
-  { to: '/presencial/salao', label: 'Salão', roles: ['vendedor', 'garcom'] },
+  // Garçom vê o Salão; a Cozinha é só do cozinheiro (vendedor só usa o /painel)
+  { to: '/presencial/salao', label: 'Salão', roles: ['garcom'] },
   { to: '/presencial/cozinha', label: 'Cozinha (KDS)', roles: ['cozinheiro'] },
 
   { group: 'Catálogo' },
