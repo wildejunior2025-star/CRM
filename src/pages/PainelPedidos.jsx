@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras } from '../utils/imprimirCupom'
+import { CONDICOES_PAGAMENTO } from '../lib/constants'
 import './PainelPedidos.css'
 
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
@@ -321,6 +322,555 @@ const ORIGEM_CONFIG = {
   whatsapp: { label: 'WhatsApp', bg: '#25d366', color: '#fff', borda: '#25d366' },
   cardapio:  { label: 'Cardápio', bg: '#3b82f6', color: '#fff', borda: '#3b82f6' },
   app:       { label: 'App',      bg: '#f97316', color: '#fff', borda: '#f97316' },
+  balcao:    { label: 'Balcão',   bg: '#0891b2', color: '#fff', borda: '#0891b2' },
+}
+
+// Campo de quantidade digitável (permite digitar 100 em vez de clicar 100x).
+// Mantém um texto local para deixar apagar/retypear sem sumir o item.
+function QtdInput({ value, onChange }) {
+  const [txt, setTxt] = useState(String(value))
+  useEffect(() => { setTxt(String(value)) }, [value])
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={txt}
+      onChange={e => {
+        const v = e.target.value.replace(/\D/g, '')
+        setTxt(v)
+        if (v !== '') onChange(parseInt(v, 10))
+      }}
+      onFocus={e => e.target.select()}
+      onBlur={() => { if (txt === '') setTxt(String(value)) }}
+      style={{
+        width: 52, height: 30, textAlign: 'center', fontWeight: 700, fontSize: 14,
+        borderRadius: 7, border: '1px solid var(--border, #2a2a3a)',
+        background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
+      }}
+    />
+  )
+}
+
+// ── Modal de cadastro completo de cliente (mesma ficha do CRM) ──
+const DIAS_VISITA = ['segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado']
+const TIPOS_CLIENTE_PADRAO = ['mercadinho', 'bar', 'restaurante', 'distribuidor', 'outro']
+
+function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar, onSalvo }) {
+  const [form, setForm] = useState({
+    nome: initialNome, tipo: 'mercadinho', cnpj_cpf: '', telefone: initialTel,
+    endereco: '', bairro: '', cidade: '', dia_visita: '',
+    condicao_pagamento: 'a_vista', limite_credito: 0,
+    desconto_percentual: 0, desconto_minimo_pedido: 0, observacoes: '', ativo: true,
+  })
+  const [tipos, setTipos]   = useState(TIPOS_CLIENTE_PADRAO)
+  const [saving, setSaving] = useState(false)
+  const [erro, setErro]     = useState(null)
+
+  useEffect(() => {
+    let ativo = true
+    ;(async () => {
+      const { data } = await supabase.from('tipos_cliente').select('nome').order('nome')
+      if (ativo && data && data.length) setTipos(data.map(t => t.nome))
+    })()
+    return () => { ativo = false }
+  }, [])
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onFechar() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onFechar])
+
+  function ch(e) {
+    const { name, value, type, checked } = e.target
+    setForm(p => ({ ...p, [name]: type === 'checkbox' ? checked : value }))
+  }
+
+  async function salvar(e) {
+    e.preventDefault()
+    if (!form.nome.trim()) { setErro('Informe o nome do cliente.'); return }
+    setSaving(true); setErro(null)
+    const payload = {
+      ...form, empresa_id: empresa.id,
+      limite_credito: Number(form.limite_credito) || 0,
+      desconto_percentual: Number(form.desconto_percentual) || 0,
+      desconto_minimo_pedido: Number(form.desconto_minimo_pedido) || 0,
+    }
+    const { data, error } = await supabase
+      .from('clientes')
+      .insert(payload)
+      .select('id, nome, telefone, endereco, numero, complemento, bairro, cidade')
+      .single()
+    setSaving(false)
+    if (error) { setErro(error.message); return }
+    onSalvo(data)
+  }
+
+  const inp = {
+    width: '100%', padding: '9px 11px', borderRadius: 8,
+    border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)',
+    color: 'var(--text)', fontSize: 14,
+  }
+  const lbl = { fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', margin: '0 0 4px', display: 'block' }
+  const col = { flex: 1, minWidth: 0 }
+
+  return (
+    <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 200 }}>
+      <form className="pp-modal" onClick={e => e.stopPropagation()} onSubmit={salvar}
+        style={{ maxWidth: 560, width: '94vw', maxHeight: '90vh', overflowY: 'auto', display: 'block' }}>
+        <p className="pp-modal-titulo">Novo cliente</p>
+
+        <div style={{ marginBottom: 12 }}>
+          <label style={lbl}>Nome / Razão social *</label>
+          <input name="nome" value={form.nome} onChange={ch} style={inp} autoFocus />
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+          <div style={col}>
+            <label style={lbl}>Tipo</label>
+            <select name="tipo" value={form.tipo} onChange={ch} style={inp}>
+              {tipos.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div style={col}>
+            <label style={lbl}>CNPJ / CPF</label>
+            <input name="cnpj_cpf" value={form.cnpj_cpf} onChange={ch} style={inp} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+          <div style={col}>
+            <label style={lbl}>Telefone</label>
+            <input name="telefone" value={form.telefone} onChange={ch} style={inp} />
+          </div>
+          <div style={col}>
+            <label style={lbl}>Dia de visita</label>
+            <select name="dia_visita" value={form.dia_visita} onChange={ch} style={inp}>
+              <option value="">-</option>
+              {DIAS_VISITA.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <label style={lbl}>Endereço</label>
+          <input name="endereco" value={form.endereco} onChange={ch} style={inp} />
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+          <div style={col}>
+            <label style={lbl}>Bairro</label>
+            <input name="bairro" value={form.bairro} onChange={ch} style={inp} />
+          </div>
+          <div style={col}>
+            <label style={lbl}>Cidade</label>
+            <input name="cidade" value={form.cidade} onChange={ch} style={inp} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+          <div style={col}>
+            <label style={lbl}>Condição de pagamento</label>
+            <select name="condicao_pagamento" value={form.condicao_pagamento} onChange={ch} style={inp}>
+              {CONDICOES_PAGAMENTO.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div style={col}>
+            <label style={lbl}>Limite de crédito (R$)</label>
+            <input name="limite_credito" type="number" value={form.limite_credito} onChange={ch} style={inp} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+          <div style={col}>
+            <label style={lbl}>Desconto autorizado (%)</label>
+            <input name="desconto_percentual" type="number" value={form.desconto_percentual} onChange={ch} style={inp} />
+          </div>
+          <div style={col}>
+            <label style={lbl}>Pedido mínimo para desconto (R$)</label>
+            <input name="desconto_minimo_pedido" type="number" value={form.desconto_minimo_pedido} onChange={ch} style={inp} />
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <label style={lbl}>Observações</label>
+          <textarea name="observacoes" value={form.observacoes} onChange={ch} rows={3} style={{ ...inp, resize: 'vertical' }} />
+        </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--text)', marginBottom: 14, cursor: 'pointer' }}>
+          <input name="ativo" type="checkbox" checked={form.ativo} onChange={ch} />
+          Ativo
+        </label>
+
+        {erro && <p style={{ color: 'var(--danger, #ef4444)', fontSize: 13, margin: '0 0 10px' }}>{erro}</p>}
+
+        <div className="pp-modal-actions">
+          <button type="button" className="pp-modal-btn-secondary" onClick={onFechar}>Cancelar</button>
+          <button type="submit" className="pp-modal-btn-danger" style={{ background: '#7c3aed', borderColor: '#7c3aed' }} disabled={saving}>
+            {saving ? 'Salvando...' : 'Salvar'}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+// ── Modal de venda no balcão (PDV do gestor) ────────────────
+// O vendedor monta o pedido pelo catálogo; ele entra na lista do painel.
+function ModalVenda({ empresa, onFechar, onCriado }) {
+  const [produtos, setProdutos] = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [busca, setBusca]       = useState('')
+  const [cart, setCart]         = useState({}) // { [id]: { id, nome, preco, qtd } }
+  const [nome, setNome]         = useState('')
+  const [telefone, setTelefone] = useState('')
+  const [tipo, setTipo]         = useState('retirada') // 'retirada' (balcão) | 'entrega'
+  const [rua, setRua]           = useState('')
+  const [numero, setNumero]     = useState('')
+  const [bairro, setBairro]     = useState('')
+  const [cidade, setCidade]     = useState('')
+  const [taxa, setTaxa]         = useState('')
+  const [pagamento, setPagamento] = useState('dinheiro')
+  const [troco, setTroco]       = useState('')
+  const [obs, setObs]           = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro]         = useState(null)
+  // Busca de clientes já cadastrados na loja
+  const [sugestoes, setSugestoes]       = useState([])
+  const [clienteSelId, setClienteSelId] = useState(null)
+  const [msgCli, setMsgCli]             = useState(null)
+  const buscaCliTimer = useRef(null)
+  // Abre a ficha completa de cadastro de cliente
+  const [cadastroAberto, setCadastroAberto] = useState(false)
+
+  useEffect(() => {
+    let ativo = true
+    ;(async () => {
+      const { data } = await supabase
+        .from('produtos')
+        .select('id, nome, preco_venda, categoria')
+        .eq('empresa_id', empresa.id)
+        .order('nome', { ascending: true })
+      if (ativo) { setProdutos(data || []); setLoading(false) }
+    })()
+    return () => { ativo = false }
+  }, [empresa])
+
+  // Busca clientes da loja pelo nome (debounce) enquanto digita
+  function buscarClientes(q) {
+    clearTimeout(buscaCliTimer.current)
+    if (!q || q.trim().length < 2) { setSugestoes([]); return }
+    buscaCliTimer.current = setTimeout(async () => {
+      const { data } = await supabase
+        .from('clientes')
+        .select('id, nome, telefone, endereco, numero, complemento, bairro, cidade, estado, cep')
+        .eq('empresa_id', empresa.id)
+        .ilike('nome', `%${q.trim()}%`)
+        .order('nome', { ascending: true })
+        .limit(8)
+      setSugestoes(data || [])
+    }, 300)
+  }
+
+  function selecionarCliente(c) {
+    setNome(c.nome || '')
+    setTelefone(c.telefone || '')
+    if (c.endereco || c.bairro || c.cidade) {
+      setRua(c.endereco || ''); setNumero(c.numero || '')
+      setBairro(c.bairro || ''); setCidade(c.cidade || '')
+    }
+    setClienteSelId(c.id)
+    setSugestoes([])
+    setMsgCli(null)
+  }
+
+  // Vincula à venda o cliente recém-cadastrado pela ficha completa
+  function aoCadastrarCliente(c) {
+    selecionarCliente(c)
+    setCadastroAberto(false)
+    setMsgCli('Cliente cadastrado ✓')
+  }
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onFechar() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onFechar])
+
+  function addItem(p) {
+    setCart(prev => {
+      const qtd = (prev[p.id]?.qtd ?? 0) + 1
+      return { ...prev, [p.id]: { id: p.id, nome: p.nome, preco: Number(p.preco_venda || 0), qtd } }
+    })
+  }
+  function subItem(id) {
+    setCart(prev => {
+      const cur = prev[id]
+      if (!cur) return prev
+      const novo = { ...prev }
+      if (cur.qtd <= 1) delete novo[id]
+      else novo[id] = { ...cur, qtd: cur.qtd - 1 }
+      return novo
+    })
+  }
+  function setItemQtd(p, n) {
+    const qtd = Math.max(0, Math.floor(Number(n) || 0))
+    setCart(prev => {
+      const novo = { ...prev }
+      if (qtd <= 0) delete novo[p.id]
+      else novo[p.id] = { id: p.id, nome: p.nome, preco: Number(p.preco_venda || 0), qtd }
+      return novo
+    })
+  }
+
+  const itens     = Object.values(cart)
+  const subtotal  = itens.reduce((s, i) => s + i.preco * i.qtd, 0)
+  const taxaNum   = tipo === 'entrega' ? (parseFloat(String(taxa).replace(',', '.')) || 0) : 0
+  const total     = subtotal + taxaNum
+  const filtrados = produtos.filter(p => !busca.trim() || p.nome?.toLowerCase().includes(busca.trim().toLowerCase()))
+
+  async function concluir() {
+    if (itens.length === 0) { setErro('Adicione pelo menos um item.'); return }
+    if (tipo === 'entrega' && !rua.trim()) { setErro('Informe o endereço da entrega.'); return }
+    setSalvando(true); setErro(null)
+
+    // Vincula o cliente: usa o selecionado ou cadastra/atualiza pelo telefone.
+    let clienteId = clienteSelId
+    if (!clienteId && telefone.trim()) {
+      try {
+        const { data: cid } = await supabase.rpc('upsert_cliente_loja', {
+          p_empresa_id: empresa.id, p_nome: nome.trim() || 'Cliente', p_telefone: telefone.trim(),
+          p_email: '', p_cep: '', p_endereco: rua.trim(), p_numero: numero.trim(),
+          p_complemento: '', p_bairro: bairro.trim(), p_cidade: cidade.trim(), p_estado: '',
+        })
+        clienteId = cid ?? null
+      } catch { /* não bloqueia a venda */ }
+    }
+
+    const payload = {
+      empresa_id: empresa.id,
+      cliente_id: clienteId,
+      cliente_nome: nome.trim() || 'Balcão',
+      cliente_telefone: telefone.trim() || null,
+      tipo_entrega: tipo,
+      origem: 'balcao',
+      status: 'confirmado', // já aceito — o vendedor está criando o pedido
+      itens: itens.map(i => ({
+        produto_id: i.id, nome: i.nome, quantidade: i.qtd,
+        preco_unitario: i.preco, subtotal: i.preco * i.qtd,
+      })),
+      subtotal,
+      taxa_entrega: taxaNum,
+      total,
+      forma_pagamento: pagamento,
+      troco_para: pagamento === 'dinheiro' && troco
+        ? Math.round(parseFloat(troco.replace(',', '.')) * 100) / 100
+        : null,
+      observacoes: obs.trim() || null,
+    }
+    if (tipo === 'entrega') {
+      payload.endereco_rua = rua.trim()
+      payload.endereco_numero = numero.trim()
+      payload.endereco_bairro = bairro.trim()
+      payload.endereco_cidade = cidade.trim()
+    }
+    const { error } = await supabase.from('pedidos_delivery').insert(payload)
+    setSalvando(false)
+    if (error) { setErro(error.message); return }
+    onCriado()
+    onFechar()
+  }
+
+  const inputSt = {
+    width: '100%', padding: '9px 11px', borderRadius: 8,
+    border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)',
+    color: 'var(--text)', fontSize: 14,
+  }
+  const tipoBtn = (val, lbl) => ({
+    flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+    border: `1.5px solid ${tipo === val ? '#7c3aed' : 'var(--border, #2a2a3a)'}`,
+    background: tipo === val ? 'rgba(124,58,237,.15)' : 'transparent',
+    color: tipo === val ? '#a78bfa' : 'var(--text)',
+  })
+  const pagBtn = (val, lbl) => ({
+    flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+    border: `1.5px solid ${pagamento === val ? '#16a34a' : 'var(--border, #2a2a3a)'}`,
+    background: pagamento === val ? 'rgba(34,197,94,.12)' : 'transparent',
+    color: pagamento === val ? '#16a34a' : 'var(--text)',
+  })
+
+  return (
+    <>
+    <div className="pp-modal-overlay" onClick={onFechar}>
+      <div className="pp-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 560, width: '94vw', maxHeight: '90vh', overflowY: 'auto' }}>
+        <p className="pp-modal-titulo">Nova venda (balcão)</p>
+
+        {/* Produtos */}
+        <input
+          type="search" value={busca} onChange={e => setBusca(e.target.value)}
+          placeholder="Buscar produto..." style={{ ...inputSt, marginBottom: 8 }}
+        />
+        <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 6, marginBottom: 14 }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>Carregando produtos...</div>
+          ) : filtrados.length === 0 ? (
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>Nenhum produto.</div>
+          ) : filtrados.map(p => {
+            const qtd = cart[p.id]?.qtd ?? 0
+            return (
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 6px', borderRadius: 8 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nome}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmt(p.preco_venda)}</div>
+                </div>
+                {qtd > 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    <button type="button" onClick={() => subItem(p.id)} style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid var(--border,#2a2a3a)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontWeight: 800, fontSize: 16 }}>−</button>
+                    <QtdInput value={qtd} onChange={n => setItemQtd(p, n)} />
+                    <button type="button" onClick={() => addItem(p)} style={{ width: 30, height: 30, borderRadius: 7, border: 'none', background: '#7c3aed', color: '#fff', cursor: 'pointer', fontWeight: 800, fontSize: 16 }}>+</button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => addItem(p)} style={{ flexShrink: 0, padding: '6px 14px', borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Adicionar</button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Carrinho */}
+        {itens.length > 0 && (
+          <div style={{ marginBottom: 14, fontSize: 13 }}>
+            {itens.map(i => (
+              <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text)', padding: '2px 0' }}>
+                <span>{i.qtd}× {i.nome}</span>
+                <span>{fmt(i.preco * i.qtd)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Cliente — busca os já cadastrados pelo nome */}
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <input
+                value={nome}
+                onChange={e => { setNome(e.target.value); setClienteSelId(null); setMsgCli(null); buscarClientes(e.target.value) }}
+                placeholder="Nome do cliente (busca os cadastrados)"
+                style={inputSt}
+                autoComplete="off"
+              />
+              {sugestoes.length > 0 && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 5,
+                  background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)',
+                  borderRadius: 8, maxHeight: 200, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,.3)',
+                }}>
+                  {sugestoes.map(c => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => selecionarCliente(c)}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left', padding: '8px 11px',
+                        background: 'transparent', border: 'none', borderBottom: '1px solid var(--border,#2a2a3a)',
+                        cursor: 'pointer', color: 'var(--text)',
+                      }}
+                    >
+                      <div style={{ fontSize: 13.5, fontWeight: 600 }}>{c.nome}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        {c.telefone || 'sem telefone'}{c.bairro ? ` · ${c.bairro}` : ''}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <input value={telefone} onChange={e => { setTelefone(e.target.value); setClienteSelId(null) }} placeholder="Telefone (opcional)" style={{ ...inputSt, maxWidth: 160 }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
+            <button
+              type="button"
+              onClick={() => setCadastroAberto(true)}
+              style={{
+                background: 'none', border: '1px dashed var(--border, #2a2a3a)', borderRadius: 8,
+                padding: '5px 10px', cursor: 'pointer',
+                color: 'var(--primary, #a78bfa)', fontWeight: 700, fontSize: 12.5,
+              }}
+            >
+              + Cadastrar novo cliente
+            </button>
+            {clienteSelId && <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 700 }}>● cliente vinculado</span>}
+            {msgCli && <span style={{ fontSize: 12, color: msgCli.includes('✓') ? '#16a34a' : 'var(--danger,#ef4444)' }}>{msgCli}</span>}
+          </div>
+        </div>
+
+        {/* Tipo */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          <button type="button" style={tipoBtn('retirada')} onClick={() => setTipo('retirada')}>Balcão / Retirada</button>
+          <button type="button" style={tipoBtn('entrega')} onClick={() => setTipo('entrega')}>Entrega</button>
+        </div>
+
+        {tipo === 'entrega' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input value={rua} onChange={e => setRua(e.target.value)} placeholder="Rua" style={inputSt} />
+              <input value={numero} onChange={e => setNumero(e.target.value)} placeholder="Nº" style={{ ...inputSt, maxWidth: 90 }} />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input value={bairro} onChange={e => setBairro(e.target.value)} placeholder="Bairro" style={inputSt} />
+              <input value={cidade} onChange={e => setCidade(e.target.value)} placeholder="Cidade" style={inputSt} />
+            </div>
+            <input value={taxa} onChange={e => setTaxa(e.target.value)} placeholder="Taxa de entrega (R$)" inputMode="decimal" style={inputSt} />
+          </div>
+        )}
+
+        {/* Pagamento */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          <button type="button" style={pagBtn('dinheiro')} onClick={() => setPagamento('dinheiro')}>Dinheiro</button>
+          <button type="button" style={pagBtn('pix')} onClick={() => setPagamento('pix')}>Pix</button>
+          <button type="button" style={pagBtn('cartao')} onClick={() => setPagamento('cartao')}>Cartão</button>
+        </div>
+        {pagamento === 'dinheiro' && (
+          <input value={troco} onChange={e => setTroco(e.target.value)} placeholder="Troco para (R$) — opcional" inputMode="decimal" style={{ ...inputSt, marginBottom: 10 }} />
+        )}
+
+        <input value={obs} onChange={e => setObs(e.target.value)} placeholder="Observações (opcional)" style={{ ...inputSt, marginBottom: 14 }} />
+
+        {/* Total */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 18, fontWeight: 800, color: 'var(--text)', marginBottom: 14 }}>
+          <span>Total</span>
+          <span style={{ color: '#7c3aed' }}>{fmt(total)}</span>
+        </div>
+
+        {erro && <p style={{ fontSize: 13, color: 'var(--danger, #ef4444)', margin: '0 0 10px' }}>{erro}</p>}
+
+        <div className="pp-modal-actions">
+          <button type="button" className="pp-modal-btn-secondary" onClick={onFechar}>Cancelar</button>
+          <button
+            type="button"
+            className="pp-modal-btn-danger"
+            style={{ background: '#7c3aed', borderColor: '#7c3aed' }}
+            disabled={salvando || itens.length === 0}
+            onClick={concluir}
+          >
+            {salvando ? 'Salvando...' : `Concluir venda · ${fmt(total)}`}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    {cadastroAberto && (
+      <ModalNovoCliente
+        empresa={empresa}
+        initialNome={nome}
+        initialTel={telefone}
+        onFechar={() => setCadastroAberto(false)}
+        onSalvo={aoCadastrarCliente}
+      />
+    )}
+    </>
+  )
 }
 
 // ── Card de pedido ──────────────────────────────────────────
@@ -573,8 +1123,20 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           </>
         )}
 
-        {/* Passo 2: preparando → despachar */}
-        {(pedido.status === 'confirmado' || pedido.status === 'em_preparo') && (
+        {/* Balcão (PDV): venda feita pelo vendedor — finaliza direto, sem código de entrega */}
+        {pedido.origem === 'balcao' && (pedido.status === 'confirmado' || pedido.status === 'em_preparo' || pedido.status === 'saiu_entrega') && (
+          <button
+            type="button"
+            className="pp-btn pp-btn-avancar"
+            style={{ width: '100%', background: '#16a34a', borderColor: '#16a34a' }}
+            onClick={() => onAvancar(pedido.id, 'entregue')}
+          >
+            Finalizar venda
+          </button>
+        )}
+
+        {/* Passo 2: preparando → despachar (fluxo de delivery, não-balcão) */}
+        {pedido.origem !== 'balcao' && (pedido.status === 'confirmado' || pedido.status === 'em_preparo') && (
           <button type="button" className="pp-btn pp-btn-avancar"
             onClick={() => onAvancar(pedido.id, 'saiu_entrega')}>
             Despachar
@@ -582,7 +1144,7 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         )}
 
         {/* Passo 3: saiu → primeiro mostra status, depois confirma com código */}
-        {pedido.status === 'saiu_entrega' && (
+        {pedido.origem !== 'balcao' && pedido.status === 'saiu_entrega' && (
           <div style={{ width: '100%' }}>
             {!confirmandoEntrega ? (
               <>
@@ -777,7 +1339,76 @@ const RIGHTBAR_BOTOES = [
       </svg>
     ),
   },
+  {
+    id: 'hoje', label: 'Hoje',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="18" rx="2"/>
+        <line x1="16" y1="2" x2="16" y2="6"/>
+        <line x1="8" y1="2" x2="8" y2="6"/>
+        <line x1="3" y1="10" x2="21" y2="10"/>
+        <polyline points="9 16 11 18 15 14"/>
+      </svg>
+    ),
+  },
 ]
+
+// Timer compacto para os cards "a aceitar"
+function MiniTimer({ createdAt, aguardandoDesde, onExpirado }) {
+  const [restante, setRestante] = useState(() => getTempoRestante(createdAt, aguardandoDesde))
+  const expRef = useRef(false)
+  useEffect(() => {
+    if (restante === 0) {
+      if (!expRef.current) { expRef.current = true; onExpirado() }
+      return
+    }
+    const id = setTimeout(() => setRestante(getTempoRestante(createdAt, aguardandoDesde)), 500)
+    return () => clearTimeout(id)
+  }, [restante, createdAt, aguardandoDesde, onExpirado])
+  const urg = getUrgencia(restante)
+  const cor = urg === 'critico' ? '#ef4444' : urg === 'atencao' ? '#f59e0b' : '#16a34a'
+  return <span style={{ fontSize: 11, fontWeight: 800, color: cor, whiteSpace: 'nowrap' }}>⏱ {formatarTempo(restante)}</span>
+}
+
+// Card compacto do quadro — clica pra abrir o pedido completo
+function CardMini({ pedido, onClick, onExpirado }) {
+  const oc = ORIGEM_CONFIG[pedido.origem] ?? ORIGEM_CONFIG.cardapio
+  const itens = Array.isArray(pedido.itens) ? pedido.itens : []
+  const qtdItens = itens.reduce((s, i) => s + Number(i.qtd ?? i.quantidade ?? 1), 0)
+  const hora = new Date(pedido.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const isRetirada = (pedido.tipo_entrega || 'entrega') === 'retirada'
+  return (
+    <button type="button" onClick={onClick} className="pp-mini" style={{ borderLeft: `3px solid ${oc.borda}` }}>
+      <div className="pp-mini-top">
+        <span className="pp-mini-num">#{pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()} · {fmt(pedido.total)}</span>
+        {pedido.status === 'aguardando' && onExpirado && (
+          <MiniTimer createdAt={pedido.created_at} aguardandoDesde={pedido.aguardando_desde} onExpirado={() => onExpirado(pedido.id)} />
+        )}
+      </div>
+      <div className="pp-mini-sub">{hora} · {pedido.cliente_nome || '—'}</div>
+      <div className="pp-mini-tags">
+        <span className="pp-mini-badge" style={{ background: oc.bg, color: oc.color }}>{oc.label}</span>
+        <span className="pp-mini-itens">{qtdItens} {qtdItens === 1 ? 'item' : 'itens'}</span>
+        {isRetirada && <span className="pp-mini-itens">{pedido.origem === 'balcao' ? 'Balcão' : 'Retirada'}</span>}
+      </div>
+    </button>
+  )
+}
+
+// Coluna do quadro
+function Coluna({ titulo, cor, count, vazio, children }) {
+  return (
+    <div className="pp-col">
+      <div className="pp-col-head" style={{ borderTopColor: cor }}>
+        <span>{titulo}</span>
+        <span className="pp-col-count" style={{ background: cor }}>{count}</span>
+      </div>
+      <div className="pp-col-body">
+        {count === 0 ? <div className="pp-col-vazio">{vazio}</div> : children}
+      </div>
+    </div>
+  )
+}
 
 // ── Componente principal ────────────────────────────────────
 export default function PainelPedidos() {
@@ -789,6 +1420,8 @@ export default function PainelPedidos() {
   const [avisoHorario, setAvisoHorario] = useState(null)
   const [pedidoRecusando, setPedidoRecusando] = useState(null)
   const [pedidoMensagem, setPedidoMensagem] = useState(null)
+  const [vendaAberta, setVendaAberta] = useState(false)
+  const [pedidoDetalhe, setPedidoDetalhe] = useState(null) // pedido aberto em detalhe (card completo)
   const [autoImprimir, setAutoImprimir] = useState(autoImprimirAtivo)
 
   function toggleAutoImprimir() {
@@ -820,6 +1453,9 @@ export default function PainelPedidos() {
   })
   const [historico, setHistorico] = useState([])
   const [loadingHist, setLoadingHist] = useState(false)
+  // Concluídos do dia
+  const [concluidosHoje, setConcluidosHoje] = useState([])
+  const [loadingHoje, setLoadingHoje] = useState(false)
   // Catálogo (pausar/ativar itens da loja online)
   const [catalogo, setCatalogo] = useState([])
   const [loadingCatalogo, setLoadingCatalogo] = useState(false)
@@ -886,6 +1522,30 @@ export default function PainelPedidos() {
   useEffect(() => {
     if (painelDireito === 'pedidos') carregarHistorico()
   }, [painelDireito, carregarHistorico])
+
+  // ── Concluídos do dia (vendas finalizadas hoje) ─────────────
+  const carregarConcluidosHoje = useCallback(async () => {
+    if (!empresa) return
+    setLoadingHoje(true)
+    const inicio = new Date()
+    inicio.setHours(0, 0, 0, 0)
+    const { data } = await supabase
+      .from('pedidos_delivery')
+      .select('*')
+      .eq('empresa_id', empresa.id)
+      .eq('status', 'entregue')
+      .gte('created_at', inicio.toISOString())
+      .order('created_at', { ascending: false })
+    setConcluidosHoje(data || [])
+    setLoadingHoje(false)
+  }, [empresa])
+
+  useEffect(() => {
+    if (painelDireito === 'hoje') carregarConcluidosHoje()
+  }, [painelDireito, carregarConcluidosHoje])
+
+  // Carrega a coluna "Concluídos" do quadro assim que o painel abre
+  useEffect(() => { carregarConcluidosHoje() }, [carregarConcluidosHoje])
 
   // ── Catálogo: carrega os produtos da loja ───────────────────
   const carregarCatalogo = useCallback(async () => {
@@ -1181,6 +1841,9 @@ export default function PainelPedidos() {
       .update(update)
       .eq('id', id)
 
+    // Pedido concluído → recarrega a coluna "Concluídos hoje"
+    if (novoStatus === 'entregue') carregarConcluidosHoje()
+
     notificarCliente(id, novoStatus)
   }
 
@@ -1315,6 +1978,20 @@ export default function PainelPedidos() {
         </div>
 
         <div className="pp-header-right">
+          {/* Nova venda (balcão / PDV) */}
+          <button
+            type="button"
+            className="pp-toggle-loja aberta"
+            onClick={() => setVendaAberta(true)}
+            title="Registrar uma venda no balcão"
+            style={{ background: '#7c3aed', borderColor: '#7c3aed', color: '#fff' }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            <span>Vender</span>
+          </button>
+
           {/* Sair */}
           <button type="button" className="pp-back-link" title="Sair" onClick={logout}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1368,26 +2045,43 @@ export default function PainelPedidos() {
         </div>
       </header>
 
-      {/* Corpo */}
+      {/* Corpo — quadro com 4 colunas (cards compactos; clica pra ver completo) */}
       <main className="pp-body" style={{ paddingRight: 56 }}>
         {carregando ? (
           <SkeletonGrid />
-        ) : pedidos.length === 0 ? (
-          <EmptyState />
         ) : (
-          <div className="pp-grid">
-            {pedidos.map(pedido => (
-              <CardPedido
-                key={pedido.id}
-                pedido={pedido}
-                onConfirmar={handleConfirmar}
-                onRecusar={setPedidoRecusando}
-                onExpirado={handleExpirado}
-                onAvancar={handleAvancar}
-                onEnviarMensagem={setPedidoMensagem}
-                onImprimir={handleImprimir}
-              />
-            ))}
+          <div className="pp-board">
+            <Coluna titulo="A aceitar" cor="#ca8a04"
+              count={pedidos.filter(p => p.status === 'aguardando').length}
+              vazio="Nenhum pedido novo">
+              {pedidos.filter(p => p.status === 'aguardando').map(p => (
+                <CardMini key={p.id} pedido={p} onExpirado={handleExpirado} onClick={() => setPedidoDetalhe(p)} />
+              ))}
+            </Coluna>
+
+            <Coluna titulo="Na cozinha" cor="#1d4ed8"
+              count={pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length}
+              vazio="Nada em preparo">
+              {pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').map(p => (
+                <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
+              ))}
+            </Coluna>
+
+            <Coluna titulo="Em entrega" cor="#7c3aed"
+              count={pedidos.filter(p => p.status === 'saiu_entrega').length}
+              vazio="Ninguém na rua">
+              {pedidos.filter(p => p.status === 'saiu_entrega').map(p => (
+                <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
+              ))}
+            </Coluna>
+
+            <Coluna titulo="Concluídos hoje" cor="#16a34a"
+              count={concluidosHoje.length}
+              vazio="Nenhum concluído hoje">
+              {concluidosHoje.map(p => (
+                <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
+              ))}
+            </Coluna>
           </div>
         )}
       </main>
@@ -1410,6 +2104,32 @@ export default function PainelPedidos() {
         />
       )}
 
+      {/* Modal de venda no balcão (PDV) */}
+      {vendaAberta && (
+        <ModalVenda
+          empresa={empresa}
+          onFechar={() => setVendaAberta(false)}
+          onCriado={carregarPedidos}
+        />
+      )}
+
+      {/* Detalhe do pedido — card completo ao clicar num card compacto */}
+      {pedidoDetalhe && (
+        <div className="pp-modal-overlay" onClick={() => setPedidoDetalhe(null)} style={{ zIndex: 120 }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: 'min(440px, 94vw)', maxHeight: '92vh', overflowY: 'auto' }}>
+            <CardPedido
+              pedido={pedidos.find(p => p.id === pedidoDetalhe.id) || concluidosHoje.find(p => p.id === pedidoDetalhe.id) || pedidoDetalhe}
+              onConfirmar={(id) => { handleConfirmar(id); setPedidoDetalhe(null) }}
+              onRecusar={(p) => { setPedidoRecusando(p); setPedidoDetalhe(null) }}
+              onExpirado={(id) => { handleExpirado(id); setPedidoDetalhe(null) }}
+              onAvancar={(id, st) => { handleAvancar(id, st); setPedidoDetalhe(null) }}
+              onEnviarMensagem={(p) => { setPedidoMensagem(p); setPedidoDetalhe(null) }}
+              onImprimir={handleImprimir}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── Gaveta lateral direita ── */}
       {painelDireito && (
         <aside style={{
@@ -1419,7 +2139,10 @@ export default function PainelPedidos() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
-              {painelDireito === 'impressora' ? 'Impressora' : painelDireito === 'pedidos' ? 'Pedidos finalizados' : 'Catálogo'}
+              {painelDireito === 'impressora' ? 'Impressora'
+                : painelDireito === 'pedidos' ? 'Pedidos finalizados'
+                : painelDireito === 'hoje' ? 'Concluídos hoje'
+                : 'Catálogo'}
             </h3>
             <button type="button" onClick={() => setPainelDireito(null)} aria-label="Fechar"
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 22, lineHeight: 1 }}>
@@ -1658,6 +2381,60 @@ export default function PainelPedidos() {
                 </div>
               )}
             </div>
+          )}
+          {/* Painel: Concluídos do dia */}
+          {painelDireito === 'hoje' && (
+            loadingHoje ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 13 }}>Carregando...</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Resumo do dia */}
+                <div style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '12px 14px', background: 'rgba(34,197,94,.08)' }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>
+                    {concluidosHoje.length} pedido{concluidosHoje.length !== 1 ? 's' : ''} concluído{concluidosHoje.length !== 1 ? 's' : ''} hoje
+                  </div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: '#16a34a', marginTop: 2 }}>
+                    {fmt(concluidosHoje.reduce((s, p) => s + Number(p.total || 0), 0))}
+                  </div>
+                </div>
+
+                {concluidosHoje.length === 0 ? (
+                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 13 }}>
+                    Nenhum pedido concluído hoje ainda.
+                  </div>
+                ) : (
+                  concluidosHoje.map(p => {
+                    const oc = ORIGEM_CONFIG[p.origem] ?? ORIGEM_CONFIG.cardapio
+                    return (
+                      <div key={p.id} style={{
+                        border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '10px 12px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                      }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                            #{p.numero_pedido ?? p.id.slice(-4).toUpperCase()} · {fmt(p.total)}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            {new Date(p.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
+                          </div>
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 20, background: oc.bg, color: oc.color }}>
+                            {oc.label}
+                          </span>
+                        </div>
+                        <button type="button" onClick={() => imprimirCupom(p, empresa)} title="Reimprimir cupom"
+                          style={{ background: 'none', border: '1px solid var(--border, #2a2a3a)', borderRadius: 8, cursor: 'pointer', padding: 6, color: 'var(--text-muted)', flexShrink: 0 }}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <polyline points="6 9 6 2 18 2 18 9"/>
+                            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                            <rect x="6" y="14" width="12" height="8"/>
+                          </svg>
+                        </button>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            )
           )}
         </aside>
       )}

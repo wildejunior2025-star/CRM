@@ -23,6 +23,7 @@ export default function SuperAdminMLM() {
   const [resolvendo, setResolvendo]     = useState(null)
   const [filtroStatus, setFiltroStatus] = useState('todos')
   const [filtroNivel, setFiltroNivel]   = useState('todos')
+  const [filtroLogin, setFiltroLogin]   = useState('')
   const [filtroPeriodo, setFiltroPeriodo] = useState(new Date().toISOString().slice(0, 7))
   const [abaAtiva, setAbaAtiva]         = useState('comissoes')
   const [niveisLabel, setNiveisLabel]   = useState(['', '3,0%', '1,5%', '0,8%', '0,4%', '0,2%'])
@@ -36,7 +37,7 @@ export default function SuperAdminMLM() {
         .from('comissoes_indicacao')
         .select(`
           *,
-          beneficiario:profiles!comissoes_indicacao_beneficiario_id_fkey(nome, ref_token),
+          beneficiario:profiles!comissoes_indicacao_beneficiario_id_fkey(nome, username, ref_token),
           comprador:profiles!comissoes_indicacao_comprador_id_fkey(nome)
         `)
         .order('created_at', { ascending: false }),
@@ -68,7 +69,7 @@ export default function SuperAdminMLM() {
     for (const c of rows) {
       const key = c.beneficiario_id
       if (!map[key]) map[key] = {
-        id: key, nome: c.beneficiario?.nome ?? '—',
+        id: key, nome: c.beneficiario?.nome ?? '—', login: c.beneficiario?.username ?? null,
         total: 0, totalPts: 0, pendente: 0, pago: 0, count: 0,
       }
       map[key].total    += Number(c.valor_comissao)
@@ -136,6 +137,12 @@ export default function SuperAdminMLM() {
     if (filtroStatus !== 'todos' && c.status !== filtroStatus) return false
     if (filtroNivel !== 'todos' && String(c.nivel) !== filtroNivel) return false
     if (filtroPeriodo && !c.created_at.startsWith(filtroPeriodo)) return false
+    if (filtroLogin.trim()) {
+      const q = filtroLogin.trim().toLowerCase().replace(/^@/, '')
+      const login = (c.beneficiario?.username ?? '').toLowerCase()
+      const nome = (c.beneficiario?.nome ?? '').toLowerCase()
+      if (!login.includes(q) && !nome.includes(q)) return false
+    }
     return true
   })
 
@@ -219,7 +226,7 @@ export default function SuperAdminMLM() {
                   <tbody>
                     {resumo.map(r => (
                       <tr key={r.id}>
-                        <td style={{ fontWeight: 600 }}>{r.nome}</td>
+                        <td style={{ fontWeight: 600 }}>{r.login ? `@${r.login}` : r.nome}</td>
                         <td className="caixa-amount-col">{r.count}</td>
                         <td className="caixa-amount-col" style={{ fontWeight: 700, color: 'var(--primary)' }}>{r.totalPts} pts</td>
                         <td className="caixa-amount-col" style={{ color: 'var(--primary)', fontWeight: 700 }}>{fmt(r.total)}</td>
@@ -241,6 +248,13 @@ export default function SuperAdminMLM() {
 
           {/* Filtros */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              type="search"
+              value={filtroLogin}
+              onChange={e => setFiltroLogin(e.target.value)}
+              placeholder="Filtrar por login do indicador..."
+              style={{ padding: '7px 10px', borderRadius: 8, border: '1.5px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, minWidth: 220 }}
+            />
             <input
               type="month"
               value={filtroPeriodo}
@@ -305,7 +319,9 @@ export default function SuperAdminMLM() {
                       <td style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                         {new Date(c.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
                       </td>
-                      <td style={{ fontWeight: 600 }}>{c.beneficiario?.nome ?? '—'}</td>
+                      <td style={{ fontWeight: 600 }}>
+                        {c.beneficiario?.username ? `@${c.beneficiario.username}` : (c.beneficiario?.nome ?? '—')}
+                      </td>
                       <td style={{ color: 'var(--text-muted)' }}>{c.comprador?.nome ?? '—'}</td>
                       <td>
                         <span style={{

@@ -906,3 +906,124 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ── Quadro (Kanban) de pedidos ── */
+.pp-board {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  height: 100%;
+  overflow-x: auto;
+}
+.pp-col {
+  flex: 1 1 0;
+  min-width: 230px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border, #2a2a3a);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 92px);
+}
+.pp-col-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 14px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text, #f1f5f9);
+  border-top: 3px solid;
+  border-radius: 12px 12px 0 0;
+  border-bottom: 1px solid var(--border, #2a2a3a);
+}
+.pp-col-count {
+  min-width: 22px;
+  text-align: center;
+  padding: 1px 8px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+}
+.pp-col-body {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+.pp-col-vazio {
+  text-align: center;
+  color: var(--text-muted, #9aa0b5);
+  font-size: 12.5px;
+  padding: 18px 8px;
+}
+
+/* Card compacto */
+.pp-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  background: var(--surface, #16161f);
+  border: 1px solid var(--border, #2a2a3a);
+  border-radius: 10px;
+  padding: 9px 11px;
+  transition: border-color .12s, transform .08s;
+}
+.pp-mini:hover { border-color: #7c3aed; }
+.pp-mini:active { transform: scale(0.99); }
+.pp-mini-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pp-mini-num {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--text, #f1f5f9);
+}
+.pp-mini-sub {
+  font-size: 11.5px;
+  color: var(--text-muted, #9aa0b5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pp-mini-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.pp-mini-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 20px;
+}
+.pp-mini-itens {
+  font-size: 10.5px;
+  color: var(--text-muted, #9aa0b5);
+  font-weight: 600;
+}
+
+/* No celular as colunas viram blocos empilhados */
+@media (max-width: 640px) {
+  .pp-board {
+    flex-direction: column;
+    overflow-x: visible;
+    height: auto;
+  }
+  .pp-col {
+    width: 100%;
+    min-width: 0;
+    max-height: none;
+  }
+}
