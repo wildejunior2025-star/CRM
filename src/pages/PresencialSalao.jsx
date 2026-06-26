@@ -304,11 +304,15 @@ export default function PresencialSalao() {
               <div>
                 <div style={{ fontWeight: 800, fontSize: 18 }}>Mesa {mesaSel.numero}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{mesaSel.nome || `${mesaSel.capacidade} lugares`}</div>
-                {comandaSel?.garcom_id && garcons[comandaSel.garcom_id] && (
+                {comandaSel?.garcom_id && garcons[comandaSel.garcom_id] ? (
                   <div style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600, marginTop: 2 }}>
                     👤 Atendido por {garcons[comandaSel.garcom_id]}
                   </div>
-                )}
+                ) : comandaSel && !comandaSel.garcom_id ? (
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, marginTop: 2 }}>
+                    📱 Pedido pelo QR (autoatendimento)
+                  </div>
+                ) : null}
               </div>
               <button type="button" onClick={() => setMesaSel(null)} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-muted)' }}>×</button>
             </div>

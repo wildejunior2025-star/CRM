@@ -1,0 +1,203 @@
+import { useEffect, useMemo, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { supabase } from '../lib/supabaseClient'
+
+const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+
+export default function MesaCardapio() {
+  const { token } = useParams()
+  const [info, setInfo]       = useState(null)
+  const [produtos, setProdutos] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [erro, setErro]       = useState(null)
+  const [busca, setBusca]     = useState('')
+  const [cat, setCat]         = useState('Todos')
+  const [carrinho, setCarrinho] = useState({}) // { produto_id: { nome, preco, qtd } }
+  const [drawer, setDrawer]   = useState(false)
+  const [enviando, setEnviando] = useState(false)
+  const [sucesso, setSucesso] = useState(false)
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase.rpc('mesa_info', { p_token: token })
+      if (error || !data) { setErro('Mesa não encontrada.'); setLoading(false); return }
+      if (!data.ativa) { setErro('Esta mesa está indisponível.'); setLoading(false); return }
+      if (!data.presencial_ativo) { setErro('O pedido pela mesa não está disponível agora.'); setLoading(false); return }
+      setInfo(data)
+      const { data: ps } = await supabase
+        .from('estoque_catalogo')
+        .select('produto_id, nome, preco_venda, categoria, foto_url')
+        .eq('empresa_id', data.empresa_id)
+        .order('categoria').order('nome').limit(500)
+      setProdutos(ps ?? [])
+      setLoading(false)
+    })()
+  }, [token])
+
+  const categorias = useMemo(
+    () => ['Todos', ...new Set(produtos.map(p => p.categoria).filter(Boolean))],
+    [produtos]
+  )
+  const filtrados = produtos.filter(p => {
+    const okCat = cat === 'Todos' || p.categoria === cat
+    const t = busca.trim().toLowerCase()
+    return okCat && (!t || p.nome?.toLowerCase().includes(t))
+  })
+
+  const itens = Object.entries(carrinho).map(([id, v]) => ({ id, ...v }))
+  const totalItens = itens.reduce((s, i) => s + i.qtd, 0)
+  const totalValor = itens.reduce((s, i) => s + i.qtd * i.preco, 0)
+
+  function add(p) {
+    setCarrinho(c => ({ ...c, [p.produto_id]: {
+      nome: p.nome, preco: Number(p.preco_venda),
+      qtd: (c[p.produto_id]?.qtd ?? 0) + 1,
+    } }))
+  }
+  function mudar(id, d) {
+    setCarrinho(c => {
+      const q = (c[id]?.qtd ?? 0) + d
+      if (q <= 0) { const n = { ...c }; delete n[id]; return n }
+      return { ...c, [id]: { ...c[id], qtd: q } }
+    })
+  }
+
+  async function enviar() {
+    setEnviando(true)
+    const payload = itens.map(i => ({ produto_id: i.id, nome: i.nome, preco: i.preco, qtd: i.qtd }))
+    const { data, error } = await supabase.rpc('mesa_pedir', { p_token: token, p_itens: payload })
+    setEnviando(false)
+    if (error || !data?.ok) { alert('Não deu pra enviar: ' + (error?.message ?? 'erro')); return }
+    setCarrinho({}); setDrawer(false); setSucesso(true)
+  }
+
+  const C = {
+    page: { minHeight: '100dvh', background: '#0f0a1e', color: '#fff', paddingBottom: 90, fontFamily: 'system-ui, sans-serif' },
+    header: { padding: '18px 16px', background: 'linear-gradient(135deg,#5b21b6,#7c3aed)', position: 'sticky', top: 0, zIndex: 5 },
+    card: { background: '#1b1430', border: '1px solid #2c2350', borderRadius: 12, padding: 12, display: 'flex', alignItems: 'center', gap: 12 },
+  }
+
+  if (loading) return <div style={{ ...C.page, display: 'grid', placeItems: 'center' }}>Carregando…</div>
+  if (erro) return (
+    <div style={{ ...C.page, display: 'grid', placeItems: 'center', padding: 24, textAlign: 'center' }}>
+      <div>
+        <div style={{ fontSize: 40 }}>🍽️</div>
+        <p style={{ marginTop: 10 }}>{erro}</p>
+      </div>
+    </div>
+  )
+
+  return (
+    <div style={C.page}>
+      <header style={C.header}>
+        <div style={{ fontSize: 13, opacity: .85 }}>{info.empresa_nome}</div>
+        <div style={{ fontSize: 22, fontWeight: 800 }}>Mesa {info.numero}{info.nome ? ` · ${info.nome}` : ''}</div>
+        <div style={{ fontSize: 12, opacity: .85, marginTop: 2 }}>Faça seu pedido — vai direto pra cozinha 👨‍🍳</div>
+      </header>
+
+      <div style={{ padding: 14 }}>
+        <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar item…"
+          style={{ width: '100%', padding: '11px 14px', borderRadius: 10, border: '1px solid #2c2350', background: '#1b1430', color: '#fff', marginBottom: 12 }} />
+
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 8 }}>
+          {categorias.map(c => (
+            <button key={c} onClick={() => setCat(c)}
+              style={{ whiteSpace: 'nowrap', padding: '7px 14px', borderRadius: 999, cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                border: '1px solid ' + (cat === c ? '#7c3aed' : '#2c2350'),
+                background: cat === c ? '#7c3aed' : 'transparent', color: '#fff' }}>
+              {c}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {filtrados.map(p => {
+            const qtd = carrinho[p.produto_id]?.qtd ?? 0
+            return (
+              <div key={p.produto_id} style={C.card}>
+                {p.foto_url
+                  ? <img src={p.foto_url} alt="" style={{ width: 54, height: 54, borderRadius: 10, objectFit: 'cover' }} />
+                  : <div style={{ width: 54, height: 54, borderRadius: 10, background: '#2c2350', display: 'grid', placeItems: 'center', fontSize: 22 }}>🍴</div>}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{p.nome}</div>
+                  <div style={{ color: '#a78bfa', fontWeight: 800, fontSize: 14 }}>{fmt(p.preco_venda)}</div>
+                </div>
+                {qtd > 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button onClick={() => mudar(p.produto_id, -1)} style={btnQ}>−</button>
+                    <span style={{ fontWeight: 800, minWidth: 18, textAlign: 'center' }}>{qtd}</span>
+                    <button onClick={() => mudar(p.produto_id, +1)} style={btnQ}>+</button>
+                  </div>
+                ) : (
+                  <button onClick={() => add(p)} style={{ ...btnQ, width: 'auto', padding: '0 16px', background: '#7c3aed', borderColor: '#7c3aed' }}>Adicionar</button>
+                )}
+              </div>
+            )
+          })}
+          {filtrados.length === 0 && <p style={{ opacity: .7, textAlign: 'center', marginTop: 20 }}>Nenhum item encontrado.</p>}
+        </div>
+      </div>
+
+      {/* Barra do carrinho */}
+      {totalItens > 0 && (
+        <button onClick={() => setDrawer(true)}
+          style={{ position: 'fixed', left: 12, right: 12, bottom: 12, height: 56, borderRadius: 14, border: 'none', cursor: 'pointer',
+            background: '#7c3aed', color: '#fff', fontWeight: 800, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 18px', zIndex: 6 }}>
+          <span>{totalItens} {totalItens === 1 ? 'item' : 'itens'}</span>
+          <span>Ver pedido · {fmt(totalValor)}</span>
+        </button>
+      )}
+
+      {/* Drawer do pedido */}
+      {drawer && (
+        <div onClick={() => setDrawer(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 10, display: 'flex', alignItems: 'flex-end' }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: '100%', background: '#15102a', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, maxHeight: '80dvh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <strong style={{ fontSize: 17 }}>Seu pedido</strong>
+              <button onClick={() => setDrawer(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer' }}>×</button>
+            </div>
+            {itens.map(i => (
+              <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #2c2350' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14 }}>{i.nome}</div>
+                  <div style={{ fontSize: 12, color: '#a78bfa' }}>{fmt(i.preco)}</div>
+                </div>
+                <button onClick={() => mudar(i.id, -1)} style={btnQ}>−</button>
+                <span style={{ fontWeight: 800, minWidth: 18, textAlign: 'center' }}>{i.qtd}</span>
+                <button onClick={() => mudar(i.id, +1)} style={btnQ}>+</button>
+              </div>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', margin: '14px 0', fontSize: 16, fontWeight: 800 }}>
+              <span>Total</span><span style={{ color: '#a78bfa' }}>{fmt(totalValor)}</span>
+            </div>
+            <p style={{ fontSize: 12, opacity: .7, marginBottom: 12 }}>💳 O pagamento é feito no fim, com a equipe.</p>
+            <button onClick={enviar} disabled={enviando}
+              style={{ width: '100%', height: 52, borderRadius: 14, border: 'none', cursor: 'pointer', background: '#22c55e', color: '#fff', fontWeight: 800, fontSize: 16 }}>
+              {enviando ? 'Enviando…' : 'Enviar pedido para a cozinha'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sucesso */}
+      {sucesso && (
+        <div onClick={() => setSucesso(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 20, display: 'grid', placeItems: 'center', padding: 24, textAlign: 'center' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#15102a', borderRadius: 18, padding: 28, maxWidth: 340 }}>
+            <div style={{ fontSize: 48 }}>🎉</div>
+            <h2 style={{ margin: '10px 0 6px' }}>Pedido enviado!</h2>
+            <p style={{ opacity: .8, fontSize: 14 }}>Já foi pra cozinha. Pode pedir mais quando quiser — é só adicionar e enviar de novo.</p>
+            <button onClick={() => setSucesso(false)}
+              style={{ marginTop: 18, width: '100%', height: 48, borderRadius: 12, border: 'none', cursor: 'pointer', background: '#7c3aed', color: '#fff', fontWeight: 800 }}>
+              Continuar pedindo
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const btnQ = {
+  width: 34, height: 34, borderRadius: 9, cursor: 'pointer', flexShrink: 0,
+  border: '1px solid #7c3aed', background: 'transparent', color: '#fff', fontSize: 18, fontWeight: 700,
+}

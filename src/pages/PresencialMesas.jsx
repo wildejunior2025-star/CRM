@@ -24,6 +24,10 @@ export default function PresencialMesas() {
   const [numero, setNumero]         = useState('')
   const [nome, setNome]             = useState('')
   const [capacidade, setCapacidade] = useState(4)
+  const [qrMesa, setQrMesa]         = useState(null)   // mesa do modal de QR
+  const [copiado, setCopiado]       = useState(false)
+
+  const linkMesa = (m) => `${window.location.origin}/mesa/${m.token}`
 
   async function carregar() {
     if (!empresaId) return
@@ -126,6 +130,10 @@ export default function PresencialMesas() {
                   👥 {m.capacidade} lugares · {m.ativa ? cor.label : 'Inativa'}
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <button type="button" onClick={() => { setQrMesa(m); setCopiado(false) }}
+                    style={{ flex: 1, fontSize: 12, padding: '5px 0', borderRadius: 6, cursor: 'pointer', border: '1px solid var(--primary)', background: 'rgba(134,59,255,.1)', color: 'var(--primary)', fontWeight: 700 }}>
+                    📱 QR
+                  </button>
                   <button type="button" onClick={() => alternarAtiva(m)}
                     style={{ flex: 1, fontSize: 12, padding: '5px 0', borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)' }}>
                     {m.ativa ? 'Desativar' : 'Ativar'}
@@ -138,6 +146,39 @@ export default function PresencialMesas() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Modal QR / Link da mesa */}
+      {qrMesa && (
+        <div onClick={() => setQrMesa(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 360, background: 'var(--bg)', borderRadius: 16, border: '1px solid var(--border)', padding: 22, textAlign: 'center' }}>
+            <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 4 }}>QR da Mesa {qrMesa.numero}</div>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 16px' }}>
+              Imprima e cole na mesa. O cliente escaneia e pede sozinho — vai direto pra cozinha.
+            </p>
+            <img
+              alt={`QR Mesa ${qrMesa.numero}`}
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=10&data=${encodeURIComponent(linkMesa(qrMesa))}`}
+              style={{ width: 240, height: 240, borderRadius: 12, background: '#fff' }}
+            />
+            <div style={{ wordBreak: 'break-all', fontSize: 12, color: 'var(--text-muted)', margin: '14px 0' }}>
+              {linkMesa(qrMesa)}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button"
+                onClick={async () => { await navigator.clipboard.writeText(linkMesa(qrMesa)); setCopiado(true); setTimeout(() => setCopiado(false), 2000) }}
+                className="btn btn-primary" style={{ flex: 1 }}>
+                {copiado ? '✓ Copiado!' : 'Copiar link'}
+              </button>
+              <button type="button" onClick={() => setQrMesa(null)}
+                style={{ flex: '0 0 auto', padding: '0 16px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
+                Fechar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

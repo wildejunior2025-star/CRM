@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-ro
 import { useEffect } from 'react'
 import { useAuth } from './hooks/useAuth'
 
-const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor']
+const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor', '/mesa/']
 
 function HostnameRedirect() {
   const navigate = useNavigate()
@@ -106,6 +106,7 @@ import PresencialMesas from './pages/PresencialMesas'
 import PresencialSalao from './pages/PresencialSalao'
 import PresencialCozinha from './pages/PresencialCozinha'
 import PresencialHistorico from './pages/PresencialHistorico'
+import MesaCardapio from './pages/MesaCardapio'
 
 export default function App() {
   // lojaonline.fwcinter.com — vitrine pública da loja (sem login).
@@ -123,6 +124,7 @@ export default function App() {
             <Route path="/lojas" element={<DeliveryLojas />} />
             <Route path="/checkout" element={<DeliveryCheckout />} />
             <Route path="/pedido/:id" element={<DeliveryPedido />} />
+            <Route path="/mesa/:token" element={<MesaCardapio />} />
             <Route path="/:slug" element={<DeliveryLoja />} />
           </Routes>
         </BrowserRouter>
@@ -146,6 +148,8 @@ export default function App() {
           <Route path="/loja/:id" element={<DeliveryLoja />} />
           <Route path="/checkout" element={<DeliveryCheckout />} />
           <Route path="/pedido/:id" element={<DeliveryPedido />} />
+          {/* Autoatendimento por QR da mesa (público, sem login) */}
+          <Route path="/mesa/:token" element={<MesaCardapio />} />
           {/* Link de indicação unificado — pergunta "sou cliente ou loja" */}
           <Route path="/entrar" element={<CadastroRef />} />
           {/* Cadastro de cliente livre (sem empresa) */}

@@ -27,7 +27,7 @@ Legenda: ✅ feito e testável · 🔨 em desenvolvimento · 🔜 próximo · �
 |---|------|--------|------|
 | 2.1 | **KDS** — painel de preparo ao vivo | ✅ | /presencial/cozinha |
 | 2.2 | Impressão automática na cozinha | 💡 | — |
-| 2.3 | **QR Code na mesa** — cliente pede sozinho (reaproveita vitrine) | 💡 | — |
+| 2.3 | **QR Code na mesa** — cliente pede sozinho, vai direto pra cozinha | ✅ | /mesa/:token · migration 0055 |
 
 ## Fechamento avançado
 | # | Item | Status |
