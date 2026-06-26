@@ -225,7 +225,7 @@ export default function App() {
             />
             <Route
               path="presencial/cozinha"
-              element={<ProtectedRoute roles={['admin', 'vendedor', 'garcom', 'cozinheiro']}><PresencialCozinha /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'cozinheiro']}><PresencialCozinha /></ProtectedRoute>}
             />
             <Route
               path="presencial/historico"
