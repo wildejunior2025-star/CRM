@@ -19,7 +19,7 @@ function HostnameRedirect() {
       // Domínio do app é exclusivo do cliente. Admin/vendedor de empresa que
       // caírem aqui (ex.: impersonação por magic link) usam o CRM nas rotas raiz;
       // super_admin vai para a área dele. Só o cliente (ou não logado) vai ao portal.
-      if (perfil === 'admin' || perfil === 'vendedor' || perfil === 'garcom') return
+      if (perfil === 'admin' || perfil === 'vendedor' || perfil === 'garcom' || perfil === 'cozinheiro') return
       if (perfil === 'super_admin') {
         if (!pathname.startsWith('/super-admin')) navigate('/super-admin', { replace: true })
         return
@@ -28,7 +28,7 @@ function HostnameRedirect() {
     } else if (h === 'admin.fwcinter.com') {
       // Admin/vendedor impersonado não pode ser forçado para /super-admin (geraria loop):
       // usa o CRM da empresa nas rotas raiz.
-      if (perfil === 'admin' || perfil === 'vendedor' || perfil === 'garcom') return
+      if (perfil === 'admin' || perfil === 'vendedor' || perfil === 'garcom' || perfil === 'cozinheiro') return
       if (perfil === 'cliente') {
         // Super admin "entrar como cliente": mantém no mesmo domínio (backup p/ voltar funciona por origem).
         if (localStorage.getItem('crm_superadmin_backup')) {
@@ -181,7 +181,7 @@ export default function App() {
 
           <Route
             element={
-              <ProtectedRoute roles={['admin', 'vendedor', 'garcom']}>
+              <ProtectedRoute roles={['admin', 'vendedor', 'garcom', 'cozinheiro']}>
                 <Layout />
               </ProtectedRoute>
             }
@@ -225,7 +225,7 @@ export default function App() {
             />
             <Route
               path="presencial/cozinha"
-              element={<ProtectedRoute roles={['admin', 'vendedor', 'garcom']}><PresencialCozinha /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'vendedor', 'garcom', 'cozinheiro']}><PresencialCozinha /></ProtectedRoute>}
             />
             <Route
               path="presencial/historico"

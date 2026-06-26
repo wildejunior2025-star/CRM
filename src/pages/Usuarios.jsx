@@ -9,6 +9,7 @@ const PERFIS = [
   { value: 'admin', label: 'Admin' },
   { value: 'vendedor', label: 'Vendedor' },
   { value: 'garcom', label: 'Garçom' },
+  { value: 'cozinheiro', label: 'Cozinheiro' },
 ]
 
 const emptyVendorForm = { nome: '', email: '', senha: '', telefone: '' }
@@ -63,7 +64,7 @@ export default function Usuarios() {
     const { data, error } = await supabase
       .from('profiles').select('*')
       .eq('empresa_id', profile.empresa_id)
-      .in('perfil', ['admin', 'vendedor', 'garcom'])
+      .in('perfil', ['admin', 'vendedor', 'garcom', 'cozinheiro'])
       .order('created_at')
 
     if (error) setError(error.message)
