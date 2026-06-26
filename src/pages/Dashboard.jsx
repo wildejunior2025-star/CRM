@@ -97,16 +97,17 @@ export default function Dashboard() {
       const monthStart = new Date(hoje0.getFullYear(), hoje0.getMonth(), 1)
 
       const [clientesRes, produtosRes, saldoRes, cascoRes, fiadoRes,
-             vendas31Res, topItensRes, prodNomesRes, ultimasRes] = await Promise.all([
+             vendas31Res, topItensRes, prodNomesRes, ultimasRes, pedidosRes] = await Promise.all([
         supabase.from('clientes').select('id', { count: 'exact', head: true }).eq('ativo', true),
         supabase.from('produtos').select('id', { count: 'exact', head: true }).eq('ativo', true),
         supabase.from('estoque_saldo').select('*'),
         supabase.from('casco_saldo').select('*'),
         supabase.from('clientes_saldo_fiado').select('saldo_fiado'),
-        supabase.from('vendas').select('total, created_at, forma_pagamento').neq('status', 'cancelado').gte('created_at', desde.toISOString()),
+        supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes').neq('status', 'cancelado').gte('created_at', desde.toISOString()),
         supabase.from('venda_itens').select('produto_id, quantidade, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', monthStart.toISOString()).limit(5000),
         supabase.from('produtos').select('id, nome'),
         supabase.from('vendas').select('id, total, forma_pagamento, created_at, clientes(nome)').neq('status', 'cancelado').order('created_at', { ascending: false }).limit(8),
+        supabase.from('pedidos_delivery').select('total, created_at, origem, status').gte('created_at', desde.toISOString()),
       ])
 
       if (clientesRes.error || produtosRes.error || vendas31Res.error) {

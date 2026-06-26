@@ -1545,6 +1545,8 @@ export default function PainelPedidos() {
   // Concluídos do dia
   const [concluidosHoje, setConcluidosHoje] = useState([])
   const [loadingHoje, setLoadingHoje] = useState(false)
+  // Filtro do quadro — null = todas as colunas; ou 'aceitar'|'cozinha'|'entrega'|'concluidos'
+  const [filtroColuna, setFiltroColuna] = useState(null)
   // Caixa de entrada (chat com clientes) — a loja responde aqui
   const [chatMsgs, setChatMsgs]       = useState([])
   const [chatAberto, setChatAberto]   = useState(null)   // "canal|cliente_ref"
@@ -2212,39 +2214,81 @@ export default function PainelPedidos() {
         {carregando ? (
           <SkeletonGrid />
         ) : (
-          <div className="pp-board">
-            <Coluna titulo="A aceitar" cor="#ca8a04"
-              count={pedidos.filter(p => p.status === 'aguardando').length}
-              vazio="Nenhum pedido novo">
-              {pedidos.filter(p => p.status === 'aguardando').map(p => (
-                <CardMini key={p.id} pedido={p} onExpirado={handleExpirado} onClick={() => setPedidoDetalhe(p)} />
-              ))}
-            </Coluna>
+          <>
+            {/* Filtro de colunas */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+              {[
+                { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidos.length + concluidosHoje.length },
+                { id: 'aceitar',    label: 'A aceitar', cor: '#ca8a04', count: pedidos.filter(p => p.status === 'aguardando').length },
+                { id: 'cozinha',    label: 'Na cozinha', cor: '#1d4ed8', count: pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length },
+                { id: 'entrega',    label: 'Em entrega', cor: '#7c3aed', count: pedidos.filter(p => p.status === 'saiu_entrega').length },
+                { id: 'concluidos', label: 'Concluídos', cor: '#16a34a', count: concluidosHoje.length },
+              ].map(f => {
+                const ativo = filtroColuna === f.id
+                return (
+                  <button key={f.label} type="button" onClick={() => setFiltroColuna(f.id)}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px',
+                      borderRadius: 20, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+                      border: `1.5px solid ${ativo ? f.cor : 'var(--border, #2a2a3a)'}`,
+                      background: ativo ? f.cor : 'transparent',
+                      color: ativo ? '#fff' : 'var(--text-muted, #9aa0b5)',
+                    }}>
+                    {f.label}
+                    <span style={{
+                      minWidth: 18, height: 18, borderRadius: 9, padding: '0 5px',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, fontWeight: 800,
+                      background: ativo ? 'rgba(255,255,255,.25)' : 'var(--border, #2a2a3a)',
+                      color: ativo ? '#fff' : 'var(--text-muted, #9aa0b5)',
+                    }}>{f.count}</span>
+                  </button>
+                )
+              })}
+            </div>
 
-            <Coluna titulo="Na cozinha" cor="#1d4ed8"
-              count={pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length}
-              vazio="Nada em preparo">
-              {pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').map(p => (
-                <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
-              ))}
-            </Coluna>
+            <div className="pp-board" style={filtroColuna ? { gridTemplateColumns: 'minmax(0, 460px)' } : undefined}>
+              {(!filtroColuna || filtroColuna === 'aceitar') && (
+                <Coluna titulo="A aceitar" cor="#ca8a04"
+                  count={pedidos.filter(p => p.status === 'aguardando').length}
+                  vazio="Nenhum pedido novo">
+                  {pedidos.filter(p => p.status === 'aguardando').map(p => (
+                    <CardMini key={p.id} pedido={p} onExpirado={handleExpirado} onClick={() => setPedidoDetalhe(p)} />
+                  ))}
+                </Coluna>
+              )}
 
-            <Coluna titulo="Em entrega" cor="#7c3aed"
-              count={pedidos.filter(p => p.status === 'saiu_entrega').length}
-              vazio="Ninguém na rua">
-              {pedidos.filter(p => p.status === 'saiu_entrega').map(p => (
-                <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
-              ))}
-            </Coluna>
+              {(!filtroColuna || filtroColuna === 'cozinha') && (
+                <Coluna titulo="Na cozinha" cor="#1d4ed8"
+                  count={pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length}
+                  vazio="Nada em preparo">
+                  {pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').map(p => (
+                    <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
+                  ))}
+                </Coluna>
+              )}
 
-            <Coluna titulo="Concluídos hoje" cor="#16a34a"
-              count={concluidosHoje.length}
-              vazio="Nenhum concluído hoje">
-              {concluidosHoje.map(p => (
-                <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
-              ))}
-            </Coluna>
-          </div>
+              {(!filtroColuna || filtroColuna === 'entrega') && (
+                <Coluna titulo="Em entrega" cor="#7c3aed"
+                  count={pedidos.filter(p => p.status === 'saiu_entrega').length}
+                  vazio="Ninguém na rua">
+                  {pedidos.filter(p => p.status === 'saiu_entrega').map(p => (
+                    <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
+                  ))}
+                </Coluna>
+              )}
+
+              {(!filtroColuna || filtroColuna === 'concluidos') && (
+                <Coluna titulo="Concluídos hoje" cor="#16a34a"
+                  count={concluidosHoje.length}
+                  vazio="Nenhum concluído hoje">
+                  {concluidosHoje.map(p => (
+                    <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
+                  ))}
+                </Coluna>
+              )}
+            </div>
+          </>
         )}
       </main>
 
