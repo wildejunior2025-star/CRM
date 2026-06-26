@@ -266,7 +266,7 @@ export default function PortalHome() {
       // a uma loja guarda em clientes. Tenta profiles primeiro, depois clientes.
       const { data: prof } = await supabase
         .from('profiles')
-        .select('cep, cidade, endereco, numero, bairro')
+        .select('cep, cidade, endereco, numero, bairro, latitude, longitude')
         .eq('id', user.id)
         .maybeSingle()
 
@@ -287,6 +287,9 @@ export default function PortalHome() {
           numero:   src.numero   || '',
           bairro:   src.bairro   || '',
           cidade:   src.cidade   || '',
+          // localização exata marcada no mapa durante o cadastro (quando houver)
+          latitude:  src.latitude  != null ? Number(src.latitude)  : null,
+          longitude: src.longitude != null ? Number(src.longitude) : null,
         }
         salvarEnderecoAtivo(end)
         adicionarAoHistorico(end)
@@ -300,6 +303,11 @@ export default function PortalHome() {
   // Reativo: roda no 1º carregamento e sempre que o cliente troca de endereço.
   useEffect(() => {
     if (!enderecoAtivo) { setCoordsCliente(null); return }
+    // Localização exata marcada no mapa tem prioridade sobre o geocoding aproximado
+    if (enderecoAtivo.latitude != null && enderecoAtivo.longitude != null) {
+      setCoordsCliente({ lat: Number(enderecoAtivo.latitude), lng: Number(enderecoAtivo.longitude) })
+      return
+    }
     const endStr = [enderecoAtivo.endereco, enderecoAtivo.numero, enderecoAtivo.bairro, enderecoAtivo.cidade]
       .filter(Boolean).join(', ')
     if (!endStr) { setCoordsCliente(null); return }

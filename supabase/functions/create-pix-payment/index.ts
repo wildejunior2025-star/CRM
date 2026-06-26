@@ -19,7 +19,42 @@ Deno.serve(async (req) => {
     // pedido: { empresa_id, empresa_nome, cliente_id, cliente_nome, cliente_telefone,
     //           itens, total, subtotal, taxa_entrega, forma_pagamento, tipo_entrega,
     //           endereco_rua, endereco_numero, endereco_complemento, endereco_bairro,
-    //           endereco_cidade, observacoes, troco_para, codigo_entrega, payer_email }
+    //           endereco_cidade, observacoes, troco_para, codigo_entrega, payer_email,
+    //           pontos_usados }
+
+    const supabaseSrv = createClient(SUPABASE_URL, SUPABASE_KEY)
+
+    // ── Desconto por pontos (validado no servidor) ──────────────────────────
+    // O cliente informa pontos_usados, mas quem manda é o saldo real + a config.
+    // Garante que a cobrança do PIX e os pontos a debitar batem com o saldo.
+    const baseTotal = Number(pedido.subtotal ?? 0) + Number(pedido.taxa_entrega ?? 0)
+    let pontosUsados = Math.max(0, Math.floor(Number(pedido.pontos_usados ?? 0)))
+    let desconto = 0
+    if (pontosUsados > 0 && pedido.user_id) {
+      const { data: cfgRows } = await supabaseSrv
+        .from('configuracoes_plataforma')
+        .select('chave, valor')
+        .in('chave', ['valor_resgate_ponto', 'pontos_minimo_resgate'])
+      const valPonto = Number(cfgRows?.find((c: { chave: string; valor: string }) => c.chave === 'valor_resgate_ponto')?.valor ?? 0.02)
+      const minResg  = Number(cfgRows?.find((c: { chave: string; valor: string }) => c.chave === 'pontos_minimo_resgate')?.valor ?? 100)
+
+      const { data: saldo } = await supabaseSrv
+        .from('saldo_pontos').select('pontos').eq('profile_id', pedido.user_id).single()
+      const disponivel = Number(saldo?.pontos ?? 0)
+
+      // Não pode descontar mais que o saldo nem mais que o valor do pedido (deixa ao menos R$0,01)
+      const maxPorValor = Math.floor((baseTotal - 0.01) / valPonto)
+      pontosUsados = Math.min(pontosUsados, disponivel, Math.max(0, maxPorValor))
+      if (pontosUsados < minResg) pontosUsados = 0
+      desconto = Math.round(pontosUsados * valPonto * 100) / 100
+    } else {
+      pontosUsados = 0
+    }
+    // Sem desconto: mantém exatamente o total enviado (não muda nada p/ bot e pedidos normais).
+    // Com desconto por pontos: recalcula a cobrança a partir do subtotal+taxa-desconto.
+    const totalCobrar = pontosUsados > 0
+      ? Math.max(0.01, Math.round((baseTotal - desconto) * 100) / 100)
+      : Number(pedido.total ?? baseTotal)
 
     // MP exige mínimo 30 min para PIX — nosso cron cancela internamente aos 7 min
     const expiration = new Date(Date.now() + 30 * 60 * 1000).toISOString()
@@ -32,7 +67,7 @@ Deno.serve(async (req) => {
         'X-Idempotency-Key': crypto.randomUUID(),
       },
       body: JSON.stringify({
-        transaction_amount: Number(pedido.total),
+        transaction_amount: totalCobrar,
         description:        `Pedido ${pedido.empresa_nome ?? 'FWC Inter'}`,
         payment_method_id:  'pix',
         date_of_expiration: expiration,
@@ -58,7 +93,7 @@ Deno.serve(async (req) => {
     const { qr_code, qr_code_base64 } = point_of_interaction.transaction_data
 
     // Insere pedido no banco com status aguardando_pagamento
-    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
+    const supabase = supabaseSrv
 
     const { data: order, error: dbErr } = await supabase
       .from('pedidos_delivery')
@@ -69,9 +104,11 @@ Deno.serve(async (req) => {
         cliente_nome:          pedido.cliente_nome,
         cliente_telefone:      pedido.cliente_telefone,
         itens:                 pedido.itens,
-        total:                 pedido.total,
+        total:                 totalCobrar,
         subtotal:              pedido.subtotal,
         taxa_entrega:          pedido.taxa_entrega,
+        desconto:              desconto,
+        pontos_usados:         pontosUsados,
         forma_pagamento:       'pix',
         pix_status:            'pendente',
         pix_copia_cola:        qr_code,

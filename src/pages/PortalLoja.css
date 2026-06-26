@@ -31,7 +31,11 @@
 }
 
 @media (min-width: 768px) {
-  .loja-hero { height: 280px; }
+  /* height: banner maior no desktop.
+     margin-top negativo: o .portal-content tem padding-top de 24px no desktop,
+     que aparecia como uma faixa escura entre o header roxo e o banner.
+     Puxa o banner pra cima pra encostar no header (sem a linha preta). */
+  .loja-hero { height: 280px; margin-top: -24px; }
 }
 
 .loja-hero-img {

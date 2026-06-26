@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { supabase } from '../lib/supabaseClient'
 import ThemeToggle from '../components/ThemeToggle'
+import ModalMapaEndereco from '../components/ModalMapaEndereco'
 import './Login.css'
 
 const ESTADOS_BR = [
@@ -89,6 +90,11 @@ export default function CadastroCliente() {
   // Cadastro em 3 passos: 1 dados pessoais · 2 endereço · 3 senha
   const [step, setStep]                   = useState(1)
   const PASSOS = ['Seus dados', 'Endereço', 'Senha']
+
+  // Localização exata escolhida no mapa (pino arrastável)
+  const [latitude, setLatitude]   = useState(null)
+  const [longitude, setLongitude] = useState(null)
+  const [showMapa, setShowMapa]   = useState(false)
 
   if (session) {
     return <Navigate to="/portal" replace />
@@ -234,11 +240,20 @@ export default function CadastroCliente() {
   }
 
   function avancar() {
-    const err = step === 1 ? validarPasso1() : step === 2 ? validarPasso2() : null
-    if (err) { setError(err); return }
-    setError(null)
-    setStep(s => Math.min(3, s + 1))
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    if (step === 1) {
+      const err = validarPasso1()
+      if (err) { setError(err); return }
+      setError(null)
+      setStep(2)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    if (step === 2) {
+      const err = validarPasso2()
+      if (err) { setError(err); return }
+      setError(null)
+      setShowMapa(true) // antes de ir pra senha, marca a casa no mapa
+    }
   }
 
   function voltar() {
@@ -246,6 +261,22 @@ export default function CadastroCliente() {
     setStep(s => Math.max(1, s - 1))
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
+
+  function confirmarLocalizacao(lat, lng) {
+    setLatitude(lat)
+    setLongitude(lng)
+    setShowMapa(false)
+    setStep(3)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function pularMapa() {
+    setShowMapa(false)
+    setStep(3)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const enderecoTextoMapa = [endereco, numero, bairro, cidade, estado].filter(Boolean).join(', ')
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -303,6 +334,8 @@ export default function CadastroCliente() {
       bairro:       bairro || null,
       cidade:       cidade || null,
       estado:       estado || null,
+      latitude:     latitude != null ? String(latitude) : undefined,
+      longitude:    longitude != null ? String(longitude) : undefined,
     })
 
     if (error) {
@@ -321,7 +354,17 @@ export default function CadastroCliente() {
     setLoading(false)
 
     setSuccess(`Cadastro realizado! Entre com o apelido "${username}" e sua senha.`)
-    setTimeout(() => navigate('/login?tipo=cliente'), 2500)
+    // Cliente pertence ao domínio do app. Se o cadastro foi aberto em outro
+    // subdomínio (admin/gestor/lojaonline), leva pro login do app — senão fica
+    // logado/redirecionado no domínio errado e dá tela branca.
+    const HOSTS_REDIR = ['admin.fwcinter.com', 'gestor.fwcinter.com', 'lojaonline.fwcinter.com']
+    setTimeout(() => {
+      if (HOSTS_REDIR.includes(window.location.hostname)) {
+        window.location.replace('https://app.fwcinter.com/login?tipo=cliente')
+      } else {
+        navigate('/login?tipo=cliente')
+      }
+    }, 2500)
   }
 
   const selectStyle = {
@@ -710,6 +753,15 @@ export default function CadastroCliente() {
           </p>
         </form>
       </div>
+
+      {showMapa && (
+        <ModalMapaEndereco
+          enderecoTexto={enderecoTextoMapa}
+          onConfirmar={confirmarLocalizacao}
+          onFechar={() => setShowMapa(false)}
+          onPular={pularMapa}
+        />
+      )}
     </div>
   )
 }

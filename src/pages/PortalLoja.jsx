@@ -202,6 +202,12 @@ export default function PortalLoja() {
   const [taxaCalculada, setTaxaCalculada]   = useState(null)  // null = ainda não calculada por km
   const [tempoCalculado, setTempoCalculado] = useState(null)  // tempo estimado pela faixa
 
+  // Saldo de pontos (desconto nas compras)
+  const [saldoPontos, setSaldoPontos] = useState(0)
+  const [valorPonto, setValorPonto]   = useState(0.02)
+  const [minResgate, setMinResgate]   = useState(100)
+  const [usarSaldo, setUsarSaldo]     = useState(false)
+
   /* ── Persistir carrinho no localStorage ── */
   useEffect(() => {
     try {
@@ -255,7 +261,7 @@ export default function PortalLoja() {
     async function loadCliente() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const [{ data: cliente }, { data: profile }] = await Promise.all([
+      const [{ data: cliente }, { data: profile }, { data: saldo }, { data: cfgs }] = await Promise.all([
         supabase.from('clientes')
           .select('id, nome, telefone, cep, endereco, numero, complemento, bairro, cidade')
           .eq('user_id', user.id)
@@ -264,7 +270,15 @@ export default function PortalLoja() {
           .select('nome, telefone')
           .eq('id', user.id)
           .maybeSingle(),
+        supabase.from('saldo_pontos').select('pontos').eq('profile_id', user.id).maybeSingle(),
+        supabase.from('configuracoes_plataforma').select('chave, valor')
+          .in('chave', ['valor_resgate_ponto', 'pontos_minimo_resgate']),
       ])
+      setSaldoPontos(Number(saldo?.pontos ?? 0))
+      const vrp = cfgs?.find(c => c.chave === 'valor_resgate_ponto')?.valor
+      const pmr = cfgs?.find(c => c.chave === 'pontos_minimo_resgate')?.valor
+      if (vrp != null) setValorPonto(Number(vrp) || 0.02)
+      if (pmr != null) setMinResgate(Number(pmr) || 100)
       if (cliente) setClienteProfile(cliente)
       const d = cliente ?? profile
       const endLocal = getEnderecoAtivo()
@@ -313,6 +327,15 @@ export default function PortalLoja() {
   const temFaixasKm = Array.isArray(empresa?.taxas_entrega_km) && empresa.taxas_entrega_km.length > 0
   const taxa = taxaCalculada !== null ? taxaCalculada : (temFaixasKm ? null : Number(empresa?.taxa_entrega ?? 0))
   const totalComTaxa = totalValor + (taxa ?? 0)
+
+  // ── Saldo de pontos como desconto (usa o máximo possível automaticamente) ──
+  const baseDesconto    = Number.isFinite(totalComTaxa) ? totalComTaxa : totalValor
+  const maxPtsPorValor  = Math.max(0, Math.floor((baseDesconto - 0.01) / (valorPonto || 0.02)))
+  const pontosUsaveis   = Math.min(saldoPontos, maxPtsPorValor)
+  const podeUsarSaldo   = pontosUsaveis >= minResgate
+  const pontosUsados    = usarSaldo && podeUsarSaldo ? pontosUsaveis : 0
+  const descontoPontos  = Math.round(pontosUsados * (valorPonto || 0.02) * 100) / 100
+  const totalFinal      = Math.max(0, baseDesconto - descontoPontos)
 
   /* ── Carregar mais produtos ── */
   async function carregarMais() {
@@ -459,7 +482,9 @@ export default function PortalLoja() {
       itens,
       subtotal:             totalValor,
       taxa_entrega:         isRetirada ? 0 : (taxa ?? 0),
-      total:                isRetirada ? totalValor : totalValor + (taxa ?? 0),
+      desconto:             descontoPontos,
+      pontos_usados:        pontosUsados,
+      total:                Math.max(0, (isRetirada ? totalValor : totalValor + (taxa ?? 0)) - descontoPontos),
       forma_pagamento:      form.forma,
       troco_para:           form.forma === 'dinheiro' && form.troco ? Math.round(Number(form.troco) * 100) / 100 : null,
       observacoes:          form.obs.trim() || null,
@@ -777,8 +802,87 @@ export default function PortalLoja() {
                 )}
                 <div className="loja-checkout-total">
                   <span>Total</span>
-                  <strong>R$ {totalComTaxa.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
+                  <strong>R$ {totalFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
                 </div>
+
+                {/* ── Usar saldo de pontos (destaque) ── */}
+                {saldoPontos > 0 && podeUsarSaldo && (
+                  <div
+                    style={{
+                      marginTop: 14, borderRadius: 16, overflow: 'hidden',
+                      border: `2px solid ${usarSaldo ? 'var(--success)' : 'var(--primary)'}`,
+                      background: usarSaldo
+                        ? 'linear-gradient(135deg, rgba(34,197,94,.14), rgba(34,197,94,.05))'
+                        : 'linear-gradient(135deg, rgba(134,59,255,.16), rgba(134,59,255,.05))',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setUsarSaldo(v => !v)}
+                      style={{
+                        width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                        padding: '14px 16px', cursor: 'pointer', background: 'transparent',
+                        border: 'none', textAlign: 'left',
+                      }}
+                    >
+                      <span style={{ fontSize: 28, lineHeight: 1 }}>💰</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text)' }}>
+                          Usar meu saldo de pontos
+                        </div>
+                        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                          Você tem <strong style={{ color: 'var(--text)' }}>{saldoPontos.toLocaleString('pt-BR')} pts</strong>
+                          {' '}· economize até{' '}
+                          <strong style={{ color: 'var(--success)' }}>
+                            R$ {(pontosUsaveis * (valorPonto || 0.02)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </strong>
+                        </div>
+                      </div>
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          width: 48, height: 28, borderRadius: 999, flexShrink: 0, position: 'relative',
+                          background: usarSaldo ? 'var(--success)' : 'rgba(255,255,255,.25)',
+                          transition: 'background 150ms',
+                        }}
+                      >
+                        <span style={{
+                          position: 'absolute', top: 3, left: usarSaldo ? 23 : 3, width: 22, height: 22,
+                          borderRadius: '50%', background: '#fff', transition: 'left 150ms',
+                          boxShadow: '0 1px 3px rgba(0,0,0,.3)',
+                        }} />
+                      </span>
+                    </button>
+
+                    {usarSaldo && (
+                      <div style={{ padding: '0 16px 14px' }}>
+                        <div style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          fontSize: 13, color: 'var(--text-muted)', padding: '8px 0',
+                          borderTop: '1px dashed rgba(255,255,255,.18)',
+                        }}>
+                          <span>Desconto aplicado ({pontosUsados.toLocaleString('pt-BR')} pts)</span>
+                          <strong style={{ color: 'var(--success)', fontSize: 15 }}>
+                            − R$ {descontoPontos.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </strong>
+                        </div>
+                        <div style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                        }}>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Você vai pagar</span>
+                          <strong style={{ fontSize: 22, fontWeight: 800, color: 'var(--success)' }}>
+                            R$ {totalFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </strong>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {saldoPontos > 0 && !podeUsarSaldo && (
+                  <p style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+                    💰 Você tem {saldoPontos.toLocaleString('pt-BR')} pts — junte {(minResgate - saldoPontos).toLocaleString('pt-BR')} pts (mínimo {minResgate.toLocaleString('pt-BR')}) para usar como desconto.
+                  </p>
+                )}
               </div>
 
               {/* Dados pessoais */}
@@ -940,10 +1044,10 @@ export default function PortalLoja() {
                     <input
                       value={form.troco}
                       onChange={e => setForm(p => ({ ...p, troco: e.target.value }))}
-                      placeholder={`R$ ${Math.ceil(totalComTaxa + 10)},00`}
+                      placeholder={`R$ ${Math.ceil(totalFinal + 10)},00`}
                       type="number"
                       step="0.01"
-                      min={totalComTaxa}
+                      min={totalFinal}
                     />
                   </label>
                 )}
