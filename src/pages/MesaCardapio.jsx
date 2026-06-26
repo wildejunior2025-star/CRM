@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
@@ -16,6 +16,35 @@ export default function MesaCardapio() {
   const [drawer, setDrawer]   = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [sucesso, setSucesso] = useState(false)
+  const [comanda, setComanda] = useState(null)   // o que já foi pedido (status ao vivo)
+  const [acompanhar, setAcompanhar] = useState(false)
+  const [notif, setNotif]     = useState(null)
+  const prevPronto = useRef(new Set())
+
+  function avisar() {
+    try { navigator.vibrate?.([200, 100, 200]) } catch { /* sem vibração */ }
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext
+      if (Ctx) {
+        const ctx = new Ctx(); const o = ctx.createOscillator(); const g = ctx.createGain()
+        o.connect(g); g.connect(ctx.destination); o.type = 'sine'; o.frequency.value = 880
+        g.gain.setValueAtTime(0.001, ctx.currentTime)
+        g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + 0.02)
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
+        o.start(); o.stop(ctx.currentTime + 0.4)
+      }
+    } catch { /* áudio bloqueado */ }
+  }
+
+  async function fetchComanda() {
+    const { data } = await supabase.rpc('mesa_comanda', { p_token: token })
+    setComanda(data || null)
+    const prontoIds = new Set((data?.itens ?? []).filter(i => i.status === 'pronto').map(i => i.id))
+    let novo = false
+    prontoIds.forEach(id => { if (!prevPronto.current.has(id)) novo = true })
+    prevPronto.current = prontoIds
+    if (novo) { setNotif('🔔 Seu pedido ficou pronto!'); avisar() }
+  }
 
   useEffect(() => {
     (async () => {
@@ -33,6 +62,20 @@ export default function MesaCardapio() {
       setLoading(false)
     })()
   }, [token])
+
+  // Acompanha a comanda ao vivo (e avisa quando a cozinha dá o pronto)
+  useEffect(() => {
+    if (!info) return
+    fetchComanda()
+    const t = setInterval(fetchComanda, 8000)
+    return () => clearInterval(t)
+  }, [info])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!notif) return
+    const t = setTimeout(() => setNotif(null), 8000)
+    return () => clearTimeout(t)
+  }, [notif])
 
   const categorias = useMemo(
     () => ['Todos', ...new Set(produtos.map(p => p.categoria).filter(Boolean))],
@@ -69,6 +112,7 @@ export default function MesaCardapio() {
     setEnviando(false)
     if (error || !data?.ok) { alert('Não deu pra enviar: ' + (error?.message ?? 'erro')); return }
     setCarrinho({}); setDrawer(false); setSucesso(true)
+    fetchComanda()
   }
 
   const C = {
@@ -94,6 +138,23 @@ export default function MesaCardapio() {
         <div style={{ fontSize: 22, fontWeight: 800 }}>Mesa {info.numero}{info.nome ? ` · ${info.nome}` : ''}</div>
         <div style={{ fontSize: 12, opacity: .85, marginTop: 2 }}>Faça seu pedido — vai direto pra cozinha 👨‍🍳</div>
       </header>
+
+      {/* Aviso de pronto */}
+      {notif && (
+        <div onClick={() => { setNotif(null); setAcompanhar(true) }}
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 30, background: '#22c55e', color: '#fff', padding: '14px 16px', textAlign: 'center', fontWeight: 800, cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,.4)' }}>
+          {notif} <span style={{ fontWeight: 600, opacity: .9 }}>· toque para ver</span>
+        </div>
+      )}
+
+      {/* Acessar "Meu pedido" */}
+      {comanda && (comanda.itens?.length > 0) && (
+        <button onClick={() => setAcompanhar(true)}
+          style={{ width: 'calc(100% - 28px)', margin: '12px 14px 0', padding: '12px 14px', borderRadius: 12, border: '1px solid #2c2350', background: '#1b1430', color: '#fff', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 700 }}>
+          <span>📋 Meu pedido ({comanda.itens.length})</span>
+          <span style={{ color: '#a78bfa' }}>{fmt(comanda.subtotal)} ›</span>
+        </button>
+      )}
 
       <div style={{ padding: 14 }}>
         <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar item…"
@@ -178,6 +239,52 @@ export default function MesaCardapio() {
           </div>
         </div>
       )}
+
+      {/* Acompanhar pedido */}
+      {acompanhar && (() => {
+        const lista = comanda?.itens ?? []
+        const sub = Number(comanda?.subtotal ?? 0)
+        const taxaPct = Number(comanda?.taxa_pct ?? 0)
+        const taxa = Math.round(sub * taxaPct / 100 * 100) / 100
+        const totalEst = sub + taxa
+        const sLabel = s => s === 'pronto' ? '🔔 Pronto!' : s === 'entregue' ? '🍽️ Entregue' : '⏳ Preparando'
+        const sCor = s => s === 'pronto' ? '#22c55e' : s === 'entregue' ? '#a78bfa' : '#f59e0b'
+        return (
+          <div onClick={() => setAcompanhar(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 15, display: 'flex', alignItems: 'flex-end' }}>
+            <div onClick={e => e.stopPropagation()} style={{ width: '100%', background: '#15102a', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, maxHeight: '85dvh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <strong style={{ fontSize: 17 }}>Meu pedido</strong>
+                <button onClick={() => setAcompanhar(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer' }}>×</button>
+              </div>
+              {lista.length === 0 ? (
+                <p style={{ opacity: .7 }}>Você ainda não pediu nada.</p>
+              ) : (
+                <>
+                  {lista.map(it => (
+                    <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderBottom: '1px solid #2c2350' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14 }}>{it.quantidade}× {it.nome}</div>
+                        {it.observacao && <div style={{ fontSize: 12, opacity: .7 }}>📝 {it.observacao}</div>}
+                        <div style={{ fontSize: 12.5, fontWeight: 800, color: sCor(it.status), marginTop: 2 }}>{sLabel(it.status)}</div>
+                      </div>
+                      <span style={{ fontWeight: 700 }}>{fmt(it.preco * it.quantidade)}</span>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, fontSize: 14 }}><span>Subtotal</span><span>{fmt(sub)}</span></div>
+                  {taxaPct > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, opacity: .8 }}><span>Taxa de serviço ({taxaPct}%)</span><span>{fmt(taxa)}</span></div>}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 18, fontWeight: 800 }}>
+                    <span>{taxaPct > 0 ? 'Total estimado' : 'Total'}</span><span style={{ color: '#a78bfa' }}>{fmt(totalEst)}</span>
+                  </div>
+                  <p style={{ fontSize: 12, opacity: .7, marginTop: 10 }}>💳 O pagamento é feito no fim, com a equipe.</p>
+                </>
+              )}
+              <button onClick={() => setAcompanhar(false)} style={{ marginTop: 14, width: '100%', height: 48, borderRadius: 12, border: 'none', cursor: 'pointer', background: '#7c3aed', color: '#fff', fontWeight: 800 }}>
+                Pedir mais
+              </button>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Sucesso */}
       {sucesso && (
