@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
 import { useAuth } from './hooks/useAuth'
 
@@ -19,7 +19,7 @@ function HostnameRedirect() {
       // Domínio do app é exclusivo do cliente. Admin/vendedor de empresa que
       // caírem aqui (ex.: impersonação por magic link) usam o CRM nas rotas raiz;
       // super_admin vai para a área dele. Só o cliente (ou não logado) vai ao portal.
-      if (perfil === 'admin' || perfil === 'vendedor') return
+      if (perfil === 'admin' || perfil === 'vendedor' || perfil === 'garcom') return
       if (perfil === 'super_admin') {
         if (!pathname.startsWith('/super-admin')) navigate('/super-admin', { replace: true })
         return
@@ -28,10 +28,18 @@ function HostnameRedirect() {
     } else if (h === 'admin.fwcinter.com') {
       // Admin/vendedor impersonado não pode ser forçado para /super-admin (geraria loop):
       // usa o CRM da empresa nas rotas raiz.
-      if (perfil === 'admin' || perfil === 'vendedor') return
-      // "Entrar como cliente": a sessão vira cliente mas continua neste domínio
-      // (mesma origem preserva o backup p/ voltar). Deixa usar o /portal.
-      if (pathname.startsWith('/portal') && localStorage.getItem('crm_superadmin_backup')) return
+      if (perfil === 'admin' || perfil === 'vendedor' || perfil === 'garcom') return
+      if (perfil === 'cliente') {
+        // Super admin "entrar como cliente": mantém no mesmo domínio (backup p/ voltar funciona por origem).
+        if (localStorage.getItem('crm_superadmin_backup')) {
+          if (!pathname.startsWith('/portal')) navigate('/portal', { replace: true })
+          return
+        }
+        // Cliente de verdade pertence ao app, não ao painel admin → manda pro domínio do app.
+        // (Antes ia pra /super-admin e entrava em loop com o ProtectedRoute → tela branca.)
+        window.location.replace('https://app.fwcinter.com/portal')
+        return
+      }
       if (!pathname.startsWith('/super-admin') && pathname !== '/login') {
         navigate('/super-admin', { replace: true })
       }
@@ -93,6 +101,11 @@ import RaioEntrega from './pages/RaioEntrega'
 import WhatsAppCreditos from './pages/WhatsAppCreditos'
 import Termos from './pages/Termos'
 import Privacidade from './pages/Privacidade'
+import ServicoPresencial from './pages/ServicoPresencial'
+import PresencialMesas from './pages/PresencialMesas'
+import PresencialSalao from './pages/PresencialSalao'
+import PresencialCozinha from './pages/PresencialCozinha'
+import PresencialHistorico from './pages/PresencialHistorico'
 
 export default function App() {
   // lojaonline.fwcinter.com — vitrine pública da loja (sem login).
@@ -164,12 +177,12 @@ export default function App() {
 
           <Route
             element={
-              <ProtectedRoute roles={['admin', 'vendedor']}>
+              <ProtectedRoute roles={['admin', 'vendedor', 'garcom']}>
                 <Layout />
               </ProtectedRoute>
             }
           >
-            <Route index element={<Dashboard />} />
+            <Route index element={<ProtectedRoute roles={['admin', 'vendedor']}><Dashboard /></ProtectedRoute>} />
             <Route path="clientes" element={<Clientes />} />
             <Route path="vendas" element={<Vendas />} />
             <Route path="caixa" element={<Caixa />} />
@@ -193,6 +206,26 @@ export default function App() {
             <Route
               path="raio-entrega"
               element={<ProtectedRoute roles={['admin']}><RaioEntrega /></ProtectedRoute>}
+            />
+            <Route
+              path="presencial"
+              element={<ProtectedRoute roles={['admin']}><ServicoPresencial /></ProtectedRoute>}
+            />
+            <Route
+              path="presencial/mesas"
+              element={<ProtectedRoute roles={['admin']}><PresencialMesas /></ProtectedRoute>}
+            />
+            <Route
+              path="presencial/salao"
+              element={<ProtectedRoute roles={['admin', 'vendedor', 'garcom']}><PresencialSalao /></ProtectedRoute>}
+            />
+            <Route
+              path="presencial/cozinha"
+              element={<ProtectedRoute roles={['admin', 'vendedor', 'garcom']}><PresencialCozinha /></ProtectedRoute>}
+            />
+            <Route
+              path="presencial/historico"
+              element={<ProtectedRoute roles={['admin']}><PresencialHistorico /></ProtectedRoute>}
             />
             <Route
               path="pedidos-delivery"

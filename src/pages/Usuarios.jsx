@@ -4,10 +4,11 @@ import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 import './Usuarios.css'
 
+// Perfis de equipe (cliente é gerenciado na tela "Clientes")
 const PERFIS = [
   { value: 'admin', label: 'Admin' },
   { value: 'vendedor', label: 'Vendedor' },
-  { value: 'cliente', label: 'Cliente' },
+  { value: 'garcom', label: 'Garçom' },
 ]
 
 const emptyVendorForm = { nome: '', email: '', senha: '', telefone: '' }
@@ -15,7 +16,6 @@ const emptyVendorForm = { nome: '', email: '', senha: '', telefone: '' }
 export default function Usuarios() {
   const { user, profile, refreshProfile } = useAuth()
   const [perfis, setPerfis] = useState([])
-  const [clientes, setClientes] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [savingId, setSavingId] = useState(null)
@@ -55,25 +55,25 @@ export default function Usuarios() {
   }
 
   async function loadAll() {
+    if (!profile?.empresa_id) { setLoading(false); return }
     setLoading(true)
     setError(null)
 
-    const [perfisRes, clientesRes] = await Promise.all([
-      supabase.from('profiles').select('*').order('created_at'),
-      supabase.from('clientes').select('id, nome').order('nome'),
-    ])
+    // Só a equipe DESTA loja — clientes ficam na tela "Clientes"
+    const { data, error } = await supabase
+      .from('profiles').select('*')
+      .eq('empresa_id', profile.empresa_id)
+      .in('perfil', ['admin', 'vendedor', 'garcom'])
+      .order('created_at')
 
-    const firstError = perfisRes.error || clientesRes.error
-    if (firstError) setError(firstError.message)
-
-    setPerfis(perfisRes.data ?? [])
-    setClientes(clientesRes.data ?? [])
+    if (error) setError(error.message)
+    setPerfis(data ?? [])
     setLoading(false)
   }
 
   useEffect(() => {
     loadAll()
-  }, [])
+  }, [profile?.empresa_id])  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handlePerfilChange(profile, novoPerfil) {
     setSavingId(profile.id)
@@ -93,29 +93,6 @@ export default function Usuarios() {
 
     setPerfis((prev) =>
       prev.map((p) => (p.id === profile.id ? { ...p, ...updates } : p))
-    )
-
-    if (profile.id === user?.id) await refreshProfile()
-  }
-
-  async function handleClienteChange(profile, clienteId) {
-    setSavingId(profile.id)
-    setError(null)
-
-    const { error } = await supabase
-      .from('profiles')
-      .update({ cliente_id: clienteId || null })
-      .eq('id', profile.id)
-
-    setSavingId(null)
-
-    if (error) {
-      setError(error.message)
-      return
-    }
-
-    setPerfis((prev) =>
-      prev.map((p) => (p.id === profile.id ? { ...p, cliente_id: clienteId || null } : p))
     )
 
     if (profile.id === user?.id) await refreshProfile()
@@ -169,12 +146,12 @@ export default function Usuarios() {
   return (
     <div>
       <div className="page-header">
-        <h1>Vendedores</h1>
+        <h1>Funcionários</h1>
         <button
           className="btn btn-primary"
           onClick={() => { setVendorForm(emptyVendorForm); setVendorError(null); setShowVendorModal(true) }}
         >
-          + Novo Vendedor
+          + Novo Colaborador
         </button>
       </div>
 
@@ -202,7 +179,6 @@ export default function Usuarios() {
                 <th>Nome</th>
                 <th>E-mail</th>
                 <th>Perfil</th>
-                <th>Cliente vinculado</th>
               </tr>
             </thead>
             <tbody>
@@ -222,24 +198,6 @@ export default function Usuarios() {
                         </option>
                       ))}
                     </select>
-                  </td>
-                  <td>
-                    {p.perfil === 'cliente' ? (
-                      <select
-                        value={p.cliente_id ?? ''}
-                        onChange={(e) => handleClienteChange(p, e.target.value)}
-                        disabled={savingId === p.id}
-                      >
-                        <option value="">Não vinculado</option>
-                        {clientes.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.nome}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span className="usr-muted">-</span>
-                    )}
                   </td>
                 </tr>
               ))}
@@ -262,7 +220,7 @@ export default function Usuarios() {
       {showVendorModal && (
         <div className="modal-overlay" onClick={() => setShowVendorModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
-            <h2>Novo Vendedor</h2>
+            <h2>Novo Colaborador</h2>
             <form onSubmit={handleCreateVendor}>
               <div className="form-field">
                 <label>Nome</label>
@@ -332,7 +290,7 @@ export default function Usuarios() {
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={creatingVendor}>
-                  {creatingVendor ? 'Criando...' : 'Criar vendedor'}
+                  {creatingVendor ? 'Criando...' : 'Criar colaborador'}
                 </button>
               </div>
             </form>

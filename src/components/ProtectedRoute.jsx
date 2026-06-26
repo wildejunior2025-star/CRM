@@ -25,6 +25,7 @@ export default function ProtectedRoute({ children, roles }) {
     let home = '/portal'
     if (profile?.perfil === 'super_admin') home = '/super-admin'
     else if (profile?.perfil === 'admin' || profile?.perfil === 'vendedor') home = '/'
+    else if (profile?.perfil === 'garcom') home = '/presencial/salao'
     return <Navigate to={home} replace />
   }
 

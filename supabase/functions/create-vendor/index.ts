@@ -91,15 +91,16 @@ serve(async (req) => {
 
     const newUserId = newUser.user.id
 
-    // O trigger handle_new_user cria o profile com perfil='cliente'.
-    // Corrigimos para 'vendedor' e vinculamos à empresa do admin chamador.
-    const profileUpdates: Record<string, unknown> = { perfil: "vendedor", empresa_id, nome }
-    if (telefone) profileUpdates.telefone = telefone
+    // O trigger handle_new_user NÃO cria profile para usuários sem tipo_cadastro,
+    // então fazemos UPSERT (cria se não existir) com perfil 'vendedor' e a empresa.
+    const profileRow: Record<string, unknown> = {
+      id: newUserId, perfil: "vendedor", empresa_id, nome, email: newUser.user.email,
+    }
+    if (telefone) profileRow.telefone = telefone
 
     const { error: updateError } = await sbAdmin
       .from("profiles")
-      .update(profileUpdates)
-      .eq("id", newUserId)
+      .upsert(profileRow, { onConflict: "id" })
 
     if (updateError) {
       // Usuário foi criado no Auth mas o profile não foi atualizado.

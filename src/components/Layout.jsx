@@ -14,7 +14,19 @@ const links = [
   { to: '/vendas', label: 'Vendas', roles: ['admin', 'vendedor'] },
   { to: '/caixa', label: 'Caixa', roles: ['admin', 'vendedor'] },
   { to: '/clientes', label: 'Clientes', roles: ['admin'] },
-  { to: '/usuarios', label: 'Vendedores', roles: ['admin'] },
+  { to: '/usuarios', label: 'Funcionários', roles: ['admin'] },
+  {
+    to: '/presencial', label: 'Serviço Presencial', roles: ['admin'],
+    children: [
+      { to: '/presencial/salao', label: 'Salão', roles: ['admin'] },
+      { to: '/presencial/cozinha', label: 'Cozinha (KDS)', roles: ['admin'] },
+      { to: '/presencial/historico', label: 'Histórico', roles: ['admin'] },
+      { to: '/presencial/mesas', label: 'Mesas', roles: ['admin'] },
+    ],
+  },
+  // Garçom/atendente (vendedor) veem direto o Salão e a Cozinha
+  { to: '/presencial/salao', label: 'Salão', roles: ['vendedor', 'garcom'] },
+  { to: '/presencial/cozinha', label: 'Cozinha (KDS)', roles: ['vendedor', 'garcom'] },
 
   { group: 'Catálogo' },
   { to: '/produtos', label: 'Catálogo', roles: ['admin'] },
@@ -63,7 +75,7 @@ export default function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [expandidos, setExpandidos] = useState(() => new Set(['/minha-loja']))
+  const [expandidos, setExpandidos] = useState(() => new Set(['/minha-loja', '/presencial']))
 
   function toggleExpandido(to) {
     setExpandidos(prev => {
