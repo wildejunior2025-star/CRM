@@ -255,39 +255,58 @@ export default function PortalHome() {
       setEmpresas(data ?? [])
       setLoading(false)
 
-      // Geocodifica endereço do cliente para filtro por raio e verifica cadastro
-      const endLocal = getEnderecoAtivo()
-      if (endLocal) {
-        const endStr = [endLocal.endereco, endLocal.numero, endLocal.bairro, endLocal.cidade].filter(Boolean).join(', ')
-        const coords = await geocodificar(endStr)
-        if (coords) setCoordsCliente(coords)
-        return
-      }
+      // Se já tem endereço ativo (localStorage), o filtro por raio é resolvido
+      // pelo efeito de geocodificação abaixo. Senão, puxa do cadastro do cliente.
+      if (getEnderecoAtivo()) return
 
       const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        const { data: clienteData } = await supabase
+      if (!user) return
+
+      // Cliente do app (portal) guarda o endereço em profiles; cliente vinculado
+      // a uma loja guarda em clientes. Tenta profiles primeiro, depois clientes.
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('cep, cidade, endereco, numero, bairro')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      let src = (prof?.cep || prof?.cidade || prof?.endereco) ? prof : null
+      if (!src) {
+        const { data: cli } = await supabase
           .from('clientes')
-          .select('cep, cidade, endereco, numero, bairro, telefone')
+          .select('cep, cidade, endereco, numero, bairro')
           .eq('user_id', user.id)
           .maybeSingle()
+        if (cli?.cep || cli?.cidade || cli?.endereco) src = cli
+      }
 
-        if (clienteData?.cep || clienteData?.cidade) {
-          const end = {
-            cep:      clienteData.cep      || '',
-            endereco: clienteData.endereco  || '',
-            numero:   clienteData.numero    || '',
-            bairro:   clienteData.bairro    || '',
-            cidade:   clienteData.cidade    || '',
-          }
-          salvarEnderecoAtivo(end)
-          adicionarAoHistorico(end)
-          setEnderecoAtivo(end)
+      if (src) {
+        const end = {
+          cep:      src.cep      || '',
+          endereco: src.endereco || '',
+          numero:   src.numero   || '',
+          bairro:   src.bairro   || '',
+          cidade:   src.cidade   || '',
         }
+        salvarEnderecoAtivo(end)
+        adicionarAoHistorico(end)
+        setEnderecoAtivo(end)
       }
     }
     load()
   }, [])
+
+  // Geocodifica o endereço ativo do cliente para o filtro por raio.
+  // Reativo: roda no 1º carregamento e sempre que o cliente troca de endereço.
+  useEffect(() => {
+    if (!enderecoAtivo) { setCoordsCliente(null); return }
+    const endStr = [enderecoAtivo.endereco, enderecoAtivo.numero, enderecoAtivo.bairro, enderecoAtivo.cidade]
+      .filter(Boolean).join(', ')
+    if (!endStr) { setCoordsCliente(null); return }
+    let cancelado = false
+    geocodificar(endStr).then(coords => { if (!cancelado && coords) setCoordsCliente(coords) })
+    return () => { cancelado = true }
+  }, [enderecoAtivo])
 
   if (!loadingBranding && empresaParceira) {
     return <Navigate to={`/portal/loja/${empresaParceira.id}`} replace />

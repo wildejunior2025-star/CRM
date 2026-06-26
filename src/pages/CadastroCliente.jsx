@@ -86,6 +86,10 @@ export default function CadastroCliente() {
   const [success, setSuccess]             = useState(null)
   const [loading, setLoading]             = useState(false)
 
+  // Cadastro em 3 passos: 1 dados pessoais · 2 endereço · 3 senha
+  const [step, setStep]                   = useState(1)
+  const PASSOS = ['Seus dados', 'Endereço', 'Senha']
+
   if (session) {
     return <Navigate to="/portal" replace />
   }
@@ -133,6 +137,16 @@ export default function CadastroCliente() {
       const { data } = await supabase.rpc('get_root_ref_token')
       setRootRefToken(data)
     }
+  }
+
+  function handleTelefoneChange(e) {
+    const v = e.target.value.replace(/\D/g, '').slice(0, 11) // trava: máx. 11 dígitos
+    let fmt = v
+    if (v.length > 10)      fmt = v.replace(/^(\d{2})(\d{5})(\d{1,4}).*/, '($1) $2-$3')
+    else if (v.length > 6)  fmt = v.replace(/^(\d{2})(\d{4})(\d{1,4}).*/, '($1) $2-$3')
+    else if (v.length > 2)  fmt = v.replace(/^(\d{2})(\d{1,5}).*/, '($1) $2')
+    else if (v.length > 0)  fmt = v.replace(/^(\d{1,2}).*/, '($1')
+    setTelefone(fmt)
   }
 
   function handleCpfChange(e) {
@@ -199,8 +213,44 @@ export default function CadastroCliente() {
     if (uf) await carregarCidades(uf)
   }
 
+  // ── Validação por passo ──────────────────────────────────────────────────
+  function validarPasso1() {
+    if (!username || username.length < 3) return 'Escolha um apelido com pelo menos 3 caracteres.'
+    if (!/^[a-z0-9_.]{3,30}$/.test(username)) return 'Apelido: só letras, números, _ ou . sem espaço.'
+    if (usernameStatus === 'taken') return 'Este apelido já está em uso. Escolha outro.'
+    if (!nome.trim()) return 'Informe seu nome.'
+    if (!telefone.trim()) return 'Informe seu WhatsApp / telefone.'
+    if (!email.trim()) return 'Informe seu e-mail.'
+    return null
+  }
+
+  function validarPasso2() {
+    if (!endereco.trim()) return 'Informe o nome da rua.'
+    if (!numero.trim()) return 'Número da casa é obrigatório.'
+    if (!estado) return 'Selecione o estado.'
+    if (!cidade) return 'Selecione a cidade.'
+    if (!bairro.trim()) return 'Bairro é obrigatório.'
+    return null
+  }
+
+  function avancar() {
+    const err = step === 1 ? validarPasso1() : step === 2 ? validarPasso2() : null
+    if (err) { setError(err); return }
+    setError(null)
+    setStep(s => Math.min(3, s + 1))
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function voltar() {
+    setError(null)
+    setStep(s => Math.max(1, s - 1))
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
+    // Enter em passos intermediários apenas avança, não envia
+    if (step < 3) { avancar(); return }
     setError(null)
     setSuccess(null)
 
@@ -309,11 +359,32 @@ export default function CadastroCliente() {
           </span>
           <div>
             <h1>Depósito CRM</h1>
-            <p className="login-subtitle">Crie sua conta de cliente</p>
+            <p className="login-subtitle">Passo {step} de 3 · {PASSOS[step - 1]}</p>
           </div>
         </div>
 
+        {/* Barra de progresso dos passos */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
+          {PASSOS.map((label, i) => (
+            <div key={label} style={{ flex: 1 }}>
+              <div style={{
+                height: 4, borderRadius: 999,
+                background: i + 1 <= step ? 'var(--primary)' : 'var(--border)',
+                transition: 'background 200ms',
+              }} />
+              <div style={{
+                marginTop: 6, fontSize: 11, fontWeight: i + 1 === step ? 700 : 500,
+                color: i + 1 === step ? 'var(--primary)' : 'var(--text-muted)',
+                textAlign: 'center',
+              }}>{label}</div>
+            </div>
+          ))}
+        </div>
+
         <form className="login-form" onSubmit={handleSubmit}>
+
+          {/* ── PASSO 1 · Dados pessoais ──────────────────────────────────── */}
+          {step === 1 && (<>
 
           {/* Banner de indicação via link */}
           {indicadorNome && (
@@ -464,7 +535,8 @@ export default function CadastroCliente() {
           <div className="form-field">
             <label htmlFor="telefone">WhatsApp / Telefone</label>
             <input id="telefone" type="tel" placeholder="(84) 99999-9999" value={telefone}
-              onChange={(e) => setTelefone(e.target.value)} autoComplete="tel" required />
+              onChange={handleTelefoneChange} inputMode="numeric" maxLength={15}
+              autoComplete="tel" required />
           </div>
 
           {/* E-mail */}
@@ -473,6 +545,11 @@ export default function CadastroCliente() {
             <input id="email" type="email" placeholder="voce@exemplo.com" value={email}
               onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
           </div>
+
+          </>)}
+
+          {/* ── PASSO 2 · Endereço ────────────────────────────────────────── */}
+          {step === 2 && (<>
 
           {/* Separador de endereço */}
           <p style={{ margin: '8px 0 0', fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
@@ -547,6 +624,11 @@ export default function CadastroCliente() {
               onChange={(e) => setBairro(e.target.value)} />
           </div>
 
+          </>)}
+
+          {/* ── PASSO 3 · Senha ───────────────────────────────────────────── */}
+          {step === 3 && (<>
+
           {/* Senha */}
           <div className="form-field" style={{ marginTop: 8 }}>
             <label htmlFor="password">Senha</label>
@@ -560,6 +642,8 @@ export default function CadastroCliente() {
             <input id="confirm-password" type="password" placeholder="••••••••" value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" required />
           </div>
+
+          </>)}
 
           {error && (
             <div className="login-error" role="alert">
@@ -579,24 +663,47 @@ export default function CadastroCliente() {
             </div>
           )}
 
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.6, margin: '4px 0' }}>
-            Ao criar sua conta, você concorda com os{' '}
-            <Link to="/termos" target="_blank" style={{ color: 'var(--primary)' }}>Termos de Uso</Link>
-            {' '}e a{' '}
-            <Link to="/privacidade" target="_blank" style={{ color: 'var(--primary)' }}>Política de Privacidade</Link>
-            {' '}da plataforma.
-          </p>
+          {step === 3 && (
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.6, margin: '4px 0' }}>
+              Ao criar sua conta, você concorda com os{' '}
+              <Link to="/termos" target="_blank" style={{ color: 'var(--primary)' }}>Termos de Uso</Link>
+              {' '}e a{' '}
+              <Link to="/privacidade" target="_blank" style={{ color: 'var(--primary)' }}>Política de Privacidade</Link>
+              {' '}da plataforma.
+            </p>
+          )}
 
-          <button type="submit" className="btn btn-primary login-submit" disabled={loading}>
-            {loading ? (
-              <>
-                <span className="login-spinner" aria-hidden="true" />
-                Cadastrando...
-              </>
-            ) : (
-              'Criar conta'
+          {/* Botões de navegação entre os passos */}
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+            {step > 1 && (
+              <button type="button" className="btn" onClick={voltar} disabled={loading}
+                style={{
+                  flex: '0 0 auto', padding: '0 18px',
+                  border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)',
+                }}>
+                ← Voltar
+              </button>
             )}
-          </button>
+
+            {step < 3 ? (
+              <button type="button" className="btn btn-primary login-submit" onClick={avancar}
+                style={{ flex: 1, marginTop: 0 }}>
+                Continuar
+              </button>
+            ) : (
+              <button type="submit" className="btn btn-primary login-submit" disabled={loading}
+                style={{ flex: 1, marginTop: 0 }}>
+                {loading ? (
+                  <>
+                    <span className="login-spinner" aria-hidden="true" />
+                    Cadastrando...
+                  </>
+                ) : (
+                  'Criar conta'
+                )}
+              </button>
+            )}
+          </div>
 
           <p className="login-links">
             Já tem conta? <Link to="/login?tipo=cliente">Entrar</Link>
