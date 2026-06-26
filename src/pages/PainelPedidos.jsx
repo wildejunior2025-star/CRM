@@ -1329,6 +1329,14 @@ const RIGHTBAR_BOTOES = [
     ),
   },
   {
+    id: 'chat', label: 'Mensagens',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+      </svg>
+    ),
+  },
+  {
     id: 'catalogo', label: 'Catálogo',
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1456,6 +1464,11 @@ export default function PainelPedidos() {
   // Concluídos do dia
   const [concluidosHoje, setConcluidosHoje] = useState([])
   const [loadingHoje, setLoadingHoje] = useState(false)
+  // Caixa de entrada (chat com clientes) — a loja responde aqui
+  const [chatMsgs, setChatMsgs]       = useState([])
+  const [chatAberto, setChatAberto]   = useState(null)   // "canal|cliente_ref"
+  const [chatTexto, setChatTexto]     = useState('')
+  const [enviandoChat, setEnviandoChat] = useState(false)
   // Catálogo (pausar/ativar itens da loja online)
   const [catalogo, setCatalogo] = useState([])
   const [loadingCatalogo, setLoadingCatalogo] = useState(false)
@@ -1546,6 +1559,59 @@ export default function PainelPedidos() {
 
   // Carrega a coluna "Concluídos" do quadro assim que o painel abre
   useEffect(() => { carregarConcluidosHoje() }, [carregarConcluidosHoje])
+
+  // ── Chat: carrega mensagens e escuta em tempo real ──────────
+  useEffect(() => {
+    if (!empresa) return
+    let ativo = true
+    ;(async () => {
+      const { data } = await supabase
+        .from('mensagens_chat')
+        .select('*')
+        .eq('empresa_id', empresa.id)
+        .order('created_at', { ascending: true })
+        .limit(500)
+      if (ativo) setChatMsgs(data || [])
+    })()
+    const canal = supabase
+      .channel(`chat_${empresa.id}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'mensagens_chat', filter: `empresa_id=eq.${empresa.id}` },
+        payload => {
+          if (payload.eventType === 'INSERT') {
+            setChatMsgs(prev => prev.some(m => m.id === payload.new.id) ? prev : [...prev, payload.new])
+          } else if (payload.eventType === 'UPDATE') {
+            setChatMsgs(prev => prev.map(m => m.id === payload.new.id ? payload.new : m))
+          }
+        })
+      .subscribe()
+    return () => { ativo = false; canal.unsubscribe() }
+  }, [empresa])
+
+  // Marca como lidas as mensagens do cliente ao abrir a conversa, e envia resposta
+  async function abrirThread(t) {
+    setChatAberto(t.key)
+    const naoLidas = t.msgs.filter(m => m.remetente === 'cliente' && !m.lida).map(m => m.id)
+    if (naoLidas.length) {
+      setChatMsgs(prev => prev.map(m => naoLidas.includes(m.id) ? { ...m, lida: true } : m))
+      await supabase.from('mensagens_chat').update({ lida: true }).in('id', naoLidas)
+    }
+  }
+  async function enviarChat() {
+    const txt = chatTexto.trim()
+    if (!txt || !chatAberto) return
+    const sep = chatAberto.indexOf('|')
+    const canal = chatAberto.slice(0, sep)
+    const cliente_ref = chatAberto.slice(sep + 1)
+    const thread = chatMsgs.find(m => `${m.canal}|${m.cliente_ref}` === chatAberto)
+    setEnviandoChat(true)
+    const { error } = await supabase.from('mensagens_chat').insert({
+      empresa_id: empresa.id, canal, cliente_ref,
+      cliente_nome: thread?.cliente_nome ?? null, remetente: 'loja', texto: txt,
+    })
+    setEnviandoChat(false)
+    if (!error) setChatTexto('')
+  }
 
   // ── Catálogo: carrega os produtos da loja ───────────────────
   const carregarCatalogo = useCallback(async () => {
@@ -1957,6 +2023,21 @@ export default function PainelPedidos() {
   const catalogoFiltrado = catalogo.filter(p =>
     !buscaCatalogo.trim() || p.nome?.toLowerCase().includes(buscaCatalogo.trim().toLowerCase())
   )
+
+  // Agrupa as mensagens em conversas (canal + cliente)
+  const chatThreads = Object.values(chatMsgs.reduce((acc, m) => {
+    const k = `${m.canal}|${m.cliente_ref}`
+    if (!acc[k]) acc[k] = { key: k, canal: m.canal, cliente_ref: m.cliente_ref, cliente_nome: m.cliente_nome, msgs: [], unread: 0 }
+    acc[k].msgs.push(m)
+    if (m.cliente_nome) acc[k].cliente_nome = m.cliente_nome
+    if (m.remetente === 'cliente' && !m.lida) acc[k].unread++
+    return acc
+  }, {})).sort((a, b) =>
+    new Date(b.msgs[b.msgs.length - 1].created_at) - new Date(a.msgs[a.msgs.length - 1].created_at)
+  )
+  const chatNaoLidas = chatThreads.reduce((s, t) => s + t.unread, 0)
+  const threadAberta = chatThreads.find(t => t.key === chatAberto)
+  const CANAL_LABEL = { app: 'App', lojaonline: 'Loja online', whatsapp: 'WhatsApp' }
 
   return (
     <div className="pp-root">
