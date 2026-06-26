@@ -18,7 +18,7 @@ Legenda: ✅ feito · 🔨 em desenvolvimento · 🔜 próximo · 💡 planejado
 | # | Item | Status |
 |---|------|--------|
 | I1 | Resumo diário no WhatsApp do dono | ✅ (cron 22h + botão "Receber agora") |
-| I2 | Alertas automáticos (estoque acabando, vendas caindo, meta batida) | 🔜 |
+| I2 | Alertas automáticos (estoque baixo às 8h no WhatsApp) | ✅ |
 | I3 | Fechamento/relatório mensal em PDF | 💡 |
 | I4 | Curva ABC — produtos por lucro | 💡 |
 | I5 | Contas a pagar/receber + fluxo de caixa | 💡 |

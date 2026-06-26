@@ -116,6 +116,15 @@ export default function Dashboard() {
       ? { tipo: 'ok', txt: 'Resumo enviado no seu WhatsApp! 📲' }
       : { tipo: 'aviso', txt: 'Não enviou — confira o telefone de contato da loja em Minha Loja.' })
   }
+  async function enviarAlerta() {
+    setEnviandoResumo(true); setResumoMsg(null)
+    const { data, error } = await supabase.functions.invoke('alertas-loja', { body: { empresa_id: empresaId } })
+    setEnviandoResumo(false)
+    if (error || !data?.ok) { setResumoMsg({ tipo: 'erro', txt: 'Erro ao enviar: ' + (error?.message ?? data?.error ?? 'falhou') }); return }
+    setResumoMsg(data.enviadas > 0
+      ? { tipo: 'ok', txt: 'Alerta de estoque enviado no WhatsApp! 📦' }
+      : { tipo: 'aviso', txt: 'Sem itens abaixo do mínimo (ou telefone de contato não configurado).' })
+  }
 
   useEffect(() => {
     async function load() {
@@ -368,13 +377,18 @@ export default function Dashboard() {
       )}
 
       <div className="card" style={{ marginTop: 24, padding: '18px 20px' }}>
-        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>🤖 Resumo diário no WhatsApp</div>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>🤖 Avisos no WhatsApp</div>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-          Todo dia às 22h você recebe no WhatsApp o resumo da loja (faturamento, pedidos, top produto, meta). Quer testar agora?
+          Automático: <strong>resumo do dia às 22h</strong> e <strong>alerta de estoque às 8h</strong>. Quer testar agora?
         </p>
-        <button onClick={enviarResumo} disabled={enviandoResumo} className="btn btn-primary">
-          {enviandoResumo ? 'Enviando...' : '📲 Receber resumo agora'}
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={enviarResumo} disabled={enviandoResumo} className="btn btn-primary">
+            {enviandoResumo ? 'Enviando...' : '📲 Resumo do dia'}
+          </button>
+          <button onClick={enviarAlerta} disabled={enviandoResumo} className="btn btn-secondary">
+            {enviandoResumo ? 'Enviando...' : '📦 Alerta de estoque'}
+          </button>
+        </div>
         {resumoMsg && (
           <div style={{ marginTop: 10, fontSize: 13, color: resumoMsg.tipo === 'ok' ? 'var(--success)' : resumoMsg.tipo === 'aviso' ? '#f59e0b' : 'var(--danger)' }}>
             {resumoMsg.txt}
