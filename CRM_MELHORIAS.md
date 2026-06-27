@@ -11,7 +11,7 @@ Legenda: ✅ feito · 🔨 em desenvolvimento · 🔜 próximo · 💡 planejado
 | O1 | Impressão (QZ Tray): delivery (auto), comanda na cozinha e conta do presencial | ✅ |
 | O3 | Aceitar/recusar pedido de delivery + status pro cliente (Gestor de Pedidos) | ✅ |
 | O3b | Tempo de preparo estimado no aceite ("fica pronto em ~X min") visível pro cliente | 🔨 |
-| O2 | Gestão de entregas / tela do entregador (atribuir, saiu pra entrega, rota) | 🔜 |
+| O2 | Gestão de entregas: perfil entregador, atribuir no Gestor, tela do entregador (rota, ligar, confirmar com código) | ✅ |
 | O4 | Reservas e fila de mesa (presencial): data/horário, ocasião (aniversário), mesa, status | ✅ |
 | O4b | Avisar reserva/fila no WhatsApp + bot fazer reserva pelo cliente | 💡 (depois) |
 

@@ -10,6 +10,7 @@ const PERFIS = [
   { value: 'vendedor', label: 'Vendedor' },
   { value: 'garcom', label: 'Garçom' },
   { value: 'cozinheiro', label: 'Cozinheiro' },
+  { value: 'entregador', label: 'Entregador' },
 ]
 
 const emptyVendorForm = { nome: '', email: '', senha: '', telefone: '' }

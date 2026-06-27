@@ -963,7 +963,7 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
 }
 
 // ── Card de pedido ──────────────────────────────────────────
-function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir }) {
+function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, entregadores = [], onAtribuirEntregador }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const pagamento = pedido.forma_pagamento || ''
   const endereco = enderecoCompleto(pedido)
@@ -1177,6 +1177,34 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           </svg>
           Pronto por volta de {new Date(pedido.pronto_previsto_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
           {pedido.tempo_preparo_min ? ` (~${pedido.tempo_preparo_min} min)` : ''}
+        </div>
+      )}
+
+      {/* Entregador — atribuição (só entrega, em estado despachável) */}
+      {!isRetirada && onAtribuirEntregador && ['confirmado', 'em_preparo', 'saiu_entrega'].includes(pedido.status) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0 2px' }}>
+          <span style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+            🛵 Entregador
+          </span>
+          {entregadores.length === 0 ? (
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+              cadastre um funcionário com perfil Entregador
+            </span>
+          ) : (
+            <select
+              value={pedido.entregador_id || ''}
+              onChange={e => onAtribuirEntregador(pedido.id, e.target.value)}
+              style={{
+                flex: 1, padding: '6px 8px', borderRadius: 8, fontSize: 13,
+                border: '1.5px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
+              }}
+            >
+              <option value="">A definir</option>
+              {entregadores.map(en => (
+                <option key={en.id} value={en.id}>{en.nome || 'Entregador'}</option>
+              ))}
+            </select>
+          )}
         </div>
       )}
 
@@ -1606,6 +1634,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
 export default function PainelPedidos() {
   const { empresa, logout } = useAuth()
   const [pedidos, setPedidos] = useState([])
+  const [entregadores, setEntregadores] = useState([])
   const [carregando, setCarregando] = useState(true)
   const [lojaAberta, setLojaAberta] = useState(false)
   const [togglingLoja, setTogglingLoja] = useState(false)
@@ -1944,6 +1973,25 @@ export default function PainelPedidos() {
     setPedidos(data || [])
     setCarregando(false)
   }, [empresa])
+
+  // Carrega os entregadores da loja (para atribuir aos pedidos)
+  useEffect(() => {
+    if (!empresa) return
+    supabase
+      .from('profiles')
+      .select('id, nome')
+      .eq('empresa_id', empresa.id)
+      .eq('perfil', 'entregador')
+      .eq('ativo', true)
+      .order('nome')
+      .then(({ data }) => setEntregadores(data || []))
+  }, [empresa])
+
+  async function atribuirEntregador(pedidoId, entregadorId) {
+    const valor = entregadorId || null
+    setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, entregador_id: valor } : p))
+    await supabase.from('pedidos_delivery').update({ entregador_id: valor }).eq('id', pedidoId)
+  }
 
   // ── Realtime subscription + polling de segurança + visibilidade ──
   useEffect(() => {
@@ -2453,6 +2501,8 @@ export default function PainelPedidos() {
               onAvancar={(id, st) => { handleAvancar(id, st); setPedidoDetalhe(null) }}
               onEnviarMensagem={(p) => { setPedidoMensagem(p); setPedidoDetalhe(null) }}
               onImprimir={handleImprimir}
+              entregadores={entregadores}
+              onAtribuirEntregador={atribuirEntregador}
             />
           </div>
         </div>

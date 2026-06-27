@@ -29,6 +29,7 @@ export default function ProtectedRoute({ children, roles, modulo }) {
     else if (profile?.perfil === 'vendedor') home = '/painel'
     else if (profile?.perfil === 'garcom') home = '/presencial/salao'
     else if (profile?.perfil === 'cozinheiro') home = '/presencial/cozinha'
+    else if (profile?.perfil === 'entregador') home = '/entregas'
     return <Navigate to={home} replace />
   }
 

@@ -96,6 +96,7 @@ import CadastroVendedor from './pages/CadastroVendedor'
 import MinhaLoja from './pages/MinhaLoja'
 import PedidosDelivery from './pages/PedidosDelivery'
 import PainelPedidos from './pages/PainelPedidos'
+import PainelEntregador from './pages/PainelEntregador'
 import ResetPassword from './pages/ResetPassword'
 import WhatsAppConfig from './pages/WhatsAppConfig'
 import BotTeste from './pages/BotTeste'
@@ -270,6 +271,16 @@ export default function App() {
             element={
               <ProtectedRoute roles={['admin', 'super_admin', 'vendedor']}>
                 <PainelPedidos />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Tela do entregador — autônoma, mobile (entregador fica só aqui) */}
+          <Route
+            path="/entregas"
+            element={
+              <ProtectedRoute roles={['entregador', 'admin', 'super_admin']}>
+                <PainelEntregador />
               </ProtectedRoute>
             }
           />
