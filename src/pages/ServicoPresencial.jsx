@@ -8,6 +8,7 @@ import '../components/Page.css'
 const SUBAREAS = [
   { to: '/presencial/salao', icon: '🗺️', nome: 'Salão', desc: 'Abrir mesas, lançar comanda e fechar a conta', pronto: true },
   { to: '/presencial/cozinha', icon: '👨‍🍳', nome: 'Cozinha (KDS)', desc: 'Painel de preparo dos pedidos, ao vivo', pronto: true },
+  { to: '/presencial/reservas', icon: '📅', nome: 'Reservas e fila', desc: 'Agende mesas e gerencie a fila de espera', pronto: true },
   { to: '/presencial/historico', icon: '🧾', nome: 'Histórico', desc: 'Contas fechadas e total recebido', pronto: true },
   { to: '/presencial/mesas', icon: '🪑', nome: 'Mesas', desc: 'Cadastre as mesas do salão', pronto: true },
 ]

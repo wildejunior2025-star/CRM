@@ -112,6 +112,7 @@ import PresencialMesas from './pages/PresencialMesas'
 import PresencialSalao from './pages/PresencialSalao'
 import PresencialCozinha from './pages/PresencialCozinha'
 import PresencialHistorico from './pages/PresencialHistorico'
+import PresencialReservas from './pages/PresencialReservas'
 import MesaCardapio from './pages/MesaCardapio'
 
 export default function App() {
@@ -236,6 +237,10 @@ export default function App() {
             <Route
               path="presencial/historico"
               element={<ProtectedRoute roles={['admin']} modulo="presencial"><PresencialHistorico /></ProtectedRoute>}
+            />
+            <Route
+              path="presencial/reservas"
+              element={<ProtectedRoute roles={['admin', 'garcom']} modulo="presencial"><PresencialReservas /></ProtectedRoute>}
             />
             <Route
               path="pedidos-delivery"

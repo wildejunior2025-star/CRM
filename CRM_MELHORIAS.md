@@ -12,7 +12,8 @@ Legenda: ✅ feito · 🔨 em desenvolvimento · 🔜 próximo · 💡 planejado
 | O3 | Aceitar/recusar pedido de delivery + status pro cliente (Gestor de Pedidos) | ✅ |
 | O3b | Tempo de preparo estimado no aceite ("fica pronto em ~X min") visível pro cliente | 🔨 |
 | O2 | Gestão de entregas / tela do entregador (atribuir, saiu pra entrega, rota) | 🔜 |
-| O4 | Reservas e fila de mesa (presencial): data/horário, aniversário, aviso no WhatsApp; bot reserva depois | 🔜 |
+| O4 | Reservas e fila de mesa (presencial): data/horário, ocasião (aniversário), mesa, status | ✅ |
+| O4b | Avisar reserva/fila no WhatsApp + bot fazer reserva pelo cliente | 💡 (depois) |
 
 ## 📊 Inteligência pro dono
 | # | Item | Status |

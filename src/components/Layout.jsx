@@ -23,6 +23,7 @@ const links = [
     children: [
       { to: '/presencial/salao', label: 'Salão', roles: ['admin'] },
       { to: '/presencial/cozinha', label: 'Cozinha (KDS)', roles: ['admin'] },
+      { to: '/presencial/reservas', label: 'Reservas e fila', roles: ['admin'] },
       { to: '/presencial/historico', label: 'Histórico', roles: ['admin'] },
       { to: '/presencial/mesas', label: 'Mesas', roles: ['admin'] },
     ],
