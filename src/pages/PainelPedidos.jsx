@@ -2413,8 +2413,19 @@ export default function PainelPedidos() {
                 <Coluna titulo="A aceitar" cor="#ca8a04"
                   count={pedidos.filter(p => p.status === 'aguardando').length}
                   vazio="Nenhum pedido novo">
+                  {/* Card completo já aqui — o lojista vê tudo e aceita/recusa sem abrir */}
                   {pedidos.filter(p => p.status === 'aguardando').map(p => (
-                    <CardMini key={p.id} pedido={p} onExpirado={handleExpirado} onClick={() => setPedidoDetalhe(p)} />
+                    <CardPedido
+                      key={p.id}
+                      pedido={p}
+                      entregadores={entregadores}
+                      onConfirmar={(id) => setPedidoAceitando(pedidos.find(x => x.id === id) || p)}
+                      onRecusar={(ped) => setPedidoRecusando(ped)}
+                      onExpirado={handleExpirado}
+                      onAvancar={handleAvancar}
+                      onEnviarMensagem={(ped) => setPedidoMensagem(ped)}
+                      onImprimir={handleImprimir}
+                    />
                   ))}
                 </Coluna>
               )}
