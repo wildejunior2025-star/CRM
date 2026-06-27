@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { getEnderecoAtivo } from '../utils/enderecoPortal'
+import { registrarPedido } from '../lib/meusPedidos'
 import './DeliveryCheckout.css'
 
 // Cliente lembrado no aparelho (Opção A — login sem senha)
@@ -371,6 +372,7 @@ export default function DeliveryCheckout() {
         complemento: form.complemento.trim(), estado: form.estado, cidade: form.cidade, bairro: form.bairro.trim(),
       }))
     } catch { /* ok */ }
+    registrarPedido(data.id, empresaId)
     navigate(`/pedido/${data.id}`, { replace: true })
   }
 

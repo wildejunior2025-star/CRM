@@ -313,6 +313,18 @@ export default function DeliveryLoja() {
               {loja.delivery_ativo ? 'Aberto' : 'Fechado'}
             </span>
           </div>
+          <button
+            type="button"
+            onClick={() => navigate(`/meus-pedidos?loja=${loja.id}`)}
+            style={{
+              marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6,
+              background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.15)',
+              color: '#fff', borderRadius: 10, padding: '8px 12px', cursor: 'pointer',
+              fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap',
+            }}
+          >
+            🧾 Meus pedidos
+          </button>
         </div>
       </header>
 

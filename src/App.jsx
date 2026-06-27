@@ -104,6 +104,8 @@ import DeliveryLojas from './pages/DeliveryLojas'
 import DeliveryLoja from './pages/DeliveryLoja'
 import DeliveryCheckout from './pages/DeliveryCheckout'
 import DeliveryPedido from './pages/DeliveryPedido'
+import MeusPedidos from './pages/MeusPedidos'
+import LojaOnlineHome from './pages/LojaOnlineHome'
 import RaioEntrega from './pages/RaioEntrega'
 import WhatsAppCreditos from './pages/WhatsAppCreditos'
 import Termos from './pages/Termos'
@@ -128,10 +130,12 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<DeliveryLojas />} />
-            <Route path="/lojas" element={<DeliveryLojas />} />
+            {/* Sem marketplace: cada cliente só acessa a loja pelo link dela */}
+            <Route path="/" element={<LojaOnlineHome />} />
+            <Route path="/lojas" element={<LojaOnlineHome />} />
             <Route path="/checkout" element={<DeliveryCheckout />} />
             <Route path="/pedido/:id" element={<DeliveryPedido />} />
+            <Route path="/meus-pedidos" element={<MeusPedidos />} />
             <Route path="/mesa/:token" element={<MesaCardapio />} />
             {/* Link antigo por id (ex: loja sem slug) — resolve por id no DeliveryLoja */}
             <Route path="/loja/:id" element={<DeliveryLoja />} />
@@ -158,6 +162,7 @@ export default function App() {
           <Route path="/loja/:id" element={<DeliveryLoja />} />
           <Route path="/checkout" element={<DeliveryCheckout />} />
           <Route path="/pedido/:id" element={<DeliveryPedido />} />
+          <Route path="/meus-pedidos" element={<MeusPedidos />} />
           {/* Autoatendimento por QR da mesa (público, sem login) */}
           <Route path="/mesa/:token" element={<MesaCardapio />} />
           {/* Link de indicação unificado — pergunta "sou cliente ou loja" */}
