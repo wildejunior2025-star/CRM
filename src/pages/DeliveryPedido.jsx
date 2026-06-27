@@ -191,6 +191,7 @@ export default function DeliveryPedido() {
   const [loading, setLoading] = useState(true)
   const [lastUpdate, setLastUpdate] = useState(null)
   const [pixCopied, setPixCopied] = useState(false)
+  const [loja, setLoja] = useState(null) // loja onde o pedido foi feito (cabeçalho + voltar)
   // Avaliação (pós-entrega)
   const [nota, setNota] = useState(0)
   const [hoverNota, setHoverNota] = useState(0)
@@ -247,6 +248,17 @@ export default function DeliveryPedido() {
     }
   }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Busca a loja do pedido (nome/logo) para o cabeçalho e o "voltar à loja"
+  useEffect(() => {
+    if (!pedido?.empresa_id) return
+    supabase
+      .from('empresas')
+      .select('id, nome, logo_url, slug')
+      .eq('id', pedido.empresa_id)
+      .maybeSingle()
+      .then(({ data }) => setLoja(data ?? null))
+  }, [pedido?.empresa_id])
+
   async function handleCopiarPix() {
     if (!pedido?.pix_copia_cola) return
     try {
@@ -288,9 +300,6 @@ export default function DeliveryPedido() {
     return (
       <div className="dpd-loading">
         <p style={{ color: '#94a3b8' }}>Pedido não encontrado.</p>
-        <button className="dpd-back-link" onClick={() => navigate('/lojas')}>
-          Ver lojas
-        </button>
       </div>
     )
   }
@@ -303,8 +312,19 @@ export default function DeliveryPedido() {
     <div className="dpd-root">
       <header className="dpd-header">
         <div className="dpd-header-inner">
-          <button className="dpd-logo-btn" onClick={() => navigate('/lojas')}>
-            <span className="dpd-logo">FWC</span>
+          <button
+            className="dpd-logo-btn"
+            onClick={() => navigate(`/loja/${pedido.empresa_id}`)}
+            title="Voltar à loja para pedir de novo"
+            style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+          >
+            {loja?.logo_url
+              ? <img src={loja.logo_url} alt={loja.nome} style={{ width: 30, height: 30, borderRadius: 8, objectFit: 'cover' }} />
+              : <span style={{
+                  width: 30, height: 30, borderRadius: 8, background: 'rgba(124,58,237,.25)', color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 15,
+                }}>{(loja?.nome ?? 'L').trim().charAt(0).toUpperCase()}</span>}
+            <span className="dpd-logo" style={{ fontSize: 16 }}>{loja?.nome ?? 'Loja'}</span>
           </button>
           <div className="dpd-header-right">
             <span className="dpd-pedido-id">Pedido #{shortId(pedido.id)}</span>
