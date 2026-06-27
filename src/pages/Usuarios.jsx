@@ -65,7 +65,7 @@ export default function Usuarios() {
     const { data, error } = await supabase
       .from('profiles').select('*')
       .eq('empresa_id', profile.empresa_id)
-      .in('perfil', ['admin', 'vendedor', 'garcom', 'cozinheiro'])
+      .in('perfil', ['admin', 'vendedor', 'garcom', 'cozinheiro', 'entregador'])
       .order('created_at')
 
     if (error) setError(error.message)
