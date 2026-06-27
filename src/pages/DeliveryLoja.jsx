@@ -86,6 +86,7 @@ export default function DeliveryLoja() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const drawerRef = useRef(null)
   const [filtroEstoqueBaixo, setFiltroEstoqueBaixo] = useState(false)
+  const [busca, setBusca] = useState('')
 
   // Sincroniza carrinho com localStorage (chave = id real da loja)
   useEffect(() => {
@@ -190,6 +191,14 @@ export default function DeliveryLoja() {
   const categorias = [...new Set(produtosFiltrados.map(p => p.categoria).filter(Boolean))]
   const semCategoria = produtosFiltrados.filter(p => !p.categoria)
   const todasCats = semCategoria.length > 0 ? [...categorias, '__sem__'] : categorias
+
+  // Busca por nome do produto (filtra tudo, ignorando a divisão por categoria)
+  const buscaTrim = busca.trim().toLowerCase()
+  const resultadosBusca = buscaTrim
+    ? produtosFiltrados.filter(p =>
+        (p.nome ?? '').toLowerCase().includes(buscaTrim) ||
+        (p.descricao ?? '').toLowerCase().includes(buscaTrim))
+    : null
 
   // Define categoria ativa inicial
   useEffect(() => {
@@ -307,7 +316,38 @@ export default function DeliveryLoja() {
         </div>
       </header>
 
-      {/* ── Barra de categorias ── */}
+      {/* ── Busca flutuante (fixa no topo ao rolar) ── */}
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 30,
+        background: 'var(--dloja-bg, #0f0f1a)',
+        padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,.06)',
+      }}>
+        <div style={{ position: 'relative', maxWidth: 720, margin: '0 auto' }}>
+          <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', pointerEvents: 'none' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          </span>
+          <input
+            type="search"
+            value={busca}
+            onChange={e => setBusca(e.target.value)}
+            placeholder="Buscar produto..."
+            style={{
+              width: '100%', boxSizing: 'border-box', padding: '11px 38px', borderRadius: 12,
+              border: '1.5px solid rgba(255,255,255,.12)', background: 'rgba(255,255,255,.06)',
+              color: '#fff', fontSize: 15, outline: 'none',
+            }}
+          />
+          {busca && (
+            <button type="button" onClick={() => setBusca('')} aria-label="Limpar busca"
+              style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4, display: 'flex' }}>
+              <IconX />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Barra de categorias (some durante a busca) ── */}
+      {!buscaTrim && (
       <nav className="dloja-cat-nav" ref={navRef} aria-label="Categorias">
         <div className="dloja-cat-nav-inner">
           {categorias.map(cat => (
@@ -331,6 +371,7 @@ export default function DeliveryLoja() {
           )}
         </div>
       </nav>
+      )}
 
       {!loja.delivery_ativo && (
         <div className="dloja-closed-banner">
@@ -339,7 +380,30 @@ export default function DeliveryLoja() {
       )}
 
       <main className="dloja-main">
-        {categorias.length === 0 && semCategoria.length === 0 ? (
+        {resultadosBusca ? (
+          resultadosBusca.length === 0 ? (
+            <div className="dloja-empty">
+              <IconImage />
+              <p>Nenhum produto encontrado para “{busca.trim()}”.</p>
+            </div>
+          ) : (
+            <section className="dloja-section">
+              <h2 className="dloja-cat-title">Resultados ({resultadosBusca.length})</h2>
+              <div className="dloja-produtos">
+                {resultadosBusca.map(p => (
+                  <ProdutoCard
+                    key={p.id}
+                    produto={p}
+                    quantidade={carrinho[p.id]?.quantidade ?? 0}
+                    lojaAberta={loja.delivery_ativo}
+                    onAdd={() => addOne(p)}
+                    onRemove={() => removeOne(p.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          )
+        ) : categorias.length === 0 && semCategoria.length === 0 ? (
           <div className="dloja-empty">
             <IconImage />
             <p>{filtroEstoqueBaixo ? 'Nenhum produto com estoque baixo.' : 'Nenhum produto disponível para delivery.'}</p>
