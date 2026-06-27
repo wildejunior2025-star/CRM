@@ -5,17 +5,6 @@ import { supabase } from '../lib/supabaseClient'
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? ''
 
-const LABEL_STATUS = {
-  confirmado:   'Preparando',
-  em_preparo:   'Preparando',
-  saiu_entrega: 'Em rota',
-}
-const COR_STATUS = {
-  confirmado:   '#1d4ed8',
-  em_preparo:   '#1d4ed8',
-  saiu_entrega: '#7c3aed',
-}
-
 function fmt(v) {
   return Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
@@ -26,63 +15,56 @@ function enderecoTexto(p) {
 }
 
 function mapsUrl(p) {
-  const addr = enderecoTexto(p)
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(enderecoTexto(p))}`
 }
 
-// Telefone só com dígitos para o link do WhatsApp (wa.me não consome crédito —
-// abre a conversa, o entregador fala manualmente).
+// Só dígitos para o link do WhatsApp (wa.me abre a conversa, não gasta crédito).
 function soDigitos(tel) {
   return String(tel || '').replace(/\D/g, '')
 }
 
 // ── Card de entrega ─────────────────────────────────────────
-function CardEntrega({ pedido, onSair, onConfirmar }) {
+function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar }) {
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
-  const emRota = pedido.status === 'saiu_entrega'
   const endereco = enderecoTexto(pedido)
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const tel = soDigitos(pedido.cliente_telefone)
+  const emRota = pedido.status === 'saiu_entrega'
+  const cor = !mine ? '#0d9488' : emRota ? '#7c3aed' : '#2563eb'
 
-  async function sair() {
+  async function run(fn) {
     setOcupado(true)
-    await onSair(pedido)
+    await fn()
     setOcupado(false)
   }
 
-  async function confirmar() {
+  function confirmar() {
     if (pedido.codigo_entrega && codigo.trim() !== String(pedido.codigo_entrega).trim()) {
       setErro('Código incorreto.')
       return
     }
-    setOcupado(true)
-    await onConfirmar(pedido)
-    setOcupado(false)
+    run(() => onConfirmar(pedido))
   }
 
   return (
     <div style={{
       background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)',
-      borderRadius: 14, padding: 16, borderTop: `4px solid ${COR_STATUS[pedido.status] || '#7c3aed'}`,
+      borderRadius: 14, padding: 16, borderTop: `4px solid ${cor}`,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <span style={{ fontWeight: 800, fontSize: 18, color: 'var(--text)' }}>
           #{pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()}
         </span>
-        <span style={{
-          fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
-          background: `${COR_STATUS[pedido.status]}22`, color: COR_STATUS[pedido.status],
-        }}>
-          {LABEL_STATUS[pedido.status] || pedido.status}
+        <span style={{ fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: `${cor}22`, color: cor }}>
+          {!mine ? 'Disponível' : emRota ? 'Em rota' : 'Aceita'}
         </span>
       </div>
 
       <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>{pedido.cliente_nome || 'Cliente'}</div>
       <div style={{ fontSize: 14, color: 'var(--text-muted)', margin: '4px 0 10px' }}>📍 {endereco}</div>
 
-      {/* Itens resumidos */}
       {itens.length > 0 && (
         <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
           {itens.map((it, i) => (
@@ -91,7 +73,6 @@ function CardEntrega({ pedido, onSair, onConfirmar }) {
         </div>
       )}
 
-      {/* Pagamento a receber */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         background: 'var(--bg, #0f0f1a)', borderRadius: 10, padding: '8px 12px', marginBottom: 12,
@@ -107,22 +88,23 @@ function CardEntrega({ pedido, onSair, onConfirmar }) {
         <strong style={{ fontSize: 16, color: 'var(--text)' }}>{fmt(pedido.total)}</strong>
       </div>
 
-      {/* Ações de contato/rota */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <a href={mapsUrl(pedido)} target="_blank" rel="noopener noreferrer"
-          style={btnLink('#7c3aed')}>🗺️ Rota</a>
-        {tel && (
-          <a href={`tel:${tel}`} style={btnLink('#0891b2')}>📞 Ligar</a>
-        )}
-        {tel && (
-          <a href={`https://wa.me/${tel}`} target="_blank" rel="noopener noreferrer"
-            style={btnLink('#25d366')}>💬 WhatsApp</a>
-        )}
-      </div>
+      {/* Contato / rota — só faz sentido depois de aceitar */}
+      {mine && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <a href={mapsUrl(pedido)} target="_blank" rel="noopener noreferrer" style={btnLink('#7c3aed')}>🗺️ Rota</a>
+          {tel && <a href={`tel:${tel}`} style={btnLink('#0891b2')}>📞 Ligar</a>}
+          {tel && <a href={`https://wa.me/${tel}`} target="_blank" rel="noopener noreferrer" style={btnLink('#25d366')}>💬 Zap</a>}
+        </div>
+      )}
 
       {/* Ação principal */}
-      {!emRota ? (
-        <button type="button" onClick={sair} disabled={ocupado}
+      {!mine ? (
+        <button type="button" onClick={() => run(() => onAceitar(pedido))} disabled={ocupado}
+          style={btnPrimario('#0d9488')}>
+          {ocupado ? 'Aceitando...' : '✋ Aceitar entrega'}
+        </button>
+      ) : !emRota ? (
+        <button type="button" onClick={() => run(() => onSair(pedido))} disabled={ocupado}
           style={btnPrimario('#7c3aed')}>
           {ocupado ? 'Salvando...' : '🛵 Sair para entrega'}
         </button>
@@ -174,13 +156,14 @@ export default function PainelEntregador() {
   const [pedidos, setPedidos] = useState([])
   const [loading, setLoading] = useState(true)
 
+  // A RLS já limita: cada entregador recebe os pedidos dele + os 'pronto' livres
+  // da própria loja. Por isso basta filtrar por status e deixar o banco filtrar o resto.
   const carregar = useCallback(async () => {
     if (!user) return
     const { data } = await supabase
       .from('pedidos_delivery')
       .select('*')
-      .eq('entregador_id', user.id)
-      .in('status', ['confirmado', 'em_preparo', 'saiu_entrega'])
+      .in('status', ['pronto', 'saiu_entrega'])
       .order('created_at')
     setPedidos(data ?? [])
     setLoading(false)
@@ -189,10 +172,12 @@ export default function PainelEntregador() {
   useEffect(() => {
     carregar()
     if (!user) return
+    // Sem filtro de coluna: o Realtime respeita a RLS, então só chegam eventos
+    // dos pedidos que este entregador pode ver (os dele + o pool da loja).
     const canal = supabase
       .channel(`entregas_${user.id}`)
       .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'pedidos_delivery', filter: `entregador_id=eq.${user.id}` },
+        { event: '*', schema: 'public', table: 'pedidos_delivery' },
         () => carregar())
       .subscribe()
     return () => { canal.unsubscribe() }
@@ -212,15 +197,16 @@ export default function PainelEntregador() {
     } catch { /* best-effort */ }
   }
 
+  async function aceitar(pedido) {
+    // Otimista: marca como meu. Se outro pegou primeiro, o reload corrige.
+    setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, entregador_id: user.id } : p))
+    await supabase.from('pedidos_delivery').update({ entregador_id: user.id }).eq('id', pedido.id).is('entregador_id', null)
+    carregar()
+  }
+
   async function sairParaEntrega(pedido) {
-    const update = {
-      status: 'saiu_entrega',
-      saiu_entrega_at: new Date().toISOString(),
-    }
-    // Gera o código de confirmação se ainda não houver
-    if (!pedido.codigo_entrega) {
-      update.codigo_entrega = String(Math.floor(1000 + Math.random() * 9000))
-    }
+    const update = { status: 'saiu_entrega', saiu_entrega_at: new Date().toISOString() }
+    if (!pedido.codigo_entrega) update.codigo_entrega = String(Math.floor(1000 + Math.random() * 9000))
     setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, ...update } : p))
     await supabase.from('pedidos_delivery').update(update).eq('id', pedido.id)
     notificarCliente(pedido.id, 'saiu_entrega')
@@ -232,12 +218,11 @@ export default function PainelEntregador() {
     notificarCliente(pedido.id, 'entregue')
   }
 
-  const emRota = pedidos.filter(p => p.status === 'saiu_entrega')
-  const aguardando = pedidos.filter(p => p.status !== 'saiu_entrega')
+  const minhas = pedidos.filter(p => p.entregador_id === user?.id)
+  const disponiveis = pedidos.filter(p => p.status === 'pronto' && !p.entregador_id)
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg, #0f0f1a)' }}>
-      {/* Topo */}
       <header style={{
         position: 'sticky', top: 0, zIndex: 10,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -262,26 +247,31 @@ export default function PainelEntregador() {
         ) : pedidos.length === 0 ? (
           <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
             <div style={{ fontSize: 40, marginBottom: 8 }}>🛵</div>
-            Nenhuma entrega atribuída a você no momento.
+            Nenhuma entrega no momento. Os pedidos prontos aparecem aqui.
           </div>
         ) : (
           <>
-            {emRota.length > 0 && (
+            {minhas.length > 0 && (
               <>
-                <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '0 0 -4px' }}>Em rota ({emRota.length})</h2>
-                {emRota.map(p => (
-                  <CardEntrega key={p.id} pedido={p} onSair={sairParaEntrega} onConfirmar={confirmarEntrega} />
+                <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '0 0 -4px' }}>Minhas ({minhas.length})</h2>
+                {minhas.map(p => (
+                  <CardEntrega key={p.id} pedido={p} mine
+                    onSair={sairParaEntrega} onConfirmar={confirmarEntrega} />
                 ))}
               </>
             )}
-            {aguardando.length > 0 && (
-              <>
-                <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '8px 0 -4px' }}>A caminho da cozinha ({aguardando.length})</h2>
-                {aguardando.map(p => (
-                  <CardEntrega key={p.id} pedido={p} onSair={sairParaEntrega} onConfirmar={confirmarEntrega} />
-                ))}
-              </>
-            )}
+            <>
+              <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '8px 0 -4px' }}>
+                Disponíveis ({disponiveis.length})
+              </h2>
+              {disponiveis.length === 0 ? (
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: 12 }}>
+                  Nenhum pedido pronto esperando. Aguarde a cozinha liberar.
+                </p>
+              ) : disponiveis.map(p => (
+                <CardEntrega key={p.id} pedido={p} mine={false} onAceitar={aceitar} />
+              ))}
+            </>
           </>
         )}
       </main>

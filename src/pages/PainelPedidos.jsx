@@ -31,6 +31,7 @@ const LABEL_STATUS = {
   aguardando:   'Aguardando',
   confirmado:   'Preparando',
   em_preparo:   'Preparando',
+  pronto:       'Pronto p/ entrega',
   saiu_entrega: 'Saiu p/ entrega',
   entregue:     'Entregue',
   cancelado:    'Cancelado',
@@ -40,6 +41,7 @@ const BADGE_STATUS_COR = {
   aguardando:   { bg: 'rgba(234,179,8,.18)',  color: '#ca8a04' },
   confirmado:   { bg: 'rgba(59,130,246,.15)', color: '#1d4ed8' },
   em_preparo:   { bg: 'rgba(59,130,246,.15)', color: '#1d4ed8' },
+  pronto:       { bg: 'rgba(13,148,136,.15)', color: '#0d9488' },
   saiu_entrega: { bg: 'rgba(124,58,237,.15)', color: '#7c3aed' },
   entregue:     { bg: 'rgba(34,197,94,.15)',  color: '#16a34a' },
   cancelado:    { bg: 'rgba(239,68,68,.15)',  color: '#dc2626' },
@@ -241,6 +243,13 @@ const PRESETS_PREPARO = [10, 15, 20, 30, 45, 60]
 function ModalAceitar({ pedido, onConfirmar, onFechar }) {
   const [min, setMin] = useState(30)
   const [salvando, setSalvando] = useState(false)
+  // Horário previsto calculado fora do render (Date.now é impuro em render)
+  const [previsao, setPrevisao] = useState('')
+
+  useEffect(() => {
+    if (min == null) { setPrevisao(''); return }
+    setPrevisao(new Date(Date.now() + min * 60000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))
+  }, [min])
 
   useEffect(() => {
     function onKey(e) { if (e.key === 'Escape') onFechar() }
@@ -298,12 +307,10 @@ function ModalAceitar({ pedido, onConfirmar, onFechar }) {
           </button>
         </div>
 
-        {min !== null && (
+        {min !== null && previsao && (
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px' }}>
             Fica pronto por volta de{' '}
-            <strong style={{ color: 'var(--text)' }}>
-              {new Date(Date.now() + min * 60000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-            </strong>
+            <strong style={{ color: 'var(--text)' }}>{previsao}</strong>
           </p>
         )}
 
@@ -963,7 +970,7 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
 }
 
 // ── Card de pedido ──────────────────────────────────────────
-function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, entregadores = [], onAtribuirEntregador }) {
+function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, entregadores = [] }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const pagamento = pedido.forma_pagamento || ''
   const endereco = enderecoCompleto(pedido)
@@ -1180,31 +1187,13 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         </div>
       )}
 
-      {/* Entregador — atribuição (só entrega, em estado despachável) */}
-      {!isRetirada && onAtribuirEntregador && ['confirmado', 'em_preparo', 'saiu_entrega'].includes(pedido.status) && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0 2px' }}>
-          <span style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-            🛵 Entregador
-          </span>
-          {entregadores.length === 0 ? (
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
-              cadastre um funcionário com perfil Entregador
-            </span>
-          ) : (
-            <select
-              value={pedido.entregador_id || ''}
-              onChange={e => onAtribuirEntregador(pedido.id, e.target.value)}
-              style={{
-                flex: 1, padding: '6px 8px', borderRadius: 8, fontSize: 13,
-                border: '1.5px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
-              }}
-            >
-              <option value="">A definir</option>
-              {entregadores.map(en => (
-                <option key={en.id} value={en.id}>{en.nome || 'Entregador'}</option>
-              ))}
-            </select>
-          )}
+      {/* Entregador — quem aceitou a entrega (o entregador se atribui na tela dele) */}
+      {!isRetirada && ['pronto', 'saiu_entrega'].includes(pedido.status) && pedido.entregador_id && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '6px 0 2px', fontSize: 13 }}>
+          <span style={{ color: 'var(--text-muted)' }}>🛵 Entregador:</span>
+          <strong style={{ color: 'var(--text)' }}>
+            {entregadores.find(en => en.id === pedido.entregador_id)?.nome || 'Entregador'}
+          </strong>
         </div>
       )}
 
@@ -1266,12 +1255,27 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           </button>
         )}
 
-        {/* Passo 2: preparando → despachar (fluxo de delivery, não-balcão) */}
+        {/* Passo 2: preparando → marcar pronto (libera para os entregadores) */}
         {pedido.origem !== 'balcao' && (pedido.status === 'confirmado' || pedido.status === 'em_preparo') && (
           <button type="button" className="pp-btn pp-btn-avancar"
-            onClick={() => onAvancar(pedido.id, 'saiu_entrega')}>
-            Despachar
+            onClick={() => onAvancar(pedido.id, isRetirada ? 'saiu_entrega' : 'pronto')}>
+            {isRetirada ? 'Pronto para retirada' : 'Marcar pronto p/ entrega'}
           </button>
+        )}
+
+        {/* Passo 2b: pronto — aguardando um entregador aceitar (com fallback manual) */}
+        {pedido.origem !== 'balcao' && !isRetirada && pedido.status === 'pronto' && (
+          <div style={{ width: '100%' }}>
+            <p style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, margin: '0 0 10px', color: pedido.entregador_id ? '#16a34a' : '#a16207' }}>
+              {pedido.entregador_id ? '🛵 Entregador a caminho' : '✅ Pronto · aguardando um entregador aceitar'}
+            </p>
+            {!pedido.entregador_id && (
+              <button type="button" className="pp-btn pp-btn-avancar"
+                onClick={() => onAvancar(pedido.id, 'saiu_entrega')} style={{ width: '100%' }}>
+                Despachar mesmo assim
+              </button>
+            )}
+          </div>
         )}
 
         {/* Passo 3: saiu → primeiro mostra status, depois confirma com código */}
@@ -1510,12 +1514,16 @@ function MiniTimer({ createdAt, aguardandoDesde, onExpirado }) {
 }
 
 // Card compacto do quadro — clica pra abrir o pedido completo
-function CardMini({ pedido, onClick, onExpirado }) {
+function CardMini({ pedido, onClick, onExpirado, entregadores = [] }) {
   const oc = ORIGEM_CONFIG[pedido.origem] ?? ORIGEM_CONFIG.cardapio
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const qtdItens = itens.reduce((s, i) => s + Number(i.qtd ?? i.quantidade ?? 1), 0)
   const hora = new Date(pedido.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   const isRetirada = (pedido.tipo_entrega || 'entrega') === 'retirada'
+  const entregadorNome = pedido.entregador_id
+    ? (entregadores.find(en => en.id === pedido.entregador_id)?.nome || 'Entregador')
+    : null
+  const aguardandoEntregador = pedido.status === 'pronto' && !pedido.entregador_id && !isRetirada
   return (
     <button type="button" onClick={onClick} className="pp-mini" style={{ borderLeft: `3px solid ${oc.borda}` }}>
       <div className="pp-mini-top">
@@ -1529,6 +1537,8 @@ function CardMini({ pedido, onClick, onExpirado }) {
         <span className="pp-mini-badge" style={{ background: oc.bg, color: oc.color }}>{oc.label}</span>
         <span className="pp-mini-itens">{qtdItens} {qtdItens === 1 ? 'item' : 'itens'}</span>
         {isRetirada && <span className="pp-mini-itens">{pedido.origem === 'balcao' ? 'Balcão' : 'Retirada'}</span>}
+        {entregadorNome && <span className="pp-mini-itens">🛵 {entregadorNome}</span>}
+        {aguardandoEntregador && <span className="pp-mini-itens" style={{ color: '#a16207' }}>aguardando entregador</span>}
       </div>
     </button>
   )
@@ -1987,12 +1997,6 @@ export default function PainelPedidos() {
       .then(({ data }) => setEntregadores(data || []))
   }, [empresa])
 
-  async function atribuirEntregador(pedidoId, entregadorId) {
-    const valor = entregadorId || null
-    setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, entregador_id: valor } : p))
-    await supabase.from('pedidos_delivery').update({ entregador_id: valor }).eq('id', pedidoId)
-  }
-
   // ── Realtime subscription + polling de segurança + visibilidade ──
   useEffect(() => {
     if (!empresa) return
@@ -2378,7 +2382,7 @@ export default function PainelPedidos() {
                 { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidos.length + concluidosHoje.length },
                 { id: 'aceitar',    label: 'A aceitar', cor: '#ca8a04', count: pedidos.filter(p => p.status === 'aguardando').length },
                 { id: 'cozinha',    label: 'Na cozinha', cor: '#1d4ed8', count: pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length },
-                { id: 'entrega',    label: 'Em entrega', cor: '#7c3aed', count: pedidos.filter(p => p.status === 'saiu_entrega').length },
+                { id: 'entrega',    label: 'Pronto / Em rota', cor: '#7c3aed', count: pedidos.filter(p => p.status === 'pronto' || p.status === 'saiu_entrega').length },
                 { id: 'concluidos', label: 'Concluídos', cor: '#16a34a', count: concluidosHoje.length },
               ].map(f => {
                 const ativo = filtroColuna === f.id
@@ -2426,11 +2430,11 @@ export default function PainelPedidos() {
               )}
 
               {(!filtroColuna || filtroColuna === 'entrega') && (
-                <Coluna titulo="Em entrega" cor="#7c3aed"
-                  count={pedidos.filter(p => p.status === 'saiu_entrega').length}
+                <Coluna titulo="Pronto / Em rota" cor="#7c3aed"
+                  count={pedidos.filter(p => p.status === 'pronto' || p.status === 'saiu_entrega').length}
                   vazio="Ninguém na rua">
-                  {pedidos.filter(p => p.status === 'saiu_entrega').map(p => (
-                    <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
+                  {pedidos.filter(p => p.status === 'pronto' || p.status === 'saiu_entrega').map(p => (
+                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
@@ -2502,7 +2506,6 @@ export default function PainelPedidos() {
               onEnviarMensagem={(p) => { setPedidoMensagem(p); setPedidoDetalhe(null) }}
               onImprimir={handleImprimir}
               entregadores={entregadores}
-              onAtribuirEntregador={atribuirEntregador}
             />
           </div>
         </div>
