@@ -193,37 +193,37 @@ export default function App() {
             }
           >
             <Route index element={<ProtectedRoute roles={['admin', 'vendedor']}><Dashboard /></ProtectedRoute>} />
-            <Route path="clientes" element={<Clientes />} />
-            <Route path="vendas" element={<Vendas />} />
-            <Route path="caixa" element={<Caixa />} />
-            <Route path="relatorios" element={<Relatorios />} />
+            <Route path="clientes" element={<ProtectedRoute modulo="clientes"><Clientes /></ProtectedRoute>} />
+            <Route path="vendas" element={<ProtectedRoute modulo="vendas"><Vendas /></ProtectedRoute>} />
+            <Route path="caixa" element={<ProtectedRoute modulo="caixa"><Caixa /></ProtectedRoute>} />
+            <Route path="relatorios" element={<ProtectedRoute modulo="relatorios"><Relatorios /></ProtectedRoute>} />
             <Route
               path="produtos"
-              element={<ProtectedRoute roles={['admin']}><Produtos /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin']} modulo="produtos"><Produtos /></ProtectedRoute>}
             />
             <Route
               path="estoque"
-              element={<ProtectedRoute roles={['admin']}><Estoque /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin']} modulo="estoque"><Estoque /></ProtectedRoute>}
             />
             <Route
               path="financeiro"
-              element={<ProtectedRoute roles={['admin']}><Financeiro /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin']} modulo="financeiro"><Financeiro /></ProtectedRoute>}
             />
             <Route
               path="minha-loja"
-              element={<ProtectedRoute roles={['admin']}><MinhaLoja /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin']} modulo="delivery"><MinhaLoja /></ProtectedRoute>}
             />
             <Route
               path="raio-entrega"
-              element={<ProtectedRoute roles={['admin']}><RaioEntrega /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin']} modulo="delivery"><RaioEntrega /></ProtectedRoute>}
             />
             <Route
               path="presencial"
-              element={<ProtectedRoute roles={['admin']}><ServicoPresencial /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin']} modulo="presencial"><ServicoPresencial /></ProtectedRoute>}
             />
             <Route
               path="presencial/mesas"
-              element={<ProtectedRoute roles={['admin']}><PresencialMesas /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin']} modulo="presencial"><PresencialMesas /></ProtectedRoute>}
             />
             <Route
               path="presencial/salao"
@@ -235,27 +235,27 @@ export default function App() {
             />
             <Route
               path="presencial/historico"
-              element={<ProtectedRoute roles={['admin']}><PresencialHistorico /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin']} modulo="presencial"><PresencialHistorico /></ProtectedRoute>}
             />
             <Route
               path="pedidos-delivery"
-              element={<ProtectedRoute roles={['admin']}><PedidosDelivery /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin']} modulo="delivery"><PedidosDelivery /></ProtectedRoute>}
             />
             <Route
               path="whatsapp"
-              element={<ProtectedRoute roles={['admin', 'super_admin']}><WhatsAppConfig /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'super_admin']} modulo="whatsapp"><WhatsAppConfig /></ProtectedRoute>}
             />
             <Route
               path="whatsapp-creditos"
-              element={<ProtectedRoute roles={['admin']}><WhatsAppCreditos /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin']} modulo="whatsapp"><WhatsAppCreditos /></ProtectedRoute>}
             />
             <Route
               path="bot-teste"
-              element={<ProtectedRoute roles={['admin', 'super_admin']}><BotTeste /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'super_admin']} modulo="whatsapp"><BotTeste /></ProtectedRoute>}
             />
             <Route
               path="usuarios"
-              element={<ProtectedRoute roles={['admin']}><Usuarios /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin']} modulo="funcionarios"><Usuarios /></ProtectedRoute>}
             />
           </Route>
 

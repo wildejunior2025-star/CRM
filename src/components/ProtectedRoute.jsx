@@ -1,8 +1,9 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { moduloAtivo } from '../lib/modulos'
 
-export default function ProtectedRoute({ children, roles }) {
-  const { session, profile, loading, profileLoading } = useAuth()
+export default function ProtectedRoute({ children, roles, modulo }) {
+  const { session, profile, empresa, loading, profileLoading } = useAuth()
   const location = useLocation()
 
   // Espera a sessão e a 1ª busca do profile terminarem (sem travar para sempre
@@ -29,6 +30,11 @@ export default function ProtectedRoute({ children, roles }) {
     else if (profile?.perfil === 'garcom') home = '/presencial/salao'
     else if (profile?.perfil === 'cozinheiro') home = '/presencial/cozinha'
     return <Navigate to={home} replace />
+  }
+
+  // Funcionalidade desligada para esta loja pelo Super Admin → fora.
+  if (modulo && !moduloAtivo(empresa, modulo)) {
+    return <Navigate to="/" replace />
   }
 
   return children

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { MODULOS, moduloAtivo } from '../lib/modulos'
 import '../components/Page.css'
 import './SuperAdminEmpresas.css'
 
@@ -76,6 +77,11 @@ export default function SuperAdminEmpresas() {
   const [cobrando, setCobrando]   = useState(null) // empresaId
   const [cobrancaMsg, setCobrancaMsg] = useState({}) // { [empresaId]: 'ok' | 'erro: ...' }
 
+  // Modal de funcionalidades (módulos) liga/desliga por loja
+  const [modulosModal, setModulosModal] = useState(null) // { id, nome }
+  const [modulosForm, setModulosForm]   = useState({})   // { [key]: bool }
+  const [savingModulos, setSavingModulos] = useState(false)
+
   const hoje = new Date().toISOString().split('T')[0]
 
   async function renovarEmpresa(empresa) {
@@ -129,6 +135,26 @@ export default function SuperAdminEmpresas() {
     setSavingCredit(false)
     setCreditModal(null)
     await loadAll()
+  }
+
+  function abrirModulos(emp) {
+    const form = {}
+    for (const m of MODULOS) form[m.key] = moduloAtivo(emp, m.key)
+    setModulosForm(form)
+    setModulosModal({ id: emp.id, nome: emp.nome })
+  }
+
+  async function salvarModulos() {
+    setSavingModulos(true)
+    setError(null)
+    const { error } = await supabase
+      .from('empresas')
+      .update({ modulos: modulosForm })
+      .eq('id', modulosModal.id)
+    setSavingModulos(false)
+    if (error) { setError(error.message); return }
+    setEmpresas(prev => prev.map(e => e.id === modulosModal.id ? { ...e, modulos: modulosForm } : e))
+    setModulosModal(null)
   }
 
   async function loadAll() {
@@ -631,6 +657,9 @@ export default function SuperAdminEmpresas() {
                             transform: dropRect.bottom + 4 > window.innerHeight - 200 ? 'translateY(-100%)' : 'none',
                             zIndex: 9999,
                           }}>
+                            <button onClick={() => { abrirModulos(emp); setOpenMenuId(null) }}>
+                              Funcionalidades
+                            </button>
                             <button onClick={() => { setInviteLink(`${window.location.origin}/cadastro-admin/${emp.id}`); setOpenMenuId(null) }}>
                               Link admin
                             </button>
@@ -814,6 +843,66 @@ export default function SuperAdminEmpresas() {
               <button className="btn btn-secondary" onClick={() => setCreditModal(null)}>Cancelar</button>
               <button className="btn btn-primary" onClick={adicionarCreditos} disabled={savingCredit}>
                 {savingCredit ? 'Salvando...' : `Adicionar ${creditQtd || 0} créditos`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de funcionalidades (módulos) liga/desliga por loja */}
+      {modulosModal && (
+        <div className="modal-overlay" onClick={() => setModulosModal(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <h2>Funcionalidades da loja</h2>
+            <p style={{ marginBottom: 4, color: 'var(--text-muted)', fontSize: 14 }}>
+              Empresa: <strong style={{ color: 'var(--text)' }}>{modulosModal.nome}</strong>
+            </p>
+            <p style={{ marginBottom: 18, color: 'var(--text-muted)', fontSize: 13 }}>
+              A loja só vê (no menu e pela URL) o que estiver <strong>ligado</strong>. Desligue o que ela não usa para não poluir a tela.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 20 }}>
+              {MODULOS.map((m) => {
+                const ativo = modulosForm[m.key] !== false
+                return (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => setModulosForm((prev) => ({ ...prev, [m.key]: !ativo }))}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      gap: 12, width: '100%', textAlign: 'left',
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      padding: '10px 6px', borderBottom: '1px solid var(--border)',
+                    }}
+                  >
+                    <span style={{ flex: 1 }}>
+                      <span style={{ display: 'block', fontWeight: 600, color: 'var(--text)', fontSize: 14 }}>{m.label}</span>
+                      <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: 12, marginTop: 2 }}>{m.descricao}</span>
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        flexShrink: 0, width: 42, height: 24, borderRadius: 999,
+                        background: ativo ? 'var(--success)' : 'var(--border)',
+                        position: 'relative', transition: 'background 150ms',
+                      }}
+                    >
+                      <span style={{
+                        position: 'absolute', top: 3, left: ativo ? 21 : 3,
+                        width: 18, height: 18, borderRadius: '50%', background: '#fff',
+                        transition: 'left 150ms', boxShadow: '0 1px 3px rgba(0,0,0,.3)',
+                      }} />
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary" onClick={() => setModulosModal(null)} disabled={savingModulos}>Cancelar</button>
+              <button className="btn btn-primary" onClick={salvarModulos} disabled={savingModulos}>
+                {savingModulos ? 'Salvando...' : 'Salvar'}
               </button>
             </div>
           </div>

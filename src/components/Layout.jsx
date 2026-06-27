@@ -2,21 +2,24 @@ import { useState } from 'react'
 import { NavLink, useLocation, useNavigate, useMatch } from 'react-router-dom'
 import { useTheme } from '../hooks/useTheme'
 import { useAuth } from '../hooks/useAuth'
+import { moduloAtivo } from '../lib/modulos'
 import ThemeToggle from './ThemeToggle'
 import SubscriptionGate from './SubscriptionGate'
 import InstallPWA from './InstallPWA'
 import NotificationBell from './NotificationBell'
 import './Layout.css'
 
+// `mod` liga o item a uma funcionalidade que o Super Admin pode desligar por loja
+// (ver src/lib/modulos.js). Itens sem `mod` (Dashboard) ficam sempre visíveis.
 const links = [
   { group: 'Operações' },
   { to: '/', label: 'Dashboard', end: true, roles: ['admin'] },
-  { to: '/vendas', label: 'Vendas', roles: ['admin', 'vendedor'] },
-  { to: '/caixa', label: 'Caixa', roles: ['admin', 'vendedor'] },
-  { to: '/clientes', label: 'Clientes', roles: ['admin'] },
-  { to: '/usuarios', label: 'Funcionários', roles: ['admin'] },
+  { to: '/vendas', label: 'Vendas', roles: ['admin', 'vendedor'], mod: 'vendas' },
+  { to: '/caixa', label: 'Caixa', roles: ['admin', 'vendedor'], mod: 'caixa' },
+  { to: '/clientes', label: 'Clientes', roles: ['admin'], mod: 'clientes' },
+  { to: '/usuarios', label: 'Funcionários', roles: ['admin'], mod: 'funcionarios' },
   {
-    to: '/presencial', label: 'Serviço Presencial', roles: ['admin'],
+    to: '/presencial', label: 'Serviço Presencial', roles: ['admin'], mod: 'presencial',
     children: [
       { to: '/presencial/salao', label: 'Salão', roles: ['admin'] },
       { to: '/presencial/cozinha', label: 'Cozinha (KDS)', roles: ['admin'] },
@@ -25,30 +28,30 @@ const links = [
     ],
   },
   // Garçom vê o Salão; a Cozinha é só do cozinheiro (vendedor só usa o /painel)
-  { to: '/presencial/salao', label: 'Salão', roles: ['garcom'] },
-  { to: '/presencial/cozinha', label: 'Cozinha (KDS)', roles: ['cozinheiro'] },
+  { to: '/presencial/salao', label: 'Salão', roles: ['garcom'], mod: 'presencial' },
+  { to: '/presencial/cozinha', label: 'Cozinha (KDS)', roles: ['cozinheiro'], mod: 'presencial' },
 
   { group: 'Catálogo' },
-  { to: '/produtos', label: 'Catálogo', roles: ['admin'] },
-  { to: '/estoque', label: 'Estoque', roles: ['admin'] },
+  { to: '/produtos', label: 'Catálogo', roles: ['admin'], mod: 'produtos' },
+  { to: '/estoque', label: 'Estoque', roles: ['admin'], mod: 'estoque' },
 
   { group: 'Delivery' },
   {
-    to: '/minha-loja', label: 'Minha Loja', roles: ['admin'],
+    to: '/minha-loja', label: 'Minha Loja', roles: ['admin'], mod: 'delivery',
     children: [
       { to: '/raio-entrega', label: 'Raio de Entrega', roles: ['admin'] },
     ],
   },
-  { to: '/pedidos-delivery', label: 'Pedidos Delivery', roles: ['admin'] },
+  { to: '/pedidos-delivery', label: 'Pedidos Delivery', roles: ['admin'], mod: 'delivery' },
 
   { group: 'Automação' },
-  { to: '/whatsapp', label: 'WhatsApp', roles: ['admin', 'super_admin'] },
-  { to: '/whatsapp-creditos', label: 'Créditos Bot', roles: ['admin'] },
-  { to: '/bot-teste', label: 'Teste Bot', roles: ['admin', 'super_admin'] },
+  { to: '/whatsapp', label: 'WhatsApp', roles: ['admin', 'super_admin'], mod: 'whatsapp' },
+  { to: '/whatsapp-creditos', label: 'Créditos Bot', roles: ['admin'], mod: 'whatsapp' },
+  { to: '/bot-teste', label: 'Teste Bot', roles: ['admin', 'super_admin'], mod: 'whatsapp' },
 
   { group: 'Financeiro' },
-  { to: '/financeiro', label: 'Financeiro', roles: ['admin'] },
-  { to: '/relatorios', label: 'Relatórios', roles: ['admin'] },
+  { to: '/financeiro', label: 'Financeiro', roles: ['admin'], mod: 'financeiro' },
+  { to: '/relatorios', label: 'Relatórios', roles: ['admin'], mod: 'relatorios' },
 ]
 
 function ChevronDown({ size = 12 }) {
@@ -92,7 +95,16 @@ export default function Layout() {
     if (ok) navigate('/super-admin')
   }
 
-  const visibleLinks = links.filter((link) => link.group || link.roles?.includes(profile?.perfil))
+  // Filtra por papel do usuário E por funcionalidade ligada/desligada da loja.
+  const porPerfilEModulo = links.filter(
+    (link) => link.group || (link.roles?.includes(profile?.perfil) && moduloAtivo(empresa, link.mod))
+  )
+  // Remove cabeçalhos de grupo que ficaram sem nenhum item visível abaixo.
+  const visibleLinks = porPerfilEModulo.filter((link, i) => {
+    if (!link.group) return true
+    const proximo = porPerfilEModulo[i + 1]
+    return !!proximo && !proximo.group
+  })
 
   function closeMenu() { setMenuOpen(false) }
 
