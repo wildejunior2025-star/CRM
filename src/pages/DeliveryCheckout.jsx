@@ -116,6 +116,8 @@ export default function DeliveryCheckout() {
   const state = location.state
 
   const [form, setForm]         = useState(INITIAL_FORM)
+  const [tipo, setTipo]         = useState('entrega') // 'entrega' | 'retirada'
+  const [lojaEndereco, setLojaEndereco] = useState(null)
   const [errors, setErrors]     = useState({})
   const [enviando, setEnviando] = useState(false)
   const [erroGlobal, setErroGlobal] = useState(null)
@@ -158,6 +160,16 @@ export default function DeliveryCheckout() {
     }
     loadPerfil()
   }, [])
+
+  // Endereço da loja — mostrado quando o cliente escolhe Retirada
+  useEffect(() => {
+    if (!state?.empresaId) return
+    supabase.from('empresas')
+      .select('endereco, bairro, cidade, estado')
+      .eq('id', state.empresaId)
+      .maybeSingle()
+      .then(({ data }) => setLojaEndereco(data ?? null))
+  }, [state?.empresaId])
 
   // Opção A — pré-preenche com o cliente lembrado neste aparelho
   useEffect(() => {
@@ -214,7 +226,8 @@ export default function DeliveryCheckout() {
   }
 
   const { empresaId, empresaNome, itens, subtotal, taxaEntrega } = state
-  const total = subtotal + taxaEntrega
+  const taxaAplicada = tipo === 'retirada' ? 0 : taxaEntrega
+  const total = subtotal + taxaAplicada
 
   function set(field, value) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -279,11 +292,13 @@ export default function DeliveryCheckout() {
     const e = {}
     if (!form.nome.trim()) e.nome = 'Nome obrigatório'
     if (form.telefone.replace(/\D/g, '').length < 10) e.telefone = 'Telefone inválido'
-    if (!form.rua.trim()) e.rua = 'Rua obrigatória'
-    if (!form.numero.trim()) e.numero = 'Número obrigatório'
-    if (!form.estado) e.estado = 'Estado obrigatório'
-    if (!form.cidade) e.cidade = 'Cidade obrigatória'
-    if (!form.bairro.trim()) e.bairro = 'Bairro obrigatório'
+    if (tipo === 'entrega') {
+      if (!form.rua.trim()) e.rua = 'Rua obrigatória'
+      if (!form.numero.trim()) e.numero = 'Número obrigatório'
+      if (!form.estado) e.estado = 'Estado obrigatório'
+      if (!form.cidade) e.cidade = 'Cidade obrigatória'
+      if (!form.bairro.trim()) e.bairro = 'Bairro obrigatório'
+    }
     if (form.pagamento === 'dinheiro' && form.troco) {
       const val = parseFloat(form.troco.replace(',', '.'))
       if (isNaN(val) || val < total) e.troco = `Valor deve ser maior que R$ ${fmt(total)}`
@@ -333,13 +348,13 @@ export default function DeliveryCheckout() {
         cliente_id:           clienteId,
         cliente_nome:         form.nome.trim(),
         cliente_telefone:     form.telefone,
-        endereco_rua:         form.rua.trim(),
-        endereco_numero:      form.numero.trim(),
-        endereco_complemento: form.complemento.trim() || null,
-        endereco_estado:      form.estado,
-        endereco_cidade:      form.cidade,
-        endereco_bairro:      form.bairro.trim(),
-        tipo_entrega:         'entrega',
+        endereco_rua:         tipo === 'entrega' ? form.rua.trim() : null,
+        endereco_numero:      tipo === 'entrega' ? form.numero.trim() : null,
+        endereco_complemento: tipo === 'entrega' ? (form.complemento.trim() || null) : null,
+        endereco_estado:      tipo === 'entrega' ? form.estado : null,
+        endereco_cidade:      tipo === 'entrega' ? form.cidade : null,
+        endereco_bairro:      tipo === 'entrega' ? form.bairro.trim() : null,
+        tipo_entrega:         tipo,
         origem: window.Capacitor?.isNativePlatform?.() ? 'app' : 'cardapio',
         itens: itens.map(i => ({
           produto_id:    i.id,
@@ -349,7 +364,7 @@ export default function DeliveryCheckout() {
           subtotal:      i.quantidade * i.preco,
         })),
         subtotal,
-        taxa_entrega:   taxaEntrega,
+        taxa_entrega:   taxaAplicada,
         total,
         forma_pagamento: form.pagamento,
         troco_para: form.pagamento === 'dinheiro' && form.troco
@@ -433,7 +448,41 @@ export default function DeliveryCheckout() {
                 </div>
               </section>
 
-              {/* Endereço */}
+              {/* Tipo: entrega ou retirada */}
+              <section className="dco-section">
+                <h2 className="dco-section-title">Como você quer receber?</h2>
+                <div className="dco-payment-row">
+                  <button type="button"
+                    className={`dco-pay-btn${tipo === 'entrega' ? ' dco-pay-btn--active' : ''}`}
+                    onClick={() => setTipo('entrega')}>
+                    <span>🛵 Entrega</span>
+                    {tipo === 'entrega' && <span className="dco-pay-check"><IconCheck /></span>}
+                  </button>
+                  <button type="button"
+                    className={`dco-pay-btn${tipo === 'retirada' ? ' dco-pay-btn--active' : ''}`}
+                    onClick={() => setTipo('retirada')}>
+                    <span>🏬 Retirar na loja</span>
+                    {tipo === 'retirada' && <span className="dco-pay-check"><IconCheck /></span>}
+                  </button>
+                </div>
+                {tipo === 'retirada' && (
+                  <div style={{
+                    marginTop: 12, padding: '12px 14px', borderRadius: 10,
+                    background: 'rgba(124,58,237,.1)', border: '1px solid rgba(124,58,237,.3)',
+                    fontSize: 13.5, color: 'var(--text, #fff)', lineHeight: 1.5,
+                  }}>
+                    <strong>Você vai retirar na loja</strong> — sem taxa de entrega.
+                    {lojaEndereco && (lojaEndereco.endereco || lojaEndereco.cidade) && (
+                      <div style={{ marginTop: 4, opacity: .85 }}>
+                        📍 {[lojaEndereco.endereco, lojaEndereco.bairro, lojaEndereco.cidade].filter(Boolean).join(', ')}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+
+              {/* Endereço (só na entrega) */}
+              {tipo === 'entrega' && (
               <section className="dco-section">
                 <h2 className="dco-section-title">Endereço de entrega</h2>
                 <div className="dco-field-group">
@@ -534,6 +583,7 @@ export default function DeliveryCheckout() {
 
                 </div>
               </section>
+              )}
 
               {/* Pagamento */}
               <section className="dco-section">
@@ -606,8 +656,8 @@ export default function DeliveryCheckout() {
                     <span>R$ {fmt(subtotal)}</span>
                   </div>
                   <div className="dco-resumo-linha">
-                    <span>Taxa de entrega</span>
-                    <span>{taxaEntrega === 0 ? 'Grátis' : `R$ ${fmt(taxaEntrega)}`}</span>
+                    <span>{tipo === 'retirada' ? 'Retirada na loja' : 'Taxa de entrega'}</span>
+                    <span>{taxaAplicada === 0 ? 'Grátis' : `R$ ${fmt(taxaAplicada)}`}</span>
                   </div>
                   <div className="dco-resumo-linha dco-resumo-total">
                     <span>Total</span>
