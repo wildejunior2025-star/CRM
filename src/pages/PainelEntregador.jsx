@@ -155,6 +155,9 @@ export default function PainelEntregador() {
   const { user, profile, empresa, logout } = useAuth()
   const [pedidos, setPedidos] = useState([])
   const [loading, setLoading] = useState(true)
+  const [aba, setAba] = useState('ativas') // 'ativas' | 'historico'
+  const [historico, setHistorico] = useState([])
+  const [histLoading, setHistLoading] = useState(false)
 
   // A RLS já limita: cada entregador recebe os pedidos dele + os 'pronto' livres
   // da própria loja. Por isso basta filtrar por status e deixar o banco filtrar o resto.
@@ -218,6 +221,20 @@ export default function PainelEntregador() {
     notificarCliente(pedido.id, 'entregue')
   }
 
+  // Histórico: entregas já concluídas por este entregador (carrega ao abrir a aba)
+  useEffect(() => {
+    if (aba !== 'historico' || !user) return
+    setHistLoading(true)
+    supabase
+      .from('pedidos_delivery')
+      .select('id, numero_pedido, cliente_nome, total, forma_pagamento, endereco_bairro, endereco_cidade, created_at')
+      .eq('entregador_id', user.id)
+      .eq('status', 'entregue')
+      .order('created_at', { ascending: false })
+      .limit(100)
+      .then(({ data }) => { setHistorico(data ?? []); setHistLoading(false) })
+  }, [aba, user])
+
   const minhas = pedidos.filter(p => p.entregador_id === user?.id)
   const disponiveis = pedidos.filter(p => p.status === 'pronto' && !p.entregador_id)
 
@@ -241,38 +258,100 @@ export default function PainelEntregador() {
         </button>
       </header>
 
+      {/* Abas */}
+      <div style={{ maxWidth: 560, margin: '0 auto', padding: '14px 16px 0', display: 'flex', gap: 8 }}>
+        {[
+          { id: 'ativas', label: 'Entregas' },
+          { id: 'historico', label: 'Histórico' },
+        ].map(t => (
+          <button key={t.id} type="button" onClick={() => setAba(t.id)}
+            style={{
+              flex: 1, padding: '9px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 14,
+              border: `1.5px solid ${aba === t.id ? '#7c3aed' : 'var(--border, #2a2a3a)'}`,
+              background: aba === t.id ? 'rgba(124,58,237,.15)' : 'transparent',
+              color: aba === t.id ? '#a78bfa' : 'var(--text)',
+            }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       <main style={{ maxWidth: 560, margin: '0 auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {loading ? (
-          <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>Carregando...</p>
-        ) : pedidos.length === 0 ? (
-          <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
-            <div style={{ fontSize: 40, marginBottom: 8 }}>🛵</div>
-            Nenhuma entrega no momento. Os pedidos prontos aparecem aqui.
-          </div>
-        ) : (
-          <>
-            {minhas.length > 0 && (
+        {aba === 'ativas' ? (
+          loading ? (
+            <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>Carregando...</p>
+          ) : pedidos.length === 0 ? (
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
+              <div style={{ fontSize: 40, marginBottom: 8 }}>🛵</div>
+              Nenhuma entrega no momento. Os pedidos prontos aparecem aqui.
+            </div>
+          ) : (
+            <>
+              {minhas.length > 0 && (
+                <>
+                  <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '0 0 -4px' }}>Minhas ({minhas.length})</h2>
+                  {minhas.map(p => (
+                    <CardEntrega key={p.id} pedido={p} mine
+                      onSair={sairParaEntrega} onConfirmar={confirmarEntrega} />
+                  ))}
+                </>
+              )}
               <>
-                <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '0 0 -4px' }}>Minhas ({minhas.length})</h2>
-                {minhas.map(p => (
-                  <CardEntrega key={p.id} pedido={p} mine
-                    onSair={sairParaEntrega} onConfirmar={confirmarEntrega} />
+                <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '8px 0 -4px' }}>
+                  Disponíveis ({disponiveis.length})
+                </h2>
+                {disponiveis.length === 0 ? (
+                  <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: 12 }}>
+                    Nenhum pedido pronto esperando. Aguarde a cozinha liberar.
+                  </p>
+                ) : disponiveis.map(p => (
+                  <CardEntrega key={p.id} pedido={p} mine={false} onAceitar={aceitar} />
                 ))}
               </>
-            )}
+            </>
+          )
+        ) : (
+          /* ── Histórico de entregas concluídas ── */
+          histLoading ? (
+            <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>Carregando...</p>
+          ) : historico.length === 0 ? (
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
+              <div style={{ fontSize: 40, marginBottom: 8 }}>📭</div>
+              Você ainda não concluiu nenhuma entrega.
+            </div>
+          ) : (
             <>
-              <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '8px 0 -4px' }}>
-                Disponíveis ({disponiveis.length})
-              </h2>
-              {disponiveis.length === 0 ? (
-                <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: 12 }}>
-                  Nenhum pedido pronto esperando. Aguarde a cozinha liberar.
-                </p>
-              ) : disponiveis.map(p => (
-                <CardEntrega key={p.id} pedido={p} mine={false} onAceitar={aceitar} />
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)',
+                borderRadius: 12, padding: '10px 14px', fontSize: 13, color: 'var(--text-muted)',
+              }}>
+                <span><strong style={{ color: 'var(--text)' }}>{historico.length}</strong> entregas concluídas</span>
+                <span>Total: <strong style={{ color: 'var(--text)' }}>{fmt(historico.reduce((s, p) => s + Number(p.total || 0), 0))}</strong></span>
+              </div>
+              {historico.map(p => (
+                <div key={p.id} style={{
+                  background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)',
+                  borderRadius: 12, padding: 14,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 800, color: 'var(--text)' }}>
+                      #{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}
+                    </span>
+                    <strong style={{ color: '#16a34a' }}>{fmt(p.total)}</strong>
+                  </div>
+                  <div style={{ fontSize: 13.5, color: 'var(--text)', marginTop: 4 }}>{p.cliente_nome || 'Cliente'}</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {[p.endereco_bairro, p.endereco_cidade].filter(Boolean).join(', ')}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                    {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    {p.forma_pagamento ? ` · ${p.forma_pagamento}` : ''}
+                  </div>
+                </div>
               ))}
             </>
-          </>
+          )
         )}
       </main>
     </div>
