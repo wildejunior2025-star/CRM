@@ -267,7 +267,7 @@ export default function PortalLoja() {
           .eq('user_id', user.id)
           .maybeSingle(),
         supabase.from('profiles')
-          .select('nome, telefone')
+          .select('nome, telefone, cep, endereco, numero, complemento, bairro, cidade, estado')
           .eq('id', user.id)
           .maybeSingle(),
         supabase.from('saldo_pontos').select('pontos').eq('profile_id', user.id).maybeSingle(),
