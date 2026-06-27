@@ -1506,6 +1506,17 @@ const RIGHTBAR_BOTOES = [
       </svg>
     ),
   },
+  {
+    id: 'entregadores', label: 'Entregadores',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="5" cy="17" r="3"/>
+        <circle cx="19" cy="17" r="3"/>
+        <path d="M8 17h8M5 14l2-7h8l3 7"/>
+        <path d="M13 7l1-4h3"/>
+      </svg>
+    ),
+  },
 ]
 
 // Timer compacto para os cards "a aceitar"
@@ -1700,6 +1711,9 @@ export default function PainelPedidos() {
   // Concluídos do dia
   const [concluidosHoje, setConcluidosHoje] = useState([])
   const [loadingHoje, setLoadingHoje] = useState(false)
+  // Entregadores — estatísticas e histórico por motoboy
+  const [entregasConcluidas, setEntregasConcluidas] = useState([])
+  const [entregadorSel, setEntregadorSel] = useState(null)
   // Filtro do quadro — null = todas as colunas; ou 'aceitar'|'cozinha'|'entrega'|'concluidos'
   const [filtroColuna, setFiltroColuna] = useState(null)
   // Caixa de entrada (chat com clientes) — a loja responde aqui
@@ -1773,6 +1787,24 @@ export default function PainelPedidos() {
   useEffect(() => {
     if (painelDireito === 'pedidos') carregarHistorico()
   }, [painelDireito, carregarHistorico])
+
+  // ── Entregadores: entregas já concluídas (para contagem + histórico) ──
+  const carregarEntregasConcluidas = useCallback(async () => {
+    if (!empresa) return
+    const { data } = await supabase
+      .from('pedidos_delivery')
+      .select('id, numero_pedido, cliente_nome, total, created_at, entregador_id, endereco_bairro, endereco_cidade')
+      .eq('empresa_id', empresa.id)
+      .eq('status', 'entregue')
+      .not('entregador_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(500)
+    setEntregasConcluidas(data ?? [])
+  }, [empresa])
+
+  useEffect(() => {
+    if (painelDireito === 'entregadores') { setEntregadorSel(null); carregarEntregasConcluidas() }
+  }, [painelDireito, carregarEntregasConcluidas])
 
   // ── Concluídos do dia (vendas finalizadas hoje) ─────────────
   const carregarConcluidosHoje = useCallback(async () => {
@@ -2547,6 +2579,7 @@ export default function PainelPedidos() {
                 : painelDireito === 'pedidos' ? 'Pedidos finalizados'
                 : painelDireito === 'hoje' ? 'Concluídos hoje'
                 : painelDireito === 'chat' ? 'Mensagens'
+                : painelDireito === 'entregadores' ? 'Entregadores'
                 : 'Catálogo'}
             </h3>
             <button type="button" onClick={() => setPainelDireito(null)} aria-label="Fechar"
@@ -2898,6 +2931,86 @@ export default function PainelPedidos() {
               </div>
             )
           )}
+
+          {/* Painel: Entregadores (contagem + histórico por motoboy) */}
+          {painelDireito === 'entregadores' && (() => {
+            const emRota = (id) => pedidos.filter(p => p.entregador_id === id && p.status === 'saiu_entrega')
+            const concluidas = (id) => entregasConcluidas.filter(p => p.entregador_id === id)
+
+            if (entregadores.length === 0) {
+              return (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24, fontSize: 13 }}>
+                  Nenhum entregador cadastrado. Cadastre em Funcionários (perfil Entregador).
+                </div>
+              )
+            }
+
+            // Detalhe de um entregador (histórico)
+            if (entregadorSel) {
+              const ent = entregadores.find(e => e.id === entregadorSel)
+              const rota = emRota(entregadorSel)
+              const concl = concluidas(entregadorSel)
+              const OrderRow = (p, tag) => (
+                <div key={p.id} style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '9px 11px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
+                    <strong style={{ fontSize: 13, color: tag === 'rota' ? '#7c3aed' : '#16a34a' }}>{fmt(p.total)}</strong>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
+                  </div>
+                </div>
+              )
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <button type="button" onClick={() => setEntregadorSel(null)}
+                    style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: 'var(--primary, #a78bfa)', cursor: 'pointer', fontSize: 13, fontWeight: 700, padding: 0 }}>
+                    ← Todos os entregadores
+                  </button>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{ent?.nome || 'Entregador'}</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {[['Em rota', rota.length, '#7c3aed'], ['Concluídos', concl.length, '#16a34a'], ['Total', rota.length + concl.length, 'var(--text)']].map(([lab, val, cor]) => (
+                      <div key={lab} style={{ flex: 1, textAlign: 'center', border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '8px 4px' }}>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: cor }}>{val}</div>
+                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{lab}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {rota.length > 0 && (
+                    <>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginTop: 4 }}>Em rota agora</div>
+                      {rota.map(p => OrderRow(p, 'rota'))}
+                    </>
+                  )}
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginTop: 4 }}>Concluídos</div>
+                  {concl.length === 0
+                    ? <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Nenhuma entrega concluída ainda.</div>
+                    : concl.map(p => OrderRow(p, 'ok'))}
+                </div>
+              )
+            }
+
+            // Lista de todos os entregadores com os números
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {entregadores.map(e => {
+                  const r = emRota(e.id).length
+                  const c = concluidas(e.id).length
+                  return (
+                    <button key={e.id} type="button" onClick={() => setEntregadorSel(e.id)}
+                      style={{ textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border, #2a2a3a)', borderRadius: 12, padding: '12px 14px', background: 'transparent' }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>🛵 {e.nome || 'Entregador'}</div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <span style={{ flex: 1, textAlign: 'center', fontSize: 12, padding: '4px 0', borderRadius: 8, background: 'rgba(124,58,237,.15)', color: '#7c3aed', fontWeight: 700 }}>Rota {r}</span>
+                        <span style={{ flex: 1, textAlign: 'center', fontSize: 12, padding: '4px 0', borderRadius: 8, background: 'rgba(34,197,94,.14)', color: '#16a34a', fontWeight: 700 }}>Concl. {c}</span>
+                        <span style={{ flex: 1, textAlign: 'center', fontSize: 12, padding: '4px 0', borderRadius: 8, background: 'var(--border, #2a2a3a)', color: 'var(--text)', fontWeight: 700 }}>Total {r + c}</span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          })()}
         </aside>
       )}
 
