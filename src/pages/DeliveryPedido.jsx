@@ -61,9 +61,22 @@ function paymLabel(forma) {
   return forma ?? '—'
 }
 
+// O banco tem status que não são exatamente as chaves da timeline
+// (ex: 'saiu_entrega' → passo 'saiu'; 'pronto' ainda está no preparo).
+const STATUS_TO_STEP = {
+  aguardando_pagamento: 'aguardando',
+  aguardando: 'aguardando',
+  confirmado: 'confirmado',
+  em_preparo: 'em_preparo',
+  pronto: 'em_preparo',
+  saiu_entrega: 'saiu',
+  entregue: 'entregue',
+}
+
 function statusIndex(status) {
   if (status === 'cancelado') return -1
-  return STATUS_STEPS.findIndex(s => s.key === status)
+  const chave = STATUS_TO_STEP[status] || status
+  return STATUS_STEPS.findIndex(s => s.key === chave)
 }
 
 // ── Chat do cliente (loja online, sem login) com a loja ─────
@@ -332,6 +345,22 @@ export default function DeliveryPedido() {
             {pedido.motivo_cancelamento && (
               <p className="dpd-cancelado-motivo">{pedido.motivo_cancelamento}</p>
             )}
+          </section>
+        )}
+
+        {/* Código de entrega — cliente informa ao entregador na chegada */}
+        {!isCancelado && pedido.status === 'saiu_entrega' && pedido.codigo_entrega && (
+          <section className="dpd-card" style={{ textAlign: 'center', border: '2px solid #7c3aed', background: 'rgba(124,58,237,.08)' }}>
+            <h2 className="dpd-card-title" style={{ marginBottom: 6 }}>🛵 Seu pedido saiu para entrega</h2>
+            <p style={{ fontSize: 13.5, color: '#94a3b8', margin: '0 0 10px' }}>
+              Informe este código ao entregador para confirmar o recebimento:
+            </p>
+            <div style={{
+              fontSize: 40, fontWeight: 800, letterSpacing: 10, color: '#7c3aed',
+              fontVariantNumeric: 'tabular-nums', paddingLeft: 10,
+            }}>
+              {pedido.codigo_entrega}
+            </div>
           </section>
         )}
 
