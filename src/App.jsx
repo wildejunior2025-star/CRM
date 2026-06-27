@@ -133,6 +133,8 @@ export default function App() {
             <Route path="/checkout" element={<DeliveryCheckout />} />
             <Route path="/pedido/:id" element={<DeliveryPedido />} />
             <Route path="/mesa/:token" element={<MesaCardapio />} />
+            {/* Link antigo por id (ex: loja sem slug) — resolve por id no DeliveryLoja */}
+            <Route path="/loja/:id" element={<DeliveryLoja />} />
             <Route path="/:slug" element={<DeliveryLoja />} />
           </Routes>
         </BrowserRouter>
