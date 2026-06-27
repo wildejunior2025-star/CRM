@@ -1173,6 +1173,18 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         </div>
       </div>
 
+      {/* Avaliação do cliente (pós-entrega) */}
+      {pedido.avaliacao_nota && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '6px 0 2px', fontSize: 13, flexWrap: 'wrap' }}>
+          <span style={{ color: '#f59e0b', letterSpacing: 1, fontSize: 15 }}>
+            {'★'.repeat(pedido.avaliacao_nota)}{'☆'.repeat(5 - pedido.avaliacao_nota)}
+          </span>
+          {pedido.avaliacao_comentario && (
+            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>“{pedido.avaliacao_comentario}”</span>
+          )}
+        </div>
+      )}
+
       {/* Tempo de preparo prometido ao cliente */}
       {(pedido.status === 'confirmado' || pedido.status === 'em_preparo') && pedido.pronto_previsto_at && (
         <div style={{

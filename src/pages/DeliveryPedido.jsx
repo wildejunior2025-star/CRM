@@ -191,6 +191,12 @@ export default function DeliveryPedido() {
   const [loading, setLoading] = useState(true)
   const [lastUpdate, setLastUpdate] = useState(null)
   const [pixCopied, setPixCopied] = useState(false)
+  // Avaliação (pós-entrega)
+  const [nota, setNota] = useState(0)
+  const [hoverNota, setHoverNota] = useState(0)
+  const [comentario, setComentario] = useState('')
+  const [enviandoAval, setEnviandoAval] = useState(false)
+  const [erroAval, setErroAval] = useState(null)
   const intervalRef = useRef(null)
 
   const fetchPedido = async () => {
@@ -250,6 +256,23 @@ export default function DeliveryPedido() {
     } catch {
       // Fallback para ambientes sem clipboard API
     }
+  }
+
+  async function enviarAvaliacao() {
+    if (nota < 1) { setErroAval('Escolha de 1 a 5 estrelas.'); return }
+    setEnviandoAval(true)
+    setErroAval(null)
+    const { error } = await supabase.rpc('avaliar_pedido', {
+      p_pedido_id: id, p_nota: nota, p_comentario: comentario,
+    })
+    setEnviandoAval(false)
+    if (error) { setErroAval('Não foi possível enviar. Tente de novo.'); return }
+    setPedido(prev => prev ? {
+      ...prev,
+      avaliacao_nota: nota,
+      avaliacao_comentario: comentario.trim() || null,
+      avaliacao_at: new Date().toISOString(),
+    } : prev)
   }
 
   if (loading) {
@@ -361,6 +384,74 @@ export default function DeliveryPedido() {
             }}>
               {pedido.codigo_entrega}
             </div>
+          </section>
+        )}
+
+        {/* Pedido entregue — confirmação + avaliação */}
+        {pedido.status === 'entregue' && (
+          <section className="dpd-card" style={{ border: '2px solid #16a34a', background: 'rgba(34,197,94,.07)' }}>
+            <h2 className="dpd-card-title" style={{ textAlign: 'center', marginBottom: 4 }}>🎉 Pedido entregue!</h2>
+
+            {pedido.avaliacao_nota ? (
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ fontSize: 14, color: '#16a34a', fontWeight: 700, margin: '6px 0' }}>Obrigado pela sua avaliação!</p>
+                <div style={{ fontSize: 30, letterSpacing: 4 }}>
+                  {[1, 2, 3, 4, 5].map(i => (
+                    <span key={i} style={{ color: i <= pedido.avaliacao_nota ? '#f59e0b' : '#cbd5e1' }}>★</span>
+                  ))}
+                </div>
+                {pedido.avaliacao_comentario && (
+                  <p style={{ fontSize: 13.5, color: '#475569', fontStyle: 'italic', marginTop: 8 }}>
+                    “{pedido.avaliacao_comentario}”
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ fontSize: 13.5, color: '#64748b', margin: '4px 0 8px' }}>Que tal avaliar seu pedido?</p>
+                <div style={{ fontSize: 38, lineHeight: 1 }}>
+                  {[1, 2, 3, 4, 5].map(i => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => { setNota(i); setErroAval(null) }}
+                      onMouseEnter={() => setHoverNota(i)}
+                      onMouseLeave={() => setHoverNota(0)}
+                      aria-label={`${i} estrela${i > 1 ? 's' : ''}`}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px',
+                        fontSize: 38, lineHeight: 1,
+                        color: i <= (hoverNota || nota) ? '#f59e0b' : '#cbd5e1',
+                      }}
+                    >★</button>
+                  ))}
+                </div>
+                <textarea
+                  value={comentario}
+                  onChange={e => setComentario(e.target.value)}
+                  placeholder="Deixe um comentário (opcional)"
+                  rows={3}
+                  style={{
+                    width: '100%', marginTop: 12, padding: '10px 12px', borderRadius: 10,
+                    border: '1px solid #e2e8f0', background: '#fff', color: '#0f172a',
+                    fontSize: 13.5, fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box',
+                  }}
+                />
+                {erroAval && <p style={{ fontSize: 12.5, color: '#dc2626', margin: '6px 0 0' }}>{erroAval}</p>}
+                <button
+                  type="button"
+                  onClick={enviarAvaliacao}
+                  disabled={enviandoAval}
+                  style={{
+                    width: '100%', marginTop: 10, padding: '12px 0', borderRadius: 10, border: 'none',
+                    background: '#16a34a', color: '#fff', fontWeight: 800, fontSize: 15,
+                    cursor: enviandoAval ? 'default' : 'pointer',
+                  }}
+                >
+                  {enviandoAval ? 'Enviando...' : 'Enviar avaliação'}
+                </button>
+              </div>
+            )}
           </section>
         )}
 
