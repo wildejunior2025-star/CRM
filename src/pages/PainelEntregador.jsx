@@ -115,15 +115,15 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar }) {
               value={codigo}
               onChange={e => { setCodigo(e.target.value.replace(/\D/g, '').slice(0, 4)); setErro(null) }}
               inputMode="numeric"
-              placeholder="Código do cliente"
+              placeholder="Código"
               style={{
-                flex: 1, padding: '10px 12px', borderRadius: 10, textAlign: 'center',
-                fontSize: 18, fontWeight: 700, letterSpacing: 4,
+                flex: 1, minWidth: 0, width: '100%', padding: '10px 8px', borderRadius: 10, textAlign: 'center',
+                fontSize: 18, fontWeight: 700, letterSpacing: 3,
                 border: '1.5px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
               }}
             />
             <button type="button" onClick={confirmar} disabled={ocupado}
-              style={{ ...btnPrimario('#16a34a'), width: 'auto', padding: '0 18px' }}>
+              style={{ ...btnPrimario('#16a34a'), width: 'auto', flexShrink: 0, padding: '0 16px', whiteSpace: 'nowrap' }}>
               {ocupado ? '...' : 'Entreguei'}
             </button>
           </div>
