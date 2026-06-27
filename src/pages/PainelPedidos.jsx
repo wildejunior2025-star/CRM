@@ -235,6 +235,95 @@ function ModalRecusa({ pedido, onConfirmar, onFechar }) {
   )
 }
 
+// ── Modal de aceite (tempo de preparo) ──────────────────────
+const PRESETS_PREPARO = [10, 15, 20, 30, 45, 60]
+
+function ModalAceitar({ pedido, onConfirmar, onFechar }) {
+  const [min, setMin] = useState(30)
+  const [salvando, setSalvando] = useState(false)
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onFechar() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onFechar])
+
+  async function confirmar() {
+    setSalvando(true)
+    await onConfirmar(pedido.id, min)
+    setSalvando(false)
+  }
+
+  const isRetirada = (pedido.tipo_entrega || 'entrega') === 'retirada'
+
+  return (
+    <div className="pp-modal-overlay" onClick={onFechar}>
+      <div className="pp-modal" onClick={e => e.stopPropagation()}>
+        <div>
+          <p className="pp-modal-titulo">
+            Aceitar pedido #{pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()}
+          </p>
+          <p className="pp-modal-sub">
+            Em quanto tempo {isRetirada ? 'fica pronto para retirada' : 'fica pronto'}? O cliente acompanha na tela dele.
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '6px 0 14px' }}>
+          {PRESETS_PREPARO.map(p => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setMin(p)}
+              style={{
+                padding: '8px 14px', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 14,
+                border: `1.5px solid ${min === p ? '#16a34a' : 'var(--border, #2a2a3a)'}`,
+                background: min === p ? 'rgba(34,197,94,.14)' : 'transparent',
+                color: min === p ? '#16a34a' : 'var(--text)',
+              }}
+            >
+              {p} min
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setMin(null)}
+            style={{
+              padding: '8px 14px', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 14,
+              border: `1.5px solid ${min === null ? '#7c3aed' : 'var(--border, #2a2a3a)'}`,
+              background: min === null ? 'rgba(124,58,237,.14)' : 'transparent',
+              color: min === null ? '#a78bfa' : 'var(--text)',
+            }}
+          >
+            Sem estimativa
+          </button>
+        </div>
+
+        {min !== null && (
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px' }}>
+            Fica pronto por volta de{' '}
+            <strong style={{ color: 'var(--text)' }}>
+              {new Date(Date.now() + min * 60000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+            </strong>
+          </p>
+        )}
+
+        <div className="pp-modal-actions">
+          <button type="button" className="pp-modal-btn-secondary" onClick={onFechar}>Voltar</button>
+          <button
+            type="button"
+            className="pp-modal-btn-danger"
+            style={{ background: '#16a34a', borderColor: '#16a34a' }}
+            disabled={salvando}
+            onClick={confirmar}
+          >
+            {salvando ? 'Aceitando...' : 'Aceitar pedido'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Modal de mensagem ───────────────────────────────────────
 const MSGS_RAPIDAS = [
   'Seu pedido está sendo preparado! 🍽️',
@@ -1077,6 +1166,20 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         </div>
       </div>
 
+      {/* Tempo de preparo prometido ao cliente */}
+      {(pedido.status === 'confirmado' || pedido.status === 'em_preparo') && pedido.pronto_previsto_at && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6, margin: '4px 0 2px',
+          fontSize: 13, fontWeight: 600, color: '#16a34a',
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+          </svg>
+          Pronto por volta de {new Date(pedido.pronto_previsto_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+          {pedido.tempo_preparo_min ? ` (~${pedido.tempo_preparo_min} min)` : ''}
+        </div>
+      )}
+
       {/* Pagamento */}
       <div className="pp-pagamento-row">
         {pagamento === 'pix' && (
@@ -1508,6 +1611,7 @@ export default function PainelPedidos() {
   const [togglingLoja, setTogglingLoja] = useState(false)
   const [avisoHorario, setAvisoHorario] = useState(null)
   const [pedidoRecusando, setPedidoRecusando] = useState(null)
+  const [pedidoAceitando, setPedidoAceitando] = useState(null) // pedido no modal de aceite (tempo de preparo)
   const [pedidoMensagem, setPedidoMensagem] = useState(null)
   const [vendaAberta, setVendaAberta] = useState(false)
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null) // pedido aberto em detalhe (card completo)
@@ -1967,8 +2071,8 @@ export default function PainelPedidos() {
     }
   }
 
-  async function handleAvancar(id, novoStatus) {
-    const update = { status: novoStatus }
+  async function handleAvancar(id, novoStatus, extra = {}) {
+    const update = { status: novoStatus, ...extra }
 
     // Gera código de confirmação de 4 dígitos ao despachar.
     // O cliente apresenta esse código ao entregador para confirmar o recebimento.
@@ -1996,8 +2100,13 @@ export default function PainelPedidos() {
     notificarCliente(id, novoStatus)
   }
 
-  async function handleConfirmar(id) {
-    await handleAvancar(id, 'confirmado')
+  async function handleConfirmar(id, minutos = null) {
+    const extra = {}
+    if (minutos) {
+      extra.tempo_preparo_min = minutos
+      extra.pronto_previsto_at = new Date(Date.now() + minutos * 60000).toISOString()
+    }
+    await handleAvancar(id, 'confirmado', extra)
   }
 
   async function handleConfirmarRecusa(id, motivo) {
@@ -2301,6 +2410,15 @@ export default function PainelPedidos() {
         />
       )}
 
+      {/* Modal de aceite — tempo de preparo */}
+      {pedidoAceitando && (
+        <ModalAceitar
+          pedido={pedidoAceitando}
+          onConfirmar={(id, minutos) => { handleConfirmar(id, minutos); setPedidoAceitando(null) }}
+          onFechar={() => setPedidoAceitando(null)}
+        />
+      )}
+
       {/* Modal de mensagem WhatsApp */}
       {pedidoMensagem && (
         <ModalMensagem
@@ -2325,7 +2443,11 @@ export default function PainelPedidos() {
           <div onClick={e => e.stopPropagation()} style={{ width: 'min(440px, 94vw)', maxHeight: '92vh', overflowY: 'auto' }}>
             <CardPedido
               pedido={pedidos.find(p => p.id === pedidoDetalhe.id) || concluidosHoje.find(p => p.id === pedidoDetalhe.id) || pedidoDetalhe}
-              onConfirmar={(id) => { handleConfirmar(id); setPedidoDetalhe(null) }}
+              onConfirmar={(id) => {
+                const p = pedidos.find(x => x.id === id) || pedidoDetalhe
+                setPedidoDetalhe(null)
+                setPedidoAceitando(p)
+              }}
               onRecusar={(p) => { setPedidoRecusando(p); setPedidoDetalhe(null) }}
               onExpirado={(id) => { handleExpirado(id); setPedidoDetalhe(null) }}
               onAvancar={(id, st) => { handleAvancar(id, st); setPedidoDetalhe(null) }}

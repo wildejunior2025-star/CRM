@@ -304,6 +304,19 @@ export default function DeliveryPedido() {
                 )
               })}
             </ol>
+            {['confirmado', 'em_preparo'].includes(pedido.status) && pedido.pronto_previsto_at && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, padding: '10px 12px',
+                borderRadius: 12, background: '#ecfdf5', color: '#047857',
+                fontSize: 14, fontWeight: 600,
+              }}>
+                <span style={{ display: 'flex', flexShrink: 0 }}><IconChef /></span>
+                <span>
+                  {(pedido.tipo_entrega || 'entrega') === 'retirada' ? 'Pronto para retirada' : 'Fica pronto'} por volta de{' '}
+                  <strong>{new Date(pedido.pronto_previsto_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</strong>
+                </span>
+              </div>
+            )}
             {lastUpdate && (
               <p className="dpd-update-time">
                 Atualizado às {lastUpdate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
