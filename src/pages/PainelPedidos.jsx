@@ -419,6 +419,7 @@ const ORIGEM_CONFIG = {
   cardapio:  { label: 'Cardápio', bg: '#3b82f6', color: '#fff', borda: '#3b82f6' },
   app:       { label: 'App',      bg: '#f97316', color: '#fff', borda: '#f97316' },
   balcao:    { label: 'Balcão',   bg: '#0891b2', color: '#fff', borda: '#0891b2' },
+  ifood:     { label: 'iFood',    bg: '#ea1d2c', color: '#fff', borda: '#ea1d2c' },
 }
 
 // Campo de quantidade digitável (permite digitar 100 em vez de clicar 100x).
@@ -2167,6 +2168,26 @@ export default function PainelPedidos() {
     }
   }
 
+  // Devolve o status pro iFood quando o pedido é de lá. Silencioso: se a
+  // chamada falhar, o pedido continua andando normal no nosso painel.
+  async function sincronizarIfood(id, novoStatus) {
+    const pedido = pedidos.find(p => p.id === id)
+    if (!pedido || pedido.origem !== 'ifood') return
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      await fetch(`${SUPABASE_URL}/functions/v1/ifood-integration`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ acao: 'status', pedido_id: id, novo_status: novoStatus }),
+      })
+    } catch {
+      // iFood indisponível — não trava a operação da loja
+    }
+  }
+
   async function handleAvancar(id, novoStatus, extra = {}) {
     const update = { status: novoStatus, ...extra }
 
@@ -2193,6 +2214,7 @@ export default function PainelPedidos() {
     // Pedido concluído → recarrega a coluna "Concluídos hoje"
     if (novoStatus === 'entregue') carregarConcluidosHoje()
 
+    sincronizarIfood(id, novoStatus)
     notificarCliente(id, novoStatus)
   }
 
@@ -2228,6 +2250,7 @@ export default function PainelPedidos() {
         .eq('id', id)
     }
 
+    sincronizarIfood(id, 'cancelado')
     notificarCliente(id, 'cancelado')
   }
 

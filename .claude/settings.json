@@ -56,7 +56,8 @@
       "mcp__supabase__deploy_edge_function",
       "Bash(npx supabase *)",
       "Bash(curl -s -X POST https://ycytrsqdvrviihkqfvno.supabase.co/functions/v1/admin-whatsapp-connect -H 'Content-Type: application/json' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InljeXRyc3FkdnJ2aWloa3Fmdm5vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExMjc1NDcsImV4cCI6MjA5NjcwMzU0N30.zAq-8gaw2U9wvwBJCX_rK2jP-tnjOL5VPS23fFxf2Zc' -d '{\"action\":\"fix_webhook\",\"instanceName\":\"crma95b716bd97342abace9dae0fd1acd62\"}')",
-      "Bash(powershell -Command \"Get-Content src/pages/PortalIndicacoes.jsx -Encoding Byte | Select-Object -First 3\")"
+      "Bash(powershell -Command \"Get-Content src/pages/PortalIndicacoes.jsx -Encoding Byte | Select-Object -First 3\")",
+      "PowerShell(npm run deploy)"
     ],
     "additionalDirectories": [
       "C:\\Users\\wilde junior\\.cache\\chrome-devtools-mcp\\chrome-profile",

@@ -34,6 +34,70 @@ export default function MinhaLoja() {
   const [erroSenha, setErroSenha] = useState(null)
   const [sucessoSenha, setSucessoSenha] = useState(false)
 
+  // Integração iFood
+  const [ifoodCfg, setIfoodCfg] = useState({
+    client_id: '', client_secret: '', merchant_id: '', ambiente: 'teste', ativo: false,
+  })
+  const [ifoodStatus, setIfoodStatus] = useState(null) // { ultimo_polling_em, ultimo_erro }
+  const [ifoodSalvando, setIfoodSalvando] = useState(false)
+  const [ifoodTestando, setIfoodTestando] = useState(false)
+  const [ifoodMsg, setIfoodMsg] = useState(null) // { tipo: 'ok'|'erro', texto }
+
+  async function handleSalvarIfood(e) {
+    e.preventDefault()
+    if (!empresa) return
+    setIfoodSalvando(true)
+    setIfoodMsg(null)
+    const { error } = await supabase
+      .from('ifood_config')
+      .upsert({
+        empresa_id: empresa.id,
+        client_id: ifoodCfg.client_id.trim() || null,
+        client_secret: ifoodCfg.client_secret.trim() || null,
+        merchant_id: ifoodCfg.merchant_id.trim() || null,
+        ambiente: ifoodCfg.ambiente,
+        ativo: ifoodCfg.ativo,
+      }, { onConflict: 'empresa_id' })
+    setIfoodSalvando(false)
+    if (error) { setIfoodMsg({ tipo: 'erro', texto: error.message }); return }
+    setIfoodMsg({ tipo: 'ok', texto: 'Configuração do iFood salva.' })
+    setTimeout(() => setIfoodMsg(null), 3000)
+  }
+
+  async function handleTestarIfood() {
+    if (!empresa) return
+    setIfoodTestando(true)
+    setIfoodMsg(null)
+    // Salva antes de testar pra garantir que a edge function lê o que está na tela
+    await supabase.from('ifood_config').upsert({
+      empresa_id: empresa.id,
+      client_id: ifoodCfg.client_id.trim() || null,
+      client_secret: ifoodCfg.client_secret.trim() || null,
+      merchant_id: ifoodCfg.merchant_id.trim() || null,
+      ambiente: ifoodCfg.ambiente,
+      ativo: ifoodCfg.ativo,
+    }, { onConflict: 'empresa_id' })
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const url = `${import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'}/functions/v1/ifood-integration`
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token ?? ''}`,
+        },
+        body: JSON.stringify({ acao: 'test', empresa_id: empresa.id }),
+      })
+      const data = await res.json()
+      if (data.ok) setIfoodMsg({ tipo: 'ok', texto: data.mensagem ?? 'Conexão OK!' })
+      else setIfoodMsg({ tipo: 'erro', texto: data.error ?? 'Falha ao conectar' })
+    } catch (err) {
+      setIfoodMsg({ tipo: 'erro', texto: String(err.message ?? err) })
+    }
+    setIfoodTestando(false)
+  }
+
   async function handleAlterarSenha(e) {
     e.preventDefault()
     setErroSenha(null)
@@ -63,6 +127,18 @@ export default function MinhaLoja() {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user?.email) setEmailLogin(user.email)
     })
+    supabase.from('ifood_config').select('*').eq('empresa_id', empresa.id).maybeSingle()
+      .then(({ data }) => {
+        if (!data) return
+        setIfoodCfg({
+          client_id: data.client_id ?? '',
+          client_secret: data.client_secret ?? '',
+          merchant_id: data.merchant_id ?? '',
+          ambiente: data.ambiente ?? 'teste',
+          ativo: data.ativo ?? false,
+        })
+        setIfoodStatus({ ultimo_polling_em: data.ultimo_polling_em, ultimo_erro: data.ultimo_erro })
+      })
   }, [empresa])
 
   const [salvandoEmail, setSalvandoEmail] = useState(false)
@@ -434,6 +510,120 @@ export default function MinhaLoja() {
         >
           {salvando ? 'Salvando...' : 'Salvar'}
         </button>
+      </form>
+
+      {/* Card de integração com o iFood */}
+      <form onSubmit={handleSalvarIfood} style={{ marginTop: 16 }}>
+        <div className="card" style={{ marginBottom: 16, borderTop: '3px solid #ea1d2c' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <span style={{
+              background: '#ea1d2c', color: '#fff', borderRadius: 6,
+              padding: '3px 8px', fontSize: 12, fontWeight: 800, letterSpacing: '.02em',
+            }}>iFood</span>
+            <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Integração com o iFood</h2>
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
+            Os pedidos que caírem no iFood aparecem aqui no painel automaticamente. Pegue as
+            credenciais em <strong>developer.ifood.com.br</strong> (Portal do Desenvolvedor) e cole abaixo.
+            Comece pelo ambiente de <strong>teste</strong> — o portal já cria uma loja de teste.
+          </p>
+
+          {ifoodMsg && (
+            <div style={{
+              background: ifoodMsg.tipo === 'ok' ? 'var(--success-bg)' : 'var(--danger-bg)',
+              color: ifoodMsg.tipo === 'ok' ? 'var(--success)' : 'var(--danger)',
+              border: `1px solid ${ifoodMsg.tipo === 'ok' ? 'var(--success)' : 'var(--danger)'}`,
+              borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 14,
+            }}>
+              {ifoodMsg.texto}
+            </div>
+          )}
+
+          <label style={{
+            display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+            padding: '10px 14px', borderRadius: 8, marginBottom: 16,
+            border: `1.5px solid ${ifoodCfg.ativo ? '#ea1d2c' : 'var(--border)'}`,
+            background: ifoodCfg.ativo ? 'rgba(234,29,44,.08)' : 'transparent',
+          }}>
+            <input
+              type="checkbox"
+              checked={ifoodCfg.ativo}
+              onChange={e => setIfoodCfg(c => ({ ...c, ativo: e.target.checked }))}
+              style={{ width: 18, height: 18, cursor: 'pointer' }}
+            />
+            <span style={{ fontWeight: 700, fontSize: 14 }}>
+              Receber pedidos do iFood {ifoodCfg.ativo ? '(ativo)' : '(desligado)'}
+            </span>
+          </label>
+
+          <div className="form-grid">
+            <div className="form-field">
+              <label>Ambiente</label>
+              <select
+                value={ifoodCfg.ambiente}
+                onChange={e => setIfoodCfg(c => ({ ...c, ambiente: e.target.value }))}
+              >
+                <option value="teste">Teste (loja de teste do portal)</option>
+                <option value="producao">Produção (loja real — após homologação)</option>
+              </select>
+            </div>
+            <div className="form-field">
+              <label>Merchant ID (UUID da loja no iFood)</label>
+              <input
+                type="text"
+                value={ifoodCfg.merchant_id}
+                onChange={e => setIfoodCfg(c => ({ ...c, merchant_id: e.target.value }))}
+                placeholder="ex: 1b2c3d4e-..."
+              />
+            </div>
+            <div className="form-field full">
+              <label>Client ID</label>
+              <input
+                type="text"
+                value={ifoodCfg.client_id}
+                onChange={e => setIfoodCfg(c => ({ ...c, client_id: e.target.value }))}
+                placeholder="Client ID do app no Portal do Desenvolvedor"
+              />
+            </div>
+            <div className="form-field full">
+              <label>Client Secret</label>
+              <input
+                type="password"
+                value={ifoodCfg.client_secret}
+                onChange={e => setIfoodCfg(c => ({ ...c, client_secret: e.target.value }))}
+                placeholder="Client Secret do app"
+                autoComplete="off"
+              />
+            </div>
+          </div>
+
+          {ifoodStatus?.ultimo_polling_em && (
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12, marginBottom: 0 }}>
+              Última verificação: {new Date(ifoodStatus.ultimo_polling_em).toLocaleString('pt-BR')}
+              {ifoodStatus.ultimo_erro && (
+                <span style={{ color: 'var(--danger)' }}> · último erro: {ifoodStatus.ultimo_erro}</span>
+              )}
+            </p>
+          )}
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+            <button type="submit" className="btn btn-primary" disabled={ifoodSalvando}>
+              {ifoodSalvando ? 'Salvando...' : 'Salvar integração'}
+            </button>
+            <button
+              type="button"
+              onClick={handleTestarIfood}
+              disabled={ifoodTestando}
+              style={{
+                padding: '8px 18px', borderRadius: 8, cursor: 'pointer',
+                border: '1.5px solid var(--border)', background: 'var(--surface)',
+                fontWeight: 700, fontSize: 14, color: 'var(--text)',
+              }}
+            >
+              {ifoodTestando ? 'Testando...' : 'Testar conexão'}
+            </button>
+          </div>
+        </div>
       </form>
 
       {/* Card de alteração de e-mail de login */}
