@@ -27,6 +27,7 @@ export default function Login() {
     'portal.fwcinter.com': 'empresa',
     'admin.fwcinter.com': 'empresa',
     'gestor.fwcinter.com': 'gestor', // Painel de Pedidos em domínio próprio
+    'entregas.fwcinter.com': 'entregador', // Tela do entregador em domínio próprio
   }
   const tipo = tipoParam || HOST_TIPO[window.location.hostname] || null
 
@@ -78,6 +79,7 @@ export default function Login() {
   if (session) {
     if (tipo === 'cliente') return <Navigate to="/portal" replace />
     if (tipo === 'gestor')  return <Navigate to="/painel" replace />
+    if (tipo === 'entregador') return <Navigate to="/entregas" replace />
     const from = location.state?.from?.pathname ?? '/'
     return <Navigate to={from} replace />
   }
@@ -237,7 +239,9 @@ export default function Login() {
       ? 'Área do Cliente'
       : tipo === 'gestor'
         ? 'Gestor de Pedidos'
-        : 'Área da Empresa'
+        : tipo === 'entregador'
+          ? 'Área do Entregador'
+          : 'Área da Empresa'
   const subtitulo = 'Entre com seu apelido ou e-mail'
 
   return (
