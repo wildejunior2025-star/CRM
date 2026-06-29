@@ -1361,6 +1361,23 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
             )}
           </div>
         )}
+
+        {/* Cancelar um pedido JÁ aceito (faltou produto, cliente desistiu, etc.).
+            Não aparece no balcão (venda própria) nem em quem ainda está "A aceitar"
+            (esse usa o botão Recusar acima). */}
+        {pedido.origem !== 'balcao' && ['confirmado', 'em_preparo', 'pronto', 'saiu_entrega'].includes(pedido.status) && (
+          <button
+            type="button"
+            onClick={() => onRecusar(pedido)}
+            style={{
+              width: '100%', marginTop: 8, padding: '8px', borderRadius: 8,
+              background: 'transparent', border: '1.5px solid rgba(239,68,68,.5)',
+              color: '#ef4444', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+            }}
+          >
+            Cancelar pedido
+          </button>
+        )}
       </div>
     </div>
   )

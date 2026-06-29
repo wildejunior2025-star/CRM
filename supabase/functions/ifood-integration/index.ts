@@ -316,9 +316,26 @@ async function runStatus(sb: any, pedidoId: string, novoStatus: string) {
   } else if (novoStatus === "entregue" && ehRetirada) {
     acaoIfood = { path: `orders/${orderId}/readyToPickup` }
   } else if (novoStatus === "cancelado") {
+    // Consulta os motivos de cancelamento válidos pra ESTE pedido e usa o
+    // primeiro disponível (cada pedido aceita códigos diferentes conforme o
+    // momento do ciclo). Exigência da homologação + evita código inválido.
+    let code = "501"
+    let desc = "PROBLEMAS_SISTEMA"
+    try {
+      const rRes = await fetch(`${IFOOD}/order/v1.0/orders/${orderId}/cancellationReasons`, {
+        headers: { "Authorization": `Bearer ${token}` },
+      })
+      if (rRes.ok) {
+        const reasons = await rRes.json()
+        if (Array.isArray(reasons) && reasons.length > 0) {
+          code = reasons[0].cancelCodeId ?? reasons[0].code ?? code
+          desc = reasons[0].description ?? desc
+        }
+      }
+    } catch { /* mantém o fallback */ }
     acaoIfood = {
       path: `orders/${orderId}/requestCancellation`,
-      body: { reason: "Cancelado pela loja", cancellationCode: "501" },
+      body: { reason: desc, cancellationCode: code },
     }
   }
 
