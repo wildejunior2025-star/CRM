@@ -1045,6 +1045,12 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           }}>
             {origemCfg.label}
           </span>
+          {/* Nº do pedido no iFood (além do nosso) */}
+          {pedido.origem === 'ifood' && pedido.ifood_display_id && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#ea1d2c', flexShrink: 0 }}>
+              iFood #{pedido.ifood_display_id}
+            </span>
+          )}
           {/* Badge de status para pedidos não-aguardando */}
           {pedido.status !== 'aguardando' && (
             <span
@@ -1576,6 +1582,9 @@ function CardMini({ pedido, onClick, onExpirado, entregadores = [] }) {
       <div className="pp-mini-sub">{hora} · {pedido.cliente_nome || '—'}</div>
       <div className="pp-mini-tags">
         <span className="pp-mini-badge" style={{ background: oc.bg, color: oc.color }}>{oc.label}</span>
+        {pedido.origem === 'ifood' && pedido.ifood_display_id && (
+          <span className="pp-mini-itens" style={{ color: '#ea1d2c', fontWeight: 700 }}>iFood #{pedido.ifood_display_id}</span>
+        )}
         <span className="pp-mini-itens">{qtdItens} {qtdItens === 1 ? 'item' : 'itens'}</span>
         {isRetirada && <span className="pp-mini-itens">{pedido.origem === 'balcao' ? 'Balcão' : 'Retirada'}</span>}
         {entregadorNome && <span className="pp-mini-itens">🛵 {entregadorNome}</span>}
