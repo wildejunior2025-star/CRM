@@ -2168,25 +2168,9 @@ export default function PainelPedidos() {
     }
   }
 
-  // Devolve o status pro iFood quando o pedido é de lá. Silencioso: se a
-  // chamada falhar, o pedido continua andando normal no nosso painel.
-  async function sincronizarIfood(id, novoStatus) {
-    const pedido = pedidos.find(p => p.id === id)
-    if (!pedido || pedido.origem !== 'ifood') return
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      await fetch(`${SUPABASE_URL}/functions/v1/ifood-integration`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({ acao: 'status', pedido_id: id, novo_status: novoStatus }),
-      })
-    } catch {
-      // iFood indisponível — não trava a operação da loja
-    }
-  }
+  // A devolução de status pro iFood é feita por trigger no banco
+  // (notify_ifood_status, migração 0070) — cobre gestor, entregador e
+  // auto-conclusão sem o front precisar chamar a edge function.
 
   async function handleAvancar(id, novoStatus, extra = {}) {
     const update = { status: novoStatus, ...extra }
@@ -2214,7 +2198,6 @@ export default function PainelPedidos() {
     // Pedido concluído → recarrega a coluna "Concluídos hoje"
     if (novoStatus === 'entregue') carregarConcluidosHoje()
 
-    sincronizarIfood(id, novoStatus)
     notificarCliente(id, novoStatus)
   }
 
@@ -2250,7 +2233,6 @@ export default function PainelPedidos() {
         .eq('id', id)
     }
 
-    sincronizarIfood(id, 'cancelado')
     notificarCliente(id, 'cancelado')
   }
 
