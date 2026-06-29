@@ -267,12 +267,15 @@ function mapearPagamento(payments: any): { forma: string; troco: number | null }
 }
 
 async function atualizarStatusLocal(sb: any, orderId: string, code: string) {
-  // Espelha cancelamentos vindos do iFood; demais transições o lojista controla
-  const cancelado = ["CAN", "CANCELLED", "CANCELLATION_REQUESTED"].includes(code)
+  // Espelha cancelamentos e conclusões vindos do iFood; demais transições o
+  // lojista controla pelo painel.
   const patch: Record<string, unknown> = { ifood_status: code }
-  if (cancelado) {
+  if (["CAN", "CANCELLED", "CANCELLATION_REQUESTED"].includes(code)) {
     patch.status = "cancelado"
     patch.motivo_cancelamento = "Cancelado pelo iFood/cliente"
+  } else if (["CON", "CONCLUDED"].includes(code)) {
+    // Pedido concluído no iFood (ex.: envio imediato) → reflete como entregue
+    patch.status = "entregue"
   }
   await sb.from("pedidos_delivery").update(patch).eq("ifood_order_id", orderId)
 }
