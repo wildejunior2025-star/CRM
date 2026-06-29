@@ -1711,6 +1711,7 @@ export default function PainelPedidos() {
   const [loadingHist, setLoadingHist] = useState(false)
   // Concluídos do dia
   const [concluidosHoje, setConcluidosHoje] = useState([])
+  const [canceladosHoje, setCanceladosHoje] = useState([])
   const [loadingHoje, setLoadingHoje] = useState(false)
   // Entregadores — estatísticas e histórico por motoboy
   const [entregasConcluidas, setEntregasConcluidas] = useState([])
@@ -1817,10 +1818,12 @@ export default function PainelPedidos() {
       .from('pedidos_delivery')
       .select('*')
       .eq('empresa_id', empresa.id)
-      .eq('status', 'entregue')
+      .in('status', ['entregue', 'cancelado'])
       .gte('created_at', inicio.toISOString())
       .order('created_at', { ascending: false })
-    setConcluidosHoje(data || [])
+    const todos = data || []
+    setConcluidosHoje(todos.filter(p => p.status === 'entregue'))
+    setCanceladosHoje(todos.filter(p => p.status === 'cancelado'))
     setLoadingHoje(false)
   }, [empresa])
 
@@ -2233,6 +2236,7 @@ export default function PainelPedidos() {
         .eq('id', id)
     }
 
+    carregarConcluidosHoje()
     notificarCliente(id, 'cancelado')
   }
 
@@ -2258,6 +2262,7 @@ export default function PainelPedidos() {
         .eq('status', 'aguardando')
     }
 
+    carregarConcluidosHoje()
     notificarCliente(id, 'cancelado')
   }
 
@@ -2428,11 +2433,12 @@ export default function PainelPedidos() {
             {/* Filtro de colunas */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
               {[
-                { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidos.length + concluidosHoje.length },
+                { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidos.length + concluidosHoje.length + canceladosHoje.length },
                 { id: 'aceitar',    label: 'A aceitar', cor: '#ca8a04', count: pedidos.filter(p => p.status === 'aguardando').length },
                 { id: 'cozinha',    label: 'Na cozinha', cor: '#1d4ed8', count: pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length },
                 { id: 'entrega',    label: 'Pronto / Em rota', cor: '#7c3aed', count: pedidos.filter(p => p.status === 'pronto' || p.status === 'saiu_entrega').length },
                 { id: 'concluidos', label: 'Concluídos', cor: '#16a34a', count: concluidosHoje.length },
+                { id: 'cancelados', label: 'Cancelados', cor: '#dc2626', count: canceladosHoje.length },
               ].map(f => {
                 const ativo = filtroColuna === f.id
                 return (
@@ -2508,6 +2514,16 @@ export default function PainelPedidos() {
                   ))}
                 </Coluna>
               )}
+
+              {(!filtroColuna || filtroColuna === 'cancelados') && (
+                <Coluna titulo="Cancelados hoje" cor="#dc2626"
+                  count={canceladosHoje.length}
+                  vazio="Nenhum cancelado hoje">
+                  {canceladosHoje.map(p => (
+                    <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
+                  ))}
+                </Coluna>
+              )}
             </div>
           </>
         )}
@@ -2554,7 +2570,7 @@ export default function PainelPedidos() {
         <div className="pp-modal-overlay" onClick={() => setPedidoDetalhe(null)} style={{ zIndex: 120 }}>
           <div onClick={e => e.stopPropagation()} style={{ width: 'min(440px, 94vw)', maxHeight: '92vh', overflowY: 'auto' }}>
             <CardPedido
-              pedido={pedidos.find(p => p.id === pedidoDetalhe.id) || concluidosHoje.find(p => p.id === pedidoDetalhe.id) || pedidoDetalhe}
+              pedido={pedidos.find(p => p.id === pedidoDetalhe.id) || concluidosHoje.find(p => p.id === pedidoDetalhe.id) || canceladosHoje.find(p => p.id === pedidoDetalhe.id) || pedidoDetalhe}
               onConfirmar={(id) => {
                 const p = pedidos.find(x => x.id === id) || pedidoDetalhe
                 setPedidoDetalhe(null)
