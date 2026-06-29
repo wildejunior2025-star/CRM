@@ -37,6 +37,12 @@ function labelPagamento(pedido) {
   const p = pedido.forma_pagamento || ''
   if (p === 'pix') return pedido.pix_status === 'pago' ? 'PIX (pago)' : 'PIX'
   if (p === 'dinheiro') return 'Dinheiro'
+  // Formas que chegam dos pedidos do iFood
+  if (p === 'online') return pedido.origem === 'ifood' ? 'PAGO ONLINE (iFood)' : 'Pago online'
+  if (p === 'credito') return 'Cartão de crédito'
+  if (p === 'debito') return 'Cartão de débito'
+  if (p === 'cartao') return 'Cartão'
+  if (p === 'vale') return 'Vale-refeição'
   return p || '—'
 }
 
@@ -90,7 +96,10 @@ export function montarCupomHtml(pedido, empresa = {}) {
   .row span:last-child { white-space: nowrap; }
   ul { list-style: none; margin: 0; padding: 0; }
   li { margin-bottom: 2px; }
+  .ifood { background: #000; color: #fff; text-align: center; font-weight: 800;
+           padding: 5px 4px; margin: 0 0 5px; font-size: ${lgPx + 2}px; letter-spacing: 1px; }
 </style></head><body>
+  ${pedido.origem === 'ifood' ? `<div class="ifood">★ PEDIDO iFOOD ★${pedido.ifood_display_id ? ` Nº ${esc(pedido.ifood_display_id)}` : ''}</div>` : ''}
   <div class="center b lg">${esc(empresa.nome || 'Pedido')}</div>
   ${empresa.telefone ? `<div class="center">${esc(empresa.telefone)}</div>` : ''}
   <hr>
