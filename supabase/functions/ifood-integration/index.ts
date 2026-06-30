@@ -53,6 +53,7 @@ serve(async (req) => {
     if (acao === "poll") return json(await runPoll(sb))
     if (acao === "test") return json(await runTest(sb, body?.empresa_id))
     if (acao === "status") return json(await runStatus(sb, body?.pedido_id, body?.novo_status))
+    if (acao === "catalogo") return json(await runImportarCatalogo(sb, body?.empresa_id))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
   } catch (e) {
     return json({ ok: false, error: String(e?.message ?? e) }, 500)
@@ -261,6 +262,21 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     if (String(error.message).includes("uq_pedidos_delivery_ifood_order")) return false
     throw new Error(`insert pedido: ${error.message}`)
   }
+
+  // Opção B: preenche o catálogo automaticamente com os itens do pedido que
+  // ainda não existem (vão pra Produtos, sem publicar na loja online — o
+  // lojista revisa). Não trava a criação do pedido se falhar.
+  try {
+    for (const it of (o.items ?? [])) {
+      await upsertProduto(sb, cfg.empresa_id, {
+        nome: it.name,
+        preco: it.unitPrice ?? it.price ?? 0,
+        categoria: "iFood",
+        publicar: false,
+      })
+    }
+  } catch { /* não atrapalha o pedido */ }
+
   return true
 }
 
@@ -283,6 +299,92 @@ function mapearPagamento(payments: any): { forma: string; troco: number | null }
   if (metodo === "DEBIT") return { forma: "debito", troco: null }
   if (metodo === "MEAL_VOUCHER" || metodo === "FOOD_VOUCHER") return { forma: "vale", troco: null }
   return { forma: "outro", troco: null }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Catálogo: cria produtos no CRM a partir dos itens do iFood
+// ─────────────────────────────────────────────────────────────────────
+// Garante que a categoria exista na lista de categorias da empresa.
+async function ensureCategoria(sb: any, empresaId: string, nome: string) {
+  if (!nome) return
+  const { data } = await sb.from("categorias").select("id")
+    .eq("empresa_id", empresaId).ilike("nome", nome).maybeSingle()
+  if (!data) {
+    try { await sb.from("categorias").insert({ empresa_id: empresaId, nome }) } catch { /* corrida/duplicado ok */ }
+  }
+}
+
+// Cria um produto a partir de um item do iFood, se ainda não existir (por nome).
+// Retorna true se criou. `publicar` define se aparece na loja online.
+async function upsertProduto(
+  sb: any,
+  empresaId: string,
+  item: { nome: string; preco: number; descricao?: string | null; foto?: string | null; categoria?: string | null; publicar?: boolean },
+): Promise<boolean> {
+  const nome = (item.nome ?? "").trim()
+  if (!nome) return false
+  const { data: existe } = await sb.from("produtos").select("id")
+    .eq("empresa_id", empresaId).ilike("nome", nome).maybeSingle()
+  if (existe) return false
+  const cat = (item.categoria ?? "iFood").trim() || "iFood"
+  await ensureCategoria(sb, empresaId, cat)
+  const preco = Number(item.preco) || 0
+  const { error } = await sb.from("produtos").insert({
+    empresa_id: empresaId,
+    nome,
+    categoria: cat,
+    descricao: item.descricao || null,
+    foto_url: item.foto || null,
+    preco_venda: preco,
+    preco_app: preco,
+    ativo: true,
+    disponivel_delivery: item.publicar !== false,
+  })
+  return !error
+}
+
+// Importa o cardápio inteiro do iFood (Opção A — botão "Importar cardápio").
+async function runImportarCatalogo(sb: any, empresaId: string) {
+  if (!empresaId) return { ok: false, error: "empresa_id obrigatório" }
+  const { data: cfg } = await sb.from("ifood_config").select("*").eq("empresa_id", empresaId).maybeSingle()
+  if (!cfg) return { ok: false, error: "iFood não configurado" }
+  if (!cfg.merchant_id) return { ok: false, error: "Informe o Merchant ID primeiro" }
+
+  const token = await getToken(sb, cfg as Config)
+  const mid = cfg.merchant_id
+  const auth = { "Authorization": `Bearer ${token}` }
+
+  // 1. Lista de catálogos da loja
+  const catRes = await fetch(`${IFOOD}/catalog/v2.0/merchants/${mid}/catalogs`, { headers: auth })
+  if (!catRes.ok) {
+    return { ok: false, error: `iFood ${catRes.status} ao ler catálogo. O módulo "Catálogo" pode não estar liberado no app crm-fwc.` }
+  }
+  let catalogs: any = await catRes.json()
+  if (!Array.isArray(catalogs)) catalogs = catalogs ? [catalogs] : []
+
+  let total = 0
+  let criados = 0
+  for (const cat of catalogs) {
+    const catalogId = cat.catalogId ?? cat.id
+    if (!catalogId) continue
+    const cRes = await fetch(`${IFOOD}/catalog/v2.0/merchants/${mid}/catalogs/${catalogId}/categories?includeItems=true`, { headers: auth })
+    if (!cRes.ok) continue
+    const categorias: any[] = await cRes.json()
+    for (const c of (Array.isArray(categorias) ? categorias : [])) {
+      const nomeCat = c.name ?? "iFood"
+      for (const it of (c.items ?? [])) {
+        total++
+        const preco = it.price?.value ?? it.price ?? 0
+        const foto = it.imagePath ? `https://static-images.ifood.com.br/image/upload/${it.imagePath}` : null
+        const ok = await upsertProduto(sb, empresaId, {
+          nome: it.name, preco, descricao: it.description, foto,
+          categoria: nomeCat, publicar: true,
+        })
+        if (ok) criados++
+      }
+    }
+  }
+  return { ok: true, total, criados }
 }
 
 async function atualizarStatusLocal(sb: any, orderId: string, code: string) {

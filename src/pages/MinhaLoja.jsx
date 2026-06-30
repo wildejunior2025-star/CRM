@@ -41,6 +41,7 @@ export default function MinhaLoja() {
   const [ifoodStatus, setIfoodStatus] = useState(null) // { ultimo_polling_em, ultimo_erro }
   const [ifoodSalvando, setIfoodSalvando] = useState(false)
   const [ifoodTestando, setIfoodTestando] = useState(false)
+  const [ifoodImportando, setIfoodImportando] = useState(false)
   const [ifoodMsg, setIfoodMsg] = useState(null) // { tipo: 'ok'|'erro', texto }
   const [ifoodAjuda, setIfoodAjuda] = useState(false) // popup "onde encontro o Merchant ID"
 
@@ -93,6 +94,38 @@ export default function MinhaLoja() {
       setIfoodMsg({ tipo: 'erro', texto: String(err.message ?? err) })
     }
     setIfoodTestando(false)
+  }
+
+  async function handleImportarCardapio() {
+    if (!empresa) return
+    setIfoodImportando(true)
+    setIfoodMsg(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const url = `${import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'}/functions/v1/ifood-integration`
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token ?? ''}`,
+        },
+        body: JSON.stringify({ acao: 'catalogo', empresa_id: empresa.id }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setIfoodMsg({
+          tipo: 'ok',
+          texto: data.criados > 0
+            ? `Cardápio importado! ${data.criados} produto(s) novo(s) adicionado(s) (de ${data.total} encontrados). Veja em Produtos.`
+            : `Nenhum produto novo pra importar (${data.total} já estavam no sistema).`,
+        })
+      } else {
+        setIfoodMsg({ tipo: 'erro', texto: data.error ?? 'Falha ao importar o cardápio' })
+      }
+    } catch (err) {
+      setIfoodMsg({ tipo: 'erro', texto: String(err.message ?? err) })
+    }
+    setIfoodImportando(false)
   }
 
   async function handleAlterarSenha(e) {
@@ -617,7 +650,24 @@ export default function MinhaLoja() {
             >
               {ifoodTestando ? 'Testando...' : 'Testar conexão'}
             </button>
+            <button
+              type="button"
+              onClick={handleImportarCardapio}
+              disabled={ifoodImportando || !ifoodCfg.merchant_id}
+              title={!ifoodCfg.merchant_id ? 'Informe o Merchant ID primeiro' : ''}
+              style={{
+                padding: '8px 18px', borderRadius: 8, cursor: ifoodCfg.merchant_id ? 'pointer' : 'not-allowed',
+                border: 'none', background: '#ea1d2c', color: '#fff',
+                fontWeight: 700, fontSize: 14, opacity: ifoodCfg.merchant_id ? 1 : 0.5,
+              }}
+            >
+              {ifoodImportando ? 'Importando...' : '📥 Importar cardápio do iFood'}
+            </button>
           </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 0 }}>
+            “Importar cardápio” copia os produtos da sua loja do iFood pra cá. Os pedidos que chegarem também
+            vão criando os produtos automaticamente em <strong>Produtos</strong>.
+          </p>
         </div>
       </form>
 
