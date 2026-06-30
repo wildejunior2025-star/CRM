@@ -117,38 +117,6 @@ import PresencialCozinha from './pages/PresencialCozinha'
 import PresencialHistorico from './pages/PresencialHistorico'
 import PresencialReservas from './pages/PresencialReservas'
 import MesaCardapio from './pages/MesaCardapio'
-import LandingFWC from './pages/LandingFWC'
-
-// Hosts onde a raiz "/" mostra a landing pública (não os subdomínios do app).
-function isMarketingHost() {
-  if (typeof window === 'undefined') return false
-  const h = window.location.hostname
-  return h === 'fwcinter.com' || h === 'www.fwcinter.com'
-    || h.endsWith('.workers.dev') || h === 'localhost' || h === '127.0.0.1'
-}
-
-// Decide o que mostrar na raiz "/" do domínio principal:
-// visitante sem login → landing de vendas; logado → CRM (Layout + Dashboard).
-function CrmHomeGate() {
-  const { session, loading } = useAuth()
-  const { pathname } = useLocation()
-  if (loading) {
-    return (
-      <div className="auth-loading">
-        <span className="auth-loading-spinner" aria-hidden="true" />
-        <span>Carregando...</span>
-      </div>
-    )
-  }
-  if (!session && pathname === '/' && isMarketingHost()) {
-    return <LandingFWC />
-  }
-  return (
-    <ProtectedRoute roles={['admin', 'garcom', 'cozinheiro']}>
-      <Layout />
-    </ProtectedRoute>
-  )
-}
 
 export default function App() {
   // lojaonline.fwcinter.com — vitrine pública da loja (sem login).
@@ -226,7 +194,13 @@ export default function App() {
             <Route path="/super-admin/financeiro" element={<SuperAdminFinanceiro />} />
           </Route>
 
-          <Route element={<CrmHomeGate />}>
+          <Route
+            element={
+              <ProtectedRoute roles={['admin', 'garcom', 'cozinheiro']}>
+                <Layout />
+              </ProtectedRoute>
+            }
+          >
             <Route index element={<ProtectedRoute roles={['admin', 'vendedor']}><Dashboard /></ProtectedRoute>} />
             <Route path="clientes" element={<ProtectedRoute modulo="clientes"><Clientes /></ProtectedRoute>} />
             <Route path="vendas" element={<ProtectedRoute modulo="vendas"><Vendas /></ProtectedRoute>} />

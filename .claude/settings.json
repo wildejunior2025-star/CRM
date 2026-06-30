@@ -57,13 +57,26 @@
       "Bash(npx supabase *)",
       "Bash(curl -s -X POST https://ycytrsqdvrviihkqfvno.supabase.co/functions/v1/admin-whatsapp-connect -H 'Content-Type: application/json' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InljeXRyc3FkdnJ2aWloa3Fmdm5vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExMjc1NDcsImV4cCI6MjA5NjcwMzU0N30.zAq-8gaw2U9wvwBJCX_rK2jP-tnjOL5VPS23fFxf2Zc' -d '{\"action\":\"fix_webhook\",\"instanceName\":\"crma95b716bd97342abace9dae0fd1acd62\"}')",
       "Bash(powershell -Command \"Get-Content src/pages/PortalIndicacoes.jsx -Encoding Byte | Select-Object -First 3\")",
-      "PowerShell(npm run deploy)"
+      "PowerShell(npm run deploy)",
+      "Bash(grep -rl \"Falar com a equipe\\\\|do pedido ao pagamento\\\\|Gerencie sua distribuidora\" \"/c/Users/wilde junior/OneDrive/Desktop\" \"/c/Users/wilde junior/Documents\" 2>/dev/null | grep -v node_modules | head -20)",
+      "Read(//c/Users/wilde junior/OneDrive/Desktop/**)",
+      "Bash(grep -rl \"Falar com a equipe\\\\|Gerencie sua distribuidora\" \"/c/Users/wilde junior\" 2>/dev/null | grep -v -i \"node_modules\\\\|\\\\.cache\\\\|AppData\" | head -20; echo \"=== FIM ===\")",
+      "Read(//c/Users/wilde junior/**)",
+      "Bash(ls -d \"/c/Users/wilde junior/OneDrive/Desktop\"/*/ 2>/dev/null | head -50)",
+      "Bash(grep -rl \"Falar com a equipe\\\\|Gerencie sua\\\\|do pedido ao pagamento\\\\|distribuidoras de bebidas\" \"/c/Users/wilde junior/OneDrive/Desktop/FWC geral\" \"/c/Users/wilde junior/OneDrive/Desktop/contrução\" \"/c/Users/wilde junior/OneDrive/Desktop/CLAUDE\" 2>/dev/null | grep -v node_modules | head -20; echo \"=== FIM ===\")",
+      "Read(//c/Users/wilde junior/OneDrive/Desktop/FWC geral/**)",
+      "Bash(cd \"/c/Users/wilde junior/OneDrive/Desktop/FWC geral/vendamais-site\" && ls -la && echo \"=== LINKS/HREFS no index.html ===\" && grep -n \"href\\\\|Começar\\\\|teste grátis\\\\|equipe\\\\|workers.dev\\\\|cadastro\\\\|entrar\" index.html | head -40)",
+      "Read(//c/Users/wilde junior/OneDrive/Desktop/FWC geral/vendamais-site/**)",
+      "Bash(npx wrangler *)",
+      "Bash(curl -s \"https://fwcinter.com/\")",
+      "mcp__supabase__execute_sql"
     ],
     "additionalDirectories": [
       "C:\\Users\\wilde junior\\.cache\\chrome-devtools-mcp\\chrome-profile",
       "C:\\Users\\wilde junior\\OneDrive\\Desktop\\CRM\\src",
       "C:\\Users\\wilde junior\\OneDrive\\Desktop\\logo venda mais",
-      "C:\\Users\\wilde junior\\OneDrive\\Desktop"
+      "C:\\Users\\wilde junior\\OneDrive\\Desktop",
+      "C:\\Users\\wilde junior\\OneDrive\\Desktop\\FWC geral\\vendamais-site"
     ]
   }
 }
