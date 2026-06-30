@@ -1,6 +1,9 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "crm",
+  // Desliga a URL de preview *.workers.dev — o sistema é acessado só pelos
+  // domínios próprios (fwcinter.com e subdomínios).
+  "workers_dev": false,
   "compatibility_date": "2026-06-11",
   "observability": {
     "enabled": true
