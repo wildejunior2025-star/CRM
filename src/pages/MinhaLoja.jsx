@@ -36,7 +36,7 @@ export default function MinhaLoja() {
 
   // Integração iFood
   const [ifoodCfg, setIfoodCfg] = useState({
-    client_id: '', client_secret: '', merchant_id: '', ambiente: 'teste', ativo: false,
+    client_id: '', client_secret: '', merchant_id: '', ambiente: 'producao', ativo: false,
   })
   const [ifoodStatus, setIfoodStatus] = useState(null) // { ultimo_polling_em, ultimo_erro }
   const [ifoodSalvando, setIfoodSalvando] = useState(false)
@@ -52,8 +52,6 @@ export default function MinhaLoja() {
       .from('ifood_config')
       .upsert({
         empresa_id: empresa.id,
-        client_id: ifoodCfg.client_id.trim() || null,
-        client_secret: ifoodCfg.client_secret.trim() || null,
         merchant_id: ifoodCfg.merchant_id.trim() || null,
         ambiente: ifoodCfg.ambiente,
         ativo: ifoodCfg.ativo,
@@ -71,8 +69,6 @@ export default function MinhaLoja() {
     // Salva antes de testar pra garantir que a edge function lê o que está na tela
     await supabase.from('ifood_config').upsert({
       empresa_id: empresa.id,
-      client_id: ifoodCfg.client_id.trim() || null,
-      client_secret: ifoodCfg.client_secret.trim() || null,
       merchant_id: ifoodCfg.merchant_id.trim() || null,
       ambiente: ifoodCfg.ambiente,
       ativo: ifoodCfg.ativo,
@@ -523,9 +519,9 @@ export default function MinhaLoja() {
             <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Integração com o iFood</h2>
           </div>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
-            Os pedidos que caírem no iFood aparecem aqui no painel automaticamente. Pegue as
-            credenciais em <strong>developer.ifood.com.br</strong> (Portal do Desenvolvedor) e cole abaixo.
-            Comece pelo ambiente de <strong>teste</strong> — o portal já cria uma loja de teste.
+            Os pedidos que caírem no iFood aparecem aqui no painel automaticamente. A integração
+            já está configurada pela FWC — você só precisa informar o <strong>ID da sua loja no
+            iFood (Merchant ID)</strong> e ativar.
           </p>
 
           {ifoodMsg && (
@@ -557,43 +553,27 @@ export default function MinhaLoja() {
           </label>
 
           <div className="form-grid">
+            <div className="form-field full">
+              <label>ID da sua loja no iFood (Merchant ID)</label>
+              <input
+                type="text"
+                value={ifoodCfg.merchant_id}
+                onChange={e => setIfoodCfg(c => ({ ...c, merchant_id: e.target.value }))}
+                placeholder="ex: 1b2c3d4e-5678-..."
+              />
+              <small style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                É o código da sua loja no iFood. Não tem em mãos? Fale com a FWC que a gente pega pra você.
+              </small>
+            </div>
             <div className="form-field">
               <label>Ambiente</label>
               <select
                 value={ifoodCfg.ambiente}
                 onChange={e => setIfoodCfg(c => ({ ...c, ambiente: e.target.value }))}
               >
-                <option value="teste">Teste (loja de teste do portal)</option>
-                <option value="producao">Produção (loja real — após homologação)</option>
+                <option value="producao">Produção (loja real)</option>
+                <option value="teste">Teste</option>
               </select>
-            </div>
-            <div className="form-field">
-              <label>Merchant ID (UUID da loja no iFood)</label>
-              <input
-                type="text"
-                value={ifoodCfg.merchant_id}
-                onChange={e => setIfoodCfg(c => ({ ...c, merchant_id: e.target.value }))}
-                placeholder="ex: 1b2c3d4e-..."
-              />
-            </div>
-            <div className="form-field full">
-              <label>Client ID</label>
-              <input
-                type="text"
-                value={ifoodCfg.client_id}
-                onChange={e => setIfoodCfg(c => ({ ...c, client_id: e.target.value }))}
-                placeholder="Client ID do app no Portal do Desenvolvedor"
-              />
-            </div>
-            <div className="form-field full">
-              <label>Client Secret</label>
-              <input
-                type="password"
-                value={ifoodCfg.client_secret}
-                onChange={e => setIfoodCfg(c => ({ ...c, client_secret: e.target.value }))}
-                placeholder="Client Secret do app"
-                autoComplete="off"
-              />
             </div>
           </div>
 

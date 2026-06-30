@@ -62,6 +62,20 @@ serve(async (req) => {
 // ─────────────────────────────────────────────────────────────────────
 // OAuth — token com cache no próprio ifood_config
 // ─────────────────────────────────────────────────────────────────────
+// Resolve as credenciais: usa as da própria empresa se existirem; senão cai
+// nas credenciais padrão da plataforma (tabela ifood_app) — modelo Centralizado
+// onde o mesmo app crm-fwc atende todos os clientes.
+async function resolverCreds(sb: any, cfg: Config): Promise<{ clientId: string | null; clientSecret: string | null }> {
+  let clientId = cfg.client_id
+  let clientSecret = cfg.client_secret
+  if (!clientId || !clientSecret) {
+    const { data: app } = await sb.from("ifood_app").select("client_id, client_secret").eq("id", 1).maybeSingle()
+    clientId = clientId || app?.client_id || null
+    clientSecret = clientSecret || app?.client_secret || null
+  }
+  return { clientId, clientSecret }
+}
+
 async function getToken(sb: any, cfg: Config): Promise<string> {
   // Reaproveita o token em cache se ainda faltar > 60s pra expirar
   if (cfg.access_token && cfg.token_expira_em) {
@@ -69,10 +83,13 @@ async function getToken(sb: any, cfg: Config): Promise<string> {
     if (restante > 60_000) return cfg.access_token
   }
 
+  const { clientId, clientSecret } = await resolverCreds(sb, cfg)
+  if (!clientId || !clientSecret) throw new Error("sem credenciais iFood (nem da empresa nem padrão)")
+
   const form = new URLSearchParams()
   form.set("grantType", "client_credentials")
-  form.set("clientId", cfg.client_id ?? "")
-  form.set("clientSecret", cfg.client_secret ?? "")
+  form.set("clientId", clientId)
+  form.set("clientSecret", clientSecret)
 
   const res = await fetch(`${IFOOD}/authentication/v1.0/oauth/token`, {
     method: "POST",
@@ -110,7 +127,9 @@ async function runPoll(sb: any) {
   const erros: string[] = []
 
   for (const cfg of (configs ?? []) as Config[]) {
-    if (!cfg.client_id || !cfg.client_secret) continue
+    // Precisa do merchant_id pra rotear os pedidos pra empresa certa.
+    // As credenciais podem vir do padrão da plataforma (resolverCreds).
+    if (!cfg.merchant_id) continue
     try {
       const token = await getToken(sb, cfg)
 
@@ -372,7 +391,8 @@ async function runTest(sb: any, empresaId: string) {
     .eq("empresa_id", empresaId)
     .maybeSingle()
   if (!cfg) return { ok: false, error: "iFood não configurado" }
-  if (!cfg.client_id || !cfg.client_secret) return { ok: false, error: "Preencha client_id e client_secret" }
+  const creds = await resolverCreds(sb, cfg as Config)
+  if (!creds.clientId || !creds.clientSecret) return { ok: false, error: "Credenciais do iFood não configuradas na plataforma" }
 
   // Força reautenticação ignorando o cache
   await sb.from("ifood_config").update({ access_token: null, token_expira_em: null }).eq("empresa_id", empresaId)

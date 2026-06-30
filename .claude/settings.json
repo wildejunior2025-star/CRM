@@ -69,7 +69,8 @@
       "Read(//c/Users/wilde junior/OneDrive/Desktop/FWC geral/vendamais-site/**)",
       "Bash(npx wrangler *)",
       "Bash(curl -s \"https://fwcinter.com/\")",
-      "mcp__supabase__execute_sql"
+      "mcp__supabase__execute_sql",
+      "mcp__supabase__apply_migration"
     ],
     "additionalDirectories": [
       "C:\\Users\\wilde junior\\.cache\\chrome-devtools-mcp\\chrome-profile",
