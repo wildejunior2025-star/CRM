@@ -7,6 +7,12 @@ const WHATSAPP = '5584999281009'
 const WHATSAPP_MSG = encodeURIComponent('Olá! Quero conhecer o sistema FWC Inter para a minha loja.')
 const waLink = `https://wa.me/${WHATSAPP}?text=${WHATSAPP_MSG}`
 
+// Página de cadastro (escolhe cliente ou empresa) com o código de indicação.
+const CADASTRO_URL = 'https://admin.fwcinter.com/entrar?ref=89612b50'
+
+// Preço do plano completo (edite aqui quando criar mais planos).
+const PRECO = '149,90'
+
 // Recursos exibidos na grade — ícone (emoji), título e descrição.
 const RECURSOS = [
   { icone: '🛵', titulo: 'Delivery próprio', desc: 'Receba pedidos online com sua taxa, raio de entrega e tempo de preparo — sem comissão de marketplace.' },
@@ -38,7 +44,7 @@ export default function LandingFWC() {
               WhatsApp
             </a>
             <Link to="/login" className="lp-btn lp-btn-ghost">Entrar</Link>
-            <Link to="/cadastro" className="lp-btn lp-btn-solid">Começar grátis</Link>
+            <a href={CADASTRO_URL} className="lp-btn lp-btn-solid">Começar grátis</a>
           </div>
         </div>
       </header>
@@ -55,7 +61,7 @@ export default function LandingFWC() {
             financeiro. Pare de pular de sistema em sistema — o FWC Inter junta tudo num lugar.
           </p>
           <div className="lp-hero-cta">
-            <Link to="/cadastro" className="lp-btn lp-btn-solid lp-btn-lg">Começar grátis</Link>
+            <a href={CADASTRO_URL} className="lp-btn lp-btn-solid lp-btn-lg">Começar grátis</a>
             <a href={waLink} target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-wa lp-btn-lg">
               <span aria-hidden="true">💬</span> Falar no WhatsApp
             </a>
@@ -93,6 +99,36 @@ export default function LandingFWC() {
         </div>
       </section>
 
+      {/* Preço */}
+      <section className="lp-preco" id="preco">
+        <div className="lp-sec-head">
+          <h2>Um plano, tudo incluído</h2>
+          <p>Sem comissão por pedido. Você usa todos os recursos por um valor fixo por mês.</p>
+        </div>
+        <div className="lp-preco-card">
+          <span className="lp-preco-tag">Plano completo</span>
+          <div className="lp-preco-valor">
+            <span className="lp-preco-cifra">R$</span>
+            <span className="lp-preco-num">{PRECO}</span>
+            <span className="lp-preco-mes">/mês</span>
+          </div>
+          <ul className="lp-preco-lista">
+            <li>Delivery, loja online e app do cliente</li>
+            <li>Integração com o iFood</li>
+            <li>Gestor de pedidos e painel do entregador</li>
+            <li>Salão, WhatsApp, fiado e financeiro</li>
+            <li>Relatórios, suporte e atualizações</li>
+          </ul>
+          <div className="lp-hero-cta" style={{ justifyContent: 'center' }}>
+            <a href={CADASTRO_URL} className="lp-btn lp-btn-solid lp-btn-lg">Começar grátis</a>
+            <a href={waLink} target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-wa lp-btn-lg">
+              <span aria-hidden="true">💬</span> Falar no WhatsApp
+            </a>
+          </div>
+          <p className="lp-preco-nota">Comece grátis e fale com a gente para ativar o plano.</p>
+        </div>
+      </section>
+
       {/* Como funciona */}
       <section className="lp-passos">
         <div className="lp-sec-head">
@@ -123,7 +159,7 @@ export default function LandingFWC() {
           <h2>Pronto pra organizar sua loja?</h2>
           <p>Comece grátis agora ou fale com a gente pra tirar suas dúvidas.</p>
           <div className="lp-hero-cta">
-            <Link to="/cadastro" className="lp-btn lp-btn-solid lp-btn-lg">Começar grátis</Link>
+            <a href={CADASTRO_URL} className="lp-btn lp-btn-solid lp-btn-lg">Começar grátis</a>
             <a href={waLink} target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-wa lp-btn-lg">
               <span aria-hidden="true">💬</span> Falar no WhatsApp
             </a>
@@ -140,7 +176,7 @@ export default function LandingFWC() {
           </div>
           <nav className="lp-footer-links">
             <Link to="/login">Entrar</Link>
-            <Link to="/cadastro">Cadastrar loja</Link>
+            <a href={CADASTRO_URL}>Criar conta</a>
             <a href={waLink} target="_blank" rel="noopener noreferrer">WhatsApp</a>
             <Link to="/termos">Termos</Link>
             <Link to="/privacidade">Privacidade</Link>
