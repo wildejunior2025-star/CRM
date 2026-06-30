@@ -42,6 +42,7 @@ export default function MinhaLoja() {
   const [ifoodSalvando, setIfoodSalvando] = useState(false)
   const [ifoodTestando, setIfoodTestando] = useState(false)
   const [ifoodMsg, setIfoodMsg] = useState(null) // { tipo: 'ok'|'erro', texto }
+  const [ifoodAjuda, setIfoodAjuda] = useState(false) // popup "onde encontro o Merchant ID"
 
   async function handleSalvarIfood(e) {
     e.preventDefault()
@@ -554,7 +555,21 @@ export default function MinhaLoja() {
 
           <div className="form-grid">
             <div className="form-field full">
-              <label>ID da sua loja no iFood (Merchant ID)</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                ID da sua loja no iFood (Merchant ID)
+                <button
+                  type="button"
+                  onClick={() => setIfoodAjuda(true)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    background: 'var(--primary-bg, #f5f0ff)', color: 'var(--primary)',
+                    border: '1px solid var(--primary)', borderRadius: 999,
+                    padding: '2px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  }}
+                >
+                  ❓ Onde encontro?
+                </button>
+              </label>
               <input
                 type="text"
                 value={ifoodCfg.merchant_id}
@@ -605,6 +620,73 @@ export default function MinhaLoja() {
           </div>
         </div>
       </form>
+
+      {/* Popup: onde encontrar o Merchant ID */}
+      {ifoodAjuda && (
+        <div
+          onClick={() => setIfoodAjuda(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,.5)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', padding: 16,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: 'var(--surface, #fff)', borderRadius: 14, maxWidth: 460, width: '100%',
+              maxHeight: '90vh', overflowY: 'auto', padding: '22px 22px 20px',
+              boxShadow: '0 20px 60px rgba(0,0,0,.3)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ background: '#ea1d2c', color: '#fff', borderRadius: 6, padding: '2px 7px', fontSize: 11, fontWeight: 800 }}>iFood</span>
+                Onde achar o Merchant ID
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIfoodAjuda(false)}
+                style={{ background: 'none', border: 'none', fontSize: 22, lineHeight: 1, cursor: 'pointer', color: 'var(--text-muted)' }}
+                aria-label="Fechar"
+              >×</button>
+            </div>
+
+            <p style={{ fontSize: 13.5, color: 'var(--text-muted)', marginTop: 0, marginBottom: 14 }}>
+              O Merchant ID é o código da sua loja no iFood. Veja como pegar:
+            </p>
+
+            <ol style={{ margin: 0, paddingLeft: 20, fontSize: 14, lineHeight: 1.6, color: 'var(--text)' }}>
+              <li>Entre no <strong>Portal do Parceiro do iFood</strong> em <strong>portal.ifood.com.br</strong> com o login da sua loja.</li>
+              <li>No menu, abra <strong>“Configurações”</strong> (ou “Dados da loja” / “Minha loja”).</li>
+              <li>Procure por <strong>“ID da loja”</strong>, <strong>“Merchant ID”</strong> ou “código da loja”.</li>
+              <li><strong>Copie</strong> esse código e <strong>cole aqui</strong> no campo Merchant ID.</li>
+            </ol>
+
+            <div style={{
+              marginTop: 16, padding: '12px 14px', borderRadius: 10,
+              background: 'var(--primary-bg, #f5f0ff)', border: '1px solid var(--primary)',
+              fontSize: 13, color: 'var(--text)',
+            }}>
+              💬 <strong>Não achou ou tem dúvida?</strong> Fale com a FWC no WhatsApp{' '}
+              <a
+                href="https://wa.me/5584999281009?text=Ol%C3%A1%21%20Preciso%20de%20ajuda%20para%20pegar%20o%20Merchant%20ID%20da%20minha%20loja%20no%20iFood."
+                target="_blank" rel="noopener noreferrer"
+                style={{ color: 'var(--primary)', fontWeight: 700 }}
+              >(84) 99928-1009</a> que a gente pega esse código pra você.
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIfoodAjuda(false)}
+              className="btn btn-primary"
+              style={{ width: '100%', marginTop: 16 }}
+            >
+              Entendi
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Card de alteração de e-mail de login */}
       <form onSubmit={handleAlterarEmail} style={{ marginTop: 16 }}>
