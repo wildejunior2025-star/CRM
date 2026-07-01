@@ -53,13 +53,15 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar }) {
       borderRadius: 14, padding: 16, borderTop: `4px solid ${cor}`,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 800, fontSize: 18, color: 'var(--text)' }}>
-            #{pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()}
-          </span>
-          {pedido.origem === 'ifood' && (
-            <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 20, background: '#ea1d2c', color: '#fff' }}>
-              iFood{pedido.ifood_display_id ? ` #${pedido.ifood_display_id}` : ''}
+        <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 7, flexWrap: 'wrap' }}>
+          {pedido.origem === 'ifood' && pedido.ifood_display_id ? (
+            <>
+              <span style={{ fontWeight: 800, fontSize: 18, color: '#ea1d2c' }}>iFood #{pedido.ifood_display_id}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>#{pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()}</span>
+            </>
+          ) : (
+            <span style={{ fontWeight: 800, fontSize: 18, color: 'var(--text)' }}>
+              #{pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()}
             </span>
           )}
         </span>

@@ -6,6 +6,8 @@
 //  2) Fallback do navegador (window.print num iframe oculto): usado quando
 //     nenhuma impressora foi escolhida ou o QZ Tray não está rodando.
 
+import { separarItem } from '../lib/itensPedido'
+
 const QZ_CDN = 'https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js'
 
 function fmt(v) {
@@ -79,14 +81,14 @@ export function montarCupomHtml(pedido, empresa = {}) {
     const sub = item.subtotal != null
       ? Number(item.subtotal)
       : qtd * Number(item.preco ?? item.preco_unitario ?? 0)
-    const comps = Array.isArray(item.complementos) ? item.complementos : []
+    const { nome: nomeItem, complementos: comps } = separarItem(item)
     const compsHtml = comps.map(c => {
       const cq = Number(c?.qtd ?? 1)
       const cn = esc(c?.nome ?? c)
       return `<div class="comp">▸ ${cq > 1 ? cq + 'x ' : ''}${cn}</div>`
     }).join('')
     const obsHtml = item.observacao ? `<div class="comp">obs: ${esc(item.observacao)}</div>` : ''
-    return `<li><div class="row"><span>${esc(qtd)}x ${esc(item.nome)}</span><span>${fmt(sub)}</span></div>${compsHtml}${obsHtml}</li>`
+    return `<li><div class="row"><span>${esc(qtd)}x ${esc(nomeItem)}</span><span>${fmt(sub)}</span></div>${compsHtml}${obsHtml}</li>`
   }).join('')
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>Pedido ${esc(numero)}</title>

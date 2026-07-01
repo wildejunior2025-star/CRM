@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { imprimirHtml, montarComandaCozinhaHtml } from '../utils/imprimirCupom'
+import { separarItem } from '../lib/itensPedido'
 import '../components/Page.css'
 
 function tempoDesde(iso) {
@@ -22,12 +23,14 @@ function CardEntregaKDS({ pedido, onPronto, tempoDesde }) {
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
       <div style={{ background: headerCor, color: '#fff', padding: '10px 14px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span>#{numero}</span>
-          {ehIfood && (
-            <span style={{ background: 'rgba(255,255,255,.25)', borderRadius: 20, padding: '1px 8px', fontSize: 11 }}>
-              iFood{pedido.ifood_display_id ? ` #${pedido.ifood_display_id}` : ''}
-            </span>
+        <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 7, flexWrap: 'wrap' }}>
+          {ehIfood ? (
+            <>
+              <span>iFood #{pedido.ifood_display_id ?? numero}</span>
+              <span style={{ fontSize: 11, fontWeight: 600, opacity: .8 }}>#{numero}</span>
+            </>
+          ) : (
+            <span>#{numero}</span>
           )}
         </span>
         <span style={{ fontSize: 11, fontWeight: 700, background: 'rgba(255,255,255,.2)', borderRadius: 20, padding: '2px 8px' }}>
@@ -36,11 +39,11 @@ function CardEntregaKDS({ pedido, onPronto, tempoDesde }) {
       </div>
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {itens.map((item, i) => {
-          const comps = Array.isArray(item.complementos) ? item.complementos : []
+          const { nome, complementos: comps } = separarItem(item)
           return (
             <div key={i}>
               <div style={{ fontWeight: 700, fontSize: 14 }}>
-                {item.quantidade ?? item.qtd ?? 1}× {item.nome}
+                {item.quantidade ?? item.qtd ?? 1}× {nome}
               </div>
               {comps.map((c, j) => (
                 <div key={j} style={{ fontSize: 12.5, color: 'var(--text-muted)', paddingLeft: 14 }}>

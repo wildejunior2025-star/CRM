@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras } from '../utils/imprimirCupom'
 import { CONDICOES_PAGAMENTO } from '../lib/constants'
+import { separarItem } from '../lib/itensPedido'
 import './PainelPedidos.css'
 
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
@@ -1058,7 +1059,16 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
       {/* Header */}
       <div className="pp-card-header">
         <div className="pp-card-header-left">
-          <span className="pp-numero">#{pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()}</span>
+          {/* Nos pedidos do iFood, o número do iFood é o principal (grande);
+              o nosso número interno fica pequeno ao lado. */}
+          {pedido.origem === 'ifood' && pedido.ifood_display_id ? (
+            <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
+              <span className="pp-numero" style={{ color: '#ea1d2c' }}>iFood #{pedido.ifood_display_id}</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>#{pedido.numero_pedido ?? ''}</span>
+            </span>
+          ) : (
+            <span className="pp-numero">#{pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()}</span>
+          )}
           {/* Badge de origem */}
           <span style={{
             background: origemCfg.bg,
@@ -1072,12 +1082,6 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           }}>
             {origemCfg.label}
           </span>
-          {/* Nº do pedido no iFood (além do nosso) */}
-          {pedido.origem === 'ifood' && pedido.ifood_display_id && (
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#ea1d2c', flexShrink: 0 }}>
-              iFood #{pedido.ifood_display_id}
-            </span>
-          )}
           {/* Badge de status para pedidos não-aguardando */}
           {pedido.status !== 'aguardando' && (
             <span
@@ -1176,11 +1180,11 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
             const sub = item.subtotal != null
               ? Number(item.subtotal)
               : qtd * Number(item.preco ?? item.preco_unitario ?? 0)
-            const complementos = Array.isArray(item.complementos) ? item.complementos : []
+            const { nome: nomeItem, complementos } = separarItem(item)
             return (
               <li key={i} style={{ display: 'block' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
-                  <span><strong style={{ marginRight: 5 }}>{qtd}x</strong>{item.nome}</span>
+                  <span><strong style={{ marginRight: 5 }}>{qtd}x</strong>{nomeItem}</span>
                   <span style={{ whiteSpace: 'nowrap' }}>{fmt(sub)}</span>
                 </div>
                 {complementos.length > 0 && (
@@ -1639,7 +1643,12 @@ function CardMini({ pedido, onClick, onExpirado, entregadores = [] }) {
   return (
     <button type="button" onClick={onClick} className="pp-mini" style={{ borderLeft: `3px solid ${oc.borda}` }}>
       <div className="pp-mini-top">
-        <span className="pp-mini-num">#{pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()} · {fmt(pedido.total)}</span>
+        <span className="pp-mini-num">
+          {pedido.origem === 'ifood' && pedido.ifood_display_id
+            ? <>iFood #{pedido.ifood_display_id} <span style={{ fontWeight: 600, opacity: .6, fontSize: '.85em' }}>#{pedido.numero_pedido ?? ''}</span></>
+            : `#${pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()}`
+          } · {fmt(pedido.total)}
+        </span>
         {pedido.status === 'aguardando' && onExpirado && (
           <MiniTimer createdAt={pedido.created_at} aguardandoDesde={pedido.aguardando_desde} onExpirado={() => onExpirado(pedido.id)} />
         )}
@@ -1647,9 +1656,6 @@ function CardMini({ pedido, onClick, onExpirado, entregadores = [] }) {
       <div className="pp-mini-sub">{hora} · {pedido.cliente_nome || '—'}</div>
       <div className="pp-mini-tags">
         <span className="pp-mini-badge" style={{ background: oc.bg, color: oc.color }}>{oc.label}</span>
-        {pedido.origem === 'ifood' && pedido.ifood_display_id && (
-          <span className="pp-mini-itens" style={{ color: '#ea1d2c', fontWeight: 700 }}>iFood #{pedido.ifood_display_id}</span>
-        )}
         <span className="pp-mini-itens">{qtdItens} {qtdItens === 1 ? 'item' : 'itens'}</span>
         {isRetirada && <span className="pp-mini-itens">{pedido.origem === 'balcao' ? 'Balcão' : 'Retirada'}</span>}
         {entregadorNome && <span className="pp-mini-itens">🛵 {entregadorNome}</span>}
