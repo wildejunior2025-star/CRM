@@ -84,6 +84,7 @@ export default function Produtos() {
   }
 
   const [showCategModal, setShowCategModal] = useState(false)
+  const [dragIdx, setDragIdx] = useState(null)
   const [novaCategoria, setNovaCategoria] = useState('')
   const [savingCateg, setSavingCateg] = useState(false)
   const [categError, setCategError] = useState(null)
@@ -103,20 +104,32 @@ export default function Produtos() {
     setCategorias(data ?? [])
   }
 
-  // Move uma categoria pra cima/baixo trocando a ordem com a vizinha
-  async function moverCategoria(index, dir) {
+  // Persiste a ordem 1..n de uma nova lista de categorias (otimista)
+  async function persistOrdem(novaLista) {
+    setCategorias(novaLista.map((c, i) => ({ ...c, ordem: i + 1 })))
+    await Promise.all(novaLista.map((c, i) =>
+      supabase.from('categorias').update({ ordem: i + 1 }).eq('id', c.id)))
+    loadCategorias()
+  }
+
+  // Setas (reserva / celular)
+  function moverCategoria(index, dir) {
     const outro = index + dir
     if (outro < 0 || outro >= categorias.length) return
-    const a = categorias[index]
-    const b = categorias[outro]
-    // troca os valores de ordem (usa índice como fallback se vierem iguais)
-    const ordemA = a.ordem ?? index
-    const ordemB = b.ordem ?? outro
-    await Promise.all([
-      supabase.from('categorias').update({ ordem: ordemB }).eq('id', a.id),
-      supabase.from('categorias').update({ ordem: ordemA }).eq('id', b.id),
-    ])
-    loadCategorias()
+    const arr = [...categorias]
+    ;[arr[index], arr[outro]] = [arr[outro], arr[index]]
+    persistOrdem(arr)
+  }
+
+  // Arrastar e soltar
+  function onSoltarCategoria(dropIdx) {
+    const from = dragIdx
+    setDragIdx(null)
+    if (from == null || from === dropIdx) return
+    const arr = [...categorias]
+    const [movida] = arr.splice(from, 1)
+    arr.splice(dropIdx, 0, movida)
+    persistOrdem(arr)
   }
 
   async function loadEmbalagens() {
@@ -349,7 +362,7 @@ export default function Produtos() {
         <h1>Produtos</h1>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button className="btn btn-secondary" onClick={() => { setCategError(null); setShowCategModal(true) }}>
-            + Nova categoria
+            ☰ Categorias
           </button>
           <button className="btn btn-secondary" onClick={() => { setEmbError(null); setShowEmbalagensModal(true) }}>
             + Nova embalagem
@@ -885,14 +898,29 @@ export default function Produtos() {
                 <table>
                   <tbody>
                     {categorias.map((c, i) => (
-                      <tr key={c.id}>
-                        <td style={{ width: 84 }}>
+                      <tr
+                        key={c.id}
+                        draggable
+                        onDragStart={() => setDragIdx(i)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => onSoltarCategoria(i)}
+                        onDragEnd={() => setDragIdx(null)}
+                        style={{
+                          cursor: 'grab',
+                          background: dragIdx === i ? 'var(--primary-bg)' : undefined,
+                          borderTop: dragIdx != null && dragIdx !== i ? '2px dashed transparent' : undefined,
+                        }}
+                      >
+                        <td style={{ width: 24, textAlign: 'center', color: 'var(--text-muted)', cursor: 'grab', userSelect: 'none' }} title="Arraste para reordenar">
+                          ⠿
+                        </td>
+                        <td style={{ width: 74 }}>
                           <button
                             className="btn btn-secondary btn-sm"
                             title="Subir"
                             disabled={i === 0}
                             onClick={() => moverCategoria(i, -1)}
-                            style={{ padding: '2px 8px' }}
+                            style={{ padding: '2px 7px' }}
                           >
                             ↑
                           </button>{' '}
@@ -901,7 +929,7 @@ export default function Produtos() {
                             title="Descer"
                             disabled={i === categorias.length - 1}
                             onClick={() => moverCategoria(i, 1)}
-                            style={{ padding: '2px 8px' }}
+                            style={{ padding: '2px 7px' }}
                           >
                             ↓
                           </button>
