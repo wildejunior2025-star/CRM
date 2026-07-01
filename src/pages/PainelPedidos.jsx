@@ -803,6 +803,34 @@ function cartFromPedido(p) {
   return c
 }
 
+// Cache do catálogo (produtos + complementos) por empresa. Sem isto, cada
+// abertura do modal de venda/edição refazia 2 consultas e, num painel movimentado
+// (realtime + polling), a lista demorava a aparecer ("Carregando produtos..."
+// travado). Carregamos uma vez e reaproveitamos; o painel ainda pré-aquece.
+const catalogoCache = {} // { [empresaId]: { produtos, compMap } }
+
+async function carregarCatalogo(empresaId) {
+  const [prodRes, gruposRes] = await Promise.all([
+    supabase.from('produtos').select('id, nome, preco_venda, categoria')
+      .eq('empresa_id', empresaId).order('nome', { ascending: true }),
+    supabase.from('complemento_grupos')
+      .select('id, produto_id, nome, min, max, ordem, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
+      .eq('empresa_id', empresaId).order('ordem'),
+  ])
+  if (prodRes.error) throw prodRes.error
+  const compMap = {}
+  for (const g of (gruposRes.data ?? [])) {
+    const opcoes = (g.complemento_opcoes ?? [])
+      .filter(o => o.disponivel !== false)
+      .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+    if (!opcoes.length) continue
+    ;(compMap[g.produto_id] = compMap[g.produto_id] || []).push({ id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, opcoes })
+  }
+  const catalogo = { produtos: prodRes.data || [], compMap }
+  catalogoCache[empresaId] = catalogo
+  return catalogo
+}
+
 function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const editando = !!pedidoEdicao
   const [produtos, setProdutos] = useState([])
@@ -835,30 +863,22 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   useEffect(() => {
     if (!empresa?.id) { setLoading(false); return }
     let ativo = true
+    // Cache quente → a lista aparece na hora, sem esperar a rede.
+    const cache = catalogoCache[empresa.id]
+    if (cache) {
+      setProdutos(cache.produtos)
+      setCompMap(cache.compMap)
+      setLoading(false)
+    }
+    // Carrega/atualiza em segundo plano (catálogo pode ter mudado).
     ;(async () => {
       try {
-        const [prodRes, gruposRes] = await Promise.all([
-          supabase.from('produtos').select('id, nome, preco_venda, categoria')
-            .eq('empresa_id', empresa.id).order('nome', { ascending: true }),
-          supabase.from('complemento_grupos')
-            .select('id, produto_id, nome, min, max, ordem, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
-            .eq('empresa_id', empresa.id).order('ordem'),
-        ])
+        const catalogo = await carregarCatalogo(empresa.id)
         if (!ativo) return
-        if (prodRes.error) throw prodRes.error
-        setProdutos(prodRes.data || [])
-        // Mapa produto_id -> grupos (só opções disponíveis, ordenadas)
-        const map = {}
-        for (const g of (gruposRes.data ?? [])) {
-          const opcoes = (g.complemento_opcoes ?? [])
-            .filter(o => o.disponivel !== false)
-            .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
-          if (!opcoes.length) continue
-          ;(map[g.produto_id] = map[g.produto_id] || []).push({ id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, opcoes })
-        }
-        setCompMap(map)
+        setProdutos(catalogo.produtos)
+        setCompMap(catalogo.compMap)
       } catch (e) {
-        if (ativo) setErro(`Erro ao carregar produtos: ${String(e?.message ?? e)}`)
+        if (ativo && !cache) setErro(`Erro ao carregar produtos: ${String(e?.message ?? e)}`)
       } finally {
         if (ativo) setLoading(false)
       }
@@ -1056,7 +1076,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
           type="search" value={busca} onChange={e => setBusca(e.target.value)}
           placeholder="Buscar produto..." style={{ ...inputSt, marginBottom: 8 }}
         />
-        <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 6, marginBottom: 14 }}>
+        <div style={{ maxHeight: 240, overflowY: 'auto', flexShrink: 0, border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 6, marginBottom: 14 }}>
           {loading ? (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>Carregando produtos...</div>
           ) : filtrados.length === 0 ? (
@@ -2423,6 +2443,12 @@ export default function PainelPedidos() {
       .eq('ativo', true)
       .order('nome')
       .then(({ data }) => setEntregadores(data || []))
+  }, [empresa])
+
+  // Pré-aquece o catálogo (produtos + complementos) pro modal de venda/edição
+  // abrir instantâneo, sem o "Carregando produtos..." aparecer.
+  useEffect(() => {
+    if (empresa?.id) carregarCatalogo(empresa.id).catch(() => {})
   }, [empresa])
 
   // ── Realtime subscription + polling de segurança + visibilidade ──
