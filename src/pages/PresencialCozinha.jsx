@@ -172,12 +172,19 @@ export default function PresencialCozinha() {
                 </button>
               </div>
               <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {lista.map(item => (
+                {lista.map(item => {
+                  const { nome, complementos: comps } = separarItem(item)
+                  return (
                   <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>
-                        {item.quantidade}× {item.nome}
+                        {item.quantidade}× {nome}
                       </div>
+                      {comps.map((c, j) => (
+                        <div key={j} style={{ fontSize: 12.5, color: 'var(--text-muted)', paddingLeft: 14 }}>
+                          {Number(c?.qtd) > 1 ? `${c.qtd}× ` : ''}{c?.nome ?? c}
+                        </div>
+                      ))}
                       {item.observacao && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.observacao}</div>}
                       <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>há {tempoDesde(item.created_at)}</div>
                     </div>
@@ -187,7 +194,8 @@ export default function PresencialCozinha() {
                       ✓ Pronto
                     </button>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           ))}

@@ -1967,6 +1967,37 @@ function CardMini({ pedido, onClick, onExpirado, entregadores = [] }) {
   )
 }
 
+// Card compacto de uma mesa (autoatendimento por QR) no quadro do gestor
+function CardMesa({ comanda }) {
+  const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
+  const total = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
+  const hora = new Date(comanda.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  return (
+    <div className="pp-mini" style={{ borderLeft: '3px solid #db2777', cursor: 'default' }}>
+      <div className="pp-mini-top">
+        <span className="pp-mini-num">🍽️ Mesa {comanda.numero_mesa} · {fmt(total)}</span>
+      </div>
+      <div className="pp-mini-sub">{hora} · autoatendimento (QR)</div>
+      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {itens.map(it => {
+          const { nome, complementos } = separarItem(it)
+          const pronto = it.status === 'pronto' || it.status === 'entregue'
+          return (
+            <div key={it.id} style={{ fontSize: 12.5 }}>
+              <div style={{ color: 'var(--text)' }}>
+                {pronto ? '✓ ' : ''}{it.quantidade}× {nome}
+              </div>
+              {complementos.map((c, j) => (
+                <div key={j} style={{ fontSize: 11, color: 'var(--text-muted)', paddingLeft: 14 }}>+ {c?.nome ?? c}</div>
+              ))}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // Coluna do quadro
 function Coluna({ titulo, cor, count, vazio, children }) {
   return (
@@ -2077,6 +2108,7 @@ export default function PainelPedidos() {
   const [pedidoMensagem, setPedidoMensagem] = useState(null)
   const [vendaAberta, setVendaAberta] = useState(false)
   const [vendaEditando, setVendaEditando] = useState(null) // pedido de balcão sendo editado
+  const [comandas, setComandas] = useState([]) // mesas (autoatendimento QR) abertas
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null) // pedido aberto em detalhe (card completo)
   const [autoImprimir, setAutoImprimir] = useState(autoImprimirAtivo)
 
@@ -2449,6 +2481,30 @@ export default function PainelPedidos() {
   // abrir instantâneo, sem o "Carregando produtos..." aparecer.
   useEffect(() => {
     if (empresa?.id) carregarCatalogo(empresa.id).catch(() => {})
+  }, [empresa])
+
+  // Mesas abertas (autoatendimento por QR) — o gestor vê os pedidos das mesas
+  // no quadro, junto com delivery/iFood, com o nome da mesa.
+  useEffect(() => {
+    if (!empresa?.id) return
+    let ativo = true
+    async function carregarComandas() {
+      const { data } = await supabase
+        .from('comandas')
+        .select('id, numero_mesa, created_at, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao)')
+        .eq('empresa_id', empresa.id)
+        .eq('status', 'aberta')
+        .order('numero_mesa')
+      if (ativo) setComandas(data ?? [])
+    }
+    carregarComandas()
+    const ch = supabase
+      .channel(`painel_comandas_${empresa.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas', filter: `empresa_id=eq.${empresa.id}` }, carregarComandas)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `empresa_id=eq.${empresa.id}` }, carregarComandas)
+      .subscribe()
+    const id = setInterval(carregarComandas, 30_000)
+    return () => { ativo = false; ch.unsubscribe(); clearInterval(id) }
   }, [empresa])
 
   // ── Realtime subscription + polling de segurança + visibilidade ──
@@ -2857,6 +2913,10 @@ export default function PainelPedidos() {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
               {[
                 { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidos.length + concluidosHoje.length + canceladosHoje.length },
+                // "Mesas" só aparece quando há mesa aberta (autoatendimento por QR)
+                ...(comandas.length > 0
+                  ? [{ id: 'mesas', label: 'Mesas', cor: '#db2777', count: comandas.length }]
+                  : []),
                 // "A aceitar" só aparece quando há pedido aguardando (esconde quando vazia)
                 ...(pedidos.some(p => p.status === 'aguardando')
                   ? [{ id: 'aceitar', label: 'A aceitar', cor: '#ca8a04', count: pedidos.filter(p => p.status === 'aguardando').length }]
@@ -2891,6 +2951,12 @@ export default function PainelPedidos() {
             </div>
 
             <div className="pp-board" style={filtroColuna ? { gridTemplateColumns: 'minmax(0, 460px)' } : undefined}>
+              {(!filtroColuna || filtroColuna === 'mesas') && comandas.length > 0 && (
+                <Coluna titulo="Mesas" cor="#db2777" count={comandas.length} vazio="Nenhuma mesa aberta">
+                  {comandas.map(c => <CardMesa key={c.id} comanda={c} />)}
+                </Coluna>
+              )}
+
               {(!filtroColuna || filtroColuna === 'aceitar') && pedidos.some(p => p.status === 'aguardando') && (
                 <Coluna titulo="A aceitar" cor="#ca8a04"
                   count={pedidos.filter(p => p.status === 'aguardando').length}
