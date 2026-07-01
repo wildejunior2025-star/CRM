@@ -79,7 +79,14 @@ export function montarCupomHtml(pedido, empresa = {}) {
     const sub = item.subtotal != null
       ? Number(item.subtotal)
       : qtd * Number(item.preco ?? item.preco_unitario ?? 0)
-    return `<li><div class="row"><span>${esc(qtd)}x ${esc(item.nome)}</span><span>${fmt(sub)}</span></div></li>`
+    const comps = Array.isArray(item.complementos) ? item.complementos : []
+    const compsHtml = comps.map(c => {
+      const cq = Number(c?.qtd ?? 1)
+      const cn = esc(c?.nome ?? c)
+      return `<div class="comp">▸ ${cq > 1 ? cq + 'x ' : ''}${cn}</div>`
+    }).join('')
+    const obsHtml = item.observacao ? `<div class="comp">obs: ${esc(item.observacao)}</div>` : ''
+    return `<li><div class="row"><span>${esc(qtd)}x ${esc(item.nome)}</span><span>${fmt(sub)}</span></div>${compsHtml}${obsHtml}</li>`
   }).join('')
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>Pedido ${esc(numero)}</title>
@@ -95,7 +102,8 @@ export function montarCupomHtml(pedido, empresa = {}) {
   .row { display: flex; justify-content: space-between; gap: 8px; }
   .row span:last-child { white-space: nowrap; }
   ul { list-style: none; margin: 0; padding: 0; }
-  li { margin-bottom: 2px; }
+  li { margin-bottom: 4px; }
+  .comp { padding-left: 12px; font-size: ${fontePx - 1}px; }
   .ifood { background: #000; color: #fff; text-align: center; font-weight: 800;
            padding: 5px 4px; margin: 0 0 5px; font-size: ${lgPx + 2}px; letter-spacing: 1px; }
 </style></head><body>

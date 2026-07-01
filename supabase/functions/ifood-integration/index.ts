@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 // =====================================================================
@@ -36,7 +35,7 @@ type Config = {
   auto_criar_produtos?: boolean
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
   const json = (d: unknown, s = 200) =>
     new Response(JSON.stringify(d), { status: s, headers: { ...cors, "Content-Type": "application/json" } })
@@ -210,17 +209,21 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
   const ehEntrega = (o.orderType ?? "DELIVERY") === "DELIVERY"
   const addr = o.delivery?.deliveryAddress ?? {}
 
-  // Itens -> formato usado pelo painel/cupom
+  // Itens -> formato usado pelo painel/cupom. Os complementos/adicionais ficam
+  // numa lista separada (não mais colados no nome) pra exibir cada um em sua
+  // linha, igual o iFood mostra.
   const itens = (o.items ?? []).map((it: any) => {
-    const adicionais = (it.options ?? []).map((op: any) => op.name).filter(Boolean)
-    const nome = adicionais.length ? `${it.name} (${adicionais.join(", ")})` : it.name
+    const complementos = (it.options ?? [])
+      .map((op: any) => ({ nome: op.name, qtd: Number(op.quantity ?? 1) }))
+      .filter((c: any) => c.nome)
     return {
-      nome,
+      nome: it.name,
       qtd: Number(it.quantity ?? 1),
       quantidade: Number(it.quantity ?? 1),
       preco_unitario: Number(it.unitPrice ?? it.price ?? 0),
       subtotal: Number(it.totalPrice ?? it.price ?? 0),
       observacao: it.observations ?? null,
+      complementos,
     }
   })
 

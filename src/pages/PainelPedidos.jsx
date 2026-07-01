@@ -1176,11 +1176,27 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
             const sub = item.subtotal != null
               ? Number(item.subtotal)
               : qtd * Number(item.preco ?? item.preco_unitario ?? 0)
+            const complementos = Array.isArray(item.complementos) ? item.complementos : []
             return (
-              <li key={i}>
-                <span className="pp-item-qtd">{qtd}x</span>
-                <span className="pp-item-nome">{item.nome}</span>
-                <span className="pp-item-sub">{fmt(sub)}</span>
+              <li key={i} style={{ display: 'block' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+                  <span><strong style={{ marginRight: 5 }}>{qtd}x</strong>{item.nome}</span>
+                  <span style={{ whiteSpace: 'nowrap' }}>{fmt(sub)}</span>
+                </div>
+                {complementos.length > 0 && (
+                  <div style={{ paddingLeft: 18, marginTop: 3, marginBottom: 4 }}>
+                    {complementos.map((c, j) => (
+                      <div key={j} style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                        {Number(c.qtd) > 1 ? `${c.qtd}× ` : ''}{c.nome ?? c}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {item.observacao && (
+                  <div style={{ paddingLeft: 18, fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                    obs: {item.observacao}
+                  </div>
+                )}
               </li>
             )
           })}
