@@ -742,29 +742,45 @@ function ModalComplementos({ produto, onFechar, onConfirmar }) {
   )
 }
 
-function ModalVenda({ empresa, onFechar, onCriado }) {
+// Reconstrói o carrinho a partir dos itens de um pedido (ao editar).
+function cartFromPedido(p) {
+  const c = {}
+  ;(p?.itens ?? []).forEach((it, idx) => {
+    const comps = Array.isArray(it.complementos) ? it.complementos : []
+    const key = comps.length ? `${it.produto_id}::${comps.map(x => x.nome).join(',')}::${idx}` : (it.produto_id || `i${idx}`)
+    c[key] = {
+      id: key, produto_id: it.produto_id,
+      nome: it.nome, preco: Number(it.preco_unitario ?? it.preco ?? 0),
+      qtd: Number(it.quantidade ?? it.qtd ?? 1), complementos: comps,
+    }
+  })
+  return c
+}
+
+function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
+  const editando = !!pedidoEdicao
   const [produtos, setProdutos] = useState([])
   const [loading, setLoading]   = useState(true)
   const [busca, setBusca]       = useState('')
-  const [cart, setCart]         = useState({}) // { [id]: { id, nome, preco, qtd, complementos? } }
+  const [cart, setCart]         = useState(() => cartFromPedido(pedidoEdicao))
   const [compMap, setCompMap]   = useState({}) // { [produto_id]: grupos[] }
   const [produtoComp, setProdutoComp] = useState(null) // produto sendo montado (complementos)
-  const [nome, setNome]         = useState('')
-  const [telefone, setTelefone] = useState('')
-  const [tipo, setTipo]         = useState('retirada') // 'retirada' (balcão) | 'entrega'
-  const [rua, setRua]           = useState('')
-  const [numero, setNumero]     = useState('')
-  const [bairro, setBairro]     = useState('')
-  const [cidade, setCidade]     = useState('')
-  const [taxa, setTaxa]         = useState('')
-  const [pagamento, setPagamento] = useState('dinheiro')
-  const [troco, setTroco]       = useState('')
-  const [obs, setObs]           = useState('')
+  const [nome, setNome]         = useState(pedidoEdicao && pedidoEdicao.cliente_nome !== 'Balcão' ? (pedidoEdicao.cliente_nome ?? '') : '')
+  const [telefone, setTelefone] = useState(pedidoEdicao && pedidoEdicao.cliente_telefone !== '—' ? (pedidoEdicao.cliente_telefone ?? '') : '')
+  const [tipo, setTipo]         = useState(pedidoEdicao?.tipo_entrega ?? 'retirada') // 'retirada' (balcão) | 'entrega'
+  const [rua, setRua]           = useState(pedidoEdicao && pedidoEdicao.endereco_rua !== 'Retirada na loja' ? (pedidoEdicao.endereco_rua ?? '') : '')
+  const [numero, setNumero]     = useState(pedidoEdicao?.endereco_numero ?? '')
+  const [bairro, setBairro]     = useState(pedidoEdicao?.endereco_bairro ?? '')
+  const [cidade, setCidade]     = useState(pedidoEdicao?.endereco_cidade && pedidoEdicao.endereco_cidade !== 'Retirada' ? pedidoEdicao.endereco_cidade : '')
+  const [taxa, setTaxa]         = useState(pedidoEdicao?.taxa_entrega ? String(pedidoEdicao.taxa_entrega) : '')
+  const [pagamento, setPagamento] = useState(pedidoEdicao?.forma_pagamento ?? 'dinheiro')
+  const [troco, setTroco]       = useState(pedidoEdicao?.troco_para ? String(pedidoEdicao.troco_para) : '')
+  const [obs, setObs]           = useState(pedidoEdicao?.observacoes ?? '')
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro]         = useState(null)
   // Busca de clientes já cadastrados na loja
   const [sugestoes, setSugestoes]       = useState([])
-  const [clienteSelId, setClienteSelId] = useState(null)
+  const [clienteSelId, setClienteSelId] = useState(pedidoEdicao?.cliente_id ?? null)
   const [msgCli, setMsgCli]             = useState(null)
   const buscaCliTimer = useRef(null)
   // Abre a ficha completa de cadastro de cliente
@@ -939,7 +955,19 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
       payload.endereco_bairro = bairro.trim()
       payload.endereco_cidade = cidade.trim()
     }
-    const { error } = await supabase.from('pedidos_delivery').insert(payload)
+    let error
+    if (editando) {
+      // Edição: não mexe em origem/status; atualiza os dados do pedido.
+      const upd = { ...payload }
+      delete upd.empresa_id; delete upd.origem; delete upd.status
+      if (tipo !== 'entrega') {
+        upd.endereco_rua = 'Retirada na loja'; upd.endereco_numero = null
+        upd.endereco_bairro = null; upd.endereco_cidade = 'Retirada'
+      }
+      ;({ error } = await supabase.from('pedidos_delivery').update(upd).eq('id', pedidoEdicao.id))
+    } else {
+      ;({ error } = await supabase.from('pedidos_delivery').insert(payload))
+    }
     setSalvando(false)
     if (error) { setErro(error.message); return }
     onCriado()
@@ -968,7 +996,7 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
     <>
     <div className="pp-modal-overlay" onClick={onFechar}>
       <div className="pp-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 560, width: '94vw', maxHeight: '90vh', overflowY: 'auto' }}>
-        <p className="pp-modal-titulo">Nova venda (balcão)</p>
+        <p className="pp-modal-titulo">{editando ? `Editar pedido #${pedidoEdicao.numero_pedido ?? ''}` : 'Nova venda (balcão)'}</p>
 
         {/* Produtos */}
         <input
@@ -1129,7 +1157,7 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
             disabled={salvando || itens.length === 0}
             onClick={concluir}
           >
-            {salvando ? 'Salvando...' : `Concluir venda · ${fmt(total)}`}
+            {salvando ? 'Salvando...' : `${editando ? 'Salvar alterações' : 'Concluir venda'} · ${fmt(total)}`}
           </button>
         </div>
       </div>
@@ -1184,7 +1212,7 @@ function SeletorEntregador({ entregadores = [], onAtribuir, pedidoId }) {
   )
 }
 
-function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onAtribuir, entregadores = [] }) {
+function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onAtribuir, onEditar, entregadores = [] }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const pagamento = pedido.forma_pagamento || ''
   const endereco = enderecoCompleto(pedido)
@@ -1496,14 +1524,28 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
 
         {/* Balcão (PDV): venda feita pelo vendedor — finaliza direto, sem código de entrega */}
         {pedido.origem === 'balcao' && (pedido.status === 'confirmado' || pedido.status === 'em_preparo' || pedido.status === 'saiu_entrega') && (
-          <button
-            type="button"
-            className="pp-btn pp-btn-avancar"
-            style={{ width: '100%', background: '#16a34a', borderColor: '#16a34a' }}
-            onClick={() => onAvancar(pedido.id, 'entregue')}
-          >
-            Finalizar venda
-          </button>
+          <>
+            <button
+              type="button"
+              className="pp-btn pp-btn-avancar"
+              style={{ width: '100%', background: '#16a34a', borderColor: '#16a34a' }}
+              onClick={() => onAvancar(pedido.id, 'entregue')}
+            >
+              Finalizar venda
+            </button>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, width: '100%' }}>
+              <button type="button" onClick={() => onEditar?.(pedido)}
+                style={{ flex: 1, padding: '8px', borderRadius: 8, cursor: 'pointer',
+                  border: '1.5px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontWeight: 700, fontSize: 13 }}>
+                ✏️ Editar
+              </button>
+              <button type="button" onClick={() => onRecusar(pedido)}
+                style={{ flex: 1, padding: '8px', borderRadius: 8, cursor: 'pointer',
+                  background: 'transparent', border: '1.5px solid rgba(239,68,68,.5)', color: '#ef4444', fontWeight: 700, fontSize: 13 }}>
+                Cancelar
+              </button>
+            </div>
+          </>
         )}
 
         {/* Passo 2: preparando → marcar pronto (libera para os entregadores) */}
@@ -1959,6 +2001,7 @@ export default function PainelPedidos() {
   const [pedidoAceitando, setPedidoAceitando] = useState(null) // pedido no modal de aceite (tempo de preparo)
   const [pedidoMensagem, setPedidoMensagem] = useState(null)
   const [vendaAberta, setVendaAberta] = useState(false)
+  const [vendaEditando, setVendaEditando] = useState(null) // pedido de balcão sendo editado
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null) // pedido aberto em detalhe (card completo)
   const [autoImprimir, setAutoImprimir] = useState(autoImprimirAtivo)
 
@@ -2871,6 +2914,16 @@ export default function PainelPedidos() {
         />
       )}
 
+      {/* Edição de um pedido de balcão */}
+      {vendaEditando && (
+        <ModalVenda
+          empresa={empresa}
+          pedidoEdicao={vendaEditando}
+          onFechar={() => setVendaEditando(null)}
+          onCriado={carregarPedidos}
+        />
+      )}
+
       {/* Detalhe do pedido — card completo ao clicar num card compacto */}
       {pedidoDetalhe && (
         <div className="pp-modal-overlay" onClick={() => setPedidoDetalhe(null)} style={{ zIndex: 120 }}>
@@ -2886,6 +2939,7 @@ export default function PainelPedidos() {
               onExpirado={(id) => { handleExpirado(id); setPedidoDetalhe(null) }}
               onAvancar={(id, st) => { handleAvancar(id, st); setPedidoDetalhe(null) }}
               onAtribuir={handleAtribuirEntregador}
+              onEditar={(p) => { setVendaEditando(p); setPedidoDetalhe(null) }}
               onEnviarMensagem={(p) => { setPedidoMensagem(p); setPedidoDetalhe(null) }}
               onImprimir={handleImprimir}
               entregadores={entregadores}
