@@ -173,7 +173,7 @@ export default function Dashboard() {
 
     // eventos de venda no período (vendas + delivery)
     let fat = 0, n = 0, fatPrev = 0
-    const canal = { app: 0, wpp: 0, presencial: 0 }
+    const canal = { ifood: 0, app: 0, wpp: 0, presencial: 0 }
     const horas = Array.from({ length: 24 }, (_, h) => ({ label: h, value: 0 }))
     const ehHoje = periodo === 'hoje'
     const buckets = []; const bIdx = {}
@@ -203,7 +203,8 @@ export default function Dashboard() {
       const val = Number(p.total)
       if (new Date(p.created_at) >= start && new Date(p.created_at) < now) {
         fat += val; n++; addBucket(p.created_at, val)
-        if (p.origem === 'app') canal.app += val
+        if (p.origem === 'ifood') canal.ifood += val
+        else if (p.origem === 'app') canal.app += val
         else if (p.origem === 'whatsapp' || p.origem === 'cardapio') canal.wpp += val
       }
       if (inRange(p.created_at, prevStart, prevEnd)) fatPrev += val
@@ -243,6 +244,7 @@ export default function Dashboard() {
   }
   const metaPct = meta > 0 ? Math.min(100, Math.round((m.fatMes / meta) * 100)) : 0
   const canais = [
+    { icon: '🍔', nome: 'iFood', value: m.canal.ifood },
     { icon: '📱', nome: 'App', value: m.canal.app },
     { icon: '💬', nome: 'WhatsApp + Loja Online', value: m.canal.wpp },
     { icon: '🍽️', nome: 'Presencial', value: m.canal.presencial },
