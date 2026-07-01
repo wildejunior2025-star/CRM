@@ -8,6 +8,13 @@ const TIMER_LIMITE_MS = 7 * 60 * 1000 // 7 minutos
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? ''
 
+// Data de hoje no formato YYYY-MM-DD (fuso local) — usada pra abrir a lista
+// já filtrada no dia, batendo com o gestor.
+function hojeISO() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 const ORIGEM_CONFIG = {
   whatsapp: { label: 'WhatsApp', bg: '#25d366', color: '#fff', borda: '#25d366' },
   cardapio:  { label: 'Cardápio', bg: '#3b82f6', color: '#fff', borda: '#3b82f6' },
@@ -795,8 +802,8 @@ export default function PedidosDelivery() {
   const [modalCfg, setModalCfg] = useState(false)
   const [config, setConfig] = useState(lerConfig)
   const [viewMode, setViewMode] = useState(lerViewMode)
-  const [dataInicio, setDataInicio] = useState('')
-  const [dataFim, setDataFim] = useState('')
+  const [dataInicio, setDataInicio] = useState(hojeISO())
+  const [dataFim, setDataFim] = useState(hojeISO())
   const [taxaPlataforma, setTaxaPlataforma] = useState(5)
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null)
   const [filtroOrigem, setFiltroOrigem] = useState('todos')
