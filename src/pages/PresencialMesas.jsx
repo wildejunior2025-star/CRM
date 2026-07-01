@@ -26,18 +26,34 @@ export default function PresencialMesas() {
   const [capacidade, setCapacidade] = useState(4)
   const [qrMesa, setQrMesa]         = useState(null)   // mesa do modal de QR
   const [copiado, setCopiado]       = useState(false)
+  const [presencialAtivo, setPresencialAtivo] = useState(true) // serviço presencial ligado?
+  const [ligando, setLigando]       = useState(false)
 
-  const linkMesa = (m) => `${window.location.origin}/mesa/${m.token}`
+  // Link/QR do cliente aponta SEMPRE pro domínio público da loja online
+  // (não pro admin/gestor onde o dono está gerando o QR).
+  const linkMesa = (m) => `https://lojaonline.fwcinter.com/mesa/${m.token}`
 
   async function carregar() {
     if (!empresaId) return
-    const { data } = await supabase.from('mesas')
-      .select('*').eq('empresa_id', empresaId).order('numero')
+    const [{ data }, { data: emp }] = await Promise.all([
+      supabase.from('mesas').select('*').eq('empresa_id', empresaId).order('numero'),
+      supabase.from('empresas').select('presencial_ativo').eq('id', empresaId).maybeSingle(),
+    ])
     setMesas(data ?? [])
+    setPresencialAtivo(emp?.presencial_ativo ?? false)
     setLoading(false)
     // sugere o próximo número
     const max = (data ?? []).reduce((m, x) => Math.max(m, x.numero), 0)
     setNumero(String(max + 1))
+  }
+
+  async function ligarPresencial() {
+    if (!empresaId) return
+    setLigando(true)
+    const { error } = await supabase.from('empresas')
+      .update({ presencial_ativo: true }).eq('id', empresaId)
+    setLigando(false)
+    if (!error) setPresencialAtivo(true)
   }
 
   useEffect(() => { carregar() }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
@@ -85,6 +101,22 @@ export default function PresencialMesas() {
           <p className="page-subtitle">Cadastre as mesas do seu salão.</p>
         </div>
       </div>
+
+      {/* Aviso: sem o Serviço Presencial ligado, os QR das mesas não abrem */}
+      {!presencialAtivo && (
+        <div className="card" style={{
+          marginBottom: 16, border: '1px solid #f59e0b', background: 'rgba(245,158,11,.1)',
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+        }}>
+          <div style={{ flex: 1, minWidth: 200, fontSize: 13.5, color: 'var(--text)' }}>
+            <strong>⚠️ Serviço Presencial desligado.</strong> Os links/QR das mesas <u>não abrem</u> pro
+            cliente enquanto isto estiver desligado.
+          </div>
+          <button type="button" className="btn btn-primary" onClick={ligarPresencial} disabled={ligando}>
+            {ligando ? 'Ligando...' : 'Ligar agora'}
+          </button>
+        </div>
+      )}
 
       {/* Form nova mesa */}
       <form className="card" onSubmit={adicionar} style={{ marginBottom: 20 }}>
