@@ -70,14 +70,16 @@
       "Bash(npx wrangler *)",
       "Bash(curl -s \"https://fwcinter.com/\")",
       "mcp__supabase__execute_sql",
-      "mcp__supabase__apply_migration"
+      "mcp__supabase__apply_migration",
+      "Bash(cp \"/c/Users/wilde junior/Downloads/20260630_140420.jpg\" \"/c/Users/wilde junior/OneDrive/Desktop/CRM/.tmp-cnh.jpg\" && echo ok)"
     ],
     "additionalDirectories": [
       "C:\\Users\\wilde junior\\.cache\\chrome-devtools-mcp\\chrome-profile",
       "C:\\Users\\wilde junior\\OneDrive\\Desktop\\CRM\\src",
       "C:\\Users\\wilde junior\\OneDrive\\Desktop\\logo venda mais",
       "C:\\Users\\wilde junior\\OneDrive\\Desktop",
-      "C:\\Users\\wilde junior\\OneDrive\\Desktop\\FWC geral\\vendamais-site"
+      "C:\\Users\\wilde junior\\OneDrive\\Desktop\\FWC geral\\vendamais-site",
+      "C:\\Users\\wilde junior\\Downloads"
     ]
   }
 }

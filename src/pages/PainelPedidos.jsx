@@ -463,6 +463,13 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
   const [tipos, setTipos]   = useState(TIPOS_CLIENTE_PADRAO)
   const [saving, setSaving] = useState(false)
   const [erro, setErro]     = useState(null)
+  const [step, setStep]     = useState(1) // 1 = dados, 2 = endereço
+
+  function avancar(e) {
+    e.preventDefault()
+    if (!form.nome.trim()) { setErro('Informe o nome do cliente.'); return }
+    setErro(null); setStep(2)
+  }
 
   useEffect(() => {
     let ativo = true
@@ -514,99 +521,123 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
 
   return (
     <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 200 }}>
-      <form className="pp-modal" onClick={e => e.stopPropagation()} onSubmit={salvar}
+      <form className="pp-modal" onClick={e => e.stopPropagation()} onSubmit={step === 1 ? avancar : salvar}
         style={{ maxWidth: 560, width: '94vw', maxHeight: '90vh', overflowY: 'auto', display: 'block' }}>
-        <p className="pp-modal-titulo">Novo cliente</p>
+        <p className="pp-modal-titulo" style={{ marginBottom: 4 }}>Novo cliente</p>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 14px' }}>
+          Etapa {step} de 2 · {step === 1 ? 'Dados do cliente' : 'Endereço'}
+        </p>
 
-        <div style={{ marginBottom: 12 }}>
-          <label style={lbl}>Nome / Razão social *</label>
-          <input name="nome" value={form.nome} onChange={ch} style={inp} autoFocus />
-        </div>
+        {step === 1 ? (
+          <>
+            <div style={{ marginBottom: 12 }}>
+              <label style={lbl}>Nome / Razão social *</label>
+              <input name="nome" value={form.nome} onChange={ch} style={inp} autoFocus />
+            </div>
 
-        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-          <div style={col}>
-            <label style={lbl}>Tipo</label>
-            <select name="tipo" value={form.tipo} onChange={ch} style={inp}>
-              {tipos.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div style={col}>
-            <label style={lbl}>CNPJ / CPF</label>
-            <input name="cnpj_cpf" value={form.cnpj_cpf} onChange={ch} style={inp} />
-          </div>
-        </div>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+              <div style={col}>
+                <label style={lbl}>Tipo</label>
+                <select name="tipo" value={form.tipo} onChange={ch} style={inp}>
+                  {tipos.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div style={col}>
+                <label style={lbl}>CNPJ / CPF</label>
+                <input name="cnpj_cpf" value={form.cnpj_cpf} onChange={ch} style={inp} />
+              </div>
+            </div>
 
-        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-          <div style={col}>
-            <label style={lbl}>Telefone</label>
-            <input name="telefone" value={form.telefone} onChange={ch} style={inp} />
-          </div>
-          <div style={col}>
-            <label style={lbl}>Dia de visita</label>
-            <select name="dia_visita" value={form.dia_visita} onChange={ch} style={inp}>
-              <option value="">-</option>
-              {DIAS_VISITA.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </div>
-        </div>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+              <div style={col}>
+                <label style={lbl}>Telefone</label>
+                <input name="telefone" value={form.telefone} onChange={ch} style={inp} />
+              </div>
+              <div style={col}>
+                <label style={lbl}>Dia de visita</label>
+                <select name="dia_visita" value={form.dia_visita} onChange={ch} style={inp}>
+                  <option value="">-</option>
+                  {DIAS_VISITA.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+            </div>
 
-        <div style={{ marginBottom: 12 }}>
-          <label style={lbl}>Endereço</label>
-          <input name="endereco" value={form.endereco} onChange={ch} style={inp} />
-        </div>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+              <div style={col}>
+                <label style={lbl}>Condição de pagamento</label>
+                <select name="condicao_pagamento" value={form.condicao_pagamento} onChange={ch} style={inp}>
+                  {CONDICOES_PAGAMENTO.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+              <div style={col}>
+                <label style={lbl}>Limite de crédito (R$)</label>
+                <input name="limite_credito" type="number" value={form.limite_credito} onChange={ch} style={inp} />
+              </div>
+            </div>
 
-        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-          <div style={col}>
-            <label style={lbl}>Bairro</label>
-            <input name="bairro" value={form.bairro} onChange={ch} style={inp} />
-          </div>
-          <div style={col}>
-            <label style={lbl}>Cidade</label>
-            <input name="cidade" value={form.cidade} onChange={ch} style={inp} />
-          </div>
-        </div>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+              <div style={col}>
+                <label style={lbl}>Desconto autorizado (%)</label>
+                <input name="desconto_percentual" type="number" value={form.desconto_percentual} onChange={ch} style={inp} />
+              </div>
+              <div style={col}>
+                <label style={lbl}>Pedido mínimo para desconto (R$)</label>
+                <input name="desconto_minimo_pedido" type="number" value={form.desconto_minimo_pedido} onChange={ch} style={inp} />
+              </div>
+            </div>
 
-        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-          <div style={col}>
-            <label style={lbl}>Condição de pagamento</label>
-            <select name="condicao_pagamento" value={form.condicao_pagamento} onChange={ch} style={inp}>
-              {CONDICOES_PAGAMENTO.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
-          <div style={col}>
-            <label style={lbl}>Limite de crédito (R$)</label>
-            <input name="limite_credito" type="number" value={form.limite_credito} onChange={ch} style={inp} />
-          </div>
-        </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={lbl}>Observações</label>
+              <textarea name="observacoes" value={form.observacoes} onChange={ch} rows={3} style={{ ...inp, resize: 'vertical' }} />
+            </div>
 
-        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-          <div style={col}>
-            <label style={lbl}>Desconto autorizado (%)</label>
-            <input name="desconto_percentual" type="number" value={form.desconto_percentual} onChange={ch} style={inp} />
-          </div>
-          <div style={col}>
-            <label style={lbl}>Pedido mínimo para desconto (R$)</label>
-            <input name="desconto_minimo_pedido" type="number" value={form.desconto_minimo_pedido} onChange={ch} style={inp} />
-          </div>
-        </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--text)', marginBottom: 14, cursor: 'pointer' }}>
+              <input name="ativo" type="checkbox" checked={form.ativo} onChange={ch} />
+              Ativo
+            </label>
+          </>
+        ) : (
+          <>
+            <div style={{ marginBottom: 12 }}>
+              <label style={lbl}>Endereço</label>
+              <input name="endereco" value={form.endereco} onChange={ch} style={inp} autoFocus />
+            </div>
 
-        <div style={{ marginBottom: 12 }}>
-          <label style={lbl}>Observações</label>
-          <textarea name="observacoes" value={form.observacoes} onChange={ch} rows={3} style={{ ...inp, resize: 'vertical' }} />
-        </div>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+              <div style={col}>
+                <label style={lbl}>Bairro</label>
+                <input name="bairro" value={form.bairro} onChange={ch} style={inp} />
+              </div>
+              <div style={col}>
+                <label style={lbl}>Cidade</label>
+                <input name="cidade" value={form.cidade} onChange={ch} style={inp} />
+              </div>
+            </div>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--text)', marginBottom: 14, cursor: 'pointer' }}>
-          <input name="ativo" type="checkbox" checked={form.ativo} onChange={ch} />
-          Ativo
-        </label>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 14px' }}>
+              O endereço é opcional — pode deixar em branco e salvar.
+            </p>
+          </>
+        )}
 
         {erro && <p style={{ color: 'var(--danger, #ef4444)', fontSize: 13, margin: '0 0 10px' }}>{erro}</p>}
 
         <div className="pp-modal-actions">
-          <button type="button" className="pp-modal-btn-secondary" onClick={onFechar}>Cancelar</button>
-          <button type="submit" className="pp-modal-btn-danger" style={{ background: '#7c3aed', borderColor: '#7c3aed' }} disabled={saving}>
-            {saving ? 'Salvando...' : 'Salvar'}
-          </button>
+          {step === 1 ? (
+            <>
+              <button type="button" className="pp-modal-btn-secondary" onClick={onFechar}>Cancelar</button>
+              <button type="submit" className="pp-modal-btn-danger" style={{ background: '#7c3aed', borderColor: '#7c3aed' }}>
+                Próximo →
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="pp-modal-btn-secondary" onClick={() => setStep(1)}>← Voltar</button>
+              <button type="submit" className="pp-modal-btn-danger" style={{ background: '#7c3aed', borderColor: '#7c3aed' }} disabled={saving}>
+                {saving ? 'Salvando...' : 'Salvar cliente'}
+              </button>
+            </>
+          )}
         </div>
       </form>
     </div>
@@ -882,7 +913,9 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
       empresa_id: empresa.id,
       cliente_id: clienteId,
       cliente_nome: nome.trim() || 'Balcão',
-      cliente_telefone: telefone.trim() || null,
+      // Telefone é opcional no balcão (cliente do self-service pode não dar).
+      // A coluna exige valor, então usamos um traço quando vier vazio.
+      cliente_telefone: telefone.trim() || '—',
       tipo_entrega: tipo,
       origem: 'balcao',
       status: 'confirmado', // já aceito — o vendedor está criando o pedido
