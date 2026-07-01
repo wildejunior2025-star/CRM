@@ -2176,6 +2176,7 @@ export default function PainelPedidos() {
   const [enviandoChat, setEnviandoChat] = useState(false)
   // Catálogo (pausar/ativar itens da loja online)
   const [catalogo, setCatalogo] = useState([])
+  const [complementosCat, setComplementosCat] = useState([]) // opções de complemento (pausáveis)
   const [loadingCatalogo, setLoadingCatalogo] = useState(false)
   const [buscaCatalogo, setBuscaCatalogo] = useState('')
   const [pausandoId, setPausandoId] = useState(null)
@@ -2348,12 +2349,43 @@ export default function PainelPedidos() {
       .eq('empresa_id', empresa.id)
       .order('nome', { ascending: true })
     setCatalogo(data || [])
+    // Complementos (opções) — deduplicados por grupo+nome (o mesmo complemento
+    // costuma repetir nas 3 quentinhas). Pausar afeta todas as cópias.
+    const { data: grupos } = await supabase
+      .from('complemento_grupos')
+      .select('nome, ordem, complemento_opcoes(id, nome, disponivel, ordem)')
+      .eq('empresa_id', empresa.id)
+      .order('ordem')
+    const map = new Map()
+    for (const g of (grupos ?? [])) {
+      for (const o of (g.complemento_opcoes ?? [])) {
+        const key = `${g.nome}::${o.nome}`
+        if (!map.has(key)) map.set(key, { key, nome: o.nome, grupo: g.nome, ids: [], ativo: false })
+        const e = map.get(key)
+        e.ids.push(o.id)
+        if (o.disponivel !== false) e.ativo = true
+      }
+    }
+    setComplementosCat([...map.values()])
     setLoadingCatalogo(false)
   }, [empresa])
 
   useEffect(() => {
     if (painelDireito === 'catalogo') carregarCatalogo()
   }, [painelDireito, carregarCatalogo])
+
+  // Pausa/reativa uma opção de complemento (ex.: "Frango Assado" acabou).
+  async function togglePausarOpcao(op) {
+    const ativar = !op.ativo // se está pausada (nenhuma ativa), reativa
+    setPausandoId(op.key)
+    setComplementosCat(prev => prev.map(x => x.key === op.key ? { ...x, ativo: ativar } : x))
+    const { error } = await supabase
+      .from('complemento_opcoes')
+      .update({ disponivel: ativar })
+      .in('id', op.ids)
+    setPausandoId(null)
+    if (error) setComplementosCat(prev => prev.map(x => x.key === op.key ? { ...x, ativo: op.ativo } : x))
+  }
 
   // Pausa/reativa um item — pausado some da loja online na hora.
   async function togglePausarProduto(prod) {
@@ -2829,6 +2861,10 @@ export default function PainelPedidos() {
   const catalogoFiltrado = catalogo.filter(p =>
     !buscaCatalogo.trim() || p.nome?.toLowerCase().includes(buscaCatalogo.trim().toLowerCase())
   )
+  const complementosFiltrados = complementosCat.filter(o => {
+    const t = buscaCatalogo.trim().toLowerCase()
+    return !t || o.nome.toLowerCase().includes(t) || o.grupo.toLowerCase().includes(t)
+  })
 
   // Agrupa as mensagens em conversas (canal + cliente)
   const chatThreads = Object.values(chatMsgs.reduce((acc, m) => {
@@ -3409,12 +3445,15 @@ export default function PainelPedidos() {
               />
               {loadingCatalogo ? (
                 <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 13 }}>Carregando...</div>
-              ) : catalogoFiltrado.length === 0 ? (
+              ) : catalogoFiltrado.length === 0 && complementosFiltrados.length === 0 ? (
                 <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 13 }}>
-                  {buscaCatalogo ? 'Nenhum produto encontrado.' : 'Nenhum produto cadastrado.'}
+                  {buscaCatalogo ? 'Nada encontrado.' : 'Nenhum item cadastrado.'}
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {catalogoFiltrado.length > 0 && (
+                    <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: .5, textTransform: 'uppercase' }}>Produtos</div>
+                  )}
                   {catalogoFiltrado.map(prod => {
                     const pausado = prod.disponivel_delivery === false
                     return (
@@ -3445,6 +3484,46 @@ export default function PainelPedidos() {
                           }}
                         >
                           {pausandoId === prod.id ? '...' : pausado ? 'Ativar' : 'Pausar'}
+                        </button>
+                      </div>
+                    )
+                  })}
+
+                  {complementosFiltrados.length > 0 && (
+                    <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: .5, textTransform: 'uppercase', marginTop: 8 }}>
+                      Complementos (monte sua quentinha)
+                    </div>
+                  )}
+                  {complementosFiltrados.map(op => {
+                    const pausado = !op.ativo
+                    return (
+                      <div key={op.key} style={{
+                        border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '10px 12px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                        opacity: pausado ? 0.6 : 1,
+                      }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {op.nome}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            {op.grupo}
+                            {pausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => togglePausarOpcao(op)}
+                          disabled={pausandoId === op.key}
+                          style={{
+                            flexShrink: 0, padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+                            fontWeight: 700, fontSize: 12, border: '1.5px solid',
+                            borderColor: pausado ? '#16a34a' : '#dc2626',
+                            background: pausado ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
+                            color: pausado ? '#16a34a' : '#dc2626',
+                          }}
+                        >
+                          {pausandoId === op.key ? '...' : pausado ? 'Ativar' : 'Pausar'}
                         </button>
                       </div>
                     )
