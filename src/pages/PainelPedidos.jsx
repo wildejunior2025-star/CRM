@@ -833,28 +833,35 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const [cadastroAberto, setCadastroAberto] = useState(false)
 
   useEffect(() => {
+    if (!empresa?.id) { setLoading(false); return }
     let ativo = true
     ;(async () => {
-      const [prodRes, gruposRes] = await Promise.all([
-        supabase.from('produtos').select('id, nome, preco_venda, categoria')
-          .eq('empresa_id', empresa.id).order('nome', { ascending: true }),
-        supabase.from('complemento_grupos')
-          .select('id, produto_id, nome, min, max, ordem, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
-          .eq('empresa_id', empresa.id).order('ordem'),
-      ])
-      if (!ativo) return
-      setProdutos(prodRes.data || [])
-      // Mapa produto_id -> grupos (só opções disponíveis, ordenadas)
-      const map = {}
-      for (const g of (gruposRes.data ?? [])) {
-        const opcoes = (g.complemento_opcoes ?? [])
-          .filter(o => o.disponivel !== false)
-          .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
-        if (!opcoes.length) continue
-        ;(map[g.produto_id] = map[g.produto_id] || []).push({ id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, opcoes })
+      try {
+        const [prodRes, gruposRes] = await Promise.all([
+          supabase.from('produtos').select('id, nome, preco_venda, categoria')
+            .eq('empresa_id', empresa.id).order('nome', { ascending: true }),
+          supabase.from('complemento_grupos')
+            .select('id, produto_id, nome, min, max, ordem, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
+            .eq('empresa_id', empresa.id).order('ordem'),
+        ])
+        if (!ativo) return
+        if (prodRes.error) throw prodRes.error
+        setProdutos(prodRes.data || [])
+        // Mapa produto_id -> grupos (só opções disponíveis, ordenadas)
+        const map = {}
+        for (const g of (gruposRes.data ?? [])) {
+          const opcoes = (g.complemento_opcoes ?? [])
+            .filter(o => o.disponivel !== false)
+            .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+          if (!opcoes.length) continue
+          ;(map[g.produto_id] = map[g.produto_id] || []).push({ id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, opcoes })
+        }
+        setCompMap(map)
+      } catch (e) {
+        if (ativo) setErro(`Erro ao carregar produtos: ${String(e?.message ?? e)}`)
+      } finally {
+        if (ativo) setLoading(false)
       }
-      setCompMap(map)
-      setLoading(false)
     })()
     return () => { ativo = false }
   }, [empresa])
@@ -1053,7 +1060,9 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
           {loading ? (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>Carregando produtos...</div>
           ) : filtrados.length === 0 ? (
-            <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>Nenhum produto.</div>
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>
+              {produtos.length === 0 ? 'Nenhum produto cadastrado.' : `Nenhum produto com “${busca}”. (${produtos.length} produtos no catálogo)`}
+            </div>
           ) : filtrados.map(p => {
             const qtd = cart[p.id]?.qtd ?? 0
             return (
