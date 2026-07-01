@@ -13,7 +13,9 @@ export default function MesaCardapio() {
   const [erro, setErro]       = useState(null)
   const [busca, setBusca]     = useState('')
   const [cat, setCat]         = useState('Todos')
-  const [carrinho, setCarrinho] = useState({}) // { produto_id: { nome, preco, qtd } }
+  const [carrinho, setCarrinho] = useState({}) // { key: { produto_id, nome, preco, qtd, complementos } }
+  const [compMap, setCompMap]   = useState({}) // { produto_id: grupos[] } — "monte sua quentinha"
+  const [montando, setMontando] = useState(null) // produto sendo montado (complementos)
   const [drawer, setDrawer]   = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [sucesso, setSucesso] = useState(false)
@@ -67,6 +69,24 @@ export default function MesaCardapio() {
       const ordemMap = {}
       for (const c of (cats ?? [])) ordemMap[c.nome] = c.ordem ?? 999
       setCatOrdem(ordemMap)
+      // Complementos por produto ("monte sua quentinha")
+      const ids = (ps ?? []).map(p => p.produto_id)
+      const cm = {}
+      if (ids.length) {
+        const { data: grupos } = await supabase
+          .from('complemento_grupos')
+          .select('id, produto_id, nome, min, max, ordem, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
+          .in('produto_id', ids)
+          .order('ordem')
+        for (const g of (grupos ?? [])) {
+          const opcoes = (g.complemento_opcoes ?? [])
+            .filter(o => o.disponivel !== false)
+            .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+          if (!opcoes.length) continue
+          ;(cm[g.produto_id] ??= []).push({ id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, opcoes })
+        }
+      }
+      setCompMap(cm)
       setProdutos(ps ?? [])
       setLoading(false)
     })()
@@ -111,10 +131,19 @@ export default function MesaCardapio() {
   const totalValor = itens.reduce((s, i) => s + i.qtd * i.preco, 0)
 
   function add(p) {
+    if (compMap[p.produto_id]?.length) { setMontando(p); return }
     setCarrinho(c => ({ ...c, [p.produto_id]: {
-      nome: p.nome, preco: Number(p.preco_venda),
-      qtd: (c[p.produto_id]?.qtd ?? 0) + 1,
+      produto_id: p.produto_id, nome: p.nome, preco: Number(p.preco_venda),
+      qtd: (c[p.produto_id]?.qtd ?? 0) + 1, complementos: [],
     } }))
+  }
+  function addComplemento(produto, complementos, precoUnit) {
+    const key = `${produto.produto_id}::${complementos.map(c => c.nome).join(',')}`
+    setCarrinho(c => ({ ...c, [key]: {
+      produto_id: produto.produto_id, nome: produto.nome, preco: precoUnit,
+      qtd: (c[key]?.qtd ?? 0) + 1, complementos,
+    } }))
+    setMontando(null)
   }
   function mudar(id, d) {
     setCarrinho(c => {
@@ -126,7 +155,11 @@ export default function MesaCardapio() {
 
   async function enviar() {
     setEnviando(true)
-    const payload = itens.map(i => ({ produto_id: i.id, nome: i.nome, preco: i.preco, qtd: i.qtd }))
+    const payload = itens.map(i => {
+      const comps = i.complementos ?? []
+      const nome = comps.length ? `${i.nome} (${comps.map(c => c.nome).join(', ')})` : i.nome
+      return { produto_id: i.produto_id ?? i.id, nome, preco: i.preco, qtd: i.qtd }
+    })
     const { data, error } = await supabase.rpc('mesa_pedir', { p_token: token, p_itens: payload })
     setEnviando(false)
     if (error || !data?.ok) { alert('Não deu pra enviar: ' + (error?.message ?? 'erro')); return }
@@ -200,9 +233,14 @@ export default function MesaCardapio() {
                   : <div style={{ width: 54, height: 54, borderRadius: 10, background: '#2c2350', display: 'grid', placeItems: 'center', fontSize: 22 }}>🍴</div>}
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: 14 }}>{p.nome}</div>
-                  <div style={{ color: '#a78bfa', fontWeight: 800, fontSize: 14 }}>{fmt(p.preco_venda)}</div>
+                  <div style={{ color: '#a78bfa', fontWeight: 800, fontSize: 14 }}>
+                    {fmt(p.preco_venda)}
+                    {compMap[p.produto_id]?.length ? <span style={{ color: '#f0abfc', fontWeight: 700 }}> · monte</span> : null}
+                  </div>
                 </div>
-                {qtd > 0 ? (
+                {compMap[p.produto_id]?.length ? (
+                  <button onClick={() => setMontando(p)} style={{ ...btnQ, width: 'auto', padding: '0 16px', background: '#7c3aed', borderColor: '#7c3aed' }}>Escolher</button>
+                ) : qtd > 0 ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <button onClick={() => mudar(p.produto_id, -1)} style={btnQ}>−</button>
                     <span style={{ fontWeight: 800, minWidth: 18, textAlign: 'center' }}>{qtd}</span>
@@ -240,6 +278,9 @@ export default function MesaCardapio() {
               <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #2c2350' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 14 }}>{i.nome}</div>
+                  {(i.complementos ?? []).map((c, j) => (
+                    <div key={j} style={{ fontSize: 11.5, color: '#8b7bb8' }}>+ {c.nome}</div>
+                  ))}
                   <div style={{ fontSize: 12, color: '#a78bfa' }}>{fmt(i.preco)}</div>
                 </div>
                 <button onClick={() => mudar(i.id, -1)} style={btnQ}>−</button>
@@ -257,6 +298,16 @@ export default function MesaCardapio() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Modal "monte" (complementos) */}
+      {montando && compMap[montando.produto_id] && (
+        <ModalCompMesa
+          produto={montando}
+          grupos={compMap[montando.produto_id]}
+          onClose={() => setMontando(null)}
+          onConfirm={addComplemento}
+        />
       )}
 
       {/* Acompanhar pedido */}
@@ -326,4 +377,78 @@ export default function MesaCardapio() {
 const btnQ = {
   width: 34, height: 34, borderRadius: 9, cursor: 'pointer', flexShrink: 0,
   border: '1px solid #7c3aed', background: 'transparent', color: '#fff', fontSize: 18, fontWeight: 700,
+}
+
+// Modal "monte sua quentinha" — escolhe complementos por grupo (min/max)
+function ModalCompMesa({ produto, grupos, onClose, onConfirm }) {
+  const [sel, setSel] = useState({}) // { grupoId: [opcaoId] }
+  const base = Number(produto.preco_venda)
+
+  function toggle(g, o) {
+    setSel(prev => {
+      const atual = prev[g.id] ?? []
+      const tem = atual.includes(o.id)
+      let novo
+      if (g.max === 1) novo = tem ? [] : [o.id]
+      else if (tem) novo = atual.filter(x => x !== o.id)
+      else if (atual.length >= g.max) novo = atual // trava no máximo
+      else novo = [...atual, o.id]
+      return { ...prev, [g.id]: novo }
+    })
+  }
+
+  const selecionados = grupos.flatMap(g => (sel[g.id] ?? []).map(oid => {
+    const o = g.opcoes.find(x => x.id === oid)
+    return { nome: o.nome, preco_adicional: Number(o.preco_adicional || 0) }
+  }))
+  const precoUnit = base + selecionados.reduce((s, c) => s + c.preco_adicional, 0)
+  const faltando = grupos.filter(g => (g.min ?? 0) > 0 && (sel[g.id]?.length ?? 0) < g.min)
+  const pode = faltando.length === 0
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 25, display: 'flex', alignItems: 'flex-end' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: '100%', background: '#15102a', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, maxHeight: '85dvh', overflowY: 'auto', color: '#fff' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+          <strong style={{ fontSize: 17 }}>{produto.nome}</strong>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer' }}>×</button>
+        </div>
+        <p style={{ fontSize: 12.5, opacity: .7, margin: '0 0 12px' }}>Monte do seu jeito 👇</p>
+        {grupos.map(g => {
+          const conta = sel[g.id]?.length ?? 0
+          const falta = (g.min ?? 0) > 0 && conta < g.min
+          return (
+            <div key={g.id} style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <strong style={{ fontSize: 14 }}>{g.nome}</strong>
+                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: falta ? '#7f1d1d' : '#2c2350', color: falta ? '#fecaca' : '#a78bfa' }}>
+                  {g.max === 1 ? 'escolha 1' : `até ${g.max}`}{g.min > 0 ? ' · obrigatório' : ''}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {g.opcoes.map(o => {
+                  const marcado = (sel[g.id] ?? []).includes(o.id)
+                  return (
+                    <button key={o.id} onClick={() => toggle(g, o)} style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+                      padding: '10px 12px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+                      border: '1px solid ' + (marcado ? '#7c3aed' : '#2c2350'),
+                      background: marcado ? 'rgba(124,58,237,.18)' : 'transparent', color: '#fff', fontSize: 14,
+                    }}>
+                      <span>{marcado ? '✓ ' : ''}{o.nome}</span>
+                      {Number(o.preco_adicional) > 0 && <span style={{ color: '#a78bfa', fontSize: 13 }}>+{fmt(o.preco_adicional)}</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+        <button onClick={() => pode && onConfirm(produto, selecionados, precoUnit)} disabled={!pode}
+          style={{ width: '100%', height: 52, borderRadius: 14, border: 'none', cursor: pode ? 'pointer' : 'not-allowed',
+            background: pode ? '#22c55e' : '#374151', color: '#fff', fontWeight: 800, fontSize: 15, marginTop: 6 }}>
+          {pode ? `Adicionar · ${fmt(precoUnit)}` : `Escolha: ${faltando.map(g => g.nome).join(', ')}`}
+        </button>
+      </div>
+    </div>
+  )
 }
