@@ -2839,6 +2839,14 @@ export default function PainelPedidos() {
         </div>
       </header>
 
+      {/* Aviso forte quando a loja está fechada — pedidos não entram */}
+      {!lojaAberta && (
+        <div className="pp-loja-fechada-banner" role="alert">
+          <span className="pp-lf-dot" aria-hidden="true" />
+          LOJA FECHADA — novos pedidos NÃO estão entrando. Clique em “Loja fechada” no topo para abrir.
+        </div>
+      )}
+
       {/* Corpo — quadro com 4 colunas (cards compactos; clica pra ver completo) */}
       <main className="pp-body" style={{ paddingRight: 56 }}>
         {carregando ? (
