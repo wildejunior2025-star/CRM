@@ -33,6 +33,7 @@ type Config = {
   polling_ativo: boolean
   access_token: string | null
   token_expira_em: string | null
+  auto_criar_produtos?: boolean
 }
 
 serve(async (req) => {
@@ -263,19 +264,22 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     throw new Error(`insert pedido: ${error.message}`)
   }
 
-  // Opção B: preenche o catálogo automaticamente com os itens do pedido que
-  // ainda não existem (vão pra Produtos, sem publicar na loja online — o
-  // lojista revisa). Não trava a criação do pedido se falhar.
-  try {
-    for (const it of (o.items ?? [])) {
-      await upsertProduto(sb, cfg.empresa_id, {
-        nome: it.name,
-        preco: it.unitPrice ?? it.price ?? 0,
-        categoria: "iFood",
-        publicar: false,
-      })
-    }
-  } catch { /* não atrapalha o pedido */ }
+  // Opção B (OPCIONAL, off por padrão): preenche o catálogo automaticamente
+  // com os itens do pedido que ainda não existem. Só roda se a loja ligou a
+  // opção — senão, loja que já tem cardápio ficaria com itens duplicados
+  // espelhando o cadastro do iFood. Não trava a criação do pedido se falhar.
+  if (cfg.auto_criar_produtos) {
+    try {
+      for (const it of (o.items ?? [])) {
+        await upsertProduto(sb, cfg.empresa_id, {
+          nome: it.name,
+          preco: it.unitPrice ?? it.price ?? 0,
+          categoria: "iFood",
+          publicar: false,
+        })
+      }
+    } catch { /* não atrapalha o pedido */ }
+  }
 
   return true
 }

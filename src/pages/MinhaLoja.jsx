@@ -37,6 +37,7 @@ export default function MinhaLoja() {
   // Integração iFood
   const [ifoodCfg, setIfoodCfg] = useState({
     client_id: '', client_secret: '', merchant_id: '', ambiente: 'producao', ativo: false,
+    auto_criar_produtos: false,
   })
   const [ifoodStatus, setIfoodStatus] = useState(null) // { ultimo_polling_em, ultimo_erro }
   const [ifoodSalvando, setIfoodSalvando] = useState(false)
@@ -57,6 +58,7 @@ export default function MinhaLoja() {
         merchant_id: ifoodCfg.merchant_id.trim() || null,
         ambiente: ifoodCfg.ambiente,
         ativo: ifoodCfg.ativo,
+        auto_criar_produtos: ifoodCfg.auto_criar_produtos,
       }, { onConflict: 'empresa_id' })
     setIfoodSalvando(false)
     if (error) { setIfoodMsg({ tipo: 'erro', texto: error.message }); return }
@@ -74,6 +76,7 @@ export default function MinhaLoja() {
       merchant_id: ifoodCfg.merchant_id.trim() || null,
       ambiente: ifoodCfg.ambiente,
       ativo: ifoodCfg.ativo,
+      auto_criar_produtos: ifoodCfg.auto_criar_produtos,
     }, { onConflict: 'empresa_id' })
 
     try {
@@ -166,6 +169,7 @@ export default function MinhaLoja() {
           merchant_id: data.merchant_id ?? '',
           ambiente: data.ambiente ?? 'teste',
           ativo: data.ativo ?? false,
+          auto_criar_produtos: data.auto_criar_produtos ?? false,
         })
         setIfoodStatus({ ultimo_polling_em: data.ultimo_polling_em, ultimo_erro: data.ultimo_erro })
       })
@@ -664,10 +668,21 @@ export default function MinhaLoja() {
               {ifoodImportando ? 'Importando...' : '📥 Importar cardápio do iFood'}
             </button>
           </div>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 0 }}>
-            “Importar cardápio” copia os produtos da sua loja do iFood pra cá. Os pedidos que chegarem também
-            vão criando os produtos automaticamente em <strong>Produtos</strong>.
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 10 }}>
+            “Importar cardápio” copia os produtos da sua loja do iFood pra cá, de uma vez.
           </p>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={ifoodCfg.auto_criar_produtos}
+              onChange={e => setIfoodCfg(c => ({ ...c, auto_criar_produtos: e.target.checked }))}
+              style={{ width: 16, height: 16, marginTop: 1, cursor: 'pointer', flexShrink: 0 }}
+            />
+            <span>
+              Criar produtos automaticamente pelos pedidos
+              <span style={{ color: 'var(--text-muted)' }}> — deixe <strong>desligado</strong> se sua loja já tem o cardápio cadastrado (evita itens duplicados).</span>
+            </span>
+          </label>
         </div>
       </form>
 
