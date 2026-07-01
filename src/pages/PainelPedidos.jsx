@@ -1968,32 +1968,51 @@ function CardMini({ pedido, onClick, onExpirado, entregadores = [] }) {
 }
 
 // Card compacto de uma mesa (autoatendimento por QR) no quadro do gestor
-function CardMesa({ comanda }) {
+function CardMesa({ comanda, onPronto, onItemPronto }) {
   const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
   const total = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
   const hora = new Date(comanda.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const pendentes = itens.filter(it => it.status !== 'pronto' && it.status !== 'entregue')
   return (
     <div className="pp-mini" style={{ borderLeft: '3px solid #db2777', cursor: 'default' }}>
       <div className="pp-mini-top">
         <span className="pp-mini-num">🍽️ Mesa {comanda.numero_mesa} · {fmt(total)}</span>
       </div>
       <div className="pp-mini-sub">{hora} · autoatendimento (QR)</div>
-      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 5 }}>
         {itens.map(it => {
           const { nome, complementos } = separarItem(it)
           const pronto = it.status === 'pronto' || it.status === 'entregue'
           return (
-            <div key={it.id} style={{ fontSize: 12.5 }}>
-              <div style={{ color: 'var(--text)' }}>
-                {pronto ? '✓ ' : ''}{it.quantidade}× {nome}
+            <div key={it.id} style={{ fontSize: 12.5, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: pronto ? '#16a34a' : 'var(--text)' }}>
+                  {pronto ? '✓ ' : ''}{it.quantidade}× {nome}
+                </div>
+                {complementos.map((c, j) => (
+                  <div key={j} style={{ fontSize: 11, color: 'var(--text-muted)', paddingLeft: 14 }}>+ {c?.nome ?? c}</div>
+                ))}
               </div>
-              {complementos.map((c, j) => (
-                <div key={j} style={{ fontSize: 11, color: 'var(--text-muted)', paddingLeft: 14 }}>+ {c?.nome ?? c}</div>
-              ))}
+              {!pronto && onItemPronto && (
+                <button type="button" title="Marcar este item pronto" onClick={() => onItemPronto(comanda, it)}
+                  style={{ flexShrink: 0, padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 800,
+                    border: '1px solid #22c55e', background: 'rgba(34,197,94,.12)', color: '#16a34a' }}>
+                  ✓
+                </button>
+              )}
             </div>
           )
         })}
       </div>
+      {onPronto && (pendentes.length > 0 ? (
+        <button type="button" onClick={() => onPronto(comanda)}
+          style={{ marginTop: 8, width: '100%', padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12.5,
+            border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.14)', color: '#16a34a' }}>
+          ✓ Marcar tudo pronto
+        </button>
+      ) : (
+        <div style={{ marginTop: 8, textAlign: 'center', fontSize: 12.5, fontWeight: 800, color: '#16a34a' }}>✓ Tudo pronto</div>
+      ))}
     </div>
   )
 }
@@ -2507,6 +2526,24 @@ export default function PainelPedidos() {
     return () => { ativo = false; ch.unsubscribe(); clearInterval(id) }
   }, [empresa])
 
+  // Marcar itens da mesa como prontos direto pelo gestor (pra quem não usa a
+  // Cozinha/KDS — já imprime tudo). O cliente é avisado igual (acompanha no cel).
+  async function handleMesaPronto(comanda) {
+    const ids = (comanda.comanda_itens ?? [])
+      .filter(it => it.status !== 'pronto' && it.status !== 'entregue').map(it => it.id)
+    if (!ids.length) return
+    setComandas(cs => cs.map(c => c.id === comanda.id
+      ? { ...c, comanda_itens: (c.comanda_itens ?? []).map(it => ids.includes(it.id) ? { ...it, status: 'pronto' } : it) }
+      : c))
+    await supabase.from('comanda_itens').update({ status: 'pronto' }).in('id', ids)
+  }
+  async function handleMesaItemPronto(comanda, item) {
+    setComandas(cs => cs.map(c => c.id === comanda.id
+      ? { ...c, comanda_itens: (c.comanda_itens ?? []).map(it => it.id === item.id ? { ...it, status: 'pronto' } : it) }
+      : c))
+    await supabase.from('comanda_itens').update({ status: 'pronto' }).eq('id', item.id)
+  }
+
   // ── Realtime subscription + polling de segurança + visibilidade ──
   useEffect(() => {
     if (!empresa) return
@@ -2953,7 +2990,9 @@ export default function PainelPedidos() {
             <div className="pp-board" style={filtroColuna ? { gridTemplateColumns: 'minmax(0, 460px)' } : undefined}>
               {(!filtroColuna || filtroColuna === 'mesas') && comandas.length > 0 && (
                 <Coluna titulo="Mesas" cor="#db2777" count={comandas.length} vazio="Nenhuma mesa aberta">
-                  {comandas.map(c => <CardMesa key={c.id} comanda={c} />)}
+                  {comandas.map(c => (
+                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} />
+                  ))}
                 </Coluna>
               )}
 
@@ -2979,7 +3018,7 @@ export default function PainelPedidos() {
                 </Coluna>
               )}
 
-              {(!filtroColuna || filtroColuna === 'cozinha') && (
+              {((!filtroColuna && pedidos.some(p => p.status === 'confirmado' || p.status === 'em_preparo')) || filtroColuna === 'cozinha') && (
                 <Coluna titulo="Na cozinha" cor="#1d4ed8"
                   count={pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length}
                   vazio="Nada em preparo">
@@ -2989,7 +3028,7 @@ export default function PainelPedidos() {
                 </Coluna>
               )}
 
-              {(!filtroColuna || filtroColuna === 'entrega') && (
+              {((!filtroColuna && pedidos.some(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega'))) || filtroColuna === 'entrega') && (
                 <Coluna titulo="Pronto / Em rota" cor="#7c3aed"
                   count={pedidos.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
                   vazio="Ninguém na rua">
@@ -2999,7 +3038,7 @@ export default function PainelPedidos() {
                 </Coluna>
               )}
 
-              {(!filtroColuna || filtroColuna === 'retirada') && (
+              {((!filtroColuna && pedidos.some(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega'))) || filtroColuna === 'retirada') && (
                 <Coluna titulo="Retirada" cor="#0891b2"
                   count={pedidos.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
                   vazio="Nenhuma retirada pronta">
@@ -3009,7 +3048,7 @@ export default function PainelPedidos() {
                 </Coluna>
               )}
 
-              {(!filtroColuna || filtroColuna === 'concluidos') && (
+              {((!filtroColuna && concluidosHoje.length > 0) || filtroColuna === 'concluidos') && (
                 <Coluna titulo="Concluídos hoje" cor="#16a34a"
                   count={concluidosHoje.length}
                   vazio="Nenhum concluído hoje">
@@ -3019,7 +3058,7 @@ export default function PainelPedidos() {
                 </Coluna>
               )}
 
-              {(!filtroColuna || filtroColuna === 'cancelados') && (
+              {((!filtroColuna && canceladosHoje.length > 0) || filtroColuna === 'cancelados') && (
                 <Coluna titulo="Cancelados hoje" cor="#dc2626"
                   count={canceladosHoje.length}
                   vazio="Nenhum cancelado hoje">
