@@ -12,6 +12,8 @@ const ORIGEM_CONFIG = {
   whatsapp: { label: 'WhatsApp', bg: '#25d366', color: '#fff', borda: '#25d366' },
   cardapio:  { label: 'Cardápio', bg: '#3b82f6', color: '#fff', borda: '#3b82f6' },
   app:       { label: 'App',      bg: '#f97316', color: '#fff', borda: '#f97316' },
+  ifood:     { label: 'iFood',    bg: '#ea1d2c', color: '#fff', borda: '#ea1d2c' },
+  balcao:    { label: 'Balcão',   bg: '#0891b2', color: '#fff', borda: '#0891b2' },
 }
 
 const STATUS_CONFIG = {
@@ -1061,9 +1063,11 @@ export default function PedidosDelivery() {
       <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
         {[
           { id: 'todos', label: 'Todos' },
+          { id: 'ifood',     label: 'iFood',     ...ORIGEM_CONFIG.ifood },
           { id: 'whatsapp', label: 'WhatsApp', ...ORIGEM_CONFIG.whatsapp },
           { id: 'cardapio',  label: 'Cardápio',  ...ORIGEM_CONFIG.cardapio },
           { id: 'app',       label: 'App',        ...ORIGEM_CONFIG.app },
+          { id: 'balcao',    label: 'Balcão',    ...ORIGEM_CONFIG.balcao },
         ].map(opt => {
           const ativo = filtroOrigem === opt.id
           const countOrigem = pedidos.filter(p => {
