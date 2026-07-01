@@ -498,10 +498,10 @@ export default function DeliveryLoja() {
                     <ProdutoCard
                       key={p.id}
                       produto={p}
-                      quantidade={carrinho[p.id]?.quantidade ?? 0}
+                      quantidade={qtdProduto(p.id)}
                       lojaAberta={loja.delivery_ativo}
-                      onAdd={() => addOne(p)}
-                      onRemove={() => removeOne(p.id)}
+                      onAdd={() => (p.complementos?.length ? setOptProduto(p) : addOne(p))}
+                      onRemove={() => removeOne(String(p.id))}
                     />
                   ))}
                 </div>
@@ -516,10 +516,10 @@ export default function DeliveryLoja() {
                     <ProdutoCard
                       key={p.id}
                       produto={p}
-                      quantidade={carrinho[p.id]?.quantidade ?? 0}
+                      quantidade={qtdProduto(p.id)}
                       lojaAberta={loja.delivery_ativo}
-                      onAdd={() => addOne(p)}
-                      onRemove={() => removeOne(p.id)}
+                      onAdd={() => (p.complementos?.length ? setOptProduto(p) : addOne(p))}
+                      onRemove={() => removeOne(String(p.id))}
                     />
                   ))}
                 </div>
