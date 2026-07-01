@@ -454,9 +454,12 @@ const DIAS_VISITA = ['segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado']
 const TIPOS_CLIENTE_PADRAO = ['mercadinho', 'bar', 'restaurante', 'distribuidor', 'outro']
 
 function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar, onSalvo }) {
+  const { profile } = useAuth()
+  // Desconto e limite de crédito só o dono (admin/super_admin) pode definir.
+  const podeFinanceiro = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
   const [form, setForm] = useState({
     nome: initialNome, tipo: 'mercadinho', cnpj_cpf: '', telefone: initialTel,
-    endereco: '', bairro: '', cidade: '', dia_visita: '',
+    cep: '', endereco: '', numero: '', complemento: '', bairro: '', cidade: '', estado: '', dia_visita: '',
     condicao_pagamento: 'a_vista', limite_credito: 0,
     desconto_percentual: 0, desconto_minimo_pedido: 0, observacoes: '', ativo: true,
   })
@@ -464,6 +467,27 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
   const [saving, setSaving] = useState(false)
   const [erro, setErro]     = useState(null)
   const [step, setStep]     = useState(1) // 1 = dados, 2 = endereço
+  const [buscandoCep, setBuscandoCep] = useState(false)
+
+  // Ao digitar o CEP completo, puxa endereço/bairro/cidade/UF (ViaCEP).
+  async function buscarCep(cepRaw) {
+    const cep = (cepRaw || '').replace(/\D/g, '')
+    if (cep.length !== 8) return
+    setBuscandoCep(true)
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`)
+      const d = await res.json()
+      if (!d.erro) {
+        setForm(p => ({ ...p,
+          endereco: d.logradouro || p.endereco,
+          bairro: d.bairro || p.bairro,
+          cidade: d.localidade || p.cidade,
+          estado: d.uf || p.estado,
+        }))
+      }
+    } catch { /* CEP offline — segue manual */ }
+    setBuscandoCep(false)
+  }
 
   function avancar(e) {
     e.preventDefault()
@@ -569,22 +593,27 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
                   {CONDICOES_PAGAMENTO.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </div>
-              <div style={col}>
-                <label style={lbl}>Limite de crédito (R$)</label>
-                <input name="limite_credito" type="number" value={form.limite_credito} onChange={ch} style={inp} />
-              </div>
+              {podeFinanceiro && (
+                <div style={col}>
+                  <label style={lbl}>Limite de crédito (R$)</label>
+                  <input name="limite_credito" type="number" value={form.limite_credito} onChange={ch} style={inp} />
+                </div>
+              )}
             </div>
 
-            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-              <div style={col}>
-                <label style={lbl}>Desconto autorizado (%)</label>
-                <input name="desconto_percentual" type="number" value={form.desconto_percentual} onChange={ch} style={inp} />
+            {/* Desconto e limite: só o dono (admin) define — vendedor não vê */}
+            {podeFinanceiro && (
+              <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+                <div style={col}>
+                  <label style={lbl}>Desconto autorizado (%)</label>
+                  <input name="desconto_percentual" type="number" value={form.desconto_percentual} onChange={ch} style={inp} />
+                </div>
+                <div style={col}>
+                  <label style={lbl}>Pedido mínimo para desconto (R$)</label>
+                  <input name="desconto_minimo_pedido" type="number" value={form.desconto_minimo_pedido} onChange={ch} style={inp} />
+                </div>
               </div>
-              <div style={col}>
-                <label style={lbl}>Pedido mínimo para desconto (R$)</label>
-                <input name="desconto_minimo_pedido" type="number" value={form.desconto_minimo_pedido} onChange={ch} style={inp} />
-              </div>
-            </div>
+            )}
 
             <div style={{ marginBottom: 12 }}>
               <label style={lbl}>Observações</label>
@@ -598,9 +627,26 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
           </>
         ) : (
           <>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+              <div style={{ ...col, flex: '0 0 45%' }}>
+                <label style={lbl}>CEP {buscandoCep && <span style={{ color: 'var(--primary)' }}>· buscando...</span>}</label>
+                <input name="cep" value={form.cep} onChange={e => { ch(e); buscarCep(e.target.value) }}
+                  placeholder="00000-000" inputMode="numeric" style={inp} autoFocus />
+              </div>
+              <div style={col}>
+                <label style={lbl}>Número</label>
+                <input name="numero" value={form.numero} onChange={ch} style={inp} />
+              </div>
+            </div>
+
             <div style={{ marginBottom: 12 }}>
               <label style={lbl}>Endereço</label>
-              <input name="endereco" value={form.endereco} onChange={ch} style={inp} autoFocus />
+              <input name="endereco" value={form.endereco} onChange={ch} style={inp} />
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={lbl}>Complemento</label>
+              <input name="complemento" value={form.complemento} onChange={ch} style={inp} placeholder="Apto, bloco, referência..." />
             </div>
 
             <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
@@ -615,7 +661,7 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
             </div>
 
             <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 14px' }}>
-              O endereço é opcional — pode deixar em branco e salvar.
+              Digite o CEP que a gente puxa o endereço. É opcional — pode salvar sem.
             </p>
           </>
         )}
