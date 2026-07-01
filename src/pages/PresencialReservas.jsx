@@ -27,6 +27,40 @@ const FILA_STATUS = {
   chamado:    { label: 'Chamado',    bg: 'rgba(59,130,246,.14)', cor: '#1d4ed8' },
 }
 
+// Prioridade legal (Lei 10.048, Estatuto do Idoso/PCD). rank: 0 = super
+// prioridade (idoso 80+), 1 = prioridade, 2 = normal.
+const PRIORIDADES = [
+  { value: 'normal',   label: 'Normal',          rank: 2, badge: '' },
+  { value: 'idoso80',  label: 'Idoso 80+',       rank: 0, badge: '👴 80+' },
+  { value: 'idoso',    label: 'Idoso 60+',       rank: 1, badge: '👴 60+' },
+  { value: 'pcd',      label: 'PCD',             rank: 1, badge: '♿ PCD' },
+  { value: 'gestante', label: 'Gestante',        rank: 1, badge: '🤰 Gestante' },
+  { value: 'crianca',  label: 'Criança de colo', rank: 1, badge: '👶 Colo' },
+  { value: 'obeso',    label: 'Obeso',           rank: 1, badge: '⚖️ Obeso' },
+]
+const prioInfo = (v) => PRIORIDADES.find(p => p.value === v) ?? PRIORIDADES[0]
+
+// Ordena a fila: prioritários furam a fila dos normais, mas a cada `ratio`
+// prioritários passa 1 normal (pra fila normal não travar). Entre prioritários,
+// 80+ vem primeiro; no mesmo nível, ordem de chegada.
+function ordenarFilaPrioridade(itens, ratio) {
+  const arr = (x) => new Date(x.created_at).getTime()
+  const rank = (x) => prioInfo(x.prioridade).rank
+  const pri = itens.filter(x => rank(x) < 2).sort((a, b) => rank(a) - rank(b) || arr(a) - arr(b))
+  const nor = itens.filter(x => rank(x) === 2).sort((a, b) => arr(a) - arr(b))
+  const r = Math.max(1, ratio || 1)
+  const out = []
+  let pi = 0, ni = 0
+  while (pi < pri.length || ni < nor.length) {
+    let n = 0
+    while (pi < pri.length && n < r) { out.push(pri[pi++]); n++ }
+    if (ni < nor.length) out.push(nor[ni++])
+    if (pi >= pri.length) while (ni < nor.length) out.push(nor[ni++])
+    if (ni >= nor.length) while (pi < pri.length) out.push(pri[pi++])
+  }
+  return out
+}
+
 const hojeISO = () => new Date().toISOString().slice(0, 10)
 
 function fmtData(d) {
@@ -69,20 +103,30 @@ export default function PresencialReservas() {
   const [fTel, setFTel] = useState('')
   const [fPessoas, setFPessoas] = useState(2)
   const [fObs, setFObs] = useState('')
+  const [fPrioridade, setFPrioridade] = useState('normal')
   const [fSalvando, setFSalvando] = useState(false)
+  const [ratio, setRatio] = useState(2) // a cada X prioritários, passa 1 normal
 
   const carregar = useCallback(async () => {
     if (!empresaId) return
-    const [mesasRes, reservasRes, filaRes] = await Promise.all([
+    const [mesasRes, reservasRes, filaRes, empRes] = await Promise.all([
       supabase.from('mesas').select('id, numero, nome, capacidade').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('reservas').select('*').eq('empresa_id', empresaId).order('data_reserva').order('hora_reserva'),
       supabase.from('fila_espera').select('*').eq('empresa_id', empresaId).in('status', ['aguardando', 'chamado']).order('created_at'),
+      supabase.from('empresas').select('fila_prioridade_ratio').eq('id', empresaId).maybeSingle(),
     ])
     setMesas(mesasRes.data ?? [])
     setReservas(reservasRes.data ?? [])
     setFila(filaRes.data ?? [])
+    setRatio(empRes.data?.fila_prioridade_ratio ?? 2)
     setLoading(false)
   }, [empresaId])
+
+  async function salvarRatio(novo) {
+    const n = Math.max(1, parseInt(novo, 10) || 1)
+    setRatio(n)
+    await supabase.from('empresas').update({ fila_prioridade_ratio: n }).eq('id', empresaId)
+  }
 
   useEffect(() => { carregar() }, [carregar])
 
@@ -141,10 +185,11 @@ export default function PresencialReservas() {
       cliente_telefone: fTel.trim() || null,
       num_pessoas: parseInt(fPessoas, 10) || 1,
       observacoes: fObs.trim() || null,
+      prioridade: fPrioridade,
     })
     setFSalvando(false)
     if (error) { setErro(error.message); return }
-    setFNome(''); setFTel(''); setFPessoas(2); setFObs('')
+    setFNome(''); setFTel(''); setFPessoas(2); setFObs(''); setFPrioridade('normal')
     carregar()
   }
 
@@ -330,6 +375,14 @@ export default function PresencialReservas() {
                 <label>Pessoas</label>
                 <input type="number" min="1" value={fPessoas} onChange={e => setFPessoas(e.target.value)} />
               </div>
+              <div className="form-field" style={{ width: 170 }}>
+                <label>Prioridade</label>
+                <select value={fPrioridade} onChange={e => setFPrioridade(e.target.value)}>
+                  {PRIORIDADES.map(p => (
+                    <option key={p.value} value={p.value}>{p.badge ? `${p.badge} ` : ''}{p.label}</option>
+                  ))}
+                </select>
+              </div>
               <div className="form-field" style={{ flex: 1, minWidth: 160 }}>
                 <label>Observações</label>
                 <input value={fObs} onChange={e => setFObs(e.target.value)} placeholder="Ex: aceita mesa externa" />
@@ -340,24 +393,47 @@ export default function PresencialReservas() {
             </div>
           </form>
 
+          {/* Configuração da proporção — fica aqui mesmo, fácil de ajustar */}
+          <div className="card" style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13.5, fontWeight: 700 }}>⚖️ Prioridade:</span>
+            <span style={{ fontSize: 13 }}>a cada</span>
+            <input
+              type="number" min="1" value={ratio}
+              onChange={e => setRatio(e.target.value)}
+              onBlur={e => salvarRatio(e.target.value)}
+              style={{ width: 56, textAlign: 'center', padding: '6px 4px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)' }}
+            />
+            <span style={{ fontSize: 13 }}>prioritário(s) chamados, passa <strong>1 normal</strong>.</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>· Idoso 80+ tem super-prioridade (vem antes).</span>
+          </div>
+
           {fila.length === 0 ? (
             <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
               Ninguém na fila no momento. ✅
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {fila.map((item, i) => {
+              {ordenarFilaPrioridade(fila, ratio).map((item, i) => {
                 const st = FILA_STATUS[item.status] ?? FILA_STATUS.aguardando
                 const espera = esperaMin(item.created_at)
+                const pri = prioInfo(item.prioridade)
+                const ehPrioritario = pri.rank < 2
                 return (
-                  <div key={item.id} className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                  <div key={item.id} className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', borderLeft: ehPrioritario ? `4px solid ${pri.rank === 0 ? '#dc2626' : '#a16207'}` : undefined }}>
                     <div style={{
                       width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
                       background: 'var(--primary)', color: '#fff', fontWeight: 800,
                       display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15,
                     }}>{i + 1}</div>
                     <div style={{ flex: 1, minWidth: 150 }}>
-                      <div style={{ fontWeight: 800, fontSize: 16 }}>{item.cliente_nome}</div>
+                      <div style={{ fontWeight: 800, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        {item.cliente_nome}
+                        {ehPrioritario && (
+                          <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 20, background: pri.rank === 0 ? 'rgba(220,38,38,.14)' : 'rgba(161,98,7,.16)', color: pri.rank === 0 ? '#dc2626' : '#a16207' }}>
+                            {pri.badge}{pri.rank === 0 ? ' · super' : ''}
+                          </span>
+                        )}
+                      </div>
                       <div style={{ fontSize: 13, color: 'var(--text-muted)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                         <span>👥 {item.num_pessoas}</span>
                         <span>⏱ {espera} min na fila</span>
