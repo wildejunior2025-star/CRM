@@ -2460,9 +2460,13 @@ export default function PainelPedidos() {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
               {[
                 { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidos.length + concluidosHoje.length + canceladosHoje.length },
-                { id: 'aceitar',    label: 'A aceitar', cor: '#ca8a04', count: pedidos.filter(p => p.status === 'aguardando').length },
+                // "A aceitar" só aparece quando há pedido aguardando (esconde quando vazia)
+                ...(pedidos.some(p => p.status === 'aguardando')
+                  ? [{ id: 'aceitar', label: 'A aceitar', cor: '#ca8a04', count: pedidos.filter(p => p.status === 'aguardando').length }]
+                  : []),
                 { id: 'cozinha',    label: 'Na cozinha', cor: '#1d4ed8', count: pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length },
-                { id: 'entrega',    label: 'Pronto / Em rota', cor: '#7c3aed', count: pedidos.filter(p => p.status === 'pronto' || p.status === 'saiu_entrega').length },
+                { id: 'entrega',    label: 'Pronto / Em rota', cor: '#7c3aed', count: pedidos.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length },
+                { id: 'retirada',   label: 'Retirada',  cor: '#0891b2', count: pedidos.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length },
                 { id: 'concluidos', label: 'Concluídos', cor: '#16a34a', count: concluidosHoje.length },
                 { id: 'cancelados', label: 'Cancelados', cor: '#dc2626', count: canceladosHoje.length },
               ].map(f => {
@@ -2490,7 +2494,7 @@ export default function PainelPedidos() {
             </div>
 
             <div className="pp-board" style={filtroColuna ? { gridTemplateColumns: 'minmax(0, 460px)' } : undefined}>
-              {(!filtroColuna || filtroColuna === 'aceitar') && (
+              {(!filtroColuna || filtroColuna === 'aceitar') && pedidos.some(p => p.status === 'aguardando') && (
                 <Coluna titulo="A aceitar" cor="#ca8a04"
                   count={pedidos.filter(p => p.status === 'aguardando').length}
                   vazio="Nenhum pedido novo">
@@ -2523,10 +2527,20 @@ export default function PainelPedidos() {
 
               {(!filtroColuna || filtroColuna === 'entrega') && (
                 <Coluna titulo="Pronto / Em rota" cor="#7c3aed"
-                  count={pedidos.filter(p => p.status === 'pronto' || p.status === 'saiu_entrega').length}
+                  count={pedidos.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
                   vazio="Ninguém na rua">
-                  {pedidos.filter(p => p.status === 'pronto' || p.status === 'saiu_entrega').map(p => (
+                  {pedidos.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).map(p => (
                     <CardMini key={p.id} pedido={p} entregadores={entregadores} onClick={() => setPedidoDetalhe(p)} />
+                  ))}
+                </Coluna>
+              )}
+
+              {(!filtroColuna || filtroColuna === 'retirada') && (
+                <Coluna titulo="Retirada" cor="#0891b2"
+                  count={pedidos.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
+                  vazio="Nenhuma retirada pronta">
+                  {pedidos.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).map(p => (
+                    <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
