@@ -97,9 +97,26 @@ export default function Produtos() {
   async function loadCategorias() {
     const { data } = await supabase
       .from('categorias')
-      .select('id, nome')
+      .select('id, nome, ordem')
+      .order('ordem', { ascending: true })
       .order('nome', { ascending: true })
     setCategorias(data ?? [])
+  }
+
+  // Move uma categoria pra cima/baixo trocando a ordem com a vizinha
+  async function moverCategoria(index, dir) {
+    const outro = index + dir
+    if (outro < 0 || outro >= categorias.length) return
+    const a = categorias[index]
+    const b = categorias[outro]
+    // troca os valores de ordem (usa índice como fallback se vierem iguais)
+    const ordemA = a.ordem ?? index
+    const ordemB = b.ordem ?? outro
+    await Promise.all([
+      supabase.from('categorias').update({ ordem: ordemB }).eq('id', a.id),
+      supabase.from('categorias').update({ ordem: ordemA }).eq('id', b.id),
+    ])
+    loadCategorias()
   }
 
   async function loadEmbalagens() {
@@ -317,6 +334,15 @@ export default function Produtos() {
 
   const totalPaginas = Math.ceil(total / PAGE_SIZE)
 
+  // Ordena os produtos exibidos seguindo a ordem personalizada das categorias
+  const catOrdem = Object.fromEntries(categorias.map(c => [c.nome, c.ordem ?? 999]))
+  const produtosOrdenados = [...produtos].sort((a, b) => {
+    const oa = catOrdem[a.categoria] ?? 999
+    const ob = catOrdem[b.categoria] ?? 999
+    if (oa !== ob) return oa - ob
+    return (a.nome ?? '').localeCompare(b.nome ?? '')
+  })
+
   return (
     <div>
       <div className="page-header">
@@ -407,8 +433,8 @@ export default function Produtos() {
               </tr>
             </thead>
             <tbody>
-              {produtos.map((p, idx) => {
-                const catAnterior = idx === 0 ? null : produtos[idx - 1].categoria
+              {produtosOrdenados.map((p, idx) => {
+                const catAnterior = idx === 0 ? null : produtosOrdenados[idx - 1].categoria
                 const mudouCategoria = p.categoria !== catAnterior
                 return (
                   <React.Fragment key={p.id}>
@@ -858,8 +884,28 @@ export default function Produtos() {
               ) : (
                 <table>
                   <tbody>
-                    {categorias.map((c) => (
+                    {categorias.map((c, i) => (
                       <tr key={c.id}>
+                        <td style={{ width: 84 }}>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            title="Subir"
+                            disabled={i === 0}
+                            onClick={() => moverCategoria(i, -1)}
+                            style={{ padding: '2px 8px' }}
+                          >
+                            ↑
+                          </button>{' '}
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            title="Descer"
+                            disabled={i === categorias.length - 1}
+                            onClick={() => moverCategoria(i, 1)}
+                            style={{ padding: '2px 8px' }}
+                          >
+                            ↓
+                          </button>
+                        </td>
                         <td>{c.nome}</td>
                         <td style={{ textAlign: 'right' }}>
                           <button

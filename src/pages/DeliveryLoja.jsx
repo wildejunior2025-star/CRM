@@ -76,6 +76,7 @@ export default function DeliveryLoja() {
 
   const [loja, setLoja] = useState(null)
   const [produtos, setProdutos] = useState([])
+  const [catOrdem, setCatOrdem] = useState({}) // { nomeCategoria: ordem }
   const [loading, setLoading] = useState(true)
   const [catAtiva, setCatAtiva] = useState(null)
   const catRefs = useRef({})
@@ -160,12 +161,21 @@ export default function DeliveryLoja() {
         }))
       }
 
+      // Ordem personalizada das categorias
+      const { data: catData } = await supabase
+        .from('categorias')
+        .select('nome, ordem')
+        .eq('empresa_id', lojaData.id)
+      const ordemMap = {}
+      for (const c of (catData ?? [])) ordemMap[c.nome] = c.ordem ?? 999
+
       // Restaura carrinho salvo desta loja (chave = id real)
       let savedCart = {}
       try { savedCart = JSON.parse(localStorage.getItem(`sacola_${lojaData.id}`) || '{}') } catch { savedCart = {} }
 
       setLoja(lojaData)
       setProdutos(produtosFinal)
+      setCatOrdem(ordemMap)
       setCarrinho(savedCart)
       setLoading(false)
     }
@@ -250,6 +260,12 @@ export default function DeliveryLoja() {
     : produtos
 
   const categorias = [...new Set(produtosFiltrados.map(p => p.categoria).filter(Boolean))]
+    .sort((a, b) => {
+      const oa = catOrdem[a] ?? 999
+      const ob = catOrdem[b] ?? 999
+      if (oa !== ob) return oa - ob
+      return a.localeCompare(b)
+    })
   const semCategoria = produtosFiltrados.filter(p => !p.categoria)
   const todasCats = semCategoria.length > 0 ? [...categorias, '__sem__'] : categorias
 
