@@ -29,7 +29,6 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar }) {
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
   const endereco = enderecoTexto(pedido)
-  const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const tel = soDigitos(pedido.cliente_telefone)
   const emRota = pedido.status === 'saiu_entrega'
   const cor = !mine ? '#0d9488' : emRota ? '#7c3aed' : '#2563eb'
@@ -72,13 +71,6 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar }) {
       <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>{pedido.cliente_nome || 'Cliente'}</div>
       <div style={{ fontSize: 14, color: 'var(--text-muted)', margin: '4px 0 10px' }}>📍 {endereco}</div>
 
-      {itens.length > 0 && (
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
-          {itens.map((it, i) => (
-            <div key={i}>{it.quantidade ?? it.qtd ?? 1}x {it.nome}</div>
-          ))}
-        </div>
-      )}
 
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',

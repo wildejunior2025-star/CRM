@@ -971,7 +971,34 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
 }
 
 // ── Card de pedido ──────────────────────────────────────────
-function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, entregadores = [] }) {
+// Seletor pra o gestor atrelar um entregador a um pedido (ex.: pedido do iFood
+// que foi despachado sem motoboy). Ao escolher, o pedido passa a aparecer no
+// app daquele entregador.
+function SeletorEntregador({ entregadores = [], onAtribuir, pedidoId }) {
+  if (!entregadores.length) {
+    return (
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', margin: '0 0 8px' }}>
+        Nenhum entregador cadastrado ainda.
+      </p>
+    )
+  }
+  return (
+    <select
+      defaultValue=""
+      onChange={e => { if (e.target.value) onAtribuir?.(pedidoId, e.target.value) }}
+      style={{
+        width: '100%', padding: '9px 12px', borderRadius: 8, marginBottom: 8,
+        border: '1.5px solid var(--border)', background: 'var(--surface)',
+        color: 'var(--text)', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+      }}
+    >
+      <option value="">🛵 Atribuir a um entregador...</option>
+      {entregadores.map(en => <option key={en.id} value={en.id}>{en.nome}</option>)}
+    </select>
+  )
+}
+
+function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onAtribuir, entregadores = [] }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const pagamento = pedido.forma_pagamento || ''
   const endereco = enderecoCompleto(pedido)
@@ -1289,10 +1316,13 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
               {pedido.entregador_id ? '🛵 Entregador a caminho' : '✅ Pronto · aguardando um entregador aceitar'}
             </p>
             {!pedido.entregador_id && (
-              <button type="button" className="pp-btn pp-btn-avancar"
-                onClick={() => onAvancar(pedido.id, 'saiu_entrega')} style={{ width: '100%' }}>
-                Despachar mesmo assim
-              </button>
+              <>
+                <SeletorEntregador entregadores={entregadores} onAtribuir={onAtribuir} pedidoId={pedido.id} />
+                <button type="button" className="pp-btn pp-btn-avancar"
+                  onClick={() => onAvancar(pedido.id, 'saiu_entrega')} style={{ width: '100%' }}>
+                  Despachar mesmo assim
+                </button>
+              </>
             )}
           </div>
         )}
@@ -1302,8 +1332,13 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           <div style={{ width: '100%' }}>
             {!confirmandoEntrega ? (
               <>
+                {/* Despachado sem motoboy (ex.: pedido do iFood) → o gestor pode
+                    atrelar um entregador, e o pedido passa a aparecer no app dele */}
+                {!isRetirada && !pedido.entregador_id && (
+                  <SeletorEntregador entregadores={entregadores} onAtribuir={onAtribuir} pedidoId={pedido.id} />
+                )}
                 <p style={{ textAlign: 'center', color: '#a78bfa', fontSize: 13, fontWeight: 600, margin: '0 0 10px' }}>
-                  🛵 Pedido saiu para entrega
+                  🛵 {pedido.entregador_id ? 'Pedido com o entregador' : 'Saiu para entrega (sem motoboy atribuído)'}
                 </p>
                 <button
                   type="button"
@@ -2201,6 +2236,13 @@ export default function PainelPedidos() {
   // (notify_ifood_status, migração 0070) — cobre gestor, entregador e
   // auto-conclusão sem o front precisar chamar a edge function.
 
+  // Gestor atrela um entregador ao pedido (ex.: iFood despachado sem motoboy).
+  // Só seta o entregador_id — o pedido passa a aparecer no app daquele motoboy.
+  async function handleAtribuirEntregador(id, entregadorId) {
+    setPedidos(prev => prev.map(p => p.id === id ? { ...p, entregador_id: entregadorId } : p))
+    await supabase.from('pedidos_delivery').update({ entregador_id: entregadorId }).eq('id', id)
+  }
+
   async function handleAvancar(id, novoStatus, extra = {}) {
     const update = { status: novoStatus, ...extra }
 
@@ -2508,6 +2550,7 @@ export default function PainelPedidos() {
                       onRecusar={(ped) => setPedidoRecusando(ped)}
                       onExpirado={handleExpirado}
                       onAvancar={handleAvancar}
+                      onAtribuir={handleAtribuirEntregador}
                       onEnviarMensagem={(ped) => setPedidoMensagem(ped)}
                       onImprimir={handleImprimir}
                     />
@@ -2619,6 +2662,7 @@ export default function PainelPedidos() {
               onRecusar={(p) => { setPedidoRecusando(p); setPedidoDetalhe(null) }}
               onExpirado={(id) => { handleExpirado(id); setPedidoDetalhe(null) }}
               onAvancar={(id, st) => { handleAvancar(id, st); setPedidoDetalhe(null) }}
+              onAtribuir={handleAtribuirEntregador}
               onEnviarMensagem={(p) => { setPedidoMensagem(p); setPedidoDetalhe(null) }}
               onImprimir={handleImprimir}
               entregadores={entregadores}
