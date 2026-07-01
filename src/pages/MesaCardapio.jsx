@@ -8,6 +8,7 @@ export default function MesaCardapio() {
   const { token } = useParams()
   const [info, setInfo]       = useState(null)
   const [produtos, setProdutos] = useState([])
+  const [catOrdem, setCatOrdem] = useState({}) // { nomeCategoria: ordem } — ordem do cardápio
   const [loading, setLoading] = useState(true)
   const [erro, setErro]       = useState(null)
   const [busca, setBusca]     = useState('')
@@ -58,6 +59,14 @@ export default function MesaCardapio() {
         .select('produto_id, nome, preco_venda, categoria, foto_url')
         .eq('empresa_id', data.empresa_id)
         .order('categoria').order('nome').limit(500)
+      // Ordem personalizada das categorias (mesma da loja online)
+      const { data: cats } = await supabase
+        .from('categorias')
+        .select('nome, ordem')
+        .eq('empresa_id', data.empresa_id)
+      const ordemMap = {}
+      for (const c of (cats ?? [])) ordemMap[c.nome] = c.ordem ?? 999
+      setCatOrdem(ordemMap)
       setProdutos(ps ?? [])
       setLoading(false)
     })()
@@ -77,15 +86,25 @@ export default function MesaCardapio() {
     return () => clearTimeout(t)
   }, [notif])
 
-  const categorias = useMemo(
-    () => ['Todos', ...new Set(produtos.map(p => p.categoria).filter(Boolean))],
-    [produtos]
-  )
-  const filtrados = produtos.filter(p => {
-    const okCat = cat === 'Todos' || p.categoria === cat
-    const t = busca.trim().toLowerCase()
-    return okCat && (!t || p.nome?.toLowerCase().includes(t))
-  })
+  const ordemCat = (nome) => catOrdem[nome] ?? 999
+  const categorias = useMemo(() => {
+    const nomes = [...new Set(produtos.map(p => p.categoria).filter(Boolean))]
+      .sort((a, b) => {
+        const oa = ordemCat(a), ob = ordemCat(b)
+        return oa !== ob ? oa - ob : a.localeCompare(b)
+      })
+    return ['Todos', ...nomes]
+  }, [produtos, catOrdem]) // eslint-disable-line react-hooks/exhaustive-deps
+  const filtrados = produtos
+    .filter(p => {
+      const okCat = cat === 'Todos' || p.categoria === cat
+      const t = busca.trim().toLowerCase()
+      return okCat && (!t || p.nome?.toLowerCase().includes(t))
+    })
+    .sort((a, b) => {
+      const oa = ordemCat(a.categoria), ob = ordemCat(b.categoria)
+      return oa !== ob ? oa - ob : (a.nome ?? '').localeCompare(b.nome ?? '')
+    })
 
   const itens = Object.entries(carrinho).map(([id, v]) => ({ id, ...v }))
   const totalItens = itens.reduce((s, i) => s + i.qtd, 0)
