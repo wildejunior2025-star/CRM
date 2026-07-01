@@ -615,11 +615,109 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
 
 // ── Modal de venda no balcão (PDV do gestor) ────────────────
 // O vendedor monta o pedido pelo catálogo; ele entra na lista do painel.
+// Seletor de complementos ("monte sua quentinha") na venda de balcão.
+function ModalComplementos({ produto, onFechar, onConfirmar }) {
+  const grupos = produto.grupos ?? []
+  const [sel, setSel] = useState(() => {
+    const init = {}
+    for (const g of grupos) init[g.id] = new Set()
+    return init
+  })
+
+  function toggle(grupo, opcao) {
+    setSel(prev => {
+      const atual = new Set(prev[grupo.id] ?? [])
+      if (atual.has(opcao.id)) atual.delete(opcao.id)
+      else {
+        if (grupo.max === 1) atual.clear()          // rádio
+        if (atual.size >= grupo.max) return prev     // limite atingido
+        atual.add(opcao.id)
+      }
+      return { ...prev, [grupo.id]: atual }
+    })
+  }
+
+  const selecoes = grupos.flatMap(g =>
+    [...(sel[g.id] ?? [])].map(oid => {
+      const o = g.opcoes.find(x => x.id === oid)
+      return { grupoId: g.id, opcaoId: oid, nome: o?.nome ?? '', preco: Number(o?.preco_adicional ?? 0) }
+    })
+  )
+  const adicional = selecoes.reduce((s, x) => s + x.preco, 0)
+  const precoUnit = Number(produto.preco_venda || 0) + adicional
+  const faltando = grupos.filter(g => (sel[g.id]?.size ?? 0) < (g.min ?? 0))
+  const podeAdd = faltando.length === 0
+
+  return (
+    <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 200 }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 'min(440px, 94vw)', maxHeight: '90vh', overflowY: 'auto',
+        background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)',
+        borderRadius: 14, padding: 20,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>{produto.nome}</h3>
+          <button type="button" onClick={onFechar} style={{ background: 'none', border: 'none', fontSize: 22, color: 'var(--text-muted)', cursor: 'pointer', lineHeight: 1 }}>×</button>
+        </div>
+
+        {grupos.map(grupo => {
+          const qtdSel = sel[grupo.id]?.size ?? 0
+          const obrig = (grupo.min ?? 0) > 0
+          const incompleto = qtdSel < (grupo.min ?? 0)
+          return (
+            <div key={grupo.id} style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{grupo.nome}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6,
+                  background: incompleto ? 'rgba(239,68,68,.15)' : 'var(--border,#2a2a3a)',
+                  color: incompleto ? '#f87171' : 'var(--text-muted)' }}>
+                  {obrig ? `Obrigatório${grupo.min > 1 ? ` · min ${grupo.min}` : ''}` : 'Opcional'}{grupo.max > 1 ? ` · até ${grupo.max}` : ''}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {grupo.opcoes.map(opcao => {
+                  const marcado = sel[grupo.id]?.has(opcao.id)
+                  const bloqueado = !marcado && grupo.max > 1 && qtdSel >= grupo.max
+                  return (
+                    <button key={opcao.id} type="button" onClick={() => toggle(grupo, opcao)} disabled={bloqueado}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
+                        padding: '9px 11px', borderRadius: 9, cursor: bloqueado ? 'not-allowed' : 'pointer',
+                        border: `1.5px solid ${marcado ? '#22c55e' : 'var(--border,#2a2a3a)'}`,
+                        background: marcado ? 'rgba(34,197,94,.12)' : 'transparent',
+                        color: 'var(--text)', opacity: bloqueado ? 0.4 : 1 }}>
+                      <span style={{ width: 18, height: 18, flexShrink: 0, borderRadius: grupo.max === 1 ? '50%' : 5,
+                        border: `2px solid ${marcado ? '#22c55e' : '#64748b'}`, background: marcado ? '#22c55e' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#04120a', fontSize: 12, fontWeight: 900 }}>
+                        {marcado ? '✓' : ''}
+                      </span>
+                      <span style={{ flex: 1, fontSize: 14 }}>{opcao.nome}</span>
+                      {Number(opcao.preco_adicional) > 0 && (
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>+{fmt(opcao.preco_adicional)}</span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+
+        <button type="button" disabled={!podeAdd} onClick={() => onConfirmar(produto, selecoes, precoUnit)}
+          className="btn btn-primary" style={{ width: '100%', opacity: podeAdd ? 1 : 0.5, marginTop: 4 }}>
+          {podeAdd ? `Adicionar · ${fmt(precoUnit)}` : (faltando[0] ? `Escolha: ${faltando[0].nome}` : 'Escolha os obrigatórios')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function ModalVenda({ empresa, onFechar, onCriado }) {
   const [produtos, setProdutos] = useState([])
   const [loading, setLoading]   = useState(true)
   const [busca, setBusca]       = useState('')
-  const [cart, setCart]         = useState({}) // { [id]: { id, nome, preco, qtd } }
+  const [cart, setCart]         = useState({}) // { [id]: { id, nome, preco, qtd, complementos? } }
+  const [compMap, setCompMap]   = useState({}) // { [produto_id]: grupos[] }
+  const [produtoComp, setProdutoComp] = useState(null) // produto sendo montado (complementos)
   const [nome, setNome]         = useState('')
   const [telefone, setTelefone] = useState('')
   const [tipo, setTipo]         = useState('retirada') // 'retirada' (balcão) | 'entrega'
@@ -644,12 +742,26 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
   useEffect(() => {
     let ativo = true
     ;(async () => {
-      const { data } = await supabase
-        .from('produtos')
-        .select('id, nome, preco_venda, categoria')
-        .eq('empresa_id', empresa.id)
-        .order('nome', { ascending: true })
-      if (ativo) { setProdutos(data || []); setLoading(false) }
+      const [prodRes, gruposRes] = await Promise.all([
+        supabase.from('produtos').select('id, nome, preco_venda, categoria')
+          .eq('empresa_id', empresa.id).order('nome', { ascending: true }),
+        supabase.from('complemento_grupos')
+          .select('id, produto_id, nome, min, max, ordem, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
+          .eq('empresa_id', empresa.id).order('ordem'),
+      ])
+      if (!ativo) return
+      setProdutos(prodRes.data || [])
+      // Mapa produto_id -> grupos (só opções disponíveis, ordenadas)
+      const map = {}
+      for (const g of (gruposRes.data ?? [])) {
+        const opcoes = (g.complemento_opcoes ?? [])
+          .filter(o => o.disponivel !== false)
+          .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+        if (!opcoes.length) continue
+        ;(map[g.produto_id] = map[g.produto_id] || []).push({ id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, opcoes })
+      }
+      setCompMap(map)
+      setLoading(false)
     })()
     return () => { ativo = false }
   }, [empresa])
@@ -698,8 +810,26 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
   function addItem(p) {
     setCart(prev => {
       const qtd = (prev[p.id]?.qtd ?? 0) + 1
-      return { ...prev, [p.id]: { id: p.id, nome: p.nome, preco: Number(p.preco_venda || 0), qtd } }
+      return { ...prev, [p.id]: { id: p.id, produto_id: p.id, nome: p.nome, preco: Number(p.preco_venda || 0), qtd } }
     })
+  }
+  // Se o produto tem complementos, abre o seletor; senão adiciona direto.
+  function pedirProduto(p) {
+    const grupos = compMap[p.id]
+    if (grupos?.length) setProdutoComp({ ...p, grupos })
+    else addItem(p)
+  }
+  // Adiciona uma linha com os complementos escolhidos (mesma escolha soma qtd).
+  function adicionarComComplementos(produto, selecoes, precoUnit) {
+    const sig = `${produto.id}::${selecoes.map(s => s.opcaoId).sort().join(',')}`
+    setCart(prev => {
+      const qtd = (prev[sig]?.qtd ?? 0) + 1
+      return { ...prev, [sig]: {
+        id: sig, produto_id: produto.id, nome: produto.nome, preco: precoUnit, qtd,
+        complementos: selecoes.map(s => ({ nome: s.nome, qtd: 1 })),
+      } }
+    })
+    setProdutoComp(null)
   }
   function subItem(id) {
     setCart(prev => {
@@ -710,6 +840,9 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
       else novo[id] = { ...cur, qtd: cur.qtd - 1 }
       return novo
     })
+  }
+  function removeItem(id) {
+    setCart(prev => { const novo = { ...prev }; delete novo[id]; return novo })
   }
   function setItemQtd(p, n) {
     const qtd = Math.max(0, Math.floor(Number(n) || 0))
@@ -754,8 +887,9 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
       origem: 'balcao',
       status: 'confirmado', // já aceito — o vendedor está criando o pedido
       itens: itens.map(i => ({
-        produto_id: i.id, nome: i.nome, quantidade: i.qtd,
+        produto_id: i.produto_id ?? i.id, nome: i.nome, quantidade: i.qtd,
         preco_unitario: i.preco, subtotal: i.preco * i.qtd,
+        complementos: i.complementos ?? [],
       })),
       subtotal,
       taxa_entrega: taxaNum,
@@ -819,7 +953,10 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
               <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 6px', borderRadius: 8 }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nome}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmt(p.preco_venda)}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    {fmt(p.preco_venda)}
+                    {compMap[p.id]?.length ? <span style={{ color: '#7c3aed', fontWeight: 700 }}> · monte</span> : null}
+                  </div>
                 </div>
                 {qtd > 0 ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
@@ -828,7 +965,7 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
                     <button type="button" onClick={() => addItem(p)} style={{ width: 30, height: 30, borderRadius: 7, border: 'none', background: '#7c3aed', color: '#fff', cursor: 'pointer', fontWeight: 800, fontSize: 16 }}>+</button>
                   </div>
                 ) : (
-                  <button type="button" onClick={() => addItem(p)} style={{ flexShrink: 0, padding: '6px 14px', borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Adicionar</button>
+                  <button type="button" onClick={() => pedirProduto(p)} style={{ flexShrink: 0, padding: '6px 14px', borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>{compMap[p.id]?.length ? 'Escolher' : 'Adicionar'}</button>
                 )}
               </div>
             )
@@ -839,9 +976,16 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
         {itens.length > 0 && (
           <div style={{ marginBottom: 14, fontSize: 13 }}>
             {itens.map(i => (
-              <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text)', padding: '2px 0' }}>
-                <span>{i.qtd}× {i.nome}</span>
-                <span>{fmt(i.preco * i.qtd)}</span>
+              <div key={i.id} style={{ padding: '3px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, color: 'var(--text)' }}>
+                  <span style={{ flex: 1 }}>{i.qtd}× {i.nome}</span>
+                  <span>{fmt(i.preco * i.qtd)}</span>
+                  <button type="button" onClick={() => removeItem(i.id)} title="Remover"
+                    style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>×</button>
+                </div>
+                {Array.isArray(i.complementos) && i.complementos.map((c, j) => (
+                  <div key={j} style={{ fontSize: 12, color: 'var(--text-muted)', paddingLeft: 16 }}>+ {c.nome}</div>
+                ))}
               </div>
             ))}
           </div>
@@ -965,6 +1109,14 @@ function ModalVenda({ empresa, onFechar, onCriado }) {
         initialTel={telefone}
         onFechar={() => setCadastroAberto(false)}
         onSalvo={aoCadastrarCliente}
+      />
+    )}
+
+    {produtoComp && (
+      <ModalComplementos
+        produto={produtoComp}
+        onFechar={() => setProdutoComp(null)}
+        onConfirmar={adicionarComComplementos}
       />
     )}
     </>
