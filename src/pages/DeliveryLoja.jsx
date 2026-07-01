@@ -84,6 +84,7 @@ export default function DeliveryLoja() {
   // Carrinho é chaveado pelo id REAL da loja (uuid) — bate com a limpeza do checkout.
   const cartKey = loja?.id ? `sacola_${loja.id}` : null
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [optProduto, setOptProduto] = useState(null) // produto aberto no modal de complementos
   const drawerRef = useRef(null)
   const [filtroEstoqueBaixo, setFiltroEstoqueBaixo] = useState(false)
   const [busca, setBusca] = useState('')
@@ -106,10 +107,13 @@ export default function DeliveryLoja() {
     if (produtos.length === 0) return
     setCarrinho(prev => {
       const atualizado = {}
-      for (const [pid, item] of Object.entries(prev)) {
-        const produtoAtual = produtos.find(p => String(p.id) === String(pid))
+      for (const [key, item] of Object.entries(prev)) {
+        const produtoAtual = produtos.find(p => String(p.id) === String(item.id ?? key))
         if (produtoAtual) {
-          atualizado[pid] = { ...item, preco: produtoAtual.preco }
+          // Combos (com complementos) mantêm o preço já calculado (base + adicionais)
+          atualizado[key] = item.complementos?.length
+            ? { key, ...item }
+            : { key, ...item, id: produtoAtual.id, preco: Number(produtoAtual.preco) }
         }
       }
       return atualizado
@@ -133,12 +137,35 @@ export default function DeliveryLoja() {
         .order('categoria')
         .order('nome')
 
+      // Complementos (ex.: "monte sua quentinha") — grupos + opções por produto
+      let produtosFinal = produtosData ?? []
+      const ids = produtosFinal.map(p => p.id)
+      if (ids.length) {
+        const { data: grupos } = await supabase
+          .from('complemento_grupos')
+          .select('id, produto_id, nome, min, max, ordem, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
+          .in('produto_id', ids)
+        const porProduto = {}
+        for (const g of (grupos ?? [])) {
+          const opcoes = (g.complemento_opcoes ?? [])
+            .filter(o => o.disponivel !== false)
+            .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+          ;(porProduto[g.produto_id] ??= []).push({
+            id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, ordem: g.ordem ?? 0, opcoes,
+          })
+        }
+        produtosFinal = produtosFinal.map(p => ({
+          ...p,
+          complementos: (porProduto[p.id] ?? []).sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0)),
+        }))
+      }
+
       // Restaura carrinho salvo desta loja (chave = id real)
       let savedCart = {}
       try { savedCart = JSON.parse(localStorage.getItem(`sacola_${lojaData.id}`) || '{}') } catch { savedCart = {} }
 
       setLoja(lojaData)
-      setProdutos(produtosData ?? [])
+      setProdutos(produtosFinal)
       setCarrinho(savedCart)
       setLoading(false)
     }
@@ -154,28 +181,62 @@ export default function DeliveryLoja() {
     return () => document.removeEventListener('keydown', onKey)
   }, [drawerOpen])
 
+  // Produto simples (sem complementos) — chave = id do produto
   function addOne(prod) {
-    setCarrinho(prev => ({ ...prev, [prod.id]: { ...prod, quantidade: (prev[prod.id]?.quantidade ?? 0) + 1 } }))
+    const key = String(prod.id)
+    setCarrinho(prev => ({
+      ...prev,
+      [key]: {
+        key, id: prod.id, nome: prod.nome, preco: Number(prod.preco),
+        foto_url: prod.foto_url, quantidade: (prev[key]?.quantidade ?? 0) + 1,
+      },
+    }))
   }
 
-  function removeOne(id) {
+  // Produto com complementos — chave = id + opções escolhidas (combos distintos = linhas distintas)
+  function addCombo(prod, selecoes, precoUnit) {
+    const key = selecoes.length
+      ? `${prod.id}::${selecoes.map(s => s.opcaoId).sort().join('-')}`
+      : String(prod.id)
+    setCarrinho(prev => ({
+      ...prev,
+      [key]: {
+        key, id: prod.id, nome: prod.nome, preco: precoUnit, foto_url: prod.foto_url,
+        complementos: selecoes.map(s => ({ grupo: s.grupo, nome: s.nome, preco: s.preco })),
+        quantidade: (prev[key]?.quantidade ?? 0) + 1,
+      },
+    }))
+    setOptProduto(null)
+  }
+
+  function incKey(key) {
+    setCarrinho(prev => prev[key]
+      ? { ...prev, [key]: { ...prev[key], quantidade: prev[key].quantidade + 1 } }
+      : prev)
+  }
+
+  function removeOne(key) {
     setCarrinho(prev => {
       const next = { ...prev }
-      if (!next[id] || next[id].quantidade <= 1) {
-        delete next[id]
-      } else {
-        next[id] = { ...next[id], quantidade: next[id].quantidade - 1 }
-      }
+      if (!next[key] || next[key].quantidade <= 1) delete next[key]
+      else next[key] = { ...next[key], quantidade: next[key].quantidade - 1 }
       return next
     })
   }
 
-  function removeItem(id) {
+  function removeItem(key) {
     setCarrinho(prev => {
       const next = { ...prev }
-      delete next[id]
+      delete next[key]
       return next
     })
+  }
+
+  // Quantidade total de um produto somando todos os combos dele
+  function qtdProduto(prodId) {
+    return Object.values(carrinho)
+      .filter(i => String(i.id) === String(prodId))
+      .reduce((s, i) => s + i.quantidade, 0)
   }
 
   const itens = Object.values(carrinho)
@@ -251,9 +312,11 @@ export default function DeliveryLoja() {
         empresaNome: loja.nome,
         itens: itens.map(i => ({
           id: i.id,
+          key: i.key,
           nome: i.nome,
           quantidade: i.quantidade,
           preco: Number(i.preco),
+          complementos: i.complementos ?? [],
         })),
         subtotal,
         taxaEntrega,
@@ -406,10 +469,10 @@ export default function DeliveryLoja() {
                   <ProdutoCard
                     key={p.id}
                     produto={p}
-                    quantidade={carrinho[p.id]?.quantidade ?? 0}
+                    quantidade={qtdProduto(p.id)}
                     lojaAberta={loja.delivery_ativo}
-                    onAdd={() => addOne(p)}
-                    onRemove={() => removeOne(p.id)}
+                    onAdd={() => (p.complementos?.length ? setOptProduto(p) : addOne(p))}
+                    onRemove={() => removeOne(String(p.id))}
                   />
                 ))}
               </div>
@@ -493,23 +556,28 @@ export default function DeliveryLoja() {
 
             <div className="dloja-drawer-body">
               {itens.map(item => (
-                <div key={item.id} className="dloja-drawer-item">
+                <div key={item.key} className="dloja-drawer-item">
                   <div className="dloja-drawer-item-info">
                     <span className="dloja-drawer-item-nome">{item.nome}</span>
+                    {item.complementos?.length > 0 && (
+                      <span style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.4, display: 'block', marginTop: 2 }}>
+                        {item.complementos.map(c => c.nome).join(', ')}
+                      </span>
+                    )}
                     <span className="dloja-drawer-item-preco">R$ {fmt(item.preco)} cada</span>
                   </div>
                   <div className="dloja-drawer-item-ctrl">
                     <div className="dloja-qty">
-                      <button className="dloja-qty-btn" onClick={() => removeOne(item.id)} aria-label="Remover um">
+                      <button className="dloja-qty-btn" onClick={() => removeOne(item.key)} aria-label="Remover um">
                         <IconMinus />
                       </button>
                       <span className="dloja-qty-val">{item.quantidade}</span>
-                      <button className="dloja-qty-btn" onClick={() => addOne(item)} aria-label="Adicionar um">
+                      <button className="dloja-qty-btn" onClick={() => incKey(item.key)} aria-label="Adicionar um">
                         <IconPlus />
                       </button>
                     </div>
                     <span className="dloja-drawer-item-sub">R$ {fmt(item.quantidade * Number(item.preco))}</span>
-                    <button className="dloja-drawer-item-del" onClick={() => removeItem(item.id)} aria-label={`Remover ${item.nome}`}>
+                    <button className="dloja-drawer-item-del" onClick={() => removeItem(item.key)} aria-label={`Remover ${item.nome}`}>
                       <IconTrash />
                     </button>
                   </div>
@@ -541,11 +609,20 @@ export default function DeliveryLoja() {
           </aside>
         </div>
       )}
+
+      {optProduto && (
+        <OptionsModal
+          produto={optProduto}
+          onClose={() => setOptProduto(null)}
+          onConfirm={(selecoes, precoUnit) => addCombo(optProduto, selecoes, precoUnit)}
+        />
+      )}
     </div>
   )
 }
 
 function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
+  const temComplementos = produto.complementos?.length > 0
   return (
     <div className="dloja-prod-card">
       <div className="dloja-prod-foto">
@@ -563,10 +640,31 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
         {produto.descricao && (
           <p className="dloja-prod-desc">{produto.descricao}</p>
         )}
-        <p className="dloja-prod-preco">R$ {fmt(produto.preco)}</p>
+        <p className="dloja-prod-preco">
+          {temComplementos && <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 500 }}>a partir de </span>}
+          R$ {fmt(produto.preco)}
+        </p>
       </div>
       <div className="dloja-prod-acao">
-        {quantidade === 0 ? (
+        {temComplementos ? (
+          // Produtos com opções: sempre abre o modal pra escolher (montar)
+          <button
+            className="dloja-btn-add"
+            onClick={onAdd}
+            disabled={!lojaAberta}
+            aria-label={`Montar ${produto.nome}`}
+            style={quantidade > 0 ? { position: 'relative' } : undefined}
+          >
+            <IconPlus size={14} />
+            {quantidade > 0 && (
+              <span style={{
+                position: 'absolute', top: -6, right: -6, minWidth: 18, height: 18, padding: '0 4px',
+                borderRadius: 9, background: '#22c55e', color: '#04120a', fontSize: 11, fontWeight: 800,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>{quantidade}</span>
+            )}
+          </button>
+        ) : quantidade === 0 ? (
           <button
             className="dloja-btn-add"
             onClick={onAdd}
@@ -588,5 +686,128 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
         )}
       </div>
     </div>
+  )
+}
+
+// ── Modal "monte seu produto" (complementos: proteínas, saladas, etc.) ──
+function OptionsModal({ produto, onClose, onConfirm }) {
+  const grupos = produto.complementos ?? []
+  // seleção: { [grupoId]: Set(opcaoId) }
+  const [sel, setSel] = useState(() => {
+    const init = {}
+    for (const g of grupos) init[g.id] = new Set()
+    return init
+  })
+
+  function toggle(grupo, opcao) {
+    setSel(prev => {
+      const atual = new Set(prev[grupo.id] ?? [])
+      if (atual.has(opcao.id)) {
+        atual.delete(opcao.id)
+      } else {
+        if (grupo.max === 1) atual.clear()        // rádio
+        if (atual.size >= grupo.max) return prev   // limite atingido (checkbox)
+        atual.add(opcao.id)
+      }
+      return { ...prev, [grupo.id]: atual }
+    })
+  }
+
+  const selecoes = grupos.flatMap(g =>
+    [...(sel[g.id] ?? [])].map(oid => {
+      const o = g.opcoes.find(x => x.id === oid)
+      return { grupoId: g.id, grupo: g.nome, opcaoId: oid, nome: o?.nome ?? '', preco: Number(o?.preco_adicional ?? 0) }
+    })
+  )
+  const adicional = selecoes.reduce((s, x) => s + x.preco, 0)
+  const precoUnit = Number(produto.preco) + adicional
+  const faltando = grupos.filter(g => (sel[g.id]?.size ?? 0) < (g.min ?? 0))
+  const podeAdd = faltando.length === 0
+
+  return (
+    <div className="dloja-overlay" onClick={onClose}>
+      <aside className="dloja-drawer" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={`Montar ${produto.nome}`}>
+        <div className="dloja-drawer-header">
+          <h2 className="dloja-drawer-title">{produto.nome}</h2>
+          <button className="dloja-drawer-close" onClick={onClose} aria-label="Fechar"><IconX /></button>
+        </div>
+
+        <div className="dloja-drawer-body">
+          {produto.descricao && (
+            <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 12px' }}>{produto.descricao}</p>
+          )}
+          {grupos.map(grupo => {
+            const qtdSel = sel[grupo.id]?.size ?? 0
+            const obrig = (grupo.min ?? 0) > 0
+            const incompleto = qtdSel < (grupo.min ?? 0)
+            return (
+              <div key={grupo.id} style={{ marginBottom: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontWeight: 700, fontSize: 14.5, color: '#fff' }}>{grupo.nome}</span>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6,
+                    background: incompleto ? 'rgba(239,68,68,.15)' : 'rgba(255,255,255,.08)',
+                    color: incompleto ? '#f87171' : '#94a3b8',
+                  }}>
+                    {obrig ? 'Obrigatório' : 'Opcional'}
+                    {grupo.max > 1 ? ` · até ${grupo.max}` : ''}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {grupo.opcoes.map(opcao => {
+                    const marcado = sel[grupo.id]?.has(opcao.id)
+                    const bloqueado = !marcado && grupo.max > 1 && qtdSel >= grupo.max
+                    return (
+                      <button
+                        key={opcao.id}
+                        type="button"
+                        onClick={() => toggle(grupo, opcao)}
+                        disabled={bloqueado}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
+                          padding: '10px 12px', borderRadius: 10, cursor: bloqueado ? 'not-allowed' : 'pointer',
+                          border: `1.5px solid ${marcado ? '#22c55e' : 'rgba(255,255,255,.12)'}`,
+                          background: marcado ? 'rgba(34,197,94,.12)' : 'rgba(255,255,255,.04)',
+                          color: '#fff', opacity: bloqueado ? 0.4 : 1,
+                        }}
+                      >
+                        <span style={{
+                          width: 20, height: 20, flexShrink: 0, borderRadius: grupo.max === 1 ? '50%' : 6,
+                          border: `2px solid ${marcado ? '#22c55e' : '#64748b'}`,
+                          background: marcado ? '#22c55e' : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#04120a',
+                        }}>
+                          {marcado && <IconCheckSmall />}
+                        </span>
+                        <span style={{ flex: 1, fontSize: 14 }}>{opcao.nome}</span>
+                        {Number(opcao.preco_adicional) > 0 && (
+                          <span style={{ fontSize: 13, color: '#22c55e', fontWeight: 700 }}>+ R$ {fmt(opcao.preco_adicional)}</span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="dloja-drawer-footer">
+          <button className="dloja-btn-finalizar" onClick={() => onConfirm(selecoes, precoUnit)} disabled={!podeAdd}>
+            {podeAdd
+              ? `Adicionar · R$ ${fmt(precoUnit)}`
+              : `Escolha: ${faltando.map(g => g.nome).join(', ')}`}
+          </button>
+        </div>
+      </aside>
+    </div>
+  )
+}
+
+function IconCheckSmall() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
   )
 }

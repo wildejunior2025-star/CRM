@@ -57,6 +57,32 @@ export default function Produtos() {
   const [saving, setSaving] = useState(false)
   const [uploadingFoto, setUploadingFoto] = useState(false)
 
+  // Complementos / opções do produto (ex.: monte sua quentinha)
+  const [grupos, setGrupos] = useState([])
+
+  async function loadComplementos(produtoId) {
+    const { data } = await supabase
+      .from('complemento_grupos')
+      .select('id, nome, min, max, ordem, complemento_opcoes(id, nome, preco_adicional, ordem)')
+      .eq('produto_id', produtoId)
+      .order('ordem')
+    const gs = (data ?? []).map(g => ({
+      id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1,
+      opcoes: (g.complemento_opcoes ?? [])
+        .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+        .map(o => ({ id: o.id, nome: o.nome, preco: o.preco_adicional ?? 0 })),
+    }))
+    setGrupos(gs)
+  }
+
+  function updGrupo(gi, patch) {
+    setGrupos(prev => prev.map((g, i) => (i === gi ? { ...g, ...patch } : g)))
+  }
+  function updOpcao(gi, oi, patch) {
+    setGrupos(prev => prev.map((g, i) =>
+      i === gi ? { ...g, opcoes: g.opcoes.map((o, j) => (j === oi ? { ...o, ...patch } : o)) } : g))
+  }
+
   const [showCategModal, setShowCategModal] = useState(false)
   const [novaCategoria, setNovaCategoria] = useState('')
   const [savingCateg, setSavingCateg] = useState(false)
@@ -168,12 +194,15 @@ export default function Produtos() {
 
   function openNew() {
     setEditingId(null)
+    setGrupos([])
     setForm({ ...emptyForm, categoria: categorias[0]?.nome ?? '' })
     setShowModal(true)
   }
 
   function openEdit(produto) {
     setEditingId(produto.id)
+    setGrupos([])
+    loadComplementos(produto.id)
     setForm({
       nome: produto.nome ?? '',
       categoria: produto.categoria ?? categorias[0]?.nome ?? '',
@@ -239,17 +268,42 @@ export default function Produtos() {
       faixas_preco: form.faixas_preco ?? [],
     }
 
-    const { error } = editingId
-      ? await supabase.from('produtos').update(payload).eq('id', editingId)
-      : await supabase.from('produtos').insert(payload)
-
-    setSaving(false)
+    const { data: saved, error } = editingId
+      ? await supabase.from('produtos').update(payload).eq('id', editingId).select('id').single()
+      : await supabase.from('produtos').insert(payload).select('id').single()
 
     if (error) {
+      setSaving(false)
       setError(error.message)
       return
     }
 
+    // Persiste os complementos (recria: apaga os antigos e insere os atuais)
+    const produtoId = saved.id
+    try {
+      await supabase.from('complemento_grupos').delete().eq('produto_id', produtoId)
+      for (const [gi, g] of grupos.entries()) {
+        if (!g.nome.trim()) continue
+        const { data: gIns } = await supabase
+          .from('complemento_grupos')
+          .insert({
+            empresa_id: profile.empresa_id, produto_id: produtoId, nome: g.nome.trim(),
+            min: Number(g.min) || 0, max: Number(g.max) || 1, ordem: gi,
+          })
+          .select('id').single()
+        if (!gIns) continue
+        const ops = (g.opcoes || [])
+          .filter(o => o.nome.trim())
+          .map((o, oi) => ({ grupo_id: gIns.id, nome: o.nome.trim(), preco_adicional: Number(o.preco) || 0, ordem: oi }))
+        if (ops.length) await supabase.from('complemento_opcoes').insert(ops)
+      }
+    } catch (err) {
+      setSaving(false)
+      setError('Produto salvo, mas houve erro nos complementos: ' + (err?.message ?? err))
+      return
+    }
+
+    setSaving(false)
     setShowModal(false)
     loadProdutos(search, categoriaFiltro, page)
   }
@@ -693,6 +747,69 @@ export default function Produtos() {
                     />{' '}
                     Ativo
                   </label>
+                </div>
+
+                {/* Complementos / opções (monte sua quentinha) */}
+                <div className="form-field full" style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <span>
+                      Complementos / opções{' '}
+                      <span style={{ fontWeight: 400, fontSize: '0.8em', color: 'var(--text-muted)' }}>
+                        (ex.: monte sua quentinha — proteínas, saladas...)
+                      </span>
+                    </span>
+                    <button type="button" className="btn btn-secondary btn-sm"
+                      onClick={() => setGrupos(prev => [...prev, { nome: '', min: 1, max: 1, opcoes: [] }])}>
+                      + Grupo
+                    </button>
+                  </label>
+
+                  {grupos.length === 0 && (
+                    <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '6px 0 0' }}>
+                      Nenhum complemento. Clique em “+ Grupo” pra criar (ex.: “Proteínas”, escolher de 1 a 2).
+                    </p>
+                  )}
+
+                  {grupos.map((g, gi) => (
+                    <div key={gi} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12, marginTop: 10, background: 'var(--bg-secondary, #f9fafb)' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 68px 68px auto', gap: 8, alignItems: 'end' }}>
+                        <div>
+                          <label style={{ fontSize: '0.72em', color: 'var(--text-muted)' }}>Nome do grupo</label>
+                          <input value={g.nome} placeholder="Ex: Proteínas" onChange={e => updGrupo(gi, { nome: e.target.value })} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '0.72em', color: 'var(--text-muted)' }}>Mín.</label>
+                          <input type="number" min="0" value={g.min} onChange={e => updGrupo(gi, { min: e.target.value })} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '0.72em', color: 'var(--text-muted)' }}>Máx.</label>
+                          <input type="number" min="1" value={g.max} onChange={e => updGrupo(gi, { max: e.target.value })} />
+                        </div>
+                        <button type="button" className="btn btn-danger btn-sm"
+                          onClick={() => setGrupos(prev => prev.filter((_, i) => i !== gi))}>
+                          Excluir
+                        </button>
+                      </div>
+
+                      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {(g.opcoes || []).map((o, oi) => (
+                          <div key={oi} style={{ display: 'grid', gridTemplateColumns: '1fr 104px auto', gap: 8, alignItems: 'center' }}>
+                            <input value={o.nome} placeholder="Opção (ex: Frango assado)" onChange={e => updOpcao(gi, oi, { nome: e.target.value })} />
+                            <input type="number" step="0.01" min="0" value={o.preco} placeholder="+ R$ 0,00" onChange={e => updOpcao(gi, oi, { preco: e.target.value })} />
+                            <button type="button" title="Remover opção"
+                              style={{ background: 'none', border: 'none', color: 'var(--danger, #e55)', cursor: 'pointer', fontSize: '1.1em', padding: '2px 6px' }}
+                              onClick={() => updGrupo(gi, { opcoes: g.opcoes.filter((_, i) => i !== oi) })}>
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                        <button type="button" className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start' }}
+                          onClick={() => updGrupo(gi, { opcoes: [...(g.opcoes || []), { nome: '', preco: 0 }] })}>
+                          + Opção
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 

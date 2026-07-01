@@ -358,10 +358,14 @@ export default function DeliveryCheckout() {
         origem: window.Capacitor?.isNativePlatform?.() ? 'app' : 'cardapio',
         itens: itens.map(i => ({
           produto_id:    i.id,
-          nome:          i.nome,
+          // Dobra as escolhas no nome (aparece no painel/cupom) + guarda estruturado
+          nome:          i.complementos?.length
+            ? `${i.nome} (${i.complementos.map(c => c.nome).join(', ')})`
+            : i.nome,
           quantidade:    i.quantidade,
           preco_unitario: i.preco,
           subtotal:      i.quantidade * i.preco,
+          complementos:  i.complementos ?? [],
         })),
         subtotal,
         taxa_entrega:   taxaAplicada,
@@ -643,9 +647,16 @@ export default function DeliveryCheckout() {
                 <h2 className="dco-section-title">Resumo do pedido</h2>
                 <div className="dco-resumo-itens">
                   {itens.map(item => (
-                    <div key={item.id} className="dco-resumo-item">
+                    <div key={item.key ?? item.id} className="dco-resumo-item">
                       <span className="dco-resumo-item-qty">{item.quantidade}x</span>
-                      <span className="dco-resumo-item-nome">{item.nome}</span>
+                      <span className="dco-resumo-item-nome">
+                        {item.nome}
+                        {item.complementos?.length > 0 && (
+                          <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted, #888)', fontWeight: 400 }}>
+                            {item.complementos.map(c => c.nome).join(', ')}
+                          </span>
+                        )}
+                      </span>
                       <span className="dco-resumo-item-sub">R$ {fmt(item.quantidade * item.preco)}</span>
                     </div>
                   ))}
