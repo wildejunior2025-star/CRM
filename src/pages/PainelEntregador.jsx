@@ -54,8 +54,15 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar }) {
       borderRadius: 14, padding: 16, borderTop: `4px solid ${cor}`,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontWeight: 800, fontSize: 18, color: 'var(--text)' }}>
-          #{pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 800, fontSize: 18, color: 'var(--text)' }}>
+            #{pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()}
+          </span>
+          {pedido.origem === 'ifood' && (
+            <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 20, background: '#ea1d2c', color: '#fff' }}>
+              iFood{pedido.ifood_display_id ? ` #${pedido.ifood_display_id}` : ''}
+            </span>
+          )}
         </span>
         <span style={{ fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: `${cor}22`, color: cor }}>
           {!mine ? 'Disponível' : emRota ? 'Em rota' : 'Aceita'}
@@ -236,7 +243,13 @@ export default function PainelEntregador() {
   }, [aba, user])
 
   const minhas = pedidos.filter(p => p.entregador_id === user?.id)
-  const disponiveis = pedidos.filter(p => p.status === 'pronto' && !p.entregador_id)
+  // Disponíveis pro motoboy: só ENTREGA (retirada o cliente busca) e sem dono.
+  // iFood: como o pedido costuma ir direto pra "saiu_entrega" (despachado no
+  // iFood), também liberamos esses pro entregador da loja pegar e levar.
+  const disponiveis = pedidos.filter(p =>
+    p.tipo_entrega !== 'retirada' && !p.entregador_id &&
+    (p.status === 'pronto' || (p.origem === 'ifood' && p.status === 'saiu_entrega'))
+  )
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg, #0f0f1a)' }}>
