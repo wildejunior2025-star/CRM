@@ -992,7 +992,7 @@ function SeletorEntregador({ entregadores = [], onAtribuir, pedidoId }) {
         color: 'var(--text)', fontSize: 14, fontWeight: 600, cursor: 'pointer',
       }}
     >
-      <option value="">🛵 Atribuir a um entregador...</option>
+      <option value="">🛵 Atribuir / trocar entregador...</option>
       {entregadores.map(en => <option key={en.id} value={en.id}>{en.nome}</option>)}
     </select>
   )
@@ -1416,6 +1416,20 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* Concluído: o gestor pode atribuir/trocar o entregador (ex.: a moto de
+            um quebrou e outro levou), pra o histórico refletir quem entregou. */}
+        {pedido.origem !== 'balcao' && !isRetirada && pedido.status === 'entregue' && (
+          <div style={{ width: '100%' }}>
+            <p style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, margin: '0 0 8px', color: '#16a34a' }}>
+              {(() => {
+                const en = entregadores.find(e => e.id === pedido.entregador_id)
+                return en ? `🛵 Entregue por: ${en.nome}` : '🛵 Entregue (sem motoboy atribuído)'
+              })()}
+            </p>
+            <SeletorEntregador entregadores={entregadores} onAtribuir={onAtribuir} pedidoId={pedido.id} />
           </div>
         )}
 
@@ -2255,7 +2269,9 @@ export default function PainelPedidos() {
   // Gestor atrela um entregador ao pedido (ex.: iFood despachado sem motoboy).
   // Só seta o entregador_id — o pedido passa a aparecer no app daquele motoboy.
   async function handleAtribuirEntregador(id, entregadorId) {
-    setPedidos(prev => prev.map(p => p.id === id ? { ...p, entregador_id: entregadorId } : p))
+    const patch = p => p.id === id ? { ...p, entregador_id: entregadorId } : p
+    setPedidos(prev => prev.map(patch))
+    setConcluidosHoje(prev => prev.map(patch)) // pedidos concluídos também podem ser reatribuídos
     await supabase.from('pedidos_delivery').update({ entregador_id: entregadorId }).eq('id', id)
   }
 
