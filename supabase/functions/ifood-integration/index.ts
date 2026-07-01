@@ -387,17 +387,48 @@ async function runImportarCatalogo(sb: any, empresaId: string) {
   return { ok: true, total, criados }
 }
 
+// Espelha no nosso painel QUALQUER status que vier do iFood — assim, se o
+// lojista aceitar/despachar direto no app do iFood, o painel acompanha sozinho.
+// O trigger notify_ifood_status tem guard anti-eco (não devolve pro iFood o que
+// já bate com ifood_status), então isso não gera loop.
+const IFOOD_CODE_TO_STATUS: Record<string, string> = {
+  CFM: "confirmado", CONFIRMED: "confirmado",
+  RTP: "pronto", READYTOPICKUP: "pronto", READY_TO_PICKUP: "pronto",
+  DSP: "saiu_entrega", DISPATCHED: "saiu_entrega",
+  CON: "entregue", CONCLUDED: "entregue",
+  CAN: "cancelado", CANCELLED: "cancelado", CANCELLATION_REQUESTED: "cancelado",
+}
+// Ranking pra não regredir o status (eventos do iFood podem chegar fora de ordem)
+const STATUS_RANK: Record<string, number> = {
+  aguardando: 0, confirmado: 1, em_preparo: 2, pronto: 3, saiu_entrega: 3, entregue: 4,
+}
+
 async function atualizarStatusLocal(sb: any, orderId: string, code: string) {
-  // Espelha cancelamentos e conclusões vindos do iFood; demais transições o
-  // lojista controla pelo painel.
+  const c = (code ?? "").toUpperCase()
   const patch: Record<string, unknown> = { ifood_status: code }
-  if (["CAN", "CANCELLED", "CANCELLATION_REQUESTED"].includes(code)) {
-    patch.status = "cancelado"
-    patch.motivo_cancelamento = "Cancelado pelo iFood/cliente"
-  } else if (["CON", "CONCLUDED"].includes(code)) {
-    // Pedido concluído no iFood (ex.: envio imediato) → reflete como entregue
-    patch.status = "entregue"
+  const novo = IFOOD_CODE_TO_STATUS[c]
+
+  if (novo) {
+    const { data: atual } = await sb
+      .from("pedidos_delivery")
+      .select("status")
+      .eq("ifood_order_id", orderId)
+      .maybeSingle()
+    const stAtual: string | undefined = atual?.status
+    const finalizado = stAtual === "entregue" || stAtual === "cancelado"
+
+    if (novo === "cancelado") {
+      // Cancelamento sempre reflete (a não ser que já tenha sido entregue)
+      if (stAtual !== "entregue") {
+        patch.status = "cancelado"
+        patch.motivo_cancelamento = "Cancelado pelo iFood/cliente"
+      }
+    } else if (!finalizado && (STATUS_RANK[novo] ?? 0) > (STATUS_RANK[stAtual ?? ""] ?? -1)) {
+      // Só avança (nunca volta atrás)
+      patch.status = novo
+    }
   }
+
   await sb.from("pedidos_delivery").update(patch).eq("ifood_order_id", orderId)
 }
 
