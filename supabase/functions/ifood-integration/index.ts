@@ -238,6 +238,8 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
 
     cliente_nome: o.customer?.name ?? "Cliente iFood",
     cliente_telefone: o.customer?.phone?.number ?? o.customer?.phone ?? "—",
+    // ID/Localizador que o entregador digita ao ligar no 0800 do iFood (F2)
+    ifood_phone_localizer: o.customer?.phone?.localizer ?? null,
 
     endereco_rua: ehEntrega ? (addr.streetName ?? "Endereço iFood") : "Retirada na loja",
     endereco_numero: ehEntrega ? (addr.streetNumber ?? null) : null,

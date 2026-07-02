@@ -62,6 +62,10 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onDesistir 
   const emRota = pedido.status === 'saiu_entrega'
   const cor = !mine ? '#0d9488' : emRota ? '#7c3aed' : '#2563eb'
   const pg = pagamentoInfo(pedido)
+  // iFood não expõe o telefone real do cliente: liga num 0800 e digita um ID.
+  // Por isso, nos pedidos do iFood some o WhatsApp e o "Ligar" vai no 0800.
+  const isIfood = pedido.origem === 'ifood'
+  const ifoodId = pedido.ifood_phone_localizer
 
   function desistir() {
     if (!window.confirm('Largar esta entrega? Ela volta para os outros motoqueiros pegarem.')) return
@@ -142,11 +146,24 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onDesistir 
 
       {/* Contato / rota — só faz sentido depois de aceitar */}
       {mine && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <a href={mapsUrl(pedido)} target="_blank" rel="noopener noreferrer" style={btnLink('#7c3aed')}>🗺️ Rota</a>
-          {tel && <a href={`tel:${tel}`} style={btnLink('#0891b2')}>📞 Ligar</a>}
-          {tel && <a href={`https://wa.me/${tel}`} target="_blank" rel="noopener noreferrer" style={btnLink('#25d366')}>💬 Zap</a>}
-        </div>
+        <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: isIfood && ifoodId ? 6 : 12 }}>
+            <a href={mapsUrl(pedido)} target="_blank" rel="noopener noreferrer" style={btnLink('#7c3aed')}>🗺️ Rota</a>
+            {tel && <a href={`tel:${tel}`} style={btnLink('#0891b2')}>📞 {isIfood ? 'Ligar (iFood)' : 'Ligar'}</a>}
+            {/* WhatsApp só pros pedidos que NÃO são do iFood (iFood não tem zap do cliente) */}
+            {tel && !isIfood && <a href={`https://wa.me/${tel}`} target="_blank" rel="noopener noreferrer" style={btnLink('#25d366')}>💬 Zap</a>}
+          </div>
+          {isIfood && ifoodId && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+              background: 'rgba(234,29,44,.10)', border: '1.5px solid #ea1d2c',
+              borderRadius: 10, padding: '8px 12px', marginBottom: 12, fontSize: 13, color: 'var(--text-muted)',
+            }}>
+              <span>Ao ligar, informe o ID do pedido:</span>
+              <strong style={{ fontSize: 17, color: 'var(--text)', letterSpacing: 1 }}>{ifoodId}</strong>
+            </div>
+          )}
+        </>
       )}
 
       {/* Ação principal */}
