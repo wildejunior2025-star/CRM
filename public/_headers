@@ -1,0 +1,15 @@
+# Cloudflare Workers Assets — controle de cache.
+# Assets com hash no nome podem ser cacheados "pra sempre" (o nome muda a cada build).
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# HTML e service worker NUNCA podem ficar em cache — senão o app trava numa
+# versão antiga depois de cada deploy (foi o que aconteceu).
+/
+  Cache-Control: no-store, must-revalidate
+/index.html
+  Cache-Control: no-store, must-revalidate
+/sw.js
+  Cache-Control: no-store, must-revalidate
+/manifest.webmanifest
+  Cache-Control: no-store, must-revalidate
