@@ -372,6 +372,24 @@ export default function PainelEntregador() {
     notificarCliente(pedido.id, 'entregue')
   }
 
+  // Força pegar a versão mais nova do app (limpa cache + atualiza o service
+  // worker) — pro motoqueiro não ficar preso numa versão antiga no navegador.
+  const [atualizando, setAtualizando] = useState(false)
+  async function atualizarApp() {
+    setAtualizando(true)
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(regs.map(r => r.update()))
+      }
+      if ('caches' in window) {
+        const keys = await caches.keys()
+        await Promise.all(keys.map(k => caches.delete(k)))
+      }
+    } catch { /* segue pro reload de qualquer jeito */ }
+    window.location.reload()
+  }
+
   // iFood com código de entrega (F1): valida o código do cliente no iFood.
   // Retorna true se o iFood aceitou (pedido concluído) — o card mostra o erro se não.
   async function confirmarEntregaIfood(pedido, codigo) {
@@ -448,10 +466,16 @@ export default function PainelEntregador() {
             {empresa?.nome || ''} · {profile?.nome || user?.email}
           </div>
         </div>
-        <button type="button" onClick={logout}
-          style={{ background: 'none', border: '1px solid var(--border, #2a2a3a)', color: 'var(--text)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>
-          Sair
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" onClick={atualizarApp} disabled={atualizando}
+            style={{ background: 'none', border: '1px solid var(--border, #2a2a3a)', color: 'var(--text)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>
+            {atualizando ? '...' : '🔄 Atualizar'}
+          </button>
+          <button type="button" onClick={logout}
+            style={{ background: 'none', border: '1px solid var(--border, #2a2a3a)', color: 'var(--text)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>
+            Sair
+          </button>
+        </div>
       </header>
 
       {/* Barra da fila (E4) — só quando a loja usa fila por ordem de chegada */}
