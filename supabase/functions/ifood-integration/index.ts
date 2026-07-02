@@ -53,6 +53,7 @@ Deno.serve(async (req) => {
     if (acao === "poll") return json(await runPoll(sb))
     if (acao === "test") return json(await runTest(sb, body?.empresa_id))
     if (acao === "status") return json(await runStatus(sb, body?.pedido_id, body?.novo_status))
+    if (acao === "verify_delivery_code") return json(await runVerifyDeliveryCode(sb, body?.pedido_id, body?.codigo))
     if (acao === "catalogo") return json(await runImportarCatalogo(sb, body?.empresa_id))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
   } catch (e) {
@@ -158,9 +159,14 @@ async function runPoll(sb: any) {
         if (!orderId) continue
         // Só criamos o pedido no "colocado". Os demais (CFM, DSP, CON, CAN)
         // só atualizam o status do que já existe.
+        const full = (ev.fullCode ?? "").toUpperCase()
         if (code === "PLC" || code === "PLACED") {
           const criou = await criarPedidoDoIfood(sb, cfg, token, orderId)
           if (criou) totalPedidos++
+        } else if (code === "DDCR" || full === "DELIVERY_DROP_CODE_REQUESTED") {
+          // Pedido exige código de confirmação de entrega (F1) — marca pro app
+          // do motoqueiro pedir o código do cliente ao concluir.
+          await sb.from("pedidos_delivery").update({ ifood_requer_codigo: true }).eq("ifood_order_id", orderId)
         } else {
           await atualizarStatusLocal(sb, orderId, code)
         }
@@ -520,6 +526,55 @@ async function runStatus(sb: any, pedidoId: string, novoStatus: string) {
 
   await sb.from("pedidos_delivery").update({ ifood_status: novoStatus }).eq("id", pedidoId)
   return { ok: true, enviado: novoStatus }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// VERIFY DELIVERY CODE — F1: motoqueiro digita o código do cliente e a gente
+// valida no iFood (POST verifyDeliveryCode). Se válido, o iFood conclui e a
+// gente marca 'entregue' localmente.
+// ─────────────────────────────────────────────────────────────────────
+async function runVerifyDeliveryCode(sb: any, pedidoId: string, codigo: string) {
+  if (!pedidoId || !codigo) return { ok: false, error: "pedido_id e codigo obrigatórios" }
+
+  const { data: pedido } = await sb
+    .from("pedidos_delivery")
+    .select("id, empresa_id, origem, ifood_order_id")
+    .eq("id", pedidoId)
+    .maybeSingle()
+  if (!pedido) return { ok: false, error: "pedido não encontrado" }
+  if (pedido.origem !== "ifood" || !pedido.ifood_order_id) {
+    return { ok: false, error: "pedido não é do iFood" }
+  }
+
+  const { data: cfg } = await sb
+    .from("ifood_config")
+    .select("*")
+    .eq("empresa_id", pedido.empresa_id)
+    .maybeSingle()
+  if (!cfg) return { ok: false, error: "iFood não configurado para esta empresa" }
+
+  const token = await getToken(sb, cfg as Config)
+  const res = await fetch(`${IFOOD}/order/v1.0/orders/${pedido.ifood_order_id}/verifyDeliveryCode`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ code: String(codigo).trim() }),
+  })
+
+  // 400/422 = código inválido (o iFood recusa). Não é erro nosso.
+  if (!res.ok) {
+    const txt = await res.text()
+    return { ok: true, valid: false, status: res.status, detalhe: txt.slice(0, 200) }
+  }
+  const data = await res.json().catch(() => ({}))
+  const valid = data?.valid !== false // 200 sem "valid:false" = válido
+
+  if (valid) {
+    // Conclui do nosso lado. ifood_status=CONCLUDED evita eco do trigger.
+    await sb.from("pedidos_delivery")
+      .update({ status: "entregue", ifood_status: "CONCLUDED" })
+      .eq("id", pedidoId)
+  }
+  return { ok: true, valid }
 }
 
 // ─────────────────────────────────────────────────────────────────────

@@ -17,7 +17,7 @@
 
 | ID | Melhoria | Detalhe / o que fazer | Complex. | Status |
 |----|----------|-----------------------|----------|--------|
-| F1 | Confirmar entrega do iFood pelo nosso sistema | Ver se dá pra **confirmar o pedido do iFood direto pela nossa tela de entrega**. Se não der pela API, mostrar pro motoqueiro o **código/Localizador** (ex: `1451 8048`) pra ele confirmar no app do iFood dele | Alta | ⬜ |
+| F1 | Confirmar entrega do iFood pelo nosso sistema | **FEITO (código):** o motoqueiro digita o **código do cliente** no nosso app e a gente valida via `POST verifyDeliveryCode` → iFood conclui. Poll detecta `DDCR`/`DELIVERY_DROP_CODE_REQUESTED` e marca o pedido (mig 0085 + edge v10). **Falta:** nova homologação no portal iFood pra liberar o fluxo + teste com pedido real | Alta | 🔧 |
 | F2 | Ligar pro Localizador do iFood (0800) | **FEITO:** no app do motoqueiro, pedidos iFood **não mostram WhatsApp**; o botão 📞 liga direto no 0800 do iFood e exibe o **ID** (localizer) pra digitar. Guardamos o `ifood_phone_localizer` (mig 0084 + edge fn) | Baixa | ✅ |
 | F3 | Pausar/esgotar item no iFood + cardápio | Pelo nosso gestor, **pausar (marcar esgotado) um item** e refletir tanto no **iFood** quanto no **nosso cardápio** | Média | ⬜ |
 

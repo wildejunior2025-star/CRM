@@ -53,7 +53,7 @@ function pagamentoInfo(p) {
 }
 
 // ── Card de entrega ─────────────────────────────────────────
-function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onDesistir }) {
+function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir }) {
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
@@ -66,6 +66,8 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onDesistir 
   // Por isso, nos pedidos do iFood some o WhatsApp e o "Ligar" vai no 0800.
   const isIfood = pedido.origem === 'ifood'
   const ifoodId = pedido.ifood_phone_localizer
+  // Pedido do iFood que exige o código de confirmação de entrega (F1)
+  const precisaCodigoIfood = isIfood && pedido.ifood_requer_codigo
 
   function desistir() {
     if (!window.confirm('Largar esta entrega? Ela volta para os outros motoqueiros pegarem.')) return
@@ -78,7 +80,16 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onDesistir 
     setOcupado(false)
   }
 
-  function confirmar() {
+  async function confirmar() {
+    // iFood que exige código: valida o código do CLIENTE no iFood (verifyDeliveryCode)
+    if (precisaCodigoIfood) {
+      if (codigo.trim().length < 2) { setErro('Digite o código do cliente.'); return }
+      setErro(null); setOcupado(true)
+      const ok = await onConfirmarIfood(pedido, codigo.trim())
+      setOcupado(false)
+      if (!ok) setErro('Código do iFood não confere. Confira com o cliente.')
+      return
+    }
     if (pedido.codigo_entrega && codigo.trim() !== String(pedido.codigo_entrega).trim()) {
       setErro('Código incorreto.')
       return
@@ -188,9 +199,9 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onDesistir 
           <div style={{ display: 'flex', gap: 8 }}>
             <input
               value={codigo}
-              onChange={e => { setCodigo(e.target.value.replace(/\D/g, '').slice(0, 4)); setErro(null) }}
+              onChange={e => { setCodigo(e.target.value.replace(/\D/g, '').slice(0, precisaCodigoIfood ? 8 : 4)); setErro(null) }}
               inputMode="numeric"
-              placeholder="Código"
+              placeholder={precisaCodigoIfood ? 'Cód. do cliente' : 'Código'}
               style={{
                 flex: 1, minWidth: 0, width: '100%', padding: '10px 8px', borderRadius: 10, textAlign: 'center',
                 fontSize: 18, fontWeight: 700, letterSpacing: 3,
@@ -204,7 +215,9 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onDesistir 
           </div>
           {erro && <div style={{ fontSize: 12.5, color: 'var(--danger, #ef4444)', marginTop: 6 }}>{erro}</div>}
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>
-            Peça ao cliente os 4 dígitos que aparecem na tela do pedido dele.
+            {precisaCodigoIfood
+              ? '📱 Peça ao cliente o código de confirmação do iFood (aparece no app dele).'
+              : 'Peça ao cliente os 4 dígitos que aparecem na tela do pedido dele.'}
           </div>
         </div>
       )}
@@ -355,6 +368,30 @@ export default function PainelEntregador() {
     notificarCliente(pedido.id, 'entregue')
   }
 
+  // iFood com código de entrega (F1): valida o código do cliente no iFood.
+  // Retorna true se o iFood aceitou (pedido concluído) — o card mostra o erro se não.
+  async function confirmarEntregaIfood(pedido, codigo) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/ifood-integration`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ acao: 'verify_delivery_code', pedido_id: pedido.id, codigo }),
+      })
+      const json = await res.json()
+      if (json?.valid) {
+        setPedidos(prev => prev.filter(p => p.id !== pedido.id))
+        return true
+      }
+      return false
+    } catch {
+      return false
+    }
+  }
+
   // Desistir: devolve o pedido pro pool. Se já tinha saído pra entrega, volta
   // pra 'pronto' pra outro motoqueiro pegar (a RLS 0079 permite esse caso).
   async function desistirEntrega(pedido) {
@@ -502,7 +539,8 @@ export default function PainelEntregador() {
                   )}
                   {minhas.map(p => (
                     <CardEntrega key={p.id} pedido={p} mine
-                      onSair={sairParaEntrega} onConfirmar={confirmarEntrega} onDesistir={desistirEntrega} />
+                      onSair={sairParaEntrega} onConfirmar={confirmarEntrega}
+                      onConfirmarIfood={confirmarEntregaIfood} onDesistir={desistirEntrega} />
                   ))}
                 </>
               )}
