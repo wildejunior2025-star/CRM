@@ -19,7 +19,7 @@
 |----|----------|-----------------------|----------|--------|
 | F1 | Confirmar entrega do iFood pelo nosso sistema | **FEITO e VALIDADO (02/07):** motoqueiro digita o código do cliente → `verifyDeliveryCode` → iFood conclui. Poll detecta `DDCR` e marca o pedido (mig 0085/0086 + edge). **Testado no ambiente-teste:** pedido #6157 despachado → DDCR detectado (`ifood_requer_codigo=true`) → endpoint respondeu com auth válida. **NÃO precisa de homologação nova** (roda no crm-fwc já aprovado). Só falta ver o `valid:true` com o código certo | Alta | ✅ |
 | F2 | Ligar pro Localizador do iFood (0800) | **FEITO:** no app do motoqueiro, pedidos iFood **não mostram WhatsApp**; o botão 📞 liga direto no 0800 do iFood e exibe o **ID** (localizer) pra digitar. Guardamos o `ifood_phone_localizer` (mig 0084 + edge fn) | Baixa | ✅ |
-| F3 | Pausar/esgotar item no iFood + cardápio | Pelo nosso gestor, **pausar (marcar esgotado) um item** e refletir tanto no **iFood** quanto no **nosso cardápio** | Média | ⬜ |
+| F3 | Pausar/esgotar item no iFood + cardápio | **CÓDIGO PRONTO (02/07):** edge `catalogo_listar`/`catalogo_pausar` (PATCH items/status) + tela em Minha Loja → Integração iFood ("Pausar itens no iFood"). **Aguardando:** ticket de homologação do módulo Catálogo (Em análise) + reunião + Zebu autorizar scope catálogo. Testar na reunião | Média | 🔧 |
 
 ## 🧑‍🍳 Cozinha / Gestor
 
