@@ -15,6 +15,7 @@ const emptyForm = {
   embalagem: 'caixa',
   unidades_por_caixa: 1,
   controla_casco: false,
+  controla_estoque: true,
   preco_custo: 0,
   preco_venda: 0,
   preco_app: 0,
@@ -239,6 +240,7 @@ export default function Produtos() {
       embalagem: produto.embalagem ?? 'caixa',
       unidades_por_caixa: produto.unidades_por_caixa ?? 1,
       controla_casco: produto.controla_casco ?? false,
+      controla_estoque: produto.controla_estoque ?? true,
       preco_custo: produto.preco_custo ?? 0,
       preco_venda: produto.preco_venda ?? 0,
       preco_app: produto.preco_app ?? 0,
@@ -645,6 +647,21 @@ export default function Produtos() {
                       onChange={handleChange}
                     />{' '}
                     Controla vasilhame (casco)
+                  </label>
+                </div>
+
+                <div className="form-field">
+                  <label>
+                    <input
+                      type="checkbox"
+                      name="controla_estoque"
+                      checked={form.controla_estoque}
+                      onChange={handleChange}
+                    />{' '}
+                    Controla estoque{' '}
+                    <span style={{ color: 'var(--text-muted, #888)', fontWeight: 400, fontSize: 13 }}>
+                      (desmarque p/ self service / prato feito na hora)
+                    </span>
                   </label>
                 </div>
 
