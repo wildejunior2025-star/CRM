@@ -16,8 +16,10 @@ const PERFIS = [
 const emptyVendorForm = { nome: '', email: '', senha: '', telefone: '' }
 
 export default function Usuarios() {
-  const { user, profile, refreshProfile } = useAuth()
+  const { user, profile, empresa, refreshProfile } = useAuth()
   const [perfis, setPerfis] = useState([])
+  const [filaAtiva, setFilaAtiva] = useState(false)
+  const [filaSaving, setFilaSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [savingId, setSavingId] = useState(null)
@@ -76,6 +78,18 @@ export default function Usuarios() {
   useEffect(() => {
     loadAll()
   }, [profile?.empresa_id])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { setFilaAtiva(!!empresa?.fila_entregador_ativa) }, [empresa?.fila_entregador_ativa])
+
+  async function toggleFila() {
+    if (!profile?.empresa_id) return
+    const novo = !filaAtiva
+    setFilaAtiva(novo)
+    setFilaSaving(true)
+    const { error } = await supabase.from('empresas').update({ fila_entregador_ativa: novo }).eq('id', profile.empresa_id)
+    if (error) { setFilaAtiva(!novo); setError(error.message) }
+    setFilaSaving(false)
+  }
 
   async function handlePerfilChange(profile, novoPerfil) {
     setSavingId(profile.id)
@@ -159,6 +173,30 @@ export default function Usuarios() {
 
       {error && <p className="error-text">{error}</p>}
 
+      {/* Fila de entregadores (E4) — por ordem de chegada / Online */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        border: '1px solid var(--border, #e5e7eb)', borderRadius: 12, padding: '12px 16px', marginBottom: 12,
+        background: 'var(--surface, #fff)',
+      }}>
+        <div>
+          <div style={{ fontWeight: 700 }}>🛵 Fila de entregadores (ordem de chegada)</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted, #6b7280)', marginTop: 2 }}>
+            Ligado: o motoqueiro fica <strong>Online</strong> ao chegar e entra na fila; só quem está na vez aceita.
+            Desligado: qualquer entregador pega qualquer pedido (pool livre).
+          </div>
+        </div>
+        <button type="button" onClick={toggleFila} disabled={filaSaving}
+          style={{
+            flexShrink: 0, width: 52, height: 30, borderRadius: 999, border: 'none', cursor: 'pointer',
+            background: filaAtiva ? '#16a34a' : '#9ca3af', position: 'relative', transition: 'background .15s',
+          }} aria-pressed={filaAtiva} title={filaAtiva ? 'Ligado' : 'Desligado'}>
+          <span style={{
+            position: 'absolute', top: 3, left: filaAtiva ? 25 : 3, width: 24, height: 24,
+            borderRadius: '50%', background: '#fff', transition: 'left .15s',
+          }} />
+        </button>
+      </div>
 
       <div className="toolbar">
         <input

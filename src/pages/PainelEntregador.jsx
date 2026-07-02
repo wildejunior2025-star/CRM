@@ -139,10 +139,16 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onDesistir 
 
       {/* Ação principal */}
       {!mine ? (
-        <button type="button" onClick={() => run(() => onAceitar(pedido))} disabled={ocupado}
-          style={btnPrimario('#0d9488')}>
-          {ocupado ? 'Aceitando...' : '✋ Aceitar entrega'}
-        </button>
+        onAceitar ? (
+          <button type="button" onClick={() => run(() => onAceitar(pedido))} disabled={ocupado}
+            style={btnPrimario('#0d9488')}>
+            {ocupado ? 'Aceitando...' : '✋ Aceitar entrega'}
+          </button>
+        ) : (
+          <div style={{ textAlign: 'center', fontSize: 12.5, color: 'var(--text-muted)', padding: '4px 0' }}>
+            Aguarde sua vez para aceitar
+          </div>
+        )
       ) : !emRota ? (
         <button type="button" onClick={() => run(() => onSair(pedido))} disabled={ocupado}
           style={btnPrimario('#7c3aed')}>
@@ -201,6 +207,18 @@ function btnPrimario(cor) {
     background: cor, color: '#fff', fontWeight: 800, fontSize: 15,
   }
 }
+function filaBox(cor) {
+  return {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+    background: `${cor}18`, border: `1.5px solid ${cor}`, borderRadius: 12, padding: '12px 14px',
+  }
+}
+function btnFila(cor) {
+  return {
+    flexShrink: 0, padding: '10px 16px', borderRadius: 10, border: 'none', cursor: 'pointer',
+    background: cor, color: '#fff', fontWeight: 800, fontSize: 14, whiteSpace: 'nowrap',
+  }
+}
 
 // ── Tela do entregador ──────────────────────────────────────
 export default function PainelEntregador() {
@@ -210,6 +228,9 @@ export default function PainelEntregador() {
   const [aba, setAba] = useState('ativas') // 'ativas' | 'historico'
   const [historico, setHistorico] = useState([])
   const [histLoading, setHistLoading] = useState(false)
+  // Fila (E4): null = ainda não carregou. { fila_ativa, online, pausado, na_vez, posicao, total_fila }
+  const [fila, setFila] = useState(null)
+  const [filaBusy, setFilaBusy] = useState(false)
 
   // A RLS já limita: cada entregador recebe os pedidos dele + os 'pronto' livres
   // da própria loja. Por isso basta filtrar por status e deixar o banco filtrar o resto.
@@ -238,6 +259,31 @@ export default function PainelEntregador() {
     return () => { canal.unsubscribe() }
   }, [user, carregar])
 
+  // Estado da fila (E4). Faz polling curto porque a fila muda no profile de
+  // OUTROS entregadores (que o Realtime deste usuário não recebe).
+  const carregarFila = useCallback(async () => {
+    if (!user) return
+    const { data } = await supabase.rpc('entregador_estado')
+    if (data) setFila(data)
+  }, [user])
+
+  useEffect(() => {
+    carregarFila()
+    const t = setInterval(carregarFila, 5000)
+    return () => clearInterval(t)
+  }, [carregarFila])
+
+  async function acaoFila(rpc, args) {
+    setFilaBusy(true)
+    await supabase.rpc(rpc, args)
+    await Promise.all([carregarFila(), carregar()])
+    setFilaBusy(false)
+  }
+  const ficarOnline    = () => acaoFila('entregador_set_online', { p_online: true })
+  const ficarOffline   = () => acaoFila('entregador_set_online', { p_online: false })
+  const finalizarVez   = () => acaoFila('entregador_finalizar_vez')
+  const voltarFila      = () => acaoFila('entregador_voltar_fila')
+
   async function notificarCliente(pedidoId, novoStatus) {
     try {
       const { data: { session } } = await supabase.auth.getSession()
@@ -253,7 +299,14 @@ export default function PainelEntregador() {
   }
 
   async function aceitar(pedido) {
-    // Otimista: marca como meu. Se outro pegou primeiro, o reload corrige.
+    // Com fila ativa, o servidor decide se posso aceitar (tenho que estar na vez).
+    if (fila?.fila_ativa) {
+      const { data: ok } = await supabase.rpc('entregador_aceitar_pedido', { p_pedido: pedido.id })
+      if (ok === false) alert('Não deu pra aceitar — ou não é a sua vez, ou outro motoqueiro pegou primeiro.')
+      await Promise.all([carregar(), carregarFila()])
+      return
+    }
+    // Pool livre (comportamento padrão): otimista, o reload corrige se outro pegou.
     setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, entregador_id: user.id } : p))
     await supabase.from('pedidos_delivery').update({ entregador_id: user.id }).eq('id', pedido.id).is('entregador_id', null)
     carregar()
@@ -306,6 +359,11 @@ export default function PainelEntregador() {
     (p.status === 'pronto' || (p.origem === 'ifood' && p.status === 'saiu_entrega'))
   )
 
+  // Fila (E4): com a fila ativa, só quem está online, sem pausa e na vez aceita.
+  const filaAtiva = !!fila?.fila_ativa
+  const emAtividade = !filaAtiva || (fila?.online && !fila?.pausado) // pode ver o pool?
+  const podeAceitar = !filaAtiva || !!fila?.na_vez
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg, #0f0f1a)' }}>
       <header style={{
@@ -325,6 +383,55 @@ export default function PainelEntregador() {
           Sair
         </button>
       </header>
+
+      {/* Barra da fila (E4) — só quando a loja usa fila por ordem de chegada */}
+      {filaAtiva && (
+        <div style={{ maxWidth: 560, margin: '0 auto', padding: '14px 16px 0' }}>
+          {!fila.online ? (
+            <div style={filaBox('#6b7280')}>
+              <div>
+                <div style={{ fontWeight: 800, color: 'var(--text)' }}>⚪ Você está offline</div>
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Fique online ao chegar na loja para entrar na fila.</div>
+              </div>
+              <button type="button" onClick={ficarOnline} disabled={filaBusy} style={btnFila('#16a34a')}>
+                🟢 Ficar online
+              </button>
+            </div>
+          ) : fila.pausado ? (
+            <div style={filaBox('#f59e0b')}>
+              <div>
+                <div style={{ fontWeight: 800, color: 'var(--text)' }}>⏸️ Vez finalizada — em pausa</div>
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Quando voltar, entre de novo no fim da fila.</div>
+              </div>
+              <button type="button" onClick={voltarFila} disabled={filaBusy} style={btnFila('#7c3aed')}>
+                ↩️ Voltar pra fila
+              </button>
+            </div>
+          ) : (
+            <div style={filaBox(fila.na_vez ? '#16a34a' : '#2563eb')}>
+              <div>
+                <div style={{ fontWeight: 800, color: 'var(--text)' }}>
+                  {fila.na_vez ? '🟢 É a SUA VEZ' : `🟢 Online · você é o Nº ${fila.posicao}`}
+                </div>
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                  {fila.na_vez
+                    ? `Você pode aceitar as entregas. (${fila.total_fila} na fila)`
+                    : `Aguarde sua vez — ${fila.total_fila} na fila.`}
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <button type="button" onClick={finalizarVez} disabled={filaBusy} style={btnFila('#f59e0b')}>
+                  Finalizar minha vez
+                </button>
+                <button type="button" onClick={ficarOffline} disabled={filaBusy}
+                  style={{ background: 'none', border: '1px solid var(--border, #2a2a3a)', color: 'var(--text-muted)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12.5 }}>
+                  Ficar offline
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Abas */}
       <div style={{ maxWidth: 560, margin: '0 auto', padding: '14px 16px 0', display: 'flex', gap: 8 }}>
@@ -364,18 +471,20 @@ export default function PainelEntregador() {
                   ))}
                 </>
               )}
-              <>
-                <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '8px 0 -4px' }}>
-                  Disponíveis ({disponiveis.length})
-                </h2>
-                {disponiveis.length === 0 ? (
-                  <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: 12 }}>
-                    Nenhum pedido pronto esperando. Aguarde a cozinha liberar.
-                  </p>
-                ) : disponiveis.map(p => (
-                  <CardEntrega key={p.id} pedido={p} mine={false} onAceitar={aceitar} />
-                ))}
-              </>
+              {emAtividade && (
+                <>
+                  <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '8px 0 -4px' }}>
+                    Disponíveis ({disponiveis.length})
+                  </h2>
+                  {disponiveis.length === 0 ? (
+                    <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: 12 }}>
+                      Nenhum pedido pronto esperando. Aguarde a cozinha liberar.
+                    </p>
+                  ) : disponiveis.map(p => (
+                    <CardEntrega key={p.id} pedido={p} mine={false} onAceitar={podeAceitar ? aceitar : undefined} />
+                  ))}
+                </>
+              )}
             </>
           )
         ) : (
