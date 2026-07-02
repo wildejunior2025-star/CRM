@@ -1939,7 +1939,25 @@ function MiniTimer({ createdAt, aguardandoDesde, onExpirado }) {
 }
 
 // Card compacto do quadro — clica pra abrir o pedido completo
-function CardMini({ pedido, onClick, onExpirado, entregadores = [] }) {
+// Próximo passo rápido do pedido (botão direto no card, sem abrir o pedido).
+function acaoRapidaPedido(pedido) {
+  const isRet = (pedido.tipo_entrega || 'entrega') === 'retirada'
+  switch (pedido.status) {
+    case 'confirmado':
+    case 'em_preparo':
+      return { status: 'pronto', label: '✓ Pronto', cor: '#1d4ed8' }
+    case 'pronto':
+      return isRet
+        ? { status: 'entregue', label: '✓ Entregue', cor: '#16a34a' }
+        : { status: 'saiu_entrega', label: '🛵 Despachar', cor: '#7c3aed' }
+    case 'saiu_entrega':
+      return { status: 'entregue', label: '✓ Entregue', cor: '#16a34a' }
+    default:
+      return null
+  }
+}
+
+function CardMini({ pedido, onClick, onExpirado, onAvancar, entregadores = [] }) {
   const oc = ORIGEM_CONFIG[pedido.origem] ?? ORIGEM_CONFIG.cardapio
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const qtdItens = itens.reduce((s, i) => s + Number(i.qtd ?? i.quantidade ?? 1), 0)
@@ -1949,8 +1967,11 @@ function CardMini({ pedido, onClick, onExpirado, entregadores = [] }) {
     ? (entregadores.find(en => en.id === pedido.entregador_id)?.nome || 'Entregador')
     : null
   const aguardandoEntregador = pedido.status === 'pronto' && !pedido.entregador_id && !isRetirada
+  const acao = onAvancar ? acaoRapidaPedido(pedido) : null
   return (
-    <button type="button" onClick={onClick} className="pp-mini" style={{ borderLeft: `3px solid ${oc.borda}` }}>
+    <div role="button" tabIndex={0} onClick={onClick}
+      onKeyDown={e => { if (e.key === 'Enter') onClick?.() }}
+      className="pp-mini" style={{ borderLeft: `3px solid ${oc.borda}`, cursor: 'pointer' }}>
       <div className="pp-mini-top">
         <span className="pp-mini-num">
           {pedido.origem === 'ifood' && pedido.ifood_display_id
@@ -1970,7 +1991,15 @@ function CardMini({ pedido, onClick, onExpirado, entregadores = [] }) {
         {entregadorNome && <span className="pp-mini-itens">🛵 {entregadorNome}</span>}
         {aguardandoEntregador && <span className="pp-mini-itens" style={{ color: '#a16207' }}>aguardando entregador</span>}
       </div>
-    </button>
+      {acao && (
+        <button type="button"
+          onClick={e => { e.stopPropagation(); onAvancar(pedido.id, acao.status) }}
+          style={{ marginTop: 8, width: '100%', padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+            fontWeight: 800, fontSize: 13, border: `1.5px solid ${acao.cor}`, background: `${acao.cor}1e`, color: acao.cor }}>
+          {acao.label}
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -3239,7 +3268,7 @@ export default function PainelPedidos() {
                   count={pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length}
                   vazio="Nada em preparo">
                   {pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').map(p => (
-                    <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
+                    <CardMini key={p.id} pedido={p} onAvancar={handleAvancar} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
@@ -3249,7 +3278,7 @@ export default function PainelPedidos() {
                   count={pedidos.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
                   vazio="Ninguém na rua">
                   {pedidos.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).map(p => (
-                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onClick={() => setPedidoDetalhe(p)} />
+                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onAvancar={handleAvancar} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
@@ -3259,7 +3288,7 @@ export default function PainelPedidos() {
                   count={pedidos.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
                   vazio="Nenhuma retirada pronta">
                   {pedidos.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).map(p => (
-                    <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
+                    <CardMini key={p.id} pedido={p} onAvancar={handleAvancar} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
