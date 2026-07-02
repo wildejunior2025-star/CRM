@@ -23,8 +23,25 @@ function soDigitos(tel) {
   return String(tel || '').replace(/\D/g, '')
 }
 
+// Diz pro motoqueiro se ele PRECISA cobrar (dinheiro) ou se já está pago.
+// iFood e cartão/online caem sempre como pago; PIX só quando confirmado.
+function pagamentoInfo(p) {
+  const forma = p.forma_pagamento
+  if (forma === 'dinheiro') {
+    return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'Dinheiro', cor: '#f59e0b' }
+  }
+  if (forma === 'pix') {
+    if (p.pix_status === 'pago') return { pago: true, titulo: 'JÁ PAGO', detalhe: 'PIX confirmado', cor: '#16a34a' }
+    return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'PIX (não confirmado)', cor: '#f59e0b' }
+  }
+  if (p.origem === 'ifood') {
+    return { pago: true, titulo: 'JÁ PAGO', detalhe: 'Pago no iFood', cor: '#16a34a' }
+  }
+  return { pago: true, titulo: 'JÁ PAGO', detalhe: forma || 'Pago online', cor: '#16a34a' }
+}
+
 // ── Card de entrega ─────────────────────────────────────────
-function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar }) {
+function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onDesistir }) {
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
@@ -32,6 +49,12 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar }) {
   const tel = soDigitos(pedido.cliente_telefone)
   const emRota = pedido.status === 'saiu_entrega'
   const cor = !mine ? '#0d9488' : emRota ? '#7c3aed' : '#2563eb'
+  const pg = pagamentoInfo(pedido)
+
+  function desistir() {
+    if (!window.confirm('Largar esta entrega? Ela volta para os outros motoqueiros pegarem.')) return
+    run(() => onDesistir(pedido))
+  }
 
   async function run(fn) {
     setOcupado(true)
@@ -74,20 +97,36 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar }) {
       <div style={{ fontSize: 14, color: 'var(--text-muted)', margin: '4px 0 10px' }}>📍 {endereco}</div>
 
 
+      {/* Pagamento: deixa MUITO claro se já pagou ou se o motoqueiro precisa cobrar */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        background: 'var(--bg, #0f0f1a)', borderRadius: 10, padding: '8px 12px', marginBottom: 12,
+        background: `${pg.cor}18`, border: `1.5px solid ${pg.cor}`,
+        borderRadius: 10, padding: '10px 12px', marginBottom: 10,
       }}>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-          {pedido.forma_pagamento === 'pix' && (pedido.pix_status === 'pago' ? 'PIX pago ✓' : 'PIX')}
-          {pedido.forma_pagamento === 'dinheiro' && 'Dinheiro'}
-          {pedido.forma_pagamento && !['pix', 'dinheiro'].includes(pedido.forma_pagamento) && pedido.forma_pagamento}
-          {pedido.forma_pagamento === 'dinheiro' && pedido.troco_para > 0 && (
-            <span> · troco p/ {fmt(pedido.troco_para)}</span>
-          )}
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 900, color: pg.cor, letterSpacing: .3 }}>
+            {pg.pago ? '✓ ' : '💵 '}{pg.titulo}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>
+            {pg.detalhe}
+            {pedido.forma_pagamento === 'dinheiro' && pedido.troco_para > 0 && (
+              <span> · troco p/ {fmt(pedido.troco_para)}</span>
+            )}
+          </div>
         </div>
-        <strong style={{ fontSize: 16, color: 'var(--text)' }}>{fmt(pedido.total)}</strong>
+        <strong style={{ fontSize: 18, color: 'var(--text)' }}>{fmt(pedido.total)}</strong>
       </div>
+
+      {/* Taxa da corrida (o que a entrega vale para o motoqueiro) */}
+      {pedido.taxa_entrega != null && Number(pedido.taxa_entrega) > 0 && (
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          fontSize: 13.5, color: 'var(--text-muted)', margin: '0 2px 12px',
+        }}>
+          <span>🛵 Taxa desta corrida</span>
+          <strong style={{ color: 'var(--text)', fontSize: 15 }}>{fmt(pedido.taxa_entrega)}</strong>
+        </div>
+      )}
 
       {/* Contato / rota — só faz sentido depois de aceitar */}
       {mine && (
@@ -133,6 +172,18 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar }) {
             Peça ao cliente os 4 dígitos que aparecem na tela do pedido dele.
           </div>
         </div>
+      )}
+
+      {/* Desistir: devolve a entrega pro pool (só nas minhas) */}
+      {mine && onDesistir && (
+        <button type="button" onClick={desistir} disabled={ocupado}
+          style={{
+            width: '100%', marginTop: 8, padding: '9px 0', borderRadius: 10,
+            background: 'transparent', border: '1.5px solid var(--border, #2a2a3a)',
+            color: 'var(--text-muted)', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+          }}>
+          Largar entrega
+        </button>
       )}
     </div>
   )
@@ -222,6 +273,16 @@ export default function PainelEntregador() {
     notificarCliente(pedido.id, 'entregue')
   }
 
+  // Desistir: devolve o pedido pro pool. Se já tinha saído pra entrega, volta
+  // pra 'pronto' pra outro motoqueiro pegar (a RLS 0079 permite esse caso).
+  async function desistirEntrega(pedido) {
+    const update = { entregador_id: null }
+    if (pedido.status === 'saiu_entrega') update.status = 'pronto'
+    setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, ...update } : p))
+    await supabase.from('pedidos_delivery').update(update).eq('id', pedido.id).eq('entregador_id', user.id)
+    carregar()
+  }
+
   // Histórico: entregas já concluídas por este entregador (carrega ao abrir a aba)
   useEffect(() => {
     if (aba !== 'historico' || !user) return
@@ -299,7 +360,7 @@ export default function PainelEntregador() {
                   <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '0 0 -4px' }}>Minhas ({minhas.length})</h2>
                   {minhas.map(p => (
                     <CardEntrega key={p.id} pedido={p} mine
-                      onSair={sairParaEntrega} onConfirmar={confirmarEntrega} />
+                      onSair={sairParaEntrega} onConfirmar={confirmarEntrega} onDesistir={desistirEntrega} />
                   ))}
                 </>
               )}
