@@ -78,10 +78,11 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
   const ifoodId = pedido.ifood_phone_localizer
   // Pedido do iFood que exige o código de confirmação de entrega (F1)
   const precisaCodigoIfood = isIfood && pedido.ifood_requer_codigo
-  // Link de ligação: no iFood já embute o ID depois de uma pausa (as vírgulas
-  // fazem o celular esperar e "digitar" o ID sozinho no 0800, igual o app deles).
+  // Link de ligação: no iFood embute o ID no formato que o próprio iFood usa —
+  // 0800 + ";" (espera) + ID. Ex: tel:08007054050;51303807. O motoqueiro liga e,
+  // quando a gravação pedir, aperta pra enviar o código (não digita os 8 números).
   const telHref = (isIfood && ifoodId)
-    ? `tel:${tel},,,${soDigitos(ifoodId)}#`
+    ? `tel:${tel};${soDigitos(ifoodId)}`
     : `tel:${tel}`
 
   function desistir() {
