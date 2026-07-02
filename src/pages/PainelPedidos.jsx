@@ -2224,6 +2224,35 @@ export default function PainelPedidos() {
     }, empresa)
   }
 
+  // Gera e baixa um atalho .bat que abre o gestor no Chrome com impressão
+  // silenciosa (--kiosk-printing). O cliente dá 2 cliques e imprime sozinho,
+  // sem instalar nada e sem a janela de impressão travar.
+  function baixarAtalhoImpressao() {
+    const url = 'https://gestor.fwcinter.com/painel'
+    const linhas = [
+      '@echo off',
+      'title Gestor FWC - impressao automatica',
+      'rem Deixe a impressora termica como PADRAO no Windows. De 2 cliques neste atalho.',
+      'set "PROF=%USERPROFILE%\\gestor-fwc"',
+      'if exist "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" (',
+      `  start "" "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="%PROF%" "${url}"`,
+      ') else if exist "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" (',
+      `  start "" "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="%PROF%" "${url}"`,
+      ') else (',
+      `  start "" chrome --kiosk-printing --user-data-dir="%PROF%" "${url}"`,
+      ')',
+    ]
+    const blob = new Blob(['﻿' + linhas.join('\r\n')], { type: 'application/octet-stream' })
+    const href = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = href
+    a.download = 'Gestor FWC - impressao automatica.bat'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(href)
+  }
+
   const carregarHistorico = useCallback(async () => {
     if (!empresa) return
     setLoadingHist(true)
@@ -3376,8 +3405,25 @@ export default function PainelPedidos() {
                 Imprimir cupom de teste
               </button>
 
+              {/* Impressão automática sem instalar nada (atalho kiosk do Chrome) */}
+              <div style={{ border: '1px solid #16a34a', borderRadius: 10, padding: 12, background: 'rgba(34,197,94,.08)' }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', marginBottom: 4 }}>
+                  🖨️ Impressão automática (sem instalar nada)
+                </div>
+                <p style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5, margin: '0 0 10px' }}>
+                  Baixe o atalho, deixe a <strong>impressora térmica como padrão</strong> do Windows e dê 2 cliques nele.
+                  O gestor abre e cada pedido imprime <strong>sozinho, sem a janela do Chrome</strong>.
+                </p>
+                <button type="button" onClick={baixarAtalhoImpressao} style={{
+                  width: '100%', padding: '10px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
+                  background: '#16a34a', color: '#fff', fontWeight: 800, fontSize: 13.5,
+                }}>
+                  ⬇️ Baixar atalho de impressão automática
+                </button>
+              </div>
+
               <p style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
-                Com o <strong>QZ Tray</strong> instalado e aberto, o cupom imprime sozinho na impressora escolhida — sem janela.{' '}
+                Prefere escolher a impressora entre várias? Com o <strong>QZ Tray</strong> instalado e aberto, o cupom imprime sozinho na impressora escolhida.{' '}
                 <a href="https://qz.io/download/" target="_blank" rel="noreferrer" style={{ color: 'var(--primary, #a78bfa)', fontWeight: 700 }}>
                   Baixar QZ Tray
                 </a>
