@@ -4,6 +4,30 @@ import { useAuth } from './hooks/useAuth'
 
 const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor', '/mesa/']
 
+// Domínios em que a raiz "/" mostra a landing de marketing (visitante deslogado).
+// Nos subdomínios (app./admin./gestor./lojaonline.) a raiz mantém o fluxo antigo.
+function isDominioLanding() {
+  if (typeof window === 'undefined') return false
+  const h = window.location.hostname
+  return h === 'fwcinter.com' || h === 'www.fwcinter.com' || h === 'localhost' || h === '127.0.0.1'
+}
+
+// Element da raiz "/": deslogado no domínio principal → landing de vendas;
+// caso contrário, comportamento atual (CRM protegido com Layout).
+function LayoutOrLanding() {
+  const { session, loading } = useAuth()
+  const { pathname } = useLocation()
+  const naRaiz = pathname === '/'
+  if (naRaiz && isDominioLanding() && !loading && !session) {
+    return <Landing />
+  }
+  return (
+    <ProtectedRoute roles={['admin', 'garcom', 'cozinheiro']}>
+      <Layout />
+    </ProtectedRoute>
+  )
+}
+
 function HostnameRedirect() {
   const navigate = useNavigate()
   const { pathname } = useLocation()
@@ -117,6 +141,7 @@ import PresencialCozinha from './pages/PresencialCozinha'
 import PresencialHistorico from './pages/PresencialHistorico'
 import PresencialReservas from './pages/PresencialReservas'
 import MesaCardapio from './pages/MesaCardapio'
+import Landing from './pages/Landing'
 
 export default function App() {
   // lojaonline.fwcinter.com — vitrine pública da loja (sem login).
@@ -194,13 +219,7 @@ export default function App() {
             <Route path="/super-admin/financeiro" element={<SuperAdminFinanceiro />} />
           </Route>
 
-          <Route
-            element={
-              <ProtectedRoute roles={['admin', 'garcom', 'cozinheiro']}>
-                <Layout />
-              </ProtectedRoute>
-            }
-          >
+          <Route element={<LayoutOrLanding />}>
             <Route index element={<ProtectedRoute roles={['admin', 'vendedor']}><Dashboard /></ProtectedRoute>} />
             <Route path="clientes" element={<ProtectedRoute modulo="clientes"><Clientes /></ProtectedRoute>} />
             <Route path="vendas" element={<ProtectedRoute modulo="vendas"><Vendas /></ProtectedRoute>} />

@@ -1,0 +1,487 @@
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+  .fwc-landing *, .fwc-landing *::before, .fwc-landing *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  .fwc-landing {
+    --purple: #7c3aed;
+    --purple-dark: #5b21b6;
+    --purple-light: #a78bfa;
+    --purple-bg: #f5f3ff;
+    --text: #111827;
+    --text-muted: #6b7280;
+    --border: #e5e7eb;
+    --white: #ffffff;
+    font-family: 'Inter', sans-serif;
+    color: var(--text);
+    background: var(--white);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  .fwc-landing a { color: inherit; text-decoration: none; }
+
+  /* ── NAV ── */
+  .fwc-landing nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(255,255,255,.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+  }
+  .fwc-landing .nav-inner {
+    max-width: 1100px; margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 64px;
+  }
+  .fwc-landing .nav-logo {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .fwc-landing .nav-logo-icon {
+    width: 40px; height: 40px; border-radius: 10px;
+    overflow: hidden; flex-shrink: 0;
+  }
+  .fwc-landing .nav-logo-icon img { width: 100%; height: 100%; object-fit: cover; }
+  .fwc-landing .nav-logo-text { font-size: 18px; font-weight: 800; }
+  .fwc-landing .nav-logo-text span { color: var(--purple); }
+  .fwc-landing .nav-actions { display: flex; align-items: center; gap: 8px; }
+  .fwc-landing .nav-login {
+    background: transparent; color: var(--text);
+    border: 1.5px solid var(--border); border-radius: 8px;
+    padding: 9px 20px; font-size: 14px; font-weight: 700;
+    cursor: pointer; transition: border-color .15s, color .15s;
+  }
+  .fwc-landing .nav-login:hover { border-color: var(--purple); color: var(--purple); }
+  .fwc-landing .nav-cta {
+    background: var(--purple);
+    color: #fff; border: none; border-radius: 8px;
+    padding: 10px 22px; font-size: 14px; font-weight: 700;
+    cursor: pointer; transition: background .15s;
+  }
+  .fwc-landing .nav-cta:hover { background: var(--purple-dark); }
+
+  /* ── HERO ── */
+  .fwc-landing .hero {
+    padding: 100px 24px 80px;
+    text-align: center;
+    background: linear-gradient(180deg, var(--purple-bg) 0%, var(--white) 100%);
+  }
+  .fwc-landing .hero-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #ede9fe; color: var(--purple); border-radius: 999px;
+    padding: 6px 16px; font-size: 13px; font-weight: 600;
+    margin-bottom: 24px;
+  }
+  .fwc-landing .hero h1 {
+    font-size: clamp(36px, 6vw, 64px);
+    font-weight: 900; line-height: 1.1;
+    letter-spacing: -1.5px;
+    max-width: 800px; margin: 0 auto 20px;
+  }
+  .fwc-landing .hero h1 span { color: var(--purple); }
+  .fwc-landing .hero p {
+    font-size: clamp(16px, 2.5vw, 20px);
+    color: var(--text-muted); max-width: 560px;
+    margin: 0 auto 40px;
+  }
+  .fwc-landing .hero-btns {
+    display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
+  }
+  .fwc-landing .btn-primary {
+    background: var(--purple); color: #fff;
+    padding: 14px 32px; border-radius: 10px;
+    font-size: 16px; font-weight: 700;
+    border: none; cursor: pointer; transition: background .15s;
+  }
+  .fwc-landing .btn-primary:hover { background: var(--purple-dark); }
+  .fwc-landing .btn-secondary {
+    background: var(--white); color: var(--text);
+    padding: 14px 32px; border-radius: 10px;
+    font-size: 16px; font-weight: 600;
+    border: 1.5px solid var(--border); cursor: pointer;
+    transition: border-color .15s;
+  }
+  .fwc-landing .btn-secondary:hover { border-color: var(--purple); color: var(--purple); }
+
+  /* ── STATS ── */
+  .fwc-landing .stats {
+    padding: 60px 24px;
+    background: var(--purple);
+  }
+  .fwc-landing .stats-inner {
+    max-width: 1100px; margin: 0 auto;
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 32px; text-align: center;
+  }
+  .fwc-landing .stat-num {
+    font-size: 40px; font-weight: 900; color: #fff;
+    letter-spacing: -1px;
+  }
+  .fwc-landing .stat-label {
+    font-size: 14px; color: rgba(255,255,255,.75);
+    font-weight: 500; margin-top: 4px;
+  }
+
+  /* ── FEATURES ── */
+  .fwc-landing .features { padding: 100px 24px; }
+  .fwc-landing .section-label {
+    text-align: center;
+    font-size: 13px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--purple); margin-bottom: 14px;
+  }
+  .fwc-landing .section-title {
+    text-align: center;
+    font-size: clamp(28px, 4vw, 42px); font-weight: 800;
+    letter-spacing: -.5px; margin-bottom: 16px;
+  }
+  .fwc-landing .section-sub {
+    text-align: center; color: var(--text-muted);
+    font-size: 17px; max-width: 540px;
+    margin: 0 auto 64px;
+  }
+  .fwc-landing .features-grid {
+    max-width: 1100px; margin: 0 auto;
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  .fwc-landing .feature-card {
+    background: var(--white);
+    border: 1.5px solid var(--border);
+    border-radius: 16px; padding: 32px 28px;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .fwc-landing .feature-card:hover {
+    border-color: var(--purple-light);
+    box-shadow: 0 8px 32px rgba(124,58,237,.1);
+  }
+  .fwc-landing .feature-icon {
+    width: 48px; height: 48px; border-radius: 12px;
+    background: var(--purple-bg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; margin-bottom: 20px;
+  }
+  .fwc-landing .feature-title {
+    font-size: 17px; font-weight: 700; margin-bottom: 10px;
+  }
+  .fwc-landing .feature-desc {
+    font-size: 14px; color: var(--text-muted); line-height: 1.7;
+  }
+
+  /* ── HOW IT WORKS ── */
+  .fwc-landing .how { padding: 100px 24px; background: var(--purple-bg); }
+  .fwc-landing .steps {
+    max-width: 860px; margin: 0 auto;
+    display: flex; flex-direction: column; gap: 0;
+  }
+  .fwc-landing .step {
+    display: flex; gap: 28px; align-items: flex-start;
+    padding: 32px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .fwc-landing .step:last-child { border-bottom: none; }
+  .fwc-landing .step-num {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: var(--purple); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 16px; flex-shrink: 0;
+  }
+  .fwc-landing .step-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .fwc-landing .step-desc  { font-size: 15px; color: var(--text-muted); }
+
+  /* ── SEGMENTOS ── */
+  .fwc-landing .segments { padding: 100px 24px; }
+  .fwc-landing .seg-grid {
+    max-width: 1100px; margin: 0 auto;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+  }
+  .fwc-landing .seg-card {
+    border: 1.5px solid var(--border); border-radius: 14px;
+    padding: 28px 20px; text-align: center;
+  }
+  .fwc-landing .seg-icon { font-size: 36px; margin-bottom: 12px; }
+  .fwc-landing .seg-name { font-size: 15px; font-weight: 700; }
+
+  /* ── CTA FINAL ── */
+  .fwc-landing .cta-section {
+    padding: 100px 24px;
+    background: linear-gradient(135deg, var(--purple), var(--purple-dark));
+    text-align: center;
+  }
+  .fwc-landing .cta-section h2 {
+    font-size: clamp(28px, 4vw, 48px); font-weight: 900;
+    color: #fff; margin-bottom: 16px; letter-spacing: -.5px;
+  }
+  .fwc-landing .cta-section p { color: rgba(255,255,255,.8); font-size: 18px; margin-bottom: 40px; }
+  .fwc-landing .btn-white {
+    background: #fff; color: var(--purple);
+    padding: 14px 36px; border-radius: 10px;
+    font-size: 16px; font-weight: 700; border: none; cursor: pointer;
+    transition: opacity .15s;
+  }
+  .fwc-landing .btn-white:hover { opacity: .9; }
+
+  /* ── FOOTER ── */
+  .fwc-landing footer {
+    background: #111827; color: rgba(255,255,255,.5);
+    padding: 40px 24px; text-align: center; font-size: 14px;
+  }
+  .fwc-landing footer strong { color: rgba(255,255,255,.8); }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 768px) {
+    .fwc-landing .stats-inner   { grid-template-columns: 1fr; gap: 24px; }
+    .fwc-landing .features-grid { grid-template-columns: 1fr; }
+    .fwc-landing .seg-grid      { grid-template-columns: repeat(2, 1fr); }
+    .fwc-landing .step          { flex-direction: column; gap: 16px; }
+  }
+  @media (max-width: 480px) {
+    .fwc-landing .seg-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="fwc-landing">
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <div class="nav-logo">
+      <div class="nav-logo-icon"><img src="/logo-fwc.png" alt="FWC" /></div>
+      <div class="nav-logo-text">FWC <span>Inter</span></div>
+    </div>
+    <div class="nav-actions">
+      <a href="/login"><button class="nav-login">Entrar</button></a>
+      <a href="https://wa.me/5584999281009?text=Ol%C3%A1%21%20Gostaria%20de%20conhecer%20a%20FWC%20Inter." target="_blank" rel="noopener">
+        <button class="nav-cta">Falar com a equipe</button>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge">🚀 Tecnologia e soluções para o seu negócio</div>
+  <h1>Gerencie sua distribuidora <span>do pedido ao pagamento</span></h1>
+  <p>CRM, delivery, iFood, loja online, estoque e financeiro — tudo integrado numa plataforma SaaS feita para distribuidoras de bebidas.</p>
+  <div class="hero-btns">
+    <a href="https://admin.fwcinter.com/entrar?ref=89612b50"><button class="btn-primary">Começar teste grátis</button></a>
+    <a href="https://wa.me/5584999281009?text=Ol%C3%A1%21%20Quero%20solicitar%20uma%20demonstra%C3%A7%C3%A3o%20gratuita%20da%20FWC%20Inter." target="_blank" rel="noopener"><button class="btn-secondary">Falar com a equipe</button></a>
+  </div>
+  <p style="margin-top:16px;font-size:13px;color:var(--text-muted)">Sem cartão de crédito · 14 dias grátis</p>
+</section>
+
+<!-- STATS -->
+<section class="stats">
+  <div class="stats-inner">
+    <div>
+      <div class="stat-num">100%</div>
+      <div class="stat-label">Digital — sem papel, sem planilha</div>
+    </div>
+    <div>
+      <div class="stat-num">PIX</div>
+      <div class="stat-label">Pagamentos integrados nativos</div>
+    </div>
+    <div>
+      <div class="stat-num">24h</div>
+      <div class="stat-label">Portal do cliente ativo</div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="funcionalidades">
+  <div class="section-label">Funcionalidades</div>
+  <h2 class="section-title">Tudo que sua distribuidora precisa</h2>
+  <p class="section-sub">Uma plataforma completa, do cadastro de clientes à gestão financeira, com delivery integrado.</p>
+
+  <div class="features-grid">
+    <div class="feature-card" style="border-color:#ea1d2c">
+      <div class="feature-icon">🍔</div>
+      <div class="feature-title">Integração iFood <span style="background:#ea1d2c;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;vertical-align:middle;margin-left:4px">NOVO</span></div>
+      <div class="feature-desc">Os pedidos do iFood caem direto no seu painel, junto com os demais. Confirme, despache e cancele sem trocar de tela. Integração oficial homologada.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🏪</div>
+      <div class="feature-title">Loja Online</div>
+      <div class="feature-desc">Vitrine pública com link próprio (lojaonline.fwcinter.com/sualoja). O cliente vê o catálogo e faz o pedido sem instalar nada.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📲</div>
+      <div class="feature-title">App do Cliente</div>
+      <div class="feature-desc">Seu cliente acompanha o pedido, junta pontos de fidelidade e vê o fiado dele pelo aplicativo.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🖥️</div>
+      <div class="feature-title">Gestor de Pedidos</div>
+      <div class="feature-desc">Painel com som de pedido novo, colunas por etapa (na cozinha, pronto, em rota), impressão de cupom e tudo em tempo real.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🛵</div>
+      <div class="feature-title">Painel do Entregador</div>
+      <div class="feature-desc">O motoboy aceita a entrega, vê a rota, liga pro cliente e confirma o recebimento com código — tudo no celular.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🍽️</div>
+      <div class="feature-title">Atendimento no Salão</div>
+      <div class="feature-desc">Mesas, comandas, QR code de autoatendimento, tela da cozinha e do garçom. Feche a conta dividida em segundos.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">👥</div>
+      <div class="feature-title">CRM de Clientes</div>
+      <div class="feature-desc">Histórico completo de compras, fiado, interações e preferências de cada cliente. Tudo em um só lugar.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🛵</div>
+      <div class="feature-title">Delivery Integrado</div>
+      <div class="feature-desc">Portal de pedidos para clientes, painel de acompanhamento para a loja e confirmação por código de 4 dígitos.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📦</div>
+      <div class="feature-title">Controle de Estoque</div>
+      <div class="feature-desc">Entrada, saída, saldo em tempo real e alertas de estoque mínimo. Com controle de cascos e embalagens.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">💳</div>
+      <div class="feature-title">Pagamento PIX</div>
+      <div class="feature-desc">Receba PIX diretamente pelo app de delivery com QR Code gerado automaticamente via Mercado Pago. Reembolso automático em cancelamentos.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">💰</div>
+      <div class="feature-title">Financeiro Completo</div>
+      <div class="feature-desc">Contas a pagar, a receber, caixa diário e relatórios. Agendamento de pagamentos recorrentes a fornecedores.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📱</div>
+      <div class="feature-title">Portal do Cliente</div>
+      <div class="feature-desc">Cada cliente acessa o próprio portal para fazer pedidos, ver histórico, saldo de fiado e status de entrega em tempo real.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🤖</div>
+      <div class="feature-title">WhatsApp com IA</div>
+      <div class="feature-desc">Atendimento automático via WhatsApp integrado por loja. Responde dúvidas, confirma pedidos e notifica clientes.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📊</div>
+      <div class="feature-title">Relatórios e Comissões</div>
+      <div class="feature-desc">Relatórios de vendas por período, vendedor e produto. Cálculo automático de comissões.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🏢</div>
+      <div class="feature-title">Multi-empresa</div>
+      <div class="feature-desc">Gerencie múltiplas distribuidoras em uma plataforma. Cada empresa com seus dados, usuários e configurações isolados.</div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how">
+  <div class="section-label">Como funciona</div>
+  <h2 class="section-title">Da loja ao cliente em minutos</h2>
+  <p class="section-sub">Fluxo simples e automatizado do pedido ao recebimento.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div>
+        <div class="step-title">Cliente faz o pedido pelo portal</div>
+        <div class="step-desc">O cliente acessa o portal personalizado da distribuidora, monta o carrinho e escolhe pagar por PIX ou na entrega.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div>
+        <div class="step-title">Distribuidora recebe e confirma</div>
+        <div class="step-desc">A loja vê o pedido em tempo real no painel, confirma ou recusa. O pagamento PIX é processado automaticamente.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div>
+        <div class="step-title">Entrega com confirmação segura</div>
+        <div class="step-desc">O entregador despacha o pedido e o cliente confirma o recebimento com um código de 4 dígitos enviado pelo sistema.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div>
+        <div class="step-title">Gestão financeira automática</div>
+        <div class="step-desc">Tudo lançado automaticamente no financeiro: vendas, recebimentos, comissões e relatórios atualizados em tempo real.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SEGMENTOS -->
+<section class="segments">
+  <div class="section-label">Para quem é</div>
+  <h2 class="section-title">Feito para o comércio de bebidas</h2>
+  <p class="section-sub">Atendemos distribuidoras e varejistas do setor de bebidas em todo o Brasil.</p>
+
+  <div class="seg-grid">
+    <div class="seg-card">
+      <div class="seg-icon">🍺</div>
+      <div class="seg-name">Distribuidoras de Bebidas</div>
+    </div>
+    <div class="seg-card">
+      <div class="seg-icon">🥤</div>
+      <div class="seg-name">Depósitos de Bebidas</div>
+    </div>
+    <div class="seg-card">
+      <div class="seg-icon">🍾</div>
+      <div class="seg-name">Atacadistas</div>
+    </div>
+    <div class="seg-card">
+      <div class="seg-icon">🚚</div>
+      <div class="seg-name">Entregas por Rota</div>
+    </div>
+  </div>
+</section>
+
+<!-- PLANOS -->
+<section style="padding:80px 24px;text-align:center" id="planos">
+  <div class="section-label">Planos</div>
+  <h2 class="section-title">Um plano, tudo incluído</h2>
+  <p class="section-sub">Sem comissão por pedido. Você usa todos os recursos por um valor fixo por mês.</p>
+  <div style="max-width:440px;margin:36px auto 0;background:#fff;border:2px solid var(--purple);border-radius:20px;padding:40px 32px;box-shadow:0 20px 50px rgba(124,58,237,.15)">
+    <div style="display:inline-block;background:#ede9fe;color:var(--purple);font-size:13px;font-weight:800;padding:5px 14px;border-radius:999px;margin-bottom:18px">Plano completo</div>
+    <div style="margin-bottom:24px">
+      <span style="font-size:22px;font-weight:700;color:var(--text-muted);vertical-align:top;line-height:1">R$ </span>
+      <span style="font-size:56px;font-weight:900;letter-spacing:-2px">149,90</span>
+      <span style="font-size:17px;color:var(--text-muted)">/mês</span>
+    </div>
+    <ul style="list-style:none;text-align:left;display:inline-block;margin:0 0 28px;padding:0">
+      <li style="padding:7px 0 7px 26px;position:relative;font-size:15px"><span style="position:absolute;left:0;color:var(--purple);font-weight:800">✓</span>Delivery, loja online e app do cliente</li>
+      <li style="padding:7px 0 7px 26px;position:relative;font-size:15px"><span style="position:absolute;left:0;color:var(--purple);font-weight:800">✓</span>Integração com o iFood</li>
+      <li style="padding:7px 0 7px 26px;position:relative;font-size:15px"><span style="position:absolute;left:0;color:var(--purple);font-weight:800">✓</span>Gestor de pedidos e painel do entregador</li>
+      <li style="padding:7px 0 7px 26px;position:relative;font-size:15px"><span style="position:absolute;left:0;color:var(--purple);font-weight:800">✓</span>Salão, WhatsApp, fiado e financeiro</li>
+      <li style="padding:7px 0 7px 26px;position:relative;font-size:15px"><span style="position:absolute;left:0;color:var(--purple);font-weight:800">✓</span>Relatórios, suporte e atualizações</li>
+    </ul>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+      <a href="https://admin.fwcinter.com/entrar?ref=89612b50"><button class="btn-primary">Começar teste grátis</button></a>
+      <a href="https://wa.me/5584999281009?text=Ol%C3%A1%21%20Quero%20saber%20mais%20sobre%20os%20planos%20da%20FWC%20Inter." target="_blank" rel="noopener"><button class="btn-secondary">Falar com a equipe</button></a>
+    </div>
+    <p style="margin-top:16px;font-size:13px;color:var(--text-muted)">14 dias grátis · Sem cartão de crédito</p>
+  </div>
+</section>
+
+<!-- CTA FINAL -->
+<section class="cta-section">
+  <h2>Pronto para vender mais?</h2>
+  <p>Crie sua conta grátis agora e comece a usar em minutos.</p>
+  <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+    <a href="https://admin.fwcinter.com/entrar?ref=89612b50">
+      <button class="btn-white">Começar teste grátis</button>
+    </a>
+    <a href="https://wa.me/5584999281009?text=Ol%C3%A1%21%20Quero%20solicitar%20uma%20demonstra%C3%A7%C3%A3o%20gratuita%20da%20FWC%20Inter." target="_blank" rel="noopener">
+      <button class="btn-white" style="background:transparent;color:#fff;border:2px solid rgba(255,255,255,.5)">Falar com a equipe</button>
+    </a>
+  </div>
+  <p style="margin-top:16px;color:rgba(255,255,255,.6);font-size:13px">Sem cartão de crédito · 14 dias grátis</p>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <strong>FWC Inter</strong> — Sistema de Gestão para Distribuidoras<br />
+  <span style="margin-top:8px;display:block">© 2026 FWC Inter. Todos os direitos reservados.</span>
+</footer>
+
+</div>
