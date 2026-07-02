@@ -144,8 +144,11 @@ export default function PresencialCozinha() {
   }
 
   // G1 — aceitar trava o pedido na pessoa (só quem aceitou marca Pronto).
+  // IMPORTANTE: NÃO muda o status (mantém confirmado) — só vincula quem pegou.
+  // Assim NÃO dispara o WhatsApp do cliente (o gatilho avisa em 'em_preparo').
+  // É controle 100% interno da loja.
   async function aceitarPedido(pedido) {
-    const patch = { preparando_por: meuId, preparando_nome: meuNome, preparando_em: new Date().toISOString(), status: 'em_preparo' }
+    const patch = { preparando_por: meuId, preparando_nome: meuNome, preparando_em: new Date().toISOString() }
     setEntregas(prev => prev.map(p => p.id === pedido.id ? { ...p, ...patch } : p))
     // .is(null) garante que só pega se ninguém pegou antes (evita 2 pegarem juntos)
     await supabase.from('pedidos_delivery').update(patch).eq('id', pedido.id).is('preparando_por', null)
