@@ -7,11 +7,11 @@
 
 | ID | Melhoria | Detalhe / o que fazer | Complex. | Status |
 |----|----------|-----------------------|----------|--------|
-| E1 | Rota completa no app | Montar a rota já partindo da localização atual do motoqueiro; quando ele tiver mais de uma entrega, gerar **rota com várias paradas** numa navegação só (Google Maps/Waze) | Média | ⬜ |
+| E1 | Rota completa no app | Montar a rota já partindo da localização atual do motoqueiro; quando ele tiver mais de uma entrega, gerar **rota com várias paradas** numa navegação só (Google Maps/Waze) | Média | ✅ |
 | E2 | "PAGO" bem visível + taxa da corrida | Deixar claro pro entregador que o pedido **já está pago** (destaque forte, não só texto pequeno) e mostrar a **taxa de entrega de cada corrida** | Baixa | ✅ |
 | E3 | Desistir da entrega aceita | Botão no app do entregador pra **largar/devolver** uma entrega que ele já aceitou (volta pro pool de disponíveis) | Baixa | ✅ |
 | E4 | Fila por ordem de chegada (ON/OFF) | Motoqueiro tem botão **Online/Offline**. Só vê pedidos quando está **ON**. Ao clicar ON, **entra na fila por ordem de chegada**. Só o da vez aceita. Botão **Finalizar minha vez** → pausa e passa pro próximo; **Voltar pra fila** entra no fim. Liga/desliga por loja em **Funcionários** | Alta | ✅ |
-| E5 | Desconto opcional por entrega | **Opcional por loja.** No **cadastro do entregador**, um **toggle ao lado do nome**: se ligado, a loja define um **valor a descontar dele por cada entrega** (ex: R$1). Entra no acerto/relatório | Média | ⬜ |
+| E5 | Desconto opcional por entrega | **Opcional por loja.** No **cadastro do entregador**, um **toggle ao lado do nome**: se ligado, a loja define um **valor a descontar dele por cada entrega** (ex: R$1). Entra no acerto/relatório | Média | ✅ |
 
 ## 🍔 iFood (ligado ao entregador)
 

@@ -18,6 +18,18 @@ function mapsUrl(p) {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(enderecoTexto(p))}`
 }
 
+// Rota única com várias paradas (E1). Sem origem = parte da localização atual.
+// A última entrega vira o destino; as demais entram como waypoints, na ordem.
+function rotaMultiplaUrl(pedidos) {
+  const enderecos = pedidos.map(enderecoTexto).filter(Boolean)
+  if (enderecos.length === 0) return null
+  const destino = encodeURIComponent(enderecos[enderecos.length - 1])
+  const paradas = enderecos.slice(0, -1).map(e => encodeURIComponent(e)).join('|')
+  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${destino}`
+  if (paradas) url += `&waypoints=${paradas}`
+  return url
+}
+
 // Só dígitos para o link do WhatsApp (wa.me abre a conversa, não gasta crédito).
 function soDigitos(tel) {
   return String(tel || '').replace(/\D/g, '')
@@ -465,6 +477,12 @@ export default function PainelEntregador() {
               {minhas.length > 0 && (
                 <>
                   <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '0 0 -4px' }}>Minhas ({minhas.length})</h2>
+                  {minhas.filter(p => enderecoTexto(p)).length >= 2 && (
+                    <a href={rotaMultiplaUrl(minhas.filter(p => enderecoTexto(p)))} target="_blank" rel="noopener noreferrer"
+                      style={{ ...btnPrimario('#7c3aed'), display: 'block', textAlign: 'center', textDecoration: 'none' }}>
+                      🗺️ Rota de todas ({minhas.filter(p => enderecoTexto(p)).length} paradas)
+                    </a>
+                  )}
                   {minhas.map(p => (
                     <CardEntrega key={p.id} pedido={p} mine
                       onSair={sairParaEntrega} onConfirmar={confirmarEntrega} onDesistir={desistirEntrega} />
@@ -506,6 +524,20 @@ export default function PainelEntregador() {
                 <span><strong style={{ color: 'var(--text)' }}>{historico.length}</strong> entregas concluídas</span>
                 <span>Total: <strong style={{ color: 'var(--text)' }}>{fmt(historico.reduce((s, p) => s + Number(p.total || 0), 0))}</strong></span>
               </div>
+
+              {/* Acerto de desconto por entrega (E5), quando a loja cobra do motoqueiro */}
+              {profile?.entregador_desconto_ativo && Number(profile?.entregador_desconto_valor) > 0 && (
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  background: 'rgba(245,158,11,.12)', border: '1.5px solid #f59e0b',
+                  borderRadius: 12, padding: '10px 14px', fontSize: 13, color: 'var(--text-muted)',
+                }}>
+                  <span>Desconto: {historico.length} × {fmt(profile.entregador_desconto_valor)}</span>
+                  <span>A acertar com a loja: <strong style={{ color: '#f59e0b' }}>
+                    {fmt(historico.length * Number(profile.entregador_desconto_valor))}
+                  </strong></span>
+                </div>
+              )}
               {historico.map(p => (
                 <div key={p.id} style={{
                   background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)',

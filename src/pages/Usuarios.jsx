@@ -114,6 +114,17 @@ export default function Usuarios() {
     if (profile.id === user?.id) await refreshProfile()
   }
 
+  // E5 — desconto por entrega do entregador (liga/desliga e valor)
+  async function saveDesconto(p, patch) {
+    const novo = {
+      entregador_desconto_ativo: patch.ativo ?? p.entregador_desconto_ativo ?? false,
+      entregador_desconto_valor: patch.valor ?? p.entregador_desconto_valor ?? 0,
+    }
+    setPerfis(prev => prev.map(x => (x.id === p.id ? { ...x, ...novo } : x)))
+    const { error } = await supabase.from('profiles').update(novo).eq('id', p.id)
+    if (error) setError(error.message)
+  }
+
   async function handleCreateVendor(e) {
     e.preventDefault()
     setVendorError(null)
@@ -219,6 +230,7 @@ export default function Usuarios() {
                 <th>Nome</th>
                 <th>E-mail</th>
                 <th>Perfil</th>
+                <th>Desconto/entrega</th>
               </tr>
             </thead>
             <tbody>
@@ -238,6 +250,32 @@ export default function Usuarios() {
                         </option>
                       ))}
                     </select>
+                  </td>
+                  <td>
+                    {p.perfil === 'entregador' ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!p.entregador_desconto_ativo}
+                          onChange={(e) => saveDesconto(p, { ativo: e.target.checked })}
+                          title="Descontar um valor por cada entrega deste motoqueiro"
+                        />
+                        {p.entregador_desconto_ativo && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            R$
+                            <input
+                              type="number" min="0" step="0.50"
+                              value={p.entregador_desconto_valor ?? 0}
+                              onChange={(e) => setPerfis(prev => prev.map(x => x.id === p.id ? { ...x, entregador_desconto_valor: e.target.value } : x))}
+                              onBlur={(e) => saveDesconto(p, { valor: Number(e.target.value) || 0 })}
+                              style={{ width: 72 }}
+                            />
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span style={{ color: 'var(--text-muted, #9ca3af)' }}>—</span>
+                    )}
                   </td>
                 </tr>
               ))}
