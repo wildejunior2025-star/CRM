@@ -71,7 +71,8 @@
       "Bash(curl -s \"https://fwcinter.com/\")",
       "mcp__supabase__execute_sql",
       "mcp__supabase__apply_migration",
-      "Bash(cp \"/c/Users/wilde junior/Downloads/20260630_140420.jpg\" \"/c/Users/wilde junior/OneDrive/Desktop/CRM/.tmp-cnh.jpg\" && echo ok)"
+      "Bash(cp \"/c/Users/wilde junior/Downloads/20260630_140420.jpg\" \"/c/Users/wilde junior/OneDrive/Desktop/CRM/.tmp-cnh.jpg\" && echo ok)",
+      "Bash(ffmpeg -version)"
     ],
     "additionalDirectories": [
       "C:\\Users\\wilde junior\\.cache\\chrome-devtools-mcp\\chrome-profile",
