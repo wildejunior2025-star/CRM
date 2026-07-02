@@ -398,17 +398,6 @@ export default function Dashboard() {
         )}
       </div>
 
-      <a href="https://github.com/wildejunior2025-star/CRM/releases/download/v1.0.0/Painel.de.Pedidos.Setup.1.0.0.exe" download className="card"
-        style={{ marginTop: 24, padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 16, textDecoration: 'none', color: 'var(--text)', cursor: 'pointer' }}>
-        <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <svg width="22" height="22" fill="none" viewBox="0 0 24 24"><path d="M12 3v13m0 0-4-4m4 4 4-4M4 20h16" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </div>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 14 }}>APP Windows</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Baixar Painel de Pedidos para PC (.exe)</div>
-        </div>
-      </a>
-
       {refToken && (() => {
         const link = `${window.location.origin}/entrar?ref=${refToken}`
         function copiar() { navigator.clipboard.writeText(link); setCopiado(true); clearTimeout(timerRef.current); timerRef.current = setTimeout(() => setCopiado(false), 2500) }
