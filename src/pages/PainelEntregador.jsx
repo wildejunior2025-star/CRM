@@ -68,6 +68,11 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
   const ifoodId = pedido.ifood_phone_localizer
   // Pedido do iFood que exige o código de confirmação de entrega (F1)
   const precisaCodigoIfood = isIfood && pedido.ifood_requer_codigo
+  // Link de ligação: no iFood já embute o ID depois de uma pausa (as vírgulas
+  // fazem o celular esperar e "digitar" o ID sozinho no 0800, igual o app deles).
+  const telHref = (isIfood && ifoodId)
+    ? `tel:${tel},,,${soDigitos(ifoodId)}#`
+    : `tel:${tel}`
 
   function desistir() {
     if (!window.confirm('Largar esta entrega? Ela volta para os outros motoqueiros pegarem.')) return
@@ -160,7 +165,7 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
         <>
           <div style={{ display: 'flex', gap: 8, marginBottom: isIfood && ifoodId ? 6 : 12 }}>
             <a href={mapsUrl(pedido)} target="_blank" rel="noopener noreferrer" style={btnLink('#7c3aed')}>🗺️ Rota</a>
-            {tel && <a href={`tel:${tel}`} style={btnLink('#0891b2')}>📞 {isIfood ? 'Ligar (iFood)' : 'Ligar'}</a>}
+            {tel && <a href={telHref} style={btnLink('#0891b2')}>📞 {isIfood ? 'Ligar (iFood)' : 'Ligar'}</a>}
             {/* WhatsApp só pros pedidos que NÃO são do iFood (iFood não tem zap do cliente) */}
             {tel && !isIfood && <a href={`https://wa.me/${tel}`} target="_blank" rel="noopener noreferrer" style={btnLink('#25d366')}>💬 Zap</a>}
           </div>
