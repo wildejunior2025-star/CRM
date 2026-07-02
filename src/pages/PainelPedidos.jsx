@@ -2241,6 +2241,7 @@ export default function PainelPedidos() {
   const [loadingHist, setLoadingHist] = useState(false)
   // Concluídos do dia
   const [concluidosHoje, setConcluidosHoje] = useState([])
+  const [mesasFechadasHoje, setMesasFechadasHoje] = useState([]) // G3: mesas com conta fechada hoje
   const [canceladosHoje, setCanceladosHoje] = useState([])
   const [loadingHoje, setLoadingHoje] = useState(false)
   // Entregadores — estatísticas e histórico por motoboy
@@ -2384,6 +2385,16 @@ export default function PainelPedidos() {
     const todos = data || []
     setConcluidosHoje(todos.filter(p => p.status === 'entregue'))
     setCanceladosHoje(todos.filter(p => p.status === 'cancelado'))
+
+    // G3 — mesas (comandas) com conta fechada hoje também entram nos concluídos
+    const { data: mesas } = await supabase
+      .from('comandas')
+      .select('id, numero_mesa, total, forma_pagamento, fechada_at')
+      .eq('empresa_id', empresa.id)
+      .eq('status', 'fechada')
+      .gte('fechada_at', inicio.toISOString())
+      .order('fechada_at', { ascending: false })
+    setMesasFechadasHoje(mesas ?? [])
     setLoadingHoje(false)
   }, [empresa])
 
@@ -2719,6 +2730,11 @@ export default function PainelPedidos() {
     if (error) { alert('Erro ao fechar a conta: ' + error.message); return }
     setComandaFechando(null)
     setComandas(cs => cs.filter(c => c.id !== comanda.id))
+    // G3 — mostra na coluna "Concluídos hoje" na hora (o reload confirma depois)
+    setMesasFechadasHoje(prev => [
+      { id: comanda.id, numero_mesa: comanda.numero_mesa, total, forma_pagamento: forma, fechada_at: new Date().toISOString() },
+      ...prev.filter(m => m.id !== comanda.id),
+    ])
   }
 
   // ── Realtime subscription + polling de segurança + visibilidade ──
@@ -3149,7 +3165,7 @@ export default function PainelPedidos() {
             {/* Filtro de colunas */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
               {[
-                { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidos.length + concluidosHoje.length + canceladosHoje.length },
+                { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidos.length + concluidosHoje.length + mesasFechadasHoje.length + canceladosHoje.length },
                 // "Mesas" só aparece quando há mesa aberta (autoatendimento por QR)
                 ...(comandas.length > 0
                   ? [{ id: 'mesas', label: 'Mesas', cor: '#db2777', count: comandas.length }]
@@ -3161,7 +3177,7 @@ export default function PainelPedidos() {
                 { id: 'cozinha',    label: 'Na cozinha', cor: '#1d4ed8', count: pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length },
                 { id: 'entrega',    label: 'Pronto / Em rota', cor: '#7c3aed', count: pedidos.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length },
                 { id: 'retirada',   label: 'Retirada',  cor: '#0891b2', count: pedidos.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length },
-                { id: 'concluidos', label: 'Concluídos', cor: '#16a34a', count: concluidosHoje.length },
+                { id: 'concluidos', label: 'Concluídos', cor: '#16a34a', count: concluidosHoje.length + mesasFechadasHoje.length },
                 { id: 'cancelados', label: 'Cancelados', cor: '#dc2626', count: canceladosHoje.length },
               ].map(f => {
                 const ativo = filtroColuna === f.id
@@ -3248,10 +3264,24 @@ export default function PainelPedidos() {
                 </Coluna>
               )}
 
-              {((!filtroColuna && concluidosHoje.length > 0) || filtroColuna === 'concluidos') && (
+              {((!filtroColuna && (concluidosHoje.length > 0 || mesasFechadasHoje.length > 0)) || filtroColuna === 'concluidos') && (
                 <Coluna titulo="Concluídos hoje" cor="#16a34a"
-                  count={concluidosHoje.length}
+                  count={concluidosHoje.length + mesasFechadasHoje.length}
                   vazio="Nenhum concluído hoje">
+                  {mesasFechadasHoje.map(m => (
+                    <div key={m.id} className="pp-mini" style={{ borderLeft: '3px solid #db2777', cursor: 'default' }}>
+                      <div className="pp-mini-top">
+                        <span className="pp-mini-num">🍽️ Mesa {m.numero_mesa} · {fmt(m.total)}</span>
+                      </div>
+                      <div className="pp-mini-sub">
+                        {m.fechada_at ? new Date(m.fechada_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''} · conta fechada
+                      </div>
+                      <div className="pp-mini-tags">
+                        <span className="pp-mini-badge" style={{ background: '#dcfce7', color: '#166534' }}>Mesa paga</span>
+                        {m.forma_pagamento && <span className="pp-mini-itens">{m.forma_pagamento}</span>}
+                      </div>
+                    </div>
+                  ))}
                   {concluidosHoje.map(p => (
                     <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
                   ))}
