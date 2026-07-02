@@ -1975,7 +1975,7 @@ function CardMini({ pedido, onClick, onExpirado, entregadores = [] }) {
 }
 
 // Card compacto de uma mesa (autoatendimento por QR) no quadro do gestor
-function CardMesa({ comanda, onPronto, onItemPronto }) {
+function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta }) {
   const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
   const total = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
   const hora = new Date(comanda.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
@@ -2020,6 +2020,67 @@ function CardMesa({ comanda, onPronto, onItemPronto }) {
       ) : (
         <div style={{ marginTop: 8, textAlign: 'center', fontSize: 12.5, fontWeight: 800, color: '#16a34a' }}>✓ Tudo pronto</div>
       ))}
+      {onFecharConta && itens.length > 0 && (
+        <button type="button" onClick={() => onFecharConta(comanda)}
+          style={{ marginTop: 6, width: '100%', padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12.5,
+            border: 'none', background: '#7c3aed', color: '#fff' }}>
+          💳 Fechar conta
+        </button>
+      )}
+    </div>
+  )
+}
+
+// Modal de fechar conta da mesa pelo gestor
+function ModalFecharConta({ comanda, taxaPct, onFechar, onConfirmar }) {
+  const [forma, setForma] = useState('dinheiro')
+  const [aplicarTaxa, setAplicarTaxa] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+  const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
+  const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
+  const taxa = aplicarTaxa ? Math.round(subtotal * taxaPct / 100 * 100) / 100 : 0
+  const total = subtotal + taxa
+  const FORMAS = [['dinheiro', '💵 Dinheiro'], ['pix', '⚡ Pix'], ['cartao', '💳 Cartão']]
+  async function confirmar() {
+    setSalvando(true)
+    await onConfirmar({ comanda, forma, aplicarTaxa, total })
+    setSalvando(false)
+  }
+  return (
+    <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 130 }}>
+      <div className="pp-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 380, width: '92vw' }}>
+        <p className="pp-modal-titulo">Fechar conta · Mesa {comanda.numero_mesa}</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13, marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
+          <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={aplicarTaxa} onChange={e => setAplicarTaxa(e.target.checked)} />
+              Taxa de serviço ({taxaPct}%)
+            </span>
+            <span>{fmt(taxa)}</span>
+          </label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 16, marginTop: 4 }}>
+            <span>Total</span><span style={{ color: '#7c3aed' }}>{fmt(total)}</span>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, color: 'var(--text-muted)' }}>Forma de pagamento</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          {FORMAS.map(([v, lbl]) => (
+            <button key={v} type="button" onClick={() => setForma(v)} style={{
+              flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12.5,
+              border: `1.5px solid ${forma === v ? '#16a34a' : 'var(--border, #2a2a3a)'}`,
+              background: forma === v ? 'rgba(34,197,94,.12)' : 'transparent',
+              color: forma === v ? '#16a34a' : 'var(--text)',
+            }}>{lbl}</button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" onClick={onFechar} style={{ flex: '0 0 auto', padding: '0 16px', borderRadius: 10, border: '1px solid var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>Cancelar</button>
+          <button type="button" onClick={confirmar} disabled={salvando} style={{ flex: 1, height: 44, borderRadius: 10, border: 'none', cursor: 'pointer', background: '#16a34a', color: '#fff', fontWeight: 800 }}>
+            {salvando ? 'Fechando...' : `Fechar · ${fmt(total)}`}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -2135,6 +2196,7 @@ export default function PainelPedidos() {
   const [vendaAberta, setVendaAberta] = useState(false)
   const [vendaEditando, setVendaEditando] = useState(null) // pedido de balcão sendo editado
   const [comandas, setComandas] = useState([]) // mesas (autoatendimento QR) abertas
+  const [comandaFechando, setComandaFechando] = useState(null) // comanda no modal de fechar conta
   const mesaPrintRef = useRef({}) // buffer p/ imprimir itens da mesa juntos
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null) // pedido aberto em detalhe (card completo)
   const [autoImprimir, setAutoImprimir] = useState(autoImprimirAtivo)
@@ -2647,6 +2709,18 @@ export default function PainelPedidos() {
     }))
   }
 
+  // Fecha a conta da mesa pelo gestor (cria a venda, baixa estoque, libera a mesa).
+  async function handleFecharConta({ comanda, forma, aplicarTaxa, total }) {
+    const { error } = await supabase.rpc('fechar_conta_presencial', {
+      p_comanda_id: comanda.id,
+      p_pagamentos: [{ forma, valor: total }],
+      p_aplicar_taxa: aplicarTaxa,
+    })
+    if (error) { alert('Erro ao fechar a conta: ' + error.message); return }
+    setComandaFechando(null)
+    setComandas(cs => cs.filter(c => c.id !== comanda.id))
+  }
+
   // ── Realtime subscription + polling de segurança + visibilidade ──
   useEffect(() => {
     if (!empresa) return
@@ -3103,7 +3177,7 @@ export default function PainelPedidos() {
               {(!filtroColuna || filtroColuna === 'mesas') && comandas.length > 0 && (
                 <Coluna titulo="Mesas" cor="#db2777" count={comandas.length} vazio="Nenhuma mesa aberta">
                   {comandas.map(c => (
-                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} />
+                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} />
                   ))}
                 </Coluna>
               )}
@@ -3227,6 +3301,15 @@ export default function PainelPedidos() {
           pedidoEdicao={vendaEditando}
           onFechar={() => setVendaEditando(null)}
           onCriado={carregarPedidos}
+        />
+      )}
+
+      {comandaFechando && (
+        <ModalFecharConta
+          comanda={comandaFechando}
+          taxaPct={Number(empresa?.taxa_servico_pct ?? 10)}
+          onFechar={() => setComandaFechando(null)}
+          onConfirmar={handleFecharConta}
         />
       )}
 
