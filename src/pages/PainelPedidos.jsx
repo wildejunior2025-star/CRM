@@ -3091,6 +3091,20 @@ export default function PainelPedidos() {
             <span>{autoImprimir ? 'Auto-imprimir ON' : 'Auto-imprimir OFF'}</span>
           </button>
 
+          {/* Toggle aceitar pedido automático */}
+          <button
+            type="button"
+            className={`pp-toggle-loja ${aceitarAuto ? 'aberta' : 'fechada'}`}
+            onClick={toggleAceitarAuto}
+            title={aceitarAuto ? 'Todo pedido novo é aceito sozinho' : 'Aceite automático desligado'}
+            aria-label="Alternar aceite automático de pedidos"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span>{aceitarAuto ? 'Aceitar auto ON' : 'Aceitar auto OFF'}</span>
+          </button>
+
           {/* Toggle loja */}
           <div style={{ position: 'relative' }}>
             <button
