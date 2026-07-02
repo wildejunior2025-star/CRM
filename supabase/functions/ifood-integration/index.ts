@@ -55,6 +55,8 @@ Deno.serve(async (req) => {
     if (acao === "status") return json(await runStatus(sb, body?.pedido_id, body?.novo_status))
     if (acao === "verify_delivery_code") return json(await runVerifyDeliveryCode(sb, body?.pedido_id, body?.codigo))
     if (acao === "catalogo") return json(await runImportarCatalogo(sb, body?.empresa_id))
+    if (acao === "catalogo_listar") return json(await runCatalogoListar(sb, body?.empresa_id))
+    if (acao === "catalogo_pausar") return json(await runCatalogoPausar(sb, body?.empresa_id, body?.item_id, body?.pausar))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
   } catch (e) {
     return json({ ok: false, error: String(e?.message ?? e) }, 500)
@@ -410,6 +412,67 @@ async function runImportarCatalogo(sb: any, empresaId: string) {
     }
   }
   return { ok: true, total, criados }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// CATÁLOGO — listar itens (com status) e pausar/despausar item (F3)
+// ─────────────────────────────────────────────────────────────────────
+async function runCatalogoListar(sb: any, empresaId: string) {
+  if (!empresaId) return { ok: false, error: "empresa_id obrigatório" }
+  const { data: cfg } = await sb.from("ifood_config").select("*").eq("empresa_id", empresaId).maybeSingle()
+  if (!cfg) return { ok: false, error: "iFood não configurado" }
+  if (!cfg.merchant_id) return { ok: false, error: "Informe o Merchant ID primeiro" }
+  const token = await getToken(sb, cfg as Config)
+  const mid = cfg.merchant_id
+  const auth = { "Authorization": `Bearer ${token}` }
+
+  const catRes = await fetch(`${IFOOD}/catalog/v2.0/merchants/${mid}/catalogs`, { headers: auth })
+  if (!catRes.ok) {
+    return { ok: false, error: `iFood ${catRes.status} ao ler catálogo. O módulo Catálogo pode não estar homologado/autorizado ainda.` }
+  }
+  let catalogs: any = await catRes.json()
+  if (!Array.isArray(catalogs)) catalogs = catalogs ? [catalogs] : []
+
+  const itens: any[] = []
+  for (const cat of catalogs) {
+    const catalogId = cat.catalogId ?? cat.id
+    if (!catalogId) continue
+    const cRes = await fetch(`${IFOOD}/catalog/v2.0/merchants/${mid}/catalogs/${catalogId}/categories?includeItems=true`, { headers: auth })
+    if (!cRes.ok) continue
+    const categorias: any[] = await cRes.json()
+    for (const c of (Array.isArray(categorias) ? categorias : [])) {
+      for (const it of (c.items ?? [])) {
+        itens.push({
+          id: it.id ?? it.itemId,
+          nome: it.name,
+          categoria: c.name ?? "",
+          status: it.status ?? "AVAILABLE",
+          preco: it.price?.value ?? it.price ?? 0,
+        })
+      }
+    }
+  }
+  return { ok: true, itens }
+}
+
+async function runCatalogoPausar(sb: any, empresaId: string, itemId: string, pausar: boolean) {
+  if (!empresaId || !itemId) return { ok: false, error: "empresa_id e item_id obrigatórios" }
+  const { data: cfg } = await sb.from("ifood_config").select("*").eq("empresa_id", empresaId).maybeSingle()
+  if (!cfg) return { ok: false, error: "iFood não configurado" }
+  if (!cfg.merchant_id) return { ok: false, error: "Informe o Merchant ID primeiro" }
+  const token = await getToken(sb, cfg as Config)
+  const mid = cfg.merchant_id
+  const status = pausar ? "UNAVAILABLE" : "AVAILABLE"
+
+  const res = await fetch(`${IFOOD}/catalog/v2.0/merchants/${mid}/items/status`, {
+    method: "PATCH",
+    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ itemId, status }),
+  })
+  if (!res.ok && res.status !== 202) {
+    return { ok: false, error: `iFood ${res.status}: ${(await res.text()).slice(0, 200)}` }
+  }
+  return { ok: true, status }
 }
 
 // Espelha no nosso painel QUALQUER status que vier do iFood — assim, se o
