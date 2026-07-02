@@ -18,17 +18,17 @@ function mapsUrl(p) {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(enderecoTexto(p))}`
 }
 
-// Rota única com várias paradas (E1). Formato que funcionou no teste real:
-// api=1, sem origem (= localização atual), última entrega = destino, as demais
-// em waypoints separados por "|" CRU (o navegador codifica; se a gente já mandar
-// %7C o app do Maps não decodifica e perde as paradas). Máx. 10 paradas.
+// Rota única com várias paradas (E1). PRECISA de ponto de partida, senão o Maps
+// preenche os endereços mas não traça o caminho. Por isso a 1ª entrega vira a
+// ORIGEM, a última o destino, e as do meio vão em waypoints (separados por "|"
+// cru — o navegador codifica; %7C já codificado o app não entende). Máx. 10.
 function rotaMultiplaUrl(pedidos) {
-  const enderecos = pedidos.map(enderecoTexto).filter(Boolean)
-  if (enderecos.length === 0) return null
-  const limitadas = enderecos.slice(0, 10)
-  const destino = encodeURIComponent(limitadas[limitadas.length - 1])
-  const meio = limitadas.slice(0, -1).map(e => encodeURIComponent(e))
-  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${destino}`
+  const enderecos = pedidos.map(enderecoTexto).filter(Boolean).slice(0, 10)
+  if (enderecos.length < 2) return null
+  const origem = encodeURIComponent(enderecos[0])
+  const destino = encodeURIComponent(enderecos[enderecos.length - 1])
+  const meio = enderecos.slice(1, -1).map(e => encodeURIComponent(e))
+  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${origem}&destination=${destino}`
   if (meio.length) url += `&waypoints=${meio.join('|')}`
   return url
 }
