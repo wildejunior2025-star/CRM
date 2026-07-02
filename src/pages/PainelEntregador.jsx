@@ -18,16 +18,15 @@ function mapsUrl(p) {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(enderecoTexto(p))}`
 }
 
-// Rota única com várias paradas (E1). Sem origem = parte da localização atual.
-// A última entrega vira o destino; as demais entram como waypoints, na ordem.
+// Rota única com várias paradas (E1). Usa o formato de PATH (dir/A/B/C): o app
+// do Google Maps no celular respeita TODAS as paradas nesse formato — o
+// ?api=1&waypoints= funciona no navegador mas costuma mostrar só 1 no app.
+// Primeiro segmento vazio ("dir//A/B") = parte da "sua localização atual".
 function rotaMultiplaUrl(pedidos) {
   const enderecos = pedidos.map(enderecoTexto).filter(Boolean)
   if (enderecos.length === 0) return null
-  const destino = encodeURIComponent(enderecos[enderecos.length - 1])
-  const paradas = enderecos.slice(0, -1).map(e => encodeURIComponent(e)).join('|')
-  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${destino}`
-  if (paradas) url += `&waypoints=${paradas}`
-  return url
+  const paradas = enderecos.map(e => encodeURIComponent(e))
+  return `https://www.google.com/maps/dir/${['', ...paradas].join('/')}?travelmode=driving`
 }
 
 // Só dígitos para o link do WhatsApp (wa.me abre a conversa, não gasta crédito).
