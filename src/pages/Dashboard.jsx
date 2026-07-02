@@ -91,7 +91,7 @@ const cardBox = { background: 'var(--card-bg, var(--bg))', border: '1px solid va
 export default function Dashboard() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id
-  const [periodo, setPeriodo] = useState('7d')
+  const [periodo, setPeriodo] = useState('hoje')
   const [vendas, setVendas] = useState([])
   const [pedidos, setPedidos] = useState([])
   const [itens, setItens] = useState([])
