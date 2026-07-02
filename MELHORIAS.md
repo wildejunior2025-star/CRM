@@ -25,7 +25,7 @@
 
 | ID | Melhoria | Detalhe / o que fazer | Complex. | Status |
 |----|----------|-----------------------|----------|--------|
-| G1 | Cozinha: "Aceitar" antes do "Pronto" | Hoje só tem **Pronto**. Adicionar um **Aceitar** primeiro, que **trava o pedido** pra 2 pessoas não pegarem/prepararem o mesmo pedido ao mesmo tempo | Média | ⬜ |
+| G1 | Cozinha: "Aceitar" antes do "Pronto" | **FEITO:** no KDS, botão **Aceitar** trava o pedido/item na pessoa (`preparando_por`, mig 0088). Mostra "👨‍🍳 Você está preparando" / "🔒 Fulano está preparando"; **só quem aceitou** vê o Pronto (+ botão Soltar). Cada cozinheiro com login próprio | Média | ✅ |
 | G2 | Gestor não mostra nada pro atendente | **CORRIGIDO:** faltava policy de RLS pro perfil **vendedor** em `pedidos_delivery` (quadro abria vazio). Migration 0083 dá ao vendedor os poderes do admin, restritos à empresa | Feito | ✅ |
 | G3 | Mesa concluída não fica no gestor | **CORRIGIDO:** mesa fechada virava venda e sumia do quadro. Agora as **mesas fechadas hoje** aparecem na coluna "Concluídos hoje" (contagem incluída) | Feito | ✅ |
 

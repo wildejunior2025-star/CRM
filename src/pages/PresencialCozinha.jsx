@@ -13,8 +13,48 @@ function tempoDesde(iso) {
   return `${min} min`
 }
 
+// Botão/estado de "Aceitar → Preparando → Pronto" (G1). Reusado por pedido e item.
+function AcaoPreparo({ registro, meuId, onAceitar, onSoltar, onPronto, size = 'md' }) {
+  const prep = registro.preparando_por
+  const mine = prep && prep === meuId
+  const pad = size === 'sm' ? '8px 12px' : '10px 12px'
+  const fs = size === 'sm' ? 12.5 : 13
+  if (!prep) {
+    return (
+      <button type="button" onClick={() => onAceitar(registro)}
+        style={{ padding: pad, borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: fs,
+          border: '1.5px solid #2563eb', background: 'rgba(37,99,235,.12)', color: '#2563eb', width: '100%' }}>
+        ✋ Aceitar
+      </button>
+    )
+  }
+  if (mine) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#16a34a' }}>👨‍🍳 Você está preparando</div>
+        <button type="button" onClick={() => onPronto(registro)}
+          style={{ padding: pad, borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: fs,
+            border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.12)', color: '#16a34a' }}>
+          ✓ Pronto
+        </button>
+        <button type="button" onClick={() => onSoltar(registro)}
+          style={{ padding: '4px', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 11.5,
+            border: 'none', background: 'none', color: 'var(--text-muted)' }}>
+          Soltar
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div style={{ padding: pad, borderRadius: 8, textAlign: 'center', fontWeight: 700, fontSize: fs,
+      background: 'rgba(245,158,11,.12)', border: '1.5px solid #f59e0b', color: '#b45309' }}>
+      🔒 {registro.preparando_nome || 'Outro'} está preparando
+    </div>
+  )
+}
+
 // Card de um pedido de delivery/iFood na cozinha (KDS).
-function CardEntregaKDS({ pedido, onPronto, tempoDesde }) {
+function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, tempoDesde }) {
   const ehIfood = pedido.origem === 'ifood'
   const headerCor = ehIfood ? '#ea1d2c' : '#7c3aed'
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
@@ -57,11 +97,7 @@ function CardEntregaKDS({ pedido, onPronto, tempoDesde }) {
           )
         })}
         <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>há {tempoDesde(pedido.created_at)}</div>
-        <button type="button" onClick={() => onPronto(pedido)}
-          style={{ padding: '10px 12px', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 13,
-            border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.12)', color: '#16a34a' }}>
-          ✓ Pronto
-        </button>
+        <AcaoPreparo registro={pedido} meuId={meuId} onAceitar={onAceitar} onSoltar={onSoltar} onPronto={onPronto} />
       </div>
     </div>
   )
@@ -97,11 +133,29 @@ export default function PresencialCozinha() {
     setLoading(false)
   }
 
+  const meuId = profile?.id
+  const meuNome = profile?.nome || 'Cozinha'
+
   async function marcarPedidoPronto(pedido) {
     // Otimista + atualiza no banco. O trigger avisa o iFood (readyToPickup) e
     // o pedido segue pro motoboy / retirada.
     setEntregas(prev => prev.filter(p => p.id !== pedido.id))
     await supabase.from('pedidos_delivery').update({ status: 'pronto' }).eq('id', pedido.id)
+  }
+
+  // G1 — aceitar trava o pedido na pessoa (só quem aceitou marca Pronto).
+  async function aceitarPedido(pedido) {
+    const patch = { preparando_por: meuId, preparando_nome: meuNome, preparando_em: new Date().toISOString(), status: 'em_preparo' }
+    setEntregas(prev => prev.map(p => p.id === pedido.id ? { ...p, ...patch } : p))
+    // .is(null) garante que só pega se ninguém pegou antes (evita 2 pegarem juntos)
+    await supabase.from('pedidos_delivery').update(patch).eq('id', pedido.id).is('preparando_por', null)
+    load()
+  }
+  async function soltarPedido(pedido) {
+    const patch = { preparando_por: null, preparando_nome: null, preparando_em: null }
+    setEntregas(prev => prev.map(p => p.id === pedido.id ? { ...p, ...patch } : p))
+    await supabase.from('pedidos_delivery').update(patch).eq('id', pedido.id).eq('preparando_por', meuId)
+    load()
   }
 
   useEffect(() => { load() }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
@@ -124,6 +178,18 @@ export default function PresencialCozinha() {
 
   async function marcarPronto(item) {
     await supabase.from('comanda_itens').update({ status: 'pronto' }).eq('id', item.id)
+    load()
+  }
+  async function aceitarItem(item) {
+    await supabase.from('comanda_itens')
+      .update({ preparando_por: meuId, preparando_nome: meuNome, preparando_em: new Date().toISOString() })
+      .eq('id', item.id).is('preparando_por', null)
+    load()
+  }
+  async function soltarItem(item) {
+    await supabase.from('comanda_itens')
+      .update({ preparando_por: null, preparando_nome: null, preparando_em: null })
+      .eq('id', item.id).eq('preparando_por', meuId)
     load()
   }
 
@@ -158,7 +224,8 @@ export default function PresencialCozinha() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
           {/* Pedidos de delivery / iFood em preparo */}
           {entregas.map(pedido => (
-            <CardEntregaKDS key={pedido.id} pedido={pedido} onPronto={marcarPedidoPronto} tempoDesde={tempoDesde} />
+            <CardEntregaKDS key={pedido.id} pedido={pedido} meuId={meuId}
+              onAceitar={aceitarPedido} onSoltar={soltarPedido} onPronto={marcarPedidoPronto} tempoDesde={tempoDesde} />
           ))}
 
           {porMesa.map(([mesa, lista]) => (
@@ -188,11 +255,10 @@ export default function PresencialCozinha() {
                       {item.observacao && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.observacao}</div>}
                       <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>há {tempoDesde(item.created_at)}</div>
                     </div>
-                    <button type="button" onClick={() => marcarPronto(item)}
-                      style={{ padding: '8px 12px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12.5,
-                        border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.12)', color: '#16a34a' }}>
-                      ✓ Pronto
-                    </button>
+                    <div style={{ minWidth: 130 }}>
+                      <AcaoPreparo registro={item} meuId={meuId} size="sm"
+                        onAceitar={aceitarItem} onSoltar={soltarItem} onPronto={marcarPronto} />
+                    </div>
                   </div>
                   )
                 })}
