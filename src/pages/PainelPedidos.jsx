@@ -1957,7 +1957,16 @@ function acaoRapidaPedido(pedido) {
   }
 }
 
-function CardMini({ pedido, onClick, onExpirado, onAvancar, entregadores = [] }) {
+// Passo pra TRÁS (desfazer quando avançou errado / quer trocar).
+function acaoVoltarPedido(pedido) {
+  switch (pedido.status) {
+    case 'pronto':       return { status: 'em_preparo', label: '↩ Voltar pra cozinha' }
+    case 'saiu_entrega': return { status: 'pronto',      label: '↩ Cancelar despacho' }
+    default:             return null
+  }
+}
+
+function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregadores = [] }) {
   const oc = ORIGEM_CONFIG[pedido.origem] ?? ORIGEM_CONFIG.cardapio
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const qtdItens = itens.reduce((s, i) => s + Number(i.qtd ?? i.quantidade ?? 1), 0)
@@ -1968,6 +1977,7 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, entregadores = [] })
     : null
   const aguardandoEntregador = pedido.status === 'pronto' && !pedido.entregador_id && !isRetirada
   const acao = onAvancar ? acaoRapidaPedido(pedido) : null
+  const voltar = onVoltar ? acaoVoltarPedido(pedido) : null
   return (
     <div role="button" tabIndex={0} onClick={onClick}
       onKeyDown={e => { if (e.key === 'Enter') onClick?.() }}
@@ -1997,6 +2007,14 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, entregadores = [] })
           style={{ marginTop: 8, width: '100%', padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
             fontWeight: 800, fontSize: 13, border: `1.5px solid ${acao.cor}`, background: `${acao.cor}1e`, color: acao.cor }}>
           {acao.label}
+        </button>
+      )}
+      {voltar && (
+        <button type="button"
+          onClick={e => { e.stopPropagation(); onVoltar(pedido.id, voltar.status) }}
+          style={{ marginTop: 6, width: '100%', padding: '5px', borderRadius: 8, cursor: 'pointer',
+            fontWeight: 600, fontSize: 11.5, border: '1px solid var(--border, #2a2a3a)', background: 'none', color: 'var(--text-muted)' }}>
+          {voltar.label}
         </button>
       )}
     </div>
@@ -2939,6 +2957,15 @@ export default function PainelPedidos() {
     notificarCliente(id, novoStatus)
   }
 
+  // Voltar um passo (avançou errado / quer trocar) — correção interna, NÃO avisa
+  // o cliente. Ao cancelar o despacho, limpa o código e a hora de saída.
+  async function handleVoltar(id, novoStatus) {
+    const update = { status: novoStatus }
+    if (novoStatus === 'pronto') { update.codigo_entrega = null; update.saiu_entrega_at = null }
+    setPedidos(prev => prev.map(p => p.id === id ? { ...p, ...update } : p))
+    await supabase.from('pedidos_delivery').update(update).eq('id', id)
+  }
+
   async function handleConfirmar(id, minutos = null) {
     const extra = {}
     if (minutos) {
@@ -3268,7 +3295,7 @@ export default function PainelPedidos() {
                   count={pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length}
                   vazio="Nada em preparo">
                   {pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').map(p => (
-                    <CardMini key={p.id} pedido={p} onAvancar={handleAvancar} onClick={() => setPedidoDetalhe(p)} />
+                    <CardMini key={p.id} pedido={p} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
@@ -3278,7 +3305,7 @@ export default function PainelPedidos() {
                   count={pedidos.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
                   vazio="Ninguém na rua">
                   {pedidos.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).map(p => (
-                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onAvancar={handleAvancar} onClick={() => setPedidoDetalhe(p)} />
+                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
@@ -3288,7 +3315,7 @@ export default function PainelPedidos() {
                   count={pedidos.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
                   vazio="Nenhuma retirada pronta">
                   {pedidos.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).map(p => (
-                    <CardMini key={p.id} pedido={p} onAvancar={handleAvancar} onClick={() => setPedidoDetalhe(p)} />
+                    <CardMini key={p.id} pedido={p} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
