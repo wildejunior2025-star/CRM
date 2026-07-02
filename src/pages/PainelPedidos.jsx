@@ -1,7 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
-import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras } from '../utils/imprimirCupom'
+import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras, imprimirHtml, montarComandaCozinhaHtml } from '../utils/imprimirCupom'
+
+// Aceitar pedidos automaticamente (lido do localStorage pra não pegar estado
+// velho dentro do handler de realtime).
+function aceitarAutoAtivo() {
+  try { return JSON.parse(localStorage.getItem('painelConfig') || '{}').aceitarAuto === true }
+  catch { return false }
+}
 import { CONDICOES_PAGAMENTO } from '../lib/constants'
 import { separarItem } from '../lib/itensPedido'
 import './PainelPedidos.css'
@@ -2128,19 +2135,29 @@ export default function PainelPedidos() {
   const [vendaAberta, setVendaAberta] = useState(false)
   const [vendaEditando, setVendaEditando] = useState(null) // pedido de balcão sendo editado
   const [comandas, setComandas] = useState([]) // mesas (autoatendimento QR) abertas
+  const mesaPrintRef = useRef({}) // buffer p/ imprimir itens da mesa juntos
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null) // pedido aberto em detalhe (card completo)
   const [autoImprimir, setAutoImprimir] = useState(autoImprimirAtivo)
+  const [aceitarAuto, setAceitarAuto] = useState(aceitarAutoAtivo)
 
+  function patchConfigLocal(patch) {
+    try {
+      const cfg = JSON.parse(localStorage.getItem('painelConfig') || '{}')
+      Object.assign(cfg, patch)
+      localStorage.setItem('painelConfig', JSON.stringify(cfg))
+    } catch {
+      localStorage.setItem('painelConfig', JSON.stringify(patch))
+    }
+  }
   function toggleAutoImprimir() {
     const novo = !autoImprimir
     setAutoImprimir(novo)
-    try {
-      const cfg = JSON.parse(localStorage.getItem('painelConfig') || '{}')
-      cfg.autoImprimir = novo
-      localStorage.setItem('painelConfig', JSON.stringify(cfg))
-    } catch {
-      localStorage.setItem('painelConfig', JSON.stringify({ autoImprimir: novo }))
-    }
+    patchConfigLocal({ autoImprimir: novo })
+  }
+  function toggleAceitarAuto() {
+    const novo = !aceitarAuto
+    setAceitarAuto(novo)
+    patchConfigLocal({ aceitarAuto: novo })
   }
 
   function handleImprimir(pedido) {
@@ -2581,7 +2598,10 @@ export default function PainelPedidos() {
     const ch = supabase
       .channel(`painel_comandas_${empresa.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas', filter: `empresa_id=eq.${empresa.id}` }, carregarComandas)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `empresa_id=eq.${empresa.id}` }, carregarComandas)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `empresa_id=eq.${empresa.id}` }, (payload) => {
+        carregarComandas()
+        if (payload.eventType === 'INSERT') agendarImpressaoMesa(payload.new)
+      })
       .subscribe()
     const id = setInterval(carregarComandas, 30_000)
     return () => { ativo = false; ch.unsubscribe(); clearInterval(id) }
@@ -2603,6 +2623,28 @@ export default function PainelPedidos() {
       ? { ...c, comanda_itens: (c.comanda_itens ?? []).map(it => it.id === item.id ? { ...it, status: 'pronto' } : it) }
       : c))
     await supabase.from('comanda_itens').update({ status: 'pronto' }).eq('id', item.id)
+  }
+
+  // Auto-imprime o pedido da mesa (comanda). Junta os itens que chegam quase
+  // juntos (mesmo envio do cliente) num cupom só, com pequeno atraso.
+  function agendarImpressaoMesa(item) {
+    if (!autoImprimirAtivo() || (item.status && item.status !== 'pendente')) return
+    const cid = item.comanda_id
+    const buf = mesaPrintRef.current
+    if (!buf[cid]) buf[cid] = { itens: [], timer: null }
+    buf[cid].itens.push(item)
+    clearTimeout(buf[cid].timer)
+    buf[cid].timer = setTimeout(() => flushImpressaoMesa(cid), 1500)
+  }
+  async function flushImpressaoMesa(cid) {
+    const entry = mesaPrintRef.current[cid]
+    delete mesaPrintRef.current[cid]
+    if (!entry?.itens?.length) return
+    const { data: c } = await supabase.from('comandas').select('numero_mesa').eq('id', cid).maybeSingle()
+    imprimirHtml(montarComandaCozinhaHtml({
+      numeroMesa: c?.numero_mesa ?? '?',
+      itens: entry.itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao })),
+    }))
   }
 
   // ── Realtime subscription + polling de segurança + visibilidade ──
@@ -2627,9 +2669,13 @@ export default function PainelPedidos() {
             // Só adiciona ao painel se não for finalizado E não for aguardando pagamento PIX
             if (!STATUS_FINALIZADOS.has(novo.status) && novo.status !== 'aguardando_pagamento') {
               setPedidos(prev => [...prev, novo])
+              // Imprime pedido novo (aguardando) OU venda de balcão (já confirmada)
+              if (autoImprimirAtivo() && (novo.status === 'aguardando' || novo.origem === 'balcao')) {
+                imprimirCupom(novo, empresa)
+              }
               if (novo.status === 'aguardando') {
                 iniciarLoopSom()
-                if (autoImprimirAtivo()) imprimirCupom(novo, empresa)
+                if (aceitarAutoAtivo()) handleConfirmar(novo.id)
               }
             }
           } else if (payload.eventType === 'UPDATE') {
@@ -2645,6 +2691,7 @@ export default function PainelPedidos() {
                   if (novo.status === 'aguardando') {
                     iniciarLoopSom()
                     if (autoImprimirAtivo()) imprimirCupom(novo, empresa)
+                    if (aceitarAutoAtivo()) handleConfirmar(novo.id)
                   }
                   return [...prev, novo]
                 }
@@ -3396,6 +3443,12 @@ export default function PainelPedidos() {
               </div>
 
               <ToggleRow label="Imprimir automático" ativo={autoImprimir} onToggle={toggleAutoImprimir} />
+              <ToggleRow label="Aceitar pedido automático" ativo={aceitarAuto} onToggle={toggleAceitarAuto} />
+              {aceitarAuto && (
+                <p style={{ fontSize: 11, color: '#a16207', lineHeight: 1.4, margin: '-4px 0 0' }}>
+                  ⚠️ Todo pedido novo é aceito sozinho, sem revisar. Bom pra quem confia no fluxo (ex.: iFood/app).
+                </p>
+              )}
               <ToggleRow label="Som de novo pedido" ativo={somAtivo} onToggle={toggleSom} />
 
               <button type="button" onClick={imprimirTeste} style={{
