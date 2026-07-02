@@ -14,8 +14,15 @@ function enderecoTexto(p) {
     .filter(Boolean).join(', ')
 }
 
+// Ponto pra rota: prefere COORDENADAS (GPS) — nunca falha em geocodificar, ao
+// contrário do texto (um endereço que o Google não acha quebra a rota inteira).
+function enderecoPonto(p) {
+  if (p.endereco_lat != null && p.endereco_lng != null) return `${p.endereco_lat},${p.endereco_lng}`
+  return enderecoTexto(p)
+}
+
 function mapsUrl(p) {
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(enderecoTexto(p))}`
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(enderecoPonto(p))}`
 }
 
 // Rota única com várias paradas (E1). PRECISA de ponto de partida, senão o Maps
@@ -23,11 +30,11 @@ function mapsUrl(p) {
 // ORIGEM, a última o destino, e as do meio vão em waypoints (separados por "|"
 // cru — o navegador codifica; %7C já codificado o app não entende). Máx. 10.
 function rotaMultiplaUrl(pedidos) {
-  const enderecos = pedidos.map(enderecoTexto).filter(Boolean).slice(0, 10)
-  if (enderecos.length < 2) return null
-  const origem = encodeURIComponent(enderecos[0])
-  const destino = encodeURIComponent(enderecos[enderecos.length - 1])
-  const meio = enderecos.slice(1, -1).map(e => encodeURIComponent(e))
+  const pontos = pedidos.map(enderecoPonto).filter(Boolean).slice(0, 10)
+  if (pontos.length < 2) return null
+  const origem = encodeURIComponent(pontos[0])
+  const destino = encodeURIComponent(pontos[pontos.length - 1])
+  const meio = pontos.slice(1, -1).map(e => encodeURIComponent(e))
   let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${origem}&destination=${destino}`
   if (meio.length) url += `&waypoints=${meio.join('|')}`
   return url

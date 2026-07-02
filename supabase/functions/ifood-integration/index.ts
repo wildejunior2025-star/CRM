@@ -218,6 +218,10 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
 
   const ehEntrega = (o.orderType ?? "DELIVERY") === "DELIVERY"
   const addr = o.delivery?.deliveryAddress ?? {}
+  // Coordenadas GPS do cliente (à prova de erro de geocodificação na rota).
+  const coord = addr.coordinates ?? {}
+  const lat = coord.latitude ?? coord.lat ?? null
+  const lng = coord.longitude ?? coord.lng ?? null
 
   // Itens -> formato usado pelo painel/cupom. Os complementos/adicionais ficam
   // numa lista separada (não mais colados no nome) pra exibir cada um em sua
@@ -256,6 +260,8 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     endereco_complemento: addr.complement ?? null,
     endereco_bairro: addr.neighborhood ?? null,
     endereco_cidade: ehEntrega ? (addr.city ?? "—") : "Retirada",
+    endereco_lat: ehEntrega ? lat : null,
+    endereco_lng: ehEntrega ? lng : null,
 
     itens,
     subtotal: Number(total.subTotal ?? 0),
