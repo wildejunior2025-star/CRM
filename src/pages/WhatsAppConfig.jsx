@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { conectarWhatsAppCloud } from '../lib/waEmbeddedSignup'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 import './WhatsAppConfig.css'
+
+const CLOUD_HABILITADO = !!import.meta.env.VITE_WA_CONFIG_ID
 
 function WhatsAppIcon({ size = 16 }) {
   return (
@@ -46,12 +49,18 @@ const NOTIF_DEFAULTS = {
 export default function WhatsAppConfig() {
   const { profile } = useAuth()
 
-  // ── Estado de conexão ──
+  // ── Estado de conexão (Evolution / QR) ──
   const [connStatus, setConnStatus] = useState('loading') // 'loading'|'connected'|'disconnected'|'connecting'
   const [connPhone,  setConnPhone]  = useState(null)
   const [qrCode,     setQrCode]     = useState(null)
   const [connError,  setConnError]  = useState(null)
   const [disconnecting, setDisconnecting] = useState(false)
+
+  // ── Estado da conexão Cloud API (Meta oficial) ──
+  const [cloudPhone,  setCloudPhone]  = useState(null)  // número de exibição salvo
+  const [cloudName,   setCloudName]   = useState(null)
+  const [cloudBusy,   setCloudBusy]   = useState(false)
+  const [cloudError,  setCloudError]  = useState(null)
 
   // ── Configurações de notificação ──
   const [form,    setForm]    = useState(NOTIF_DEFAULTS)
@@ -106,6 +115,14 @@ export default function WhatsAppConfig() {
       // Carrega phone salvo no banco como fallback
       if (data.connected_phone && !connPhone) {
         setConnPhone(data.connected_phone)
+      }
+      // Conexão Cloud API já feita?
+      if (data.cloud_phone_number_id) {
+        setCloudPhone(data.cloud_display_number ?? null)
+        setCloudName(data.cloud_verified_name ?? null)
+      } else {
+        setCloudPhone(null)
+        setCloudName(null)
       }
     }
 
@@ -229,6 +246,46 @@ export default function WhatsAppConfig() {
       setQrCode(data.qrcode)
       startPolling()
     }
+  }
+
+  async function handleConnectCloud() {
+    setCloudBusy(true)
+    setCloudError(null)
+    try {
+      // 1. Popup da Meta — lojista conecta o próprio número
+      const { code, phone_number_id, waba_id } = await conectarWhatsAppCloud()
+
+      // 2. Backend finaliza: assina o app na WABA, registra o número e salva
+      const { data, error } = await supabase.functions.invoke('whatsapp-cloud-signup', {
+        body: { code, phone_number_id, waba_id },
+      })
+      if (error || data?.error) {
+        throw new Error(data?.error ?? error?.message ?? 'Erro ao conectar.')
+      }
+
+      setCloudPhone(data.display_number ?? null)
+      setCloudName(data.verified_name ?? null)
+      loadConfig()
+    } catch (e) {
+      setCloudError(e.message ?? String(e))
+    } finally {
+      setCloudBusy(false)
+    }
+  }
+
+  async function handleDisconnectCloud() {
+    if (!confirm('Desconectar o WhatsApp (Cloud API) desta loja? O robô para de responder até reconectar.')) return
+    setCloudBusy(true)
+    setCloudError(null)
+    const { error } = await supabase
+      .from('whatsapp_config')
+      .update({ cloud_phone_number_id: null, cloud_display_number: null, ativo: false })
+      .eq('empresa_id', profile.empresa_id)
+    setCloudBusy(false)
+    if (error) { setCloudError(error.message); return }
+    setCloudPhone(null)
+    setCloudName(null)
+    loadConfig()
   }
 
   async function handleDisconnect() {
@@ -385,11 +442,69 @@ export default function WhatsAppConfig() {
         </div>
       </Link>
 
-      {/* ── Seção Conexão ── */}
+      {/* ── Seção Conexão Cloud API (Meta oficial) ── */}
+      {CLOUD_HABILITADO && (
+        <div className="wa-section">
+          <h2 className="wa-section-title">
+            <WhatsAppIcon size={15} />
+            Conectar WhatsApp (oficial Meta)
+          </h2>
+
+          {cloudPhone ? (
+            <div className="wa-conn-connected">
+              <div className="wa-conn-badge">
+                <CheckIcon />
+                WhatsApp conectado pela Meta
+              </div>
+              <p className="wa-conn-phone">
+                Número: <strong>{cloudPhone}</strong>
+                {cloudName ? <> — {cloudName}</> : null}
+              </p>
+              <p className="wa-hint">
+                O robô responde os clientes por este número. Ele fica dedicado ao atendimento
+                (não abre no WhatsApp normal do celular).
+              </p>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ marginTop: 8 }}
+                onClick={handleDisconnectCloud}
+                disabled={cloudBusy}
+              >
+                {cloudBusy ? 'Aguarde...' : 'Desconectar'}
+              </button>
+            </div>
+          ) : (
+            <div className="wa-conn-disconnected">
+              <p className="wa-hint" style={{ marginBottom: 16 }}>
+                Conecte um número <strong>dedicado ao robô</strong> (separado do seu WhatsApp pessoal).
+                Você faz login na Meta, escolhe o número e pronto — o robô passa a atender os clientes
+                automaticamente por ele.
+              </p>
+              {cloudError && (
+                <div className="wa-test-result error" style={{ marginBottom: 12 }}>
+                  <AlertIcon />
+                  {cloudError}
+                </div>
+              )}
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleConnectCloud}
+                disabled={cloudBusy}
+              >
+                {cloudBusy ? 'Conectando...' : 'Conectar meu WhatsApp'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Seção Conexão (Evolution / QR — modo alternativo) ── */}
       <div className="wa-section">
         <h2 className="wa-section-title">
           <WhatsAppIcon size={15} />
-          Conexão WhatsApp
+          {CLOUD_HABILITADO ? 'Conexão por QR (alternativa)' : 'Conexão WhatsApp'}
         </h2>
 
         {isLoading && (
