@@ -165,8 +165,12 @@ async function runPoll(sb: any) {
           if (criou) totalPedidos++
         } else if (code === "DDCR" || full === "DELIVERY_DROP_CODE_REQUESTED") {
           // Pedido exige código de confirmação de entrega (F1) — marca pro app
-          // do motoqueiro pedir o código do cliente ao concluir.
-          await sb.from("pedidos_delivery").update({ ifood_requer_codigo: true }).eq("ifood_order_id", orderId)
+          // do motoqueiro pedir o código do cliente ao concluir. Em pedidos
+          // on-demand/POS o iFood manda o código no metadata.CODE (guardamos).
+          const cod = ev.metadata?.CODE ?? ev.metadata?.code ?? null
+          const upd: Record<string, unknown> = { ifood_requer_codigo: true }
+          if (cod) upd.ifood_codigo_entrega = String(cod)
+          await sb.from("pedidos_delivery").update(upd).eq("ifood_order_id", orderId)
         } else {
           await atualizarStatusLocal(sb, orderId, code)
         }
