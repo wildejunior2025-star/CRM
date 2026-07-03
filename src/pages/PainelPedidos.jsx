@@ -839,6 +839,27 @@ async function carregarCatalogo(empresaId) {
   return catalogo
 }
 
+// Distância entre dois pontos (km) — pra calcular taxa de entrega por km.
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+// Endereço em texto → coordenadas (OpenStreetMap/Nominatim, mesmo do checkout).
+async function geocodificarEndereco(endereco) {
+  try {
+    const q = encodeURIComponent(`${endereco}, Brasil`)
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, {
+      headers: { 'User-Agent': 'CRM-FWC/1.0' },
+    })
+    const data = await res.json()
+    if (data?.[0]) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
+  } catch { /* ignora */ }
+  return null
+}
+
 // Rascunho da venda de balcão: se o vendedor sai da tela no meio do pedido,
 // a gente guarda o que ele já digitou e reabre igualzinho quando ele volta.
 const draftKeyFor = (empresaId) => (empresaId ? `pp-venda-draft-${empresaId}` : null)
@@ -886,6 +907,8 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const [colarPronto, setColarPronto] = useState(false)
   const fileRef = useRef(null)
   const pasteRef = useRef(null)
+  // Cálculo automático da taxa de entrega pela distância loja↔cliente
+  const [calcTaxa, setCalcTaxa] = useState({ loading: false, msg: null })
 
   useEffect(() => {
     if (!empresa?.id) { setLoading(false); return }
@@ -980,6 +1003,46 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   // Limpa o rascunho e fecha (usado ao concluir a venda ou cancelar de propósito)
   function limparDraft() { if (draftKey) { try { localStorage.removeItem(draftKey) } catch { /* ignore */ } } }
   function cancelar() { limparDraft(); onFechar() }
+
+  // Calcula a taxa de entrega pela distância entre a loja e o endereço do cliente
+  // (usa a config de Raio de Entrega da loja: localização + faixas por km).
+  async function calcularTaxaPorEndereco() {
+    const endStr = [rua, numero, bairro, cidade].filter(s => s && s.trim()).join(', ')
+    if (!endStr.trim()) { setCalcTaxa({ loading: false, msg: { tipo: 'erro', txt: 'Preencha o endereço primeiro.' } }); return }
+    setCalcTaxa({ loading: true, msg: null })
+    try {
+      const { data: emp } = await supabase.from('empresas')
+        .select('latitude, longitude, taxa_entrega, taxas_entrega_km, raio_entrega_km')
+        .eq('id', empresa.id).maybeSingle()
+      if (!emp?.latitude || !emp?.longitude) {
+        setCalcTaxa({ loading: false, msg: { tipo: 'erro', txt: 'A loja não tem localização configurada. Vá em Configurações → Raio de entrega, ou digite a taxa manual.' } })
+        return
+      }
+      const coords = await geocodificarEndereco(endStr)
+      if (!coords) { setCalcTaxa({ loading: false, msg: { tipo: 'erro', txt: 'Não achei esse endereço no mapa. Digite a taxa manual.' } }); return }
+      const dist = haversineKm(coords.lat, coords.lng, Number(emp.latitude), Number(emp.longitude))
+      const faixas = Array.isArray(emp.taxas_entrega_km) ? emp.taxas_entrega_km : []
+      let valor
+      if (faixas.length > 0) {
+        const ordenadas = [...faixas].sort((a, b) => a.km - b.km)
+        const faixa = ordenadas.find(f => dist <= Number(f.km)) ?? ordenadas[ordenadas.length - 1]
+        valor = Number(faixa.taxa) || 0
+      } else {
+        valor = Number(emp.taxa_entrega || 0)
+      }
+      setTaxa(String(valor))
+      const foraRaio = emp.raio_entrega_km && dist > Number(emp.raio_entrega_km)
+      setCalcTaxa({
+        loading: false,
+        msg: {
+          tipo: foraRaio ? 'aviso' : 'ok',
+          txt: `${dist.toFixed(1)} km → taxa ${fmt(valor)}` + (foraRaio ? ` · ⚠️ fora do raio de ${emp.raio_entrega_km} km` : ''),
+        },
+      })
+    } catch {
+      setCalcTaxa({ loading: false, msg: { tipo: 'erro', txt: 'Erro ao calcular. Digite a taxa manual.' } })
+    }
+  }
 
   function addItem(p) {
     setCart(prev => {
@@ -1166,6 +1229,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         if (e.numero) setNumero(String(e.numero))
         if (e.bairro) setBairro(e.bairro)
         if (e.cidade) setCidade(e.cidade)
+        if (d.taxa_entrega != null) setTaxa(String(d.taxa_entrega))
       } else if (d.tipo === 'retirada') {
         setTipo('retirada')
       }
@@ -1412,7 +1476,32 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
               <input value={bairro} onChange={e => setBairro(e.target.value)} placeholder="Bairro" style={inputSt} />
               <input value={cidade} onChange={e => setCidade(e.target.value)} placeholder="Cidade" style={inputSt} />
             </div>
-            <input value={taxa} onChange={e => setTaxa(e.target.value)} placeholder="Taxa de entrega (R$)" inputMode="decimal" style={inputSt} />
+            <div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                <input value={taxa} onChange={e => { setTaxa(e.target.value); setCalcTaxa({ loading: false, msg: null }) }} placeholder="Taxa de entrega (R$)" inputMode="decimal" style={inputSt} />
+                <button
+                  type="button"
+                  onClick={calcularTaxaPorEndereco}
+                  disabled={calcTaxa.loading}
+                  title="Calcular a taxa pela distância entre a loja e o endereço do cliente"
+                  style={{
+                    flexShrink: 0, padding: '0 12px', borderRadius: 8, cursor: calcTaxa.loading ? 'wait' : 'pointer',
+                    border: '1.5px solid #7c3aed', background: 'rgba(124,58,237,.12)',
+                    color: '#a78bfa', fontWeight: 700, fontSize: 12.5, whiteSpace: 'nowrap',
+                  }}
+                >
+                  {calcTaxa.loading ? '⏳ Calculando...' : '📍 Calcular pela distância'}
+                </button>
+              </div>
+              {calcTaxa.msg && (
+                <div style={{
+                  marginTop: 5, fontSize: 12, fontWeight: 600,
+                  color: calcTaxa.msg.tipo === 'erro' ? 'var(--danger,#ef4444)' : calcTaxa.msg.tipo === 'aviso' ? '#eab308' : '#16a34a',
+                }}>
+                  {calcTaxa.msg.txt}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
