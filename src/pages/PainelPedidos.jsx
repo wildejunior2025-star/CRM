@@ -2669,6 +2669,7 @@ export default function PainelPedidos() {
   const [entregadorSel, setEntregadorSel] = useState(null)
   // Filtro do quadro — null = todas as colunas; ou 'aceitar'|'cozinha'|'entrega'|'concluidos'
   const [filtroColuna, setFiltroColuna] = useState(null)
+  const [filtroOrigem, setFiltroOrigem] = useState(null) // WhatsApp/App/iFood/Balcão/Cardápio; null = todas
   // Busca de pedido pelo código/nº, código iFood, nome ou telefone do cliente
   const [buscaPedido, setBuscaPedido] = useState('')
   // Caixa de entrada (chat com clientes) — a loja responde aqui
@@ -3493,6 +3494,19 @@ export default function PainelPedidos() {
     ? [...pedidos, ...concluidosHoje, ...canceladosHoje].filter(pedidoCasaBusca)
     : []
 
+  // Filtro por origem (WhatsApp / App / iFood / Balcão / Cardápio). null = todas.
+  const passaOrigem = (p) => !filtroOrigem || (p?.origem || 'cardapio') === filtroOrigem
+  // Origens presentes hoje, para montar só os botões que fazem sentido.
+  const origensPresentes = [...new Set(
+    [...pedidos, ...concluidosHoje, ...canceladosHoje].map(p => p?.origem || 'cardapio')
+  )]
+  const pedidosView         = filtroOrigem ? pedidos.filter(passaOrigem)         : pedidos
+  const concluidosHojeView  = filtroOrigem ? concluidosHoje.filter(passaOrigem)  : concluidosHoje
+  const canceladosHojeView  = filtroOrigem ? canceladosHoje.filter(passaOrigem)  : canceladosHoje
+  // Mesas (autoatendimento) não têm origem zap/app/ifood — somem quando há filtro de origem.
+  const mesasFechadasHojeView = filtroOrigem ? [] : mesasFechadasHoje
+  const comandasView          = filtroOrigem ? [] : comandas
+
   return (
     <div className="pp-root">
       {/* Header fixo */}
@@ -3650,24 +3664,62 @@ export default function PainelPedidos() {
             {!buscaQ && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
               {[
-                { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidos.length + concluidosHoje.length + mesasFechadasHoje.length + canceladosHoje.length },
+                { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidosView.length + concluidosHojeView.length + mesasFechadasHojeView.length + canceladosHojeView.length },
                 // "Mesas" só aparece quando há mesa aberta (autoatendimento por QR)
-                ...(comandas.length > 0
-                  ? [{ id: 'mesas', label: 'Mesas', cor: '#db2777', count: comandas.length }]
+                ...(comandasView.length > 0
+                  ? [{ id: 'mesas', label: 'Mesas', cor: '#db2777', count: comandasView.length }]
                   : []),
                 // "A aceitar" só aparece quando há pedido aguardando (esconde quando vazia)
-                ...(pedidos.some(p => p.status === 'aguardando')
-                  ? [{ id: 'aceitar', label: 'A aceitar', cor: '#ca8a04', count: pedidos.filter(p => p.status === 'aguardando').length }]
+                ...(pedidosView.some(p => p.status === 'aguardando')
+                  ? [{ id: 'aceitar', label: 'A aceitar', cor: '#ca8a04', count: pedidosView.filter(p => p.status === 'aguardando').length }]
                   : []),
-                { id: 'cozinha',    label: 'Na cozinha', cor: '#1d4ed8', count: pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length },
-                { id: 'entrega',    label: 'Pronto / Em rota', cor: '#7c3aed', count: pedidos.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length },
-                { id: 'retirada',   label: 'Retirada',  cor: '#0891b2', count: pedidos.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length },
-                { id: 'concluidos', label: 'Concluídos', cor: '#16a34a', count: concluidosHoje.length + mesasFechadasHoje.length },
-                { id: 'cancelados', label: 'Cancelados', cor: '#dc2626', count: canceladosHoje.length },
+                { id: 'cozinha',    label: 'Na cozinha', cor: '#1d4ed8', count: pedidosView.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length },
+                { id: 'entrega',    label: 'Pronto / Em rota', cor: '#7c3aed', count: pedidosView.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length },
+                { id: 'retirada',   label: 'Retirada',  cor: '#0891b2', count: pedidosView.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length },
+                { id: 'concluidos', label: 'Concluídos', cor: '#16a34a', count: concluidosHojeView.length + mesasFechadasHojeView.length },
+                { id: 'cancelados', label: 'Cancelados', cor: '#dc2626', count: canceladosHojeView.length },
               ].map(f => {
                 const ativo = filtroColuna === f.id
                 return (
                   <button key={f.label} type="button" onClick={() => setFiltroColuna(f.id)}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px',
+                      borderRadius: 20, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+                      border: `1.5px solid ${ativo ? f.cor : 'var(--border, #2a2a3a)'}`,
+                      background: ativo ? f.cor : 'transparent',
+                      color: ativo ? '#fff' : 'var(--text-muted, #9aa0b5)',
+                    }}>
+                    {f.label}
+                    <span style={{
+                      minWidth: 18, height: 18, borderRadius: 9, padding: '0 5px',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, fontWeight: 800,
+                      background: ativo ? 'rgba(255,255,255,.25)' : 'var(--border, #2a2a3a)',
+                      color: ativo ? '#fff' : 'var(--text-muted, #9aa0b5)',
+                    }}>{f.count}</span>
+                  </button>
+                )
+              })}
+            </div>
+            )}
+
+            {/* Filtro por origem — só aparece quando há mais de uma origem hoje */}
+            {!buscaQ && origensPresentes.length > 1 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+              {[
+                { id: null, label: 'Todas origens', cor: '#7c3aed', count: pedidos.length + concluidosHoje.length + canceladosHoje.length },
+                ...['whatsapp', 'app', 'ifood', 'balcao', 'cardapio']
+                  .filter(o => origensPresentes.includes(o))
+                  .map(o => ({
+                    id: o,
+                    label: ORIGEM_CONFIG[o]?.label ?? o,
+                    cor: ORIGEM_CONFIG[o]?.bg ?? '#7c3aed',
+                    count: [...pedidos, ...concluidosHoje, ...canceladosHoje].filter(p => (p?.origem || 'cardapio') === o).length,
+                  })),
+              ].map(f => {
+                const ativo = filtroOrigem === f.id
+                return (
+                  <button key={f.label} type="button" onClick={() => setFiltroOrigem(f.id)}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px',
                       borderRadius: 20, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
@@ -3702,20 +3754,20 @@ export default function PainelPedidos() {
 
             {!buscaQ && (
             <div className="pp-board" style={filtroColuna ? { gridTemplateColumns: 'minmax(0, 460px)' } : undefined}>
-              {(!filtroColuna || filtroColuna === 'mesas') && comandas.length > 0 && (
-                <Coluna titulo="Mesas" cor="#db2777" count={comandas.length} vazio="Nenhuma mesa aberta">
-                  {comandas.map(c => (
+              {(!filtroColuna || filtroColuna === 'mesas') && comandasView.length > 0 && (
+                <Coluna titulo="Mesas" cor="#db2777" count={comandasView.length} vazio="Nenhuma mesa aberta">
+                  {comandasView.map(c => (
                     <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} />
                   ))}
                 </Coluna>
               )}
 
-              {(!filtroColuna || filtroColuna === 'aceitar') && pedidos.some(p => p.status === 'aguardando') && (
+              {(!filtroColuna || filtroColuna === 'aceitar') && pedidosView.some(p => p.status === 'aguardando') && (
                 <Coluna titulo="A aceitar" cor="#ca8a04"
-                  count={pedidos.filter(p => p.status === 'aguardando').length}
+                  count={pedidosView.filter(p => p.status === 'aguardando').length}
                   vazio="Nenhum pedido novo">
                   {/* Card completo já aqui — o lojista vê tudo e aceita/recusa sem abrir */}
-                  {pedidos.filter(p => p.status === 'aguardando').map(p => (
+                  {pedidosView.filter(p => p.status === 'aguardando').map(p => (
                     <CardPedido
                       key={p.id}
                       pedido={p}
@@ -3732,41 +3784,41 @@ export default function PainelPedidos() {
                 </Coluna>
               )}
 
-              {((!filtroColuna && pedidos.some(p => p.status === 'confirmado' || p.status === 'em_preparo')) || filtroColuna === 'cozinha') && (
+              {((!filtroColuna && pedidosView.some(p => p.status === 'confirmado' || p.status === 'em_preparo')) || filtroColuna === 'cozinha') && (
                 <Coluna titulo="Na cozinha" cor="#1d4ed8"
-                  count={pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length}
+                  count={pedidosView.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length}
                   vazio="Nada em preparo">
-                  {pedidos.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').map(p => (
+                  {pedidosView.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').map(p => (
                     <CardMini key={p.id} pedido={p} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
 
-              {((!filtroColuna && pedidos.some(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega'))) || filtroColuna === 'entrega') && (
+              {((!filtroColuna && pedidosView.some(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega'))) || filtroColuna === 'entrega') && (
                 <Coluna titulo="Pronto / Em rota" cor="#7c3aed"
-                  count={pedidos.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
+                  count={pedidosView.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
                   vazio="Ninguém na rua">
-                  {pedidos.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).map(p => (
+                  {pedidosView.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).map(p => (
                     <CardMini key={p.id} pedido={p} entregadores={entregadores} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
 
-              {((!filtroColuna && pedidos.some(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega'))) || filtroColuna === 'retirada') && (
+              {((!filtroColuna && pedidosView.some(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega'))) || filtroColuna === 'retirada') && (
                 <Coluna titulo="Retirada" cor="#0891b2"
-                  count={pedidos.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
+                  count={pedidosView.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
                   vazio="Nenhuma retirada pronta">
-                  {pedidos.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).map(p => (
+                  {pedidosView.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).map(p => (
                     <CardMini key={p.id} pedido={p} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
 
-              {((!filtroColuna && (concluidosHoje.length > 0 || mesasFechadasHoje.length > 0)) || filtroColuna === 'concluidos') && (
+              {((!filtroColuna && (concluidosHojeView.length > 0 || mesasFechadasHojeView.length > 0)) || filtroColuna === 'concluidos') && (
                 <Coluna titulo="Concluídos hoje" cor="#16a34a"
-                  count={concluidosHoje.length + mesasFechadasHoje.length}
+                  count={concluidosHojeView.length + mesasFechadasHojeView.length}
                   vazio="Nenhum concluído hoje">
-                  {mesasFechadasHoje.map(m => (
+                  {mesasFechadasHojeView.map(m => (
                     <div key={m.id} className="pp-mini" style={{ borderLeft: '3px solid #db2777', cursor: 'default' }}>
                       <div className="pp-mini-top">
                         <span className="pp-mini-num">🍽️ Mesa {m.numero_mesa} · {fmt(m.total)}</span>
@@ -3780,17 +3832,17 @@ export default function PainelPedidos() {
                       </div>
                     </div>
                   ))}
-                  {concluidosHoje.map(p => (
+                  {concluidosHojeView.map(p => (
                     <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
 
-              {((!filtroColuna && canceladosHoje.length > 0) || filtroColuna === 'cancelados') && (
+              {((!filtroColuna && canceladosHojeView.length > 0) || filtroColuna === 'cancelados') && (
                 <Coluna titulo="Cancelados hoje" cor="#dc2626"
-                  count={canceladosHoje.length}
+                  count={canceladosHojeView.length}
                   vazio="Nenhum cancelado hoje">
-                  {canceladosHoje.map(p => (
+                  {canceladosHojeView.map(p => (
                     <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
