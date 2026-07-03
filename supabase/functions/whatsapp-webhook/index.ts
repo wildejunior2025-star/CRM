@@ -1,4 +1,4 @@
-// Bot v180 — ao adicionar quentinha, mostra os complementos escolhidos p/ o cliente conferir (evita receber errado)
+// Bot v181 — safety net: cliente cadastrado nunca é perguntado nome/email (troca pela próxima etapa) — corrige o Haiku pedindo nome de quem já é cliente
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -1670,6 +1670,22 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
       console.log("[Numero] safety net para:", text)
       const resultado = await handleSalvarNumero(supabase, empresaId, phone, phoneLocal, text.trim(), aceitaDelivery)
       resposta = resultado.resposta
+    }
+
+    // Rede de segurança: cliente JÁ cadastrado NUNCA deve ser perguntado nome/e-mail.
+    // O Haiku às vezes ignora a diretiva e pede o nome ao fechar — aqui o código corrige,
+    // mandando pra próxima etapa certa (entrega/retirada ou pagamento).
+    if (cliente?.nome && /(seu\s+\*?nome\*?|seu\s+\*?e-?mail\*?|qual\s+(é\s+|o\s+)*seu\s+\*?(nome|e-?mail))/i.test(resposta)) {
+      const primeiro = String(cliente.nome).split(" ")[0]
+      const escolheuEntrega = mensagens.some((m: any) => m.role === "user" && /\b(entrega|retirada|retirar)\b/i.test(m.content || ""))
+      if (escolheuEntrega) {
+        resposta = `Perfeito, ${primeiro}! 😊 Como vai pagar: *dinheiro* ou *cartão*? 💳`
+      } else if (aceitaDelivery) {
+        resposta = `Perfeito, ${primeiro}! 😊 Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪`
+      } else {
+        resposta = `Perfeito, ${primeiro}! 😊 Pode retirar em: *${empresaEndereco || empresaNome}*. Como vai pagar: *dinheiro* ou *cartão*? 💳`
+      }
+      console.log("[SafeNet] cliente cadastrado — troquei o pedido de nome pela próxima etapa")
     }
 
     if (!resposta) {
