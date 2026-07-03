@@ -5,6 +5,21 @@ const EVOLUTION_API_URL = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$
 const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY") ?? ""
 const SUPABASE_URL      = Deno.env.get("SUPABASE_URL") ?? ""
 const SUPABASE_KEY      = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+const CLOUD_TOKEN       = Deno.env.get("WHATSAPP_CLOUD_TOKEN") ?? ""   // Meta Cloud API
+const GRAPH_VERSION     = Deno.env.get("WHATSAPP_GRAPH_VERSION") ?? "v21.0"
+
+// Envia texto pela Cloud API (Meta Graph). Usado quando a loja está no cano Cloud.
+async function sendViaCloud(phoneNumberId: string, to: string, text: string) {
+  const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${CLOUD_TOKEN}` },
+    body: JSON.stringify({
+      messaging_product: "whatsapp", recipient_type: "individual",
+      to, type: "text", text: { body: text, preview_url: false },
+    }),
+  })
+  if (!res.ok) console.error("[notify cloud] erro", res.status, (await res.text()).slice(0, 300))
+}
 
 function getMensagem(status: string, tipoEntrega: string, num: string, codigo: string, motivo: string): string | null {
   switch (status) {
@@ -46,12 +61,12 @@ serve(async (req) => {
 
     const { data: waCfg } = await supabase
       .from("whatsapp_config")
-      .select("instance_name")
+      .select("instance_name, cloud_phone_number_id")
       .eq("empresa_id", pedido.empresa_id)
       .eq("ativo", true)
       .single()
 
-    if (!waCfg?.instance_name) return new Response("ok")
+    if (!waCfg?.instance_name && !waCfg?.cloud_phone_number_id) return new Response("ok")
 
     const mensagem = getMensagem(
       novo_status,
@@ -69,11 +84,16 @@ serve(async (req) => {
       ? phoneWpp.slice(0, 4) + phoneWpp.slice(5)
       : phoneWpp
 
-    await fetch(`${EVOLUTION_API_URL}/message/sendText/${waCfg.instance_name}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
-      body: JSON.stringify({ number: phoneWpp, text: mensagem }),
-    })
+    // Cloud API (Meta) quando a loja está no cano Cloud; senão, Evolution (compat)
+    if (waCfg.cloud_phone_number_id) {
+      await sendViaCloud(String(waCfg.cloud_phone_number_id), phoneWpp, mensagem)
+    } else {
+      await fetch(`${EVOLUTION_API_URL}/message/sendText/${waCfg.instance_name}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+        body: JSON.stringify({ number: phoneWpp, text: mensagem }),
+      })
+    }
 
     await supabase.from("whatsapp_conversas").insert({
       empresa_id: pedido.empresa_id,
