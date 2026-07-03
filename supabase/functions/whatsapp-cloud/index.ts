@@ -22,6 +22,52 @@ const SUPABASE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
 const CLOUD_TOKEN   = Deno.env.get("WHATSAPP_CLOUD_TOKEN") ?? ""       // token permanente (System User)
 const VERIFY_TOKEN  = Deno.env.get("WHATSAPP_VERIFY_TOKEN") ?? ""      // token que a gente define no webhook
 const GRAPH_VERSION = Deno.env.get("WHATSAPP_GRAPH_VERSION") ?? "v21.0"
+const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? ""            // Whisper (transcrição de áudio)
+
+// ── Baixa mídia da Graph API (por media id) → base64 + mimetype ───────────────
+async function baixarMidiaCloud(mediaId: string): Promise<{ base64: string; mimetype: string } | null> {
+  try {
+    // 1. pega a URL temporária da mídia
+    const metaRes = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${mediaId}`, {
+      headers: { "Authorization": `Bearer ${CLOUD_TOKEN}` },
+    })
+    if (!metaRes.ok) { console.error("[cloud media] meta erro", metaRes.status, (await metaRes.text()).slice(0, 300)); return null }
+    const meta = await metaRes.json()
+    const mediaUrl = meta?.url
+    const mimetype = String(meta?.mime_type ?? "audio/ogg").split(";")[0]
+    if (!mediaUrl) return null
+    // 2. baixa o binário (a URL da Meta também exige o token)
+    const binRes = await fetch(mediaUrl, { headers: { "Authorization": `Bearer ${CLOUD_TOKEN}` } })
+    if (!binRes.ok) { console.error("[cloud media] download erro", binRes.status); return null }
+    const buf = new Uint8Array(await binRes.arrayBuffer())
+    let bin = ""
+    for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i])
+    return { base64: btoa(bin), mimetype }
+  } catch (e) { console.error("[cloud media] exceção", String(e)); return null }
+}
+
+// ── Transcreve áudio com Whisper (OpenAI) ─────────────────────────────────────
+async function transcreverAudio(base64: string, mimetype: string): Promise<string | null> {
+  if (!OPENAI_API_KEY) { console.error("[cloud whisper] sem OPENAI_API_KEY"); return null }
+  try {
+    const binary = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
+    const ext = mimetype.includes("ogg") ? "ogg"
+      : (mimetype.includes("mp4") || mimetype.includes("m4a")) ? "mp4"
+      : mimetype.includes("mpeg") ? "mp3" : "ogg"
+    const form = new FormData()
+    form.append("file", new Blob([binary], { type: mimetype }), `audio.${ext}`)
+    form.append("model", "whisper-1")
+    form.append("language", "pt")
+    const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${OPENAI_API_KEY}` },
+      body: form,
+    })
+    if (!res.ok) { console.error("[cloud whisper] erro", (await res.text()).slice(0, 300)); return null }
+    const data = await res.json()
+    return data.text ?? null
+  } catch (e) { console.error("[cloud whisper] exceção", String(e)); return null }
+}
 
 // ── Envio de texto pela Graph API ────────────────────────────────────────────
 async function sendText(phoneNumberId: string, to: string, text: string) {
@@ -74,8 +120,20 @@ async function processar(body: any) {
       message.interactive?.button_reply?.title ??
       message.interactive?.list_reply?.title ?? ""
     ).trim()
+  } else if (message.type === "audio") {
+    // Áudio/nota de voz: baixa da Graph API e transcreve com Whisper.
+    const mediaId = message.audio?.id
+    const midia = mediaId ? await baixarMidiaCloud(String(mediaId)) : null
+    const transcricao = midia ? await transcreverAudio(midia.base64, midia.mimetype) : null
+    if (transcricao?.trim()) {
+      text = transcricao.trim()
+      console.log("[cloud audio] transcrito:", text)
+    } else {
+      await sendText(phoneNumberId, from, "Oi! 😊 Não consegui entender o áudio. Pode escrever por texto?")
+      return
+    }
   } else {
-    // áudio/imagem/documento ainda não suportados por aqui
+    // imagem/documento ainda não suportados por aqui
     await sendText(phoneNumberId, from, "Oi! 😊 Por enquanto consigo te atender melhor por *texto*. Pode escrever o que você precisa?")
     return
   }
