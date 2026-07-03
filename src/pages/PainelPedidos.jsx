@@ -2668,8 +2668,19 @@ export default function PainelPedidos() {
   const [entregasConcluidas, setEntregasConcluidas] = useState([])
   const [entregadorSel, setEntregadorSel] = useState(null)
   // Filtro do quadro — null = todas as colunas; ou 'aceitar'|'cozinha'|'entrega'|'concluidos'
-  const [filtroColuna, setFiltroColuna] = useState(null)
-  const [filtroOrigem, setFiltroOrigem] = useState(null) // WhatsApp/App/iFood/Balcão/Cardápio; null = todas
+  // Persistem no localStorage: ao sair e voltar da tela, mantêm o filtro escolhido.
+  const [filtroColuna, setFiltroColuna] = useState(() => {
+    try { const v = localStorage.getItem('pp-filtro-coluna'); return v ? v : null } catch { return null }
+  })
+  const [filtroOrigem, setFiltroOrigem] = useState(() => {
+    try { const v = localStorage.getItem('pp-filtro-origem'); return v ? v : null } catch { return null }
+  }) // WhatsApp/App/iFood/Balcão/Cardápio; null = todas
+  useEffect(() => {
+    try { filtroColuna ? localStorage.setItem('pp-filtro-coluna', filtroColuna) : localStorage.removeItem('pp-filtro-coluna') } catch {}
+  }, [filtroColuna])
+  useEffect(() => {
+    try { filtroOrigem ? localStorage.setItem('pp-filtro-origem', filtroOrigem) : localStorage.removeItem('pp-filtro-origem') } catch {}
+  }, [filtroOrigem])
   // Busca de pedido pelo código/nº, código iFood, nome ou telefone do cliente
   const [buscaPedido, setBuscaPedido] = useState('')
   // Caixa de entrada (chat com clientes) — a loja responde aqui
