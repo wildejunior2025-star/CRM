@@ -516,6 +516,69 @@ export default function DeliveryCheckout() {
       clienteId = cid ?? null
     } catch { /* não bloqueia o pedido */ }
 
+    const itensPedido = itens.map(i => ({
+      produto_id:    i.id,
+      // Dobra as escolhas no nome (aparece no painel/cupom) + guarda estruturado
+      nome:          i.complementos?.length
+        ? `${i.nome} (${i.complementos.map(c => c.nome).join(', ')})`
+        : i.nome,
+      quantidade:    i.quantidade,
+      preco_unitario: i.preco,
+      subtotal:      i.quantidade * i.preco,
+      complementos:  i.complementos ?? [],
+    }))
+
+    function lembrarCliente() {
+      try {
+        localStorage.removeItem(`sacola_${empresaId}`)
+        localStorage.setItem(LS_CLIENTE, JSON.stringify({
+          nome: form.nome.trim(), telefone: form.telefone, email: form.email.trim(),
+          cep: form.cep, rua: form.rua.trim(), numero: form.numero.trim(),
+          complemento: form.complemento.trim(), estado: form.estado, cidade: form.cidade, bairro: form.bairro.trim(),
+        }))
+      } catch { /* ok */ }
+    }
+
+    // ── PIX: gera o QR pelo create-pix-payment (cai na conta da loja, se conectada) ──
+    if (form.pagamento === 'pix') {
+      const pedidoPix = {
+        empresa_id:   empresaId,
+        empresa_nome: empresaNome,
+        user_id:      userId ?? null,
+        cliente_id:   clienteId,
+        cliente_nome: form.nome.trim(),
+        cliente_telefone: form.telefone,
+        payer_email:  form.email.trim() || `${form.telefone.replace(/\D/g, '')}@lojaonline.app`,
+        itens:        itensPedido,
+        subtotal,
+        taxa_entrega: taxaAplicada,
+        total,
+        tipo_entrega: tipo,
+        endereco_rua:         tipo === 'entrega' ? form.rua.trim() : null,
+        endereco_numero:      tipo === 'entrega' ? form.numero.trim() : null,
+        endereco_complemento: tipo === 'entrega' ? (form.complemento.trim() || null) : null,
+        endereco_bairro:      tipo === 'entrega' ? form.bairro.trim() : null,
+        endereco_cidade:      tipo === 'entrega' ? form.cidade : null,
+        endereco_estado:      tipo === 'entrega' ? form.estado : null,
+        observacoes:  form.observacoes.trim() || null,
+      }
+      let pixData = null, pixErr = null
+      try {
+        const res = await supabase.functions.invoke('create-pix-payment', { body: { pedido: pedidoPix } })
+        pixData = res.data; pixErr = res.error
+      } catch (err) { pixErr = err }
+      setEnviando(false)
+      if (pixErr || !pixData?.order_id || pixData?.error) {
+        setErroGlobal(pixData?.error || 'Não consegui gerar o PIX agora. Tente dinheiro/cartão ou tente de novo.')
+        return
+      }
+      lembrarCliente()
+      registrarPedido(pixData.order_id, empresaId)
+      navigate(`/pedido/${pixData.order_id}`, { replace: true })
+      return
+    }
+
+    // ── Dinheiro / Cartão: insere o pedido direto ──
     const { data, error } = await supabase
       .from('pedidos_delivery')
       .insert({
@@ -532,17 +595,7 @@ export default function DeliveryCheckout() {
         endereco_bairro:      tipo === 'entrega' ? form.bairro.trim() : null,
         tipo_entrega:         tipo,
         origem: window.Capacitor?.isNativePlatform?.() ? 'app' : 'cardapio',
-        itens: itens.map(i => ({
-          produto_id:    i.id,
-          // Dobra as escolhas no nome (aparece no painel/cupom) + guarda estruturado
-          nome:          i.complementos?.length
-            ? `${i.nome} (${i.complementos.map(c => c.nome).join(', ')})`
-            : i.nome,
-          quantidade:    i.quantidade,
-          preco_unitario: i.preco,
-          subtotal:      i.quantidade * i.preco,
-          complementos:  i.complementos ?? [],
-        })),
+        itens: itensPedido,
         subtotal,
         taxa_entrega:   taxaAplicada,
         total,
@@ -559,14 +612,7 @@ export default function DeliveryCheckout() {
 
     if (error) { setErroGlobal(error.message); return }
 
-    try {
-      localStorage.removeItem(`sacola_${empresaId}`)
-      localStorage.setItem(LS_CLIENTE, JSON.stringify({
-        nome: form.nome.trim(), telefone: form.telefone, email: form.email.trim(),
-        cep: form.cep, rua: form.rua.trim(), numero: form.numero.trim(),
-        complemento: form.complemento.trim(), estado: form.estado, cidade: form.cidade, bairro: form.bairro.trim(),
-      }))
-    } catch { /* ok */ }
+    lembrarCliente()
     registrarPedido(data.id, empresaId)
     navigate(`/pedido/${data.id}`, { replace: true })
   }
@@ -800,8 +846,7 @@ export default function DeliveryCheckout() {
               <section className="dco-section">
                 <h2 className="dco-section-title">Pagamento</h2>
                 <div className="dco-payment-row">
-                  {/* Pix oculto temporariamente — remover o style para reativar */}
-                  <button type="button" style={{ display: 'none' }}
+                  <button type="button"
                     className={`dco-pay-btn${form.pagamento === 'pix' ? ' dco-pay-btn--active' : ''}`}
                     onClick={() => set('pagamento', 'pix')}>
                     <IconPix />
