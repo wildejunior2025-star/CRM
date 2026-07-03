@@ -2328,9 +2328,11 @@ function acaoRapidaPedido(pedido) {
 
 // Passo pra TRÁS (desfazer quando avançou errado / quer trocar).
 function acaoVoltarPedido(pedido) {
+  // iFood segue o fluxo dele — não existe "cancelar despacho" no iFood; não mostra.
+  const isIfood = pedido.origem === 'ifood'
   switch (pedido.status) {
     case 'pronto':       return { status: 'em_preparo', label: '↩ Voltar pra cozinha' }
-    case 'saiu_entrega': return { status: 'pronto',      label: '↩ Cancelar despacho' }
+    case 'saiu_entrega': return isIfood ? null : { status: 'pronto', label: '↩ Cancelar despacho' }
     default:             return null
   }
 }
