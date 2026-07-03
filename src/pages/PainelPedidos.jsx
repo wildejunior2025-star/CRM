@@ -2599,6 +2599,8 @@ export default function PainelPedidos() {
   const [entregadorSel, setEntregadorSel] = useState(null)
   // Filtro do quadro — null = todas as colunas; ou 'aceitar'|'cozinha'|'entrega'|'concluidos'
   const [filtroColuna, setFiltroColuna] = useState(null)
+  // Busca de pedido pelo código/nº, código iFood, nome ou telefone do cliente
+  const [buscaPedido, setBuscaPedido] = useState('')
   // Caixa de entrada (chat com clientes) — a loja responde aqui
   const [chatMsgs, setChatMsgs]       = useState([])
   const [chatAberto, setChatAberto]   = useState(null)   // "canal|cliente_ref"
@@ -3406,6 +3408,21 @@ export default function PainelPedidos() {
   const threadAberta = chatThreads.find(t => t.key === chatAberto)
   const CANAL_LABEL = { app: 'App', lojaonline: 'Loja online', whatsapp: 'WhatsApp' }
 
+  // Busca de pedido: casa nº do pedido, código iFood, id, nome ou telefone.
+  const buscaQ = buscaPedido.trim().toLowerCase()
+  function pedidoCasaBusca(p) {
+    if (!buscaQ) return true
+    const alvos = [
+      p.numero_pedido, p.ifood_display_id, p.id, p.cliente_nome, p.cliente_telefone,
+      p.id ? String(p.id).slice(-4) : '',
+    ]
+    return alvos.some(v => v != null && String(v).toLowerCase().includes(buscaQ))
+  }
+  // Resultados da busca (todos os pedidos do dia, de qualquer coluna)
+  const resultadosBusca = buscaQ
+    ? [...pedidos, ...concluidosHoje, ...canceladosHoje].filter(pedidoCasaBusca)
+    : []
+
   return (
     <div className="pp-root">
       {/* Header fixo */}
@@ -3541,7 +3558,26 @@ export default function PainelPedidos() {
           <SkeletonGrid />
         ) : (
           <>
-            {/* Filtro de colunas */}
+            {/* Barra de busca de pedido (nº, código iFood, nome ou telefone) */}
+            <div style={{ position: 'relative', maxWidth: 320, marginBottom: 10 }}>
+              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted, #9aa0b5)' }} aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </span>
+              <input
+                type="search"
+                value={buscaPedido}
+                onChange={e => setBuscaPedido(e.target.value)}
+                placeholder="Buscar pedido (nº, iFood, cliente...)"
+                style={{
+                  width: '100%', padding: '8px 12px 8px 32px', borderRadius: 20, fontSize: 13,
+                  border: '1.5px solid var(--border, #2a2a3a)', background: 'var(--surface, #16161f)',
+                  color: 'var(--text)', outline: 'none',
+                }}
+              />
+            </div>
+
+            {/* Filtro de colunas — some quando está buscando */}
+            {!buscaQ && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
               {[
                 { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidos.length + concluidosHoje.length + mesasFechadasHoje.length + canceladosHoje.length },
@@ -3581,7 +3617,20 @@ export default function PainelPedidos() {
                 )
               })}
             </div>
+            )}
 
+            {/* Resultados da busca (substitui as colunas enquanto tem texto) */}
+            {buscaQ && (
+              <div className="pp-board" style={{ gridTemplateColumns: 'minmax(0, 460px)' }}>
+                <Coluna titulo={`Busca: "${buscaPedido.trim()}"`} cor="#7c3aed" count={resultadosBusca.length} vazio="Nenhum pedido encontrado com esse termo">
+                  {resultadosBusca.map(p => (
+                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
+                  ))}
+                </Coluna>
+              </div>
+            )}
+
+            {!buscaQ && (
             <div className="pp-board" style={filtroColuna ? { gridTemplateColumns: 'minmax(0, 460px)' } : undefined}>
               {(!filtroColuna || filtroColuna === 'mesas') && comandas.length > 0 && (
                 <Coluna titulo="Mesas" cor="#db2777" count={comandas.length} vazio="Nenhuma mesa aberta">
@@ -3677,6 +3726,7 @@ export default function PainelPedidos() {
                 </Coluna>
               )}
             </div>
+            )}
           </>
         )}
       </main>
