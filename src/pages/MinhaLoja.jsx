@@ -12,6 +12,13 @@ export default function MinhaLoja({ secao = 'loja' }) {
   const [descricao, setDescricao] = useState('')
   const [emailContato, setEmailContato] = useState('')
   const [emailLogin, setEmailLogin] = useState('')
+  // Dados do responsável (aba Conta)
+  const [nomeResponsavel, setNomeResponsavel] = useState('')
+  const [cnpj, setCnpj] = useState('')
+  const [telefoneContato, setTelefoneContato] = useState('')
+  const [salvandoDados, setSalvandoDados] = useState(false)
+  const [erroDados, setErroDados] = useState(null)
+  const [sucessoDados, setSucessoDados] = useState(false)
   const [bannerUrl, setBannerUrl] = useState('')
   const [logoUrl, setLogoUrl] = useState('')
 
@@ -191,6 +198,9 @@ export default function MinhaLoja({ secao = 'loja' }) {
     setNome(empresa.nome ?? '')
     setDescricao(empresa.descricao ?? '')
     setEmailContato(empresa.email_contato ?? '')
+    setNomeResponsavel(empresa.nome_responsavel ?? '')
+    setCnpj(empresa.cnpj ?? '')
+    setTelefoneContato(empresa.telefone_contato ?? '')
     setBannerUrl(empresa.banner_url ?? '')
     setLogoUrl(empresa.logo_url ?? '')
     setFormasPagamento(empresa.formas_pagamento ?? ['a_vista', 'fiado', 'boleto_7d', 'boleto_14d', 'boleto_30d'])
@@ -339,6 +349,27 @@ export default function MinhaLoja({ secao = 'loja' }) {
     await refreshProfile()
     setSucesso(true)
     setTimeout(() => setSucesso(false), 3000)
+  }
+
+  // Salva os dados do responsável (aba Conta)
+  async function handleSalvarDados(e) {
+    e.preventDefault()
+    if (!empresa) return
+    setSalvandoDados(true); setErroDados(null); setSucessoDados(false)
+    const { error } = await supabase
+      .from('empresas')
+      .update({
+        nome_responsavel: nomeResponsavel.trim() || null,
+        cnpj: cnpj.trim() || null,
+        telefone_contato: telefoneContato.trim() || null,
+        email_contato: emailContato.trim() || null,
+      })
+      .eq('id', empresa.id)
+    setSalvandoDados(false)
+    if (error) { setErroDados(error.message); return }
+    await refreshProfile()
+    setSucessoDados(true)
+    setTimeout(() => setSucessoDados(false), 3000)
   }
 
   if (!empresa) return null
@@ -948,6 +979,49 @@ export default function MinhaLoja({ secao = 'loja' }) {
 
       {secao === 'conta' && (
       <>
+      {/* Card de dados do responsável / da empresa */}
+      <form onSubmit={handleSalvarDados} style={{ marginTop: 16 }}>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Dados do responsável</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
+            Dados de quem responde pela loja — usados para contato, suporte e nota fiscal.
+          </p>
+
+          {erroDados && (
+            <div style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid var(--danger)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 14 }}>
+              {erroDados}
+            </div>
+          )}
+          {sucessoDados && (
+            <div style={{ background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid var(--success)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 14 }}>
+              Dados salvos ✓
+            </div>
+          )}
+
+          <div className="form-grid">
+            <div className="form-field full">
+              <label>Nome do responsável</label>
+              <input type="text" value={nomeResponsavel} onChange={e => setNomeResponsavel(e.target.value)} placeholder="Nome de quem responde pela loja" autoComplete="name" />
+            </div>
+            <div className="form-field">
+              <label>CPF / CNPJ</label>
+              <input type="text" value={cnpj} onChange={e => setCnpj(e.target.value)} placeholder="Só números" inputMode="numeric" />
+            </div>
+            <div className="form-field">
+              <label>Telefone / WhatsApp</label>
+              <input type="tel" value={telefoneContato} onChange={e => setTelefoneContato(e.target.value)} placeholder="(00) 00000-0000" autoComplete="tel" />
+            </div>
+            <div className="form-field full">
+              <label>E-mail de contato</label>
+              <input type="email" value={emailContato} onChange={e => setEmailContato(e.target.value)} placeholder="contato@email.com" autoComplete="email" />
+            </div>
+          </div>
+        </div>
+        <button type="submit" className="btn btn-primary" disabled={salvandoDados} style={{ marginBottom: 16 }}>
+          {salvandoDados ? 'Salvando...' : 'Salvar dados'}
+        </button>
+      </form>
+
       {/* Card de alteração de e-mail de login */}
       <form onSubmit={handleAlterarEmail} style={{ marginTop: 16 }}>
         <div className="card" style={{ marginBottom: 16 }}>

@@ -1,4 +1,4 @@
-// Bot v175 — taxa de entrega calculada pela distância (geocode + faixas por km, igual ao gestor) no prompt e no fechamento
+// Bot v178 — CEP com retry (RPC ViaCEP falha intermitente) + fixes v177 (telefone com/sem 9, não pede nome de cadastrado, backstop de itens)
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -260,9 +260,12 @@ async function resolveCepData(
   cep: string
 ): Promise<{ rua: string; bairro: string; cidade: string; uf: string } | null> {
   try {
-    const { data, error } = await supabase.rpc("buscar_cep_sql", { p_cep: cep })
-    if (error) { console.error("[CEP] rpc erro:", error.message); return null }
-    const d = data as any
+    let d: any = null
+    for (let tentativa = 1; tentativa <= 4 && !d; tentativa++) {
+      const { data, error } = await supabase.rpc("buscar_cep_sql", { p_cep: cep })
+      if (error) { console.error(`[CEP] rpc erro (tent ${tentativa}):`, error.message); continue }
+      if (data) { d = data; break }
+    }
     if (!d || d.erro) return null
     return { rua: d.logradouro ?? "", bairro: d.bairro ?? "", cidade: d.localidade ?? "", uf: d.uf ?? "" }
   } catch (e: any) {
@@ -281,11 +284,17 @@ async function handleBuscarCep(
     const cepClean = cep.replace(/\D/g, "").slice(0, 8)
     if (cepClean.length !== 8) return { resposta: "CEP inválido. Confere e me manda só os 8 números. 😊" }
 
-    const { data, error } = await supabase.rpc("buscar_cep_sql", { p_cep: cepClean })
-    const d = data as any
+    // A RPC faz http pro ViaCEP de dentro do Postgres e falha de forma intermitente
+    // (retorna null às vezes) — tenta até 4x antes de desistir.
+    let d: any = null
+    for (let tentativa = 1; tentativa <= 4 && !d; tentativa++) {
+      const { data, error } = await supabase.rpc("buscar_cep_sql", { p_cep: cepClean })
+      if (error) { console.error(`[CEP] rpc erro (tent ${tentativa}):`, error.message); continue }
+      if (data) { d = data; break }
+      console.log(`[CEP] null na tentativa ${tentativa}, retry...`)
+    }
 
-    if (error || !d) {
-      if (error) console.error("[CEP] rpc erro:", error.message)
+    if (!d) {
       return { resposta: "Não consegui buscar o CEP agora. 😕 Me informa:\n• Nome da rua\n• Número\n• Bairro\n• Cidade" }
     }
     if (d.erro) {
@@ -748,6 +757,27 @@ async function getMediaBase64(instanceName: string, msg: any): Promise<{ base64:
   }
 }
 
+// ── extrairItensDoResumo — backstop quando o carrinho ficou vazio ────────────
+// O Haiku às vezes diz "anotado" sem emitir atualizar_carrinho. Pra o pedido não
+// se perder, extraímos os itens do último resumo/lista que o bot mostrou.
+// Aceita "x1" ou "x 1"; o valor é o TOTAL da linha (divide pela qtd pro unitário).
+function extrairItensDoResumo(mensagens: any[]): any[] {
+  for (let i = mensagens.length - 1; i >= 0; i--) {
+    const m = mensagens[i]
+    if (m?.role !== "assistant") continue
+    const content = m.content ?? ""
+    const matches = [...content.matchAll(/•\s*(.+?)\s+x\s*(\d+)\s*[—–\-]+\s*R\$\s*([\d.,]+)/gi)]
+    if (matches.length > 0) {
+      return matches.map((ma: any) => {
+        const qtd   = parseInt(ma[2], 10) || 1
+        const total = parseFloat(String(ma[3]).replace(",", "."))
+        return { nome: String(ma[1]).trim(), qtd, preco: +(total / qtd).toFixed(2) }
+      })
+    }
+  }
+  return []
+}
+
 // ── Taxa de entrega por distância (mesma regra do gestor/PainelPedidos) ──────
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371
@@ -912,6 +942,11 @@ serve(async (req) => {
     const phoneLocalWith9 = phoneLocal.length === 10
       ? `${phoneLocal.slice(0, 2)}9${phoneLocal.slice(2)}`
       : phoneLocal
+    // Variante SEM o 9 (BR): se veio com 9 (11 díg, 3º dígito 9), gera a versão de 10 díg.
+    // Garante achar o cadastro salvo sem o 9 (Evolution às vezes entrega com, às vezes sem).
+    const phoneLocalNo9 = phoneLocal.length === 11 && phoneLocal[2] === "9"
+      ? `${phoneLocal.slice(0, 2)}${phoneLocal.slice(3)}`
+      : phoneLocal
 
     const [creditRes] = await Promise.all([
       supabase.from("empresas").select("whatsapp_creditos").eq("id", empresaId).single(),
@@ -977,7 +1012,7 @@ serve(async (req) => {
       supabase.from("clientes")
         .select("id, nome, email, cep, numero, endereco, bairro, cidade, estado, telefone, created_at, origem")
         .eq("empresa_id", empresaId)
-        .in("telefone", [phone, phoneLocal, `0${phoneLocal}`, `55${phoneLocal}`, phoneLocalWith9, `55${phoneLocalWith9}`])
+        .in("telefone", [...new Set([phone, phoneLocal, `0${phoneLocal}`, `55${phoneLocal}`, phoneLocalWith9, `55${phoneLocalWith9}`, phoneLocalNo9, `55${phoneLocalNo9}`])])
         .limit(1)
         .maybeSingle(),
     ])
@@ -1063,7 +1098,7 @@ serve(async (req) => {
     // Verifica profiles global quando não há clientes nessa loja (policy bot_read_profiles USING true)
     let profileGlobal: { nome: string; email: string | null; telefone: string | null; cep: string | null; endereco: string | null; numero: string | null; complemento: string | null; bairro: string | null; cidade: string | null; estado: string | null } | null = null
     if (!cliente) {
-      const phonesToTry = [...new Set([phoneLocal, phoneLocalWith9, phone, `55${phoneLocal}`, `55${phoneLocalWith9}`, `+55${phoneLocal}`, `+55${phoneLocalWith9}`])]
+      const phonesToTry = [...new Set([phoneLocal, phoneLocalWith9, phoneLocalNo9, phone, `55${phoneLocal}`, `55${phoneLocalWith9}`, `55${phoneLocalNo9}`, `+55${phoneLocal}`, `+55${phoneLocalWith9}`])]
       for (const tel of phonesToTry) {
         const { data: pg } = await supabase.from("profiles").select("nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado").eq("telefone", tel).limit(1).maybeSingle()
         if (pg?.nome) { profileGlobal = { nome: pg.nome, email: pg.email ?? null, telefone: pg.telefone ?? null, cep: pg.cep ?? null, endereco: pg.endereco ?? null, numero: pg.numero ?? null, complemento: pg.complemento ?? null, bairro: pg.bairro ?? null, cidade: pg.cidade ?? null, estado: pg.estado ?? null }; break }
@@ -1149,7 +1184,8 @@ CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) =
 }).join("\n")}\nSUBTOTAL: R$ ${totalCarrinho.toFixed(2)}`}
 ⚠️ No resumo (PASSO 6) use EXATAMENTE estes preços e este SUBTOTAL do CARRINHO ATUAL. Itens montados (quentinha) já têm os adicionais embutidos no preço — NUNCA use o preço base da lista de produtos nem recalcule.
 
-CLIENTE: ${cliente?.nome ? `${cliente.nome}${enderecoCliente ? `\nEndereço: ${enderecoCliente}` : ""}` : "Não cadastrado nesta loja"}
+CLIENTE: ${cliente?.nome ? `✅ JÁ CADASTRADO — ${cliente.nome}${enderecoCliente ? ` (Endereço: ${enderecoCliente})` : ""}
+⛔ PROIBIDO pedir nome ou e-mail deste cliente — ele JÁ é cadastrado. Cumprimente-o pelo nome. Quando ele fechar a sacola, vá DIRETO para entrega/retirada (PASSO 4), NUNCA para o cadastro (PASSO 3).` : "Não cadastrado nesta loja"}
 TELEFONE: ${phoneLocal}
 ${profileGlobal ? `NOME_NO_SISTEMA: ${profileGlobal.nome}` : ""}
 
@@ -1485,6 +1521,14 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
             if (!acao.cliente_telefone) acao.cliente_telefone = phoneLocal
             console.log(`[Fallback] nome="${acao.cliente_nome}" email="${acao.cliente_email}"`)
           }
+          // Backstop: carrinho vazio (modelo não emitiu atualizar_carrinho) → extrai itens do resumo
+          if (carrinho.length === 0 && !(Array.isArray(acao.items) && acao.items.length > 0)) {
+            const extraidos = extrairItensDoResumo(mensagens)
+            if (extraidos.length > 0) {
+              acao.items = extraidos
+              console.log(`[Fechar] ${extraidos.length} itens extraídos do resumo (carrinho vazio)`)
+            }
+          }
           const resultado = await handleFecharPedido(
             supabase, empresaId, phone, phoneLocal, acao, carrinho,
             cliente, empresa, SUPABASE_URL, SUPABASE_KEY, instanceName, carrinhoEndereco,
@@ -1555,21 +1599,10 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
         if (carrinho.length > 0) {
           safeAcao.items = carrinho
         } else {
-          for (let i = mensagens.length - 1; i >= 0; i--) {
-            const m = mensagens[i]
-            if (m.role !== "assistant") continue
-            const content = m.content ?? ""
-            // Formato: "• Nome xN — R$ X,XX" (o valor é o TOTAL da linha, não o unitário)
-            const matches = [...content.matchAll(/•\s+(.+?)\s+x(\d+)\s+[—–\-]+\s+R\$\s*([\d.,]+)/g)]
-            if (matches.length > 0) {
-              safeAcao.items = matches.map((ma: any) => {
-                const qtd   = parseInt(ma[2], 10)
-                const total = parseFloat(String(ma[3]).replace(",", "."))
-                return { nome: String(ma[1]).trim(), qtd, preco: +(total / qtd).toFixed(2) }
-              })
-              console.log(`[SafeNet] ${safeAcao.items.length} itens extraídos da conversa`)
-              break
-            }
+          const extraidos = extrairItensDoResumo(mensagens)
+          if (extraidos.length > 0) {
+            safeAcao.items = extraidos
+            console.log(`[SafeNet] ${extraidos.length} itens extraídos da conversa`)
           }
         }
 
@@ -1640,7 +1673,7 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
 
     if (isTest) {
       return new Response(
-        JSON.stringify({ ok: true, resposta, _debug: { clienteNome, profileGlobal, phoneLocal } }),
+        JSON.stringify({ ok: true, resposta, _debug: { clienteNome, clienteAchado: !!cliente, clienteId: cliente?.id ?? null, enderecoCliente, profileGlobal, phoneLocal, phoneLocalNo9 } }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       )
     }
