@@ -866,6 +866,11 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const buscaCliTimer = useRef(null)
   // Abre a ficha completa de cadastro de cliente
   const [cadastroAberto, setCadastroAberto] = useState(false)
+  // Leitor de print: lê a captura de tela de um pedido de outro canal (iFood,
+  // WhatsApp, planilha...) e preenche a venda automaticamente.
+  const [lendoPrint, setLendoPrint] = useState(false)
+  const [msgPrint, setMsgPrint] = useState(null)
+  const fileRef = useRef(null)
 
   useEffect(() => {
     if (!empresa?.id) { setLoading(false); return }
@@ -933,6 +938,20 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onFechar])
+
+  // Colar (Ctrl+V) um print da área de transferência → lê direto.
+  useEffect(() => {
+    if (editando) return
+    function onPaste(e) {
+      const item = [...(e.clipboardData?.items || [])].find(i => i.type?.startsWith('image/'))
+      if (!item) return
+      const file = item.getAsFile()
+      if (file) { e.preventDefault(); lerPrint(file) }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editando, produtos])
 
   function addItem(p) {
     setCart(prev => {
@@ -1054,6 +1073,86 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     onFechar()
   }
 
+  // Lê o print escolhido → chama a IA → preenche os campos da venda.
+  async function lerPrint(file) {
+    if (!file) return
+    if (!file.type?.startsWith('image/')) { setMsgPrint({ tipo: 'erro', txt: 'Selecione uma imagem (print).' }); return }
+    setLendoPrint(true); setMsgPrint(null); setErro(null)
+    try {
+      // arquivo → base64 puro (sem o prefixo data:...)
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader()
+        r.onload = () => res(String(r.result).split(',')[1] || '')
+        r.onerror = rej
+        r.readAsDataURL(file)
+      })
+      const { data, error } = await supabase.functions.invoke('ler-print-pedido', {
+        body: {
+          imageBase64: base64,
+          mimetype: file.type || 'image/png',
+          produtos: produtos.map(p => ({ id: p.id, nome: p.nome, preco: Number(p.preco_venda || 0) })),
+        },
+      })
+      if (error) throw new Error(error.message)
+      if (!data?.ok) throw new Error(data?.error || 'Não consegui ler o print.')
+      const d = data.dados || {}
+
+      // Itens → carrinho (soma sobre o que já estiver)
+      let addidos = 0
+      if (Array.isArray(d.itens) && d.itens.length) {
+        setCart(prev => {
+          const novo = { ...prev }
+          for (const it of d.itens) {
+            const p = produtos.find(x => x.id === it.produto_id)
+            if (!p) continue
+            const q = (novo[p.id]?.qtd ?? 0) + Math.max(1, Number(it.quantidade) || 1)
+            novo[p.id] = { id: p.id, produto_id: p.id, nome: p.nome, preco: Number(p.preco_venda || 0), qtd: q }
+            addidos++
+          }
+          return novo
+        })
+      }
+
+      // Cliente
+      if (d.cliente_nome) { setNome(d.cliente_nome); setClienteSelId(null) }
+      if (d.telefone) setTelefone(d.telefone)
+      // Tipo + endereço
+      if (d.tipo === 'entrega') {
+        setTipo('entrega')
+        const e = d.endereco || {}
+        if (e.rua) setRua(e.rua)
+        if (e.numero) setNumero(String(e.numero))
+        if (e.bairro) setBairro(e.bairro)
+        if (e.cidade) setCidade(e.cidade)
+      } else if (d.tipo === 'retirada') {
+        setTipo('retirada')
+      }
+      // Pagamento / troco
+      if (d.pagamento) setPagamento(d.pagamento)
+      if (d.troco_para != null) setTroco(String(d.troco_para))
+      // Observações + itens que a IA não achou no catálogo
+      const partes = []
+      if (d.observacoes) partes.push(String(d.observacoes))
+      if (Array.isArray(d.nao_encontrados) && d.nao_encontrados.length) {
+        partes.push('⚠️ Não achei no catálogo: ' + d.nao_encontrados.join(', '))
+      }
+      if (partes.length) setObs(prev => [prev, ...partes].filter(Boolean).join(' · '))
+
+      const faltou = Array.isArray(d.nao_encontrados) ? d.nao_encontrados.length : 0
+      setMsgPrint({
+        tipo: faltou ? 'aviso' : 'ok',
+        txt: `Preenchido: ${addidos} ${addidos === 1 ? 'item' : 'itens'}` +
+          (faltou ? ` · ${faltou} não achei no catálogo (veja Observações)` : '') +
+          '. Confira antes de concluir.',
+      })
+    } catch (e) {
+      setMsgPrint({ tipo: 'erro', txt: 'Erro ao ler o print: ' + String(e?.message ?? e) })
+    } finally {
+      setLendoPrint(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
   const inputSt = {
     width: '100%', padding: '9px 11px', borderRadius: 8,
     border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)',
@@ -1077,6 +1176,45 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     <div className="pp-modal-overlay" onClick={onFechar}>
       <div className="pp-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 560, width: '94vw', maxHeight: '90vh', overflowY: 'auto' }}>
         <p className="pp-modal-titulo">{editando ? `Editar pedido #${pedidoEdicao.numero_pedido ?? ''}` : 'Nova venda (balcão)'}</p>
+
+        {/* Leitor de print — pra loja que recebe pedido por outro canal (iFood,
+            WhatsApp...): tira o print de lá e a IA preenche a venda. */}
+        {!editando && (
+          <div style={{ marginBottom: 12 }}>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={e => lerPrint(e.target.files?.[0])}
+            />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={lendoPrint || loading}
+              style={{
+                width: '100%', padding: '10px 12px', borderRadius: 10, cursor: lendoPrint ? 'wait' : 'pointer',
+                border: '1.5px dashed #7c3aed', background: 'rgba(124,58,237,.10)',
+                color: '#a78bfa', fontWeight: 700, fontSize: 13.5,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}
+            >
+              {lendoPrint ? '⏳ Lendo o print...' : '📷 Ler print do pedido (preenche automático)'}
+            </button>
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', textAlign: 'center', marginTop: 4 }}>
+              Recebeu o pedido por outro canal? Cole o print aqui (Ctrl+V) ou toque no botão.
+            </div>
+            {msgPrint && (
+              <div style={{
+                marginTop: 8, fontSize: 12.5, fontWeight: 600, padding: '7px 10px', borderRadius: 8,
+                background: msgPrint.tipo === 'erro' ? 'rgba(239,68,68,.12)' : msgPrint.tipo === 'aviso' ? 'rgba(234,179,8,.12)' : 'rgba(34,197,94,.12)',
+                color: msgPrint.tipo === 'erro' ? '#ef4444' : msgPrint.tipo === 'aviso' ? '#eab308' : '#16a34a',
+              }}>
+                {msgPrint.txt}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Produtos */}
         <input
