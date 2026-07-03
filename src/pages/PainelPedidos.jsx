@@ -1599,12 +1599,19 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
   })
   const tipoEntrega = pedido.tipo_entrega || 'entrega'
   const isRetirada = tipoEntrega === 'retirada'
+  // iFood: a confirmação de entrega é feita pelo CÓDIGO DO IFOOD (validado na API
+  // do iFood), não pelo nosso código interno. ifood_requer_codigo vem do handshake.
+  const isIfood = pedido.origem === 'ifood'
+  const precisaCodigoIfood = isIfood && pedido.ifood_requer_codigo
+  // Precisa digitar código? iFood (código do iFood) ou nosso pedido com código gerado.
+  const precisaCodigo = precisaCodigoIfood || (!isIfood && !!pedido.codigo_entrega)
 
   // Estado local para input de código de confirmação (saiu_entrega)
   const [codigoDigitos, setCodigoDigitos] = useState(['', '', '', ''])
   const [erroLocal, setErroLocal] = useState(null)
   const digitRefs = useRef([])
   const [confirmandoEntrega, setConfirmandoEntrega] = useState(false)
+  const [verificandoIfood, setVerificandoIfood] = useState(false)
 
   function handleDigitChange(i, v) {
     const digit = v.replace(/\D/g, '').slice(-1)
@@ -1624,8 +1631,31 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
     }
   }
 
-  function handleConfirmarComCodigo() {
+  async function handleConfirmarComCodigo() {
     const codigo = codigoDigitos.join('')
+    // iFood: valida o código NA API do iFood (não é o nosso código interno).
+    if (precisaCodigoIfood) {
+      setVerificandoIfood(true); setErroLocal(null)
+      try {
+        const { data, error } = await supabase.functions.invoke('ifood-integration', {
+          body: { acao: 'verify_delivery_code', pedido_id: pedido.id, codigo },
+        })
+        if (error || !data?.valid) {
+          setErroLocal('Código do iFood inválido. Confira com o cliente.')
+          setCodigoDigitos(['', '', '', ''])
+          digitRefs.current[0]?.focus()
+          return
+        }
+        // iFood aceitou — o backend já concluiu; atualiza o quadro.
+        onAvancar(pedido.id, 'entregue')
+      } catch {
+        setErroLocal('Erro ao validar no iFood. Tente de novo.')
+      } finally {
+        setVerificandoIfood(false)
+      }
+      return
+    }
+    // Fluxo normal (nosso código de 4 dígitos)
     if (pedido.codigo_entrega && codigo !== String(pedido.codigo_entrega).trim()) {
       setErroLocal('Código incorreto.')
       setCodigoDigitos(['', '', '', ''])
@@ -1967,7 +1997,11 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
                 <button
                   type="button"
                   className="pp-btn pp-btn-avancar"
-                  onClick={() => { setConfirmandoEntrega(true); setTimeout(() => digitRefs.current[0]?.focus(), 80) }}
+                  onClick={() => {
+                    // Sem código exigido (ex.: iFood sem handshake) → conclui direto.
+                    if (!precisaCodigo) { onAvancar(pedido.id, 'entregue'); return }
+                    setConfirmandoEntrega(true); setTimeout(() => digitRefs.current[0]?.focus(), 80)
+                  }}
                   style={{ width: '100%', background: '#7c3aed', borderColor: '#7c3aed' }}
                 >
                   Confirmar entrega
@@ -1976,7 +2010,9 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
             ) : (
               <>
                 <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', margin: '0 0 8px' }}>
-                  Peça o código de 4 dígitos ao cliente:
+                  {precisaCodigoIfood
+                    ? 'Peça o código de confirmação do iFood ao cliente:'
+                    : 'Peça o código de 4 dígitos ao cliente:'}
                 </p>
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'center', margin: '4px 0 10px' }}>
                   {[0, 1, 2, 3].map(i => (
@@ -2016,10 +2052,10 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
                     type="button"
                     className="pp-btn pp-btn-avancar"
                     onClick={handleConfirmarComCodigo}
-                    disabled={codigoDigitos.some(d => d === '')}
+                    disabled={codigoDigitos.some(d => d === '') || verificandoIfood}
                     style={{ flex: 1 }}
                   >
-                    Confirmar entrega
+                    {verificandoIfood ? 'Validando no iFood...' : 'Confirmar entrega'}
                   </button>
                 </div>
               </>
