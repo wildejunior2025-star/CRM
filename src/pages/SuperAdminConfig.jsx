@@ -31,6 +31,7 @@ export default function SuperAdminConfig() {
   const [savingMlm, setSavingMlm] = useState(false)
   const [savingCb, setSavingCb] = useState(false)
   const [savingComissao, setSavingComissao] = useState(false)
+  const [savingComissaoPix, setSavingComissaoPix] = useState(false)
   const [msg, setMsg] = useState(null)
   const inputRef = useRef(null)
 
@@ -190,6 +191,20 @@ export default function SuperAdminConfig() {
     setMsg(error
       ? { tipo: 'erro', texto: 'Erro: ' + error.message }
       : { tipo: 'ok', texto: 'Comissão salva!' }
+    )
+  }
+
+  async function handleSalvarComissaoPix(e) {
+    e.preventDefault()
+    setSavingComissaoPix(true)
+    setMsg(null)
+    const { error } = await supabase.from('configuracoes_plataforma').upsert([
+      { chave: 'comissao_pix_percent', valor: String(configs.comissao_pix_percent ?? '0.5') },
+    ])
+    setSavingComissaoPix(false)
+    setMsg(error
+      ? { tipo: 'erro', texto: 'Erro: ' + error.message }
+      : { tipo: 'ok', texto: 'Comissão do PIX salva!' }
     )
   }
 
@@ -565,6 +580,46 @@ export default function SuperAdminConfig() {
 
             <button type="submit" className="btn btn-primary" disabled={savingComissao}>
               {savingComissao ? 'Salvando...' : 'Salvar comissão'}
+            </button>
+          </form>
+        </div>
+
+        {/* Comissão do PIX (Mercado Pago marketplace) */}
+        <div className="card" style={{ padding: 28, breakInside: 'avoid', marginBottom: 20 }}>
+          <h2 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700 }}>Comissão do PIX (Mercado Pago)</h2>
+          <p style={{ margin: '0 0 18px', fontSize: 13, color: 'var(--text-muted)' }}>
+            Percentual que a plataforma desconta de cada <strong>PIX pago pela loja conectada</strong> ao Mercado Pago.
+            O valor cai automaticamente na sua conta (via <em>split</em> do MP); o restante vai pra loja.
+          </p>
+
+          <form onSubmit={handleSalvarComissaoPix}>
+            <div className="form-field" style={{ margin: '0 0 16px' }}>
+              <label style={{ fontWeight: 600, fontSize: 13 }}>Percentual de comissão do PIX (%)</label>
+              <input
+                type="number" step="0.1" min="0" max="100"
+                value={configs.comissao_pix_percent ?? '0.5'}
+                onChange={e => setConfigs(prev => ({ ...prev, comissao_pix_percent: e.target.value }))}
+                placeholder="0.5"
+                style={{ marginTop: 6, maxWidth: 180 }}
+              />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, display: 'block' }}>
+                Ex: 0,5% → PIX de R$ 100,00 gera R$ 0,50 pra plataforma. Use 0 para não cobrar.
+              </span>
+            </div>
+
+            {configs.comissao_pix_percent != null && configs.comissao_pix_percent !== '' && Number(configs.comissao_pix_percent) > 0 && (
+              <div style={{
+                padding: '10px 14px', borderRadius: 8, marginBottom: 16,
+                background: 'rgba(0,158,227,.08)', border: '1px solid rgba(0,158,227,.25)',
+                fontSize: 13,
+              }}>
+                PIX de <strong>R$ 100,00</strong> → <strong>R$ {(100 * Number(configs.comissao_pix_percent) / 100).toFixed(2)}</strong> pra você
+                &nbsp;· PIX de <strong>R$ 50,00</strong> → <strong>R$ {(50 * Number(configs.comissao_pix_percent) / 100).toFixed(2)}</strong>
+              </div>
+            )}
+
+            <button type="submit" className="btn btn-primary" disabled={savingComissaoPix}>
+              {savingComissaoPix ? 'Salvando...' : 'Salvar comissão do PIX'}
             </button>
           </form>
         </div>
