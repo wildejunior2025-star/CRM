@@ -839,30 +839,42 @@ async function carregarCatalogo(empresaId) {
   return catalogo
 }
 
+// Rascunho da venda de balcão: se o vendedor sai da tela no meio do pedido,
+// a gente guarda o que ele já digitou e reabre igualzinho quando ele volta.
+const draftKeyFor = (empresaId) => (empresaId ? `pp-venda-draft-${empresaId}` : null)
+function lerDraftVenda(empresaId) {
+  const k = draftKeyFor(empresaId)
+  if (!k) return null
+  try { return JSON.parse(localStorage.getItem(k) || 'null') } catch { return null }
+}
+
 function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const editando = !!pedidoEdicao
+  // Rascunho só vale pra venda nova (não pra edição de pedido existente)
+  const draft = editando ? null : lerDraftVenda(empresa?.id)
+  const draftKey = editando ? null : draftKeyFor(empresa?.id)
   const [produtos, setProdutos] = useState([])
   const [loading, setLoading]   = useState(true)
   const [busca, setBusca]       = useState('')
-  const [cart, setCart]         = useState(() => cartFromPedido(pedidoEdicao))
+  const [cart, setCart]         = useState(() => draft?.cart ?? cartFromPedido(pedidoEdicao))
   const [compMap, setCompMap]   = useState({}) // { [produto_id]: grupos[] }
   const [produtoComp, setProdutoComp] = useState(null) // produto sendo montado (complementos)
-  const [nome, setNome]         = useState(pedidoEdicao && pedidoEdicao.cliente_nome !== 'Balcão' ? (pedidoEdicao.cliente_nome ?? '') : '')
-  const [telefone, setTelefone] = useState(pedidoEdicao && pedidoEdicao.cliente_telefone !== '—' ? (pedidoEdicao.cliente_telefone ?? '') : '')
-  const [tipo, setTipo]         = useState(pedidoEdicao?.tipo_entrega ?? 'retirada') // 'retirada' (balcão) | 'entrega'
-  const [rua, setRua]           = useState(pedidoEdicao && pedidoEdicao.endereco_rua !== 'Retirada na loja' ? (pedidoEdicao.endereco_rua ?? '') : '')
-  const [numero, setNumero]     = useState(pedidoEdicao?.endereco_numero ?? '')
-  const [bairro, setBairro]     = useState(pedidoEdicao?.endereco_bairro ?? '')
-  const [cidade, setCidade]     = useState(pedidoEdicao?.endereco_cidade && pedidoEdicao.endereco_cidade !== 'Retirada' ? pedidoEdicao.endereco_cidade : '')
-  const [taxa, setTaxa]         = useState(pedidoEdicao?.taxa_entrega ? String(pedidoEdicao.taxa_entrega) : '')
-  const [pagamento, setPagamento] = useState(pedidoEdicao?.forma_pagamento ?? 'dinheiro')
-  const [troco, setTroco]       = useState(pedidoEdicao?.troco_para ? String(pedidoEdicao.troco_para) : '')
-  const [obs, setObs]           = useState(pedidoEdicao?.observacoes ?? '')
+  const [nome, setNome]         = useState(draft?.nome ?? (pedidoEdicao && pedidoEdicao.cliente_nome !== 'Balcão' ? (pedidoEdicao.cliente_nome ?? '') : ''))
+  const [telefone, setTelefone] = useState(draft?.telefone ?? (pedidoEdicao && pedidoEdicao.cliente_telefone !== '—' ? (pedidoEdicao.cliente_telefone ?? '') : ''))
+  const [tipo, setTipo]         = useState(draft?.tipo ?? pedidoEdicao?.tipo_entrega ?? 'retirada') // 'retirada' (balcão) | 'entrega'
+  const [rua, setRua]           = useState(draft?.rua ?? (pedidoEdicao && pedidoEdicao.endereco_rua !== 'Retirada na loja' ? (pedidoEdicao.endereco_rua ?? '') : ''))
+  const [numero, setNumero]     = useState(draft?.numero ?? pedidoEdicao?.endereco_numero ?? '')
+  const [bairro, setBairro]     = useState(draft?.bairro ?? pedidoEdicao?.endereco_bairro ?? '')
+  const [cidade, setCidade]     = useState(draft?.cidade ?? (pedidoEdicao?.endereco_cidade && pedidoEdicao.endereco_cidade !== 'Retirada' ? pedidoEdicao.endereco_cidade : ''))
+  const [taxa, setTaxa]         = useState(draft?.taxa ?? (pedidoEdicao?.taxa_entrega ? String(pedidoEdicao.taxa_entrega) : ''))
+  const [pagamento, setPagamento] = useState(draft?.pagamento ?? pedidoEdicao?.forma_pagamento ?? 'dinheiro')
+  const [troco, setTroco]       = useState(draft?.troco ?? (pedidoEdicao?.troco_para ? String(pedidoEdicao.troco_para) : ''))
+  const [obs, setObs]           = useState(draft?.obs ?? (pedidoEdicao?.observacoes ?? ''))
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro]         = useState(null)
   // Busca de clientes já cadastrados na loja
   const [sugestoes, setSugestoes]       = useState([])
-  const [clienteSelId, setClienteSelId] = useState(pedidoEdicao?.cliente_id ?? null)
+  const [clienteSelId, setClienteSelId] = useState(draft?.clienteSelId ?? pedidoEdicao?.cliente_id ?? null)
   const [msgCli, setMsgCli]             = useState(null)
   const buscaCliTimer = useRef(null)
   // Abre a ficha completa de cadastro de cliente
@@ -955,6 +967,19 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     return () => window.removeEventListener('paste', onPaste)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editando, produtos])
+
+  // Salva o rascunho da venda enquanto o vendedor mexe (pra não perder se sair).
+  useEffect(() => {
+    if (editando || !draftKey) return
+    const temConteudo = Object.keys(cart).length > 0 || nome.trim() || telefone.trim() || obs.trim()
+    if (!temConteudo) { try { localStorage.removeItem(draftKey) } catch { /* ignore */ } return }
+    const d = { cart, nome, telefone, tipo, rua, numero, bairro, cidade, taxa, pagamento, troco, obs, clienteSelId }
+    try { localStorage.setItem(draftKey, JSON.stringify(d)) } catch { /* ignore */ }
+  }, [editando, draftKey, cart, nome, telefone, tipo, rua, numero, bairro, cidade, taxa, pagamento, troco, obs, clienteSelId])
+
+  // Limpa o rascunho e fecha (usado ao concluir a venda ou cancelar de propósito)
+  function limparDraft() { if (draftKey) { try { localStorage.removeItem(draftKey) } catch { /* ignore */ } } }
+  function cancelar() { limparDraft(); onFechar() }
 
   function addItem(p) {
     setCart(prev => {
@@ -1072,6 +1097,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     }
     setSalvando(false)
     if (error) { setErro(error.message); return }
+    limparDraft()
     onCriado()
     onFechar()
   }
@@ -1095,14 +1121,19 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         body: {
           imageBase64: base64,
           mimetype: file.type || (ehPdf ? 'application/pdf' : 'image/png'),
-          produtos: produtos.map(p => ({ id: p.id, nome: p.nome, preco: Number(p.preco_venda || 0) })),
+          produtos: produtos.map(p => ({
+            id: p.id, nome: p.nome, preco: Number(p.preco_venda || 0),
+            // Adicionais/complementos do produto (achatados) pra IA casar os extras do print.
+            comps: (compMap[p.id] || []).flatMap(g => g.opcoes.map(o => ({ nome: o.nome, preco: Number(o.preco_adicional || 0) }))),
+          })),
         },
       })
       if (error) throw new Error(error.message)
       if (!data?.ok) throw new Error(data?.error || 'Não consegui ler o print.')
       const d = data.dados || {}
 
-      // Itens → carrinho (soma sobre o que já estiver)
+      // Itens → carrinho (soma sobre o que já estiver). Com complementos, cada
+      // combinação de adicionais vira uma linha própria (mesma lógica do "monte").
       let addidos = 0
       if (Array.isArray(d.itens) && d.itens.length) {
         setCart(prev => {
@@ -1110,8 +1141,14 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
           for (const it of d.itens) {
             const p = produtos.find(x => x.id === it.produto_id)
             if (!p) continue
-            const q = (novo[p.id]?.qtd ?? 0) + Math.max(1, Number(it.quantidade) || 1)
-            novo[p.id] = { id: p.id, produto_id: p.id, nome: p.nome, preco: Number(p.preco_venda || 0), qtd: q }
+            const comps = Array.isArray(it.complementos) ? it.complementos : []
+            const precoUnit = Number(p.preco_venda || 0) + comps.reduce((s, c) => s + Number(c.preco || 0), 0)
+            const sig = comps.length ? `${p.id}::${comps.map(c => c.nome).sort().join(',')}` : p.id
+            const q = (novo[sig]?.qtd ?? 0) + Math.max(1, Number(it.quantidade) || 1)
+            novo[sig] = {
+              id: sig, produto_id: p.id, nome: p.nome, preco: precoUnit, qtd: q,
+              complementos: comps.map(c => ({ nome: c.nome, qtd: 1 })),
+            }
             addidos++
           }
           return novo
@@ -1400,7 +1437,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         {erro && <p style={{ fontSize: 13, color: 'var(--danger, #ef4444)', margin: '0 0 10px' }}>{erro}</p>}
 
         <div className="pp-modal-actions">
-          <button type="button" className="pp-modal-btn-secondary" onClick={onFechar}>Cancelar</button>
+          <button type="button" className="pp-modal-btn-secondary" onClick={editando ? onFechar : cancelar}>Cancelar</button>
           <button
             type="button"
             className="pp-modal-btn-danger"
@@ -2412,6 +2449,13 @@ export default function PainelPedidos() {
   const [pedidoMensagem, setPedidoMensagem] = useState(null)
   const [vendaAberta, setVendaAberta] = useState(false)
   const [vendaEditando, setVendaEditando] = useState(null) // pedido de balcão sendo editado
+
+  // Se o vendedor tinha uma venda de balcão pela metade e saiu da tela, reabre
+  // o modal ao voltar (o rascunho fica salvo no localStorage — ver ModalVenda).
+  useEffect(() => {
+    const d = lerDraftVenda(empresa?.id)
+    if (d && d.cart && Object.keys(d.cart).length > 0) setVendaAberta(true)
+  }, [empresa?.id])
   const [comandas, setComandas] = useState([]) // mesas (autoatendimento QR) abertas
   const [comandaFechando, setComandaFechando] = useState(null) // comanda no modal de fechar conta
   const mesaPrintRef = useRef({}) // buffer p/ imprimir itens da mesa juntos

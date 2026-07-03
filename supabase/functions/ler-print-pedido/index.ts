@@ -29,7 +29,7 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}))
     const imageBase64: string = body?.imageBase64 ?? ""
     const mimetype: string = body?.mimetype || "image/png"
-    const produtos: { id: string; nome: string; preco?: number }[] = Array.isArray(body?.produtos) ? body.produtos : []
+    const produtos: { id: string; nome: string; preco?: number; comps?: { nome: string; preco?: number }[] }[] = Array.isArray(body?.produtos) ? body.produtos : []
 
     if (!imageBase64) return json({ ok: false, error: "Nenhum arquivo recebido." }, 400)
 
@@ -41,8 +41,15 @@ serve(async (req) => {
 
     // Catálogo enviado pro modelo: id curto (índice) + nome. Usamos o índice pra
     // não gastar tokens com UUIDs e evitar o modelo "inventar" ids.
+    // Se o produto tem adicionais/complementos, listamos com sub-índices [comps: 0=..].
     const cap = produtos.slice(0, 600)
-    const catalogoTxt = cap.map((p, i) => `${i}\t${p.nome}`).join("\n")
+    const catalogoTxt = cap.map((p, i) => {
+      const comps = Array.isArray(p.comps) ? p.comps : []
+      const compsTxt = comps.length
+        ? ` [comps: ${comps.map((c, j) => `${j}=${c.nome}${Number(c.preco) ? `(+${c.preco})` : ""}`).join(" ")}]`
+        : ""
+      return `${i}\t${p.nome}${compsTxt}`
+    }).join("\n")
 
     const system = [
       "Você lê o PRINT (captura de tela) ou o PDF de um pedido de comida/mercado feito em OUTRO canal",
@@ -63,13 +70,16 @@ serve(async (req) => {
       '  "pagamento": "dinheiro" | "pix" | "cartao" | null,',
       '  "troco_para": number | null,',
       '  "observacoes": string | null,',
-      '  "itens": [ { "indice": number, "quantidade": number } ],',
+      '  "itens": [ { "indice": number, "quantidade": number, "comps": [ number ] } ],',
       '  "nao_encontrados": [ string ]',
       "}",
       "",
       "Regras:",
       "- 'tipo' = 'entrega' se houver endereço de entrega; senão 'retirada'.",
       "- Só use índices que existam no catálogo. Quantidade sempre >= 1.",
+      "- ADICIONAIS/COMPLEMENTOS: se o item traz extras escolhidos (sabores, acompanhamentos, molhos, 'com X', 'sem X' que na verdade é opção, tamanho, etc.),",
+      "  ponha em 'comps' os SUB-ÍNDICES desses adicionais — os números que aparecem em [comps: 0=.. 1=..] DAQUELE produto. Se não tiver adicional, use 'comps': [].",
+      "- Só use sub-índices que existam nos comps daquele produto. Se o extra do print não bater com nenhum comp, cite em 'observacoes'.",
       "- Telefone: só os dígitos, sem formatação.",
       "- 'troco_para' só quando o print disser 'troco para X'.",
       "- 'observacoes': junte adicionais/sem-tal-coisa/recados do print.",
@@ -121,14 +131,20 @@ serve(async (req) => {
       return json({ ok: false, error: "Não consegui interpretar o print." }, 422)
     }
 
-    // Converte índices → produtos reais do catálogo
-    const itens: { produto_id: string; nome: string; quantidade: number }[] = []
+    // Converte índices → produtos reais do catálogo (+ complementos escolhidos)
+    const itens: { produto_id: string; nome: string; quantidade: number; complementos: { nome: string; preco: number }[] }[] = []
     for (const it of (Array.isArray(parsed.itens) ? parsed.itens : [])) {
       const idx = Number(it?.indice)
       const p = cap[idx]
       if (!p) continue
       const q = Math.max(1, Math.floor(Number(it?.quantidade) || 1))
-      itens.push({ produto_id: p.id, nome: p.nome, quantidade: q })
+      const compsAll = Array.isArray(p.comps) ? p.comps : []
+      const complementos: { nome: string; preco: number }[] = []
+      for (const ci of (Array.isArray(it?.comps) ? it.comps : [])) {
+        const c = compsAll[Number(ci)]
+        if (c) complementos.push({ nome: c.nome, preco: Number(c.preco) || 0 })
+      }
+      itens.push({ produto_id: p.id, nome: p.nome, quantidade: q, complementos })
     }
 
     const dados = {
