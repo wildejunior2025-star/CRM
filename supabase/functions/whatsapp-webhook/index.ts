@@ -1,4 +1,4 @@
-// Bot v174 — persiste endereço no cadastro do cliente ao fechar (próximo pedido não pede CEP de novo)
+// Bot v175 — taxa de entrega calculada pela distância (geocode + faixas por km, igual ao gestor) no prompt e no fechamento
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -447,7 +447,8 @@ async function handleFecharPedido(
   supabase_key: string,
   instanceName: string,
   carrinhoEndereco: { rua: string|null; numero: string|null; bairro: string|null; cidade: string|null },
-  indicadorProfileId: string|null = null
+  indicadorProfileId: string|null = null,
+  taxaEntregaCalc: number|null = null
 ): Promise<{ mensagemExtra: string; acaoPromise: Promise<any>; pixCode?: string; bloqueioMensagem?: string }> {
   console.log(`[Pedido] fechando para ${phone}, pgto: ${acao.forma_pagamento}`)
   try {
@@ -489,7 +490,8 @@ async function handleFecharPedido(
       }
     }
     const totalCarrinho  = itens.reduce((s: number, i: any) => s + Number(i.qtd) * Number(i.preco), 0)
-    const taxaFinal      = tipoEntrega === "entrega" ? taxaEntrega : 0
+    // Taxa: usa a calculada pela distância (quando veio); senão cai na fixa da loja.
+    const taxaFinal      = tipoEntrega === "entrega" ? (taxaEntregaCalc != null ? taxaEntregaCalc : taxaEntrega) : 0
     const totalFinal     = totalCarrinho + taxaFinal
 
     let clienteId         = cliente?.id ?? null
@@ -746,6 +748,41 @@ async function getMediaBase64(instanceName: string, msg: any): Promise<{ base64:
   }
 }
 
+// ── Taxa de entrega por distância (mesma regra do gestor/PainelPedidos) ──────
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+async function geocodificarEndereco(endereco: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const q = encodeURIComponent(`${endereco}, Brasil`)
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, {
+      headers: { "User-Agent": "CRM-FWC/1.0" },
+    })
+    const data = await res.json()
+    if (data?.[0]) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
+  } catch (e: any) { console.error("[Geo] erro:", e?.message) }
+  return null
+}
+// Taxa (número) pela distância entre a loja e o endereço, ou null se não deu pra calcular.
+async function calcularTaxaEntregaKm(empresa: any, endStr: string): Promise<number | null> {
+  try {
+    if (!empresa?.latitude || !empresa?.longitude) return null
+    const faixas = Array.isArray(empresa.taxas_entrega_km) ? empresa.taxas_entrega_km : []
+    if (faixas.length === 0) return null
+    const coords = await geocodificarEndereco(endStr)
+    if (!coords) return null
+    const dist = haversineKm(coords.lat, coords.lng, Number(empresa.latitude), Number(empresa.longitude))
+    const ordenadas = [...faixas].sort((a: any, b: any) => a.km - b.km)
+    const faixa = ordenadas.find((f: any) => dist <= Number(f.km)) ?? ordenadas[ordenadas.length - 1]
+    console.log(`[Taxa] ${dist.toFixed(1)}km → R$${faixa.taxa}`)
+    return Number(faixa.taxa) || 0
+  } catch (e: any) { console.error("[Taxa] erro:", e?.message); return null }
+}
+
 // ── transcribeAudio — Whisper OpenAI ────────────────────────────────────────
 async function transcribeAudio(base64: string, mimetype: string): Promise<string | null> {
   const openaiKey = Deno.env.get("OPENAI_API_KEY") ?? ""
@@ -842,7 +879,7 @@ serve(async (req) => {
 
     const configRes = await supabase
       .from("whatsapp_config")
-      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, aceita_delivery, endereco, cidade, estado, cep, horario_abertura, horario_fechamento, indicador_profile_id)")
+      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, taxas_entrega_km, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, cidade, estado, cep, horario_abertura, horario_fechamento, indicador_profile_id)")
       .eq("instance_name", instanceName)
       .eq("ativo", true)
       .single()
@@ -1073,6 +1110,22 @@ serve(async (req) => {
       return `${rua}${numero ? `, ${numero}` : ""}${bairro ? ` — ${bairro}` : ""}${cidade ? `, ${cidade}` : ""}${estado ? `/${estado}` : ""}`
     })()
 
+    // Taxa de entrega: calcula pela distância (faixas por km) quando já temos o endereço.
+    // Cai na taxa fixa da loja se não der pra geocodificar / loja não tem faixas.
+    let taxaEntregaCalc = taxaEntrega
+    if (aceitaDelivery) {
+      const endParaCalc = [
+        carrinhoEndereco.rua ?? cliente?.endereco,
+        carrinhoEndereco.numero ?? cliente?.numero,
+        carrinhoEndereco.bairro ?? cliente?.bairro,
+        carrinhoEndereco.cidade ?? cliente?.cidade,
+      ].filter(Boolean).join(", ")
+      if (endParaCalc) {
+        const t = await calcularTaxaEntregaKm(empresa, endParaCalc)
+        if (t != null) taxaEntregaCalc = t
+      }
+    }
+
     // ── System prompt ────────────────────────────────────────────────────────
     const systemPrompt = `Você é o assistente virtual de vendas da ${empresaNome}. Responda sempre em português.
 Seja inteligente e conversacional — entenda o que o cliente quer e responda naturalmente.
@@ -1084,7 +1137,7 @@ ${empresaEndereco   ? `- Endereço: ${empresaEndereco}` : ""}
 ${empresaHorario    ? `- Horário: ${empresaHorario}` : ""}
 ${empresa.chave_pix ? `- PIX: ${empresa.chave_pix} (${empresa.pix_nome ?? ""})` : ""}
 CATÁLOGO: ${catalogoUrl}
-${aceitaDelivery ? `ENTREGA: taxa R$ ${taxaEntrega.toFixed(2)}` : "ENTREGA: somente retirada no local"}
+${aceitaDelivery ? `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)}${enderecoCliente ? " (já calculada pela distância do endereço do cliente)" : " (taxa base — pode mudar conforme a distância do endereço)"}` : "ENTREGA: somente retirada no local"}
 FORMAS DE PAGAMENTO: Dinheiro ou Cartão (PIX não disponível pelo WhatsApp)
 
 PRODUTOS DISPONÍVEIS:
@@ -1153,7 +1206,7 @@ Após ter entrega/retirada E pagamento confirmados, envie o resumo completo:
 "📋 *Resumo do pedido:*
 
 [liste cada item: • Nome x qtd — R$ valor]
-${aceitaDelivery ? `🚚 Taxa de entrega: R$ ${taxaEntrega.toFixed(2)} (só se for entrega)` : ""}
+${aceitaDelivery ? `🚚 Taxa de entrega: R$ ${taxaEntregaCalc.toFixed(2)} (só se for entrega — use EXATAMENTE este valor)` : ""}
 💰 *Total: R$ [total]*
 
 📍 [Entrega em: endereço / Retirada em: endereço da loja]
@@ -1435,7 +1488,7 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
           const resultado = await handleFecharPedido(
             supabase, empresaId, phone, phoneLocal, acao, carrinho,
             cliente, empresa, SUPABASE_URL, SUPABASE_KEY, instanceName, carrinhoEndereco,
-            indicadorProfileId
+            indicadorProfileId, taxaEntregaCalc
           )
           if (resultado.bloqueioMensagem) {
             resposta = resultado.bloqueioMensagem
@@ -1539,7 +1592,7 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
           supabase, empresaId, phone, phoneLocal, safeAcao,
           carrinho, cliente, empresa,
           SUPABASE_URL, SUPABASE_KEY, instanceName, carrinhoEndereco,
-          indicadorProfileId
+          indicadorProfileId, taxaEntregaCalc
         )
         if (!resultado.bloqueioMensagem) {
           acaoPromise = resultado.acaoPromise
