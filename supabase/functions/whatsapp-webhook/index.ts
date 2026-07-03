@@ -1,4 +1,4 @@
-// Bot v169 — quentinha: carrega todos os produtos (fim do limit 50) + monta quentinha com complementos (grupos/máximos no prompt)
+// Bot v174 — persiste endereço no cadastro do cliente ao fechar (próximo pedido não pede CEP de novo)
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -627,6 +627,14 @@ async function handleFecharPedido(
       return { mensagemExtra: "", acaoPromise: Promise.resolve() }
     }
 
+    // Salva endereço no cadastro do cliente desta loja (para próximos pedidos não pedirem CEP de novo)
+    if (endRua && clienteId && tipoEntrega === "entrega") {
+      await supabase.from("clientes").update({
+        endereco: endRua, numero: endNumero ?? null,
+        bairro: endBairro ?? null, cidade: endCidade ?? null, estado: endEstado ?? null,
+      }).eq("id", clienteId)
+    }
+
     // Salva endereço no profile global — cobre todos os caminhos (cliente já existia, recém-cadastrado, etc)
     if (endRua && clienteId) {
       const { data: cliForProfile } = await supabase
@@ -952,7 +960,12 @@ serve(async (req) => {
 
     // ── Complementos ("monte sua quentinha") — só dos produtos que têm grupos ──
     // Texto injetado no prompt para o bot listar categorias + máximo de cada.
+    // Mapas de preço (verdade do banco) para recalcular o preço no servidor —
+    // NUNCA confiar na conta feita pelo modelo.
     let complementosTexto = ""
+    const precoBaseMap: Record<string, number> = {}   // produto_id → preço base
+    const precoOpcaoMap: Record<string, number> = {}  // nome da opção (minúsculo) → adicional
+    for (const p of produtos as any[]) precoBaseMap[p.id] = Number(p.preco_venda ?? 0)
     try {
       const produtoIds = produtos.map((p: any) => p.id)
       if (produtoIds.length) {
@@ -962,7 +975,12 @@ serve(async (req) => {
           .in("produto_id", produtoIds)
         if (gruposComp && gruposComp.length) {
           const porProduto: Record<string, any[]> = {}
-          for (const g of gruposComp as any[]) (porProduto[g.produto_id] ||= []).push(g)
+          for (const g of gruposComp as any[]) {
+            (porProduto[g.produto_id] ||= []).push(g)
+            for (const o of (g.complemento_opcoes ?? [])) {
+              precoOpcaoMap[String(o.nome).trim().toLowerCase()] = Number(o.preco_adicional ?? 0)
+            }
+          }
           const nomeDoProduto = (id: string) => produtos.find((p: any) => p.id === id)?.nome ?? ""
           const blocos: string[] = []
           for (const [pid, grupos] of Object.entries(porProduto)) {
@@ -1072,7 +1090,11 @@ FORMAS DE PAGAMENTO: Dinheiro ou Cartão (PIX não disponível pelo WhatsApp)
 PRODUTOS DISPONÍVEIS:
 ${produtos.map((p: any) => `• ${p.nome} [id:${p.id}] — R$ ${Number(p.preco_venda).toFixed(2)} (${p.embalagem || "un"})`).join("\n") || "Nenhum produto cadastrado"}
 ${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n` : ""}
-CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) => `• ${i.nome} x${i.qtd} = R$ ${(i.qtd * i.preco).toFixed(2)}`).join("\n")}\nSUBTOTAL: R$ ${totalCarrinho.toFixed(2)}`}
+CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) => {
+  const comps = Array.isArray(i.complementos) && i.complementos.length ? ` (${i.complementos.map((c: any) => c.nome).join(", ")})` : ""
+  return `• ${i.nome}${comps} x${i.qtd} = R$ ${(i.qtd * Number(i.preco)).toFixed(2)}`
+}).join("\n")}\nSUBTOTAL: R$ ${totalCarrinho.toFixed(2)}`}
+⚠️ No resumo (PASSO 6) use EXATAMENTE estes preços e este SUBTOTAL do CARRINHO ATUAL. Itens montados (quentinha) já têm os adicionais embutidos no preço — NUNCA use o preço base da lista de produtos nem recalcule.
 
 CLIENTE: ${cliente?.nome ? `${cliente.nome}${enderecoCliente ? `\nEndereço: ${enderecoCliente}` : ""}` : "Não cadastrado nesta loja"}
 TELEFONE: ${phoneLocal}
@@ -1092,41 +1114,40 @@ SUAS RESPONSABILIDADES:
 FLUXO DE VENDA — SIGA EXATAMENTE ESTA ORDEM
 ══════════════════════════════════════
 
-▶ PASSO 1 — IDENTIFICAR O CLIENTE
-• SE CLIENTE tem nome real (não é "Não cadastrado") → cliente identificado ✅ Atenda normalmente, ajude a montar a sacola. Na PRIMEIRA mensagem inclua ao final: "\n👉 ${catalogoUrl}"
-• SE existe NOME_NO_SISTEMA → sabemos o nome! Sua PRIMEIRA resposta deve ser EXATAMENTE: "Olá, [NOME_NO_SISTEMA]! 😊 Para finalizar seu cadastro aqui, qual o seu *e-mail*?"
-• SE CLIENTE = "Não cadastrado nesta loja" e NÃO existe NOME_NO_SISTEMA → faça saudação calorosa e pergunte o que o cliente deseja. NÃO peça o nome na saudação — pergunte nome e e-mail só quando o cliente quiser fechar o pedido (antes do PASSO 4). Inclua ao final da saudação: "\n👉 ${catalogoUrl}"
+▶ PASSO 1 — SAUDAÇÃO
+Já verificamos pelo telefone se o cliente tem conta nesta loja (ver CLIENTE acima).
+• SE CLIENTE tem nome real (já é cliente desta loja) → cumprimente pelo nome, de forma calorosa. Diga que ele pode pedir pelo link OU por aqui mesmo, e ajude a montar a sacola. Inclua ao final: "\n👉 ${catalogoUrl}"
+• SE CLIENTE = "Não cadastrado nesta loja" → saudação calorosa oferecendo o LINK como a forma mais fácil e rápida de pedir, mas deixando claro que dá pra pedir por aqui também. NÃO peça nome, e-mail nem endereço agora. Exemplo:
+  "Oi! 😊 Seja bem-vindo(a) à ${empresaNome}! A forma mais rápida de pedir é pelo nosso cardápio online, é só clicar:\n👉 ${catalogoUrl}\n\nMas se preferir, é só me dizer o que deseja que eu monto seu pedido por aqui mesmo! O que vai querer hoje?"
 
-▶ PASSO 2 — CADASTRO (somente quando CLIENTE = "Não cadastrado nesta loja")
-SE existe NOME_NO_SISTEMA:
-  1. Sua primeira resposta: "Olá, [NOME_NO_SISTEMA]! 😊 Para finalizar seu cadastro aqui, qual o seu *e-mail*?"
-  2. Recebeu e-mail → emita cadastrar_cliente com nome=[NOME_NO_SISTEMA] e email recebido IMEDIATAMENTE
-SE NÃO existe NOME_NO_SISTEMA:
-  1. Pergunte o nome naturalmente — NUNCA mencione "sistema", "cadastro" ou "identificar" na saudação
-  2. Recebeu nome → "Qual o seu *e-mail*?"
-  3. Recebeu e-mail → emita cadastrar_cliente IMEDIATAMENTE (sem nenhum texto antes).
-O sistema pede o CEP automaticamente após o cadastro — não pergunte mais nada.
+▶ PASSO 2 — MONTAR A SACOLA
+Ajude o cliente a escolher os produtos. A CADA produto escolhido, emita atualizar_carrinho (ver AÇÕES).
+Produto com complementos (Quentinha): siga o fluxo de complementos — mostre as categorias com os máximos e monte o item.
+Continue somando itens até o cliente dizer que é só isso / que quer fechar.
+⚠️ Enquanto monta a sacola, NUNCA peça nome, e-mail, CEP, endereço, entrega ou pagamento. Isso é SÓ depois que a sacola fechar.
+
+▶ PASSO 3 — CADASTRO (só DEPOIS da sacola fechada, e só se CLIENTE = "Não cadastrado nesta loja")
+Se o cliente JÁ tem nome em CLIENTE → PULE este passo inteiro, vá direto ao PASSO 4.
+⚠️ GATILHO: assim que o cliente indicar que fechou a sacola ("é só isso", "pode fechar", "só isso mesmo", "fechar"), sua PRÓXIMA mensagem JÁ deve pedir o *nome* (item 1 abaixo). NÃO pergunte "quer mais algum item?" de novo, NÃO mostre resumo ainda. Se o cliente mandar o nome ou o e-mail por conta própria, ACEITE e siga a ordem — nunca responda "quer mais alguma coisa?".
+Colete UM POR VEZ, nesta ordem exata:
+  1. "Pra fechar seu pedido, qual o seu *nome*? 😊"
+  2. Recebeu o nome → "E o seu *e-mail*? 📧"
+  3. Recebeu o e-mail → emita cadastrar_cliente IMEDIATAMENTE (sem texto antes). O sistema pede o CEP em seguida.
+  4. Recebeu o CEP → emita buscar_cep (sem texto antes). O sistema confirma o endereço e pede o número.
+  5. Recebeu o número → emita salvar_numero. O sistema pergunta entrega/retirada automaticamente.
+O telefone já temos (${phoneLocal}) — NUNCA peça.
 ⚠️ CRÍTICO: nome + e-mail são obrigatórios. Nunca pule um dos dois.
 
-▶ PASSO 3 — ENDEREÇO (somente se cliente não tem endereço cadastrado)
-"Me manda o seu *CEP* 😊"
-→ CEP recebido: emita buscar_cep IMEDIATAMENTE (sem texto antes)
-→ Sistema confirma endereço → cliente confirma → "Qual o *número* da sua casa? 🏠"
-→ emita salvar_numero → O sistema já pergunta entrega/retirada automaticamente.
-
-▶ PASSO 4 — FECHAR O PEDIDO (quando a sacola estiver montada e o cliente quiser fechar)
-Siga esta ordem sem pular nenhuma etapa:
-
-ETAPA 4A — ENTREGA OU RETIRADA
+▶ PASSO 4 — ENTREGA OU RETIRADA
 ${aceitaDelivery
-  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE tem endereço cadastrado (ver CLIENTE acima) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → ETAPA 4B\n  - Quer trocar → peça CEP (vá ao PASSO 3)\n• SE não tem endereço → vá ao PASSO 3 primeiro\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá à ETAPA 4B`
-  : `Somente retirada no local.\nInforme: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\nVá à ETAPA 4B`}
+  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE já temos o endereço (ver CLIENTE, ou acabou de coletar no cadastro) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → PASSO 5\n  - Quer trocar → peça o CEP (emita buscar_cep) e depois o número (emita salvar_numero)\n• SE ainda não temos endereço → peça o CEP (emita buscar_cep) e depois o número (emita salvar_numero), aí siga ao PASSO 5\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá ao PASSO 5`
+  : `Somente retirada no local.\nInforme: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\nVá ao PASSO 5`}
 
-ETAPA 4B — FORMA DE PAGAMENTO
+▶ PASSO 5 — FORMA DE PAGAMENTO
 "Como vai pagar: *dinheiro* ou *cartão*? 💳"
 Aguarde a resposta.
 
-ETAPA 4C — RESUMO E CONFIRMAÇÃO
+▶ PASSO 6 — RESUMO E CONFIRMAÇÃO
 Após ter entrega/retirada E pagamento confirmados, envie o resumo completo:
 
 "📋 *Resumo do pedido:*
@@ -1142,10 +1163,8 @@ Confirma? 😊"
 
 → Cliente confirma → emita fechar_pedido IMEDIATAMENTE
 
-▶ PASSO 5 — ACOMPANHAMENTO
-O sistema notifica automaticamente quando a loja aceitar, cancelar ou despachar o pedido.
-
-▶ PASSO FINAL — Após a entrega, peça avaliação ao cliente sobre o atendimento e os produtos.
+▶ PASSO 7 — ACOMPANHAMENTO (automático — você NÃO faz nada aqui)
+O sistema avisa sozinho quando a loja confirma o pedido, quando ele sai para entrega / fica pronto para retirada (mandando o *código* ao cliente) e quando é entregue (pedindo a avaliação de 1 a 5 ⭐).
 
 ══════════════════════════════════════
 REGRAS IMPORTANTES
@@ -1153,8 +1172,8 @@ REGRAS IMPORTANTES
 1. NUNCA invente produtos ou preços — use APENAS a lista acima
 2. NUNCA peça o telefone — já temos: ${phoneLocal}
 3. NUNCA peça CEP se já temos o endereço do cliente (ver CLIENTE acima)
-4. O resumo (ETAPA 4C) é OBRIGATÓRIO antes de fechar. NUNCA emita fechar_pedido sem antes mostrar o resumo e receber confirmação.
-5. Colete nome e e-mail UM POR VEZ para clientes novos
+4. O resumo (PASSO 6) é OBRIGATÓRIO antes de fechar. NUNCA emita fechar_pedido sem antes mostrar o resumo e receber confirmação. E NUNCA mostre resumo/total ANTES de ter entrega/retirada E pagamento definidos — ao fechar a sacola, se o cliente não é cadastrado, a próxima coisa é pedir o NOME (PASSO 3), sem resumo ainda.
+5. Colete nome e e-mail UM POR VEZ para clientes novos — e SÓ depois que a sacola estiver fechada (nunca durante a montagem)
 6. CEP (8 dígitos): emita buscar_cep IMEDIATAMENTE, sem texto antes
 7. NUNCA assuma forma de pagamento ou tipo de entrega sem perguntar nesta conversa
 8. ⚠️ CRÍTICO — CARRINHO: toda vez que o cliente escolher um produto VOCÊ DEVE emitir ACAO: atualizar_carrinho com TODOS os itens. NUNCA diga "anotei" ou "adicionei" sem emitir esta ACAO. Sem ela o carrinho fica vazio e o pedido NÃO é criado.
@@ -1169,13 +1188,13 @@ ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome":
 
 ▸ PRODUTO COM COMPLEMENTOS (ex.: Quentinha) — fluxo obrigatório:
   1. Quando o cliente escolher um produto que está na lista "PRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS", NÃO adicione direto. Primeiro mostre TODAS as categorias daquele produto, com as opções e quantos itens ele pode escolher em cada uma (ex.: "escolha 1", "escolha até 2"). Peça que ele diga o que quer em cada categoria.
-  2. Respeite o máximo de cada categoria — nunca aceite mais opções do que o "escolha até N" permite.
+  2. Respeite o máximo de cada categoria — nunca aceite mais opções do que o "escolha até N" permite. Mas se o cliente escolher menos do que o máximo permitido (ex.: 1 salada quando pode 2), está OK — NÃO fique insistindo para ele adicionar mais. Assim que ele disser as opções, emita atualizar_carrinho na hora.
   3. Só depois que o cliente escolher, emita atualizar_carrinho com a quentinha montada:
      - "preco" = preço base do produto + a soma dos adicionais pagos (os que têm "+R$") escolhidos.
      - inclua "complementos": lista com o que ele escolheu, cada um {"nome": "opção", "qtd": 1}.
   ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Quentinha (M)", "qtd": 1, "preco": 17.00, "complementos": [{"nome": "Feijão Preto", "qtd": 1}, {"nome": "Arroz refogado", "qtd": 1}, {"nome": "Frango Assado", "qtd": 1}]}]}
 
-Cadastrar cliente novo (após coletar nome E e-mail — PASSO 2):
+Cadastrar cliente novo (após coletar nome E e-mail — PASSO 3, só depois da sacola fechada):
 ACAO: {"tipo": "cadastrar_cliente", "nome": "[nome]", "email": "[email]"}
 ⚠️ Emita IMEDIATAMENTE após receber o e-mail. SEM texto antes. O sistema pede CEP em seguida.
 
@@ -1326,12 +1345,38 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
         const acao = JSON.parse(acaoMatch[1])
 
         if (acao.tipo === "atualizar_carrinho" && Array.isArray(acao.items)) {
+          // Recalcula o preço no servidor (verdade do banco) — o modelo erra a conta.
+          // preço = base do produto + soma dos adicionais das opções escolhidas.
+          for (const it of acao.items) {
+            const base = it.produto_id != null ? precoBaseMap[String(it.produto_id)] : undefined
+            if (base != null) {
+              let adicionais = 0
+              for (const c of (Array.isArray(it.complementos) ? it.complementos : [])) {
+                const add = precoOpcaoMap[String(c?.nome ?? "").trim().toLowerCase()]
+                if (add) adicionais += add * Number(c?.qtd ?? 1)
+              }
+              const novo = +(base + adicionais).toFixed(2)
+              if (novo !== Number(it.preco)) console.log(`[Preço] corrigido ${it.nome}: ${it.preco} → ${novo}`)
+              it.preco = novo
+            }
+          }
           const carrinhoResult = await handleAtualizar_carrinho(supabase, empresaId, phone, acao.items)
           if (!carrinhoResult.ok) console.error("[Carrinho] falhou:", carrinhoResult)
           // Sempre substitui resposta do Haiku — evita "Vou adicionar..." (REGRA 10 não é respeitada pelo modelo)
           if (acao.items.length > 0) {
             const nomes = acao.items.map((i: any) => `${i.nome} x${i.qtd}`).join(", ")
-            resposta = `✅ ${nomes} adicionado${acao.items.length > 1 ? "s" : ""} ao carrinho!\n\nDeseja mais algum item ou pode fechar o pedido? 😊`
+            // Transição determinística: se o cliente já sinalizou fechar a sacola,
+            // não pergunta "quer mais?" — segue direto para cadastro (se novo) ou entrega (se já cliente).
+            const querFechar = /\b(pode fechar|só isso|so isso|é só isso|e so isso|só isso mesmo|so isso mesmo|fechar( o)? pedido|finaliza|encerra|é isso|e isso|pode mandar|pode confirmar)\b/i.test(text)
+            if (querFechar && !cliente) {
+              resposta = `✅ ${nomes} adicionado! 🛒\n\nPra fechar seu pedido, qual o seu *nome*? 😊`
+            } else if (querFechar && cliente) {
+              resposta = aceitaDelivery
+                ? `✅ ${nomes} adicionado! 🛒\n\nPrefere *entrega* 🚚 ou vai *retirar* na loja? 🏪`
+                : `✅ ${nomes} adicionado! 🛒\n\nPode retirar em: *${empresaEndereco || empresaNome}*. Como vai pagar: *dinheiro* ou *cartão*? 💳`
+            } else {
+              resposta = `✅ ${nomes} adicionado${acao.items.length > 1 ? "s" : ""} ao carrinho!\n\nDeseja mais algum item ou pode fechar o pedido? 😊`
+            }
           }
 
         } else if (acao.tipo === "verificar_cliente" && acao.busca) {
