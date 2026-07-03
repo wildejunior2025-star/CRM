@@ -31,7 +31,13 @@ serve(async (req) => {
     const mimetype: string = body?.mimetype || "image/png"
     const produtos: { id: string; nome: string; preco?: number }[] = Array.isArray(body?.produtos) ? body.produtos : []
 
-    if (!imageBase64) return json({ ok: false, error: "Nenhuma imagem recebida." }, 400)
+    if (!imageBase64) return json({ ok: false, error: "Nenhum arquivo recebido." }, 400)
+
+    // Aceita imagem (print) OU PDF do pedido. O PDF vai como bloco "document".
+    const isPdf = mimetype === "application/pdf"
+    const arquivoBlock = isPdf
+      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: imageBase64 } }
+      : { type: "image", source: { type: "base64", media_type: mimetype, data: imageBase64 } }
 
     // Catálogo enviado pro modelo: id curto (índice) + nome. Usamos o índice pra
     // não gastar tokens com UUIDs e evitar o modelo "inventar" ids.
@@ -39,8 +45,8 @@ serve(async (req) => {
     const catalogoTxt = cap.map((p, i) => `${i}\t${p.nome}`).join("\n")
 
     const system = [
-      "Você lê o PRINT (captura de tela) de um pedido de comida/mercado feito em OUTRO canal",
-      "(iFood, WhatsApp, planilha, comanda, etc.) e devolve os dados do pedido em JSON,",
+      "Você lê o PRINT (captura de tela) ou o PDF de um pedido de comida/mercado feito em OUTRO canal",
+      "(iFood, WhatsApp, planilha, comanda, nota, etc.) e devolve os dados do pedido em JSON,",
       "pra preencher a tela de venda de um sistema de PDV.",
       "",
       "Você recebe o CATÁLOGO da loja como linhas 'indice<TAB>nome'.",
@@ -88,8 +94,8 @@ serve(async (req) => {
           {
             role: "user",
             content: [
-              { type: "image", source: { type: "base64", media_type: mimetype, data: imageBase64 } },
-              { type: "text", text: "Extraia o pedido deste print e responda só com o JSON." },
+              arquivoBlock,
+              { type: "text", text: "Extraia o pedido deste arquivo e responda só com o JSON." },
             ],
           },
         ],

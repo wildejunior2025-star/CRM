@@ -1076,10 +1076,12 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     onFechar()
   }
 
-  // Lê o print escolhido → chama a IA → preenche os campos da venda.
+  // Lê o print/PDF escolhido → chama a IA → preenche os campos da venda.
   async function lerPrint(file) {
     if (!file) return
-    if (!file.type?.startsWith('image/')) { setMsgPrint({ tipo: 'erro', txt: 'Selecione uma imagem (print).' }); return }
+    const ehImagem = file.type?.startsWith('image/')
+    const ehPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '')
+    if (!ehImagem && !ehPdf) { setMsgPrint({ tipo: 'erro', txt: 'Selecione uma imagem (print) ou um PDF.' }); return }
     setLendoPrint(true); setMsgPrint(null); setErro(null)
     try {
       // arquivo → base64 puro (sem o prefixo data:...)
@@ -1092,7 +1094,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       const { data, error } = await supabase.functions.invoke('ler-print-pedido', {
         body: {
           imageBase64: base64,
-          mimetype: file.type || 'image/png',
+          mimetype: file.type || (ehPdf ? 'application/pdf' : 'image/png'),
           produtos: produtos.map(p => ({ id: p.id, nome: p.nome, preco: Number(p.preco_venda || 0) })),
         },
       })
@@ -1188,7 +1190,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
             <input
               ref={fileRef}
               type="file"
-              accept="image/*"
+              accept="image/*,application/pdf,.pdf"
               style={{ display: 'none' }}
               onChange={e => lerPrint(e.target.files?.[0])}
             />
@@ -1212,13 +1214,13 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
             >
               <div style={{ color: '#a78bfa', fontWeight: 700, fontSize: 13.5 }}>
                 {lendoPrint
-                  ? '⏳ Lendo o print...'
+                  ? '⏳ Lendo o pedido...'
                   : colarPronto
                     ? '📋 Agora aperte Ctrl+V pra colar o print'
-                    : '📷 Ler print do pedido — clique aqui e aperte Ctrl+V'}
+                    : '📷 Ler print ou PDF do pedido — clique aqui e aperte Ctrl+V'}
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 3 }}>
-                Recebeu por iFood/WhatsApp? Copie o print e cole aqui — a IA preenche tudo.
+                Recebeu por iFood/WhatsApp? Cole o print (Ctrl+V) ou anexe um PDF — a IA preenche tudo.
               </div>
               <button
                 type="button"
@@ -1230,7 +1232,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
                   color: 'var(--text-muted)', fontWeight: 600, fontSize: 12,
                 }}
               >
-                ou escolher a imagem do computador
+                ou escolher imagem/PDF do computador
               </button>
             </div>
             {msgPrint && (
