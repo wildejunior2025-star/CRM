@@ -2407,7 +2407,7 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
         <button type="button"
           onClick={e => { e.stopPropagation(); onAvancar(pedido.id, acao.status) }}
           style={{ marginTop: 8, width: '100%', padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
-            fontWeight: 800, fontSize: 13, border: `1.5px solid ${acao.cor}`, background: `${acao.cor}1e`, color: acao.cor }}>
+            fontWeight: 800, fontSize: 15, border: `1.5px solid ${acao.cor}`, background: `${acao.cor}1e`, color: acao.cor }}>
           {acao.label}
         </button>
       )}
@@ -2415,7 +2415,7 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
         <button type="button"
           onClick={e => { e.stopPropagation(); onVoltar(pedido.id, voltar.status) }}
           style={{ marginTop: 6, width: '100%', padding: '5px', borderRadius: 8, cursor: 'pointer',
-            fontWeight: 600, fontSize: 11.5, border: '1px solid var(--border, #2a2a3a)', background: 'none', color: 'var(--text-muted)' }}>
+            fontWeight: 600, fontSize: 13, border: '1px solid var(--border, #2a2a3a)', background: 'none', color: 'var(--text-muted)' }}>
           {voltar.label}
         </button>
       )}
@@ -3701,7 +3701,7 @@ export default function PainelPedidos() {
                 onChange={e => setBuscaPedido(e.target.value)}
                 placeholder="Buscar pedido (nº, iFood, cliente...)"
                 style={{
-                  width: '100%', padding: '8px 12px 8px 32px', borderRadius: 20, fontSize: 13,
+                  width: '100%', padding: '9px 12px 9px 34px', borderRadius: 20, fontSize: 15,
                   border: '1.5px solid var(--border, #2a2a3a)', background: 'var(--surface, #16161f)',
                   color: 'var(--text)', outline: 'none',
                 }}
@@ -3732,16 +3732,16 @@ export default function PainelPedidos() {
                   <button key={f.label} type="button" onClick={() => setFiltroColuna(f.id)}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px',
-                      borderRadius: 20, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+                      borderRadius: 20, cursor: 'pointer', fontSize: 14, fontWeight: 700,
                       border: `1.5px solid ${ativo ? f.cor : 'var(--border, #2a2a3a)'}`,
                       background: ativo ? f.cor : 'transparent',
                       color: ativo ? '#fff' : 'var(--text-muted, #9aa0b5)',
                     }}>
                     {f.label}
                     <span style={{
-                      minWidth: 18, height: 18, borderRadius: 9, padding: '0 5px',
+                      minWidth: 20, height: 20, borderRadius: 10, padding: '0 6px',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 11, fontWeight: 800,
+                      fontSize: 12.5, fontWeight: 800,
                       background: ativo ? 'rgba(255,255,255,.25)' : 'var(--border, #2a2a3a)',
                       color: ativo ? '#fff' : 'var(--text-muted, #9aa0b5)',
                     }}>{f.count}</span>
@@ -3770,16 +3770,16 @@ export default function PainelPedidos() {
                   <button key={f.label} type="button" onClick={() => setFiltroOrigem(f.id)}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px',
-                      borderRadius: 20, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+                      borderRadius: 20, cursor: 'pointer', fontSize: 14, fontWeight: 700,
                       border: `1.5px solid ${ativo ? f.cor : 'var(--border, #2a2a3a)'}`,
                       background: ativo ? f.cor : 'transparent',
                       color: ativo ? '#fff' : 'var(--text-muted, #9aa0b5)',
                     }}>
                     {f.label}
                     <span style={{
-                      minWidth: 18, height: 18, borderRadius: 9, padding: '0 5px',
+                      minWidth: 20, height: 20, borderRadius: 10, padding: '0 6px',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 11, fontWeight: 800,
+                      fontSize: 12.5, fontWeight: 800,
                       background: ativo ? 'rgba(255,255,255,.25)' : 'var(--border, #2a2a3a)',
                       color: ativo ? '#fff' : 'var(--text-muted, #9aa0b5)',
                     }}>{f.count}</span>
