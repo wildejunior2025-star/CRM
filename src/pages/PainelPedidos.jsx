@@ -883,6 +883,8 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const [nome, setNome]         = useState(draft?.nome ?? (pedidoEdicao && pedidoEdicao.cliente_nome !== 'Balcão' ? (pedidoEdicao.cliente_nome ?? '') : ''))
   const [telefone, setTelefone] = useState(draft?.telefone ?? (pedidoEdicao && pedidoEdicao.cliente_telefone !== '—' ? (pedidoEdicao.cliente_telefone ?? '') : ''))
   const [tipo, setTipo]         = useState(draft?.tipo ?? pedidoEdicao?.tipo_entrega ?? 'retirada') // 'retirada' (balcão) | 'entrega'
+  const [cep, setCep]           = useState(draft?.cep ?? pedidoEdicao?.endereco_cep ?? '')
+  const [buscandoCepVenda, setBuscandoCepVenda] = useState(false)
   const [rua, setRua]           = useState(draft?.rua ?? (pedidoEdicao && pedidoEdicao.endereco_rua !== 'Retirada na loja' ? (pedidoEdicao.endereco_rua ?? '') : ''))
   const [numero, setNumero]     = useState(draft?.numero ?? pedidoEdicao?.endereco_numero ?? '')
   const [bairro, setBairro]     = useState(draft?.bairro ?? pedidoEdicao?.endereco_bairro ?? '')
@@ -958,6 +960,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     if (c.endereco || c.bairro || c.cidade) {
       setRua(c.endereco || ''); setNumero(c.numero || '')
       setBairro(c.bairro || ''); setCidade(c.cidade || '')
+      if (c.cep) setCep(c.cep)
     }
     setClienteSelId(c.id)
     setSugestoes([])
@@ -996,18 +999,35 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     if (editando || !draftKey) return
     const temConteudo = Object.keys(cart).length > 0 || nome.trim() || telefone.trim() || obs.trim()
     if (!temConteudo) { try { localStorage.removeItem(draftKey) } catch { /* ignore */ } return }
-    const d = { cart, nome, telefone, tipo, rua, numero, bairro, cidade, taxa, pagamento, troco, obs, clienteSelId }
+    const d = { cart, nome, telefone, tipo, cep, rua, numero, bairro, cidade, taxa, pagamento, troco, obs, clienteSelId }
     try { localStorage.setItem(draftKey, JSON.stringify(d)) } catch { /* ignore */ }
-  }, [editando, draftKey, cart, nome, telefone, tipo, rua, numero, bairro, cidade, taxa, pagamento, troco, obs, clienteSelId])
+  }, [editando, draftKey, cart, nome, telefone, tipo, cep, rua, numero, bairro, cidade, taxa, pagamento, troco, obs, clienteSelId])
 
   // Limpa o rascunho e fecha (usado ao concluir a venda ou cancelar de propósito)
   function limparDraft() { if (draftKey) { try { localStorage.removeItem(draftKey) } catch { /* ignore */ } } }
   function cancelar() { limparDraft(); onFechar() }
 
+  // CEP → preenche rua/bairro/cidade automaticamente (ViaCEP).
+  async function buscarCepVenda(cepRaw) {
+    const num = (cepRaw || '').replace(/\D/g, '')
+    if (num.length !== 8) return
+    setBuscandoCepVenda(true)
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${num}/json/`)
+      const d = await res.json()
+      if (!d.erro) {
+        if (d.logradouro) setRua(d.logradouro)
+        if (d.bairro) setBairro(d.bairro)
+        if (d.localidade) setCidade(d.localidade)
+      }
+    } catch { /* CEP offline — segue manual */ }
+    setBuscandoCepVenda(false)
+  }
+
   // Calcula a taxa de entrega pela distância entre a loja e o endereço do cliente
   // (usa a config de Raio de Entrega da loja: localização + faixas por km).
   async function calcularTaxaPorEndereco() {
-    const endStr = [rua, numero, bairro, cidade].filter(s => s && s.trim()).join(', ')
+    const endStr = [rua, numero, bairro, cidade, cep].filter(s => s && s.trim()).join(', ')
     if (!endStr.trim()) { setCalcTaxa({ loading: false, msg: { tipo: 'erro', txt: 'Preencha o endereço primeiro.' } }); return }
     setCalcTaxa({ loading: true, msg: null })
     try {
@@ -1108,7 +1128,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       try {
         const { data: cid } = await supabase.rpc('upsert_cliente_loja', {
           p_empresa_id: empresa.id, p_nome: nome.trim() || 'Cliente', p_telefone: telefone.trim(),
-          p_email: '', p_cep: '', p_endereco: rua.trim(), p_numero: numero.trim(),
+          p_email: '', p_cep: cep.trim(), p_endereco: rua.trim(), p_numero: numero.trim(),
           p_complemento: '', p_bairro: bairro.trim(), p_cidade: cidade.trim(), p_estado: '',
         })
         clienteId = cid ?? null
@@ -1144,6 +1164,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       payload.endereco_numero = numero.trim()
       payload.endereco_bairro = bairro.trim()
       payload.endereco_cidade = cidade.trim()
+      payload.endereco_cep = cep.trim() || null
     }
     let error
     if (editando) {
@@ -1229,6 +1250,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         if (e.numero) setNumero(String(e.numero))
         if (e.bairro) setBairro(e.bairro)
         if (e.cidade) setCidade(e.cidade)
+        if (e.cep) setCep(String(e.cep))
         if (d.taxa_entrega != null) setTaxa(String(d.taxa_entrega))
       } else if (d.tipo === 'retirada') {
         setTipo('retirada')
@@ -1468,6 +1490,18 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
 
         {tipo === 'entrega' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+            <div style={{ position: 'relative' }}>
+              <input
+                value={cep}
+                onChange={e => { setCep(e.target.value); buscarCepVenda(e.target.value) }}
+                placeholder="CEP (preenche o endereço)"
+                inputMode="numeric"
+                style={inputSt}
+              />
+              {buscandoCepVenda && (
+                <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11.5, color: '#a78bfa', fontWeight: 600 }}>buscando...</span>
+              )}
+            </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <input value={rua} onChange={e => setRua(e.target.value)} placeholder="Rua" style={inputSt} />
               <input value={numero} onChange={e => setNumero(e.target.value)} placeholder="Nº" style={{ ...inputSt, maxWidth: 90 }} />

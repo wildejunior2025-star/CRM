@@ -66,7 +66,7 @@ serve(async (req) => {
       '  "cliente_nome": string | null,',
       '  "telefone": string | null,',
       '  "tipo": "entrega" | "retirada",',
-      '  "endereco": { "rua": string|null, "numero": string|null, "bairro": string|null, "cidade": string|null } | null,',
+      '  "endereco": { "rua": string|null, "numero": string|null, "bairro": string|null, "cidade": string|null, "cep": string|null } | null,',
       '  "pagamento": "dinheiro" | "pix" | "cartao" | null,',
       '  "troco_para": number | null,',
       '  "taxa_entrega": number | null,',
