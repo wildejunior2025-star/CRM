@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { getEnderecoAtivo } from '../utils/enderecoPortal'
 import { registrarPedido } from '../lib/meusPedidos'
+import 'leaflet/dist/leaflet.css'
 import './DeliveryCheckout.css'
 
 // Cliente lembrado no aparelho (Opção A — login sem senha)
@@ -94,6 +95,121 @@ function fmtTelefone(val) {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`
 }
 
+// ── Taxa de entrega por distância (mesma regra do gestor/bot) ────────────────
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+function calcTaxaKm(faixas, distKm) {
+  const arr = Array.isArray(faixas) ? [...faixas].sort((a, b) => a.km - b.km) : []
+  if (!arr.length) return null
+  const faixa = arr.find(f => distKm <= Number(f.km)) ?? arr[arr.length - 1]
+  return Number(faixa.taxa) || 0
+}
+async function geocodeEndereco(q) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Brasil')}&format=json&limit=1`, { headers: { 'User-Agent': 'CRM-FWC/1.0' } })
+    const d = await res.json()
+    if (d?.[0]) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
+  } catch { /* ignora */ }
+  return null
+}
+async function reverseGeocode(lat, lng) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`, { headers: { 'User-Agent': 'CRM-FWC/1.0' } })
+    const d = await res.json()
+    const a = d?.address ?? {}
+    return {
+      rua: a.road || a.pedestrian || a.footway || '',
+      bairro: a.suburb || a.neighbourhood || a.village || a.quarter || '',
+      cidade: a.city || a.town || a.municipality || a.county || '',
+      estado: String(a['ISO3166-2-lvl4'] || '').split('-')[1] || '',
+      cep: String(a.postcode || '').replace(/\D/g, ''),
+    }
+  } catch { return null }
+}
+
+// ── Modal do mapa: cliente arrasta o pino até a casa (ponto exato) ───────────
+function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, onConfirm, onClose }) {
+  const mapRef = useRef(null)
+  const mapObj = useRef(null)
+  const pinRef = useRef(null)
+  const [coord, setCoord] = useState(initial || (storeLat ? { lat: Number(storeLat), lng: Number(storeLng) } : null))
+  const [locLoading, setLocLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelado = false
+    async function init() {
+      const L = (await import('leaflet')).default
+      if (cancelado || !mapRef.current || mapObj.current) return
+      const c = coord || { lat: Number(storeLat), lng: Number(storeLng) }
+      const map = L.map(mapRef.current, { zoomControl: true }).setView([c.lat, c.lng], 15)
+      mapObj.current = map
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map)
+      if (storeLat && storeLng) {
+        const lojaIcon = L.divIcon({ html: `<div style="width:32px;height:32px;background:#7c3aed;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:16px;">🏪</div>`, className: '', iconSize: [32, 32], iconAnchor: [16, 16] })
+        L.marker([Number(storeLat), Number(storeLng)], { icon: lojaIcon, interactive: false }).addTo(map)
+        if (raioKm) L.circle([Number(storeLat), Number(storeLng)], { radius: raioKm * 1000, color: '#7c3aed', weight: 1.5, fillColor: '#7c3aed', fillOpacity: 0.06 }).addTo(map)
+      }
+      const pinIcon = L.divIcon({ html: `<div style="width:34px;height:34px;background:#ef4444;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 3px 10px rgba(0,0,0,.4);"></div>`, className: '', iconSize: [34, 34], iconAnchor: [17, 32] })
+      pinRef.current = L.marker([c.lat, c.lng], { icon: pinIcon, draggable: true }).addTo(map)
+      pinRef.current.on('dragend', e => { const { lat, lng } = e.target.getLatLng(); setCoord({ lat, lng }) })
+      map.on('click', e => { const { lat, lng } = e.latlng; pinRef.current.setLatLng([lat, lng]); setCoord({ lat, lng }) })
+    }
+    init()
+    return () => { cancelado = true; if (mapObj.current) { mapObj.current.remove(); mapObj.current = null } }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function usarMinhaLocalizacao() {
+    if (!navigator.geolocation) return
+    setLocLoading(true)
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const c = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+        setCoord(c); setLocLoading(false)
+        if (pinRef.current) pinRef.current.setLatLng([c.lat, c.lng])
+        if (mapObj.current) mapObj.current.setView([c.lat, c.lng], 17)
+      },
+      () => setLocLoading(false),
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
+  const dist = coord && storeLat ? haversineKm(coord.lat, coord.lng, Number(storeLat), Number(storeLng)) : null
+  const taxa = dist != null ? calcTaxaKm(taxas, dist) : null
+  const foraRaio = dist != null && raioKm && dist > Number(raioKm)
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }} onClick={onClose}>
+      <div style={{ width: '100%', maxWidth: 560, background: 'var(--surface,#16161f)', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '92vh' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', borderBottom: '1px solid var(--border,#2a2a3a)' }}>
+          <strong style={{ fontSize: 15, color: 'var(--text,#fff)' }}>📍 Marque o ponto exato da entrega</strong>
+          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted,#9aa)', fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+        </div>
+        <div ref={mapRef} style={{ width: '100%', height: '58vh', minHeight: 300 }} />
+        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border,#2a2a3a)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+            <button type="button" onClick={usarMinhaLocalizacao} style={{ padding: '9px 14px', borderRadius: 10, border: '1.5px solid #7c3aed', background: 'rgba(124,58,237,.12)', color: '#a78bfa', fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}>
+              {locLoading ? 'Localizando…' : '🎯 Usar minha localização'}
+            </button>
+            <div style={{ fontSize: 14, color: foraRaio ? '#f87171' : 'var(--text,#fff)', fontWeight: 600 }}>
+              {dist != null ? <>📏 {dist.toFixed(1)} km · <strong style={{ color: '#34d399' }}>Taxa {taxa != null ? `R$ ${fmt(taxa)}` : '—'}</strong>{foraRaio ? ' · ⚠️ fora do raio' : ''}</> : 'Arraste o pino até sua casa'}
+            </div>
+          </div>
+          <button type="button" onClick={() => coord && onConfirm({ lat: coord.lat, lng: coord.lng, dist, taxa })} disabled={!coord}
+            style={{ width: '100%', padding: '13px', borderRadius: 12, border: 'none', background: coord ? '#7c3aed' : '#4b3a7a', color: '#fff', fontWeight: 800, fontSize: 15, cursor: coord ? 'pointer' : 'not-allowed' }}>
+            Confirmar este local
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const INITIAL_FORM = {
   nome: '',
   telefone: '',
@@ -127,6 +243,9 @@ export default function DeliveryCheckout() {
   const [erroCep, setErroCep]     = useState(null)
   const [userId, setUserId]         = useState(null)
   const [reconhecido, setReconhecido] = useState(false) // cadastro achado pelo telefone
+  const [coordCliente, setCoordCliente] = useState(null) // {lat,lng} do ponto de entrega
+  const [mapaAberto, setMapaAberto]     = useState(false)
+  const pinManualRef = useRef(false) // true quando o cliente marcou no mapa (não sobrescreve com geocode)
 
   useEffect(() => {
     async function loadPerfil() {
@@ -166,7 +285,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, bairro, cidade, estado')
+      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, raio_entrega_km')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -223,17 +342,65 @@ export default function DeliveryCheckout() {
     return () => clearTimeout(t)
   }, [form.telefone, state])
 
+  // Geocodifica o endereço (debounced) pra estimar a taxa por distância mesmo sem
+  // abrir o mapa. Se o cliente já marcou o ponto no mapa, não sobrescreve.
+  useEffect(() => {
+    if (tipo !== 'entrega' || pinManualRef.current || !state?.empresaId) return
+    const rua = form.rua.trim(), cidade = form.cidade
+    if (!rua || !cidade) return
+    const q = [rua, form.numero, form.bairro, cidade, form.estado].filter(s => s && String(s).trim()).join(', ')
+    const t = setTimeout(async () => {
+      const c = await geocodeEndereco(q)
+      if (c && !pinManualRef.current) setCoordCliente(c)
+    }, 900)
+    return () => clearTimeout(t)
+  }, [form.rua, form.numero, form.bairro, form.cidade, form.estado, tipo, state])
+
   if (!state?.itens?.length) {
     return <Navigate to="/lojas" replace />
   }
 
   const { empresaId, empresaNome, itens, subtotal, taxaEntrega } = state
-  const taxaAplicada = tipo === 'retirada' ? 0 : taxaEntrega
+  // Taxa por distância (faixas por km da loja) a partir do ponto do cliente;
+  // se não der pra calcular, cai na taxa fixa passada pela loja.
+  const temFaixas = Array.isArray(lojaEndereco?.taxas_entrega_km) && lojaEndereco.taxas_entrega_km.length > 0
+  const taxaCalculada = (() => {
+    if (tipo === 'retirada') return 0
+    if (coordCliente && lojaEndereco?.latitude && lojaEndereco?.longitude && temFaixas) {
+      const dist = haversineKm(coordCliente.lat, coordCliente.lng, Number(lojaEndereco.latitude), Number(lojaEndereco.longitude))
+      const t = calcTaxaKm(lojaEndereco.taxas_entrega_km, dist)
+      if (t != null) return t
+    }
+    return taxaEntrega
+  })()
+  // Precisa marcar o ponto pra saber a taxa? (loja cobra por km e ainda não temos o ponto)
+  const taxaPendente = tipo === 'entrega' && temFaixas && !coordCliente
+  const taxaAplicada = taxaCalculada
   const total = subtotal + taxaAplicada
 
   function set(field, value) {
     setForm(prev => ({ ...prev, [field]: value }))
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: null }))
+  }
+
+  // Cliente confirmou o ponto no mapa: fixa o pino, calcula a taxa e preenche o endereço
+  function confirmarMapa({ lat, lng }) {
+    pinManualRef.current = true
+    setCoordCliente({ lat, lng })
+    setMapaAberto(false)
+    reverseGeocode(lat, lng).then(a => {
+      if (!a) return
+      const cepFmt = a.cep && a.cep.length === 8 ? `${a.cep.slice(0, 5)}-${a.cep.slice(5)}` : ''
+      setForm(prev => ({
+        ...prev,
+        rua:    a.rua    || prev.rua,
+        bairro: a.bairro || prev.bairro,
+        cidade: a.cidade || prev.cidade,
+        estado: a.estado || prev.estado,
+        cep:    prev.cep || cepFmt,
+      }))
+      if (a.estado && a.estado !== form.estado) carregarCidades(a.estado, a.cidade || '')
+    })
   }
 
   async function carregarCidades(uf, cidadeParaSelecionar = '') {
@@ -318,6 +485,13 @@ export default function DeliveryCheckout() {
       setTimeout(() => {
         document.querySelector('[data-field-error]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       }, 50)
+      return
+    }
+
+    // Loja cobra por distância mas não sabemos o ponto → pede pra marcar no mapa
+    if (tipo === 'entrega' && temFaixas && !coordCliente) {
+      setErroGlobal('Toque em "Marcar meu local no mapa" pra calcular a taxa de entrega.')
+      setMapaAberto(true)
       return
     }
 
@@ -598,6 +772,26 @@ export default function DeliveryCheckout() {
                     />
                   </Field>
 
+                  {/* Localizador no mapa — ponto exato pra taxa certinha */}
+                  {lojaEndereco?.latitude && lojaEndereco?.longitude && (
+                    <div style={{ marginTop: 4 }}>
+                      <button type="button" onClick={() => setMapaAberto(true)}
+                        style={{ width: '100%', padding: '12px', borderRadius: 12, cursor: 'pointer', fontWeight: 700, fontSize: 14,
+                          border: `1.5px solid ${coordCliente ? '#16a34a' : '#7c3aed'}`,
+                          background: coordCliente ? 'rgba(16,185,129,.12)' : 'rgba(124,58,237,.12)',
+                          color: coordCliente ? '#34d399' : '#a78bfa' }}>
+                        {coordCliente ? '✓ Local marcado no mapa — toque para ajustar' : '📍 Marcar meu local no mapa (recomendado)'}
+                      </button>
+                      {temFaixas && (
+                        <div style={{ marginTop: 6, fontSize: 12.5, color: taxaPendente ? '#eab308' : 'var(--text-muted,#9aa)' }}>
+                          {taxaPendente
+                            ? '⚠️ Marque seu local no mapa pra calcular a taxa de entrega certinha.'
+                            : `📏 Entrega calculada pela distância: R$ ${fmt(taxaAplicada)}`}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                 </div>
               </section>
               )}
@@ -681,11 +875,11 @@ export default function DeliveryCheckout() {
                   </div>
                   <div className="dco-resumo-linha">
                     <span>{tipo === 'retirada' ? 'Retirada na loja' : 'Taxa de entrega'}</span>
-                    <span>{taxaAplicada === 0 ? 'Grátis' : `R$ ${fmt(taxaAplicada)}`}</span>
+                    <span>{tipo === 'retirada' ? 'Grátis' : taxaPendente ? 'a calcular' : taxaAplicada === 0 ? 'Grátis' : `R$ ${fmt(taxaAplicada)}`}</span>
                   </div>
                   <div className="dco-resumo-linha dco-resumo-total">
                     <span>Total</span>
-                    <strong>R$ {fmt(total)}</strong>
+                    <strong>{taxaPendente ? `R$ ${fmt(subtotal)}+` : `R$ ${fmt(total)}`}</strong>
                   </div>
                 </div>
 
@@ -709,6 +903,18 @@ export default function DeliveryCheckout() {
           </div>
         </form>
       </main>
+
+      {mapaAberto && (
+        <MapaLocalizador
+          storeLat={lojaEndereco?.latitude}
+          storeLng={lojaEndereco?.longitude}
+          raioKm={lojaEndereco?.raio_entrega_km}
+          taxas={lojaEndereco?.taxas_entrega_km}
+          initial={coordCliente}
+          onConfirm={confirmarMapa}
+          onClose={() => setMapaAberto(false)}
+        />
+      )}
     </div>
   )
 }
