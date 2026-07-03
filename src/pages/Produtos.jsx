@@ -158,6 +158,18 @@ export default function Produtos() {
     setLoading(false)
   }, [])
 
+  // Pausar/ativar disponibilidade do produto (1 clique na lista). Não é estoque —
+  // é só ligar/desligar o item pra vender (loja online, bot, balcão).
+  async function togglePausar(p) {
+    const novo = !p.ativo
+    setProdutos(prev => prev.map(x => x.id === p.id ? { ...x, ativo: novo } : x))
+    const { error } = await supabase.from('produtos').update({ ativo: novo }).eq('id', p.id)
+    if (error) {
+      setProdutos(prev => prev.map(x => x.id === p.id ? { ...x, ativo: !novo } : x))
+      setError(error.message)
+    }
+  }
+
   function handleSearch(val) {
     setSearch(val)
     setPage(0)
@@ -443,7 +455,7 @@ export default function Produtos() {
                 <th>Venda</th>
                 <th>Venda App</th>
                 <th>Estoque mín.</th>
-                <th>Status</th>
+                <th>Disponível</th>
                 <th style={{ position: 'sticky', right: 0, background: 'var(--bg)' }}></th>
               </tr>
             </thead>
@@ -495,13 +507,20 @@ export default function Produtos() {
                   <td>R$ {Number(p.preco_app || 0).toFixed(2)}</td>
                   <td>{p.estoque_minimo}</td>
                   <td>
-                    <span
-                      className={`badge ${
-                        p.ativo ? 'badge-success' : 'badge-danger'
-                      }`}
+                    <button
+                      type="button"
+                      onClick={() => togglePausar(p)}
+                      title={p.ativo ? 'Pausar — deixa indisponível pra vender' : 'Ativar — volta a aparecer pra vender'}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                        padding: '5px 12px', borderRadius: 20, fontWeight: 700, fontSize: 13,
+                        border: `1.5px solid ${p.ativo ? '#16a34a' : '#eab308'}`,
+                        background: p.ativo ? 'rgba(22,163,74,.12)' : 'rgba(234,179,8,.16)',
+                        color: p.ativo ? '#16a34a' : '#a16207',
+                      }}
                     >
-                      {p.ativo ? 'Ativo' : 'Inativo'}
-                    </span>
+                      {p.ativo ? '⏸ Pausar' : '▶ Ativar'}
+                    </button>
                   </td>
                   <td style={{ position: 'sticky', right: 0, background: 'var(--surface)', boxShadow: '-4px 0 8px rgba(0,0,0,0.15)' }}>
                     <button
@@ -794,15 +813,26 @@ export default function Produtos() {
                 </div>
 
                 <div className="form-field">
-                  <label>
-                    <input
-                      type="checkbox"
-                      name="ativo"
-                      checked={form.ativo}
-                      onChange={handleChange}
-                    />{' '}
-                    Ativo
-                  </label>
+                  <label style={{ display: 'block', marginBottom: 6 }}>Disponibilidade</label>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, ativo: !f.ativo }))}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                      padding: '9px 16px', borderRadius: 10, fontWeight: 700, fontSize: 14,
+                      border: `1.5px solid ${form.ativo ? '#16a34a' : '#eab308'}`,
+                      background: form.ativo ? 'rgba(22,163,74,.12)' : 'rgba(234,179,8,.16)',
+                      color: form.ativo ? '#16a34a' : '#a16207',
+                    }}
+                  >
+                    {form.ativo ? '⏸ Pausar item' : '▶ Ativar item'}
+                  </button>
+                  <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '6px 0 0' }}>
+                    {form.ativo
+                      ? 'Item aparecendo pra vender. Pause quando faltar / ficar indisponível.'
+                      : 'Item pausado — não aparece pra vender. Dê play pra voltar.'}
+                    {' '}(Isto não é estoque — estoque é o "Controla estoque" acima.)
+                  </p>
                 </div>
 
                 {/* Complementos / opções (monte sua quentinha) */}
