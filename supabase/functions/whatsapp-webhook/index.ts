@@ -1,4 +1,4 @@
-// Bot v168 — modelo 2: remove "Cadastro criado!" quando profile já existia (profile preexistente)
+// Bot v169 — quentinha: carrega todos os produtos (fim do limit 50) + monta quentinha com complementos (grupos/máximos no prompt)
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -922,7 +922,8 @@ serve(async (req) => {
         .select("id, nome, preco_venda, embalagem")
         .eq("empresa_id", empresaId)
         .eq("ativo", true)
-        .limit(50),
+        .order("nome")
+        .limit(300),
       supabase.from("whatsapp_carrinho")
         .select("items, cliente_id, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, endereco_estado")
         .eq("empresa_id", empresaId)
@@ -948,6 +949,43 @@ serve(async (req) => {
       return acc
     }, [])
     const produtos    = produtosRes.data ?? []
+
+    // ── Complementos ("monte sua quentinha") — só dos produtos que têm grupos ──
+    // Texto injetado no prompt para o bot listar categorias + máximo de cada.
+    let complementosTexto = ""
+    try {
+      const produtoIds = produtos.map((p: any) => p.id)
+      if (produtoIds.length) {
+        const { data: gruposComp } = await supabase
+          .from("complemento_grupos")
+          .select("produto_id, nome, min, max, ordem, complemento_opcoes(nome, preco_adicional, ordem, disponivel)")
+          .in("produto_id", produtoIds)
+        if (gruposComp && gruposComp.length) {
+          const porProduto: Record<string, any[]> = {}
+          for (const g of gruposComp as any[]) (porProduto[g.produto_id] ||= []).push(g)
+          const nomeDoProduto = (id: string) => produtos.find((p: any) => p.id === id)?.nome ?? ""
+          const blocos: string[] = []
+          for (const [pid, grupos] of Object.entries(porProduto)) {
+            const linhas = (grupos as any[])
+              .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+              .map((g: any) => {
+                const ops = (g.complemento_opcoes ?? [])
+                  .filter((o: any) => o.disponivel)
+                  .sort((a: any, b: any) => (a.ordem ?? 0) - (b.ordem ?? 0))
+                  .map((o: any) => Number(o.preco_adicional) > 0
+                    ? `${o.nome} (+R$ ${Number(o.preco_adicional).toFixed(2)})`
+                    : o.nome)
+                  .join(", ")
+                const quant = g.max > 1 ? `escolha até ${g.max}` : (g.min > 0 ? "escolha 1" : "opcional")
+                return `  - ${g.nome} (${quant}): ${ops}`
+              }).join("\n")
+            blocos.push(`▸ ${nomeDoProduto(pid)}:\n${linhas}`)
+          }
+          complementosTexto = blocos.join("\n\n")
+        }
+      }
+    } catch (e) { console.error("[Complementos] erro ao carregar:", e) }
+
     const carrinho    = carrinhoRes.data?.items ?? []
     const clienteIdNoCarrinho = carrinhoRes.data?.cliente_id ?? null
     const carrinhoEndereco: any = {
@@ -1033,7 +1071,7 @@ FORMAS DE PAGAMENTO: Dinheiro ou Cartão (PIX não disponível pelo WhatsApp)
 
 PRODUTOS DISPONÍVEIS:
 ${produtos.map((p: any) => `• ${p.nome} [id:${p.id}] — R$ ${Number(p.preco_venda).toFixed(2)} (${p.embalagem || "un"})`).join("\n") || "Nenhum produto cadastrado"}
-
+${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n` : ""}
 CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) => `• ${i.nome} x${i.qtd} = R$ ${(i.qtd * i.preco).toFixed(2)}`).join("\n")}\nSUBTOTAL: R$ ${totalCarrinho.toFixed(2)}`}
 
 CLIENTE: ${cliente?.nome ? `${cliente.nome}${enderecoCliente ? `\nEndereço: ${enderecoCliente}` : ""}` : "Não cadastrado nesta loja"}
@@ -1128,6 +1166,14 @@ AÇÕES DISPONÍVEIS
 
 Atualizar carrinho (ao adicionar/remover produto — OBRIGATÓRIO ao confirmar produto escolhido):
 ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Nome", "qtd": 1, "preco": 0.00}]}
+
+▸ PRODUTO COM COMPLEMENTOS (ex.: Quentinha) — fluxo obrigatório:
+  1. Quando o cliente escolher um produto que está na lista "PRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS", NÃO adicione direto. Primeiro mostre TODAS as categorias daquele produto, com as opções e quantos itens ele pode escolher em cada uma (ex.: "escolha 1", "escolha até 2"). Peça que ele diga o que quer em cada categoria.
+  2. Respeite o máximo de cada categoria — nunca aceite mais opções do que o "escolha até N" permite.
+  3. Só depois que o cliente escolher, emita atualizar_carrinho com a quentinha montada:
+     - "preco" = preço base do produto + a soma dos adicionais pagos (os que têm "+R$") escolhidos.
+     - inclua "complementos": lista com o que ele escolheu, cada um {"nome": "opção", "qtd": 1}.
+  ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Quentinha (M)", "qtd": 1, "preco": 17.00, "complementos": [{"nome": "Feijão Preto", "qtd": 1}, {"nome": "Arroz refogado", "qtd": 1}, {"nome": "Frango Assado", "qtd": 1}]}]}
 
 Cadastrar cliente novo (após coletar nome E e-mail — PASSO 2):
 ACAO: {"tipo": "cadastrar_cliente", "nome": "[nome]", "email": "[email]"}
