@@ -2313,10 +2313,14 @@ function acaoRapidaPedido(pedido) {
       return { status: 'pronto', label: '✓ Pronto', cor: '#1d4ed8' }
     case 'pronto':
       return isRet
-        ? { status: 'entregue', label: '✓ Entregue', cor: '#16a34a' }
+        ? { status: 'entregue', label: '✓ Confirmar retirada', cor: '#16a34a' }
         : { status: 'saiu_entrega', label: '🛵 Despachar', cor: '#7c3aed' }
     case 'saiu_entrega':
-      return { status: 'entregue', label: '✓ Entregue', cor: '#16a34a' }
+      // Retirada: confirma no próprio gestor. Entrega por motoboy: só o CÓDIGO
+      // do cliente confirma (no app do entregador) — sem botão "Entregue" aqui.
+      return isRet
+        ? { status: 'entregue', label: '✓ Confirmar retirada', cor: '#16a34a' }
+        : null
     default:
       return null
   }
@@ -2329,6 +2333,29 @@ function acaoVoltarPedido(pedido) {
     case 'saiu_entrega': return { status: 'pronto',      label: '↩ Cancelar despacho' }
     default:             return null
   }
+}
+
+// Tempo decorrido (pra "há X min" na cozinha e "despachado há X min")
+function minutosDesde(iso) {
+  if (!iso) return null
+  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  return m < 0 ? 0 : m
+}
+function tempoDecorridoTxt(iso) {
+  const m = minutosDesde(iso)
+  if (m == null) return ''
+  if (m < 1) return 'agora'
+  if (m < 60) return `há ${m} min`
+  const h = Math.floor(m / 60), r = m % 60
+  return r ? `há ${h}h${r}min` : `há ${h}h`
+}
+// Pedido em preparo/pronto atrasado? usa a previsão do preparo; senão 40 min de teto.
+const ATRASO_PADRAO_MIN = 40
+function pedidoAtrasado(pedido) {
+  if (!['confirmado', 'em_preparo', 'pronto'].includes(pedido.status)) return false
+  if (pedido.pronto_previsto_at) return Date.now() > new Date(pedido.pronto_previsto_at).getTime()
+  const m = minutosDesde(pedido.created_at)
+  return m != null && m > ATRASO_PADRAO_MIN
 }
 
 function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregadores = [] }) {
@@ -2365,6 +2392,14 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
         {isRetirada && <span className="pp-mini-itens">{pedido.origem === 'balcao' ? 'Balcão' : 'Retirada'}</span>}
         {entregadorNome && <span className="pp-mini-itens">🛵 {entregadorNome}</span>}
         {aguardandoEntregador && <span className="pp-mini-itens" style={{ color: '#a16207' }}>aguardando entregador</span>}
+        {['confirmado', 'em_preparo', 'pronto'].includes(pedido.status) && (
+          pedidoAtrasado(pedido)
+            ? <span className="pp-mini-badge" style={{ background: '#dc2626', color: '#fff' }}>⚠️ Em atraso · {tempoDecorridoTxt(pedido.created_at)}</span>
+            : <span className="pp-mini-itens">⏱ {tempoDecorridoTxt(pedido.created_at)}</span>
+        )}
+        {pedido.status === 'saiu_entrega' && !isRetirada && (
+          <span className="pp-mini-itens" style={{ color: '#7c3aed', fontWeight: 700 }}>🛵 Despachado {tempoDecorridoTxt(pedido.saiu_entrega_at || pedido.updated_at)}</span>
+        )}
       </div>
       {acao && (
         <button type="button"
@@ -3684,9 +3719,9 @@ export default function PainelPedidos() {
                 ...(pedidosView.some(p => p.status === 'aguardando')
                   ? [{ id: 'aceitar', label: 'A aceitar', cor: '#ca8a04', count: pedidosView.filter(p => p.status === 'aguardando').length }]
                   : []),
-                { id: 'cozinha',    label: 'Na cozinha', cor: '#1d4ed8', count: pedidosView.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length },
-                { id: 'entrega',    label: 'Pronto / Em rota', cor: '#7c3aed', count: pedidosView.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length },
-                { id: 'retirada',   label: 'Retirada',  cor: '#0891b2', count: pedidosView.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length },
+                { id: 'cozinha',    label: 'Na cozinha', cor: '#1d4ed8', count: pedidosView.filter(p => p.tipo_entrega !== 'retirada' && ['confirmado', 'em_preparo', 'pronto'].includes(p.status)).length },
+                { id: 'entrega',    label: 'Em rota', cor: '#7c3aed', count: pedidosView.filter(p => p.tipo_entrega !== 'retirada' && p.status === 'saiu_entrega').length },
+                { id: 'retirada',   label: 'Retirada',  cor: '#0891b2', count: pedidosView.filter(p => p.tipo_entrega === 'retirada' && ['confirmado', 'em_preparo', 'pronto', 'saiu_entrega'].includes(p.status)).length },
                 { id: 'concluidos', label: 'Concluídos', cor: '#16a34a', count: concluidosHojeView.length + mesasFechadasHojeView.length },
                 { id: 'cancelados', label: 'Cancelados', cor: '#dc2626', count: canceladosHojeView.length },
               ].map(f => {
@@ -3795,31 +3830,34 @@ export default function PainelPedidos() {
                 </Coluna>
               )}
 
-              {((!filtroColuna && pedidosView.some(p => p.status === 'confirmado' || p.status === 'em_preparo')) || filtroColuna === 'cozinha') && (
+              {/* Na cozinha: pedidos de ENTREGA em preparo OU prontos aguardando despacho (ficam aqui até despachar) */}
+              {((!filtroColuna && pedidosView.some(p => p.tipo_entrega !== 'retirada' && ['confirmado', 'em_preparo', 'pronto'].includes(p.status))) || filtroColuna === 'cozinha') && (
                 <Coluna titulo="Na cozinha" cor="#1d4ed8"
-                  count={pedidosView.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').length}
+                  count={pedidosView.filter(p => p.tipo_entrega !== 'retirada' && ['confirmado', 'em_preparo', 'pronto'].includes(p.status)).length}
                   vazio="Nada em preparo">
-                  {pedidosView.filter(p => p.status === 'confirmado' || p.status === 'em_preparo').map(p => (
-                    <CardMini key={p.id} pedido={p} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
-                  ))}
-                </Coluna>
-              )}
-
-              {((!filtroColuna && pedidosView.some(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega'))) || filtroColuna === 'entrega') && (
-                <Coluna titulo="Pronto / Em rota" cor="#7c3aed"
-                  count={pedidosView.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
-                  vazio="Ninguém na rua">
-                  {pedidosView.filter(p => p.tipo_entrega !== 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).map(p => (
+                  {pedidosView.filter(p => p.tipo_entrega !== 'retirada' && ['confirmado', 'em_preparo', 'pronto'].includes(p.status)).map(p => (
                     <CardMini key={p.id} pedido={p} entregadores={entregadores} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
 
-              {((!filtroColuna && pedidosView.some(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega'))) || filtroColuna === 'retirada') && (
+              {/* Em rota: pedidos de ENTREGA já despachados (só o código do cliente conclui) */}
+              {((!filtroColuna && pedidosView.some(p => p.tipo_entrega !== 'retirada' && p.status === 'saiu_entrega')) || filtroColuna === 'entrega') && (
+                <Coluna titulo="Em rota" cor="#7c3aed"
+                  count={pedidosView.filter(p => p.tipo_entrega !== 'retirada' && p.status === 'saiu_entrega').length}
+                  vazio="Ninguém na rua">
+                  {pedidosView.filter(p => p.tipo_entrega !== 'retirada' && p.status === 'saiu_entrega').map(p => (
+                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
+                  ))}
+                </Coluna>
+              )}
+
+              {/* Retirada: lista separada (não sai pra entrega) — confirma no próprio gestor */}
+              {((!filtroColuna && pedidosView.some(p => p.tipo_entrega === 'retirada' && ['confirmado', 'em_preparo', 'pronto', 'saiu_entrega'].includes(p.status))) || filtroColuna === 'retirada') && (
                 <Coluna titulo="Retirada" cor="#0891b2"
-                  count={pedidosView.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).length}
-                  vazio="Nenhuma retirada pronta">
-                  {pedidosView.filter(p => p.tipo_entrega === 'retirada' && (p.status === 'pronto' || p.status === 'saiu_entrega')).map(p => (
+                  count={pedidosView.filter(p => p.tipo_entrega === 'retirada' && ['confirmado', 'em_preparo', 'pronto', 'saiu_entrega'].includes(p.status)).length}
+                  vazio="Nenhuma retirada">
+                  {pedidosView.filter(p => p.tipo_entrega === 'retirada' && ['confirmado', 'em_preparo', 'pronto', 'saiu_entrega'].includes(p.status)).map(p => (
                     <CardMini key={p.id} pedido={p} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
