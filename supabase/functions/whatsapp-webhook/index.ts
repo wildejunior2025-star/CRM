@@ -1,4 +1,4 @@
-// Bot v179 — quentinha: proíbe lista de confirmação com ✓ (deixava carrinho vazio/sem complementos); força atualizar_carrinho na hora. + v178 (CEP retry, telefone c/s 9)
+// Bot v180 — ao adicionar quentinha, mostra os complementos escolhidos p/ o cliente conferir (evita receber errado)
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -1454,17 +1454,29 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
           // Sempre substitui resposta do Haiku — evita "Vou adicionar..." (REGRA 10 não é respeitada pelo modelo)
           if (acao.items.length > 0) {
             const nomes = acao.items.map((i: any) => `${i.nome} x${i.qtd}`).join(", ")
+            // Detalhe com os complementos escolhidos — pro cliente CONFERIR o que foi anotado
+            // (se a IA anotou errado, ele corrige antes de fechar).
+            const temComp = acao.items.some((i: any) => Array.isArray(i.complementos) && i.complementos.length > 0)
+            const detalhe = acao.items.map((i: any) => {
+              const comps = (Array.isArray(i.complementos) && i.complementos.length > 0)
+                ? "\n" + i.complementos.map((c: any) => `   • ${c.nome}`).join("\n")
+                : ""
+              return `🍽️ *${i.nome}*${Number(i.qtd) > 1 ? ` x${i.qtd}` : ""}${comps}`
+            }).join("\n\n")
+            const cabecalho = temComp
+              ? `✅ Anotei! Confere se está tudo certo:\n\n${detalhe}`
+              : `✅ ${nomes} adicionado${acao.items.length > 1 ? "s" : ""} ao carrinho!`
             // Transição determinística: se o cliente já sinalizou fechar a sacola,
             // não pergunta "quer mais?" — segue direto para cadastro (se novo) ou entrega (se já cliente).
             const querFechar = /\b(pode fechar|só isso|so isso|é só isso|e so isso|só isso mesmo|so isso mesmo|fechar( o)? pedido|finaliza|encerra|é isso|e isso|pode mandar|pode confirmar)\b/i.test(text)
             if (querFechar && !cliente) {
-              resposta = `✅ ${nomes} adicionado! 🛒\n\nPra fechar seu pedido, qual o seu *nome*? 😊`
+              resposta = `${cabecalho}\n\nPra fechar seu pedido, qual o seu *nome*? 😊`
             } else if (querFechar && cliente) {
               resposta = aceitaDelivery
-                ? `✅ ${nomes} adicionado! 🛒\n\nPrefere *entrega* 🚚 ou vai *retirar* na loja? 🏪`
-                : `✅ ${nomes} adicionado! 🛒\n\nPode retirar em: *${empresaEndereco || empresaNome}*. Como vai pagar: *dinheiro* ou *cartão*? 💳`
+                ? `${cabecalho}\n\nPrefere *entrega* 🚚 ou vai *retirar* na loja? 🏪`
+                : `${cabecalho}\n\nPode retirar em: *${empresaEndereco || empresaNome}*. Como vai pagar: *dinheiro* ou *cartão*? 💳`
             } else {
-              resposta = `✅ ${nomes} adicionado${acao.items.length > 1 ? "s" : ""} ao carrinho!\n\nDeseja mais algum item ou pode fechar o pedido? 😊`
+              resposta = `${cabecalho}\n\n${temComp ? "Está certo? " : ""}Deseja mais algum item ou pode fechar o pedido? 😊`
             }
           }
 
