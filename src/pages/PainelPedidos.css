@@ -1,16 +1,77 @@
 /* ═══════════════════════════════════════════════════════════
    PainelPedidos.css — Painel autônomo de recebimento delivery
-   Fundo escuro fixo, independente do tema do app.
+   Tema claro/escuro: os valores DARK são os originais (via vars),
+   e [data-theme='light'] troca só a paleta — o toggle fica no header.
    ═══════════════════════════════════════════════════════════ */
 
 *, *::before, *::after {
   box-sizing: border-box;
 }
 
+/* Paleta do painel (valores escuros = originais, não muda nada no dark) */
+.pp-root {
+  --pp-bg: #111827;          /* fundo da página + insets (timer/obs) */
+  --pp-header-bg: #0f172a;   /* header */
+  --pp-card: #1f2937;        /* cards, modais, toggles */
+  --pp-surface-hover: #263041;
+  --pp-border: #374151;
+  --pp-border-soft: #1e293b;
+  --pp-text: #f9fafb;        /* texto principal */
+  --pp-text-2: #e5e7eb;      /* texto secundário (nome de item) */
+  --pp-muted: #9ca3af;
+  --pp-muted-2: #6b7280;
+  --pp-faint: #4b5563;
+  --pp-text-hover: #d1d5db;
+}
+
+/* Modo claro — só remapeia a paleta acima */
+[data-theme='light'] .pp-root {
+  --pp-bg: #eef1f6;
+  --pp-header-bg: #ffffff;
+  --pp-card: #ffffff;
+  --pp-surface-hover: #eef1f6;
+  --pp-border: #dfe3ea;
+  --pp-border-soft: #e6e9ef;
+  --pp-text: #111827;
+  --pp-text-2: #1f2937;
+  --pp-muted: #55607a;
+  --pp-muted-2: #6b7280;
+  --pp-faint: #9aa2b4;
+  --pp-text-hover: #111827;
+}
+
+/* No claro, cores de destaque (verde/vermelho/roxo/azul/âmbar) que eram
+   claras demais pra fundo escuro ganham tons mais fechados pra ler no branco. */
+[data-theme='light'] .pp-root .pp-cliente-tel:hover,
+[data-theme='light'] .pp-root .pp-item-qtd,
+[data-theme='light'] .pp-root .pp-mini-num { color: #6d28d9; }
+[data-theme='light'] .pp-root .pp-badge-pix,
+[data-theme='light'] .pp-root .pp-tipo-badge.entrega { color: #6d28d9; background: rgba(124,58,237,.10); border-color: rgba(124,58,237,.28); }
+[data-theme='light'] .pp-root .pp-badge-dinheiro { color: #047857; background: rgba(16,185,129,.10); border-color: rgba(16,185,129,.30); }
+[data-theme='light'] .pp-root .pp-badge-pix-pago { color: #047857; background: rgba(16,185,129,.12); border-color: rgba(16,185,129,.30); }
+[data-theme='light'] .pp-root .pp-badge-pix-pago svg { color: #047857; }
+[data-theme='light'] .pp-root .pp-tipo-badge.retirada { color: #c2410c; background: rgba(249,115,22,.10); border-color: rgba(249,115,22,.28); }
+[data-theme='light'] .pp-root .pp-timer-tempo.ok { color: #047857; }
+[data-theme='light'] .pp-root .pp-timer-tempo.atencao { color: #b45309; }
+[data-theme='light'] .pp-root .pp-timer-tempo.critico { color: #dc2626; }
+[data-theme='light'] .pp-root .pp-toggle-loja.aberta { color: #047857; }
+[data-theme='light'] .pp-root .pp-toggle-loja.fechada { color: #dc2626; }
+[data-theme='light'] .pp-root .pp-btn-confirmar { color: #047857; }
+[data-theme='light'] .pp-root .pp-btn-confirmar:hover:not(:disabled) { color: #065f46; }
+[data-theme='light'] .pp-root .pp-btn-recusar { color: #dc2626; }
+[data-theme='light'] .pp-root .pp-btn-recusar:hover:not(:disabled) { color: #b91c1c; }
+[data-theme='light'] .pp-root .pp-btn-avancar { color: #1d4ed8; }
+[data-theme='light'] .pp-root .pp-btn-avancar:hover:not(:disabled) { color: #1e40af; }
+[data-theme='light'] .pp-root .pp-modal-pix-aviso { color: #b45309; }
+[data-theme='light'] .pp-root .pp-modal-pix-aviso svg { color: #b45309; }
+/* Sombra suave nos cards/header no claro (no dark não tinha) */
+[data-theme='light'] .pp-root .pp-card { box-shadow: 0 1px 3px rgba(16,24,40,.06); }
+[data-theme='light'] .pp-root .pp-header { box-shadow: 0 1px 2px rgba(16,24,40,.05); }
+
 .pp-root {
   min-height: 100dvh;
-  background: #111827;
-  color: #f9fafb;
+  background: var(--pp-bg);
+  color: var(--pp-text);
   font-family: 'Inter', 'Geist', system-ui, -apple-system, sans-serif;
   display: flex;
   flex-direction: column;
@@ -21,8 +82,8 @@
   position: sticky;
   top: 0;
   z-index: 10;
-  background: #0f172a;
-  border-bottom: 1px solid #1e293b;
+  background: var(--pp-header-bg);
+  border-bottom: 1px solid var(--pp-border-soft);
   padding: 0 20px;
   height: 60px;
   display: flex;
@@ -57,7 +118,7 @@
 .pp-loja-nome {
   font-size: 15px;
   font-weight: 700;
-  color: #f9fafb;
+  color: var(--pp-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -99,17 +160,17 @@
   gap: 6px;
   font-size: 12px;
   font-weight: 500;
-  color: #6b7280;
+  color: var(--pp-muted-2);
   text-decoration: none;
   padding: 6px 10px;
   border-radius: 6px;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--pp-border-soft);
   transition: color 140ms ease, border-color 140ms ease;
 }
 
 .pp-back-link:hover {
-  color: #d1d5db;
-  border-color: #374151;
+  color: var(--pp-text-hover);
+  border-color: var(--pp-border);
 }
 
 .pp-back-link svg {
@@ -123,9 +184,9 @@
   gap: 8px;
   padding: 8px 14px;
   border-radius: 8px;
-  border: 1.5px solid #374151;
-  background: #1f2937;
-  color: #d1d5db;
+  border: 1.5px solid var(--pp-border);
+  background: var(--pp-card);
+  color: var(--pp-text-2);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -134,9 +195,9 @@
 }
 
 .pp-toggle-loja:hover:not(:disabled) {
-  border-color: #6b7280;
-  background: #263041;
-  color: #f9fafb;
+  border-color: var(--pp-muted-2);
+  background: var(--pp-surface-hover);
+  color: var(--pp-text);
 }
 
 .pp-toggle-loja:disabled {
@@ -170,7 +231,7 @@
   border-radius: 50%;
   flex-shrink: 0;
   transition: background 160ms ease, box-shadow 160ms ease;
-  background: #4b5563;
+  background: var(--pp-faint);
 }
 
 .pp-toggle-loja.aberta .pp-toggle-dot {
@@ -180,6 +241,28 @@
 
 .pp-toggle-loja.fechada .pp-toggle-dot {
   background: #ef4444;
+}
+
+/* Botão de tema (sol/lua) no header do painel */
+.pp-theme-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  border: 1.5px solid var(--pp-border);
+  background: var(--pp-card);
+  color: var(--pp-text-2);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.pp-theme-btn:hover {
+  border-color: var(--pp-muted-2);
+  background: var(--pp-surface-hover);
+  color: var(--pp-text);
 }
 
 /* ── Body: área de scroll ── */
@@ -224,9 +307,9 @@
 
 /* ── Card de pedido ── */
 .pp-card {
-  background: #1f2937;
-  border: 1px solid #374151;
-  border-left: 4px solid #374151;
+  background: var(--pp-card);
+  border: 1px solid var(--pp-border);
+  border-left: 4px solid var(--pp-border);
   border-radius: 12px;
   padding: 20px;
   display: flex;
@@ -272,7 +355,7 @@
 .pp-numero {
   font-size: 13px;
   font-weight: 700;
-  color: #f9fafb;
+  color: var(--pp-text);
   font-family: 'Courier New', monospace;
   letter-spacing: 0.06em;
   white-space: nowrap;
@@ -280,7 +363,7 @@
 
 .pp-hora {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--pp-muted-2);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -290,10 +373,10 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  background: #111827;
+  background: var(--pp-bg);
   border-radius: 8px;
   padding: 10px 12px;
-  border: 1px solid #374151;
+  border: 1px solid var(--pp-border);
 }
 
 .pp-timer-row {
@@ -307,7 +390,7 @@
   font-size: 22px;
   font-weight: 800;
   font-family: 'Courier New', monospace;
-  color: #f9fafb;
+  color: var(--pp-text);
   letter-spacing: 0.04em;
   line-height: 1;
   transition: color 300ms ease;
@@ -333,13 +416,13 @@
 
 .pp-timer-label {
   font-size: 11px;
-  color: #6b7280;
+  color: var(--pp-muted-2);
   white-space: nowrap;
 }
 
 .pp-timer-barra-bg {
   height: 4px;
-  background: #374151;
+  background: var(--pp-border);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -364,7 +447,7 @@
 .pp-cliente-nome {
   font-size: 15px;
   font-weight: 700;
-  color: #f9fafb;
+  color: var(--pp-text);
 }
 
 .pp-cliente-tel {
@@ -381,7 +464,7 @@
 
 .pp-endereco {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--pp-muted);
   line-height: 1.45;
   display: flex;
   align-items: flex-start;
@@ -391,7 +474,7 @@
 .pp-endereco svg {
   flex-shrink: 0;
   margin-top: 1px;
-  color: #6b7280;
+  color: var(--pp-muted-2);
 }
 
 /* ── Itens ── */
@@ -399,8 +482,8 @@
   list-style: none;
   margin: 0;
   padding: 10px 0;
-  border-top: 1px solid #374151;
-  border-bottom: 1px solid #374151;
+  border-top: 1px solid var(--pp-border);
+  border-bottom: 1px solid var(--pp-border);
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -423,11 +506,11 @@
 
 .pp-item-nome {
   flex: 1;
-  color: #e5e7eb;
+  color: var(--pp-text-2);
 }
 
 .pp-item-sub {
-  color: #9ca3af;
+  color: var(--pp-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -443,7 +526,7 @@
   display: flex;
   justify-content: space-between;
   font-size: 13px;
-  color: #9ca3af;
+  color: var(--pp-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -452,10 +535,10 @@
   justify-content: space-between;
   font-size: 16px;
   font-weight: 800;
-  color: #f9fafb;
+  color: var(--pp-text);
   padding-top: 6px;
   margin-top: 2px;
-  border-top: 1px dashed #374151;
+  border-top: 1px dashed var(--pp-border);
   font-variant-numeric: tabular-nums;
 }
 
@@ -492,14 +575,14 @@
 }
 
 .pp-badge-outro {
-  background: #374151;
-  color: #9ca3af;
-  border: 1px solid #4b5563;
+  background: var(--pp-border);
+  color: var(--pp-muted);
+  border: 1px solid var(--pp-faint);
 }
 
 .pp-troco {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--pp-muted);
 }
 
 /* Badge "PIX pago" — confirma pagamento já recebido */
@@ -527,17 +610,17 @@
 /* ── Observações ── */
 .pp-obs {
   font-size: 12px;
-  color: #9ca3af;
-  background: #111827;
+  color: var(--pp-muted);
+  background: var(--pp-bg);
   border-radius: 6px;
   padding: 8px 10px;
   line-height: 1.5;
-  border: 1px solid #374151;
+  border: 1px solid var(--pp-border);
 }
 
 .pp-obs-label {
   font-weight: 700;
-  color: #6b7280;
+  color: var(--pp-muted-2);
   margin-right: 4px;
 }
 
@@ -666,24 +749,24 @@
   width: 56px;
   height: 56px;
   border-radius: 14px;
-  background: #1f2937;
-  border: 1px solid #374151;
+  background: var(--pp-card);
+  border: 1px solid var(--pp-border);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #4b5563;
+  color: var(--pp-faint);
 }
 
 .pp-empty-titulo {
   font-size: 18px;
   font-weight: 700;
-  color: #e5e7eb;
+  color: var(--pp-text-2);
   margin: 0;
 }
 
 .pp-empty-sub {
   font-size: 14px;
-  color: #6b7280;
+  color: var(--pp-muted-2);
   margin: 0;
   max-width: 300px;
   line-height: 1.5;
@@ -721,8 +804,8 @@
 }
 
 .pp-modal {
-  background: #1f2937;
-  border: 1px solid #374151;
+  background: var(--pp-card);
+  border: 1px solid var(--pp-border);
   border-radius: 14px;
   padding: 28px;
   width: 100%;
@@ -735,13 +818,13 @@
 .pp-modal-titulo {
   font-size: 17px;
   font-weight: 700;
-  color: #f9fafb;
+  color: var(--pp-text);
   margin: 0;
 }
 
 .pp-modal-sub {
   font-size: 13px;
-  color: #9ca3af;
+  color: var(--pp-muted);
   margin: 0;
   line-height: 1.5;
 }
@@ -775,16 +858,16 @@
 .pp-modal-label {
   font-size: 12px;
   font-weight: 600;
-  color: #9ca3af;
+  color: var(--pp-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
 .pp-modal-textarea {
-  background: #111827;
-  border: 1.5px solid #374151;
+  background: var(--pp-bg);
+  border: 1.5px solid var(--pp-border);
   border-radius: 8px;
-  color: #f9fafb;
+  color: var(--pp-text);
   font-size: 14px;
   padding: 10px 12px;
   resize: vertical;
@@ -800,7 +883,7 @@
 }
 
 .pp-modal-textarea::placeholder {
-  color: #4b5563;
+  color: var(--pp-faint);
 }
 
 .pp-modal-actions {
@@ -812,9 +895,9 @@
 .pp-modal-btn-secondary {
   padding: 9px 16px;
   border-radius: 8px;
-  border: 1.5px solid #374151;
+  border: 1.5px solid var(--pp-border);
   background: transparent;
-  color: #9ca3af;
+  color: var(--pp-muted);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -822,8 +905,8 @@
 }
 
 .pp-modal-btn-secondary:hover {
-  border-color: #6b7280;
-  color: #d1d5db;
+  border-color: var(--pp-muted-2);
+  color: var(--pp-text-hover);
 }
 
 .pp-modal-btn-danger {
@@ -857,13 +940,13 @@
   justify-content: center;
   gap: 14px;
   min-height: 100dvh;
-  background: #111827;
+  background: var(--pp-bg);
 }
 
 .pp-spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid #1f2937;
+  border: 3px solid var(--pp-card);
   border-top-color: #7c3aed;
   border-radius: 50%;
   animation: pp-spin 0.75s linear infinite;
@@ -875,7 +958,7 @@
 
 .pp-loading-text {
   font-size: 14px;
-  color: #6b7280;
+  color: var(--pp-muted-2);
   font-family: 'Inter', system-ui, sans-serif;
 }
 
@@ -887,7 +970,7 @@
 .pp-skel-row {
   height: 14px;
   border-radius: 6px;
-  background: linear-gradient(90deg, #374151 0%, #4b5563 50%, #374151 100%);
+  background: linear-gradient(90deg, var(--pp-border) 0%, var(--pp-faint) 50%, var(--pp-border) 100%);
   background-size: 200% 100%;
   animation: pp-shimmer 1.4s ease infinite;
 }
@@ -944,8 +1027,8 @@
 .pp-col {
   flex: 1 1 0;
   min-width: 230px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border, #2a2a3a);
+  background: rgba(127, 127, 127, 0.05);
+  border: 1px solid var(--pp-border);
   border-radius: 12px;
   display: flex;
   flex-direction: column;
@@ -959,10 +1042,10 @@
   padding: 11px 14px;
   font-size: 14px;
   font-weight: 800;
-  color: var(--text, #f1f5f9);
+  color: var(--pp-text);
   border-top: 3px solid;
   border-radius: 12px 12px 0 0;
-  border-bottom: 1px solid var(--border, #2a2a3a);
+  border-bottom: 1px solid var(--pp-border);
 }
 .pp-col-count {
   min-width: 22px;
@@ -982,7 +1065,7 @@
 }
 .pp-col-vazio {
   text-align: center;
-  color: var(--text-muted, #9aa0b5);
+  color: var(--pp-muted);
   font-size: 12.5px;
   padding: 18px 8px;
 }
@@ -995,8 +1078,8 @@
   width: 100%;
   text-align: left;
   cursor: pointer;
-  background: var(--surface, #16161f);
-  border: 1px solid var(--border, #2a2a3a);
+  background: var(--pp-card);
+  border: 1px solid var(--pp-border);
   border-radius: 10px;
   padding: 9px 11px;
   transition: border-color .12s, transform .08s;
@@ -1012,11 +1095,11 @@
 .pp-mini-num {
   font-size: 13.5px;
   font-weight: 800;
-  color: var(--text, #f1f5f9);
+  color: var(--pp-text);
 }
 .pp-mini-sub {
   font-size: 11.5px;
-  color: var(--text-muted, #9aa0b5);
+  color: var(--pp-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1035,7 +1118,7 @@
 }
 .pp-mini-itens {
   font-size: 10.5px;
-  color: var(--text-muted, #9aa0b5);
+  color: var(--pp-muted);
   font-weight: 600;
 }
 
