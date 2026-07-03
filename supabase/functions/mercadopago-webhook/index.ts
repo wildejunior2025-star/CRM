@@ -1,10 +1,47 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const MP_ACCESS_TOKEN   = Deno.env.get('MP_ACCESS_TOKEN')!
+const MP_CLIENT_ID      = Deno.env.get('MP_CLIENT_ID') ?? '736904729861760'
+const MP_CLIENT_SECRET  = Deno.env.get('MP_CLIENT_SECRET') ?? ''
 const SUPABASE_URL      = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_KEY      = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const EVOLUTION_API_URL = (Deno.env.get('EVOLUTION_API_URL') ?? '').replace(/\/$/, '')
 const EVOLUTION_API_KEY = Deno.env.get('EVOLUTION_API_KEY') ?? ''
+
+// deno-lint-ignore no-explicit-any
+type SB = any
+
+// O pagamento pertence à conta da LOJA (marketplace); pra consultá-lo é preciso
+// o token dela. Descobre a empresa pelo mp_payment_id e devolve o token certo
+// (renovando se expirou). Sem loja conectada → token da conta central.
+async function tokenDoPagamento(sb: SB, paymentId: string): Promise<string> {
+  const { data: pedido } = await sb.from('pedidos_delivery')
+    .select('empresa_id').eq('mp_payment_id', String(paymentId)).maybeSingle()
+  if (!pedido?.empresa_id) return MP_ACCESS_TOKEN
+  const { data: conta } = await sb.from('mercadopago_contas')
+    .select('access_token, refresh_token, expires_at').eq('empresa_id', pedido.empresa_id).maybeSingle()
+  if (!conta?.access_token) return MP_ACCESS_TOKEN
+  const expMs = conta.expires_at ? new Date(conta.expires_at).getTime() : 0
+  if (expMs && expMs < Date.now() + 60_000 && conta.refresh_token) {
+    const r = await fetch('https://api.mercadopago.com/oauth/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: MP_CLIENT_ID, client_secret: MP_CLIENT_SECRET,
+        grant_type: 'refresh_token', refresh_token: conta.refresh_token,
+      }),
+    })
+    const tk = await r.json()
+    if (r.ok && tk.access_token) {
+      const expiresAt = new Date(Date.now() + Number(tk.expires_in ?? 15552000) * 1000).toISOString()
+      await sb.from('mercadopago_contas').update({
+        access_token: tk.access_token, refresh_token: tk.refresh_token ?? conta.refresh_token,
+        expires_at: expiresAt, updated_at: new Date().toISOString(),
+      }).eq('empresa_id', pedido.empresa_id)
+      return tk.access_token
+    }
+  }
+  return conta.access_token
+}
 
 Deno.serve(async (req) => {
   try {
@@ -15,12 +52,14 @@ Deno.serve(async (req) => {
     const paymentId = body.data?.id
     if (!paymentId) return new Response('ok', { status: 200 })
 
+    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
+
+    // Consulta o pagamento com o token da loja dona dele (fallback: conta central).
+    const mpToken = await tokenDoPagamento(supabase, paymentId)
     const mpRes = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-      headers: { 'Authorization': `Bearer ${MP_ACCESS_TOKEN}` },
+      headers: { 'Authorization': `Bearer ${mpToken}` },
     })
     const payment = await mpRes.json()
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
     if (payment.status === 'approved') {
       // Atualiza pedido para aguardando (entra na fila da loja)

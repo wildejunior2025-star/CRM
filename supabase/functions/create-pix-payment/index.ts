@@ -1,9 +1,56 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const MP_ACCESS_TOKEN   = Deno.env.get('MP_ACCESS_TOKEN')!
+const MP_CLIENT_ID      = Deno.env.get('MP_CLIENT_ID') ?? '736904729861760'
+const MP_CLIENT_SECRET  = Deno.env.get('MP_CLIENT_SECRET') ?? ''
 const SUPABASE_URL      = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_KEY      = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const WEBHOOK_URL       = `${SUPABASE_URL}/functions/v1/mercadopago-webhook`
+
+// deno-lint-ignore no-explicit-any
+type SB = any
+
+// Renova o access_token da loja usando o refresh_token. Retorna o novo token ou null.
+async function refreshSellerToken(sb: SB, empresaId: string, refreshToken: string): Promise<string | null> {
+  const r = await fetch('https://api.mercadopago.com/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: MP_CLIENT_ID, client_secret: MP_CLIENT_SECRET,
+      grant_type: 'refresh_token', refresh_token: refreshToken,
+    }),
+  })
+  const tk = await r.json()
+  if (!r.ok || !tk.access_token) { console.error('MP refresh error:', JSON.stringify(tk)); return null }
+  const expiresAt = new Date(Date.now() + Number(tk.expires_in ?? 15552000) * 1000).toISOString()
+  await sb.from('mercadopago_contas').update({
+    access_token: tk.access_token,
+    refresh_token: tk.refresh_token ?? refreshToken,
+    expires_at: expiresAt, updated_at: new Date().toISOString(),
+  }).eq('empresa_id', empresaId)
+  return tk.access_token
+}
+
+// Decide qual token MP usar (o da loja, se conectou) e quanto de comissão cobrar.
+async function resolverContaMp(sb: SB, empresaId: string, totalCobrar: number) {
+  const { data: conta } = await sb.from('mercadopago_contas')
+    .select('access_token, refresh_token, expires_at').eq('empresa_id', empresaId).maybeSingle()
+  // Loja não conectou o MP dela → cai na conta central (comportamento antigo), sem comissão.
+  if (!conta?.access_token) return { token: MP_ACCESS_TOKEN, applicationFee: 0 }
+
+  let token = conta.access_token
+  const expMs = conta.expires_at ? new Date(conta.expires_at).getTime() : 0
+  if (expMs && expMs < Date.now() + 60_000 && conta.refresh_token) {
+    token = (await refreshSellerToken(sb, empresaId, conta.refresh_token)) ?? token
+  }
+
+  // Comissão da plataforma (% do total), arredondada a centavos.
+  const { data: cfg } = await sb.from('configuracoes_plataforma')
+    .select('valor').eq('chave', 'comissao_pix_percent').maybeSingle()
+  const pct = Number(cfg?.valor ?? 0)
+  const applicationFee = pct > 0 ? Math.round(totalCobrar * pct) / 100 : 0
+  return { token, applicationFee }
+}
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
@@ -59,25 +106,32 @@ Deno.serve(async (req) => {
     // MP exige mínimo 30 min para PIX — nosso cron cancela internamente aos 7 min
     const expiration = new Date(Date.now() + 30 * 60 * 1000).toISOString()
 
+    // Token da loja (marketplace) + comissão da plataforma. Fallback: conta central.
+    const { token: mpToken, applicationFee } = await resolverContaMp(supabaseSrv, pedido.empresa_id, totalCobrar)
+
+    const paymentBody: Record<string, unknown> = {
+      transaction_amount: totalCobrar,
+      description:        `Pedido ${pedido.empresa_nome ?? 'FWC Inter'}`,
+      payment_method_id:  'pix',
+      date_of_expiration: expiration,
+      payer: {
+        email:      pedido.payer_email ?? 'cliente@vendamais.app',
+        first_name: (pedido.cliente_nome ?? 'Cliente').split(' ')[0],
+        last_name:  (pedido.cliente_nome ?? '').split(' ').slice(1).join(' ') || 'Cliente',
+      },
+      notification_url: WEBHOOK_URL,
+    }
+    // A comissão (application_fee) só vale com token obtido via OAuth (loja conectada).
+    if (applicationFee > 0) paymentBody.application_fee = applicationFee
+
     const mpRes = await fetch('https://api.mercadopago.com/v1/payments', {
       method: 'POST',
       headers: {
-        'Authorization':    `Bearer ${MP_ACCESS_TOKEN}`,
+        'Authorization':    `Bearer ${mpToken}`,
         'Content-Type':     'application/json',
         'X-Idempotency-Key': crypto.randomUUID(),
       },
-      body: JSON.stringify({
-        transaction_amount: totalCobrar,
-        description:        `Pedido ${pedido.empresa_nome ?? 'FWC Inter'}`,
-        payment_method_id:  'pix',
-        date_of_expiration: expiration,
-        payer: {
-          email:      pedido.payer_email ?? 'cliente@vendamais.app',
-          first_name: (pedido.cliente_nome ?? 'Cliente').split(' ')[0],
-          last_name:  (pedido.cliente_nome ?? '').split(' ').slice(1).join(' ') || 'Cliente',
-        },
-        notification_url: WEBHOOK_URL,
-      }),
+      body: JSON.stringify(paymentBody),
     })
 
     const mpData = await mpRes.json()

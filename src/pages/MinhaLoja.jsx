@@ -20,6 +20,9 @@ export default function MinhaLoja() {
   const [pixNome, setPixNome] = useState('')
   const [pixCidade, setPixCidade] = useState('')
 
+  const [mpConectando, setMpConectando] = useState(false)
+  const [mpMsg, setMpMsg] = useState(null)
+
   const [salvando, setSalvando] = useState(false)
   const [uploadandoBanner, setUploadandoBanner] = useState(false)
   const [uploadandoLogo, setUploadandoLogo] = useState(false)
@@ -210,6 +213,51 @@ export default function MinhaLoja() {
         setIfoodStatus({ ultimo_polling_em: data.ultimo_polling_em, ultimo_erro: data.ultimo_erro })
       })
   }, [empresa])
+
+  // ── Mercado Pago (conectar conta da loja p/ receber PIX direto) ──
+  const MP_FN_BASE = import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'
+
+  // Mostra o resultado ao voltar do Mercado Pago (?mp=ok / ?mp=erro)
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get('mp')
+    if (p === 'ok') { setMpMsg({ tipo: 'ok', texto: 'Mercado Pago conectado com sucesso! Os PIX agora caem na sua conta.' }); refreshProfile?.() }
+    else if (p === 'erro') { setMpMsg({ tipo: 'erro', texto: 'Não foi possível conectar. Tente novamente.' }) }
+    if (p) window.history.replaceState({}, '', window.location.pathname)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function conectarMercadoPago() {
+    setMpConectando(true); setMpMsg(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const returnUrl = window.location.origin + window.location.pathname
+      const res = await fetch(
+        `${MP_FN_BASE}/functions/v1/mercadopago-oauth?action=start&return_url=${encodeURIComponent(returnUrl)}`,
+        { headers: { Authorization: `Bearer ${session?.access_token ?? ''}` } }
+      )
+      const data = await res.json()
+      if (data.url) { window.location.href = data.url; return }
+      setMpMsg({ tipo: 'erro', texto: data.error || 'Erro ao iniciar a conexão.' })
+    } catch {
+      setMpMsg({ tipo: 'erro', texto: 'Erro ao conectar. Verifique a internet.' })
+    }
+    setMpConectando(false)
+  }
+
+  async function desconectarMercadoPago() {
+    if (!window.confirm('Desconectar sua conta Mercado Pago? Os PIX deixam de cair direto na sua conta.')) return
+    setMpConectando(true); setMpMsg(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`${MP_FN_BASE}/functions/v1/mercadopago-oauth?action=disconnect`, {
+        method: 'POST', headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
+      })
+      if (res.ok) { setMpMsg({ tipo: 'ok', texto: 'Conta desconectada.' }); await refreshProfile?.() }
+      else setMpMsg({ tipo: 'erro', texto: 'Erro ao desconectar.' })
+    } catch {
+      setMpMsg({ tipo: 'erro', texto: 'Erro ao desconectar.' })
+    }
+    setMpConectando(false)
+  }
 
   const [salvandoEmail, setSalvandoEmail] = useState(false)
   const [erroEmail, setErroEmail] = useState(null)
@@ -533,7 +581,53 @@ export default function MinhaLoja() {
         </div>
 
         <div className="card" style={{ marginBottom: 16 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Pagamento PIX</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Receber PIX automático (Mercado Pago)</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 14 }}>
+            Conecte sua conta Mercado Pago para receber os PIX dos pedidos <strong>direto nela</strong>,
+            com confirmação automática (o pedido cai na loja assim que o cliente paga).
+          </p>
+
+          {mpMsg && (
+            <div style={{
+              fontSize: 13, fontWeight: 600, padding: '10px 12px', borderRadius: 8, marginBottom: 12,
+              background: mpMsg.tipo === 'ok' ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
+              color: mpMsg.tipo === 'ok' ? '#16a34a' : '#dc2626',
+            }}>{mpMsg.texto}</div>
+          )}
+
+          {empresa?.mp_conectado ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#16a34a' }}>● Conta conectada ✓</span>
+              <button
+                type="button"
+                onClick={desconectarMercadoPago}
+                disabled={mpConectando}
+                style={{
+                  fontSize: 13, fontWeight: 600, padding: '8px 14px', borderRadius: 8, cursor: 'pointer',
+                  border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)',
+                }}
+              >
+                {mpConectando ? 'Aguarde...' : 'Desconectar'}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={conectarMercadoPago}
+              disabled={mpConectando}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                fontSize: 14, fontWeight: 700, padding: '10px 18px', borderRadius: 10, cursor: 'pointer',
+                border: 'none', background: '#009ee3', color: '#fff',
+              }}
+            >
+              {mpConectando ? 'Abrindo o Mercado Pago...' : 'Conectar Mercado Pago'}
+            </button>
+          )}
+        </div>
+
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Pagamento PIX (chave manual)</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
             Chave PIX exibida no checkout para seus clientes pagarem pedidos.
           </p>
