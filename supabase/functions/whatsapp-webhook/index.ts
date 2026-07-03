@@ -1,4 +1,4 @@
-// Bot v178 — CEP com retry (RPC ViaCEP falha intermitente) + fixes v177 (telefone com/sem 9, não pede nome de cadastrado, backstop de itens)
+// Bot v179 — quentinha: proíbe lista de confirmação com ✓ (deixava carrinho vazio/sem complementos); força atualizar_carrinho na hora. + v178 (CEP retry, telefone c/s 9)
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -1278,9 +1278,9 @@ ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome":
 ▸ PRODUTO COM COMPLEMENTOS (ex.: Quentinha) — fluxo obrigatório:
   1. Quando o cliente escolher um produto que está na lista "PRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS", NÃO adicione direto. Primeiro mostre TODAS as categorias daquele produto, com as opções e quantos itens ele pode escolher em cada uma (ex.: "escolha 1", "escolha até 2"). Peça que ele diga o que quer em cada categoria.
   2. Respeite o máximo de cada categoria — nunca aceite mais opções do que o "escolha até N" permite. Mas se o cliente escolher menos do que o máximo permitido (ex.: 1 salada quando pode 2), está OK — NÃO fique insistindo para ele adicionar mais. Assim que ele disser as opções, emita atualizar_carrinho na hora.
-  3. Só depois que o cliente escolher, emita atualizar_carrinho com a quentinha montada:
+  3. Assim que o cliente disser as opções (mesmo que junto com "só isso"), sua PRÓXIMA ação é emitir atualizar_carrinho com a quentinha montada. ⛔ NUNCA mostre uma lista de confirmação com ✓ ("Deixa eu confirmar sua Quentinha: • X ✓") antes de emitir — isso deixa o carrinho VAZIO e o pedido sai errado. Emita a ACAO direto; a confirmação vem automática do sistema.
      - "preco" = preço base do produto + a soma dos adicionais pagos (os que têm "+R$") escolhidos.
-     - inclua "complementos": lista com o que ele escolheu, cada um {"nome": "opção", "qtd": 1}.
+     - inclua SEMPRE "complementos": lista com o que ele escolheu, cada um {"nome": "opção", "qtd": 1}. Sem os complementos a cozinha não sabe o que fazer.
   ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Quentinha (M)", "qtd": 1, "preco": 17.00, "complementos": [{"nome": "Feijão Preto", "qtd": 1}, {"nome": "Arroz refogado", "qtd": 1}, {"nome": "Frango Assado", "qtd": 1}]}]}
 
 Cadastrar cliente novo (após coletar nome E e-mail — PASSO 3, só depois da sacola fechada):
