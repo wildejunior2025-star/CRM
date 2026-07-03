@@ -239,7 +239,19 @@ export default function App() {
             />
             <Route
               path="minha-loja"
-              element={<ProtectedRoute roles={['admin']} modulo="delivery"><MinhaLoja /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin']} modulo="delivery"><MinhaLoja secao="loja" /></ProtectedRoute>}
+            />
+            <Route
+              path="loja-pagamento"
+              element={<ProtectedRoute roles={['admin']} modulo="delivery"><MinhaLoja secao="pagamentos" /></ProtectedRoute>}
+            />
+            <Route
+              path="loja-integracoes"
+              element={<ProtectedRoute roles={['admin']} modulo="delivery"><MinhaLoja secao="integracoes" /></ProtectedRoute>}
+            />
+            <Route
+              path="loja-conta"
+              element={<ProtectedRoute roles={['admin']} modulo="delivery"><MinhaLoja secao="conta" /></ProtectedRoute>}
             />
             <Route
               path="raio-entrega"

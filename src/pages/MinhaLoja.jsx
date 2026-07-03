@@ -4,8 +4,9 @@ import { supabase } from '../lib/supabaseClient'
 import { CONDICOES_PAGAMENTO, ICONE_PAGAMENTO } from '../lib/constants'
 import '../components/Page.css'
 
-export default function MinhaLoja() {
+export default function MinhaLoja({ secao = 'loja' }) {
   const { empresa, refreshProfile } = useAuth()
+  const SECAO_TITULO = { loja: 'Minha Loja', pagamentos: 'Pagamento', integracoes: 'Integrações', conta: 'Conta' }
 
   const [nome, setNome] = useState('')
   const [descricao, setDescricao] = useState('')
@@ -354,9 +355,22 @@ export default function MinhaLoja() {
   return (
     <div>
       <div className="page-header">
-        <h1>Minha Loja</h1>
+        <h1>{SECAO_TITULO[secao] ?? 'Minha Loja'}</h1>
       </div>
 
+      {erro && (
+        <div style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid var(--danger)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 14 }}>
+          {erro}
+        </div>
+      )}
+      {sucesso && (
+        <div style={{ background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid var(--success)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 14 }}>
+          Salvo com sucesso.
+        </div>
+      )}
+
+      {secao === 'loja' && (
+      <>
       {/* Card do link do catálogo digital */}
       <div className="card" style={{ marginBottom: 20, padding: '18px 20px' }}>
         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>
@@ -403,17 +417,6 @@ export default function MinhaLoja() {
           </a>
         </div>
       </div>
-
-      {erro && (
-        <div style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid var(--danger)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 14 }}>
-          {erro}
-        </div>
-      )}
-      {sucesso && (
-        <div style={{ background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid var(--success)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 14 }}>
-          Salvo com sucesso.
-        </div>
-      )}
 
       <form onSubmit={handleSalvar}>
         <div className="card" style={{ marginBottom: 16 }}>
@@ -536,6 +539,19 @@ export default function MinhaLoja() {
           </label>
         </div>
 
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={salvando || uploadandoBanner || uploadandoLogo}
+        >
+          {salvando ? 'Salvando...' : 'Salvar'}
+        </button>
+      </form>
+      </>
+      )}
+
+      {secao === 'pagamentos' && (
+      <form onSubmit={handleSalvar}>
         <div className="card" style={{ marginBottom: 16 }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Formas de pagamento aceitas</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 14 }}>
@@ -675,7 +691,10 @@ export default function MinhaLoja() {
           {salvando ? 'Salvando...' : 'Salvar'}
         </button>
       </form>
+      )}
 
+      {secao === 'integracoes' && (
+      <>
       {/* Card de integração com o iFood */}
       <form onSubmit={handleSalvarIfood} style={{ marginTop: 16 }}>
         <div className="card" style={{ marginBottom: 16, borderTop: '3px solid #ea1d2c' }}>
@@ -924,7 +943,11 @@ export default function MinhaLoja() {
           </div>
         </div>
       )}
+      </>
+      )}
 
+      {secao === 'conta' && (
+      <>
       {/* Card de alteração de e-mail de login */}
       <form onSubmit={handleAlterarEmail} style={{ marginTop: 16 }}>
         <div className="card" style={{ marginBottom: 16 }}>
@@ -1012,6 +1035,8 @@ export default function MinhaLoja() {
           {salvandoSenha ? 'Alterando...' : 'Alterar senha'}
         </button>
       </form>
+      </>
+      )}
     </div>
   )
 }
