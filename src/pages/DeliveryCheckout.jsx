@@ -126,6 +126,7 @@ export default function DeliveryCheckout() {
   const [buscandoCep, setBuscandoCep] = useState(false)
   const [erroCep, setErroCep]     = useState(null)
   const [userId, setUserId]         = useState(null)
+  const [reconhecido, setReconhecido] = useState(false) // cadastro achado pelo telefone
 
   useEffect(() => {
     async function loadPerfil() {
@@ -204,6 +205,7 @@ export default function DeliveryCheckout() {
       const { data } = await supabase.rpc('buscar_cliente_loja', { p_empresa_id: empId, p_telefone: tel })
       if (!data) return
       reconhecidoRef.current = true
+      setReconhecido(true)
       setForm(prev => ({
         ...prev,
         nome:        prev.nome.trim()        ? prev.nome        : (data.nome || ''),
@@ -420,6 +422,27 @@ export default function DeliveryCheckout() {
               <section className="dco-section">
                 <h2 className="dco-section-title">Seus dados</h2>
                 <div className="dco-field-group">
+                  {/* Telefone primeiro: se já é cliente, preenche o resto sozinho */}
+                  <Field label="Telefone" required hint="Já pediu aqui? A gente preenche o resto pelo seu número" error={errors.telefone}>
+                    <input
+                      className={`dco-input${errors.telefone ? ' dco-input--error' : ''}`}
+                      placeholder="(11) 99999-9999"
+                      value={form.telefone}
+                      onChange={e => set('telefone', fmtTelefone(e.target.value))}
+                      inputMode="tel"
+                      autoFocus
+                      data-field-error={errors.telefone ? true : undefined}
+                    />
+                  </Field>
+                  {reconhecido && (
+                    <div style={{
+                      margin: '-4px 0 4px', padding: '9px 12px', borderRadius: 10,
+                      background: 'rgba(16,185,129,.12)', border: '1px solid rgba(16,185,129,.35)',
+                      color: '#34d399', fontSize: 13.5, fontWeight: 600,
+                    }}>
+                      ✓ Encontramos seu cadastro! Confira os dados abaixo.
+                    </div>
+                  )}
                   <Field label="Nome completo" required error={errors.nome}>
                     <input
                       className={`dco-input${errors.nome ? ' dco-input--error' : ''}`}
@@ -427,16 +450,6 @@ export default function DeliveryCheckout() {
                       value={form.nome}
                       onChange={e => set('nome', e.target.value)}
                       data-field-error={errors.nome ? true : undefined}
-                    />
-                  </Field>
-                  <Field label="Telefone" required error={errors.telefone}>
-                    <input
-                      className={`dco-input${errors.telefone ? ' dco-input--error' : ''}`}
-                      placeholder="(11) 99999-9999"
-                      value={form.telefone}
-                      onChange={e => set('telefone', fmtTelefone(e.target.value))}
-                      inputMode="tel"
-                      data-field-error={errors.telefone ? true : undefined}
                     />
                   </Field>
                   <Field label="E-mail" hint="Opcional">
