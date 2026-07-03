@@ -870,7 +870,9 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   // WhatsApp, planilha...) e preenche a venda automaticamente.
   const [lendoPrint, setLendoPrint] = useState(false)
   const [msgPrint, setMsgPrint] = useState(null)
+  const [colarPronto, setColarPronto] = useState(false)
   const fileRef = useRef(null)
+  const pasteRef = useRef(null)
 
   useEffect(() => {
     if (!empresa?.id) { setLoading(false); return }
@@ -1178,7 +1180,8 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         <p className="pp-modal-titulo">{editando ? `Editar pedido #${pedidoEdicao.numero_pedido ?? ''}` : 'Nova venda (balcão)'}</p>
 
         {/* Leitor de print — pra loja que recebe pedido por outro canal (iFood,
-            WhatsApp...): tira o print de lá e a IA preenche a venda. */}
+            WhatsApp...): tira o print de lá e a IA preenche a venda.
+            A caixa é uma "zona de colar": clica nela e aperta Ctrl+V. */}
         {!editando && (
           <div style={{ marginBottom: 12 }}>
             <input
@@ -1188,21 +1191,46 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
               style={{ display: 'none' }}
               onChange={e => lerPrint(e.target.files?.[0])}
             />
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={lendoPrint || loading}
+            <div
+              ref={pasteRef}
+              tabIndex={0}
+              onPaste={e => {
+                const it = [...(e.clipboardData?.items || [])].find(i => i.type?.startsWith('image/'))
+                const f = it?.getAsFile()
+                if (f) { e.preventDefault(); lerPrint(f) }
+              }}
+              onFocus={() => setColarPronto(true)}
+              onBlur={() => setColarPronto(false)}
+              onClick={() => pasteRef.current?.focus()}
               style={{
-                width: '100%', padding: '10px 12px', borderRadius: 10, cursor: lendoPrint ? 'wait' : 'pointer',
-                border: '1.5px dashed #7c3aed', background: 'rgba(124,58,237,.10)',
-                color: '#a78bfa', fontWeight: 700, fontSize: 13.5,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                padding: '12px', borderRadius: 10, cursor: lendoPrint ? 'wait' : 'text', outline: 'none',
+                border: `2px ${colarPronto ? 'solid' : 'dashed'} #7c3aed`,
+                background: colarPronto ? 'rgba(124,58,237,.18)' : 'rgba(124,58,237,.08)',
+                textAlign: 'center', transition: 'all .15s',
               }}
             >
-              {lendoPrint ? '⏳ Lendo o print...' : '📷 Ler print do pedido (preenche automático)'}
-            </button>
-            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', textAlign: 'center', marginTop: 4 }}>
-              Recebeu o pedido por outro canal? Cole o print aqui (Ctrl+V) ou toque no botão.
+              <div style={{ color: '#a78bfa', fontWeight: 700, fontSize: 13.5 }}>
+                {lendoPrint
+                  ? '⏳ Lendo o print...'
+                  : colarPronto
+                    ? '📋 Agora aperte Ctrl+V pra colar o print'
+                    : '📷 Ler print do pedido — clique aqui e aperte Ctrl+V'}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 3 }}>
+                Recebeu por iFood/WhatsApp? Copie o print e cole aqui — a IA preenche tudo.
+              </div>
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
+                disabled={lendoPrint || loading}
+                style={{
+                  marginTop: 8, padding: '5px 12px', borderRadius: 8, cursor: 'pointer',
+                  border: '1px solid var(--border,#2a2a3a)', background: 'transparent',
+                  color: 'var(--text-muted)', fontWeight: 600, fontSize: 12,
+                }}
+              >
+                ou escolher a imagem do computador
+              </button>
             </div>
             {msgPrint && (
               <div style={{
