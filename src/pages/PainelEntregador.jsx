@@ -63,14 +63,22 @@ function mapsUrl(p) {
 // ORIGEM, a última o destino, e as do meio vão em waypoints (separados por "|"
 // cru — o navegador codifica; %7C já codificado o app não entende). Máx. 10.
 function rotaMultiplaUrl(pedidos) {
-  const pontos = pedidos.map(enderecoPonto).filter(Boolean).slice(0, 10)
-  if (pontos.length < 2) return null
+  // Remove pontos repetidos (ex.: 2 pedidos pro mesmo endereço) — senão a rota fica
+  // com origem == destino e o Google não traça nada.
+  const pontos = [...new Set(pedidos.map(enderecoPonto).filter(Boolean))].slice(0, 10)
+  if (pontos.length === 0) return null
+  // 1 ponto só (ou tudo no mesmo lugar): rota simples até ele (o Maps usa sua localização como origem).
+  if (pontos.length === 1) return `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${encodeURIComponent(pontos[0])}`
   const origem = encodeURIComponent(pontos[0])
   const destino = encodeURIComponent(pontos[pontos.length - 1])
   const meio = pontos.slice(1, -1).map(e => encodeURIComponent(e))
   let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${origem}&destination=${destino}`
   if (meio.length) url += `&waypoints=${meio.join('|')}`
   return url
+}
+// Nº de paradas ÚNICAS (endereços distintos) — pro rótulo do botão "Rota de todas".
+function paradasUnicas(pedidos) {
+  return new Set(pedidos.map(enderecoPonto).filter(Boolean)).size
 }
 
 // Só dígitos para o link do WhatsApp (wa.me abre a conversa, não gasta crédito).
@@ -646,10 +654,10 @@ export default function PainelEntregador() {
               </div>
             ) : (
               <>
-                {minhas.filter(p => enderecoTexto(p)).length >= 2 && (
-                  <a href={rotaMultiplaUrl(minhas.filter(p => enderecoTexto(p)))} target="_blank" rel="noopener noreferrer"
+                {paradasUnicas(minhas) >= 2 && (
+                  <a href={rotaMultiplaUrl(minhas.filter(p => enderecoTexto(p) || enderecoPonto(p)))} target="_blank" rel="noopener noreferrer"
                     style={{ ...btnPrimario('#7c3aed'), display: 'block', textAlign: 'center', textDecoration: 'none' }}>
-                    🗺️ Rota de todas ({minhas.filter(p => enderecoTexto(p)).length} paradas)
+                    🗺️ Rota de todas ({paradasUnicas(minhas)} paradas)
                   </a>
                 )}
                 {minhas.map(p => (
