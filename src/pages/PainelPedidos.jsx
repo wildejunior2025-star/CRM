@@ -2360,6 +2360,60 @@ function pedidoAtrasado(pedido) {
   return m != null && m > ATRASO_PADRAO_MIN
 }
 
+// Mini-modal: pede o código de retirada ao concluir um pedido de retirada.
+// Igual ao motoboy na entrega — só conclui se o código bater com o do pedido
+// (ex.: o código de retirada que veio do iFood).
+function ModalCodigoRetirada({ pedido, onOk, onCancelar }) {
+  const [digitos, setDigitos] = useState(['', '', '', ''])
+  const [erro, setErro] = useState(null)
+  const refs = useRef([])
+  useEffect(() => { const t = setTimeout(() => refs.current[0]?.focus(), 60); return () => clearTimeout(t) }, [])
+  function change(i, v) {
+    const d = v.replace(/\D/g, '').slice(-1)
+    const novos = [...digitos]; novos[i] = d; setDigitos(novos); setErro(null)
+    if (d && i < 3) refs.current[i + 1]?.focus()
+  }
+  function keyDown(i, e) {
+    if (e.key === 'Backspace' && !digitos[i] && i > 0) {
+      const n = [...digitos]; n[i - 1] = ''; setDigitos(n); refs.current[i - 1]?.focus()
+    }
+  }
+  function confirmar() {
+    const codigo = digitos.join('')
+    if (codigo !== String(pedido.codigo_entrega ?? '').trim()) {
+      setErro('Código incorreto. Confira com o cliente.')
+      setDigitos(['', '', '', '']); refs.current[0]?.focus(); return
+    }
+    onOk()
+  }
+  return (
+    <div className="pp-modal-overlay" onClick={onCancelar} style={{ zIndex: 130 }}>
+      <div onClick={e => e.stopPropagation()} className="pp-modal" style={{ width: 'min(360px, 94vw)', padding: 22, textAlign: 'center' }}>
+        <h3 style={{ margin: '0 0 4px' }}>Confirmar retirada</h3>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 16px' }}>
+          Pedido #{pedido.numero_pedido} · peça o <strong>código de retirada</strong> ao cliente:
+        </p>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', margin: '0 0 12px' }}>
+          {[0, 1, 2, 3].map(i => (
+            <input key={i} ref={el => { refs.current[i] = el }} type="text" inputMode="numeric" maxLength={1}
+              value={digitos[i]} onChange={e => change(i, e.target.value)} onKeyDown={e => keyDown(i, e)}
+              style={{ width: 52, height: 58, textAlign: 'center', fontSize: 24, fontWeight: 800, borderRadius: 10,
+                border: `2px solid ${erro ? '#ef4444' : '#444'}`, background: '#0f0f1a', color: '#fff', outline: 'none' }} />
+          ))}
+        </div>
+        {erro && <p style={{ color: '#ef4444', fontSize: 12, margin: '0 0 10px' }}>{erro}</p>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="pp-btn pp-btn-recusar" onClick={onCancelar} style={{ flex: '0 0 auto' }}>Cancelar</button>
+          <button type="button" className="pp-btn pp-btn-avancar" onClick={confirmar}
+            disabled={digitos.some(d => d === '')} style={{ flex: 1 }}>
+            Confirmar retirada
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregadores = [] }) {
   const oc = ORIGEM_CONFIG[pedido.origem] ?? ORIGEM_CONFIG.cardapio
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
@@ -2656,6 +2710,7 @@ export default function PainelPedidos() {
   const [comandaFechando, setComandaFechando] = useState(null) // comanda no modal de fechar conta
   const mesaPrintRef = useRef({}) // buffer p/ imprimir itens da mesa juntos
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null) // pedido aberto em detalhe (card completo)
+  const [modalCodRetirada, setModalCodRetirada] = useState(null) // retirada aguardando o código do cliente
   const [autoImprimir, setAutoImprimir] = useState(autoImprimirAtivo)
   const [aceitarAuto, setAceitarAuto] = useState(aceitarAutoAtivo)
 
@@ -2727,7 +2782,8 @@ export default function PainelPedidos() {
   const [enviandoChat, setEnviandoChat] = useState(false)
   // Catálogo (pausar/ativar itens da loja online)
   const [catalogo, setCatalogo] = useState([])
-  const [complementosCat, setComplementosCat] = useState([]) // opções de complemento (pausáveis)
+  const [complementosPorProduto, setComplementosPorProduto] = useState({}) // produtoId -> [grupos] (pausáveis)
+  const [catExpandido, setCatExpandido] = useState(() => new Set())        // produtos com complementos abertos
   const [loadingCatalogo, setLoadingCatalogo] = useState(false)
   const [buscaCatalogo, setBuscaCatalogo] = useState('')
   const [pausandoId, setPausandoId] = useState(null)
@@ -2939,42 +2995,67 @@ export default function PainelPedidos() {
       .eq('empresa_id', empresa.id)
       .order('nome', { ascending: true })
     setCatalogo(data || [])
-    // Complementos (opções) — deduplicados por grupo+nome (o mesmo complemento
-    // costuma repetir nas 3 quentinhas). Pausar afeta todas as cópias.
+    // Complementos aninhados por produto (estilo iFood): cada produto abre seus
+    // grupos ("subcategorias") e opções, cada um pausável individualmente.
     const { data: grupos } = await supabase
       .from('complemento_grupos')
-      .select('nome, ordem, complemento_opcoes(id, nome, disponivel, ordem)')
+      .select('id, produto_id, nome, min, max, ordem, disponivel, complemento_opcoes(id, nome, preco_adicional, disponivel, ordem)')
       .eq('empresa_id', empresa.id)
       .order('ordem')
-    const map = new Map()
+    const porProduto = {}
     for (const g of (grupos ?? [])) {
-      for (const o of (g.complemento_opcoes ?? [])) {
-        const key = `${g.nome}::${o.nome}`
-        if (!map.has(key)) map.set(key, { key, nome: o.nome, grupo: g.nome, ids: [], ativo: false })
-        const e = map.get(key)
-        e.ids.push(o.id)
-        if (o.disponivel !== false) e.ativo = true
-      }
+      const opcoes = (g.complemento_opcoes ?? [])
+        .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+      ;(porProduto[g.produto_id] ??= []).push({
+        id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, ordem: g.ordem ?? 0,
+        disponivel: g.disponivel !== false, opcoes,
+      })
     }
-    setComplementosCat([...map.values()])
+    for (const pid in porProduto) porProduto[pid].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+    setComplementosPorProduto(porProduto)
     setLoadingCatalogo(false)
   }, [empresa])
+
+  function toggleExpandirCat(produtoId) {
+    setCatExpandido(prev => {
+      const n = new Set(prev)
+      n.has(produtoId) ? n.delete(produtoId) : n.add(produtoId)
+      return n
+    })
+  }
 
   useEffect(() => {
     if (painelDireito === 'catalogo') carregarCatalogo()
   }, [painelDireito, carregarCatalogo])
 
   // Pausa/reativa uma opção de complemento (ex.: "Frango Assado" acabou).
-  async function togglePausarOpcao(op) {
-    const ativar = !op.ativo // se está pausada (nenhuma ativa), reativa
-    setPausandoId(op.key)
-    setComplementosCat(prev => prev.map(x => x.key === op.key ? { ...x, ativo: ativar } : x))
-    const { error } = await supabase
-      .from('complemento_opcoes')
-      .update({ disponivel: ativar })
-      .in('id', op.ids)
+  async function togglePausarOpcao(produtoId, grupoId, op) {
+    const novo = op.disponivel === false // se está pausada, reativa
+    setPausandoId(op.id)
+    const patch = (val) => setComplementosPorProduto(prev => ({
+      ...prev,
+      [produtoId]: (prev[produtoId] ?? []).map(g => g.id !== grupoId ? g : {
+        ...g, opcoes: g.opcoes.map(o => o.id === op.id ? { ...o, disponivel: val } : o),
+      }),
+    }))
+    patch(novo)
+    const { error } = await supabase.from('complemento_opcoes').update({ disponivel: novo }).eq('id', op.id)
     setPausandoId(null)
-    if (error) setComplementosCat(prev => prev.map(x => x.key === op.key ? { ...x, ativo: op.ativo } : x))
+    if (error) patch(op.disponivel)
+  }
+
+  // Pausa/reativa a subcategoria inteira (ex.: acabou o feijão → some o grupo todo).
+  async function togglePausarGrupo(produtoId, grupo) {
+    const novo = grupo.disponivel === false // se está pausado, reativa
+    setPausandoId(grupo.id)
+    const patch = (val) => setComplementosPorProduto(prev => ({
+      ...prev,
+      [produtoId]: (prev[produtoId] ?? []).map(g => g.id === grupo.id ? { ...g, disponivel: val } : g),
+    }))
+    patch(novo)
+    const { error } = await supabase.from('complemento_grupos').update({ disponivel: novo }).eq('id', grupo.id)
+    setPausandoId(null)
+    if (error) patch(grupo.disponivel)
   }
 
   // Pausa/reativa um item — pausado some da loja online na hora.
@@ -3353,12 +3434,23 @@ export default function PainelPedidos() {
   }
 
   async function handleAvancar(id, novoStatus, extra = {}) {
-    const update = { status: novoStatus, ...extra }
+    // Trava da RETIRADA: não conclui ('entregue') sem o cliente informar o código
+    // de retirada. Igual ao motoboy na entrega. Abre o mini-modal do código.
+    if (novoStatus === 'entregue' && !extra.__codigoOk) {
+      const pAtual = pedidos.find(x => x.id === id)
+      const ehRet = pAtual && (pAtual.tipo_entrega || 'entrega') === 'retirada'
+      if (ehRet && pAtual.codigo_entrega) { setModalCodRetirada(pAtual); return }
+    }
 
-    // Gera código de confirmação de 4 dígitos ao despachar.
-    // O cliente apresenta esse código ao entregador para confirmar o recebimento.
+    const { __codigoOk, ...extraLimpo } = extra
+    const update = { status: novoStatus, ...extraLimpo }
+
+    // Gera código de confirmação de 4 dígitos ao despachar (SÓ entrega). Retirada
+    // mantém o código que já veio (ex.: o código de retirada do iFood) — não regera.
     if (novoStatus === 'saiu_entrega') {
-      update.codigo_entrega = String(Math.floor(1000 + Math.random() * 9000))
+      const pAtual = pedidos.find(x => x.id === id)
+      const ehRet = pAtual && (pAtual.tipo_entrega || 'entrega') === 'retirada'
+      if (!ehRet) update.codigo_entrega = String(Math.floor(1000 + Math.random() * 9000))
       // Marca quando saiu para entrega — usado pelo auto-conclusão de 6h.
       update.saiu_entrega_at = new Date().toISOString()
     }
@@ -3504,12 +3596,13 @@ export default function PainelPedidos() {
     )
   }
 
-  const catalogoFiltrado = catalogo.filter(p =>
-    !buscaCatalogo.trim() || p.nome?.toLowerCase().includes(buscaCatalogo.trim().toLowerCase())
-  )
-  const complementosFiltrados = complementosCat.filter(o => {
+  const catalogoFiltrado = catalogo.filter(p => {
     const t = buscaCatalogo.trim().toLowerCase()
-    return !t || o.nome.toLowerCase().includes(t) || o.grupo.toLowerCase().includes(t)
+    if (!t) return true
+    if (p.nome?.toLowerCase().includes(t)) return true
+    // casa também se algum complemento do produto bate na busca
+    return (complementosPorProduto[p.id] ?? []).some(g =>
+      g.nome.toLowerCase().includes(t) || g.opcoes.some(o => o.nome.toLowerCase().includes(t)))
   })
 
   // Agrupa as mensagens em conversas (canal + cliente)
@@ -3981,6 +4074,14 @@ export default function PainelPedidos() {
             />
           </div>
         </div>
+      )}
+
+      {modalCodRetirada && (
+        <ModalCodigoRetirada
+          pedido={modalCodRetirada}
+          onCancelar={() => setModalCodRetirada(null)}
+          onOk={() => { const p = modalCodRetirada; setModalCodRetirada(null); handleAvancar(p.id, 'entregue', { __codigoOk: true }) }}
+        />
       )}
 
       {/* ── Gaveta lateral direita ── */}
