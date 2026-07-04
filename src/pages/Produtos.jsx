@@ -428,8 +428,6 @@ export default function Produtos() {
     else loadProdutos(search, categoriaFiltro)
   }
 
-  const totalPaginas = Math.ceil(produtosOrdenados.length / PAGE_SIZE)
-
   // Ordena os produtos exibidos seguindo a ordem personalizada das categorias
   const catOrdem = Object.fromEntries(categorias.map(c => [c.nome, c.ordem ?? 999]))
   const produtosOrdenados = [...produtos].sort((a, b) => {
@@ -440,6 +438,7 @@ export default function Produtos() {
   })
   // Paginação client-side sobre a lista JÁ ordenada pelas categorias
   const produtosPagina = produtosOrdenados.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const totalPaginas = Math.ceil(produtosOrdenados.length / PAGE_SIZE)
 
   return (
     <div>
