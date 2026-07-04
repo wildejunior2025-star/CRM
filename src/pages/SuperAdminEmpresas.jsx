@@ -125,12 +125,16 @@ export default function SuperAdminEmpresas() {
   }
 
   async function adicionarCreditos() {
-    const qtd = parseInt(creditQtd, 10)
-    if (!qtd || qtd <= 0) return
+    const novoSaldo = parseInt(creditQtd, 10)
+    if (isNaN(novoSaldo) || novoSaldo < 0) return
+    // Define o saldo EXATO digitado: aplica só a diferença (a função aceita valor
+    // negativo, então também dá pra reduzir). Registra a diferença no log.
+    const delta = novoSaldo - (creditModal.creditos ?? 0)
+    if (delta === 0) { setCreditModal(null); return }
     setSavingCredit(true)
     await supabase.rpc('adicionar_credito_whatsapp', {
       p_empresa_id: creditModal.id,
-      p_quantidade: qtd,
+      p_quantidade: delta,
     })
     setSavingCredit(false)
     setCreditModal(null)
@@ -582,7 +586,7 @@ export default function SuperAdminEmpresas() {
                   <td className="caixa-amount-col">
                     <button
                       title="Adicionar créditos WhatsApp"
-                      onClick={() => { setCreditModal({ id: emp.id, nome: emp.nome, creditos: emp.whatsapp_creditos ?? 0 }); setCreditQtd('100') }}
+                      onClick={() => { setCreditModal({ id: emp.id, nome: emp.nome, creditos: emp.whatsapp_creditos ?? 0 }); setCreditQtd(String(emp.whatsapp_creditos ?? 0)) }}
                       style={{
                         background: 'none', border: 'none', cursor: 'pointer',
                         color: (emp.whatsapp_creditos ?? 0) === 0 ? 'var(--danger)' : (emp.whatsapp_creditos ?? 0) < 10 ? 'var(--warning, #f59e0b)' : 'var(--success)',
@@ -663,7 +667,7 @@ export default function SuperAdminEmpresas() {
                             <button onClick={() => { setInviteLink(`${window.location.origin}/cadastro-admin/${emp.id}`); setOpenMenuId(null) }}>
                               Link admin
                             </button>
-                            <button onClick={() => { setCreditModal({ id: emp.id, nome: emp.nome, creditos: emp.whatsapp_creditos ?? 0 }); setCreditQtd('100'); setOpenMenuId(null) }}>
+                            <button onClick={() => { setCreditModal({ id: emp.id, nome: emp.nome, creditos: emp.whatsapp_creditos ?? 0 }); setCreditQtd(String(emp.whatsapp_creditos ?? 0)); setOpenMenuId(null) }}>
                               Créditos WhatsApp
                             </button>
                             <button disabled={savingId === emp.id} onClick={() => { renovarEmpresa(emp); setOpenMenuId(null) }}>
@@ -826,24 +830,50 @@ export default function SuperAdminEmpresas() {
             <p style={{ marginBottom: 20, color: 'var(--text-muted)', fontSize: 14 }}>
               Saldo atual: <strong style={{ color: creditModal.creditos === 0 ? 'var(--danger)' : 'var(--success)' }}>{creditModal.creditos} créditos</strong>
             </p>
-            <div className="form-field" style={{ marginBottom: 20 }}>
-              <label>Quantidade a adicionar</label>
+            <div className="form-field" style={{ marginBottom: 12 }}>
+              <label>Saldo total (créditos)</label>
               <input
                 type="number"
-                min="1"
+                min="0"
                 value={creditQtd}
                 onChange={(e) => setCreditQtd(e.target.value)}
-                style={{ marginTop: 6 }}
+                onFocus={(e) => e.target.select()}
+                style={{ marginTop: 6, fontSize: 18, fontWeight: 700 }}
               />
               <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                1 crédito = 1 mensagem enviada. Sugerido: 100, 500 ou 1000.
+                Digite o total que a loja deve ficar. 1 crédito = 1 mensagem enviada.
               </span>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+              {[100, 500, 1000].map((n) => (
+                <button
+                  key={n}
+                  className="btn btn-secondary"
+                  style={{ padding: '6px 12px', fontSize: 13 }}
+                  onClick={() => setCreditQtd(String((parseInt(creditQtd, 10) || 0) + n))}
+                >
+                  +{n}
+                </button>
+              ))}
+              <button
+                className="btn btn-secondary"
+                style={{ padding: '6px 12px', fontSize: 13 }}
+                onClick={() => setCreditQtd(String(creditModal.creditos ?? 0))}
+              >
+                ↺ atual
+              </button>
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn btn-secondary" onClick={() => setCreditModal(null)}>Cancelar</button>
-              <button className="btn btn-primary" onClick={adicionarCreditos} disabled={savingCredit}>
-                {savingCredit ? 'Salvando...' : `Adicionar ${creditQtd || 0} créditos`}
-              </button>
+              {(() => {
+                const novo  = parseInt(creditQtd, 10)
+                const delta = (isNaN(novo) ? 0 : novo) - (creditModal.creditos ?? 0)
+                return (
+                  <button className="btn btn-primary" onClick={adicionarCreditos} disabled={savingCredit || isNaN(novo) || novo < 0 || delta === 0}>
+                    {savingCredit ? 'Salvando...' : delta > 0 ? `Salvar (+${delta})` : delta < 0 ? `Salvar (${delta})` : 'Salvar'}
+                  </button>
+                )
+              })()}
             </div>
           </div>
         </div>
