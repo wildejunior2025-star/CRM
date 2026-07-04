@@ -2360,6 +2360,17 @@ function pedidoAtrasado(pedido) {
   return m != null && m > ATRASO_PADRAO_MIN
 }
 
+// Filtro de período por data (created_at). 'tudo' | 'hoje' | '7d' | '30d'.
+function dentroDoPeriodo(iso, periodo) {
+  if (periodo === 'tudo' || !iso) return true
+  const d = new Date(iso).getTime()
+  if (periodo === 'hoje') { const s = new Date(); s.setHours(0, 0, 0, 0); return d >= s.getTime() }
+  if (periodo === '7d') return d >= Date.now() - 7 * 86400000
+  if (periodo === '30d') return d >= Date.now() - 30 * 86400000
+  return true
+}
+const PERIODOS_ENT = [['hoje', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias'], ['tudo', 'Tudo']]
+
 // Mini-modal: pede o código de retirada ao concluir um pedido de retirada.
 // Igual ao motoboy na entrega — só conclui se o código bater com o do pedido
 // (ex.: o código de retirada que veio do iFood).
@@ -2784,6 +2795,7 @@ export default function PainelPedidos() {
   // Entregadores — estatísticas e histórico por motoboy
   const [entregasConcluidas, setEntregasConcluidas] = useState([])
   const [entregadorSel, setEntregadorSel] = useState(null)
+  const [periodoEnt, setPeriodoEnt] = useState('tudo') // filtro de data do histórico do entregador
   // Filtro do quadro — null = todas as colunas; ou 'aceitar'|'cozinha'|'entrega'|'concluidos'
   // Persistem no localStorage: ao sair e voltar da tela, mantêm o filtro escolhido.
   const [filtroColuna, setFiltroColuna] = useState(() => {
@@ -4619,7 +4631,7 @@ export default function PainelPedidos() {
             if (entregadorSel) {
               const ent = entregadores.find(e => e.id === entregadorSel)
               const rota = emRota(entregadorSel)
-              const concl = concluidas(entregadorSel)
+              const concl = concluidas(entregadorSel).filter(p => dentroDoPeriodo(p.created_at, periodoEnt))
               const pendentes = concl.filter(p => !p.entregador_pago)
               const pagos = concl.filter(p => p.entregador_pago)
               const somaTaxa = arr => arr.reduce((s, p) => s + Number(p.taxa_entrega || 0), 0)
@@ -4655,6 +4667,17 @@ export default function PainelPedidos() {
                     ← Todos os entregadores
                   </button>
                   <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{ent?.nome || 'Entregador'}</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {PERIODOS_ENT.map(([val, lab]) => (
+                      <button key={val} type="button" onClick={() => setPeriodoEnt(val)}
+                        style={{ fontSize: 12, fontWeight: 700, padding: '4px 12px', borderRadius: 20, cursor: 'pointer',
+                          border: `1px solid ${periodoEnt === val ? 'var(--primary, #a78bfa)' : 'var(--border, #2a2a3a)'}`,
+                          background: periodoEnt === val ? 'var(--primary, #a78bfa)' : 'transparent',
+                          color: periodoEnt === val ? '#fff' : 'var(--text-muted)' }}>
+                        {lab}
+                      </button>
+                    ))}
+                  </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     {[['A receber', fmt(somaTaxa(pendentes)), '#f59e0b'], ['Pago', fmt(somaTaxa(pagos)), '#16a34a'], ['Em rota', rota.length, '#7c3aed']].map(([lab, val, cor]) => (
                       <div key={lab} style={{ flex: 1, textAlign: 'center', border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '8px 4px' }}>

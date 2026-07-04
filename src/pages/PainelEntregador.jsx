@@ -9,6 +9,17 @@ function fmt(v) {
   return Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
+// Filtro de período por data (created_at). 'tudo' | 'hoje' | '7d' | '30d'.
+function dentroDoPeriodo(iso, periodo) {
+  if (periodo === 'tudo' || !iso) return true
+  const d = new Date(iso).getTime()
+  if (periodo === 'hoje') { const s = new Date(); s.setHours(0, 0, 0, 0); return d >= s.getTime() }
+  if (periodo === '7d') return d >= Date.now() - 7 * 86400000
+  if (periodo === '30d') return d >= Date.now() - 30 * 86400000
+  return true
+}
+const PERIODOS_HIST = [['hoje', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias'], ['tudo', 'Tudo']]
+
 function enderecoTexto(p) {
   return [p.endereco_rua, p.endereco_numero, p.endereco_bairro, p.endereco_cidade]
     .filter(Boolean).join(', ')
@@ -286,6 +297,7 @@ export default function PainelEntregador() {
   const [aba, setAba] = useState('ativas') // 'ativas' | 'historico'
   const [historico, setHistorico] = useState([])
   const [histLoading, setHistLoading] = useState(false)
+  const [periodoHist, setPeriodoHist] = useState('tudo') // filtro de data do histórico
   // Fila (E4): null = ainda não carregou. { fila_ativa, online, pausado, na_vez, posicao, total_fila }
   const [fila, setFila] = useState(null)
   const [filaBusy, setFilaBusy] = useState(false)
@@ -612,8 +624,9 @@ export default function PainelEntregador() {
           ) : (
             <>
               {(() => {
-                const pend = historico.filter(p => !p.entregador_pago)
-                const pagos = historico.filter(p => p.entregador_pago)
+                const base = historico.filter(p => dentroDoPeriodo(p.created_at, periodoHist))
+                const pend = base.filter(p => !p.entregador_pago)
+                const pagos = base.filter(p => p.entregador_pago)
                 const soma = arr => arr.reduce((s, p) => s + Number(p.taxa_entrega || 0), 0)
                 const dataDe = p => new Date(p.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
                 const grupos = arr => {
@@ -641,6 +654,17 @@ export default function PainelEntregador() {
                 )
                 return (
                   <>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {PERIODOS_HIST.map(([val, lab]) => (
+                        <button key={val} type="button" onClick={() => setPeriodoHist(val)}
+                          style={{ fontSize: 12, fontWeight: 700, padding: '5px 14px', borderRadius: 20, cursor: 'pointer',
+                            border: `1px solid ${periodoHist === val ? 'var(--primary, #a78bfa)' : 'var(--border, #2a2a3a)'}`,
+                            background: periodoHist === val ? 'var(--primary, #a78bfa)' : 'transparent',
+                            color: periodoHist === val ? '#fff' : 'var(--text-muted)' }}>
+                          {lab}
+                        </button>
+                      ))}
+                    </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <div style={{ flex: 1, textAlign: 'center', background: 'var(--surface,#16161f)', border: '1px solid var(--border,#2a2a3a)', borderRadius: 12, padding: '10px 4px' }}>
                         <div style={{ fontSize: 17, fontWeight: 800, color: '#f59e0b' }}>{fmt(soma(pend))}</div>
