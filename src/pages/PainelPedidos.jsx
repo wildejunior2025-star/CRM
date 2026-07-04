@@ -1866,18 +1866,22 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         {pedido.origem === 'ifood' && pedido.ifood_valores ? (() => {
           const v = pedido.ifood_valores
           const subComTaxa = Number(v.itens || 0) + Number(v.taxa || 0)
+          const aLojaRecebe = Number(v.pago || 0) + Number(v.incentivo_ifood || 0)
           return (
             <>
               <div className="pp-totais-row"><span>Itens</span><span>{fmt(v.itens)}</span></div>
               {!isRetirada && <div className="pp-totais-row"><span>Taxa de entrega</span><span>{fmt(v.taxa)}</span></div>}
               <div className="pp-totais-row"><span>Subtotal</span><span>{fmt(subComTaxa)}</span></div>
               {Number(v.incentivo_loja) > 0 && (
-                <div className="pp-totais-row"><span>Incentivos e cobranças da loja</span><span>− {fmt(v.incentivo_loja)}</span></div>
+                <div className="pp-totais-row"><span>Desconto da loja</span><span>− {fmt(v.incentivo_loja)}</span></div>
               )}
-              {Number(v.incentivo_ifood) > 0 && (
-                <div className="pp-totais-row" style={{ color: '#ea1d2c' }}><span>Incentivos iFood</span><span>− {fmt(v.incentivo_ifood)}</span></div>
-              )}
-              <div className="pp-totais-total"><span>Pago via iFood</span><span>{fmt(v.pago)}</span></div>
+              <div className="pp-totais-total" style={{ color: '#16a34a' }}><span>💰 A loja recebe</span><span>{fmt(aLojaRecebe)}</span></div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>• Cliente pagou (via iFood)</span><span>{fmt(v.pago)}</span></div>
+                {Number(v.incentivo_ifood) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#16a34a', fontWeight: 700 }}><span>• Incentivo iFood (iFood repassa)</span><span>+ {fmt(v.incentivo_ifood)}</span></div>
+                )}
+              </div>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#16a34a', marginTop: 6 }}>
                 ✓ Pago via iFood — não precisa cobrar na entrega
               </div>
