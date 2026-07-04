@@ -4374,86 +4374,139 @@ export default function PainelPedidos() {
               />
               {loadingCatalogo ? (
                 <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 13 }}>Carregando...</div>
-              ) : catalogoFiltrado.length === 0 && complementosFiltrados.length === 0 ? (
+              ) : catalogoFiltrado.length === 0 ? (
                 <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 13 }}>
                   {buscaCatalogo ? 'Nada encontrado.' : 'Nenhum item cadastrado.'}
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {catalogoFiltrado.length > 0 && (
-                    <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: .5, textTransform: 'uppercase' }}>Produtos</div>
-                  )}
                   {catalogoFiltrado.map(prod => {
                     const pausado = prod.disponivel_delivery === false
+                    const grupos = complementosPorProduto[prod.id] ?? []
+                    const temComp = grupos.length > 0
+                    const aberto = catExpandido.has(prod.id)
                     return (
-                      <div key={prod.id} style={{
-                        border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '10px 12px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-                        opacity: pausado ? 0.6 : 1,
-                      }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {prod.nome}
+                      <div key={prod.id} style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, overflow: 'hidden' }}>
+                        {/* Linha do produto */}
+                        <div style={{
+                          padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                          opacity: pausado ? 0.6 : 1,
+                        }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {prod.nome}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                              {fmt(prod.preco_venda)}{prod.categoria ? ` · ${prod.categoria}` : ''}
+                              {pausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
+                            </div>
                           </div>
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            {fmt(prod.preco_venda)}{prod.categoria ? ` · ${prod.categoria}` : ''}
-                            {pausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                            {temComp && (
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandirCat(prod.id)}
+                                style={{
+                                  display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 8, cursor: 'pointer',
+                                  fontWeight: 700, fontSize: 12, border: '1.5px solid',
+                                  borderColor: aberto ? '#2563eb' : 'var(--border, #2a2a3a)',
+                                  background: aberto ? 'rgba(37,99,235,.12)' : 'transparent',
+                                  color: aberto ? '#2563eb' : 'var(--text-muted)',
+                                }}
+                                title="Ver e pausar os complementos"
+                              >
+                                Complementos
+                                <span style={{ fontSize: 10, fontWeight: 800, background: 'rgba(148,163,184,.25)', borderRadius: 20, padding: '0 6px' }}>{grupos.length}</span>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                                  style={{ transform: aberto ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} aria-hidden="true">
+                                  <polyline points="6 9 12 15 18 9" />
+                                </svg>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => togglePausarProduto(prod)}
+                              disabled={pausandoId === prod.id}
+                              style={{
+                                padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+                                fontWeight: 700, fontSize: 12, border: '1.5px solid',
+                                borderColor: pausado ? '#16a34a' : '#dc2626',
+                                background: pausado ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
+                                color: pausado ? '#16a34a' : '#dc2626',
+                              }}
+                            >
+                              {pausandoId === prod.id ? '...' : pausado ? 'Ativar' : 'Pausar'}
+                            </button>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => togglePausarProduto(prod)}
-                          disabled={pausandoId === prod.id}
-                          style={{
-                            flexShrink: 0, padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
-                            fontWeight: 700, fontSize: 12, border: '1.5px solid',
-                            borderColor: pausado ? '#16a34a' : '#dc2626',
-                            background: pausado ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
-                            color: pausado ? '#16a34a' : '#dc2626',
-                          }}
-                        >
-                          {pausandoId === prod.id ? '...' : pausado ? 'Ativar' : 'Pausar'}
-                        </button>
-                      </div>
-                    )
-                  })}
 
-                  {complementosFiltrados.length > 0 && (
-                    <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: .5, textTransform: 'uppercase', marginTop: 8 }}>
-                      Complementos (monte sua quentinha)
-                    </div>
-                  )}
-                  {complementosFiltrados.map(op => {
-                    const pausado = !op.ativo
-                    return (
-                      <div key={op.key} style={{
-                        border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '10px 12px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-                        opacity: pausado ? 0.6 : 1,
-                      }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {op.nome}
+                        {/* Complementos aninhados (grupos + opções) */}
+                        {temComp && aberto && (
+                          <div style={{ borderTop: '1px solid var(--border, #2a2a3a)', background: 'rgba(148,163,184,.05)', padding: '6px 8px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {grupos.map(g => {
+                              const gPausado = g.disponivel === false
+                              const qtd = g.max > 1 ? `escolha até ${g.max}` : (g.min > 0 ? 'obrigatório' : 'opcional')
+                              return (
+                                <div key={g.id} style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 8, overflow: 'hidden', opacity: gPausado ? 0.6 : 1 }}>
+                                  {/* Cabeçalho do grupo (subcategoria) */}
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 10px', background: 'var(--bg, #0f0f1a)' }}>
+                                    <div style={{ minWidth: 0 }}>
+                                      <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text)' }}>
+                                        {g.nome}
+                                        {gPausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
+                                      </div>
+                                      <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{qtd} · {g.opcoes.length} {g.opcoes.length === 1 ? 'opção' : 'opções'}</div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => togglePausarGrupo(prod.id, g)}
+                                      disabled={pausandoId === g.id}
+                                      style={{
+                                        flexShrink: 0, padding: '5px 10px', borderRadius: 7, cursor: 'pointer',
+                                        fontWeight: 700, fontSize: 11.5, border: '1.5px solid',
+                                        borderColor: gPausado ? '#16a34a' : '#dc2626',
+                                        background: gPausado ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
+                                        color: gPausado ? '#16a34a' : '#dc2626',
+                                      }}
+                                    >
+                                      {pausandoId === g.id ? '...' : gPausado ? 'Ativar grupo' : 'Pausar grupo'}
+                                    </button>
+                                  </div>
+                                  {/* Opções do grupo */}
+                                  {g.opcoes.map(op => {
+                                    const oPausado = op.disponivel === false
+                                    return (
+                                      <div key={op.id} style={{
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                                        padding: '6px 10px', borderTop: '1px solid var(--border, #2a2a3a)', opacity: oPausado ? 0.55 : 1,
+                                      }}>
+                                        <div style={{ fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                          {op.nome}
+                                          {Number(op.preco_adicional) > 0 && <span style={{ color: 'var(--text-muted)' }}> · +{fmt(op.preco_adicional)}</span>}
+                                          {oPausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => togglePausarOpcao(prod.id, g.id, op)}
+                                          disabled={pausandoId === op.id}
+                                          style={{
+                                            flexShrink: 0, padding: '4px 10px', borderRadius: 7, cursor: 'pointer',
+                                            fontWeight: 700, fontSize: 11, border: '1.5px solid',
+                                            borderColor: oPausado ? '#16a34a' : '#dc2626',
+                                            background: oPausado ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
+                                            color: oPausado ? '#16a34a' : '#dc2626',
+                                          }}
+                                        >
+                                          {pausandoId === op.id ? '...' : oPausado ? 'Ativar' : 'Pausar'}
+                                        </button>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )
+                            })}
                           </div>
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            {op.grupo}
-                            {pausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => togglePausarOpcao(op)}
-                          disabled={pausandoId === op.key}
-                          style={{
-                            flexShrink: 0, padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
-                            fontWeight: 700, fontSize: 12, border: '1.5px solid',
-                            borderColor: pausado ? '#16a34a' : '#dc2626',
-                            background: pausado ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
-                            color: pausado ? '#16a34a' : '#dc2626',
-                          }}
-                        >
-                          {pausandoId === op.key ? '...' : pausado ? 'Ativar' : 'Pausar'}
-                        </button>
+                        )}
                       </div>
                     )
                   })}

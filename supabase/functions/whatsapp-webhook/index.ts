@@ -1091,11 +1091,12 @@ serve(async (req) => {
       if (produtoIds.length) {
         const { data: gruposComp } = await supabase
           .from("complemento_grupos")
-          .select("produto_id, nome, min, max, ordem, complemento_opcoes(nome, preco_adicional, ordem, disponivel)")
+          .select("produto_id, nome, min, max, ordem, disponivel, complemento_opcoes(nome, preco_adicional, ordem, disponivel)")
           .in("produto_id", produtoIds)
         if (gruposComp && gruposComp.length) {
           const porProduto: Record<string, any[]> = {}
           for (const g of gruposComp as any[]) {
+            if (g.disponivel === false) continue // grupo pausado: bot não oferece
             (porProduto[g.produto_id] ||= []).push(g)
             for (const o of (g.complemento_opcoes ?? [])) {
               precoOpcaoMap[String(o.nome).trim().toLowerCase()] = Number(o.preco_adicional ?? 0)

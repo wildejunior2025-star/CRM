@@ -75,10 +75,11 @@ export default function MesaCardapio() {
       if (ids.length) {
         const { data: grupos } = await supabase
           .from('complemento_grupos')
-          .select('id, produto_id, nome, min, max, ordem, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
+          .select('id, produto_id, nome, min, max, ordem, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
           .in('produto_id', ids)
           .order('ordem')
         for (const g of (grupos ?? [])) {
+          if (g.disponivel === false) continue // grupo pausado some do cardápio da mesa
           const opcoes = (g.complemento_opcoes ?? [])
             .filter(o => o.disponivel !== false)
             .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
