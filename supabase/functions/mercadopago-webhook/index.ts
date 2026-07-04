@@ -61,6 +61,46 @@ Deno.serve(async (req) => {
     })
     const payment = await mpRes.json()
 
+    // ── COMPRA DE CRÉDITOS DO BOT (SaaS — conta central, separado dos pedidos) ──
+    // O mp_payment_id de um crédito nunca existe em pedidos_delivery, então os dois
+    // fluxos jamais se cruzam. Se este pagamento é de crédito, trata aqui e retorna.
+    {
+      const { data: compra } = await supabase
+        .from('whatsapp_credito_pagamentos')
+        .select('empresa_id, creditos, valor_reais, status')
+        .eq('mp_payment_id', String(paymentId))
+        .maybeSingle()
+
+      if (compra) {
+        if (payment.status === 'approved') {
+          // .eq('status','pendente') = trava anti-duplicação: só credita 1x
+          const { data: pago } = await supabase
+            .from('whatsapp_credito_pagamentos')
+            .update({ status: 'pago' })
+            .eq('mp_payment_id', String(paymentId))
+            .eq('status', 'pendente')
+            .select('empresa_id, creditos, valor_reais')
+            .maybeSingle()
+          if (pago) {
+            await supabase.rpc('adicionar_creditos_whatsapp', {
+              p_empresa_id:    pago.empresa_id,
+              p_creditos:      pago.creditos,
+              p_tipo:          'compra_pix',
+              p_valor_reais:   pago.valor_reais,
+              p_mp_payment_id: String(paymentId),
+            })
+          }
+        } else if (['cancelled', 'rejected', 'expired'].includes(payment.status)) {
+          await supabase
+            .from('whatsapp_credito_pagamentos')
+            .update({ status: 'cancelado' })
+            .eq('mp_payment_id', String(paymentId))
+            .eq('status', 'pendente')
+        }
+        return new Response('ok', { status: 200 })
+      }
+    }
+
     if (payment.status === 'approved') {
       // Atualiza pedido para aguardando (entra na fila da loja)
       const { data: pedido } = await supabase

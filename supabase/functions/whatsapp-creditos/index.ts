@@ -38,6 +38,49 @@ async function mp(path: string, method = 'GET', body?: unknown) {
   return res.json()
 }
 
+// Rede de segurança: confere no MP os PIX de crédito ainda pendentes desta loja e
+// credita os que já foram pagos (caso o webhook tenha perdido o aviso). Idempotente
+// pela trava .eq('status','pendente'). Roda a cada get_balance.
+// deno-lint-ignore no-explicit-any
+async function reconciliarPendentes(supabase: any, empresa_id: string) {
+  const { data: pendentes } = await supabase
+    .from('whatsapp_credito_pagamentos')
+    .select('mp_payment_id, creditos, valor_reais')
+    .eq('empresa_id', empresa_id)
+    .eq('status', 'pendente')
+  if (!pendentes?.length) return
+
+  for (const p of pendentes) {
+    try {
+      const pay = await mp(`/v1/payments/${p.mp_payment_id}`)
+      if (pay?.status === 'approved') {
+        const { data: pago } = await supabase
+          .from('whatsapp_credito_pagamentos')
+          .update({ status: 'pago' })
+          .eq('mp_payment_id', String(p.mp_payment_id))
+          .eq('status', 'pendente')
+          .select('empresa_id, creditos, valor_reais')
+          .maybeSingle()
+        if (pago) {
+          await supabase.rpc('adicionar_creditos_whatsapp', {
+            p_empresa_id:    pago.empresa_id,
+            p_creditos:      pago.creditos,
+            p_tipo:          'compra_pix',
+            p_valor_reais:   pago.valor_reais,
+            p_mp_payment_id: String(p.mp_payment_id),
+          })
+        }
+      } else if (['cancelled', 'rejected', 'expired'].includes(pay?.status)) {
+        await supabase
+          .from('whatsapp_credito_pagamentos')
+          .update({ status: 'cancelado' })
+          .eq('mp_payment_id', String(p.mp_payment_id))
+          .eq('status', 'pendente')
+      }
+    } catch (_e) { /* ignora falha de consulta pontual; tenta de novo no próximo load */ }
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
@@ -61,6 +104,9 @@ Deno.serve(async (req) => {
   try {
     // ── GET BALANCE ──────────────────────────────────────────────────────────
     if (action === 'get_balance') {
+      // Antes de ler o saldo, credita qualquer PIX pendente que já foi pago (rede de segurança)
+      await reconciliarPendentes(supabase, empresa_id)
+
       const [{ data: empresa }, { data: historico }] = await Promise.all([
         supabase.from('empresas').select(
           'whatsapp_creditos, mp_card_id, mp_card_last4, mp_card_brand, auto_recarga_ativo, auto_recarga_minimo, auto_recarga_valor'
@@ -99,7 +145,7 @@ Deno.serve(async (req) => {
       if (!pacote) return new Response(JSON.stringify({ error: 'Pacote inválido' }), { status: 400, headers: CORS })
 
       const { data: empresa } = await supabase.from('empresas').select('nome').eq('id', empresa_id).single()
-      const expiration = new Date(Date.now() + 60 * 60 * 1000).toISOString() // 1h
+      const expiration = new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 min (mínimo do MP)
 
       const mpRes = await mp('/v1/payments', 'POST', {
         transaction_amount: pacote.valor,
@@ -128,6 +174,7 @@ Deno.serve(async (req) => {
         qr_code_base64:  mpRes.point_of_interaction?.transaction_data?.qr_code_base64,
         valor: pacote.valor,
         creditos,
+        expira_em: expiration,
       }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
 

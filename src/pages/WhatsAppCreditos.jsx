@@ -28,6 +28,8 @@ export default function WhatsAppCreditos() {
   const [pixData, setPixData]       = useState(null)
   const [copiado, setCopiado]       = useState(false)
   const [processando, setProcessando] = useState(false)
+  const [segRestante, setSegRestante] = useState(0)   // cronômetro do PIX (segundos)
+  const [expirado, setExpirado]     = useState(false)
   const pollRef = useRef(null)
   const [msg, setMsg]               = useState(null)
   const [cvvInput, setCvvInput]     = useState('')
@@ -68,11 +70,26 @@ export default function WhatsAppCreditos() {
       if ((data.creditos ?? 0) > (dados?.creditos ?? 0)) {
         setDados(data)
         setPixData(null)
-        setMsg({ tipo: 'ok', texto: `+${pacoteSel?.creditos ?? 0} créditos adicionados!` })
+        setMsg({ tipo: 'ok', texto: `✅ Pagamento confirmado! +${pacoteSel?.creditos ?? 0} créditos adicionados.` })
         clearInterval(pollRef.current)
       }
     }, 5000)
     return () => clearInterval(pollRef.current)
+  }, [pixData])
+
+  // Cronômetro do PIX — conta regressiva até expira_em; ao zerar, marca expirado e para de esperar
+  useEffect(() => {
+    if (!pixData?.expira_em) { setSegRestante(0); return }
+    setExpirado(false)
+    const alvo = new Date(pixData.expira_em).getTime()
+    const tick = () => {
+      const s = Math.max(0, Math.round((alvo - Date.now()) / 1000))
+      setSegRestante(s)
+      if (s <= 0) { setExpirado(true); clearInterval(pollRef.current) }
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
   }, [pixData])
 
   // Carrega SDK do Mercado Pago
@@ -328,14 +345,20 @@ export default function WhatsAppCreditos() {
           </button>
 
           {/* QR Code PIX */}
-          {pixData && (
+          {pixData && !expirado && (
             <div style={{ marginTop: 20, textAlign: 'center' }}>
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, color: 'var(--primary)' }}>
                 Escaneie o QR Code para pagar
               </div>
               <img src={`data:image/png;base64,${pixData.qr_code_base64}`} alt="QR PIX"
                 style={{ width: 180, height: 180, borderRadius: 12, border: '3px solid var(--border)' }} />
-              <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+              <div style={{
+                marginTop: 12, fontSize: 13, fontWeight: 800,
+                color: segRestante <= 60 ? 'var(--danger)' : 'var(--primary)',
+              }}>
+                ⏳ Pague em {String(Math.floor(segRestante / 60)).padStart(2, '0')}:{String(segRestante % 60).padStart(2, '0')}
+              </div>
+              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
                 ou copie o código Pix Copia e Cola
               </div>
               <button onClick={copiarPix} style={{
@@ -348,6 +371,23 @@ export default function WhatsAppCreditos() {
               <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
                 Os créditos são adicionados automaticamente após a confirmação do pagamento.
               </div>
+            </div>
+          )}
+
+          {pixData && expirado && (
+            <div style={{ marginTop: 20, textAlign: 'center' }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--danger)', marginBottom: 12 }}>
+                ⌛ PIX expirado
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
+                O tempo para pagar acabou. Gere um novo PIX para continuar.
+              </div>
+              <button onClick={handleComprar} disabled={processando} style={{
+                padding: '10px 28px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                background: 'var(--primary)', color: '#fff', fontWeight: 700, fontSize: 13,
+              }}>
+                {processando ? 'Gerando...' : 'Gerar novo PIX'}
+              </button>
             </div>
           )}
         </div>
