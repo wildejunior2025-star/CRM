@@ -84,12 +84,16 @@ function soDigitos(tel) {
   return String(tel || '').replace(/\D/g, '')
 }
 
-// Diz pro motoqueiro se ele PRECISA cobrar (dinheiro) ou se já está pago.
-// iFood e cartão/online caem sempre como pago; PIX só quando confirmado.
+// Diz pro motoqueiro se ele PRECISA cobrar ou se já está pago.
+// Só iFood e PIX confirmado são pré-pagos. Dinheiro e cartão (maquininha) o
+// motoqueiro cobra na entrega — cartão NÃO é pago antecipado.
 function pagamentoInfo(p) {
   const forma = p.forma_pagamento
   if (forma === 'dinheiro') {
     return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'Dinheiro', cor: '#f59e0b' }
+  }
+  if (forma === 'cartao' || forma === 'cartão') {
+    return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'Cartão (maquininha)', cor: '#f59e0b' }
   }
   if (forma === 'pix') {
     if (p.pix_status === 'pago') return { pago: true, titulo: 'JÁ PAGO', detalhe: 'PIX confirmado', cor: '#16a34a' }
