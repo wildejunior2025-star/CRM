@@ -105,21 +105,25 @@ serve(async (req) => {
           } catch { /* ignora */ }
         }
 
-        if (state === "open") {
-          await supabaseAdmin.from("whatsapp_config").upsert(
-            { empresa_id: empresaId, ativo: true, instance_name: instanceName, ...(phone ? { connected_phone: phone } : {}) },
-            { onConflict: "empresa_id" }
-          )
-        }
-
-        // Se ainda não temos o phone, busca do banco
+        // Se ainda não temos o phone da Evolution, busca do banco (conexão anterior)
         if (!phone) {
           const { data: cfg } = await supabaseAdmin
             .from("whatsapp_config").select("connected_phone").eq("empresa_id", empresaId).single()
           phone = cfg?.connected_phone ?? null
         }
 
-        return new Response(JSON.stringify({ state, phone }), {
+        // "open" só conta como conectado se há um número real. "open" SEM número é
+        // instância fantasma (travada) → reporta como desconectado pra loja clicar
+        // em Conectar e gerar um QR novo.
+        const conectadoDeVerdade = state === "open" && !!phone
+        if (conectadoDeVerdade) {
+          await supabaseAdmin.from("whatsapp_config").upsert(
+            { empresa_id: empresaId, ativo: true, instance_name: instanceName, connected_phone: phone },
+            { onConflict: "empresa_id" }
+          )
+        }
+
+        return new Response(JSON.stringify({ state: conectadoDeVerdade ? "open" : (state === "open" ? "close" : state), phone }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         })
       } catch {
@@ -155,31 +159,36 @@ serve(async (req) => {
               }
             } catch { /* ignora */ }
           }
-          await supabaseAdmin.from("whatsapp_config").upsert(
-            { empresa_id: empresaId, ativo: true, instance_name: instanceName, ...(phone ? { connected_phone: phone } : {}) },
-            { onConflict: "empresa_id" }
-          )
-          // Sempre reaplicar webhook (pode ter sido perdido se servidor reiniciou)
-          const supabaseUrl2 = Deno.env.get("SUPABASE_URL") ?? ""
-          const projectRef2 = supabaseUrl2.match(/https:\/\/([^.]+)/)?.[1] ?? ""
-          if (projectRef2) {
-            fetch(`${apiBase}/webhook/set/${instanceName}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", apikey: apiKey },
-              body: JSON.stringify({
-                webhook: {
-                  enabled: true,
-                  url: `https://${projectRef2}.supabase.co/functions/v1/whatsapp-webhook?apikey=${Deno.env.get("SUPABASE_ANON_KEY") ?? ""}`,
-                  webhookByEvents: false,
-                  webhookBase64: false,
-                  events: ["MESSAGES_UPSERT"]
-                }
-              })
-            }).catch(() => {})
+          // Só considera "conectado" se tem um número real (ownerJid). Estado "open"
+          // SEM número é fantasma (instância travada) → cai pro delete+recriar abaixo
+          // e gera um QR novo, em vez de fingir que já está conectado.
+          if (phone) {
+            await supabaseAdmin.from("whatsapp_config").upsert(
+              { empresa_id: empresaId, ativo: true, instance_name: instanceName, connected_phone: phone },
+              { onConflict: "empresa_id" }
+            )
+            // Sempre reaplicar webhook (pode ter sido perdido se servidor reiniciou)
+            const supabaseUrl2 = Deno.env.get("SUPABASE_URL") ?? ""
+            const projectRef2 = supabaseUrl2.match(/https:\/\/([^.]+)/)?.[1] ?? ""
+            if (projectRef2) {
+              fetch(`${apiBase}/webhook/set/${instanceName}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", apikey: apiKey },
+                body: JSON.stringify({
+                  webhook: {
+                    enabled: true,
+                    url: `https://${projectRef2}.supabase.co/functions/v1/whatsapp-webhook?apikey=${Deno.env.get("SUPABASE_ANON_KEY") ?? ""}`,
+                    webhookByEvents: false,
+                    webhookBase64: false,
+                    events: ["MESSAGES_UPSERT"]
+                  }
+                })
+              }).catch(() => {})
+            }
+            return new Response(JSON.stringify({ connected: true, phone }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" }
+            })
           }
-          return new Response(JSON.stringify({ connected: true, phone }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" }
-          })
         }
 
         // Instância existe mas não está conectada: deleta para recriar limpa
