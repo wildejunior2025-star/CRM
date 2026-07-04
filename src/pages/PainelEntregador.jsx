@@ -74,7 +74,7 @@ function pagamentoInfo(p) {
 }
 
 // ── Card de entrega ─────────────────────────────────────────
-function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir }) {
+function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0 }) {
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
@@ -179,16 +179,20 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
         <strong style={{ fontSize: 18, color: 'var(--text)' }}>{fmt(pedido.total)}</strong>
       </div>
 
-      {/* Taxa da corrida (o que a entrega vale para o motoqueiro) */}
-      {pedido.taxa_entrega != null && Number(pedido.taxa_entrega) > 0 && (
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          fontSize: 13.5, color: 'var(--text-muted)', margin: '0 2px 12px',
-        }}>
-          <span>🛵 Taxa desta corrida</span>
-          <strong style={{ color: 'var(--text)', fontSize: 15 }}>{fmt(pedido.taxa_entrega)}</strong>
-        </div>
-      )}
+      {/* O que o motoqueiro RECEBE nesta corrida (iFood já com o desconto abatido) */}
+      {pedido.taxa_entrega != null && Number(pedido.taxa_entrega) > 0 && (() => {
+        const desc = pedido.origem === 'ifood' ? Number(descValor || 0) : 0
+        const liquido = Math.max(0, Number(pedido.taxa_entrega) - desc)
+        return (
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            fontSize: 13.5, color: 'var(--text-muted)', margin: '0 2px 12px',
+          }}>
+            <span>🛵 Você recebe{desc > 0 ? <span style={{ fontSize: 11 }}> (taxa {fmt(pedido.taxa_entrega)} − iFood {fmt(desc)})</span> : ''}</span>
+            <strong style={{ color: 'var(--text)', fontSize: 15 }}>{fmt(liquido)}</strong>
+          </div>
+        )
+      })()}
 
       {/* Contato / rota — só faz sentido depois de aceitar */}
       {mine && (
@@ -482,6 +486,9 @@ export default function PainelEntregador() {
     (p.status === 'pronto' || (p.origem === 'ifood' && p.status === 'saiu_entrega'))
   )
 
+  // Desconto por corrida (só iFood) deste motoqueiro — abatido do que ele recebe.
+  const descValorEntrega = (profile?.entregador_desconto_ativo && Number(profile?.entregador_desconto_valor) > 0) ? Number(profile.entregador_desconto_valor) : 0
+
   // Fila (E4): com a fila ativa, só quem está online, sem pausa e na vez aceita.
   const filaAtiva = !!fila?.fila_ativa
   const emAtividade = !filaAtiva || (fila?.online && !fila?.pausado) // pode ver o pool?
@@ -601,7 +608,7 @@ export default function PainelEntregador() {
                   </a>
                 )}
                 {minhas.map(p => (
-                  <CardEntrega key={p.id} pedido={p} mine
+                  <CardEntrega key={p.id} pedido={p} mine descValor={descValorEntrega}
                     onSair={sairParaEntrega} onConfirmar={confirmarEntrega}
                     onConfirmarIfood={confirmarEntregaIfood} onDesistir={desistirEntrega} />
                 ))}
@@ -619,7 +626,7 @@ export default function PainelEntregador() {
                 Nenhum pedido pronto esperando. Aguarde a cozinha liberar.
               </div>
             ) : disponiveis.map(p => (
-              <CardEntrega key={p.id} pedido={p} mine={false} onAceitar={podeAceitar ? aceitar : undefined} />
+              <CardEntrega key={p.id} pedido={p} mine={false} descValor={descValorEntrega} onAceitar={podeAceitar ? aceitar : undefined} />
             ))
           )
         ) : (
