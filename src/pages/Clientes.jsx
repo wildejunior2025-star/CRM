@@ -29,6 +29,7 @@ export default function Clientes() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
+  const [mostrarInativos, setMostrarInativos] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(emptyForm)
@@ -142,14 +143,33 @@ export default function Clientes() {
 
   async function handleDelete(id) {
     if (!confirm('Excluir este cliente?')) return
+    setError(null)
     // Remove referências no carrinho antes de excluir o cliente
     await supabase.from('whatsapp_carrinho').update({ cliente_id: null }).eq('cliente_id', id)
     const { error } = await supabase.from('clientes').delete().eq('id', id)
-    if (error) setError(error.message)
-    else loadClientes()
+    if (!error) { loadClientes(); return }
+
+    // Cliente com vendas/pagamentos: o banco bloqueia a exclusão pra não apagar
+    // o histórico financeiro. Nesse caso, oferece ARQUIVAR (some da lista, mantém tudo).
+    const temHistorico = /foreign key|constraint|violates/i.test(error.message || '')
+    if (temHistorico) {
+      const ok = confirm(
+        'Esse cliente já tem vendas registradas, então não dá pra apagar de vez ' +
+        '(apagaria o histórico de vendas).\n\nDeseja ARQUIVAR? Ele sai da lista, mas ' +
+        'as vendas continuam guardadas. (Marque "Mostrar arquivados" pra vê-lo de novo.)'
+      )
+      if (!ok) return
+      const { error: e2 } = await supabase.from('clientes').update({ ativo: false }).eq('id', id)
+      if (e2) { setError(e2.message); return }
+      loadClientes()
+      return
+    }
+    setError(error.message)
   }
 
   const filtered = clientes.filter((c) => {
+    // Arquivados (ativo = false) ficam escondidos, a menos que o toggle esteja ligado.
+    if (!mostrarInativos && c.ativo === false) return false
     const term = search.trim().toLowerCase()
     if (!term) return true
     return (
@@ -174,12 +194,17 @@ export default function Clientes() {
         </div>
       </div>
 
-      <div className="toolbar">
+      <div className="toolbar" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <input
           placeholder="Buscar por nome, bairro, cidade ou documento..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1, minWidth: 220 }}
         />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          <input type="checkbox" checked={mostrarInativos} onChange={(e) => setMostrarInativos(e.target.checked)} />
+          Mostrar arquivados
+        </label>
       </div>
 
       {error && <p className="error-text">{error}</p>}
