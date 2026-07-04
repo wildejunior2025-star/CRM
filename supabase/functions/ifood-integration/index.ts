@@ -246,6 +246,34 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
   const total = o.total ?? {}
   const { forma, troco } = mapearPagamento(o.payments)
 
+  // Detalhamento financeiro pra mostrar no gestor igual ao app do iFood:
+  // incentivos separados por patrocinador (loja x iFood) + valor pago via iFood.
+  const beneficios = Array.isArray(o.benefits) ? o.benefits : []
+  let incLoja = 0, incIfood = 0
+  for (const b of beneficios) {
+    const svs = Array.isArray(b.sponsorshipValues) ? b.sponsorshipValues : []
+    if (svs.length) {
+      for (const s of svs) {
+        const nome = String(s.name ?? s.sponsor ?? "").toUpperCase()
+        const val = Number(s.value ?? s.amount ?? 0)
+        if (nome.includes("MERCHANT") || nome.includes("LOJA")) incLoja += val
+        else incIfood += val
+      }
+    } else {
+      incIfood += Number(b.value ?? b.amount ?? 0)
+    }
+  }
+  const incTotal = Number(total.benefits ?? (incLoja + incIfood))
+  const ifoodValores = {
+    itens: Number(total.subTotal ?? 0),
+    taxa: Number(total.deliveryFee ?? 0),
+    incentivo_loja: Number(incLoja.toFixed(2)),
+    incentivo_ifood: Number(incIfood.toFixed(2)),
+    incentivos_total: Number(incTotal.toFixed(2)),
+    pago: Number(total.orderAmount ?? 0),
+    pago_online: true, // iFood: cliente já pagou no app
+  }
+
   const novo: Record<string, unknown> = {
     empresa_id: cfg.empresa_id,
     origem: "ifood",
@@ -278,6 +306,7 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     ifood_order_id: o.id ?? orderId,
     ifood_display_id: o.displayId ?? null,
     ifood_status: "PLACED",
+    ifood_valores: ifoodValores,
   }
 
   const { error } = await sb.from("pedidos_delivery").insert(novo)

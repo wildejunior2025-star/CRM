@@ -1863,22 +1863,46 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
 
       {/* Totais */}
       <div className="pp-totais">
-        {pedido.subtotal != null && (
-          <div className="pp-totais-row">
-            <span>Subtotal</span>
-            <span>{fmt(pedido.subtotal)}</span>
-          </div>
+        {pedido.origem === 'ifood' && pedido.ifood_valores ? (() => {
+          const v = pedido.ifood_valores
+          const subComTaxa = Number(v.itens || 0) + Number(v.taxa || 0)
+          return (
+            <>
+              <div className="pp-totais-row"><span>Itens</span><span>{fmt(v.itens)}</span></div>
+              {!isRetirada && <div className="pp-totais-row"><span>Taxa de entrega</span><span>{fmt(v.taxa)}</span></div>}
+              <div className="pp-totais-row"><span>Subtotal</span><span>{fmt(subComTaxa)}</span></div>
+              {Number(v.incentivo_loja) > 0 && (
+                <div className="pp-totais-row"><span>Incentivos e cobranças da loja</span><span>− {fmt(v.incentivo_loja)}</span></div>
+              )}
+              {Number(v.incentivo_ifood) > 0 && (
+                <div className="pp-totais-row" style={{ color: '#ea1d2c' }}><span>Incentivos iFood</span><span>− {fmt(v.incentivo_ifood)}</span></div>
+              )}
+              <div className="pp-totais-total"><span>Pago via iFood</span><span>{fmt(v.pago)}</span></div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#16a34a', marginTop: 6 }}>
+                ✓ Pago via iFood — não precisa cobrar na entrega
+              </div>
+            </>
+          )
+        })() : (
+          <>
+            {pedido.subtotal != null && (
+              <div className="pp-totais-row">
+                <span>Subtotal</span>
+                <span>{fmt(pedido.subtotal)}</span>
+              </div>
+            )}
+            {!isRetirada && pedido.taxa_entrega != null && (
+              <div className="pp-totais-row">
+                <span>Taxa de entrega</span>
+                <span>{fmt(pedido.taxa_entrega)}</span>
+              </div>
+            )}
+            <div className="pp-totais-total">
+              <span>Total</span>
+              <span>{fmt(pedido.total)}</span>
+            </div>
+          </>
         )}
-        {!isRetirada && pedido.taxa_entrega != null && (
-          <div className="pp-totais-row">
-            <span>Taxa de entrega</span>
-            <span>{fmt(pedido.taxa_entrega)}</span>
-          </div>
-        )}
-        <div className="pp-totais-total">
-          <span>Total</span>
-          <span>{fmt(pedido.total)}</span>
-        </div>
       </div>
 
       {/* Avaliação do cliente (pós-entrega) */}
