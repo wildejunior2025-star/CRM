@@ -1751,6 +1751,28 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
       console.log("[SafeNet] cliente cadastrado — troquei o pedido de nome pela próxima etapa")
     }
 
+    // Rede de segurança INVERSA: cliente NOVO (sem cadastro) com a sacola já montada
+    // NUNCA pode pular o CADASTRO. O Haiku às vezes vai direto pro "entrega/retirada"
+    // ou "CEP" sem pedir o nome/e-mail — aqui forçamos a coleta na ordem certa.
+    if (!cliente?.nome && carrinho.length > 0) {
+      const histAssist = mensagens.filter((m: any) => m.role === "assistant").map((m: any) => (m.content ?? "").toLowerCase())
+      const respAtual = (resposta ?? "").toLowerCase()
+      const botJaPediuNome  = histAssist.some((c: string) => /seu\s*\*?nome/.test(c))    || /seu\s*\*?nome/.test(respAtual)
+      const botJaPediuEmail = histAssist.some((c: string) => /seu\s*\*?e-?mail/.test(c)) || /seu\s*\*?e-?mail/.test(respAtual)
+      const cadastrouAgora = acaoMatch !== null && (() => { try { return JSON.parse(acaoMatch![1])?.tipo === "cadastrar_cliente" } catch { return false } })()
+      // Bot está tentando avançar (entrega/retirada/pagamento/CEP/resumo) sem ter feito o cadastro
+      const respostaAvancou = /(prefere\s*\*?entrega|vai\s*\*?retirar|\bretirada\b|como vai pagar|forma de pagamento|seu\s*\*?cep|resumo do pedido)/i.test(respAtual)
+      if (!cadastrouAgora && respostaAvancou) {
+        if (!botJaPediuNome) {
+          resposta = "Pra fechar seu pedido, qual o seu *nome*? 😊"
+          console.log("[SafeNet] cliente novo — forcei a pergunta do NOME (Haiku pulou o cadastro)")
+        } else if (!botJaPediuEmail) {
+          resposta = "E o seu *e-mail*? 📧"
+          console.log("[SafeNet] cliente novo — forcei a pergunta do E-MAIL")
+        }
+      }
+    }
+
     if (!resposta) {
       resposta = "Desculpe, não entendi bem. Pode repetir? 😊"
     }
