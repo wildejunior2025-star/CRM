@@ -59,12 +59,19 @@ serve(async (req) => {
     }
 
     const empresaId    = profile.empresa_id
-    const instanceName = toInstanceName(empresaId)
 
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     )
+
+    // Nome da instância: usa o guardado no config (pode ter sido trocado por um novo
+    // quando o antigo travou no Evolution); senão, deriva do empresa_id.
+    const { data: cfgInst } = await supabaseAdmin
+      .from("whatsapp_config").select("instance_name").eq("empresa_id", empresaId).maybeSingle()
+    let instanceName = (cfgInst?.instance_name && cfgInst.instance_name.length > 0)
+      ? cfgInst.instance_name
+      : toInstanceName(empresaId)
 
     const body = await req.json()
     const { action } = body
@@ -218,8 +225,9 @@ serve(async (req) => {
         // Create falhou (ex.: a instância fantasma ainda não terminou de apagar).
         // Não aborta: apaga de novo, espera e tenta recriar uma vez.
         console.error("[connect] create falhou:", createRes.status, await createRes.text().catch(() => ""))
-        await fetch(`${apiBase}/instance/delete/${instanceName}`, { method: "DELETE", headers: { apikey: apiKey } }).catch(() => {})
-        await new Promise(r => setTimeout(r, 2500))
+        // A instância antiga está travada no Evolution (ex.: número que estava
+        // ligado ao Facebook/Meta). Cria com um nome NOVO e passa a usar ele.
+        instanceName = toInstanceName(empresaId) + "x" + Date.now().toString(36).slice(-5)
         const retryRes = await fetch(`${apiBase}/instance/create`, {
           method: "POST",
           headers: { "Content-Type": "application/json", apikey: apiKey },
