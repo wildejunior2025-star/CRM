@@ -231,8 +231,21 @@ export default function DeliveryCheckout() {
   const navigate = useNavigate()
   const state = location.state
 
-  const [form, setForm]         = useState(INITIAL_FORM)
-  const [tipo, setTipo]         = useState('entrega') // 'entrega' | 'retirada'
+  // Rascunho salvo no navegador — se o cliente sair e voltar, não perde o que
+  // digitou (e lembra os dados na próxima compra). Chave global (é o dado do
+  // próprio cliente, serve pra qualquer loja).
+  const [form, setForm]         = useState(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('fwc_checkout_draft') || 'null')
+      return d?.form ? { ...INITIAL_FORM, ...d.form } : INITIAL_FORM
+    } catch { return INITIAL_FORM }
+  })
+  const [tipo, setTipo]         = useState(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('fwc_checkout_draft') || 'null')
+      return d?.tipo ?? 'entrega'
+    } catch { return 'entrega' }
+  }) // 'entrega' | 'retirada'
   const [lojaEndereco, setLojaEndereco] = useState(null)
   const [errors, setErrors]     = useState({})
   const [enviando, setEnviando] = useState(false)
@@ -246,6 +259,11 @@ export default function DeliveryCheckout() {
   const [coordCliente, setCoordCliente] = useState(null) // {lat,lng} do ponto de entrega
   const [mapaAberto, setMapaAberto]     = useState(false)
   const pinManualRef = useRef(false) // true quando o cliente marcou no mapa (não sobrescreve com geocode)
+
+  // Salva o rascunho a cada mudança (sobrevive a sair/voltar da tela).
+  useEffect(() => {
+    try { localStorage.setItem('fwc_checkout_draft', JSON.stringify({ form, tipo })) } catch { /* ignore */ }
+  }, [form, tipo])
 
   useEffect(() => {
     async function loadPerfil() {
