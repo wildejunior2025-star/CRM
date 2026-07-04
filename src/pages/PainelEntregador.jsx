@@ -442,7 +442,7 @@ export default function PainelEntregador() {
     setHistLoading(true)
     supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, forma_pagamento, endereco_bairro, endereco_cidade, created_at')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, endereco_bairro, endereco_cidade, created_at')
       .eq('entregador_id', user.id)
       .eq('status', 'entregue')
       .order('created_at', { ascending: false })
@@ -617,7 +617,7 @@ export default function PainelEntregador() {
                 borderRadius: 12, padding: '10px 14px', fontSize: 13, color: 'var(--text-muted)',
               }}>
                 <span><strong style={{ color: 'var(--text)' }}>{historico.length}</strong> entregas concluídas</span>
-                <span>Total: <strong style={{ color: 'var(--text)' }}>{fmt(historico.reduce((s, p) => s + Number(p.total || 0), 0))}</strong></span>
+                <span>Total: <strong style={{ color: 'var(--text)' }}>{fmt(historico.reduce((s, p) => s + Number(p.taxa_entrega || 0), 0))}</strong></span>
               </div>
 
               {/* Acerto de desconto por entrega (E5), quando a loja cobra do motoqueiro */}
@@ -642,7 +642,7 @@ export default function PainelEntregador() {
                     <span style={{ fontWeight: 800, color: 'var(--text)' }}>
                       #{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}
                     </span>
-                    <strong style={{ color: '#16a34a' }}>{fmt(p.total)}</strong>
+                    <strong style={{ color: '#16a34a' }} title="Taxa de entrega">{fmt(p.taxa_entrega ?? 0)}</strong>
                   </div>
                   <div style={{ fontSize: 13.5, color: 'var(--text)', marginTop: 4 }}>{p.cliente_nome || 'Cliente'}</div>
                   <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
