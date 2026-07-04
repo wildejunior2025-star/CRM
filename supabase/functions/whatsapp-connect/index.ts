@@ -119,18 +119,17 @@ serve(async (req) => {
           phone = cfg?.connected_phone ?? null
         }
 
-        // "open" só conta como conectado se há um número real. "open" SEM número é
-        // instância fantasma (travada) → reporta como desconectado pra loja clicar
-        // em Conectar e gerar um QR novo.
-        const conectadoDeVerdade = state === "open" && !!phone
-        if (conectadoDeVerdade) {
+        // "open" = conectado (mesmo que o número ainda não tenha vindo — ele chega em
+        // seguida). O caso fantasma (open sem número) é tratado no 'connect', que
+        // recria a instância quando a loja clica em Conectar.
+        if (state === "open") {
           await supabaseAdmin.from("whatsapp_config").upsert(
-            { empresa_id: empresaId, ativo: true, instance_name: instanceName, connected_phone: phone },
+            { empresa_id: empresaId, ativo: true, instance_name: instanceName, ...(phone ? { connected_phone: phone } : {}) },
             { onConflict: "empresa_id" }
           )
         }
 
-        return new Response(JSON.stringify({ state: conectadoDeVerdade ? "open" : (state === "open" ? "close" : state), phone }), {
+        return new Response(JSON.stringify({ state, phone }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         })
       } catch {
