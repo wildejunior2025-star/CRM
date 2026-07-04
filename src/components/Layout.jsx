@@ -41,6 +41,7 @@ const links = [
     to: '/minha-loja', label: 'Minha Loja', roles: ['admin'], mod: 'delivery',
     children: [
       { to: '/raio-entrega', label: 'Raio de Entrega', roles: ['admin'] },
+      { to: '/loja-horarios', label: 'Horários', roles: ['admin'] },
       { to: '/loja-pagamento', label: 'Pagamento', roles: ['admin'] },
       { to: '/loja-integracoes', label: 'Integrações', roles: ['admin'] },
       { to: '/loja-conta', label: 'Conta', roles: ['admin'] },

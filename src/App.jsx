@@ -131,6 +131,7 @@ import DeliveryPedido from './pages/DeliveryPedido'
 import MeusPedidos from './pages/MeusPedidos'
 import LojaOnlineHome from './pages/LojaOnlineHome'
 import RaioEntrega from './pages/RaioEntrega'
+import HorariosLoja from './pages/HorariosLoja'
 import WhatsAppCreditos from './pages/WhatsAppCreditos'
 import Termos from './pages/Termos'
 import Privacidade from './pages/Privacidade'
@@ -256,6 +257,10 @@ export default function App() {
             <Route
               path="raio-entrega"
               element={<ProtectedRoute roles={['admin']} modulo="delivery"><RaioEntrega /></ProtectedRoute>}
+            />
+            <Route
+              path="loja-horarios"
+              element={<ProtectedRoute roles={['admin']} modulo="delivery"><HorariosLoja /></ProtectedRoute>}
             />
             <Route
               path="presencial"
