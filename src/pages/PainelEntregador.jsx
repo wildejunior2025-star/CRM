@@ -379,14 +379,18 @@ export default function PainelEntregador() {
     // Com fila ativa, o servidor decide se posso aceitar (tenho que estar na vez).
     if (fila?.fila_ativa) {
       const { data: ok } = await supabase.rpc('entregador_aceitar_pedido', { p_pedido: pedido.id })
-      if (ok === false) alert('Não deu pra aceitar — ou não é a sua vez, ou outro motoqueiro pegou primeiro.')
       await Promise.all([carregar(), carregarFila()])
+      if (ok === false) { alert('Não deu pra aceitar — ou não é a sua vez, ou outro motoqueiro pegou primeiro.'); return }
+      setAba('minhas') // mostra na aba "Aceitas"
       return
     }
     // Pool livre (comportamento padrão): otimista, o reload corrige se outro pegou.
     setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, entregador_id: user.id } : p))
-    await supabase.from('pedidos_delivery').update({ entregador_id: user.id }).eq('id', pedido.id).is('entregador_id', null)
-    carregar()
+    const { data } = await supabase.from('pedidos_delivery')
+      .update({ entregador_id: user.id }).eq('id', pedido.id).is('entregador_id', null).select('id')
+    await carregar()
+    if (data && data.length) setAba('minhas')
+    else alert('Não deu pra aceitar — outro motoqueiro pode ter pego primeiro. Atualize a lista.')
   }
 
   async function sairParaEntrega(pedido) {
