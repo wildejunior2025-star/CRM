@@ -186,15 +186,17 @@ export default function Produtos() {
     setEmbalagens(data ?? [])
   }
 
-  const loadProdutos = useCallback(async (busca = '', categ = '', pg = 0) => {
+  const loadProdutos = useCallback(async (busca = '', categ = '') => {
     setLoading(true)
     setError(null)
+    // Carrega tudo (até 1000) e a paginação é feita no cliente, seguindo a ORDEM
+    // das categorias (Quentinhas, Janta, Lanches, Tapioca...). Assim a busca do
+    // banco (alfabética) não separa mais uma categoria entre páginas diferentes.
     let query = supabase
       .from('produtos')
       .select('*', { count: 'exact' })
-      .order('categoria', { ascending: true })
       .order('nome', { ascending: true })
-      .range(pg * PAGE_SIZE, pg * PAGE_SIZE + PAGE_SIZE - 1)
+      .limit(1000)
     if (busca.trim()) query = query.ilike('nome', `%${busca.trim()}%`)
     if (categ) query = query.eq('categoria', categ)
     const { data, error, count } = await query
@@ -241,22 +243,22 @@ export default function Produtos() {
     setSearch(val)
     setPage(0)
     clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => loadProdutos(val, categoriaFiltro, 0), 400)
+    debounceRef.current = setTimeout(() => loadProdutos(val, categoriaFiltro), 400)
   }
 
   function handleCategoria(val) {
     setCategoriaFiltro(val)
     setPage(0)
-    loadProdutos(search, val, 0)
+    loadProdutos(search, val)
   }
 
   function irParaPagina(pg) {
+    // Paginação no cliente: só troca a página, sem recarregar do banco.
     setPage(pg)
-    loadProdutos(search, categoriaFiltro, pg)
   }
 
   useEffect(() => {
-    loadProdutos('', '', 0)
+    loadProdutos('', '')
     loadCategorias()
     loadEmbalagens()
   }, [loadProdutos])
@@ -416,17 +418,17 @@ export default function Produtos() {
 
     setSaving(false)
     setShowModal(false)
-    loadProdutos(search, categoriaFiltro, page)
+    loadProdutos(search, categoriaFiltro)
   }
 
   async function handleDelete(id) {
     if (!confirm('Excluir este produto?')) return
     const { error } = await supabase.from('produtos').delete().eq('id', id)
     if (error) setError(error.message)
-    else loadProdutos(search, categoriaFiltro, page)
+    else loadProdutos(search, categoriaFiltro)
   }
 
-  const totalPaginas = Math.ceil(total / PAGE_SIZE)
+  const totalPaginas = Math.ceil(produtosOrdenados.length / PAGE_SIZE)
 
   // Ordena os produtos exibidos seguindo a ordem personalizada das categorias
   const catOrdem = Object.fromEntries(categorias.map(c => [c.nome, c.ordem ?? 999]))
@@ -436,6 +438,8 @@ export default function Produtos() {
     if (oa !== ob) return oa - ob
     return (a.nome ?? '').localeCompare(b.nome ?? '')
   })
+  // Paginação client-side sobre a lista JÁ ordenada pelas categorias
+  const produtosPagina = produtosOrdenados.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
 
   return (
     <div>
@@ -527,8 +531,8 @@ export default function Produtos() {
               </tr>
             </thead>
             <tbody>
-              {produtosOrdenados.map((p, idx) => {
-                const catAnterior = idx === 0 ? null : produtosOrdenados[idx - 1].categoria
+              {produtosPagina.map((p, idx) => {
+                const catAnterior = idx === 0 ? null : produtosPagina[idx - 1].categoria
                 const mudouCategoria = p.categoria !== catAnterior
                 return (
                   <React.Fragment key={p.id}>
@@ -709,7 +713,7 @@ export default function Produtos() {
             ← Anterior
           </button>
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-            {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} de {total} produtos
+            {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, produtosOrdenados.length)} de {produtosOrdenados.length} produtos
           </span>
           <button className="btn btn-secondary btn-sm" disabled={page + 1 >= totalPaginas} onClick={() => irParaPagina(page + 1)}>
             Próximo →
