@@ -2366,7 +2366,9 @@ function pedidoAtrasado(pedido) {
 function ModalCodigoRetirada({ pedido, onOk, onCancelar }) {
   const [digitos, setDigitos] = useState(['', '', '', ''])
   const [erro, setErro] = useState(null)
+  const [validando, setValidando] = useState(false)
   const refs = useRef([])
+  const ehIfood = pedido.origem === 'ifood'
   useEffect(() => { const t = setTimeout(() => refs.current[0]?.focus(), 60); return () => clearTimeout(t) }, [])
   function change(i, v) {
     const d = v.replace(/\D/g, '').slice(-1)
@@ -2378,8 +2380,29 @@ function ModalCodigoRetirada({ pedido, onOk, onCancelar }) {
       const n = [...digitos]; n[i - 1] = ''; setDigitos(n); refs.current[i - 1]?.focus()
     }
   }
-  function confirmar() {
+  async function confirmar() {
     const codigo = digitos.join('')
+    // iFood: valida o código NA API do iFood (verifyDeliveryCode) — igual ao motoboy
+    // na entrega. Se o iFood aceitar, ele conclui a retirada e a gente marca entregue.
+    if (ehIfood) {
+      setValidando(true); setErro(null)
+      try {
+        const { data, error } = await supabase.functions.invoke('ifood-integration', {
+          body: { acao: 'verify_delivery_code', pedido_id: pedido.id, codigo },
+        })
+        if (error || !data?.valid) {
+          setErro('Código do iFood inválido. Confira com o cliente.')
+          setDigitos(['', '', '', '']); refs.current[0]?.focus(); return
+        }
+        onOk()
+      } catch {
+        setErro('Erro ao validar no iFood. Tente de novo.')
+      } finally {
+        setValidando(false)
+      }
+      return
+    }
+    // Nossa loja: compara com o código do pedido
     if (codigo !== String(pedido.codigo_entrega ?? '').trim()) {
       setErro('Código incorreto. Confira com o cliente.')
       setDigitos(['', '', '', '']); refs.current[0]?.focus(); return
@@ -2391,7 +2414,9 @@ function ModalCodigoRetirada({ pedido, onOk, onCancelar }) {
       <div onClick={e => e.stopPropagation()} className="pp-modal" style={{ width: 'min(360px, 94vw)', padding: 22, textAlign: 'center' }}>
         <h3 style={{ margin: '0 0 4px' }}>Confirmar retirada</h3>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 16px' }}>
-          Pedido #{pedido.numero_pedido} · peça o <strong>código de retirada</strong> ao cliente:
+          Pedido #{pedido.numero_pedido} · {ehIfood
+            ? <>peça os <strong>4 últimos dígitos do telefone</strong> do cliente:</>
+            : <>peça o <strong>código de retirada</strong> ao cliente:</>}
         </p>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center', margin: '0 0 12px' }}>
           {[0, 1, 2, 3].map(i => (
@@ -2405,8 +2430,8 @@ function ModalCodigoRetirada({ pedido, onOk, onCancelar }) {
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" className="pp-btn pp-btn-recusar" onClick={onCancelar} style={{ flex: '0 0 auto' }}>Cancelar</button>
           <button type="button" className="pp-btn pp-btn-avancar" onClick={confirmar}
-            disabled={digitos.some(d => d === '')} style={{ flex: 1 }}>
-            Confirmar retirada
+            disabled={digitos.some(d => d === '') || validando} style={{ flex: 1 }}>
+            {validando ? 'Validando no iFood...' : 'Confirmar retirada'}
           </button>
         </div>
       </div>
@@ -4087,7 +4112,7 @@ export default function PainelPedidos() {
       {/* ── Gaveta lateral direita ── */}
       {painelDireito && (
         <aside style={{
-          position: 'fixed', top: 60, right: 56, bottom: 0, width: 'min(340px, 82vw)', zIndex: 39,
+          position: 'fixed', top: 60, right: 56, bottom: 0, width: 'min(480px, 94vw)', zIndex: 39,
           background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
           boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowY: 'auto', padding: 16,
         }}>
@@ -4392,11 +4417,11 @@ export default function PainelPedidos() {
                           padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                           opacity: pausado ? 0.6 : 1,
                         }}>
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', lineHeight: 1.25 }}>
                               {prod.nome}
                             </div>
-                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                               {fmt(prod.preco_venda)}{prod.categoria ? ` · ${prod.categoria}` : ''}
                               {pausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
                             </div>

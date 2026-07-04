@@ -557,7 +557,10 @@ async function runStatus(sb: any, pedidoId: string, novoStatus: string) {
   } else if (novoStatus === "saiu_entrega") {
     acaoIfood = { path: `orders/${orderId}/dispatch` }
   } else if (novoStatus === "entregue" && ehRetirada) {
-    acaoIfood = { path: `orders/${orderId}/readyToPickup` }
+    // Retirada: a CONCLUSÃO no iFood é feita pelo verifyDeliveryCode (código do
+    // cliente) no momento da confirmação. Marcar 'entregue' aqui NÃO deve reenviar
+    // nada ao iFood (senão faria readyToPickup num pedido já concluído).
+    return { ok: true, skip: "retirada concluída via verifyDeliveryCode" }
   } else if (novoStatus === "cancelado") {
     // Consulta os motivos de cancelamento válidos pra ESTE pedido e usa o
     // primeiro disponível (cada pedido aceita códigos diferentes conforme o
