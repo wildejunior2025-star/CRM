@@ -4616,7 +4616,7 @@ export default function PainelPedidos() {
                 <div key={p.id} style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '9px 11px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
-                    <strong style={{ fontSize: 13, color: tag === 'rota' ? '#7c3aed' : '#16a34a' }}>{fmt(p.total)}</strong>
+                    <strong style={{ fontSize: 13, color: tag === 'rota' ? '#7c3aed' : '#16a34a' }} title="Taxa de entrega">{fmt(p.taxa_entrega ?? 0)}</strong>
                   </div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
                     {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
