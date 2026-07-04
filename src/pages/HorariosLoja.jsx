@@ -29,6 +29,8 @@ export default function HorariosLoja() {
   const [horarios, setHorarios] = useState(horariosVazios)
   const [salvando, setSalvando] = useState(false)
   const [msg, setMsg] = useState(null)
+  const [copiaDe, setCopiaDe] = useState(null)          // idx do dia que está sendo copiado (ou null)
+  const [copiaSel, setCopiaSel] = useState(() => new Set())
 
   useEffect(() => {
     if (!profile?.empresa_id) return
@@ -61,11 +63,20 @@ export default function HorariosLoja() {
   function setPeriodoCampo(idx, pi, campo, val) {
     setHorarios(hs => hs.map((d, i) => (i === idx ? { ...d, periodos: d.periodos.map((p, j) => (j === pi ? { ...p, [campo]: val } : p)) } : d)))
   }
-  function copiarParaTodos(idx) {
+  function toggleCopiaDia(j) {
+    setCopiaSel(s => { const n = new Set(s); n.has(j) ? n.delete(j) : n.add(j); return n })
+  }
+  function copiarParaDias(sourceIdx, destIdxs) {
     setHorarios(hs => {
-      const base = hs[idx]
-      return hs.map(() => ({ aberto: base.aberto, periodos: base.periodos.map(p => ({ ...p })) }))
+      const base = hs[sourceIdx]
+      return hs.map((d, i) => (destIdxs.includes(i)
+        ? { aberto: base.aberto, periodos: base.periodos.map(p => ({ ...p })) }
+        : d))
     })
+  }
+  function abrirCopia(idx) {
+    setCopiaDe(prev => (prev === idx ? null : idx))
+    setCopiaSel(new Set())
   }
 
   async function handleSalvar() {
@@ -118,8 +129,29 @@ export default function HorariosLoja() {
                   ))}
                   <div style={{ display: 'flex', gap: 10, marginTop: 2, flexWrap: 'wrap' }}>
                     <button type="button" className="btn btn-secondary btn-sm" onClick={() => addPeriodo(idx)} style={{ padding: '4px 10px' }}>+ Período</button>
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => copiarParaTodos(idx)} style={{ padding: '4px 10px' }} title="Aplica este dia a todos os dias da semana">⧉ Copiar p/ todos</button>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => abrirCopia(idx)} style={{ padding: '4px 10px' }} title="Copiar este horário para outros dias">⧉ Copiar para outros dias</button>
                   </div>
+
+                  {copiaDe === idx && (
+                    <div style={{ marginTop: 8, padding: 12, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg)' }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Copiar o horário de <strong>{DIAS_SEMANA[idx]}</strong> para:</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 12 }}>
+                        {DIAS_SEMANA.map((nome, j) => (j === idx ? null : (
+                          <label key={j} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                            <input type="checkbox" checked={copiaSel.has(j)} onChange={() => toggleCopiaDia(j)} />
+                            {nome.replace('-Feira', '')}
+                          </label>
+                        )))}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button type="button" className="btn btn-primary btn-sm" disabled={copiaSel.size === 0}
+                          onClick={() => { copiarParaDias(idx, [...copiaSel]); setCopiaDe(null) }} style={{ padding: '4px 12px' }}>
+                          Copiar{copiaSel.size > 0 ? ` (${copiaSel.size})` : ''}
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setCopiaDe(null)} style={{ padding: '4px 12px' }}>Cancelar</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

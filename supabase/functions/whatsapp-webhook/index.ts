@@ -909,7 +909,7 @@ serve(async (req) => {
 
     const configRes = await supabase
       .from("whatsapp_config")
-      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, taxas_entrega_km, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, cidade, estado, cep, horario_abertura, horario_fechamento, indicador_profile_id, mp_conectado)")
+      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, taxas_entrega_km, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, indicador_profile_id, mp_conectado)")
       .eq("instance_name", instanceName)
       .eq("ativo", true)
       .single()
@@ -958,15 +958,43 @@ serve(async (req) => {
     ])
     if (!creditRes.data || creditRes.data.whatsapp_creditos <= 0) return new Response("ok", { headers: corsHeaders })
 
-    // Verifica horário de funcionamento — responde "fechado" e retorna sem chamar Claude
-    if (empresa.horario_abertura && empresa.horario_fechamento) {
-      const horaBR     = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Fortaleza" }))
+    // Verifica horário de funcionamento — responde "fechado" e retorna sem chamar Claude.
+    // Fonte: grade semanal nova (horarios_funcionamento). Sem grade, cai no horário único legado.
+    {
+      const DIAS_SEM = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"]
+      const toMinH = (t: string) => { const [h, m] = String(t).slice(0, 5).split(":").map(Number); return (h || 0) * 60 + (m || 0) }
+      const horaBR      = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Fortaleza" }))
       const minutoAtual = horaBR.getHours() * 60 + horaBR.getMinutes()
-      const [aH, aM]  = empresa.horario_abertura.slice(0, 5).split(":").map(Number)
-      const [fH, fM]  = empresa.horario_fechamento.slice(0, 5).split(":").map(Number)
-      const minutoAbre  = aH * 60 + aM
-      const minutoFecha = fH * 60 + fM
-      const lojaFechada = minutoAtual < minutoAbre || minutoAtual >= minutoFecha
+      const dow         = horaBR.getDay()
+
+      const grade = Array.isArray(empresa.horarios_funcionamento) && empresa.horarios_funcionamento.length === 7
+        ? empresa.horarios_funcionamento : null
+
+      let lojaFechada = false
+      let horarioTexto = ""
+
+      if (grade) {
+        const dia = grade[dow] as any
+        const periodosHoje = ((dia?.aberto ? (dia.periodos ?? []) : []) as any[]).filter(p => p?.i && p?.f)
+        lojaFechada = !periodosHoje.some(p => {
+          const a = toMinH(p.i), b = toMinH(p.f)
+          return a <= b ? (minutoAtual >= a && minutoAtual < b) : (minutoAtual >= a || minutoAtual < b)
+        })
+        if (periodosHoje.length) {
+          horarioTexto = "Hoje atendemos das " + periodosHoje.map(p => `*${p.i}* às *${p.f}*`).join(" e ")
+        } else {
+          for (let k = 1; k <= 7; k++) {
+            const nd = grade[(dow + k) % 7] as any
+            const ps = ((nd?.aberto ? (nd.periodos ?? []) : []) as any[]).filter(p => p?.i && p?.f)
+            if (ps.length) { horarioTexto = `Voltamos ${DIAS_SEM[(dow + k) % 7]} às *${ps[0].i}*`; break }
+          }
+        }
+      } else if (empresa.horario_abertura && empresa.horario_fechamento) {
+        const [aH, aM] = empresa.horario_abertura.slice(0, 5).split(":").map(Number)
+        const [fH, fM] = empresa.horario_fechamento.slice(0, 5).split(":").map(Number)
+        lojaFechada = minutoAtual < (aH * 60 + aM) || minutoAtual >= (fH * 60 + fM)
+        horarioTexto = `Horário de atendimento: *${empresa.horario_abertura.slice(0, 5)}* às *${empresa.horario_fechamento.slice(0, 5)}*`
+      }
 
       if (lojaFechada) {
         // Só avisa uma vez — se a última mensagem do bot já foi "fechado", ignora
@@ -979,9 +1007,7 @@ serve(async (req) => {
 
         const jaAvisou = ultimaBotMsg?.content?.includes("Estamos fechados")
         if (!jaAvisou) {
-          const abertura = empresa.horario_abertura.slice(0, 5)
-          const fechamento = empresa.horario_fechamento.slice(0, 5)
-          const msgFechado = `😴 Estamos fechados no momento!\n\nHorário de atendimento: *${abertura}* às *${fechamento}*.\n\nMas você já pode ver nosso cardápio e se planejar! 😊\n👉 ${catalogoUrl}`
+          const msgFechado = `😴 Estamos fechados no momento!\n\n${horarioTexto || "Confira nosso cardápio"}.\n\nMas você já pode ver nosso cardápio e se planejar! 😊\n👉 ${catalogoUrl}`
           await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: msgFechado })
           if (!isTest) {
             await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
