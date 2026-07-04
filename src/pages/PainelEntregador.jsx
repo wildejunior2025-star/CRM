@@ -461,7 +461,7 @@ export default function PainelEntregador() {
     setHistLoading(true)
     supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, origem, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
       .eq('entregador_id', user.id)
       .eq('status', 'entregue')
       .order('created_at', { ascending: false })
@@ -682,12 +682,16 @@ export default function PainelEntregador() {
                       </div>
                     </div>
 
-                    {profile?.entregador_desconto_ativo && Number(profile?.entregador_desconto_valor) > 0 && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(245,158,11,.12)', border: '1.5px solid #f59e0b', borderRadius: 12, padding: '10px 14px', fontSize: 13, color: 'var(--text-muted)' }}>
-                        <span>Desconto: {historico.length} × {fmt(profile.entregador_desconto_valor)}</span>
-                        <span>A acertar com a loja: <strong style={{ color: '#f59e0b' }}>{fmt(historico.length * Number(profile.entregador_desconto_valor))}</strong></span>
-                      </div>
-                    )}
+                    {profile?.entregador_desconto_ativo && Number(profile?.entregador_desconto_valor) > 0 && (() => {
+                      const nIfood = base.filter(p => p.origem === 'ifood').length
+                      const valor = Number(profile.entregador_desconto_valor)
+                      return (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(245,158,11,.12)', border: '1.5px solid #f59e0b', borderRadius: 12, padding: '10px 14px', fontSize: 13, color: 'var(--text-muted)' }}>
+                          <span>Desconto (só iFood): {nIfood} × {fmt(valor)}</span>
+                          <span>A acertar: <strong style={{ color: '#f59e0b' }}>{fmt(nIfood * valor)}</strong></span>
+                        </div>
+                      )
+                    })()}
 
                     <div style={{ fontSize: 14, fontWeight: 800, color: '#f59e0b', marginTop: 4 }}>A receber</div>
                     {pend.length === 0

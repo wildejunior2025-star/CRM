@@ -2920,7 +2920,7 @@ export default function PainelPedidos() {
     if (!empresa) return
     const { data } = await supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, created_at, entregador_id, endereco_bairro, endereco_cidade, entregador_pago, entregador_pago_em')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, created_at, entregador_id, origem, endereco_bairro, endereco_cidade, entregador_pago, entregador_pago_em')
       .eq('empresa_id', empresa.id)
       .eq('status', 'entregue')
       .not('entregador_id', 'is', null)
@@ -3236,7 +3236,7 @@ export default function PainelPedidos() {
     if (!empresa) return
     supabase
       .from('profiles')
-      .select('id, nome')
+      .select('id, nome, entregador_desconto_ativo, entregador_desconto_valor')
       .eq('empresa_id', empresa.id)
       .eq('perfil', 'entregador')
       .eq('ativo', true)
@@ -4686,6 +4686,18 @@ export default function PainelPedidos() {
                       </div>
                     ))}
                   </div>
+
+                  {/* Desconto que a loja fica por corrida — SÓ nas entregas do iFood */}
+                  {ent?.entregador_desconto_ativo && Number(ent?.entregador_desconto_valor) > 0 && (() => {
+                    const nIfood = concl.filter(p => p.origem === 'ifood').length
+                    const valor = Number(ent.entregador_desconto_valor)
+                    return (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(245,158,11,.12)', border: '1.5px solid #f59e0b', borderRadius: 10, padding: '9px 12px', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                        <span>💰 Desconto da loja (só iFood): {nIfood} × {fmt(valor)}</span>
+                        <strong style={{ color: '#f59e0b', fontSize: 14 }}>{fmt(nIfood * valor)}</strong>
+                      </div>
+                    )
+                  })()}
 
                   {rota.length > 0 && (
                     <>
