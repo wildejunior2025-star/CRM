@@ -30,6 +30,9 @@ export default function Clientes() {
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
   const [mostrarInativos, setMostrarInativos] = useState(false)
+  // Modal de confirmação de exclusão/arquivamento (substitui o confirm() do navegador)
+  const [confirmar, setConfirmar] = useState(null) // { id, nome, fase: 'excluir' | 'arquivar' }
+  const [processandoExcluir, setProcessandoExcluir] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(emptyForm)
@@ -141,30 +144,35 @@ export default function Clientes() {
     loadClientes()
   }
 
-  async function handleDelete(id) {
-    if (!confirm('Excluir este cliente?')) return
+  // Abre o modal bonito de confirmação (no lugar do confirm() feio do navegador)
+  function pedirExcluir(cliente) {
     setError(null)
+    setConfirmar({ id: cliente.id, nome: cliente.nome, fase: 'excluir' })
+  }
+
+  // Tenta excluir de fato; se o banco bloquear por ter vendas, muda o modal pra "arquivar".
+  async function executarExcluir() {
+    if (!confirmar) return
+    const id = confirmar.id
+    setProcessandoExcluir(true); setError(null)
     // Remove referências no carrinho antes de excluir o cliente
     await supabase.from('whatsapp_carrinho').update({ cliente_id: null }).eq('cliente_id', id)
     const { error } = await supabase.from('clientes').delete().eq('id', id)
-    if (!error) { loadClientes(); return }
-
-    // Cliente com vendas/pagamentos: o banco bloqueia a exclusão pra não apagar
-    // o histórico financeiro. Nesse caso, oferece ARQUIVAR (some da lista, mantém tudo).
+    setProcessandoExcluir(false)
+    if (!error) { setConfirmar(null); loadClientes(); return }
+    // Cliente com vendas/pagamentos → não dá pra apagar sem perder o histórico.
     const temHistorico = /foreign key|constraint|violates/i.test(error.message || '')
-    if (temHistorico) {
-      const ok = confirm(
-        'Esse cliente já tem vendas registradas, então não dá pra apagar de vez ' +
-        '(apagaria o histórico de vendas).\n\nDeseja ARQUIVAR? Ele sai da lista, mas ' +
-        'as vendas continuam guardadas. (Marque "Mostrar arquivados" pra vê-lo de novo.)'
-      )
-      if (!ok) return
-      const { error: e2 } = await supabase.from('clientes').update({ ativo: false }).eq('id', id)
-      if (e2) { setError(e2.message); return }
-      loadClientes()
-      return
-    }
-    setError(error.message)
+    if (temHistorico) { setConfirmar({ ...confirmar, fase: 'arquivar' }); return }
+    setError(error.message); setConfirmar(null)
+  }
+
+  async function executarArquivar() {
+    if (!confirmar) return
+    setProcessandoExcluir(true); setError(null)
+    const { error } = await supabase.from('clientes').update({ ativo: false }).eq('id', confirmar.id)
+    setProcessandoExcluir(false)
+    if (error) { setError(error.message); setConfirmar(null); return }
+    setConfirmar(null); loadClientes()
   }
 
   const filtered = clientes.filter((c) => {
@@ -267,7 +275,7 @@ export default function Clientes() {
                     </button>{' '}
                     <button
                       className="btn btn-danger btn-sm"
-                      onClick={() => handleDelete(c.id)}
+                      onClick={() => pedirExcluir(c)}
                     >
                       Excluir
                     </button>
@@ -497,6 +505,43 @@ export default function Clientes() {
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setShowTiposModal(false)}>Fechar</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmação de excluir / arquivar cliente (modal bonito no lugar do confirm feio) */}
+      {confirmar && (
+        <div className="modal-overlay" onClick={() => !processandoExcluir && setConfirmar(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            {confirmar.fase === 'excluir' ? (
+              <>
+                <h2 style={{ marginTop: 0 }}>Excluir cliente</h2>
+                <p style={{ color: 'var(--text-muted)', fontSize: 14, lineHeight: 1.5 }}>
+                  Tem certeza que quer excluir <strong style={{ color: 'var(--text)' }}>{confirmar.nome || 'este cliente'}</strong>? Essa ação não pode ser desfeita.
+                </p>
+                <div className="modal-actions">
+                  <button className="btn btn-secondary" onClick={() => setConfirmar(null)} disabled={processandoExcluir}>Cancelar</button>
+                  <button className="btn btn-danger" onClick={executarExcluir} disabled={processandoExcluir}>
+                    {processandoExcluir ? 'Excluindo...' : 'Excluir'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 style={{ marginTop: 0 }}>Cliente com vendas</h2>
+                <p style={{ color: 'var(--text-muted)', fontSize: 14, lineHeight: 1.5 }}>
+                  <strong style={{ color: 'var(--text)' }}>{confirmar.nome || 'Este cliente'}</strong> já tem vendas registradas, então não dá pra apagar de vez (apagaria o histórico de vendas).
+                  <br /><br />
+                  Deseja <strong style={{ color: 'var(--text)' }}>arquivar</strong>? Ele sai da lista, mas as vendas continuam guardadas. (Marque “Mostrar arquivados” pra vê-lo de novo.)
+                </p>
+                <div className="modal-actions">
+                  <button className="btn btn-secondary" onClick={() => setConfirmar(null)} disabled={processandoExcluir}>Cancelar</button>
+                  <button className="btn btn-primary" onClick={executarArquivar} disabled={processandoExcluir}>
+                    {processandoExcluir ? 'Arquivando...' : 'Arquivar cliente'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
