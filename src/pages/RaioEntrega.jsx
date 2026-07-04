@@ -39,8 +39,6 @@ export default function RaioEntrega() {
   const [tempoMin,        setTempoMin]        = useState(30)
   const [tempoMax,        setTempoMax]        = useState(60)
   const [categoria,       setCategoria]       = useState('')
-  const [horarioAbertura, setHorarioAbertura] = useState('')
-  const [horarioFechamento, setHorarioFechamento] = useState('')
   const [raio, setRaio] = useState(10)
 
   // UI
@@ -53,7 +51,7 @@ export default function RaioEntrega() {
     if (!profile?.empresa_id) return
     supabase
       .from('empresas')
-      .select('id, aceita_delivery, taxa_entrega, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, cep, endereco, numero, bairro, cidade, estado, categoria_delivery, horario_abertura, horario_fechamento, raio_entrega_km, latitude, longitude')
+      .select('id, aceita_delivery, taxa_entrega, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, cep, endereco, numero, bairro, cidade, estado, categoria_delivery, raio_entrega_km, latitude, longitude')
       .eq('id', profile.empresa_id)
       .single()
       .then(({ data }) => {
@@ -71,8 +69,6 @@ export default function RaioEntrega() {
         setCidade(data.cidade ?? '')
         setEstado(data.estado ?? '')
         setCategoria(data.categoria_delivery ?? '')
-        setHorarioAbertura(data.horario_abertura ?? '')
-        setHorarioFechamento(data.horario_fechamento ?? '')
         setRaio(data.raio_entrega_km ?? 10)
         const faixas = Array.isArray(data.taxas_entrega_km) ? data.taxas_entrega_km : []
         setTaxasKm(faixas)
@@ -227,8 +223,6 @@ export default function RaioEntrega() {
       cidade:               cidade || null,
       estado:               estado || null,
       categoria_delivery:   categoria || null,
-      horario_abertura:     horarioAbertura || null,
-      horario_fechamento:   horarioFechamento || null,
       raio_entrega_km:      parseFloat(raio) || 10,
       latitude:             latitude || null,
       longitude:            longitude || null,
@@ -560,16 +554,6 @@ export default function RaioEntrega() {
                     <option value="roupas">Roupas</option>
                     <option value="geral">Geral</option>
                   </select>
-                </div>
-
-                {/* Horários */}
-                <div className="form-field">
-                  <label>Horário de abertura</label>
-                  <input type="time" value={horarioAbertura} onChange={e => setHorarioAbertura(e.target.value)} />
-                </div>
-                <div className="form-field">
-                  <label>Horário de fechamento</label>
-                  <input type="time" value={horarioFechamento} onChange={e => setHorarioFechamento(e.target.value)} />
                 </div>
 
               </div>
