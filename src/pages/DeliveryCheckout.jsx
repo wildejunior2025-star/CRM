@@ -109,8 +109,26 @@ function calcTaxaKm(faixas, distKm) {
   const faixa = arr.find(f => distKm <= Number(f.km)) ?? arr[arr.length - 1]
   return Number(faixa.taxa) || 0
 }
-async function geocodeEndereco(q) {
+async function geocodeEndereco({ rua, numero, bairro, cidade, estado, cep } = {}) {
+  const uf = estado || ''
+  const cepLimpo = String(cep || '').replace(/\D/g, '')
+  // 1) Busca ESTRUTURADA com o CEP — bem mais precisa que a busca por texto
+  //    (ajuda em endereços que a busca livre erra, tipo em São Gonçalo/RN).
+  if (cepLimpo.length === 8) {
+    try {
+      const params = new URLSearchParams({
+        street: [numero, rua].filter(Boolean).join(' '),
+        city: cidade || '', state: uf, postalcode: cepLimpo,
+        country: 'Brazil', format: 'json', limit: '1',
+      })
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, { headers: { 'User-Agent': 'CRM-FWC/1.0' } })
+      const d = await res.json()
+      if (d?.[0]) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
+    } catch { /* cai no fallback */ }
+  }
+  // 2) Fallback: busca livre por texto (com o CEP junto quando tiver)
   try {
+    const q = [rua, numero, bairro, cidade, uf, cepLimpo].filter(s => s && String(s).trim()).join(', ')
     const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Brasil')}&format=json&limit=1`, { headers: { 'User-Agent': 'CRM-FWC/1.0' } })
     const d = await res.json()
     if (d?.[0]) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
@@ -366,13 +384,12 @@ export default function DeliveryCheckout() {
     if (tipo !== 'entrega' || pinManualRef.current || !state?.empresaId) return
     const rua = form.rua.trim(), cidade = form.cidade
     if (!rua || !cidade) return
-    const q = [rua, form.numero, form.bairro, cidade, form.estado].filter(s => s && String(s).trim()).join(', ')
     const t = setTimeout(async () => {
-      const c = await geocodeEndereco(q)
+      const c = await geocodeEndereco({ rua, numero: form.numero, bairro: form.bairro, cidade, estado: form.estado, cep: form.cep })
       if (c && !pinManualRef.current) setCoordCliente(c)
     }, 900)
     return () => clearTimeout(t)
-  }, [form.rua, form.numero, form.bairro, form.cidade, form.estado, tipo, state])
+  }, [form.rua, form.numero, form.bairro, form.cidade, form.estado, form.cep, tipo, state])
 
   if (!state?.itens?.length) {
     return <Navigate to="/lojas" replace />
