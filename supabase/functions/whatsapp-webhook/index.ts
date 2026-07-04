@@ -354,14 +354,14 @@ async function handleBuscarCep(
     await salvarEndereco({ endereco_rua: logradouro, endereco_numero: null, endereco_bairro: bairro, endereco_cidade: localidade, endereco_estado: uf || null })
 
     const linhas = [
-      `✅ Encontrei o endereço! Confira:`,
+      `✅ Encontrei seu endereço:`,
       ``,
       `📍 *Rua:* ${logradouro}`,
       bairro     ? `🏘️ *Bairro:* ${bairro}`    : null,
       localidade ? `🏙️ *Cidade:* ${localidade}` : null,
       uf         ? `🗺️ *Estado:* ${uf}`         : null,
       ``,
-      `Está correto? 😊`,
+      `Qual o *número* da sua casa? 😊`,
     ].filter(l => l !== null).join("\n")
 
     return { resposta: linhas }
