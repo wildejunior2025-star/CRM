@@ -1003,7 +1003,7 @@ serve(async (req) => {
         .order("created_at", { ascending: false })
         .limit(30),
       supabase.from("produtos")
-        .select("id, nome, preco_venda, embalagem")
+        .select("id, nome, preco_venda, embalagem, categoria")
         .eq("empresa_id", empresaId)
         .eq("ativo", true)
         .order("nome")
@@ -1032,7 +1032,25 @@ serve(async (req) => {
       acc.push({ role: m.role, content: m.content })
       return acc
     }, [])
-    const produtos    = produtosRes.data ?? []
+    // Remove da listagem os produtos cuja categoria está FORA do horário de venda
+    // agora (horário de Brasília). Categoria sem horário = sempre disponível.
+    // Só filtra o cardápio — não muda mais nada do fluxo do bot. Como toda a
+    // montagem (lista + complementos + preços) usa `produtos`, o filtro cobre tudo.
+    const { data: catsHorario } = await supabase
+      .from("categorias")
+      .select("nome, hora_inicio, hora_fim")
+      .eq("empresa_id", empresaId)
+    const nowBRT = new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit" })
+    const toMinBRT = (t: string) => { const [h, m] = String(t).slice(0, 5).split(":").map(Number); return h * 60 + m }
+    const nowMinBRT = toMinBRT(nowBRT)
+    const catForaHorario = new Set<string>()
+    for (const c of ((catsHorario ?? []) as any[])) {
+      if (!c.hora_inicio || !c.hora_fim) continue
+      const a = toMinBRT(c.hora_inicio), b = toMinBRT(c.hora_fim)
+      const disp = a <= b ? (nowMinBRT >= a && nowMinBRT < b) : (nowMinBRT >= a || nowMinBRT < b)
+      if (!disp) catForaHorario.add(c.nome)
+    }
+    const produtos = ((produtosRes.data ?? []) as any[]).filter((p: any) => !p.categoria || !catForaHorario.has(p.categoria))
 
     // ── Complementos ("monte sua quentinha") — só dos produtos que têm grupos ──
     // Texto injetado no prompt para o bot listar categorias + máximo de cada.
