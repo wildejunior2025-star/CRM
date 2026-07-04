@@ -148,7 +148,15 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
       </div>
 
       <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>{pedido.cliente_nome || 'Cliente'}</div>
-      <div style={{ fontSize: 14, color: 'var(--text-muted)', margin: '4px 0 10px' }}>📍 {endereco}</div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, margin: '4px 0 10px' }}>
+        <div style={{ fontSize: 14, color: 'var(--text-muted)', flex: 1 }}>📍 {endereco}</div>
+        <a href={mapsUrl(pedido)} target="_blank" rel="noopener noreferrer"
+          title="Ver o ponto no mapa"
+          style={{ flexShrink: 0, fontSize: 12, fontWeight: 700, color: '#7c3aed', textDecoration: 'none',
+            background: 'rgba(124,58,237,.12)', border: '1px solid #7c3aed', borderRadius: 8, padding: '5px 10px', whiteSpace: 'nowrap' }}>
+          🗺️ Rota
+        </a>
+      </div>
 
 
       {/* Pagamento: deixa MUITO claro se já pagou ou se o motoqueiro precisa cobrar */}
@@ -186,7 +194,6 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
       {mine && (
         <>
           <div style={{ display: 'flex', gap: 8, marginBottom: isIfood && ifoodId ? 6 : 12 }}>
-            <a href={mapsUrl(pedido)} target="_blank" rel="noopener noreferrer" style={btnLink('#7c3aed')}>🗺️ Rota</a>
             {tel && <a href={telHref} style={btnLink('#0891b2')}>📞 {isIfood ? 'Ligar (iFood)' : 'Ligar'}</a>}
             {/* WhatsApp só pros pedidos que NÃO são do iFood (iFood não tem zap do cliente) */}
             {tel && !isIfood && <a href={`https://wa.me/${tel}`} target="_blank" rel="noopener noreferrer" style={btnLink('#25d366')}>💬 Zap</a>}
@@ -294,7 +301,7 @@ export default function PainelEntregador() {
   const { user, profile, empresa, logout } = useAuth()
   const [pedidos, setPedidos] = useState([])
   const [loading, setLoading] = useState(true)
-  const [aba, setAba] = useState('ativas') // 'ativas' | 'historico'
+  const [aba, setAba] = useState('disponiveis') // 'disponiveis' | 'minhas' | 'historico'
   const [historico, setHistorico] = useState([])
   const [histLoading, setHistLoading] = useState(false)
   const [periodoHist, setPeriodoHist] = useState('tudo') // filtro de data do histórico
@@ -554,12 +561,13 @@ export default function PainelEntregador() {
       {/* Abas */}
       <div style={{ maxWidth: 560, margin: '0 auto', padding: '14px 16px 0', display: 'flex', gap: 8 }}>
         {[
-          { id: 'ativas', label: 'Entregas' },
+          { id: 'disponiveis', label: `Disponíveis${disponiveis.length ? ` (${disponiveis.length})` : ''}` },
+          { id: 'minhas', label: `Aceitas${minhas.length ? ` (${minhas.length})` : ''}` },
           { id: 'historico', label: 'Histórico' },
         ].map(t => (
           <button key={t.id} type="button" onClick={() => setAba(t.id)}
             style={{
-              flex: 1, padding: '9px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 14,
+              flex: 1, padding: '9px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 13,
               border: `1.5px solid ${aba === t.id ? '#7c3aed' : 'var(--border, #2a2a3a)'}`,
               background: aba === t.id ? 'rgba(124,58,237,.15)' : 'transparent',
               color: aba === t.id ? '#a78bfa' : 'var(--text)',
@@ -570,47 +578,45 @@ export default function PainelEntregador() {
       </div>
 
       <main style={{ maxWidth: 560, margin: '0 auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {aba === 'ativas' ? (
+        {aba !== 'historico' ? (
           loading ? (
             <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>Carregando...</p>
-          ) : pedidos.length === 0 ? (
-            <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
-              <div style={{ fontSize: 40, marginBottom: 8 }}>🛵</div>
-              Nenhuma entrega no momento. Os pedidos prontos aparecem aqui.
-            </div>
+          ) : aba === 'minhas' ? (
+            /* ── Entregas que EU aceitei (seguir rota / dar saída / confirmar) ── */
+            minhas.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
+                <div style={{ fontSize: 40, marginBottom: 8 }}>🛵</div>
+                Você não aceitou nenhuma entrega ainda. Veja as prontas na aba <strong>Disponíveis</strong>.
+              </div>
+            ) : (
+              <>
+                {minhas.filter(p => enderecoTexto(p)).length >= 2 && (
+                  <a href={rotaMultiplaUrl(minhas.filter(p => enderecoTexto(p)))} target="_blank" rel="noopener noreferrer"
+                    style={{ ...btnPrimario('#7c3aed'), display: 'block', textAlign: 'center', textDecoration: 'none' }}>
+                    🗺️ Rota de todas ({minhas.filter(p => enderecoTexto(p)).length} paradas)
+                  </a>
+                )}
+                {minhas.map(p => (
+                  <CardEntrega key={p.id} pedido={p} mine
+                    onSair={sairParaEntrega} onConfirmar={confirmarEntrega}
+                    onConfirmarIfood={confirmarEntregaIfood} onDesistir={desistirEntrega} />
+                ))}
+              </>
+            )
           ) : (
-            <>
-              {minhas.length > 0 && (
-                <>
-                  <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '0 0 -4px' }}>Minhas ({minhas.length})</h2>
-                  {minhas.filter(p => enderecoTexto(p)).length >= 2 && (
-                    <a href={rotaMultiplaUrl(minhas.filter(p => enderecoTexto(p)))} target="_blank" rel="noopener noreferrer"
-                      style={{ ...btnPrimario('#7c3aed'), display: 'block', textAlign: 'center', textDecoration: 'none' }}>
-                      🗺️ Rota de todas ({minhas.filter(p => enderecoTexto(p)).length} paradas)
-                    </a>
-                  )}
-                  {minhas.map(p => (
-                    <CardEntrega key={p.id} pedido={p} mine
-                      onSair={sairParaEntrega} onConfirmar={confirmarEntrega}
-                      onConfirmarIfood={confirmarEntregaIfood} onDesistir={desistirEntrega} />
-                  ))}
-                </>
-              )}
-              {emAtividade && (
-                <>
-                  <h2 style={{ fontSize: 14, color: 'var(--text-muted)', margin: '8px 0 -4px' }}>
-                    Disponíveis ({disponiveis.length})
-                  </h2>
-                  {disponiveis.length === 0 ? (
-                    <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: 12 }}>
-                      Nenhum pedido pronto esperando. Aguarde a cozinha liberar.
-                    </p>
-                  ) : disponiveis.map(p => (
-                    <CardEntrega key={p.id} pedido={p} mine={false} onAceitar={podeAceitar ? aceitar : undefined} />
-                  ))}
-                </>
-              )}
-            </>
+            /* ── Disponíveis pra aceitar ── */
+            !emAtividade ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
+                Fique <strong>online</strong> para ver as entregas disponíveis.
+              </div>
+            ) : disponiveis.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
+                <div style={{ fontSize: 40, marginBottom: 8 }}>📭</div>
+                Nenhum pedido pronto esperando. Aguarde a cozinha liberar.
+              </div>
+            ) : disponiveis.map(p => (
+              <CardEntrega key={p.id} pedido={p} mine={false} onAceitar={podeAceitar ? aceitar : undefined} />
+            ))
           )
         ) : (
           /* ── Histórico de entregas concluídas ── */
