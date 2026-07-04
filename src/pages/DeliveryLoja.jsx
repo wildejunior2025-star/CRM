@@ -3,6 +3,25 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import './DeliveryLoja.css'
 
+// Loja dentro da grade semanal de funcionamento AGORA? (horário de Brasília).
+// Grade ausente/vazia = sem restrição de horário (mantém comportamento antigo).
+function dentroDaGradeAgora(horarios) {
+  if (!Array.isArray(horarios) || horarios.length !== 7) return true
+  const map = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  const diaAbrev = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Fortaleza', weekday: 'short' }).format(new Date())
+  const dow = map[diaAbrev] ?? new Date().getDay()
+  const dia = horarios[dow]
+  if (!dia?.aberto || !Array.isArray(dia.periodos) || dia.periodos.length === 0) return false
+  const hm = new Date().toLocaleTimeString('en-GB', { hour12: false, timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit' })
+  const toMin = t => { const [h, m] = String(t).slice(0, 5).split(':').map(Number); return (h || 0) * 60 + (m || 0) }
+  const now = toMin(hm)
+  return dia.periodos.some(p => {
+    if (!p?.i || !p?.f) return false
+    const a = toMin(p.i), b = toMin(p.f)
+    return a <= b ? (now >= a && now < b) : (now >= a || now < b)  // trata virada da madrugada
+  })
+}
+
 function IconArrowLeft() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -297,6 +316,9 @@ export default function DeliveryLoja() {
          (p.descricao ?? '').toLowerCase().includes(buscaTrim)))
     : null
 
+  // Loja aberta = pausa manual ligada (delivery_ativo) E dentro da grade semanal de horário.
+  const lojaAberta = !!loja?.delivery_ativo && dentroDaGradeAgora(loja?.horarios_funcionamento)
+
   // Define categoria ativa inicial
   useEffect(() => {
     if (todasCats.length > 0 && !catAtiva) setCatAtiva(todasCats[0])
@@ -408,8 +430,8 @@ export default function DeliveryLoja() {
           </div>
           <div className="dloja-store-info">
             <span className="dloja-store-nome">{loja.nome}</span>
-            <span className={`dloja-status-badge ${loja.delivery_ativo ? 'dloja-status--open' : 'dloja-status--closed'}`}>
-              {loja.delivery_ativo ? 'Aberto' : 'Fechado'}
+            <span className={`dloja-status-badge ${lojaAberta ? 'dloja-status--open' : 'dloja-status--closed'}`}>
+              {lojaAberta ? 'Aberto' : 'Fechado'}
             </span>
           </div>
           <button
@@ -484,7 +506,7 @@ export default function DeliveryLoja() {
       </nav>
       )}
 
-      {!loja.delivery_ativo && (
+      {!lojaAberta && (
         <div className="dloja-closed-banner">
           <strong>Loja fechada no momento</strong> — você pode ver o cardápio, mas não é possível fazer pedidos.
         </div>
@@ -506,7 +528,7 @@ export default function DeliveryLoja() {
                     key={p.id}
                     produto={p}
                     quantidade={qtdProduto(p.id)}
-                    lojaAberta={loja.delivery_ativo}
+                    lojaAberta={lojaAberta}
                     onAdd={() => (p.complementos?.length ? setOptProduto(p) : addOne(p))}
                     onRemove={() => removeOne(String(p.id))}
                   />
@@ -535,7 +557,7 @@ export default function DeliveryLoja() {
                       key={p.id}
                       produto={p}
                       quantidade={qtdProduto(p.id)}
-                      lojaAberta={loja.delivery_ativo}
+                      lojaAberta={lojaAberta}
                       onAdd={() => (p.complementos?.length ? setOptProduto(p) : addOne(p))}
                       onRemove={() => removeOne(String(p.id))}
                     />
@@ -553,7 +575,7 @@ export default function DeliveryLoja() {
                       key={p.id}
                       produto={p}
                       quantidade={qtdProduto(p.id)}
-                      lojaAberta={loja.delivery_ativo}
+                      lojaAberta={lojaAberta}
                       onAdd={() => (p.complementos?.length ? setOptProduto(p) : addOne(p))}
                       onRemove={() => removeOne(String(p.id))}
                     />
@@ -637,9 +659,9 @@ export default function DeliveryLoja() {
               <button
                 className="dloja-btn-finalizar"
                 onClick={handleFinalizar}
-                disabled={!loja.delivery_ativo}
+                disabled={!lojaAberta}
               >
-                {loja.delivery_ativo ? 'Finalizar pedido' : 'Loja fechada'}
+                {lojaAberta ? 'Finalizar pedido' : 'Loja fechada'}
               </button>
             </div>
           </aside>
