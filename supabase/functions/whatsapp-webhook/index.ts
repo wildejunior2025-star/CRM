@@ -909,7 +909,7 @@ serve(async (req) => {
 
     const configRes = await supabase
       .from("whatsapp_config")
-      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, taxas_entrega_km, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, cidade, estado, cep, horario_abertura, horario_fechamento, indicador_profile_id)")
+      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, taxas_entrega_km, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, cidade, estado, cep, horario_abertura, horario_fechamento, indicador_profile_id, mp_conectado)")
       .eq("instance_name", instanceName)
       .eq("ativo", true)
       .single()
@@ -923,6 +923,10 @@ serve(async (req) => {
     const empresaSlug    = empresa.slug ?? ""
     const taxaEntrega    = Number(empresa.taxa_entrega ?? 0)
     const aceitaDelivery      = empresa.aceita_delivery ?? false
+    // PIX no bot: só oferecido se a loja conectou o Mercado Pago dela (dinheiro cai na conta da loja,
+    // pedido só vai pro painel após pagamento confirmado). Loja sem MP conectado: nada muda, segue dinheiro/cartão.
+    const mpConectado         = empresa.mp_conectado === true
+    const pgtoOpcoes          = mpConectado ? "*dinheiro*, *cartão* ou *PIX*" : "*dinheiro* ou *cartão*"
     const iaInstrucoes        = (config.ia_instrucoes ?? "").trim()
     const adminPhone          = (config.admin_phone ?? "").replace(/\D/g, "")
     const indicadorProfileId  = empresa.indicador_profile_id ?? null
@@ -1173,7 +1177,7 @@ ${empresaHorario    ? `- Horário: ${empresaHorario}` : ""}
 ${empresa.chave_pix ? `- PIX: ${empresa.chave_pix} (${empresa.pix_nome ?? ""})` : ""}
 CATÁLOGO: ${catalogoUrl}
 ${aceitaDelivery ? `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)}${enderecoCliente ? " (já calculada pela distância do endereço do cliente)" : " (taxa base — pode mudar conforme a distância do endereço)"}` : "ENTREGA: somente retirada no local"}
-FORMAS DE PAGAMENTO: Dinheiro ou Cartão (PIX não disponível pelo WhatsApp)
+FORMAS DE PAGAMENTO: ${mpConectado ? "Dinheiro, Cartão ou PIX. Se o cliente escolher PIX, o sistema gera o QR Code e o código copia-e-cola automaticamente ao fechar o pedido — o pedido só vai para a loja depois que o pagamento for confirmado. Você NÃO envia chave PIX manualmente." : "Dinheiro ou Cartão (PIX não disponível nesta loja pelo WhatsApp)"}
 
 PRODUTOS DISPONÍVEIS:
 ${produtos.map((p: any) => `• ${p.nome} [id:${p.id}] — R$ ${Number(p.preco_venda).toFixed(2)} (${p.embalagem || "un"})`).join("\n") || "Nenhum produto cadastrado"}
@@ -1233,8 +1237,8 @@ ${aceitaDelivery
   : `Somente retirada no local.\nInforme: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\nVá ao PASSO 5`}
 
 ▶ PASSO 5 — FORMA DE PAGAMENTO
-"Como vai pagar: *dinheiro* ou *cartão*? 💳"
-Aguarde a resposta.
+"Como vai pagar: ${pgtoOpcoes}? 💳"
+Aguarde a resposta.${mpConectado ? "\nSe escolher PIX: NÃO mande chave nem texto de pagamento — apenas siga para o resumo (PASSO 6) e, ao confirmar, emita fechar_pedido com forma_pagamento \"pix\". O sistema gera o QR e o copia-e-cola sozinho." : ""}
 
 ▶ PASSO 6 — RESUMO E CONFIRMAÇÃO
 Após ter entrega/retirada E pagamento confirmados, envie o resumo completo:
@@ -1246,7 +1250,7 @@ ${aceitaDelivery ? `🚚 Taxa de entrega: R$ ${taxaEntregaCalc.toFixed(2)} (só 
 💰 *Total: R$ [total]*
 
 📍 [Entrega em: endereço / Retirada em: endereço da loja]
-💳 Pagamento: [dinheiro/cartão]
+💳 Pagamento: ${mpConectado ? "[dinheiro/cartão/PIX]" : "[dinheiro/cartão]"}
 
 Confirma? 😊"
 
@@ -1299,7 +1303,7 @@ ACAO: {"tipo": "salvar_numero", "numero": "42"}
 
 Fechar pedido — CLIENTE IDENTIFICADO (tem nome em CLIENTE acima, ou cadastrar_cliente foi emitido nesta sessão):
 ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "entrega", "forma_pagamento": "dinheiro", "cliente_rua": "[rua confirmada na conversa]", "cliente_numero": "[número confirmado]", "cliente_bairro": "[bairro]", "cliente_cidade": "[cidade]", "cliente_estado": "[estado]", "items": [{"produto_id": "ID_REAL", "nome": "Nome", "qtd": 1, "preco": 0.00}]}
-[tipo_entrega: "entrega" ou "retirada" | forma_pagamento: "dinheiro" ou "cartao"]
+[tipo_entrega: "entrega" ou "retirada" | forma_pagamento: ${mpConectado ? `"dinheiro", "cartao" ou "pix"` : `"dinheiro" ou "cartao"`}]
 ⚠️ SEMPRE inclua os "items" do carrinho atual E o endereço confirmado na conversa no ACAO fechar_pedido
 ⚠️ SE for retirada, omita os campos cliente_rua/numero/bairro/cidade/estado
 
@@ -1474,7 +1478,7 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
             } else if (querFechar && cliente) {
               resposta = aceitaDelivery
                 ? `${cabecalho}\n\nPrefere *entrega* 🚚 ou vai *retirar* na loja? 🏪`
-                : `${cabecalho}\n\nPode retirar em: *${empresaEndereco || empresaNome}*. Como vai pagar: *dinheiro* ou *cartão*? 💳`
+                : `${cabecalho}\n\nPode retirar em: *${empresaEndereco || empresaNome}*. Como vai pagar: ${pgtoOpcoes}? 💳`
             } else {
               resposta = `${cabecalho}\n\n${temComp ? "Está certo? " : ""}Deseja mais algum item ou pode fechar o pedido? 😊`
             }
@@ -1601,7 +1605,7 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
         )
         const forma_pagamento = lastPayMsg?.includes("dinh") ? "dinheiro"
           : lastPayMsg?.includes("cart") ? "cartao"
-          : lastPayMsg?.includes("pix") ? "pix"
+          : (lastPayMsg?.includes("pix") && mpConectado) ? "pix"
           : "dinheiro"
         const userHist = userMsgs.join(" ")
         const tipo_entrega = userHist.includes("retirada") ? "retirada" : "entrega"
@@ -1679,11 +1683,11 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
       const primeiro = String(cliente.nome).split(" ")[0]
       const escolheuEntrega = mensagens.some((m: any) => m.role === "user" && /\b(entrega|retirada|retirar)\b/i.test(m.content || ""))
       if (escolheuEntrega) {
-        resposta = `Perfeito, ${primeiro}! 😊 Como vai pagar: *dinheiro* ou *cartão*? 💳`
+        resposta = `Perfeito, ${primeiro}! 😊 Como vai pagar: ${pgtoOpcoes}? 💳`
       } else if (aceitaDelivery) {
         resposta = `Perfeito, ${primeiro}! 😊 Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪`
       } else {
-        resposta = `Perfeito, ${primeiro}! 😊 Pode retirar em: *${empresaEndereco || empresaNome}*. Como vai pagar: *dinheiro* ou *cartão*? 💳`
+        resposta = `Perfeito, ${primeiro}! 😊 Pode retirar em: *${empresaEndereco || empresaNome}*. Como vai pagar: ${pgtoOpcoes}? 💳`
       }
       console.log("[SafeNet] cliente cadastrado — troquei o pedido de nome pela próxima etapa")
     }
