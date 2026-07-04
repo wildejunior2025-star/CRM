@@ -81,7 +81,9 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
   const endereco = enderecoTexto(pedido)
   const tel = soDigitos(pedido.cliente_telefone)
   const emRota = pedido.status === 'saiu_entrega'
-  const cor = !mine ? '#0d9488' : emRota ? '#7c3aed' : '#2563eb'
+  const naCozinha = pedido.status === 'confirmado' || pedido.status === 'em_preparo'
+  const prontoParaSair = pedido.status === 'pronto'
+  const cor = !mine ? (naCozinha ? '#d97706' : '#0d9488') : emRota ? '#7c3aed' : '#2563eb'
   const pg = pagamentoInfo(pedido)
   // iFood não expõe o telefone real do cliente: liga num 0800 e digita um ID.
   // Por isso, nos pedidos do iFood some o WhatsApp e o "Ligar" vai no 0800.
@@ -143,7 +145,7 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
           )}
         </span>
         <span style={{ fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: `${cor}22`, color: cor }}>
-          {!mine ? 'Disponível' : emRota ? 'Em rota' : 'Aceita'}
+          {!mine ? (naCozinha ? '👨‍🍳 Na cozinha' : '✅ Pronto') : emRota ? 'Em rota' : (prontoParaSair ? 'Aceita · pronto' : 'Aceita · na cozinha')}
         </span>
       </div>
 
@@ -228,10 +230,16 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
           </div>
         )
       ) : !emRota ? (
-        <button type="button" onClick={() => run(() => onSair(pedido))} disabled={ocupado}
-          style={btnPrimario('#7c3aed')}>
-          {ocupado ? 'Salvando...' : '🛵 Sair para entrega'}
-        </button>
+        prontoParaSair ? (
+          <button type="button" onClick={() => run(() => onSair(pedido))} disabled={ocupado}
+            style={btnPrimario('#7c3aed')}>
+            {ocupado ? 'Salvando...' : '🛵 Sair para entrega'}
+          </button>
+        ) : (
+          <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 700, color: '#d97706', background: 'rgba(217,119,6,.12)', border: '1px solid #d97706', borderRadius: 10, padding: '10px 0' }}>
+            👨‍🍳 Aguardando a cozinha ficar pronto
+          </div>
+        )
       ) : (
         <div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -320,7 +328,7 @@ export default function PainelEntregador() {
     const { data } = await supabase
       .from('pedidos_delivery')
       .select('*')
-      .in('status', ['pronto', 'saiu_entrega'])
+      .in('status', ['confirmado', 'em_preparo', 'pronto', 'saiu_entrega'])
       .order('created_at')
     setPedidos(data ?? [])
     setLoading(false)
@@ -483,7 +491,8 @@ export default function PainelEntregador() {
   // não faz sentido aparecer como "aceitar". Ele só aparece pra alguém se o gestor
   // atribuir um motoqueiro (aí cai nas "Aceitas" dele).
   const disponiveis = pedidos.filter(p =>
-    p.tipo_entrega !== 'retirada' && !p.entregador_id && p.status === 'pronto'
+    p.tipo_entrega !== 'retirada' && !p.entregador_id &&
+    ['confirmado', 'em_preparo', 'pronto'].includes(p.status)
   )
 
   // Desconto por corrida (só iFood) deste motoqueiro — abatido do que ele recebe.
@@ -623,7 +632,7 @@ export default function PainelEntregador() {
             ) : disponiveis.length === 0 ? (
               <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
                 <div style={{ fontSize: 40, marginBottom: 8 }}>📭</div>
-                Nenhum pedido pronto esperando. Aguarde a cozinha liberar.
+                Nenhum pedido no momento. Os pedidos da cozinha aparecem aqui.
               </div>
             ) : disponiveis.map(p => (
               <CardEntrega key={p.id} pedido={p} mine={false} descValor={descValorEntrega} onAceitar={podeAceitar ? aceitar : undefined} />
