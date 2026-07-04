@@ -210,16 +210,31 @@ serve(async (req) => {
         })
       })
 
-      if (!createRes.ok) {
-        const errText = await createRes.text()
-        return new Response(
-          JSON.stringify({ error: `Erro ao criar instância (${createRes.status}): ${errText}` }),
-          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        )
+      let qrFromCreate: string | null = null
+      if (createRes.ok) {
+        const createData = await createRes.json()
+        qrFromCreate = createData.qrcode?.base64 ?? createData.base64 ?? null
+      } else {
+        // Create falhou (ex.: a instância fantasma ainda não terminou de apagar).
+        // Não aborta: apaga de novo, espera e tenta recriar uma vez.
+        console.error("[connect] create falhou:", createRes.status, await createRes.text().catch(() => ""))
+        await fetch(`${apiBase}/instance/delete/${instanceName}`, { method: "DELETE", headers: { apikey: apiKey } }).catch(() => {})
+        await new Promise(r => setTimeout(r, 2500))
+        const retryRes = await fetch(`${apiBase}/instance/create`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: apiKey },
+          body: JSON.stringify({ instanceName, integration: "WHATSAPP-BAILEYS", qrcode: true })
+        })
+        if (retryRes.ok) {
+          const retryData = await retryRes.json()
+          qrFromCreate = retryData.qrcode?.base64 ?? retryData.base64 ?? null
+        } else {
+          return new Response(
+            JSON.stringify({ error: `Erro ao criar instância (${retryRes.status}): ${await retryRes.text().catch(() => "")}` }),
+            { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          )
+        }
       }
-
-      const createData = await createRes.json()
-      const qrFromCreate = createData.qrcode?.base64 ?? createData.base64 ?? null
 
       await supabaseAdmin.from("whatsapp_config").upsert(
         { empresa_id: empresaId, instance_name: instanceName, ativo: false },
