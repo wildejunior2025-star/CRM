@@ -1937,6 +1937,12 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         {pagamento !== 'pix' && pagamento !== 'dinheiro' && pagamento && (
           <span className="pp-badge pp-badge-outro">{pagamento}</span>
         )}
+        {/* Precisa cobrar na entrega? (não é pré-pago: iFood e PIX confirmado são pagos) */}
+        {pedido.origem !== 'ifood' && !(pagamento === 'pix' && pedido.pix_status === 'pago') && (
+          <span className="pp-badge" style={{ background: 'rgba(245,158,11,.15)', color: '#b45309', fontWeight: 800, border: '1px solid #f59e0b' }}>
+            💵 Cobrar do cliente · {fmt(pedido.total)}
+          </span>
+        )}
       </div>
 
       {/* Observacoes */}
