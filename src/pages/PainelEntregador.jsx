@@ -20,6 +20,28 @@ function dentroDoPeriodo(iso, periodo) {
 }
 const PERIODOS_HIST = [['hoje', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias'], ['tudo', 'Tudo']]
 
+// Tempo decorrido e atraso — igual ao gestor, pro motoqueiro ver quanto tá na cozinha.
+function minutosDesde(iso) {
+  if (!iso) return null
+  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  return m < 0 ? 0 : m
+}
+function tempoDecorridoTxt(iso) {
+  const m = minutosDesde(iso)
+  if (m == null) return ''
+  if (m < 1) return 'agora'
+  if (m < 60) return `há ${m} min`
+  const h = Math.floor(m / 60), r = m % 60
+  return r ? `há ${h}h${r}min` : `há ${h}h`
+}
+const ATRASO_PADRAO_MIN = 40
+function pedidoAtrasado(p) {
+  if (!['confirmado', 'em_preparo', 'pronto'].includes(p.status)) return false
+  if (p.pronto_previsto_at) return Date.now() > new Date(p.pronto_previsto_at).getTime()
+  const m = minutosDesde(p.created_at)
+  return m != null && m > ATRASO_PADRAO_MIN
+}
+
 function enderecoTexto(p) {
   return [p.endereco_rua, p.endereco_numero, p.endereco_bairro, p.endereco_cidade]
     .filter(Boolean).join(', ')
@@ -150,6 +172,14 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
       </div>
 
       <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>{pedido.cliente_nome || 'Cliente'}</div>
+      {(naCozinha || prontoParaSair) && (() => {
+        const atrasado = pedidoAtrasado(pedido)
+        return (
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginTop: 3, color: atrasado ? '#ef4444' : 'var(--text-muted)' }}>
+            {atrasado ? '⚠️ Em atraso · ' : '⏱ '}{tempoDecorridoTxt(pedido.created_at)} na cozinha
+          </div>
+        )
+      })()}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, margin: '4px 0 10px' }}>
         <div style={{ fontSize: 14, color: 'var(--text-muted)', flex: 1 }}>📍 {endereco}</div>
         <a href={mapsUrl(pedido)} target="_blank" rel="noopener noreferrer"
@@ -317,6 +347,7 @@ export default function PainelEntregador() {
   const [historico, setHistorico] = useState([])
   const [histLoading, setHistLoading] = useState(false)
   const [periodoHist, setPeriodoHist] = useState('tudo') // filtro de data do histórico
+  const [, setTick] = useState(0) // atualiza "há X min" / atraso a cada 30s
   // Fila (E4): null = ainda não carregou. { fila_ativa, online, pausado, na_vez, posicao, total_fila }
   const [fila, setFila] = useState(null)
   const [filaBusy, setFilaBusy] = useState(false)
@@ -333,6 +364,11 @@ export default function PainelEntregador() {
     setPedidos(data ?? [])
     setLoading(false)
   }, [user])
+
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 30000)
+    return () => clearInterval(id)
+  }, [])
 
   useEffect(() => {
     carregar()
