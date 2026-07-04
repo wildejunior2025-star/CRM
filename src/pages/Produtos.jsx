@@ -99,10 +99,18 @@ export default function Produtos() {
   async function loadCategorias() {
     const { data } = await supabase
       .from('categorias')
-      .select('id, nome, ordem')
+      .select('id, nome, ordem, hora_inicio, hora_fim')
       .order('ordem', { ascending: true })
       .order('nome', { ascending: true })
     setCategorias(data ?? [])
+  }
+
+  // Salva o horário de disponibilidade da categoria (hora_inicio/hora_fim).
+  // Vazio => null (sempre disponível). Otimista + persiste.
+  async function salvarHorarioCategoria(id, campo, valor) {
+    const v = valor ? valor : null
+    setCategorias(cs => cs.map(c => (c.id === id ? { ...c, [campo]: v } : c)))
+    await supabase.from('categorias').update({ [campo]: v }).eq('id', id)
   }
 
   // Persiste a ordem 1..n de uma nova lista de categorias (otimista)
@@ -938,6 +946,11 @@ export default function Produtos() {
 
             {categError && <p className="error-text">{categError}</p>}
 
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+              🕒 Defina o horário que cada categoria fica disponível para venda. Deixe <strong>em branco</strong> = sempre disponível.
+              Ex.: Quentinhas <strong>10:00 às 14:00</strong>, Janta <strong>17:00 às 22:00</strong>.
+            </p>
+
             <div className="data-table">
               {categorias.length === 0 ? (
                 <div className="empty-state">Nenhuma categoria cadastrada.</div>
@@ -982,6 +995,23 @@ export default function Produtos() {
                           </button>
                         </td>
                         <td>{c.nome}</td>
+                        <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
+                          <input
+                            type="time"
+                            value={(c.hora_inicio || '').slice(0, 5)}
+                            onChange={(e) => salvarHorarioCategoria(c.id, 'hora_inicio', e.target.value)}
+                            title="Disponível a partir de"
+                            style={{ width: 96 }}
+                          />
+                          <span style={{ margin: '0 5px', color: 'var(--text-muted)' }}>às</span>
+                          <input
+                            type="time"
+                            value={(c.hora_fim || '').slice(0, 5)}
+                            onChange={(e) => salvarHorarioCategoria(c.id, 'hora_fim', e.target.value)}
+                            title="Disponível até"
+                            style={{ width: 96 }}
+                          />
+                        </td>
                         <td style={{ textAlign: 'right' }}>
                           <button
                             className="btn btn-danger btn-sm"

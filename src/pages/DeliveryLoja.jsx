@@ -77,6 +77,7 @@ export default function DeliveryLoja() {
   const [loja, setLoja] = useState(null)
   const [produtos, setProdutos] = useState([])
   const [catOrdem, setCatOrdem] = useState({}) // { nomeCategoria: ordem }
+  const [catHorario, setCatHorario] = useState({}) // { nomeCategoria: { inicio, fim } }
   const [loading, setLoading] = useState(true)
   const [catAtiva, setCatAtiva] = useState(null)
   const catRefs = useRef({})
@@ -161,13 +162,17 @@ export default function DeliveryLoja() {
         }))
       }
 
-      // Ordem personalizada das categorias
+      // Ordem personalizada + horário de disponibilidade das categorias
       const { data: catData } = await supabase
         .from('categorias')
-        .select('nome, ordem')
+        .select('nome, ordem, hora_inicio, hora_fim')
         .eq('empresa_id', lojaData.id)
       const ordemMap = {}
-      for (const c of (catData ?? [])) ordemMap[c.nome] = c.ordem ?? 999
+      const horarioMap = {}
+      for (const c of (catData ?? [])) {
+        ordemMap[c.nome] = c.ordem ?? 999
+        if (c.hora_inicio && c.hora_fim) horarioMap[c.nome] = { inicio: c.hora_inicio, fim: c.hora_fim }
+      }
 
       // Restaura carrinho salvo desta loja (chave = id real)
       let savedCart = {}
@@ -176,6 +181,7 @@ export default function DeliveryLoja() {
       setLoja(lojaData)
       setProdutos(produtosFinal)
       setCatOrdem(ordemMap)
+      setCatHorario(horarioMap)
       setCarrinho(savedCart)
       setLoading(false)
     }
@@ -259,7 +265,20 @@ export default function DeliveryLoja() {
     ? produtos.filter(p => p.estoque != null && p.estoque_minimo != null && p.estoque <= p.estoque_minimo)
     : produtos
 
+  // Categoria dentro do horário de venda? (sem horário = sempre). Usa horário de Brasília
+  // (America/Fortaleza) pra não depender do fuso do aparelho do cliente. Trata janela
+  // que vira a noite (fim < inicio, ex.: 22:00-02:00).
+  const catDisponivelAgora = (nome) => {
+    const h = catHorario[nome]
+    if (!h) return true
+    const agora = new Date().toLocaleTimeString('en-GB', { hour12: false, timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit' })
+    const toMin = (t) => { const [hh, mm] = String(t).slice(0, 5).split(':').map(Number); return hh * 60 + mm }
+    const n = toMin(agora), a = toMin(h.inicio), b = toMin(h.fim)
+    return a <= b ? (n >= a && n < b) : (n >= a || n < b)
+  }
+
   const categorias = [...new Set(produtosFiltrados.map(p => p.categoria).filter(Boolean))]
+    .filter(cat => catDisponivelAgora(cat))
     .sort((a, b) => {
       const oa = catOrdem[a] ?? 999
       const ob = catOrdem[b] ?? 999
@@ -273,8 +292,9 @@ export default function DeliveryLoja() {
   const buscaTrim = busca.trim().toLowerCase()
   const resultadosBusca = buscaTrim
     ? produtosFiltrados.filter(p =>
-        (p.nome ?? '').toLowerCase().includes(buscaTrim) ||
-        (p.descricao ?? '').toLowerCase().includes(buscaTrim))
+        (!p.categoria || catDisponivelAgora(p.categoria)) &&
+        ((p.nome ?? '').toLowerCase().includes(buscaTrim) ||
+         (p.descricao ?? '').toLowerCase().includes(buscaTrim)))
     : null
 
   // Define categoria ativa inicial
