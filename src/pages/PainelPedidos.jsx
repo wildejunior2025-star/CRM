@@ -2908,7 +2908,7 @@ export default function PainelPedidos() {
     if (!empresa) return
     const { data } = await supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, created_at, entregador_id, endereco_bairro, endereco_cidade')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, created_at, entregador_id, endereco_bairro, endereco_cidade')
       .eq('empresa_id', empresa.id)
       .eq('status', 'entregue')
       .not('entregador_id', 'is', null)
