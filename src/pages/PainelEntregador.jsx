@@ -633,7 +633,10 @@ export default function PainelEntregador() {
                 const base = historico.filter(p => dentroDoPeriodo(p.created_at, periodoHist))
                 const pend = base.filter(p => !p.entregador_pago)
                 const pagos = base.filter(p => p.entregador_pago)
-                const soma = arr => arr.reduce((s, p) => s + Number(p.taxa_entrega || 0), 0)
+                // Ganho LÍQUIDO: taxa cheia, menos o desconto SÓ nas do iFood.
+                const descValor = (profile?.entregador_desconto_ativo && Number(profile?.entregador_desconto_valor) > 0) ? Number(profile.entregador_desconto_valor) : 0
+                const ganho = p => Math.max(0, Number(p.taxa_entrega || 0) - (p.origem === 'ifood' ? descValor : 0))
+                const soma = arr => arr.reduce((s, p) => s + ganho(p), 0)
                 const dataDe = p => new Date(p.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
                 const grupos = arr => {
                   const g = {}
@@ -645,7 +648,8 @@ export default function PainelEntregador() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontWeight: 800, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <strong style={{ color: '#16a34a' }} title="Taxa de entrega">{fmt(p.taxa_entrega ?? 0)}</strong>
+                        <strong style={{ color: '#16a34a' }}
+                          title={p.origem === 'ifood' && descValor > 0 ? `Taxa ${fmt(p.taxa_entrega)} − iFood ${fmt(descValor)}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
                         {p.entregador_pago
                           ? <span style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '2px 8px', borderRadius: 20 }}>✓ Pago</span>
                           : <span style={{ fontSize: 11, fontWeight: 800, color: '#f59e0b', background: 'rgba(245,158,11,.14)', padding: '2px 8px', borderRadius: 20 }}>A receber</span>}
@@ -655,6 +659,7 @@ export default function PainelEntregador() {
                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>{[p.endereco_bairro, p.endereco_cidade].filter(Boolean).join(', ')}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
                       {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{p.forma_pagamento ? ` · ${p.forma_pagamento}` : ''}
+                      {p.origem === 'ifood' && descValor > 0 && <span style={{ color: '#f59e0b' }}> · iFood −{fmt(descValor)}</span>}
                     </div>
                   </div>
                 )
@@ -682,13 +687,12 @@ export default function PainelEntregador() {
                       </div>
                     </div>
 
-                    {profile?.entregador_desconto_ativo && Number(profile?.entregador_desconto_valor) > 0 && (() => {
+                    {descValor > 0 && base.some(p => p.origem === 'ifood') && (() => {
                       const nIfood = base.filter(p => p.origem === 'ifood').length
-                      const valor = Number(profile.entregador_desconto_valor)
                       return (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(245,158,11,.12)', border: '1.5px solid #f59e0b', borderRadius: 12, padding: '10px 14px', fontSize: 13, color: 'var(--text-muted)' }}>
-                          <span>Desconto (só iFood): {nIfood} × {fmt(valor)}</span>
-                          <span>A acertar: <strong style={{ color: '#f59e0b' }}>{fmt(nIfood * valor)}</strong></span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(245,158,11,.10)', border: '1px solid #f59e0b', borderRadius: 12, padding: '9px 14px', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                          <span>iFood: {fmt(descValor)}/corrida já descontado · {nIfood} corrida{nIfood > 1 ? 's' : ''}</span>
+                          <strong style={{ color: '#f59e0b' }}>−{fmt(nIfood * descValor)}</strong>
                         </div>
                       )
                     })()}

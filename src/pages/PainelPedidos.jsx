@@ -4634,7 +4634,10 @@ export default function PainelPedidos() {
               const concl = concluidas(entregadorSel).filter(p => dentroDoPeriodo(p.created_at, periodoEnt))
               const pendentes = concl.filter(p => !p.entregador_pago)
               const pagos = concl.filter(p => p.entregador_pago)
-              const somaTaxa = arr => arr.reduce((s, p) => s + Number(p.taxa_entrega || 0), 0)
+              // Ganho LÍQUIDO do motoqueiro: taxa cheia, menos o desconto SÓ nas do iFood.
+              const descValor = (ent?.entregador_desconto_ativo && Number(ent?.entregador_desconto_valor) > 0) ? Number(ent.entregador_desconto_valor) : 0
+              const ganho = p => Math.max(0, Number(p.taxa_entrega || 0) - (p.origem === 'ifood' ? descValor : 0))
+              const somaTaxa = arr => arr.reduce((s, p) => s + ganho(p), 0)
               const dataDe = p => new Date(p.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
               const agrupaPorData = arr => {
                 const g = {}
@@ -4646,7 +4649,8 @@ export default function PainelPedidos() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <strong style={{ fontSize: 13, color: ehRota ? '#7c3aed' : '#16a34a' }} title="Taxa de entrega">{fmt(p.taxa_entrega ?? 0)}</strong>
+                      <strong style={{ fontSize: 13, color: ehRota ? '#7c3aed' : '#16a34a' }}
+                        title={p.origem === 'ifood' && descValor > 0 ? `Taxa ${fmt(p.taxa_entrega)} − iFood ${fmt(descValor)}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
                       {!ehRota && (pago
                         ? <span style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '2px 8px', borderRadius: 20 }}>✓ Pago</span>
                         : <button type="button" onClick={() => pagarCorridas([p.id])}
@@ -4657,6 +4661,7 @@ export default function PainelPedidos() {
                   </div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
                     {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
+                    {p.origem === 'ifood' && descValor > 0 && <span style={{ color: '#f59e0b' }}> · iFood −{fmt(descValor)}</span>}
                   </div>
                 </div>
               )
