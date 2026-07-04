@@ -1773,6 +1773,15 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
       }
     }
 
+    // Rede de segurança: garante o link do catálogo na mensagem de BOAS-VINDAS
+    // (1ª resposta do bot nesta conversa), caso o modelo esqueça. SÓ na saudação —
+    // não altera nada do resto do fluxo.
+    const ehBoasVindas = mensagens.filter((m: any) => m.role === "assistant").length === 0
+    if (ehBoasVindas && catalogoUrl && resposta && !resposta.includes("lojaonline.fwcinter.com")) {
+      resposta = `${resposta}\n\n👉 ${catalogoUrl}`
+      console.log("[SafeNet] link do catálogo adicionado na mensagem de boas-vindas")
+    }
+
     if (!resposta) {
       resposta = "Desculpe, não entendi bem. Pode repetir? 😊"
     }
