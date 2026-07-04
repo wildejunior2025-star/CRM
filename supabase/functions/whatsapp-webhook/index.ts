@@ -442,6 +442,23 @@ async function handleSalvarNumero(
   }
 }
 
+// Decide entrega/retirada pela CONVERSA (o modelo às vezes erra o tipo no fechar,
+// ex.: cliente disse "Retirar na loja" mas gravou entrega). O resumo do bot é
+// autoritativo ("Retirada em" / "Entrega em"); senão, a última escolha clara do
+// cliente. "retir" cobre "retirar" E "retirada". Retorna null se não der pra saber.
+function tipoEntregaDaConversa(mensagens: any[]): "entrega" | "retirada" | null {
+  const ultimaBot = (mensagens.filter((m: any) => m.role === "assistant").pop()?.content ?? "").toLowerCase()
+  if (/retirada em|retire em|retirar em|vai retirar/.test(ultimaBot)) return "retirada"
+  if (/entrega em|taxa de entrega|vou entregar/.test(ultimaBot)) return "entrega"
+  const userMsgs = mensagens.filter((m: any) => m.role === "user").map((m: any) => (m.content ?? "").toLowerCase())
+  for (let i = userMsgs.length - 1; i >= 0; i--) {
+    const c = userMsgs[i]
+    if (/\bretir|vou pegar|pegar na loja|buscar na loja/.test(c)) return "retirada"
+    if (/\bentreg|em casa|delivery/.test(c)) return "entrega"
+  }
+  return null
+}
+
 // ── handleFecharPedido ───────────────────────────────────────────────────────
 async function handleFecharPedido(
   supabase: ReturnType<typeof createClient>,
@@ -1579,6 +1596,13 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
           resposta = resultado.resposta
 
         } else if (acao.tipo === "fechar_pedido") {
+          // Corrige entrega/retirada pela conversa (o modelo às vezes erra o tipo —
+          // ex.: cliente disse "retirar" e o fechar veio como entrega).
+          const tipoConv = tipoEntregaDaConversa(mensagens)
+          if (tipoConv && acao.tipo_entrega !== tipoConv) {
+            console.log(`[SafeNet] tipo_entrega corrigido pela conversa: ${acao.tipo_entrega} -> ${tipoConv}`)
+            acao.tipo_entrega = tipoConv
+          }
           // Fallback: se cliente não identificado e ACAO sem nome/email, extrai da conversa
           if (!cliente && !acao.cliente_nome) {
             for (let i = 0; i < mensagens.length; i++) {
@@ -1666,8 +1690,7 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
           : lastPayMsg?.includes("cart") ? "cartao"
           : (lastPayMsg?.includes("pix") && mpConectado) ? "pix"
           : "dinheiro"
-        const userHist = userMsgs.join(" ")
-        const tipo_entrega = userHist.includes("retirada") ? "retirada" : "entrega"
+        const tipo_entrega = tipoEntregaDaConversa(mensagens) ?? "entrega"
         const safeAcao: any = { tipo_entrega, forma_pagamento }
 
         // Se o carrinho do DB está vazio, tenta extrair itens da conversa
