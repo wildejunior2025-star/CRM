@@ -499,6 +499,20 @@ async function handleFecharPedido(
       }
     }
     const totalCarrinho  = itens.reduce((s: number, i: any) => s + Number(i.qtd) * Number(i.preco), 0)
+
+    // Pedido mínimo p/ ENTREGA (só produtos; retirada não exige). Bloqueia ANTES de
+    // gravar qualquer coisa — mesmo padrão do bloqueio de endereço acima.
+    const pedidoMinimo = Number(empresa.pedido_minimo ?? 0)
+    if (tipoEntrega === "entrega" && pedidoMinimo > 0 && totalCarrinho < pedidoMinimo) {
+      const falta = pedidoMinimo - totalCarrinho
+      const rs = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`
+      return {
+        mensagemExtra: "",
+        acaoPromise: Promise.resolve(),
+        bloqueioMensagem: `🛒 O pedido mínimo para *entrega* é *${rs(pedidoMinimo)}* (só os produtos).\n\nFaltam *${rs(falta)}* pra fechar. Quer adicionar mais alguma coisa? 😊\n\n_Se preferir, também dá pra escolher *retirada* na loja._`,
+      }
+    }
+
     // Taxa: usa a calculada pela distância (quando veio); senão cai na fixa da loja.
     const taxaFinal      = tipoEntrega === "entrega" ? (taxaEntregaCalc != null ? taxaEntregaCalc : taxaEntrega) : 0
     const totalFinal     = totalCarrinho + taxaFinal
@@ -909,7 +923,7 @@ serve(async (req) => {
 
     const configRes = await supabase
       .from("whatsapp_config")
-      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, taxas_entrega_km, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, indicador_profile_id, mp_conectado)")
+      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, indicador_profile_id, mp_conectado)")
       .eq("instance_name", instanceName)
       .eq("ativo", true)
       .single()

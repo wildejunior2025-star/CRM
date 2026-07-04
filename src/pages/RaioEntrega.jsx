@@ -34,6 +34,7 @@ export default function RaioEntrega() {
   // Delivery
   const [aceitaDelivery,  setAceitaDelivery]  = useState(false)
   const [taxaEntrega,     setTaxaEntrega]     = useState(0)
+  const [pedidoMinimo,    setPedidoMinimo]    = useState(0)
   const [usarTaxasPorKm,  setUsarTaxasPorKm]  = useState(false)
   const [taxasKm,         setTaxasKm]         = useState([])  // [{km, taxa}]
   const [tempoMin,        setTempoMin]        = useState(30)
@@ -51,7 +52,7 @@ export default function RaioEntrega() {
     if (!profile?.empresa_id) return
     supabase
       .from('empresas')
-      .select('id, aceita_delivery, taxa_entrega, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, cep, endereco, numero, bairro, cidade, estado, categoria_delivery, raio_entrega_km, latitude, longitude')
+      .select('id, aceita_delivery, taxa_entrega, pedido_minimo, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, cep, endereco, numero, bairro, cidade, estado, categoria_delivery, raio_entrega_km, latitude, longitude')
       .eq('id', profile.empresa_id)
       .single()
       .then(({ data }) => {
@@ -59,6 +60,7 @@ export default function RaioEntrega() {
         setEmpresaId(data.id)
         setAceitaDelivery(data.aceita_delivery ?? false)
         setTaxaEntrega(data.taxa_entrega ?? 0)
+        setPedidoMinimo(data.pedido_minimo ?? 0)
         setTempoMin(data.tempo_entrega_min ?? 30)
         setTempoMax(data.tempo_entrega_max ?? 60)
         const cepNum = (data.cep ?? '').replace(/\D/g, '')
@@ -211,6 +213,7 @@ export default function RaioEntrega() {
     const { error } = await supabase.from('empresas').update({
       aceita_delivery:      aceitaDelivery,
       taxa_entrega:         usarTaxasPorKm ? 0 : (parseFloat(taxaEntrega) || 0),
+      pedido_minimo:        parseFloat(pedidoMinimo) || 0,
       taxas_entrega_km:     usarTaxasPorKm
         ? [...taxasKm].sort((a, b) => a.km - b.km)
         : [],
@@ -518,6 +521,17 @@ export default function RaioEntrega() {
                     </div>
                   </div>
                 )}
+
+                {/* Pedido mínimo (só entrega) */}
+                <div className="form-field">
+                  <label>Pedido mínimo p/ entrega (R$)</label>
+                  <input
+                    type="number" step="0.01" min="0"
+                    value={pedidoMinimo}
+                    onChange={e => setPedidoMinimo(e.target.value)}
+                    placeholder="0 = sem mínimo"
+                  />
+                </div>
 
                 {/* Tempo de entrega */}
                 <div className="form-field">

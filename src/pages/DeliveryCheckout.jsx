@@ -321,7 +321,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, raio_entrega_km')
+      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, raio_entrega_km, pedido_minimo')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -412,6 +412,11 @@ export default function DeliveryCheckout() {
   const taxaPendente = tipo === 'entrega' && temFaixas && !coordCliente
   const taxaAplicada = taxaCalculada
   const total = subtotal + taxaAplicada
+
+  // Pedido mínimo (só entrega, conta o subtotal dos produtos — sem a taxa)
+  const pedidoMinimo = Number(lojaEndereco?.pedido_minimo ?? 0)
+  const faltaMinimo = tipo === 'entrega' && pedidoMinimo > 0 && subtotal < pedidoMinimo
+  const faltamParaMinimo = faltaMinimo ? (pedidoMinimo - subtotal) : 0
 
   function set(field, value) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -527,6 +532,13 @@ export default function DeliveryCheckout() {
     if (tipo === 'entrega' && temFaixas && !coordCliente) {
       setErroGlobal('Toque em "Marcar meu local no mapa" pra calcular a taxa de entrega.')
       setMapaAberto(true)
+      return
+    }
+
+    // Pedido mínimo para entrega
+    if (faltaMinimo) {
+      setErroGlobal(`Pedido mínimo para entrega é R$ ${fmt(pedidoMinimo)}. Faltam R$ ${fmt(faltamParaMinimo)} em produtos (ou escolha Retirada).`)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
 
@@ -963,10 +975,17 @@ export default function DeliveryCheckout() {
                   </div>
                 </div>
 
+                {faltaMinimo && (
+                  <div className="dco-erro-global" style={{ background: 'rgba(217,119,6,.12)', border: '1px solid #d97706', color: '#d97706' }}>
+                    Pedido mínimo p/ entrega: <strong>R$ {fmt(pedidoMinimo)}</strong> · faltam <strong>R$ {fmt(faltamParaMinimo)}</strong> em produtos.
+                  </div>
+                )}
+
                 {erroGlobal && <div className="dco-erro-global">{erroGlobal}</div>}
 
-                <button type="submit" className="dco-btn-submit" disabled={enviando}>
-                  {enviando ? <><span className="dco-spinner" />Enviando pedido...</> : 'Fazer pedido'}
+                <button type="submit" className="dco-btn-submit" disabled={enviando || faltaMinimo}>
+                  {enviando ? <><span className="dco-spinner" />Enviando pedido...</>
+                    : faltaMinimo ? `Faltam R$ ${fmt(faltamParaMinimo)} p/ o mínimo` : 'Fazer pedido'}
                 </button>
               </div>
             </div>
@@ -975,9 +994,11 @@ export default function DeliveryCheckout() {
           {erroGlobal && <div className="dco-erro-global dco-erro-mobile">{erroGlobal}</div>}
 
           <div className="dco-submit-mobile">
-            <button type="submit" className="dco-btn-submit" disabled={enviando}>
+            <button type="submit" className="dco-btn-submit" disabled={enviando || faltaMinimo}>
               {enviando
                 ? <><span className="dco-spinner" />Enviando pedido...</>
+                : faltaMinimo
+                ? `Faltam R$ ${fmt(faltamParaMinimo)} p/ o mínimo`
                 : `Fazer pedido · R$ ${fmt(total)}`}
             </button>
           </div>
