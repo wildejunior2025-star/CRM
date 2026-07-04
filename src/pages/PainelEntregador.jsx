@@ -442,7 +442,7 @@ export default function PainelEntregador() {
     setHistLoading(true)
     supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, endereco_bairro, endereco_cidade, created_at')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
       .eq('entregador_id', user.id)
       .eq('status', 'entregue')
       .order('created_at', { ascending: false })
@@ -611,49 +611,76 @@ export default function PainelEntregador() {
             </div>
           ) : (
             <>
-              <div style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)',
-                borderRadius: 12, padding: '10px 14px', fontSize: 13, color: 'var(--text-muted)',
-              }}>
-                <span><strong style={{ color: 'var(--text)' }}>{historico.length}</strong> entregas concluídas</span>
-                <span>Total: <strong style={{ color: 'var(--text)' }}>{fmt(historico.reduce((s, p) => s + Number(p.taxa_entrega || 0), 0))}</strong></span>
-              </div>
+              {(() => {
+                const pend = historico.filter(p => !p.entregador_pago)
+                const pagos = historico.filter(p => p.entregador_pago)
+                const soma = arr => arr.reduce((s, p) => s + Number(p.taxa_entrega || 0), 0)
+                const dataDe = p => new Date(p.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+                const grupos = arr => {
+                  const g = {}
+                  for (const p of arr) (g[dataDe(p)] ??= []).push(p)
+                  return Object.entries(g)
+                }
+                const Card = (p) => (
+                  <div key={p.id} style={{ background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)', borderRadius: 12, padding: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontWeight: 800, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <strong style={{ color: '#16a34a' }} title="Taxa de entrega">{fmt(p.taxa_entrega ?? 0)}</strong>
+                        {p.entregador_pago
+                          ? <span style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '2px 8px', borderRadius: 20 }}>✓ Pago</span>
+                          : <span style={{ fontSize: 11, fontWeight: 800, color: '#f59e0b', background: 'rgba(245,158,11,.14)', padding: '2px 8px', borderRadius: 20 }}>A receber</span>}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 13.5, color: 'var(--text)', marginTop: 4 }}>{p.cliente_nome || 'Cliente'}</div>
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>{[p.endereco_bairro, p.endereco_cidade].filter(Boolean).join(', ')}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                      {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{p.forma_pagamento ? ` · ${p.forma_pagamento}` : ''}
+                    </div>
+                  </div>
+                )
+                return (
+                  <>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <div style={{ flex: 1, textAlign: 'center', background: 'var(--surface,#16161f)', border: '1px solid var(--border,#2a2a3a)', borderRadius: 12, padding: '10px 4px' }}>
+                        <div style={{ fontSize: 17, fontWeight: 800, color: '#f59e0b' }}>{fmt(soma(pend))}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>A receber ({pend.length})</div>
+                      </div>
+                      <div style={{ flex: 1, textAlign: 'center', background: 'var(--surface,#16161f)', border: '1px solid var(--border,#2a2a3a)', borderRadius: 12, padding: '10px 4px' }}>
+                        <div style={{ fontSize: 17, fontWeight: 800, color: '#16a34a' }}>{fmt(soma(pagos))}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Recebido ({pagos.length})</div>
+                      </div>
+                    </div>
 
-              {/* Acerto de desconto por entrega (E5), quando a loja cobra do motoqueiro */}
-              {profile?.entregador_desconto_ativo && Number(profile?.entregador_desconto_valor) > 0 && (
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  background: 'rgba(245,158,11,.12)', border: '1.5px solid #f59e0b',
-                  borderRadius: 12, padding: '10px 14px', fontSize: 13, color: 'var(--text-muted)',
-                }}>
-                  <span>Desconto: {historico.length} × {fmt(profile.entregador_desconto_valor)}</span>
-                  <span>A acertar com a loja: <strong style={{ color: '#f59e0b' }}>
-                    {fmt(historico.length * Number(profile.entregador_desconto_valor))}
-                  </strong></span>
-                </div>
-              )}
-              {historico.map(p => (
-                <div key={p.id} style={{
-                  background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)',
-                  borderRadius: 12, padding: 14,
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 800, color: 'var(--text)' }}>
-                      #{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}
-                    </span>
-                    <strong style={{ color: '#16a34a' }} title="Taxa de entrega">{fmt(p.taxa_entrega ?? 0)}</strong>
-                  </div>
-                  <div style={{ fontSize: 13.5, color: 'var(--text)', marginTop: 4 }}>{p.cliente_nome || 'Cliente'}</div>
-                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
-                    {[p.endereco_bairro, p.endereco_cidade].filter(Boolean).join(', ')}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                    {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                    {p.forma_pagamento ? ` · ${p.forma_pagamento}` : ''}
-                  </div>
-                </div>
-              ))}
+                    {profile?.entregador_desconto_ativo && Number(profile?.entregador_desconto_valor) > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(245,158,11,.12)', border: '1.5px solid #f59e0b', borderRadius: 12, padding: '10px 14px', fontSize: 13, color: 'var(--text-muted)' }}>
+                        <span>Desconto: {historico.length} × {fmt(profile.entregador_desconto_valor)}</span>
+                        <span>A acertar com a loja: <strong style={{ color: '#f59e0b' }}>{fmt(historico.length * Number(profile.entregador_desconto_valor))}</strong></span>
+                      </div>
+                    )}
+
+                    <div style={{ fontSize: 14, fontWeight: 800, color: '#f59e0b', marginTop: 4 }}>A receber</div>
+                    {pend.length === 0
+                      ? <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nada pendente. 🎉</div>
+                      : grupos(pend).map(([data, ps]) => (
+                        <div key={data} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginTop: 4 }}>{data} · {fmt(soma(ps))}</div>
+                          {ps.map(Card)}
+                        </div>
+                      ))}
+
+                    <div style={{ fontSize: 14, fontWeight: 800, color: '#16a34a', marginTop: 12 }}>Recebidas</div>
+                    {pagos.length === 0
+                      ? <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nenhuma paga ainda.</div>
+                      : grupos(pagos).map(([data, ps]) => (
+                        <div key={data} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginTop: 4 }}>{data} · {fmt(soma(ps))}</div>
+                          {ps.map(Card)}
+                        </div>
+                      ))}
+                  </>
+                )
+              })()}
             </>
           )
         )}

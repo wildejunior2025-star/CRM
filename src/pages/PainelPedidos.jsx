@@ -2908,7 +2908,7 @@ export default function PainelPedidos() {
     if (!empresa) return
     const { data } = await supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, created_at, entregador_id, endereco_bairro, endereco_cidade')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, created_at, entregador_id, endereco_bairro, endereco_cidade, entregador_pago, entregador_pago_em')
       .eq('empresa_id', empresa.id)
       .eq('status', 'entregue')
       .not('entregador_id', 'is', null)
@@ -2916,6 +2916,14 @@ export default function PainelPedidos() {
       .limit(500)
     setEntregasConcluidas(data ?? [])
   }, [empresa])
+
+  // Marca corridas como PAGAS ao entregador (acerto da taxa). Otimista + persiste.
+  async function pagarCorridas(ids) {
+    if (!ids?.length) return
+    const agora = new Date().toISOString()
+    setEntregasConcluidas(prev => prev.map(p => (ids.includes(p.id) ? { ...p, entregador_pago: true, entregador_pago_em: agora } : p)))
+    await supabase.from('pedidos_delivery').update({ entregador_pago: true, entregador_pago_em: agora }).in('id', ids)
+  }
 
   useEffect(() => {
     if (painelDireito === 'entregadores') { setEntregadorSel(null); carregarEntregasConcluidas() }
@@ -4612,11 +4620,28 @@ export default function PainelPedidos() {
               const ent = entregadores.find(e => e.id === entregadorSel)
               const rota = emRota(entregadorSel)
               const concl = concluidas(entregadorSel)
-              const OrderRow = (p, tag) => (
+              const pendentes = concl.filter(p => !p.entregador_pago)
+              const pagos = concl.filter(p => p.entregador_pago)
+              const somaTaxa = arr => arr.reduce((s, p) => s + Number(p.taxa_entrega || 0), 0)
+              const dataDe = p => new Date(p.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+              const agrupaPorData = arr => {
+                const g = {}
+                for (const p of arr) (g[dataDe(p)] ??= []).push(p)
+                return Object.entries(g)
+              }
+              const OrderRow = (p, { pago = false, rota: ehRota = false } = {}) => (
                 <div key={p.id} style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '9px 11px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
-                    <strong style={{ fontSize: 13, color: tag === 'rota' ? '#7c3aed' : '#16a34a' }} title="Taxa de entrega">{fmt(p.taxa_entrega ?? 0)}</strong>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <strong style={{ fontSize: 13, color: ehRota ? '#7c3aed' : '#16a34a' }} title="Taxa de entrega">{fmt(p.taxa_entrega ?? 0)}</strong>
+                      {!ehRota && (pago
+                        ? <span style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '2px 8px', borderRadius: 20 }}>✓ Pago</span>
+                        : <button type="button" onClick={() => pagarCorridas([p.id])}
+                            style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.12)', border: '1px solid #22c55e', borderRadius: 20, padding: '2px 10px', cursor: 'pointer' }}>
+                            Pagar
+                          </button>)}
+                    </div>
                   </div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
                     {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
@@ -4631,23 +4656,52 @@ export default function PainelPedidos() {
                   </button>
                   <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{ent?.nome || 'Entregador'}</div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    {[['Em rota', rota.length, '#7c3aed'], ['Concluídos', concl.length, '#16a34a'], ['Total', rota.length + concl.length, 'var(--text)']].map(([lab, val, cor]) => (
+                    {[['A receber', fmt(somaTaxa(pendentes)), '#f59e0b'], ['Pago', fmt(somaTaxa(pagos)), '#16a34a'], ['Em rota', rota.length, '#7c3aed']].map(([lab, val, cor]) => (
                       <div key={lab} style={{ flex: 1, textAlign: 'center', border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '8px 4px' }}>
-                        <div style={{ fontSize: 20, fontWeight: 800, color: cor }}>{val}</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: cor }}>{val}</div>
                         <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{lab}</div>
                       </div>
                     ))}
                   </div>
+
                   {rota.length > 0 && (
                     <>
                       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginTop: 4 }}>Em rota agora</div>
-                      {rota.map(p => OrderRow(p, 'rota'))}
+                      {rota.map(p => OrderRow(p, { rota: true }))}
                     </>
                   )}
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginTop: 4 }}>Concluídos</div>
-                  {concl.length === 0
-                    ? <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Nenhuma entrega concluída ainda.</div>
-                    : concl.map(p => OrderRow(p, 'ok'))}
+
+                  {/* A PAGAR (pendentes por data) */}
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#f59e0b', marginTop: 6 }}>
+                    A pagar · {fmt(somaTaxa(pendentes))}
+                  </div>
+                  {pendentes.length === 0
+                    ? <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Tudo acertado. 🎉</div>
+                    : agrupaPorData(pendentes).map(([data, ps]) => (
+                      <div key={data} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
+                          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)' }}>{data} · {ps.length} corrida{ps.length > 1 ? 's' : ''} · {fmt(somaTaxa(ps))}</span>
+                          <button type="button" onClick={() => pagarCorridas(ps.map(p => p.id))}
+                            style={{ fontSize: 11, fontWeight: 800, color: '#fff', background: '#16a34a', border: 'none', borderRadius: 20, padding: '3px 12px', cursor: 'pointer' }}>
+                            Pagar todas
+                          </button>
+                        </div>
+                        {ps.map(p => OrderRow(p, { pago: false }))}
+                      </div>
+                    ))}
+
+                  {/* PAGAS (por data) */}
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#16a34a', marginTop: 10 }}>
+                    Pagas · {fmt(somaTaxa(pagos))}
+                  </div>
+                  {pagos.length === 0
+                    ? <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Nenhuma corrida paga ainda.</div>
+                    : agrupaPorData(pagos).map(([data, ps]) => (
+                      <div key={data} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)', marginTop: 2 }}>{data} · {ps.length} corrida{ps.length > 1 ? 's' : ''} · {fmt(somaTaxa(ps))}</div>
+                        {ps.map(p => OrderRow(p, { pago: true }))}
+                      </div>
+                    ))}
                 </div>
               )
             }
