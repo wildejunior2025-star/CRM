@@ -61,6 +61,43 @@ export default function Produtos() {
   // Complementos / opções do produto (ex.: monte sua quentinha)
   const [grupos, setGrupos] = useState([])
 
+  // Complementos na LISTA (accordion pausável estilo iFood, direto na tabela)
+  const [compProd, setCompProd] = useState({})            // produtoId -> [grupos]
+  const [compAberto, setCompAberto] = useState(() => new Set())
+  const [pausandoComp, setPausandoComp] = useState(null)
+
+  function toggleAbrirComp(produtoId) {
+    setCompAberto(prev => {
+      const n = new Set(prev)
+      n.has(produtoId) ? n.delete(produtoId) : n.add(produtoId)
+      return n
+    })
+  }
+  async function togglePausarGrupoLista(produtoId, grupo) {
+    const novo = grupo.disponivel === false
+    setPausandoComp(grupo.id)
+    const patch = (val) => setCompProd(prev => ({
+      ...prev, [produtoId]: (prev[produtoId] ?? []).map(g => g.id === grupo.id ? { ...g, disponivel: val } : g),
+    }))
+    patch(novo)
+    const { error } = await supabase.from('complemento_grupos').update({ disponivel: novo }).eq('id', grupo.id)
+    setPausandoComp(null)
+    if (error) patch(grupo.disponivel)
+  }
+  async function togglePausarOpcaoLista(produtoId, grupoId, op) {
+    const novo = op.disponivel === false
+    setPausandoComp(op.id)
+    const patch = (val) => setCompProd(prev => ({
+      ...prev, [produtoId]: (prev[produtoId] ?? []).map(g => g.id !== grupoId ? g : {
+        ...g, opcoes: g.opcoes.map(o => o.id === op.id ? { ...o, disponivel: val } : o),
+      }),
+    }))
+    patch(novo)
+    const { error } = await supabase.from('complemento_opcoes').update({ disponivel: novo }).eq('id', op.id)
+    setPausandoComp(null)
+    if (error) patch(op.disponivel)
+  }
+
   async function loadComplementos(produtoId) {
     const { data } = await supabase
       .from('complemento_grupos')
@@ -162,7 +199,29 @@ export default function Produtos() {
     if (categ) query = query.eq('categoria', categ)
     const { data, error, count } = await query
     if (error) setError(error.message)
-    else { setProdutos(data ?? []); setTotal(count ?? 0) }
+    else {
+      setProdutos(data ?? [])
+      setTotal(count ?? 0)
+      // Complementos dos produtos exibidos (accordion pausável na própria lista)
+      const ids = (data ?? []).map(p => p.id)
+      if (ids.length) {
+        const { data: gs } = await supabase
+          .from('complemento_grupos')
+          .select('id, produto_id, nome, min, max, ordem, disponivel, complemento_opcoes(id, nome, preco_adicional, disponivel, ordem)')
+          .in('produto_id', ids)
+          .order('ordem')
+        const map = {}
+        for (const g of (gs ?? [])) {
+          const opcoes = (g.complemento_opcoes ?? []).sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+          ;(map[g.produto_id] ??= []).push({
+            id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, ordem: g.ordem ?? 0,
+            disponivel: g.disponivel !== false, opcoes,
+          })
+        }
+        for (const pid in map) map[pid].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+        setCompProd(map)
+      } else setCompProd({})
+    }
     setLoading(false)
   }, [])
 
@@ -503,7 +562,27 @@ export default function Produtos() {
                           📷
                         </div>
                       )}
-                      {p.nome}
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                        <span>{p.nome}</span>
+                        {(compProd[p.id]?.length > 0) && (
+                          <button
+                            type="button"
+                            onClick={() => toggleAbrirComp(p.id)}
+                            title="Ver e pausar os complementos"
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer',
+                              padding: '3px 10px', borderRadius: 20, fontWeight: 700, fontSize: 12,
+                              border: `1.5px solid ${compAberto.has(p.id) ? '#2563eb' : 'var(--border)'}`,
+                              background: compAberto.has(p.id) ? 'rgba(37,99,235,.12)' : 'transparent',
+                              color: compAberto.has(p.id) ? '#2563eb' : 'var(--text-muted)',
+                            }}
+                          >
+                            Complementos
+                            <span style={{ fontWeight: 800, background: 'rgba(148,163,184,.25)', borderRadius: 20, padding: '0 6px' }}>{compProd[p.id].length}</span>
+                            <span style={{ transform: compAberto.has(p.id) ? 'rotate(180deg)' : 'none', transition: 'transform .15s', fontSize: 10 }}>▼</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </td>
                   <td>{p.categoria}</td>
@@ -545,6 +624,77 @@ export default function Produtos() {
                     </button>
                   </td>
                 </tr>
+                {/* Complementos aninhados (grupos + opções) — estilo iFood */}
+                {compAberto.has(p.id) && (compProd[p.id]?.length > 0) && (
+                  <tr>
+                    <td colSpan={11} style={{ padding: 0, background: 'var(--bg-hover)' }}>
+                      <div style={{ padding: '8px 12px 12px 74px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {compProd[p.id].map(g => {
+                          const gPausado = g.disponivel === false
+                          const qtd = g.max > 1 ? `escolha até ${g.max}` : (g.min > 0 ? 'obrigatório' : 'opcional')
+                          return (
+                            <div key={g.id} style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--surface)', opacity: gPausado ? 0.6 : 1 }}>
+                              {/* Cabeçalho do grupo (subcategoria) */}
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 12px', background: 'var(--bg)' }}>
+                                <div>
+                                  <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>
+                                    {g.nome}
+                                    {gPausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
+                                  </div>
+                                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{qtd} · {g.opcoes.length} {g.opcoes.length === 1 ? 'opção' : 'opções'}</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => togglePausarGrupoLista(p.id, g)}
+                                  disabled={pausandoComp === g.id}
+                                  style={{
+                                    flexShrink: 0, padding: '6px 14px', borderRadius: 20, cursor: 'pointer',
+                                    fontWeight: 700, fontSize: 13, border: '1.5px solid',
+                                    borderColor: gPausado ? '#16a34a' : '#dc2626',
+                                    background: gPausado ? 'rgba(22,163,74,.12)' : 'rgba(239,68,68,.12)',
+                                    color: gPausado ? '#16a34a' : '#dc2626',
+                                  }}
+                                >
+                                  {pausandoComp === g.id ? '...' : gPausado ? '▶ Ativar grupo' : '⏸ Pausar grupo'}
+                                </button>
+                              </div>
+                              {/* Opções do grupo */}
+                              {g.opcoes.map(op => {
+                                const oPausado = op.disponivel === false
+                                return (
+                                  <div key={op.id} style={{
+                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                                    padding: '7px 12px', borderTop: '1px solid var(--border)', opacity: oPausado ? 0.55 : 1,
+                                  }}>
+                                    <div style={{ fontSize: 13, color: 'var(--text)' }}>
+                                      {op.nome}
+                                      {Number(op.preco_adicional) > 0 && <span style={{ color: 'var(--text-muted)' }}> · +R$ {Number(op.preco_adicional).toFixed(2)}</span>}
+                                      {oPausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => togglePausarOpcaoLista(p.id, g.id, op)}
+                                      disabled={pausandoComp === op.id}
+                                      style={{
+                                        flexShrink: 0, padding: '5px 14px', borderRadius: 20, cursor: 'pointer',
+                                        fontWeight: 700, fontSize: 13, border: '1.5px solid',
+                                        borderColor: oPausado ? '#16a34a' : '#dc2626',
+                                        background: oPausado ? 'rgba(22,163,74,.12)' : 'rgba(239,68,68,.12)',
+                                        color: oPausado ? '#16a34a' : '#dc2626',
+                                      }}
+                                    >
+                                      {pausandoComp === op.id ? '...' : oPausado ? '▶ Ativar' : '⏸ Pausar'}
+                                    </button>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </td>
+                  </tr>
+                )}
                   </React.Fragment>
                 )
               })}
