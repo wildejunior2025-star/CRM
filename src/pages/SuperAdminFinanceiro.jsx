@@ -3,6 +3,10 @@ import { supabase } from '../lib/supabaseClient'
 import '../components/Page.css'
 
 const fmt = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const fmtData = d => new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+const LABEL_TIPO = { recarga_pix: 'PIX', recarga_cartao: 'Cartão', auto_recarga: 'Auto (cartão)', manual: 'Manual' }
+const CifraTipo = tipo => tipo === 'recarga_pix' ? '#16a34a' : tipo === 'manual' ? '#6b7280' : '#3b82f6'
+const FundoTipo = tipo => tipo === 'recarga_pix' ? 'rgba(37,211,102,.15)' : tipo === 'manual' ? 'rgba(107,114,128,.15)' : 'rgba(59,130,246,.15)'
 
 const PERIODOS = [
   { label: 'Este mês',    valor: 'mes_atual' },
@@ -103,7 +107,10 @@ export default function SuperAdminFinanceiro() {
           'cashback_pct',
           'mlm_pct_nivel_1','mlm_pct_nivel_2','mlm_pct_nivel_3','mlm_pct_nivel_4','mlm_pct_nivel_5',
         ]),
-      applyDates(supabase.from('whatsapp_credito_pagamentos').select('valor_reais').eq('status', 'pago')),
+      applyDates(supabase.from('whatsapp_credito_historico')
+        .select('creditos, valor_reais, tipo, created_at, empresas(nome)')
+        .neq('tipo', 'consumo')
+        .order('created_at', { ascending: false })),
       applyDates(supabase.from('pedidos_delivery').select('total, forma_pagamento').eq('origem', 'app').neq('status', 'cancelado')),
       applyDates(supabase.from('comissoes_indicacao').select('valor_comissao, status')),
     ])
@@ -129,7 +136,8 @@ export default function SuperAdminFinanceiro() {
     const cashbackPct = Number(cfgMap.cashback_pct         ?? 5)
 
     // Receitas
-    const receitaCreditos   = (creditosRes.data ?? []).reduce((s, r) => s + Number(r.valor_reais || 0), 0)
+    const creditosLista     = creditosRes.data ?? []
+    const receitaCreditos   = creditosLista.reduce((s, r) => s + Number(r.valor_reais || 0), 0)
     const pedidosApp        = vendasRes.data ?? []
     const volumeVendasApp   = pedidosApp.reduce((s, r) => s + Number(r.total || 0), 0)
     const qtdPedidosApp     = pedidosApp.length
@@ -159,7 +167,7 @@ export default function SuperAdminFinanceiro() {
 
     setDados({
       taxaPct, impostosPct, custoFixo, cashbackPct,
-      receitaCreditos, volumeVendasApp, qtdPedidosApp,
+      receitaCreditos, creditosLista, volumeVendasApp, qtdPedidosApp,
       comissaoTotal, comissaoPago, comissaoPendente,
       totalMlm, mlmPago, mlmPendente,
       totalCashback,
@@ -260,6 +268,58 @@ export default function SuperAdminFinanceiro() {
                 <span style={{ fontSize: 14 }}>= Total receitas</span>
                 <span style={{ fontSize: 16, color: 'var(--primary)' }}>{fmt(dados.receitaTotal)}</span>
               </div>
+            </div>
+          </section>
+
+          {/* ── ABASTECIMENTO DE CRÉDITOS WHATSAPP ── */}
+          <section style={{ marginBottom: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>
+                Abastecimento de créditos WhatsApp
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                {dados.creditosLista.length} recarga{dados.creditosLista.length === 1 ? '' : 's'} · {fmt(dados.receitaCreditos)}
+              </div>
+            </div>
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+              {dados.creditosLista.length === 0 ? (
+                <div style={{ padding: '18px 20px', fontSize: 13, color: 'var(--text-muted)' }}>
+                  Nenhuma recarga confirmada no período.
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ textAlign: 'left', color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                        <th style={{ padding: '10px 16px', fontWeight: 700 }}>Loja</th>
+                        <th style={{ padding: '10px 16px', fontWeight: 700 }}>Forma</th>
+                        <th style={{ padding: '10px 16px', fontWeight: 700, textAlign: 'right' }}>Créditos</th>
+                        <th style={{ padding: '10px 16px', fontWeight: 700, textAlign: 'right' }}>Valor</th>
+                        <th style={{ padding: '10px 16px', fontWeight: 700, textAlign: 'right' }}>Data</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dados.creditosLista.map((c, i) => (
+                        <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                          <td style={{ padding: '10px 16px', fontWeight: 600 }}>{c.empresas?.nome ?? '—'}</td>
+                          <td style={{ padding: '10px 16px' }}>
+                            <span style={{
+                              fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                              background: FundoTipo(c.tipo),
+                              color: CifraTipo(c.tipo),
+                            }}>
+                              {LABEL_TIPO[c.tipo] ?? c.tipo}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 700 }}>{Number(c.creditos || 0).toLocaleString('pt-BR')}</td>
+                          <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 700, color: '#25d366' }}>{fmt(c.valor_reais)}</td>
+                          <td style={{ padding: '10px 16px', textAlign: 'right', color: 'var(--text-muted)' }}>{fmtData(c.created_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </section>
 
