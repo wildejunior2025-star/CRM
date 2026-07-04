@@ -63,16 +63,14 @@ function mapsUrl(p) {
 // ORIGEM, a última o destino, e as do meio vão em waypoints (separados por "|"
 // cru — o navegador codifica; %7C já codificado o app não entende). Máx. 10.
 function rotaMultiplaUrl(pedidos) {
-  // Remove pontos repetidos (ex.: 2 pedidos pro mesmo endereço) — senão a rota fica
-  // com origem == destino e o Google não traça nada.
+  // Remove pontos repetidos (ex.: 2 pedidos pro mesmo endereço).
   const pontos = [...new Set(pedidos.map(enderecoPonto).filter(Boolean))].slice(0, 10)
   if (pontos.length === 0) return null
-  // 1 ponto só (ou tudo no mesmo lugar): rota simples até ele (o Maps usa sua localização como origem).
-  if (pontos.length === 1) return `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${encodeURIComponent(pontos[0])}`
-  const origem = encodeURIComponent(pontos[0])
+  // SEM origem fixa: o Google usa a SUA LOCALIZAÇÃO ATUAL como partida (igual ao
+  // botão "Rota" de cada card). Todos os pedidos viram paradas + destino final.
   const destino = encodeURIComponent(pontos[pontos.length - 1])
-  const meio = pontos.slice(1, -1).map(e => encodeURIComponent(e))
-  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${origem}&destination=${destino}`
+  const meio = pontos.slice(0, -1).map(e => encodeURIComponent(e))
+  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${destino}`
   if (meio.length) url += `&waypoints=${meio.join('|')}`
   return url
 }
