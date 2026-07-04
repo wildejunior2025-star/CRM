@@ -17,12 +17,14 @@ const PACOTES = [
 ]
 
 const DESCRICAO_TIPO: Record<string, string> = {
-  compra_pix:    'Compra via PIX',
-  compra_cartao: 'Compra via cartão',
-  uso_bot:       'Resposta do bot',
-  recarga_auto:  'Recarga automática',
-  bonus:         'Bônus',
-  ajuste:        'Ajuste manual',
+  recarga_pix:    'Recarga via PIX',
+  recarga_cartao: 'Recarga via cartão',
+  auto_recarga:   'Recarga automática',
+  consumo:        'Resposta do bot',
+  manual:         'Ajuste manual',
+  // legados (não usados mais, mas mantidos p/ extratos antigos)
+  compra_pix:     'Recarga via PIX',
+  compra_cartao:  'Recarga via cartão',
 }
 
 async function mp(path: string, method = 'GET', body?: unknown) {
@@ -54,22 +56,8 @@ async function reconciliarPendentes(supabase: any, empresa_id: string) {
     try {
       const pay = await mp(`/v1/payments/${p.mp_payment_id}`)
       if (pay?.status === 'approved') {
-        const { data: pago } = await supabase
-          .from('whatsapp_credito_pagamentos')
-          .update({ status: 'pago' })
-          .eq('mp_payment_id', String(p.mp_payment_id))
-          .eq('status', 'pendente')
-          .select('empresa_id, creditos, valor_reais')
-          .maybeSingle()
-        if (pago) {
-          await supabase.rpc('adicionar_creditos_whatsapp', {
-            p_empresa_id:    pago.empresa_id,
-            p_creditos:      pago.creditos,
-            p_tipo:          'compra_pix',
-            p_valor_reais:   pago.valor_reais,
-            p_mp_payment_id: String(p.mp_payment_id),
-          })
-        }
+        // Atômico + idempotente (mesma função do webhook)
+        await supabase.rpc('confirmar_pagamento_credito', { p_mp_payment_id: String(p.mp_payment_id) })
       } else if (['cancelled', 'rejected', 'expired'].includes(pay?.status)) {
         await supabase
           .from('whatsapp_credito_pagamentos')
@@ -245,7 +233,7 @@ Deno.serve(async (req) => {
         await supabase.rpc('adicionar_creditos_whatsapp', {
           p_empresa_id:   empresa_id,
           p_creditos:     creditos,
-          p_tipo:         'compra_cartao',
+          p_tipo:         'recarga_cartao',
           p_valor_reais:  pacote.valor,
           p_mp_payment_id: String(mpRes.id),
         })

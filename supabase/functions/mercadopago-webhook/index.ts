@@ -73,23 +73,10 @@ Deno.serve(async (req) => {
 
       if (compra) {
         if (payment.status === 'approved') {
-          // .eq('status','pendente') = trava anti-duplicação: só credita 1x
-          const { data: pago } = await supabase
-            .from('whatsapp_credito_pagamentos')
-            .update({ status: 'pago' })
-            .eq('mp_payment_id', String(paymentId))
-            .eq('status', 'pendente')
-            .select('empresa_id, creditos, valor_reais')
-            .maybeSingle()
-          if (pago) {
-            await supabase.rpc('adicionar_creditos_whatsapp', {
-              p_empresa_id:    pago.empresa_id,
-              p_creditos:      pago.creditos,
-              p_tipo:          'compra_pix',
-              p_valor_reais:   pago.valor_reais,
-              p_mp_payment_id: String(paymentId),
-            })
-          }
+          // Atômico: credita saldo + histórico + marca 'pago' numa transação só.
+          // Idempotente (trava status='pendente' + FOR UPDATE) — nunca credita 2x
+          // nem fica 'pago' sem creditar.
+          await supabase.rpc('confirmar_pagamento_credito', { p_mp_payment_id: String(paymentId) })
         } else if (['cancelled', 'rejected', 'expired'].includes(payment.status)) {
           await supabase
             .from('whatsapp_credito_pagamentos')
