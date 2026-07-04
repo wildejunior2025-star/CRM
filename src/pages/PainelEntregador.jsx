@@ -478,12 +478,12 @@ export default function PainelEntregador() {
   }, [aba, user])
 
   const minhas = pedidos.filter(p => p.entregador_id === user?.id)
-  // Disponíveis pro motoboy: só ENTREGA (retirada o cliente busca) e sem dono.
-  // iFood: como o pedido costuma ir direto pra "saiu_entrega" (despachado no
-  // iFood), também liberamos esses pro entregador da loja pegar e levar.
+  // Disponíveis pro motoboy: só ENTREGA (retirada o cliente busca), sem dono e que
+  // ainda NÃO saiu. Pedido em 'saiu_entrega' já foi despachado (no iFood ou aqui) —
+  // não faz sentido aparecer como "aceitar". Ele só aparece pra alguém se o gestor
+  // atribuir um motoqueiro (aí cai nas "Aceitas" dele).
   const disponiveis = pedidos.filter(p =>
-    p.tipo_entrega !== 'retirada' && !p.entregador_id &&
-    (p.status === 'pronto' || (p.origem === 'ifood' && p.status === 'saiu_entrega'))
+    p.tipo_entrega !== 'retirada' && !p.entregador_id && p.status === 'pronto'
   )
 
   // Desconto por corrida (só iFood) deste motoqueiro — abatido do que ele recebe.
