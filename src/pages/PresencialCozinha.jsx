@@ -120,6 +120,7 @@ export default function PresencialCozinha() {
   const [itens, setItens]       = useState([]) // itens de mesa (pendente + pronto de hoje)
   const [entregas, setEntregas] = useState([]) // pedidos delivery/iFood (em preparo + pronto de hoje)
   const [aba, setAba]           = useState('afazer') // 'afazer' | 'preparando' | 'historico'
+  const [busca, setBusca]       = useState('') // filtra por nº/código/cliente/mesa
   const [loading, setLoading]   = useState(true)
   const [, setTick]             = useState(0)
 
@@ -233,8 +234,15 @@ export default function PresencialCozinha() {
     }
     return Object.entries(map).sort((a, b) => Number(a[0]) - Number(b[0]))
   }
-  const entAba  = ent[aba]
-  const mesaAba = useMemo(() => agruparPorMesa(mesa[aba]), [itens, aba, meuId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Busca (loja com muito pedido): filtra por nº do pedido, código de entrega,
+  // nº do iFood, cliente, endereço ou mesa.
+  const buscaLimpa = busca.trim().toLowerCase()
+  const casaBusca = campos => !buscaLimpa || campos.filter(Boolean).join(' ').toLowerCase().includes(buscaLimpa)
+  const entAba  = ent[aba].filter(p => casaBusca([p.numero_pedido, p.ifood_display_id, p.codigo_entrega, p.cliente_nome, p.endereco_rua, p.endereco_bairro, p.endereco_cidade, String(p.id || '').slice(-4)]))
+  const mesaAba = useMemo(
+    () => agruparPorMesa(mesa[aba].filter(i => casaBusca([i.comandas?.numero_mesa, 'mesa ' + (i.comandas?.numero_mesa ?? ''), i.nome]))),
+    [itens, aba, meuId, buscaLimpa] // eslint-disable-line react-hooks/exhaustive-deps
+  )
 
   if (loading) return <div className="page"><p>Carregando cozinha...</p></div>
 
@@ -271,9 +279,34 @@ export default function PresencialCozinha() {
         ))}
       </div>
 
+      {/* Busca por nº/código/cliente/mesa — ajuda quando tem muito pedido */}
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', maxWidth: 420, marginBottom: 16 }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+          style={{ position: 'absolute', left: 12, pointerEvents: 'none' }} aria-hidden="true">
+          <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input
+          type="search"
+          value={busca}
+          onChange={e => setBusca(e.target.value)}
+          placeholder="Buscar por nº, código, cliente ou mesa"
+          style={{
+            width: '100%', padding: '10px 12px 10px 38px', borderRadius: 10, fontSize: 14,
+            border: '1.5px solid var(--border)', background: 'var(--surface, var(--bg))', color: 'var(--text)', boxSizing: 'border-box',
+          }}
+        />
+        {busca && (
+          <button type="button" onClick={() => setBusca('')} aria-label="Limpar busca"
+            style={{ position: 'absolute', right: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 18, lineHeight: 1, padding: 6 }}>
+            ×
+          </button>
+        )}
+      </div>
+
       {entAba.length === 0 && mesaAba.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
-          {aba === 'afazer' ? '🍳 Nenhum pedido esperando. Tudo em dia!'
+          {buscaLimpa ? `🔍 Nenhum pedido encontrado pra “${busca}”.`
+            : aba === 'afazer' ? '🍳 Nenhum pedido esperando. Tudo em dia!'
             : aba === 'preparando' ? '👨‍🍳 Você não está preparando nada agora.'
             : '📋 Nenhum pedido pronto hoje ainda.'}
         </div>
