@@ -171,7 +171,7 @@ function ModalPagarChave({ onClose, onSuccess }) {
         )}
 
         <p className="pag-confirm-aviso" style={{ marginTop: 12 }}>
-          ⚠️ Pagamento real debitado da sua conta Mercado Pago.
+          ⚠️ Pagamento real via PIX debitado da sua conta Efí.
         </p>
 
         <div className="pp-modal-actions">
@@ -274,7 +274,7 @@ function ModalPagarCola({ onClose, onSuccess }) {
         )}
 
         <p className="pag-confirm-aviso" style={{ marginTop: 12 }}>
-          ⚠️ Pagamento real debitado da sua conta Mercado Pago.
+          ⚠️ Pagamento real via PIX debitado da sua conta Efí.
         </p>
 
         <div className="pp-modal-actions">
@@ -391,7 +391,7 @@ export default function SuperAdminPagamentos() {
   }
 
   async function handlePagarAgendado(pag) {
-    if (!confirm(`Pagar ${fmt(pag.valor)} para ${pag.destinatario_nome} via Mercado Pago agora?`)) return
+    if (!confirm(`Pagar ${fmt(pag.valor)} para ${pag.destinatario_nome} via PIX (Efí) agora?`)) return
     setPagandoId(pag.id)
     const data = await callPayPix({ pagamento_id: pag.id })
     setPagandoId(null)
