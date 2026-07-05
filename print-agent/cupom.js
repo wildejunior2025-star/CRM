@@ -8,7 +8,9 @@ const ALIGN  = n => Buffer.from([ESC, 0x61, n])        // 0 esq, 1 centro, 2 dir
 const SIZE   = n => Buffer.from([GS, 0x21, n])         // GS ! — largura(bits4-7)/altura(bits0-3)
 const BOLD   = on => Buffer.from([ESC, 0x45, on ? 1 : 0])
 const NL     = Buffer.from('\n', 'latin1')
-const LARGURA = 48
+// 80mm Font A. A MP-4200 (e a maioria das térmicas 80mm) quebra em 42 colunas —
+// se passar disso, o valor "R$ x,xx" quebra pra linha de baixo. 42 = fica certo.
+const LARGURA = 42
 
 function txt(s) {
   const clean = String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\x00-\x7F]/g, '')
