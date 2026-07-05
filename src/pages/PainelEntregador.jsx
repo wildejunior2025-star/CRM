@@ -363,6 +363,7 @@ export default function PainelEntregador() {
   const [pedidos, setPedidos] = useState([])
   const [loading, setLoading] = useState(true)
   const [aba, setAba] = useState('disponiveis') // 'disponiveis' | 'minhas' | 'historico'
+  const [busca, setBusca] = useState('') // filtra por nº/código/cliente/endereço
   const [historico, setHistorico] = useState([])
   const [histLoading, setHistLoading] = useState(false)
   const [periodoHist, setPeriodoHist] = useState('tudo') // filtro de data do histórico
@@ -550,6 +551,19 @@ export default function PainelEntregador() {
     ['confirmado', 'em_preparo', 'pronto'].includes(p.status)
   )
 
+  // Busca (loja com muito pedido): filtra por nº do pedido, código de entrega,
+  // nº do iFood, nome do cliente ou endereço.
+  const buscaLimpa = busca.trim().toLowerCase()
+  const filtraBusca = (lista) => {
+    if (!buscaLimpa) return lista
+    return lista.filter(p => [
+      p.numero_pedido, p.ifood_display_id, p.codigo_entrega,
+      p.cliente_nome, enderecoTexto(p), String(p.id || '').slice(-4),
+    ].filter(Boolean).join(' ').toLowerCase().includes(buscaLimpa))
+  }
+  const disponiveisF = filtraBusca(disponiveis)
+  const minhasF = filtraBusca(minhas)
+
   // Desconto por corrida (só iFood) deste motoqueiro — abatido do que ele recebe.
   const descValorEntrega = (profile?.entregador_desconto_ativo && Number(profile?.entregador_desconto_valor) > 0) ? Number(profile.entregador_desconto_valor) : 0
 
@@ -652,6 +666,36 @@ export default function PainelEntregador() {
         ))}
       </div>
 
+      {/* Busca por nº/código/cliente/endereço — ajuda quando tem muito pedido */}
+      {aba !== 'historico' && (
+        <div style={{ maxWidth: 560, margin: '0 auto', padding: '12px 16px 0' }}>
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              style={{ position: 'absolute', left: 12, pointerEvents: 'none' }} aria-hidden="true">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="search"
+              inputMode="search"
+              value={busca}
+              onChange={e => setBusca(e.target.value)}
+              placeholder="Buscar por nº, código, cliente ou endereço"
+              style={{
+                width: '100%', padding: '11px 12px 11px 38px', borderRadius: 10, fontSize: 14,
+                border: '1.5px solid var(--border, #2a2a3a)', background: 'var(--surface, #16161f)',
+                color: 'var(--text)', boxSizing: 'border-box',
+              }}
+            />
+            {busca && (
+              <button type="button" onClick={() => setBusca('')} aria-label="Limpar busca"
+                style={{ position: 'absolute', right: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 18, lineHeight: 1, padding: 6 }}>
+                ×
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <main style={{ maxWidth: 560, margin: '0 auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
         {aba !== 'historico' ? (
           loading ? (
@@ -663,6 +707,11 @@ export default function PainelEntregador() {
                 <div style={{ fontSize: 40, marginBottom: 8 }}>🛵</div>
                 Você não aceitou nenhuma entrega ainda. Veja as prontas na aba <strong>Disponíveis</strong>.
               </div>
+            ) : minhasF.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
+                <div style={{ fontSize: 40, marginBottom: 8 }}>🔍</div>
+                Nenhuma entrega encontrada pra <strong>“{busca}”</strong>.
+              </div>
             ) : (
               <>
                 {paradasUnicas(minhas) >= 2 && (
@@ -671,7 +720,7 @@ export default function PainelEntregador() {
                     🗺️ Rota de todas ({paradasUnicas(minhas)} paradas)
                   </a>
                 )}
-                {minhas.map(p => (
+                {minhasF.map(p => (
                   <CardEntrega key={p.id} pedido={p} mine descValor={descValorEntrega}
                     onSair={sairParaEntrega} onConfirmar={confirmarEntrega}
                     onConfirmarIfood={confirmarEntregaIfood} onDesistir={desistirEntrega} />
@@ -689,7 +738,12 @@ export default function PainelEntregador() {
                 <div style={{ fontSize: 40, marginBottom: 8 }}>📭</div>
                 Nenhum pedido no momento. Os pedidos da cozinha aparecem aqui.
               </div>
-            ) : disponiveis.map(p => (
+            ) : disponiveisF.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
+                <div style={{ fontSize: 40, marginBottom: 8 }}>🔍</div>
+                Nenhum pedido encontrado pra <strong>“{busca}”</strong>.
+              </div>
+            ) : disponiveisF.map(p => (
               <CardEntrega key={p.id} pedido={p} mine={false} descValor={descValorEntrega} onAceitar={podeAceitar ? aceitar : undefined} />
             ))
           )
