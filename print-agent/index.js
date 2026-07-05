@@ -72,7 +72,7 @@ if([RawPrinter]::SendBytes($Printer,$b)){Write-Output "OK"}else{Write-Output "FA
 try { fs.writeFileSync(PS1_FILE, PS1) } catch (e) {}
 
 function listarImpressoras() {
-  const r = spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Get-Printer | Select-Object -ExpandProperty Name'], { encoding: 'utf8' })
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Get-Printer | Select-Object -ExpandProperty Name'], { encoding: 'utf8', windowsHide: true })
   return (r.stdout || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
 }
 
@@ -123,7 +123,7 @@ function imprimir(pedido) {
     const bytes = montarCupom(pedido, empresa)
     const tmp = path.join(os.tmpdir(), 'fwc-cupom-' + pedido.id + '.bin')
     fs.writeFileSync(tmp, bytes)
-    const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', PS1_FILE, '-Printer', printer, '-File', tmp], { encoding: 'utf8' })
+    const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', PS1_FILE, '-Printer', printer, '-File', tmp], { encoding: 'utf8', windowsHide: true })
     log('  -> impresso #' + (pedido.numero_pedido ?? pedido.id) + ' [' + ((r.stdout || '') + (r.stderr || '')).trim() + ']')
     try { fs.unlinkSync(tmp) } catch (e) {}
   } catch (e) { log('  -> ERRO imprimir: ' + e.message) }
