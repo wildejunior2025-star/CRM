@@ -12,6 +12,9 @@ function tempoDesde(iso) {
   if (min === 1) return '1 min'
   return `${min} min`
 }
+function horaBR(iso) {
+  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
 
 // Botão/estado de "Aceitar → Preparando → Pronto" (G1). Reusado por pedido e item.
 function AcaoPreparo({ registro, meuId, onAceitar, onSoltar, onPronto, size = 'md' }) {
@@ -54,9 +57,9 @@ function AcaoPreparo({ registro, meuId, onAceitar, onSoltar, onPronto, size = 'm
 }
 
 // Card de um pedido de delivery/iFood na cozinha (KDS).
-function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, tempoDesde }) {
+function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historico }) {
   const ehIfood = pedido.origem === 'ifood'
-  const headerCor = ehIfood ? '#ea1d2c' : '#7c3aed'
+  const headerCor = historico ? '#16a34a' : (ehIfood ? '#ea1d2c' : '#7c3aed')
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const isRetirada = (pedido.tipo_entrega || 'entrega') === 'retirada'
   const numero = pedido.numero_pedido ?? String(pedido.id).slice(-4).toUpperCase()
@@ -96,8 +99,14 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, tempoDes
             </div>
           )
         })}
-        <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>há {tempoDesde(pedido.created_at)}</div>
-        <AcaoPreparo registro={pedido} meuId={meuId} onAceitar={onAceitar} onSoltar={onSoltar} onPronto={onPronto} />
+        {historico ? (
+          <div style={{ fontSize: 12.5, fontWeight: 800, color: '#16a34a' }}>✓ Pronto às {horaBR(pedido.updated_at || pedido.created_at)}</div>
+        ) : (
+          <>
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>há {tempoDesde(pedido.created_at)}</div>
+            <AcaoPreparo registro={pedido} meuId={meuId} onAceitar={onAceitar} onSoltar={onSoltar} onPronto={onPronto} />
+          </>
+        )}
       </div>
     </div>
   )
@@ -106,26 +115,33 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, tempoDes
 export default function PresencialCozinha() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id
-  const [itens, setItens]     = useState([])
-  const [entregas, setEntregas] = useState([]) // pedidos de delivery/iFood em preparo
-  const [loading, setLoading] = useState(true)
-  const [, setTick]           = useState(0)
+  const meuId = profile?.id
+  const meuNome = profile?.nome || 'Cozinha'
+  const [itens, setItens]       = useState([]) // itens de mesa (pendente + pronto de hoje)
+  const [entregas, setEntregas] = useState([]) // pedidos delivery/iFood (em preparo + pronto de hoje)
+  const [aba, setAba]           = useState('afazer') // 'afazer' | 'preparando' | 'historico'
+  const [loading, setLoading]   = useState(true)
+  const [, setTick]             = useState(0)
 
   async function load() {
     if (!empresaId) return
+    const inicioHoje = new Date(); inicioHoje.setHours(0, 0, 0, 0)
+    const hojeISO = inicioHoje.toISOString()
     const [mesasRes, entregasRes] = await Promise.all([
       supabase
         .from('comanda_itens')
         .select('*, comandas!inner(numero_mesa, status)')
         .eq('empresa_id', empresaId)
-        .eq('status', 'pendente')
         .eq('comandas.status', 'aberta')
+        .in('status', ['pendente', 'pronto'])
+        .gte('created_at', hojeISO)
         .order('created_at'),
       supabase
         .from('pedidos_delivery')
         .select('*')
         .eq('empresa_id', empresaId)
-        .in('status', ['confirmado', 'em_preparo'])
+        .in('status', ['confirmado', 'em_preparo', 'pronto'])
+        .gte('created_at', hojeISO)
         .order('created_at'),
     ])
     setItens(mesasRes.data ?? [])
@@ -133,24 +149,19 @@ export default function PresencialCozinha() {
     setLoading(false)
   }
 
-  const meuId = profile?.id
-  const meuNome = profile?.nome || 'Cozinha'
-
   async function marcarPedidoPronto(pedido) {
-    // Otimista + atualiza no banco. O trigger avisa o iFood (readyToPickup) e
-    // o pedido segue pro motoboy / retirada.
-    setEntregas(prev => prev.filter(p => p.id !== pedido.id))
+    // Otimista: move pra Histórico. O trigger avisa o iFood (readyToPickup) e o
+    // pedido segue pro motoboy / retirada.
+    setEntregas(prev => prev.map(p => p.id === pedido.id ? { ...p, status: 'pronto', updated_at: new Date().toISOString() } : p))
     await supabase.from('pedidos_delivery').update({ status: 'pronto' }).eq('id', pedido.id)
   }
 
   // G1 — aceitar trava o pedido na pessoa (só quem aceitou marca Pronto).
-  // IMPORTANTE: NÃO muda o status (mantém confirmado) — só vincula quem pegou.
-  // Assim NÃO dispara o WhatsApp do cliente (o gatilho avisa em 'em_preparo').
-  // É controle 100% interno da loja.
+  // NÃO muda o status (mantém confirmado) — só vincula quem pegou. Assim NÃO
+  // dispara o WhatsApp do cliente. É controle 100% interno da loja.
   async function aceitarPedido(pedido) {
     const patch = { preparando_por: meuId, preparando_nome: meuNome, preparando_em: new Date().toISOString() }
     setEntregas(prev => prev.map(p => p.id === pedido.id ? { ...p, ...patch } : p))
-    // .is(null) garante que só pega se ninguém pegou antes (evita 2 pegarem juntos)
     await supabase.from('pedidos_delivery').update(patch).eq('id', pedido.id).is('preparando_por', null)
     load()
   }
@@ -158,6 +169,23 @@ export default function PresencialCozinha() {
     const patch = { preparando_por: null, preparando_nome: null, preparando_em: null }
     setEntregas(prev => prev.map(p => p.id === pedido.id ? { ...p, ...patch } : p))
     await supabase.from('pedidos_delivery').update(patch).eq('id', pedido.id).eq('preparando_por', meuId)
+    load()
+  }
+
+  async function marcarPronto(item) {
+    setItens(prev => prev.map(i => i.id === item.id ? { ...i, status: 'pronto', updated_at: new Date().toISOString() } : i))
+    await supabase.from('comanda_itens').update({ status: 'pronto' }).eq('id', item.id)
+  }
+  async function aceitarItem(item) {
+    const patch = { preparando_por: meuId, preparando_nome: meuNome, preparando_em: new Date().toISOString() }
+    setItens(prev => prev.map(i => i.id === item.id ? { ...i, ...patch } : i))
+    await supabase.from('comanda_itens').update(patch).eq('id', item.id).is('preparando_por', null)
+    load()
+  }
+  async function soltarItem(item) {
+    const patch = { preparando_por: null, preparando_nome: null, preparando_em: null }
+    setItens(prev => prev.map(i => i.id === item.id ? { ...i, ...patch } : i))
+    await supabase.from('comanda_itens').update(patch).eq('id', item.id).eq('preparando_por', meuId)
     load()
   }
 
@@ -179,33 +207,42 @@ export default function PresencialCozinha() {
     return () => { supabase.removeChannel(ch) }
   }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function marcarPronto(item) {
-    await supabase.from('comanda_itens').update({ status: 'pronto' }).eq('id', item.id)
-    load()
+  // ── Filtros por aba (igual ao app do motoqueiro) ─────────────
+  const emPreparoStatus = s => s === 'confirmado' || s === 'em_preparo'
+  const ent = {
+    afazer:     entregas.filter(p => emPreparoStatus(p.status) && !p.preparando_por),
+    preparando: entregas.filter(p => emPreparoStatus(p.status) && p.preparando_por === meuId),
+    historico:  entregas.filter(p => p.status === 'pronto'),
   }
-  async function aceitarItem(item) {
-    await supabase.from('comanda_itens')
-      .update({ preparando_por: meuId, preparando_nome: meuNome, preparando_em: new Date().toISOString() })
-      .eq('id', item.id).is('preparando_por', null)
-    load()
+  const mesa = {
+    afazer:     itens.filter(i => i.status === 'pendente' && !i.preparando_por),
+    preparando: itens.filter(i => i.status === 'pendente' && i.preparando_por === meuId),
+    historico:  itens.filter(i => i.status === 'pronto'),
   }
-  async function soltarItem(item) {
-    await supabase.from('comanda_itens')
-      .update({ preparando_por: null, preparando_nome: null, preparando_em: null })
-      .eq('id', item.id).eq('preparando_por', meuId)
-    load()
+  const cont = {
+    afazer:     ent.afazer.length + mesa.afazer.length,
+    preparando: ent.preparando.length + mesa.preparando.length,
+    historico:  ent.historico.length + mesa.historico.length,
   }
 
-  const porMesa = useMemo(() => {
+  const agruparPorMesa = lista => {
     const map = {}
-    for (const it of itens) {
+    for (const it of lista) {
       const k = it.comandas?.numero_mesa ?? '—'
       ;(map[k] = map[k] || []).push(it)
     }
     return Object.entries(map).sort((a, b) => Number(a[0]) - Number(b[0]))
-  }, [itens])
+  }
+  const entAba  = ent[aba]
+  const mesaAba = useMemo(() => agruparPorMesa(mesa[aba]), [itens, aba, meuId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <div className="page"><p>Carregando cozinha...</p></div>
+
+  const ABAS = [
+    ['afazer',     'A fazer'],
+    ['preparando', 'Preparando'],
+    ['historico',  'Histórico'],
+  ]
 
   return (
     <div className="page">
@@ -215,28 +252,46 @@ export default function PresencialCozinha() {
             <Link to="/presencial" style={{ color: 'var(--primary)' }}>← Serviço Presencial</Link>
           </p>
           <h1>Cozinha (KDS)</h1>
-          <p className="page-subtitle">Itens aguardando preparo, ao vivo.</p>
+          <p className="page-subtitle">Aceite o pedido, prepare e marque pronto — ao vivo.</p>
         </div>
       </div>
 
-      {porMesa.length === 0 && entregas.length === 0 ? (
+      {/* Abas (igual ao app do motoqueiro) */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        {ABAS.map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setAba(id)}
+            style={{
+              padding: '9px 16px', borderRadius: 10, cursor: 'pointer', fontWeight: 800, fontSize: 13.5,
+              border: `1.5px solid ${aba === id ? '#7c3aed' : 'var(--border)'}`,
+              background: aba === id ? 'rgba(124,58,237,.14)' : 'transparent',
+              color: aba === id ? '#7c3aed' : 'var(--text)',
+            }}>
+            {label} {cont[id] > 0 && <span style={{ opacity: .8 }}>({cont[id]})</span>}
+          </button>
+        ))}
+      </div>
+
+      {entAba.length === 0 && mesaAba.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
-          🍳 Nenhum item na fila. Tudo em dia!
+          {aba === 'afazer' ? '🍳 Nenhum pedido esperando. Tudo em dia!'
+            : aba === 'preparando' ? '👨‍🍳 Você não está preparando nada agora.'
+            : '📋 Nenhum pedido pronto hoje ainda.'}
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
-          {/* Pedidos de delivery / iFood em preparo */}
-          {entregas.map(pedido => (
-            <CardEntregaKDS key={pedido.id} pedido={pedido} meuId={meuId}
-              onAceitar={aceitarPedido} onSoltar={soltarPedido} onPronto={marcarPedidoPronto} tempoDesde={tempoDesde} />
+          {/* Pedidos de delivery / iFood */}
+          {entAba.map(pedido => (
+            <CardEntregaKDS key={pedido.id} pedido={pedido} meuId={meuId} historico={aba === 'historico'}
+              onAceitar={aceitarPedido} onSoltar={soltarPedido} onPronto={marcarPedidoPronto} />
           ))}
 
-          {porMesa.map(([mesa, lista]) => (
-            <div key={mesa} style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-              <div style={{ background: 'var(--primary)', color: '#fff', padding: '10px 14px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>Mesa {mesa}</span>
+          {/* Itens de mesa, agrupados por mesa */}
+          {mesaAba.map(([numeroMesa, lista]) => (
+            <div key={numeroMesa} style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+              <div style={{ background: aba === 'historico' ? '#16a34a' : 'var(--primary)', color: '#fff', padding: '10px 14px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Mesa {numeroMesa}</span>
                 <button type="button" title="Imprimir comanda"
-                  onClick={() => imprimirHtml(montarComandaCozinhaHtml({ numeroMesa: mesa, itens: lista }))}
+                  onClick={() => imprimirHtml(montarComandaCozinhaHtml({ numeroMesa, itens: lista }))}
                   style={{ background: 'rgba(255,255,255,.2)', border: 'none', color: '#fff', borderRadius: 8, cursor: 'pointer', fontSize: 16, padding: '2px 8px' }}>
                   🖨️
                 </button>
@@ -245,24 +300,26 @@ export default function PresencialCozinha() {
                 {lista.map(item => {
                   const { nome, complementos: comps } = separarItem(item)
                   return (
-                  <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>
-                        {item.quantidade}× {nome}
+                    <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>{item.quantidade}× {nome}</div>
+                        {comps.map((c, j) => (
+                          <div key={j} style={{ fontSize: 12.5, color: 'var(--text-muted)', paddingLeft: 14 }}>
+                            {Number(c?.qtd) > 1 ? `${c.qtd}× ` : ''}{c?.nome ?? c}
+                          </div>
+                        ))}
+                        {item.observacao && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.observacao}</div>}
+                        {aba === 'historico'
+                          ? <div style={{ fontSize: 12, fontWeight: 800, color: '#16a34a' }}>✓ Pronto às {horaBR(item.updated_at || item.created_at)}</div>
+                          : <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>há {tempoDesde(item.created_at)}</div>}
                       </div>
-                      {comps.map((c, j) => (
-                        <div key={j} style={{ fontSize: 12.5, color: 'var(--text-muted)', paddingLeft: 14 }}>
-                          {Number(c?.qtd) > 1 ? `${c.qtd}× ` : ''}{c?.nome ?? c}
+                      {aba !== 'historico' && (
+                        <div style={{ minWidth: 130 }}>
+                          <AcaoPreparo registro={item} meuId={meuId} size="sm"
+                            onAceitar={aceitarItem} onSoltar={soltarItem} onPronto={marcarPronto} />
                         </div>
-                      ))}
-                      {item.observacao && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.observacao}</div>}
-                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>há {tempoDesde(item.created_at)}</div>
+                      )}
                     </div>
-                    <div style={{ minWidth: 130 }}>
-                      <AcaoPreparo registro={item} meuId={meuId} size="sm"
-                        onAceitar={aceitarItem} onSoltar={soltarItem} onPronto={marcarPronto} />
-                    </div>
-                  </div>
                   )
                 })}
               </div>
