@@ -2754,6 +2754,32 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
   )
 }
 
+// Tempo previsto (min) pra ficar pronto — usa o tempo do Raio de Entrega por KM,
+// sem perguntar ao lojista. Ordem: distância→faixa; senão faixa pela taxa; senão
+// maior tempo das faixas; senão tempo_entrega_max.
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371, toRad = d => d * Math.PI / 180
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+function tempoPrevistoMin(pedido, empresa) {
+  const faixas = Array.isArray(empresa?.taxas_entrega_km) ? empresa.taxas_entrega_km : []
+  if (pedido.tipo_entrega !== 'retirada' && faixas.length) {
+    const ord = [...faixas].sort((a, b) => Number(a.km) - Number(b.km))
+    if (empresa?.latitude && empresa?.longitude && pedido.endereco_lat && pedido.endereco_lng) {
+      const km = haversineKm(Number(empresa.latitude), Number(empresa.longitude), Number(pedido.endereco_lat), Number(pedido.endereco_lng))
+      const f = ord.find(x => km <= Number(x.km)) || ord[ord.length - 1]
+      if (Number(f?.tempo) > 0) return Number(f.tempo)
+    }
+    const porTaxa = ord.find(x => Number(x.taxa) === Number(pedido.taxa_entrega))
+    if (Number(porTaxa?.tempo) > 0) return Number(porTaxa.tempo)
+    const maxT = Math.max(...ord.map(x => Number(x.tempo) || 0))
+    if (maxT > 0) return maxT
+  }
+  return Number(empresa?.tempo_entrega_max) || 40
+}
+
 // ── Componente principal ────────────────────────────────────
 export default function PainelPedidos() {
   const { empresa, logout } = useAuth()
@@ -3396,7 +3422,7 @@ export default function PainelPedidos() {
               }
               if (novo.status === 'aguardando') {
                 iniciarLoopSom()
-                if (aceitarAutoAtivo()) handleConfirmar(novo.id)
+                if (aceitarAutoAtivo()) handleConfirmar(novo.id, tempoPrevistoMin(novo, empresa))
               }
             }
           } else if (payload.eventType === 'UPDATE') {
@@ -3412,7 +3438,7 @@ export default function PainelPedidos() {
                   if (novo.status === 'aguardando') {
                     iniciarLoopSom()
                     if (autoImprimirAtivo()) imprimirCupom(novo, empresa)
-                    if (aceitarAutoAtivo()) handleConfirmar(novo.id)
+                    if (aceitarAutoAtivo()) handleConfirmar(novo.id, tempoPrevistoMin(novo, empresa))
                   }
                   return [...prev, novo]
                 }
@@ -3992,7 +4018,7 @@ export default function PainelPedidos() {
                       key={p.id}
                       pedido={p}
                       entregadores={entregadores}
-                      onConfirmar={(id) => setPedidoAceitando(pedidos.find(x => x.id === id) || p)}
+                      onConfirmar={(id) => { const ped = pedidos.find(x => x.id === id) || p; handleConfirmar(id, tempoPrevistoMin(ped, empresa)) }}
                       onRecusar={(ped) => setPedidoRecusando(ped)}
                       onExpirado={handleExpirado}
                       onAvancar={handleAvancar}
@@ -4140,7 +4166,7 @@ export default function PainelPedidos() {
               onConfirmar={(id) => {
                 const p = pedidos.find(x => x.id === id) || pedidoDetalhe
                 setPedidoDetalhe(null)
-                setPedidoAceitando(p)
+                handleConfirmar(id, tempoPrevistoMin(p, empresa))
               }}
               onRecusar={(p) => { setPedidoRecusando(p); setPedidoDetalhe(null) }}
               onExpirado={(id) => { handleExpirado(id); setPedidoDetalhe(null) }}
