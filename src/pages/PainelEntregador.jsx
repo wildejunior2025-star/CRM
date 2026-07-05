@@ -523,7 +523,7 @@ export default function PainelEntregador() {
     setHistLoading(true)
     supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, origem, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, origem, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
       .eq('entregador_id', user.id)
       .eq('status', 'entregue')
       .order('created_at', { ascending: false })
@@ -722,7 +722,7 @@ export default function PainelEntregador() {
                       </div>
                     </div>
                     <div style={{ fontSize: 13.5, color: 'var(--text)', marginTop: 4 }}>{p.cliente_nome || 'Cliente'}</div>
-                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>{[p.endereco_bairro, p.endereco_cidade].filter(Boolean).join(', ')}</div>
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>{[[p.endereco_rua, p.endereco_numero].filter(Boolean).join(', '), [p.endereco_bairro, p.endereco_cidade].filter(Boolean).join(', ')].filter(Boolean).join(' — ')}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
                       {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{p.forma_pagamento ? ` · ${p.forma_pagamento}` : ''}
                       {p.origem === 'ifood' && descValor > 0 && <span style={{ color: '#f59e0b' }}> · iFood −{fmt(descValor)}</span>}
