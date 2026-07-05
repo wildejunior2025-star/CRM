@@ -3010,23 +3010,36 @@ export default function PainelPedidos() {
   // App Impressora FWC conectado + com impressora? Se sim, ele imprime os
   // pedidos (delivery/balcão) sozinho — o navegador NÃO imprime junto (evita 2x).
   const [fwcAppImprime, setFwcAppImprime] = useState(false)
+  const [fwcPausado, setFwcPausado] = useState(false)
   const fwcImprimeRef = useRef(false)
   useEffect(() => {
     let vivo = true
     const ping = async () => {
-      let on = false
+      let on = false, pausado = false
       try {
         const c = new AbortController(); const t = setTimeout(() => c.abort(), 3000)
         const r = await fetch('http://127.0.0.1:9110/api/status', { signal: c.signal, cache: 'no-store' })
         clearTimeout(t)
         const j = await r.json().catch(() => null)
         on = !!(j && j.logado && j.impressora)
+        pausado = !!(j && j.pausado)
       } catch (e) { on = false }
-      if (vivo) { setFwcAppImprime(on); fwcImprimeRef.current = on }
+      if (vivo) { setFwcAppImprime(on); fwcImprimeRef.current = on; setFwcPausado(pausado) }
     }
     ping(); const id = setInterval(ping, 15000)
     return () => { vivo = false; clearInterval(id) }
   }, [])
+  // Atalho do topo: liga/pausa a impressão automática do app FWC.
+  async function toggleFwcPausa() {
+    const novo = !fwcPausado
+    setFwcPausado(novo) // otimista
+    try {
+      await fetch('http://127.0.0.1:9110/api/pausar', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ pausado: novo }),
+      })
+    } catch { setFwcPausado(!novo) /* reverte se falhou */ }
+  }
 
   function patchConfigLocal(patch) {
     try {
@@ -4041,18 +4054,17 @@ export default function PainelPedidos() {
           {fwcAppImprime ? (
             <button
               type="button"
-              onClick={() => setPainelDireito('impressora')}
-              title="Os pedidos (delivery/balcão) imprimem sozinhos pela Impressora FWC. Clique para abrir as configurações."
-              aria-label="Status: imprimindo pelo app Impressora FWC"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+              onClick={toggleFwcPausa}
+              className={`pp-toggle-loja ${fwcPausado ? 'fechada' : 'aberta'}`}
+              title={fwcPausado ? 'Impressão automática PAUSADA — clique para LIGAR' : 'Impressão automática LIGADA (app FWC) — clique para PAUSAR'}
+              aria-label="Ligar/pausar impressão automática"
             >
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#16a34a', flexShrink: 0 }} />
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <polyline points="6 9 6 2 18 2 18 9"/>
                 <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
                 <rect x="6" y="14" width="12" height="8"/>
               </svg>
-              <span>Impressora FWC ativa</span>
+              <span>{fwcPausado ? 'Impressão OFF' : 'Impressão ON'}</span>
             </button>
           ) : (
             <button

@@ -189,7 +189,12 @@ async function iniciarEscuta() {
   if (canal) { try { supabase.removeChannel(canal) } catch (e) {} }
   canal = supabase.channel('impressora-fwc-' + empresaId)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pedidos_delivery', filter: 'empresa_id=eq.' + empresaId },
-      payload => { const p = payload.new; log('NOVO PEDIDO #' + (p.numero_pedido ?? p.id) + ' - ' + (p.cliente_nome || '') + ' (' + (p.origem || '') + ')'); imprimir(p) })
+      payload => {
+        const p = payload.new
+        log('NOVO PEDIDO #' + (p.numero_pedido ?? p.id) + ' - ' + (p.cliente_nome || '') + ' (' + (p.origem || '') + ')')
+        if (config().pausado) { log('  (impressao automatica PAUSADA — nao imprimiu)'); return }
+        imprimir(p)
+      })
     .subscribe(st => log('Conexao: ' + st + (st === 'SUBSCRIBED' ? ' — imprimindo pedidos novos automaticamente!' : '')))
   log('Loja: ' + (empresa?.nome || '—'))
   return true
@@ -279,6 +284,7 @@ function statusObj() {
     empresas: empresasDisponiveis,
     impressora: config().printer || null,
     impressoras: sessionAtiva ? listarImpressoras() : [],
+    pausado: !!config().pausado,
   }
 }
 // CORS + Private Network Access — libera o gestor (https) a falar com o app (localhost).
@@ -330,6 +336,13 @@ const server = http.createServer(async (req, res) => {
         const f = await jsonBody(req)
         const ok = imprimirBytes(montarTexto(htmlParaLinhas(f.html || ''), f.titulo), 'doc')
         return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
+      }
+      // Liga/pausa a impressão automática (atalho do topo do gestor).
+      if (req.method === 'POST' && req.url === '/api/pausar') {
+        const f = await jsonBody(req)
+        setConfig({ pausado: !!f.pausado })
+        log(f.pausado ? 'Impressao automatica PAUSADA.' : 'Impressao automatica LIGADA.')
+        return sendJson(res, { ok: true, ...statusObj() })
       }
       if (req.method === 'POST' && req.url === '/api/printer') {
         const f = await jsonBody(req); setConfig({ printer: f.printer }); log('Impressora: ' + f.printer); return sendJson(res, { ok: true, ...statusObj() })
