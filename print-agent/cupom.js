@@ -76,8 +76,8 @@ function montarCupom(pedido, empresa) {
     const comps = Array.isArray(it.complementos) ? it.complementos : []
     for (const c of comps) {
       const cn = typeof c === 'string' ? c : (c?.nome ?? '')
-      const cq = Number(c?.qtd) > 1 ? (c.qtd + 'x ') : ''
-      if (cn) parts.push(linha('   + ' + cq + cn))
+      const cq = Number(c?.qtd ?? 1)
+      if (cn) parts.push(linha('   ' + cq + 'x ' + cn))
     }
     if (it.observacao) parts.push(linha('   obs: ' + it.observacao))
   }

@@ -1419,7 +1419,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
                     style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>×</button>
                 </div>
                 {Array.isArray(i.complementos) && i.complementos.map((c, j) => (
-                  <div key={j} style={{ fontSize: 12, color: 'var(--text-muted)', paddingLeft: 16 }}>+ {c.nome}</div>
+                  <div key={j} style={{ fontSize: 12, color: 'var(--text-muted)', paddingLeft: 16 }}>{Number(c.qtd ?? 1)}× {c.nome}</div>
                 ))}
               </div>
             ))}
@@ -1845,7 +1845,7 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
                   <div style={{ paddingLeft: 18, marginTop: 3, marginBottom: 4 }}>
                     {complementos.map((c, j) => (
                       <div key={j} style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                        {Number(c.qtd) > 1 ? `${c.qtd}× ` : ''}{c.nome ?? c}
+                        {Number(c.qtd ?? 1)}× {c.nome ?? c}
                       </div>
                     ))}
                   </div>
@@ -2774,7 +2774,7 @@ function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta }) {
                   {pronto ? '✓ ' : ''}{it.quantidade}× {nome}
                 </div>
                 {complementos.map((c, j) => (
-                  <div key={j} style={{ fontSize: 11, color: 'var(--text-muted)', paddingLeft: 14 }}>+ {c?.nome ?? c}</div>
+                  <div key={j} style={{ fontSize: 11, color: 'var(--text-muted)', paddingLeft: 14 }}>{Number(c?.qtd ?? 1)}× {c?.nome ?? c}</div>
                 ))}
               </div>
               {!pronto && onItemPronto && (

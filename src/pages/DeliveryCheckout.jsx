@@ -952,7 +952,7 @@ export default function DeliveryCheckout() {
                         {item.nome}
                         {item.complementos?.length > 0 && (
                           <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted, #888)', fontWeight: 400 }}>
-                            {item.complementos.map(c => c.nome).join(', ')}
+                            {item.complementos.map(c => `${Number(c.qtd ?? 1)}× ${c.nome}`).join(', ')}
                           </span>
                         )}
                       </span>

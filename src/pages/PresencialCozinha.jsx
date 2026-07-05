@@ -90,7 +90,7 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
               </div>
               {comps.map((c, j) => (
                 <div key={j} style={{ fontSize: 12.5, color: 'var(--text-muted)', paddingLeft: 14 }}>
-                  {Number(c?.qtd) > 1 ? `${c.qtd}× ` : ''}{c?.nome ?? c}
+                  {Number(c?.qtd ?? 1)}× {c?.nome ?? c}
                 </div>
               ))}
               {item.observacao && (
@@ -338,7 +338,7 @@ export default function PresencialCozinha() {
                         <div style={{ fontWeight: 700, fontSize: 14 }}>{item.quantidade}× {nome}</div>
                         {comps.map((c, j) => (
                           <div key={j} style={{ fontSize: 12.5, color: 'var(--text-muted)', paddingLeft: 14 }}>
-                            {Number(c?.qtd) > 1 ? `${c.qtd}× ` : ''}{c?.nome ?? c}
+                            {Number(c?.qtd ?? 1)}× {c?.nome ?? c}
                           </div>
                         ))}
                         {item.observacao && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.observacao}</div>}

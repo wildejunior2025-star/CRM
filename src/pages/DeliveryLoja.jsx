@@ -620,7 +620,7 @@ export default function DeliveryLoja() {
                     <span className="dloja-drawer-item-nome">{item.nome}</span>
                     {item.complementos?.length > 0 && (
                       <span style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.4, display: 'block', marginTop: 2 }}>
-                        {item.complementos.map(c => c.nome).join(', ')}
+                        {item.complementos.map(c => `${Number(c.qtd ?? 1)}× ${c.nome}`).join(', ')}
                       </span>
                     )}
                     <span className="dloja-drawer-item-preco">R$ {fmt(item.preco)} cada</span>

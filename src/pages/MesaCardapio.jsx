@@ -280,7 +280,7 @@ export default function MesaCardapio() {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 14 }}>{i.nome}</div>
                   {(i.complementos ?? []).map((c, j) => (
-                    <div key={j} style={{ fontSize: 11.5, color: '#8b7bb8' }}>+ {c.nome}</div>
+                    <div key={j} style={{ fontSize: 11.5, color: '#8b7bb8' }}>{Number(c.qtd ?? 1)}× {c.nome}</div>
                   ))}
                   <div style={{ fontSize: 12, color: '#a78bfa' }}>{fmt(i.preco)}</div>
                 </div>
