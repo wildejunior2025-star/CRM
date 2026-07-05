@@ -61,6 +61,31 @@ export default function Produtos() {
   // Complementos / opções do produto (ex.: monte sua quentinha)
   const [grupos, setGrupos] = useState([])
 
+  // Rascunho automático: guarda o produto que está sendo editado. Se sair da
+  // página / o app recarregar, ao voltar reabre com tudo preenchido (não perde
+  // o trabalho). Limpa ao salvar ou cancelar.
+  const draftKey = empresa?.id ? `produtos-draft-${empresa.id}` : null
+  const limparRascunho = () => { try { if (draftKey) localStorage.removeItem(draftKey) } catch { /* ok */ } }
+  const fecharModal = () => { limparRascunho(); setShowModal(false) }
+  useEffect(() => {
+    if (!showModal || !draftKey) return
+    try { localStorage.setItem(draftKey, JSON.stringify({ editingId, form, grupos })) } catch { /* quota */ }
+  }, [showModal, editingId, form, grupos, draftKey])
+  const rascunhoRestaurado = useRef(false)
+  useEffect(() => {
+    if (rascunhoRestaurado.current || !draftKey) return
+    rascunhoRestaurado.current = true
+    try {
+      const d = JSON.parse(localStorage.getItem(draftKey) || 'null')
+      if (d && d.form) {
+        setEditingId(d.editingId ?? null)
+        setForm(d.form)
+        setGrupos(Array.isArray(d.grupos) ? d.grupos : [])
+        setShowModal(true)
+      }
+    } catch { /* rascunho inválido */ }
+  }, [draftKey])
+
   // Complementos na LISTA (accordion pausável estilo iFood, direto na tabela)
   const [compProd, setCompProd] = useState({})            // produtoId -> [grupos]
   const [compAberto, setCompAberto] = useState(() => new Set())
@@ -417,7 +442,7 @@ export default function Produtos() {
     }
 
     setSaving(false)
-    setShowModal(false)
+    fecharModal()
     loadProdutos(search, categoriaFiltro)
   }
 
@@ -461,7 +486,7 @@ export default function Produtos() {
       {linkCardapio && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: '0.75rem',
-          background: 'var(--bg-secondary, #f9fafb)',
+          background: 'var(--surface-hover)',
           border: '1px solid var(--border, #e5e7eb)',
           borderRadius: '10px', padding: '12px 16px', marginBottom: '1rem',
           flexWrap: 'wrap',
@@ -721,7 +746,7 @@ export default function Produtos() {
       )}
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+        <div className="modal-overlay">
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>{editingId ? 'Editar produto' : 'Novo produto'}</h2>
             <form onSubmit={handleSubmit}>
@@ -1018,7 +1043,7 @@ export default function Produtos() {
                   )}
 
                   {grupos.map((g, gi) => (
-                    <div key={gi} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12, marginTop: 10, background: 'var(--bg-secondary, #f9fafb)' }}>
+                    <div key={gi} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12, marginTop: 10, background: 'var(--surface-hover)' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 68px 68px auto', gap: 8, alignItems: 'end' }}>
                         <div>
                           <label style={{ fontSize: '0.72em', color: 'var(--text-muted)' }}>Nome do grupo</label>
@@ -1066,7 +1091,7 @@ export default function Produtos() {
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => setShowModal(false)}
+                  onClick={fecharModal}
                 >
                   Cancelar
                 </button>
