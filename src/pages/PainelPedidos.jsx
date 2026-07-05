@@ -4039,17 +4039,18 @@ export default function PainelPedidos() {
           {fwcAppImprime ? (
             <button
               type="button"
-              className="pp-toggle-loja aberta"
               onClick={() => setPainelDireito('impressora')}
-              title="Os pedidos imprimem sozinhos pela Impressora FWC (app instalado neste PC)"
-              aria-label="Impressão pelo app Impressora FWC"
+              title="Os pedidos (delivery/balcão) imprimem sozinhos pela Impressora FWC. Clique para abrir as configurações."
+              aria-label="Status: imprimindo pelo app Impressora FWC"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
             >
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#16a34a', flexShrink: 0 }} />
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <polyline points="6 9 6 2 18 2 18 9"/>
                 <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
                 <rect x="6" y="14" width="12" height="8"/>
               </svg>
-              <span>Imprime pelo app FWC</span>
+              <span>Impressora FWC ativa</span>
             </button>
           ) : (
             <button
