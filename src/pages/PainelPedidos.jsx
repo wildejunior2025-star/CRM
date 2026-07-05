@@ -3007,6 +3007,26 @@ export default function PainelPedidos() {
   const [modalCodRetirada, setModalCodRetirada] = useState(null) // retirada aguardando o código do cliente
   const [autoImprimir, setAutoImprimir] = useState(autoImprimirAtivo)
   const [aceitarAuto, setAceitarAuto] = useState(aceitarAutoAtivo)
+  // App Impressora FWC conectado + com impressora? Se sim, ele imprime os
+  // pedidos (delivery/balcão) sozinho — o navegador NÃO imprime junto (evita 2x).
+  const [fwcAppImprime, setFwcAppImprime] = useState(false)
+  const fwcImprimeRef = useRef(false)
+  useEffect(() => {
+    let vivo = true
+    const ping = async () => {
+      let on = false
+      try {
+        const c = new AbortController(); const t = setTimeout(() => c.abort(), 3000)
+        const r = await fetch('http://127.0.0.1:9110/api/status', { signal: c.signal, cache: 'no-store' })
+        clearTimeout(t)
+        const j = await r.json().catch(() => null)
+        on = !!(j && j.logado && j.impressora)
+      } catch (e) { on = false }
+      if (vivo) { setFwcAppImprime(on); fwcImprimeRef.current = on }
+    }
+    ping(); const id = setInterval(ping, 15000)
+    return () => { vivo = false; clearInterval(id) }
+  }, [])
 
   function patchConfigLocal(patch) {
     try {
@@ -3614,8 +3634,9 @@ export default function PainelPedidos() {
             // Só adiciona ao painel se não for finalizado E não for aguardando pagamento PIX
             if (!STATUS_FINALIZADOS.has(novo.status) && novo.status !== 'aguardando_pagamento') {
               setPedidos(prev => [...prev, novo])
-              // Imprime pedido novo (aguardando) OU venda de balcão (já confirmada)
-              if (autoImprimirAtivo() && (novo.status === 'aguardando' || novo.origem === 'balcao')) {
+              // Imprime pedido novo (aguardando) OU venda de balcão (já confirmada).
+              // Se o app Impressora FWC está imprimindo, o navegador não imprime (evita 2 vias).
+              if (autoImprimirAtivo() && !fwcImprimeRef.current && (novo.status === 'aguardando' || novo.origem === 'balcao')) {
                 imprimirCupom(novo, empresa)
               }
               if (novo.status === 'aguardando') {
@@ -3635,7 +3656,7 @@ export default function PainelPedidos() {
                   // Pedido chegou ao painel agora (ex: PIX confirmado)
                   if (novo.status === 'aguardando') {
                     iniciarLoopSom()
-                    if (autoImprimirAtivo()) imprimirCupom(novo, empresa)
+                    if (autoImprimirAtivo() && !fwcImprimeRef.current) imprimirCupom(novo, empresa)
                     if (aceitarAutoAtivo()) handleConfirmar(novo.id, tempoPrevistoMin(novo, empresa))
                   }
                   return [...prev, novo]
@@ -4013,21 +4034,39 @@ export default function PainelPedidos() {
             <span>Sair</span>
           </button>
 
-          {/* Toggle impressão automática */}
-          <button
-            type="button"
-            className={`pp-toggle-loja ${autoImprimir ? 'aberta' : 'fechada'}`}
-            onClick={toggleAutoImprimir}
-            title={autoImprimir ? 'Imprimir cupom automaticamente ao chegar pedido' : 'Impressão automática desligada'}
-            aria-label="Alternar impressão automática"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <polyline points="6 9 6 2 18 2 18 9"/>
-              <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
-              <rect x="6" y="14" width="12" height="8"/>
-            </svg>
-            <span>{autoImprimir ? 'Auto-imprimir ON' : 'Auto-imprimir OFF'}</span>
-          </button>
+          {/* Impressão automática: se o app FWC está imprimindo, mostra isso (fim da
+              confusão do "OFF" que ainda imprime). Senão, o toggle do navegador. */}
+          {fwcAppImprime ? (
+            <button
+              type="button"
+              className="pp-toggle-loja aberta"
+              onClick={() => setPainelDireito('impressora')}
+              title="Os pedidos imprimem sozinhos pela Impressora FWC (app instalado neste PC)"
+              aria-label="Impressão pelo app Impressora FWC"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="6 9 6 2 18 2 18 9"/>
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                <rect x="6" y="14" width="12" height="8"/>
+              </svg>
+              <span>Imprime pelo app FWC</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={`pp-toggle-loja ${autoImprimir ? 'aberta' : 'fechada'}`}
+              onClick={toggleAutoImprimir}
+              title={autoImprimir ? 'Imprimir cupom automaticamente ao chegar pedido' : 'Impressão automática desligada'}
+              aria-label="Alternar impressão automática"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="6 9 6 2 18 2 18 9"/>
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                <rect x="6" y="14" width="12" height="8"/>
+              </svg>
+              <span>{autoImprimir ? 'Auto-imprimir ON' : 'Auto-imprimir OFF'}</span>
+            </button>
+          )}
 
           {/* Toggle aceitar pedido automático */}
           <button
@@ -4513,7 +4552,13 @@ export default function PainelPedidos() {
                 <ToggleRow label="Total de itens" ativo={cupomCfg.totalItens === true} onToggle={() => setCupom({ totalItens: !(cupomCfg.totalItens === true) })} />
               </div>
 
-              <ToggleRow label="Imprimir automático" ativo={autoImprimir} onToggle={toggleAutoImprimir} />
+              {fwcAppImprime ? (
+                <div style={{ fontSize: 12, color: '#16a34a', fontWeight: 700, background: 'rgba(34,197,94,.08)', border: '1px solid #16a34a', borderRadius: 8, padding: '8px 10px' }}>
+                  ✓ Impressão automática pelo app FWC — os pedidos imprimem sozinhos, sem precisar do navegador.
+                </div>
+              ) : (
+                <ToggleRow label="Imprimir automático (pelo navegador)" ativo={autoImprimir} onToggle={toggleAutoImprimir} />
+              )}
               <ToggleRow label="Aceitar pedido automático" ativo={aceitarAuto} onToggle={toggleAceitarAuto} />
               {aceitarAuto && (
                 <p style={{ fontSize: 11, color: '#a16207', lineHeight: 1.4, margin: '-4px 0 0' }}>
