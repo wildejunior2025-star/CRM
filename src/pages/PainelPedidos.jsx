@@ -3963,7 +3963,9 @@ export default function PainelPedidos() {
   const origensPresentes = [...new Set(
     [...pedidos, ...concluidosHoje, ...canceladosHoje].map(p => p?.origem || 'cardapio')
   )]
-  const pedidosView         = filtroOrigem ? pedidos.filter(passaOrigem)         : pedidos
+  // Novo no topo: as colunas mostram o pedido mais recente em cima (ordem de chegada, de cima pra baixo).
+  const pedidosView         = [...(filtroOrigem ? pedidos.filter(passaOrigem) : pedidos)]
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
   const concluidosHojeView  = filtroOrigem ? concluidosHoje.filter(passaOrigem)  : concluidosHoje
   const canceladosHojeView  = filtroOrigem ? canceladosHoje.filter(passaOrigem)  : canceladosHoje
   // Mesas (autoatendimento) não têm origem zap/app/ifood — somem quando há filtro de origem.
