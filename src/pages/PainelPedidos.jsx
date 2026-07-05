@@ -4305,6 +4305,22 @@ export default function PainelPedidos() {
           {/* Painel: Impressora */}
           {painelDireito === 'impressora' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Impressora FWC — app proprio (recomendado) */}
+              <div style={{ border: '2px solid #7c3aed', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(124,58,237,0.07)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 14, fontWeight: 800 }}>🖨️ Impressora FWC</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, background: '#7c3aed', color: '#fff', borderRadius: 20, padding: '2px 8px' }}>RECOMENDADO</span>
+                </div>
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  Baixe, abra, faça login com a conta da loja e escolha a impressora. Cada pedido novo imprime <b>sozinho</b> — sem navegador, sem QZ, sem certificado.
+                </div>
+                <a href="https://ycytrsqdvrviihkqfvno.supabase.co/storage/v1/object/public/downloads/ImpressoraFWC.exe" download
+                  style={{ alignSelf: 'flex-start', background: '#7c3aed', color: '#fff', borderRadius: 8, padding: '10px 16px', fontWeight: 800, fontSize: 13, textDecoration: 'none', marginTop: 2 }}>
+                  ⬇️ Baixar Impressora FWC (Windows)
+                </a>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Deixe o programa aberto. Se o Windows avisar, clique em "Mais informações → Executar assim mesmo".</div>
+              </div>
+
               {/* QZ Tray — impressora do PC */}
               <div style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

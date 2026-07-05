@@ -1,0 +1,14 @@
+{
+  "name": "impressora-fwc",
+  "version": "0.1.0",
+  "description": "Agente de impressao automatica FWC Inter — imprime pedidos direto na termica (ESC/POS), sem navegador nem certificado.",
+  "main": "index.js",
+  "bin": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "ws": "^8.18.0"
+  }
+}
