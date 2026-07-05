@@ -2974,7 +2974,7 @@ export default function PainelPedidos() {
     if (!empresa) return
     const { data } = await supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, created_at, entregador_id, origem, endereco_bairro, endereco_cidade, entregador_pago, entregador_pago_em')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, pix_status, created_at, entregador_id, origem, endereco_bairro, endereco_cidade, entregador_pago, entregador_pago_em')
       .eq('empresa_id', empresa.id)
       .eq('status', 'entregue')
       .not('entregador_id', 'is', null)
@@ -4692,18 +4692,33 @@ export default function PainelPedidos() {
               const descValor = (ent?.entregador_desconto_ativo && Number(ent?.entregador_desconto_valor) > 0) ? Number(ent.entregador_desconto_valor) : 0
               const ganho = p => Math.max(0, Number(p.taxa_entrega || 0) - (p.origem === 'ifood' ? descValor : 0))
               const somaTaxa = arr => arr.reduce((s, p) => s + ganho(p), 0)
+              // Pagamento do CLIENTE: o motoqueiro cobrou na entrega (dinheiro/cartão)
+              // ou já estava pago (PIX confirmado / iFood)?
+              const pagCliente = p => {
+                if (p.origem === 'ifood') return { pago: true, label: 'Pago no iFood' }
+                const f = p.forma_pagamento
+                if (f === 'pix' && p.pix_status === 'pago') return { pago: true, label: 'PIX pago' }
+                if (f === 'dinheiro') return { pago: false, label: 'Dinheiro' }
+                if (f === 'cartao' || f === 'cartão') return { pago: false, label: 'Cartão' }
+                if (f === 'pix') return { pago: false, label: 'PIX não confirmado' }
+                return { pago: true, label: f || 'Pago' }
+              }
               const dataDe = p => new Date(p.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
               const agrupaPorData = arr => {
                 const g = {}
                 for (const p of arr) (g[dataDe(p)] ??= []).push(p)
                 return Object.entries(g)
               }
-              const OrderRow = (p, { pago = false, rota: ehRota = false } = {}) => (
+              const OrderRow = (p, { pago = false, rota: ehRota = false } = {}) => {
+                const pgc = pagCliente(p)
+                // Taxa a pagar ao motoqueiro: laranja enquanto pendente, verde quando pago.
+                const corTaxa = ehRota ? '#7c3aed' : (pago ? '#16a34a' : '#f59e0b')
+                return (
                 <div key={p.id} style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '9px 11px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <strong style={{ fontSize: 13, color: ehRota ? '#7c3aed' : '#16a34a' }}
+                      <strong style={{ fontSize: 13, color: corTaxa }}
                         title={p.origem === 'ifood' && descValor > 0 ? `Taxa ${fmt(p.taxa_entrega)} − iFood ${fmt(descValor)}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
                       {!ehRota && (pago
                         ? <span style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '2px 8px', borderRadius: 20 }}>✓ Pago</span>
@@ -4717,8 +4732,14 @@ export default function PainelPedidos() {
                     {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
                     {p.origem === 'ifood' && descValor > 0 && <span style={{ color: '#f59e0b' }}> · iFood −{fmt(descValor)}</span>}
                   </div>
+                  {/* Valor do pedido: laranja = cobrar na entrega; verde = já pago */}
+                  <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: 'flex', justifyContent: 'space-between', gap: 8, color: pgc.pago ? '#16a34a' : '#f59e0b' }}>
+                    <span>{pgc.pago ? '✓ Pago' : '💵 Cobrar na entrega'} · {pgc.label}</span>
+                    <span>{fmt(p.total)}</span>
+                  </div>
                 </div>
-              )
+                )
+              }
               return (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <button type="button" onClick={() => setEntregadorSel(null)}
