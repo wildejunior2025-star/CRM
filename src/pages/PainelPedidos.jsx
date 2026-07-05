@@ -4312,15 +4312,19 @@ export default function PainelPedidos() {
                   <span style={{ fontSize: 10, fontWeight: 800, background: '#7c3aed', color: '#fff', borderRadius: 20, padding: '2px 8px' }}>RECOMENDADO</span>
                 </div>
                 <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  Baixe, abra e faça login com a conta da loja. <b>Dentro do app você escolhe a impressora</b> — ele lista todas as instaladas neste PC. Cada pedido novo imprime <b>sozinho</b>, sem navegador, sem QZ, sem certificado.
+                  Baixe e abra o app. Ele abre uma telinha de configuração no navegador — <b>faça login com a conta da loja</b> (a mesma do gestor). Cada pedido novo imprime <b>sozinho</b>, sem QZ e sem certificado.
                 </div>
                 <a href="https://ycytrsqdvrviihkqfvno.supabase.co/storage/v1/object/public/downloads/ImpressoraFWC.exe" download
                   style={{ alignSelf: 'flex-start', background: '#7c3aed', color: '#fff', borderRadius: 8, padding: '10px 16px', fontWeight: 800, fontSize: 13, textDecoration: 'none', marginTop: 2 }}>
                   ⬇️ Baixar Impressora FWC (Windows)
                 </a>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Deixe o programa aberto. Se o Windows avisar, clique em "Mais informações → Executar assim mesmo".</div>
-                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 4, paddingTop: 8, borderTop: '1px dashed var(--border, #2a2a3a)' }}>
-                  ℹ️ A escolha da impressora fica no app FWC (abra a bandeja → <b>Escolher impressora</b>). Não precisa de QZ nem de nenhum outro programa.
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.6, marginTop: 4, paddingTop: 8, borderTop: '1px dashed var(--border, #2a2a3a)' }}>
+                  <b>Como escolher a impressora:</b><br />
+                  1. Abra o app (a tela de config abre sozinha, ou acesse <b>localhost:9110</b>).<br />
+                  2. Faça login com a conta da loja.<br />
+                  3. No campo <b>"Impressora"</b>, escolha a sua (aparecem todas as instaladas neste PC) e clique <b>"Salvar impressora"</b>.<br />
+                  4. Toque em <b>"Imprimir cupom de teste"</b> pra conferir.
                 </div>
               </div>
 

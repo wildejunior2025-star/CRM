@@ -107,6 +107,8 @@ async function iniciarEscuta() {
     if (empresasDisponiveis.length === 1) { empresaId = empresasDisponiveis[0].id; setConfig({ empresa_id: empresaId }) }
     else { log('Escolha a loja na tela de configuracao (' + empresasDisponiveis.length + ' lojas).'); return false }
   }
+  // Guarda a loja resolvida pra sobreviver ao refresh / reabrir o app.
+  if (empresaId) setConfig({ empresa_id: empresaId })
   const { data: emp } = await supabase.from('empresas').select('nome, slug, endereco, numero, bairro, cidade, telefone_contato').eq('id', empresaId).single()
   empresa = emp || { nome: prof?.nome || 'Loja' }
   supabase.realtime.setAuth(sess.session.access_token)
@@ -125,7 +127,20 @@ function paginaHtml() {
   const imps = listarImpressoras()
   const opts = imps.map(i => `<option${i === c.printer ? ' selected' : ''}>${i}</option>`).join('')
   const empOpts = empresasDisponiveis.map(e => `<option value="${e.id}"${e.id === c.empresa_id ? ' selected' : ''}>${e.nome}</option>`).join('')
-  const bloco = !sessionAtiva ? `
+  // Card de escolher a impressora — aparece SEMPRE que estiver logado.
+  const cardImpressora = `
+<div class="card">
+  <label>Impressora (escolha a sua)</label>
+  <form method="POST" action="/printer">
+    <select name="printer">${opts || '<option value="">(nenhuma encontrada)</option>'}</select>
+    <button>Salvar impressora</button>
+  </form>
+  <div class="sub" style="margin:8px 0 0">Aparecem todas as impressoras instaladas neste PC. Escolha a térmica e clique em Salvar.</div>
+  <form method="POST" action="/teste"><button style="background:#16a34a">Imprimir cupom de teste</button></form>
+</div>`
+  let bloco
+  if (!sessionAtiva) {
+    bloco = `
 <div class="card">
   <div class="warn">Faca login com a conta da sua loja (a mesma do gestor).</div>
   <form method="POST" action="/login">
@@ -133,7 +148,16 @@ function paginaHtml() {
     <label>Senha</label><input name="senha" type="password" required>
     <button>Entrar</button>
   </form>
-</div>` : !empresaId ? `
+</div>`
+  } else {
+    const cardStatus = `
+<div class="card">
+  <div class="ok">✓ Conectado</div>
+  <div style="margin-top:6px">Loja: <span class="pill">${(empresa?.nome || '—')}</span></div>
+  <div style="margin-top:6px">Impressora: <span class="pill">${c.printer || 'nenhuma'}</span></div>
+  <form method="POST" action="/logout"><button style="background:#374151">Sair (trocar conta)</button></form>
+</div>`
+    const cardLoja = (!empresaId && empresasDisponiveis.length > 0) ? `
 <div class="card">
   <div class="warn">Sua conta tem mais de uma loja. Escolha qual vai imprimir:</div>
   <form method="POST" action="/empresa">
@@ -141,22 +165,9 @@ function paginaHtml() {
     <select name="empresa_id">${empOpts}</select>
     <button>Usar esta loja</button>
   </form>
-  <form method="POST" action="/logout"><button style="background:#374151">Sair</button></form>
-</div>` : `
-<div class="card">
-  <div class="ok">✓ Conectado</div>
-  <div style="margin-top:6px">Loja: <span class="pill">${(empresa?.nome || '—')}</span></div>
-  <div style="margin-top:6px">Impressora: <span class="pill">${c.printer || 'nenhuma'}</span></div>
-  <form method="POST" action="/logout"><button style="background:#374151">Sair (trocar conta)</button></form>
-</div>
-<div class="card">
-  <form method="POST" action="/printer">
-    <label>Impressora</label>
-    <select name="printer">${opts || '<option>(nenhuma encontrada)</option>'}</select>
-    <button>Salvar impressora</button>
-  </form>
-  <form method="POST" action="/teste"><button style="background:#16a34a">Imprimir cupom de teste</button></form>
-</div>`
+</div>` : ''
+    bloco = cardStatus + cardLoja + cardImpressora
+  }
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Impressora FWC</title><style>
 body{font-family:Segoe UI,Arial,sans-serif;background:#0f1420;color:#e5e7eb;margin:0;padding:24px;max-width:560px;margin:0 auto}
@@ -172,18 +183,28 @@ button{background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:11px 
 <h1>🖨️ Impressora FWC</h1><p class="sub">Impressao automatica dos pedidos direto na sua impressora.</p>
 ${bloco}
 <div class="card"><label>Atividade</label><div class="log" id="log">${logs.slice(-40).join('\n')}</div></div>
-<script>setInterval(async()=>{try{const r=await fetch('/logs');const t=await r.text();const el=document.getElementById('log');if(el){el.textContent=t;el.scrollTop=el.scrollHeight}}catch(e){}},3000)</script>
+<script>
+var _st=${JSON.stringify(estadoStr())};
+setInterval(async()=>{try{
+  const r=await fetch('/logs',{cache:'no-store'});const t=await r.text();const el=document.getElementById('log');if(el){el.textContent=t;el.scrollTop=el.scrollHeight}
+  const rs=await fetch('/state',{cache:'no-store'});const s=await rs.text();if(s!==_st){location.reload()}
+}catch(e){}},2000)</script>
 </body></html>`
 }
 function body(req) { return new Promise(res => { let d = ''; req.on('data', c => d += c); req.on('end', () => { const o = {}; new URLSearchParams(d).forEach((v, k) => o[k] = v); res(o) }) }) }
+// Assinatura do estado — quando muda, a tela recarrega sozinha (fim da tela travada).
+function estadoStr() { return JSON.stringify({ s: sessionAtiva, e: !!empresaId, p: config().printer || '', n: empresasDisponiveis.length }) }
 
 http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && req.url === '/') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(paginaHtml())
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(paginaHtml())
     }
     if (req.method === 'GET' && req.url === '/logs') {
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end(logs.slice(-40).join('\n'))
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(logs.slice(-40).join('\n'))
+    }
+    if (req.method === 'GET' && req.url === '/state') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); return res.end(estadoStr())
     }
     if (req.method === 'POST' && req.url === '/login') {
       const f = await body(req)
