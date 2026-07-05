@@ -1867,6 +1867,8 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           const v = pedido.ifood_valores
           const subComTaxa = Number(v.itens || 0) + Number(v.taxa || 0)
           const aLojaRecebe = Number(v.pago || 0) + Number(v.incentivo_ifood || 0)
+          // Cobrar na entrega quando NÃO é pré-pago (débito/crédito/dinheiro "via loja")
+          const cobrar = !(pagamento === 'online' || (pagamento === 'pix' && pedido.pix_status === 'pago'))
           return (
             <>
               <div className="pp-totais-row"><span>Itens</span><span>{fmt(v.itens)}</span></div>
@@ -1877,14 +1879,20 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
               )}
               <div className="pp-totais-total" style={{ color: '#16a34a' }}><span>💰 A loja recebe</span><span>{fmt(aLojaRecebe)}</span></div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>• Cliente pagou (via iFood)</span><span>{fmt(v.pago)}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>• Cliente {cobrar ? 'paga na entrega' : 'pagou (via iFood)'}</span><span>{fmt(v.pago)}</span></div>
                 {Number(v.incentivo_ifood) > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#16a34a', fontWeight: 700 }}><span>• Incentivo iFood (iFood repassa)</span><span>+ {fmt(v.incentivo_ifood)}</span></div>
                 )}
               </div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#16a34a', marginTop: 6 }}>
-                ✓ Pago via iFood — não precisa cobrar na entrega
-              </div>
+              {cobrar ? (
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: '#b45309', marginTop: 6 }}>
+                  💵 Cobrar {fmt(v.pago)} do cliente na entrega ({pagamento || 'via loja'})
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#16a34a', marginTop: 6 }}>
+                  ✓ Pago via iFood — não precisa cobrar na entrega
+                </div>
+              )}
             </>
           )
         })() : (
@@ -1965,8 +1973,9 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         {pagamento !== 'pix' && pagamento !== 'dinheiro' && pagamento && (
           <span className="pp-badge pp-badge-outro">{pagamento}</span>
         )}
-        {/* Precisa cobrar na entrega? (não é pré-pago: iFood e PIX confirmado são pagos) */}
-        {pedido.origem !== 'ifood' && !(pagamento === 'pix' && pedido.pix_status === 'pago') && (
+        {/* Precisa cobrar na entrega? Pré-pago = "online" (iFood app) ou PIX confirmado.
+            iFood "via loja" (débito/crédito/dinheiro) o cliente paga na entrega. */}
+        {!(pagamento === 'online' || (pagamento === 'pix' && pedido.pix_status === 'pago')) && (
           <span className="pp-badge" style={{ background: 'rgba(245,158,11,.15)', color: '#b45309', fontWeight: 800, border: '1px solid #f59e0b' }}>
             💵 Cobrar do cliente · {fmt(pedido.total)}
           </span>
@@ -4726,13 +4735,16 @@ export default function PainelPedidos() {
               // Pagamento do CLIENTE: o motoqueiro cobrou na entrega (dinheiro/cartão)
               // ou já estava pago (PIX confirmado / iFood)?
               const pagCliente = p => {
-                if (p.origem === 'ifood') return { pago: true, label: 'Pago no iFood' }
                 const f = p.forma_pagamento
-                if (f === 'pix' && p.pix_status === 'pago') return { pago: true, label: 'PIX pago' }
-                if (f === 'dinheiro') return { pago: false, label: 'Dinheiro' }
-                if (f === 'cartao' || f === 'cartão') return { pago: false, label: 'Cartão' }
-                if (f === 'pix') return { pago: false, label: 'PIX não confirmado' }
-                return { pago: true, label: f || 'Pago' }
+                const ehIfood = p.origem === 'ifood'
+                if (f === 'dinheiro') return { pago: false, label: 'Dinheiro' + (ehIfood ? ' (via iFood)' : '') }
+                if (['cartao', 'cartão', 'credito', 'debito'].includes(f)) {
+                  const n = f === 'debito' ? 'Débito' : f === 'credito' ? 'Crédito' : 'Cartão'
+                  return { pago: false, label: n + (ehIfood ? ' (via iFood)' : ' (maquininha)') }
+                }
+                if (f === 'vale') return { pago: false, label: 'Vale' + (ehIfood ? ' (via iFood)' : '') }
+                if (f === 'pix') return p.pix_status === 'pago' ? { pago: true, label: 'PIX pago' } : { pago: false, label: 'PIX não confirmado' }
+                return { pago: true, label: ehIfood ? 'Pago no iFood' : (f || 'Pago') }
               }
               const dataDe = p => new Date(p.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
               const agrupaPorData = arr => {

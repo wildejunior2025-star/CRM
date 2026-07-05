@@ -244,7 +244,7 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
   })
 
   const total = o.total ?? {}
-  const { forma, troco } = mapearPagamento(o.payments)
+  const { forma, troco, pago: pagoOnline } = mapearPagamento(o.payments)
 
   // Detalhamento financeiro pra mostrar no gestor igual ao app do iFood:
   // incentivos separados por patrocinador (loja x iFood) + valor pago via iFood.
@@ -271,7 +271,7 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     incentivo_ifood: Number(incIfood.toFixed(2)),
     incentivos_total: Number(incTotal.toFixed(2)),
     pago: Number(total.orderAmount ?? 0),
-    pago_online: true, // iFood: cliente já pagou no app
+    pago_online: pagoOnline, // true = pago no app; false = cobrar na entrega
   }
 
   const novo: Record<string, unknown> = {
@@ -336,25 +336,29 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
   return true
 }
 
-function mapearPagamento(payments: any): { forma: string; troco: number | null } {
+// `pago`=true → cliente já pagou (online no app do iFood). `pago`=false → o
+// entregador COBRA na entrega (dinheiro/crédito/débito/vale "via loja").
+function mapearPagamento(payments: any): { forma: string; troco: number | null; pago: boolean } {
   const methods = payments?.methods ?? []
-  // Pago online no app do iFood
+  // Pago online no app do iFood (prepaid, sem valor pendente pra cobrar)
   if (payments?.prepaid && Number(payments.prepaid) > 0 && (!payments.pending || Number(payments.pending) === 0)) {
-    return { forma: "online", troco: null }
+    return { forma: "online", troco: null, pago: true }
   }
   const m = methods[0]
-  if (!m) return { forma: "online", troco: null }
-  if ((m.type ?? "").toUpperCase() === "ONLINE") return { forma: "online", troco: null }
+  if (!m) return { forma: "online", troco: null, pago: true }
+  const tipo = (m.type ?? "").toUpperCase()
+  if (tipo === "ONLINE" || tipo === "PREPAID") return { forma: "online", troco: null, pago: true }
 
+  // PENDING = cobrar na entrega (maquininha/dinheiro do entregador)
   const metodo = (m.method ?? "").toUpperCase()
   if (metodo === "CASH") {
     const changeFor = m.cash?.changeFor != null ? Number(m.cash.changeFor) : null
-    return { forma: "dinheiro", troco: changeFor && changeFor > 0 ? changeFor : null }
+    return { forma: "dinheiro", troco: changeFor && changeFor > 0 ? changeFor : null, pago: false }
   }
-  if (metodo === "CREDIT") return { forma: "credito", troco: null }
-  if (metodo === "DEBIT") return { forma: "debito", troco: null }
-  if (metodo === "MEAL_VOUCHER" || metodo === "FOOD_VOUCHER") return { forma: "vale", troco: null }
-  return { forma: "outro", troco: null }
+  if (metodo === "CREDIT") return { forma: "credito", troco: null, pago: false }
+  if (metodo === "DEBIT") return { forma: "debito", troco: null, pago: false }
+  if (metodo === "MEAL_VOUCHER" || metodo === "FOOD_VOUCHER") return { forma: "vale", troco: null, pago: false }
+  return { forma: "outro", troco: null, pago: false }
 }
 
 // ─────────────────────────────────────────────────────────────────────

@@ -85,24 +85,29 @@ function soDigitos(tel) {
 }
 
 // Diz pro motoqueiro se ele PRECISA cobrar ou se já está pago.
-// Só iFood e PIX confirmado são pré-pagos. Dinheiro e cartão (maquininha) o
-// motoqueiro cobra na entrega — cartão NÃO é pago antecipado.
+// Pré-pago (verde): "online" (pago no app do iFood) e PIX confirmado.
+// Cobrar na entrega (laranja): dinheiro, cartão/crédito/débito (maquininha), vale
+// — inclusive quando vem do iFood como "via loja" (o cliente paga na entrega).
 function pagamentoInfo(p) {
   const forma = p.forma_pagamento
+  const ehIfood = p.origem === 'ifood'
+  const sufIfood = ehIfood ? ' (via iFood)' : ''
   if (forma === 'dinheiro') {
-    return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'Dinheiro', cor: '#f59e0b' }
+    return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'Dinheiro' + sufIfood, cor: '#f59e0b' }
   }
-  if (forma === 'cartao' || forma === 'cartão') {
-    return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'Cartão (maquininha)', cor: '#f59e0b' }
+  if (['cartao', 'cartão', 'credito', 'debito'].includes(forma)) {
+    const nome = forma === 'debito' ? 'Débito' : forma === 'credito' ? 'Crédito' : 'Cartão'
+    return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: nome + (ehIfood ? ' (via iFood)' : ' (maquininha)'), cor: '#f59e0b' }
+  }
+  if (forma === 'vale') {
+    return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'Vale' + sufIfood, cor: '#f59e0b' }
   }
   if (forma === 'pix') {
     if (p.pix_status === 'pago') return { pago: true, titulo: 'JÁ PAGO', detalhe: 'PIX confirmado', cor: '#16a34a' }
     return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'PIX (não confirmado)', cor: '#f59e0b' }
   }
-  if (p.origem === 'ifood') {
-    return { pago: true, titulo: 'JÁ PAGO', detalhe: 'Pago no iFood', cor: '#16a34a' }
-  }
-  return { pago: true, titulo: 'JÁ PAGO', detalhe: forma || 'Pago online', cor: '#16a34a' }
+  // Pré-pago: "online" (iFood app) ou qualquer outro online
+  return { pago: true, titulo: 'JÁ PAGO', detalhe: ehIfood ? 'Pago no iFood' : (forma || 'Pago online'), cor: '#16a34a' }
 }
 
 // ── Card de entrega ─────────────────────────────────────────
