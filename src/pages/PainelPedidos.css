@@ -44,7 +44,7 @@
    claras demais pra fundo escuro ganham tons mais fechados pra ler no branco. */
 [data-theme='light'] .pp-root .pp-cliente-tel:hover,
 [data-theme='light'] .pp-root .pp-item-qtd,
-[data-theme='light'] .pp-root .pp-mini-num { color: #6d28d9; }
+[data-theme='light'] .pp-root .pp-mini-num { color: var(--pp-text); }
 [data-theme='light'] .pp-root .pp-badge-pix,
 [data-theme='light'] .pp-root .pp-tipo-badge.entrega { color: #6d28d9; background: rgba(124,58,237,.10); border-color: rgba(124,58,237,.28); }
 [data-theme='light'] .pp-root .pp-badge-dinheiro { color: #047857; background: rgba(16,185,129,.10); border-color: rgba(16,185,129,.30); }
