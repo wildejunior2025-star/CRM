@@ -75,6 +75,44 @@ function listarImpressoras() {
   const r = spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Get-Printer | Select-Object -ExpandProperty Name'], { encoding: 'utf8' })
   return (r.stdout || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
 }
+
+// Esconde a janela preta do console — o app roda no fundo, silencioso (igual
+// impressora de concorrente). Todo o controle passou pro gestor. Use --debug
+// pra ver a janela.
+function esconderJanela() {
+  if (process.argv.includes('--debug')) return
+  try {
+    const ps1 = path.join(DATA_DIR, 'hide.ps1')
+    fs.writeFileSync(ps1, [
+      '$s=\'[DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow(); [DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h,int c);\'',
+      '$w=Add-Type -Name Win -Namespace Fwc -PassThru -MemberDefinition $s',
+      '$h=$w::GetConsoleWindow()',
+      'if($h -ne [System.IntPtr]::Zero){ [void]$w::ShowWindow($h,0) }',
+    ].join('\r\n'))
+    spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1], { stdio: 'ignore', windowsHide: true })
+  } catch (e) {}
+}
+
+// Cria um atalho na pasta de Inicializar do Windows, pra ligar junto com o PC.
+function garantirAutoStart() {
+  try {
+    if (!process.env.APPDATA) return
+    const dir = path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup')
+    const lnk = path.join(dir, 'ImpressoraFWC.lnk')
+    if (fs.existsSync(lnk)) return
+    const exe = process.execPath
+    const ps1 = path.join(DATA_DIR, 'autostart.ps1')
+    const esc = s => s.replace(/'/g, "''")
+    fs.writeFileSync(ps1, [
+      `$w = New-Object -ComObject WScript.Shell`,
+      `$s = $w.CreateShortcut('${esc(lnk)}')`,
+      `$s.TargetPath = '${esc(exe)}'`,
+      `$s.WorkingDirectory = '${esc(path.dirname(exe))}'`,
+      `$s.Save()`,
+    ].join('\r\n'))
+    spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1], { stdio: 'ignore', windowsHide: true })
+  } catch (e) {}
+}
 const jaImpressos = new Set()
 function imprimir(pedido) {
   const printer = config().printer
@@ -217,7 +255,7 @@ function cors(req, res) {
 }
 function sendJson(res, obj) { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)) }
 
-http.createServer(async (req, res) => {
+const server = http.createServer(async (req, res) => {
   try {
     // ── API JSON pro gestor (CORS liberado) ───────────────────────────────
     if (req.url.startsWith('/api/')) {
@@ -278,9 +316,13 @@ http.createServer(async (req, res) => {
     }
     res.writeHead(302, { Location: '/' }); res.end()
   } catch (e) { res.writeHead(500); res.end(String(e.message)) }
-}).listen(PORT, '127.0.0.1', () => {
+})
+// Uma instância só: se a porta já está em uso, outro app FWC já roda — sai quieto.
+server.on('error', e => { if (e && e.code === 'EADDRINUSE') process.exit(0) })
+server.listen(PORT, '127.0.0.1', () => {
   log('=== Impressora FWC ===')
   log('Configuracao: http://localhost:' + PORT)
-  exec('start "" http://localhost:' + PORT) // abre a tela no navegador
-  iniciarEscuta()
+  esconderJanela()      // roda invisível no fundo
+  garantirAutoStart()   // liga junto com o Windows
+  iniciarEscuta()       // conecta e escuta os pedidos
 })
