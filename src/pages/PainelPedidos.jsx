@@ -2288,7 +2288,7 @@ function ImpressoraFWCPanel() {
 
   const chamar = useCallback(async (path, opts) => {
     const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), 4000)
+    const t = setTimeout(() => ctrl.abort(), 8000)
     try {
       const r = await fetch(FWC_API + path, { ...opts, signal: ctrl.signal })
       return await r.json().catch(() => ({}))
