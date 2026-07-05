@@ -4760,6 +4760,8 @@ export default function PainelPedidos() {
                 }
                 if (f === 'vale') return { pago: false, label: 'Vale' + (ehIfood ? ' (via iFood)' : '') }
                 if (f === 'pix') return p.pix_status === 'pago' ? { pago: true, label: 'PIX pago' } : { pago: false, label: 'PIX não confirmado' }
+                // iFood com forma não mapeada ("outro") = cobrar na entrega, não "pago".
+                if (ehIfood && f !== 'online') return { pago: false, label: (f || 'via iFood') + ' (via iFood)' }
                 return { pago: true, label: ehIfood ? 'Pago no iFood' : (f || 'Pago') }
               }
               const dataDe = p => new Date(p.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })

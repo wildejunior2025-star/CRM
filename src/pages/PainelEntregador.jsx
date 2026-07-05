@@ -106,7 +106,11 @@ function pagamentoInfo(p) {
     if (p.pix_status === 'pago') return { pago: true, titulo: 'JÁ PAGO', detalhe: 'PIX confirmado', cor: '#16a34a' }
     return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'PIX (não confirmado)', cor: '#f59e0b' }
   }
-  // Pré-pago: "online" (iFood app) ou qualquer outro online
+  // Pré-pago só quando é "online" (pago no app do iFood). Qualquer outra forma
+  // vinda do iFood (ex.: "outro"/método não mapeado) = cobrar na entrega.
+  if (ehIfood && forma !== 'online') {
+    return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: (forma || 'via iFood') + ' (via iFood)', cor: '#f59e0b' }
+  }
   return { pago: true, titulo: 'JÁ PAGO', detalhe: ehIfood ? 'Pago no iFood' : (forma || 'Pago online'), cor: '#16a34a' }
 }
 
