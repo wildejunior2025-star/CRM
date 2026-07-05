@@ -8,7 +8,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const http = require('http')
-const { spawnSync, exec } = require('child_process')
+const { spawnSync, spawn, exec } = require('child_process')
 const { createClient } = require('@supabase/supabase-js')
 const { montarCupom } = require('./cupom')
 
@@ -24,6 +24,11 @@ const PORT = 9110
 // Pasta de dados (grava mesmo com o .exe em Program Files)
 const DATA_DIR = path.join(process.env.APPDATA || os.homedir(), 'ImpressoraFWC')
 try { fs.mkdirSync(DATA_DIR, { recursive: true }) } catch (e) {}
+
+// Se está rodando de fora do lugar instalado (ex.: baixado na Downloads), se
+// instala na Área de Trabalho e sai. (definições das funções mais abaixo)
+if (autoInstalar()) process.exit(0)
+
 const SESSION_FILE = path.join(DATA_DIR, 'session.json')
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json')
 const PS1_FILE = path.join(DATA_DIR, 'print-raw.ps1')
@@ -76,42 +81,62 @@ function listarImpressoras() {
   return (r.stdout || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
 }
 
-// Esconde a janela preta do console — o app roda no fundo, silencioso (igual
-// impressora de concorrente). Todo o controle passou pro gestor. Use --debug
-// pra ver a janela.
-function esconderJanela() {
-  if (process.argv.includes('--debug')) return
+// Caminho real da Área de Trabalho (respeita redirecionamento do OneDrive).
+function caminhoDesktop() {
   try {
-    const ps1 = path.join(DATA_DIR, 'hide.ps1')
-    fs.writeFileSync(ps1, [
-      '$s=\'[DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow(); [DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h,int c);\'',
-      '$w=Add-Type -Name Win -Namespace Fwc -PassThru -MemberDefinition $s',
-      '$h=$w::GetConsoleWindow()',
-      'if($h -ne [System.IntPtr]::Zero){ [void]$w::ShowWindow($h,0) }',
-    ].join('\r\n'))
-    spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1], { stdio: 'ignore', windowsHide: true })
+    const r = spawnSync('powershell.exe', ['-NoProfile', '-Command', "[Environment]::GetFolderPath('Desktop')"], { encoding: 'utf8', windowsHide: true })
+    const p = (r.stdout || '').trim()
+    if (p) return p
   } catch (e) {}
+  return path.join(process.env.USERPROFILE || os.homedir(), 'Desktop')
 }
 
-// Cria um atalho na pasta de Inicializar do Windows, pra ligar junto com o PC.
-function garantirAutoStart() {
+// Cria/atualiza o atalho na pasta Inicializar do Windows, apontando pra `alvo`.
+function criarAtalhoStartup(alvo) {
   try {
     if (!process.env.APPDATA) return
-    const dir = path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup')
-    const lnk = path.join(dir, 'ImpressoraFWC.lnk')
-    if (fs.existsSync(lnk)) return
-    const exe = process.execPath
+    const lnk = path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'ImpressoraFWC.lnk')
     const ps1 = path.join(DATA_DIR, 'autostart.ps1')
     const esc = s => s.replace(/'/g, "''")
     fs.writeFileSync(ps1, [
       `$w = New-Object -ComObject WScript.Shell`,
       `$s = $w.CreateShortcut('${esc(lnk)}')`,
-      `$s.TargetPath = '${esc(exe)}'`,
-      `$s.WorkingDirectory = '${esc(path.dirname(exe))}'`,
+      `$s.TargetPath = '${esc(alvo)}'`,
+      `$s.Arguments = '--installed'`,
+      `$s.WorkingDirectory = '${esc(path.dirname(alvo))}'`,
       `$s.Save()`,
     ].join('\r\n'))
     spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1], { stdio: 'ignore', windowsHide: true })
   } catch (e) {}
+}
+
+// AUTO-INSTALAÇÃO: quando o cliente roda o .exe baixado (Downloads etc.), ele se
+// copia pra Área de Trabalho, cria o atalho de inicialização, abre a cópia
+// instalada e sai. O arquivo baixado vira só um "instalador" (rodar de novo =
+// reinstala/atualiza). Retorna true se instalou (o chamador deve encerrar).
+function autoInstalar() {
+  if (process.platform !== 'win32' || process.argv.includes('--debug') || process.argv.includes('--installed')) return false
+  const eu = process.execPath
+  const alvo = path.join(caminhoDesktop(), 'ImpressoraFWC.exe')
+  if (path.normalize(eu).toLowerCase() === path.normalize(alvo).toLowerCase()) return false // já está no lugar certo
+  try {
+    // Para qualquer instância já instalada (pra poder sobrescrever/atualizar) — sem me matar.
+    spawnSync('powershell.exe', ['-NoProfile', '-Command',
+      `Get-CimInstance Win32_Process -Filter "Name='ImpressoraFWC.exe'" | Where-Object { $_.ProcessId -ne ${process.pid} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`],
+      { windowsHide: true })
+    // Copia com algumas tentativas (a instância parada pode demorar a liberar o arquivo).
+    let ok = false
+    for (let i = 0; i < 6 && !ok; i++) {
+      try { fs.copyFileSync(eu, alvo); ok = true } catch (e) { spawnSync('cmd.exe', ['/c', 'ping', '127.0.0.1', '-n', '2', '>nul'], { windowsHide: true }) }
+    }
+    if (!ok) return false
+    criarAtalhoStartup(alvo)
+    spawn(alvo, ['--installed'], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+    spawnSync('powershell.exe', ['-NoProfile', '-Command',
+      "(New-Object -ComObject WScript.Shell).Popup('Impressora FWC instalada! Ja esta rodando escondida na Area de Trabalho e vai ligar junto com o Windows.',7,'Impressora FWC',64) | Out-Null"],
+      { windowsHide: true })
+    return true
+  } catch (e) { return false }
 }
 const jaImpressos = new Set()
 function imprimir(pedido) {
@@ -322,7 +347,6 @@ server.on('error', e => { if (e && e.code === 'EADDRINUSE') process.exit(0) })
 server.listen(PORT, '127.0.0.1', () => {
   log('=== Impressora FWC ===')
   log('Configuracao: http://localhost:' + PORT)
-  esconderJanela()      // roda invisível no fundo
-  garantirAutoStart()   // liga junto com o Windows
-  iniciarEscuta()       // conecta e escuta os pedidos
+  criarAtalhoStartup(process.execPath)  // mantém o "ligar com o Windows" no lugar certo
+  iniciarEscuta()                       // conecta e escuta os pedidos
 })

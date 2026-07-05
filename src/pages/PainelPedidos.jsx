@@ -2326,13 +2326,13 @@ function ImpressoraFWCPanel() {
           <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 800 }}>● App fechado</span>
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-          Baixe e <b>deixe o app aberto</b> neste PC. Assim que abrir, a configuração da impressora aparece aqui mesmo — sem precisar do localhost.
+          Baixe e <b>abra o arquivo uma vez</b> — ele se <b>instala sozinho</b>: vai pra Área de Trabalho, liga junto com o Windows e começa a rodar escondido. Depois a configuração da impressora aparece aqui mesmo.
         </div>
         <a href={FWC_EXE_URL} download
           style={{ alignSelf: 'flex-start', background: '#7c3aed', color: '#fff', borderRadius: 8, padding: '10px 16px', fontWeight: 800, fontSize: 13, textDecoration: 'none', marginTop: 2 }}>
           ⬇️ Baixar Impressora FWC (Windows)
         </a>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Se o Windows avisar, clique em "Mais informações → Executar assim mesmo".</div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Se o Windows avisar, clique em "Mais informações → Executar assim mesmo". Aparece um aviso "instalada!" e pronto.</div>
         <button type="button" onClick={carregar} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary, #a78bfa)', fontSize: 12, fontWeight: 700, padding: 0, marginTop: 2 }}>
           ↻ Já abri o app — detectar de novo
         </button>
