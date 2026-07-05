@@ -2271,6 +2271,140 @@ function horarioHojeTexto(emp) {
 }
 
 // ── Toggle reutilizável (liga/desliga) ─────────────────────
+// ── Impressora FWC: configuração DENTRO do gestor ────────────────────────────
+// O app FWC roda no PC e expõe uma API local (127.0.0.1:9110). Aqui o gestor
+// fala com ela pra logar, escolher loja/impressora e imprimir teste — tudo sem
+// abrir o localhost. Se o app não estiver aberto, mostra o botão de baixar.
+const FWC_EXE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co/storage/v1/object/public/downloads/ImpressoraFWC.exe'
+const FWC_API = 'http://127.0.0.1:9110/api'
+
+function ImpressoraFWCPanel() {
+  const [online, setOnline] = useState(null) // null=checando | true | false
+  const [st, setSt] = useState(null)
+  const [email, setEmail] = useState('')
+  const [senha, setSenha] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [erro, setErro] = useState('')
+
+  const chamar = useCallback(async (path, opts) => {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), 4000)
+    try {
+      const r = await fetch(FWC_API + path, { ...opts, signal: ctrl.signal })
+      return await r.json().catch(() => ({}))
+    } finally { clearTimeout(t) }
+  }, [])
+
+  const carregar = useCallback(async () => {
+    try { const s = await chamar('/status'); setSt(s); setOnline(true) }
+    catch (e) { setOnline(false) }
+  }, [chamar])
+
+  useEffect(() => { carregar(); const id = setInterval(carregar, 5000); return () => clearInterval(id) }, [carregar])
+
+  const acao = async (path, corpo) => {
+    setBusy(true); setErro('')
+    try {
+      const j = await chamar(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(corpo || {}) })
+      if (j && j.ok === false) setErro(j.erro || 'Não deu certo.')
+      await carregar()
+      return j
+    } catch (e) { setErro('Não consegui falar com o app. Ele está aberto?'); setOnline(false) }
+    finally { setBusy(false) }
+  }
+
+  const inp = { width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }
+  const btnRoxo = { padding: '10px 14px', borderRadius: 8, border: 'none', cursor: busy ? 'wait' : 'pointer', background: '#7c3aed', color: '#fff', fontWeight: 800, fontSize: 13, opacity: busy ? .6 : 1 }
+  const btnVerde = { ...btnRoxo, background: '#16a34a' }
+
+  // ── App não encontrado (fechado ou não instalado) ──
+  if (online === false) {
+    return (
+      <div style={{ border: '2px solid #7c3aed', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(124,58,237,0.07)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 14, fontWeight: 800 }}>🖨️ Impressora FWC</span>
+          <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 800 }}>● App fechado</span>
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+          Baixe e <b>deixe o app aberto</b> neste PC. Assim que abrir, a configuração da impressora aparece aqui mesmo — sem precisar do localhost.
+        </div>
+        <a href={FWC_EXE_URL} download
+          style={{ alignSelf: 'flex-start', background: '#7c3aed', color: '#fff', borderRadius: 8, padding: '10px 16px', fontWeight: 800, fontSize: 13, textDecoration: 'none', marginTop: 2 }}>
+          ⬇️ Baixar Impressora FWC (Windows)
+        </a>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Se o Windows avisar, clique em "Mais informações → Executar assim mesmo".</div>
+        <button type="button" onClick={carregar} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary, #a78bfa)', fontSize: 12, fontWeight: 700, padding: 0, marginTop: 2 }}>
+          ↻ Já abri o app — detectar de novo
+        </button>
+      </div>
+    )
+  }
+
+  // ── Checando ──
+  if (online === null || !st) {
+    return (
+      <div style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 14, fontSize: 12.5, color: 'var(--text-muted)' }}>
+        🖨️ Procurando o app Impressora FWC neste PC…
+      </div>
+    )
+  }
+
+  // ── App online ──
+  return (
+    <div style={{ border: '2px solid #7c3aed', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 12, background: 'rgba(124,58,237,0.07)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 14, fontWeight: 800 }}>🖨️ Impressora FWC</span>
+        <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 800 }}>● App conectado</span>
+      </div>
+
+      {erro && <div style={{ fontSize: 12, color: '#dc2626', fontWeight: 700 }}>{erro}</div>}
+
+      {/* Não logado → login */}
+      {!st.logado ? (
+        <>
+          <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Entre com a conta da loja (a mesma do gestor).</div>
+          <input style={inp} type="email" placeholder="E-mail" value={email} onChange={e => setEmail(e.target.value)} />
+          <input style={inp} type="password" placeholder="Senha" value={senha} onChange={e => setSenha(e.target.value)} />
+          <button type="button" disabled={busy} style={btnRoxo} onClick={() => acao('/login', { email, senha })}>Entrar</button>
+        </>
+      ) : (
+        <>
+          {/* Loja (só se tiver mais de uma e ainda não escolheu) */}
+          {!st.empresaId && st.empresas?.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>Sua conta tem mais de uma loja — escolha qual imprime:</div>
+              <select style={inp} defaultValue="" onChange={e => e.target.value && acao('/empresa', { empresa_id: e.target.value })}>
+                <option value="">Selecione a loja</option>
+                {st.empresas.map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* Status */}
+          <div style={{ fontSize: 12.5, color: 'var(--text)' }}>
+            <div>Loja: <b>{st.loja || '—'}</b></div>
+            <div>Impressora: <b style={{ color: st.impressora ? '#16a34a' : '#dc2626' }}>{st.impressora || 'nenhuma escolhida'}</b></div>
+          </div>
+
+          {/* Escolher impressora */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>Impressora (todas as instaladas neste PC)</div>
+            <select style={inp} value={st.impressora || ''} onChange={e => acao('/printer', { printer: e.target.value })}>
+              <option value="">Selecione a impressora</option>
+              {(st.impressoras || []).map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" disabled={busy || !st.impressora} style={{ ...btnVerde, opacity: (busy || !st.impressora) ? .6 : 1 }} onClick={() => acao('/teste')}>Imprimir cupom de teste</button>
+            <button type="button" disabled={busy} style={{ ...btnRoxo, background: '#374151' }} onClick={() => acao('/logout')}>Sair (trocar conta)</button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function ToggleRow({ label, ativo, onToggle }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -4305,28 +4439,8 @@ export default function PainelPedidos() {
           {/* Painel: Impressora */}
           {painelDireito === 'impressora' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* Impressora FWC — app proprio (recomendado) */}
-              <div style={{ border: '2px solid #7c3aed', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(124,58,237,0.07)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 14, fontWeight: 800 }}>🖨️ Impressora FWC</span>
-                  <span style={{ fontSize: 10, fontWeight: 800, background: '#7c3aed', color: '#fff', borderRadius: 20, padding: '2px 8px' }}>RECOMENDADO</span>
-                </div>
-                <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  Baixe e abra o app. Ele abre uma telinha de configuração no navegador — <b>faça login com a conta da loja</b> (a mesma do gestor). Cada pedido novo imprime <b>sozinho</b>, sem QZ e sem certificado.
-                </div>
-                <a href="https://ycytrsqdvrviihkqfvno.supabase.co/storage/v1/object/public/downloads/ImpressoraFWC.exe" download
-                  style={{ alignSelf: 'flex-start', background: '#7c3aed', color: '#fff', borderRadius: 8, padding: '10px 16px', fontWeight: 800, fontSize: 13, textDecoration: 'none', marginTop: 2 }}>
-                  ⬇️ Baixar Impressora FWC (Windows)
-                </a>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Deixe o programa aberto. Se o Windows avisar, clique em "Mais informações → Executar assim mesmo".</div>
-                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.6, marginTop: 4, paddingTop: 8, borderTop: '1px dashed var(--border, #2a2a3a)' }}>
-                  <b>Como escolher a impressora:</b><br />
-                  1. Abra o app (a tela de config abre sozinha, ou acesse <b>localhost:9110</b>).<br />
-                  2. Faça login com a conta da loja.<br />
-                  3. No campo <b>"Impressora"</b>, escolha a sua (aparecem todas as instaladas neste PC) e clique <b>"Salvar impressora"</b>.<br />
-                  4. Toque em <b>"Imprimir cupom de teste"</b> pra conferir.
-                </div>
-              </div>
+              {/* Impressora FWC — configuração ao vivo dentro do gestor */}
+              <ImpressoraFWCPanel />
 
               <div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>Largura do cupom</div>

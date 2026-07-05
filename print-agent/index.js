@@ -192,11 +192,64 @@ setInterval(async()=>{try{
 </body></html>`
 }
 function body(req) { return new Promise(res => { let d = ''; req.on('data', c => d += c); req.on('end', () => { const o = {}; new URLSearchParams(d).forEach((v, k) => o[k] = v); res(o) }) }) }
+// Corpo JSON (usado pela API que o gestor chama).
+function jsonBody(req) { return new Promise(res => { let d = ''; req.on('data', c => d += c); req.on('end', () => { try { res(JSON.parse(d || '{}')) } catch (e) { res({}) } }) }) }
 // Assinatura do estado — quando muda, a tela recarrega sozinha (fim da tela travada).
 function estadoStr() { return JSON.stringify({ s: sessionAtiva, e: !!empresaId, p: config().printer || '', n: empresasDisponiveis.length }) }
+// Estado completo pra API (gestor mostra tudo bonitinho por lá).
+function statusObj() {
+  return {
+    logado: sessionAtiva,
+    loja: empresa?.nome || null,
+    empresaId: empresaId || null,
+    empresas: empresasDisponiveis,
+    impressora: config().printer || null,
+    impressoras: sessionAtiva ? listarImpressoras() : [],
+  }
+}
+// CORS + Private Network Access — libera o gestor (https) a falar com o app (localhost).
+function cors(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*')
+  res.setHeader('Vary', 'Origin')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'content-type')
+  res.setHeader('Access-Control-Allow-Private-Network', 'true')
+}
+function sendJson(res, obj) { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)) }
 
 http.createServer(async (req, res) => {
   try {
+    // ── API JSON pro gestor (CORS liberado) ───────────────────────────────
+    if (req.url.startsWith('/api/')) {
+      cors(req, res)
+      if (req.method === 'OPTIONS') { res.writeHead(204); return res.end() }
+      if (req.method === 'GET' && req.url === '/api/status') return sendJson(res, statusObj())
+      if (req.method === 'POST' && req.url === '/api/login') {
+        const f = await jsonBody(req)
+        const { error } = await supabase.auth.signInWithPassword({ email: (f.email || '').trim(), password: f.senha || '' })
+        if (error) { log('Login falhou: ' + error.message); return sendJson(res, { ok: false, erro: error.message }) }
+        log('Login OK: ' + f.email); await iniciarEscuta(); return sendJson(res, { ok: true, ...statusObj() })
+      }
+      if (req.method === 'POST' && req.url === '/api/empresa') {
+        const f = await jsonBody(req); setConfig({ empresa_id: f.empresa_id }); empresaId = null; log('Loja escolhida.'); await iniciarEscuta()
+        return sendJson(res, { ok: true, ...statusObj() })
+      }
+      if (req.method === 'POST' && req.url === '/api/printer') {
+        const f = await jsonBody(req); setConfig({ printer: f.printer }); log('Impressora: ' + f.printer); return sendJson(res, { ok: true, ...statusObj() })
+      }
+      if (req.method === 'POST' && req.url === '/api/logout') {
+        await supabase.auth.signOut(); empresaId = null; empresa = null; sessionAtiva = false; empresasDisponiveis = []
+        setConfig({ empresa_id: null }); if (canal) { try { supabase.removeChannel(canal) } catch (e) {} } log('Desconectado.')
+        return sendJson(res, { ok: true, ...statusObj() })
+      }
+      if (req.method === 'POST' && req.url === '/api/teste') {
+        jaImpressos.delete('teste')
+        imprimir({ id: 'teste', numero_pedido: '0000', cliente_nome: 'TESTE', tipo_entrega: 'retirada', origem: 'teste',
+          itens: [{ nome: 'Cupom de teste', qtd: 1 }], subtotal: 0, total: 0, forma_pagamento: 'dinheiro' })
+        return sendJson(res, { ok: true })
+      }
+      res.writeHead(404); return res.end('{}')
+    }
     if (req.method === 'GET' && req.url === '/') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(paginaHtml())
     }
