@@ -4312,76 +4312,16 @@ export default function PainelPedidos() {
                   <span style={{ fontSize: 10, fontWeight: 800, background: '#7c3aed', color: '#fff', borderRadius: 20, padding: '2px 8px' }}>RECOMENDADO</span>
                 </div>
                 <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  Baixe, abra, faça login com a conta da loja e escolha a impressora. Cada pedido novo imprime <b>sozinho</b> — sem navegador, sem QZ, sem certificado.
+                  Baixe, abra e faça login com a conta da loja. <b>Dentro do app você escolhe a impressora</b> — ele lista todas as instaladas neste PC. Cada pedido novo imprime <b>sozinho</b>, sem navegador, sem QZ, sem certificado.
                 </div>
                 <a href="https://ycytrsqdvrviihkqfvno.supabase.co/storage/v1/object/public/downloads/ImpressoraFWC.exe" download
                   style={{ alignSelf: 'flex-start', background: '#7c3aed', color: '#fff', borderRadius: 8, padding: '10px 16px', fontWeight: 800, fontSize: 13, textDecoration: 'none', marginTop: 2 }}>
                   ⬇️ Baixar Impressora FWC (Windows)
                 </a>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Deixe o programa aberto. Se o Windows avisar, clique em "Mais informações → Executar assim mesmo".</div>
-              </div>
-
-              {/* QZ Tray — impressora do PC */}
-              <div style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Impressora do PC</span>
-                  {qzStatus === 'ok' && <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 700 }}>● Conectado</span>}
-                  {qzStatus === 'verificando' && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>verificando…</span>}
-                  {qzStatus === 'sem-qz' && <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 700 }}>● Não encontrado</span>}
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 4, paddingTop: 8, borderTop: '1px dashed var(--border, #2a2a3a)' }}>
+                  ℹ️ A escolha da impressora fica no app FWC (abra a bandeja → <b>Escolher impressora</b>). Não precisa de QZ nem de nenhum outro programa.
                 </div>
-
-                {qzStatus === 'ok' && (
-                  <>
-                    {impressoras.length === 0 ? (
-                      <div style={{ fontSize: 12, color: '#dc2626' }}>Nenhuma impressora encontrada neste PC.</div>
-                    ) : (
-                      <select
-                        value={impressoraSel}
-                        onChange={e => escolherImpressora(e.target.value)}
-                        style={{
-                          width: '100%', padding: '8px 10px', borderRadius: 8,
-                          border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)',
-                          color: 'var(--text)', fontSize: 13,
-                        }}
-                      >
-                        <option value="">Selecione a impressora</option>
-                        {impressoras.map(p => (
-                          <option key={p} value={p}>{p}{p === impressoraPadrao ? ' (padrão)' : ''}</option>
-                        ))}
-                      </select>
-                    )}
-                    <button type="button" onClick={detectarImpressoras} style={{
-                      alignSelf: 'flex-start', background: 'none', border: 'none', cursor: 'pointer',
-                      color: 'var(--primary, #a78bfa)', fontSize: 12, fontWeight: 700, padding: 0,
-                    }}>
-                      ↻ Atualizar lista
-                    </button>
-                  </>
-                )}
-
-                {qzStatus === 'sem-qz' && (
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                    Para escolher a impressora e imprimir automático, instale o <strong>QZ Tray</strong> (grátis) neste computador e deixe o programa aberto.
-                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                      <a href="https://qz.io/download/" target="_blank" rel="noreferrer" style={{
-                        flex: 1, textAlign: 'center', padding: '8px 0', borderRadius: 8,
-                        background: 'var(--primary, #7c3aed)', color: '#fff', fontWeight: 700, fontSize: 13, textDecoration: 'none',
-                      }}>
-                        Baixar QZ Tray
-                      </a>
-                      <button type="button" onClick={detectarImpressoras} style={{
-                        padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border, #2a2a3a)',
-                        cursor: 'pointer', background: 'transparent', color: 'var(--text)', fontWeight: 700, fontSize: 13,
-                      }}>
-                        Tentar de novo
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {qzStatus === 'verificando' && (
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Procurando o QZ Tray…</div>
-                )}
               </div>
 
               <div>
@@ -4442,30 +4382,6 @@ export default function PainelPedidos() {
               }}>
                 Imprimir cupom de teste
               </button>
-
-              {/* Impressão automática sem instalar nada (atalho kiosk do Chrome) */}
-              <div style={{ border: '1px solid #16a34a', borderRadius: 10, padding: 12, background: 'rgba(34,197,94,.08)' }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', marginBottom: 4 }}>
-                  🖨️ Impressão automática (sem instalar nada)
-                </div>
-                <p style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5, margin: '0 0 10px' }}>
-                  Baixe o atalho, deixe a <strong>impressora térmica como padrão</strong> do Windows e dê 2 cliques nele.
-                  O gestor abre e cada pedido imprime <strong>sozinho, sem a janela do Chrome</strong>.
-                </p>
-                <button type="button" onClick={baixarAtalhoImpressao} style={{
-                  width: '100%', padding: '10px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
-                  background: '#16a34a', color: '#fff', fontWeight: 800, fontSize: 13.5,
-                }}>
-                  ⬇️ Baixar atalho de impressão automática
-                </button>
-              </div>
-
-              <p style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
-                Prefere escolher a impressora entre várias? Com o <strong>QZ Tray</strong> instalado e aberto, o cupom imprime sozinho na impressora escolhida.{' '}
-                <a href="https://qz.io/download/" target="_blank" rel="noreferrer" style={{ color: 'var(--primary, #a78bfa)', fontWeight: 700 }}>
-                  Baixar QZ Tray
-                </a>
-              </p>
             </div>
           )}
 
