@@ -5,7 +5,8 @@
   "main": "index.js",
   "bin": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "build": "npx pkg index.js --targets node18-win-x64 --output dist/ImpressoraFWC.exe && node patch-subsystem.js dist/ImpressoraFWC.exe"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
