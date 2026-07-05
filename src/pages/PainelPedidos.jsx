@@ -4552,13 +4552,12 @@ export default function PainelPedidos() {
                 <ToggleRow label="Total de itens" ativo={cupomCfg.totalItens === true} onToggle={() => setCupom({ totalItens: !(cupomCfg.totalItens === true) })} />
               </div>
 
-              {fwcAppImprime ? (
+              {fwcAppImprime && (
                 <div style={{ fontSize: 12, color: '#16a34a', fontWeight: 700, background: 'rgba(34,197,94,.08)', border: '1px solid #16a34a', borderRadius: 8, padding: '8px 10px' }}>
-                  ✓ Impressão automática pelo app FWC — os pedidos imprimem sozinhos, sem precisar do navegador.
+                  ✓ Pedidos de delivery/balcão imprimem sozinhos pelo <b>app FWC</b>. O toggle abaixo vale só pra impressão pelo <b>navegador</b> (ex.: mesa/comanda).
                 </div>
-              ) : (
-                <ToggleRow label="Imprimir automático (pelo navegador)" ativo={autoImprimir} onToggle={toggleAutoImprimir} />
               )}
+              <ToggleRow label={fwcAppImprime ? 'Auto-imprimir pelo navegador (mesa)' : 'Imprimir automático'} ativo={autoImprimir} onToggle={toggleAutoImprimir} />
               <ToggleRow label="Aceitar pedido automático" ativo={aceitarAuto} onToggle={toggleAceitarAuto} />
               {aceitarAuto && (
                 <p style={{ fontSize: 11, color: '#a16207', lineHeight: 1.4, margin: '-4px 0 0' }}>
