@@ -293,6 +293,15 @@ const server = http.createServer(async (req, res) => {
         if (error) { log('Login falhou: ' + error.message); return sendJson(res, { ok: false, erro: error.message }) }
         log('Login OK: ' + f.email); await iniciarEscuta(); return sendJson(res, { ok: true, ...statusObj() })
       }
+      // Adota a sessão do gestor (o usuário já está logado no navegador) — sem digitar login.
+      if (req.method === 'POST' && req.url === '/api/adotar-sessao') {
+        const f = await jsonBody(req)
+        if (!f.access_token || !f.refresh_token) return sendJson(res, { ok: false, erro: 'sem sessão' })
+        const { error } = await supabase.auth.setSession({ access_token: f.access_token, refresh_token: f.refresh_token })
+        if (error) { log('Adotar sessão falhou: ' + error.message); return sendJson(res, { ok: false, erro: error.message }) }
+        if (f.empresa_id) setConfig({ empresa_id: f.empresa_id })
+        log('Sessão do gestor adotada.'); await iniciarEscuta(); return sendJson(res, { ok: true, ...statusObj() })
+      }
       if (req.method === 'POST' && req.url === '/api/empresa') {
         const f = await jsonBody(req); setConfig({ empresa_id: f.empresa_id }); empresaId = null; log('Loja escolhida.'); await iniciarEscuta()
         return sendJson(res, { ok: true, ...statusObj() })

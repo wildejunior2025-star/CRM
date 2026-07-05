@@ -2278,13 +2278,15 @@ function horarioHojeTexto(emp) {
 const FWC_EXE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_API = 'http://127.0.0.1:9110/api'
 
-function ImpressoraFWCPanel() {
+function ImpressoraFWCPanel({ empresaId }) {
   const [online, setOnline] = useState(null) // null=checando | true | false
   const [st, setSt] = useState(null)
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
   const [busy, setBusy] = useState(false)
   const [erro, setErro] = useState('')
+  const [adotando, setAdotando] = useState(false)
+  const adotouRef = useRef(false)
 
   const chamar = useCallback(async (path, opts) => {
     const ctrl = new AbortController()
@@ -2301,6 +2303,28 @@ function ImpressoraFWCPanel() {
   }, [chamar])
 
   useEffect(() => { carregar(); const id = setInterval(carregar, 5000); return () => clearInterval(id) }, [carregar])
+
+  // Reconhece a conta do gestor sozinho: se o app está aberto mas SEM login,
+  // entrega a sessão do gestor pro app (1x por abertura do painel). Sem digitar.
+  useEffect(() => {
+    if (online !== true || !st || st.logado || adotouRef.current) return
+    adotouRef.current = true
+    ;(async () => {
+      setAdotando(true)
+      try {
+        const { data } = await supabase.auth.getSession()
+        const s = data?.session
+        if (s?.access_token && s?.refresh_token) {
+          await chamar('/adotar-sessao', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ access_token: s.access_token, refresh_token: s.refresh_token, empresa_id: empresaId || undefined }),
+          })
+          await carregar()
+        }
+      } catch (e) { /* cai no login manual */ }
+      finally { setAdotando(false) }
+    })()
+  }, [online, st, empresaId, chamar, carregar])
 
   const acao = async (path, corpo) => {
     setBusy(true); setErro('')
@@ -2359,14 +2383,18 @@ function ImpressoraFWCPanel() {
 
       {erro && <div style={{ fontSize: 12, color: '#dc2626', fontWeight: 700 }}>{erro}</div>}
 
-      {/* Não logado → login */}
+      {/* Não logado → tenta reconhecer a conta do gestor; senão, login manual */}
       {!st.logado ? (
-        <>
-          <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Entre com a conta da loja (a mesma do gestor).</div>
-          <input style={inp} type="email" placeholder="E-mail" value={email} onChange={e => setEmail(e.target.value)} />
-          <input style={inp} type="password" placeholder="Senha" value={senha} onChange={e => setSenha(e.target.value)} />
-          <button type="button" disabled={busy} style={btnRoxo} onClick={() => acao('/login', { email, senha })}>Entrar</button>
-        </>
+        adotando ? (
+          <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>🔑 Reconhecendo a conta do gestor…</div>
+        ) : (
+          <>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Entre com a conta da loja (a mesma do gestor).</div>
+            <input style={inp} type="email" placeholder="E-mail" value={email} onChange={e => setEmail(e.target.value)} />
+            <input style={inp} type="password" placeholder="Senha" value={senha} onChange={e => setSenha(e.target.value)} />
+            <button type="button" disabled={busy} style={btnRoxo} onClick={() => acao('/login', { email, senha })}>Entrar</button>
+          </>
+        )
       ) : (
         <>
           {/* Loja (só se tiver mais de uma e ainda não escolheu) */}
@@ -4440,7 +4468,7 @@ export default function PainelPedidos() {
           {painelDireito === 'impressora' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {/* Impressora FWC — configuração ao vivo dentro do gestor */}
-              <ImpressoraFWCPanel />
+              <ImpressoraFWCPanel empresaId={empresa?.id} />
 
               <div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>Largura do cupom</div>
