@@ -13,7 +13,7 @@ const PERFIS = [
   { value: 'entregador', label: 'Entregador' },
 ]
 
-const emptyVendorForm = { nome: '', email: '', senha: '', telefone: '' }
+const emptyVendorForm = { nome: '', email: '', senha: '', telefone: '', perfil: 'entregador' }
 
 export default function Usuarios() {
   const { user, profile, empresa, refreshProfile } = useAuth()
@@ -68,6 +68,7 @@ export default function Usuarios() {
       .from('profiles').select('*')
       .eq('empresa_id', profile.empresa_id)
       .in('perfil', ['admin', 'vendedor', 'garcom', 'cozinheiro', 'entregador'])
+      .not('ativo', 'is', false) // esconde funcionários excluídos (soft delete)
       .order('created_at')
 
     if (error) setError(error.message)
@@ -125,6 +126,19 @@ export default function Usuarios() {
     if (error) setError(error.message)
   }
 
+  // Excluir funcionário = soft delete (ativo=false). Não apaga de verdade pra não
+  // quebrar o histórico de pedidos (entregador_id) nem o login; ele só sai da loja.
+  async function handleExcluir(p) {
+    if (p.id === user?.id) { setError('Você não pode excluir a si mesmo.'); return }
+    if (!confirm(`Excluir o funcionário "${p.nome || p.email}"?\nEle perde o acesso à loja. O histórico de pedidos é mantido.`)) return
+    setSavingId(p.id)
+    setError(null)
+    const { error } = await supabase.from('profiles').update({ ativo: false }).eq('id', p.id)
+    setSavingId(null)
+    if (error) { setError(error.message); return }
+    setPerfis(prev => prev.filter(x => x.id !== p.id))
+  }
+
   async function handleCreateVendor(e) {
     e.preventDefault()
     setVendorError(null)
@@ -144,7 +158,7 @@ export default function Usuarios() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ nome: vendorForm.nome, email: vendorForm.email, password: vendorForm.senha, telefone: vendorForm.telefone || undefined }),
+        body: JSON.stringify({ nome: vendorForm.nome, email: vendorForm.email, password: vendorForm.senha, telefone: vendorForm.telefone || undefined, perfil: vendorForm.perfil }),
       })
       const json = await res.json()
       if (!json.ok) {
@@ -231,6 +245,7 @@ export default function Usuarios() {
                 <th>E-mail</th>
                 <th>Perfil</th>
                 <th>Desconto/entrega</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -277,6 +292,21 @@ export default function Usuarios() {
                       <span style={{ color: 'var(--text-muted, #9ca3af)' }}>—</span>
                     )}
                   </td>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleExcluir(p)}
+                      disabled={savingId === p.id || p.id === user?.id}
+                      title={p.id === user?.id ? 'Você não pode se excluir' : 'Excluir funcionário'}
+                      style={{
+                        background: 'none', border: '1px solid var(--danger, #ef4444)', color: 'var(--danger, #ef4444)',
+                        borderRadius: 8, cursor: p.id === user?.id ? 'not-allowed' : 'pointer', padding: '4px 10px',
+                        fontSize: 12.5, fontWeight: 700, opacity: p.id === user?.id ? 0.4 : 1,
+                      }}
+                    >
+                      Excluir
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -318,6 +348,17 @@ export default function Usuarios() {
                   onChange={(e) => setVendorForm((p) => ({ ...p, email: e.target.value }))}
                   placeholder="vendedor@exemplo.com"
                 />
+              </div>
+              <div className="form-field">
+                <label>Perfil / Função</label>
+                <select
+                  value={vendorForm.perfil}
+                  onChange={(e) => setVendorForm((p) => ({ ...p, perfil: e.target.value }))}
+                >
+                  {PERFIS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
               <div className="form-field">
                 <label>Senha inicial</label>

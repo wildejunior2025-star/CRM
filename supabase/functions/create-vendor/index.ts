@@ -61,7 +61,11 @@ serve(async (req) => {
     const empresa_id = callerProfile.empresa_id
 
     const body = await req.json()
-    const { nome, email, password, telefone } = body
+    const { nome, email, password, telefone, perfil } = body
+
+    // Perfil escolhido no formulário (motoqueiro/cozinheiro/etc.). Default: vendedor.
+    const PERFIS_OK = ["admin", "vendedor", "garcom", "cozinheiro", "entregador"]
+    const perfilFinal = PERFIS_OK.includes(perfil) ? perfil : "vendedor"
 
     if (!nome || !email || !password) {
       return new Response(JSON.stringify({ ok: false, error: "nome, email e password são obrigatórios" }), {
@@ -94,7 +98,7 @@ serve(async (req) => {
     // O trigger handle_new_user NÃO cria profile para usuários sem tipo_cadastro,
     // então fazemos UPSERT (cria se não existir) com perfil 'vendedor' e a empresa.
     const profileRow: Record<string, unknown> = {
-      id: newUserId, perfil: "vendedor", empresa_id, nome, email: newUser.user.email,
+      id: newUserId, perfil: perfilFinal, empresa_id, nome, email: newUser.user.email,
     }
     if (telefone) profileRow.telefone = telefone
 
