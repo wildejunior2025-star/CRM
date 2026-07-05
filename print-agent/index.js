@@ -10,7 +10,7 @@ const path = require('path')
 const http = require('http')
 const { spawnSync, spawn, exec } = require('child_process')
 const { createClient } = require('@supabase/supabase-js')
-const { montarCupom } = require('./cupom')
+const { montarCupom, montarTexto } = require('./cupom')
 
 // Node empacotado (pkg) nao tem WebSocket nativo — a lib realtime do Supabase
 // precisa. Injeta o 'ws' como implementacao global.
@@ -139,19 +139,30 @@ function autoInstalar() {
   } catch (e) { return false }
 }
 const jaImpressos = new Set()
-function imprimir(pedido) {
+// Envia bytes ESC/POS pra impressora escolhida. Retorna true se conseguiu mandar.
+function imprimirBytes(bytes, nome) {
   const printer = config().printer
-  if (!printer) { log('  ! sem impressora escolhida'); return }
-  if (jaImpressos.has(pedido.id)) return
-  jaImpressos.add(pedido.id)
+  if (!printer) { log('  ! sem impressora escolhida'); return false }
   try {
-    const bytes = montarCupom(pedido, empresa)
-    const tmp = path.join(os.tmpdir(), 'fwc-cupom-' + pedido.id + '.bin')
+    const tmp = path.join(os.tmpdir(), 'fwc-' + (nome || 'doc') + '.bin')
     fs.writeFileSync(tmp, bytes)
     const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', PS1_FILE, '-Printer', printer, '-File', tmp], { encoding: 'utf8', windowsHide: true })
-    log('  -> impresso #' + (pedido.numero_pedido ?? pedido.id) + ' [' + ((r.stdout || '') + (r.stderr || '')).trim() + ']')
+    log('  -> impresso ' + (nome || '') + ' [' + ((r.stdout || '') + (r.stderr || '')).trim() + ']')
     try { fs.unlinkSync(tmp) } catch (e) {}
-  } catch (e) { log('  -> ERRO imprimir: ' + e.message) }
+    return true
+  } catch (e) { log('  -> ERRO imprimir: ' + e.message); return false }
+}
+function imprimir(pedido) {
+  if (jaImpressos.has(pedido.id)) return
+  jaImpressos.add(pedido.id)
+  imprimirBytes(montarCupom(pedido, empresa), 'cupom-' + pedido.id)
+}
+// HTML (cozinha/conta de mesa) -> linhas de texto pra térmica.
+function htmlParaLinhas(html) {
+  let s = String(html || '')
+  s = s.replace(/<\s*(br|\/p|\/div|\/tr|\/h[1-6]|\/li)\s*>/gi, '\n').replace(/<[^>]+>/g, '')
+  s = s.replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+  return s.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean)
 }
 
 // ---- conecta e escuta os pedidos da loja ----
@@ -305,6 +316,20 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' && req.url === '/api/empresa') {
         const f = await jsonBody(req); setConfig({ empresa_id: f.empresa_id }); empresaId = null; log('Loja escolhida.'); await iniciarEscuta()
         return sendJson(res, { ok: true, ...statusObj() })
+      }
+      // Imprime/reimprime um pedido (cupom) mandado pelo gestor.
+      if (req.method === 'POST' && req.url === '/api/imprimir') {
+        const f = await jsonBody(req)
+        if (!f.pedido) return sendJson(res, { ok: false, erro: 'sem pedido' })
+        jaImpressos.delete(f.pedido.id) // permite reimprimir
+        const ok = imprimirBytes(montarCupom(f.pedido, empresa), 'cupom-' + (f.pedido.id || 're'))
+        return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
+      }
+      // Imprime um HTML (cozinha/conta de mesa) como texto na térmica.
+      if (req.method === 'POST' && req.url === '/api/imprimir-html') {
+        const f = await jsonBody(req)
+        const ok = imprimirBytes(montarTexto(htmlParaLinhas(f.html || ''), f.titulo), 'doc')
+        return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
       }
       if (req.method === 'POST' && req.url === '/api/printer') {
         const f = await jsonBody(req); setConfig({ printer: f.printer }); log('Impressora: ' + f.printer); return sendJson(res, { ok: true, ...statusObj() })

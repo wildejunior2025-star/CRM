@@ -233,9 +233,26 @@ function imprimirCupomNavegador(pedido, empresa = {}) {
   }, 300)
 }
 
-// Imprime o cupom. Se houver impressora escolhida e o QZ Tray estiver rodando,
-// imprime direto nela (silencioso). Caso contrário, cai no diálogo do navegador.
+// Tenta imprimir pelo app Impressora FWC (127.0.0.1:9110) — a térmica configurada.
+// Retorna true se o app imprimiu. Falha rápido se o app não estiver rodando
+// (aí cai no QZ/navegador). É por aqui que TODA impressão vai pra térmica do FWC.
+async function imprimirViaAppFwc(rota, corpo) {
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), 3500)
+    const r = await fetch('http://127.0.0.1:9110/api/' + rota, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(corpo), signal: ctrl.signal,
+    })
+    clearTimeout(t)
+    const j = await r.json().catch(() => ({}))
+    return !!(j && j.ok)
+  } catch { return false }
+}
+
+// Imprime o cupom. Ordem: app Impressora FWC (térmica) → QZ Tray → navegador.
 export async function imprimirCupom(pedido, empresa = {}) {
+  if (await imprimirViaAppFwc('imprimir', { pedido })) return
   const printer = impressoraEscolhida()
   if (printer) {
     try {
@@ -271,6 +288,7 @@ function imprimirHtmlNavegador(html) {
   }, 300)
 }
 export async function imprimirHtml(html) {
+  if (await imprimirViaAppFwc('imprimir-html', { html })) return
   const printer = impressoraEscolhida()
   if (printer) {
     try { await imprimirHtmlViaQz(html, printer); return } catch { /* fallback */ }

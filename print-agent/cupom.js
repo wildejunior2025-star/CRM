@@ -109,4 +109,13 @@ function montarCupom(pedido, empresa) {
   return Buffer.concat(parts)
 }
 
-module.exports = { montarCupom }
+// Cupom de texto simples (cozinha, conta de mesa) — cada item do array vira uma linha.
+function montarTexto(linhas, titulo) {
+  const parts = [INIT]
+  if (titulo) parts.push(ALIGN(1), SIZE(0x11), BOLD(1), linha(String(titulo).toUpperCase()), BOLD(0), SIZE(0), ALIGN(0), divisor())
+  for (const l of (Array.isArray(linhas) ? linhas : [])) parts.push(linha(l))
+  parts.push(divisor(), ALIGN(1), linha('Impressora FWC'), FEED(4), CUT)
+  return Buffer.concat(parts)
+}
+
+module.exports = { montarCupom, montarTexto }
