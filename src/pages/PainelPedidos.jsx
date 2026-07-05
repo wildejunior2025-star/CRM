@@ -2756,13 +2756,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
 
 // Tempo previsto (min) pra ficar pronto — usa o tempo do Raio de Entrega por KM,
 // sem perguntar ao lojista. Ordem: distância→faixa; senão faixa pela taxa; senão
-// maior tempo das faixas; senão tempo_entrega_max.
-function haversineKm(lat1, lng1, lat2, lng2) {
-  const R = 6371, toRad = d => d * Math.PI / 180
-  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1)
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
+// maior tempo das faixas; senão tempo_entrega_max. (haversineKm já existe acima.)
 function tempoPrevistoMin(pedido, empresa) {
   const faixas = Array.isArray(empresa?.taxas_entrega_km) ? empresa.taxas_entrega_km : []
   if (pedido.tipo_entrega !== 'retirada' && faixas.length) {
