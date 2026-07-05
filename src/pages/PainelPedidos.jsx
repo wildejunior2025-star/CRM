@@ -2219,13 +2219,46 @@ function somAtivoConfig() {
 }
 
 // ── Verifica se a loja deveria estar aberta pelo horário ────
+// Prioriza a GRADE SEMANAL nova (horarios_funcionamento); só cai no horário único
+// legado (horario_abertura/fechamento) se não houver grade.
+function diaDaGradeHoje(grade) {
+  if (!Array.isArray(grade) || grade.length !== 7) return null
+  const map = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  const diaAbrev = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Fortaleza', weekday: 'short' }).format(new Date())
+  const dow = map[diaAbrev] ?? new Date().getDay()
+  return grade[dow] ?? null
+}
 function lojaAbertaPorHorario(emp) {
+  const dia = diaDaGradeHoje(emp?.horarios_funcionamento)
+  if (dia) {
+    if (!dia.aberto || !Array.isArray(dia.periodos) || dia.periodos.length === 0) return false
+    const hm = new Date().toLocaleTimeString('en-GB', { hour12: false, timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit' })
+    const toMin = t => { const [h, m] = String(t).slice(0, 5).split(':').map(Number); return (h || 0) * 60 + (m || 0) }
+    const now = toMin(hm)
+    return dia.periodos.some(p => {
+      if (!p?.i || !p?.f) return false
+      const a = toMin(p.i), b = toMin(p.f)
+      return a <= b ? (now >= a && now < b) : (now >= a || now < b)  // virada da madrugada
+    })
+  }
+  // Fallback: horário único legado
   if (!emp?.horario_abertura || !emp?.horario_fechamento) return true
   const horaBR = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Fortaleza' }))
   const minuto = horaBR.getHours() * 60 + horaBR.getMinutes()
   const [aH, aM] = emp.horario_abertura.slice(0, 5).split(':').map(Number)
   const [fH, fM] = emp.horario_fechamento.slice(0, 5).split(':').map(Number)
   return minuto >= aH * 60 + aM && minuto < fH * 60 + fM
+}
+function horarioHojeTexto(emp) {
+  const dia = diaDaGradeHoje(emp?.horarios_funcionamento)
+  if (dia) {
+    if (dia.aberto && Array.isArray(dia.periodos) && dia.periodos.length) {
+      return dia.periodos.map(p => `${String(p.i).slice(0, 5)} às ${String(p.f).slice(0, 5)}`).join(' e ')
+    }
+    return 'fechado hoje'
+  }
+  const ab = emp?.horario_abertura?.slice(0, 5), fe = emp?.horario_fechamento?.slice(0, 5)
+  return (ab && fe) ? `${ab} às ${fe}` : ''
 }
 
 // ── Toggle reutilizável (liga/desliga) ─────────────────────
@@ -3670,9 +3703,7 @@ export default function PainelPedidos() {
     const tentandoAbrir = !lojaAberta
     // Bloqueia abertura manual fora do horário
     if (tentandoAbrir && !lojaAbertaPorHorario(empresa)) {
-      const ab = empresa.horario_abertura?.slice(0, 5)
-      const fe = empresa.horario_fechamento?.slice(0, 5)
-      setAvisoHorario(`Horário de funcionamento: ${ab} às ${fe}. Ajuste em Minha Loja para abrir fora do horário.`)
+      setAvisoHorario(`Horário de funcionamento: ${horarioHojeTexto(empresa)}. Ajuste em Minha Loja para abrir fora do horário.`)
       setTimeout(() => setAvisoHorario(null), 5000)
       return
     }
