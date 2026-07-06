@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
@@ -128,9 +128,11 @@ export default function PresencialCozinha() {
   const [busca, setBusca]       = useState('') // filtra por nº/código/cliente/mesa
   const [loading, setLoading]   = useState(true)
   const [, setTick]             = useState(0)
+  const loadGenRef              = useRef(0) // descarta reload atrasado que reverteria um "aceitar" recém-feito
 
   async function load() {
     if (!empresaId) return
+    const gen = ++loadGenRef.current
     const inicioHoje = new Date(); inicioHoje.setHours(0, 0, 0, 0)
     const hojeISO = inicioHoje.toISOString()
     const [mesasRes, entregasRes] = await Promise.all([
@@ -150,6 +152,9 @@ export default function PresencialCozinha() {
         .gte('created_at', hojeISO)
         .order('created_at'),
     ])
+    // Descarta este reload se um mais novo já começou — evita que uma leitura
+    // atrasada reverta um "aceitar" recém-feito (o pedido sumia do "Preparando").
+    if (gen !== loadGenRef.current) return
     setItens(mesasRes.data ?? [])
     setEntregas(entregasRes.data ?? [])
     setLoading(false)
@@ -168,10 +173,12 @@ export default function PresencialCozinha() {
   async function aceitarPedido(pedido) {
     const patch = { preparando_por: meuId, preparando_nome: meuNome, preparando_em: new Date().toISOString() }
     setEntregas(prev => prev.map(p => p.id === pedido.id ? { ...p, ...patch } : p))
-    await supabase.from('pedidos_delivery').update(patch).eq('id', pedido.id).is('preparando_por', null)
+    const { data } = await supabase.from('pedidos_delivery').update(patch).eq('id', pedido.id).is('preparando_por', null).select('id')
+    if (!data || !data.length) alert('Esse pedido já foi pego por outra pessoa (ou não deu pra aceitar). Atualizando a lista…')
     load()
   }
   async function soltarPedido(pedido) {
+    if (!window.confirm('Devolver este pedido para "A fazer"? Ele sai do seu "Preparando" e volta pra fila de aceitar.')) return
     const patch = { preparando_por: null, preparando_nome: null, preparando_em: null }
     setEntregas(prev => prev.map(p => p.id === pedido.id ? { ...p, ...patch } : p))
     await supabase.from('pedidos_delivery').update(patch).eq('id', pedido.id).eq('preparando_por', meuId)
@@ -185,10 +192,12 @@ export default function PresencialCozinha() {
   async function aceitarItem(item) {
     const patch = { preparando_por: meuId, preparando_nome: meuNome, preparando_em: new Date().toISOString() }
     setItens(prev => prev.map(i => i.id === item.id ? { ...i, ...patch } : i))
-    await supabase.from('comanda_itens').update(patch).eq('id', item.id).is('preparando_por', null)
+    const { data } = await supabase.from('comanda_itens').update(patch).eq('id', item.id).is('preparando_por', null).select('id')
+    if (!data || !data.length) alert('Esse item já foi pego por outra pessoa. Atualizando a lista…')
     load()
   }
   async function soltarItem(item) {
+    if (!window.confirm('Devolver este item para "A fazer"?')) return
     const patch = { preparando_por: null, preparando_nome: null, preparando_em: null }
     setItens(prev => prev.map(i => i.id === item.id ? { ...i, ...patch } : i))
     await supabase.from('comanda_itens').update(patch).eq('id', item.id).eq('preparando_por', meuId)

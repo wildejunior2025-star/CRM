@@ -449,7 +449,7 @@ export default function PainelEntregador() {
       const { data: ok } = await supabase.rpc('entregador_aceitar_pedido', { p_pedido: pedido.id })
       await Promise.all([carregar(), carregarFila()])
       if (ok === false) { alert('Não deu pra aceitar — ou não é a sua vez, ou outro motoqueiro pegou primeiro.'); return }
-      setAba('minhas') // mostra na aba "Aceitas"
+      // Fica na aba "Disponíveis" pra poder aceitar vários pedidos antes de dar saída.
       return
     }
     // Pool livre (comportamento padrão): otimista, o reload corrige se outro pegou.
@@ -457,8 +457,8 @@ export default function PainelEntregador() {
     const { data } = await supabase.from('pedidos_delivery')
       .update({ entregador_id: user.id }).eq('id', pedido.id).is('entregador_id', null).select('id')
     await carregar()
-    if (data && data.length) setAba('minhas')
-    else alert('Não deu pra aceitar — outro motoqueiro pode ter pego primeiro. Atualize a lista.')
+    // Fica na aba "Disponíveis" pra aceitar vários; só avisa se não conseguiu pegar.
+    if (!data || !data.length) alert('Não deu pra aceitar — outro motoqueiro pode ter pego primeiro. Atualize a lista.')
   }
 
   async function sairParaEntrega(pedido) {
