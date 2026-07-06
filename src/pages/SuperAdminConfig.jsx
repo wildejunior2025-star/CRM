@@ -22,6 +22,47 @@ const CHAVES_MLM = [
   { chave: 'comissao_indicacao_loja_pct', label: 'Comissão por indicação de loja (%)', placeholder: '5', hint: 'Quem trouxe a loja ganha esta % das vendas brutas dela (1 nível só).' },
 ]
 
+// Botão global: exigir (ou não) o código de entrega do motoqueiro nos pedidos da loja.
+// O iFood SEMPRE exige o código próprio dele — isto aqui NÃO afeta o iFood.
+function ToggleCodigoEntrega() {
+  const [exige, setExige] = useState(true)
+  const [carregando, setCarregando] = useState(true)
+  const [salvando, setSalvando] = useState(false)
+  useEffect(() => {
+    supabase.from('configuracoes_plataforma').select('valor').eq('chave', 'exigir_codigo_entrega').maybeSingle()
+      .then(({ data }) => { setExige(data ? data.valor !== 'false' : true); setCarregando(false) })
+  }, [])
+  async function alternar() {
+    const novo = !exige
+    setSalvando(true); setExige(novo)
+    const { error } = await supabase.from('configuracoes_plataforma')
+      .upsert({ chave: 'exigir_codigo_entrega', valor: novo ? 'true' : 'false' }, { onConflict: 'chave' })
+    if (error) setExige(!novo)
+    setSalvando(false)
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+      <div style={{ maxWidth: 520 }}>
+        <div style={{ fontWeight: 800, fontSize: 14, color: exige ? '#16a34a' : '#dc2626' }}>
+          {carregando ? 'Carregando…' : (exige ? '🔒 Código ATIVADO' : '🔓 Código DESATIVADO')}
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.5 }}>
+          {exige
+            ? 'O motoqueiro precisa digitar o código do cliente pra confirmar a entrega dos pedidos da loja.'
+            : 'O motoqueiro confirma a entrega direto, sem código. (Pedidos do iFood continuam exigindo o código do iFood.)'}
+        </div>
+      </div>
+      <button type="button" onClick={alternar} disabled={carregando || salvando} aria-pressed={exige}
+        style={{
+          width: 58, height: 32, borderRadius: 20, border: 'none', cursor: (carregando || salvando) ? 'wait' : 'pointer',
+          position: 'relative', flexShrink: 0, background: exige ? '#16a34a' : '#9ca3af', transition: 'background .15s', opacity: carregando ? .5 : 1,
+        }}>
+        <span style={{ position: 'absolute', top: 3, left: exige ? 29 : 3, width: 26, height: 26, borderRadius: '50%', background: '#fff', transition: 'left .15s' }} />
+      </button>
+    </div>
+  )
+}
+
 export default function SuperAdminConfig() {
   const [logoUrl, setLogoUrl] = useState('')
   const [configs, setConfigs] = useState({})
@@ -340,6 +381,15 @@ export default function SuperAdminConfig() {
         </div>
 
         {/* Cashback */}
+        {/* Código de entrega do motoqueiro (global) */}
+        <div className="card" style={{ padding: 28, breakInside: 'avoid', marginBottom: 20 }}>
+          <h2 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700 }}>🛵 Código de entrega</h2>
+          <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--text-muted)' }}>
+            Liga/desliga a exigência do código do cliente na confirmação de entrega dos pedidos da loja. Vale pra todas as lojas. O iFood não é afetado (sempre pede o código dele).
+          </p>
+          <ToggleCodigoEntrega />
+        </div>
+
         <div className="card" style={{ padding: 28, breakInside: 'avoid', marginBottom: 20 }}>
           <h2 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700 }}>Cashback</h2>
           <p style={{ margin: '0 0 18px', fontSize: 13, color: 'var(--text-muted)' }}>

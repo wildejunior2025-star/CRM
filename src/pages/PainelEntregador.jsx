@@ -120,7 +120,7 @@ function normTxt(s) { return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').
 // Palavras que denunciam bebida — fallback caso a lista de produtos não carregue.
 const BEBIDA_KEYWORDS = /refrigerante|guaran|\bcerveja|heineken|\bskol|\bbrahma|energetic|red bull|monster|\bsuco|\bagua\b|itaipava/
 
-function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, temBebida = false }) {
+function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, temBebida = false, exigeCodigo = true }) {
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
@@ -140,6 +140,8 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
   const ifoodId = pedido.ifood_phone_localizer
   // Pedido do iFood que exige o código de confirmação de entrega (F1)
   const precisaCodigoIfood = isIfood && pedido.ifood_requer_codigo
+  // iFood mantém o fluxo de sempre; loja só pede código se a config global exigir.
+  const pedeCodigo = isIfood || exigeCodigo
   // Link de ligação: no iFood embute o ID no formato que o próprio iFood usa —
   // 0800 + ";" (espera) + ID. Ex: tel:08007054050;51303807. O motoqueiro liga e,
   // quando a gravação pedir, aperta pra enviar o código (não digita os 8 números).
@@ -329,7 +331,7 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
             👨‍🍳 Aguardando a cozinha ficar pronto
           </div>
         )
-      ) : (
+      ) : pedeCodigo ? (
         <div>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
@@ -355,6 +357,11 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
               : 'Peça ao cliente os 4 dígitos que aparecem na tela do pedido dele.'}
           </div>
         </div>
+      ) : (
+        <button type="button" onClick={() => run(() => onConfirmar(pedido))} disabled={ocupado}
+          style={btnPrimario('#16a34a')}>
+          {ocupado ? 'Confirmando...' : '✓ Confirmar entrega'}
+        </button>
       )}
 
       {/* Desistir: devolve a entrega pro pool (só nas minhas) */}
@@ -437,6 +444,15 @@ export default function PainelEntregador() {
       return bebidaNomes.has(n) || BEBIDA_KEYWORDS.test(n)
     })
   }
+
+  // Config global: exigir código de entrega da loja? (iFood sempre exige o dele.)
+  const [exigeCodigo, setExigeCodigo] = useState(true)
+  useEffect(() => {
+    let vivo = true
+    supabase.from('configuracoes_plataforma').select('valor').eq('chave', 'exigir_codigo_entrega').maybeSingle()
+      .then(({ data }) => { if (vivo) setExigeCodigo(data ? data.valor !== 'false' : true) })
+    return () => { vivo = false }
+  }, [])
 
   // A RLS já limita: cada entregador recebe os pedidos dele + os 'pronto' livres
   // da própria loja. Por isso basta filtrar por status e deixar o banco filtrar o resto.
@@ -529,7 +545,7 @@ export default function PainelEntregador() {
 
   async function sairParaEntrega(pedido) {
     const update = { status: 'saiu_entrega', saiu_entrega_at: new Date().toISOString() }
-    if (!pedido.codigo_entrega) update.codigo_entrega = String(Math.floor(1000 + Math.random() * 9000))
+    if (exigeCodigo && !pedido.codigo_entrega) update.codigo_entrega = String(Math.floor(1000 + Math.random() * 9000))
     setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, ...update } : p))
     await supabase.from('pedidos_delivery').update(update).eq('id', pedido.id)
     notificarCliente(pedido.id, 'saiu_entrega')
@@ -787,7 +803,7 @@ export default function PainelEntregador() {
                   </a>
                 )}
                 {minhasF.map(p => (
-                  <CardEntrega key={p.id} pedido={p} mine temBebida={pedidoTemBebida(p)} descValor={descValorEntrega}
+                  <CardEntrega key={p.id} pedido={p} mine temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega}
                     onSair={sairParaEntrega} onConfirmar={confirmarEntrega}
                     onConfirmarIfood={confirmarEntregaIfood} onDesistir={desistirEntrega} />
                 ))}
@@ -810,7 +826,7 @@ export default function PainelEntregador() {
                 Nenhum pedido encontrado pra <strong>“{busca}”</strong>.
               </div>
             ) : disponiveisF.map(p => (
-              <CardEntrega key={p.id} pedido={p} mine={false} temBebida={pedidoTemBebida(p)} descValor={descValorEntrega} onAceitar={podeAceitar ? aceitar : undefined} />
+              <CardEntrega key={p.id} pedido={p} mine={false} temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} onAceitar={podeAceitar ? aceitar : undefined} />
             ))
           )
         ) : (
