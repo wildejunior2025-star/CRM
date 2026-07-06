@@ -6,6 +6,12 @@ import './RaioEntrega.css'
 
 let L = null
 
+// Normaliza nome de bairro pra agrupar/casar (tira acento, minúsculo, "bairro " do começo).
+function normBairro(s) {
+  return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+    .replace(/^bairro\s+/, '').replace(/\s+/g, ' ')
+}
+
 export default function RaioEntrega() {
   const { profile, refreshProfile } = useAuth()
 
@@ -41,6 +47,8 @@ export default function RaioEntrega() {
   const [tempoMax,        setTempoMax]        = useState(60)
   const [categoria,       setCategoria]       = useState('')
   const [raio, setRaio] = useState(10)
+  const [taxasBairro, setTaxasBairro] = useState([]) // [{bairro, norm, modo:'km'|'taxa'|'bloqueio', taxa, tempo, total}]
+  const [novoBairro, setNovoBairro] = useState('')
 
   // UI
   const [geocodando, setGeocodando] = useState(false)
@@ -78,6 +86,45 @@ export default function RaioEntrega() {
         setLatitude(data.latitude ? Number(data.latitude) : null)
         setLongitude(data.longitude ? Number(data.longitude) : null)
       })
+  }, [profile?.empresa_id])
+
+  // ── Carrega bairros: config salva + sugestões dos pedidos passados ──
+  useEffect(() => {
+    if (!profile?.empresa_id) return
+    let vivo = true
+    ;(async () => {
+      const [{ data: emp }, { data: peds }] = await Promise.all([
+        supabase.from('empresas').select('taxas_entrega_bairro').eq('id', profile.empresa_id).single(),
+        supabase.from('pedidos_delivery').select('endereco_bairro').eq('empresa_id', profile.empresa_id).not('endereco_bairro', 'is', null).limit(3000),
+      ])
+      if (!vivo) return
+      const salvos = Array.isArray(emp?.taxas_entrega_bairro) ? emp.taxas_entrega_bairro : []
+      const cfg = new Map()
+      for (const s of salvos) {
+        const n = normBairro(s.bairro)
+        cfg.set(n, { bairro: s.bairro, norm: n, modo: s.entrega === false ? 'bloqueio' : 'taxa', taxa: s.taxa ?? '', tempo: s.tempo ?? '', total: 0 })
+      }
+      const cont = new Map()
+      for (const p of (peds || [])) {
+        const b = (p.endereco_bairro || '').trim()
+        const n = normBairro(b)
+        if (!n) continue
+        const cur = cont.get(n) || { grafias: new Map(), total: 0 }
+        cur.grafias.set(b, (cur.grafias.get(b) || 0) + 1); cur.total++
+        cont.set(n, cur)
+      }
+      const lista = []
+      const vistos = new Set()
+      for (const [n, info] of [...cont.entries()].sort((a, b) => b[1].total - a[1].total)) {
+        const display = [...info.grafias.entries()].sort((a, b) => b[1] - a[1])[0][0]
+        if (cfg.has(n)) lista.push({ ...cfg.get(n), bairro: cfg.get(n).bairro || display, total: info.total })
+        else lista.push({ bairro: display, norm: n, modo: 'km', taxa: '', tempo: '', total: info.total })
+        vistos.add(n)
+      }
+      for (const [n, c] of cfg) if (!vistos.has(n)) lista.push(c)
+      setTaxasBairro(lista)
+    })()
+    return () => { vivo = false }
   }, [profile?.empresa_id])
 
   // ── Inicializa mapa (só uma vez quando tiver coords) ──────────
@@ -229,6 +276,9 @@ export default function RaioEntrega() {
       raio_entrega_km:      parseFloat(raio) || 10,
       latitude:             latitude || null,
       longitude:            longitude || null,
+      taxas_entrega_bairro: taxasBairro
+        .filter(b => b.modo === 'taxa' || b.modo === 'bloqueio')
+        .map(b => ({ bairro: b.bairro, entrega: b.modo !== 'bloqueio', taxa: b.modo === 'taxa' ? (parseFloat(b.taxa) || 0) : 0, tempo: b.modo === 'taxa' ? (parseInt(b.tempo) || null) : null })),
     }).eq('id', empresaId)
 
     setSalvando(false)
@@ -574,6 +624,62 @@ export default function RaioEntrega() {
             </div>
           )}
         </div>
+
+        {/* ── Taxa por bairro (opcional) ── */}
+        {aceitaDelivery && (
+        <div style={{ background: 'var(--surface, #fff)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginBottom: 16 }}>
+          <h2 className="re-card-title">🏘️ Taxa por bairro (opcional)</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 14px' }}>
+            Puxei os bairros dos seus pedidos. Pra cada um: <b>cobrar taxa fixa</b>, <b>não entregar</b>, ou deixar no <b>cálculo por km</b> (padrão). Bairro fora da lista usa o km.
+          </p>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+            <input value={novoBairro} onChange={e => setNovoBairro(e.target.value)} placeholder="Adicionar outro bairro..."
+              style={{ flex: 1, minWidth: 180, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)' }} />
+            <button type="button" className="btn btn-secondary"
+              onClick={() => {
+                const b = novoBairro.trim(); if (!b) return
+                const n = normBairro(b)
+                if (taxasBairro.some(x => x.norm === n)) { setNovoBairro(''); return }
+                setTaxasBairro([{ bairro: b, norm: n, modo: 'taxa', taxa: '', tempo: '', total: 0 }, ...taxasBairro])
+                setNovoBairro('')
+              }}>+ Adicionar</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {taxasBairro.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Carregando bairros…</p>}
+            {taxasBairro.map((b, i) => (
+              <div key={b.norm} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8 }}>
+                <div style={{ flex: 1, minWidth: 130 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{b.bairro}</div>
+                  {b.total > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{b.total} pedido{b.total === 1 ? '' : 's'}</div>}
+                </div>
+                <select value={b.modo}
+                  onChange={e => { const v = e.target.value; setTaxasBairro(prev => prev.map((x, j) => j === i ? { ...x, modo: v } : x)) }}
+                  style={{ padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }}>
+                  <option value="km">Usar km (padrão)</option>
+                  <option value="taxa">Cobrar taxa fixa</option>
+                  <option value="bloqueio">🚫 Não entrego</option>
+                </select>
+                {b.modo === 'taxa' && (
+                  <>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>R$</span>
+                    <input type="number" step="0.01" min="0" value={b.taxa} placeholder="taxa"
+                      onChange={e => { const v = e.target.value; setTaxasBairro(prev => prev.map((x, j) => j === i ? { ...x, taxa: v } : x)) }}
+                      style={{ width: 80, padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border)' }} />
+                    <input type="number" min="0" value={b.tempo} placeholder="min"
+                      onChange={e => { const v = e.target.value; setTaxasBairro(prev => prev.map((x, j) => j === i ? { ...x, tempo: v } : x)) }}
+                      style={{ width: 68, padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border)' }} />
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>min</span>
+                  </>
+                )}
+                {b.modo === 'bloqueio' && <span style={{ fontSize: 13, fontWeight: 700, color: '#dc2626' }}>Cliente não consegue pedir</span>}
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
+            ⚠️ O cálculo por bairro entra no ar na próxima etapa. Por enquanto você pode cadastrar; ainda vale o km.
+          </p>
+        </div>
+        )}
 
         {/* ── Feedback ── */}
         {msg && (
