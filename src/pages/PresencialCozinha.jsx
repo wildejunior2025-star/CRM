@@ -79,7 +79,7 @@ function ChkLinha({ chave, texto, principal, marcados, onToggle }) {
 }
 
 // Card de um pedido de delivery/iFood na cozinha (KDS).
-function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historico, adminView = false }) {
+function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historico, adminView = false, ehAdmin = false, cozinheiros = [], onDefinirPreparador }) {
   const ehIfood = pedido.origem === 'ifood'
   const headerCor = historico ? '#16a34a' : (ehIfood ? '#ea1d2c' : '#7c3aed')
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
@@ -152,7 +152,20 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
           )
         })}
         {historico ? (
-          <div style={{ fontSize: 12.5, fontWeight: 800, color: '#16a34a' }}>✓ Pronto às {horaBR(pedido.updated_at || pedido.created_at)}</div>
+          <>
+            {pedido.preparando_nome ? (
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>👩‍🍳 Preparado por {pedido.preparando_nome}</div>
+            ) : ehAdmin && onDefinirPreparador ? (
+              <select defaultValue="" onChange={e => { const c = cozinheiros.find(x => x.id === e.target.value); if (c) onDefinirPreparador(pedido, c) }}
+                style={{ fontSize: 12.5, fontWeight: 700, padding: '7px 8px', borderRadius: 8, border: '1.5px solid #f59e0b', background: 'rgba(245,158,11,.10)', color: 'var(--text)', width: '100%', boxSizing: 'border-box' }}>
+                <option value="">⚠️ Sem responsável — quem preparou?</option>
+                {cozinheiros.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+            ) : (
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: '#d97706' }}>⚠️ Sem responsável</div>
+            )}
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: '#16a34a' }}>✓ Pronto às {horaBR(pedido.updated_at || pedido.created_at)}</div>
+          </>
         ) : adminView ? (
           <div style={{
             fontSize: 13, fontWeight: 800, borderRadius: 8, padding: '7px 10px', textAlign: 'center',
@@ -186,6 +199,7 @@ export default function PresencialCozinha() {
   const [busca, setBusca]       = useState('') // filtra por nº/código/cliente/mesa
   const [loading, setLoading]   = useState(true)
   const [, setTick]             = useState(0)
+  const [cozinheiros, setCozinheiros] = useState([]) // quem pode preparar (pro admin definir responsável)
   const loadGenRef              = useRef(0) // descarta reload atrasado que reverteria um "aceitar" recém-feito
 
   async function load() {
@@ -223,6 +237,14 @@ export default function PresencialCozinha() {
     // pedido segue pro motoboy / retirada.
     setEntregas(prev => prev.map(p => p.id === pedido.id ? { ...p, status: 'pronto', updated_at: new Date().toISOString() } : p))
     await supabase.from('pedidos_delivery').update({ status: 'pronto' }).eq('id', pedido.id)
+  }
+  // Admin define quem preparou um pedido órfão (sem responsável). Some o "sem responsável"
+  // e o pedido passa a aparecer no histórico da pessoa escolhida.
+  async function definirPreparador(pedido, cozinheiro) {
+    const patch = { preparando_por: cozinheiro.id, preparando_nome: cozinheiro.nome }
+    setEntregas(prev => prev.map(p => p.id === pedido.id ? { ...p, ...patch } : p))
+    await supabase.from('pedidos_delivery').update(patch).eq('id', pedido.id)
+    load()
   }
 
   // G1 — aceitar trava o pedido na pessoa (só quem aceitou marca Pronto).
@@ -263,6 +285,13 @@ export default function PresencialCozinha() {
   }
 
   useEffect(() => { load() }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Carrega quem pode preparar (cozinheiros + admins) pro admin definir o responsável.
+  useEffect(() => {
+    if (!empresaId) return
+    supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId).in('perfil', ['cozinheiro', 'admin'])
+      .then(({ data }) => setCozinheiros(data || []))
+  }, [empresaId])
 
   // Atualiza o "tempo de espera" a cada 30s
   useEffect(() => {
@@ -392,6 +421,7 @@ export default function PresencialCozinha() {
           {/* Pedidos de delivery / iFood */}
           {entAba.map(pedido => (
             <CardEntregaKDS key={pedido.id} pedido={pedido} meuId={meuId} historico={aba === 'historico'} adminView={aba === 'todos'}
+              ehAdmin={ehAdmin} cozinheiros={cozinheiros} onDefinirPreparador={definirPreparador}
               onAceitar={aceitarPedido} onSoltar={soltarPedido} onPronto={marcarPedidoPronto} />
           ))}
 
