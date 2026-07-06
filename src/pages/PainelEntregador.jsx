@@ -115,11 +115,19 @@ function pagamentoInfo(p) {
 }
 
 // ── Card de entrega ─────────────────────────────────────────
-function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0 }) {
+// Normaliza texto (tira acento, minúsculo) pra comparar nome de produto/categoria.
+function normTxt(s) { return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase() }
+// Palavras que denunciam bebida — fallback caso a lista de produtos não carregue.
+const BEBIDA_KEYWORDS = /refrigerante|guaran|\bcerveja|heineken|\bskol|\bbrahma|energetic|red bull|monster|\bsuco|\bagua\b|itaipava/
+
+function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, temBebida = false }) {
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
+  const [verItens, setVerItens] = useState(false)
   const endereco = enderecoTexto(pedido)
+  const itensPedido = Array.isArray(pedido.itens) ? pedido.itens : []
+  const totalItens = itensPedido.reduce((s, it) => s + Number(it.quantidade ?? it.qtd ?? 1), 0)
   const tel = soDigitos(pedido.cliente_telefone)
   const emRota = pedido.status === 'saiu_entrega'
   const naCozinha = pedido.status === 'confirmado' || pedido.status === 'em_preparo'
@@ -210,6 +218,27 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
       </div>
 
 
+      {/* Itens do pedido — badge com a contagem; clica pra abrir e ver tudo (não esquecer nada) */}
+      <button type="button" onClick={() => setVerItens(v => !v)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 10,
+          background: 'rgba(124,58,237,.10)', border: '1px solid var(--border, #2a2a3a)',
+          borderRadius: 8, padding: '5px 10px', cursor: 'pointer', color: 'var(--text)',
+          fontSize: 12.5, fontWeight: 800,
+        }}>
+        🛍️ {totalItens} {totalItens === 1 ? 'item' : 'itens'}
+        <span style={{ fontSize: 11, fontWeight: 600, opacity: .7 }}>{verItens ? '▲ fechar' : '▼ ver'}</span>
+      </button>
+      {verItens && (
+        <ul style={{ listStyle: 'none', margin: '0 0 10px', padding: '8px 10px',
+          background: 'rgba(0,0,0,.15)', border: '1px solid var(--border, #2a2a3a)', borderRadius: 8 }}>
+          {itensPedido.map((it, i) => (
+            <li key={i} style={{ fontSize: 13.5, color: 'var(--text)', padding: '3px 0' }}>
+              <strong>{it.quantidade ?? it.qtd ?? 1}×</strong> {String(it.nome || '—').replace(/\s*\([^()]*\)\s*$/, '')}
+            </li>
+          ))}
+        </ul>
+      )}
       {/* Pagamento: deixa MUITO claro se já pagou ou se o motoqueiro precisa cobrar */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -230,6 +259,17 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
         <strong style={{ fontSize: 18, color: 'var(--text)' }}>{fmt(pedido.total)}</strong>
       </div>
 
+      {/* Alerta de bebida (menor que a caixa de pagamento) — fácil de esquecer */}
+      {temBebida && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: 'rgba(245,158,11,.12)', border: '1px solid #f59e0b',
+          borderRadius: 8, padding: '6px 10px', marginBottom: 10,
+          fontSize: 12.5, fontWeight: 800, color: '#b45309',
+        }}>
+          🥤 Tem bebida neste pedido — não esqueça!
+        </div>
+      )}
       {/* O que o motoqueiro RECEBE nesta corrida (iFood já com o desconto abatido) */}
       {pedido.taxa_entrega != null && Number(pedido.taxa_entrega) > 0 && (() => {
         const desc = pedido.origem === 'ifood' ? Number(descValor || 0) : 0
@@ -371,6 +411,32 @@ export default function PainelEntregador() {
   // Fila (E4): null = ainda não carregou. { fila_ativa, online, pausado, na_vez, posicao, total_fila }
   const [fila, setFila] = useState(null)
   const [filaBusy, setFilaBusy] = useState(false)
+
+  // Bebidas da loja (pra alertar o motoqueiro): carrega 1x os produtos das
+  // categorias de bebida. Se não carregar (RLS), o fallback por palavra-chave cobre.
+  const [bebidaIds, setBebidaIds] = useState(() => new Set())
+  const [bebidaNomes, setBebidaNomes] = useState(() => new Set())
+  useEffect(() => {
+    if (!empresa?.id) return
+    let vivo = true
+    ;(async () => {
+      const { data } = await supabase.from('produtos').select('id, nome, categoria').eq('empresa_id', empresa.id)
+      if (!vivo || !data) return
+      const ehBebida = c => /refriger|cerveja|suco|agua|energetic|bebida|drink/.test(normTxt(c))
+      const ids = new Set(), nomes = new Set()
+      for (const p of data) if (ehBebida(p.categoria)) { ids.add(p.id); nomes.add(normTxt(p.nome)) }
+      setBebidaIds(ids); setBebidaNomes(nomes)
+    })()
+    return () => { vivo = false }
+  }, [empresa?.id])
+  function pedidoTemBebida(pedido) {
+    const itens = Array.isArray(pedido.itens) ? pedido.itens : []
+    return itens.some(it => {
+      if (it.produto_id && bebidaIds.has(it.produto_id)) return true
+      const n = normTxt(it.nome)
+      return bebidaNomes.has(n) || BEBIDA_KEYWORDS.test(n)
+    })
+  }
 
   // A RLS já limita: cada entregador recebe os pedidos dele + os 'pronto' livres
   // da própria loja. Por isso basta filtrar por status e deixar o banco filtrar o resto.
@@ -721,7 +787,7 @@ export default function PainelEntregador() {
                   </a>
                 )}
                 {minhasF.map(p => (
-                  <CardEntrega key={p.id} pedido={p} mine descValor={descValorEntrega}
+                  <CardEntrega key={p.id} pedido={p} mine temBebida={pedidoTemBebida(p)} descValor={descValorEntrega}
                     onSair={sairParaEntrega} onConfirmar={confirmarEntrega}
                     onConfirmarIfood={confirmarEntregaIfood} onDesistir={desistirEntrega} />
                 ))}
@@ -744,7 +810,7 @@ export default function PainelEntregador() {
                 Nenhum pedido encontrado pra <strong>“{busca}”</strong>.
               </div>
             ) : disponiveisF.map(p => (
-              <CardEntrega key={p.id} pedido={p} mine={false} descValor={descValorEntrega} onAceitar={podeAceitar ? aceitar : undefined} />
+              <CardEntrega key={p.id} pedido={p} mine={false} temBebida={pedidoTemBebida(p)} descValor={descValorEntrega} onAceitar={podeAceitar ? aceitar : undefined} />
             ))
           )
         ) : (
