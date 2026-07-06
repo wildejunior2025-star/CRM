@@ -81,6 +81,11 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
         </span>
       </div>
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {pedido.cliente_nome && (
+          <div style={{ fontWeight: 800, fontSize: 14.5, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            👤 {pedido.cliente_nome}
+          </div>
+        )}
         {itens.map((item, i) => {
           const { nome, complementos: comps } = separarItem(item)
           return (
