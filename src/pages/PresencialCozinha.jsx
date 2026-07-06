@@ -96,6 +96,15 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
     try { localStorage.setItem('kds_chk_' + pedido.id, JSON.stringify([...n])) } catch {}
     return n
   })
+  // Item principal (prato): marca/desmarca ele + TODOS os complementos de uma vez.
+  const marcarItemTudo = (i, comps) => setMarcados(prev => {
+    const chaves = [`i${i}`, ...comps.map((_, j) => `c${i}_${j}`)]
+    const n = new Set(prev)
+    const tudoMarcado = chaves.every(k => n.has(k))
+    chaves.forEach(k => tudoMarcado ? n.delete(k) : n.add(k))
+    try { localStorage.setItem('kds_chk_' + pedido.id, JSON.stringify([...n])) } catch {}
+    return n
+  })
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
       <div style={{ background: headerCor, color: '#fff', padding: '10px 14px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -120,7 +129,7 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
           </div>
         )}
         {checklist && (
-          <div style={{ fontSize: 11.5, fontWeight: 700, color: '#16a34a' }}>👇 Marque o que já colocou</div>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: '#16a34a' }}>👇 Toque no prato pra marcar tudo, ou marque um a um</div>
         )}
         {itens.map((item, i) => {
           const { nome, complementos: comps } = separarItem(item)
@@ -128,7 +137,7 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
           return (
             <div key={i}>
               {checklist
-                ? <ChkLinha chave={`i${i}`} principal texto={`${qtd}× ${nome}`} marcados={marcados} onToggle={toggleMarca} />
+                ? <ChkLinha chave={`i${i}`} principal texto={`${qtd}× ${nome}`} marcados={marcados} onToggle={() => marcarItemTudo(i, comps)} />
                 : <div style={{ fontWeight: 700, fontSize: 14 }}>{qtd}× {nome}</div>}
               {comps.map((c, j) => {
                 const txt = `${Number(c?.qtd ?? 1)}× ${c?.nome ?? c}`
