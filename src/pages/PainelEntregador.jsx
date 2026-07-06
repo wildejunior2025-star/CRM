@@ -327,8 +327,16 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
             {ocupado ? 'Salvando...' : '🛵 Sair para entrega'}
           </button>
         ) : (
-          <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 700, color: '#d97706', background: 'rgba(217,119,6,.12)', border: '1px solid #d97706', borderRadius: 10, padding: '10px 0' }}>
-            👨‍🍳 Aguardando a cozinha ficar pronto
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 700, color: '#d97706', background: 'rgba(217,119,6,.12)', border: '1px solid #d97706', borderRadius: 10, padding: '10px 0' }}>
+              👨‍🍳 Aguardando a cozinha ficar pronto
+            </div>
+            {/* Se a comida já está pronta e a cozinha esqueceu de marcar, o motoboy sai
+                mesmo assim — o pedido é dado como pronto e o nome de quem separou fica. */}
+            <button type="button" onClick={() => run(() => onSair(pedido))} disabled={ocupado}
+              style={{ ...btnPrimario('#7c3aed'), fontSize: 12.5, padding: '9px 0' }}>
+              {ocupado ? 'Salvando...' : '🛵 Já está pronto — sair mesmo assim'}
+            </button>
           </div>
         )
       ) : pedeCodigo ? (
