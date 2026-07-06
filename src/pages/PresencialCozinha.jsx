@@ -179,6 +179,7 @@ export default function PresencialCozinha() {
   const empresaId = profile?.empresa_id
   const meuId = profile?.id
   const meuNome = profile?.nome || 'Cozinha'
+  const ehAdmin = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
   const [itens, setItens]       = useState([]) // itens de mesa (pendente + pronto de hoje)
   const [entregas, setEntregas] = useState([]) // pedidos delivery/iFood (em preparo + pronto de hoje)
   const [aba, setAba]           = useState('afazer') // 'afazer' | 'preparando' | 'historico'
@@ -205,7 +206,7 @@ export default function PresencialCozinha() {
         .from('pedidos_delivery')
         .select('*')
         .eq('empresa_id', empresaId)
-        .in('status', ['confirmado', 'em_preparo', 'pronto'])
+        .in('status', ['confirmado', 'em_preparo', 'pronto', 'saiu_entrega', 'entregue'])
         .gte('created_at', hojeISO)
         .order('created_at'),
     ])
@@ -284,16 +285,15 @@ export default function PresencialCozinha() {
   const ent = {
     afazer:     entregas.filter(p => emPreparoStatus(p.status) && !p.preparando_por),
     preparando: entregas.filter(p => emPreparoStatus(p.status) && p.preparando_por === meuId),
-    historico:  entregas.filter(p => p.status === 'pronto'),
+    historico:  entregas.filter(p => (p.status === 'pronto' || p.status === 'saiu_entrega' || p.status === 'entregue') && (ehAdmin || p.preparando_por === meuId)),
     todos:      entregas.filter(p => emPreparoStatus(p.status)),
   }
   const mesa = {
     afazer:     itens.filter(i => i.status === 'pendente' && !i.preparando_por),
     preparando: itens.filter(i => i.status === 'pendente' && i.preparando_por === meuId),
-    historico:  itens.filter(i => i.status === 'pronto'),
+    historico:  itens.filter(i => i.status === 'pronto' && (ehAdmin || i.preparando_por === meuId)),
     todos:      itens.filter(i => i.status === 'pendente'),
   }
-  const ehAdmin = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
   const cont = {
     afazer:     ent.afazer.length + mesa.afazer.length,
     preparando: ent.preparando.length + mesa.preparando.length,
