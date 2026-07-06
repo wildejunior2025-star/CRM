@@ -96,6 +96,16 @@ function fmtTelefone(val) {
 }
 
 // ── Taxa de entrega por distância (mesma regra do gestor/bot) ────────────────
+// Normaliza bairro pra casar cliente <-> config (mesma regra da tela Raio de Entrega).
+function normBairro(s) {
+  return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+    .replace(/^bairro\s+/, '').replace(/\s+/g, ' ')
+}
+function acharBairroCfg(lista, bairroCliente) {
+  if (!Array.isArray(lista) || !bairroCliente) return null
+  const n = normBairro(bairroCliente)
+  return lista.find(b => normBairro(b.bairro) === n) || null
+}
 function haversineKm(lat1, lng1, lat2, lng2) {
   const R = 6371
   const dLat = (lat2 - lat1) * Math.PI / 180
@@ -321,7 +331,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, raio_entrega_km, pedido_minimo')
+      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -399,8 +409,15 @@ export default function DeliveryCheckout() {
   // Taxa por distância (faixas por km da loja) a partir do ponto do cliente;
   // se não der pra calcular, cai na taxa fixa passada pela loja.
   const temFaixas = Array.isArray(lojaEndereco?.taxas_entrega_km) && lojaEndereco.taxas_entrega_km.length > 0
+  // BAIRRO primeiro: se o bairro do cliente estiver configurado, ele manda (taxa fixa ou bloqueio).
+  const cfgBairro = acharBairroCfg(lojaEndereco?.taxas_entrega_bairro, form.bairro)
+  const bairroBloqueado = tipo === 'entrega' && !!cfgBairro && cfgBairro.entrega === false
+  const bairroTaxaFixa = !!cfgBairro && cfgBairro.entrega !== false
   const taxaCalculada = (() => {
     if (tipo === 'retirada') return 0
+    // 1) taxa fixa do bairro (ignora o km)
+    if (bairroTaxaFixa) return Number(cfgBairro.taxa) || 0
+    // 2) km (fallback pros bairros não configurados)
     if (coordCliente && lojaEndereco?.latitude && lojaEndereco?.longitude && temFaixas) {
       const dist = haversineKm(coordCliente.lat, coordCliente.lng, Number(lojaEndereco.latitude), Number(lojaEndereco.longitude))
       const t = calcTaxaKm(lojaEndereco.taxas_entrega_km, dist)
@@ -408,8 +425,8 @@ export default function DeliveryCheckout() {
     }
     return taxaEntrega
   })()
-  // Precisa marcar o ponto pra saber a taxa? (loja cobra por km e ainda não temos o ponto)
-  const taxaPendente = tipo === 'entrega' && temFaixas && !coordCliente
+  // Precisa marcar o ponto pra saber a taxa? (só quando é por km — bairro com taxa fixa não precisa)
+  const taxaPendente = tipo === 'entrega' && temFaixas && !coordCliente && !bairroTaxaFixa && !bairroBloqueado
   const taxaAplicada = taxaCalculada
   const total = subtotal + taxaAplicada
 
@@ -538,6 +555,13 @@ export default function DeliveryCheckout() {
     // Pedido mínimo para entrega
     if (faltaMinimo) {
       setErroGlobal(`Pedido mínimo para entrega é R$ ${fmt(pedidoMinimo)}. Faltam R$ ${fmt(faltamParaMinimo)} em produtos (ou escolha Retirada).`)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+
+    // Bairro bloqueado (não entregamos)
+    if (bairroBloqueado) {
+      setErroGlobal('Poxa, ainda não entregamos no seu bairro 😔. Você pode escolher Retirada, se disponível.')
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
@@ -981,10 +1005,17 @@ export default function DeliveryCheckout() {
                   </div>
                 )}
 
+                {bairroBloqueado && (
+                  <div className="dco-erro-global" style={{ background: 'rgba(220,38,38,.12)', border: '1px solid #dc2626', color: '#dc2626' }}>
+                    😔 Ainda não entregamos no bairro <strong>{form.bairro}</strong>. Se quiser, escolha <strong>Retirada</strong>.
+                  </div>
+                )}
+
                 {erroGlobal && <div className="dco-erro-global">{erroGlobal}</div>}
 
-                <button type="submit" className="dco-btn-submit" disabled={enviando || faltaMinimo}>
+                <button type="submit" className="dco-btn-submit" disabled={enviando || faltaMinimo || bairroBloqueado}>
                   {enviando ? <><span className="dco-spinner" />Enviando pedido...</>
+                    : bairroBloqueado ? 'Não entregamos no seu bairro'
                     : faltaMinimo ? `Faltam R$ ${fmt(faltamParaMinimo)} p/ o mínimo` : 'Fazer pedido'}
                 </button>
               </div>
