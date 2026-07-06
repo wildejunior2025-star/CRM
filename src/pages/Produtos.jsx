@@ -217,12 +217,29 @@ export default function Produtos() {
     // Carrega tudo (até 1000) e a paginação é feita no cliente, seguindo a ORDEM
     // das categorias (Quentinhas, Janta, Lanches, Tapioca...). Assim a busca do
     // banco (alfabética) não separa mais uma categoria entre páginas diferentes.
+    const termo = busca.trim()
+    // Busca também por COMPLEMENTO: acha os produtos cujo grupo/opção de complemento casa com o termo.
+    let idsPorComp = []
+    if (termo) {
+      const [{ data: grs }, { data: ops }] = await Promise.all([
+        supabase.from('complemento_grupos').select('produto_id').ilike('nome', `%${termo}%`),
+        supabase.from('complemento_opcoes').select('complemento_grupos!inner(produto_id)').ilike('nome', `%${termo}%`),
+      ])
+      const set = new Set()
+      for (const g of (grs ?? [])) if (g.produto_id) set.add(g.produto_id)
+      for (const o of (ops ?? [])) if (o.complemento_grupos?.produto_id) set.add(o.complemento_grupos.produto_id)
+      idsPorComp = [...set]
+    }
     let query = supabase
       .from('produtos')
       .select('*', { count: 'exact' })
       .order('nome', { ascending: true })
       .limit(1000)
-    if (busca.trim()) query = query.ilike('nome', `%${busca.trim()}%`)
+    if (termo) {
+      query = idsPorComp.length
+        ? query.or(`nome.ilike.*${termo}*,id.in.(${idsPorComp.join(',')})`)
+        : query.ilike('nome', `%${termo}%`)
+    }
     if (categ) query = query.eq('categoria', categ)
     const { data, error, count } = await query
     if (error) setError(error.message)
@@ -247,6 +264,11 @@ export default function Produtos() {
         }
         for (const pid in map) map[pid].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
         setCompProd(map)
+        // Achou pelo complemento? abre o accordion desses produtos pra já ver/pausar o complemento.
+        if (idsPorComp.length) {
+          const shown = new Set(ids)
+          setCompAberto(new Set(idsPorComp.filter(id => shown.has(id))))
+        }
       } else setCompProd({})
     }
     setLoading(false)
@@ -689,12 +711,14 @@ export default function Produtos() {
                               {/* Opções do grupo */}
                               {g.opcoes.map(op => {
                                 const oPausado = op.disponivel === false
+                                const oMatch = search.trim().length >= 2 && op.nome.toLowerCase().includes(search.trim().toLowerCase())
                                 return (
                                   <div key={op.id} style={{
                                     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
                                     padding: '7px 12px', borderTop: '1px solid var(--border)', opacity: oPausado ? 0.55 : 1,
+                                    background: oMatch ? 'rgba(239,68,68,.10)' : 'transparent',
                                   }}>
-                                    <div style={{ fontSize: 13, color: 'var(--text)' }}>
+                                    <div style={{ fontSize: 13, color: oMatch ? '#dc2626' : 'var(--text)', fontWeight: oMatch ? 800 : 400 }}>
                                       {op.nome}
                                       {Number(op.preco_adicional) > 0 && <span style={{ color: 'var(--text-muted)' }}> · +R$ {Number(op.preco_adicional).toFixed(2)}</span>}
                                       {oPausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
