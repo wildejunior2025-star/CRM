@@ -816,6 +816,7 @@ export default function PedidosDelivery() {
   const [taxaPlataforma, setTaxaPlataforma] = useState(5)
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null)
   const [filtroOrigem, setFiltroOrigem] = useState('todos')
+  const [busca, setBusca] = useState('')
 
   // Mantém o drawer sincronizado quando o pedido é atualizado via Realtime
   useEffect(() => {
@@ -985,9 +986,17 @@ export default function PedidosDelivery() {
 
   const abaConfig = ABAS.find(a => a.id === abaAtiva)
 
-  // ── Filtro por data (front-end, sem refetch) ───────────────
-  const pedidosPorAba = pedidos.filter(p => abaConfig?.statuses.includes(p.status))
+  // ── Busca por código/cliente: quando ativa, varre TODAS as abas, origens e datas ──
+  const buscaLimpa = busca.trim().toLowerCase()
+  const casaBusca = p => {
+    if (!buscaLimpa) return true
+    const campos = [p.numero_pedido, p.ifood_display_id, p.codigo_entrega, p.cliente_nome, p.cliente_telefone, String(p.id || '').slice(-4)]
+    return campos.filter(Boolean).join(' ').toLowerCase().includes(buscaLimpa)
+  }
+  // ── Filtro por aba/origem/data (a busca, quando ativa, ignora todos eles) ──
+  const pedidosPorAba = buscaLimpa ? pedidos : pedidos.filter(p => abaConfig?.statuses.includes(p.status))
   const pedidosFiltrados = pedidosPorAba.filter(p => {
+    if (buscaLimpa) return casaBusca(p)
     if (filtroOrigem !== 'todos') {
       const origem = p.origem ?? 'cardapio'
       if (origem !== filtroOrigem) return false
@@ -1074,6 +1083,35 @@ export default function PedidosDelivery() {
           </button>
         )}
       </div>
+
+      {/* ── Busca por código/cliente (varre todas as abas, origens e datas) ── */}
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', maxWidth: 480, marginBottom: 12 }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+          style={{ position: 'absolute', left: 12, pointerEvents: 'none' }} aria-hidden="true">
+          <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input
+          type="search"
+          value={busca}
+          onChange={e => setBusca(e.target.value)}
+          placeholder="Buscar por cód. iFood, nº do pedido ou cliente — em todas as abas"
+          style={{
+            width: '100%', padding: '10px 12px 10px 38px', borderRadius: 10, fontSize: 14,
+            border: '1.5px solid var(--border)', background: 'var(--surface, var(--bg))', color: 'var(--text)', boxSizing: 'border-box',
+          }}
+        />
+        {busca && (
+          <button type="button" onClick={() => setBusca('')} aria-label="Limpar busca"
+            style={{ position: 'absolute', right: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 18, lineHeight: 1, padding: 6 }}>
+            ×
+          </button>
+        )}
+      </div>
+      {buscaLimpa && (
+        <div style={{ fontSize: 12.5, color: 'var(--primary)', fontWeight: 700, marginBottom: 10 }}>
+          🔎 Buscando em todas as abas e origens — {pedidosFiltrados.length} resultado{pedidosFiltrados.length === 1 ? '' : 's'}
+        </div>
+      )}
 
       {/* ── Filtro de origem ── */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
