@@ -79,7 +79,7 @@ function ChkLinha({ chave, texto, principal, marcados, onToggle }) {
 }
 
 // Card de um pedido de delivery/iFood na cozinha (KDS).
-function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historico }) {
+function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historico, adminView = false }) {
   const ehIfood = pedido.origem === 'ifood'
   const headerCor = historico ? '#16a34a' : (ehIfood ? '#ea1d2c' : '#7c3aed')
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
@@ -153,6 +153,15 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
         })}
         {historico ? (
           <div style={{ fontSize: 12.5, fontWeight: 800, color: '#16a34a' }}>✓ Pronto às {horaBR(pedido.updated_at || pedido.created_at)}</div>
+        ) : adminView ? (
+          <div style={{
+            fontSize: 13, fontWeight: 800, borderRadius: 8, padding: '7px 10px', textAlign: 'center',
+            ...(pedido.preparando_por
+              ? { background: 'rgba(245,158,11,.12)', border: '1px solid #f59e0b', color: '#b45309' }
+              : { background: 'rgba(37,99,235,.10)', border: '1px solid #2563eb', color: '#2563eb' }),
+          }}>
+            {pedido.preparando_por ? `👨‍🍳 ${pedido.preparando_nome || 'Alguém'} preparando` : '🟢 Livre — aguardando'}
+          </div>
         ) : (
           <>
             <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>há {tempoDesde(pedido.created_at)}</div>
@@ -276,16 +285,20 @@ export default function PresencialCozinha() {
     afazer:     entregas.filter(p => emPreparoStatus(p.status) && !p.preparando_por),
     preparando: entregas.filter(p => emPreparoStatus(p.status) && p.preparando_por === meuId),
     historico:  entregas.filter(p => p.status === 'pronto'),
+    todos:      entregas.filter(p => emPreparoStatus(p.status)),
   }
   const mesa = {
     afazer:     itens.filter(i => i.status === 'pendente' && !i.preparando_por),
     preparando: itens.filter(i => i.status === 'pendente' && i.preparando_por === meuId),
     historico:  itens.filter(i => i.status === 'pronto'),
+    todos:      itens.filter(i => i.status === 'pendente'),
   }
+  const ehAdmin = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
   const cont = {
     afazer:     ent.afazer.length + mesa.afazer.length,
     preparando: ent.preparando.length + mesa.preparando.length,
     historico:  ent.historico.length + mesa.historico.length,
+    todos:      ent.todos.length + mesa.todos.length,
   }
 
   const agruparPorMesa = lista => {
@@ -311,6 +324,7 @@ export default function PresencialCozinha() {
   const ABAS = [
     ['afazer',     'A fazer'],
     ['preparando', 'Preparando'],
+    ...(ehAdmin ? [['todos', '👁 Todos']] : []),
     ['historico',  'Histórico'],
   ]
 
@@ -370,13 +384,14 @@ export default function PresencialCozinha() {
           {buscaLimpa ? `🔍 Nenhum pedido encontrado pra “${busca}”.`
             : aba === 'afazer' ? '🍳 Nenhum pedido esperando. Tudo em dia!'
             : aba === 'preparando' ? '👨‍🍳 Você não está preparando nada agora.'
+            : aba === 'todos' ? '🍳 Nenhum pedido na cozinha agora.'
             : '📋 Nenhum pedido pronto hoje ainda.'}
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
           {/* Pedidos de delivery / iFood */}
           {entAba.map(pedido => (
-            <CardEntregaKDS key={pedido.id} pedido={pedido} meuId={meuId} historico={aba === 'historico'}
+            <CardEntregaKDS key={pedido.id} pedido={pedido} meuId={meuId} historico={aba === 'historico'} adminView={aba === 'todos'}
               onAceitar={aceitarPedido} onSoltar={soltarPedido} onPronto={marcarPedidoPronto} />
           ))}
 
@@ -408,12 +423,16 @@ export default function PresencialCozinha() {
                           ? <div style={{ fontSize: 12, fontWeight: 800, color: '#16a34a' }}>✓ Pronto às {horaBR(item.updated_at || item.created_at)}</div>
                           : <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>há {tempoDesde(item.created_at)}</div>}
                       </div>
-                      {aba !== 'historico' && (
+                      {aba === 'todos' ? (
+                        <div style={{ minWidth: 100, fontSize: 12, fontWeight: 800, textAlign: 'right', color: item.preparando_por ? '#b45309' : '#2563eb' }}>
+                          {item.preparando_por ? `👨‍🍳 ${item.preparando_nome || 'Alguém'}` : '🟢 Livre'}
+                        </div>
+                      ) : aba !== 'historico' ? (
                         <div style={{ minWidth: 130 }}>
                           <AcaoPreparo registro={item} meuId={meuId} size="sm"
                             onAceitar={aceitarItem} onSoltar={soltarItem} onPronto={marcarPronto} />
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   )
                 })}
