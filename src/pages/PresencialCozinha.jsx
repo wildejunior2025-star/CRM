@@ -56,6 +56,28 @@ function AcaoPreparo({ registro, meuId, onAceitar, onSoltar, onPronto, size = 'm
   )
 }
 
+// Linha da checklist da cozinha: quadradinho grande pra ir marcando o que já colocou na quentinha.
+function ChkLinha({ chave, texto, principal, marcados, onToggle }) {
+  const marcado = marcados.has(chave)
+  return (
+    <div onClick={() => onToggle(chave)}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none',
+        padding: principal ? '3px 0' : '3px 0 3px 14px' }}>
+      <span style={{
+        width: 26, height: 26, borderRadius: 6, flexShrink: 0,
+        border: `2px solid ${marcado ? '#16a34a' : 'var(--border, #999)'}`,
+        background: marcado ? '#16a34a' : 'transparent', color: '#fff',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 900,
+      }}>{marcado ? '✓' : ''}</span>
+      <span style={{
+        fontWeight: principal ? 700 : 500, fontSize: principal ? 14.5 : 13.5,
+        color: marcado ? 'var(--text-muted)' : 'var(--text)',
+        textDecoration: marcado ? 'line-through' : 'none',
+      }}>{texto}</span>
+    </div>
+  )
+}
+
 // Card de um pedido de delivery/iFood na cozinha (KDS).
 function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historico }) {
   const ehIfood = pedido.origem === 'ifood'
@@ -63,6 +85,17 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const isRetirada = (pedido.tipo_entrega || 'entrega') === 'retirada'
   const numero = pedido.numero_pedido ?? String(pedido.id).slice(-4).toUpperCase()
+  // Checklist de preparo: só aparece pra quem ACEITOU o pedido (está preparando).
+  const preparandoComigo = !!pedido.preparando_por && pedido.preparando_por === meuId
+  const checklist = preparandoComigo && !historico
+  const [marcados, setMarcados] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('kds_chk_' + pedido.id) || '[]')) } catch { return new Set() }
+  })
+  const toggleMarca = (k) => setMarcados(prev => {
+    const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k)
+    try { localStorage.setItem('kds_chk_' + pedido.id, JSON.stringify([...n])) } catch {}
+    return n
+  })
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
       <div style={{ background: headerCor, color: '#fff', padding: '10px 14px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -86,18 +119,23 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
             👤 {pedido.cliente_nome}
           </div>
         )}
+        {checklist && (
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: '#16a34a' }}>👇 Marque o que já colocou</div>
+        )}
         {itens.map((item, i) => {
           const { nome, complementos: comps } = separarItem(item)
+          const qtd = item.quantidade ?? item.qtd ?? 1
           return (
             <div key={i}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>
-                {item.quantidade ?? item.qtd ?? 1}× {nome}
-              </div>
-              {comps.map((c, j) => (
-                <div key={j} style={{ fontSize: 12.5, color: 'var(--text-muted)', paddingLeft: 14 }}>
-                  {Number(c?.qtd ?? 1)}× {c?.nome ?? c}
-                </div>
-              ))}
+              {checklist
+                ? <ChkLinha chave={`i${i}`} principal texto={`${qtd}× ${nome}`} marcados={marcados} onToggle={toggleMarca} />
+                : <div style={{ fontWeight: 700, fontSize: 14 }}>{qtd}× {nome}</div>}
+              {comps.map((c, j) => {
+                const txt = `${Number(c?.qtd ?? 1)}× ${c?.nome ?? c}`
+                return checklist
+                  ? <ChkLinha key={j} chave={`c${i}_${j}`} texto={txt} marcados={marcados} onToggle={toggleMarca} />
+                  : <div key={j} style={{ fontSize: 12.5, color: 'var(--text-muted)', paddingLeft: 14 }}>{txt}</div>
+              })}
               {item.observacao && (
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', paddingLeft: 14, fontStyle: 'italic' }}>obs: {item.observacao}</div>
               )}
@@ -109,7 +147,8 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
         ) : (
           <>
             <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>há {tempoDesde(pedido.created_at)}</div>
-            <AcaoPreparo registro={pedido} meuId={meuId} onAceitar={onAceitar} onSoltar={onSoltar} onPronto={onPronto} />
+            <AcaoPreparo registro={pedido} meuId={meuId} onAceitar={onAceitar} onSoltar={onSoltar}
+              onPronto={(reg) => { try { localStorage.removeItem('kds_chk_' + pedido.id) } catch {}; onPronto(reg) }} />
           </>
         )}
       </div>
