@@ -828,6 +828,16 @@ async function geocodificarEndereco(endereco: string): Promise<{ lat: number; ln
   } catch (e: any) { console.error("[Geo] erro:", e?.message) }
   return null
 }
+// Normaliza bairro pra casar cliente <-> config (mesma regra da tela Raio de Entrega e do site).
+function normBairro(s: string): string {
+  return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim()
+    .replace(/^bairro\s+/, "").replace(/\s+/g, " ")
+}
+function acharBairroCfg(lista: any, bairroCliente: string | null): any {
+  if (!Array.isArray(lista) || !bairroCliente) return null
+  const n = normBairro(bairroCliente)
+  return lista.find((b: any) => normBairro(b.bairro) === n) || null
+}
 // Taxa (número) pela distância entre a loja e o endereço, ou null se não deu pra calcular.
 async function calcularTaxaEntregaKm(empresa: any, endStr: string): Promise<number | null> {
   try {
@@ -940,7 +950,7 @@ serve(async (req) => {
 
     const configRes = await supabase
       .from("whatsapp_config")
-      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, indicador_profile_id, mp_conectado)")
+      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, indicador_profile_id, mp_conectado)")
       .eq("instance_name", instanceName)
       .eq("ativo", true)
       .single()
@@ -1225,10 +1235,16 @@ serve(async (req) => {
       return `${rua}${numero ? `, ${numero}` : ""}${bairro ? ` — ${bairro}` : ""}${cidade ? `, ${cidade}` : ""}${estado ? `/${estado}` : ""}`
     })()
 
-    // Taxa de entrega: calcula pela distância (faixas por km) quando já temos o endereço.
-    // Cai na taxa fixa da loja se não der pra geocodificar / loja não tem faixas.
+    // BAIRRO primeiro: taxa fixa ou bloqueio do bairro do cliente (prioridade sobre o km).
+    const bairroCliente = carrinhoEndereco.bairro ?? cliente?.bairro ?? null
+    const cfgBairro = acharBairroCfg(empresa.taxas_entrega_bairro, bairroCliente)
+    const bairroBloqueado = aceitaDelivery && !!cfgBairro && cfgBairro.entrega === false
+    const bairroTaxaFixa = !!cfgBairro && cfgBairro.entrega !== false
+    // Taxa de entrega: bairro (taxa fixa) > km (faixas por distância) > taxa fixa da loja.
     let taxaEntregaCalc = taxaEntrega
-    if (aceitaDelivery) {
+    if (aceitaDelivery && bairroTaxaFixa) {
+      taxaEntregaCalc = Number(cfgBairro.taxa) || 0
+    } else if (aceitaDelivery && !bairroBloqueado) {
       const endParaCalc = [
         carrinhoEndereco.rua ?? cliente?.endereco,
         carrinhoEndereco.numero ?? cliente?.numero,
@@ -1252,7 +1268,7 @@ ${empresaEndereco   ? `- Endereço: ${empresaEndereco}` : ""}
 ${empresaHorario    ? `- Horário: ${empresaHorario}` : ""}
 ${empresa.chave_pix ? `- PIX: ${empresa.chave_pix} (${empresa.pix_nome ?? ""})` : ""}
 CATÁLOGO: ${catalogoUrl}
-${aceitaDelivery ? `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)}${enderecoCliente ? " (já calculada pela distância do endereço do cliente)" : " (taxa base — pode mudar conforme a distância do endereço)"}` : "ENTREGA: somente retirada no local"}
+${aceitaDelivery ? (bairroBloqueado ? `⛔ ENTREGA BLOQUEADA NESTE BAIRRO: a loja NÃO entrega no bairro do cliente (${bairroCliente}). Avise educadamente que ainda não entregam nesse bairro e ofereça RETIRADA no local. NUNCA feche um pedido de ENTREGA para este cliente — só retirada.` : `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)}${enderecoCliente ? " (já calculada pela distância do endereço do cliente)" : " (taxa base — pode mudar conforme a distância do endereço)"}`) : "ENTREGA: somente retirada no local"}
 FORMAS DE PAGAMENTO: ${mpConectado ? "Dinheiro, Cartão ou PIX. Se o cliente escolher PIX, o sistema gera o QR Code e o código copia-e-cola automaticamente ao fechar o pedido — o pedido só vai para a loja depois que o pagamento for confirmado. Você NÃO envia chave PIX manualmente." : "Dinheiro ou Cartão (PIX não disponível nesta loja pelo WhatsApp)"}
 
 PRODUTOS DISPONÍVEIS:

@@ -1,4 +1,8 @@
-# 🏘️ Melhoria: Taxa de entrega por BAIRRO (fazer fora do movimento)
+# 🏘️ Melhoria: Taxa de entrega por BAIRRO — ✅ IMPLEMENTADA (2026-07-06), falta TESTAR com bairros configurados
+
+> Status: código no ar (config em Raio de Entrega, cálculo no site DeliveryCheckout e no bot whatsapp-webhook). Enquanto nenhum bairro estiver configurado, tudo funciona igual (por km). Falta o Wilde cadastrar bairros e testar no site + BotTeste.
+
+
 
 > Objetivo: cobrar **taxa** e **tempo** de entrega **por bairro**, no lugar (ou além) do cálculo por km de hoje.
 > Modelo escolhido: **HÍBRIDO** — bairro cadastrado usa o preço do bairro; bairro fora da lista cai no cálculo por km atual (nunca fica sem taxa).
