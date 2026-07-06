@@ -604,6 +604,15 @@ function DrawerDetalhe({ pedido, onFechar, onAtualizarStatus, onCancelar }) {
       <div className="pd-drawer-header">
         <div className="pd-drawer-titulo">
           <span className="pd-drawer-numero">#{pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()}</span>
+          {pedido.origem === 'ifood' && pedido.ifood_display_id && (
+            <span title="Código do pedido no iFood" style={{
+              fontSize: 13, fontWeight: 800, color: '#ea1d2c',
+              background: 'rgba(234,29,44,.12)', border: '1px solid #ea1d2c',
+              borderRadius: 8, padding: '2px 8px', whiteSpace: 'nowrap',
+            }}>
+              iFood #{pedido.ifood_display_id}
+            </span>
+          )}
           <StatusBadge status={pedido.status} />
         </div>
         <button className="pd-drawer-fechar" onClick={onFechar} aria-label="Fechar">✕</button>
