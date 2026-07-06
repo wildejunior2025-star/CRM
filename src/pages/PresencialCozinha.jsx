@@ -154,7 +154,7 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
         {historico ? (
           <>
             {pedido.preparando_nome ? (
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>👩‍🍳 Preparado por {pedido.preparando_nome}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>👩‍🍳 Preparado por <span style={{ fontSize: 18, fontWeight: 900, color: '#7c3aed' }}>{pedido.preparando_nome}</span></div>
             ) : ehAdmin && onDefinirPreparador ? (
               <select defaultValue="" onChange={e => { const c = cozinheiros.find(x => x.id === e.target.value); if (c) onDefinirPreparador(pedido, c) }}
                 style={{ fontSize: 12.5, fontWeight: 700, padding: '7px 8px', borderRadius: 8, border: '1.5px solid #f59e0b', background: 'rgba(245,158,11,.10)', color: 'var(--text)', width: '100%', boxSizing: 'border-box' }}>
