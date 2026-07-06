@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import '../components/Page.css'
 import './PedidosDelivery.css'
+import { imprimirCupom } from '../utils/imprimirCupom'
 
 const TIMER_LIMITE_MS = 7 * 60 * 1000 // 7 minutos
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
@@ -172,12 +173,10 @@ ${obs}
 </body>
 </html>`
 
-  const w = window.open('', '_blank', 'width=400,height=600')
-  if (!w) return
-  w.document.write(html)
-  w.document.close()
-  w.focus()
-  setTimeout(() => { w.print(); w.close() }, 300)
+  // Imprime SILENCIOSO pelo app Impressora FWC (sem a janela do Chrome).
+  // Só cai no navegador se o app FWC não estiver rodando. (html acima fica de reserva.)
+  void html
+  imprimirCupom(pedido)
 }
 
 // ─────────────────────────────────────────────
