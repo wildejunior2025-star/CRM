@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 
 const fmt = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -48,6 +49,11 @@ export default function WhatsAppCreditos() {
   const [autoValor, setAutoValor]     = useState(50)
   const [savingAuto, setSavingAuto]   = useState(false)
 
+  // Alerta de crédito baixo (avisa o dono, sem cobrar)
+  const { empresa } = useAuth()
+  const [alertaMinimo, setAlertaMinimo] = useState(20)
+  const [savingAlerta, setSavingAlerta] = useState(false)
+
   async function load() {
     setLoading(true)
     const data = await callCreditos('get_balance')
@@ -61,6 +67,22 @@ export default function WhatsAppCreditos() {
   }
 
   useEffect(() => { load() }, [])
+
+  // Carrega o mínimo do alerta de crédito baixo
+  useEffect(() => {
+    if (!empresa?.id) return
+    supabase.from('empresas').select('credito_alerta_minimo').eq('id', empresa.id).single()
+      .then(({ data }) => { if (data && data.credito_alerta_minimo != null) setAlertaMinimo(data.credito_alerta_minimo) })
+  }, [empresa?.id])
+
+  async function handleSalvarAlerta() {
+    if (!empresa?.id) return
+    setSavingAlerta(true)
+    const val = Math.max(0, Number(alertaMinimo) || 0)
+    const { error } = await supabase.from('empresas').update({ credito_alerta_minimo: val, credito_alerta_enviado: false }).eq('id', empresa.id)
+    setSavingAlerta(false)
+    setMsg(error ? { tipo: 'erro', texto: error.message } : { tipo: 'ok', texto: val > 0 ? `Alerta ligado: avisa abaixo de ${val} créditos.` : 'Alerta desligado.' })
+  }
 
   // Quando PIX está aberto, consulta saldo a cada 5s até ser pago
   useEffect(() => {
@@ -523,6 +545,30 @@ export default function WhatsAppCreditos() {
           }}>
             {savingAuto ? 'Salvando...' : 'Salvar configuração'}
           </button>
+        </div>
+      )}
+
+      {/* ── ALERTA DE CRÉDITO BAIXO (na aba auto) ── */}
+      {aba === 'auto' && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>🔔 Alerta de crédito baixo</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+            Manda uma mensagem no WhatsApp do dono quando o saldo ficar baixo (avisa <b>uma vez</b>; volta a avisar depois que recarregar). Não cobra nada — é só um aviso.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Avisar quando ficar abaixo de</label>
+            <input type="number" min={0} max={2000} value={alertaMinimo} onChange={e => setAlertaMinimo(Number(e.target.value))} style={{ ...inputStyle, width: 90 }} />
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>créditos (0 = desligado)</span>
+          </div>
+          <button onClick={handleSalvarAlerta} disabled={savingAlerta} style={{
+            width: '100%', padding: '11px 0', borderRadius: 9, border: 'none',
+            background: 'var(--primary)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', opacity: savingAlerta ? 0.6 : 1,
+          }}>
+            {savingAlerta ? 'Salvando...' : 'Salvar alerta'}
+          </button>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+            ⚠️ Precisa ter o número do dono configurado (em <b>WhatsApp → Config</b>, o telefone do admin).
+          </div>
         </div>
       )}
 

@@ -1002,10 +1002,30 @@ serve(async (req) => {
       : phoneLocal
 
     const [creditRes] = await Promise.all([
-      supabase.from("empresas").select("whatsapp_creditos").eq("id", empresaId).single(),
+      supabase.from("empresas").select("whatsapp_creditos, credito_alerta_minimo, credito_alerta_enviado").eq("id", empresaId).single(),
       supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text }),
     ])
     if (!creditRes.data || creditRes.data.whatsapp_creditos <= 0) return new Response("ok", { headers: corsHeaders })
+
+    // ── Alerta de crédito baixo pro dono (uma vez só; reseta após recarregar) ──
+    {
+      const saldo = Number(creditRes.data.whatsapp_creditos ?? 0)
+      const alertaMin = Number(creditRes.data.credito_alerta_minimo ?? 0)
+      const jaAvisou = creditRes.data.credito_alerta_enviado === true
+      if (adminPhone && alertaMin > 0 && saldo > 0 && saldo <= alertaMin && !jaAvisou) {
+        const msg = `⚠️ *${empresaNome}* — créditos do robô acabando!\n\n` +
+          `Saldo atual: *${saldo}* crédito(s).\n\n` +
+          `Recarregue no sistema em *WhatsApp → Créditos Bot* pra o robô não parar de responder os clientes. 🤖`
+        fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+          method: "POST", headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+          body: JSON.stringify({ number: `55${adminPhone}`, text: msg }),
+        }).catch(e => console.error("[CreditoBaixo] erro ao avisar dono:", e))
+        await supabase.from("empresas").update({ credito_alerta_enviado: true }).eq("id", empresaId)
+      } else if (jaAvisou && saldo > alertaMin) {
+        // Recarregou acima do mínimo → volta a poder alertar no próximo episódio.
+        await supabase.from("empresas").update({ credito_alerta_enviado: false }).eq("id", empresaId)
+      }
+    }
 
     // Verifica horário de funcionamento — responde "fechado" e retorna sem chamar Claude.
     // Fonte: grade semanal nova (horarios_funcionamento). Sem grade, cai no horário único legado.
