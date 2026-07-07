@@ -356,13 +356,15 @@ export default function PresencialCozinha() {
   const entBase = buscaLimpa
     ? dedupById(ehAdmin ? [...ent.todos, ...ent.historico] : [...ent.afazer, ...ent.preparando, ...ent.historico])
     : ent[aba]
-  const entAba  = entBase.filter(p => casaBusca([p.numero_pedido, p.ifood_display_id, p.codigo_entrega, p.cliente_nome, p.endereco_rua, p.endereco_bairro, p.endereco_cidade, String(p.id || '').slice(-4)]))
+  // Inclui o nome do COZINHEIRO (quem pegou e quem finalizou) — digitando o nome
+  // dele, aparecem só os pedidos feitos por ele.
+  const entAba  = entBase.filter(p => casaBusca([p.numero_pedido, p.ifood_display_id, p.codigo_entrega, p.cliente_nome, p.endereco_rua, p.endereco_bairro, p.endereco_cidade, String(p.id || '').slice(-4), p.preparando_nome, p.pronto_nome]))
   const mesaAba = useMemo(
     () => {
       const base = buscaLimpa
         ? dedupById(ehAdmin ? [...mesa.todos, ...mesa.historico] : [...mesa.afazer, ...mesa.preparando, ...mesa.historico])
         : mesa[aba]
-      return agruparPorMesa(base.filter(i => casaBusca([i.comandas?.numero_mesa, 'mesa ' + (i.comandas?.numero_mesa ?? ''), i.nome])))
+      return agruparPorMesa(base.filter(i => casaBusca([i.comandas?.numero_mesa, 'mesa ' + (i.comandas?.numero_mesa ?? ''), i.nome, i.preparando_nome])))
     },
     [itens, aba, meuId, buscaLimpa] // eslint-disable-line react-hooks/exhaustive-deps
   )
@@ -413,7 +415,7 @@ export default function PresencialCozinha() {
           type="search"
           value={busca}
           onChange={e => setBusca(e.target.value)}
-          placeholder="Buscar por nº, código, cliente ou mesa"
+          placeholder={ehAdmin ? 'Buscar por nº, código, cliente, mesa ou cozinheiro' : 'Buscar por nº, código, cliente ou mesa'}
           style={{
             width: '100%', padding: '10px 12px 10px 38px', borderRadius: 10, fontSize: 14,
             border: '1.5px solid var(--border)', background: 'var(--surface, var(--bg))', color: 'var(--text)', boxSizing: 'border-box',
