@@ -474,7 +474,9 @@ async function handleFecharPedido(
   instanceName: string,
   carrinhoEndereco: { rua: string|null; numero: string|null; bairro: string|null; cidade: string|null },
   indicadorProfileId: string|null = null,
-  taxaEntregaCalc: number|null = null
+  taxaEntregaCalc: number|null = null,
+  mensagensHist: any[] = [],
+  catalogoProdutos: any[] = []
 ): Promise<{ mensagemExtra: string; acaoPromise: Promise<any>; pixCode?: string; bloqueioMensagem?: string }> {
   console.log(`[Pedido] fechando para ${phone}, pgto: ${acao.forma_pagamento}`)
   try {
@@ -493,6 +495,10 @@ async function handleFecharPedido(
       itens = acao.items
       console.log(`[Pedido] carrinho do ACAO (fallback): ${itens.length} itens`)
     }
+    // Rede de segurança: completa itens que o cliente CONFIRMOU no resumo mas que
+    // não estão no carrinho (o modelo às vezes diz "adicionado" e não grava). Assim
+    // o total COBRADO bate com o que foi mostrado. Só adiciona o que falta.
+    itens = reconciliarComResumo(itens, mensagensHist, catalogoProdutos)
     if (itens.length === 0) {
       console.error("[Pedido] abortado — carrinho vazio mesmo após re-fetch e fallback")
       return { mensagemExtra: "⚠️ Não encontrei itens no carrinho. Pode me falar novamente o que gostaria de pedir? 😊", acaoPromise: Promise.resolve() }
@@ -807,6 +813,48 @@ function extrairItensDoResumo(mensagens: any[]): any[] {
     }
   }
   return []
+}
+
+// ── reconciliarComResumo — rede de segurança no FECHAMENTO ───────────────────
+// Garante que TUDO que o cliente confirmou no último resumo esteja no pedido.
+// Se o modelo disse "adicionado" mas esqueceu de gravar algum item no carrinho,
+// a gente completa AQUI (casando pelo nome no catálogo) — assim o total COBRADO
+// bate com o que foi mostrado/confirmado. Só ADICIONA o que falta: nunca remove
+// nem altera o que já está no carrinho (não mexe no fluxo que já funciona).
+const RE_ACENTOS = new RegExp("[\\u0300-\\u036f]", "g")
+function normNomeSafe(s: string): string {
+  return String(s ?? "").normalize("NFD").replace(RE_ACENTOS, "").toLowerCase().replace(/\s+/g, " ").trim()
+}
+function reconciliarComResumo(itens: any[], mensagens: any[], catalogo: any[]): any[] {
+  const doResumo = extrairItensDoResumo(mensagens)
+  if (!doResumo.length || !Array.isArray(catalogo) || !catalogo.length) return itens
+  const nomesNoCarrinho = new Set((itens ?? []).map((i: any) => normNomeSafe(i.nome)))
+  const idsNoCarrinho = new Set((itens ?? []).map((i: any) => String(i.produto_id ?? "")).filter(Boolean))
+  const faltando: any[] = []
+  for (const r of doResumo) {
+    const nomeR = normNomeSafe(r.nome)
+    if (!nomeR || nomesNoCarrinho.has(nomeR)) continue
+    // Casa SÓ por nome exato (o bot escreve o nome do próprio catálogo) — evita
+    // adicionar item errado. Se não achar no catálogo, não inventa.
+    const prod = catalogo.find((p: any) => normNomeSafe(p.nome) === nomeR)
+    if (!prod) continue
+    // Já está no carrinho por produto_id (mesmo item com nome escrito diferente,
+    // ex.: quentinha com complementos)? Então NÃO duplica.
+    if (idsNoCarrinho.has(String(prod.id))) continue
+    faltando.push({
+      produto_id: prod.id,
+      nome: prod.nome,
+      qtd: Math.max(1, Number(r.qtd) || 1),
+      preco: Number(prod.preco_venda ?? r.preco ?? 0),
+    })
+    nomesNoCarrinho.add(nomeR)
+    idsNoCarrinho.add(String(prod.id))
+  }
+  if (faltando.length) {
+    console.log(`[Fechar] Reconciliação: ${faltando.length} item(ns) confirmados no resumo faltavam no carrinho e foram incluídos: ${faltando.map((f) => f.nome).join(", ")}`)
+    return [...(itens ?? []), ...faltando]
+  }
+  return itens
 }
 
 // ── Taxa de entrega por distância (mesma regra do gestor/PainelPedidos) ──────
@@ -1711,7 +1759,7 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
           const resultado = await handleFecharPedido(
             supabase, empresaId, phone, phoneLocal, acao, carrinho,
             cliente, empresa, SUPABASE_URL, SUPABASE_KEY, instanceName, carrinhoEndereco,
-            indicadorProfileId, taxaEntregaCalc
+            indicadorProfileId, taxaEntregaCalc, mensagens, produtos
           )
           if (resultado.bloqueioMensagem) {
             resposta = resultado.bloqueioMensagem
@@ -1803,7 +1851,7 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
           supabase, empresaId, phone, phoneLocal, safeAcao,
           carrinho, cliente, empresa,
           SUPABASE_URL, SUPABASE_KEY, instanceName, carrinhoEndereco,
-          indicadorProfileId, taxaEntregaCalc
+          indicadorProfileId, taxaEntregaCalc, mensagens, produtos
         )
         if (!resultado.bloqueioMensagem) {
           acaoPromise = resultado.acaoPromise
