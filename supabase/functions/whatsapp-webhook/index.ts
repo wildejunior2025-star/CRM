@@ -1364,7 +1364,7 @@ Continue somando itens até o cliente dizer que é só isso / que quer fechar.
 Se o cliente JÁ tem nome em CLIENTE → PULE este passo inteiro, vá direto ao PASSO 4.
 ⚠️ GATILHO: assim que o cliente indicar que fechou a sacola ("é só isso", "pode fechar", "só isso mesmo", "fechar"), sua PRÓXIMA mensagem JÁ deve pedir o *nome* (item 1 abaixo). NÃO pergunte "quer mais algum item?" de novo, NÃO mostre resumo ainda. Se o cliente mandar o nome ou o e-mail por conta própria, ACEITE e siga a ordem — nunca responda "quer mais alguma coisa?".
 Colete UM POR VEZ, nesta ordem exata:
-  1. "Pra fechar seu pedido, qual o seu *nome*? 😊"
+  1. "⚡ Estamos com um sistema novo por aqui! Seu cadastro é rapidinho e *uma vez só* — no próximo pedido já não precisa. 😊\n\nPra começar, qual o seu *nome*?"
   2. Recebeu o nome → "E o seu *e-mail*? 📧"
   3. Recebeu o e-mail → emita cadastrar_cliente IMEDIATAMENTE (sem texto antes). O sistema pede o CEP em seguida.
   4. Recebeu o CEP → emita buscar_cep (sem texto antes). O sistema confirma o endereço e pede o número.
@@ -1615,7 +1615,7 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
             // não pergunta "quer mais?" — segue direto para cadastro (se novo) ou entrega (se já cliente).
             const querFechar = /\b(pode fechar|só isso|so isso|é só isso|e so isso|só isso mesmo|so isso mesmo|fechar( o)? pedido|finaliza|encerra|é isso|e isso|pode mandar|pode confirmar)\b/i.test(text)
             if (querFechar && !cliente) {
-              resposta = `${cabecalho}\n\nPra fechar seu pedido, qual o seu *nome*? 😊`
+              resposta = `${cabecalho}\n\n⚡ Estamos com um sistema novo por aqui! Seu cadastro é rapidinho e *uma vez só* — no próximo pedido já não precisa. 😊\n\nPra começar, qual o seu *nome*?`
             } else if (querFechar && cliente) {
               resposta = aceitaDelivery
                 ? `${cabecalho}\n\nPrefere *entrega* 🚚 ou vai *retirar* na loja? 🏪`
@@ -1852,7 +1852,7 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
       const respostaAvancou = /(prefere\s*\*?entrega|vai\s*\*?retirar|\bretirada\b|como vai pagar|forma de pagamento|seu\s*\*?cep|resumo do pedido)/i.test(respAtual)
       if (!cadastrouAgora && respostaAvancou) {
         if (!botJaPediuNome) {
-          resposta = "Pra fechar seu pedido, qual o seu *nome*? 😊"
+          resposta = "⚡ Estamos com um sistema novo por aqui! Seu cadastro é rapidinho e *uma vez só* — no próximo pedido já não precisa. 😊\n\nPra começar, qual o seu *nome*?"
           console.log("[SafeNet] cliente novo — forcei a pergunta do NOME (Haiku pulou o cadastro)")
         } else if (!botJaPediuEmail) {
           resposta = "E o seu *e-mail*? 📧"
