@@ -1215,12 +1215,13 @@ serve(async (req) => {
                   .filter((o: any) => o.disponivel)
                   .sort((a: any, b: any) => (a.ordem ?? 0) - (b.ordem ?? 0))
                   .map((o: any) => Number(o.preco_adicional) > 0
-                    ? `${o.nome} (+R$ ${Number(o.preco_adicional).toFixed(2)})`
-                    : o.nome)
-                  .join(", ")
+                    ? `• ${o.nome} (+R$ ${Number(o.preco_adicional).toFixed(2)})`
+                    : `• ${o.nome}`)
+                  .join("\n")
                 const quant = g.max > 1 ? `escolha até ${g.max}` : (g.min > 0 ? "escolha 1" : "opcional")
-                return `  - ${g.nome} (${quant}): ${ops}`
-              }).join("\n")
+                // Barra separadora + nome da categoria em negrito, uma opção por linha.
+                return `━━━━━━━━━━━━━\n*${g.nome}* (${quant})\n${ops}`
+              }).join("\n\n")
             if (!linhas) continue
             blocos.push(`▸ ${nomeDoProduto(pid)}:\n${linhas}`)
           }
@@ -1370,7 +1371,7 @@ Já verificamos pelo telefone se o cliente tem conta nesta loja (ver CLIENTE aci
 
 ▶ PASSO 2 — MONTAR A SACOLA
 Ajude o cliente a escolher os produtos. A CADA produto escolhido, emita atualizar_carrinho (ver AÇÕES).
-Produto com complementos (Quentinha): mostre TODAS as categorias DE UMA VEZ, numa ÚNICA mensagem, listando em cada categoria as opções e o máximo (ex.: "escolha 1", "escolha até 2"). NUNCA pergunte categoria por categoria (uma mensagem por categoria) — isso cansa o cliente e gasta crédito à toa. Peça pro cliente responder tudo numa mensagem só; quando ele responder, monte o item com atualizar_carrinho. Se faltar escolher alguma categoria, aí sim pergunte só as que faltam.
+Produto com complementos (Quentinha): mostre TODAS as categorias DE UMA VEZ, numa ÚNICA mensagem. Use EXATAMENTE o formato do bloco "PRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS": cada categoria com a barra separadora (━━━━━━━━━━━━━), o *nome da categoria* em negrito com o máximo do lado (ex.: "escolha 1", "escolha até 2"), e CADA opção numa linha própria começando com "• ". NUNCA junte as opções com vírgula na mesma linha — elas têm que ficar uma embaixo da outra. NUNCA pergunte categoria por categoria (uma mensagem por categoria) — isso cansa o cliente e gasta crédito à toa. Peça pro cliente responder tudo numa mensagem só; quando ele responder, monte o item com atualizar_carrinho. Se faltar escolher alguma categoria, aí sim pergunte só as que faltam.
 Continue somando itens até o cliente dizer que é só isso / que quer fechar.
 ⚠️ Enquanto monta a sacola, NUNCA peça nome, e-mail, CEP, endereço, entrega ou pagamento. Isso é SÓ depois que a sacola fechar.
 
@@ -1435,7 +1436,7 @@ Atualizar carrinho (ao adicionar/remover produto — OBRIGATÓRIO ao confirmar p
 ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Nome", "qtd": 1, "preco": 0.00}]}
 
 ▸ PRODUTO COM COMPLEMENTOS (ex.: Quentinha) — fluxo obrigatório:
-  1. Quando o cliente escolher um produto que está na lista "PRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS", NÃO adicione direto. Primeiro mostre TODAS as categorias daquele produto, com as opções e quantos itens ele pode escolher em cada uma (ex.: "escolha 1", "escolha até 2"). Peça que ele diga o que quer em cada categoria.
+  1. Quando o cliente escolher um produto que está na lista "PRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS", NÃO adicione direto. Primeiro mostre TODAS as categorias daquele produto no MESMO formato do bloco de referência: barra separadora (━━━━━━━━━━━━━), *nome da categoria* em negrito com o máximo ("escolha 1"/"escolha até 2"), e cada opção numa linha própria com "• " (NUNCA vírgula na mesma linha). Peça que ele diga o que quer em cada categoria.
   2. Respeite o máximo de cada categoria — nunca aceite mais opções do que o "escolha até N" permite. Mas se o cliente escolher menos do que o máximo permitido (ex.: 1 salada quando pode 2), está OK — NÃO fique insistindo para ele adicionar mais. Assim que ele disser as opções, emita atualizar_carrinho na hora.
   3. Assim que o cliente disser as opções (mesmo que junto com "só isso"), sua PRÓXIMA ação é emitir atualizar_carrinho com a quentinha montada. ⛔ NUNCA mostre uma lista de confirmação com ✓ ("Deixa eu confirmar sua Quentinha: • X ✓") antes de emitir — isso deixa o carrinho VAZIO e o pedido sai errado. Emita a ACAO direto; a confirmação vem automática do sistema.
      - "preco" = preço base do produto + a soma dos adicionais pagos (os que têm "+R$") escolhidos.
