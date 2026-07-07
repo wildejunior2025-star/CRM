@@ -588,6 +588,14 @@ export default function PainelEntregador() {
     notificarCliente(pedido.id, 'entregue')
   }
 
+  // Dá saída em TODOS os pedidos aceitos que ainda não saíram (de uma vez).
+  async function sairComTodas(lista) {
+    const aSair = (lista || []).filter(p => p.status === 'confirmado' || p.status === 'em_preparo' || p.status === 'pronto')
+    if (!aSair.length) return
+    if (!window.confirm(`Dar saída em ${aSair.length} pedido(s) de uma vez?`)) return
+    for (const p of aSair) await sairParaEntrega(p)
+  }
+
   // Força pegar a versão mais nova do app (limpa cache + atualiza o service
   // worker) — pro motoqueiro não ficar preso numa versão antiga no navegador.
   const [atualizando, setAtualizando] = useState(false)
@@ -832,6 +840,12 @@ export default function PainelEntregador() {
                     style={{ ...btnPrimario('#7c3aed'), display: 'block', textAlign: 'center', textDecoration: 'none' }}>
                     🗺️ Rota de todas ({paradasUnicas(minhas)} paradas)
                   </a>
+                )}
+                {minhas.filter(p => p.status === 'confirmado' || p.status === 'em_preparo' || p.status === 'pronto').length >= 2 && (
+                  <button type="button" onClick={() => sairComTodas(minhas)}
+                    style={{ alignSelf: 'flex-end', fontSize: 12.5, fontWeight: 800, color: '#fff', background: '#16a34a', border: 'none', borderRadius: 20, padding: '7px 14px', cursor: 'pointer' }}>
+                    🛵 Sair com todas ({minhas.filter(p => p.status === 'confirmado' || p.status === 'em_preparo' || p.status === 'pronto').length})
+                  </button>
                 )}
                 {minhasF.map(p => (
                   <CardEntrega key={p.id} pedido={p} mine temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max}
