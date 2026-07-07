@@ -167,6 +167,8 @@ export default function DeliveryLoja() {
           .from('produto_complemento_grupos')
           .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))')
           .in('produto_id', ids)
+        // Opção "opt-out" (Sem X / Não Quero): serve pra recusar a categoria.
+        const soSemOpcao = nome => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ''))
         const porProduto = {}
         for (const v of (vinc ?? [])) {
           const g = v.complemento_grupos
@@ -174,6 +176,8 @@ export default function DeliveryLoja() {
           const opcoes = (g.complemento_opcoes ?? [])
             .filter(o => o.disponivel !== false)
             .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+          // Categoria que sobrou só com "Sem/Não Quero" (nenhuma opção real) não aparece.
+          if (!opcoes.some(o => !soSemOpcao(o.nome))) continue
           ;(porProduto[v.produto_id] ??= []).push({
             id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1, ordem: v.ordem ?? 0, opcoes,
           })

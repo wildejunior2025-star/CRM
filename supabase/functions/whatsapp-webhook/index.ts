@@ -1193,9 +1193,13 @@ serve(async (req) => {
             }
           }
           const nomeDoProduto = (id: string) => produtos.find((p: any) => p.id === id)?.nome ?? ""
+          // Opção "opt-out" (Sem X / Não Quero) só serve pra recusar a categoria.
+          const soSemOpcao = (nome: string) => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ""))
           const blocos: string[] = []
           for (const [pid, grupos] of Object.entries(porProduto)) {
             const linhas = (grupos as any[])
+              // Categoria que sobrou só com "Sem/Não Quero" (nada real) não entra no cardápio.
+              .filter((g: any) => (g.complemento_opcoes ?? []).some((o: any) => o.disponivel && !soSemOpcao(o.nome)))
               .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
               .map((g: any) => {
                 const ops = (g.complemento_opcoes ?? [])
@@ -1208,6 +1212,7 @@ serve(async (req) => {
                 const quant = g.max > 1 ? `escolha até ${g.max}` : (g.min > 0 ? "escolha 1" : "opcional")
                 return `  - ${g.nome} (${quant}): ${ops}`
               }).join("\n")
+            if (!linhas) continue
             blocos.push(`▸ ${nomeDoProduto(pid)}:\n${linhas}`)
           }
           complementosTexto = blocos.join("\n\n")

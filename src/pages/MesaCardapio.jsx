@@ -78,13 +78,15 @@ export default function MesaCardapio() {
           .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))')
           .in('produto_id', ids)
           .order('ordem')
+        const soSemOpcao = nome => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ''))
         for (const v of (vinc ?? [])) {
           const g = v.complemento_grupos
           if (!g || g.disponivel === false) continue // grupo pausado some do cardápio da mesa
           const opcoes = (g.complemento_opcoes ?? [])
             .filter(o => o.disponivel !== false)
             .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
-          if (!opcoes.length) continue
+          // Some se não tiver opção nenhuma OU só tiver "Sem/Não Quero" (nada real).
+          if (!opcoes.some(o => !soSemOpcao(o.nome))) continue
           ;(cm[v.produto_id] ??= []).push({ id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1, opcoes })
         }
       }
