@@ -165,6 +165,18 @@ function htmlParaLinhas(html) {
   return s.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean)
 }
 
+// Imprime um pedido uma única vez (evita 2ª via quando chegam vários updates do
+// mesmo pedido). Respeita a pausa da impressão automática.
+const pedidosImpressos = new Set()
+function imprimirPedido(p) {
+  if (!p || pedidosImpressos.has(p.id)) return
+  log('NOVO PEDIDO #' + (p.numero_pedido ?? p.id) + ' - ' + (p.cliente_nome || '') + ' (' + (p.origem || '') + ')')
+  if (config().pausado) { log('  (impressao automatica PAUSADA — nao imprimiu)'); return }
+  pedidosImpressos.add(p.id)
+  if (pedidosImpressos.size > 1000) pedidosImpressos.clear() // limpeza simples de memória
+  imprimir(p)
+}
+
 // ---- conecta e escuta os pedidos da loja ----
 async function iniciarEscuta() {
   const { data: sess } = await supabase.auth.getSession()
@@ -188,12 +200,24 @@ async function iniciarEscuta() {
   supabase.realtime.setAuth(sess.session.access_token)
   if (canal) { try { supabase.removeChannel(canal) } catch (e) {} }
   canal = supabase.channel('impressora-fwc-' + empresaId)
+    // Pedido novo — imprime na hora, MENOS se for PIX ainda não pago.
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pedidos_delivery', filter: 'empresa_id=eq.' + empresaId },
       payload => {
         const p = payload.new
-        log('NOVO PEDIDO #' + (p.numero_pedido ?? p.id) + ' - ' + (p.cliente_nome || '') + ' (' + (p.origem || '') + ')')
-        if (config().pausado) { log('  (impressao automatica PAUSADA — nao imprimiu)'); return }
-        imprimir(p)
+        if (p.status === 'aguardando_pagamento') {
+          log('PIX pendente #' + (p.numero_pedido ?? p.id) + ' — aguardando pagamento, NAO imprimiu')
+          return
+        }
+        imprimirPedido(p)
+      })
+    // Pedido mudou de status — imprime quando o PIX for confirmado (deixa de ser
+    // 'aguardando_pagamento' e vira pedido de verdade). Dedupe evita 2ª via.
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pedidos_delivery', filter: 'empresa_id=eq.' + empresaId },
+      payload => {
+        const p = payload.new
+        if (p.status === 'aguardando_pagamento') return
+        if (p.status === 'entregue' || p.status === 'cancelado') return
+        imprimirPedido(p)
       })
     .subscribe(st => log('Conexao: ' + st + (st === 'SUBSCRIBED' ? ' — imprimindo pedidos novos automaticamente!' : '')))
   log('Loja: ' + (empresa?.nome || '—'))
