@@ -165,11 +165,14 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
               <div style={{ fontSize: 12.5, fontWeight: 700, color: '#d97706' }}>⚠️ Sem responsável</div>
             )}
             <div style={{ fontSize: 12.5, fontWeight: 800, color: '#16a34a' }}>✓ Pronto às {horaBR(pedido.updated_at || pedido.created_at)}</div>
-            {pedido.preparando_por === meuId && pedido.pronto_por !== meuId && (
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: '#b45309', background: 'rgba(245,158,11,.12)', border: '1px solid #f59e0b', borderRadius: 8, padding: '6px 8px' }}>
-                ℹ️ Você separou este pedido, mas quem deu o "Pronto" foi outra pessoa (ou o motoboy/sistema).
-              </div>
-            )}
+            {pedido.preparando_por === meuId && pedido.pronto_por !== meuId && (() => {
+              const quemPronto = cozinheiros.find(c => c.id === pedido.pronto_por)?.nome || pedido.pronto_nome
+              return (
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: '#b45309', background: 'rgba(245,158,11,.12)', border: '1px solid #f59e0b', borderRadius: 8, padding: '6px 8px' }}>
+                  ℹ️ Você separou este pedido, mas quem deu o "Pronto" foi {quemPronto ? <b>{quemPronto}</b> : 'outra pessoa (motoboy/sistema)'}.
+                </div>
+              )
+            })()}
           </>
         ) : adminView ? (
           <div style={{
@@ -240,8 +243,8 @@ export default function PresencialCozinha() {
   async function marcarPedidoPronto(pedido) {
     // Otimista: move pra Histórico. O trigger avisa o iFood (readyToPickup) e o
     // pedido segue pro motoboy / retirada.
-    setEntregas(prev => prev.map(p => p.id === pedido.id ? { ...p, status: 'pronto', pronto_por: meuId, updated_at: new Date().toISOString() } : p))
-    await supabase.from('pedidos_delivery').update({ status: 'pronto', pronto_por: meuId }).eq('id', pedido.id)
+    setEntregas(prev => prev.map(p => p.id === pedido.id ? { ...p, status: 'pronto', pronto_por: meuId, pronto_nome: meuNome, updated_at: new Date().toISOString() } : p))
+    await supabase.from('pedidos_delivery').update({ status: 'pronto', pronto_por: meuId, pronto_nome: meuNome }).eq('id', pedido.id)
   }
   // Admin define quem preparou um pedido órfão (sem responsável). Some o "sem responsável"
   // e o pedido passa a aparecer no histórico da pessoa escolhida.
