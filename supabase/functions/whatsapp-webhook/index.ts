@@ -950,7 +950,7 @@ serve(async (req) => {
 
     const configRes = await supabase
       .from("whatsapp_config")
-      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, indicador_profile_id, mp_conectado)")
+      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, numero, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, indicador_profile_id, mp_conectado)")
       .eq("instance_name", instanceName)
       .eq("ativo", true)
       .single()
@@ -973,7 +973,7 @@ serve(async (req) => {
     const indicadorProfileId  = empresa.indicador_profile_id ?? null
 
     const empresaDescricao = empresa.descricao ?? ""
-    const empresaEndereco  = [empresa.endereco, empresa.cidade, empresa.estado].filter(Boolean).join(", ")
+    const empresaEndereco  = [empresa.endereco, empresa.numero, empresa.cidade, empresa.estado].filter(Boolean).join(", ")
     const empresaHorario   = empresa.horario_abertura && empresa.horario_fechamento
       ? `${empresa.horario_abertura} às ${empresa.horario_fechamento}`
       : empresa.horario_abertura ?? ""
