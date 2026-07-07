@@ -571,6 +571,12 @@ export default function PainelEntregador() {
   async function sairParaEntrega(pedido) {
     const update = { status: 'saiu_entrega', saiu_entrega_at: new Date().toISOString() }
     if (exigeCodigo && !pedido.codigo_entrega) update.codigo_entrega = String(Math.floor(1000 + Math.random() * 9000))
+    // Se ninguém deu o "Pronto" ainda, a SAÍDA do motoboy registra o pronto
+    // (ele já está com o pedido na bag e vai sair = está pronto). Fica no nome dele.
+    if (!pedido.pronto_por) {
+      update.pronto_por = user.id
+      update.pronto_nome = profile?.nome || 'Motoboy'
+    }
     setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, ...update } : p))
     await supabase.from('pedidos_delivery').update(update).eq('id', pedido.id)
     notificarCliente(pedido.id, 'saiu_entrega')
