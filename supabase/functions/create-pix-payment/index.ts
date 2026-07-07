@@ -107,7 +107,7 @@ Deno.serve(async (req) => {
         : Number(pedido.total ?? baseTotal)) * 100
     ) / 100
 
-    // MP exige mínimo 30 min para PIX — nosso cron cancela internamente aos 7 min
+    // MP exige mínimo 30 min para PIX — nosso cron cancela internamente aos 5 min
     const expiration = new Date(Date.now() + 30 * 60 * 1000).toISOString()
 
     // Token da loja (marketplace) + comissão da plataforma. Fallback: conta central.
@@ -193,7 +193,7 @@ Deno.serve(async (req) => {
         status:                'aguardando_pagamento',
         mp_payment_id:         String(mp_payment_id),
         mp_payment_status:     'pending',
-        pix_expira_em:         new Date(Date.now() + 7 * 60 * 1000).toISOString(),
+        pix_expira_em:         new Date(Date.now() + 5 * 60 * 1000).toISOString(),
         aguardando_desde:      null,
       })
       .select('id, numero_pedido')

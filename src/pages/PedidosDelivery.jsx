@@ -900,6 +900,11 @@ export default function PedidosDelivery() {
   const configRef = useRef(config)
   useEffect(() => { configRef.current = config }, [config])
 
+  // Ref com a lista atual — usado no Realtime pra saber se um pedido já estava no
+  // painel (ex.: distinguir "PIX acabou de ser pago e entrou agora" de um update comum).
+  const pedidosRef = useRef(pedidos)
+  useEffect(() => { pedidosRef.current = pedidos }, [pedidos])
+
   // Evita imprimir o mesmo pedido duas vezes (ex.: imprimiu ao chegar e depois ao aceitar)
   const impressosRef = useRef(new Set())
   function imprimirAutoUmaVez(pedido) {
@@ -958,6 +963,9 @@ export default function PedidosDelivery() {
       .from('pedidos_delivery')
       .select('*')
       .eq('empresa_id', empresa.id)
+      // PIX ainda não pago (aguardando_pagamento) NÃO aparece na loja — só entra
+      // quando o Mercado Pago confirmar (vira 'aguardando') ou some se expirar.
+      .neq('status', 'aguardando_pagamento')
       .order('created_at', { ascending: false })
       .limit(100)
     setPedidos(data || [])
@@ -978,6 +986,8 @@ export default function PedidosDelivery() {
       }, async (payload) => {
         if (payload.eventType === 'INSERT') {
           const novoPedido = payload.new
+          // PIX aguardando pagamento não aparece até o Mercado Pago confirmar.
+          if (novoPedido.status === 'aguardando_pagamento') return
           setPedidos(prev => [novoPedido, ...prev])
 
           if (novoPedido.status === 'aguardando') {
@@ -995,7 +1005,30 @@ export default function PedidosDelivery() {
             }
           }
         } else if (payload.eventType === 'UPDATE') {
-          setPedidos(prev => prev.map(p => p.id === payload.new.id ? payload.new : p))
+          const novo = payload.new
+          // Continua como PIX não pago: garante que não fique na lista.
+          if (novo.status === 'aguardando_pagamento') {
+            setPedidos(prev => prev.filter(p => p.id !== novo.id))
+            return
+          }
+          const jaEstava = pedidosRef.current.some(p => p.id === novo.id)
+          setPedidos(prev => {
+            const existe = prev.some(p => p.id === novo.id)
+            return existe ? prev.map(p => p.id === novo.id ? novo : p) : [novo, ...prev]
+          })
+          // Acabou de entrar na loja agora (ex.: PIX confirmado → 'aguardando'):
+          // trata como pedido novo (som, impressão, auto-aceitar).
+          if (!jaEstava && novo.status === 'aguardando') {
+            const cfg = configRef.current
+            if (cfg.somAtivo) tocarSom()
+            if (cfg.imprimirAuto) imprimirAutoUmaVez(novo)
+            if (cfg.autoAceitar) {
+              await supabase
+                .from('pedidos_delivery')
+                .update({ status: 'confirmado' })
+                .eq('id', novo.id)
+            }
+          }
         } else if (payload.eventType === 'DELETE') {
           setPedidos(prev => prev.filter(p => p.id !== payload.old.id))
         }
