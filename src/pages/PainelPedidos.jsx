@@ -5026,8 +5026,19 @@ export default function PainelPedidos() {
             }
 
             // Lista de todos os entregadores com os números
+            const totRota = entregadores.reduce((s, e) => s + emRota(e.id).length, 0)
+            const totConcl = entregadores.reduce((s, e) => s + concluidas(e.id).filter(p => dentroDoPeriodo(p.created_at, 'hoje')).length, 0)
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Total de TODOS os entregadores (hoje) */}
+                <div style={{ border: '2px solid #7c3aed', borderRadius: 12, padding: '12px 14px', background: 'rgba(124,58,237,.08)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', marginBottom: 8 }}>📊 Todos os entregadores — hoje</div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <span style={{ flex: 1, textAlign: 'center', fontSize: 12, padding: '4px 0', borderRadius: 8, background: 'rgba(124,58,237,.15)', color: '#7c3aed', fontWeight: 700 }}>Rota {totRota}</span>
+                    <span style={{ flex: 1, textAlign: 'center', fontSize: 12, padding: '4px 0', borderRadius: 8, background: 'rgba(34,197,94,.14)', color: '#16a34a', fontWeight: 700 }}>Concl. {totConcl}</span>
+                    <span style={{ flex: 1, textAlign: 'center', fontSize: 12, padding: '4px 0', borderRadius: 8, background: 'var(--border, #2a2a3a)', color: 'var(--text)', fontWeight: 800 }}>Total {totRota + totConcl}</span>
+                  </div>
+                </div>
                 {entregadores.map(e => {
                   const r = emRota(e.id).length
                   // No gestor o resumo é só do DIA (histórico completo fica em Vendas → Entregadores)
