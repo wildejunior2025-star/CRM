@@ -9,12 +9,21 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+const PRECO_POR_CREDITO = 0.07 // R$ por crédito (base dos pacotes)
 const PACOTES = [
-  { creditos: 100,  valor: 7.00  },
   { creditos: 500,  valor: 35.00 },
   { creditos: 2000, valor: 140.00 },
   { creditos: 5000, valor: 350.00 },
 ]
+// Resolve o pacote: se for um dos fixos, usa; senão aceita valor PERSONALIZADO
+// (créditos avulsos, dentro de limites), calculando o valor pelo preço por crédito.
+function resolverPacote(creditos: number) {
+  const fixo = PACOTES.find(p => p.creditos === creditos)
+  if (fixo) return fixo
+  const c = Math.floor(Number(creditos))
+  if (!Number.isFinite(c) || c < 70 || c > 100000) return null // min ~R$5, máx ~R$7000
+  return { creditos: c, valor: Math.round(c * PRECO_POR_CREDITO * 100) / 100 }
+}
 
 const DESCRICAO_TIPO: Record<string, string> = {
   recarga_pix:    'Recarga via PIX',
@@ -129,8 +138,8 @@ Deno.serve(async (req) => {
     // ── BUY PIX ──────────────────────────────────────────────────────────────
     if (action === 'buy_pix') {
       const { creditos } = json
-      const pacote = PACOTES.find(p => p.creditos === creditos)
-      if (!pacote) return new Response(JSON.stringify({ error: 'Pacote inválido' }), { status: 400, headers: CORS })
+      const pacote = resolverPacote(creditos)
+      if (!pacote) return new Response(JSON.stringify({ error: 'Valor inválido (mínimo 70 créditos)' }), { status: 400, headers: CORS })
 
       const { data: empresa } = await supabase.from('empresas').select('nome').eq('id', empresa_id).single()
       const expiration = new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 min (mínimo do MP)
@@ -204,8 +213,8 @@ Deno.serve(async (req) => {
     // ── CHARGE CARD ───────────────────────────────────────────────────────────
     if (action === 'charge_card') {
       const { creditos, token: frontendToken } = json
-      const pacote = PACOTES.find(p => p.creditos === creditos)
-      if (!pacote) return new Response(JSON.stringify({ error: 'Pacote inválido' }), { status: 400, headers: CORS })
+      const pacote = resolverPacote(creditos)
+      if (!pacote) return new Response(JSON.stringify({ error: 'Valor inválido (mínimo 70 créditos)' }), { status: 400, headers: CORS })
       if (!frontendToken) return new Response(JSON.stringify({ error: 'Token do cartão não enviado' }), { status: 400, headers: CORS })
 
       const { data: empresa } = await supabase.from('empresas').select('mp_customer_id, mp_card_id, mp_card_brand, mp_payer_cpf').eq('id', empresa_id).single()

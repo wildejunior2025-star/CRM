@@ -25,6 +25,7 @@ export default function WhatsAppCreditos() {
   const [loading, setLoading]       = useState(true)
   const [aba, setAba]               = useState('comprar') // 'comprar' | 'cartao' | 'auto' | 'historico'
   const [pacoteSel, setPacoteSel]   = useState(null)
+  const [valorCustom, setValorCustom] = useState('') // valor personalizado (R$)
   const [metodo, setMetodo]         = useState('pix')     // 'pix' | 'cartao'
   const [pixData, setPixData]       = useState(null)
   const [copiado, setCopiado]       = useState(false)
@@ -300,7 +301,7 @@ export default function WhatsAppCreditos() {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
             {pacotes.map(p => (
-              <div key={p.creditos} onClick={() => setPacoteSel(p)} style={{
+              <div key={p.creditos} onClick={() => { setPacoteSel(p); setValorCustom('') }} style={{
                 padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
                 border: `2px solid ${pacoteSel?.creditos === p.creditos ? 'var(--primary)' : 'var(--border)'}`,
                 background: pacoteSel?.creditos === p.creditos ? 'rgba(124,58,237,.06)' : 'var(--bg)',
@@ -315,6 +316,39 @@ export default function WhatsAppCreditos() {
               </div>
             ))}
           </div>
+
+          {/* Valor personalizado */}
+          {(() => {
+            const custom = pacoteSel && !pacotes.some(p => p.creditos === pacoteSel.creditos)
+            return (
+              <div style={{ marginBottom: 20, padding: '12px 14px', borderRadius: 12,
+                border: `2px ${custom ? 'solid var(--primary)' : 'dashed var(--border)'}`,
+                background: custom ? 'rgba(124,58,237,.06)' : 'transparent' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Ou digite o valor que quiser</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 14, color: 'var(--text-muted)' }}>R$</span>
+                  <input type="number" min={5} step={5} value={valorCustom}
+                    onChange={e => {
+                      setValorCustom(e.target.value)
+                      const v = Number(e.target.value)
+                      if (v >= 5) {
+                        const creditos = Math.max(70, Math.round(v / 0.07))
+                        setPacoteSel({ creditos, valor: Math.round(creditos * 0.07 * 100) / 100 })
+                      } else if (custom) {
+                        setPacoteSel(null)
+                      }
+                    }}
+                    placeholder="Ex: 50" style={{ ...inputStyle, width: 120 }} />
+                  {Number(valorCustom) >= 5 && (
+                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                      ≈ <b style={{ color: 'var(--primary)' }}>{Math.max(70, Math.round(Number(valorCustom) / 0.07))}</b> créditos
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Mínimo R$ 5 · R$ 0,07 por crédito</div>
+              </div>
+            )
+          })()}
 
           {/* Método */}
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Forma de pagamento</div>
