@@ -12,6 +12,7 @@ const CORS = {
 const PRECO_POR_CREDITO = 0.07 // R$ por crédito (base dos pacotes)
 const PACOTES = [
   { creditos: 500,  valor: 35.00 },
+  { creditos: 1000, valor: 70.00 },
   { creditos: 2000, valor: 140.00 },
   { creditos: 5000, valor: 350.00 },
 ]
