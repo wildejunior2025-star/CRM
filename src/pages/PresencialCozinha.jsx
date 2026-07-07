@@ -140,7 +140,9 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
                 ? <ChkLinha chave={`i${i}`} principal texto={`${qtd}× ${nome}`} marcados={marcados} onToggle={() => marcarItemTudo(i, comps)} />
                 : <div style={{ fontWeight: 700, fontSize: 14 }}>{qtd}× {nome}</div>}
               {comps.map((c, j) => {
-                const txt = `${Number(c?.qtd ?? 1)}× ${c?.nome ?? c}`
+                // Complemento multiplica pela qtd do prato: 4 quentinhas → cada
+                // complemento aparece ×4 (e se o complemento já for 2, vira 8).
+                const txt = `${Number(c?.qtd ?? 1) * qtd}× ${c?.nome ?? c}`
                 return checklist
                   ? <ChkLinha key={j} chave={`c${i}_${j}`} texto={txt} marcados={marcados} onToggle={toggleMarca} />
                   : <div key={j} style={{ fontSize: 12.5, color: 'var(--text-muted)', paddingLeft: 14 }}>{txt}</div>
@@ -471,7 +473,7 @@ export default function PresencialCozinha() {
                         <div style={{ fontWeight: 700, fontSize: 14 }}>{item.quantidade}× {nome}</div>
                         {comps.map((c, j) => (
                           <div key={j} style={{ fontSize: 12.5, color: 'var(--text-muted)', paddingLeft: 14 }}>
-                            {Number(c?.qtd ?? 1)}× {c?.nome ?? c}
+                            {Number(c?.qtd ?? 1) * (item.quantidade ?? item.qtd ?? 1)}× {c?.nome ?? c}
                           </div>
                         ))}
                         {item.observacao && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.observacao}</div>}

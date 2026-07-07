@@ -85,7 +85,8 @@ function montarCupom(pedido, empresa) {
     const comps = Array.isArray(it.complementos) ? it.complementos : []
     for (const c of comps) {
       const cn = typeof c === 'string' ? c : (c?.nome ?? '')
-      const cq = Number(c?.qtd ?? 1)
+      // Complemento multiplica pela qtd do prato (4 quentinhas → complemento x4).
+      const cq = Number(c?.qtd ?? 1) * Number(qtd || 1)
       if (cn) parts.push(linha('   ' + cq + 'x ' + cn))
     }
     if (it.observacao) parts.push(linha('   obs: ' + it.observacao))

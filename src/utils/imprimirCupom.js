@@ -83,7 +83,8 @@ export function montarCupomHtml(pedido, empresa = {}) {
       : qtd * Number(item.preco ?? item.preco_unitario ?? 0)
     const { nome: nomeItem, complementos: comps } = separarItem(item)
     const compsHtml = comps.map(c => {
-      const cq = Number(c?.qtd ?? 1)
+      // Complemento multiplica pela qtd do prato (4 quentinhas → complemento ×4).
+      const cq = Number(c?.qtd ?? 1) * Number(qtd || 1)
       const cn = esc(c?.nome ?? c)
       return `<div class="comp">▸ ${cq > 1 ? cq + 'x ' : ''}${cn}</div>`
     }).join('')
