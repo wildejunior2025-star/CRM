@@ -32,7 +32,7 @@ export default function EntregadoresHistorico() {
         .select('id, nome, entregador_desconto_ativo, entregador_desconto_valor')
         .eq('empresa_id', empresa.id).eq('perfil', 'entregador').eq('ativo', true).order('nome'),
       supabase.from('pedidos_delivery')
-        .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, pix_status, created_at, entregador_id, origem, entregador_pago, entregador_pago_em')
+        .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, pix_status, mp_payment_status, created_at, entregador_id, origem, entregador_pago, entregador_pago_em')
         .eq('empresa_id', empresa.id).eq('status', 'entregue').not('entregador_id', 'is', null)
         .order('created_at', { ascending: false }).limit(2000),
     ])
@@ -69,7 +69,7 @@ export default function EntregadoresHistorico() {
       const f = p.forma_pagamento, ehIfood = p.origem === 'ifood'
       if (f === 'dinheiro') return { pago: false, label: 'Dinheiro' + (ehIfood ? ' (via iFood)' : '') }
       if (['cartao', 'cartão', 'credito', 'debito'].includes(f)) { const n = f === 'debito' ? 'Débito' : f === 'credito' ? 'Crédito' : 'Cartão'; return { pago: false, label: n + (ehIfood ? ' (via iFood)' : ' (maquininha)') } }
-      if (f === 'pix') return p.pix_status === 'pago' ? { pago: true, label: 'PIX pago' } : { pago: false, label: 'PIX não confirmado' }
+      if (f === 'pix') return (p.pix_status === 'pago' || p.mp_payment_status === 'approved') ? { pago: true, label: 'PIX pago' } : { pago: false, label: 'PIX não confirmado' }
       if (ehIfood && f !== 'online') return { pago: false, label: (f || 'via iFood') + ' (via iFood)' }
       return { pago: true, label: ehIfood ? 'Pago no iFood' : (f || 'Pago') }
     }

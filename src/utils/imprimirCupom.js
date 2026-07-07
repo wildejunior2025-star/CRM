@@ -37,7 +37,7 @@ export function autoImprimirAtivo() {
 
 function labelPagamento(pedido) {
   const p = pedido.forma_pagamento || ''
-  if (p === 'pix') return pedido.pix_status === 'pago' ? 'PIX (pago)' : 'PIX'
+  if (p === 'pix') return (pedido.pix_status === 'pago' || pedido.mp_payment_status === 'approved') ? 'PIX (pago)' : 'PIX'
   if (p === 'dinheiro') return 'Dinheiro'
   // Formas que chegam dos pedidos do iFood
   if (p === 'online') return pedido.origem === 'ifood' ? 'PAGO ONLINE (iFood)' : 'Pago online'

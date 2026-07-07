@@ -103,7 +103,7 @@ function pagamentoInfo(p) {
     return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'Vale' + sufIfood, cor: '#f59e0b' }
   }
   if (forma === 'pix') {
-    if (p.pix_status === 'pago') return { pago: true, titulo: 'JÁ PAGO', detalhe: 'PIX confirmado', cor: '#16a34a' }
+    if (p.pix_status === 'pago' || p.mp_payment_status === 'approved') return { pago: true, titulo: 'JÁ PAGO', detalhe: 'PIX confirmado', cor: '#16a34a' }
     return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'PIX (não confirmado)', cor: '#f59e0b' }
   }
   // Pré-pago só quando é "online" (pago no app do iFood). Qualquer outra forma

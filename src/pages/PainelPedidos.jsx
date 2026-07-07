@@ -203,7 +203,7 @@ function ModalRecusa({ pedido, onConfirmar, onFechar }) {
             Informe o motivo — o cliente sera notificado.
           </p>
         </div>
-        {pedido.pix_status === 'pago' && (
+        {(pedido.pix_status === 'pago' || pedido.mp_payment_status === 'approved') && (
           <div className="pp-modal-pix-aviso">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="10"/>
@@ -1888,7 +1888,7 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           const subComTaxa = Number(v.itens || 0) + Number(v.taxa || 0)
           const aLojaRecebe = Number(v.pago || 0) + Number(v.incentivo_ifood || 0)
           // Cobrar na entrega quando NÃO é pré-pago (débito/crédito/dinheiro "via loja")
-          const cobrar = !(pagamento === 'online' || (pagamento === 'pix' && pedido.pix_status === 'pago'))
+          const cobrar = !(pagamento === 'online' || (pagamento === 'pix' && (pedido.pix_status === 'pago' || pedido.mp_payment_status === 'approved')))
           return (
             <>
               <div className="pp-totais-row"><span>Itens</span><span>{fmt(v.itens)}</span></div>
@@ -1978,7 +1978,7 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         {pagamento === 'pix' && (
           <span className="pp-badge pp-badge-pix">Pix</span>
         )}
-        {pagamento === 'pix' && pedido.pix_status === 'pago' && (
+        {pagamento === 'pix' && (pedido.pix_status === 'pago' || pedido.mp_payment_status === 'approved') && (
           <span className="pp-badge-pix-pago">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
             PIX pago
@@ -1995,7 +1995,7 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         )}
         {/* Precisa cobrar na entrega? Pré-pago = "online" (iFood app) ou PIX confirmado.
             iFood "via loja" (débito/crédito/dinheiro) o cliente paga na entrega. */}
-        {!(pagamento === 'online' || (pagamento === 'pix' && pedido.pix_status === 'pago')) && (
+        {!(pagamento === 'online' || (pagamento === 'pix' && (pedido.pix_status === 'pago' || pedido.mp_payment_status === 'approved'))) && (
           <span className="pp-badge" style={{ background: 'rgba(245,158,11,.15)', color: '#b45309', fontWeight: 800, border: '1px solid #f59e0b' }}>
             💵 Cobrar do cliente · {fmt(pedido.total)}
           </span>
@@ -4910,7 +4910,7 @@ export default function PainelPedidos() {
                   return { pago: false, label: n + (ehIfood ? ' (via iFood)' : ' (maquininha)') }
                 }
                 if (f === 'vale') return { pago: false, label: 'Vale' + (ehIfood ? ' (via iFood)' : '') }
-                if (f === 'pix') return p.pix_status === 'pago' ? { pago: true, label: 'PIX pago' } : { pago: false, label: 'PIX não confirmado' }
+                if (f === 'pix') return (p.pix_status === 'pago' || p.mp_payment_status === 'approved') ? { pago: true, label: 'PIX pago' } : { pago: false, label: 'PIX não confirmado' }
                 // iFood com forma não mapeada ("outro") = cobrar na entrega, não "pago".
                 if (ehIfood && f !== 'online') return { pago: false, label: (f || 'via iFood') + ' (via iFood)' }
                 return { pago: true, label: ehIfood ? 'Pago no iFood' : (f || 'Pago') }

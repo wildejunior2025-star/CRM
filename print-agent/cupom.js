@@ -29,7 +29,8 @@ function kv(label, valor) {
 function formaPagamento(p) {
   const f = p.forma_pagamento
   const ifood = p.origem === 'ifood'
-  const prepago = f === 'online' || (f === 'pix' && p.pix_status === 'pago')
+  // PIX pelo Mercado Pago só aparece depois de pago → aprovado no MP conta como pago.
+  const prepago = f === 'online' || (f === 'pix' && (p.pix_status === 'pago' || p.mp_payment_status === 'approved'))
   if (prepago) return { cobrar: false, label: ifood ? 'PAGO no iFood' : (f === 'pix' ? 'PAGO via PIX' : 'PAGO') }
   let nome = 'Dinheiro'
   if (['cartao', 'cartao', 'credito', 'debito'].includes(f)) nome = f === 'debito' ? 'Debito' : f === 'credito' ? 'Credito' : 'Cartao'
