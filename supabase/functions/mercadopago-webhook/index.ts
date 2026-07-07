@@ -96,7 +96,54 @@ Deno.serve(async (req) => {
         .eq('mp_payment_id', String(paymentId))
         .eq('status', 'aguardando_pagamento')
         .select('numero_pedido, cliente_telefone, empresa_id')
-        .single()
+        .maybeSingle()
+
+      // ── Pagamento chegou DEPOIS do pedido já ter sido cancelado (PIX expirou
+      //    antes do cliente pagar). O QR do Mercado Pago fica válido ~30 min, mas
+      //    a loja cancela em ~5 min. Se o cliente pagar fora do prazo, NÃO adianta
+      //    "aceitar" um pedido cancelado — estorna automático e avisa o cliente. ──
+      if (!pedido) {
+        const { data: canc } = await supabase
+          .from('pedidos_delivery')
+          .select('id, numero_pedido, cliente_telefone, empresa_id, status, mp_payment_status')
+          .eq('mp_payment_id', String(paymentId))
+          .maybeSingle()
+
+        if (canc && canc.status === 'cancelado' && canc.mp_payment_status !== 'refunded') {
+          // Reembolso total com o token da loja dona do pagamento.
+          const refundRes = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}/refunds`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${mpToken}`, 'Content-Type': 'application/json', 'X-Idempotency-Key': crypto.randomUUID() },
+            body: JSON.stringify({}),
+          })
+          if (refundRes.ok) {
+            await supabase.from('pedidos_delivery')
+              .update({ mp_payment_status: 'refunded', pix_status: 'reembolsado' })
+              .eq('id', canc.id)
+
+            if (canc.cliente_telefone) {
+              const { data: waCfg } = await supabase
+                .from('whatsapp_config').select('instance_name')
+                .eq('empresa_id', canc.empresa_id).eq('ativo', true).maybeSingle()
+              if (waCfg?.instance_name) {
+                const phone = canc.cliente_telefone.replace(/\D/g, '')
+                const phoneWpp = phone.startsWith('55') ? phone : `55${phone}`
+                await fetch(`${EVOLUTION_API_URL}/message/sendText/${waCfg.instance_name}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY },
+                  body: JSON.stringify({
+                    number: phoneWpp,
+                    text: `⚠️ *Ops! O PIX chegou fora do tempo.*\n\nO pedido *#${canc.numero_pedido}* já tinha sido cancelado porque o pagamento passou do prazo, então *estornamos o valor pra você* (cai de volta na sua conta em alguns minutos).\n\nSe ainda quiser o pedido, é só chamar aqui que a gente refaz rapidinho! 😊`,
+                  }),
+                })
+              }
+            }
+          } else {
+            console.error('Reembolso tardio falhou:', await refundRes.text())
+          }
+        }
+        return new Response('ok', { status: 200 })
+      }
 
       // Notifica cliente via WhatsApp
       if (pedido?.cliente_telefone) {
