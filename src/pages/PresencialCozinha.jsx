@@ -350,9 +350,20 @@ export default function PresencialCozinha() {
   // nº do iFood, cliente, endereço ou mesa.
   const buscaLimpa = busca.trim().toLowerCase()
   const casaBusca = campos => !buscaLimpa || campos.filter(Boolean).join(' ').toLowerCase().includes(buscaLimpa)
-  const entAba  = ent[aba].filter(p => casaBusca([p.numero_pedido, p.ifood_display_id, p.codigo_entrega, p.cliente_nome, p.endereco_rua, p.endereco_bairro, p.endereco_cidade, String(p.id || '').slice(-4)]))
+  const ehHistoricoPed = p => p.status === 'pronto' || p.status === 'saiu_entrega' || p.status === 'entregue'
+  const dedupById = arr => Array.from(new Map(arr.map(x => [x.id, x])).values())
+  // Ao BUSCAR, procura em TODAS as abas (ignora o filtro) — acha o pedido onde estiver.
+  const entBase = buscaLimpa
+    ? dedupById(ehAdmin ? [...ent.todos, ...ent.historico] : [...ent.afazer, ...ent.preparando, ...ent.historico])
+    : ent[aba]
+  const entAba  = entBase.filter(p => casaBusca([p.numero_pedido, p.ifood_display_id, p.codigo_entrega, p.cliente_nome, p.endereco_rua, p.endereco_bairro, p.endereco_cidade, String(p.id || '').slice(-4)]))
   const mesaAba = useMemo(
-    () => agruparPorMesa(mesa[aba].filter(i => casaBusca([i.comandas?.numero_mesa, 'mesa ' + (i.comandas?.numero_mesa ?? ''), i.nome]))),
+    () => {
+      const base = buscaLimpa
+        ? dedupById(ehAdmin ? [...mesa.todos, ...mesa.historico] : [...mesa.afazer, ...mesa.preparando, ...mesa.historico])
+        : mesa[aba]
+      return agruparPorMesa(base.filter(i => casaBusca([i.comandas?.numero_mesa, 'mesa ' + (i.comandas?.numero_mesa ?? ''), i.nome])))
+    },
     [itens, aba, meuId, buscaLimpa] // eslint-disable-line react-hooks/exhaustive-deps
   )
 
@@ -428,7 +439,9 @@ export default function PresencialCozinha() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
           {/* Pedidos de delivery / iFood */}
           {entAba.map(pedido => (
-            <CardEntregaKDS key={pedido.id} pedido={pedido} meuId={meuId} historico={aba === 'historico'} adminView={aba === 'todos'}
+            <CardEntregaKDS key={pedido.id} pedido={pedido} meuId={meuId}
+              historico={buscaLimpa ? ehHistoricoPed(pedido) : aba === 'historico'}
+              adminView={buscaLimpa ? (ehAdmin && !ehHistoricoPed(pedido)) : aba === 'todos'}
               ehAdmin={ehAdmin} cozinheiros={cozinheiros} onDefinirPreparador={definirPreparador}
               onAceitar={aceitarPedido} onSoltar={soltarPedido} onPronto={marcarPedidoPronto} />
           ))}
@@ -447,6 +460,9 @@ export default function PresencialCozinha() {
               <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {lista.map(item => {
                   const { nome, complementos: comps } = separarItem(item)
+                  // Ao buscar, o layout segue o estado real do item (não a aba).
+                  const itemHist = buscaLimpa ? item.status === 'pronto' : aba === 'historico'
+                  const itemTodos = buscaLimpa ? (ehAdmin && item.status !== 'pronto') : aba === 'todos'
                   return (
                     <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <div style={{ flex: 1 }}>
@@ -457,15 +473,15 @@ export default function PresencialCozinha() {
                           </div>
                         ))}
                         {item.observacao && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.observacao}</div>}
-                        {aba === 'historico'
+                        {itemHist
                           ? <div style={{ fontSize: 12, fontWeight: 800, color: '#16a34a' }}>✓ Pronto às {horaBR(item.updated_at || item.created_at)}</div>
                           : <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>há {tempoDesde(item.created_at)}</div>}
                       </div>
-                      {aba === 'todos' ? (
+                      {itemTodos ? (
                         <div style={{ minWidth: 100, fontSize: 12, fontWeight: 800, textAlign: 'right', color: item.preparando_por ? '#b45309' : '#2563eb' }}>
                           {item.preparando_por ? `👨‍🍳 ${item.preparando_nome || 'Alguém'}` : '🟢 Livre'}
                         </div>
-                      ) : aba !== 'historico' ? (
+                      ) : !itemHist ? (
                         <div style={{ minWidth: 130 }}>
                           <AcaoPreparo registro={item} meuId={meuId} size="sm"
                             onAceitar={aceitarItem} onSoltar={soltarItem} onPronto={marcarPronto} />
