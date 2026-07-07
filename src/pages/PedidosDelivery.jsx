@@ -905,11 +905,34 @@ export default function PedidosDelivery() {
   const pedidosRef = useRef(pedidos)
   useEffect(() => { pedidosRef.current = pedidos }, [pedidos])
 
+  // App Impressora FWC rodando + logado + com impressora? Se sim, ELE imprime os
+  // pedidos sozinho (pela conexão realtime dele). O navegador NÃO deve mandar
+  // imprimir também, senão sai 2 vias (o cupom vai pro app pelos dois caminhos).
+  const fwcImprimeRef = useRef(false)
+  useEffect(() => {
+    let vivo = true
+    const ping = async () => {
+      let on = false
+      try {
+        const c = new AbortController(); const t = setTimeout(() => c.abort(), 3000)
+        const r = await fetch('http://127.0.0.1:9110/api/status', { signal: c.signal, cache: 'no-store' })
+        clearTimeout(t)
+        const j = await r.json().catch(() => null)
+        on = !!(j && j.logado && j.impressora)
+      } catch (e) { on = false }
+      if (vivo) fwcImprimeRef.current = on
+    }
+    ping(); const id = setInterval(ping, 15000)
+    return () => { vivo = false; clearInterval(id) }
+  }, [])
+
   // Evita imprimir o mesmo pedido duas vezes (ex.: imprimiu ao chegar e depois ao aceitar)
   const impressosRef = useRef(new Set())
   function imprimirAutoUmaVez(pedido) {
     if (!pedido || impressosRef.current.has(pedido.id)) return
     impressosRef.current.add(pedido.id)
+    // App FWC ativo → ele imprime pela conexão dele; o navegador não imprime junto.
+    if (fwcImprimeRef.current) return
     imprimirPedido(pedido)
   }
 
