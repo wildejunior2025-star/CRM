@@ -307,6 +307,8 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     ifood_display_id: o.displayId ?? null,
     ifood_status: "PLACED",
     ifood_valores: ifoodValores,
+    // Horário previsto de entrega que o iFood informa (mostrado pro motoboy)
+    entrega_prevista_at: o.delivery?.deliveryDateTime ?? null,
   }
 
   const { error } = await sb.from("pedidos_delivery").insert(novo)

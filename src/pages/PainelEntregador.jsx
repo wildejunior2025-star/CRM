@@ -120,7 +120,18 @@ function normTxt(s) { return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').
 // Palavras que denunciam bebida — fallback caso a lista de produtos não carregue.
 const BEBIDA_KEYWORDS = /refrigerante|guaran|\bcerveja|heineken|\bskol|\bbrahma|energetic|red bull|monster|\bsuco|\bagua\b|itaipava/
 
-function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, temBebida = false, exigeCodigo = true }) {
+// Horário previsto de entrega: no iFood vem do próprio iFood; na loja calcula pelo tempo de entrega.
+function previstaEntregaTxt(p, tempoMax) {
+  let dt
+  if (p.entrega_prevista_at) dt = new Date(p.entrega_prevista_at)
+  else {
+    const mins = Number(tempoMax) > 0 ? Number(tempoMax) : 45
+    dt = new Date(new Date(p.created_at).getTime() + mins * 60000)
+  }
+  return dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
+
+function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, temBebida = false, exigeCodigo = true, tempoEntregaMax }) {
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
@@ -201,6 +212,12 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
       </div>
 
       <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>{pedido.cliente_nome || 'Cliente'}</div>
+      {(pedido.tipo_entrega || 'entrega') !== 'retirada' && (
+        <div style={{ fontSize: 13, fontWeight: 800, marginTop: 3, color: '#7c3aed' }}>
+          🕒 Entregar até {previstaEntregaTxt(pedido, tempoEntregaMax)}
+          {pedido.origem === 'ifood' && pedido.entrega_prevista_at && <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}> (iFood)</span>}
+        </div>
+      )}
       {(naCozinha || prontoParaSair) && (() => {
         const atrasado = pedidoAtrasado(pedido)
         return (
@@ -811,7 +828,7 @@ export default function PainelEntregador() {
                   </a>
                 )}
                 {minhasF.map(p => (
-                  <CardEntrega key={p.id} pedido={p} mine temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega}
+                  <CardEntrega key={p.id} pedido={p} mine temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max}
                     onSair={sairParaEntrega} onConfirmar={confirmarEntrega}
                     onConfirmarIfood={confirmarEntregaIfood} onDesistir={desistirEntrega} />
                 ))}
@@ -834,7 +851,7 @@ export default function PainelEntregador() {
                 Nenhum pedido encontrado pra <strong>“{busca}”</strong>.
               </div>
             ) : disponiveisF.map(p => (
-              <CardEntrega key={p.id} pedido={p} mine={false} temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} onAceitar={podeAceitar ? aceitar : undefined} />
+              <CardEntrega key={p.id} pedido={p} mine={false} temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} onAceitar={podeAceitar ? aceitar : undefined} />
             ))
           )
         ) : (
