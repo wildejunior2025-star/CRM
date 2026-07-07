@@ -4,6 +4,31 @@
   gap: 10px;
 }
 
+/* Cabeçalho de dia no histórico (aba Concluídos) + separação sutil entre dias */
+.pd-dia-row td {
+  padding: 0 !important;
+  border-top: 2px solid var(--border);
+}
+.pd-dia-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  background: var(--bg);
+}
+.pd-dia-data {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+}
+.pd-dia-tot {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Badge pulsante de pedidos aguardando */
 .pd-badge-pulsante {
   display: inline-flex;

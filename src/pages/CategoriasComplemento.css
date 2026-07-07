@@ -1,0 +1,148 @@
+/* Tela "Complementos" — visual no padrão do resto do sistema (usa as variáveis de tema). */
+
+.cc-sub {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin: -6px 0 18px;
+  max-width: 700px;
+  line-height: 1.5;
+}
+
+/* Barra de criar categoria */
+.cc-create {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+.cc-create .cc-input { flex: 1; min-width: 220px; }
+
+/* Inputs padrão da página */
+.cc-input {
+  padding: 9px 12px;
+  font-size: 15px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 160ms ease;
+}
+.cc-input:focus {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+/* Lupa de pesquisa */
+.cc-search { position: relative; max-width: 440px; margin-bottom: 18px; }
+.cc-search .cc-input { width: 100%; padding-left: 38px; padding-right: 34px; }
+.cc-search-icon {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  font-size: 14px; color: var(--text-muted); pointer-events: none;
+}
+.cc-search-clear {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 4px 6px; border-radius: 6px;
+}
+.cc-search-clear:hover { background: var(--surface-hover); color: var(--text); }
+
+/* Card da categoria */
+.cc-card {
+  margin-bottom: 16px;
+  padding: 0;
+  overflow: hidden;
+}
+.cc-card.paused { opacity: 0.72; }
+
+.cc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-wrap: wrap;
+}
+.cc-head-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cc-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Nome da categoria: parece texto, vira input ao focar */
+.cc-name {
+  font-size: 16px;
+  font-weight: 700;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--text);
+  min-width: 150px;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.cc-name:hover { border-color: var(--border); }
+.cc-name:focus {
+  border-color: var(--primary);
+  background: var(--bg);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+.cc-minmax { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+.cc-minmax .cc-input { width: 54px; text-align: center; padding: 7px 6px; }
+
+/* Corpo: opções | produtos */
+.cc-body {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 24px;
+  padding: 16px 18px 18px;
+}
+@media (max-width: 860px) { .cc-body { grid-template-columns: 1fr; gap: 20px; } }
+
+.cc-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+}
+
+/* Opções */
+.cc-opt {
+  display: grid;
+  grid-template-columns: 1fr 92px auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+}
+.cc-opt.paused .cc-input { opacity: 0.55; }
+.cc-price-wrap { position: relative; }
+.cc-price-wrap .cc-input { width: 100%; padding-left: 26px; }
+.cc-price-prefix {
+  position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+  font-size: 12px; color: var(--text-muted); pointer-events: none;
+}
+
+/* Produtos vinculados (chips) */
+.cc-prod {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+  margin-bottom: 7px; background: var(--surface);
+}
+.cc-prod-name { flex: 1; font-weight: 600; font-size: 14px; }
+.cc-prod-max { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); }
+.cc-prod-max .cc-input { width: 52px; text-align: center; padding: 6px; }
+
+.cc-iconbtn {
+  background: none; border: none; color: var(--danger); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 4px 7px; border-radius: 6px;
+  transition: background-color 120ms ease;
+}
+.cc-iconbtn:hover { background: var(--danger-bg); }
+
+.cc-empty { color: var(--text-muted); font-size: 13px; margin: 4px 0; }
+
+.cc-add-select { margin-top: 8px; width: 100%; max-width: 360px; }

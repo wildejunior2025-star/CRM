@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { useAuth } from '../hooks/useAuth'
 import { CONDICOES_PAGAMENTO } from '../lib/constants'
 import ClienteHistorico from './ClienteHistorico'
 import '../components/Page.css'
@@ -12,9 +13,12 @@ const emptyForm = {
   tipo: 'mercadinho',
   cnpj_cpf: '',
   telefone: '',
+  cep: '',
   endereco: '',
+  numero: '',
   bairro: '',
   cidade: '',
+  estado: '',
   dia_visita: '',
   condicao_pagamento: 'a_vista',
   limite_credito: 0,
@@ -25,6 +29,12 @@ const emptyForm = {
 }
 
 export default function Clientes() {
+  const { profile } = useAuth()
+  const empresaId = profile?.empresa_id ?? null
+  // Preços especiais de parceria (cliente + produto → preço), usados pelo robô
+  const [produtosLista, setProdutosLista] = useState([]) // [{id, nome, preco_venda}]
+  const [precosEspeciais, setPrecosEspeciais] = useState([]) // [{produto_id, preco}]
+  const [buscandoCep, setBuscandoCep] = useState(false)
   const [clientes, setClientes] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -82,9 +92,17 @@ export default function Clientes() {
     loadTipos()
   }, [])
 
+  // Catálogo de produtos (pro seletor de preço especial)
+  useEffect(() => {
+    if (!empresaId) return
+    supabase.from('produtos').select('id, nome, preco_venda').eq('empresa_id', empresaId).eq('ativo', true).order('nome')
+      .then(({ data }) => setProdutosLista(data ?? []))
+  }, [empresaId])
+
   function openNew() {
     setEditingId(null)
     setForm(emptyForm)
+    setPrecosEspeciais([])
     setShowModal(true)
   }
 
@@ -95,9 +113,12 @@ export default function Clientes() {
       tipo: cliente.tipo ?? 'mercadinho',
       cnpj_cpf: cliente.cnpj_cpf ?? '',
       telefone: cliente.telefone ?? '',
+      cep: cliente.cep ?? '',
       endereco: cliente.endereco ?? '',
+      numero: cliente.numero ?? '',
       bairro: cliente.bairro ?? '',
       cidade: cliente.cidade ?? '',
+      estado: cliente.estado ?? '',
       dia_visita: cliente.dia_visita ?? '',
       condicao_pagamento: cliente.condicao_pagamento ?? 'a_vista',
       limite_credito: cliente.limite_credito ?? 0,
@@ -106,6 +127,10 @@ export default function Clientes() {
       observacoes: cliente.observacoes ?? '',
       ativo: cliente.ativo ?? true,
     })
+    // carrega os preços especiais deste cliente
+    setPrecosEspeciais([])
+    supabase.from('precos_especiais_cliente').select('produto_id, preco').eq('cliente_id', cliente.id)
+      .then(({ data }) => setPrecosEspeciais((data ?? []).map(p => ({ produto_id: p.produto_id, preco: p.preco }))))
     setShowModal(true)
   }
 
@@ -115,6 +140,27 @@ export default function Clientes() {
       ...prev,
       [name]: type === 'checkbox' ? checked : value,
     }))
+  }
+
+  // Busca o endereço pelo CEP (ViaCEP) e preenche rua/bairro/cidade/estado.
+  async function buscarCep(valor) {
+    const cep = String(valor || '').replace(/\D/g, '')
+    if (cep.length !== 8) return
+    setBuscandoCep(true)
+    try {
+      const r = await fetch(`https://viacep.com.br/ws/${cep}/json/`)
+      const d = await r.json()
+      if (!d.erro) {
+        setForm((prev) => ({
+          ...prev,
+          endereco: d.logradouro || prev.endereco,
+          bairro: d.bairro || prev.bairro,
+          cidade: d.localidade || prev.cidade,
+          estado: d.uf || prev.estado,
+        }))
+      }
+    } catch { /* ignora falha de rede */ }
+    setBuscandoCep(false)
   }
 
   async function handleSubmit(e) {
@@ -129,17 +175,39 @@ export default function Clientes() {
       desconto_minimo_pedido: Number(form.desconto_minimo_pedido) || 0,
     }
 
-    const { error } = editingId
-      ? await supabase.from('clientes').update(payload).eq('id', editingId)
-      : await supabase.from('clientes').insert(payload)
-
-    setSaving(false)
+    const { data: saved, error } = editingId
+      ? await supabase.from('clientes').update(payload).eq('id', editingId).select('id').single()
+      : await supabase.from('clientes').insert(payload).select('id').single()
 
     if (error) {
+      setSaving(false)
       setError(error.message)
       return
     }
 
+    // Reconcilia os preços especiais do cliente (apaga e regrava — simples e seguro)
+    const cid = saved?.id ?? editingId
+    if (cid) {
+      try {
+        await supabase.from('precos_especiais_cliente').delete().eq('cliente_id', cid)
+        const vistos = new Set()
+        const rows = []
+        for (const pe of precosEspeciais) {
+          if (!pe.produto_id || vistos.has(pe.produto_id)) continue
+          const preco = Number(pe.preco)
+          if (!(preco > 0)) continue
+          vistos.add(pe.produto_id)
+          rows.push({ empresa_id: empresaId, cliente_id: cid, produto_id: pe.produto_id, preco })
+        }
+        if (rows.length) await supabase.from('precos_especiais_cliente').insert(rows)
+      } catch (err) {
+        setSaving(false)
+        setError('Cliente salvo, mas houve erro nos preços especiais: ' + (err?.message ?? err))
+        return
+      }
+    }
+
+    setSaving(false)
     setShowModal(false)
     loadClientes()
   }
@@ -353,6 +421,28 @@ export default function Clientes() {
                   </select>
                 </div>
 
+                <div className="form-field">
+                  <label>CEP {buscandoCep && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>· buscando…</span>}</label>
+                  <input
+                    name="cep"
+                    value={form.cep}
+                    onChange={handleChange}
+                    onBlur={e => buscarCep(e.target.value)}
+                    placeholder="Digite o CEP (puxa rua/bairro)"
+                    inputMode="numeric"
+                  />
+                </div>
+
+                <div className="form-field">
+                  <label>Número</label>
+                  <input
+                    name="numero"
+                    value={form.numero}
+                    onChange={handleChange}
+                    placeholder="Nº"
+                  />
+                </div>
+
                 <div className="form-field full">
                   <label>Endereço</label>
                   <input
@@ -432,6 +522,38 @@ export default function Clientes() {
                     onChange={handleChange}
                     placeholder="0 = sempre aplica"
                   />
+                </div>
+
+                <div className="form-field full" style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                  <label>Preços especiais (parceria)</label>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 8px' }}>
+                    Preço combinado só pra este cliente num produto (ex.: Quentinha M por R$15). Vale só pra ele, no <b>robô do WhatsApp</b>.
+                  </div>
+                  {precosEspeciais.length === 0 && (
+                    <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nenhum. Adicione abaixo se tiver acordo de preço.</div>
+                  )}
+                  {precosEspeciais.map((pe, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                      <select
+                        value={pe.produto_id}
+                        onChange={e => setPrecosEspeciais(prev => prev.map((x, j) => j === i ? { ...x, produto_id: e.target.value } : x))}
+                        style={{ flex: 1, minWidth: 180 }}>
+                        <option value="">Escolha o produto…</option>
+                        {produtosLista.map(p => (
+                          <option key={p.id} value={p.id}>{p.nome} (normal R$ {Number(p.preco_venda ?? 0).toFixed(2)})</option>
+                        ))}
+                      </select>
+                      <input type="number" step="0.01" min="0" placeholder="R$ especial" style={{ width: 110 }}
+                        value={pe.preco}
+                        onChange={e => setPrecosEspeciais(prev => prev.map((x, j) => j === i ? { ...x, preco: e.target.value } : x))} />
+                      <button type="button" className="btn btn-danger btn-sm"
+                        onClick={() => setPrecosEspeciais(prev => prev.filter((_, j) => j !== i))}>✕</button>
+                    </div>
+                  ))}
+                  <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 8 }}
+                    onClick={() => setPrecosEspeciais(prev => [...prev, { produto_id: '', preco: '' }])}>
+                    + Adicionar preço especial
+                  </button>
                 </div>
 
                 <div className="form-field full">

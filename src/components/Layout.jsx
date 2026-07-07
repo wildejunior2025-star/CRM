@@ -14,7 +14,14 @@ import './Layout.css'
 const links = [
   { group: 'Operações' },
   { to: '/', label: 'Dashboard', end: true, roles: ['admin'] },
-  { to: '/vendas', label: 'Vendas', roles: ['admin', 'vendedor'], mod: 'vendas' },
+  {
+    to: '/vendas', label: 'Vendas', roles: ['admin', 'vendedor'], mod: 'vendas',
+    children: [
+      { to: '/vendas', label: 'Vendas física', roles: ['admin', 'vendedor'] },
+      { to: '/pedidos-delivery', label: 'Vendas delivery', roles: ['admin'], mod: 'delivery' },
+      { to: '/entregadores', label: 'Entregadores', roles: ['admin'], mod: 'delivery' },
+    ],
+  },
   { to: '/caixa', label: 'Caixa', roles: ['admin', 'vendedor'], mod: 'caixa' },
   { to: '/clientes', label: 'Clientes', roles: ['admin'], mod: 'clientes' },
   { to: '/usuarios', label: 'Funcionários', roles: ['admin'], mod: 'funcionarios' },
@@ -34,6 +41,7 @@ const links = [
 
   { group: 'Catálogo' },
   { to: '/produtos', label: 'Catálogo', roles: ['admin'], mod: 'produtos' },
+  { to: '/complementos', label: 'Complementos', roles: ['admin'], mod: 'produtos' },
   { to: '/estoque', label: 'Estoque', roles: ['admin'], mod: 'estoque' },
 
   { group: 'Delivery' },
@@ -47,12 +55,16 @@ const links = [
       { to: '/loja-conta', label: 'Conta', roles: ['admin'] },
     ],
   },
-  { to: '/pedidos-delivery', label: 'Pedidos Delivery', roles: ['admin'], mod: 'delivery' },
-
   { group: 'Automação' },
-  { to: '/whatsapp', label: 'WhatsApp', roles: ['admin', 'super_admin'], mod: 'whatsapp' },
-  { to: '/whatsapp-creditos', label: 'Créditos Bot', roles: ['admin'], mod: 'whatsapp' },
-  { to: '/bot-teste', label: 'Teste Bot', roles: ['admin', 'super_admin'], mod: 'whatsapp' },
+  {
+    to: '/whatsapp', label: 'WhatsApp', roles: ['admin', 'super_admin'], mod: 'whatsapp',
+    children: [
+      { to: '/whatsapp', label: 'Conexão / Config', roles: ['admin', 'super_admin'] },
+      { to: '/whatsapp-conversas', label: 'Conversas do bot', roles: ['admin'] },
+      { to: '/whatsapp-creditos', label: 'Créditos Bot', roles: ['admin'] },
+      { to: '/bot-teste', label: 'Teste Bot', roles: ['admin', 'super_admin'] },
+    ],
+  },
 
   { group: 'Financeiro' },
   { to: '/financeiro', label: 'Financeiro', roles: ['admin'], mod: 'financeiro' },
@@ -83,7 +95,8 @@ export default function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [expandidos, setExpandidos] = useState(() => new Set(['/minha-loja', '/presencial']))
+  // Todos os submenus começam FECHADOS (mais limpo). Abre na setinha quando quiser.
+  const [expandidos, setExpandidos] = useState(() => new Set())
 
   function toggleExpandido(to) {
     setExpandidos(prev => {
@@ -179,7 +192,7 @@ export default function Layout() {
                 {expandidos.has(link.to) && (
                   <div style={{ paddingLeft: 12 }}>
                     {link.children
-                      .filter(c => c.roles?.includes(profile?.perfil))
+                      .filter(c => c.roles?.includes(profile?.perfil) && moduloAtivo(empresa, c.mod))
                       .map(child => (
                         <NavLink
                           key={child.to}

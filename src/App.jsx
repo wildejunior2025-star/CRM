@@ -91,6 +91,7 @@ import CadastroCliente from './pages/CadastroCliente'
 import Dashboard from './pages/Dashboard'
 import Clientes from './pages/Clientes'
 import Produtos from './pages/Produtos'
+import CategoriasComplemento from './pages/CategoriasComplemento'
 import Estoque from './pages/Estoque'
 import Vendas from './pages/Vendas'
 import Caixa from './pages/Caixa'
@@ -123,6 +124,8 @@ import PainelPedidos from './pages/PainelPedidos'
 import PainelEntregador from './pages/PainelEntregador'
 import ResetPassword from './pages/ResetPassword'
 import WhatsAppConfig from './pages/WhatsAppConfig'
+import WhatsAppConversas from './pages/WhatsAppConversas'
+import EntregadoresHistorico from './pages/EntregadoresHistorico'
 import BotTeste from './pages/BotTeste'
 import DeliveryLojas from './pages/DeliveryLojas'
 import DeliveryLoja from './pages/DeliveryLoja'
@@ -231,6 +234,10 @@ export default function App() {
               element={<ProtectedRoute roles={['admin']} modulo="produtos"><Produtos /></ProtectedRoute>}
             />
             <Route
+              path="complementos"
+              element={<ProtectedRoute roles={['admin']} modulo="produtos"><CategoriasComplemento /></ProtectedRoute>}
+            />
+            <Route
               path="estoque"
               element={<ProtectedRoute roles={['admin']} modulo="estoque"><Estoque /></ProtectedRoute>}
             />
@@ -293,6 +300,14 @@ export default function App() {
             <Route
               path="whatsapp"
               element={<ProtectedRoute roles={['admin', 'super_admin']} modulo="whatsapp"><WhatsAppConfig /></ProtectedRoute>}
+            />
+            <Route
+              path="whatsapp-conversas"
+              element={<ProtectedRoute roles={['admin']} modulo="whatsapp"><WhatsAppConversas /></ProtectedRoute>}
+            />
+            <Route
+              path="entregadores"
+              element={<ProtectedRoute roles={['admin']} modulo="delivery"><EntregadoresHistorico /></ProtectedRoute>}
             />
             <Route
               path="whatsapp-creditos"

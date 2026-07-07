@@ -162,18 +162,20 @@ export default function DeliveryLoja() {
       let produtosFinal = produtosData ?? []
       const ids = produtosFinal.map(p => p.id)
       if (ids.length) {
-        const { data: grupos } = await supabase
-          .from('complemento_grupos')
-          .select('id, produto_id, nome, min, max, ordem, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
+        // Lê pela ponte produto↔grupo: uma mesma categoria pode estar em vários produtos.
+        const { data: vinc } = await supabase
+          .from('produto_complemento_grupos')
+          .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))')
           .in('produto_id', ids)
         const porProduto = {}
-        for (const g of (grupos ?? [])) {
-          if (g.disponivel === false) continue // grupo pausado some da loja
+        for (const v of (vinc ?? [])) {
+          const g = v.complemento_grupos
+          if (!g || g.disponivel === false) continue // grupo pausado some da loja
           const opcoes = (g.complemento_opcoes ?? [])
             .filter(o => o.disponivel !== false)
             .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
-          ;(porProduto[g.produto_id] ??= []).push({
-            id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, ordem: g.ordem ?? 0, opcoes,
+          ;(porProduto[v.produto_id] ??= []).push({
+            id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1, ordem: v.ordem ?? 0, opcoes,
           })
         }
         produtosFinal = produtosFinal.map(p => ({

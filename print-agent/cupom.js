@@ -48,8 +48,16 @@ function montarCupom(pedido, empresa) {
   parts.push(BOLD(0), SIZE(0))
 
   const ehIfood = p.origem === 'ifood'
-  const num = ehIfood && p.ifood_display_id ? ('iFood #' + p.ifood_display_id) : ('#' + (p.numero_pedido ?? String(p.id).slice(-4)))
-  parts.push(SIZE(0x11), BOLD(1), linha(num), BOLD(0), SIZE(0))
+  const codLoja = '#' + (p.numero_pedido ?? String(p.id).slice(-4))
+  parts.push(SIZE(0x11), BOLD(1))
+  if (ehIfood && p.ifood_display_id) {
+    // Pedido do iFood: imprime o código do iFood E o número da loja, juntos.
+    parts.push(linha('iFood #' + p.ifood_display_id))
+    parts.push(linha('Loja ' + codLoja))
+  } else {
+    parts.push(linha(codLoja))
+  }
+  parts.push(BOLD(0), SIZE(0))
   const tipo = (p.tipo_entrega || 'entrega') === 'retirada' ? 'RETIRADA' : 'ENTREGA'
   parts.push(linha(tipo))
   parts.push(ALIGN(0))

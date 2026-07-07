@@ -818,21 +818,23 @@ function cartFromPedido(p) {
 const catalogoCache = {} // { [empresaId]: { produtos, compMap } }
 
 async function carregarCatalogo(empresaId) {
-  const [prodRes, gruposRes] = await Promise.all([
+  const [prodRes, vincRes] = await Promise.all([
     supabase.from('produtos').select('id, nome, preco_venda, categoria')
       .eq('empresa_id', empresaId).order('nome', { ascending: true }),
-    supabase.from('complemento_grupos')
-      .select('id, produto_id, nome, min, max, ordem, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
-      .eq('empresa_id', empresaId).order('ordem'),
+    supabase.from('produto_complemento_grupos')
+      .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)), produtos!inner(empresa_id)')
+      .eq('produtos.empresa_id', empresaId).order('ordem'),
   ])
   if (prodRes.error) throw prodRes.error
   const compMap = {}
-  for (const g of (gruposRes.data ?? [])) {
+  for (const v of (vincRes.data ?? [])) {
+    const g = v.complemento_grupos
+    if (!g) continue
     const opcoes = (g.complemento_opcoes ?? [])
       .filter(o => o.disponivel !== false)
       .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
     if (!opcoes.length) continue
-    ;(compMap[g.produto_id] = compMap[g.produto_id] || []).push({ id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, opcoes })
+    ;(compMap[v.produto_id] = compMap[v.produto_id] || []).push({ id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1, opcoes })
   }
   const catalogo = { produtos: prodRes.data || [], compMap }
   catalogoCache[empresaId] = catalogo
@@ -898,6 +900,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   // Busca de clientes já cadastrados na loja
   const [sugestoes, setSugestoes]       = useState([])
   const [clienteSelId, setClienteSelId] = useState(draft?.clienteSelId ?? pedidoEdicao?.cliente_id ?? null)
+  const [precoEspMap, setPrecoEspMap] = useState({}) // produto_id → preço especial (parceria) do cliente selecionado
   const [msgCli, setMsgCli]             = useState(null)
   const buscaCliTimer = useRef(null)
   // Abre a ficha completa de cadastro de cliente
@@ -966,6 +969,21 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     setSugestoes([])
     setMsgCli(null)
   }
+
+  // Preço especial de parceria: quando um cliente é selecionado, carrega os preços
+  // combinados dele. Sem cliente (ou sem acordo) → mapa vazio → tudo no preço normal.
+  useEffect(() => {
+    if (!clienteSelId) { setPrecoEspMap({}); return }
+    let vivo = true
+    supabase.from('precos_especiais_cliente').select('produto_id, preco').eq('cliente_id', clienteSelId)
+      .then(({ data }) => {
+        if (!vivo) return
+        const m = {}
+        for (const r of (data ?? [])) m[r.produto_id] = Number(r.preco)
+        setPrecoEspMap(m)
+      })
+    return () => { vivo = false }
+  }, [clienteSelId])
 
   // Vincula à venda o cliente recém-cadastrado pela ficha completa
   function aoCadastrarCliente(c) {
@@ -1115,7 +1133,9 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const subtotal  = itens.reduce((s, i) => s + i.preco * i.qtd, 0)
   const taxaNum   = tipo === 'entrega' ? (parseFloat(String(taxa).replace(',', '.')) || 0) : 0
   const total     = subtotal + taxaNum
-  const filtrados = produtos.filter(p => !busca.trim() || p.nome?.toLowerCase().includes(busca.trim().toLowerCase()))
+  // Aplica o preço especial do cliente (se houver) antes de mostrar/adicionar — só afeta este cliente.
+  const produtosComPreco = produtos.map(p => (precoEspMap[p.id] != null ? { ...p, preco_venda: precoEspMap[p.id] } : p))
+  const filtrados = produtosComPreco.filter(p => !busca.trim() || p.nome?.toLowerCase().includes(busca.trim().toLowerCase()))
 
   async function concluir() {
     if (itens.length === 0) { setErro('Adicione pelo menos um item.'); return }
@@ -2383,6 +2403,14 @@ function ImpressoraFWCPanel({ empresaId }) {
 
       {erro && <div style={{ fontSize: 12, color: '#dc2626', fontWeight: 700 }}>{erro}</div>}
 
+      {/* TEMPORÁRIO: baixar a versão nova do app (feche o atual e abra o baixado). Remover depois que todos atualizarem. */}
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderTop: '1px dashed var(--border)', paddingTop: 8 }}>
+        <a href={FWC_EXE_URL} download style={{ color: '#7c3aed', fontWeight: 800, textDecoration: 'none' }}>
+          ⬇️ Baixar versão atualizada do app
+        </a>
+        <span>(feche o atual e abra o baixado — agora o iFood imprime o código da loja junto)</span>
+      </div>
+
       {/* Não logado → tenta reconhecer a conta do gestor; senão, login manual */}
       {!st.logado ? (
         adotando ? (
@@ -3086,7 +3114,7 @@ export default function PainelPedidos() {
   // Entregadores — estatísticas e histórico por motoboy
   const [entregasConcluidas, setEntregasConcluidas] = useState([])
   const [entregadorSel, setEntregadorSel] = useState(null)
-  const [periodoEnt, setPeriodoEnt] = useState('tudo') // filtro de data do histórico do entregador
+  const [periodoEnt, setPeriodoEnt] = useState('hoje') // filtro de data do histórico do entregador (começa em Hoje)
   // Filtro do quadro — null = todas as colunas; ou 'aceitar'|'cozinha'|'entrega'|'concluidos'
   // Persistem no localStorage: ao sair e voltar da tela, mantêm o filtro escolhido.
   const [filtroColuna, setFiltroColuna] = useState(() => {
@@ -3333,17 +3361,19 @@ export default function PainelPedidos() {
     setCatalogo(data || [])
     // Complementos aninhados por produto (estilo iFood): cada produto abre seus
     // grupos ("subcategorias") e opções, cada um pausável individualmente.
-    const { data: grupos } = await supabase
-      .from('complemento_grupos')
-      .select('id, produto_id, nome, min, max, ordem, disponivel, complemento_opcoes(id, nome, preco_adicional, disponivel, ordem)')
-      .eq('empresa_id', empresa.id)
+    const { data: vinc } = await supabase
+      .from('produto_complemento_grupos')
+      .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, complemento_opcoes(id, nome, preco_adicional, disponivel, ordem)), produtos!inner(empresa_id)')
+      .eq('produtos.empresa_id', empresa.id)
       .order('ordem')
     const porProduto = {}
-    for (const g of (grupos ?? [])) {
+    for (const v of (vinc ?? [])) {
+      const g = v.complemento_grupos
+      if (!g) continue
       const opcoes = (g.complemento_opcoes ?? [])
         .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
-      ;(porProduto[g.produto_id] ??= []).push({
-        id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, ordem: g.ordem ?? 0,
+      ;(porProduto[v.produto_id] ??= []).push({
+        id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1, ordem: v.ordem ?? 0,
         disponivel: g.disponivel !== false, opcoes,
       })
     }
@@ -4862,7 +4892,7 @@ export default function PainelPedidos() {
             if (entregadorSel) {
               const ent = entregadores.find(e => e.id === entregadorSel)
               const rota = emRota(entregadorSel)
-              const concl = concluidas(entregadorSel).filter(p => dentroDoPeriodo(p.created_at, periodoEnt))
+              const concl = concluidas(entregadorSel).filter(p => dentroDoPeriodo(p.created_at, 'hoje'))
               const pendentes = concl.filter(p => !p.entregador_pago)
               const pagos = concl.filter(p => p.entregador_pago)
               // Ganho LÍQUIDO do motoqueiro: taxa cheia, menos o desconto SÓ nas do iFood.
@@ -4928,17 +4958,9 @@ export default function PainelPedidos() {
                     style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: 'var(--primary, #a78bfa)', cursor: 'pointer', fontSize: 13, fontWeight: 700, padding: 0 }}>
                     ← Todos os entregadores
                   </button>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{ent?.nome || 'Entregador'}</div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {PERIODOS_ENT.map(([val, lab]) => (
-                      <button key={val} type="button" onClick={() => setPeriodoEnt(val)}
-                        style={{ fontSize: 12, fontWeight: 700, padding: '4px 12px', borderRadius: 20, cursor: 'pointer',
-                          border: `1px solid ${periodoEnt === val ? 'var(--primary, #a78bfa)' : 'var(--border, #2a2a3a)'}`,
-                          background: periodoEnt === val ? 'var(--primary, #a78bfa)' : 'transparent',
-                          color: periodoEnt === val ? '#fff' : 'var(--text-muted)' }}>
-                        {lab}
-                      </button>
-                    ))}
+                  <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{ent?.nome || 'Entregador'} <span style={{ fontSize: 12, fontWeight: 700, color: '#7c3aed' }}>· hoje</span></div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                    Histórico completo (7/30 dias, tudo) em <b>Vendas → Entregadores</b>.
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     {[['A receber', fmt(somaTaxa(pendentes)), '#f59e0b'], ['Pago', fmt(somaTaxa(pagos)), '#16a34a'], ['Em rota', rota.length, '#7c3aed']].map(([lab, val, cor]) => (
@@ -5008,7 +5030,8 @@ export default function PainelPedidos() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {entregadores.map(e => {
                   const r = emRota(e.id).length
-                  const c = concluidas(e.id).length
+                  // No gestor o resumo é só do DIA (histórico completo fica em Vendas → Entregadores)
+                  const c = concluidas(e.id).filter(p => dentroDoPeriodo(p.created_at, 'hoje')).length
                   return (
                     <button key={e.id} type="button" onClick={() => setEntregadorSel(e.id)}
                       style={{ textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border, #2a2a3a)', borderRadius: 12, padding: '12px 14px', background: 'transparent' }}>

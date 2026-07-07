@@ -42,6 +42,7 @@ const ABAS = [
 
 const CONFIG_KEY = 'venda_delivery_config'
 const VIEW_MODE_KEY = 'delivery_view_mode'
+const ABA_KEY = 'delivery_aba'
 const CONFIG_PADRAO = {
   autoAceitar: false,
   imprimirAuto: false,
@@ -453,15 +454,29 @@ function ModalCancelamento({ pedido, onConfirmar, onFechar }) {
 }
 
 function ModalConfiguracoes({ config, onSalvar, onFechar }) {
+  const { empresa } = useAuth()
   const [cfg, setCfg] = useState({ ...config })
+  const [zeraDiario, setZeraDiario] = useState(false) // config da loja (no banco)
+  const [salvando, setSalvando] = useState(false)
+
+  useEffect(() => {
+    let vivo = true
+    supabase.from('empresas').select('numero_pedido_zera_diario').eq('id', empresa.id).single()
+      .then(({ data }) => { if (vivo && data) setZeraDiario(data.numero_pedido_zera_diario === true) })
+    return () => { vivo = false }
+  }, [empresa.id])
 
   function toggle(campo) {
     setCfg(prev => ({ ...prev, [campo]: !prev[campo] }))
   }
 
-  function handleSalvar() {
+  async function handleSalvar() {
+    setSalvando(true)
     salvarConfig(cfg)
     onSalvar(cfg)
+    // Numeração diária é config da loja (vale em todos os aparelhos) → grava no banco.
+    await supabase.from('empresas').update({ numero_pedido_zera_diario: zeraDiario }).eq('id', empresa.id)
+    setSalvando(false)
     onFechar()
   }
 
@@ -523,8 +538,8 @@ function ModalConfiguracoes({ config, onSalvar, onFechar }) {
           <div className="pd-cfg-titulo">Impressora termica</div>
           <div className="pd-cfg-item">
             <div>
-              <div className="pd-cfg-item-nome">Imprimir automaticamente ao aceitar pedido</div>
-              <div className="pd-cfg-item-desc">Envia o cupom automaticamente quando o pedido for confirmado</div>
+              <div className="pd-cfg-item-nome">Imprimir automaticamente ao chegar o pedido</div>
+              <div className="pd-cfg-item-desc">Assim que um pedido novo entra, o cupom já sai na impressora (não precisa aceitar). Precisa estar ligado no computador que tem a impressora.</div>
             </div>
             <button
               type="button"
@@ -557,16 +572,35 @@ function ModalConfiguracoes({ config, onSalvar, onFechar }) {
           </button>
         </div>
 
+        {/* Numeração dos pedidos */}
+        <div className="pd-cfg-secao">
+          <div className="pd-cfg-titulo">Numeracao dos pedidos</div>
+          <div className="pd-cfg-item">
+            <div>
+              <div className="pd-cfg-item-nome">Zerar a numeracao todo dia</div>
+              <div className="pd-cfg-item-desc">O primeiro pedido de cada dia comeca no #1 e reseta sozinho na virada da meia-noite. Desligado, segue continuo (1000-9999).</div>
+            </div>
+            <button
+              type="button"
+              className={`pd-toggle ${zeraDiario ? 'ativo' : ''}`}
+              onClick={() => setZeraDiario(v => !v)}
+              aria-label="Toggle zerar numeracao diaria"
+            >
+              <span className="pd-toggle-thumb" />
+            </button>
+          </div>
+        </div>
+
         <div className="modal-actions">
-          <button className="btn btn-secondary" onClick={onFechar}>Cancelar</button>
-          <button className="btn btn-primary" onClick={handleSalvar}>Salvar</button>
+          <button className="btn btn-secondary" onClick={onFechar} disabled={salvando}>Cancelar</button>
+          <button className="btn btn-primary" onClick={handleSalvar} disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar'}</button>
         </div>
       </div>
     </div>
   )
 }
 
-function EmptyState({ aba }) {
+function EmptyState({ aba, foraDoPeriodo = 0, onVerHistorico }) {
   const mensagens = {
     aguardando: { titulo: 'Nenhum pedido aguardando', sub: 'Novos pedidos aparecerao aqui em tempo real.' },
     ativos:     { titulo: 'Nenhum pedido ativo',      sub: 'Pedidos confirmados e em preparo aparecem aqui.' },
@@ -586,7 +620,17 @@ function EmptyState({ aba }) {
         </svg>
       </div>
       <strong>{msg.titulo}</strong>
-      <p>{msg.sub}</p>
+      <p>{foraDoPeriodo > 0 ? 'Nada nesta data — mas tem pedidos em outros dias.' : msg.sub}</p>
+      {foraDoPeriodo > 0 && (
+        <div style={{ marginTop: 12, textAlign: 'center' }}>
+          <p style={{ margin: '0 0 8px' }}>
+            Há <b>{foraDoPeriodo}</b> pedido{foraDoPeriodo !== 1 ? 's' : ''} nesta aba em <b>outras datas</b>.
+          </p>
+          <button className="btn btn-primary btn-sm" onClick={onVerHistorico}>
+            📜 Ver histórico completo
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -734,7 +778,7 @@ function IconeLista() {
 }
 
 // ─── Tabela de pedidos ───
-function TabelaPedidos({ pedidos, taxaPlataforma, onRowClick }) {
+function TabelaPedidos({ pedidos, taxaPlataforma, onRowClick, agruparPorDia = false, totaisPorDia = {} }) {
   const totalBruto = pedidos.reduce((acc, p) => acc + Number(p.total || 0), 0)
   const totalLiquido = pedidos.reduce((acc, p) => acc + Number(p.total || 0) * (1 - (taxaPlataforma ?? 5) / 100), 0)
 
@@ -757,12 +801,34 @@ function TabelaPedidos({ pedidos, taxaPlataforma, onRowClick }) {
             </tr>
           </thead>
           <tbody>
-            {pedidos.map(pedido => {
+            {(() => {
+              const linhas = []
+              let ultimoDia = null
+              for (const pedido of pedidos) {
               const dt = new Date(pedido.created_at)
               const data = dt.toLocaleDateString('pt-BR')
               const hora = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
               const liquido = Number(pedido.total || 0) * (1 - (taxaPlataforma ?? 5) / 100)
-              return (
+              // Cabeçalho do dia (só na aba Concluídos): total daquele dia + separação
+              if (agruparPorDia && data !== ultimoDia) {
+                ultimoDia = data
+                const t = totaisPorDia[data]
+                linhas.push(
+                  <tr key={`dia-${data}`} className="pd-dia-row">
+                    <td colSpan={8}>
+                      <div className="pd-dia-header">
+                        <span className="pd-dia-data">📅 {data}</span>
+                        {t && (
+                          <span className="pd-dia-tot">
+                            {t.count} pedido{t.count !== 1 ? 's' : ''} · Bruto <b>{fmt(t.bruto)}</b> · Líquido <b style={{ color: 'var(--success)' }}>{fmt(t.liquido)}</b>
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              }
+              linhas.push(
                 <tr key={pedido.id} style={{ cursor: 'pointer' }} onClick={() => onRowClick?.(pedido)}>
                   <td>
                     <span className="pd-tabela-num">
@@ -784,7 +850,9 @@ function TabelaPedidos({ pedidos, taxaPlataforma, onRowClick }) {
                   </td>
                 </tr>
               )
-            })}
+              }
+              return linhas
+            })()}
           </tbody>
         </table>
       </div>
@@ -803,15 +871,19 @@ export default function PedidosDelivery() {
   const { empresa } = useAuth()
   const [pedidos, setPedidos] = useState([])
   const [carregando, setCarregando] = useState(true)
-  const [abaAtiva, setAbaAtiva] = useState('aguardando')
+  const [abaAtiva, setAbaAtiva] = useState(() => localStorage.getItem(ABA_KEY) || 'aguardando')
   const [lojaAberta, setLojaAberta] = useState(false)
   const [togglingLoja, setTogglingLoja] = useState(false)
   const [pedidoCancelando, setPedidoCancelando] = useState(null)
   const [modalCfg, setModalCfg] = useState(false)
   const [config, setConfig] = useState(lerConfig)
   const [viewMode, setViewMode] = useState(lerViewMode)
-  const [dataInicio, setDataInicio] = useState(hojeISO())
-  const [dataFim, setDataFim] = useState(hojeISO())
+  // Nasce SEM filtro de data (mostra tudo). A pessoa escolhe o período se quiser.
+  const [dataInicio, setDataInicio] = useState('')
+  const [dataFim, setDataFim] = useState('')
+  // Paginação: 10 por página (a pessoa pode estender pra 30) + navegação.
+  const [porPagina, setPorPagina] = useState(10)
+  const [pagina, setPagina] = useState(1)
   const [taxaPlataforma, setTaxaPlataforma] = useState(5)
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null)
   const [filtroOrigem, setFiltroOrigem] = useState('todos')
@@ -828,10 +900,23 @@ export default function PedidosDelivery() {
   const configRef = useRef(config)
   useEffect(() => { configRef.current = config }, [config])
 
+  // Evita imprimir o mesmo pedido duas vezes (ex.: imprimiu ao chegar e depois ao aceitar)
+  const impressosRef = useRef(new Set())
+  function imprimirAutoUmaVez(pedido) {
+    if (!pedido || impressosRef.current.has(pedido.id)) return
+    impressosRef.current.add(pedido.id)
+    imprimirPedido(pedido)
+  }
+
   // Persiste modo de visualização
   useEffect(() => {
     localStorage.setItem(VIEW_MODE_KEY, viewMode)
   }, [viewMode])
+
+  // Lembra a aba escolhida (Aguardando/Ativos/Concluídos/Cancelados) ao sair e voltar
+  useEffect(() => {
+    localStorage.setItem(ABA_KEY, abaAtiva)
+  }, [abaAtiva])
 
   // ── Heartbeat: sinaliza que o painel está online ───────────
   useEffect(() => {
@@ -899,12 +984,14 @@ export default function PedidosDelivery() {
             const cfg = configRef.current
             if (cfg.somAtivo) tocarSom()
 
+            // Imprime AO CHEGAR (não depende do auto-aceitar)
+            if (cfg.imprimirAuto) imprimirAutoUmaVez(novoPedido)
+
             if (cfg.autoAceitar) {
               await supabase
                 .from('pedidos_delivery')
                 .update({ status: 'confirmado' })
                 .eq('id', novoPedido.id)
-              if (cfg.imprimirAuto) imprimirPedido(novoPedido)
             }
           }
         } else if (payload.eventType === 'UPDATE') {
@@ -932,10 +1019,11 @@ export default function PedidosDelivery() {
       .update(update)
       .eq('id', id)
 
-    // Imprime automaticamente ao confirmar (se configurado)
+    // Imprime ao aceitar também (cobre pedidos que chegaram com o painel fechado).
+    // O controle de "uma vez só" evita cupom duplicado se já imprimiu ao chegar.
     if (novoStatus === 'confirmado' && config.imprimirAuto) {
       const pedido = pedidos.find(p => p.id === id)
-      if (pedido) imprimirPedido(pedido)
+      if (pedido) imprimirAutoUmaVez(pedido)
     }
   }
 
@@ -993,23 +1081,53 @@ export default function PedidosDelivery() {
     return campos.filter(Boolean).join(' ').toLowerCase().includes(buscaLimpa)
   }
   // ── Filtro por aba/origem/data (a busca, quando ativa, ignora todos eles) ──
-  const pedidosPorAba = buscaLimpa ? pedidos : pedidos.filter(p => abaConfig?.statuses.includes(p.status))
-  const pedidosFiltrados = pedidosPorAba.filter(p => {
-    if (buscaLimpa) return casaBusca(p)
-    if (filtroOrigem !== 'todos') {
-      const origem = p.origem ?? 'cardapio'
-      if (origem !== filtroOrigem) return false
-    }
+  // Dentro do período de datas escolhido (a busca ignora as datas).
+  const dentroPeriodo = (p) => {
     if (!dataInicio && !dataFim) return true
     const dt = new Date(p.created_at)
     const dtStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
     if (dataInicio && dtStr < dataInicio) return false
     if (dataFim && dtStr > dataFim) return false
     return true
+  }
+  const pedidosPeriodo = buscaLimpa ? pedidos : pedidos.filter(dentroPeriodo)
+  const pedidosPorAba = buscaLimpa ? pedidos : pedidosPeriodo.filter(p => abaConfig?.statuses.includes(p.status))
+  const pedidosFiltrados = pedidosPorAba.filter(p => {
+    if (buscaLimpa) return casaBusca(p)
+    if (filtroOrigem !== 'todos') {
+      const origem = p.origem ?? 'cardapio'
+      if (origem !== filtroOrigem) return false
+    }
+    return true
   })
+  // Pedidos desta aba/origem que existem FORA do período (pra sugerir o histórico).
+  const foraDoPeriodo = (!buscaLimpa && pedidosFiltrados.length === 0)
+    ? pedidos.filter(p => abaConfig?.statuses.includes(p.status)
+        && (filtroOrigem === 'todos' || (p.origem ?? 'cardapio') === filtroOrigem)
+        && !dentroPeriodo(p)).length
+    : 0
 
   const totalAguardando = pedidos.filter(p => p.status === 'aguardando' && (filtroOrigem === 'todos' || (p.origem ?? 'cardapio') === filtroOrigem)).length
   const temFiltroData = dataInicio || dataFim
+
+  // Paginação da lista visível
+  const totalPaginas = Math.max(1, Math.ceil(pedidosFiltrados.length / porPagina))
+  const paginaAtual = Math.min(pagina, totalPaginas)
+  const pedidosPagina = pedidosFiltrados.slice((paginaAtual - 1) * porPagina, paginaAtual * porPagina)
+  // Volta pra 1ª página sempre que muda o filtro/aba/quantidade por página
+  useEffect(() => { setPagina(1) }, [abaAtiva, filtroOrigem, buscaLimpa, dataInicio, dataFim, porPagina])
+
+  // Totais por dia (só na aba Concluídos) — pra mostrar o total de cada dia no histórico.
+  const totaisPorDia = {}
+  if (abaAtiva === 'concluidos') {
+    for (const p of pedidosFiltrados) {
+      const d = new Date(p.created_at).toLocaleDateString('pt-BR')
+      const t = (totaisPorDia[d] ??= { count: 0, bruto: 0, liquido: 0 })
+      t.count++
+      t.bruto += Number(p.total || 0)
+      t.liquido += Number(p.total || 0) * (1 - (taxaPlataforma ?? 5) / 100)
+    }
+  }
 
   return (
     <div>
@@ -1123,7 +1241,9 @@ export default function PedidosDelivery() {
           { id: 'balcao',    label: 'Balcão',    ...ORIGEM_CONFIG.balcao },
         ].map(opt => {
           const ativo = filtroOrigem === opt.id
-          const countOrigem = pedidos.filter(p => {
+          // Conta só dentro da aba de status selecionada (Aguardando, Concluídos…),
+          // pra o número bater com o que a lista mostra.
+          const countOrigem = pedidosPorAba.filter(p => {
             const o = p.origem ?? 'cardapio'
             return opt.id === 'todos' ? true : o === opt.id
           }).length
@@ -1160,7 +1280,7 @@ export default function PedidosDelivery() {
 
       <div className="pd-abas">
         {ABAS.map(aba => {
-          const count = pedidos.filter(p => {
+          const count = pedidosPeriodo.filter(p => {
             if (!aba.statuses.includes(p.status)) return false
             if (filtroOrigem !== 'todos') {
               const o = p.origem ?? 'cardapio'
@@ -1193,12 +1313,12 @@ export default function PedidosDelivery() {
           ))}
         </div>
       ) : pedidosFiltrados.length === 0 ? (
-        <EmptyState aba={abaAtiva} />
+        <EmptyState aba={abaAtiva} foraDoPeriodo={foraDoPeriodo} onVerHistorico={() => { setDataInicio(''); setDataFim('') }} />
       ) : viewMode === 'tabela' ? (
-        <TabelaPedidos pedidos={pedidosFiltrados} taxaPlataforma={taxaPlataforma} onRowClick={setPedidoDetalhe} />
+        <TabelaPedidos pedidos={pedidosPagina} taxaPlataforma={taxaPlataforma} onRowClick={setPedidoDetalhe} agruparPorDia={abaAtiva === 'concluidos'} totaisPorDia={totaisPorDia} />
       ) : (
         <div className="pd-grid">
-          {pedidosFiltrados.map(pedido => (
+          {pedidosPagina.map(pedido => (
             <CardPedido
               key={pedido.id}
               pedido={pedido}
@@ -1207,6 +1327,39 @@ export default function PedidosDelivery() {
               onImprimirPedido={imprimirPedido}
               onExpirado={handleExpirado}
             />
+          ))}
+        </div>
+      )}
+
+      {/* Paginação: 10 por página, dá pra estender pra 30, e navega entre páginas */}
+      {!carregando && pedidosFiltrados.length > 0 && (
+        <div className="pagination" style={{ flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            disabled={paginaAtual <= 1}
+            onClick={() => setPagina(p => Math.max(1, p - 1))}
+          >
+            ← Anterior
+          </button>
+          <span className="pagination-info">
+            Página {paginaAtual} de {totalPaginas} · {pedidosFiltrados.length} pedido{pedidosFiltrados.length === 1 ? '' : 's'}
+          </span>
+          <button
+            className="btn btn-secondary btn-sm"
+            disabled={paginaAtual >= totalPaginas}
+            onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))}
+          >
+            Próxima →
+          </button>
+          <span className="pagination-info" style={{ marginLeft: 12 }}>Por página:</span>
+          {[10, 30].map(n => (
+            <button
+              key={n}
+              className={`btn btn-sm ${porPagina === n ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setPorPagina(n)}
+            >
+              {n}
+            </button>
           ))}
         </div>
       )}

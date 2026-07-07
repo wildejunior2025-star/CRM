@@ -983,6 +983,14 @@ serve(async (req) => {
       : "https://lojaonline.fwcinter.com"
 
     const phone      = msg.key.remoteJid.replace("@s.whatsapp.net", "").replace(/\D/g, "")
+
+    // Conversa pausada pelo admin para este número? → o robô não responde.
+    {
+      const { data: pausado } = await supabase.from("whatsapp_bot_pausado")
+        .select("phone").eq("empresa_id", empresaId).eq("phone", phone).maybeSingle()
+      if (pausado) return new Response("ok", { headers: corsHeaders })
+    }
+
     const phoneLocal = phone.replace(/^55/, "")
     const phoneLocalWith9 = phoneLocal.length === 10
       ? `${phoneLocal.slice(0, 2)}9${phoneLocal.slice(2)}`
@@ -1119,6 +1127,23 @@ serve(async (req) => {
     }
     const produtos = ((produtosRes.data ?? []) as any[]).filter((p: any) => !p.categoria || !catForaHorario.has(p.categoria))
 
+    // ── Preço especial de parceria (cliente + produto) ──
+    // Se ESTE cliente tem preço combinado num produto, sobrescreve o preço base só pra ele.
+    // Como menu e cálculo usam `produtos.preco_venda`, trocar aqui cobre os dois (mostra e cobra certo).
+    const clienteEspId = clienteRes.data?.id
+    if (clienteEspId) {
+      const { data: precosEsp } = await supabase
+        .from("precos_especiais_cliente")
+        .select("produto_id, preco")
+        .eq("empresa_id", empresaId)
+        .eq("cliente_id", clienteEspId)
+      if (precosEsp && precosEsp.length) {
+        const espMap: Record<string, number> = {}
+        for (const pe of precosEsp as any[]) espMap[pe.produto_id] = Number(pe.preco)
+        for (const p of produtos) if (espMap[p.id] != null) p.preco_venda = espMap[p.id]
+      }
+    }
+
     // ── Complementos ("monte sua quentinha") — só dos produtos que têm grupos ──
     // Texto injetado no prompt para o bot listar categorias + máximo de cada.
     // Mapas de preço (verdade do banco) para recalcular o preço no servidor —
@@ -1130,15 +1155,19 @@ serve(async (req) => {
     try {
       const produtoIds = produtos.map((p: any) => p.id)
       if (produtoIds.length) {
-        const { data: gruposComp } = await supabase
-          .from("complemento_grupos")
-          .select("produto_id, nome, min, max, ordem, disponivel, complemento_opcoes(nome, preco_adicional, ordem, disponivel)")
+        // Lê pela ponte produto↔grupo: mesma categoria pode servir vários produtos,
+        // e cada vínculo pode ter min/max próprio (ex.: proteína P=1, M/G=2).
+        const { data: vincComp } = await supabase
+          .from("produto_complemento_grupos")
+          .select("produto_id, ordem, min_override, max_override, complemento_grupos(nome, min, max, disponivel, complemento_opcoes(nome, preco_adicional, ordem, disponivel))")
           .in("produto_id", produtoIds)
-        if (gruposComp && gruposComp.length) {
+        if (vincComp && vincComp.length) {
           const porProduto: Record<string, any[]> = {}
-          for (const g of gruposComp as any[]) {
-            if (g.disponivel === false) continue // grupo pausado: bot não oferece
-            (porProduto[g.produto_id] ||= []).push(g)
+          for (const v of vincComp as any[]) {
+            const g = v.complemento_grupos
+            if (!g || g.disponivel === false) continue // grupo pausado: bot não oferece
+            const gEff = { ...g, min: v.min_override ?? g.min, max: v.max_override ?? g.max, ordem: v.ordem ?? 0 }
+            ;(porProduto[v.produto_id] ||= []).push(gEff)
             for (const o of (g.complemento_opcoes ?? [])) {
               precoOpcaoMap[String(o.nome).trim().toLowerCase()] = Number(o.preco_adicional ?? 0)
             }
@@ -1307,7 +1336,7 @@ Já verificamos pelo telefone se o cliente tem conta nesta loja (ver CLIENTE aci
 
 ▶ PASSO 2 — MONTAR A SACOLA
 Ajude o cliente a escolher os produtos. A CADA produto escolhido, emita atualizar_carrinho (ver AÇÕES).
-Produto com complementos (Quentinha): siga o fluxo de complementos — mostre as categorias com os máximos e monte o item.
+Produto com complementos (Quentinha): mostre TODAS as categorias DE UMA VEZ, numa ÚNICA mensagem, listando em cada categoria as opções e o máximo (ex.: "escolha 1", "escolha até 2"). NUNCA pergunte categoria por categoria (uma mensagem por categoria) — isso cansa o cliente e gasta crédito à toa. Peça pro cliente responder tudo numa mensagem só; quando ele responder, monte o item com atualizar_carrinho. Se faltar escolher alguma categoria, aí sim pergunte só as que faltam.
 Continue somando itens até o cliente dizer que é só isso / que quer fechar.
 ⚠️ Enquanto monta a sacola, NUNCA peça nome, e-mail, CEP, endereço, entrega ou pagamento. Isso é SÓ depois que a sacola fechar.
 

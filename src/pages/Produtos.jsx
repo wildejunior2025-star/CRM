@@ -6,6 +6,10 @@ import '../components/Page.css'
 
 const PAGE_SIZE = 50
 
+// Normaliza pra busca: tira acento, deixa minúsculo e sem espaços nas pontas.
+// Assim "feijao" acha "Feijão" e "macarrao" acha "Macarrão".
+const norm = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
+
 // eslint-disable-next-line no-unused-vars
 const EMBALAGENS = ['unidade', 'lata', 'garrafa', 'caixa', 'fardo']
 
@@ -60,6 +64,12 @@ export default function Produtos() {
 
   // Complementos / opções do produto (ex.: monte sua quentinha)
   const [grupos, setGrupos] = useState([])
+  // Novo modelo: o produto só ESCOLHE categorias já criadas (as opções vivem na
+  // tela "Complementos"). Aqui guardamos os vínculos deste produto + o catálogo
+  // de categorias da empresa pro seletor.
+  const [vinculos, setVinculos] = useState([])         // [{linkId, grupo_id, nome, max_grupo, max_override}]
+  const [vincOriginais, setVincOriginais] = useState([]) // snapshot pra saber o que mudou no salvar
+  const [catsEmpresa, setCatsEmpresa] = useState([])   // [{id, nome, max}]
 
   // Rascunho automático: guarda o produto que está sendo editado. Se sair da
   // página / o app recarregar, ao voltar reabre com tudo preenchido (não perde
@@ -69,8 +79,8 @@ export default function Produtos() {
   const fecharModal = () => { limparRascunho(); setShowModal(false) }
   useEffect(() => {
     if (!showModal || !draftKey) return
-    try { localStorage.setItem(draftKey, JSON.stringify({ editingId, form, grupos })) } catch { /* quota */ }
-  }, [showModal, editingId, form, grupos, draftKey])
+    try { localStorage.setItem(draftKey, JSON.stringify({ editingId, form, vinculos })) } catch { /* quota */ }
+  }, [showModal, editingId, form, vinculos, draftKey])
   const rascunhoRestaurado = useRef(false)
   useEffect(() => {
     if (rascunhoRestaurado.current || !draftKey) return
@@ -80,7 +90,8 @@ export default function Produtos() {
       if (d && d.form) {
         setEditingId(d.editingId ?? null)
         setForm(d.form)
-        setGrupos(Array.isArray(d.grupos) ? d.grupos : [])
+        setVinculos(Array.isArray(d.vinculos) ? d.vinculos : [])
+        loadCategoriasEmpresa()
         setShowModal(true)
       }
     } catch { /* rascunho inválido */ }
@@ -123,19 +134,29 @@ export default function Produtos() {
     if (error) patch(op.disponivel)
   }
 
-  async function loadComplementos(produtoId) {
+  // Catálogo de categorias da empresa (pro seletor "adicionar categoria")
+  async function loadCategoriasEmpresa() {
     const { data } = await supabase
       .from('complemento_grupos')
-      .select('id, nome, min, max, ordem, complemento_opcoes(id, nome, preco_adicional, ordem)')
+      .select('id, nome, max')
+      .eq('empresa_id', profile.empresa_id)
+      .order('nome')
+    setCatsEmpresa(data ?? [])
+  }
+
+  // Vínculos deste produto (quais categorias ele usa + máx. próprio)
+  async function loadComplementos(produtoId) {
+    const { data } = await supabase
+      .from('produto_complemento_grupos')
+      .select('id, grupo_id, max_override, ordem, complemento_grupos(nome, max)')
       .eq('produto_id', produtoId)
       .order('ordem')
-    const gs = (data ?? []).map(g => ({
-      id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1,
-      opcoes: (g.complemento_opcoes ?? [])
-        .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
-        .map(o => ({ id: o.id, nome: o.nome, preco: o.preco_adicional ?? 0 })),
+    const vs = (data ?? []).map(v => ({
+      linkId: v.id, grupo_id: v.grupo_id, nome: v.complemento_grupos?.nome ?? '',
+      max_grupo: v.complemento_grupos?.max ?? 1, max_override: v.max_override ?? null,
     }))
-    setGrupos(gs)
+    setVinculos(vs)
+    setVincOriginais(vs)
   }
 
   function updGrupo(gi, patch) {
@@ -218,30 +239,40 @@ export default function Produtos() {
     // das categorias (Quentinhas, Janta, Lanches, Tapioca...). Assim a busca do
     // banco (alfabética) não separa mais uma categoria entre páginas diferentes.
     const termo = busca.trim()
-    // Busca também por COMPLEMENTO: acha os produtos cujo grupo/opção de complemento casa com o termo.
+    const nt = norm(termo)
+    // Busca por COMPLEMENTO ignorando acento: filtra o conjunto (pequeno) de
+    // categorias/opções da empresa no cliente e mapeia pros produtos via a ponte.
     let idsPorComp = []
-    if (termo) {
-      const [{ data: grs }, { data: ops }] = await Promise.all([
-        supabase.from('complemento_grupos').select('produto_id').ilike('nome', `%${termo}%`),
-        supabase.from('complemento_opcoes').select('complemento_grupos!inner(produto_id)').ilike('nome', `%${termo}%`),
-      ])
-      const set = new Set()
-      for (const g of (grs ?? [])) if (g.produto_id) set.add(g.produto_id)
-      for (const o of (ops ?? [])) if (o.complemento_grupos?.produto_id) set.add(o.complemento_grupos.produto_id)
-      idsPorComp = [...set]
+    if (nt) {
+      const { data: cats } = await supabase
+        .from('complemento_grupos')
+        .select('id, nome, complemento_opcoes(nome)')
+        .eq('empresa_id', profile.empresa_id)
+      const gruposMatch = (cats ?? [])
+        .filter(g => norm(g.nome).includes(nt) || (g.complemento_opcoes ?? []).some(o => norm(o.nome).includes(nt)))
+        .map(g => g.id)
+      if (gruposMatch.length) {
+        const { data: vinc } = await supabase
+          .from('produto_complemento_grupos')
+          .select('produto_id')
+          .in('grupo_id', gruposMatch)
+        idsPorComp = [...new Set((vinc ?? []).map(v => v.produto_id).filter(Boolean))]
+      }
     }
+    // Carrega os produtos (categoria filtra no banco) e o termo filtra no cliente
+    // (nome sem acento OU casou por complemento).
     let query = supabase
       .from('produtos')
-      .select('*', { count: 'exact' })
+      .select('*')
       .order('nome', { ascending: true })
       .limit(1000)
-    if (termo) {
-      query = idsPorComp.length
-        ? query.or(`nome.ilike.*${termo}*,id.in.(${idsPorComp.join(',')})`)
-        : query.ilike('nome', `%${termo}%`)
-    }
     if (categ) query = query.eq('categoria', categ)
-    const { data, error, count } = await query
+    let { data, error } = await query
+    if (!error && nt) {
+      const idset = new Set(idsPorComp)
+      data = (data ?? []).filter(p => norm(p.nome).includes(nt) || idset.has(p.id))
+    }
+    const count = (data ?? []).length
     if (error) setError(error.message)
     else {
       setProdutos(data ?? [])
@@ -250,15 +281,17 @@ export default function Produtos() {
       const ids = (data ?? []).map(p => p.id)
       if (ids.length) {
         const { data: gs } = await supabase
-          .from('complemento_grupos')
-          .select('id, produto_id, nome, min, max, ordem, disponivel, complemento_opcoes(id, nome, preco_adicional, disponivel, ordem)')
+          .from('produto_complemento_grupos')
+          .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, complemento_opcoes(id, nome, preco_adicional, disponivel, ordem))')
           .in('produto_id', ids)
           .order('ordem')
         const map = {}
-        for (const g of (gs ?? [])) {
+        for (const v of (gs ?? [])) {
+          const g = v.complemento_grupos
+          if (!g) continue
           const opcoes = (g.complemento_opcoes ?? []).sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
-          ;(map[g.produto_id] ??= []).push({
-            id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, ordem: g.ordem ?? 0,
+          ;(map[v.produto_id] ??= []).push({
+            id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1, ordem: v.ordem ?? 0,
             disponivel: g.disponivel !== false, opcoes,
           })
         }
@@ -353,14 +386,16 @@ export default function Produtos() {
 
   function openNew() {
     setEditingId(null)
-    setGrupos([])
+    setVinculos([]); setVincOriginais([])
+    loadCategoriasEmpresa()
     setForm({ ...emptyForm, categoria: categorias[0]?.nome ?? '' })
     setShowModal(true)
   }
 
   function openEdit(produto) {
     setEditingId(produto.id)
-    setGrupos([])
+    setVinculos([]); setVincOriginais([])
+    loadCategoriasEmpresa()
     loadComplementos(produto.id)
     setForm({
       nome: produto.nome ?? '',
@@ -438,24 +473,19 @@ export default function Produtos() {
       return
     }
 
-    // Persiste os complementos (recria: apaga os antigos e insere os atuais)
+    // Reconcilia só os VÍNCULOS com categorias (as opções vivem na tela Complementos).
+    // Nunca apagamos/recriamos a categoria aqui — ela é compartilhada entre produtos.
     const produtoId = saved.id
     try {
-      await supabase.from('complemento_grupos').delete().eq('produto_id', produtoId)
-      for (const [gi, g] of grupos.entries()) {
-        if (!g.nome.trim()) continue
-        const { data: gIns } = await supabase
-          .from('complemento_grupos')
-          .insert({
-            empresa_id: profile.empresa_id, produto_id: produtoId, nome: g.nome.trim(),
-            min: Number(g.min) || 0, max: Number(g.max) || 1, ordem: gi,
-          })
-          .select('id').single()
-        if (!gIns) continue
-        const ops = (g.opcoes || [])
-          .filter(o => o.nome.trim())
-          .map((o, oi) => ({ grupo_id: gIns.id, nome: o.nome.trim(), preco_adicional: Number(o.preco) || 0, ordem: oi }))
-        if (ops.length) await supabase.from('complemento_opcoes').insert(ops)
+      const removidos = vincOriginais.filter(o => o.linkId && !vinculos.some(a => a.grupo_id === o.grupo_id))
+      for (const r of removidos) await supabase.from('produto_complemento_grupos').delete().eq('id', r.linkId)
+      for (const [i, a] of vinculos.entries()) {
+        const ov = a.max_override == null || a.max_override === '' ? null : Math.max(1, Number(a.max_override) || 1)
+        if (a.linkId) {
+          await supabase.from('produto_complemento_grupos').update({ max_override: ov, ordem: i }).eq('id', a.linkId)
+        } else {
+          await supabase.from('produto_complemento_grupos').insert({ produto_id: produtoId, grupo_id: a.grupo_id, max_override: ov, ordem: i })
+        }
       }
     } catch (err) {
       setSaving(false)
@@ -679,7 +709,21 @@ export default function Produtos() {
                   <tr>
                     <td colSpan={11} style={{ padding: 0, background: 'var(--bg-hover)' }}>
                       <div style={{ padding: '8px 12px 12px 74px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {compProd[p.id].map(g => {
+                        {(() => {
+                          // Ao buscar, mostra só as opções que casam com o termo (sem acento).
+                          // Se o termo casa o NOME da categoria, mostra a categoria inteira.
+                          const nt = norm(search.trim())
+                          let gruposMostrar = compProd[p.id]
+                          if (nt) {
+                            const filtrados = compProd[p.id].map(g => {
+                              const matched = g.opcoes.filter(o => norm(o.nome).includes(nt))
+                              if (matched.length) return { ...g, opcoes: matched }
+                              if (norm(g.nome).includes(nt)) return g
+                              return null
+                            }).filter(Boolean)
+                            if (filtrados.length) gruposMostrar = filtrados
+                          }
+                          return gruposMostrar.map(g => {
                           const gPausado = g.disponivel === false
                           const qtd = g.max > 1 ? `escolha até ${g.max}` : (g.min > 0 ? 'obrigatório' : 'opcional')
                           return (
@@ -711,7 +755,7 @@ export default function Produtos() {
                               {/* Opções do grupo */}
                               {g.opcoes.map(op => {
                                 const oPausado = op.disponivel === false
-                                const oMatch = search.trim().length >= 2 && op.nome.toLowerCase().includes(search.trim().toLowerCase())
+                                const oMatch = norm(search).length >= 2 && norm(op.nome).includes(norm(search))
                                 return (
                                   <div key={op.id} style={{
                                     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
@@ -742,7 +786,8 @@ export default function Produtos() {
                               })}
                             </div>
                           )
-                        })}
+                          })
+                        })()}
                       </div>
                     </td>
                   </tr>
@@ -1045,67 +1090,59 @@ export default function Produtos() {
                   </p>
                 </div>
 
-                {/* Complementos / opções (monte sua quentinha) */}
+                {/* Complementos: escolher categorias já criadas (as opções vivem na tela Complementos) */}
                 <div className="form-field full" style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
                   <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <span>
-                      Complementos / opções{' '}
+                      Complementos{' '}
                       <span style={{ fontWeight: 400, fontSize: '0.8em', color: 'var(--text-muted)' }}>
-                        (ex.: monte sua quentinha — proteínas, saladas...)
+                        (escolha categorias já criadas — ex.: Proteínas, Saladas)
                       </span>
                     </span>
-                    <button type="button" className="btn btn-secondary btn-sm"
-                      onClick={() => setGrupos(prev => [...prev, { nome: '', min: 1, max: 1, opcoes: [] }])}>
-                      + Grupo
-                    </button>
                   </label>
 
-                  {grupos.length === 0 && (
+                  {vinculos.length === 0 && (
                     <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '6px 0 0' }}>
-                      Nenhum complemento. Clique em “+ Grupo” pra criar (ex.: “Proteínas”, escolher de 1 a 2).
+                      Nenhuma categoria neste produto. Use o seletor abaixo pra adicionar. As opções de
+                      cada categoria são criadas/editadas no menu <b>Complementos</b>.
                     </p>
                   )}
 
-                  {grupos.map((g, gi) => (
-                    <div key={gi} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12, marginTop: 10, background: 'var(--surface-hover)' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 68px 68px auto', gap: 8, alignItems: 'end' }}>
-                        <div>
-                          <label style={{ fontSize: '0.72em', color: 'var(--text-muted)' }}>Nome do grupo</label>
-                          <input value={g.nome} placeholder="Ex: Proteínas" onChange={e => updGrupo(gi, { nome: e.target.value })} />
-                        </div>
-                        <div>
-                          <label style={{ fontSize: '0.72em', color: 'var(--text-muted)' }}>Mín.</label>
-                          <input type="number" min="0" value={g.min} onChange={e => updGrupo(gi, { min: e.target.value })} />
-                        </div>
-                        <div>
-                          <label style={{ fontSize: '0.72em', color: 'var(--text-muted)' }}>Máx.</label>
-                          <input type="number" min="1" value={g.max} onChange={e => updGrupo(gi, { max: e.target.value })} />
-                        </div>
-                        <button type="button" className="btn btn-danger btn-sm"
-                          onClick={() => setGrupos(prev => prev.filter((_, i) => i !== gi))}>
-                          Excluir
-                        </button>
-                      </div>
-
-                      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {(g.opcoes || []).map((o, oi) => (
-                          <div key={oi} style={{ display: 'grid', gridTemplateColumns: '1fr 104px auto', gap: 8, alignItems: 'center' }}>
-                            <input value={o.nome} placeholder="Opção (ex: Frango assado)" onChange={e => updOpcao(gi, oi, { nome: e.target.value })} />
-                            <input type="number" step="0.01" min="0" value={o.preco} placeholder="+ R$ 0,00" onChange={e => updOpcao(gi, oi, { preco: e.target.value })} />
-                            <button type="button" title="Remover opção"
-                              style={{ background: 'none', border: 'none', color: 'var(--danger, #e55)', cursor: 'pointer', fontSize: '1.1em', padding: '2px 6px' }}
-                              onClick={() => updGrupo(gi, { opcoes: g.opcoes.filter((_, i) => i !== oi) })}>
-                              ✕
-                            </button>
-                          </div>
-                        ))}
-                        <button type="button" className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start' }}
-                          onClick={() => updGrupo(gi, { opcoes: [...(g.opcoes || []), { nome: '', preco: 0 }] })}>
-                          + Opção
-                        </button>
-                      </div>
+                  {vinculos.map((v, i) => (
+                    <div key={v.grupo_id} style={{ display: 'grid', gridTemplateColumns: '1fr 130px auto', gap: 8, alignItems: 'center', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px', marginTop: 8, background: 'var(--surface-hover)' }}>
+                      <span style={{ fontWeight: 600 }}>{v.nome}</span>
+                      <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        máx.:
+                        <input type="number" min="1" style={{ width: 60 }}
+                          value={v.max_override ?? ''}
+                          placeholder={String(v.max_grupo)}
+                          onChange={e => { const val = e.target.value; setVinculos(prev => prev.map((x, j) => j === i ? { ...x, max_override: val === '' ? null : (Number(val) || 1) } : x)) }} />
+                      </label>
+                      <button type="button" className="btn btn-danger btn-sm"
+                        onClick={() => setVinculos(prev => prev.filter((_, j) => j !== i))}>
+                        Tirar
+                      </button>
                     </div>
                   ))}
+
+                  {catsEmpresa.filter(c => !vinculos.some(v => v.grupo_id === c.id)).length > 0 && (
+                    <select value="" style={{ marginTop: 10, maxWidth: 340 }}
+                      onChange={e => {
+                        const gid = e.target.value; if (!gid) return
+                        const c = catsEmpresa.find(x => x.id === gid)
+                        setVinculos(prev => [...prev, { linkId: null, grupo_id: gid, nome: c?.nome ?? '', max_grupo: c?.max ?? 1, max_override: null }])
+                        e.target.value = ''
+                      }}>
+                      <option value="">+ Adicionar categoria…</option>
+                      {catsEmpresa.filter(c => !vinculos.some(v => v.grupo_id === c.id)).map(c => (
+                        <option key={c.id} value={c.id}>{c.nome}</option>
+                      ))}
+                    </select>
+                  )}
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+                    Pra criar uma categoria nova ou editar/pausar as opções, vá no menu <b>Complementos</b>.
+                    O “máx.” aqui é só deste produto (ex.: Proteínas 1 na P e 2 na M/G).
+                  </p>
                 </div>
               </div>
 

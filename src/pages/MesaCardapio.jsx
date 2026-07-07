@@ -73,18 +73,19 @@ export default function MesaCardapio() {
       const ids = (ps ?? []).map(p => p.produto_id)
       const cm = {}
       if (ids.length) {
-        const { data: grupos } = await supabase
-          .from('complemento_grupos')
-          .select('id, produto_id, nome, min, max, ordem, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
+        const { data: vinc } = await supabase
+          .from('produto_complemento_grupos')
+          .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))')
           .in('produto_id', ids)
           .order('ordem')
-        for (const g of (grupos ?? [])) {
-          if (g.disponivel === false) continue // grupo pausado some do cardápio da mesa
+        for (const v of (vinc ?? [])) {
+          const g = v.complemento_grupos
+          if (!g || g.disponivel === false) continue // grupo pausado some do cardápio da mesa
           const opcoes = (g.complemento_opcoes ?? [])
             .filter(o => o.disponivel !== false)
             .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
           if (!opcoes.length) continue
-          ;(cm[g.produto_id] ??= []).push({ id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, opcoes })
+          ;(cm[v.produto_id] ??= []).push({ id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1, opcoes })
         }
       }
       setCompMap(cm)
