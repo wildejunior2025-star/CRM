@@ -99,9 +99,13 @@ Deno.serve(async (req) => {
     }
     // Sem desconto: mantém exatamente o total enviado (não muda nada p/ bot e pedidos normais).
     // Com desconto por pontos: recalcula a cobrança a partir do subtotal+taxa-desconto.
-    const totalCobrar = pontosUsados > 0
-      ? Math.max(0.01, Math.round((baseTotal - desconto) * 100) / 100)
-      : Number(pedido.total ?? baseTotal)
+    // IMPORTANTE: sempre arredondar a 2 casas — o Mercado Pago rejeita (400 "Invalid
+    // transaction_amount") qualquer valor com 3+ casas decimais (ex.: 20.001).
+    const totalCobrar = Math.round(
+      (pontosUsados > 0
+        ? Math.max(0.01, baseTotal - desconto)
+        : Number(pedido.total ?? baseTotal)) * 100
+    ) / 100
 
     // MP exige mínimo 30 min para PIX — nosso cron cancela internamente aos 7 min
     const expiration = new Date(Date.now() + 30 * 60 * 1000).toISOString()
@@ -109,15 +113,25 @@ Deno.serve(async (req) => {
     // Token da loja (marketplace) + comissão da plataforma. Fallback: conta central.
     const { token: mpToken, applicationFee } = await resolverContaMp(supabaseSrv, pedido.empresa_id, totalCobrar)
 
+    // O Mercado Pago rejeita (400 "payer.email must be a valid email") qualquer e-mail
+    // fora do formato. Se o e-mail do cliente vier vazio/inválido (ex.: telefone em branco
+    // gerando "@wpp.vendamais.app"), usa um e-mail genérico válido — o PIX não depende dele.
+    const emailInformado = String(pedido.payer_email ?? '').trim()
+    const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInformado)
+    const payerEmail = emailValido ? emailInformado : 'cliente@vendamais.app'
+
+    const primeiroNome = (String(pedido.cliente_nome ?? '').trim().split(/\s+/)[0]) || 'Cliente'
+    const sobrenome = (String(pedido.cliente_nome ?? '').trim().split(/\s+/).slice(1).join(' ')) || 'Cliente'
+
     const paymentBody: Record<string, unknown> = {
       transaction_amount: totalCobrar,
       description:        `Pedido ${pedido.empresa_nome ?? 'FWC Inter'}`,
       payment_method_id:  'pix',
       date_of_expiration: expiration,
       payer: {
-        email:      pedido.payer_email ?? 'cliente@vendamais.app',
-        first_name: (pedido.cliente_nome ?? 'Cliente').split(' ')[0],
-        last_name:  (pedido.cliente_nome ?? '').split(' ').slice(1).join(' ') || 'Cliente',
+        email:      payerEmail,
+        first_name: primeiroNome,
+        last_name:  sobrenome,
       },
       notification_url: WEBHOOK_URL,
     }

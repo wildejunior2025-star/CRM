@@ -50,9 +50,10 @@ export default function WhatsAppCreditos() {
   const [autoValor, setAutoValor]     = useState(50)
   const [savingAuto, setSavingAuto]   = useState(false)
 
-  // Alerta de crédito baixo (avisa o dono, sem cobrar)
+  // Alerta de crédito baixo (avisa por WhatsApp, sem cobrar)
   const { empresa } = useAuth()
   const [alertaMinimo, setAlertaMinimo] = useState(20)
+  const [alertaNumeros, setAlertaNumeros] = useState([]) // [{nome, telefone}]
   const [savingAlerta, setSavingAlerta] = useState(false)
 
   async function load() {
@@ -72,17 +73,27 @@ export default function WhatsAppCreditos() {
   // Carrega o mínimo do alerta de crédito baixo
   useEffect(() => {
     if (!empresa?.id) return
-    supabase.from('empresas').select('credito_alerta_minimo').eq('id', empresa.id).single()
-      .then(({ data }) => { if (data && data.credito_alerta_minimo != null) setAlertaMinimo(data.credito_alerta_minimo) })
+    supabase.from('empresas').select('credito_alerta_minimo, credito_alerta_numeros').eq('id', empresa.id).single()
+      .then(({ data }) => {
+        if (!data) return
+        if (data.credito_alerta_minimo != null) setAlertaMinimo(data.credito_alerta_minimo)
+        setAlertaNumeros(Array.isArray(data.credito_alerta_numeros) ? data.credito_alerta_numeros : [])
+      })
   }, [empresa?.id])
 
   async function handleSalvarAlerta() {
     if (!empresa?.id) return
     setSavingAlerta(true)
     const val = Math.max(0, Number(alertaMinimo) || 0)
-    const { error } = await supabase.from('empresas').update({ credito_alerta_minimo: val, credito_alerta_enviado: false }).eq('id', empresa.id)
+    const nums = alertaNumeros
+      .map(n => ({ nome: (n.nome || '').trim(), telefone: String(n.telefone || '').replace(/\D/g, '') }))
+      .filter(n => n.telefone.length >= 10)
+    const { error } = await supabase.from('empresas')
+      .update({ credito_alerta_minimo: val, credito_alerta_numeros: nums, credito_alerta_enviado: false })
+      .eq('id', empresa.id)
     setSavingAlerta(false)
-    setMsg(error ? { tipo: 'erro', texto: error.message } : { tipo: 'ok', texto: val > 0 ? `Alerta ligado: avisa abaixo de ${val} créditos.` : 'Alerta desligado.' })
+    setMsg(error ? { tipo: 'erro', texto: error.message }
+      : { tipo: 'ok', texto: val > 0 ? `Alerta ligado: avisa ${nums.length} pessoa(s) abaixo de ${val} créditos.` : 'Alerta desligado.' })
   }
 
   // Quando PIX está aberto, consulta saldo a cada 5s até ser pago
@@ -587,13 +598,36 @@ export default function WhatsAppCreditos() {
         <div className="card" style={{ marginTop: 16 }}>
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>🔔 Alerta de crédito baixo</div>
           <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
-            Manda uma mensagem no WhatsApp do dono quando o saldo ficar baixo (avisa <b>uma vez</b>; volta a avisar depois que recarregar). Não cobra nada — é só um aviso.
+            Quando o saldo ficar baixo, mandamos uma mensagem no WhatsApp das pessoas abaixo (avisa <b>uma vez</b>; volta a avisar depois que recarregar). Não cobra nada — é só um aviso.
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
             <label style={{ fontSize: 13, fontWeight: 600 }}>Avisar quando ficar abaixo de</label>
             <input type="number" min={0} max={2000} value={alertaMinimo} onChange={e => setAlertaMinimo(Number(e.target.value))} style={{ ...inputStyle, width: 90 }} />
             <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>créditos (0 = desligado)</span>
           </div>
+
+          {/* Pessoas que recebem o aviso */}
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Quem recebe o aviso</div>
+          {alertaNumeros.length === 0 && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Ninguém ainda. Adicione as pessoas abaixo (ex.: os donos e a recepção).</div>
+          )}
+          {alertaNumeros.map((n, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <input placeholder="Nome" value={n.nome || ''}
+                onChange={e => setAlertaNumeros(prev => prev.map((x, j) => j === i ? { ...x, nome: e.target.value } : x))}
+                style={{ ...inputStyle, flex: 1, minWidth: 110 }} />
+              <input placeholder="WhatsApp (DDD+número)" value={n.telefone || ''}
+                onChange={e => setAlertaNumeros(prev => prev.map((x, j) => j === i ? { ...x, telefone: e.target.value } : x))}
+                style={{ ...inputStyle, width: 170 }} />
+              <button type="button" onClick={() => setAlertaNumeros(prev => prev.filter((_, j) => j !== i))}
+                style={{ background: 'none', border: 'none', color: 'var(--danger, #e55)', cursor: 'pointer', fontSize: 18, padding: '0 6px' }}>✕</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => setAlertaNumeros(prev => [...prev, { nome: '', telefone: '' }])}
+            style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--primary)', background: 'none', border: '1px dashed var(--border)', borderRadius: 8, padding: '7px 12px', cursor: 'pointer', marginBottom: 16, display: 'block' }}>
+            + Adicionar pessoa
+          </button>
+
           <button onClick={handleSalvarAlerta} disabled={savingAlerta} style={{
             width: '100%', padding: '11px 0', borderRadius: 9, border: 'none',
             background: 'var(--primary)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', opacity: savingAlerta ? 0.6 : 1,
@@ -601,7 +635,7 @@ export default function WhatsAppCreditos() {
             {savingAlerta ? 'Salvando...' : 'Salvar alerta'}
           </button>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
-            ⚠️ Precisa ter o número do dono configurado (em <b>WhatsApp → Config</b>, o telefone do admin).
+            Coloque o número com DDD (ex.: 84 98632-6942). Manda pra todos da lista quando o crédito ficar baixo.
           </div>
         </div>
       )}

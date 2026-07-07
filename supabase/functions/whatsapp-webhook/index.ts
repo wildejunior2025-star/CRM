@@ -1002,7 +1002,7 @@ serve(async (req) => {
       : phoneLocal
 
     const [creditRes] = await Promise.all([
-      supabase.from("empresas").select("whatsapp_creditos, credito_alerta_minimo, credito_alerta_enviado").eq("id", empresaId).single(),
+      supabase.from("empresas").select("whatsapp_creditos, credito_alerta_minimo, credito_alerta_enviado, credito_alerta_numeros").eq("id", empresaId).single(),
       supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text }),
     ])
     if (!creditRes.data || creditRes.data.whatsapp_creditos <= 0) return new Response("ok", { headers: corsHeaders })
@@ -1012,14 +1012,23 @@ serve(async (req) => {
       const saldo = Number(creditRes.data.whatsapp_creditos ?? 0)
       const alertaMin = Number(creditRes.data.credito_alerta_minimo ?? 0)
       const jaAvisou = creditRes.data.credito_alerta_enviado === true
-      if (adminPhone && alertaMin > 0 && saldo > 0 && saldo <= alertaMin && !jaAvisou) {
-        const msg = `⚠️ *${empresaNome}* — créditos do robô acabando!\n\n` +
-          `Saldo atual: *${saldo}* crédito(s).\n\n` +
-          `Recarregue no sistema em *WhatsApp → Créditos Bot* pra o robô não parar de responder os clientes. 🤖`
-        fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
-          method: "POST", headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
-          body: JSON.stringify({ number: `55${adminPhone}`, text: msg }),
-        }).catch(e => console.error("[CreditoBaixo] erro ao avisar dono:", e))
+      // Destinatários (nome + telefone). Sem lista, cai no telefone do admin.
+      const listaNums = Array.isArray(creditRes.data.credito_alerta_numeros) ? creditRes.data.credito_alerta_numeros : []
+      const destinos = listaNums.length ? listaNums : (adminPhone ? [{ nome: "", telefone: adminPhone }] : [])
+      const paraZap = (tel: any) => { const d = String(tel ?? "").replace(/\D/g, ""); return d ? (d.startsWith("55") ? d : "55" + d) : "" }
+      if (alertaMin > 0 && saldo > 0 && saldo <= alertaMin && !jaAvisou && destinos.length) {
+        for (const dest of destinos as any[]) {
+          const num = paraZap(dest?.telefone)
+          if (!num) continue
+          const ola = dest?.nome ? `Oi, *${dest.nome}*! ` : ""
+          const msg = `${ola}⚠️ *${empresaNome}* — créditos do robô acabando!\n\n` +
+            `Saldo atual: *${saldo}* crédito(s).\n\n` +
+            `Recarregue no sistema em *WhatsApp → Créditos Bot* pra o robô não parar de responder os clientes. 🤖`
+          fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+            method: "POST", headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+            body: JSON.stringify({ number: num, text: msg }),
+          }).catch(e => console.error("[CreditoBaixo] erro ao avisar:", e))
+        }
         await supabase.from("empresas").update({ credito_alerta_enviado: true }).eq("id", empresaId)
       } else if (jaAvisou && saldo > alertaMin) {
         // Recarregou acima do mínimo → volta a poder alertar no próximo episódio.
