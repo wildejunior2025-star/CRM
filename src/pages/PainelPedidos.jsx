@@ -701,11 +701,20 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
 // ── Modal de venda no balcão (PDV do gestor) ────────────────
 // O vendedor monta o pedido pelo catálogo; ele entra na lista do painel.
 // Seletor de complementos ("monte sua quentinha") na venda de balcão.
-function ModalComplementos({ produto, onFechar, onConfirmar }) {
+function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
   const grupos = produto.grupos ?? []
   const [sel, setSel] = useState(() => {
+    // Ao EDITAR, começa já marcado com o que o cliente tinha escolhido (casando
+    // pelo nome da opção). Ao adicionar do zero, vem tudo vazio.
+    const nomesIniciais = new Set((iniciais ?? []).map(n => String(n?.nome ?? n).toLowerCase().trim()))
     const init = {}
-    for (const g of grupos) init[g.id] = new Set()
+    for (const g of grupos) {
+      const s = new Set()
+      for (const o of (g.opcoes ?? [])) {
+        if (nomesIniciais.has(String(o.nome).toLowerCase().trim())) s.add(o.id)
+      }
+      init[g.id] = s
+    }
     return init
   })
 
@@ -1095,10 +1104,11 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     else addItem(p)
   }
   // Adiciona uma linha com os complementos escolhidos (mesma escolha soma qtd).
-  function adicionarComComplementos(produto, selecoes, precoUnit) {
+  function adicionarComComplementos(produto, selecoes, precoUnit, qtdInicial) {
     const sig = `${produto.id}::${selecoes.map(s => s.opcaoId).sort().join(',')}`
     setCart(prev => {
-      const qtd = (prev[sig]?.qtd ?? 0) + 1
+      // Ao editar, preserva a quantidade original; ao adicionar, soma 1.
+      const qtd = qtdInicial != null ? qtdInicial : (prev[sig]?.qtd ?? 0) + 1
       return { ...prev, [sig]: {
         id: sig, produto_id: produto.id, nome: produto.nome, preco: precoUnit, qtd,
         complementos: selecoes.map(s => ({ nome: s.nome, qtd: 1 })),
@@ -1451,7 +1461,13 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
                   {/* Editar complementos (só quando tem) — reabre a escolha */}
                   {temComp && (
                     <button type="button" title="Editar complementos"
-                      onClick={() => { const p = produtosComPreco.find(x => x.id === i.produto_id); if (p) { removeItem(i.id); pedirProduto(p) } }}
+                      onClick={() => {
+                        const p = produtosComPreco.find(x => x.id === i.produto_id)
+                        const grupos = compMap[i.produto_id]
+                        // Abre o modal JÁ preenchido com o que estava escolhido; só troca
+                        // ao confirmar (se fechar no X, o item original continua).
+                        if (p && grupos?.length) setProdutoComp({ ...p, grupos, _editId: i.id, _iniciais: i.complementos ?? [], _qtd: i.qtd })
+                      }}
                       style={{ background: 'none', border: 'none', color: '#7c3aed', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>✏️</button>
                   )}
                   <button type="button" onClick={() => removeItem(i.id)} title="Remover"
@@ -1627,8 +1643,17 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     {produtoComp && (
       <ModalComplementos
         produto={produtoComp}
+        iniciais={produtoComp._iniciais ?? []}
         onFechar={() => setProdutoComp(null)}
-        onConfirmar={adicionarComComplementos}
+        onConfirmar={(prod, selecoes, precoUnit) => {
+          // Edição: tira a linha antiga e recria com a escolha nova, mantendo a qtd.
+          if (produtoComp._editId) {
+            removeItem(produtoComp._editId)
+            adicionarComComplementos(prod, selecoes, precoUnit, produtoComp._qtd)
+          } else {
+            adicionarComComplementos(prod, selecoes, precoUnit)
+          }
+        }}
       />
     )}
     </>
