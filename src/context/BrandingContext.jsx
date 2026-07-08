@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabaseClient'
 
 const BrandingCtx = createContext({ empresaParceira: null, loadingBranding: false, plataformaLogoUrl: null })
 
-const MAIN_HOSTS = ['app.fwcinter.com', 'portal.fwcinter.com', 'admin.fwcinter.com', 'gestor.fwcinter.com', 'entregas.fwcinter.com', 'fwcinter.com', 'crm.wildejunior2025.workers.dev', 'localhost', '127.0.0.1']
+const MAIN_HOSTS = ['app.fwcinter.com', 'portal.fwcinter.com', 'admin.fwcinter.com', 'gestor.fwcinter.com', 'entregas.fwcinter.com', 'crm.fwcinter.com', 'fwcinter.com', 'crm.wildejunior2025.workers.dev', 'localhost', '127.0.0.1']
 
 function hexToRgb(hex) {
   return {
