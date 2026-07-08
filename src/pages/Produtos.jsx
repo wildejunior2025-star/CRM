@@ -319,18 +319,6 @@ export default function Produtos() {
     }
   }
 
-  // Pausar/ativar SÓ no delivery (site + bot). Não mexe no balcão nem no "ativo"
-  // geral — o produto some só do delivery quando estiver OFF.
-  async function toggleDelivery(p) {
-    const novo = p.disponivel_delivery === false ? true : false
-    setProdutos(prev => prev.map(x => x.id === p.id ? { ...x, disponivel_delivery: novo } : x))
-    const { error } = await supabase.from('produtos').update({ disponivel_delivery: novo }).eq('id', p.id)
-    if (error) {
-      setProdutos(prev => prev.map(x => x.id === p.id ? { ...x, disponivel_delivery: !novo } : x))
-      setError(error.message)
-    }
-  }
-
   function handleSearch(val) {
     setSearch(val)
     setPage(0)
@@ -686,39 +674,20 @@ export default function Produtos() {
                   <td>R$ {Number(p.preco_app || 0).toFixed(2)}</td>
                   <td>{p.estoque_minimo}</td>
                   <td>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
-                      <button
-                        type="button"
-                        onClick={() => togglePausar(p)}
-                        title={p.ativo ? 'Pausar em TUDO (site, bot e balcão)' : 'Ativar — volta a aparecer pra vender'}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
-                          padding: '5px 12px', borderRadius: 20, fontWeight: 700, fontSize: 13,
-                          border: `1.5px solid ${p.ativo ? '#16a34a' : '#eab308'}`,
-                          background: p.ativo ? 'rgba(22,163,74,.12)' : 'rgba(234,179,8,.16)',
-                          color: p.ativo ? '#16a34a' : '#a16207',
-                        }}
-                      >
-                        {p.ativo ? '⏸ Pausar' : '▶ Ativar'}
-                      </button>
-                      {/* Pausa só o DELIVERY (site + bot) — continua no balcão */}
-                      <button
-                        type="button"
-                        onClick={() => toggleDelivery(p)}
-                        title={p.disponivel_delivery !== false
-                          ? 'Pausar SÓ no delivery (some do site/bot; continua no balcão)'
-                          : 'Ativar no delivery (volta a aparecer no site/bot)'}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
-                          padding: '5px 12px', borderRadius: 20, fontWeight: 700, fontSize: 13,
-                          border: `1.5px solid ${p.disponivel_delivery !== false ? '#0891b2' : '#eab308'}`,
-                          background: p.disponivel_delivery !== false ? 'rgba(8,145,178,.12)' : 'rgba(234,179,8,.16)',
-                          color: p.disponivel_delivery !== false ? '#0891b2' : '#a16207',
-                        }}
-                      >
-                        {p.disponivel_delivery !== false ? '🛵 Delivery ON' : '🛵 Delivery OFF'}
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => togglePausar(p)}
+                      title={p.ativo ? 'Pausar — deixa indisponível pra vender' : 'Ativar — volta a aparecer pra vender'}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                        padding: '5px 12px', borderRadius: 20, fontWeight: 700, fontSize: 13,
+                        border: `1.5px solid ${p.ativo ? '#16a34a' : '#eab308'}`,
+                        background: p.ativo ? 'rgba(22,163,74,.12)' : 'rgba(234,179,8,.16)',
+                        color: p.ativo ? '#16a34a' : '#a16207',
+                      }}
+                    >
+                      {p.ativo ? '⏸ Pausar' : '▶ Ativar'}
+                    </button>
                   </td>
                   <td style={{ position: 'sticky', right: 0, background: 'var(--surface)', boxShadow: '-4px 0 8px rgba(0,0,0,0.15)' }}>
                     <button
