@@ -1116,6 +1116,13 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       return novo
     })
   }
+  function maisItem(id) {
+    setCart(prev => {
+      const cur = prev[id]
+      if (!cur) return prev
+      return { ...prev, [id]: { ...cur, qtd: cur.qtd + 1 } }
+    })
+  }
   function removeItem(id) {
     setCart(prev => { const novo = { ...prev }; delete novo[id]; return novo })
   }
@@ -1340,11 +1347,8 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
             <div
               ref={pasteRef}
               tabIndex={0}
-              onPaste={e => {
-                const it = [...(e.clipboardData?.items || [])].find(i => i.type?.startsWith('image/'))
-                const f = it?.getAsFile()
-                if (f) { e.preventDefault(); lerPrint(f) }
-              }}
+              /* O Ctrl+V é tratado pelo listener global (useEffect). NÃO colocar
+                 onPaste aqui também — senão o print é lido 2x e a sacola duplica. */
               onFocus={() => setColarPronto(true)}
               onBlur={() => setColarPronto(false)}
               onClick={() => pasteRef.current?.focus()}
@@ -1430,19 +1434,35 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         {/* Carrinho */}
         {itens.length > 0 && (
           <div style={{ marginBottom: 14, fontSize: 13 }}>
-            {itens.map(i => (
+            {itens.map(i => {
+              const temComp = Array.isArray(i.complementos) && i.complementos.length > 0
+              const btnQtd = { width: 24, height: 24, borderRadius: 6, border: '1px solid var(--border,#2a2a3a)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontWeight: 800, fontSize: 15, lineHeight: 1, flexShrink: 0 }
+              return (
               <div key={i.id} style={{ padding: '3px 0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, color: 'var(--text)' }}>
-                  <span style={{ flex: 1 }}>{i.qtd}× {i.nome}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, color: 'var(--text)' }}>
+                  {/* Setinhas pra aumentar/diminuir a quantidade */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+                    <button type="button" onClick={() => subItem(i.id)} title="Diminuir" style={btnQtd}>−</button>
+                    <span style={{ minWidth: 16, textAlign: 'center', fontWeight: 700 }}>{i.qtd}</span>
+                    <button type="button" onClick={() => maisItem(i.id)} title="Aumentar" style={btnQtd}>+</button>
+                  </div>
+                  <span style={{ flex: 1 }}>{i.nome}</span>
                   <span>{fmt(i.preco * i.qtd)}</span>
+                  {/* Editar complementos (só quando tem) — reabre a escolha */}
+                  {temComp && (
+                    <button type="button" title="Editar complementos"
+                      onClick={() => { const p = produtosComPreco.find(x => x.id === i.produto_id); if (p) { removeItem(i.id); pedirProduto(p) } }}
+                      style={{ background: 'none', border: 'none', color: '#7c3aed', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>✏️</button>
+                  )}
                   <button type="button" onClick={() => removeItem(i.id)} title="Remover"
-                    style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>×</button>
+                    style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>×</button>
                 </div>
-                {Array.isArray(i.complementos) && i.complementos.map((c, j) => (
+                {temComp && i.complementos.map((c, j) => (
                   <div key={j} style={{ fontSize: 12, color: 'var(--text-muted)', paddingLeft: 16 }}>{Number(c.qtd ?? 1)}× {c.nome}</div>
                 ))}
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
 
