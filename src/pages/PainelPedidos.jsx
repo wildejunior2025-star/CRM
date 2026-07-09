@@ -2840,13 +2840,14 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
 }
 
 // Card compacto de uma mesa (autoatendimento por QR) no quadro do gestor
-function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta }) {
+function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarLiberar }) {
   const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
   const total = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
   const hora = new Date(comanda.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   const pendentes = itens.filter(it => it.status !== 'pronto' && it.status !== 'entregue')
+  const aguardando = comanda.status === 'aguardando_conferencia'
   return (
-    <div className="pp-mini" style={{ borderLeft: '3px solid #db2777', cursor: 'default' }}>
+    <div className="pp-mini" style={{ borderLeft: `3px solid ${aguardando ? '#3b82f6' : '#db2777'}`, cursor: 'default' }}>
       <div className="pp-mini-top">
         <span className="pp-mini-num">🍽️ Mesa {comanda.numero_mesa} · {fmt(total)}</span>
       </div>
@@ -2885,12 +2886,27 @@ function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta }) {
       ) : (
         <div style={{ marginTop: 8, textAlign: 'center', fontSize: 12.5, fontWeight: 800, color: '#16a34a' }}>✓ Tudo pronto</div>
       ))}
-      {onFecharConta && itens.length > 0 && (
-        <button type="button" onClick={() => onFecharConta(comanda)}
-          style={{ marginTop: 6, width: '100%', padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12.5,
-            border: 'none', background: '#7c3aed', color: '#fff' }}>
-          💳 Fechar conta
-        </button>
+      {aguardando ? (
+        <>
+          <div style={{ marginTop: 8, padding: '6px 8px', borderRadius: 8, background: 'rgba(59,130,246,.16)', color: '#2563eb', fontWeight: 800, fontSize: 11.5, textAlign: 'center' }}>
+            🔵 Conta fechada pelo garçom — aguardando o ADM liberar
+          </div>
+          {onConfirmarLiberar && (
+            <button type="button" onClick={() => onConfirmarLiberar(comanda)}
+              style={{ marginTop: 6, width: '100%', padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12.5,
+                border: 'none', background: '#2563eb', color: '#fff' }}>
+              ✅ Confirmar pagamento e liberar mesa
+            </button>
+          )}
+        </>
+      ) : (
+        onFecharConta && itens.length > 0 && (
+          <button type="button" onClick={() => onFecharConta(comanda)}
+            style={{ marginTop: 6, width: '100%', padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12.5,
+              border: 'none', background: '#7c3aed', color: '#fff' }}>
+            💳 Fechar conta
+          </button>
+        )
       )}
     </div>
   )
@@ -3651,9 +3667,9 @@ export default function PainelPedidos() {
     async function carregarComandas() {
       const { data } = await supabase
         .from('comandas')
-        .select('id, numero_mesa, created_at, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao)')
+        .select('id, numero_mesa, created_at, status, fechamento_pendente, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao)')
         .eq('empresa_id', empresa.id)
-        .eq('status', 'aberta')
+        .in('status', ['aberta', 'aguardando_conferencia'])
         .order('numero_mesa')
       if (ativo) setComandas(data ?? [])
     }
@@ -3723,6 +3739,27 @@ export default function PainelPedidos() {
     // G3 — mostra na coluna "Concluídos hoje" na hora (o reload confirma depois)
     setMesasFechadasHoje(prev => [
       { id: comanda.id, numero_mesa: comanda.numero_mesa, total, forma_pagamento: forma, fechada_at: new Date().toISOString() },
+      ...prev.filter(m => m.id !== comanda.id),
+    ])
+  }
+
+  // ADM confere e libera uma mesa que o garçom já fechou (aguardando_conferencia),
+  // usando o pagamento que o garçom lançou. Sem pagamento salvo, abre o modal.
+  async function handleConfirmarLiberarMesa(comanda) {
+    const pend = comanda.fechamento_pendente || {}
+    if (!Array.isArray(pend.pagamentos) || !pend.pagamentos.length) {
+      setComandaFechando(comanda); return
+    }
+    const total = (comanda.comanda_itens ?? []).reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
+    const { error } = await supabase.rpc('fechar_conta_presencial', {
+      p_comanda_id: comanda.id,
+      p_pagamentos: pend.pagamentos,
+      p_aplicar_taxa: pend.aplicar_taxa ?? true,
+    })
+    if (error) { alert('Erro ao liberar a mesa: ' + error.message); return }
+    setComandas(cs => cs.filter(c => c.id !== comanda.id))
+    setMesasFechadasHoje(prev => [
+      { id: comanda.id, numero_mesa: comanda.numero_mesa, total, forma_pagamento: (pend.pagamentos[0]?.forma ?? 'dinheiro'), fechada_at: new Date().toISOString() },
       ...prev.filter(m => m.id !== comanda.id),
     ])
   }
@@ -4355,7 +4392,7 @@ export default function PainelPedidos() {
               {(!filtroColuna || filtroColuna === 'mesas') && comandasView.length > 0 && (
                 <Coluna titulo="Mesas" cor="#db2777" count={comandasView.length} vazio="Nenhuma mesa aberta">
                   {comandasView.map(c => (
-                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} />
+                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} onConfirmarLiberar={handleConfirmarLiberarMesa} />
                   ))}
                 </Coluna>
               )}
