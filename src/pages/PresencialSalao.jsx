@@ -286,7 +286,7 @@ export default function PresencialSalao() {
   const corStatus = (mesa) => {
     const c = comandaPorMesa[mesa.id]
     if (!c) return { bg: 'rgba(34,197,94,.12)', border: '#22c55e', label: 'Livre' }
-    if (c.status === 'aguardando_conferencia') return { bg: 'rgba(234,179,8,.16)', border: '#eab308', label: 'Aguardando ADM' }
+    if (c.status === 'aguardando_conferencia') return { bg: 'rgba(59,130,246,.16)', border: '#3b82f6', label: 'Aguardando ADM' }
     return { bg: 'rgba(239,68,68,.12)', border: '#ef4444', label: 'Ocupada' }
   }
 
@@ -448,8 +448,8 @@ export default function PresencialSalao() {
               </div>
               {comandaSel.status === 'aguardando_conferencia' ? (
                 <div>
-                  <div style={{ padding: '8px 10px', borderRadius: 8, background: 'rgba(234,179,8,.16)', color: '#a16207', fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
-                    🟡 Conta fechada pelo garçom — aguardando o ADM conferir o pagamento e liberar a mesa.
+                  <div style={{ padding: '8px 10px', borderRadius: 8, background: 'rgba(59,130,246,.16)', color: '#2563eb', fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
+                    🔵 Conta fechada pelo garçom — aguardando o ADM conferir o pagamento e liberar a mesa.
                   </div>
                   {ehAdmin ? (
                     <div style={{ display: 'flex', gap: 8 }}>
