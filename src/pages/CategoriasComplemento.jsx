@@ -79,9 +79,11 @@ export default function CategoriasComplemento() {
   }
   async function excluirCategoria(cat) {
     const usados = cat.links.length
-    const msg = usados
-      ? `Excluir a categoria "${cat.nome}"? Ela está em ${usados} produto(s) e vai sumir de todos.`
-      : `Excluir a categoria "${cat.nome}"?`
+    const onde = usados ? `\n\nEla está em ${usados} produto(s) e vai sumir de TODOS.` : ''
+    const msg = `⚠️ EXCLUIR a categoria "${cat.nome}" DE VEZ?\n\n`
+      + `Isso APAGA a categoria e todas as opções dela do sistema — NÃO dá pra desfazer.`
+      + onde
+      + `\n\n👉 Se você só quer que ela pare de aparecer, use o botão PAUSAR (não o Excluir).\n\nTem certeza que quer EXCLUIR?`
     if (!confirm(msg)) return
     setBusy(cat.id)
     // apaga vínculos, opções e a categoria (opções caem por cascade, mas garantimos)
@@ -112,7 +114,11 @@ export default function CategoriasComplemento() {
     salvarOpcao(cat, op, { disponivel: novo })
   }
   async function removerOpcao(cat, op) {
-    if (!confirm(`Remover a opção "${op.nome}"?`)) return
+    const msg = `⚠️ EXCLUIR a opção "${op.nome}" DE VEZ?\n\n`
+      + `Isso APAGA a opção do sistema — NÃO é o mesmo que pausar e NÃO dá pra desfazer.\n\n`
+      + `👉 Se você só quer que ela pare de aparecer, use o botão PAUSAR (⏸), não o ✕.\n\n`
+      + `Tem certeza que quer EXCLUIR?`
+    if (!confirm(msg)) return
     setCats(prev => prev.map(c => c.id !== cat.id ? c : { ...c, opcoes: c.opcoes.filter(o => o.id !== op.id) }))
     await supabase.from('complemento_opcoes').delete().eq('id', op.id)
   }
