@@ -16,6 +16,8 @@ const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractio
 export default function PresencialSalao() {
   const { profile, user } = useAuth()
   const empresaId = profile?.empresa_id
+  // Só o ADM confere o pagamento e libera a mesa. Garçom fecha, mas não libera.
+  const ehAdmin = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
 
   const [taxaPct, setTaxaPct] = useState(10)
   const [mesas, setMesas]     = useState([])
@@ -39,7 +41,7 @@ export default function PresencialSalao() {
     const [emp, ms, cs, ps, gs] = await Promise.all([
       supabase.from('empresas').select('taxa_servico_pct').eq('id', empresaId).single(),
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
-      supabase.from('comandas').select('*, comanda_itens(*)').eq('empresa_id', empresaId).eq('status', 'aberta'),
+      supabase.from('comandas').select('*, comanda_itens(*)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
       supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria').eq('empresa_id', empresaId).order('nome').limit(500),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
     ])
@@ -127,6 +129,8 @@ export default function PresencialSalao() {
 
   async function addItem(produto) {
     if (!comandaSel) return
+    // Conta já fechada pelo garçom (aguardando ADM): não deixa lançar mais itens.
+    if (comandaSel.status === 'aguardando_conferencia') { window.alert('Conta já fechada, aguardando o ADM liberar a mesa.'); return }
     const existe = (comandaSel.comanda_itens ?? []).find(i => i.produto_id === produto.produto_id && i.status === 'pendente')
     if (existe) {
       await supabase.from('comanda_itens').update({ quantidade: existe.quantidade + 1 }).eq('id', existe.id)
@@ -229,14 +233,46 @@ export default function PresencialSalao() {
       }
     }
     setSalvando(true)
+    if (ehAdmin) {
+      // ADM: fecha de vez (gera a venda e libera a mesa).
+      const { error } = await supabase.rpc('fechar_conta_presencial', {
+        p_comanda_id: comandaSel.id,
+        p_pagamentos: lista,
+        p_aplicar_taxa: aplicarTaxa,
+      })
+      setSalvando(false)
+      if (error) { window.alert('Erro ao fechar a conta: ' + error.message); return }
+    } else {
+      // Garçom: NÃO libera a mesa. Marca "aguardando conferência" e guarda o
+      // pagamento pra o ADM conferir e liberar depois.
+      const { error } = await supabase.from('comandas').update({
+        status: 'aguardando_conferencia',
+        fechamento_pendente: { pagamentos: lista, aplicar_taxa: aplicarTaxa },
+      }).eq('id', comandaSel.id)
+      setSalvando(false)
+      if (error) { window.alert('Erro ao enviar pro caixa: ' + error.message); return }
+    }
+    setFechando(false)
+    setMesaSel(null)
+    await loadAll()
+  }
+
+  // ADM confere o pagamento e libera a mesa de vez (a partir do que o garçom fechou).
+  async function confirmarLiberarAdm() {
+    if (!comandaSel) return
+    const pend = comandaSel.fechamento_pendente || {}
+    const lista = Array.isArray(pend.pagamentos) && pend.pagamentos.length
+      ? pend.pagamentos
+      : [{ forma: 'dinheiro', valor: Math.round(totalSel * 100) / 100 }]
+    const aplicar = pend.aplicar_taxa ?? true
+    setSalvando(true)
     const { error } = await supabase.rpc('fechar_conta_presencial', {
       p_comanda_id: comandaSel.id,
       p_pagamentos: lista,
-      p_aplicar_taxa: aplicarTaxa,
+      p_aplicar_taxa: aplicar,
     })
     setSalvando(false)
-    if (error) { window.alert('Erro ao fechar a conta: ' + error.message); return }
-    setFechando(false)
+    if (error) { window.alert('Erro ao liberar a mesa: ' + error.message); return }
     setMesaSel(null)
     await loadAll()
   }
@@ -250,6 +286,7 @@ export default function PresencialSalao() {
   const corStatus = (mesa) => {
     const c = comandaPorMesa[mesa.id]
     if (!c) return { bg: 'rgba(34,197,94,.12)', border: '#22c55e', label: 'Livre' }
+    if (c.status === 'aguardando_conferencia') return { bg: 'rgba(234,179,8,.16)', border: '#eab308', label: 'Aguardando ADM' }
     return { bg: 'rgba(239,68,68,.12)', border: '#ef4444', label: 'Ocupada' }
   }
 
@@ -409,16 +446,40 @@ export default function PresencialSalao() {
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 4 }}>
                 <span>Subtotal</span><strong>{fmt(subtotalSel)}</strong>
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" onClick={cancelarMesa}
-                  style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}>
-                  Cancelar
-                </button>
-                <button type="button" onClick={abrirFechamento} disabled={subtotalSel <= 0}
-                  className="btn btn-primary" style={{ flex: 1, marginTop: 0, opacity: subtotalSel <= 0 ? 0.5 : 1 }}>
-                  Fechar conta
-                </button>
-              </div>
+              {comandaSel.status === 'aguardando_conferencia' ? (
+                <div>
+                  <div style={{ padding: '8px 10px', borderRadius: 8, background: 'rgba(234,179,8,.16)', color: '#a16207', fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
+                    🟡 Conta fechada pelo garçom — aguardando o ADM conferir o pagamento e liberar a mesa.
+                  </div>
+                  {ehAdmin ? (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button type="button" onClick={abrirFechamento}
+                        style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
+                        Revisar
+                      </button>
+                      <button type="button" onClick={confirmarLiberarAdm} disabled={salvando}
+                        className="btn btn-primary" style={{ flex: 1, marginTop: 0 }}>
+                        {salvando ? 'Liberando...' : '✅ Confirmar e liberar mesa'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'center', padding: '4px 0' }}>
+                      Aguardando o administrador liberar a mesa.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={cancelarMesa}
+                    style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}>
+                    Cancelar
+                  </button>
+                  <button type="button" onClick={abrirFechamento} disabled={subtotalSel <= 0}
+                    className="btn btn-primary" style={{ flex: 1, marginTop: 0, opacity: subtotalSel <= 0 ? 0.5 : 1 }}>
+                    {ehAdmin ? 'Fechar conta' : 'Fechar conta'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -523,7 +584,7 @@ export default function PresencialSalao() {
               </button>
               <button type="button" onClick={confirmarFechamento} disabled={salvando || !podeReceber}
                 className="btn btn-primary" style={{ flex: 1, marginTop: 0, opacity: (salvando || !podeReceber) ? 0.5 : 1 }}>
-                {salvando ? 'Fechando...' : `Receber ${fmt(totalSel)}`}
+                {salvando ? 'Fechando...' : (ehAdmin ? `Receber ${fmt(totalSel)}` : `Fechar e enviar pro caixa · ${fmt(totalSel)}`)}
               </button>
             </div>
           </div>
