@@ -12,6 +12,10 @@ function aceitarAutoAtivo() {
 }
 import { CONDICOES_PAGAMENTO } from '../lib/constants'
 import { separarItem } from '../lib/itensPedido'
+// Sistema de salão embutido no gestor (Mesas): salão, reservas e config de mesas.
+import PresencialSalao from './PresencialSalao'
+import PresencialReservas from './PresencialReservas'
+import PresencialMesas from './PresencialMesas'
 import './PainelPedidos.css'
 
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
@@ -2554,6 +2558,17 @@ const RIGHTBAR_BOTOES = [
     ),
   },
   {
+    id: 'salao', label: 'Mesas',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 11h18"/>
+        <path d="M5 11V8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3"/>
+        <path d="M6 11v9"/>
+        <path d="M18 11v9"/>
+      </svg>
+    ),
+  },
+  {
     id: 'chat', label: 'Mensagens',
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -3139,7 +3154,8 @@ export default function PainelPedidos() {
   }
 
   // ── Painel lateral direito (Impressora / Pedidos) ─────────
-  const [painelDireito, setPainelDireito] = useState(null) // null | 'impressora' | 'pedidos'
+  const [painelDireito, setPainelDireito] = useState(null) // null | 'impressora' | 'pedidos' | 'salao'
+  const [subAbaSalao, setSubAbaSalao] = useState('salao')   // dentro de Mesas: 'salao' | 'reservas' | 'mesas'
   const [larguraCupom, setLarguraCupom] = useState(() => {
     try { return JSON.parse(localStorage.getItem('painelConfig') || '{}').larguraCupom === '58mm' ? '58mm' : '80mm' }
     catch { return '80mm' }
@@ -5138,6 +5154,44 @@ export default function PainelPedidos() {
           )
         })}
       </nav>
+
+      {/* ── MESAS / SALÃO em tela cheia (abre pela barra; "Pedidos" volta) ── */}
+      {painelDireito === 'salao' && (
+        <div style={{
+          position: 'fixed', top: 60, left: 0, right: 56, bottom: 0, zIndex: 35,
+          background: 'var(--bg, #0f1420)', display: 'flex', flexDirection: 'column',
+        }}>
+          {/* Sub-abas: tudo do salão no mesmo canto */}
+          <div style={{
+            display: 'flex', gap: 6, padding: '10px 14px', flexWrap: 'wrap', alignItems: 'center',
+            borderBottom: '1px solid var(--border, #2a2a3a)', background: 'var(--surface, #16161f)',
+          }}>
+            <span style={{ fontWeight: 800, fontSize: 15, marginRight: 8 }}>🍽️ Salão</span>
+            {[
+              { id: 'salao', label: 'Salão / Mesas' },
+              { id: 'reservas', label: 'Reservas' },
+              { id: 'mesas', label: 'Configurar mesas' },
+            ].map(t => (
+              <button key={t.id} type="button" onClick={() => setSubAbaSalao(t.id)}
+                style={{
+                  padding: '7px 14px', borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                  border: `1.5px solid ${subAbaSalao === t.id ? 'var(--primary, #7c3aed)' : 'var(--border, #2a2a3a)'}`,
+                  background: subAbaSalao === t.id ? 'rgba(124,58,237,.15)' : 'transparent',
+                  color: subAbaSalao === t.id ? 'var(--primary, #a78bfa)' : 'var(--text)',
+                }}>{t.label}</button>
+            ))}
+            <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
+              Clique em <b>Pedidos</b> na barra pra voltar aos pedidos
+            </span>
+          </div>
+          {/* Conteúdo da sub-aba */}
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            {subAbaSalao === 'salao' && <PresencialSalao />}
+            {subAbaSalao === 'reservas' && <PresencialReservas />}
+            {subAbaSalao === 'mesas' && <PresencialMesas />}
+          </div>
+        </div>
+      )}
 
     </div>
   )
