@@ -5155,18 +5155,23 @@ export default function PainelPedidos() {
         })}
       </nav>
 
-      {/* ── MESAS / SALÃO em tela cheia (abre pela barra; "Pedidos" volta) ── */}
+      {/* ── MESAS / SALÃO em tela cheia (cobre tudo; botão volta pros pedidos) ── */}
       {painelDireito === 'salao' && (
         <div style={{
-          position: 'fixed', top: 60, left: 0, right: 56, bottom: 0, zIndex: 35,
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
           background: 'var(--bg, #0f1420)', display: 'flex', flexDirection: 'column',
         }}>
-          {/* Sub-abas: tudo do salão no mesmo canto */}
+          {/* Sub-abas + voltar: tudo do salão no mesmo canto */}
           <div style={{
             display: 'flex', gap: 6, padding: '10px 14px', flexWrap: 'wrap', alignItems: 'center',
             borderBottom: '1px solid var(--border, #2a2a3a)', background: 'var(--surface, #16161f)',
           }}>
-            <span style={{ fontWeight: 800, fontSize: 15, marginRight: 8 }}>🍽️ Salão</span>
+            <button type="button" onClick={() => setPainelDireito('pedidos')}
+              style={{
+                padding: '7px 14px', borderRadius: 9, fontWeight: 800, fontSize: 13, cursor: 'pointer',
+                border: '1.5px solid var(--primary, #7c3aed)', background: 'var(--primary, #7c3aed)', color: '#fff',
+              }}>← Pedidos</button>
+            <span style={{ fontWeight: 800, fontSize: 15, margin: '0 8px' }}>🍽️ Salão</span>
             {[
               { id: 'salao', label: 'Salão / Mesas' },
               { id: 'reservas', label: 'Reservas' },
@@ -5180,9 +5185,6 @@ export default function PainelPedidos() {
                   color: subAbaSalao === t.id ? 'var(--primary, #a78bfa)' : 'var(--text)',
                 }}>{t.label}</button>
             ))}
-            <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
-              Clique em <b>Pedidos</b> na barra pra voltar aos pedidos
-            </span>
           </div>
           {/* Conteúdo da sub-aba */}
           <div style={{ flex: 1, overflow: 'auto' }}>
