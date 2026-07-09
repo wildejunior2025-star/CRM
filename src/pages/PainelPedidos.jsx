@@ -3154,8 +3154,19 @@ export default function PainelPedidos() {
   }
 
   // ── Painel lateral direito (Impressora / Pedidos) ─────────
-  const [painelDireito, setPainelDireito] = useState(null) // null | 'impressora' | 'pedidos' | 'salao'
-  const [subAbaSalao, setSubAbaSalao] = useState('salao')   // dentro de Mesas: 'salao' | 'reservas' | 'mesas'
+  // Lembra a seção aberta (ex.: Mesas) ao sair e voltar do gestor.
+  const [painelDireito, setPainelDireito] = useState(() => {
+    try { return localStorage.getItem('gestor-painel-direito') || null } catch { return null }
+  }) // null | 'impressora' | 'pedidos' | 'salao'
+  const [subAbaSalao, setSubAbaSalao] = useState(() => {
+    try { return localStorage.getItem('gestor-subaba-salao') || 'salao' } catch { return 'salao' }
+  }) // dentro de Mesas: 'salao' | 'reservas' | 'mesas'
+  useEffect(() => {
+    try { painelDireito ? localStorage.setItem('gestor-painel-direito', painelDireito) : localStorage.removeItem('gestor-painel-direito') } catch { /* ignore */ }
+  }, [painelDireito])
+  useEffect(() => {
+    try { localStorage.setItem('gestor-subaba-salao', subAbaSalao) } catch { /* ignore */ }
+  }, [subAbaSalao])
   const [larguraCupom, setLarguraCupom] = useState(() => {
     try { return JSON.parse(localStorage.getItem('painelConfig') || '{}').larguraCupom === '58mm' ? '58mm' : '80mm' }
     catch { return '80mm' }
