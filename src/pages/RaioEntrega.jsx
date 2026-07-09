@@ -463,13 +463,14 @@ export default function RaioEntrega() {
                       className={`re-taxa-btn${usarTaxasPorKm ? ' selected' : ''}`}
                       onClick={() => {
                         setUsarTaxasPorKm(true)
-                        // Gera uma faixa por km do 1 até o raio (sobrescreve sempre que não tinha faixas)
+                        // Gera uma faixa a cada 500 m (0,5 km) até o raio.
                         if (taxasKm.length === 0) {
-                          const faixasAuto = Array.from({ length: Math.max(1, Math.round(raio)) }, (_, i) => ({
-                            km: i + 1,
-                            taxa: 0,
-                            tempo: (i + 1) * 5,
-                          }))
+                          const passo = 0.5
+                          const n = Math.max(1, Math.round((parseFloat(raio) || 10) / passo))
+                          const faixasAuto = Array.from({ length: n }, (_, i) => {
+                            const km = +((i + 1) * passo).toFixed(1)
+                            return { km, taxa: 0, tempo: Math.round(km * 5) }
+                          })
                           setTaxasKm(faixasAuto)
                         }
                       }}
@@ -509,7 +510,7 @@ export default function RaioEntrega() {
                       {taxasKm.map((faixa, i) => (
                         <div key={i} className="re-faixas-row">
                           <input
-                            type="number" min="1" step="1"
+                            type="number" min="0.5" step="0.5"
                             value={faixa.km}
                             onChange={e => {
                               const next = [...taxasKm]
@@ -517,7 +518,7 @@ export default function RaioEntrega() {
                               setTaxasKm(next)
                             }}
                             className="form-input"
-                            placeholder="2"
+                            placeholder="0.5"
                           />
                           <input
                             type="number" min="0" step="0.50"
@@ -556,17 +557,18 @@ export default function RaioEntrega() {
                         type="button"
                         className="re-faixas-add"
                         onClick={() => {
+                          const raioMax = parseFloat(raio) || 10
                           const nextKm = taxasKm.length === 0
-                            ? raio
-                            : Math.min((taxasKm.at(-1)?.km ?? 0) + 1, raio)
-                          setTaxasKm([...taxasKm, { km: nextKm, taxa: 0, tempo: nextKm * 5 }])
+                            ? 0.5
+                            : +Math.min((taxasKm.at(-1)?.km ?? 0) + 0.5, raioMax).toFixed(1)
+                          setTaxasKm([...taxasKm, { km: nextKm, taxa: 0, tempo: Math.round(nextKm * 5) }])
                         }}
                       >
                         + Adicionar faixa
                       </button>
 
                       <p className="re-faixas-hint">
-                        Cada faixa define a taxa e o tempo estimado para aquela distância. A faixa mais próxima é aplicada automaticamente no pedido.
+                        Cada faixa define a taxa e o tempo estimado para aquela distância. A faixa mais próxima é aplicada automaticamente no pedido. Pode usar de <b>500 em 500 m</b> (0,5 · 1 · 1,5 · 2 km…).
                       </p>
                     </div>
                   </div>
