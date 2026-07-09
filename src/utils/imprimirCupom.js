@@ -289,7 +289,14 @@ function imprimirHtmlNavegador(html) {
   }, 300)
 }
 export async function imprimirHtml(html) {
-  if (await imprimirViaAppFwc('imprimir-html', { html })) return
+  // O app FWC imprime o HTML como TEXTO. Se mandar o <style>/<script>, o CSS sai
+  // impresso como código. Então, SÓ pro app, tira esses blocos antes de enviar.
+  // (O QZ e o navegador precisam do <style> pra renderizar — esses recebem o html cheio.)
+  const htmlParaApp = String(html || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<head[\s\S]*?<\/head>/gi, '')
+  if (await imprimirViaAppFwc('imprimir-html', { html: htmlParaApp })) return
   const printer = impressoraEscolhida()
   if (printer) {
     try { await imprimirHtmlViaQz(html, printer); return } catch { /* fallback */ }

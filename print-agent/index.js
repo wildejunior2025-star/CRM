@@ -160,6 +160,9 @@ function imprimir(pedido) {
 // HTML (cozinha/conta de mesa) -> linhas de texto pra térmica.
 function htmlParaLinhas(html) {
   let s = String(html || '')
+  // Remove blocos <style>/<script>/<head> INTEIROS (com conteúdo) — senão o CSS
+  // sai impresso como texto na térmica.
+  s = s.replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<head[\s\S]*?<\/head>/gi, '')
   s = s.replace(/<\s*(br|\/p|\/div|\/tr|\/h[1-6]|\/li)\s*>/gi, '\n').replace(/<[^>]+>/g, '')
   s = s.replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
   return s.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean)
