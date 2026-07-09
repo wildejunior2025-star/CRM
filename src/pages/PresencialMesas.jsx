@@ -26,6 +26,8 @@ export default function PresencialMesas() {
   const [capacidade, setCapacidade] = useState(4)
   const [qrMesa, setQrMesa]         = useState(null)   // mesa do modal de QR
   const [copiado, setCopiado]       = useState(false)
+  const [editId, setEditId]         = useState(null)   // mesa com lugares em edição
+  const [editCap, setEditCap]       = useState(4)
   const [presencialAtivo, setPresencialAtivo] = useState(true) // serviço presencial ligado?
   const [ligando, setLigando]       = useState(false)
 
@@ -86,6 +88,20 @@ export default function PresencialMesas() {
   async function alternarAtiva(m) {
     await supabase.from('mesas').update({ ativa: !m.ativa }).eq('id', m.id)
     carregar()
+  }
+
+  function abrirEdicaoCap(m) {
+    setEditId(m.id)
+    setEditCap(m.capacidade)
+  }
+
+  async function salvarCapacidade(m) {
+    const c = parseInt(editCap, 10)
+    if (!c || c < 1) { setEditId(null); return }
+    // atualização otimista pra não "piscar" a lista inteira
+    setMesas(prev => prev.map(x => x.id === m.id ? { ...x, capacidade: c } : x))
+    setEditId(null)
+    await supabase.from('mesas').update({ capacidade: c }).eq('id', m.id)
   }
 
   if (loading) return <div className="page"><p>Carregando...</p></div>
@@ -158,8 +174,30 @@ export default function PresencialMesas() {
               }}>
                 <div style={{ fontSize: 20, fontWeight: 800 }}>Mesa {m.numero}</div>
                 {m.nome && <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{m.nome}</div>}
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                  👥 {m.capacidade} lugares · {m.ativa ? cor.label : 'Inativa'}
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  {editId === m.id ? (
+                    <>
+                      <span>👥</span>
+                      <input
+                        type="number" min="1" autoFocus
+                        value={editCap}
+                        onChange={e => setEditCap(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') salvarCapacidade(m); if (e.key === 'Escape') setEditId(null) }}
+                        style={{ width: 52, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--primary)', background: 'var(--input-bg)', color: 'var(--text)', fontSize: 12 }}
+                      />
+                      <span>lugares</span>
+                      <button type="button" onClick={() => salvarCapacidade(m)} aria-label="Salvar lugares"
+                        style={{ fontSize: 12, padding: '2px 8px', borderRadius: 6, cursor: 'pointer', border: '1px solid var(--primary)', background: 'var(--primary)', color: '#fff', fontWeight: 700 }}>✓</button>
+                      <button type="button" onClick={() => setEditId(null)} aria-label="Cancelar"
+                        style={{ fontSize: 12, padding: '2px 6px', borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)' }}>✕</button>
+                    </>
+                  ) : (
+                    <>
+                      <span>👥 {m.capacidade} lugares · {m.ativa ? cor.label : 'Inativa'}</span>
+                      <button type="button" onClick={() => abrirEdicaoCap(m)} aria-label="Editar lugares" title="Editar nº de pessoas"
+                        style={{ fontSize: 12, padding: '1px 6px', borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--primary)', fontWeight: 700, lineHeight: 1.4 }}>✏️</button>
+                    </>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                   <button type="button" onClick={() => { setQrMesa(m); setCopiado(false) }}
