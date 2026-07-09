@@ -55,6 +55,42 @@ export default function RaioEntrega() {
   const [salvando,   setSalvando]   = useState(false)
   const [msg, setMsg] = useState(null)
 
+  // ── Rascunho automático + botão flutuante ─────────────────────
+  // Guarda o que o usuário mexeu (mesmo sem salvar) e restaura ao voltar.
+  const draftKey = profile?.empresa_id ? `re-draft-${profile.empresa_id}` : null
+  const baselineRef = useRef('') // estado salvo (pra saber se há alteração)
+  const [temAlteracao, setTemAlteracao] = useState(false)
+
+  function normSnap(o) {
+    return JSON.stringify({
+      aceitaDelivery: !!o.aceitaDelivery,
+      taxaEntrega: String(o.taxaEntrega ?? ''),
+      pedidoMinimo: String(o.pedidoMinimo ?? ''),
+      usarTaxasPorKm: !!o.usarTaxasPorKm,
+      taxasKm: (o.taxasKm ?? []).map(f => ({ km: Number(f.km) || 0, taxa: Number(f.taxa) || 0, tempo: (f.tempo == null || f.tempo === '') ? null : Number(f.tempo) })),
+      tempoMin: String(o.tempoMin ?? ''),
+      tempoMax: String(o.tempoMax ?? ''),
+      categoria: o.categoria ?? '',
+      raio: String(o.raio ?? ''),
+      cep: o.cep ?? '', rua: o.rua ?? '', numero: o.numero ?? '',
+      bairro: o.bairro ?? '', cidade: o.cidade ?? '', estado: o.estado ?? '',
+    })
+  }
+  function snapshotAtual() {
+    return normSnap({ aceitaDelivery, taxaEntrega, pedidoMinimo, usarTaxasPorKm, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado })
+  }
+  function descartarAlteracoes() {
+    if (!baselineRef.current) return
+    if (!window.confirm('Descartar as alterações não salvas e voltar ao que estava salvo?')) return
+    const b = JSON.parse(baselineRef.current)
+    setAceitaDelivery(!!b.aceitaDelivery); setTaxaEntrega(b.taxaEntrega); setPedidoMinimo(b.pedidoMinimo)
+    setUsarTaxasPorKm(!!b.usarTaxasPorKm); setTaxasKm(Array.isArray(b.taxasKm) ? b.taxasKm : [])
+    setTempoMin(b.tempoMin); setTempoMax(b.tempoMax); setCategoria(b.categoria); setRaio(b.raio)
+    setCep(b.cep); setRua(b.rua); setNumero(b.numero); setBairro(b.bairro); setCidade(b.cidade); setEstado(b.estado)
+    if (draftKey) { try { localStorage.removeItem(draftKey) } catch { /* ignore */ } }
+    setTemAlteracao(false)
+  }
+
   // ── Carrega dados ──────────────────────────────────────────────
   useEffect(() => {
     if (!profile?.empresa_id) return
@@ -72,7 +108,8 @@ export default function RaioEntrega() {
         setTempoMin(data.tempo_entrega_min ?? 30)
         setTempoMax(data.tempo_entrega_max ?? 60)
         const cepNum = (data.cep ?? '').replace(/\D/g, '')
-        setCep(cepNum.length > 5 ? `${cepNum.slice(0, 5)}-${cepNum.slice(5)}` : cepNum)
+        const cepFmt = cepNum.length > 5 ? `${cepNum.slice(0, 5)}-${cepNum.slice(5)}` : cepNum
+        setCep(cepFmt)
         setRua(data.endereco ?? '')
         setNumero(data.numero ?? '')
         setBairro(data.bairro ?? '')
@@ -85,8 +122,48 @@ export default function RaioEntrega() {
         setUsarTaxasPorKm(faixas.length > 0)
         setLatitude(data.latitude ? Number(data.latitude) : null)
         setLongitude(data.longitude ? Number(data.longitude) : null)
+
+        // Baseline = valores salvos (referência pra detectar alteração).
+        baselineRef.current = normSnap({
+          aceitaDelivery: data.aceita_delivery ?? false,
+          taxaEntrega: data.taxa_entrega ?? 0,
+          pedidoMinimo: data.pedido_minimo ?? 0,
+          usarTaxasPorKm: faixas.length > 0,
+          taxasKm: faixas,
+          tempoMin: data.tempo_entrega_min ?? 30,
+          tempoMax: data.tempo_entrega_max ?? 60,
+          categoria: data.categoria_delivery ?? '',
+          raio: data.raio_entrega_km ?? 10,
+          cep: cepFmt, rua: data.endereco ?? '', numero: data.numero ?? '',
+          bairro: data.bairro ?? '', cidade: data.cidade ?? '', estado: data.estado ?? '',
+        })
+        // Restaura o que o usuário mexeu e não salvou (rascunho no navegador).
+        try {
+          const raw = draftKey && localStorage.getItem(draftKey)
+          if (raw && raw !== baselineRef.current) {
+            const d = JSON.parse(raw)
+            setAceitaDelivery(!!d.aceitaDelivery); setTaxaEntrega(d.taxaEntrega ?? 0); setPedidoMinimo(d.pedidoMinimo ?? 0)
+            setUsarTaxasPorKm(!!d.usarTaxasPorKm); setTaxasKm(Array.isArray(d.taxasKm) ? d.taxasKm : [])
+            setTempoMin(d.tempoMin ?? 30); setTempoMax(d.tempoMax ?? 60); setCategoria(d.categoria ?? ''); setRaio(d.raio ?? 10)
+            setCep(d.cep ?? cepFmt); setRua(d.rua ?? ''); setNumero(d.numero ?? '')
+            setBairro(d.bairro ?? ''); setCidade(d.cidade ?? ''); setEstado(d.estado ?? '')
+            setMsg({ type: 'success', text: '↩️ Restauramos as alterações que você não tinha salvo. Revise e clique em Salvar.' })
+          }
+        } catch { /* ignore */ }
       })
   }, [profile?.empresa_id])
+
+  // Detecta alteração vs. o salvo e guarda o rascunho no navegador.
+  useEffect(() => {
+    if (!baselineRef.current) return
+    const snap = snapshotAtual()
+    const mudou = snap !== baselineRef.current
+    setTemAlteracao(mudou)
+    if (draftKey) {
+      try { mudou ? localStorage.setItem(draftKey, snap) : localStorage.removeItem(draftKey) } catch { /* ignore */ }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aceitaDelivery, taxaEntrega, pedidoMinimo, usarTaxasPorKm, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado])
 
   // ── Carrega bairros: config salva + sugestões dos pedidos passados ──
   useEffect(() => {
@@ -288,6 +365,10 @@ export default function RaioEntrega() {
       return
     }
     await refreshProfile()
+    // Passa a ser o novo "salvo": some o botão flutuante e limpa o rascunho.
+    baselineRef.current = snapshotAtual()
+    setTemAlteracao(false)
+    if (draftKey) { try { localStorage.removeItem(draftKey) } catch { /* ignore */ } }
     setMsg({ type: 'success', text: 'Configurações salvas com sucesso.' })
     setTimeout(() => setMsg(null), 3000)
   }
@@ -697,7 +778,29 @@ export default function RaioEntrega() {
           </button>
         </div>
 
+        {/* Espaço pra barra flutuante não cobrir o botão de baixo */}
+        {temAlteracao && <div style={{ height: 76 }} />}
+
       </div>
+
+      {/* Barra Salvar flutuante — aparece sempre que há alteração não salva */}
+      {temAlteracao && (
+        <div style={{
+          position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1000,
+          display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          padding: '12px 16px', background: 'var(--surface, #16161f)',
+          borderTop: '1px solid var(--border, #2a2a3a)', boxShadow: '0 -4px 24px rgba(0,0,0,.28)',
+        }}>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Você tem alterações não salvas</span>
+          <button type="button" onClick={descartarAlteracoes} disabled={salvando} style={{
+            padding: '9px 16px', borderRadius: 9, border: '1px solid var(--border, #2a2a3a)',
+            background: 'transparent', color: 'var(--text)', fontWeight: 600, cursor: 'pointer',
+          }}>Descartar</button>
+          <button type="submit" className="btn btn-primary" disabled={salvando} style={{ padding: '9px 22px' }}>
+            {salvando ? 'Salvando...' : '💾 Salvar'}
+          </button>
+        </div>
+      )}
     </form>
   )
 }
