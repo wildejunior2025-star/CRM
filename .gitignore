@@ -31,6 +31,9 @@ dist-ssr
 !.dev.vars.example
 !.env.example
 
+# Pasta de estudos da Gaby (INSS) - NAO faz parte do CRM
+estudos da gaby/
+
 # Chaves de assinatura do app / segredos (NUNCA commitar)
 keystore/
 *.jks
