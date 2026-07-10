@@ -115,6 +115,7 @@ import SuperAdminPagamentos from './pages/SuperAdminPagamentos'
 import SuperAdminRedeMapa from './pages/SuperAdminRedeMapa'
 import SuperAdminEmpresaRede from './pages/SuperAdminEmpresaRede'
 import SuperAdminFinanceiro from './pages/SuperAdminFinanceiro'
+import SuperAdminDespesas from './pages/SuperAdminDespesas'
 import CadastroRef from './pages/CadastroRef'
 import CadastroAdmin from './pages/CadastroAdmin'
 import CadastroVendedor from './pages/CadastroVendedor'
@@ -221,6 +222,7 @@ export default function App() {
             <Route path="/super-admin/rede-mapa" element={<SuperAdminRedeMapa />} />
             <Route path="/super-admin/empresa-rede" element={<SuperAdminEmpresaRede />} />
             <Route path="/super-admin/financeiro" element={<SuperAdminFinanceiro />} />
+            <Route path="/super-admin/despesas" element={<SuperAdminDespesas />} />
           </Route>
 
           <Route element={<LayoutOrLanding />}>

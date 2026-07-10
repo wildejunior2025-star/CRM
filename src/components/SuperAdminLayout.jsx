@@ -128,6 +128,13 @@ export default function SuperAdminLayout() {
             Financeiro
           </NavLink>
           <NavLink
+            to="/super-admin/despesas"
+            className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
+            onClick={closeMenu}
+          >
+            Despesas do sistema
+          </NavLink>
+          <NavLink
             to="/super-admin/config"
             className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
             onClick={closeMenu}
