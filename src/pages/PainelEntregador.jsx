@@ -145,6 +145,11 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
   const prontoParaSair = pedido.status === 'pronto'
   const cor = !mine ? (naCozinha ? '#d97706' : '#0d9488') : emRota ? '#7c3aed' : '#2563eb'
   const pg = pagamentoInfo(pedido)
+  // Troco: troco_para = com quanto o cliente paga; troco a levar = paga − total.
+  // (numeric vem como string do banco, por isso o Number()).
+  const ehDinheiro = pedido.forma_pagamento === 'dinheiro'
+  const trocoPara = Number(pedido.troco_para || 0)
+  const trocoLevar = trocoPara > 0 ? Math.max(0, trocoPara - Number(pedido.total || 0)) : 0
   // iFood não expõe o telefone real do cliente: liga num 0800 e digita um ID.
   // Por isso, nos pedidos do iFood some o WhatsApp e o "Ligar" vai no 0800.
   const isIfood = pedido.origem === 'ifood'
@@ -270,10 +275,19 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>
             {pg.detalhe}
-            {pedido.forma_pagamento === 'dinheiro' && pedido.troco_para > 0 && (
-              <span> · troco p/ {fmt(pedido.troco_para)}</span>
-            )}
           </div>
+          {/* Troco EM DESTAQUE — o motoqueiro precisa ver quanto levar de troco */}
+          {ehDinheiro && trocoPara > 0 && (
+            <div style={{ fontSize: 13.5, fontWeight: 900, color: pg.cor, marginTop: 4 }}>
+              💰 Levar troco de {fmt(trocoLevar)}
+              <span style={{ fontSize: 11.5, fontWeight: 700, opacity: .8 }}> · cliente paga com {fmt(trocoPara)}</span>
+            </div>
+          )}
+          {ehDinheiro && trocoPara <= 0 && (
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)', marginTop: 3 }}>
+              (troco não informado — confirme com o cliente)
+            </div>
+          )}
         </div>
         <strong style={{ fontSize: 18, color: 'var(--text)' }}>{fmt(pedido.total)}</strong>
       </div>
