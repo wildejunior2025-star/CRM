@@ -42,6 +42,32 @@ function log(...a) {
 }
 let empresa = null, empresaId = null, canal = null
 let sessionAtiva = false, empresasDisponiveis = []
+
+// ---- classificação bebida x comida (roteamento cozinha/bar) ----
+let mapaCategoria = {}     // norm(nome do produto) -> categoria
+let catBebida = new Set()  // categorias tratadas como "bebida" (vão pra impressora do bar)
+const KW_BEBIDA = ['refriger', 'suco', 'bebid', 'cerveja', 'agua', 'drink', 'tonic', 'energetic', 'chopp', 'vinho', 'destilad', 'whisky', 'cachaca', 'caipir', 'gin', 'vodka', 'licor']
+function norm(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim() }
+// Carrega os produtos/categorias da loja pra saber o que é bebida (pra rotear).
+async function carregarCategorias() {
+  mapaCategoria = {}; catBebida = new Set()
+  try {
+    const { data: prods } = await supabase.from('produtos').select('nome, categoria').eq('empresa_id', empresaId)
+    for (const p of (prods || [])) if (p && p.nome) mapaCategoria[norm(p.nome)] = p.categoria || ''
+    const { data: cats } = await supabase.from('categorias').select('nome').eq('empresa_id', empresaId)
+    const extra = (config().categoriasBebida || []).map(norm)   // override opcional (nomes de categoria)
+    for (const c of (cats || [])) {
+      const n = norm(c.nome)
+      if (KW_BEBIDA.some(k => n.includes(k)) || extra.includes(n)) catBebida.add(c.nome)
+    }
+    log('Categorias carregadas (bebida: ' + ([...catBebida].join(', ') || 'nenhuma') + ')')
+  } catch (e) { log('  ! erro ao carregar categorias: ' + e.message) }
+}
+// Um item é "bebida" se a categoria do seu produto está marcada como bebida.
+function ehBebida(nome) {
+  const cat = mapaCategoria[norm(nome)]
+  return cat ? catBebida.has(cat) : false
+}
 const config = () => { try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) } catch (e) { return {} } }
 const setConfig = o => fs.writeFileSync(CONFIG_FILE, JSON.stringify({ ...config(), ...o }, null, 2))
 
@@ -140,8 +166,8 @@ function autoInstalar() {
 }
 const jaImpressos = new Set()
 // Envia bytes ESC/POS pra impressora escolhida. Retorna true se conseguiu mandar.
-function imprimirBytes(bytes, nome) {
-  const printer = config().printer
+function imprimirBytes(bytes, nome, printerOverride) {
+  const printer = printerOverride || config().printer
   if (!printer) { log('  ! sem impressora escolhida'); return false }
   try {
     const tmp = path.join(os.tmpdir(), 'fwc-' + (nome || 'doc') + '.bin')
@@ -155,7 +181,18 @@ function imprimirBytes(bytes, nome) {
 function imprimir(pedido) {
   if (jaImpressos.has(pedido.id)) return
   jaImpressos.add(pedido.id)
+  imprimirCupomPedido(pedido)
+}
+// Cupom COMPLETO sempre na cozinha (impressora principal). Se houver impressora
+// de bar configurada, manda também um ticket só das bebidas pra ela.
+function imprimirCupomPedido(pedido) {
   imprimirBytes(montarCupom(pedido, empresa), 'cupom-' + pedido.id)
+  const bar = config().printerBar
+  if (!bar) return
+  const bebidas = (Array.isArray(pedido.itens) ? pedido.itens : []).filter(it => ehBebida(it.nome))
+  if (!bebidas.length) return
+  const linhas = bebidas.map(it => (it.quantidade ?? it.qtd ?? 1) + 'x ' + (it.nome || 'Item'))
+  imprimirBytes(montarTexto(linhas, 'BEBIDAS #' + (pedido.numero_pedido ?? String(pedido.id).slice(-4))), 'bar-' + pedido.id, bar)
 }
 // HTML (cozinha/conta de mesa) -> linhas de texto pra térmica.
 function htmlParaLinhas(html) {
@@ -191,13 +228,23 @@ async function imprimirComandaMesa(cid, itens) {
     const { data: c } = await supabase.from('comandas').select('numero_mesa').eq('id', cid).maybeSingle()
     if (c && c.numero_mesa != null) numero = c.numero_mesa
   } catch (e) {}
-  const linhas = []
-  for (const it of itens) {
-    const q = it.quantidade ?? 1
-    linhas.push(q + 'x ' + (it.nome || 'Item'))
-    if (it.observacao) linhas.push('   obs: ' + it.observacao)
+  const linhasDe = (arr) => {
+    const L = []
+    for (const it of arr) {
+      L.push((it.quantidade ?? 1) + 'x ' + (it.nome || 'Item'))
+      if (it.observacao) L.push('   obs: ' + it.observacao)
+    }
+    return L
   }
-  imprimirBytes(montarTexto(linhas, 'MESA ' + numero), 'mesa-' + cid)
+  const bar = config().printerBar
+  if (bar) {
+    const comida = itens.filter(it => !ehBebida(it.nome))
+    const bebida = itens.filter(it => ehBebida(it.nome))
+    if (comida.length) imprimirBytes(montarTexto(linhasDe(comida), 'MESA ' + numero), 'mesa-' + cid)
+    if (bebida.length) imprimirBytes(montarTexto(linhasDe(bebida), 'MESA ' + numero + ' - BEBIDAS'), 'mesa-bar-' + cid, bar)
+    return
+  }
+  imprimirBytes(montarTexto(linhasDe(itens), 'MESA ' + numero), 'mesa-' + cid)
 }
 function agendarComandaMesa(it) {
   if (!it || (it.status && it.status !== 'pendente')) return
@@ -239,6 +286,7 @@ async function iniciarEscuta() {
   if (empresaId) setConfig({ empresa_id: empresaId })
   const { data: emp } = await supabase.from('empresas').select('nome, slug, endereco, numero, bairro, cidade, telefone_contato').eq('id', empresaId).single()
   empresa = emp || { nome: prof?.nome || 'Loja' }
+  await carregarCategorias()   // pra saber o que é bebida (roteamento cozinha/bar)
   supabase.realtime.setAuth(sess.session.access_token)
   if (canal) { try { supabase.removeChannel(canal) } catch (e) {} }
   canal = supabase.channel('impressora-fwc-' + empresaId)
@@ -274,16 +322,19 @@ function paginaHtml() {
   const c = config()
   const imps = listarImpressoras()
   const opts = imps.map(i => `<option${i === c.printer ? ' selected' : ''}>${i}</option>`).join('')
+  const optsBar = `<option value=""${!c.printerBar ? ' selected' : ''}>(nenhuma — tudo na cozinha)</option>` + imps.map(i => `<option${i === c.printerBar ? ' selected' : ''}>${i}</option>`).join('')
   const empOpts = empresasDisponiveis.map(e => `<option value="${e.id}"${e.id === c.empresa_id ? ' selected' : ''}>${e.nome}</option>`).join('')
   // Card de escolher a impressora — aparece SEMPRE que estiver logado.
   const cardImpressora = `
 <div class="card">
-  <label>Impressora (escolha a sua)</label>
   <form method="POST" action="/printer">
+    <label>Impressora da COZINHA (comida)</label>
     <select name="printer">${opts || '<option value="">(nenhuma encontrada)</option>'}</select>
-    <button>Salvar impressora</button>
+    <label>Impressora do BAR (bebidas) — opcional</label>
+    <select name="printerBar">${optsBar}</select>
+    <button>Salvar impressoras</button>
   </form>
-  <div class="sub" style="margin:8px 0 0">Aparecem todas as impressoras instaladas neste PC. Escolha a térmica e clique em Salvar.</div>
+  <div class="sub" style="margin:8px 0 0">A da cozinha imprime tudo. Se você escolher a do bar, as <b>bebidas</b> saem nela e a <b>comida</b> na cozinha. Deixe "(nenhuma)" pra imprimir tudo numa só.</div>
   <form method="POST" action="/teste"><button style="background:#16a34a">Imprimir cupom de teste</button></form>
 </div>`
   let bloco
@@ -352,6 +403,7 @@ function statusObj() {
     empresaId: empresaId || null,
     empresas: empresasDisponiveis,
     impressora: config().printer || null,
+    impressoraBar: config().printerBar || null,
     impressoras: sessionAtiva ? listarImpressoras() : [],
     pausado: !!config().pausado,
   }
@@ -398,6 +450,8 @@ const server = http.createServer(async (req, res) => {
         if (!f.pedido) return sendJson(res, { ok: false, erro: 'sem pedido' })
         jaImpressos.delete(f.pedido.id) // permite reimprimir
         const ok = imprimirBytes(montarCupom(f.pedido, empresa), 'cupom-' + (f.pedido.id || 're'))
+        // roteia bebidas pro bar também (se configurado)
+        try { const bar = config().printerBar; if (bar) { const bs = (Array.isArray(f.pedido.itens) ? f.pedido.itens : []).filter(it => ehBebida(it.nome)); if (bs.length) imprimirBytes(montarTexto(bs.map(it => (it.quantidade ?? it.qtd ?? 1) + 'x ' + (it.nome || 'Item')), 'BEBIDAS'), 'bar-re', bar) } } catch (e) {}
         return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
       }
       // Imprime um HTML (cozinha/conta de mesa) como texto na térmica.
@@ -414,7 +468,11 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, { ok: true, ...statusObj() })
       }
       if (req.method === 'POST' && req.url === '/api/printer') {
-        const f = await jsonBody(req); setConfig({ printer: f.printer }); log('Impressora: ' + f.printer); return sendJson(res, { ok: true, ...statusObj() })
+        const f = await jsonBody(req)
+        const patch = { printer: f.printer }
+        if ('printerBar' in f) patch.printerBar = f.printerBar || null
+        setConfig(patch); log('Impressora: ' + f.printer + (patch.printerBar ? ' | bar: ' + patch.printerBar : ''))
+        return sendJson(res, { ok: true, ...statusObj() })
       }
       if (req.method === 'POST' && req.url === '/api/logout') {
         await supabase.auth.signOut(); empresaId = null; empresa = null; sessionAtiva = false; empresasDisponiveis = []
@@ -444,7 +502,7 @@ const server = http.createServer(async (req, res) => {
       if (error) log('Login falhou: ' + error.message)
       else { log('Login OK: ' + f.email); await iniciarEscuta() }
     } else if (req.method === 'POST' && req.url === '/printer') {
-      const f = await body(req); setConfig({ printer: f.printer }); log('Impressora: ' + f.printer)
+      const f = await body(req); setConfig({ printer: f.printer, printerBar: f.printerBar || null }); log('Impressora: ' + f.printer + (f.printerBar ? ' | bar: ' + f.printerBar : ''))
     } else if (req.method === 'POST' && req.url === '/empresa') {
       const f = await body(req); setConfig({ empresa_id: f.empresa_id }); empresaId = null; log('Loja escolhida.'); await iniciarEscuta()
     } else if (req.method === 'POST' && req.url === '/logout') {
