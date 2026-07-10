@@ -180,6 +180,45 @@ function imprimirPedido(p) {
   imprimir(p)
 }
 
+// ---- pedidos de MESA (comandas) — imprime na cozinha automaticamente ----
+// Os itens de um mesmo envio do cliente chegam quase juntos; junta num cupom só
+// (com o número da mesa) usando um pequeno atraso, igual o gestor faz.
+const comandaBuf = new Map()            // comanda_id -> { itens:[], timer }
+const comandaItensImpressos = new Set() // dedupe por id de item (reconexão)
+async function imprimirComandaMesa(cid, itens) {
+  let numero = '?'
+  try {
+    const { data: c } = await supabase.from('comandas').select('numero_mesa').eq('id', cid).maybeSingle()
+    if (c && c.numero_mesa != null) numero = c.numero_mesa
+  } catch (e) {}
+  const linhas = []
+  for (const it of itens) {
+    const q = it.quantidade ?? 1
+    linhas.push(q + 'x ' + (it.nome || 'Item'))
+    if (it.observacao) linhas.push('   obs: ' + it.observacao)
+  }
+  imprimirBytes(montarTexto(linhas, 'MESA ' + numero), 'mesa-' + cid)
+}
+function agendarComandaMesa(it) {
+  if (!it || (it.status && it.status !== 'pendente')) return
+  if (comandaItensImpressos.has(it.id)) return
+  comandaItensImpressos.add(it.id)
+  if (comandaItensImpressos.size > 2000) comandaItensImpressos.clear()
+  if (config().pausado) { log('  (mesa PAUSADA — nao imprimiu)'); return }
+  const cid = it.comanda_id
+  let e = comandaBuf.get(cid)
+  if (!e) { e = { itens: [], timer: null }; comandaBuf.set(cid, e) }
+  e.itens.push(it)
+  clearTimeout(e.timer)
+  e.timer = setTimeout(() => {
+    const entry = comandaBuf.get(cid); comandaBuf.delete(cid)
+    if (entry && entry.itens.length) {
+      log('MESA — ' + entry.itens.length + ' item(ns) na comanda ' + String(cid).slice(0, 8))
+      imprimirComandaMesa(cid, entry.itens)
+    }
+  }, 1800)
+}
+
 // ---- conecta e escuta os pedidos da loja ----
 async function iniciarEscuta() {
   const { data: sess } = await supabase.auth.getSession()
@@ -222,7 +261,10 @@ async function iniciarEscuta() {
         if (p.status === 'entregue' || p.status === 'cancelado') return
         imprimirPedido(p)
       })
-    .subscribe(st => log('Conexao: ' + st + (st === 'SUBSCRIBED' ? ' — imprimindo pedidos novos automaticamente!' : '')))
+    // Pedido de MESA (comanda) — cada item novo vira cupom de cozinha (juntando o envio).
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comanda_itens', filter: 'empresa_id=eq.' + empresaId },
+      payload => agendarComandaMesa(payload.new))
+    .subscribe(st => log('Conexao: ' + st + (st === 'SUBSCRIBED' ? ' — imprimindo pedidos (delivery + mesa) automaticamente!' : '')))
   log('Loja: ' + (empresa?.nome || '—'))
   return true
 }

@@ -3707,7 +3707,9 @@ export default function PainelPedidos() {
   // Auto-imprime o pedido da mesa (comanda). Junta os itens que chegam quase
   // juntos (mesmo envio do cliente) num cupom só, com pequeno atraso.
   function agendarImpressaoMesa(item) {
-    if (!autoImprimirAtivo() || (item.status && item.status !== 'pendente')) return
+    // Se o app FWC está ativo, ELE imprime a mesa sozinho (escuta comanda_itens).
+    // O navegador só imprime mesa quando o app não está no comando (evita 2 vias).
+    if (!autoImprimirAtivo() || fwcImprimeRef.current || (item.status && item.status !== 'pendente')) return
     const cid = item.comanda_id
     const buf = mesaPrintRef.current
     if (!buf[cid]) buf[cid] = { itens: [], timer: null }
