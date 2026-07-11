@@ -87,7 +87,11 @@ function montarCupom(pedido, empresa) {
       const cn = typeof c === 'string' ? c : (c?.nome ?? '')
       // Complemento multiplica pela qtd do prato (4 quentinhas → complemento x4).
       const cq = Number(c?.qtd ?? 1) * Number(qtd || 1)
-      if (cn) parts.push(linha('   ' + cq + 'x ' + cn))
+      if (!cn) continue
+      // Adicional pago (ex.: proteina/porcao extra) sai com o valor cobrado.
+      const cp = Number(c?.preco ?? 0)
+      if (cp > 0) parts.push(kv('   ' + cq + 'x ' + cn, '+' + money(cp * cq)))
+      else parts.push(linha('   ' + cq + 'x ' + cn))
     }
     if (it.observacao) parts.push(linha('   obs: ' + it.observacao))
   }

@@ -86,7 +86,10 @@ export function montarCupomHtml(pedido, empresa = {}) {
       // Complemento multiplica pela qtd do prato (4 quentinhas → complemento ×4).
       const cq = Number(c?.qtd ?? 1) * Number(qtd || 1)
       const cn = esc(c?.nome ?? c)
-      return `<div class="comp">▸ ${cq > 1 ? cq + 'x ' : ''}${cn}</div>`
+      // Adicional pago (ex.: proteína/porção extra) sai com o valor cobrado.
+      const cp = Number(c?.preco ?? 0)
+      const precoTxt = cp > 0 ? ` <span class="b">+${fmt(cp * cq)}</span>` : ''
+      return `<div class="comp">▸ ${cq > 1 ? cq + 'x ' : ''}${cn}${precoTxt}</div>`
     }).join('')
     const obsHtml = item.observacao ? `<div class="comp">obs: ${esc(item.observacao)}</div>` : ''
     return `<li><div class="row"><span>${esc(qtd)}x ${esc(nomeItem)}</span><span>${fmt(sub)}</span></div>${compsHtml}${obsHtml}</li>`
