@@ -2457,7 +2457,7 @@ function ImpressoraFWCPanel({ empresaId }) {
         <a href={FWC_EXE_URL} download style={{ color: '#7c3aed', fontWeight: 800, textDecoration: 'none' }}>
           ⬇️ Baixar versão atualizada do app
         </a>
-        <span>(feche o atual e abra o baixado — agora o iFood imprime o código da loja junto)</span>
+        <span>(feche o atual e abra o baixado — corrige a comanda do iFood saindo em 2 vias e mostra o valor de adicionais pagos)</span>
       </div>
 
       {/* Não logado → tenta reconhecer a conta do gestor; senão, login manual */}
