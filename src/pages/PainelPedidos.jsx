@@ -3791,7 +3791,7 @@ export default function PainelPedidos() {
               // Imprime pedido novo (aguardando) OU venda de balcão (já confirmada).
               // Se o app Impressora FWC está imprimindo, o navegador não imprime (evita 2 vias).
               if (autoImprimirAtivo() && !fwcImprimeRef.current && (novo.status === 'aguardando' || novo.origem === 'balcao')) {
-                imprimirCupom(novo, empresa)
+                imprimirCupom(novo, empresa, { auto: true })
               }
               if (novo.status === 'aguardando') {
                 iniciarLoopSom()
@@ -3810,7 +3810,7 @@ export default function PainelPedidos() {
                   // Pedido chegou ao painel agora (ex: PIX confirmado)
                   if (novo.status === 'aguardando') {
                     iniciarLoopSom()
-                    if (autoImprimirAtivo() && !fwcImprimeRef.current) imprimirCupom(novo, empresa)
+                    if (autoImprimirAtivo() && !fwcImprimeRef.current) imprimirCupom(novo, empresa, { auto: true })
                     if (aceitarAutoAtivo()) handleConfirmar(novo.id, tempoPrevistoMin(novo, empresa))
                   }
                   return [...prev, novo]

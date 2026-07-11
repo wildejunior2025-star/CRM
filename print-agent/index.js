@@ -32,6 +32,7 @@ if (autoInstalar()) process.exit(0)
 const SESSION_FILE = path.join(DATA_DIR, 'session.json')
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json')
 const PS1_FILE = path.join(DATA_DIR, 'print-raw.ps1')
+const IMPRESSOS_FILE = path.join(DATA_DIR, 'impressos.json') // dedupe persistente (sobrevive a reinicio)
 
 // ---- estado ----
 const logs = []
@@ -206,14 +207,27 @@ function htmlParaLinhas(html) {
 }
 
 // Imprime um pedido uma única vez (evita 2ª via quando chegam vários updates do
-// mesmo pedido). Respeita a pausa da impressão automática.
-const pedidosImpressos = new Set()
+// mesmo pedido). O dedupe é PERSISTENTE: sobrevive a reinício do app, senão o
+// próximo update automático do iFood (polling de 30s) reimprimiria a comanda.
+function carregarImpressos() {
+  try { const a = JSON.parse(fs.readFileSync(IMPRESSOS_FILE, 'utf8')); return new Set(Array.isArray(a) ? a : []) }
+  catch (e) { return new Set() }
+}
+const pedidosImpressos = carregarImpressos()
+function marcarImpresso(id) {
+  pedidosImpressos.add(id)
+  // Mantém só os últimos ~1500 IDs (não deixa o arquivo/memória crescer sem fim).
+  if (pedidosImpressos.size > 2000) {
+    const arr = [...pedidosImpressos].slice(-1500)
+    pedidosImpressos.clear(); for (const x of arr) pedidosImpressos.add(x)
+  }
+  try { fs.writeFileSync(IMPRESSOS_FILE, JSON.stringify([...pedidosImpressos])) } catch (e) {}
+}
 function imprimirPedido(p) {
   if (!p || pedidosImpressos.has(p.id)) return
   log('NOVO PEDIDO #' + (p.numero_pedido ?? p.id) + ' - ' + (p.cliente_nome || '') + ' (' + (p.origem || '') + ')')
   if (config().pausado) { log('  (impressao automatica PAUSADA — nao imprimiu)'); return }
-  pedidosImpressos.add(p.id)
-  if (pedidosImpressos.size > 1000) pedidosImpressos.clear() // limpeza simples de memória
+  marcarImpresso(p.id)
   imprimir(p)
 }
 
@@ -448,6 +462,15 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' && req.url === '/api/imprimir') {
         const f = await jsonBody(req)
         if (!f.pedido) return sendJson(res, { ok: false, erro: 'sem pedido' })
+        // Automatico (pedido novo vindo do navegador): passa pelo MESMO dedupe do
+        // tempo real — se o app ja imprimiu esse pedido, NAO bate 2a via (era isso
+        // que dobrava a comanda do iFood). Manual (botao reimprimir): sem f.auto,
+        // forca a impressao como sempre.
+        if (f.auto) {
+          if (pedidosImpressos.has(f.pedido.id)) return sendJson(res, { ok: true, jaImpresso: true })
+          imprimirPedido(f.pedido)
+          return sendJson(res, { ok: true })
+        }
         jaImpressos.delete(f.pedido.id) // permite reimprimir
         const ok = imprimirBytes(montarCupom(f.pedido, empresa), 'cupom-' + (f.pedido.id || 're'))
         // roteia bebidas pro bar também (se configurado)

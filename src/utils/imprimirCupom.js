@@ -255,8 +255,11 @@ async function imprimirViaAppFwc(rota, corpo) {
 }
 
 // Imprime o cupom. Ordem: app Impressora FWC (térmica) → QZ Tray → navegador.
-export async function imprimirCupom(pedido, empresa = {}) {
-  if (await imprimirViaAppFwc('imprimir', { pedido })) return
+// opts.auto=true → impressão AUTOMÁTICA (pedido novo): o app respeita o dedupe por
+// pedido, pra não bater 2 vias quando ele já imprimiu o mesmo pedido pelo tempo
+// real. Sem opts.auto (reimpressão manual pelos botões) o app força a impressão.
+export async function imprimirCupom(pedido, empresa = {}, opts = {}) {
+  if (await imprimirViaAppFwc('imprimir', { pedido, auto: opts.auto === true })) return
   const printer = impressoraEscolhida()
   if (printer) {
     try {
