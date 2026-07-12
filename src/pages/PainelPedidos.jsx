@@ -2854,7 +2854,63 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
 }
 
 // Card compacto de uma mesa (autoatendimento por QR) no quadro do gestor
-function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarLiberar, onImprimir }) {
+// Uma linha de item da comanda de mesa. Mostra o preço à direita; o ADM
+// (podeEditarPreco) clica no preço pra digitar outro valor — ex.: açaí no peso,
+// que só tem valor depois de pesar. Vale só pra essa comanda.
+function LinhaItemMesa({ comanda, it, onItemPronto, onEditarPreco, podeEditarPreco }) {
+  const { nome, complementos } = separarItem(it)
+  const pronto = it.status === 'pronto' || it.status === 'entregue'
+  const q = Number(it.quantidade ?? 1)
+  const pu = Number(it.preco_unitario ?? 0)
+  const [editando, setEditando] = useState(false)
+  const [valor, setValor] = useState('')
+  function abrir() { setValor(pu ? String(pu).replace('.', ',') : ''); setEditando(true) }
+  function salvar() {
+    const n = Number(String(valor).replace(',', '.'))
+    if (Number.isFinite(n) && n >= 0 && n !== pu) onEditarPreco(comanda, it, n)
+    setEditando(false)
+  }
+  return (
+    <div style={{ fontSize: 12.5, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ color: pronto ? '#16a34a' : 'var(--text)' }}>
+          {pronto ? '✓ ' : ''}{q}× {nome}
+        </div>
+        {complementos.map((c, j) => (
+          <div key={j} style={{ fontSize: 11, color: 'var(--text-muted)', paddingLeft: 14 }}>{Number(c?.qtd ?? 1)}× {c?.nome ?? c}</div>
+        ))}
+      </div>
+      {editando ? (
+        <input
+          autoFocus type="text" inputMode="decimal" value={valor}
+          onChange={e => setValor(e.target.value)}
+          onBlur={salvar}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); salvar() } else if (e.key === 'Escape') setEditando(false) }}
+          placeholder="0,00"
+          style={{ flexShrink: 0, width: 62, padding: '2px 6px', fontSize: 12, borderRadius: 6,
+            border: '1.5px solid #7c3aed', background: 'var(--surface)', color: 'var(--text)', textAlign: 'right' }}
+        />
+      ) : podeEditarPreco ? (
+        <button type="button" onClick={abrir} title="Editar preço deste item"
+          style={{ flexShrink: 0, padding: '2px 6px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+            border: '1px dashed var(--border)', background: 'transparent', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+          {fmt(pu * q)} ✎
+        </button>
+      ) : (
+        <span style={{ flexShrink: 0, fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{fmt(pu * q)}</span>
+      )}
+      {!pronto && onItemPronto && (
+        <button type="button" title="Marcar este item pronto" onClick={() => onItemPronto(comanda, it)}
+          style={{ flexShrink: 0, padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 800,
+            border: '1px solid #22c55e', background: 'rgba(34,197,94,.12)', color: '#16a34a' }}>
+          ✓
+        </button>
+      )}
+    </div>
+  )
+}
+
+function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarLiberar, onImprimir, onEditarPreco, podeEditarPreco }) {
   const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
   const total = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
   const hora = new Date(comanda.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
@@ -2875,29 +2931,10 @@ function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarL
       </div>
       <div className="pp-mini-sub">{hora} · autoatendimento (QR)</div>
       <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 5 }}>
-        {itens.map(it => {
-          const { nome, complementos } = separarItem(it)
-          const pronto = it.status === 'pronto' || it.status === 'entregue'
-          return (
-            <div key={it.id} style={{ fontSize: 12.5, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ color: pronto ? '#16a34a' : 'var(--text)' }}>
-                  {pronto ? '✓ ' : ''}{it.quantidade}× {nome}
-                </div>
-                {complementos.map((c, j) => (
-                  <div key={j} style={{ fontSize: 11, color: 'var(--text-muted)', paddingLeft: 14 }}>{Number(c?.qtd ?? 1)}× {c?.nome ?? c}</div>
-                ))}
-              </div>
-              {!pronto && onItemPronto && (
-                <button type="button" title="Marcar este item pronto" onClick={() => onItemPronto(comanda, it)}
-                  style={{ flexShrink: 0, padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 800,
-                    border: '1px solid #22c55e', background: 'rgba(34,197,94,.12)', color: '#16a34a' }}>
-                  ✓
-                </button>
-              )}
-            </div>
-          )
-        })}
+        {itens.map(it => (
+          <LinhaItemMesa key={it.id} comanda={comanda} it={it} onItemPronto={onItemPronto}
+            onEditarPreco={onEditarPreco} podeEditarPreco={podeEditarPreco} />
+        ))}
       </div>
       {onPronto && (pendentes.length > 0 ? (
         <button type="button" onClick={() => onPronto(comanda)}
@@ -3725,6 +3762,18 @@ export default function PainelPedidos() {
       : c))
     await supabase.from('comanda_itens').update({ status: 'pronto' }).eq('id', item.id)
   }
+  // ADM ajusta o preço de UM item da comanda (ex.: açaí no peso, que só tem valor
+  // depois de pesar). Grava direto no comanda_itens — total do card e da conta
+  // recalculam sozinhos. Só admin/super_admin (podeFinanceiro).
+  async function handleEditarPrecoMesaItem(comanda, item, novoPreco) {
+    const preco = Math.max(0, Math.round(Number(novoPreco) * 100) / 100)
+    if (!Number.isFinite(preco)) return
+    setComandas(cs => cs.map(c => c.id === comanda.id
+      ? { ...c, comanda_itens: (c.comanda_itens ?? []).map(it => it.id === item.id ? { ...it, preco_unitario: preco } : it) }
+      : c))
+    const { error } = await supabase.from('comanda_itens').update({ preco_unitario: preco }).eq('id', item.id)
+    if (error) alert('Erro ao salvar o preço: ' + error.message)
+  }
 
   // Auto-imprime o pedido da mesa (comanda). Junta os itens que chegam quase
   // juntos (mesmo envio do cliente) num cupom só, com pequeno atraso.
@@ -4438,7 +4487,7 @@ export default function PainelPedidos() {
               {(!filtroColuna || filtroColuna === 'mesas') && comandasView.length > 0 && (
                 <Coluna titulo="Mesas" cor="#db2777" count={comandasView.length} vazio="Nenhuma mesa aberta">
                   {comandasView.map(c => (
-                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} onConfirmarLiberar={handleConfirmarLiberarMesa} onImprimir={handleImprimirMesa} />
+                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} onConfirmarLiberar={handleConfirmarLiberarMesa} onImprimir={handleImprimirMesa} onEditarPreco={handleEditarPrecoMesaItem} podeEditarPreco={podeFinanceiro} />
                   ))}
                 </Coluna>
               )}
