@@ -2854,7 +2854,7 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
 }
 
 // Card compacto de uma mesa (autoatendimento por QR) no quadro do gestor
-function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarLiberar }) {
+function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarLiberar, onImprimir }) {
   const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
   const total = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
   const hora = new Date(comanda.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
@@ -2862,8 +2862,16 @@ function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarL
   const aguardando = comanda.status === 'aguardando_conferencia'
   return (
     <div className="pp-mini" style={{ borderLeft: `3px solid ${aguardando ? '#3b82f6' : '#db2777'}`, cursor: 'default' }}>
-      <div className="pp-mini-top">
-        <span className="pp-mini-num">🍽️ Mesa {comanda.numero_mesa} · {fmt(total)}</span>
+      <div className="pp-mini-top" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span className="pp-mini-num" style={{ flex: 1, minWidth: 0 }}>🍽️ Mesa {comanda.numero_mesa} · {fmt(total)}</span>
+        {onImprimir && itens.length > 0 && (
+          <button type="button" title="Imprimir comanda na cozinha" aria-label="Imprimir comanda"
+            onClick={() => onImprimir(comanda)}
+            style={{ flexShrink: 0, padding: '4px 9px', borderRadius: 7, cursor: 'pointer', fontSize: 14, lineHeight: 1,
+              border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}>
+            🖨️
+          </button>
+        )}
       </div>
       <div className="pp-mini-sub">{hora} · autoatendimento (QR)</div>
       <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -3742,6 +3750,17 @@ export default function PainelPedidos() {
     }))
   }
 
+  // Impressão MANUAL da comanda da mesa (botão no card). Imprime todos os itens
+  // pelo navegador, independente do app FWC — pro caso do automático não ter saído.
+  function handleImprimirMesa(comanda) {
+    const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
+    if (!itens.length) return
+    imprimirHtml(montarComandaCozinhaHtml({
+      numeroMesa: comanda.numero_mesa ?? '?',
+      itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao })),
+    }))
+  }
+
   // Fecha a conta da mesa pelo gestor (cria a venda, baixa estoque, libera a mesa).
   async function handleFecharConta({ comanda, forma, aplicarTaxa, total }) {
     const { error } = await supabase.rpc('fechar_conta_presencial', {
@@ -4408,7 +4427,7 @@ export default function PainelPedidos() {
               {(!filtroColuna || filtroColuna === 'mesas') && comandasView.length > 0 && (
                 <Coluna titulo="Mesas" cor="#db2777" count={comandasView.length} vazio="Nenhuma mesa aberta">
                   {comandasView.map(c => (
-                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} onConfirmarLiberar={handleConfirmarLiberarMesa} />
+                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} onConfirmarLiberar={handleConfirmarLiberarMesa} onImprimir={handleImprimirMesa} />
                   ))}
                 </Coluna>
               )}
