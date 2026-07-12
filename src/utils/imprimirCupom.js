@@ -372,6 +372,8 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
   // Mesmo tamanho de fonte do cupom de pedido/teste (respeita a config da loja).
   const fontePx = (painelConfig().cupom || {}).fonte === 'grande' ? 15 : 12
   const lgPx = fontePx + 3
+  // Divisória em TRACINHOS (texto): o app FWC apaga <hr>, então itens e totais grudavam.
+  const tracos = '-'.repeat(largura === '58mm' ? 32 : 42)
   const linhas = itens.map(it => {
     const q = it.quantidade ?? it.qtd ?? 1
     const sub = it.subtotal != null ? Number(it.subtotal) : q * Number(it.preco_unitario ?? it.preco ?? 0)
@@ -383,21 +385,20 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
   html, body { margin: 0; padding: 0; }
   body { width: ${largura}; padding: 4mm 3mm; font-family: 'Courier New', monospace; font-size: ${fontePx}px; line-height: 1.35; color: #000; }
   .center { text-align: center; } .b { font-weight: 700; } .lg { font-size: ${lgPx}px; }
-  hr { border: none; border-top: 1px dashed #000; margin: 5px 0; }
+  .hr { white-space: nowrap; overflow: hidden; margin: 3px 0; }
   .row { display: flex; justify-content: space-between; gap: 8px; }
   ul { list-style: none; margin: 0; padding: 0; } li { margin-bottom: 3px; }
 </style></head><body>
   <div class="titulo-loja center b lg">${esc(empresa.nome || 'Conta')}</div>
-  <hr>
   <div class="b">MESA ${esc(numeroMesa)} - ${esc(hora)}</div>
-  <hr>
+  <div class="hr">${tracos}</div>
   <ul>${linhas || '<li>—</li>'}</ul>
-  <hr>
+  <div class="hr">${tracos}</div>
   <div class="row"><span>Subtotal</span> <span>${fmt(subtotal)}</span></div>
   ${Number(taxa) > 0 ? `<div class="row"><span>Taxa de serviço</span> <span>${fmt(taxa)}</span></div>` : ''}
   <div class="row b lg"><span>TOTAL</span> <span>${fmt(total)}</span></div>
-  ${formaPagamento ? `<hr><div><span class="b">Pagamento:</span> ${esc(formaPagamento)}</div>` : ''}
-  <hr>
+  ${formaPagamento ? `<div class="hr">${tracos}</div><div><span class="b">Pagamento:</span> ${esc(formaPagamento)}</div>` : ''}
+  <div class="hr">${tracos}</div>
   <div class="center">Obrigado pela preferencia!</div>
   <div style="height:10mm"></div>
 </body></html>`
