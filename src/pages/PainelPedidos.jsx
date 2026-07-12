@@ -3824,7 +3824,7 @@ export default function PainelPedidos() {
     const forma = pagamentos.length > 1 ? 'Dividido' : (pagamentos[0]?.forma ?? '')
     imprimirHtml(montarContaPresencialHtml({
       numeroMesa: c.numero_mesa, itens, subtotal, taxa, total, formaPagamento: forma, empresa,
-    }))
+    }), empresa?.nome)
   }
 
   // Impressão MANUAL da comanda da mesa (botão no card). Imprime todos os itens

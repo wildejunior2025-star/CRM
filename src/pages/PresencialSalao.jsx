@@ -20,6 +20,7 @@ export default function PresencialSalao() {
   const ehAdmin = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
 
   const [taxaPct, setTaxaPct] = useState(10)
+  const [empresaNome, setEmpresaNome] = useState('')
   const [mesas, setMesas]     = useState([])
   const [comandas, setComandas] = useState([])
   const [produtos, setProdutos] = useState([])
@@ -43,13 +44,13 @@ export default function PresencialSalao() {
   async function loadAll() {
     if (!empresaId) return
     const [emp, ms, cs, ps, gs] = await Promise.all([
-      supabase.from('empresas').select('taxa_servico_pct').eq('id', empresaId).single(),
+      supabase.from('empresas').select('taxa_servico_pct, nome').eq('id', empresaId).single(),
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('comandas').select('*, comanda_itens(*)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
       supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria').eq('empresa_id', empresaId).order('nome').limit(500),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
     ])
-    if (emp.data) setTaxaPct(Number(emp.data.taxa_servico_pct ?? 10))
+    if (emp.data) { setTaxaPct(Number(emp.data.taxa_servico_pct ?? 10)); setEmpresaNome(emp.data.nome || '') }
     setMesas(ms.data ?? [])
     setComandas(cs.data ?? [])
     setProdutos(ps.data ?? [])
@@ -250,7 +251,8 @@ export default function PresencialSalao() {
       itens: comandaSel?.comanda_itens ?? [],
       subtotal: subtotalSel, taxa: taxaSel, total: totalSel,
       formaPagamento: modoPag === 'unico' ? forma : 'Dividido',
-    }))
+      empresa: { nome: empresaNome },
+    }), empresaNome)
   }
 
   async function confirmarFechamento() {

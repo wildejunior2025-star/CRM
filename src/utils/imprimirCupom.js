@@ -294,15 +294,18 @@ function imprimirHtmlNavegador(html) {
     setTimeout(() => iframe.remove(), 1500)
   }, 300)
 }
-export async function imprimirHtml(html) {
+export async function imprimirHtml(html, titulo) {
   // O app FWC imprime o HTML como TEXTO. Se mandar o <style>/<script>, o CSS sai
   // impresso como código. Então, SÓ pro app, tira esses blocos antes de enviar.
   // (O QZ e o navegador precisam do <style> pra renderizar — esses recebem o html cheio.)
-  const htmlParaApp = String(html || '')
+  let htmlParaApp = String(html || '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<head[\s\S]*?<\/head>/gi, '')
-  if (await imprimirViaAppFwc('imprimir-html', { html: htmlParaApp })) return
+  // O `titulo` sai grande/centralizado no topo (o app faz isso). Se o corpo já tem o
+  // nome da loja (titulo-loja), tira dele pra não sair duas vezes na térmica.
+  if (titulo) htmlParaApp = htmlParaApp.replace(/<div[^>]*class="[^"]*titulo-loja[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '')
+  if (await imprimirViaAppFwc('imprimir-html', { html: htmlParaApp, titulo })) return
   const printer = impressoraEscolhida()
   if (printer) {
     try { await imprimirHtmlViaQz(html, printer); return } catch { /* fallback */ }
@@ -374,7 +377,7 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
   .row { display: flex; justify-content: space-between; gap: 8px; }
   ul { list-style: none; margin: 0; padding: 0; } li { margin-bottom: 3px; }
 </style></head><body>
-  <div class="center b lg">${esc(empresa.nome || 'Conta')}</div>
+  <div class="titulo-loja center b lg">${esc(empresa.nome || 'Conta')}</div>
   <hr>
   <div class="b">MESA ${esc(numeroMesa)} - ${esc(hora)}</div>
   <hr>
