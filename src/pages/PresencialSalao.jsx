@@ -35,6 +35,10 @@ export default function PresencialSalao() {
   const [obsEdit, setObsEdit] = useState({})  // observação em edição por item
   const [modoPag, setModoPag] = useState('unico')   // 'unico' | 'dividir'
   const [pagamentos, setPagamentos] = useState([])  // [{ forma, valor(string) }] no modo dividir
+  // Rascunho: itens que o garçom monta mas que só vão pra cozinha (e pra impressora)
+  // quando ele clica "Enviar" — assim o pedido inteiro sai numa impressão só.
+  const [rascunho, setRascunho] = useState([]) // [{ produto_id, nome, preco_venda, quantidade }]
+  const [enviando, setEnviando] = useState(false)
 
   async function loadAll() {
     if (!empresaId) return
@@ -104,6 +108,18 @@ export default function PresencialSalao() {
   }, [comandas])
 
   const comandaSel = mesaSel ? comandaPorMesa[mesaSel.id] : null
+  // Rascunho é por comanda e fica salvo no navegador (sobrevive a fechar sem querer).
+  const rascunhoKey = comandaSel ? 'rasc_mesa_' + comandaSel.id : null
+  useEffect(() => {
+    if (!rascunhoKey) { setRascunho([]); return }
+    try { setRascunho(JSON.parse(localStorage.getItem(rascunhoKey) || '[]')) } catch { setRascunho([]) }
+  }, [rascunhoKey])
+  useEffect(() => {
+    if (!rascunhoKey) return
+    try { localStorage.setItem(rascunhoKey, JSON.stringify(rascunho)) } catch { /* ignora */ }
+  }, [rascunho, rascunhoKey])
+  const subtotalRascunho = rascunho.reduce((s, r) => s + Number(r.preco_venda) * r.quantidade, 0)
+
   const subtotalSel = subtotalDe(comandaSel)
   const taxaSel = aplicarTaxa ? Math.round(subtotalSel * (taxaPct / 100) * 100) / 100 : 0
   const totalSel = subtotalSel + taxaSel
@@ -127,20 +143,41 @@ export default function PresencialSalao() {
     setBusca(''); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true)
   }
 
-  async function addItem(produto) {
+  // Adicionar item agora vai pro RASCUNHO (não vai pra cozinha ainda). Só quando o
+  // garçom clica "Enviar para a cozinha" é que os itens são gravados e impressos.
+  function addItem(produto) {
     if (!comandaSel) return
-    // Conta já fechada pelo garçom (aguardando ADM): não deixa lançar mais itens.
     if (comandaSel.status === 'aguardando_conferencia') { window.alert('Conta já fechada, aguardando o ADM liberar a mesa.'); return }
-    const existe = (comandaSel.comanda_itens ?? []).find(i => i.produto_id === produto.produto_id && i.status === 'pendente')
-    if (existe) {
-      await supabase.from('comanda_itens').update({ quantidade: existe.quantidade + 1 }).eq('id', existe.id)
-    } else {
-      await supabase.from('comanda_itens').insert({
-        empresa_id: empresaId, comanda_id: comandaSel.id,
-        produto_id: produto.produto_id, nome: produto.nome,
-        preco_unitario: Number(produto.preco_venda), quantidade: 1,
-      })
-    }
+    setRascunho(prev => {
+      const i = prev.findIndex(r => r.produto_id === produto.produto_id)
+      if (i >= 0) {
+        const c = prev.slice(); c[i] = { ...c[i], quantidade: c[i].quantidade + 1 }; return c
+      }
+      return [...prev, { produto_id: produto.produto_id, nome: produto.nome, preco_venda: Number(produto.preco_venda), quantidade: 1 }]
+    })
+  }
+  function mudarQtdRascunho(produtoId, delta) {
+    setRascunho(prev => prev.flatMap(r => {
+      if (r.produto_id !== produtoId) return [r]
+      const q = r.quantidade + delta
+      return q <= 0 ? [] : [{ ...r, quantidade: q }]
+    }))
+  }
+  // Envia o pedido montado pra cozinha: insere TODOS os itens de uma vez → sai numa
+  // impressão só (o gestor e o app FWC juntam os inserts que chegam juntos).
+  async function enviarCozinha() {
+    if (!comandaSel || !rascunho.length || enviando) return
+    setEnviando(true)
+    const rows = rascunho.map(r => ({
+      empresa_id: empresaId, comanda_id: comandaSel.id,
+      produto_id: r.produto_id, nome: r.nome,
+      preco_unitario: Number(r.preco_venda), quantidade: r.quantidade,
+    }))
+    const { error } = await supabase.from('comanda_itens').insert(rows)
+    setEnviando(false)
+    if (error) { window.alert('Erro ao enviar pra cozinha: ' + error.message); return }
+    setRascunho([])
+    if (rascunhoKey) { try { localStorage.removeItem(rascunhoKey) } catch { /* ignora */ } }
     await loadAll()
   }
 
@@ -427,6 +464,27 @@ export default function PresencialSalao() {
                   ))
               )}
 
+              {/* A enviar (rascunho) — ainda não foi pra cozinha */}
+              {rascunho.length > 0 && (
+                <div style={{ marginTop: 14, padding: 12, borderRadius: 10, border: '1.5px dashed var(--primary)', background: 'rgba(124,58,237,.06)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8, color: 'var(--primary)' }}>
+                    🧾 A enviar — ainda não foi pra cozinha
+                  </div>
+                  {rascunho.map(r => (
+                    <div key={r.produto_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 600 }}>{r.nome}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmt(r.preco_venda)}</div>
+                      </div>
+                      <button type="button" onClick={() => mudarQtdRascunho(r.produto_id, -1)} style={qtdBtn}>−</button>
+                      <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{r.quantidade}</span>
+                      <button type="button" onClick={() => mudarQtdRascunho(r.produto_id, +1)} style={qtdBtn}>+</button>
+                      <span style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>{fmt(r.preco_venda * r.quantidade)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* adicionar item */}
               <div style={{ fontSize: 13, fontWeight: 700, margin: '18px 0 8px' }}>Adicionar item</div>
               <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar produto..."
@@ -445,6 +503,13 @@ export default function PresencialSalao() {
 
             {/* rodapé */}
             <div style={{ borderTop: '1px solid var(--border)', padding: 16 }}>
+              {comandaSel.status !== 'aguardando_conferencia' && rascunho.length > 0 && (
+                <button type="button" onClick={enviarCozinha} disabled={enviando}
+                  style={{ width: '100%', marginBottom: 12, padding: '12px 0', borderRadius: 10, border: 'none', cursor: enviando ? 'wait' : 'pointer',
+                    background: '#16a34a', color: '#fff', fontWeight: 800, fontSize: 15, opacity: enviando ? 0.6 : 1 }}>
+                  {enviando ? 'Enviando...' : `🍳 Enviar para a cozinha · ${rascunho.reduce((s, r) => s + r.quantidade, 0)} item(ns) · ${fmt(subtotalRascunho)}`}
+                </button>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 4 }}>
                 <span>Subtotal</span><strong>{fmt(subtotalSel)}</strong>
               </div>
