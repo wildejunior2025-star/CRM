@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 1
+const APP_VERSION = 2
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -315,11 +315,13 @@ function comandaMesaBytes(numero, itens, nomeLoja, sufixo) {
     const q = it.quantidade ?? it.qtd ?? 1
     const nome = q + 'x ' + (it.nome || 'Item')
     const pu = Number(it.preco_unitario ?? it.preco ?? 0)
+    // Item em fonte GRANDE (altura dobrada, sem negrito) pro cozinheiro ver melhor.
+    // Altura dobrada não muda a largura, então nome + valor cabem na mesma linha (42 col).
     if (pu > 0) {
       const val = money(pu * q)
-      L.push(nome + ' '.repeat(Math.max(1, LARGURA - nome.length - val.length)) + val)
+      L.push({ t: nome + ' '.repeat(Math.max(1, LARGURA - nome.length - val.length)) + val, big: true })
     } else {
-      L.push(nome)
+      L.push({ t: nome, big: true })
     }
     if (it.observacao) L.push('   obs: ' + it.observacao)
   }
