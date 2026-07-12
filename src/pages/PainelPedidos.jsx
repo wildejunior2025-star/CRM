@@ -2917,12 +2917,13 @@ function LinhaItemMesa({ comanda, it, onItemPronto, onEditarPreco, podeEditarPre
   )
 }
 
-function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarLiberar, onImprimir, onEditarPreco, podeEditarPreco }) {
+function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarLiberar, onImprimir, onEditarPreco, podeEditarPreco, onAjustarTaxa }) {
   const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
   const total = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
   const hora = new Date(comanda.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   const pendentes = itens.filter(it => it.status !== 'pronto' && it.status !== 'entregue')
   const aguardando = comanda.status === 'aguardando_conferencia'
+  const taxaAplicada = (comanda.fechamento_pendente || {}).aplicar_taxa !== false // garçom fecha com 10% por padrão
   return (
     <div className="pp-mini" style={{ borderLeft: `3px solid ${aguardando ? '#3b82f6' : '#db2777'}`, cursor: 'default' }}>
       <div className="pp-mini-top" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -2957,6 +2958,13 @@ function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarL
           <div style={{ marginTop: 8, padding: '6px 8px', borderRadius: 8, background: 'rgba(59,130,246,.16)', color: '#2563eb', fontWeight: 800, fontSize: 11.5, textAlign: 'center' }}>
             🔵 Conta fechada pelo garçom — aguardando o ADM liberar
           </div>
+          {onAjustarTaxa && (
+            <button type="button" onClick={() => onAjustarTaxa(comanda, !taxaAplicada)}
+              style={{ marginTop: 6, width: '100%', padding: '7px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12,
+                border: `1.5px solid ${taxaAplicada ? '#f59e0b' : '#16a34a'}`, background: 'transparent', color: taxaAplicada ? '#d97706' : '#16a34a' }}>
+              {taxaAplicada ? '➖ Cliente não quer os 10% (tirar e reimprimir)' : '➕ Voltar os 10% (reimprimir)'}
+            </button>
+          )}
           {onConfirmarLiberar && (
             <button type="button" onClick={() => onConfirmarLiberar(comanda)}
               style={{ marginTop: 6, width: '100%', padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12.5,
@@ -3877,6 +3885,42 @@ export default function PainelPedidos() {
     ])
   }
 
+  // ADM tira (ou volta) os 10% de uma mesa que o garçom já fechou, ANTES de liberar
+  // (cliente decidiu não pagar a taxa). Recalcula os pagamentos pro novo total,
+  // salva no fechamento_pendente e reimprime a conta já com/sem os 10%.
+  async function handleAjustarTaxaMesa(comanda, aplicar) {
+    const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
+    const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
+    const pct = Number(empresa?.taxa_servico_pct ?? 10)
+    const taxa = aplicar ? Math.round(subtotal * pct / 100 * 100) / 100 : 0
+    const novoTotal = Math.round((subtotal + taxa) * 100) / 100
+    const pend = comanda.fechamento_pendente || {}
+    const pagsAntigos = Array.isArray(pend.pagamentos) ? pend.pagamentos : []
+    const totalAntigo = pagsAntigos.reduce((s, p) => s + Number(p.valor || 0), 0) || novoTotal
+    // Reescala os pagamentos pro novo total (mantém a forma; no dividido, proporcional).
+    let novos
+    if (pagsAntigos.length <= 1) {
+      novos = [{ forma: pagsAntigos[0]?.forma ?? 'dinheiro', valor: novoTotal }]
+    } else {
+      let acc = 0
+      novos = pagsAntigos.map((p, i) => {
+        if (i === pagsAntigos.length - 1) return { forma: p.forma, valor: Math.round((novoTotal - acc) * 100) / 100 }
+        const v = Math.round(Number(p.valor || 0) * novoTotal / totalAntigo * 100) / 100
+        acc += v
+        return { forma: p.forma, valor: v }
+      })
+    }
+    const novoPend = { ...pend, pagamentos: novos, aplicar_taxa: aplicar }
+    const { error } = await supabase.from('comandas').update({ fechamento_pendente: novoPend }).eq('id', comanda.id)
+    if (error) { alert('Erro ao ajustar a taxa: ' + error.message); return }
+    setComandas(cs => cs.map(c => c.id === comanda.id ? { ...c, fechamento_pendente: novoPend } : c))
+    // reimprime a conta com o novo valor
+    const forma = novos.length > 1 ? 'Dividido' : (novos[0]?.forma ?? '')
+    imprimirHtml(montarContaPresencialHtml({
+      numeroMesa: comanda.numero_mesa, itens, subtotal, taxa, total: novoTotal, formaPagamento: forma, empresa,
+    }), empresa?.nome)
+  }
+
   // ADM confere e libera uma mesa que o garçom já fechou (aguardando_conferencia),
   // usando o pagamento que o garçom lançou. Sem pagamento salvo, abre o modal.
   async function handleConfirmarLiberarMesa(comanda) {
@@ -4526,7 +4570,7 @@ export default function PainelPedidos() {
               {(!filtroColuna || filtroColuna === 'mesas') && comandasView.length > 0 && (
                 <Coluna titulo="Mesas" cor="#db2777" count={comandasView.length} vazio="Nenhuma mesa aberta">
                   {comandasView.map(c => (
-                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} onConfirmarLiberar={handleConfirmarLiberarMesa} onImprimir={handleImprimirMesa} onEditarPreco={handleEditarPrecoMesaItem} podeEditarPreco={podeFinanceiro} />
+                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} onConfirmarLiberar={handleConfirmarLiberarMesa} onImprimir={handleImprimirMesa} onEditarPreco={handleEditarPrecoMesaItem} podeEditarPreco={podeFinanceiro} onAjustarTaxa={podeFinanceiro ? handleAjustarTaxaMesa : null} />
                   ))}
                 </Coluna>
               )}
