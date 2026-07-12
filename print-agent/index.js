@@ -104,8 +104,24 @@ if([RawPrinter]::SendBytes($Printer,$b)){Write-Output "OK"}else{Write-Output "FA
 try { fs.writeFileSync(PS1_FILE, PS1) } catch (e) {}
 
 function listarImpressoras() {
-  const r = spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Get-Printer | Select-Object -ExpandProperty Name'], { encoding: 'utf8', windowsHide: true })
-  return (r.stdout || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+  const ps = (cmd) => {
+    try {
+      const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', cmd], { encoding: 'utf8', windowsHide: true })
+      return (r.stdout || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+    } catch (e) { return [] }
+  }
+  // Tenta várias formas — Windows novo/antigo, política restrita, impressora USB.
+  let l = ps('Get-Printer | Select-Object -ExpandProperty Name')
+  if (l.length) return l
+  l = ps('Get-CimInstance Win32_Printer | Select-Object -ExpandProperty Name')
+  if (l.length) return l
+  l = ps('Get-WmiObject Win32_Printer | Select-Object -ExpandProperty Name')
+  if (l.length) return l
+  try {
+    const r = spawnSync('wmic', ['printer', 'get', 'name'], { encoding: 'utf8', windowsHide: true })
+    l = (r.stdout || '').split(/\r?\n/).map(s => s.trim()).filter(s => s && s.toLowerCase() !== 'name')
+  } catch (e) { l = [] }
+  return l
 }
 
 // Caminho real da Área de Trabalho (respeita redirecionamento do OneDrive).
@@ -339,6 +355,7 @@ function paginaHtml() {
   const optsBar = `<option value=""${!c.printerBar ? ' selected' : ''}>(nenhuma — tudo na cozinha)</option>` + imps.map(i => `<option${i === c.printerBar ? ' selected' : ''}>${i}</option>`).join('')
   const empOpts = empresasDisponiveis.map(e => `<option value="${e.id}"${e.id === c.empresa_id ? ' selected' : ''}>${e.nome}</option>`).join('')
   // Card de escolher a impressora — aparece SEMPRE que estiver logado.
+  const semLista = imps.length === 0
   const cardImpressora = `
 <div class="card">
   <form method="POST" action="/printer">
@@ -346,9 +363,12 @@ function paginaHtml() {
     <select name="printer">${opts || '<option value="">(nenhuma encontrada)</option>'}</select>
     <label>Impressora do BAR (bebidas) — opcional</label>
     <select name="printerBar">${optsBar}</select>
+    <label style="margin-top:10px">Não achou na lista? Digite o nome EXATO da impressora</label>
+    <input name="printerManual" placeholder="Ex.: POS-80 / Generic / EPSON TM-T20"
+      value="${(c.printer || '').replace(/"/g, '&quot;')}" style="width:100%;padding:9px;border-radius:8px;border:1px solid #2a3444;background:#0f1420;color:#e5e7eb">
     <button>Salvar impressoras</button>
   </form>
-  <div class="sub" style="margin:8px 0 0">A da cozinha imprime tudo. Se você escolher a do bar, as <b>bebidas</b> saem nela e a <b>comida</b> na cozinha. Deixe "(nenhuma)" pra imprimir tudo numa só.</div>
+  <div class="sub" style="margin:8px 0 0">${semLista ? '⚠️ Nenhuma impressora foi detectada automaticamente. Copie o nome EXATO da impressora (Windows: Configurações → Impressoras) e cole no campo acima.' : 'A da cozinha imprime tudo. Se escolher a do bar, as <b>bebidas</b> saem nela e a <b>comida</b> na cozinha. Deixe "(nenhuma)" pra imprimir tudo numa só.'} O nome digitado tem prioridade sobre a lista.</div>
   <form method="POST" action="/teste"><button style="background:#16a34a">Imprimir cupom de teste</button></form>
 </div>`
   let bloco
@@ -492,9 +512,10 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'POST' && req.url === '/api/printer') {
         const f = await jsonBody(req)
-        const patch = { printer: f.printer }
+        const printer = (f.printerManual && String(f.printerManual).trim()) ? String(f.printerManual).trim() : f.printer
+        const patch = { printer }
         if ('printerBar' in f) patch.printerBar = f.printerBar || null
-        setConfig(patch); log('Impressora: ' + f.printer + (patch.printerBar ? ' | bar: ' + patch.printerBar : ''))
+        setConfig(patch); log('Impressora: ' + printer + (patch.printerBar ? ' | bar: ' + patch.printerBar : ''))
         return sendJson(res, { ok: true, ...statusObj() })
       }
       if (req.method === 'POST' && req.url === '/api/logout') {
@@ -525,7 +546,9 @@ const server = http.createServer(async (req, res) => {
       if (error) log('Login falhou: ' + error.message)
       else { log('Login OK: ' + f.email); await iniciarEscuta() }
     } else if (req.method === 'POST' && req.url === '/printer') {
-      const f = await body(req); setConfig({ printer: f.printer, printerBar: f.printerBar || null }); log('Impressora: ' + f.printer + (f.printerBar ? ' | bar: ' + f.printerBar : ''))
+      const f = await body(req)
+      const printer = (f.printerManual && f.printerManual.trim()) ? f.printerManual.trim() : f.printer
+      setConfig({ printer, printerBar: f.printerBar || null }); log('Impressora: ' + printer + (f.printerBar ? ' | bar: ' + f.printerBar : ''))
     } else if (req.method === 'POST' && req.url === '/empresa') {
       const f = await body(req); setConfig({ empresa_id: f.empresa_id }); empresaId = null; log('Loja escolhida.'); await iniciarEscuta()
     } else if (req.method === 'POST' && req.url === '/logout') {
