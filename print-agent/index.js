@@ -21,6 +21,13 @@ const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
 const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InljeXRyc3FkdnJ2aWloa3Fmdm5vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExMjc1NDcsImV4cCI6MjA5NjcwMzU0N30.zAq-8gaw2U9wvwBJCX_rK2jP-tnjOL5VPS23fFxf2Zc'
 const PORT = 9110
 
+// Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
+// com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
+// sozinho (silencioso). BUMP a cada mudança no app.
+const APP_VERSION = 1
+const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
+const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
+
 // Pasta de dados (grava mesmo com o .exe em Program Files)
 const DATA_DIR = path.join(process.env.APPDATA || os.homedir(), 'ImpressoraFWC')
 try { fs.mkdirSync(DATA_DIR, { recursive: true }) } catch (e) {}
@@ -175,13 +182,43 @@ function autoInstalar() {
     if (!ok) return false
     criarAtalhoStartup(alvo)
     spawn(alvo, ['--installed'], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
-    spawnSync('powershell.exe', ['-NoProfile', '-Command',
-      "(New-Object -ComObject WScript.Shell).Popup('Impressora FWC instalada! Ja esta rodando escondida na Area de Trabalho e vai ligar junto com o Windows.',7,'Impressora FWC',64) | Out-Null"],
-      { windowsHide: true })
+    // Instalação normal mostra o aviso; auto-atualização é silenciosa.
+    if (!process.argv.includes('--auto-update')) {
+      spawnSync('powershell.exe', ['-NoProfile', '-Command',
+        "(New-Object -ComObject WScript.Shell).Popup('Impressora FWC instalada! Ja esta rodando escondida na Area de Trabalho e vai ligar junto com o Windows.',7,'Impressora FWC',64) | Out-Null"],
+        { windowsHide: true })
+    }
     return true
   } catch (e) { return false }
 }
 const jaImpressos = new Set()
+
+// Checa se saiu versão nova no bucket; se sim, baixa o .exe e roda ele —
+// o baixado (autoInstalar) para esta instância, se copia pro Desktop e reabre.
+let atualizando = false
+async function checarAtualizacao() {
+  if (atualizando || process.argv.includes('--debug')) return
+  try {
+    const r = await fetch(FWC_VERSION_URL + '?t=' + Date.now(), { cache: 'no-store' })
+    if (!r.ok) return
+    const j = await r.json().catch(() => null)
+    const ultima = Number(j && j.version)
+    if (!ultima || ultima <= APP_VERSION) return
+    log('Atualizacao v' + ultima + ' disponivel (tenho v' + APP_VERSION + ') — baixando...')
+    const rr = await fetch(FWC_EXE_URL + '?t=' + Date.now(), { cache: 'no-store' })
+    if (!rr.ok) return
+    const buf = Buffer.from(await rr.arrayBuffer())
+    if (buf.length < 5000000) { log('  exe baixado suspeito (' + buf.length + ' bytes) — ignorei'); return }
+    atualizando = true
+    const tmp = path.join(os.tmpdir(), 'ImpressoraFWC-update.exe')
+    fs.writeFileSync(tmp, buf)
+    log('  baixado ' + buf.length + ' bytes — instalando atualizacao (silenciosa)...')
+    spawn(tmp, ['--auto-update'], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+    // o baixado vai matar esta instância; saio por garantia depois de um tempinho.
+    setTimeout(() => process.exit(0), 4000)
+  } catch (e) { log('Falha ao checar atualizacao: ' + (e && e.message)) }
+}
+
 // Envia bytes ESC/POS pra impressora escolhida. Retorna true se conseguiu mandar.
 function imprimirBytes(bytes, nome, printerOverride) {
   const printer = printerOverride || config().printer
@@ -612,8 +649,10 @@ const server = http.createServer(async (req, res) => {
 // Uma instância só: se a porta já está em uso, outro app FWC já roda — sai quieto.
 server.on('error', e => { if (e && e.code === 'EADDRINUSE') process.exit(0) })
 server.listen(PORT, '127.0.0.1', () => {
-  log('=== Impressora FWC ===')
+  log('=== Impressora FWC v' + APP_VERSION + ' ===')
   log('Configuracao: http://localhost:' + PORT)
   criarAtalhoStartup(process.execPath)  // mantém o "ligar com o Windows" no lugar certo
   iniciarEscuta()                       // conecta e escuta os pedidos
+  setTimeout(checarAtualizacao, 20000)              // checa atualização 20s após ligar
+  setInterval(checarAtualizacao, 3 * 60 * 60 * 1000) // e a cada 3 horas
 })
