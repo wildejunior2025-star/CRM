@@ -2453,6 +2453,15 @@ function ImpressoraFWCPanel({ empresaId }) {
 
       {erro && <div style={{ fontSize: 12, color: '#dc2626', fontWeight: 700 }}>{erro}</div>}
 
+      {/* Download pra pegar a versão nova (a partir da v1 o app se atualiza sozinho —
+          esse link é só pro último update manual de quem ainda está numa versão antiga). */}
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderTop: '1px dashed var(--border)', paddingTop: 8 }}>
+        <a href={FWC_EXE_URL} download style={{ color: '#7c3aed', fontWeight: 800, textDecoration: 'none' }}>
+          ⬇️ Baixar versão nova do app
+        </a>
+        <span>(feche o app atual e abra o baixado — depois dessa vez ele se atualiza sozinho)</span>
+      </div>
+
       {/* Não logado → tenta reconhecer a conta do gestor; senão, login manual */}
       {!st.logado ? (
         adotando ? (
