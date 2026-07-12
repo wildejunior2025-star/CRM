@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { supabase } from '../lib/supabaseClient'
-import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml } from '../utils/imprimirCupom'
+import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
 
 // Aceitar pedidos automaticamente (lido do localStorage pra não pegar estado
 // velho dentro do handler de realtime).
@@ -3831,12 +3831,11 @@ export default function PainelPedidos() {
   function handleImprimirMesa(comanda) {
     const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
     if (!itens.length) return
-    imprimirHtml(montarComandaCozinhaHtml({
+    imprimirComandaMesaApp({
       numeroMesa: comanda.numero_mesa ?? '?',
-      precos: true,
       nomeLoja: empresa?.nome,
       itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, preco_unitario: i.preco_unitario, observacao: i.observacao })),
-    }))
+    })
   }
 
   // Fecha a conta da mesa pelo gestor (cria a venda, baixa estoque, libera a mesa).

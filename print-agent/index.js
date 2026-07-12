@@ -266,30 +266,44 @@ function imprimirPedido(p) {
 // (com o número da mesa) usando um pequeno atraso, igual o gestor faz.
 const comandaBuf = new Map()            // comanda_id -> { itens:[], timer }
 const comandaItensImpressos = new Set() // dedupe por id de item (reconexão)
+// Monta a comanda de mesa em ESC/POS: nome do restaurante (topo) + MESA X (grande),
+// data/hora, e os itens com o valor alinhado à direita. Usada no automático (garçom
+// manda os itens) e no botão manual do gestor (/api/imprimir-mesa) — mesmo visual.
+function comandaMesaBytes(numero, itens, nomeLoja, sufixo) {
+  const money = v => 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',')
+  const d = new Date(), p2 = n => String(n).padStart(2, '0')
+  const agora = p2(d.getDate()) + '/' + p2(d.getMonth() + 1) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes())
+  const L = [agora]
+  for (const it of (Array.isArray(itens) ? itens : [])) {
+    const q = it.quantidade ?? it.qtd ?? 1
+    const nome = q + 'x ' + (it.nome || 'Item')
+    const pu = Number(it.preco_unitario ?? it.preco ?? 0)
+    if (pu > 0) {
+      const val = money(pu * q)
+      L.push(nome + ' '.repeat(Math.max(1, LARGURA - nome.length - val.length)) + val)
+    } else {
+      L.push(nome)
+    }
+    if (it.observacao) L.push('   obs: ' + it.observacao)
+  }
+  return montarTexto(L, 'MESA ' + numero + (sufixo || ''), nomeLoja)
+}
 async function imprimirComandaMesa(cid, itens) {
   let numero = '?'
   try {
     const { data: c } = await supabase.from('comandas').select('numero_mesa').eq('id', cid).maybeSingle()
     if (c && c.numero_mesa != null) numero = c.numero_mesa
   } catch (e) {}
-  const linhasDe = (arr) => {
-    const L = []
-    for (const it of arr) {
-      L.push((it.quantidade ?? 1) + 'x ' + (it.nome || 'Item'))
-      if (it.observacao) L.push('   obs: ' + it.observacao)
-    }
-    return L
-  }
-  const nomeLoja = empresa?.nome || ''  // nome do restaurante no topo da comanda
+  const nomeLoja = empresa?.nome || ''
   const bar = config().printerBar
   if (bar) {
     const comida = itens.filter(it => !ehBebida(it.nome))
     const bebida = itens.filter(it => ehBebida(it.nome))
-    if (comida.length) imprimirBytes(montarTexto(linhasDe(comida), 'MESA ' + numero, nomeLoja), 'mesa-' + cid)
-    if (bebida.length) imprimirBytes(montarTexto(linhasDe(bebida), 'MESA ' + numero + ' - BEBIDAS', nomeLoja), 'mesa-bar-' + cid, bar)
+    if (comida.length) imprimirBytes(comandaMesaBytes(numero, comida, nomeLoja), 'mesa-' + cid)
+    if (bebida.length) imprimirBytes(comandaMesaBytes(numero, bebida, nomeLoja, ' - BEBIDAS'), 'mesa-bar-' + cid, bar)
     return
   }
-  imprimirBytes(montarTexto(linhasDe(itens), 'MESA ' + numero, nomeLoja), 'mesa-' + cid)
+  imprimirBytes(comandaMesaBytes(numero, itens, nomeLoja), 'mesa-' + cid)
 }
 function agendarComandaMesa(it) {
   if (!it || (it.status && it.status !== 'pendente')) return
@@ -512,10 +526,28 @@ const server = http.createServer(async (req, res) => {
         try { const bar = config().printerBar; if (bar) { const bs = (Array.isArray(f.pedido.itens) ? f.pedido.itens : []).filter(it => ehBebida(it.nome)); if (bs.length) imprimirBytes(montarTexto(bs.map(it => (it.quantidade ?? it.qtd ?? 1) + 'x ' + (it.nome || 'Item')), 'BEBIDAS'), 'bar-re', bar) } } catch (e) {}
         return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
       }
-      // Imprime um HTML (cozinha/conta de mesa) como texto na térmica.
+      // Imprime um HTML (conta de mesa etc.) como texto na térmica.
       if (req.method === 'POST' && req.url === '/api/imprimir-html') {
         const f = await jsonBody(req)
         const ok = imprimirBytes(montarTexto(htmlParaLinhas(f.html || ''), f.titulo), 'doc')
+        return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
+      }
+      // Comanda de MESA nativa (nome da loja + MESA grandes, data, itens com valor).
+      // Usada pelo botão manual do gestor pra sair igual ao automático.
+      if (req.method === 'POST' && req.url === '/api/imprimir-mesa') {
+        const f = await jsonBody(req)
+        const nomeLoja = f.nomeLoja || empresa?.nome || ''
+        const itens = Array.isArray(f.itens) ? f.itens : []
+        const bar = config().printerBar
+        let ok = false
+        if (bar) {
+          const comida = itens.filter(it => !ehBebida(it.nome))
+          const bebida = itens.filter(it => ehBebida(it.nome))
+          if (comida.length) ok = imprimirBytes(comandaMesaBytes(f.numeroMesa, comida, nomeLoja), 'mesa-man')
+          if (bebida.length) imprimirBytes(comandaMesaBytes(f.numeroMesa, bebida, nomeLoja, ' - BEBIDAS'), 'mesa-man-bar', bar)
+        } else {
+          ok = imprimirBytes(comandaMesaBytes(f.numeroMesa, itens, nomeLoja), 'mesa-man')
+        }
         return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
       }
       // Liga/pausa a impressão automática (atalho do topo do gestor).

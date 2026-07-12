@@ -313,6 +313,14 @@ export async function imprimirHtml(html, titulo) {
   imprimirHtmlNavegador(html)
 }
 
+// Comanda de MESA: pede pro app FWC montar nativamente (nome da loja + MESA grandes,
+// data, itens com valor). Se o app não responder (ou for versão antiga), cai no HTML
+// pelo navegador/QZ. Assim o botão manual do gestor sai igual ao automático.
+export async function imprimirComandaMesaApp({ numeroMesa, itens = [], nomeLoja = '' }) {
+  if (await imprimirViaAppFwc('imprimir-mesa', { numeroMesa, itens, nomeLoja })) return
+  imprimirHtml(montarComandaCozinhaHtml({ numeroMesa, itens, precos: true, nomeLoja }))
+}
+
 // Comanda da COZINHA (fonte grande) — "pedido sai na cozinha".
 // Com `precos: true`, mostra o valor de cada item ao lado + o total no rodapé
 // (impressão manual da mesa pelo gestor). O auto-print da cozinha não passa
