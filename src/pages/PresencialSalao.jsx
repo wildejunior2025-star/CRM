@@ -13,6 +13,9 @@ const FORMAS = [
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
 
+// Tira acento e deixa minúsculo: assim "agua" acha "Água", "cafe" acha "Café" etc.
+const semAcento = (s) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+
 export default function PresencialSalao() {
   const { profile, user } = useAuth()
   const empresaId = profile?.empresa_id
@@ -29,6 +32,7 @@ export default function PresencialSalao() {
 
   const [mesaSel, setMesaSel] = useState(null)   // mesa aberta no drawer
   const [busca, setBusca]     = useState('')
+  const [categoriaSel, setCategoriaSel] = useState(null) // categoria aberta no menu de adicionar item
   const [fechando, setFechando] = useState(false) // modal de fechamento
   const [forma, setForma]     = useState('dinheiro')
   const [aplicarTaxa, setAplicarTaxa] = useState(true)
@@ -142,7 +146,7 @@ export default function PresencialSalao() {
       await loadAll()
     }
     setMesaSel(mesa)
-    setBusca(''); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true)
+    setBusca(''); setCategoriaSel(null); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true)
   }
 
   // Adicionar item agora vai pro RASCUNHO (não vai pra cozinha ainda). Só quando o
@@ -321,9 +325,25 @@ export default function PresencialSalao() {
     await loadAll()
   }
 
-  const produtosFiltrados = busca.trim()
-    ? produtos.filter(p => p.nome?.toLowerCase().includes(busca.trim().toLowerCase())).slice(0, 30)
-    : produtos.slice(0, 30)
+  // Só produtos que TÊM categoria entram no menu (os "sem categoria" somem).
+  const produtosComCategoria = produtos.filter(p => (p.categoria ?? '').trim() !== '')
+
+  // Lista de categorias (distintas, em ordem alfabética) pra mostrar como no cardápio.
+  const categorias = useMemo(() => {
+    const set = new Set(produtosComCategoria.map(p => p.categoria.trim()))
+    return [...set].sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [produtos]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // O que a lista mostra:
+  //  - Digitou algo → busca em TODAS as categorias, ignorando acento.
+  //  - Sem busca + categoria escolhida → produtos daquela categoria.
+  //  - Sem busca + nenhuma categoria → mostra as categorias (não os produtos).
+  const buscaNorm = semAcento(busca)
+  const produtosFiltrados = buscaNorm
+    ? produtosComCategoria.filter(p => semAcento(p.nome).includes(buscaNorm)).slice(0, 40)
+    : categoriaSel
+      ? produtosComCategoria.filter(p => p.categoria.trim() === categoriaSel)
+      : []
 
   if (loading) return <div className="page"><p>Carregando salão...</p></div>
 
@@ -497,16 +517,40 @@ export default function PresencialSalao() {
                     }}>×</button>
                 )}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {produtosFiltrados.map(p => (
-                  <button key={p.produto_id} type="button" onClick={() => addItem(p)}
-                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', textAlign: 'left' }}>
-                    <span style={{ fontSize: 13.5 }}>{p.nome}</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--primary)' }}>+ {fmt(p.preco_venda)}</span>
-                  </button>
-                ))}
-                {produtosFiltrados.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nenhum produto encontrado.</p>}
-              </div>
+              {/* Sem busca e sem categoria escolhida: mostra as CATEGORIAS (como no cardápio). */}
+              {!busca.trim() && !categoriaSel && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {categorias.map(cat => (
+                    <button key={cat} type="button" onClick={() => setCategoriaSel(cat)}
+                      style={{ padding: '10px 14px', borderRadius: 999, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 13.5, fontWeight: 600 }}>
+                      {cat}
+                    </button>
+                  ))}
+                  {categorias.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nenhuma categoria com produtos.</p>}
+                </div>
+              )}
+
+              {/* Categoria escolhida (e sem busca): botão de voltar + produtos dela. */}
+              {!busca.trim() && categoriaSel && (
+                <button type="button" onClick={() => setCategoriaSel(null)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 8, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--primary)', fontSize: 13, fontWeight: 700 }}>
+                  ← {categoriaSel}
+                </button>
+              )}
+
+              {/* Produtos: quando há busca OU quando uma categoria está aberta. */}
+              {(busca.trim() || categoriaSel) && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {produtosFiltrados.map(p => (
+                    <button key={p.produto_id} type="button" onClick={() => addItem(p)}
+                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', textAlign: 'left' }}>
+                      <span style={{ fontSize: 13.5 }}>{p.nome}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--primary)' }}>+ {fmt(p.preco_venda)}</span>
+                    </button>
+                  ))}
+                  {produtosFiltrados.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nenhum produto encontrado.</p>}
+                </div>
+              )}
             </div>
 
             {/* rodapé */}
