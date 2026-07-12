@@ -3732,12 +3732,15 @@ export default function PainelPedidos() {
       // Conta da mesa: o garçom fecha no celular (sem impressora) e a mesa vira
       // "aguardando_conferencia". É AQUI, no gestor da loja (com a térmica/app FWC),
       // que a conta sai impressa. Dedupe por id; na 1ª carga não imprime as antigas.
+      // Imprime se HÁ como imprimir: app FWC ativo OU auto do navegador ligado —
+      // a conta não tem impressão pelo app (ele não escuta status da comanda), então
+      // quem dispara é sempre o gestor (imprimirHtml roteia pro app ou navegador).
       const aguardando = lista.filter(c => c.status === 'aguardando_conferencia')
       const primeira = contaMesaImpressaRef.current === null
       if (primeira) contaMesaImpressaRef.current = new Set()
       const novas = aguardando.filter(c => !contaMesaImpressaRef.current.has(c.id))
       novas.forEach(c => contaMesaImpressaRef.current.add(c.id))
-      if (!primeira && autoImprimirAtivo()) novas.forEach(imprimirContaMesa)
+      if (!primeira && (fwcImprimeRef.current || autoImprimirAtivo())) novas.forEach(imprimirContaMesa)
       if (ativo) setComandas(lista)
     }
     carregarComandas()
