@@ -2355,6 +2355,7 @@ function ImpressoraFWCPanel({ empresaId }) {
   const [busy, setBusy] = useState(false)
   const [erro, setErro] = useState('')
   const [adotando, setAdotando] = useState(false)
+  const [nomeManual, setNomeManual] = useState('')
   const adotouRef = useRef(false)
 
   const chamar = useCallback(async (path, opts) => {
@@ -2498,6 +2499,19 @@ function ImpressoraFWCPanel({ empresaId }) {
               <option value="">Selecione a impressora</option>
               {(st.impressoras || []).map(p => <option key={p} value={p}>{p}</option>)}
             </select>
+            {/* Escape: se a lista veio vazia (Windows não listou), digita o nome exato */}
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', margin: '10px 0 6px' }}>
+              {(st.impressoras || []).length === 0
+                ? '⚠️ Nenhuma impressora foi detectada. Digite o nome EXATO (Windows → Impressoras):'
+                : 'Não achou na lista? Digite o nome EXATO da impressora:'}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input style={{ ...inp, flex: 1 }} placeholder="Ex.: POS-80 / EPSON TM-T20"
+                value={nomeManual} onChange={e => setNomeManual(e.target.value)} />
+              <button type="button" disabled={busy || !nomeManual.trim()} style={{ ...btnRoxo, opacity: (busy || !nomeManual.trim()) ? .6 : 1 }}
+                onClick={() => acao('/printer', { printer: nomeManual.trim() })}>Salvar</button>
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>Copie o nome exatinho como aparece no Windows (Configurações → Impressoras e scanners).</div>
           </div>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
