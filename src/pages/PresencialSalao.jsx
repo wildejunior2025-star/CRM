@@ -40,6 +40,7 @@ export default function PresencialSalao() {
   // quando ele clica "Enviar" — assim o pedido inteiro sai numa impressão só.
   const [rascunho, setRascunho] = useState([]) // [{ produto_id, nome, preco_venda, quantidade }]
   const [enviando, setEnviando] = useState(false)
+  const buscaRef = useRef(null) // pra focar de volta o campo de busca ao limpar (X)
 
   async function loadAll() {
     if (!empresaId) return
@@ -483,8 +484,19 @@ export default function PresencialSalao() {
 
               {/* adicionar item */}
               <div style={{ fontSize: 13, fontWeight: 700, margin: '18px 0 8px' }}>Adicionar item</div>
-              <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar produto..."
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', marginBottom: 8 }} />
+              <div style={{ position: 'relative', marginBottom: 8 }}>
+                <input ref={buscaRef} value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar produto..."
+                  style={{ width: '100%', padding: '10px 38px 10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box' }} />
+                {busca && (
+                  <button type="button" title="Limpar" aria-label="Limpar busca"
+                    onClick={() => { setBusca(''); if (buscaRef.current) buscaRef.current.focus() }}
+                    style={{
+                      position: 'absolute', top: '50%', right: 6, transform: 'translateY(-50%)',
+                      width: 26, height: 26, borderRadius: 999, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      border: 'none', background: 'var(--border)', color: 'var(--text)', fontSize: 15, fontWeight: 800, lineHeight: 1,
+                    }}>×</button>
+                )}
+              </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {produtosFiltrados.map(p => (
                   <button key={p.produto_id} type="button" onClick={() => addItem(p)}
