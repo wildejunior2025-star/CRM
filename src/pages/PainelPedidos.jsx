@@ -3168,6 +3168,7 @@ export default function PainelPedidos() {
   const [comandas, setComandas] = useState([]) // mesas (autoatendimento QR) abertas
   const [comandaFechando, setComandaFechando] = useState(null) // comanda no modal de fechar conta
   const mesaPrintRef = useRef({}) // buffer p/ imprimir itens da mesa juntos
+  const contaMesaImpressaRef = useRef(null) // ids de comanda cuja CONTA já saiu (garçom fechou)
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null) // pedido aberto em detalhe (card completo)
   const [modalCodRetirada, setModalCodRetirada] = useState(null) // retirada aguardando o código do cliente
   const [autoImprimir, setAutoImprimir] = useState(autoImprimirAtivo)
@@ -3732,7 +3733,17 @@ export default function PainelPedidos() {
         .eq('empresa_id', empresa.id)
         .in('status', ['aberta', 'aguardando_conferencia'])
         .order('numero_mesa')
-      if (ativo) setComandas(data ?? [])
+      const lista = data ?? []
+      // Conta da mesa: o garçom fecha no celular (sem impressora) e a mesa vira
+      // "aguardando_conferencia". É AQUI, no gestor da loja (com a térmica/app FWC),
+      // que a conta sai impressa. Dedupe por id; na 1ª carga não imprime as antigas.
+      const aguardando = lista.filter(c => c.status === 'aguardando_conferencia')
+      const primeira = contaMesaImpressaRef.current === null
+      if (primeira) contaMesaImpressaRef.current = new Set()
+      const novas = aguardando.filter(c => !contaMesaImpressaRef.current.has(c.id))
+      novas.forEach(c => contaMesaImpressaRef.current.add(c.id))
+      if (!primeira && autoImprimirAtivo()) novas.forEach(imprimirContaMesa)
+      if (ativo) setComandas(lista)
     }
     carregarComandas()
     const ch = supabase
@@ -3798,6 +3809,21 @@ export default function PainelPedidos() {
     imprimirHtml(montarComandaCozinhaHtml({
       numeroMesa: c?.numero_mesa ?? '?',
       itens: entry.itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao })),
+    }))
+  }
+
+  // Imprime a CONTA da mesa na loja (chamado quando o garçom fecha e a mesa entra em
+  // "aguardando_conferencia"). Total/forma vêm do fechamento_pendente que o garçom lançou.
+  function imprimirContaMesa(c) {
+    const itens = Array.isArray(c.comanda_itens) ? c.comanda_itens : []
+    const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
+    const pend = c.fechamento_pendente || {}
+    const pagamentos = Array.isArray(pend.pagamentos) ? pend.pagamentos : []
+    const total = pagamentos.length ? pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0) : subtotal
+    const taxa = Math.max(0, Math.round((total - subtotal) * 100) / 100)
+    const forma = pagamentos.length > 1 ? 'Dividido' : (pagamentos[0]?.forma ?? '')
+    imprimirHtml(montarContaPresencialHtml({
+      numeroMesa: c.numero_mesa, itens, subtotal, taxa, total, formaPagamento: forma, empresa,
     }))
   }
 
