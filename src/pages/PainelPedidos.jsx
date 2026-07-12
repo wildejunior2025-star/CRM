@@ -3757,7 +3757,8 @@ export default function PainelPedidos() {
     if (!itens.length) return
     imprimirHtml(montarComandaCozinhaHtml({
       numeroMesa: comanda.numero_mesa ?? '?',
-      itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao })),
+      precos: true,
+      itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, preco_unitario: i.preco_unitario, observacao: i.observacao })),
     }))
   }
 

@@ -310,13 +310,23 @@ export async function imprimirHtml(html) {
   imprimirHtmlNavegador(html)
 }
 
-// Comanda da COZINHA (sem preços, fonte grande) — "pedido sai na cozinha"
-export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = '' }) {
+// Comanda da COZINHA (fonte grande) — "pedido sai na cozinha".
+// Com `precos: true`, mostra o valor de cada item ao lado + o total no rodapé
+// (impressão manual da mesa pelo gestor). O auto-print da cozinha não passa
+// preços, então continua só com os itens.
+export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = '', precos = false }) {
   const largura = larguraCupom()
   const hora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  let total = 0
   const linhas = itens.map(it => {
     const q = it.quantidade ?? it.qtd ?? 1
-    return `<li><div class="it">${esc(q)}x ${esc(it.nome)}</div>${it.observacao ? `<div class="obs">▸ ${esc(it.observacao)}</div>` : ''}</li>`
+    const pu = Number(it.preco ?? it.preco_unitario ?? 0)
+    const sub = q * pu
+    total += sub
+    const valorTxt = precos && pu > 0
+      ? `<div class="it"><span>${esc(q)}x ${esc(it.nome)}</span><span>${fmt(sub)}</span></div>`
+      : `<div class="it">${esc(q)}x ${esc(it.nome)}</div>`
+    return `<li>${valorTxt}${it.observacao ? `<div class="obs">▸ ${esc(it.observacao)}</div>` : ''}</li>`
   }).join('')
   return `<!doctype html><html><head><meta charset="utf-8"><title>Cozinha Mesa ${esc(numeroMesa)}</title>
 <style>
@@ -328,13 +338,15 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
   hr { border: none; border-top: 2px dashed #000; margin: 6px 0; }
   ul { list-style: none; margin: 0; padding: 0; }
   li { margin-bottom: 8px; }
-  .it { font-size: 18px; font-weight: 800; }
+  .it { font-size: 18px; font-weight: 800; display: flex; justify-content: space-between; gap: 8px; }
   .obs { font-size: 14px; padding-left: 10px; }
+  .total { display: flex; justify-content: space-between; font-size: 20px; font-weight: 800; }
 </style></head><body>
   <div class="mesa">MESA ${esc(numeroMesa)}</div>
   <div class="hora">${esc(hora)}</div>
   <hr>
   <ul>${linhas || '<li>—</li>'}</ul>
+  ${precos && total > 0 ? `<hr><div class="total"><span>TOTAL</span><span>${fmt(total)}</span></div>` : ''}
   ${obsGeral ? `<hr><div class="obs">${esc(obsGeral)}</div>` : ''}
   <div style="height:10mm"></div>
 </body></html>`
