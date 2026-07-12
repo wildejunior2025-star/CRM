@@ -3143,7 +3143,9 @@ function tempoPrevistoMin(pedido, empresa) {
 
 // ── Componente principal ────────────────────────────────────
 export default function PainelPedidos() {
-  const { empresa, logout } = useAuth()
+  const { empresa, logout, profile } = useAuth()
+  // Só o dono (admin/super_admin) pode editar o preço de item da mesa.
+  const podeFinanceiro = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
   const { theme, toggleTheme } = useTheme()
   const [pedidos, setPedidos] = useState([])
   const [entregadores, setEntregadores] = useState([])
