@@ -648,17 +648,19 @@ export default function PresencialSalao() {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
-              <button type="button" onClick={() => setFechando(false)}
-                style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
-                Voltar
-              </button>
-              <button type="button" onClick={imprimirConta} title="Imprimir conta"
-                style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
-                🖨️ Conta
-              </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 18 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" onClick={() => setFechando(false)}
+                  style={{ flex: 1, padding: '10px 0', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontWeight: 700 }}>
+                  Voltar
+                </button>
+                <button type="button" onClick={imprimirConta} title="Imprimir conta"
+                  style={{ flex: 1, padding: '10px 0', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontWeight: 700 }}>
+                  🖨️ Conta
+                </button>
+              </div>
               <button type="button" onClick={confirmarFechamento} disabled={salvando || !podeReceber}
-                className="btn btn-primary" style={{ flex: 1, marginTop: 0, opacity: (salvando || !podeReceber) ? 0.5 : 1 }}>
+                className="btn btn-primary" style={{ width: '100%', marginTop: 0, opacity: (salvando || !podeReceber) ? 0.5 : 1 }}>
                 {salvando ? 'Fechando...' : (ehAdmin ? `Receber ${fmt(totalSel)}` : `Fechar e enviar pro caixa · ${fmt(totalSel)}`)}
               </button>
             </div>
