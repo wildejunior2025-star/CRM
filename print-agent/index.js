@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 2
+const APP_VERSION = 3
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -500,6 +500,7 @@ function estadoStr() { return JSON.stringify({ s: sessionAtiva, e: !!empresaId, 
 // Estado completo pra API (gestor mostra tudo bonitinho por lá).
 function statusObj() {
   return {
+    versao: APP_VERSION,
     logado: sessionAtiva,
     loja: empresa?.nome || null,
     empresaId: empresaId || null,

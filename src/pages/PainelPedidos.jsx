@@ -2449,6 +2449,9 @@ function ImpressoraFWCPanel({ empresaId }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 14, fontWeight: 800 }}>🖨️ Impressora FWC</span>
         <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 800 }}>● App conectado</span>
+        {st.versao != null && (
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>v{st.versao}</span>
+        )}
       </div>
 
       {erro && <div style={{ fontSize: 12, color: '#dc2626', fontWeight: 700 }}>{erro}</div>}
