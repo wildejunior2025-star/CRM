@@ -2453,14 +2453,6 @@ function ImpressoraFWCPanel({ empresaId }) {
 
       {erro && <div style={{ fontSize: 12, color: '#dc2626', fontWeight: 700 }}>{erro}</div>}
 
-      {/* TEMPORÁRIO: baixar a versão nova do app (feche o atual e abra o baixado). Remover depois que todos atualizarem. */}
-      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderTop: '1px dashed var(--border)', paddingTop: 8 }}>
-        <a href={FWC_EXE_URL} download style={{ color: '#7c3aed', fontWeight: 800, textDecoration: 'none' }}>
-          ⬇️ Baixar versão atualizada do app
-        </a>
-        <span>(feche o atual e abra o baixado — corrige a comanda do iFood saindo em 2 vias e mostra o valor de adicionais pagos)</span>
-      </div>
-
       {/* Não logado → tenta reconhecer a conta do gestor; senão, login manual */}
       {!st.logado ? (
         adotando ? (
@@ -2499,19 +2491,22 @@ function ImpressoraFWCPanel({ empresaId }) {
               <option value="">Selecione a impressora</option>
               {(st.impressoras || []).map(p => <option key={p} value={p}>{p}</option>)}
             </select>
-            {/* Escape: se a lista veio vazia (Windows não listou), digita o nome exato */}
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', margin: '10px 0 6px' }}>
-              {(st.impressoras || []).length === 0
-                ? '⚠️ Nenhuma impressora foi detectada. Digite o nome EXATO (Windows → Impressoras):'
-                : 'Não achou na lista? Digite o nome EXATO da impressora:'}
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input style={{ ...inp, flex: 1 }} placeholder="Ex.: POS-80 / EPSON TM-T20"
-                value={nomeManual} onChange={e => setNomeManual(e.target.value)} />
-              <button type="button" disabled={busy || !nomeManual.trim()} style={{ ...btnRoxo, opacity: (busy || !nomeManual.trim()) ? .6 : 1 }}
-                onClick={() => acao('/printer', { printer: nomeManual.trim() })}>Salvar</button>
-            </div>
-            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>Copie o nome exatinho como aparece no Windows (Configurações → Impressoras e scanners).</div>
+            {/* Escape: SÓ aparece quando o Windows não listou nenhuma impressora —
+                aí o usuário digita o nome exato. Com impressora detectada, fica escondido. */}
+            {(st.impressoras || []).length === 0 && (
+              <>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', margin: '10px 0 6px' }}>
+                  ⚠️ Nenhuma impressora foi detectada. Digite o nome EXATO (Windows → Impressoras):
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input style={{ ...inp, flex: 1 }} placeholder="Ex.: POS-80 / EPSON TM-T20"
+                    value={nomeManual} onChange={e => setNomeManual(e.target.value)} />
+                  <button type="button" disabled={busy || !nomeManual.trim()} style={{ ...btnRoxo, opacity: (busy || !nomeManual.trim()) ? .6 : 1 }}
+                    onClick={() => acao('/printer', { printer: nomeManual.trim() })}>Salvar</button>
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>Copie o nome exatinho como aparece no Windows (Configurações → Impressoras e scanners).</div>
+              </>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
