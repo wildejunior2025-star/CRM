@@ -3803,6 +3803,7 @@ export default function PainelPedidos() {
     const { data: c } = await supabase.from('comandas').select('numero_mesa').eq('id', cid).maybeSingle()
     imprimirHtml(montarComandaCozinhaHtml({
       numeroMesa: c?.numero_mesa ?? '?',
+      nomeLoja: empresa?.nome,
       itens: entry.itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao })),
     }))
   }
@@ -3830,6 +3831,7 @@ export default function PainelPedidos() {
     imprimirHtml(montarComandaCozinhaHtml({
       numeroMesa: comanda.numero_mesa ?? '?',
       precos: true,
+      nomeLoja: empresa?.nome,
       itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, preco_unitario: i.preco_unitario, observacao: i.observacao })),
     }))
   }

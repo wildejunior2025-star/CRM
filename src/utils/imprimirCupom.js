@@ -317,7 +317,7 @@ export async function imprimirHtml(html, titulo) {
 // Com `precos: true`, mostra o valor de cada item ao lado + o total no rodapé
 // (impressão manual da mesa pelo gestor). O auto-print da cozinha não passa
 // preços, então continua só com os itens.
-export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = '', precos = false }) {
+export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = '', precos = false, nomeLoja = '' }) {
   const largura = larguraCupom()
   const hora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
   let total = 0
@@ -336,6 +336,7 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
   @page { size: ${largura} auto; margin: 0; }
   html, body { margin: 0; padding: 0; }
   body { width: ${largura}; padding: 4mm 3mm; font-family: 'Courier New', monospace; color: #000; }
+  .loja { font-size: 16px; font-weight: 800; text-align: center; margin-bottom: 2px; }
   .mesa { font-size: 22px; font-weight: 800; text-align: center; }
   .hora { text-align: center; font-size: 12px; margin-bottom: 4px; }
   hr { border: none; border-top: 2px dashed #000; margin: 6px 0; }
@@ -345,6 +346,7 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
   .obs { font-size: 14px; padding-left: 10px; }
   .total { display: flex; justify-content: space-between; font-size: 20px; font-weight: 800; }
 </style></head><body>
+  ${nomeLoja ? `<div class="titulo-loja loja">${esc(nomeLoja)}</div>` : ''}
   <div class="mesa">MESA ${esc(numeroMesa)}</div>
   <div class="hora">${esc(hora)}</div>
   <hr>

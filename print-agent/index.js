@@ -280,15 +280,16 @@ async function imprimirComandaMesa(cid, itens) {
     }
     return L
   }
+  const nomeLoja = empresa?.nome || ''  // nome do restaurante no topo da comanda
   const bar = config().printerBar
   if (bar) {
     const comida = itens.filter(it => !ehBebida(it.nome))
     const bebida = itens.filter(it => ehBebida(it.nome))
-    if (comida.length) imprimirBytes(montarTexto(linhasDe(comida), 'MESA ' + numero), 'mesa-' + cid)
-    if (bebida.length) imprimirBytes(montarTexto(linhasDe(bebida), 'MESA ' + numero + ' - BEBIDAS'), 'mesa-bar-' + cid, bar)
+    if (comida.length) imprimirBytes(montarTexto(linhasDe(comida), 'MESA ' + numero, nomeLoja), 'mesa-' + cid)
+    if (bebida.length) imprimirBytes(montarTexto(linhasDe(bebida), 'MESA ' + numero + ' - BEBIDAS', nomeLoja), 'mesa-bar-' + cid, bar)
     return
   }
-  imprimirBytes(montarTexto(linhasDe(itens), 'MESA ' + numero), 'mesa-' + cid)
+  imprimirBytes(montarTexto(linhasDe(itens), 'MESA ' + numero, nomeLoja), 'mesa-' + cid)
 }
 function agendarComandaMesa(it) {
   if (!it || (it.status && it.status !== 'pendente')) return

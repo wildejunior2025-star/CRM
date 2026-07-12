@@ -126,8 +126,10 @@ function montarCupom(pedido, empresa) {
 }
 
 // Cupom de texto simples (cozinha, conta de mesa) — cada item do array vira uma linha.
-function montarTexto(linhas, titulo) {
+function montarTexto(linhas, titulo, topo) {
   const parts = [INIT]
+  // `topo`: linha centralizada acima do título (ex.: nome do restaurante na comanda de mesa).
+  if (topo) parts.push(ALIGN(1), BOLD(1), linha(String(topo)), BOLD(0), ALIGN(0))
   if (titulo) parts.push(ALIGN(1), SIZE(0x11), BOLD(1), linha(String(titulo).toUpperCase()), BOLD(0), SIZE(0), ALIGN(0), divisor())
   for (const l of (Array.isArray(linhas) ? linhas : [])) parts.push(linha(l))
   parts.push(divisor(), ALIGN(1), linha('Impressora FWC'), FEED(4), CUT)
