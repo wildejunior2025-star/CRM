@@ -252,6 +252,8 @@ export default function PresencialSalao() {
       setSalvando(false)
       if (error) { window.alert('Erro ao enviar pro caixa: ' + error.message); return }
     }
+    // Imprime a conta automaticamente ao fechar (antes de limpar a seleção).
+    try { imprimirConta() } catch { /* best-effort */ }
     setFechando(false)
     setMesaSel(null)
     await loadAll()

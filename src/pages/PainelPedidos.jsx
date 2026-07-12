@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { supabase } from '../lib/supabaseClient'
-import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras, imprimirHtml, montarComandaCozinhaHtml } from '../utils/imprimirCupom'
+import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml } from '../utils/imprimirCupom'
 
 // Aceitar pedidos automaticamente (lido do localStorage pra não pegar estado
 // velho dentro do handler de realtime).
@@ -2937,7 +2937,7 @@ function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarL
 // Modal de fechar conta da mesa pelo gestor
 function ModalFecharConta({ comanda, taxaPct, onFechar, onConfirmar }) {
   const [forma, setForma] = useState('dinheiro')
-  const [aplicarTaxa, setAplicarTaxa] = useState(false)
+  const [aplicarTaxa, setAplicarTaxa] = useState(true) // taxa de serviço vem marcada; desmarca se o cliente não quiser
   const [salvando, setSalvando] = useState(false)
   const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
   const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
@@ -3770,6 +3770,16 @@ export default function PainelPedidos() {
       p_aplicar_taxa: aplicarTaxa,
     })
     if (error) { alert('Erro ao fechar a conta: ' + error.message); return }
+    // Imprime a conta automaticamente ao fechar.
+    try {
+      const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
+      const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
+      imprimirHtml(montarContaPresencialHtml({
+        numeroMesa: comanda.numero_mesa,
+        itens, subtotal, taxa: Math.max(0, total - subtotal), total,
+        formaPagamento: forma, empresa,
+      }))
+    } catch { /* best-effort */ }
     setComandaFechando(null)
     setComandas(cs => cs.filter(c => c.id !== comanda.id))
     // G3 — mostra na coluna "Concluídos hoje" na hora (o reload confirma depois)
