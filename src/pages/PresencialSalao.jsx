@@ -329,7 +329,7 @@ export default function PresencialSalao() {
   const corStatus = (mesa) => {
     const c = comandaPorMesa[mesa.id]
     if (!c) return { bg: 'rgba(34,197,94,.12)', border: '#22c55e', label: 'Livre' }
-    if (c.status === 'aguardando_conferencia') return { bg: 'rgba(59,130,246,.16)', border: '#3b82f6', label: 'Aguardando ADM' }
+    if (c.status === 'aguardando_conferencia') return { bg: 'rgba(59,130,246,.16)', border: '#3b82f6', label: 'Aguard. ADM' }
     return { bg: 'rgba(239,68,68,.12)', border: '#ef4444', label: 'Ocupada' }
   }
 
@@ -350,7 +350,7 @@ export default function PresencialSalao() {
           Você ainda não cadastrou mesas. <Link to="/presencial/mesas" style={{ color: 'var(--primary)' }}>Cadastrar mesas →</Link>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))', gap: 7 }}>
           {mesas.map(mesa => {
             const c = comandaPorMesa[mesa.id]
             const cor = corStatus(mesa)
@@ -360,29 +360,21 @@ export default function PresencialSalao() {
               <div key={mesa.id} role="button" tabIndex={0} onClick={() => abrirMesa(mesa)}
                 onKeyDown={ev => { if (ev.key === 'Enter') abrirMesa(mesa) }}
                 style={{
-                  borderRadius: 12, padding: 14, cursor: 'pointer', textAlign: 'left', position: 'relative',
-                  border: `2px solid ${prontos > 0 ? '#22c55e' : cor.border}`,
+                  borderRadius: 9, padding: '7px 8px', cursor: 'pointer', textAlign: 'left', position: 'relative',
+                  border: `1.5px solid ${prontos > 0 ? '#22c55e' : cor.border}`,
                   background: prontos > 0 ? 'rgba(34,197,94,.14)' : cor.bg,
                   color: 'var(--text)',
-                  boxShadow: prontos > 0 ? '0 0 0 3px rgba(34,197,94,.25)' : 'none',
+                  boxShadow: prontos > 0 ? '0 0 0 2px rgba(34,197,94,.25)' : 'none',
                 }}>
                 {prontos > 0 && (
                   <span style={{
-                    position: 'absolute', top: 8, right: 8, fontSize: 11, fontWeight: 800,
-                    background: '#22c55e', color: '#fff', borderRadius: 999, padding: '2px 8px',
-                  }}>🔔 {prontos} pronto{prontos > 1 ? 's' : ''}</span>
+                    position: 'absolute', top: 4, right: 4, fontSize: 9, fontWeight: 800,
+                    background: '#22c55e', color: '#fff', borderRadius: 999, padding: '1px 5px',
+                  }}>🔔{prontos}</span>
                 )}
-                <div style={{ fontSize: 19, fontWeight: 800 }}>Mesa {mesa.numero}</div>
-                {mesa.nome && <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{mesa.nome}</div>}
-                <div style={{ fontSize: 12, marginTop: 6, color: cor.border, fontWeight: 700 }}>{cor.label}</div>
-                {c && <div style={{ fontSize: 13, marginTop: 2, fontWeight: 700 }}>{fmt(sub)}</div>}
-                {c?.garcom_id && garcons[c.garcom_id] ? (
-                  <div style={{ fontSize: 11.5, marginTop: 2, color: 'var(--text-muted)' }}>
-                    👤 {garcons[c.garcom_id].split(' ')[0]}
-                  </div>
-                ) : c ? (
-                  <div style={{ fontSize: 11.5, marginTop: 2, color: 'var(--text-muted)' }}>📱 Autoatendimento</div>
-                ) : null}
+                <div style={{ fontSize: 14.5, fontWeight: 800, lineHeight: 1.1 }}>Mesa {mesa.numero}</div>
+                <div style={{ fontSize: 9.5, marginTop: 2, color: cor.border, fontWeight: 700 }}>{cor.label}</div>
+                {c && <div style={{ fontSize: 11.5, marginTop: 1, fontWeight: 800 }}>{fmt(sub)}</div>}
               </div>
             )
           })}
