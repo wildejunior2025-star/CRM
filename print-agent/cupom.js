@@ -134,4 +134,4 @@ function montarTexto(linhas, titulo) {
   return Buffer.concat(parts)
 }
 
-module.exports = { montarCupom, montarTexto }
+module.exports = { montarCupom, montarTexto, LARGURA }

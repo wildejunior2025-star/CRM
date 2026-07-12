@@ -10,7 +10,7 @@ const path = require('path')
 const http = require('http')
 const { spawnSync, spawn, exec } = require('child_process')
 const { createClient } = require('@supabase/supabase-js')
-const { montarCupom, montarTexto } = require('./cupom')
+const { montarCupom, montarTexto, LARGURA } = require('./cupom')
 
 // Node empacotado (pkg) nao tem WebSocket nativo — a lib realtime do Supabase
 // precisa. Injeta o 'ws' como implementacao global.
@@ -212,14 +212,28 @@ function imprimirCupomPedido(pedido) {
   imprimirBytes(montarTexto(linhas, 'BEBIDAS #' + (pedido.numero_pedido ?? String(pedido.id).slice(-4))), 'bar-' + pedido.id, bar)
 }
 // HTML (cozinha/conta de mesa) -> linhas de texto pra térmica.
+const SEP = '\x01' // marca interna: separa as 2 colunas (nome | valor) de uma linha
 function htmlParaLinhas(html) {
   let s = String(html || '')
   // Remove blocos <style>/<script>/<head> INTEIROS (com conteúdo) — senão o CSS
   // sai impresso como texto na térmica.
   s = s.replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<head[\s\S]*?<\/head>/gi, '')
+  // Linhas de 2 colunas (nome à esquerda, valor à direita): <div ...><span>A</span><span>B</span></div>.
+  // Vira "A" + SEP + "B" numa linha só, pra depois alinhar o valor à direita (senão gruda: "ItemR$X").
+  s = s.replace(/<div[^>]*>\s*<span>([\s\S]*?)<\/span>\s*<span>([\s\S]*?)<\/span>\s*<\/div>/gi,
+    (m, a, b) => '\n' + a.replace(/<[^>]+>/g, '') + SEP + b.replace(/<[^>]+>/g, '') + '\n')
   s = s.replace(/<\s*(br|\/p|\/div|\/tr|\/h[1-6]|\/li)\s*>/gi, '\n').replace(/<[^>]+>/g, '')
   s = s.replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
-  return s.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean)
+  return s.split('\n').map(l => {
+    if (l.includes(SEP)) {
+      const [a, b] = l.split(SEP)
+      const A = String(a).replace(/[ \t]+/g, ' ').trim()
+      const B = String(b).replace(/[ \t]+/g, ' ').trim()
+      const espacos = Math.max(1, LARGURA - A.length - B.length)
+      return A + ' '.repeat(espacos) + B
+    }
+    return l.replace(/[ \t]+/g, ' ').trim()
+  }).filter(Boolean)
 }
 
 // Imprime um pedido uma única vez (evita 2ª via quando chegam vários updates do
