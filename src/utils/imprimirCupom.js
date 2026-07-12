@@ -324,7 +324,7 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
     const sub = q * pu
     total += sub
     const valorTxt = precos && pu > 0
-      ? `<div class="it"><span>${esc(q)}x ${esc(it.nome)}</span><span>${fmt(sub)}</span></div>`
+      ? `<div class="it"><span>${esc(q)}x ${esc(it.nome)}</span> <span>${fmt(sub)}</span></div>`
       : `<div class="it">${esc(q)}x ${esc(it.nome)}</div>`
     return `<li>${valorTxt}${it.observacao ? `<div class="obs">▸ ${esc(it.observacao)}</div>` : ''}</li>`
   }).join('')
@@ -346,7 +346,7 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
   <div class="hora">${esc(hora)}</div>
   <hr>
   <ul>${linhas || '<li>—</li>'}</ul>
-  ${precos && total > 0 ? `<hr><div class="total"><span>TOTAL</span><span>${fmt(total)}</span></div>` : ''}
+  ${precos && total > 0 ? `<hr><div class="total"><span>TOTAL</span> <span>${fmt(total)}</span></div>` : ''}
   ${obsGeral ? `<hr><div class="obs">${esc(obsGeral)}</div>` : ''}
   <div style="height:10mm"></div>
 </body></html>`
@@ -362,7 +362,7 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
   const linhas = itens.map(it => {
     const q = it.quantidade ?? it.qtd ?? 1
     const sub = it.subtotal != null ? Number(it.subtotal) : q * Number(it.preco_unitario ?? it.preco ?? 0)
-    return `<li><div class="row"><span>${esc(q)}x ${esc(it.nome)}</span><span>${fmt(sub)}</span></div></li>`
+    return `<li><div class="row"><span>${esc(q)}x ${esc(it.nome)}</span> <span>${fmt(sub)}</span></div></li>`
   }).join('')
   return `<!doctype html><html><head><meta charset="utf-8"><title>Conta Mesa ${esc(numeroMesa)}</title>
 <style>
@@ -380,9 +380,9 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
   <hr>
   <ul>${linhas || '<li>—</li>'}</ul>
   <hr>
-  <div class="row"><span>Subtotal</span><span>${fmt(subtotal)}</span></div>
-  ${Number(taxa) > 0 ? `<div class="row"><span>Taxa de serviço</span><span>${fmt(taxa)}</span></div>` : ''}
-  <div class="row b lg"><span>TOTAL</span><span>${fmt(total)}</span></div>
+  <div class="row"><span>Subtotal</span> <span>${fmt(subtotal)}</span></div>
+  ${Number(taxa) > 0 ? `<div class="row"><span>Taxa de serviço</span> <span>${fmt(taxa)}</span></div>` : ''}
+  <div class="row b lg"><span>TOTAL</span> <span>${fmt(total)}</span></div>
   ${formaPagamento ? `<hr><div><span class="b">Pagamento:</span> ${esc(formaPagamento)}</div>` : ''}
   <hr>
   <div class="center">Obrigado pela preferencia!</div>
