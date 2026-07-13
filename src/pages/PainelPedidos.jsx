@@ -3842,7 +3842,7 @@ export default function PainelPedidos() {
     const taxa = Math.max(0, Math.round((total - subtotal) * 100) / 100)
     const forma = pagamentos.length > 1 ? 'Dividido' : (pagamentos[0]?.forma ?? '')
     imprimirHtml(montarContaPresencialHtml({
-      numeroMesa: c.numero_mesa, itens, subtotal, taxa, total, formaPagamento: forma, empresa,
+      numeroMesa: c.numero_mesa, itens, subtotal, taxa, total, formaPagamento: forma, pagamentos, empresa,
     }), empresa?.nome)
   }
 
@@ -3917,7 +3917,7 @@ export default function PainelPedidos() {
     // reimprime a conta com o novo valor
     const forma = novos.length > 1 ? 'Dividido' : (novos[0]?.forma ?? '')
     imprimirHtml(montarContaPresencialHtml({
-      numeroMesa: comanda.numero_mesa, itens, subtotal, taxa, total: novoTotal, formaPagamento: forma, empresa,
+      numeroMesa: comanda.numero_mesa, itens, subtotal, taxa, total: novoTotal, formaPagamento: forma, pagamentos: novos, empresa,
     }), empresa?.nome)
   }
 

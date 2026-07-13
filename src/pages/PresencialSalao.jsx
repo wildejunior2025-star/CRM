@@ -251,11 +251,15 @@ export default function PresencialSalao() {
   }
 
   function imprimirConta() {
+    const pags = modoPag === 'dividir'
+      ? pagamentos.map(p => ({ forma: p.forma, valor: Number(p.valor) || 0 })).filter(p => p.valor > 0)
+      : []
     imprimirHtml(montarContaPresencialHtml({
       numeroMesa: mesaSel?.numero,
       itens: comandaSel?.comanda_itens ?? [],
       subtotal: subtotalSel, taxa: taxaSel, total: totalSel,
       formaPagamento: modoPag === 'unico' ? forma : 'Dividido',
+      pagamentos: pags,
       empresa: { nome: empresaNome },
     }), empresaNome)
   }
