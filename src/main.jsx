@@ -19,6 +19,18 @@ registerSW({
   },
 })
 
+// Quando o service worker NOVO assume o controle (atualização chegou), recarrega
+// a página automaticamente — assim o celular pega a versão nova SEM ninguém
+// precisar limpar cache. Vale pra todas as atualizações daqui pra frente.
+if ('serviceWorker' in navigator) {
+  let recarregando = false
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (recarregando) return
+    recarregando = true
+    window.location.reload()
+  })
+}
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />
