@@ -146,4 +146,35 @@ function montarTexto(linhas, titulo, topo) {
   return Buffer.concat(parts)
 }
 
-module.exports = { montarCupom, montarTexto, LARGURA }
+// Comanda da COZINHA (mesa) — layout completo pro cozinheiro: nome da loja, mesa (+salao),
+// data/hora com segundos, atendente, nº de pessoas, itens GRANDES com espaço entre eles,
+// e um rodapé opcional da loja. SEM preço (o preço sai depois, na conta).
+function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente = '', pessoas = 0, itens = [], rodape = '', sufixo = '' }) {
+  const d = new Date(), p2 = n => String(n).padStart(2, '0')
+  const dataHora = p2(d.getDate()) + '/' + p2(d.getMonth() + 1) + '/' + String(d.getFullYear()).slice(2) +
+    ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds())
+  const parts = [INIT]
+  // Cabecalho
+  if (nomeLoja) parts.push(ALIGN(1), BOLD(1), linha(String(nomeLoja)), BOLD(0))
+  const mesaTxt = '~ Mesa: ' + numero + (area ? ' (' + area + ')' : '') + (sufixo || '') + ' ~'
+  parts.push(ALIGN(1), BOLD(1), linha(mesaTxt), BOLD(0), ALIGN(0))
+  parts.push(linha(dataHora))
+  if (atendente) parts.push(linha('Atendente: ' + atendente))
+  if (Number(pessoas) > 0) parts.push(linha('Pessoas: ' + pessoas))
+  parts.push(divisor())
+  // Itens grandes, com um divisor + linha em branco entre um e outro (bastante espaco).
+  const lista = Array.isArray(itens) ? itens : []
+  lista.forEach((it) => {
+    const q = it.quantidade ?? it.qtd ?? 1
+    parts.push(SIZE(0x11), BOLD(1), linha(q + ' ' + (it.nome || 'Item')), BOLD(0), SIZE(0))
+    if (it.observacao) parts.push(linha('  obs: ' + it.observacao))
+    parts.push(divisor(), NL)
+  })
+  if (!lista.length) parts.push(linha('(sem itens)'))
+  // Rodape da loja (ex.: versiculo) — centralizado; senao, nada.
+  if (rodape) parts.push(ALIGN(1), linha(String(rodape)), ALIGN(0))
+  parts.push(FEED(4), CUT)
+  return Buffer.concat(parts)
+}
+
+module.exports = { montarCupom, montarTexto, montarComandaMesa, LARGURA }

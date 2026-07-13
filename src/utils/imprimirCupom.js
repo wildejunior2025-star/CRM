@@ -333,22 +333,22 @@ export async function imprimirHtml(html, titulo, opts = {}) {
 // Comanda de MESA: pede pro app FWC montar nativamente (nome da loja + MESA grandes,
 // data, itens com valor). Se o app não responder (ou for versão antiga), cai no HTML
 // pelo navegador/QZ. Assim o botão manual do gestor sai igual ao automático.
-export async function imprimirComandaMesaApp({ numeroMesa, itens = [], nomeLoja = '' }) {
-  if (await imprimirViaAppFwc('imprimir-mesa', { numeroMesa, itens, nomeLoja })) return
-  imprimirHtml(montarComandaCozinhaHtml({ numeroMesa, itens, nomeLoja }))
+export async function imprimirComandaMesaApp({ numeroMesa, itens = [], nomeLoja = '', comandaId, area = '', atendente = '', pessoas = 0, rodape = '' }) {
+  if (await imprimirViaAppFwc('imprimir-mesa', { numeroMesa, itens, nomeLoja, comandaId })) return
+  imprimirHtml(montarComandaCozinhaHtml({ numeroMesa, itens, nomeLoja, area, atendente, pessoas, rodape }))
 }
 
-// Comanda da COZINHA (fonte grande) — "pedido sai na cozinha".
-// Com `precos: true`, mostra o valor de cada item ao lado + o total no rodapé
-// (impressão manual da mesa pelo gestor). O auto-print da cozinha não passa
-// preços, então continua só com os itens.
-export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = '', nomeLoja = '' }) {
+// Comanda da COZINHA (fonte grande) — "pedido sai na cozinha". SEM preço (o preço sai
+// depois, na conta). Cabeçalho completo: loja, mesa+salão, data/hora com segundos,
+// atendente, nº de pessoas; itens grandes com espaço; rodapé opcional da loja.
+export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = '', nomeLoja = '', area = '', atendente = '', pessoas = 0, rodape = '' }) {
   const largura = larguraCupom()
-  const hora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const hora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
   // Comanda da COZINHA: só o que preparar, SEM preço (o preço sai depois, na conta).
+  // Cada item tem um tracejado embaixo (espaço bom entre um e outro).
   const linhas = itens.map(it => {
     const q = it.quantidade ?? it.qtd ?? 1
-    return `<li><div class="it">${esc(q)}x ${esc(it.nome)}</div>${it.observacao ? `<div class="obs">▸ ${esc(it.observacao)}</div>` : ''}</li>`
+    return `<li><div class="it">${esc(q)} ${esc(it.nome)}</div>${it.observacao ? `<div class="obs">▸ ${esc(it.observacao)}</div>` : ''}<div class="sep"></div></li>`
   }).join('')
   return `<!doctype html><html><head><meta charset="utf-8"><title>Cozinha Mesa ${esc(numeroMesa)}</title>
 <style>
@@ -356,20 +356,27 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
   html, body { margin: 0; padding: 0; }
   body { width: ${largura}; padding: 5mm 3mm; font-family: 'Courier New', monospace; color: #000; }
   .loja { font-size: 18px; font-weight: 800; text-align: center; margin-bottom: 2px; }
-  .mesa { font-size: 28px; font-weight: 800; text-align: center; }
-  .hora { text-align: center; font-size: 13px; margin-bottom: 6px; }
+  .mesa { font-size: 20px; font-weight: 800; text-align: center; }
+  .cab { font-size: 14px; text-align: center; line-height: 1.5; margin-bottom: 4px; }
   hr { border: none; border-top: 2px dashed #000; margin: 8px 0; }
   ul { list-style: none; margin: 0; padding: 0; }
-  li { margin-bottom: 16px; }
-  .it { font-size: 23px; font-weight: 800; line-height: 1.25; }
+  li { margin-bottom: 4px; }
+  .it { font-size: 24px; font-weight: 800; line-height: 1.25; }
   .obs { font-size: 17px; padding-left: 12px; margin-top: 2px; }
+  .sep { border-top: 1px dashed #000; margin: 10px 0 18px; }
+  .rodape { text-align: center; font-size: 14px; margin-top: 8px; }
 </style></head><body>
   ${nomeLoja ? `<div class="titulo-loja loja">${esc(nomeLoja)}</div>` : ''}
-  <div class="mesa">MESA ${esc(numeroMesa)}</div>
-  <div class="hora">${esc(hora)}</div>
+  <div class="mesa">~ Mesa: ${esc(numeroMesa)}${area ? ` (${esc(area)})` : ''} ~</div>
+  <div class="cab">
+    ${esc(hora)}
+    ${atendente ? `<br>Atendente: ${esc(atendente)}` : ''}
+    ${Number(pessoas) > 0 ? `<br>Pessoas: ${esc(pessoas)}` : ''}
+  </div>
   <hr>
   <ul>${linhas || '<li>—</li>'}</ul>
-  ${obsGeral ? `<hr><div class="obs">${esc(obsGeral)}</div>` : ''}
+  ${obsGeral ? `<div class="obs">${esc(obsGeral)}</div>` : ''}
+  ${rodape ? `<div class="rodape">${esc(rodape)}</div>` : ''}
   <div style="height:12mm"></div>
 </body></html>`
 }

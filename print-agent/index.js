@@ -10,7 +10,7 @@ const path = require('path')
 const http = require('http')
 const { spawnSync, spawn, exec } = require('child_process')
 const { createClient } = require('@supabase/supabase-js')
-const { montarCupom, montarTexto, LARGURA } = require('./cupom')
+const { montarCupom, montarTexto, montarComandaMesa, LARGURA } = require('./cupom')
 
 // Node empacotado (pkg) nao tem WebSocket nativo — a lib realtime do Supabase
 // precisa. Injeta o 'ws' como implementacao global.
@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 6
+const APP_VERSION = 7
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -327,39 +327,53 @@ function imprimirPedido(p) {
 // (com o número da mesa) usando um pequeno atraso, igual o gestor faz.
 const comandaBuf = new Map()            // comanda_id -> { itens:[], timer }
 const comandaItensImpressos = new Set() // dedupe por id de item (reconexão)
-// Monta a comanda de mesa em ESC/POS: nome do restaurante (topo) + MESA X (grande),
-// data/hora, e os itens com o valor alinhado à direita. Usada no automático (garçom
-// manda os itens) e no botão manual do gestor (/api/imprimir-mesa) — mesmo visual.
-function comandaMesaBytes(numero, itens, nomeLoja, sufixo) {
-  const d = new Date(), p2 = n => String(n).padStart(2, '0')
-  const agora = p2(d.getDate()) + '/' + p2(d.getMonth() + 1) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes())
-  const L = [agora]
-  for (const it of (Array.isArray(itens) ? itens : [])) {
-    const q = it.quantidade ?? it.qtd ?? 1
-    // Comanda da COZINHA: só o que preparar, SEM preço (o preço sai depois, na conta).
-    // Item em fonte GRANDE (altura dobrada, sem negrito) pro cozinheiro ver melhor.
-    L.push({ t: q + 'x ' + (it.nome || 'Item'), big: true })
-    if (it.observacao) L.push('   obs: ' + it.observacao)
-    L.push('') // linha em branco: mais espaço entre um item e outro
-  }
-  return montarTexto(L, 'MESA ' + numero + (sufixo || ''), nomeLoja)
+// Busca os dados extras da comanda pro cabeçalho da cozinha (salão, atendente, pessoas).
+async function infoComandaMesa(cid) {
+  const info = { numero: '?', area: '', atendente: '', pessoas: 0 }
+  try {
+    const { data: c } = await supabase.from('comandas')
+      .select('numero_mesa, num_pessoas, garcom_id, mesa_id').eq('id', cid).maybeSingle()
+    if (c) {
+      if (c.numero_mesa != null) info.numero = c.numero_mesa
+      info.pessoas = c.num_pessoas || 0
+      if (c.garcom_id) {
+        const { data: g } = await supabase.from('profiles').select('nome').eq('id', c.garcom_id).maybeSingle()
+        if (g?.nome) info.atendente = String(g.nome).split(' ')[0]  // primeiro nome
+      }
+      if (c.mesa_id) {
+        const { data: m } = await supabase.from('mesas').select('nome').eq('id', c.mesa_id).maybeSingle()
+        if (m?.nome) info.area = m.nome
+      }
+    }
+  } catch (e) { /* segue com o que tiver */ }
+  return info
+}
+
+// Monta a comanda de mesa em ESC/POS pra COZINHA (nome da loja, mesa+salão, data/hora,
+// atendente, pessoas, itens grandes com espaço, rodapé da loja). Usada no automático e
+// no botão manual do gestor (/api/imprimir-mesa) — mesmo visual.
+function comandaMesaBytes(numero, itens, nomeLoja, opts) {
+  const o = opts || {}
+  return montarComandaMesa({
+    nomeLoja, numero, itens,
+    area: o.area || '', atendente: o.atendente || '', pessoas: o.pessoas || 0,
+    rodape: o.rodape || empresa?.rodape_cozinha || '', sufixo: o.sufixo || '',
+  })
 }
 async function imprimirComandaMesa(cid, itens) {
-  let numero = '?'
-  try {
-    const { data: c } = await supabase.from('comandas').select('numero_mesa').eq('id', cid).maybeSingle()
-    if (c && c.numero_mesa != null) numero = c.numero_mesa
-  } catch (e) {}
+  const info = await infoComandaMesa(cid)
+  const numero = info.numero
+  const base = { area: info.area, atendente: info.atendente, pessoas: info.pessoas }
   const nomeLoja = empresa?.nome || ''
   const bar = config().printerBar
   if (bar) {
     const comida = itens.filter(it => !ehBebida(it.nome))
     const bebida = itens.filter(it => ehBebida(it.nome))
-    if (comida.length) imprimirBytes(comandaMesaBytes(numero, comida, nomeLoja), 'mesa-' + cid)
-    if (bebida.length) imprimirBytes(comandaMesaBytes(numero, bebida, nomeLoja, ' - BEBIDAS'), 'mesa-bar-' + cid, bar)
+    if (comida.length) imprimirBytes(comandaMesaBytes(numero, comida, nomeLoja, base), 'mesa-' + cid)
+    if (bebida.length) imprimirBytes(comandaMesaBytes(numero, bebida, nomeLoja, { ...base, sufixo: ' - BEBIDAS' }), 'mesa-bar-' + cid, bar)
     return
   }
-  imprimirBytes(comandaMesaBytes(numero, itens, nomeLoja), 'mesa-' + cid)
+  imprimirBytes(comandaMesaBytes(numero, itens, nomeLoja, base), 'mesa-' + cid)
 }
 function agendarComandaMesa(it) {
   if (!it || (it.status && it.status !== 'pendente')) return
@@ -399,7 +413,7 @@ async function iniciarEscuta() {
   }
   // Guarda a loja resolvida pra sobreviver ao refresh / reabrir o app.
   if (empresaId) setConfig({ empresa_id: empresaId })
-  const { data: emp } = await supabase.from('empresas').select('nome, slug, endereco, numero, bairro, cidade, telefone_contato').eq('id', empresaId).single()
+  const { data: emp } = await supabase.from('empresas').select('nome, slug, endereco, numero, bairro, cidade, telefone_contato, rodape_cozinha').eq('id', empresaId).single()
   empresa = emp || { nome: prof?.nome || 'Loja' }
   await carregarCategorias()   // pra saber o que é bebida (roteamento cozinha/bar)
   supabase.realtime.setAuth(sess.session.access_token)
@@ -599,15 +613,19 @@ const server = http.createServer(async (req, res) => {
         const f = await jsonBody(req)
         const nomeLoja = f.nomeLoja || empresa?.nome || ''
         const itens = Array.isArray(f.itens) ? f.itens : []
+        // Busca salão/atendente/pessoas se o gestor mandou o comandaId (mesmo visual do auto).
+        const info = f.comandaId ? await infoComandaMesa(f.comandaId) : { numero: f.numeroMesa, area: '', atendente: '', pessoas: 0 }
+        const numero = info.numero != null && info.numero !== '?' ? info.numero : f.numeroMesa
+        const base = { area: info.area, atendente: info.atendente, pessoas: info.pessoas }
         const bar = config().printerBar
         let ok = false
         if (bar) {
           const comida = itens.filter(it => !ehBebida(it.nome))
           const bebida = itens.filter(it => ehBebida(it.nome))
-          if (comida.length) ok = imprimirBytes(comandaMesaBytes(f.numeroMesa, comida, nomeLoja), 'mesa-man')
-          if (bebida.length) imprimirBytes(comandaMesaBytes(f.numeroMesa, bebida, nomeLoja, ' - BEBIDAS'), 'mesa-man-bar', bar)
+          if (comida.length) ok = imprimirBytes(comandaMesaBytes(numero, comida, nomeLoja, base), 'mesa-man')
+          if (bebida.length) imprimirBytes(comandaMesaBytes(numero, bebida, nomeLoja, { ...base, sufixo: ' - BEBIDAS' }), 'mesa-man-bar', bar)
         } else {
-          ok = imprimirBytes(comandaMesaBytes(f.numeroMesa, itens, nomeLoja), 'mesa-man')
+          ok = imprimirBytes(comandaMesaBytes(numero, itens, nomeLoja, base), 'mesa-man')
         }
         return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
       }

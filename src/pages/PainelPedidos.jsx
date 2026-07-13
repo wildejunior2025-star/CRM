@@ -3858,14 +3858,31 @@ export default function PainelPedidos() {
     clearTimeout(buf[cid].timer)
     buf[cid].timer = setTimeout(() => flushImpressaoMesa(cid), 1500)
   }
+  // Dados extras pro cabeçalho da comanda da cozinha (salão, atendente, pessoas, rodapé).
+  async function infoComandaCozinha(cid) {
+    const info = { numero: '?', area: '', atendente: '', pessoas: 0, rodape: empresa?.rodape_cozinha || '' }
+    try {
+      const { data: c } = await supabase.from('comandas').select('numero_mesa, num_pessoas, garcom_id, mesa_id').eq('id', cid).maybeSingle()
+      if (c) {
+        if (c.numero_mesa != null) info.numero = c.numero_mesa
+        info.pessoas = c.num_pessoas || 0
+        if (c.garcom_id) { const { data: g } = await supabase.from('profiles').select('nome').eq('id', c.garcom_id).maybeSingle(); if (g?.nome) info.atendente = String(g.nome).split(' ')[0] }
+        if (c.mesa_id) { const { data: m } = await supabase.from('mesas').select('nome').eq('id', c.mesa_id).maybeSingle(); if (m?.nome) info.area = m.nome }
+      }
+      if (!info.rodape && empresa?.id) { const { data: e } = await supabase.from('empresas').select('rodape_cozinha').eq('id', empresa.id).maybeSingle(); if (e?.rodape_cozinha) info.rodape = e.rodape_cozinha }
+    } catch (e) { /* segue com o que tiver */ }
+    return info
+  }
+
   async function flushImpressaoMesa(cid) {
     const entry = mesaPrintRef.current[cid]
     delete mesaPrintRef.current[cid]
     if (!entry?.itens?.length) return
-    const { data: c } = await supabase.from('comandas').select('numero_mesa').eq('id', cid).maybeSingle()
+    const info = await infoComandaCozinha(cid)
     imprimirHtml(montarComandaCozinhaHtml({
-      numeroMesa: c?.numero_mesa ?? '?',
+      numeroMesa: info.numero,
       nomeLoja: empresa?.nome,
+      area: info.area, atendente: info.atendente, pessoas: info.pessoas, rodape: info.rodape,
       itens: entry.itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao })),
     }))
   }
@@ -3887,12 +3904,15 @@ export default function PainelPedidos() {
 
   // Impressão MANUAL da comanda da mesa (botão no card). Imprime todos os itens
   // pelo navegador, independente do app FWC — pro caso do automático não ter saído.
-  function handleImprimirMesa(comanda) {
+  async function handleImprimirMesa(comanda) {
     const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
     if (!itens.length) return
+    const info = await infoComandaCozinha(comanda.id)
     imprimirComandaMesaApp({
-      numeroMesa: comanda.numero_mesa ?? '?',
+      numeroMesa: comanda.numero_mesa ?? info.numero ?? '?',
+      comandaId: comanda.id,
       nomeLoja: empresa?.nome,
+      area: info.area, atendente: info.atendente, pessoas: info.pessoas, rodape: info.rodape,
       itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, preco_unitario: i.preco_unitario, observacao: i.observacao })),
     })
   }
