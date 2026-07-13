@@ -335,50 +335,42 @@ export async function imprimirHtml(html, titulo, opts = {}) {
 // pelo navegador/QZ. Assim o botão manual do gestor sai igual ao automático.
 export async function imprimirComandaMesaApp({ numeroMesa, itens = [], nomeLoja = '' }) {
   if (await imprimirViaAppFwc('imprimir-mesa', { numeroMesa, itens, nomeLoja })) return
-  imprimirHtml(montarComandaCozinhaHtml({ numeroMesa, itens, precos: true, nomeLoja }))
+  imprimirHtml(montarComandaCozinhaHtml({ numeroMesa, itens, nomeLoja }))
 }
 
 // Comanda da COZINHA (fonte grande) — "pedido sai na cozinha".
 // Com `precos: true`, mostra o valor de cada item ao lado + o total no rodapé
 // (impressão manual da mesa pelo gestor). O auto-print da cozinha não passa
 // preços, então continua só com os itens.
-export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = '', precos = false, nomeLoja = '' }) {
+export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = '', nomeLoja = '' }) {
   const largura = larguraCupom()
   const hora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-  let total = 0
+  // Comanda da COZINHA: só o que preparar, SEM preço (o preço sai depois, na conta).
   const linhas = itens.map(it => {
     const q = it.quantidade ?? it.qtd ?? 1
-    const pu = Number(it.preco ?? it.preco_unitario ?? 0)
-    const sub = q * pu
-    total += sub
-    const valorTxt = precos && pu > 0
-      ? `<div class="it"><span>${esc(q)}x ${esc(it.nome)}</span> <span>${fmt(sub)}</span></div>`
-      : `<div class="it">${esc(q)}x ${esc(it.nome)}</div>`
-    return `<li>${valorTxt}${it.observacao ? `<div class="obs">▸ ${esc(it.observacao)}</div>` : ''}</li>`
+    return `<li><div class="it">${esc(q)}x ${esc(it.nome)}</div>${it.observacao ? `<div class="obs">▸ ${esc(it.observacao)}</div>` : ''}</li>`
   }).join('')
   return `<!doctype html><html><head><meta charset="utf-8"><title>Cozinha Mesa ${esc(numeroMesa)}</title>
 <style>
   @page { size: ${largura} auto; margin: 0; }
   html, body { margin: 0; padding: 0; }
-  body { width: ${largura}; padding: 4mm 3mm; font-family: 'Courier New', monospace; color: #000; }
-  .loja { font-size: 16px; font-weight: 800; text-align: center; margin-bottom: 2px; }
-  .mesa { font-size: 22px; font-weight: 800; text-align: center; }
-  .hora { text-align: center; font-size: 12px; margin-bottom: 4px; }
-  hr { border: none; border-top: 2px dashed #000; margin: 6px 0; }
+  body { width: ${largura}; padding: 5mm 3mm; font-family: 'Courier New', monospace; color: #000; }
+  .loja { font-size: 18px; font-weight: 800; text-align: center; margin-bottom: 2px; }
+  .mesa { font-size: 28px; font-weight: 800; text-align: center; }
+  .hora { text-align: center; font-size: 13px; margin-bottom: 6px; }
+  hr { border: none; border-top: 2px dashed #000; margin: 8px 0; }
   ul { list-style: none; margin: 0; padding: 0; }
-  li { margin-bottom: 8px; }
-  .it { font-size: 18px; font-weight: 800; display: flex; justify-content: space-between; gap: 8px; }
-  .obs { font-size: 14px; padding-left: 10px; }
-  .total { display: flex; justify-content: space-between; font-size: 20px; font-weight: 800; }
+  li { margin-bottom: 16px; }
+  .it { font-size: 23px; font-weight: 800; line-height: 1.25; }
+  .obs { font-size: 17px; padding-left: 12px; margin-top: 2px; }
 </style></head><body>
   ${nomeLoja ? `<div class="titulo-loja loja">${esc(nomeLoja)}</div>` : ''}
   <div class="mesa">MESA ${esc(numeroMesa)}</div>
   <div class="hora">${esc(hora)}</div>
   <hr>
   <ul>${linhas || '<li>—</li>'}</ul>
-  ${precos && total > 0 ? `<hr><div class="total"><span>TOTAL</span> <span>${fmt(total)}</span></div>` : ''}
   ${obsGeral ? `<hr><div class="obs">${esc(obsGeral)}</div>` : ''}
-  <div style="height:10mm"></div>
+  <div style="height:12mm"></div>
 </body></html>`
 }
 

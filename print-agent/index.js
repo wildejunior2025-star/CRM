@@ -326,23 +326,16 @@ const comandaItensImpressos = new Set() // dedupe por id de item (reconexão)
 // data/hora, e os itens com o valor alinhado à direita. Usada no automático (garçom
 // manda os itens) e no botão manual do gestor (/api/imprimir-mesa) — mesmo visual.
 function comandaMesaBytes(numero, itens, nomeLoja, sufixo) {
-  const money = v => 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',')
   const d = new Date(), p2 = n => String(n).padStart(2, '0')
   const agora = p2(d.getDate()) + '/' + p2(d.getMonth() + 1) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes())
   const L = [agora]
   for (const it of (Array.isArray(itens) ? itens : [])) {
     const q = it.quantidade ?? it.qtd ?? 1
-    const nome = q + 'x ' + (it.nome || 'Item')
-    const pu = Number(it.preco_unitario ?? it.preco ?? 0)
+    // Comanda da COZINHA: só o que preparar, SEM preço (o preço sai depois, na conta).
     // Item em fonte GRANDE (altura dobrada, sem negrito) pro cozinheiro ver melhor.
-    // Altura dobrada não muda a largura, então nome + valor cabem na mesma linha (42 col).
-    if (pu > 0) {
-      const val = money(pu * q)
-      L.push({ t: nome + ' '.repeat(Math.max(1, LARGURA - nome.length - val.length)) + val, big: true })
-    } else {
-      L.push({ t: nome, big: true })
-    }
+    L.push({ t: q + 'x ' + (it.nome || 'Item'), big: true })
     if (it.observacao) L.push('   obs: ' + it.observacao)
+    L.push('') // linha em branco: mais espaço entre um item e outro
   }
   return montarTexto(L, 'MESA ' + numero + (sufixo || ''), nomeLoja)
 }
