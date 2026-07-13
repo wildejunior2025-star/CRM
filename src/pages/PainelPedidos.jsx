@@ -2356,6 +2356,8 @@ function ImpressoraFWCPanel({ empresaId }) {
   const [erro, setErro] = useState('')
   const [adotando, setAdotando] = useState(false)
   const [nomeManual, setNomeManual] = useState('')
+  const [atzMsg, setAtzMsg] = useState('')      // mensagem do botão "Atualizar agora"
+  const [atzBusy, setAtzBusy] = useState(false)
   const adotouRef = useRef(false)
 
   const chamar = useCallback(async (path, opts) => {
@@ -2407,6 +2409,22 @@ function ImpressoraFWCPanel({ empresaId }) {
     finally { setBusy(false) }
   }
 
+  // "Atualizar agora": pede pro app checar/baixar a versão nova na hora. Se ele for
+  // baixar, derruba a própria conexão (esperado) — tratamos como sucesso.
+  const atualizarAgora = async () => {
+    setAtzBusy(true); setAtzMsg('Procurando atualização…'); setErro('')
+    try {
+      const j = await chamar('/atualizar', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+      if (j?.baixando) setAtzMsg('⬇️ Baixando a versão nova… o app reinicia sozinho em alguns segundos.')
+      else if (j?.atualizado) setAtzMsg('✅ Você já está na versão mais nova.')
+      else if (j?.atualizando) setAtzMsg('⏳ Já está atualizando…')
+      else setAtzMsg('Não consegui verificar agora. Tente de novo em instantes.')
+    } catch (e) {
+      // conexão caiu = o app começou a baixar e vai reiniciar
+      setAtzMsg('⬇️ Atualizando… o app reinicia sozinho em alguns segundos.')
+    } finally { setAtzBusy(false); setTimeout(carregar, 8000) }
+  }
+
   const inp = { width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }
   const btnRoxo = { padding: '10px 14px', borderRadius: 8, border: 'none', cursor: busy ? 'wait' : 'pointer', background: '#7c3aed', color: '#fff', fontWeight: 800, fontSize: 13, opacity: busy ? .6 : 1 }
   const btnVerde = { ...btnRoxo, background: '#16a34a' }
@@ -2456,13 +2474,34 @@ function ImpressoraFWCPanel({ empresaId }) {
 
       {erro && <div style={{ fontSize: 12, color: '#dc2626', fontWeight: 700 }}>{erro}</div>}
 
-      {/* Download pra pegar a versão nova (a partir da v1 o app se atualiza sozinho —
-          esse link é só pro último update manual de quem ainda está numa versão antiga). */}
-      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderTop: '1px dashed var(--border)', paddingTop: 8 }}>
-        <a href={FWC_EXE_URL} download style={{ color: '#7c3aed', fontWeight: 800, textDecoration: 'none' }}>
-          ⬇️ Baixar versão nova do app
-        </a>
-        <span>(feche o app atual e abra o baixado — depois dessa vez ele se atualiza sozinho)</span>
+      {/* Atualização: o app se atualiza sozinho (checa a cada 3h), mas o botão força na hora.
+          O botão "Atualizar agora" só existe a partir da v6; versão mais antiga vê o download. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px dashed var(--border)', paddingTop: 8 }}>
+        {Number(st.versao) >= 6 ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <button type="button" onClick={atualizarAgora} disabled={atzBusy}
+                title="Buscar e instalar a versão mais nova agora"
+                style={{ width: 44, height: 44, borderRadius: '50%', border: 'none', cursor: atzBusy ? 'wait' : 'pointer',
+                  background: '#7c3aed', color: '#fff', fontSize: 20, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  opacity: atzBusy ? .6 : 1, flexShrink: 0 }}>
+                {atzBusy ? '…' : '🔄'}
+              </button>
+              <div style={{ fontSize: 12.5, color: 'var(--text)' }}>
+                <b>Atualizar agora</b>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sem esperar — busca e instala a versão nova na hora.</div>
+              </div>
+            </div>
+            {atzMsg && <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>{atzMsg}</div>}
+          </>
+        ) : (
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <a href={FWC_EXE_URL} download style={{ color: '#7c3aed', fontWeight: 800, textDecoration: 'none' }}>
+              ⬇️ Baixar versão nova do app
+            </a>
+            <span>(feche o app atual e abra o baixado — depois dessa vez ele se atualiza sozinho)</span>
+          </div>
+        )}
       </div>
 
       {/* Não logado → tenta reconhecer a conta do gestor; senão, login manual */}

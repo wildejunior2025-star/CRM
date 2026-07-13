@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 5
+const APP_VERSION = 6
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -196,19 +196,23 @@ const jaImpressos = new Set()
 // Checa se saiu versão nova no bucket; se sim, baixa o .exe e roda ele —
 // o baixado (autoInstalar) para esta instância, se copia pro Desktop e reabre.
 let atualizando = false
-async function checarAtualizacao() {
-  if (atualizando || process.argv.includes('--debug')) return
+// checa (e baixa) atualização. manual=true → dispara pelo botão do gestor (ignora o
+// guard de --debug) e RETORNA o resultado pra mostrar na tela. Auto ignora o retorno.
+async function checarAtualizacao(manual = false) {
+  if (atualizando) return { ok: false, atualizando: true, erro: 'ja atualizando' }
+  if (!manual && process.argv.includes('--debug')) return { ok: false }
   try {
     const r = await fetch(FWC_VERSION_URL + '?t=' + Date.now(), { cache: 'no-store' })
-    if (!r.ok) return
+    if (!r.ok) return { ok: false, erro: 'sem version.json' }
     const j = await r.json().catch(() => null)
     const ultima = Number(j && j.version)
-    if (!ultima || ultima <= APP_VERSION) return
+    if (!ultima) return { ok: false, erro: 'version.json invalido' }
+    if (ultima <= APP_VERSION) return { ok: true, atualizado: true, atual: APP_VERSION, disponivel: ultima }
     log('Atualizacao v' + ultima + ' disponivel (tenho v' + APP_VERSION + ') — baixando...')
     const rr = await fetch(FWC_EXE_URL + '?t=' + Date.now(), { cache: 'no-store' })
-    if (!rr.ok) return
+    if (!rr.ok) return { ok: false, erro: 'falha ao baixar exe' }
     const buf = Buffer.from(await rr.arrayBuffer())
-    if (buf.length < 5000000) { log('  exe baixado suspeito (' + buf.length + ' bytes) — ignorei'); return }
+    if (buf.length < 5000000) { log('  exe baixado suspeito (' + buf.length + ' bytes) — ignorei'); return { ok: false, erro: 'exe invalido' } }
     atualizando = true
     const tmp = path.join(os.tmpdir(), 'ImpressoraFWC-update.exe')
     fs.writeFileSync(tmp, buf)
@@ -216,7 +220,8 @@ async function checarAtualizacao() {
     spawn(tmp, ['--auto-update'], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
     // o baixado vai matar esta instância; saio por garantia depois de um tempinho.
     setTimeout(() => process.exit(0), 4000)
-  } catch (e) { log('Falha ao checar atualizacao: ' + (e && e.message)) }
+    return { ok: true, baixando: true, atual: APP_VERSION, disponivel: ultima }
+  } catch (e) { log('Falha ao checar atualizacao: ' + (e && e.message)); return { ok: false, erro: (e && e.message) || 'erro' } }
 }
 
 // Envia bytes ESC/POS pra impressora escolhida. Retorna true se conseguiu mandar.
@@ -540,6 +545,10 @@ const server = http.createServer(async (req, res) => {
       cors(req, res)
       if (req.method === 'OPTIONS') { res.writeHead(204); return res.end() }
       if (req.method === 'GET' && req.url === '/api/status') return sendJson(res, statusObj())
+      // Botão "Atualizar agora" do gestor — checa/baixa a versão nova na hora.
+      if (req.method === 'POST' && req.url === '/api/atualizar') {
+        return sendJson(res, await checarAtualizacao(true))
+      }
       if (req.method === 'POST' && req.url === '/api/login') {
         const f = await jsonBody(req)
         const { error } = await supabase.auth.signInWithPassword({ email: (f.email || '').trim(), password: f.senha || '' })
