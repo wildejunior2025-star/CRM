@@ -57,6 +57,12 @@ Deno.serve(async (req) => {
     if (acao === "catalogo") return json(await runImportarCatalogo(sb, body?.empresa_id))
     if (acao === "catalogo_listar") return json(await runCatalogoListar(sb, body?.empresa_id))
     if (acao === "catalogo_pausar") return json(await runCatalogoPausar(sb, body?.empresa_id, body?.item_id, body?.pausar))
+    // ── Gerência de cardápio no iFood (homologação módulo Catalog) ──
+    if (acao === "catalogo_categorias") return json(await runCatalogoCategorias(sb, body?.empresa_id))
+    if (acao === "catalogo_criar_categoria") return json(await runCriarCategoria(sb, body?.empresa_id, body?.nome))
+    if (acao === "catalogo_upload_imagem") return json(await runUploadImagem(sb, body?.empresa_id, body?.image))
+    if (acao === "catalogo_salvar_item") return json(await runSalvarItem(sb, body?.empresa_id, body?.payload))
+    if (acao === "catalogo_pausar_complemento") return json(await runPausarComplemento(sb, body?.empresa_id, body?.option_id, body?.pausar))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
   } catch (e) {
     return json({ ok: false, error: String(e?.message ?? e) }, 500)
@@ -507,6 +513,154 @@ async function runCatalogoPausar(sb: any, empresaId: string, itemId: string, pau
   if (!res.ok && res.status !== 202) {
     return { ok: false, error: `iFood ${res.status}: ${(await res.text()).slice(0, 200)}` }
   }
+  return { ok: true, status }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// CATÁLOGO — GERÊNCIA (criar/editar categoria, item, foto, complemento)
+// Contrato validado direto na Merchant API v2.0:
+//   POST  /catalogs/{catalogId}/categories   { name, status, template }
+//   POST  /image/upload                       { image:"data:...base64" } -> { imagePath }
+//   PUT   /items                              { item, products, optionGroups, options }
+//   PATCH /options/status                     { optionId, status }
+// ─────────────────────────────────────────────────────────────────────
+type CatCtx = { mid: string; auth: Record<string, string>; catalogId: string }
+// Resolve merchant + token + primeiro catálogo DEFAULT da loja (o que a UI usa).
+async function catalogoCtx(sb: any, empresaId: string): Promise<CatCtx | { error: string }> {
+  if (!empresaId) return { error: "empresa_id obrigatório" }
+  const { data: cfg } = await sb.from("ifood_config").select("*").eq("empresa_id", empresaId).maybeSingle()
+  if (!cfg) return { error: "iFood não configurado" }
+  if (!cfg.merchant_id) return { error: "Informe o Merchant ID primeiro" }
+  const token = await getToken(sb, cfg as Config)
+  const mid = cfg.merchant_id
+  const auth = { "Authorization": `Bearer ${token}` }
+  const catRes = await fetch(`${IFOOD}/catalog/v2.0/merchants/${mid}/catalogs`, { headers: auth })
+  if (!catRes.ok) return { error: `iFood ${catRes.status} ao ler catálogos (módulo Catalog liberado?)` }
+  let catalogs: any = await catRes.json()
+  if (!Array.isArray(catalogs)) catalogs = catalogs ? [catalogs] : []
+  // prefere o catálogo com contexto DEFAULT
+  const def = catalogs.find((c: any) => (c.context ?? []).includes("DEFAULT")) ?? catalogs[0]
+  const catalogId = def?.catalogId ?? def?.id
+  if (!catalogId) return { error: "loja sem catálogo no iFood" }
+  return { mid, auth, catalogId }
+}
+
+// Lista as categorias do catálogo (id + nome) — a UI usa pra escolher onde cai o item.
+async function runCatalogoCategorias(sb: any, empresaId: string) {
+  const ctx = await catalogoCtx(sb, empresaId)
+  if ("error" in ctx) return { ok: false, error: ctx.error }
+  const r = await fetch(`${IFOOD}/catalog/v2.0/merchants/${ctx.mid}/catalogs/${ctx.catalogId}/categories`, { headers: ctx.auth })
+  if (!r.ok) return { ok: false, error: `iFood ${r.status} ao listar categorias` }
+  const cats: any[] = await r.json()
+  return { ok: true, categorias: (Array.isArray(cats) ? cats : []).map(c => ({ id: c.id, nome: c.name, status: c.status })) }
+}
+
+async function runCriarCategoria(sb: any, empresaId: string, nome: string) {
+  if (!nome || !nome.trim()) return { ok: false, error: "nome da categoria obrigatório" }
+  const ctx = await catalogoCtx(sb, empresaId)
+  if ("error" in ctx) return { ok: false, error: ctx.error }
+  const r = await fetch(`${IFOOD}/catalog/v2.0/merchants/${ctx.mid}/catalogs/${ctx.catalogId}/categories`, {
+    method: "POST",
+    headers: { ...ctx.auth, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: nome.trim(), status: "AVAILABLE", template: "DEFAULT" }),
+  })
+  const txt = await r.text()
+  if (!r.ok) return { ok: false, error: `iFood ${r.status}: ${txt.slice(0, 300)}` }
+  const cat = txt ? JSON.parse(txt) : {}
+  return { ok: true, id: cat.id, nome: cat.name }
+}
+
+// Sobe uma foto (base64 data-uri) e devolve o imagePath que o item/complemento usa.
+async function runUploadImagem(sb: any, empresaId: string, image: string) {
+  if (!image) return { ok: false, error: "imagem (base64) obrigatória" }
+  const ctx = await catalogoCtx(sb, empresaId)
+  if ("error" in ctx) return { ok: false, error: ctx.error }
+  const dataUri = image.startsWith("data:") ? image : `data:image/png;base64,${image}`
+  const r = await fetch(`${IFOOD}/catalog/v2.0/merchants/${ctx.mid}/image/upload`, {
+    method: "POST",
+    headers: { ...ctx.auth, "Content-Type": "application/json" },
+    body: JSON.stringify({ image: dataUri }),
+  })
+  const txt = await r.text()
+  if (!r.ok) return { ok: false, error: `iFood ${r.status}: ${txt.slice(0, 300)}` }
+  const j = txt ? JSON.parse(txt) : {}
+  return { ok: true, imagePath: j.imagePath }
+}
+
+const uuid = () => crypto.randomUUID()
+
+// Cria OU edita um item (PUT é idempotente — mesmo id = substitui). Aceita um
+// formato simples vindo da UI e monta o payload aninhado do iFood. Reaproveita os
+// ids quando vierem (edição); senão gera novos (criação).
+async function runSalvarItem(sb: any, empresaId: string, p: any) {
+  if (!p || !p.nome) return { ok: false, error: "payload do item inválido (falta nome)" }
+  if (!p.categoriaId) return { ok: false, error: "categoriaId obrigatório" }
+  const ctx = await catalogoCtx(sb, empresaId)
+  if ("error" in ctx) return { ok: false, error: ctx.error }
+
+  const itemId = p.itemId || uuid()
+  const productId = p.productId || uuid()
+  const status = p.status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE"
+  const grupos = Array.isArray(p.grupos) ? p.grupos : []
+
+  // produtos: o principal + um por opção de complemento
+  const products: any[] = [{
+    id: productId, name: p.nome, description: p.descricao ?? "",
+    ...(p.imagePath ? { imagePath: p.imagePath } : {}),
+    optionGroups: grupos.map((g: any) => ({ id: g.grupoId, min: Number(g.min ?? 0), max: Number(g.max ?? 1) })),
+  }]
+  const optionGroups: any[] = []
+  const options: any[] = []
+  for (const g of grupos) {
+    const opcoes = Array.isArray(g.opcoes) ? g.opcoes : []
+    optionGroups.push({
+      id: g.grupoId, name: g.nome, status: "AVAILABLE",
+      min: Number(g.min ?? 0), max: Number(g.max ?? 1),
+      optionIds: opcoes.map((o: any) => o.opcaoId),
+    })
+    for (const o of opcoes) {
+      products.push({ id: o.produtoId, name: o.nome, ...(o.imagePath ? { imagePath: o.imagePath } : {}) })
+      options.push({
+        id: o.opcaoId, productId: o.produtoId,
+        status: o.status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE",
+        price: { value: Number(o.preco ?? 0) },
+      })
+    }
+  }
+
+  const bodyItem = {
+    item: {
+      id: itemId, type: "DEFAULT", categoryId: p.categoriaId, status,
+      price: { value: Number(p.preco ?? 0) },
+      externalCode: p.externalCode || `FWC-${itemId.slice(0, 8)}`,
+      index: Number(p.index ?? 1), productId,
+    },
+    products, optionGroups, options,
+  }
+  const r = await fetch(`${IFOOD}/catalog/v2.0/merchants/${ctx.mid}/items`, {
+    method: "PUT",
+    headers: { ...ctx.auth, "Content-Type": "application/json" },
+    body: JSON.stringify(bodyItem),
+  })
+  const txt = await r.text()
+  if (!r.ok) return { ok: false, error: `iFood ${r.status}: ${txt.slice(0, 400)}` }
+  // devolve os ids gerados pra UI guardar (necessário pra depois editar/pausar)
+  return { ok: true, itemId, productId,
+    grupos: grupos.map((g: any) => ({ grupoId: g.grupoId, opcoes: (g.opcoes ?? []).map((o: any) => ({ opcaoId: o.opcaoId, produtoId: o.produtoId })) })) }
+}
+
+// Pausa/despausa um COMPLEMENTO (option) — PATCH /options/status.
+async function runPausarComplemento(sb: any, empresaId: string, optionId: string, pausar: boolean) {
+  if (!optionId) return { ok: false, error: "option_id obrigatório" }
+  const ctx = await catalogoCtx(sb, empresaId)
+  if ("error" in ctx) return { ok: false, error: ctx.error }
+  const status = pausar ? "UNAVAILABLE" : "AVAILABLE"
+  const r = await fetch(`${IFOOD}/catalog/v2.0/merchants/${ctx.mid}/options/status`, {
+    method: "PATCH",
+    headers: { ...ctx.auth, "Content-Type": "application/json" },
+    body: JSON.stringify({ optionId, status }),
+  })
+  if (!r.ok && r.status !== 202) return { ok: false, error: `iFood ${r.status}: ${(await r.text()).slice(0, 200)}` }
   return { ok: true, status }
 }
 

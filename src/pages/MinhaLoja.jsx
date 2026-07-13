@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import { CONDICOES_PAGAMENTO, ICONE_PAGAMENTO } from '../lib/constants'
+import IfoodCatalogoManager from '../components/IfoodCatalogoManager'
 import '../components/Page.css'
 
 export default function MinhaLoja({ secao = 'loja' }) {
@@ -893,6 +894,9 @@ export default function MinhaLoja({ secao = 'loja' }) {
               Pausar deixa o item indisponível no iFood na hora. (Precisa do módulo Catálogo homologado — em análise.)
             </p>
           </div>
+
+          {/* Gerência completa de cardápio no iFood (criar/editar categoria, item, foto, complemento) */}
+          <IfoodCatalogoManager empresaId={empresa?.id} merchantOk={!!ifoodCfg.merchant_id} />
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', fontSize: 13 }}>
             <input
               type="checkbox"
