@@ -62,6 +62,7 @@ Deno.serve(async (req) => {
     if (acao === "catalogo_criar_categoria") return json(await runCriarCategoria(sb, body?.empresa_id, body?.nome))
     if (acao === "catalogo_upload_imagem") return json(await runUploadImagem(sb, body?.empresa_id, body?.image))
     if (acao === "catalogo_salvar_item") return json(await runSalvarItem(sb, body?.empresa_id, body?.payload))
+    if (acao === "catalogo_itens") return json(await runCatalogoItensCompletos(sb, body?.empresa_id))
     if (acao === "catalogo_pausar_complemento") return json(await runPausarComplemento(sb, body?.empresa_id, body?.option_id, body?.pausar))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
   } catch (e) {
@@ -647,6 +648,41 @@ async function runSalvarItem(sb: any, empresaId: string, p: any) {
   // devolve os ids gerados pra UI guardar (necessário pra depois editar/pausar)
   return { ok: true, itemId, productId,
     grupos: grupos.map((g: any) => ({ grupoId: g.grupoId, opcoes: (g.opcoes ?? []).map((o: any) => ({ opcaoId: o.opcaoId, produtoId: o.produtoId })) })) }
+}
+
+// Lista os itens do iFood JÁ COMPLETOS (com grupos/complementos) no formato que a
+// UI usa pra editar — assim dá pra carregar um item existente no formulário e
+// alterar/pausar sem recriar. imagePath volta como caminho cru (pra re-PUT) +
+// imagemUrl (a URL do iFood, pra mostrar a miniatura).
+function stripImg(u: any): string | null {
+  if (!u) return null
+  return String(u).replace(/^https?:\/\/static-images\.ifood\.com\.br\/(pratos|image\/upload)\//, "")
+}
+async function runCatalogoItensCompletos(sb: any, empresaId: string) {
+  const ctx = await catalogoCtx(sb, empresaId)
+  if ("error" in ctx) return { ok: false, error: ctx.error }
+  const r = await fetch(`${IFOOD}/catalog/v2.0/merchants/${ctx.mid}/catalogs/${ctx.catalogId}/categories?includeItems=true`, { headers: ctx.auth })
+  if (!r.ok) return { ok: false, error: `iFood ${r.status} ao listar itens` }
+  const cats: any[] = await r.json()
+  const itens: any[] = []
+  for (const c of (Array.isArray(cats) ? cats : [])) {
+    for (const it of (c.items ?? [])) {
+      itens.push({
+        itemId: it.id, productId: it.productId, categoriaId: c.id, categoriaNome: c.name,
+        nome: it.name, descricao: it.description ?? "", preco: it.price?.value ?? 0,
+        imagePath: stripImg(it.imagePath), imagemUrl: it.imagePath ?? null,
+        status: it.status ?? "AVAILABLE",
+        grupos: (it.optionGroups ?? []).map((g: any) => ({
+          grupoId: g.id, nome: g.name, min: g.min ?? 0, max: g.max ?? 1,
+          opcoes: (g.options ?? []).map((o: any) => ({
+            opcaoId: o.id, produtoId: o.productId, nome: o.name, preco: o.price?.value ?? 0,
+            imagePath: stripImg(o.imagePath), imagemUrl: o.imagePath ?? null, status: o.status ?? "AVAILABLE",
+          })),
+        })),
+      })
+    }
+  }
+  return { ok: true, itens }
 }
 
 // Pausa/despausa um COMPLEMENTO (option) — PATCH /options/status.

@@ -116,7 +116,35 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk }) {
     setBusy('')
   }
 
-  function editar(it) { setItem({ ...it }); setMsg({ tipo: 'ok', texto: 'Item carregado no formulário — altere e clique em "Salvar no iFood".' }) }
+  // Puxa os itens que JÁ estão no iFood (completos, com complementos) pra lista de
+  // baixo — aí dá pra clicar "Editar" e alterar sem recriar nada.
+  async function verItensIfood() {
+    setBusy('verItens'); setMsg(null)
+    const d = await chamar({ acao: 'catalogo_itens', empresa_id: empresaId })
+    if (d.ok) {
+      const itens = (d.itens ?? []).map(it => ({
+        ...it, salvo: true, imgPreview: it.imagemUrl || null,
+        grupos: (it.grupos ?? []).map(g => ({ ...g, opcoes: (g.opcoes ?? []).map(o => ({ ...o, imgPreview: o.imagemUrl || null })) })),
+      }))
+      setSalvos(itens)
+      if (itens.length === 0) notify('ok', 'Nenhum item no iFood ainda — crie um acima.')
+    } else notify('erro', d.error ?? 'Falha ao listar itens do iFood')
+    setBusy('')
+  }
+
+  function editar(it) {
+    setItem({ ...it })
+    // Garante que a categoria do item apareça selecionada na caixinha (mesmo sem
+    // ter clicado em "Carregar categorias" antes).
+    if (it.categoriaId) {
+      setCategorias(prev => {
+        const arr = prev ?? []
+        return arr.some(c => c.id === it.categoriaId) ? arr : [...arr, { id: it.categoriaId, nome: it.categoriaNome || 'categoria', status: 'AVAILABLE' }]
+      })
+    }
+    setMsg({ tipo: 'ok', texto: `Item "${it.nome}" carregado no formulário — altere e clique em "Salvar no iFood".` })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
   function novo() { setItem(itemVazio()); setMsg(null) }
 
   async function pausarItem(it, pausar) {
@@ -221,11 +249,21 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk }) {
         </div>
       </div>
 
-      {/* 3) Itens já enviados — editar / pausar item e complemento */}
-      {salvos.length > 0 && (
-        <div>
-          <strong style={{ fontSize: 13 }}>Itens enviados nesta sessão</strong>
-          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {/* 3) Itens que já estão no iFood — editar / pausar item e complemento */}
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <strong style={{ fontSize: 13 }}>Itens no iFood</strong>
+          <button type="button" style={btnOut} disabled={busy === 'verItens'} onClick={verItensIfood}>
+            {busy === 'verItens' ? 'Carregando…' : '🔄 Ver itens do iFood'}
+          </button>
+        </div>
+        {salvos.length === 0 && (
+          <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>
+            Clique em <strong>“Ver itens do iFood”</strong> pra carregar os itens já cadastrados — aí é só clicar em <strong>Editar</strong> pra alterar.
+          </p>
+        )}
+        {salvos.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {salvos.map(it => {
               const pausado = it.status === 'UNAVAILABLE'
               return (
@@ -263,8 +301,8 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk }) {
               )
             })}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
