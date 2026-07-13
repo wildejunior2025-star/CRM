@@ -240,6 +240,18 @@ function imprimirCupomNavegador(pedido, empresa = {}) {
 // Tenta imprimir pelo app Impressora FWC (127.0.0.1:9110) — a térmica configurada.
 // Retorna true se o app imprimiu. Falha rápido se o app não estiver rodando
 // (aí cai no QZ/navegador). É por aqui que TODA impressão vai pra térmica do FWC.
+// Diz se o app Impressora FWC está rodando NESTE aparelho (127.0.0.1:9110).
+// true = é o PC da loja (com térmica). false = celular/tablet sem impressora.
+export async function appFwcDisponivel() {
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), 2000)
+    const r = await fetch('http://127.0.0.1:9110/api/status', { signal: ctrl.signal })
+    clearTimeout(t)
+    return r.ok
+  } catch { return false }
+}
+
 async function imprimirViaAppFwc(rota, corpo) {
   try {
     const ctrl = new AbortController()
@@ -294,7 +306,10 @@ function imprimirHtmlNavegador(html) {
     setTimeout(() => iframe.remove(), 1500)
   }, 300)
 }
-export async function imprimirHtml(html, titulo) {
+// opts.soApp=true → imprime SÓ pelo app FWC (térmica da loja). Se o app não estiver
+// disponível (ex.: garçom/admin logado no CELULAR), NÃO cai no navegador do aparelho.
+// Usado na conta do salão: ela só pode sair na térmica da loja, nunca no celular.
+export async function imprimirHtml(html, titulo, opts = {}) {
   // O app FWC imprime o HTML como TEXTO. Se mandar o <style>/<script>, o CSS sai
   // impresso como código. Então, SÓ pro app, tira esses blocos antes de enviar.
   // (O QZ e o navegador precisam do <style> pra renderizar — esses recebem o html cheio.)
@@ -305,12 +320,14 @@ export async function imprimirHtml(html, titulo) {
   // O `titulo` sai grande/centralizado no topo (o app faz isso). Se o corpo já tem o
   // nome da loja (titulo-loja), tira dele pra não sair duas vezes na térmica.
   if (titulo) htmlParaApp = htmlParaApp.replace(/<div[^>]*class="[^"]*titulo-loja[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '')
-  if (await imprimirViaAppFwc('imprimir-html', { html: htmlParaApp, titulo })) return
+  if (await imprimirViaAppFwc('imprimir-html', { html: htmlParaApp, titulo })) return true
+  if (opts.soApp) return false // sem app FWC local (celular): não imprime no navegador do aparelho
   const printer = impressoraEscolhida()
   if (printer) {
-    try { await imprimirHtmlViaQz(html, printer); return } catch { /* fallback */ }
+    try { await imprimirHtmlViaQz(html, printer); return true } catch { /* fallback */ }
   }
   imprimirHtmlNavegador(html)
+  return true
 }
 
 // Comanda de MESA: pede pro app FWC montar nativamente (nome da loja + MESA grandes,

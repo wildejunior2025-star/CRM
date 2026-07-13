@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
-import { imprimirHtml, montarContaPresencialHtml } from '../utils/imprimirCupom'
+import { imprimirHtml, montarContaPresencialHtml, appFwcDisponivel } from '../utils/imprimirCupom'
 import '../components/Page.css'
 
 const FORMAS = [
@@ -254,14 +254,16 @@ export default function PresencialSalao() {
     const pags = modoPag === 'dividir'
       ? pagamentos.map(p => ({ forma: p.forma, valor: Number(p.valor) || 0 })).filter(p => p.valor > 0)
       : []
-    imprimirHtml(montarContaPresencialHtml({
+    // soApp: a conta do salão só sai na térmica da loja (app FWC). Se quem fechou está
+    // no CELULAR (sem app), NÃO imprime no navegador do aparelho — retorna sem imprimir.
+    return imprimirHtml(montarContaPresencialHtml({
       numeroMesa: mesaSel?.numero,
       itens: comandaSel?.comanda_itens ?? [],
       subtotal: subtotalSel, taxa: taxaSel, total: totalSel,
       formaPagamento: modoPag === 'unico' ? forma : 'Dividido',
       pagamentos: pags,
       empresa: { nome: empresaNome },
-    }), empresaNome)
+    }), empresaNome, { soApp: true })
   }
 
   async function confirmarFechamento() {
@@ -281,8 +283,12 @@ export default function PresencialSalao() {
       }
     }
     setSalvando(true)
-    if (ehAdmin) {
-      // ADM: fecha de vez (gera a venda e libera a mesa).
+    // Só fecha DIRETO (gera a venda + libera a mesa + imprime) quem é ADM e está no
+    // PC da loja (com o app FWC/térmica). ADM no CELULAR (sem impressora) NÃO fecha
+    // direto — senão a conta não sairia em lugar nenhum. Vai pro gestor, igual garçom.
+    const temImpressoraLocal = ehAdmin ? await appFwcDisponivel() : false
+    if (ehAdmin && temImpressoraLocal) {
+      // ADM no PC da loja: fecha de vez (gera a venda e libera a mesa) e imprime aqui.
       const { error } = await supabase.rpc('fechar_conta_presencial', {
         p_comanda_id: comandaSel.id,
         p_pagamentos: lista,
@@ -290,9 +296,12 @@ export default function PresencialSalao() {
       })
       setSalvando(false)
       if (error) { window.alert('Erro ao fechar a conta: ' + error.message); return }
+      try { imprimirConta() } catch { /* best-effort */ }
     } else {
-      // Garçom: NÃO libera a mesa. Marca "aguardando conferência" e guarda o
-      // pagamento pra o ADM conferir e liberar depois.
+      // Garçom, OU ADM no celular (sem impressora): NÃO libera a mesa. Marca
+      // "aguardando_conferencia" e guarda o pagamento. Quem IMPRIME a conta é o
+      // GESTOR da loja (detecta a mesa em "aguardando" e manda pra térmica/app FWC);
+      // depois o ADM confere e libera a mesa lá no gestor.
       const { error } = await supabase.from('comandas').update({
         status: 'aguardando_conferencia',
         fechamento_pendente: { pagamentos: lista, aplicar_taxa: aplicarTaxa },
@@ -300,10 +309,6 @@ export default function PresencialSalao() {
       setSalvando(false)
       if (error) { window.alert('Erro ao enviar pro caixa: ' + error.message); return }
     }
-    // Garçom pode estar no celular (sem impressora) — NÃO imprime aqui. Quem imprime a
-    // conta é o GESTOR da loja, que detecta a mesa em "aguardando_conferencia" e manda
-    // pra térmica/app FWC. Só o ADM (operador da loja, com impressora) imprime na hora.
-    if (ehAdmin) { try { imprimirConta() } catch { /* best-effort */ } }
     setFechando(false)
     setMesaSel(null)
     await loadAll()
