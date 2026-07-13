@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 3
+const APP_VERSION = 4
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -223,14 +223,33 @@ async function checarAtualizacao() {
 function imprimirBytes(bytes, nome, printerOverride) {
   const printer = printerOverride || config().printer
   if (!printer) { log('  ! sem impressora escolhida'); return false }
+  const tmp = path.join(os.tmpdir(), 'fwc-' + (nome || 'doc') + '.bin')
+  try { fs.writeFileSync(tmp, bytes) } catch (e) { log('  -> ERRO gravar tmp: ' + e.message); return false }
+
+  // Método 1: WritePrinter via PowerShell/C# (funciona na maioria dos PCs).
+  let ok = false
   try {
-    const tmp = path.join(os.tmpdir(), 'fwc-' + (nome || 'doc') + '.bin')
-    fs.writeFileSync(tmp, bytes)
     const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', PS1_FILE, '-Printer', printer, '-File', tmp], { encoding: 'utf8', windowsHide: true })
-    log('  -> impresso ' + (nome || '') + ' [' + ((r.stdout || '') + (r.stderr || '')).trim() + ']')
-    try { fs.unlinkSync(tmp) } catch (e) {}
-    return true
-  } catch (e) { log('  -> ERRO imprimir: ' + e.message); return false }
+    const out = ((r.stdout || '') + (r.stderr || '')).replace(/\s+/g, ' ').trim()
+    ok = /(^|\W)OK(\W|$)/.test(r.stdout || '') && !/erro|error|falha|80070002/i.test(out)
+    log('  -> metodo1 ' + (nome || '') + ': ' + (ok ? 'OK' : 'FALHOU') + ' [' + out.slice(0, 110) + ']')
+  } catch (e) { log('  -> metodo1 excecao: ' + e.message) }
+
+  // Método 2 (fallback SEM PowerShell): compartilha a impressora e copia RAW pro
+  // share via CMD. Necessário em PCs onde o PowerShell está quebrado (erro 80070002).
+  if (!ok) {
+    try {
+      const share = 'FWC' + String(printer).replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase()
+      spawnSync('rundll32', ['printui.dll,PrintUIEntry', '/Xs', '/n', printer, 'attributes', '+shared', 'sharename', share], { windowsHide: true })
+      const r2 = spawnSync('cmd', ['/c', 'copy', '/b', tmp, '\\\\localhost\\' + share], { encoding: 'utf8', windowsHide: true })
+      const out2 = ((r2.stdout || '') + (r2.stderr || '')).replace(/\s+/g, ' ').trim()
+      ok = r2.status === 0 && !/0 arquivo|0 file/i.test(out2)
+      log('  -> metodo2 (cmd/share) ' + (nome || '') + ': ' + (ok ? 'OK' : 'FALHOU') + ' [' + out2.slice(0, 110) + ']')
+    } catch (e) { log('  -> metodo2 excecao: ' + e.message) }
+  }
+
+  try { fs.unlinkSync(tmp) } catch (e) {}
+  return ok
 }
 function imprimir(pedido) {
   if (jaImpressos.has(pedido.id)) return
