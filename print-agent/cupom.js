@@ -131,11 +131,12 @@ function montarTexto(linhas, titulo, topo) {
   // `topo`: linha centralizada acima do título (ex.: nome do restaurante na comanda de mesa).
   if (topo) parts.push(ALIGN(1), BOLD(1), linha(String(topo)), BOLD(0), ALIGN(0))
   if (titulo) parts.push(ALIGN(1), SIZE(0x11), BOLD(1), linha(String(titulo).toUpperCase()), BOLD(0), SIZE(0), ALIGN(0), divisor())
-  // Linha pode ser string (normal) ou { t, big } — `big` sai em fonte maior (altura
-  // dobrada, sem negrito): item da comanda de mesa grande pro cozinheiro ver melhor.
+  // Linha pode ser string (normal) ou { t, big } — `big` sai em fonte GRANDE
+  // (largura E altura dobradas + negrito): item da comanda de mesa bem grande, ocupando
+  // a largura do papel, pro cozinheiro ver de longe. Nome longo quebra sozinho na térmica.
   for (const l of (Array.isArray(linhas) ? linhas : [])) {
     if (l && typeof l === 'object') {
-      if (l.big) parts.push(SIZE(0x01), linha(String(l.t ?? '')), SIZE(0))
+      if (l.big) parts.push(SIZE(0x11), BOLD(1), linha(String(l.t ?? '')), BOLD(0), SIZE(0))
       else parts.push(linha(String(l.t ?? '')))
     } else {
       parts.push(linha(l))
