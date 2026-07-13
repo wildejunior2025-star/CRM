@@ -159,7 +159,7 @@ export default function PresencialSalao() {
       if (i >= 0) {
         const c = prev.slice(); c[i] = { ...c[i], quantidade: c[i].quantidade + 1 }; return c
       }
-      return [...prev, { produto_id: produto.produto_id, nome: produto.nome, preco_venda: Number(produto.preco_venda), quantidade: 1 }]
+      return [...prev, { produto_id: produto.produto_id, nome: produto.nome, preco_venda: Number(produto.preco_venda), quantidade: 1, observacao: '' }]
     })
   }
   function mudarQtdRascunho(produtoId, delta) {
@@ -168,6 +168,10 @@ export default function PresencialSalao() {
       const q = r.quantidade + delta
       return q <= 0 ? [] : [{ ...r, quantidade: q }]
     }))
+  }
+  // Observação do item AINDA no rascunho (antes de ir pra cozinha) — vai junto no envio.
+  function mudarObsRascunho(produtoId, texto) {
+    setRascunho(prev => prev.map(r => r.produto_id === produtoId ? { ...r, observacao: texto } : r))
   }
   // Envia o pedido montado pra cozinha: insere TODOS os itens de uma vez → sai numa
   // impressão só (o gestor e o app FWC juntam os inserts que chegam juntos).
@@ -178,6 +182,7 @@ export default function PresencialSalao() {
       empresa_id: empresaId, comanda_id: comandaSel.id,
       produto_id: r.produto_id, nome: r.nome,
       preco_unitario: Number(r.preco_venda), quantidade: r.quantidade,
+      observacao: (r.observacao ?? '').trim() || null,
     }))
     const { error } = await supabase.from('comanda_itens').insert(rows)
     setEnviando(false)
@@ -497,15 +502,27 @@ export default function PresencialSalao() {
                     🧾 A enviar — ainda não foi pra cozinha
                   </div>
                   {rascunho.map(r => (
-                    <div key={r.produto_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 600 }}>{r.nome}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmt(r.preco_venda)}</div>
+                    <div key={r.produto_id} style={{ padding: '5px 0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 600 }}>{r.nome}</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmt(r.preco_venda)}</div>
+                        </div>
+                        <button type="button" onClick={() => mudarQtdRascunho(r.produto_id, -1)} style={qtdBtn}>−</button>
+                        <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{r.quantidade}</span>
+                        <button type="button" onClick={() => mudarQtdRascunho(r.produto_id, +1)} style={qtdBtn}>+</button>
+                        <span style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>{fmt(r.preco_venda * r.quantidade)}</span>
                       </div>
-                      <button type="button" onClick={() => mudarQtdRascunho(r.produto_id, -1)} style={qtdBtn}>−</button>
-                      <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{r.quantidade}</span>
-                      <button type="button" onClick={() => mudarQtdRascunho(r.produto_id, +1)} style={qtdBtn}>+</button>
-                      <span style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>{fmt(r.preco_venda * r.quantidade)}</span>
+                      <input
+                        value={r.observacao ?? ''}
+                        onChange={e => mudarObsRascunho(r.produto_id, e.target.value)}
+                        placeholder="📝 Observação (ex: sem cebola, ponto da carne...)"
+                        style={{
+                          width: '100%', marginTop: 6, padding: '6px 10px', fontSize: 12.5, boxSizing: 'border-box',
+                          borderRadius: 8, border: '1px solid var(--border)',
+                          background: 'var(--input-bg, var(--bg))', color: 'var(--text)',
+                        }}
+                      />
                     </div>
                   ))}
                 </div>
