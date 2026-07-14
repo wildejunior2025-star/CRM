@@ -45,6 +45,13 @@ export default function PresencialSalao() {
   const [rascunho, setRascunho] = useState([]) // [{ produto_id, nome, preco_venda, quantidade }]
   const [enviando, setEnviando] = useState(false)
   const buscaRef = useRef(null) // pra focar de volta o campo de busca ao limpar (X)
+  // "Inventar produto": criar item na hora (só nesta venda) ou salvar no catálogo.
+  const [invAberto, setInvAberto] = useState(false)
+  const [invNome, setInvNome] = useState('')
+  const [invPreco, setInvPreco] = useState('')
+  const [invCatalogo, setInvCatalogo] = useState(false)
+  const [invCategoria, setInvCategoria] = useState('')
+  const [invSalvando, setInvSalvando] = useState(false)
 
   async function loadAll() {
     if (!empresaId) return
@@ -173,6 +180,34 @@ export default function PresencialSalao() {
   function mudarObsRascunho(produtoId, texto) {
     setRascunho(prev => prev.map(r => r.produto_id === produtoId ? { ...r, observacao: texto } : r))
   }
+
+  // "Inventar produto": adiciona um item que não está no catálogo. Se o admin marcar
+  // "adicionar ao catálogo", cria o produto de verdade (pra próximas vendas); senão o
+  // item existe só nesta venda (produto_id "avulso:", que vira null no comanda_itens).
+  async function adicionarInventado() {
+    if (!comandaSel) return
+    if (comandaSel.status === 'aguardando_conferencia') { window.alert('Conta já fechada, aguardando o ADM liberar a mesa.'); return }
+    const nome = invNome.trim()
+    const preco = Number(String(invPreco).replace(',', '.')) || 0
+    if (!nome) { window.alert('Digite o nome do produto.'); return }
+    if (preco <= 0) { window.alert('Digite um preço válido.'); return }
+
+    let produtoId = 'avulso:' + Date.now() + '-' + Math.floor(Math.random() * 1000)
+    if (invCatalogo && ehAdmin) {
+      setInvSalvando(true)
+      const { data, error } = await supabase.from('produtos')
+        .insert({ empresa_id: empresaId, nome, preco_venda: preco, categoria: (invCategoria.trim() || 'outros'), controla_estoque: false })
+        .select('id').single()
+      setInvSalvando(false)
+      if (error) { window.alert('Erro ao salvar no catálogo: ' + error.message); return }
+      produtoId = data.id
+      await loadAll()  // recarrega os produtos pra o novo aparecer na busca
+    }
+    setRascunho(prev => [...prev, { produto_id: produtoId, nome, preco_venda: preco, quantidade: 1, observacao: '' }])
+    setInvNome(''); setInvPreco(''); setInvCatalogo(false); setInvCategoria(''); setInvAberto(false)
+  }
+  // Nome já existe no catálogo? (ignora acento/maiúsculas) — pra avisar sem bloquear.
+  const invNomeExiste = invNome.trim() && produtos.some(p => semAcento(p.nome) === semAcento(invNome))
   // Envia o pedido montado pra cozinha: insere TODOS os itens de uma vez → sai numa
   // impressão só (o gestor e o app FWC juntam os inserts que chegam juntos).
   async function enviarCozinha() {
@@ -180,7 +215,8 @@ export default function PresencialSalao() {
     setEnviando(true)
     const rows = rascunho.map(r => ({
       empresa_id: empresaId, comanda_id: comandaSel.id,
-      produto_id: r.produto_id, nome: r.nome,
+      produto_id: (r.produto_id && !String(r.produto_id).startsWith('avulso:')) ? r.produto_id : null,
+      nome: r.nome,
       preco_unitario: Number(r.preco_venda), quantidade: r.quantidade,
       observacao: (r.observacao ?? '').trim() || null,
     }))
@@ -530,6 +566,53 @@ export default function PresencialSalao() {
 
               {/* adicionar item */}
               <div style={{ fontSize: 13, fontWeight: 700, margin: '18px 0 8px' }}>Adicionar item</div>
+
+              {/* ── Inventar produto (item fora do catálogo) ── */}
+              {!invAberto ? (
+                <button type="button" onClick={() => setInvAberto(true)}
+                  style={{ width: '100%', padding: '9px 0', borderRadius: 8, marginBottom: 8, cursor: 'pointer',
+                    border: '1.5px dashed var(--primary)', background: 'rgba(124,58,237,.06)', color: 'var(--primary)', fontSize: 13, fontWeight: 700 }}>
+                  ➕ Inventar produto
+                </button>
+              ) : (
+                <div style={{ border: '1.5px solid var(--primary)', borderRadius: 10, padding: 12, marginBottom: 10, background: 'rgba(124,58,237,.05)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)' }}>➕ Inventar produto</span>
+                    <button type="button" onClick={() => { setInvAberto(false); setInvNome(''); setInvPreco(''); setInvCatalogo(false); setInvCategoria('') }}
+                      style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)', lineHeight: 1 }}>×</button>
+                  </div>
+                  <input value={invNome} onChange={e => setInvNome(e.target.value)} placeholder="Nome do produto"
+                    style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }} />
+                  {invNomeExiste && (
+                    <div style={{ fontSize: 12, color: '#d97706', fontWeight: 700, marginTop: 5 }}>
+                      ⚠️ Já existe um produto com esse nome.
+                    </div>
+                  )}
+                  <input value={invPreco} onChange={e => setInvPreco(e.target.value)} type="number" step="0.01" min="0" inputMode="decimal" placeholder="Preço (ex: 12,00)"
+                    style={{ width: '100%', marginTop: 8, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }} />
+
+                  {ehAdmin && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 12.5, color: 'var(--text)', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={invCatalogo} onChange={e => setInvCatalogo(e.target.checked)} style={{ width: 16, height: 16 }} />
+                      Adicionar ao catálogo (fica salvo pras próximas vendas)
+                    </label>
+                  )}
+                  {invCatalogo && ehAdmin && (
+                    <>
+                      <input list="cats-inv" value={invCategoria} onChange={e => setInvCategoria(e.target.value)} placeholder="Categoria (escolha ou digite uma nova)"
+                        style={{ width: '100%', marginTop: 8, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }} />
+                      <datalist id="cats-inv">{categorias.map(c => <option key={c} value={c} />)}</datalist>
+                    </>
+                  )}
+
+                  <button type="button" onClick={adicionarInventado} disabled={invSalvando}
+                    style={{ width: '100%', marginTop: 12, padding: '10px 0', borderRadius: 8, cursor: invSalvando ? 'wait' : 'pointer',
+                      border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 800, opacity: invSalvando ? .6 : 1 }}>
+                    {invSalvando ? 'Salvando...' : (invCatalogo && ehAdmin ? 'Salvar no catálogo e adicionar' : 'Adicionar só nesta venda')}
+                  </button>
+                </div>
+              )}
+
               <div style={{ position: 'relative', marginBottom: 8 }}>
                 <input ref={buscaRef} value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar produto..."
                   style={{ width: '100%', padding: '10px 38px 10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box' }} />
