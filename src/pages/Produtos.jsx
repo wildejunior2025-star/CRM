@@ -918,6 +918,8 @@ export default function Produtos() {
                 </div>
                 )}
 
+                {/* Controla vasilhame escondido por enquanto (sem uso neste contexto) */}
+                {false && (
                 <div className="form-field">
                   <label>
                     <input
@@ -929,6 +931,7 @@ export default function Produtos() {
                     Controla vasilhame (casco)
                   </label>
                 </div>
+                )}
 
                 <div className="form-field">
                   <label>
