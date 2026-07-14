@@ -35,7 +35,11 @@ const CATALOGO_BASE = 'https://lojaonline.fwcinter.com'
 // Campo de categoria com busca (dropdown próprio, estilizado — no lugar do <datalist> feio do navegador).
 function CategoriaCombobox({ categorias, value, onChange }) {
   const [open, setOpen] = useState(false)
+  const [text, setText] = useState(value || '')
   const wrapRef = useRef(null)
+
+  // Sincroniza o texto quando o valor muda de fora (abrir modal, editar produto, resetar form).
+  useEffect(() => { setText(value || '') }, [value])
 
   useEffect(() => {
     function onDoc(e) {
@@ -45,14 +49,21 @@ function CategoriaCombobox({ categorias, value, onChange }) {
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
 
-  const q = norm(value)
-  const exata = categorias.some((c) => c.nome === value)
-  // Enquanto o texto não for exatamente uma categoria, filtra. Se já bateu certinho, mostra todas (pra poder trocar).
+  const q = norm(text)
+  const exata = categorias.some((c) => norm(c.nome) === q)
+  // Filtra enquanto digita; se o texto bate exatamente numa categoria, mostra todas (pra poder trocar).
   const filtradas = (q && !exata) ? categorias.filter((c) => norm(c.nome).includes(q)) : categorias
 
   function escolher(nome) {
+    setText(nome)
     onChange({ target: { name: 'categoria', value: nome } })
     setOpen(false)
+  }
+
+  function digitar(e) {
+    setText(e.target.value)
+    onChange(e)              // mantém form.categoria em sincronia (texto livre, igual antes)
+    setOpen(true)
   }
 
   return (
@@ -60,12 +71,12 @@ function CategoriaCombobox({ categorias, value, onChange }) {
       <input
         type="text"
         name="categoria"
-        value={value}
+        value={text}
         required
         autoComplete="off"
         placeholder="Digite pra buscar ou escolha..."
-        onChange={(e) => { onChange(e); setOpen(true) }}
-        onFocus={() => setOpen(true)}
+        onChange={digitar}
+        onFocus={(e) => { e.target.select(); setOpen(true) }}
         style={{ paddingRight: 30 }}
       />
       <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)', fontSize: 11 }}>▼</span>
