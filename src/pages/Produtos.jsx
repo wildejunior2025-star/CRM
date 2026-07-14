@@ -885,6 +885,8 @@ export default function Produtos() {
                   </select>
                 </div>
 
+                {/* Embalagem escondida por enquanto (sem utilidade ainda) */}
+                {false && (
                 <div className="form-field">
                   <label>Embalagem</label>
                   <select
@@ -900,6 +902,7 @@ export default function Produtos() {
                     ))}
                   </select>
                 </div>
+                )}
 
                 <div className="form-field">
                   <label>Unidades por caixa</label>
@@ -963,6 +966,8 @@ export default function Produtos() {
                   />
                 </div>
 
+                {/* Preço App escondido por enquanto (app FWC ainda não está funcionando) */}
+                {false && (
                 <div className="form-field">
                   <label style={{color:'#a855f7'}}>Preço App (R$) <span style={{fontWeight:400, fontSize:'0.8em', color:'var(--text-muted)'}}>FWC Inter app</span></label>
                   <input
@@ -974,6 +979,7 @@ export default function Produtos() {
                     onChange={handleChange}
                   />
                 </div>
+                )}
 
                 <div className="form-field full">
                   <label>
