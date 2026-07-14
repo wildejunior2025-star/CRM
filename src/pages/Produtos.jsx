@@ -871,19 +871,20 @@ export default function Produtos() {
 
                 <div className="form-field">
                   <label>Categoria</label>
-                  <select
+                  <input
+                    list="cats-produto"
                     name="categoria"
                     value={form.categoria}
                     onChange={handleChange}
+                    placeholder="Digite pra buscar ou escolha..."
+                    autoComplete="off"
                     required
-                  >
-                    <option value="">Selecione...</option>
+                  />
+                  <datalist id="cats-produto">
                     {categorias.map((c) => (
-                      <option key={c.id} value={c.nome}>
-                        {c.nome}
-                      </option>
+                      <option key={c.id} value={c.nome} />
                     ))}
-                  </select>
+                  </datalist>
                 </div>
 
                 {/* Embalagem escondida por enquanto (sem utilidade ainda) */}
