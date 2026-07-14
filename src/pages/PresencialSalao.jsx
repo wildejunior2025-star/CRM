@@ -38,6 +38,7 @@ export default function PresencialSalao() {
   const [aplicarTaxa, setAplicarTaxa] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [obsEdit, setObsEdit] = useState({})  // observação em edição por item
+  const [precoEdit, setPrecoEdit] = useState({})  // preço em edição por item (só admin)
   const [modoPag, setModoPag] = useState('unico')   // 'unico' | 'dividir'
   const [pagamentos, setPagamentos] = useState([])  // [{ forma, valor(string) }] no modo dividir
   // Rascunho: itens que o garçom monta mas que só vão pra cozinha (e pra impressora)
@@ -240,6 +241,18 @@ export default function PresencialSalao() {
     await supabase.from('comanda_itens')
       .update({ status: 'entregue', entregue_por: user?.id ?? null, entregue_at: new Date().toISOString() })
       .eq('id', item.id)
+    await loadAll()
+  }
+
+  // Edita o preço unitário de um item já lançado (só admin) — ex.: prato por peso.
+  async function salvarPreco(item) {
+    const texto = precoEdit[item.id]
+    setPrecoEdit(prev => { const n = { ...prev }; delete n[item.id]; return n })
+    if (texto === undefined) return
+    const preco = Math.max(0, Math.round(Number(String(texto).replace(',', '.')) * 100) / 100)
+    if (!Number.isFinite(preco) || preco === Number(item.preco_unitario)) return
+    const { error } = await supabase.from('comanda_itens').update({ preco_unitario: preco }).eq('id', item.id)
+    if (error) { window.alert('Erro ao salvar o preço: ' + error.message); return }
     await loadAll()
   }
 
@@ -511,9 +524,29 @@ export default function PresencialSalao() {
                         <button type="button" onClick={() => mudarQtd(item, -1)} style={qtdBtn}>−</button>
                         <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{item.quantidade}</span>
                         <button type="button" onClick={() => mudarQtd(item, +1)} style={qtdBtn}>+</button>
-                        <span style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>
-                          {fmt(item.preco_unitario * item.quantidade)}
-                        </span>
+                        {precoEdit[item.id] !== undefined ? (
+                          <input
+                            autoFocus type="text" inputMode="decimal"
+                            value={precoEdit[item.id]}
+                            onChange={e => setPrecoEdit(prev => ({ ...prev, [item.id]: e.target.value }))}
+                            onBlur={() => salvarPreco(item)}
+                            onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); else if (e.key === 'Escape') setPrecoEdit(prev => { const n = { ...prev }; delete n[item.id]; return n }) }}
+                            placeholder="0,00"
+                            style={{ minWidth: 70, width: 70, padding: '4px 6px', fontSize: 13, borderRadius: 6, textAlign: 'right',
+                              border: '1.5px solid var(--primary)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }}
+                          />
+                        ) : ehAdmin ? (
+                          <button type="button" title="Editar preço deste item"
+                            onClick={() => setPrecoEdit(prev => ({ ...prev, [item.id]: String(item.preco_unitario).replace('.', ',') }))}
+                            style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
+                              border: '1px dashed var(--border)', borderRadius: 6, padding: '3px 6px', background: 'transparent', color: 'var(--text)' }}>
+                            {fmt(item.preco_unitario * item.quantidade)} ✎
+                          </button>
+                        ) : (
+                          <span style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>
+                            {fmt(item.preco_unitario * item.quantidade)}
+                          </span>
+                        )}
                       </div>
                       <input
                         value={obsEdit[item.id] !== undefined ? obsEdit[item.id] : (item.observacao ?? '')}
