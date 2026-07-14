@@ -32,6 +32,78 @@ const emptyForm = {
 
 const CATALOGO_BASE = 'https://lojaonline.fwcinter.com'
 
+// Campo de categoria com busca (dropdown próprio, estilizado — no lugar do <datalist> feio do navegador).
+function CategoriaCombobox({ categorias, value, onChange }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef(null)
+
+  useEffect(() => {
+    function onDoc(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  const q = norm(value)
+  const exata = categorias.some((c) => c.nome === value)
+  // Enquanto o texto não for exatamente uma categoria, filtra. Se já bateu certinho, mostra todas (pra poder trocar).
+  const filtradas = (q && !exata) ? categorias.filter((c) => norm(c.nome).includes(q)) : categorias
+
+  function escolher(nome) {
+    onChange({ target: { name: 'categoria', value: nome } })
+    setOpen(false)
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <input
+        type="text"
+        name="categoria"
+        value={value}
+        required
+        autoComplete="off"
+        placeholder="Digite pra buscar ou escolha..."
+        onChange={(e) => { onChange(e); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        style={{ paddingRight: 30 }}
+      />
+      <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)', fontSize: 11 }}>▼</span>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 50,
+          maxHeight: 240, overflowY: 'auto',
+          background: 'var(--card-bg, var(--bg))', border: '1px solid var(--border)',
+          borderRadius: 8, boxShadow: '0 10px 28px rgba(0,0,0,.22)', padding: 4,
+        }}>
+          {filtradas.length === 0 ? (
+            <div style={{ padding: '9px 10px', color: 'var(--text-muted)', fontSize: 14 }}>Nenhuma categoria encontrada.</div>
+          ) : filtradas.map((c) => {
+            const sel = c.nome === value
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => escolher(c.nome)}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '9px 10px', border: 'none', borderRadius: 6, cursor: 'pointer',
+                  background: sel ? 'var(--primary-ring)' : 'transparent',
+                  color: 'var(--text)', fontSize: 14.5, fontWeight: sel ? 700 : 500,
+                }}
+                onMouseEnter={(e) => { if (!sel) e.currentTarget.style.background = 'color-mix(in srgb, var(--bg), var(--border) 60%)' }}
+                onMouseLeave={(e) => { if (!sel) e.currentTarget.style.background = 'transparent' }}
+              >
+                {c.nome}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Produtos() {
   const { profile, empresa } = useAuth()
   const [copiadoLink, setCopiadoLink] = useState(false)
@@ -871,20 +943,7 @@ export default function Produtos() {
 
                 <div className="form-field">
                   <label>Categoria</label>
-                  <input
-                    list="cats-produto"
-                    name="categoria"
-                    value={form.categoria}
-                    onChange={handleChange}
-                    placeholder="Digite pra buscar ou escolha..."
-                    autoComplete="off"
-                    required
-                  />
-                  <datalist id="cats-produto">
-                    {categorias.map((c) => (
-                      <option key={c.id} value={c.nome} />
-                    ))}
-                  </datalist>
+                  <CategoriaCombobox categorias={categorias} value={form.categoria} onChange={handleChange} />
                 </div>
 
                 {/* Embalagem escondida por enquanto (sem utilidade ainda) */}
