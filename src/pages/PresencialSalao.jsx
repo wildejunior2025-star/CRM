@@ -157,6 +157,22 @@ export default function PresencialSalao() {
     setBusca(''); setCategoriaSel(null); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true)
   }
 
+  // Fecha o drawer da mesa. Se a mesa foi só ABERTA e não tem NADA (nenhum item
+  // lançado e nenhum rascunho), desocupa: apaga a comanda vazia e libera a mesa —
+  // assim "olhar" a mesa não deixa ela ocupada com R$ 0,00.
+  async function sairDaMesa() {
+    const c = comandaSel
+    if (c && c.status === 'aberta' && (c.comanda_itens ?? []).length === 0 && rascunho.length === 0) {
+      await supabase.from('comandas').delete().eq('id', c.id)
+      await supabase.from('mesas').update({ status: 'livre' }).eq('id', c.mesa_id)
+      if (rascunhoKey) { try { localStorage.removeItem(rascunhoKey) } catch { /* ignora */ } }
+      setMesaSel(null)
+      await loadAll()
+      return
+    }
+    setMesaSel(null)
+  }
+
   // Adicionar item agora vai pro RASCUNHO (não vai pra cozinha ainda). Só quando o
   // garçom clica "Enviar para a cozinha" é que os itens são gravados e impressos.
   function addItem(produto) {
@@ -467,7 +483,7 @@ export default function PresencialSalao() {
 
       {/* ── Drawer da comanda ── */}
       {mesaSel && comandaSel && (
-        <div onClick={() => setMesaSel(null)}
+        <div onClick={sairDaMesa}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 900, display: 'flex', justifyContent: 'flex-end' }}>
           <div onClick={e => e.stopPropagation()}
             style={{ width: 'min(460px, 100%)', height: '100%', background: 'var(--bg)', display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--border)' }}>
@@ -486,7 +502,7 @@ export default function PresencialSalao() {
                   </div>
                 ) : null}
               </div>
-              <button type="button" onClick={() => setMesaSel(null)} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-muted)' }}>×</button>
+              <button type="button" onClick={sairDaMesa} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-muted)' }}>×</button>
             </div>
 
             {/* corpo */}
