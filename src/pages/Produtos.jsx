@@ -904,6 +904,8 @@ export default function Produtos() {
                 </div>
                 )}
 
+                {/* Unidades por caixa só faz sentido quando controla estoque (ex.: caixa de bebida) */}
+                {form.controla_estoque && (
                 <div className="form-field">
                   <label>Unidades por caixa</label>
                   <input
@@ -914,6 +916,7 @@ export default function Produtos() {
                     onChange={handleChange}
                   />
                 </div>
+                )}
 
                 <div className="form-field">
                   <label>
@@ -1061,6 +1064,8 @@ export default function Produtos() {
                   </button>
                 </div>
 
+                {/* Estoque mínimo só quando controla estoque */}
+                {form.controla_estoque && (
                 <div className="form-field">
                   <label>Estoque mínimo</label>
                   <input
@@ -1072,6 +1077,7 @@ export default function Produtos() {
                     onChange={handleChange}
                   />
                 </div>
+                )}
 
                 <div className="form-field">
                   <label style={{ display: 'block', marginBottom: 6 }}>Disponibilidade</label>
