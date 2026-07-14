@@ -214,6 +214,12 @@
   transition: border-color 120ms ease, background-color 160ms ease;
 }
 
+/* Campo ainda vazio: fundo cinza bem clarinho (quase branco) pra destacar o que já foi preenchido */
+.form-field input:placeholder-shown,
+.form-field textarea:placeholder-shown {
+  background: color-mix(in srgb, var(--bg), var(--border) 45%);
+}
+
 .form-field input:focus,
 .form-field select:focus,
 .form-field textarea:focus {

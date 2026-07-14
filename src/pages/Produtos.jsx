@@ -826,6 +826,7 @@ export default function Produtos() {
                     name="nome"
                     value={form.nome}
                     onChange={handleChange}
+                    placeholder="Ex: Café com leite"
                     required
                   />
                 </div>
