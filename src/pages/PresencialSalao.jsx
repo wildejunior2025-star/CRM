@@ -246,6 +246,10 @@ export default function PresencialSalao() {
   }
 
   async function mudarQtd(item, delta) {
+    if (comandaSel?.status === 'aguardando_conferencia') {
+      window.alert('Conta já fechada, aguardando o ADM liberar a mesa. Não dá pra mexer nos itens.')
+      return
+    }
     const nova = item.quantidade + delta
     if (nova <= 0) await supabase.from('comanda_itens').delete().eq('id', item.id)
     else await supabase.from('comanda_itens').update({ quantidade: nova }).eq('id', item.id)
@@ -387,6 +391,16 @@ export default function PresencialSalao() {
   // ADM confere o pagamento e libera a mesa de vez (a partir do que o garçom fechou).
   async function confirmarLiberarAdm() {
     if (!comandaSel) return
+    // Conta sem itens (ex.: todos removidos): não gera venda R$ 0 — cancela e libera a mesa.
+    if (subtotalSel <= 0) {
+      setSalvando(true)
+      await supabase.from('comandas').update({ status: 'cancelada' }).eq('id', comandaSel.id)
+      await supabase.from('mesas').update({ status: 'livre' }).eq('id', mesaSel.id)
+      setSalvando(false)
+      setMesaSel(null)
+      await loadAll()
+      return
+    }
     const pend = comandaSel.fechamento_pendente || {}
     const lista = Array.isArray(pend.pagamentos) && pend.pagamentos.length
       ? pend.pagamentos
@@ -730,13 +744,19 @@ export default function PresencialSalao() {
                   </div>
                   {ehAdmin ? (
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button type="button" onClick={abrirFechamento}
-                        style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
-                        Revisar
+                      <button type="button" onClick={cancelarMesa}
+                        style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}>
+                        Cancelar
                       </button>
+                      {subtotalSel > 0 && (
+                        <button type="button" onClick={abrirFechamento}
+                          style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
+                          Revisar
+                        </button>
+                      )}
                       <button type="button" onClick={confirmarLiberarAdm} disabled={salvando}
                         className="btn btn-primary" style={{ flex: 1, marginTop: 0 }}>
-                        {salvando ? 'Liberando...' : '✅ Confirmar e liberar mesa'}
+                        {salvando ? 'Liberando...' : (subtotalSel <= 0 ? '✅ Liberar mesa (sem itens)' : '✅ Confirmar e liberar mesa')}
                       </button>
                     </div>
                   ) : (
