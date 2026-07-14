@@ -508,9 +508,9 @@ export default function PresencialSalao() {
             {/* corpo */}
             <div style={{ flex: 1, overflowY: 'auto', padding: 18 }}>
               {/* itens lançados */}
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Comanda</div>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Comanda</div>
               {(comandaSel.comanda_itens ?? []).length === 0 ? (
-                <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nenhum item ainda. Adicione abaixo.</p>
+                <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum item ainda. Adicione abaixo.</p>
               ) : (
                 (comandaSel.comanda_itens ?? [])
                   .slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
@@ -614,13 +614,13 @@ export default function PresencialSalao() {
               )}
 
               {/* adicionar item */}
-              <div style={{ fontSize: 13, fontWeight: 700, margin: '18px 0 8px' }}>Adicionar item</div>
+              <div style={{ fontSize: 15, fontWeight: 700, margin: '18px 0 8px' }}>Adicionar item</div>
 
               {/* ── Inventar produto (item fora do catálogo) ── */}
               {!invAberto ? (
                 <button type="button" onClick={() => setInvAberto(true)}
                   style={{ width: '100%', padding: '9px 0', borderRadius: 8, marginBottom: 8, cursor: 'pointer',
-                    border: '1.5px dashed var(--primary)', background: 'rgba(124,58,237,.06)', color: 'var(--primary)', fontSize: 13, fontWeight: 700 }}>
+                    border: '1.5px dashed var(--primary)', background: 'rgba(124,58,237,.06)', color: 'var(--primary)', fontSize: 14.5, fontWeight: 700 }}>
                   ➕ Inventar produto
                 </button>
               ) : (
@@ -664,7 +664,7 @@ export default function PresencialSalao() {
 
               <div style={{ position: 'relative', marginBottom: 8 }}>
                 <input ref={buscaRef} value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar produto..."
-                  style={{ width: '100%', padding: '10px 38px 10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box' }} />
+                  style={{ width: '100%', padding: '10px 38px 10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box', fontSize: 14.5 }} />
                 {busca && (
                   <button type="button" title="Limpar" aria-label="Limpar busca"
                     onClick={() => { setBusca(''); if (buscaRef.current) buscaRef.current.focus() }}
@@ -680,18 +680,18 @@ export default function PresencialSalao() {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {categorias.map(cat => (
                     <button key={cat} type="button" onClick={() => setCategoriaSel(cat)}
-                      style={{ padding: '10px 14px', borderRadius: 999, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 13.5, fontWeight: 600 }}>
+                      style={{ padding: '10px 14px', borderRadius: 999, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 15, fontWeight: 600 }}>
                       {cat}
                     </button>
                   ))}
-                  {categorias.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nenhuma categoria com produtos.</p>}
+                  {categorias.length === 0 && <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhuma categoria com produtos.</p>}
                 </div>
               )}
 
               {/* Categoria escolhida (e sem busca): botão de voltar + produtos dela. */}
               {!busca.trim() && categoriaSel && (
                 <button type="button" onClick={() => setCategoriaSel(null)}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 8, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--primary)', fontSize: 13, fontWeight: 700 }}>
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 8, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--primary)', fontSize: 14.5, fontWeight: 700 }}>
                   ← {categoriaSel}
                 </button>
               )}
@@ -702,11 +702,11 @@ export default function PresencialSalao() {
                   {produtosFiltrados.map(p => (
                     <button key={p.produto_id} type="button" onClick={() => addItem(p)}
                       style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', textAlign: 'left' }}>
-                      <span style={{ fontSize: 13.5 }}>{p.nome}</span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--primary)' }}>+ {fmt(p.preco_venda)}</span>
+                      <span style={{ fontSize: 15 }}>{p.nome}</span>
+                      <span style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--primary)' }}>+ {fmt(p.preco_venda)}</span>
                     </button>
                   ))}
-                  {produtosFiltrados.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nenhum produto encontrado.</p>}
+                  {produtosFiltrados.length === 0 && <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum produto encontrado.</p>}
                 </div>
               )}
             </div>
@@ -720,7 +720,7 @@ export default function PresencialSalao() {
                   {enviando ? 'Enviando...' : `🍳 Enviar para a cozinha · ${rascunho.reduce((s, r) => s + r.quantidade, 0)} item(ns) · ${fmt(subtotalRascunho)}`}
                 </button>
               )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15.5, marginBottom: 4 }}>
                 <span>Subtotal</span><strong>{fmt(subtotalSel)}</strong>
               </div>
               {comandaSel.status === 'aguardando_conferencia' ? (
