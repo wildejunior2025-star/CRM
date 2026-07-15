@@ -232,7 +232,16 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
         )
       })()}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, margin: '4px 0 10px' }}>
-        <div style={{ fontSize: 14, color: 'var(--text-muted)', flex: 1 }}>📍 {endereco}</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>📍 {endereco}</div>
+          {/* Complemento / ponto de referência (apto, bloco, "casa dos fundos"...) — o motoqueiro
+              precisava olhar na comanda impressa porque não aparecia aqui. */}
+          {pedido.endereco_complemento && (
+            <div style={{ fontSize: 13.5, fontWeight: 800, color: '#7c3aed', marginTop: 3 }}>
+              🏠 {pedido.endereco_complemento}
+            </div>
+          )}
+        </div>
         <a href={mapsUrl(pedido)} target="_blank" rel="noopener noreferrer"
           title="Ver o ponto no mapa"
           style={{ flexShrink: 0, fontSize: 12, fontWeight: 700, color: '#7c3aed', textDecoration: 'none',
