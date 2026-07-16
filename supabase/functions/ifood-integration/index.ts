@@ -316,6 +316,10 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     ifood_valores: ifoodValores,
     // Horário previsto de entrega que o iFood informa (mostrado pro motoboy)
     entrega_prevista_at: o.delivery?.deliveryDateTime ?? null,
+    // Endereço FISCAL do cliente (SINIEF 9/26). O iFood passa a mandar em
+    // pedidos de RETIRADA a partir de 03/08/2026. Só usado pra NFC-e — NÃO é o
+    // endereço da operação/rota (esse continua em endereco_*). Fica null até lá.
+    ifood_billing_address: o.customer?.billingAddress ?? null,
   }
 
   const { error } = await sb.from("pedidos_delivery").insert(novo)

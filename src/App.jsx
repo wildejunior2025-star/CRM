@@ -260,6 +260,10 @@ export default function App() {
               element={<ProtectedRoute roles={['admin']} modulo="delivery"><MinhaLoja secao="integracoes" /></ProtectedRoute>}
             />
             <Route
+              path="loja-fiscal"
+              element={<ProtectedRoute roles={['admin']} modulo="delivery"><MinhaLoja secao="fiscal" /></ProtectedRoute>}
+            />
+            <Route
               path="loja-conta"
               element={<ProtectedRoute roles={['admin']} modulo="delivery"><MinhaLoja secao="conta" /></ProtectedRoute>}
             />

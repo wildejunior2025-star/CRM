@@ -7,7 +7,7 @@ import '../components/Page.css'
 
 export default function MinhaLoja({ secao = 'loja' }) {
   const { empresa, refreshProfile } = useAuth()
-  const SECAO_TITULO = { loja: 'Minha Loja', pagamentos: 'Pagamento', integracoes: 'Integrações', conta: 'Conta' }
+  const SECAO_TITULO = { loja: 'Minha Loja', pagamentos: 'Pagamento', integracoes: 'Integrações', fiscal: 'Nota Fiscal', conta: 'Conta' }
 
   const [nome, setNome] = useState('')
   const [descricao, setDescricao] = useState('')
@@ -61,6 +61,41 @@ export default function MinhaLoja({ secao = 'loja' }) {
   const [ifoodItensLoading, setIfoodItensLoading] = useState(false)
   const [ifoodPausandoId, setIfoodPausandoId] = useState(null)
   const [ifoodAjuda, setIfoodAjuda] = useState(false) // popup "onde encontro o Merchant ID"
+
+  // Nota Fiscal (NFC-e) — cadastro fiscal da loja (opt-in, desligado por padrão)
+  const [fiscalCfg, setFiscalCfg] = useState({
+    ativo: false, inscricao_estadual: '', regime_tributario: 'simples',
+    csc: '', csc_id: '', serie: 1, ambiente: 'homologacao', emissor_token: '',
+    ncm_padrao: '21069090', cfop_padrao: '5102', csosn_padrao: '102', origem_padrao: '0',
+  })
+  const [fiscalSalvando, setFiscalSalvando] = useState(false)
+  const [fiscalMsg, setFiscalMsg] = useState(null) // { tipo, texto }
+
+  async function handleSalvarFiscal(e) {
+    e.preventDefault()
+    if (!empresa) return
+    setFiscalSalvando(true)
+    setFiscalMsg(null)
+    const { error } = await supabase.from('empresa_fiscal').upsert({
+      empresa_id: empresa.id,
+      ativo: fiscalCfg.ativo,
+      inscricao_estadual: fiscalCfg.inscricao_estadual.trim() || null,
+      regime_tributario: fiscalCfg.regime_tributario,
+      csc: fiscalCfg.csc.trim() || null,
+      csc_id: fiscalCfg.csc_id.trim() || null,
+      serie: Number(fiscalCfg.serie) || 1,
+      ambiente: fiscalCfg.ambiente,
+      emissor_token: fiscalCfg.emissor_token.trim() || null,
+      ncm_padrao: fiscalCfg.ncm_padrao.trim() || null,
+      cfop_padrao: fiscalCfg.cfop_padrao.trim() || null,
+      csosn_padrao: fiscalCfg.csosn_padrao.trim() || null,
+      origem_padrao: fiscalCfg.origem_padrao.trim() || null,
+    })
+    setFiscalSalvando(false)
+    setFiscalMsg(error
+      ? { tipo: 'erro', texto: error.message }
+      : { tipo: 'ok', texto: 'Dados fiscais salvos.' })
+  }
 
   async function handleSalvarIfood(e) {
     e.preventDefault()
@@ -223,6 +258,24 @@ export default function MinhaLoja({ secao = 'loja' }) {
           auto_criar_produtos: data.auto_criar_produtos ?? false,
         })
         setIfoodStatus({ ultimo_polling_em: data.ultimo_polling_em, ultimo_erro: data.ultimo_erro })
+      })
+    supabase.from('empresa_fiscal').select('*').eq('empresa_id', empresa.id).maybeSingle()
+      .then(({ data }) => {
+        if (!data) return
+        setFiscalCfg({
+          ativo: data.ativo ?? false,
+          inscricao_estadual: data.inscricao_estadual ?? '',
+          regime_tributario: data.regime_tributario ?? 'simples',
+          csc: data.csc ?? '',
+          csc_id: data.csc_id ?? '',
+          serie: data.serie ?? 1,
+          ambiente: data.ambiente ?? 'homologacao',
+          emissor_token: data.emissor_token ?? '',
+          ncm_padrao: data.ncm_padrao ?? '21069090',
+          cfop_padrao: data.cfop_padrao ?? '5102',
+          csosn_padrao: data.csosn_padrao ?? '102',
+          origem_padrao: data.origem_padrao ?? '0',
+        })
       })
   }, [empresa])
 
@@ -978,6 +1031,175 @@ export default function MinhaLoja({ secao = 'loja' }) {
           </div>
         </div>
       )}
+      </>
+      )}
+
+      {secao === 'fiscal' && (
+      <>
+      <form onSubmit={handleSalvarFiscal} style={{ marginTop: 16 }}>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Nota Fiscal (NFC-e)</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
+            Preencha os dados fiscais da loja para poder emitir a NFC-e (cupom fiscal do
+            consumidor) dos pedidos. A emissão é <strong>opcional e sob demanda</strong>: você
+            escolhe em quais pedidos emitir — nada sai automático.
+          </p>
+
+          {fiscalMsg && (
+            <div style={{
+              background: fiscalMsg.tipo === 'ok' ? 'var(--success-bg)' : 'var(--danger-bg)',
+              color: fiscalMsg.tipo === 'ok' ? 'var(--success)' : 'var(--danger)',
+              border: `1px solid ${fiscalMsg.tipo === 'ok' ? 'var(--success)' : 'var(--danger)'}`,
+              borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 14,
+            }}>
+              {fiscalMsg.texto}
+            </div>
+          )}
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={fiscalCfg.ativo}
+              onChange={e => setFiscalCfg({ ...fiscalCfg, ativo: e.target.checked })}
+              style={{ width: 18, height: 18 }}
+            />
+            <span style={{ fontSize: 14, fontWeight: 600 }}>Habilitar emissão de NFC-e nesta loja</span>
+          </label>
+
+          <div className="form-grid">
+            <div className="form-field">
+              <label>CNPJ</label>
+              <input value={cnpj} disabled placeholder="Cadastre na aba Conta" style={{ opacity: 0.7 }} />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Editar em Minha Loja → Conta</span>
+            </div>
+            <div className="form-field">
+              <label>Inscrição Estadual</label>
+              <input
+                value={fiscalCfg.inscricao_estadual}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, inscricao_estadual: e.target.value })}
+                placeholder="Somente números"
+              />
+            </div>
+            <div className="form-field">
+              <label>Regime tributário</label>
+              <select
+                value={fiscalCfg.regime_tributario}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, regime_tributario: e.target.value })}
+              >
+                <option value="simples">Simples Nacional</option>
+                <option value="simples_excesso">Simples Nacional - excesso de sublimite</option>
+                <option value="normal">Regime Normal</option>
+              </select>
+            </div>
+            <div className="form-field">
+              <label>Ambiente</label>
+              <select
+                value={fiscalCfg.ambiente}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, ambiente: e.target.value })}
+              >
+                <option value="homologacao">Homologação (teste)</option>
+                <option value="producao">Produção (nota válida)</option>
+              </select>
+            </div>
+          </div>
+
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: '20px 0 4px' }}>Segurança do contribuinte (CSC)</h3>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0, marginBottom: 12 }}>
+            O CSC e o ID do CSC são gerados no portal da SEFAZ do seu estado (menu de NFC-e).
+          </p>
+          <div className="form-grid">
+            <div className="form-field">
+              <label>ID do CSC</label>
+              <input
+                value={fiscalCfg.csc_id}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, csc_id: e.target.value })}
+                placeholder="Ex: 000001"
+              />
+            </div>
+            <div className="form-field">
+              <label>Série da NFC-e</label>
+              <input
+                type="number" min={1}
+                value={fiscalCfg.serie}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, serie: e.target.value })}
+              />
+            </div>
+            <div className="form-field full">
+              <label>Código CSC (token)</label>
+              <input
+                value={fiscalCfg.csc}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, csc: e.target.value })}
+                placeholder="Token de segurança do contribuinte"
+              />
+            </div>
+            <div className="form-field full">
+              <label>Chave da API do emissor (PlugNotas) — opcional por enquanto</label>
+              <input
+                value={fiscalCfg.emissor_token}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, emissor_token: e.target.value })}
+                placeholder="Preenchido quando a integração de emissão for ligada"
+              />
+            </div>
+          </div>
+
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: '20px 0 4px' }}>Classificação fiscal padrão dos produtos</h3>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0, marginBottom: 12 }}>
+            Aplicado a todos os produtos na hora de emitir. Os valores abaixo servem para a maioria
+            das lojas de comida — só mude se seu contador orientar diferente.
+          </p>
+          <div className="form-grid">
+            <div className="form-field">
+              <label>NCM padrão</label>
+              <input
+                value={fiscalCfg.ncm_padrao}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, ncm_padrao: e.target.value })}
+                placeholder="21069090"
+              />
+            </div>
+            <div className="form-field">
+              <label>CFOP padrão</label>
+              <input
+                value={fiscalCfg.cfop_padrao}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, cfop_padrao: e.target.value })}
+                placeholder="5102"
+              />
+            </div>
+            <div className="form-field">
+              <label>CSOSN / CST padrão</label>
+              <input
+                value={fiscalCfg.csosn_padrao}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, csosn_padrao: e.target.value })}
+                placeholder="102"
+              />
+            </div>
+            <div className="form-field">
+              <label>Origem da mercadoria</label>
+              <select
+                value={fiscalCfg.origem_padrao}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, origem_padrao: e.target.value })}
+              >
+                <option value="0">0 - Nacional</option>
+                <option value="1">1 - Estrangeira (importação direta)</option>
+                <option value="2">2 - Estrangeira (mercado interno)</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{
+            marginTop: 16, padding: '12px 14px', borderRadius: 8,
+            background: 'var(--primary-bg)', color: 'var(--text)',
+            border: '1px solid var(--primary)', fontSize: 13,
+          }}>
+            📄 <strong>Falta o certificado digital A1</strong> (arquivo .pfx) da loja para emitir de
+            verdade. O upload dele e o botão de emitir no pedido entram no próximo passo. Enquanto
+            isso, você já pode deixar todo o cadastro pronto aqui.
+          </div>
+
+          <button type="submit" className="btn btn-primary" disabled={fiscalSalvando} style={{ marginTop: 16 }}>
+            {fiscalSalvando ? 'Salvando...' : 'Salvar dados fiscais'}
+          </button>
+        </div>
+      </form>
       </>
       )}
 
