@@ -70,6 +70,66 @@ export default function MinhaLoja({ secao = 'loja' }) {
   })
   const [fiscalSalvando, setFiscalSalvando] = useState(false)
   const [fiscalMsg, setFiscalMsg] = useState(null) // { tipo, texto }
+  // Certificado A1 + registro no emissor (Focus)
+  const [certNome, setCertNome] = useState('')       // nome do .pfx já subido
+  const [certRegistrada, setCertRegistrada] = useState(false)
+  const [certArquivo, setCertArquivo] = useState(null) // File selecionado
+  const [certSenha, setCertSenha] = useState('')
+  const [certEnviando, setCertEnviando] = useState(false)
+  const certInputRef = useRef(null)
+
+  const FN_BASE = import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'
+
+  async function handleSubirCertificado(e) {
+    e.preventDefault()
+    if (!empresa) return
+    if (!certArquivo) { setFiscalMsg({ tipo: 'erro', texto: 'Escolha o arquivo do certificado (.pfx)' }); return }
+    if (!certSenha) { setFiscalMsg({ tipo: 'erro', texto: 'Informe a senha do certificado' }); return }
+    setCertEnviando(true)
+    setFiscalMsg(null)
+
+    // 1) sobe o .pfx no bucket privado (path = empresa_id/certificado.pfx)
+    const ext = certArquivo.name.split('.').pop().toLowerCase()
+    const path = `${empresa.id}/certificado.${ext === 'p12' ? 'p12' : 'pfx'}`
+    const up = await supabase.storage.from('certificados-fiscais')
+      .upload(path, certArquivo, { upsert: true, contentType: 'application/x-pkcs12' })
+    if (up.error) {
+      setCertEnviando(false)
+      setFiscalMsg({ tipo: 'erro', texto: `Erro ao subir o certificado: ${up.error.message}` })
+      return
+    }
+    // 2) guarda a referência no cadastro fiscal
+    await supabase.from('empresa_fiscal').upsert({
+      empresa_id: empresa.id, certificado_ref: path, certificado_nome: certArquivo.name,
+    })
+
+    // 3) registra a loja no emissor (Focus) mandando a senha (não fica salva)
+    const { data: { session } } = await supabase.auth.getSession()
+    let resp
+    try {
+      const r = await fetch(`${FN_BASE}/functions/v1/emitir-nfce`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ acao: 'registrar_empresa', empresa_id: empresa.id, senha_certificado: certSenha }),
+      })
+      resp = await r.json()
+    } catch (err) {
+      resp = { ok: false, error: String(err) }
+    }
+
+    setCertEnviando(false)
+    setCertSenha('')
+    setCertArquivo(null)
+    if (certInputRef.current) certInputRef.current.value = ''
+    setCertNome(certArquivo.name)
+    if (resp?.ok) {
+      setCertRegistrada(true)
+      setFiscalMsg({ tipo: 'ok', texto: resp.mensagem || 'Loja registrada no emissor. Já pode emitir NFC-e!' })
+    } else {
+      setCertRegistrada(false)
+      setFiscalMsg({ tipo: 'erro', texto: resp?.error || 'Não foi possível registrar no emissor.' })
+    }
+  }
 
   async function handleSalvarFiscal(e) {
     e.preventDefault()
@@ -276,6 +336,8 @@ export default function MinhaLoja({ secao = 'loja' }) {
           csosn_padrao: data.csosn_padrao ?? '102',
           origem_padrao: data.origem_padrao ?? '0',
         })
+        setCertNome(data.certificado_nome ?? '')
+        setCertRegistrada(data.focus_registrada ?? false)
       })
   }, [empresa])
 
@@ -1185,19 +1247,65 @@ export default function MinhaLoja({ secao = 'loja' }) {
             </div>
           </div>
 
-          <div style={{
-            marginTop: 16, padding: '12px 14px', borderRadius: 8,
-            background: 'var(--primary-bg)', color: 'var(--text)',
-            border: '1px solid var(--primary)', fontSize: 13,
-          }}>
-            📄 <strong>Falta o certificado digital A1</strong> (arquivo .pfx) da loja para emitir de
-            verdade. O upload dele e o botão de emitir no pedido entram no próximo passo. Enquanto
-            isso, você já pode deixar todo o cadastro pronto aqui.
-          </div>
-
           <button type="submit" className="btn btn-primary" disabled={fiscalSalvando} style={{ marginTop: 16 }}>
             {fiscalSalvando ? 'Salvando...' : 'Salvar dados fiscais'}
           </button>
+        </div>
+      </form>
+
+      {/* Card do certificado A1 — o único passo manual pra loja emitir */}
+      <form onSubmit={handleSubirCertificado}>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Certificado digital A1</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 14 }}>
+            Suba o certificado <strong>A1 (.pfx)</strong> da loja e informe a senha. Depois disso a
+            loja já fica pronta pra emitir NFC-e. A senha é usada só pra registrar no emissor e
+            <strong> não fica salva</strong>.
+          </p>
+
+          {certNome && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+              padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13,
+              background: certRegistrada ? 'var(--success-bg)' : 'var(--primary-bg)',
+              color: certRegistrada ? 'var(--success)' : 'var(--text)',
+              border: `1px solid ${certRegistrada ? 'var(--success)' : 'var(--primary)'}`,
+            }}>
+              {certRegistrada ? '✅' : '📄'} <strong>{certNome}</strong>
+              {certRegistrada
+                ? <span>· registrado no emissor — pronto pra emitir</span>
+                : <span>· enviado, mas ainda não registrado no emissor</span>}
+            </div>
+          )}
+
+          <div className="form-grid">
+            <div className="form-field">
+              <label>Arquivo do certificado (.pfx / .p12)</label>
+              <input
+                ref={certInputRef}
+                type="file"
+                accept=".pfx,.p12,application/x-pkcs12"
+                onChange={e => setCertArquivo(e.target.files?.[0] ?? null)}
+              />
+            </div>
+            <div className="form-field">
+              <label>Senha do certificado</label>
+              <input
+                type="password"
+                value={certSenha}
+                onChange={e => setCertSenha(e.target.value)}
+                placeholder="senha do arquivo .pfx"
+                autoComplete="off"
+              />
+            </div>
+          </div>
+
+          <button type="submit" className="btn btn-primary" disabled={certEnviando} style={{ marginTop: 16 }}>
+            {certEnviando ? 'Enviando e registrando...' : (certNome ? 'Trocar certificado e registrar' : 'Subir certificado e registrar')}
+          </button>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 0 }}>
+            Não tem o A1? Ele é comprado numa certificadora (ex.: Certisign, Serasa) — custa ~R$ 120–250/ano por CNPJ.
+          </p>
         </div>
       </form>
       </>

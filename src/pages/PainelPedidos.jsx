@@ -1692,7 +1692,7 @@ function SeletorEntregador({ entregadores = [], onAtribuir, pedidoId }) {
   )
 }
 
-function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onAtribuir, onEditar, entregadores = [] }) {
+function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onAtribuir, onEditar, entregadores = [], nfceHabilitada = false, onEmitirNfce, nfceEmitindo }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const pagamento = pedido.forma_pagamento || ''
   const endereco = enderecoCompleto(pedido)
@@ -1838,6 +1838,25 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
               <rect x="6" y="14" width="12" height="8"/>
             </svg>
           </button>
+          {/* Emitir NFC-e — só aparece se a loja habilitou a nota fiscal */}
+          {nfceHabilitada && onEmitirNfce && (
+            <button
+              type="button"
+              title="Emitir NFC-e deste pedido"
+              aria-label="Emitir NFC-e"
+              disabled={nfceEmitindo === pedido.id}
+              onClick={() => onEmitirNfce(pedido)}
+              style={{
+                background: 'none', border: '1px solid var(--border)', borderRadius: 6,
+                cursor: nfceEmitindo === pedido.id ? 'wait' : 'pointer', padding: '2px 6px',
+                display: 'flex', alignItems: 'center', gap: 4,
+                color: 'var(--primary)', fontSize: 11, fontWeight: 700,
+                opacity: nfceEmitindo === pedido.id ? 0.6 : 1,
+              }}
+            >
+              🧾 {nfceEmitindo === pedido.id ? '...' : 'NFC-e'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -3227,6 +3246,42 @@ export default function PainelPedidos() {
   const [modalCodRetirada, setModalCodRetirada] = useState(null) // retirada aguardando o código do cliente
   const [autoImprimir, setAutoImprimir] = useState(autoImprimirAtivo)
   const [aceitarAuto, setAceitarAuto] = useState(aceitarAutoAtivo)
+  // NFC-e: a loja habilitou a emissão E registrou o certificado no emissor?
+  const [nfceHabilitada, setNfceHabilitada] = useState(false)
+  const [nfceEmitindo, setNfceEmitindo] = useState(null) // id do pedido em emissão
+  useEffect(() => {
+    if (!empresa?.id) return
+    supabase.from('empresa_fiscal').select('ativo, focus_registrada').eq('empresa_id', empresa.id).maybeSingle()
+      .then(({ data }) => setNfceHabilitada(!!(data?.ativo && data?.focus_registrada)))
+  }, [empresa?.id])
+
+  async function handleEmitirNfce(pedido) {
+    if (!pedido?.id) return
+    setNfceEmitindo(pedido.id)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const base = import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'
+      const r = await fetch(`${base}/functions/v1/emitir-nfce`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ acao: 'emitir', pedido_id: pedido.id }),
+      })
+      const resp = await r.json()
+      if (resp?.ok || resp?.ja_emitida) {
+        const danfe = resp?.nota?.danfe_url
+        if (danfe) window.open(danfe, '_blank')
+        alert(resp?.ja_emitida ? 'NFC-e já emitida para este pedido.' : 'NFC-e autorizada! Abrindo o cupom (DANFE).')
+      } else if (resp?.status === 'processando') {
+        alert('NFC-e enviada, aguardando autorização da SEFAZ. Consulte em instantes.')
+      } else {
+        alert(`Não foi possível emitir a NFC-e:\n${resp?.mensagem || resp?.error || 'erro desconhecido'}`)
+      }
+    } catch (e) {
+      alert(`Erro ao emitir NFC-e: ${e}`)
+    } finally {
+      setNfceEmitindo(null)
+    }
+  }
   // App Impressora FWC conectado + com impressora? Se sim, ele imprime os
   // pedidos (delivery/balcão) sozinho — o navegador NÃO imprime junto (evita 2x).
   const [fwcAppImprime, setFwcAppImprime] = useState(false)
@@ -4651,6 +4706,9 @@ export default function PainelPedidos() {
                       onAtribuir={handleAtribuirEntregador}
                       onEnviarMensagem={(ped) => setPedidoMensagem(ped)}
                       onImprimir={handleImprimir}
+                      nfceHabilitada={nfceHabilitada}
+                      onEmitirNfce={handleEmitirNfce}
+                      nfceEmitindo={nfceEmitindo}
                     />
                   ))}
                 </Coluna>
@@ -4802,6 +4860,9 @@ export default function PainelPedidos() {
               onEnviarMensagem={(p) => { setPedidoMensagem(p); setPedidoDetalhe(null) }}
               onImprimir={handleImprimir}
               entregadores={entregadores}
+              nfceHabilitada={nfceHabilitada}
+              onEmitirNfce={handleEmitirNfce}
+              nfceEmitindo={nfceEmitindo}
             />
           </div>
         </div>
