@@ -5501,10 +5501,11 @@ export default function PainelPedidos() {
         })}
       </nav>
 
-      {/* ── MESAS / SALÃO em tela cheia (cobre tudo; botão volta pros pedidos) ── */}
+      {/* ── MESAS / SALÃO em painel (NÃO cobre a barra lateral esquerda; ver
+           .gestor-salao-overlay no Layout.css). Botão "← Pedidos" volta pro grid. ── */}
       {painelDireito === 'salao' && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
+        <div className="gestor-salao-overlay" style={{
+          position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 60,
           background: 'var(--bg, #0f1420)', display: 'flex', flexDirection: 'column',
         }}>
           {/* Sub-abas + voltar: tudo do salão no mesmo canto */}
