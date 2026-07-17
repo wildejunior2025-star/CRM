@@ -167,7 +167,8 @@ function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente =
   lista.forEach((it) => {
     const q = it.quantidade ?? it.qtd ?? 1
     parts.push(SIZE(0x11), BOLD(1), linha(q + ' ' + (it.nome || 'Item')), BOLD(0), SIZE(0))
-    if (it.observacao) parts.push(linha('  obs: ' + it.observacao))
+    // Observação também GRANDE (fonte alta + negrito), pra cozinha ler fácil.
+    if (it.observacao) parts.push(SIZE(0x01), BOLD(1), linha('obs: ' + it.observacao), BOLD(0), SIZE(0))
     parts.push(divisor(), NL)
   })
   if (!lista.length) parts.push(linha('(sem itens)'))

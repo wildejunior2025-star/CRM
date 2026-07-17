@@ -362,7 +362,7 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
   ul { list-style: none; margin: 0; padding: 0; }
   li { margin-bottom: 4px; }
   .it { font-size: 24px; font-weight: 800; line-height: 1.25; }
-  .obs { font-size: 17px; padding-left: 12px; margin-top: 2px; }
+  .obs { font-size: 22px; font-weight: 700; padding-left: 12px; margin-top: 2px; }
   .sep { border-top: 1px dashed #000; margin: 10px 0 18px; }
   .rodape { text-align: center; font-size: 14px; margin-top: 8px; }
 </style></head><body>
