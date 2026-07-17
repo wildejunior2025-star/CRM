@@ -377,7 +377,7 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
   <ul>${linhas || '<li>—</li>'}</ul>
   ${obsGeral ? `<div class="obs">${esc(obsGeral)}</div>` : ''}
   ${rodape ? `<div class="rodape">${esc(rodape)}</div>` : ''}
-  <div style="height:12mm"></div>
+  <div style="height:${Math.max(12, 56 - (itens.length || 1) * 16)}mm"></div>
 </body></html>`
 }
 
