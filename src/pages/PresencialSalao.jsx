@@ -532,7 +532,7 @@ export default function PresencialSalao() {
                     <div key={item.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 14, fontWeight: 600 }}>{item.nome}</div>
+                          <div style={{ fontSize: 15.5, fontWeight: 700 }}>{item.nome}</div>
                           <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                             <span>
                               {fmt(item.preco_unitario)} · {
@@ -585,7 +585,7 @@ export default function PresencialSalao() {
                         onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
                         placeholder="📝 Observação (ex: sem cebola, sem gelo, ponto da carne...)"
                         style={{
-                          width: '100%', marginTop: 6, padding: '6px 10px', fontSize: 12.5,
+                          width: '100%', marginTop: 6, padding: '8px 10px', fontSize: 14.5, fontWeight: 600,
                           borderRadius: 8, border: '1px solid var(--border)',
                           background: 'var(--input-bg, var(--bg))', color: 'var(--text)',
                         }}
@@ -604,8 +604,8 @@ export default function PresencialSalao() {
                     <div key={r.produto_id} style={{ padding: '5px 0' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13.5, fontWeight: 600 }}>{r.nome}</div>
-                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmt(r.preco_venda)}</div>
+                          <div style={{ fontSize: 15.5, fontWeight: 700 }}>{r.nome}</div>
+                          <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{fmt(r.preco_venda)}</div>
                         </div>
                         <button type="button" onClick={() => mudarQtdRascunho(r.produto_id, -1)} style={qtdBtn}>−</button>
                         <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{r.quantidade}</span>
@@ -617,7 +617,7 @@ export default function PresencialSalao() {
                         onChange={e => mudarObsRascunho(r.produto_id, e.target.value)}
                         placeholder="📝 Observação (ex: sem cebola, ponto da carne...)"
                         style={{
-                          width: '100%', marginTop: 6, padding: '6px 10px', fontSize: 12.5, boxSizing: 'border-box',
+                          width: '100%', marginTop: 6, padding: '8px 10px', fontSize: 14.5, fontWeight: 600, boxSizing: 'border-box',
                           borderRadius: 8, border: '1px solid var(--border)',
                           background: 'var(--input-bg, var(--bg))', color: 'var(--text)',
                         }}
@@ -694,7 +694,7 @@ export default function PresencialSalao() {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {categorias.map(cat => (
                     <button key={cat} type="button" onClick={() => setCategoriaSel(cat)}
-                      style={{ padding: '10px 14px', borderRadius: 999, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 15, fontWeight: 600 }}>
+                      style={{ padding: '12px 18px', borderRadius: 999, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 17.5, fontWeight: 700 }}>
                       {cat}
                     </button>
                   ))}
@@ -716,8 +716,8 @@ export default function PresencialSalao() {
                   {produtosFiltrados.map(p => (
                     <button key={p.produto_id} type="button" onClick={() => addItem(p)}
                       style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', textAlign: 'left' }}>
-                      <span style={{ fontSize: 15 }}>{p.nome}</span>
-                      <span style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--primary)' }}>+ {fmt(p.preco_venda)}</span>
+                      <span style={{ fontSize: 17.5, fontWeight: 600 }}>{p.nome}</span>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--primary)' }}>+ {fmt(p.preco_venda)}</span>
                     </button>
                   ))}
                   {produtosFiltrados.length === 0 && <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum produto encontrado.</p>}
