@@ -31,13 +31,20 @@ function LayoutOrLanding() {
 function HostnameRedirect() {
   const navigate = useNavigate()
   const { pathname } = useLocation()
-  const { profile, loading } = useAuth()
+  const { profile, empresa, loading } = useAuth()
   useEffect(() => {
     if (loading) return
     const h = window.location.hostname
     const isPublic = PUBLIC_PREFIXES.some(p => pathname.startsWith(p))
     if (isPublic) return
     const perfil = profile?.perfil
+
+    // Super admin SEM loja não usa o gestor (/painel é por loja): sai sozinho pro
+    // painel dele. Se estiver impersonando uma loja (tem empresa), deixa usar.
+    if (perfil === 'super_admin' && !empresa && pathname.startsWith('/painel')) {
+      if (!pathname.startsWith('/super-admin')) navigate('/super-admin', { replace: true })
+      return
+    }
 
     // Vendedor só usa o gestor de pedidos (/painel), em qualquer domínio
     if (perfil === 'vendedor') {
@@ -73,10 +80,16 @@ function HostnameRedirect() {
       if (!pathname.startsWith('/super-admin') && pathname !== '/login') {
         navigate('/super-admin', { replace: true })
       }
-    } else if (h === 'gestor.fwcinter.com' && !pathname.startsWith('/painel') && pathname !== '/login') {
-      navigate('/painel', { replace: true })
+    } else if (h === 'gestor.fwcinter.com') {
+      // Super admin sem loja fica no painel dele (pra escolher qual loja entrar);
+      // o guard lá em cima já cuida. Os demais vão pro gestor de pedidos.
+      if (perfil === 'super_admin' && !empresa) {
+        if (!pathname.startsWith('/super-admin')) navigate('/super-admin', { replace: true })
+      } else if (!pathname.startsWith('/painel') && pathname !== '/login') {
+        navigate('/painel', { replace: true })
+      }
     }
-  }, [pathname, navigate, profile, loading])
+  }, [pathname, navigate, profile, empresa, loading])
   return null
 }
 import { AuthProvider } from './context/AuthContext'
