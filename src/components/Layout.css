@@ -138,12 +138,6 @@
   min-width: 0;
 }
 
-/* Mesas/Salão do gestor abre como painel em tela cheia. No DESKTOP ele deve
-   começar DEPOIS da barra lateral (220px) pra não cobrir o menu. No MOBILE a
-   sidebar é um drawer (fora do fluxo), então o painel ocupa left:0. */
-.gestor-salao-overlay { left: 220px; }
-@media (max-width: 768px) { .gestor-salao-overlay { left: 0; } }
-
 /* ── Mobile top bar (oculto no desktop) ── */
 .mobile-topbar {
   display: none;
