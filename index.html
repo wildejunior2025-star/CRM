@@ -10,6 +10,16 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="FWC Inter" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <script>
+      // Favicon branco só no domínio do portal (portal.fwcinter.com).
+      // Nos outros domínios (gestor, admin, app...) fica o roxo.
+      if (location.hostname === 'portal.fwcinter.com') {
+        var _ic = document.querySelector('link[rel="icon"]');
+        if (_ic) _ic.href = '/favicon-branco.png';
+        var _at = document.querySelector('link[rel="apple-touch-icon"]');
+        if (_at) _at.href = '/apple-touch-icon-branco.png';
+      }
+    </script>
     <title>FWC Inter</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

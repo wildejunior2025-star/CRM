@@ -5,7 +5,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useBranding } from '../context/BrandingContext'
 import { supabase } from '../lib/supabaseClient'
 import ThemeToggle from '../components/ThemeToggle'
-import logoFwc from '../assets/logo-fwc-icone.png'
+import { logoFwcIcone as logoFwc, isPortalDomain } from '../lib/logoFwc'
 import './Login.css'
 
 // Botão "Entrar com Google" oculto por enquanto — religar trocando para true.
@@ -123,7 +123,7 @@ export default function Login() {
     />
   ) : (
     <img
-      src={plataformaLogoUrl || logoFwc}
+      src={isPortalDomain ? logoFwc : (plataformaLogoUrl || logoFwc)}
       alt="FWC Inter"
       style={{ height: 48, width: 48, objectFit: 'contain', borderRadius: 10 }}
     />

@@ -5,7 +5,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useBranding } from '../context/BrandingContext'
 import InstallPWA from './InstallPWA'
 import CompletarCadastro from './CompletarCadastro'
-import logoIconeUrl from '../assets/logo-fwc-icone-branco.png'
+import { logoFwcIcone as logoIconeUrl, isPortalDomain } from '../lib/logoFwc'
 import ModalEndereco from './ModalEndereco'
 import { getEnderecoAtivo, LS_ATIVO } from '../utils/enderecoPortal'
 import './PortalLayout.css'
@@ -25,7 +25,7 @@ function endLinha2(end) {
 export default function PortalLayout() {
   const { theme, toggleTheme } = useTheme()
   const { empresaParceira, plataformaLogoUrl } = useBranding()
-  const logoSrc = plataformaLogoUrl || logoIconeUrl
+  const logoSrc = isPortalDomain ? logoIconeUrl : (plataformaLogoUrl || logoIconeUrl)
   const { voltarSuperAdmin: voltarAuth, session, logout, profile, loading, user } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
