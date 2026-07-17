@@ -166,10 +166,12 @@ function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente =
   const lista = Array.isArray(itens) ? itens : []
   lista.forEach((it) => {
     const q = it.quantidade ?? it.qtd ?? 1
+    parts.push(FEED(1)) // espaço ANTES do item — cada pedido vira um bloco maior
     parts.push(SIZE(0x11), BOLD(1), linha(q + ' ' + (it.nome || 'Item')), BOLD(0), SIZE(0))
     // Observação também GRANDE (fonte alta + negrito), pra cozinha ler fácil.
     if (it.observacao) parts.push(SIZE(0x01), BOLD(1), linha('obs: ' + it.observacao), BOLD(0), SIZE(0))
-    parts.push(divisor(), NL)
+    // Espaço + tracejado + espaço: separa BEM cada pedido (comanda maior por item).
+    parts.push(FEED(1), divisor(), FEED(2))
   })
   if (!lista.length) parts.push(linha('(sem itens)'))
   // Rodape da loja (ex.: versiculo) — centralizado; senao, nada.
