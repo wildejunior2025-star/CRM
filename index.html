@@ -18,6 +18,17 @@
         if (_ic) _ic.href = '/favicon-branco.png';
         var _at = document.querySelector('link[rel="apple-touch-icon"]');
         if (_at) _at.href = '/apple-touch-icon-branco.png';
+        // Ícone do app INSTALADO (PWA) também branco só no portal: troca o
+        // manifesto pro que aponta os pwa-*-branco.png. Nos outros domínios o
+        // manifesto padrão (roxo) segue valendo. O link do manifesto é injetado
+        // pelo vite-pwa e pode vir depois deste script — então tenta agora e
+        // também no DOMContentLoaded pra garantir que já exista.
+        var _trocaManifesto = function () {
+          var _mf = document.querySelector('link[rel="manifest"]');
+          if (_mf) _mf.href = '/manifest-portal.webmanifest';
+        };
+        _trocaManifesto();
+        document.addEventListener('DOMContentLoaded', _trocaManifesto);
       }
     </script>
     <title>FWC Inter</title>
