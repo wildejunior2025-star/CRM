@@ -178,7 +178,8 @@ function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente =
   if (rodape) parts.push(ALIGN(1), linha(String(rodape)), ALIGN(0))
   // O cliente prefere SOBRAR papel a sair "miudo": com poucos itens, empurra papel
   // em branco no fim pra a comanda sair num tamanho bom (mesmo que sobre papel).
-  const feedExtra = Math.max(0, 16 - (lista.length || 1) * 5) // 1 item:+11, 2:+6, 3:+1, 4+:0
+  // Metade do espaço de antes (estava exagerado). 1 item:+4, 2:+0, 3+:0.
+  const feedExtra = Math.max(0, 8 - (lista.length || 1) * 4)
   parts.push(FEED(4 + feedExtra), CUT)
   return Buffer.concat(parts)
 }
