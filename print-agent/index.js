@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 12
+const APP_VERSION = 13
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -482,12 +482,12 @@ function paginaHtml() {
       <label>Impressora do BAR (bebidas)</label>
       <select name="printerBar">${optsBar}</select>
     </div>
-    <label style="margin-top:10px">Não achou na lista? Digite o nome EXATO da impressora</label>
+    ${semLista ? `<label style="margin-top:10px">Nenhuma impressora foi detectada — digite o nome EXATO</label>
     <input name="printerManual" placeholder="Ex.: POS-80 / Generic / EPSON TM-T20"
-      value="${(c.printer || '').replace(/"/g, '&quot;')}" style="width:100%;padding:9px;border-radius:8px;border:1px solid #2a3444;background:#0f1420;color:#e5e7eb">
+      value="${(c.printer || '').replace(/"/g, '&quot;')}" style="width:100%;padding:9px;border-radius:8px;border:1px solid #2a3444;background:#0f1420;color:#e5e7eb">` : ''}
     <button>Salvar impressora</button>
   </form>
-  <div class="sub" style="margin:8px 0 0">${semLista ? '⚠️ Nenhuma impressora foi detectada automaticamente. Copie o nome EXATO da impressora (Windows: Configurações → Impressoras) e cole no campo acima.' : 'O nome digitado tem prioridade sobre a lista. Com 2 impressoras: as <b>bebidas</b> saem no bar e a <b>comida</b> na cozinha.'}</div>
+  <div class="sub" style="margin:8px 0 0">${semLista ? '⚠️ Nenhuma impressora foi detectada. Copie o nome EXATO (Windows: Configurações → Impressoras) e cole no campo acima.' : 'Com 2 impressoras: as <b>bebidas</b> saem no bar e a <b>comida</b> na cozinha.'}</div>
   <form method="POST" action="/teste"><button style="background:#16a34a">Imprimir cupom de teste</button></form>
   <script>(function(){var cb=document.getElementById('duasImp'),row=document.getElementById('rowBar'),lbl=document.getElementById('lblCoz');if(!cb)return;function u(){var on=cb.checked;row.style.display=on?'block':'none';lbl.textContent=on?'Impressora da COZINHA (comida)':'Impressora (tudo sai aqui)';if(!on){var s=row.querySelector('select');if(s)s.value='';}}cb.addEventListener('change',u);u();})();</script>
 </div>`
@@ -508,6 +508,10 @@ function paginaHtml() {
   <div class="ok">✓ Conectado</div>
   <div style="margin-top:6px">Loja: <span class="pill">${(empresa?.nome || '—')}</span></div>
   <div style="margin-top:6px">Impressora: <span class="pill">${c.printer || 'nenhuma'}</span></div>
+  <div style="margin-top:6px;font-size:12px;color:#9ca3af">Versão do app: <b>v${APP_VERSION}</b></div>
+  <form method="POST" action="/atualizar" onsubmit="this.querySelector('button').textContent='⏳ Buscando atualização... o app reinicia sozinho se tiver versão nova.'">
+    <button style="background:#2563eb">↻ Atualizar app agora</button>
+  </form>
   <form method="POST" action="/logout"><button style="background:#374151">Sair (trocar conta)</button></form>
 </div>`
     const cardLoja = (!empresaId && empresasDisponiveis.length > 0) ? `
@@ -733,6 +737,10 @@ const server = http.createServer(async (req, res) => {
     } else if (req.method === 'POST' && req.url === '/logout') {
       await supabase.auth.signOut(); empresaId = null; empresa = null; sessionAtiva = false; empresasDisponiveis = []
       setConfig({ empresa_id: null }); if (canal) { try { supabase.removeChannel(canal) } catch (e) {} } log('Desconectado.')
+    } else if (req.method === 'POST' && req.url === '/atualizar') {
+      // Botão "Atualizar app agora" da tela local — busca/baixa a versão nova (se
+      // houver) e se reinicia sozinho. Fire-and-forget pra a página redirecionar já.
+      checarAtualizacao(true).catch(() => {})
     } else if (req.method === 'POST' && req.url === '/teste') {
       jaImpressos.delete('teste')
       imprimir({ id: 'teste', numero_pedido: '0000', cliente_nome: 'TESTE', tipo_entrega: 'retirada', origem: 'teste',
