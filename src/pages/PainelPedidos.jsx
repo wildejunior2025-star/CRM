@@ -4801,7 +4801,7 @@ export default function PainelPedidos() {
                     </div>
                   ))}
                   {concluidosHojeView.map(p => (
-                    <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
+                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
@@ -4811,7 +4811,7 @@ export default function PainelPedidos() {
                   count={canceladosHojeView.length}
                   vazio="Nenhum cancelado hoje">
                   {canceladosHojeView.map(p => (
-                    <CardMini key={p.id} pedido={p} onClick={() => setPedidoDetalhe(p)} />
+                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
