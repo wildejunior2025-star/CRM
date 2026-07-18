@@ -3405,7 +3405,8 @@ export default function PainelPedidos() {
     try { const v = localStorage.getItem('pp-filtro-coluna'); return v ? v : null } catch { return null }
   })
   const [filtroOrigem, setFiltroOrigem] = useState(() => {
-    try { const v = localStorage.getItem('pp-filtro-origem'); return v ? v : null } catch { return null }
+    // 'mesa' saiu do total de pedidos (fica só na seção Mesas) — ignora filtro antigo salvo.
+    try { const v = localStorage.getItem('pp-filtro-origem'); return (v && v !== 'mesa') ? v : null } catch { return null }
   }) // WhatsApp/App/iFood/Balcão/Cardápio; null = todas
   useEffect(() => {
     try { filtroColuna ? localStorage.setItem('pp-filtro-coluna', filtroColuna) : localStorage.removeItem('pp-filtro-coluna') } catch {}
@@ -4445,9 +4446,11 @@ export default function PainelPedidos() {
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
   const concluidosHojeView  = isMesaFiltro ? [] : (filtroOrigem ? concluidosHoje.filter(passaOrigem)  : concluidosHoje)
   const canceladosHojeView  = isMesaFiltro ? [] : (filtroOrigem ? canceladosHoje.filter(passaOrigem)  : canceladosHoje)
-  // Mesas (autoatendimento) não têm origem zap/app/ifood — aparecem só sem filtro OU no filtro "Mesa".
-  const mesasFechadasHojeView = (!filtroOrigem || isMesaFiltro) ? mesasFechadasHoje : []
-  const comandasView          = (!filtroOrigem || isMesaFiltro) ? comandas : []
+  // Mesas saíram do "total de pedidos" — ficam SÓ na seção Mesas (evita duplicidade).
+  // Zerando estas views, o tab "Mesas" e os cards de mesa somem sozinhos da tela principal.
+  // (Reversível: antes era (!filtroOrigem || isMesaFiltro) ? mesasFechadasHoje/comandas : [].)
+  const mesasFechadasHojeView = []
+  const comandasView          = []
 
   return (
     <div className="pp-root">
