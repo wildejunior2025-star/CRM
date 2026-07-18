@@ -1,7 +1,7 @@
 {
-  "name": "FWC Inter",
-  "short_name": "FWC Inter",
-  "description": "FWC Inter — tecnologia e soluções para o seu negócio",
+  "name": "FWC Portal",
+  "short_name": "FWC Portal",
+  "description": "FWC Inter — Área da Empresa",
   "theme_color": "#863bff",
   "background_color": "#1a1625",
   "display": "standalone",

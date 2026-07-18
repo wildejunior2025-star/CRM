@@ -29,6 +29,15 @@
         };
         _trocaManifesto();
         document.addEventListener('DOMContentLoaded', _trocaManifesto);
+      } else if (location.hostname === 'gestor.fwcinter.com') {
+        // Gestor: mesmo app, mas o PWA instalado se chama "FWC Gestor" (ícone
+        // roxo) pra diferenciar do "FWC Portal" na lista de apps do PC.
+        var _trocaManifestoGestor = function () {
+          var _mfg = document.querySelector('link[rel="manifest"]');
+          if (_mfg) _mfg.href = '/manifest-gestor.webmanifest';
+        };
+        _trocaManifestoGestor();
+        document.addEventListener('DOMContentLoaded', _trocaManifestoGestor);
       }
     </script>
     <title>FWC Inter</title>

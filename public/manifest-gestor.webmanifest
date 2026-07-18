@@ -1,0 +1,16 @@
+{
+  "name": "FWC Gestor",
+  "short_name": "FWC Gestor",
+  "description": "FWC Inter — Gestor de Pedidos",
+  "theme_color": "#863bff",
+  "background_color": "#1a1625",
+  "display": "standalone",
+  "orientation": "portrait",
+  "start_url": "/painel",
+  "scope": "/",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "/pwa-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
