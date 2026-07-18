@@ -55,7 +55,6 @@ export default function Financeiro() {
   const [importing, setImporting]     = useState(false)
   const [importMsg, setImportMsg]     = useState(null)
   const [entExp, setEntExp]           = useState(false)
-  const [semana, setSemana]           = useState(null)
   const fileRef = useRef(null)
 
   async function loadDelivery() {
@@ -94,21 +93,6 @@ export default function Financeiro() {
     setRepassesImp(repRes.data ?? [])
   }
   useEffect(() => { loadIfoodExtra() }, [periodoD, custIni, custFim, empresaId])
-
-  // Repasse da SEMANA atual do iFood (independe do filtro) — o que cai na quarta.
-  async function loadSemana() {
-    const ini = inicioSemana()
-    const pedRes = await fetchAll(() => supabase
-      .from('pedidos_delivery')
-      .select('total, subtotal, taxa_entrega, ifood_valores, forma_pagamento')
-      .eq('origem', 'ifood')
-      .neq('status', 'cancelado')
-      .gte('created_at', ini.toISOString())
-      .order('created_at', { ascending: false }))
-    const liq = calcIfoodLiquido(pedRes.data ?? [], ifoodRates)
-    setSemana({ ...liq, inicio: ini, pedidos: (pedRes.data ?? []).length })
-  }
-  useEffect(() => { loadSemana() }, [empresaId, ifoodRates.comissao, ifoodRates.transacao])
 
   async function onImportarIfood(e) {
     const file = e.target.files?.[0]
@@ -220,24 +204,6 @@ export default function Financeiro() {
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{pedWA.length + pedApp.length + pedCat.length} pedido{(pedWA.length + pedApp.length + pedCat.length) !== 1 ? 's' : ''}</div>
         </div>
       </div>
-
-      {/* ── iFOOD — A RECEBER NA QUARTA (semana atual) ── */}
-      {semana && semana.pedidos > 0 && (
-        <div style={{ background: 'var(--card)', border: '1px solid #16a34a', borderRadius: 12, padding: '16px 20px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontSize: 13.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-              <IfoodIcon size={17} /> A receber na quarta ({ddmm(addDias(semana.inicio, 9))})
-            </div>
-            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
-              semana {ddmm(semana.inicio)} a {ddmm(addDias(semana.inicio, 6))} · em aberto · {semana.pedidos} pedido{semana.pedidos !== 1 ? 's' : ''}
-            </div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 26, fontWeight: 900, color: '#16a34a' }}>≈ {fmtBRL(semana.repasse)}</div>
-            <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>estimado · antes da taxa de antecipação</div>
-          </div>
-        </div>
-      )}
 
       {/* ── iFOOD — LÍQUIDO (importado = exato / senão estimado) ── */}
       {(pedIfood.length > 0 || temImportado) && (
