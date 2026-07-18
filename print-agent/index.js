@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 13
+const APP_VERSION = 14
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -406,7 +406,7 @@ function agendarComandaMesa(it) {
       log('MESA — ' + entry.itens.length + ' item(ns) na comanda ' + String(cid).slice(0, 8))
       imprimirComandaMesa(cid, entry.itens)
     }
-  }, 1800)
+  }, 800) // espera curta só pra juntar itens do mesmo envio; imprime rápido
 }
 
 // ---- conecta e escuta os pedidos da loja ----
