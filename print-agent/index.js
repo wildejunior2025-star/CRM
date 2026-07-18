@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 10
+const APP_VERSION = 11
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -78,6 +78,19 @@ function ehBebida(nome) {
 }
 const config = () => { try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) } catch (e) { return {} } }
 const setConfig = o => fs.writeFileSync(CONFIG_FILE, JSON.stringify({ ...config(), ...o }, null, 2))
+
+// ---- filtro: o que ESTE computador imprime (por origem) ----
+// Cada PC/impressora escolhe o que sai nele. Sem config = imprime tudo (padrao,
+// nao muda nada pras lojas antigas). Uma origem so deixa de imprimir se estiver
+// explicitamente desligada (=== false).
+const ORIGENS_FILTRAVEIS = ['whatsapp', 'cardapio', 'app', 'balcao', 'ifood', 'mesa']
+function origemLigada(origem) {
+  const f = config().filtros
+  if (!f) return true
+  const k = String(origem || '').toLowerCase()
+  if (!ORIGENS_FILTRAVEIS.includes(k)) return true  // origem desconhecida / teste = sempre imprime
+  return f[k] !== false
+}
 
 // ---- storage de sessao em arquivo (auto-refresh do Supabase) ----
 const fileStorage = {
@@ -316,6 +329,7 @@ function marcarImpresso(id) {
 }
 function imprimirPedido(p) {
   if (!p || pedidosImpressos.has(p.id)) return
+  if (!origemLigada(p.origem)) { log('  (' + (p.origem || '?') + ' DESLIGADO nesta impressora — nao imprimiu #' + (p.numero_pedido ?? p.id) + ')'); return }
   log('NOVO PEDIDO #' + (p.numero_pedido ?? p.id) + ' - ' + (p.cliente_nome || '') + ' (' + (p.origem || '') + ')')
   if (config().pausado) { log('  (impressao automatica PAUSADA — nao imprimiu)'); return }
   marcarImpresso(p.id)
@@ -440,7 +454,7 @@ async function iniciarEscuta() {
       })
     // Pedido de MESA (comanda) — cada item novo vira cupom de cozinha (juntando o envio).
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comanda_itens', filter: 'empresa_id=eq.' + empresaId },
-      payload => agendarComandaMesa(payload.new))
+      payload => { if (!origemLigada('mesa')) return; agendarComandaMesa(payload.new) })
     .subscribe(st => log('Conexao: ' + st + (st === 'SUBSCRIBED' ? ' — imprimindo pedidos (delivery + mesa) automaticamente!' : '')))
   log('Loja: ' + (empresa?.nome || '—'))
   return true
@@ -498,7 +512,23 @@ function paginaHtml() {
     <button>Usar esta loja</button>
   </form>
 </div>` : ''
-    bloco = cardStatus + cardLoja + cardImpressora
+    const Ff = config().filtros || {}
+    const tg = (k, lbl) => `<label class="tg"><span>${lbl}</span><input type="checkbox" name="${k}"${Ff[k] === false ? '' : ' checked'}></label>`
+    const cardFiltros = `
+<div class="card">
+  <label style="font-size:14px">O que ESTE computador imprime</label>
+  <div class="sub" style="margin:2px 0 10px">Ligue so o que deve sair NESTA impressora. Ex.: PC da cozinha = so Mesa; PC do delivery = tudo menos Mesa.</div>
+  <form method="POST" action="/filtros">
+    ${tg('mesa', 'Mesa (comandas)')}
+    ${tg('whatsapp', 'WhatsApp')}
+    ${tg('ifood', 'iFood')}
+    ${tg('balcao', 'Balcao')}
+    ${tg('cardapio', 'Cardapio (loja online)')}
+    ${tg('app', 'App')}
+    <button>Salvar o que imprime</button>
+  </form>
+</div>`
+    bloco = cardStatus + cardLoja + cardImpressora + cardFiltros
   }
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Impressora FWC</title><style>
@@ -511,6 +541,12 @@ button{background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:11px 
 .ok{color:#22c55e;font-weight:800}.warn{color:#f59e0b;font-weight:800}
 .log{background:#0b0f18;border-radius:8px;padding:10px;font-family:Consolas,monospace;font-size:11.5px;height:180px;overflow:auto;white-space:pre-wrap;color:#94a3b8}
 .pill{display:inline-block;background:#2a3444;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700}
+.tg{display:flex;align-items:center;justify-content:space-between;padding:11px 2px;border-bottom:1px solid #232c3a;font-size:15px;font-weight:600;margin:0}
+.tg:last-of-type{border-bottom:none}
+.tg input{appearance:none;-webkit-appearance:none;width:46px;height:26px;border-radius:20px;background:#2a3444;position:relative;cursor:pointer;flex:0 0 auto;margin:0;transition:.2s}
+.tg input:checked{background:#7c3aed}
+.tg input::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.2s}
+.tg input:checked::after{left:23px}
 </style></head><body>
 <h1>🖨️ Impressora FWC</h1><p class="sub">Impressao automatica dos pedidos direto na sua impressora.</p>
 ${bloco}
@@ -540,6 +576,7 @@ function statusObj() {
     impressoraBar: config().printerBar || null,
     impressoras: sessionAtiva ? listarImpressoras() : [],
     pausado: !!config().pausado,
+    filtros: config().filtros || null,   // o que este PC imprime (null = tudo)
   }
 }
 // CORS + Private Network Access — libera o gestor (https) a falar com o app (localhost).
@@ -644,6 +681,15 @@ const server = http.createServer(async (req, res) => {
         setConfig(patch); log('Impressora: ' + printer + (patch.printerBar ? ' | bar: ' + patch.printerBar : ''))
         return sendJson(res, { ok: true, ...statusObj() })
       }
+      // Gestor salva o que ESTE PC imprime (por origem). Body: { filtros: {mesa:true, ifood:false, ...} }
+      if (req.method === 'POST' && req.url === '/api/filtros') {
+        const f = await jsonBody(req)
+        const filtros = {}
+        for (const k of ORIGENS_FILTRAVEIS) filtros[k] = f.filtros ? (f.filtros[k] !== false) : true
+        setConfig({ filtros })
+        log('Imprime neste PC: ' + (ORIGENS_FILTRAVEIS.filter(k => filtros[k]).join(', ') || '(nada)'))
+        return sendJson(res, { ok: true, ...statusObj() })
+      }
       if (req.method === 'POST' && req.url === '/api/logout') {
         await supabase.auth.signOut(); empresaId = null; empresa = null; sessionAtiva = false; empresasDisponiveis = []
         setConfig({ empresa_id: null }); if (canal) { try { supabase.removeChannel(canal) } catch (e) {} } log('Desconectado.')
@@ -684,6 +730,12 @@ const server = http.createServer(async (req, res) => {
       jaImpressos.delete('teste')
       imprimir({ id: 'teste', numero_pedido: '0000', cliente_nome: 'TESTE', tipo_entrega: 'retirada', origem: 'teste',
         itens: [{ nome: 'Cupom de teste', qtd: 1 }], subtotal: 0, total: 0, forma_pagamento: 'dinheiro' })
+    } else if (req.method === 'POST' && req.url === '/filtros') {
+      const f = await body(req)
+      const filtros = {}
+      for (const k of ORIGENS_FILTRAVEIS) filtros[k] = (k in f)
+      setConfig({ filtros })
+      log('Imprime neste PC: ' + (ORIGENS_FILTRAVEIS.filter(k => filtros[k]).join(', ') || '(nada)'))
     }
     res.writeHead(302, { Location: '/' }); res.end()
   } catch (e) { res.writeHead(500); res.end(String(e.message)) }
