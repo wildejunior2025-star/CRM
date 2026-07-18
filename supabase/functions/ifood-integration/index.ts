@@ -735,8 +735,9 @@ async function atualizarStatusLocal(sb: any, orderId: string, code: string) {
     const finalizado = stAtual === "entregue" || stAtual === "cancelado"
 
     if (novo === "cancelado") {
-      // Cancelamento sempre reflete (a não ser que já tenha sido entregue)
-      if (stAtual !== "entregue") {
+      // iFood cancelou = a loja NÃO recebe por esse pedido. Reflete SEMPRE, inclusive
+      // quando já estava "entregue" — senão vira venda fantasma (infla faturamento/líquido).
+      if (stAtual !== "cancelado") {
         patch.status = "cancelado"
         patch.motivo_cancelamento = "Cancelado pelo iFood/cliente"
       }
