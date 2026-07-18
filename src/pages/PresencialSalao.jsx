@@ -337,7 +337,7 @@ export default function PresencialSalao() {
       formaPagamento: modoPag === 'unico' ? forma : 'Dividido',
       pagamentos: pags,
       empresa: { nome: empresaNome },
-    }), empresaNome, { soApp: true })
+    }), empresaNome, { soApp: true, origem: 'mesa' }) // app filtra por origem (PC não-mesa não imprime)
   }
 
   async function confirmarFechamento() {

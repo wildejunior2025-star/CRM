@@ -320,7 +320,8 @@ export async function imprimirHtml(html, titulo, opts = {}) {
   // O `titulo` sai grande/centralizado no topo (o app faz isso). Se o corpo já tem o
   // nome da loja (titulo-loja), tira dele pra não sair duas vezes na térmica.
   if (titulo) htmlParaApp = htmlParaApp.replace(/<div[^>]*class="[^"]*titulo-loja[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '')
-  if (await imprimirViaAppFwc('imprimir-html', { html: htmlParaApp, titulo })) return true
+  // opts.origem (ex.: 'mesa') → o app respeita o filtro por origem deste PC.
+  if (await imprimirViaAppFwc('imprimir-html', { html: htmlParaApp, titulo, origem: opts.origem })) return true
   if (opts.soApp) return false // sem app FWC local (celular): não imprime no navegador do aparelho
   const printer = impressoraEscolhida()
   if (printer) {

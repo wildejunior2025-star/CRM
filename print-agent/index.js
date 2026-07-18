@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 17
+const APP_VERSION = 18
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -675,6 +675,8 @@ const server = http.createServer(async (req, res) => {
       // Imprime um HTML (conta de mesa etc.) como texto na térmica.
       if (req.method === 'POST' && req.url === '/api/imprimir-html') {
         const f = await jsonBody(req)
+        // Respeita o filtro por origem (ex.: conta da mesa vem com origem:'mesa').
+        if (f.origem && !origemLigada(f.origem)) { log('  (' + f.origem + ' DESLIGADO — nao imprimiu ' + (f.titulo || 'doc') + ')'); return sendJson(res, { ok: true, filtrado: true }) }
         const ok = imprimirBytes(montarTexto(htmlParaLinhas(f.html || ''), f.titulo), 'doc')
         return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
       }

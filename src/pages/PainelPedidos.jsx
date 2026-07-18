@@ -3972,7 +3972,7 @@ export default function PainelPedidos() {
   // (fwcFiltros null = sem filtro = imprime tudo, como antes.)
   function imprimirContaSeMesa(html, titulo) {
     if (fwcFiltros?.mesa === false) return
-    imprimirHtml(html, titulo)
+    imprimirHtml(html, titulo, { origem: 'mesa' }) // o app também filtra por origem
   }
 
   // Imprime a CONTA da mesa na loja (chamado quando o garçom fecha e a mesa entra em
