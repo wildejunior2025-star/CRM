@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 16
+const APP_VERSION = 17
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -722,6 +722,7 @@ const server = http.createServer(async (req, res) => {
         for (const k of ORIGENS_FILTRAVEIS) filtros[k] = f.filtros ? (f.filtros[k] !== false) : true
         setConfig({ filtros })
         log('Imprime neste PC: ' + (ORIGENS_FILTRAVEIS.filter(k => filtros[k]).join(', ') || '(nada)'))
+        verificarPendentes().catch(() => {}) // ligou uma origem? pega os pendentes na hora (nao espera 12s)
         return sendJson(res, { ok: true, ...statusObj() })
       }
       if (req.method === 'POST' && req.url === '/api/logout') {
@@ -774,6 +775,7 @@ const server = http.createServer(async (req, res) => {
       for (const k of ORIGENS_FILTRAVEIS) filtros[k] = (k in f)
       setConfig({ filtros })
       log('Imprime neste PC: ' + (ORIGENS_FILTRAVEIS.filter(k => filtros[k]).join(', ') || '(nada)'))
+      verificarPendentes().catch(() => {}) // ligou uma origem? pega os pendentes na hora
     }
     res.writeHead(302, { Location: '/' }); res.end()
   } catch (e) { res.writeHead(500); res.end(String(e.message)) }
