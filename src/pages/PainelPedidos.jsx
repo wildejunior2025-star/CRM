@@ -4426,20 +4426,20 @@ export default function PainelPedidos() {
     ? [...pedidos, ...concluidosHoje, ...canceladosHoje].filter(pedidoCasaBusca)
     : []
 
-  // Filtro por origem (WhatsApp / App / iFood / Balcão / Cardápio). null = todas.
+  // Filtro por origem (WhatsApp / App / iFood / Balcão / Cardápio / Mesa). null = todas.
+  const isMesaFiltro = filtroOrigem === 'mesa'
   const passaOrigem = (p) => !filtroOrigem || (p?.origem || 'cardapio') === filtroOrigem
-  // Origens presentes hoje, para montar só os botões que fazem sentido.
-  const origensPresentes = [...new Set(
-    [...pedidos, ...concluidosHoje, ...canceladosHoje].map(p => p?.origem || 'cardapio')
-  )]
+  const contaOrigem = (o) => [...pedidos, ...concluidosHoje, ...canceladosHoje].filter(p => (p?.origem || 'cardapio') === o).length
+  // Filtro "Mesa": mostra só as comandas/mesas e esconde o delivery.
+  // Filtro de origem de delivery: esconde as mesas. Sem filtro: mostra tudo.
   // Novo no topo: as colunas mostram o pedido mais recente em cima (ordem de chegada, de cima pra baixo).
-  const pedidosView         = [...(filtroOrigem ? pedidos.filter(passaOrigem) : pedidos)]
+  const pedidosView         = [...(isMesaFiltro ? [] : (filtroOrigem ? pedidos.filter(passaOrigem) : pedidos))]
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-  const concluidosHojeView  = filtroOrigem ? concluidosHoje.filter(passaOrigem)  : concluidosHoje
-  const canceladosHojeView  = filtroOrigem ? canceladosHoje.filter(passaOrigem)  : canceladosHoje
-  // Mesas (autoatendimento) não têm origem zap/app/ifood — somem quando há filtro de origem.
-  const mesasFechadasHojeView = filtroOrigem ? [] : mesasFechadasHoje
-  const comandasView          = filtroOrigem ? [] : comandas
+  const concluidosHojeView  = isMesaFiltro ? [] : (filtroOrigem ? concluidosHoje.filter(passaOrigem)  : concluidosHoje)
+  const canceladosHojeView  = isMesaFiltro ? [] : (filtroOrigem ? canceladosHoje.filter(passaOrigem)  : canceladosHoje)
+  // Mesas (autoatendimento) não têm origem zap/app/ifood — aparecem só sem filtro OU no filtro "Mesa".
+  const mesasFechadasHojeView = (!filtroOrigem || isMesaFiltro) ? mesasFechadasHoje : []
+  const comandasView          = (!filtroOrigem || isMesaFiltro) ? comandas : []
 
   return (
     <div className="pp-root">
@@ -4656,18 +4656,16 @@ export default function PainelPedidos() {
             )}
 
             {/* Filtro por origem — só aparece quando há mais de uma origem hoje */}
-            {!buscaQ && origensPresentes.length > 1 && (
+            {!buscaQ && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
               {[
-                { id: null, label: 'Todas origens', cor: '#7c3aed', count: pedidos.length + concluidosHoje.length + canceladosHoje.length },
-                ...['whatsapp', 'app', 'ifood', 'balcao', 'cardapio']
-                  .filter(o => origensPresentes.includes(o))
-                  .map(o => ({
-                    id: o,
-                    label: ORIGEM_CONFIG[o]?.label ?? o,
-                    cor: ORIGEM_CONFIG[o]?.bg ?? '#7c3aed',
-                    count: [...pedidos, ...concluidosHoje, ...canceladosHoje].filter(p => (p?.origem || 'cardapio') === o).length,
-                  })),
+                { id: null, label: 'Todas origens', cor: '#7c3aed', count: pedidos.length + concluidosHoje.length + canceladosHoje.length + comandas.length + mesasFechadasHoje.length },
+                { id: 'mesa', label: 'Mesa (comandas)', cor: '#f59e0b', count: comandas.length + mesasFechadasHoje.length },
+                { id: 'whatsapp', label: 'WhatsApp', cor: ORIGEM_CONFIG.whatsapp.bg, count: contaOrigem('whatsapp') },
+                { id: 'ifood', label: 'iFood', cor: ORIGEM_CONFIG.ifood.bg, count: contaOrigem('ifood') },
+                { id: 'balcao', label: 'Balcão', cor: ORIGEM_CONFIG.balcao.bg, count: contaOrigem('balcao') },
+                { id: 'cardapio', label: 'Cardápio (loja online)', cor: ORIGEM_CONFIG.cardapio.bg, count: contaOrigem('cardapio') },
+                { id: 'app', label: 'App', cor: ORIGEM_CONFIG.app.bg, count: contaOrigem('app') },
               ].map(f => {
                 const ativo = filtroOrigem === f.id
                 return (
