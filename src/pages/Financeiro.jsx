@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { calcIfoodLiquido } from '../lib/ifoodLiquido'
+import { parseIfoodPlanilha } from '../lib/ifoodPlanilha'
+import { useAuth } from '../hooks/useAuth'
 import { CONDICOES_PAGAMENTO, FORMAS_RECEBIMENTO } from '../lib/constants'
 import { sendWhatsApp, formatWaMessage } from '../lib/whatsapp'
 import '../components/Page.css'
@@ -41,11 +43,21 @@ function FormaBadge({ value }) {
 }
 
 export default function Financeiro() {
+  const { profile } = useAuth()
+  const empresaId = profile?.empresa_id
+
   // ── Delivery / repasse ──
   const [periodoD, setPeriodoD]     = useState('mes_atual')
   const [pedidos, setPedidos]       = useState([])
   const [taxaPct, setTaxaPct]       = useState(15)
   const [loadingD, setLoadingD]     = useState(true)
+
+  // ── iFood: taxa calibrada + repasses importados + importação ──
+  const [ifoodRates, setIfoodRates] = useState({})
+  const [repassesImp, setRepassesImp] = useState([])
+  const [importing, setImporting]   = useState(false)
+  const [importMsg, setImportMsg]   = useState(null)
+  const fileRef = useRef(null)
 
   // ── Fiado (existente) ──
   const [clientes, setClientes] = useState([])
@@ -92,6 +104,58 @@ export default function Financeiro() {
   }
 
   useEffect(() => { loadDelivery() }, [periodoD])
+
+  // Taxa calibrada da loja + repasses reais já importados no período
+  async function loadIfoodExtra() {
+    if (!empresaId) return
+    const { start, end } = getRangeDelivery(periodoD)
+    const [empRes, repRes] = await Promise.all([
+      supabase.from('empresas').select('ifood_comissao_pct, ifood_transacao_pct').eq('id', empresaId).maybeSingle(),
+      (() => {
+        let q = supabase.from('ifood_repasses').select('*').order('dia', { ascending: true })
+        if (start) q = q.gte('dia', start.slice(0, 10))
+        if (end)   q = q.lt('dia', end.slice(0, 10))
+        return q
+      })(),
+    ])
+    setIfoodRates({ comissao: empRes.data?.ifood_comissao_pct, transacao: empRes.data?.ifood_transacao_pct })
+    setRepassesImp(repRes.data ?? [])
+  }
+  useEffect(() => { loadIfoodExtra() }, [periodoD, empresaId])
+
+  async function onImportarIfood(e) {
+    const file = e.target.files?.[0]
+    if (fileRef.current) fileRef.current.value = ''
+    if (!file || !empresaId) return
+    setImporting(true); setImportMsg(null)
+    try {
+      const { dias, totais, calibracao, comparativo, meta } = await parseIfoodPlanilha(file)
+      if (!dias.length) throw new Error('Não achei pedidos concluídos na planilha.')
+      // grava o repasse real por dia (upsert por empresa+dia)
+      const rows = dias.map(d => ({ empresa_id: empresaId, ...d }))
+      const { error: upErr } = await supabase.from('ifood_repasses').upsert(rows, { onConflict: 'empresa_id,dia' })
+      if (upErr) throw upErr
+      // calibra a taxa da loja
+      await supabase.from('empresas').update({
+        ifood_comissao_pct: calibracao.comissao_pct,
+        ifood_transacao_pct: calibracao.transacao_pct,
+      }).eq('id', empresaId)
+      const difTaxa = comparativo.taxaEstimada - comparativo.taxaReal
+      setImportMsg({
+        tipo: 'ok',
+        dias: dias.length,
+        pedidos: totais.pedidos,
+        liquido: totais.valor_liquido,
+        comissaoPct: Math.round(calibracao.comissao_pct * 1000) / 10,
+        difTaxa,
+        cancelados: meta.cancelados,
+      })
+      await loadIfoodExtra()
+    } catch (err) {
+      setImportMsg({ tipo: 'erro', txt: err.message || 'Falha ao ler a planilha.' })
+    }
+    setImporting(false)
+  }
 
   async function loadAll() {
     setLoading(true)
@@ -235,9 +299,25 @@ export default function Financeiro() {
   const debitoCash = volCash * (taxaPct / 100)       // loja deve esse valor à plataforma
   const repLiquido = repPix - debitoCash
 
-  // ── iFood: líquido estimado (o que a loja recebe de verdade) ──
+  // ── iFood: líquido (importado = exato; senão estimado com a taxa calibrada da loja) ──
   const pedIfood = pedidos.filter(p => p.origem === 'ifood')
-  const ifood = calcIfoodLiquido(pedIfood)
+  const ifoodEst = calcIfoodLiquido(pedIfood, ifoodRates)
+  const imp = repassesImp.reduce((s, r) => ({
+    valor_liquido: s.valor_liquido + Number(r.valor_liquido || 0),
+    recebidoEntrega: s.recebidoEntrega + Number(r.recebido_entrega || 0),
+    taxasTotal: s.taxasTotal + Number(r.taxas || 0),
+    vendas: s.vendas + Number(r.vendas || 0),
+  }), { valor_liquido: 0, recebidoEntrega: 0, taxasTotal: 0, vendas: 0 })
+  const temImportado = repassesImp.length > 0
+  const ifood = temImportado
+    ? {
+        repasse: imp.valor_liquido,
+        recebidoEntrega: imp.recebidoEntrega,
+        taxasTotal: imp.taxasTotal,
+        voceRecebe: imp.valor_liquido + imp.recebidoEntrega,
+        pctTaxa: imp.vendas > 0 ? Math.round(imp.taxasTotal / imp.vendas * 100) : 0,
+      }
+    : ifoodEst
 
   return (
     <div>
@@ -319,16 +399,45 @@ export default function Financeiro() {
         </div>
       </div>
 
-      {/* ── iFOOD — LÍQUIDO ESTIMADO ── */}
-      {pedIfood.length > 0 && (
+      {/* ── iFOOD — LÍQUIDO (importado = exato / senão estimado) ── */}
+      {(pedIfood.length > 0 || temImportado) && (
         <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
             <span>🍔 iFood — seu dinheiro</span>
-            <span title="Repasse estimado com base nas taxas do iFood (comissão ~11,7% dos itens + transação ~4,5% do pago online). Bate ~99% com o extrato. Importe a planilha do iFood pra ver o valor exato."
-              style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 8px', cursor: 'help', textTransform: 'none', letterSpacing: 0 }}>
-              estimado ⓘ
-            </span>
+            {temImportado ? (
+              <span title="Valores exatos, do extrato do iFood que você importou."
+                style={{ fontSize: 10, fontWeight: 700, color: 'var(--success)', border: '1px solid var(--success)', borderRadius: 20, padding: '2px 8px', textTransform: 'none', letterSpacing: 0 }}>
+                exato ✔ (importado)
+              </span>
+            ) : (
+              <span title="Repasse estimado com base nas taxas do iFood (comissão + transação no pago online). Bate ~99% com o extrato. Importe a planilha pra ver o valor exato e calibrar a taxa da sua loja."
+                style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 8px', cursor: 'help', textTransform: 'none', letterSpacing: 0 }}>
+                estimado ⓘ
+              </span>
+            )}
+            <span style={{ flex: 1 }} />
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onImportarIfood} style={{ display: 'none' }} />
+            <button type="button" onClick={() => fileRef.current?.click()} disabled={importing}
+              style={{ fontSize: 11, fontWeight: 700, color: 'var(--primary)', background: 'transparent', border: '1px solid var(--primary)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', textTransform: 'none', letterSpacing: 0 }}>
+              {importing ? 'Importando…' : '📄 Importar planilha do iFood'}
+            </button>
           </div>
+          {importMsg && (
+            <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.5,
+              background: importMsg.tipo === 'ok' ? 'rgba(22,163,74,.10)' : 'rgba(239,68,68,.10)',
+              border: `1px solid ${importMsg.tipo === 'ok' ? 'rgba(22,163,74,.4)' : 'rgba(239,68,68,.4)'}` }}>
+              {importMsg.tipo === 'ok' ? (
+                <>
+                  ✅ <strong>Planilha importada!</strong> {importMsg.dias} dia{importMsg.dias > 1 ? 's' : ''} · {importMsg.pedidos} pedidos · repasse real <strong>{fmtBRL(importMsg.liquido)}</strong>
+                  {importMsg.cancelados > 0 && <span style={{ color: 'var(--text-muted)' }}> ({importMsg.cancelados} cancelados ignorados)</span>}
+                  <br />
+                  🎯 Nossa estimativa errou só <strong>{fmtBRL(Math.abs(importMsg.difTaxa))}</strong> em taxas. Taxa da sua loja calibrada em <strong>{importMsg.comissaoPct}%</strong> de comissão — as próximas estimativas já usam ela.
+                </>
+              ) : (
+                <>⚠️ {importMsg.txt}</>
+              )}
+            </div>
+          )}
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '6px 20px 4px', marginBottom: 28 }}>
             {/* 💵 Já na mão (recebido na entrega — bruto, pra bater o caixa) */}
             {ifood.recebidoEntrega > 0 && (
@@ -346,7 +455,7 @@ export default function Financeiro() {
                 <div style={{ fontSize: 14, fontWeight: 700 }}>🏦 iFood vai te pagar</div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>repasse que cai na sua conta</div>
               </div>
-              <span style={{ fontSize: 22, fontWeight: 900, color: 'var(--success)' }}>≈ {fmtBRL(ifood.repasse)}</span>
+              <span style={{ fontSize: 22, fontWeight: 900, color: 'var(--success)' }}>{temImportado ? '' : '≈ '}{fmtBRL(ifood.repasse)}</span>
             </div>
             {/* 🔻 iFood ficou com (o diferencial) */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '13px 0' }}>

@@ -111,5 +111,14 @@ export async function parseIfoodPlanilha(file) {
     recebido_entrega: s.recebido_entrega + d.recebido_entrega,
   }), { pedidos: 0, vendas: 0, itens: 0, taxas: 0, valor_liquido: 0, recebido_entrega: 0 })
 
-  return { dias, totais, calibracao: calibrar(orders), meta: { totalLinhas, cancelados } }
+  // Comparativo: o quanto NOSSA fórmula padrão estimaria de taxa vs o real (pra provar a precisão)
+  const taxaReal = orders.reduce((s, o) => s + o.fee, 0)
+  const taxaEstimada = orders.reduce((s, o) => s + (0.117 * o.itens + (o.online ? 0.0452 * o.pago : 0)), 0)
+
+  return {
+    dias, totais,
+    calibracao: calibrar(orders),
+    comparativo: { taxaReal: +taxaReal.toFixed(2), taxaEstimada: +taxaEstimada.toFixed(2) },
+    meta: { totalLinhas, cancelados },
+  }
 }
