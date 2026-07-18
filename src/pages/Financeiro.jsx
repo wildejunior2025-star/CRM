@@ -323,41 +323,40 @@ export default function Financeiro() {
       {pedIfood.length > 0 && (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
-            <span>🍔 iFood — quanto você recebe</span>
-            <span title="Valores estimados com base nas taxas do iFood (comissão ~11,7% dos itens + transação ~4,5% do pago online). Bate ~99% com o extrato. Vira exato ao importar a planilha ou com a integração financeira."
+            <span>🍔 iFood — seu dinheiro</span>
+            <span title="Repasse estimado com base nas taxas do iFood (comissão ~11,7% dos itens + transação ~4,5% do pago online). Bate ~99% com o extrato. Importe a planilha do iFood pra ver o valor exato."
               style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 8px', cursor: 'help', textTransform: 'none', letterSpacing: 0 }}>
               estimado ⓘ
             </span>
           </div>
-          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px', marginBottom: 28 }}>
-            {/* Herói */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
-              <span style={{ fontSize: 15, fontWeight: 700 }}>💰 Você recebe</span>
-              <span style={{ fontSize: 26, fontWeight: 900, color: 'var(--success)' }}>{fmtBRL(ifood.voceRecebe)}</span>
-            </div>
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {/* Repasse */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 13.5 }}>🏦 Repasse na conta</span>
-                <span style={{ fontSize: 14, fontWeight: 700 }}>{fmtBRL(ifood.repasse)}</span>
-              </div>
-              {/* Recebido na entrega (bruto — pra bater o caixa) */}
-              {ifood.recebidoEntrega > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <span style={{ fontSize: 13.5 }}>💵 Recebido na entrega</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>· na mão, pra bater o caixa (−{fmtBRL(ifood.comissaoEntrega)} de comissão)</span>
-                  </div>
-                  <span style={{ fontSize: 14, fontWeight: 700 }}>{fmtBRL(ifood.recebidoEntrega)}</span>
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '6px 20px 4px', marginBottom: 28 }}>
+            {/* 💵 Já na mão (recebido na entrega — bruto, pra bater o caixa) */}
+            {ifood.recebidoEntrega > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0', borderBottom: '1px solid var(--border)' }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>💵 Já na sua mão</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>dinheiro/cartão na entrega — pra bater o caixa</div>
                 </div>
-              )}
-              {/* Mordida do iFood */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                <span style={{ fontSize: 13.5, color: 'var(--danger)' }}>🔻 iFood ficou com</span>
-                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--danger)' }}>
-                  {fmtBRL(ifood.taxasTotal)} <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>({ifood.pctTaxa}%)</span>
-                </span>
+                <span style={{ fontSize: 22, fontWeight: 900 }}>{fmtBRL(ifood.recebidoEntrega)}</span>
               </div>
+            )}
+            {/* 🏦 iFood vai te pagar (repasse) */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0', borderBottom: '1px solid var(--border)' }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>🏦 iFood vai te pagar</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>repasse que cai na sua conta</div>
+              </div>
+              <span style={{ fontSize: 22, fontWeight: 900, color: 'var(--success)' }}>≈ {fmtBRL(ifood.repasse)}</span>
+            </div>
+            {/* 🔻 iFood ficou com (o diferencial) */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '13px 0' }}>
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--danger)' }}>🔻 iFood ficou com</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>comissão + taxa das suas vendas</div>
+              </div>
+              <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--danger)' }}>
+                {fmtBRL(ifood.taxasTotal)} <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>({ifood.pctTaxa}%)</span>
+              </span>
             </div>
           </div>
         </>
