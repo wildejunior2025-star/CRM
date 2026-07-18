@@ -394,6 +394,7 @@ async function imprimirComandaMesa(cid, itens) {
 }
 function agendarComandaMesa(it) {
   if (!it || (it.status && it.status !== 'pendente')) return
+  if (!origemLigada('mesa')) return // respeita o filtro "Mesa" deste PC (tempo real E backup)
   if (comandaItensImpressos.has(it.id)) return
   comandaItensImpressos.add(it.id)
   if (comandaItensImpressos.size > 2000) comandaItensImpressos.clear()
