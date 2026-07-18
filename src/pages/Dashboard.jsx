@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
-import { calcIfoodLiquido } from '../lib/ifoodLiquido'
+import { calcIfoodLiquido, FORMA_ENTREGA_LABEL } from '../lib/ifoodLiquido'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 
@@ -111,6 +111,7 @@ export default function Dashboard() {
   const [op, setOp] = useState({ clientesAtivos: 0, estoqueBaixo: 0, cascosPendentes: 0, fiado: 0 })
   const [meta, setMeta] = useState(0)
   const [ifoodRates, setIfoodRates] = useState({})
+  const [entExp, setEntExp] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refToken, setRefToken] = useState(null)
   const [copiado, setCopiado] = useState(false)
@@ -151,7 +152,7 @@ export default function Dashboard() {
       const desdeISO = desde.toISOString()
       const [vData, pData, iData, cnData, nRes, ulRes, caRes, saRes, csRes, fiRes, empRes] = await Promise.all([
         fetchAll(() => supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes').neq('status', 'cancelado').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
-        fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens, subtotal, taxa_entrega, ifood_valores').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
+        fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens, subtotal, taxa_entrega, ifood_valores, forma_pagamento').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('venda_itens').select('produto_id, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desdeISO).order('id', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('clientes').select('created_at').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         supabase.from('produtos').select('id, nome'),
@@ -354,9 +355,24 @@ export default function Dashboard() {
                   <span>🏦 Repasse na conta</span><strong>{fmt(m.ifoodLiq.repasse)}</strong>
                 </div>
                 {m.ifoodLiq.recebidoEntrega > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5 }}>
-                    <span>💵 Recebido na entrega <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>· na mão</span></span>
-                    <strong>{fmt(m.ifoodLiq.recebidoEntrega)}</strong>
+                  <div>
+                    <div onClick={() => setEntExp(v => !v)} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5, cursor: 'pointer', userSelect: 'none' }}>
+                      <span>
+                        <span style={{ display: 'inline-block', width: 14, color: 'var(--text-muted)', transform: entExp ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+                        💵 Recebido na entrega <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>· na mão · toque pra ver</span>
+                      </span>
+                      <strong>{fmt(m.ifoodLiq.recebidoEntrega)}</strong>
+                    </div>
+                    {entExp && (
+                      <div style={{ margin: '6px 0 2px 20px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        {Object.entries(m.ifoodLiq.entregaForma).sort((a, b) => b[1].total - a[1].total).map(([forma, d]) => (
+                          <div key={forma} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                            <span>{FORMA_ENTREGA_LABEL[forma] || forma} <span style={{ fontSize: 11 }}>· {d.qtd} pedido{d.qtd !== 1 ? 's' : ''}</span></span>
+                            <strong style={{ color: 'var(--text)' }}>{fmt(d.total)}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5, color: '#ef4444', borderTop: '1px solid var(--border)', paddingTop: 9 }}>

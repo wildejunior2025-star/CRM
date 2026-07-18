@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
-import { calcIfoodLiquido } from '../lib/ifoodLiquido'
+import { calcIfoodLiquido, FORMA_ENTREGA_LABEL } from '../lib/ifoodLiquido'
 import { parseIfoodPlanilha } from '../lib/ifoodPlanilha'
 import { useAuth } from '../hooks/useAuth'
 import { CONDICOES_PAGAMENTO, FORMAS_RECEBIMENTO } from '../lib/constants'
@@ -57,6 +57,7 @@ export default function Financeiro() {
   const [repassesImp, setRepassesImp] = useState([])
   const [importing, setImporting]   = useState(false)
   const [importMsg, setImportMsg]   = useState(null)
+  const [entExp, setEntExp]         = useState(false)
   const fileRef = useRef(null)
 
   // ── Fiado (existente) ──
@@ -441,12 +442,27 @@ export default function Financeiro() {
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '6px 20px 4px', marginBottom: 28 }}>
             {/* 💵 Já na mão (recebido na entrega — bruto, pra bater o caixa) */}
             {ifood.recebidoEntrega > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0', borderBottom: '1px solid var(--border)' }}>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>💵 Já na sua mão</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>dinheiro/cartão na entrega — pra bater o caixa</div>
+              <div style={{ padding: '14px 0', borderBottom: '1px solid var(--border)' }}>
+                <div onClick={() => ifood.entregaForma && setEntExp(v => !v)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: ifood.entregaForma ? 'pointer' : 'default', userSelect: 'none' }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>
+                      {ifood.entregaForma && <span style={{ display: 'inline-block', width: 14, color: 'var(--text-muted)', transform: entExp ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>}
+                      💵 Já na sua mão
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>dinheiro/cartão na entrega — pra bater o caixa{ifood.entregaForma ? ' · toque pra abrir' : ''}</div>
+                  </div>
+                  <span style={{ fontSize: 22, fontWeight: 900 }}>{fmtBRL(ifood.recebidoEntrega)}</span>
                 </div>
-                <span style={{ fontSize: 22, fontWeight: 900 }}>{fmtBRL(ifood.recebidoEntrega)}</span>
+                {entExp && ifood.entregaForma && (
+                  <div style={{ margin: '10px 0 2px 20px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {Object.entries(ifood.entregaForma).sort((a, b) => b[1].total - a[1].total).map(([forma, d]) => (
+                      <div key={forma} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--text-muted)' }}>
+                        <span>{FORMA_ENTREGA_LABEL[forma] || forma} <span style={{ fontSize: 11.5 }}>· {d.qtd} pedido{d.qtd !== 1 ? 's' : ''}</span></span>
+                        <strong style={{ color: 'var(--text)' }}>{fmtBRL(d.total)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {/* 🏦 iFood vai te pagar (repasse) */}

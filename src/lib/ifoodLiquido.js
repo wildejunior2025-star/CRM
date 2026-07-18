@@ -24,6 +24,7 @@ export function calcIfoodLiquido(pedidos = [], rates = {}) {
   let repasse = 0           // líquido que cai na conta do iFood (só pedidos online)
   let recebidoEntrega = 0   // BRUTO recebido na mão (pago na entrega) — pra bater o caixa
   let comissaoEntrega = 0   // comissão desses pedidos, que o iFood cobra depois
+  const entregaForma = {}   // quebra do "na entrega" por forma: { dinheiro:{qtd,total}, debito:{...}, ... }
 
   for (const p of pedidos) {
     const itens  = Number(p.subtotal || 0)
@@ -46,6 +47,9 @@ export function calcIfoodLiquido(pedidos = [], rates = {}) {
     } else {
       recebidoEntrega += pago
       comissaoEntrega += com
+      const f = p.forma_pagamento || 'outro'
+      const b = entregaForma[f] || (entregaForma[f] = { qtd: 0, total: 0 })
+      b.qtd += 1; b.total += pago
     }
   }
 
@@ -54,5 +58,13 @@ export function calcIfoodLiquido(pedidos = [], rates = {}) {
   const voceRecebe = repasse + recebidoEntrega - comissaoEntrega
   const pctTaxa = vendas > 0 ? Math.round((taxasTotal / vendas) * 100) : 0
 
-  return { vendas, repasse, recebidoEntrega, comissaoEntrega, comissao, transacao, taxasTotal, voceRecebe, pctTaxa }
+  return { vendas, repasse, recebidoEntrega, comissaoEntrega, comissao, transacao, taxasTotal, voceRecebe, pctTaxa, entregaForma }
+}
+
+// rótulo amigável da forma de pagamento na entrega
+export const FORMA_ENTREGA_LABEL = {
+  dinheiro: '💵 Dinheiro',
+  debito: '💳 Débito (maquininha)',
+  credito: '💳 Crédito (maquininha)',
+  outro: 'Outros',
 }
