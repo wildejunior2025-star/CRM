@@ -471,18 +471,25 @@ function paginaHtml() {
   const semLista = imps.length === 0
   const cardImpressora = `
 <div class="card">
+  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:800;font-size:14px;margin:0 0 4px">
+    <input type="checkbox" id="duasImp" style="width:auto"${c.printerBar ? ' checked' : ''}> Usar 2 impressoras (cozinha e bar separados)
+  </label>
+  <div class="sub" style="margin:0 0 10px">Desmarcado = <b>tudo sai numa impressora só</b>. Marque só se tiver uma impressora separada pro bar.</div>
   <form method="POST" action="/printer">
-    <label>Impressora da COZINHA (comida)</label>
+    <label id="lblCoz">Impressora (tudo sai aqui)</label>
     <select name="printer">${opts || '<option value="">(nenhuma encontrada)</option>'}</select>
-    <label>Impressora do BAR (bebidas) — opcional</label>
-    <select name="printerBar">${optsBar}</select>
+    <div id="rowBar" style="display:${c.printerBar ? 'block' : 'none'}">
+      <label>Impressora do BAR (bebidas)</label>
+      <select name="printerBar">${optsBar}</select>
+    </div>
     <label style="margin-top:10px">Não achou na lista? Digite o nome EXATO da impressora</label>
     <input name="printerManual" placeholder="Ex.: POS-80 / Generic / EPSON TM-T20"
       value="${(c.printer || '').replace(/"/g, '&quot;')}" style="width:100%;padding:9px;border-radius:8px;border:1px solid #2a3444;background:#0f1420;color:#e5e7eb">
-    <button>Salvar impressoras</button>
+    <button>Salvar impressora</button>
   </form>
-  <div class="sub" style="margin:8px 0 0">${semLista ? '⚠️ Nenhuma impressora foi detectada automaticamente. Copie o nome EXATO da impressora (Windows: Configurações → Impressoras) e cole no campo acima.' : 'A da cozinha imprime tudo. Se escolher a do bar, as <b>bebidas</b> saem nela e a <b>comida</b> na cozinha. Deixe "(nenhuma)" pra imprimir tudo numa só.'} O nome digitado tem prioridade sobre a lista.</div>
+  <div class="sub" style="margin:8px 0 0">${semLista ? '⚠️ Nenhuma impressora foi detectada automaticamente. Copie o nome EXATO da impressora (Windows: Configurações → Impressoras) e cole no campo acima.' : 'O nome digitado tem prioridade sobre a lista. Com 2 impressoras: as <b>bebidas</b> saem no bar e a <b>comida</b> na cozinha.'}</div>
   <form method="POST" action="/teste"><button style="background:#16a34a">Imprimir cupom de teste</button></form>
+  <script>(function(){var cb=document.getElementById('duasImp'),row=document.getElementById('rowBar'),lbl=document.getElementById('lblCoz');if(!cb)return;function u(){var on=cb.checked;row.style.display=on?'block':'none';lbl.textContent=on?'Impressora da COZINHA (comida)':'Impressora (tudo sai aqui)';if(!on){var s=row.querySelector('select');if(s)s.value='';}}cb.addEventListener('change',u);u();})();</script>
 </div>`
   let bloco
   if (!sessionAtiva) {
