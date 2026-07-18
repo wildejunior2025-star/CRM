@@ -3286,11 +3286,13 @@ export default function PainelPedidos() {
   // pedidos (delivery/balcão) sozinho — o navegador NÃO imprime junto (evita 2x).
   const [fwcAppImprime, setFwcAppImprime] = useState(false)
   const [fwcPausado, setFwcPausado] = useState(false)
+  const [fwcVersao, setFwcVersao] = useState(0)        // versão do app (>=11 tem filtro por origem)
+  const [fwcFiltros, setFwcFiltros] = useState(null)   // o que ESTE PC imprime (null = tudo)
   const fwcImprimeRef = useRef(false)
   useEffect(() => {
     let vivo = true
     const ping = async () => {
-      let on = false, pausado = false
+      let on = false, pausado = false, versao = 0, filtros = null
       try {
         const c = new AbortController(); const t = setTimeout(() => c.abort(), 3000)
         const r = await fetch('http://127.0.0.1:9110/api/status', { signal: c.signal, cache: 'no-store' })
@@ -3298,12 +3300,35 @@ export default function PainelPedidos() {
         const j = await r.json().catch(() => null)
         on = !!(j && j.logado && j.impressora)
         pausado = !!(j && j.pausado)
+        versao = Number(j?.versao || 0)
+        filtros = j?.filtros ?? null
       } catch (e) { on = false }
-      if (vivo) { setFwcAppImprime(on); fwcImprimeRef.current = on; setFwcPausado(pausado) }
+      if (vivo) { setFwcAppImprime(on); fwcImprimeRef.current = on; setFwcPausado(pausado); setFwcVersao(versao); setFwcFiltros(filtros) }
     }
     ping(); const id = setInterval(ping, 15000)
     return () => { vivo = false; clearInterval(id) }
   }, [])
+  // Liga/desliga o que ESTA impressora imprime (por origem). Salva no app FWC deste PC.
+  const FWC_ORIGENS = [
+    { k: 'mesa', lbl: 'Mesa (comandas)' },
+    { k: 'whatsapp', lbl: 'WhatsApp' },
+    { k: 'ifood', lbl: 'iFood' },
+    { k: 'balcao', lbl: 'Balcão' },
+    { k: 'cardapio', lbl: 'Cardápio (loja online)' },
+    { k: 'app', lbl: 'App' },
+  ]
+  async function toggleFwcFiltro(key) {
+    const base = {}
+    for (const { k } of FWC_ORIGENS) base[k] = (fwcFiltros?.[k] !== false)
+    base[key] = !base[key]
+    setFwcFiltros(base) // otimista
+    try {
+      await fetch('http://127.0.0.1:9110/api/filtros', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filtros: base }),
+      })
+    } catch { setFwcFiltros(fwcFiltros) /* reverte */ }
+  }
   // Atalho do topo: liga/pausa a impressão automática do app FWC.
   async function toggleFwcPausa() {
     const novo = !fwcPausado
@@ -4996,13 +5021,27 @@ export default function PainelPedidos() {
                   </div>
                 </div>
 
-                <ToggleRow label="Telefone do cliente" ativo={cupomCfg.telCliente !== false} onToggle={() => setCupom({ telCliente: cupomCfg.telCliente === false })} />
-                <ToggleRow label="Endereço de entrega" ativo={cupomCfg.endereco !== false} onToggle={() => setCupom({ endereco: cupomCfg.endereco === false })} />
-                <ToggleRow label="Taxa de entrega" ativo={cupomCfg.taxa !== false} onToggle={() => setCupom({ taxa: cupomCfg.taxa === false })} />
-                <ToggleRow label="Observações" ativo={cupomCfg.obs !== false} onToggle={() => setCupom({ obs: cupomCfg.obs === false })} />
-                <ToggleRow label="Código de entrega" ativo={cupomCfg.codigo !== false} onToggle={() => setCupom({ codigo: cupomCfg.codigo === false })} />
-                <ToggleRow label="Total de itens" ativo={cupomCfg.totalItens === true} onToggle={() => setCupom({ totalItens: !(cupomCfg.totalItens === true) })} />
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>
+                  Todas as informações do pedido (telefone, endereço, taxa, observações, código e itens) saem sempre no cupom.
+                </p>
               </div>
+
+              {/* O que ESTE computador imprime — por origem (controla o app FWC deste PC) */}
+              {fwcAppImprime && fwcVersao >= 11 ? (
+                <div style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>O que ESTE computador imprime</span>
+                  <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 4px', lineHeight: 1.4 }}>
+                    Ligue só o que deve sair NESTA impressora. Ex.: PC da cozinha = só <b>Mesa</b>; PC do delivery = tudo <b>menos Mesa</b>.
+                  </p>
+                  {FWC_ORIGENS.map(({ k, lbl }) => (
+                    <ToggleRow key={k} label={lbl} ativo={fwcFiltros?.[k] !== false} onToggle={() => toggleFwcFiltro(k)} />
+                  ))}
+                </div>
+              ) : fwcAppImprime ? (
+                <p style={{ fontSize: 11, color: '#a16207', lineHeight: 1.4, margin: 0, background: 'rgba(161,98,7,.08)', border: '1px solid #a16207', borderRadius: 8, padding: '8px 10px' }}>
+                  ⚠️ Clique em <b>"Atualizar agora"</b> aqui em cima pra atualizar o app e liberar a escolha do que cada computador imprime.
+                </p>
+              ) : null}
 
               {fwcAppImprime && (
                 <div style={{ fontSize: 12, color: '#16a34a', fontWeight: 700, background: 'rgba(34,197,94,.08)', border: '1px solid #16a34a', borderRadius: 8, padding: '8px 10px' }}>
