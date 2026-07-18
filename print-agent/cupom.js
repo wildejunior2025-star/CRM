@@ -154,8 +154,8 @@ function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente =
   const dataHora = p2(d.getDate()) + '/' + p2(d.getMonth() + 1) + '/' + String(d.getFullYear()).slice(2) +
     ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds())
   const parts = [INIT]
-  // Cabecalho
-  if (nomeLoja) parts.push(ALIGN(1), BOLD(1), linha(String(nomeLoja)), BOLD(0))
+  // Cabecalho — nome da loja GRANDE (fonte dupla), igual ao cupom de delivery.
+  if (nomeLoja) parts.push(ALIGN(1), SIZE(0x11), BOLD(1), linha(String(nomeLoja).toUpperCase()), BOLD(0), SIZE(0))
   const mesaTxt = '~ Mesa: ' + numero + (area ? ' (' + area + ')' : '') + (sufixo || '') + ' ~'
   parts.push(ALIGN(1), BOLD(1), linha(mesaTxt), BOLD(0), ALIGN(0))
   parts.push(linha(dataHora))
