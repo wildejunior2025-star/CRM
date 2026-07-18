@@ -335,7 +335,10 @@ export async function imprimirHtml(html, titulo, opts = {}) {
 // pelo navegador/QZ. Assim o botão manual do gestor sai igual ao automático.
 export async function imprimirComandaMesaApp({ numeroMesa, itens = [], nomeLoja = '', comandaId, area = '', atendente = '', pessoas = 0, rodape = '' }) {
   if (await imprimirViaAppFwc('imprimir-mesa', { numeroMesa, itens, nomeLoja, comandaId })) return
-  imprimirHtml(montarComandaCozinhaHtml({ numeroMesa, itens, nomeLoja, area, atendente, pessoas, rodape }))
+  // Comanda de mesa NUNCA cai no navegador (Chrome). Quem imprime é o app FWC — que já
+  // recebe o pedido em tempo real e filtra por PC (botões de origem). Se não há app FWC
+  // neste aparelho, não imprime aqui (evita o Chrome abrindo e a 2ª via no outro PC).
+  imprimirHtml(montarComandaCozinhaHtml({ numeroMesa, itens, nomeLoja, area, atendente, pessoas, rodape }), null, { soApp: true })
 }
 
 // Comanda da COZINHA (fonte grande) — "pedido sai na cozinha". SEM preço (o preço sai
