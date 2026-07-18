@@ -3967,6 +3967,14 @@ export default function PainelPedidos() {
     }))
   }
 
+  // A CONTA da mesa também respeita o filtro "Mesa" deste PC: se a Mesa está
+  // DESLIGADA aqui, este PC não imprime nem a comanda da cozinha nem a conta.
+  // (fwcFiltros null = sem filtro = imprime tudo, como antes.)
+  function imprimirContaSeMesa(html, titulo) {
+    if (fwcFiltros?.mesa === false) return
+    imprimirHtml(html, titulo)
+  }
+
   // Imprime a CONTA da mesa na loja (chamado quando o garçom fecha e a mesa entra em
   // "aguardando_conferencia"). Total/forma vêm do fechamento_pendente que o garçom lançou.
   function imprimirContaMesa(c) {
@@ -3977,7 +3985,7 @@ export default function PainelPedidos() {
     const total = pagamentos.length ? pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0) : subtotal
     const taxa = Math.max(0, Math.round((total - subtotal) * 100) / 100)
     const forma = pagamentos.length > 1 ? 'Dividido' : (pagamentos[0]?.forma ?? '')
-    imprimirHtml(montarContaPresencialHtml({
+    imprimirContaSeMesa(montarContaPresencialHtml({
       numeroMesa: c.numero_mesa, itens, subtotal, taxa, total, formaPagamento: forma, pagamentos, empresa,
     }), empresa?.nome)
   }
@@ -4009,7 +4017,7 @@ export default function PainelPedidos() {
     try {
       const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
       const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
-      imprimirHtml(montarContaPresencialHtml({
+      imprimirContaSeMesa(montarContaPresencialHtml({
         numeroMesa: comanda.numero_mesa,
         itens, subtotal, taxa: Math.max(0, total - subtotal), total,
         formaPagamento: forma, empresa,
@@ -4055,7 +4063,7 @@ export default function PainelPedidos() {
     setComandas(cs => cs.map(c => c.id === comanda.id ? { ...c, fechamento_pendente: novoPend } : c))
     // reimprime a conta com o novo valor
     const forma = novos.length > 1 ? 'Dividido' : (novos[0]?.forma ?? '')
-    imprimirHtml(montarContaPresencialHtml({
+    imprimirContaSeMesa(montarContaPresencialHtml({
       numeroMesa: comanda.numero_mesa, itens, subtotal, taxa, total: novoTotal, formaPagamento: forma, pagamentos: novos, empresa,
     }), empresa?.nome)
   }
