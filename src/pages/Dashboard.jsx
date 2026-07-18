@@ -7,13 +7,20 @@ import '../components/Page.css'
 
 const fmt = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const pad = (n) => String(n).padStart(2, '0')
+const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const normForma = (f) => !f ? 'Outros' : f.startsWith('boleto') ? 'Boleto' : f === 'a_vista' ? 'À vista' : f === 'fiado' ? 'Fiado' : f
-const PERIODOS = [['hoje', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias'], ['mes', 'Mês']]
+const PERIODOS = [['hoje', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias'], ['mes', 'Mês'], ['custom', 'Personalizado']]
 
-function rangeFor(periodo) {
+function rangeFor(periodo, custIni, custFim) {
   const now = new Date()
   const start = new Date(now)
   let prevStart, prevEnd
+  if (periodo === 'custom') {
+    const s = new Date(custIni + 'T00:00:00')
+    const e = new Date((custFim || custIni) + 'T00:00:00'); e.setDate(e.getDate() + 1) // fim exclusivo
+    const len = e - s
+    return { start: s, now: e, prevStart: new Date(s.getTime() - len), prevEnd: new Date(s) }
+  }
   if (periodo === 'hoje') {
     start.setHours(0, 0, 0, 0); prevEnd = new Date(start)
     prevStart = new Date(start); prevStart.setDate(prevStart.getDate() - 1)
@@ -93,6 +100,8 @@ export default function Dashboard() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id
   const [periodo, setPeriodo] = useState('hoje')
+  const [custIni, setCustIni] = useState(ymd(new Date()))
+  const [custFim, setCustFim] = useState(ymd(new Date()))
   const [vendas, setVendas] = useState([])
   const [pedidos, setPedidos] = useState([])
   const [itens, setItens] = useState([])
@@ -132,6 +141,8 @@ export default function Dashboard() {
     async function load() {
       setLoading(true)
       const desde = new Date(); desde.setHours(0, 0, 0, 0); desde.setDate(desde.getDate() - 62)
+      const custDate = new Date(custIni + 'T00:00:00')   // se o filtro custom for mais antigo, busca desde lá
+      if (custDate < desde) desde.setTime(custDate.getTime())
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         const { data: pf } = await supabase.from('profiles').select('ref_token').eq('id', user.id).single()
@@ -168,10 +179,10 @@ export default function Dashboard() {
       setLoading(false)
     }
     if (empresaId !== undefined) load()
-  }, [empresaId])
+  }, [empresaId, custIni])
 
   const m = useMemo(() => {
-    const { start, now, prevStart, prevEnd } = rangeFor(periodo)
+    const { start, now, prevStart, prevEnd } = rangeFor(periodo, custIni, custFim)
     const inRange = (ts, a, b) => { const t = new Date(ts); return t >= a && t < b }
     const validPed = p => !['cancelado', 'aguardando_pagamento'].includes(p.status)
 
@@ -180,8 +191,10 @@ export default function Dashboard() {
     const canal = { ifood: 0, app: 0, wpp: 0, presencial: 0 }
     const horas = Array.from({ length: 24 }, (_, h) => ({ label: h, value: 0 }))
     const ehHoje = periodo === 'hoje'
+    const umDia = (now - start) <= 26 * 3600 * 1000            // período de 1 dia → gráfico por hora
+    const porHora = ehHoje || (periodo === 'custom' && umDia)
     const buckets = []; const bIdx = {}
-    if (ehHoje) for (let h = 0; h < 24; h++) { bIdx['h' + h] = buckets.length; buckets.push({ label: pad(h) + 'h', value: 0 }) }
+    if (porHora) for (let h = 0; h < 24; h++) { bIdx['h' + h] = buckets.length; buckets.push({ label: pad(h) + 'h', value: 0 }) }
     else {
       const d0 = new Date(start); d0.setHours(0, 0, 0, 0)
       for (let d = new Date(d0); d <= now; d.setDate(d.getDate() + 1)) {
@@ -191,7 +204,7 @@ export default function Dashboard() {
     }
     const addBucket = (ts, val) => {
       const dt = new Date(ts)
-      const key = ehHoje ? 'h' + dt.getHours() : new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).toDateString()
+      const key = porHora ? 'h' + dt.getHours() : new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).toDateString()
       if (bIdx[key] != null) buckets[bIdx[key]].value += val
       horas[dt.getHours()].value += val
     }
@@ -241,8 +254,8 @@ export default function Dashboard() {
     for (const v of vendas) if (new Date(v.created_at) >= mStart) fatMes += Number(v.total)
     for (const p of pedidos) if (validPed(p) && new Date(p.created_at) >= mStart) fatMes += Number(p.total)
 
-    return { fat, fatPrev, n, ticket, canal, buckets, horas, top, novos, fatMes, ifoodLiq }
-  }, [periodo, vendas, pedidos, itens, nomes, clientesNovos, ifoodRates])
+    return { fat, fatPrev, n, ticket, canal, buckets, horas, top, novos, fatMes, ifoodLiq, porHora }
+  }, [periodo, custIni, custFim, vendas, pedidos, itens, nomes, clientesNovos, ifoodRates])
 
   async function salvarMeta(v) {
     const x = Math.max(0, Number(v) || 0); setMeta(x)
@@ -260,14 +273,27 @@ export default function Dashboard() {
     <div>
       <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         <h1>Dashboard</h1>
-        <div style={{ display: 'flex', gap: 6, background: 'var(--card-bg, var(--bg))', border: '1px solid var(--border)', borderRadius: 999, padding: 4 }}>
-          {PERIODOS.map(([id, lb]) => (
-            <button key={id} type="button" onClick={() => setPeriodo(id)}
-              style={{ padding: '6px 14px', borderRadius: 999, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
-                background: periodo === id ? 'var(--primary)' : 'transparent', color: periodo === id ? '#fff' : 'var(--text-muted)' }}>
-              {lb}
-            </button>
-          ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {periodo === 'custom' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-muted)' }}>
+              <input type="date" value={custIni} max={custFim || ymd(new Date())}
+                onChange={e => { setCustIni(e.target.value); if (e.target.value > custFim) setCustFim(e.target.value) }}
+                style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
+              <span>até</span>
+              <input type="date" value={custFim} min={custIni} max={ymd(new Date())}
+                onChange={e => setCustFim(e.target.value)}
+                style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 6, background: 'var(--card-bg, var(--bg))', border: '1px solid var(--border)', borderRadius: 999, padding: 4 }}>
+            {PERIODOS.map(([id, lb]) => (
+              <button key={id} type="button" onClick={() => setPeriodo(id)}
+                style={{ padding: '6px 14px', borderRadius: 999, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                  background: periodo === id ? 'var(--primary)' : 'transparent', color: periodo === id ? '#fff' : 'var(--text-muted)' }}>
+                {lb}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -452,7 +478,7 @@ export default function Dashboard() {
   )
 }
 
-function ehLabel(p) { return p === 'hoje' ? '(hoje, por hora)' : p === '7d' ? '(últimos 7 dias)' : p === '30d' ? '(últimos 30 dias)' : '(mês)' }
+function ehLabel(p) { return p === 'hoje' ? '(hoje, por hora)' : p === '7d' ? '(últimos 7 dias)' : p === '30d' ? '(últimos 30 dias)' : p === 'custom' ? '(período escolhido)' : '(mês)' }
 function Op({ label, value, to, alerta, ultimo }) {
   return (
     <Link to={to} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: ultimo ? 'none' : '1px solid var(--border)', textDecoration: 'none', color: 'var(--text)' }}>
