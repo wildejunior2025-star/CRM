@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 14
+const APP_VERSION = 15
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -100,8 +100,11 @@ const fileStorage = {
 }
 const supabase = createClient(SUPABASE_URL, ANON_KEY, {
   auth: { storage: fileStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
-  realtime: { transport: WS },
+  // heartbeat curto mantém o WebSocket vivo (evita a conexão cair por inatividade
+  // atrás de firewall/NAT e os pedidos chegarem atrasados em lote).
+  realtime: { transport: WS, heartbeatIntervalMs: 15000 },
 })
+const APP_START = Date.now() // pra o backup só olhar pedidos DESTE turno (não reimprime antigos)
 
 // ---- impressao raw (ESC/POS) via spooler do Windows ----
 const PS1 = `param([Parameter(Mandatory=$true)][string]$Printer,[Parameter(Mandatory=$true)][string]$File)
@@ -407,6 +410,25 @@ function agendarComandaMesa(it) {
       imprimirComandaMesa(cid, entry.itens)
     }
   }, 800) // espera curta só pra juntar itens do mesmo envio; imprime rápido
+}
+
+// ---- backup: verifica pedidos a cada 12s (rede de seguranca caso o tempo real
+// atrase/caia). Só olha pedidos DESTE turno (created_at >= APP_START) pra nao
+// reimprimir os antigos ao ligar. O dedup (mesmos Sets do tempo real) evita 2 vias.
+async function verificarPendentes() {
+  if (!empresaId || !sessionAtiva || config().pausado) return
+  const since = new Date(Math.max(APP_START, Date.now() - 5 * 60 * 1000)).toISOString()
+  try {
+    const { data: its } = await supabase.from('comanda_itens').select('*')
+      .eq('empresa_id', empresaId).eq('status', 'pendente').gte('created_at', since)
+    for (const it of (its || [])) if (!comandaItensImpressos.has(it.id)) agendarComandaMesa(it)
+    const { data: peds } = await supabase.from('pedidos_delivery').select('*')
+      .eq('empresa_id', empresaId).gte('created_at', since)
+    for (const p of (peds || [])) {
+      if (p.status === 'aguardando_pagamento' || p.status === 'entregue' || p.status === 'cancelado') continue
+      if (!pedidosImpressos.has(p.id)) imprimirPedido(p)
+    }
+  } catch (e) { /* silencioso — proxima rodada tenta de novo */ }
 }
 
 // ---- conecta e escuta os pedidos da loja ----
@@ -762,6 +784,7 @@ server.listen(PORT, '127.0.0.1', () => {
   log('Configuracao: http://localhost:' + PORT)
   criarAtalhoStartup(process.execPath)  // mantém o "ligar com o Windows" no lugar certo
   iniciarEscuta()                       // conecta e escuta os pedidos
+  setInterval(verificarPendentes, 12000)            // backup: pega pedidos que o tempo real atrasar
   setTimeout(checarAtualizacao, 20000)              // checa atualização 20s após ligar
   setInterval(checarAtualizacao, 3 * 60 * 60 * 1000) // e a cada 3 horas
 })
