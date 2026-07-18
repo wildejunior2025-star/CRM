@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
+import { calcIfoodLiquido } from '../lib/ifoodLiquido'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 
@@ -100,6 +101,7 @@ export default function Dashboard() {
   const [ultimas, setUltimas] = useState([])
   const [op, setOp] = useState({ clientesAtivos: 0, estoqueBaixo: 0, cascosPendentes: 0, fiado: 0 })
   const [meta, setMeta] = useState(0)
+  const [ifoodRates, setIfoodRates] = useState({})
   const [loading, setLoading] = useState(true)
   const [refToken, setRefToken] = useState(null)
   const [copiado, setCopiado] = useState(false)
@@ -138,7 +140,7 @@ export default function Dashboard() {
       const desdeISO = desde.toISOString()
       const [vData, pData, iData, cnData, nRes, ulRes, caRes, saRes, csRes, fiRes, empRes] = await Promise.all([
         fetchAll(() => supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes').neq('status', 'cancelado').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
-        fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
+        fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens, subtotal, taxa_entrega, ifood_valores').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('venda_itens').select('produto_id, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desdeISO).order('id', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('clientes').select('created_at').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         supabase.from('produtos').select('id, nome'),
@@ -147,7 +149,7 @@ export default function Dashboard() {
         supabase.from('estoque_saldo').select('*'),
         supabase.from('casco_saldo').select('*'),
         supabase.from('clientes_saldo_fiado').select('saldo_fiado'),
-        empresaId ? supabase.from('empresas').select('meta_faturamento_mensal').eq('id', empresaId).single() : Promise.resolve({ data: null }),
+        empresaId ? supabase.from('empresas').select('meta_faturamento_mensal, ifood_comissao_pct, ifood_transacao_pct').eq('id', empresaId).single() : Promise.resolve({ data: null }),
       ])
       setVendas(vData ?? [])
       setPedidos(pData ?? [])
@@ -162,6 +164,7 @@ export default function Dashboard() {
         fiado: (fiRes.data ?? []).reduce((s, f) => s + Number(f.saldo_fiado), 0),
       })
       setMeta(Number(empRes.data?.meta_faturamento_mensal ?? 0))
+      setIfoodRates({ comissao: empRes.data?.ifood_comissao_pct, transacao: empRes.data?.ifood_transacao_pct })
       setLoading(false)
     }
     if (empresaId !== undefined) load()
@@ -199,17 +202,19 @@ export default function Dashboard() {
       }
       if (inRange(v.created_at, prevStart, prevEnd)) fatPrev += val
     }
+    const ifoodPeds = []
     for (const p of pedidos) {
       if (!validPed(p)) continue
       const val = Number(p.total)
       if (new Date(p.created_at) >= start && new Date(p.created_at) < now) {
         fat += val; n++; addBucket(p.created_at, val)
-        if (p.origem === 'ifood') canal.ifood += val
+        if (p.origem === 'ifood') { canal.ifood += val; ifoodPeds.push(p) }
         else if (p.origem === 'app') canal.app += val
         else if (p.origem === 'whatsapp' || p.origem === 'cardapio') canal.wpp += val
       }
       if (inRange(p.created_at, prevStart, prevEnd)) fatPrev += val
     }
+    const ifoodLiq = calcIfoodLiquido(ifoodPeds, ifoodRates)
 
     // top produtos (vendas + delivery), por nome
     const agg = {}
@@ -236,8 +241,8 @@ export default function Dashboard() {
     for (const v of vendas) if (new Date(v.created_at) >= mStart) fatMes += Number(v.total)
     for (const p of pedidos) if (validPed(p) && new Date(p.created_at) >= mStart) fatMes += Number(p.total)
 
-    return { fat, fatPrev, n, ticket, canal, buckets, horas, top, novos, fatMes }
-  }, [periodo, vendas, pedidos, itens, nomes, clientesNovos])
+    return { fat, fatPrev, n, ticket, canal, buckets, horas, top, novos, fatMes, ifoodLiq }
+  }, [periodo, vendas, pedidos, itens, nomes, clientesNovos, ifoodRates])
 
   async function salvarMeta(v) {
     const x = Math.max(0, Number(v) || 0); setMeta(x)
@@ -305,6 +310,36 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
+
+          {/* iFood — líquido estimado */}
+          {m.canal.ifood > 0 && (
+            <div style={cardBox}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <strong style={{ fontSize: 15 }}>🍔 iFood — quanto você recebe</strong>
+                <span title="Estimado com base nas taxas do iFood (comissão sobre itens + transação no pago online). Bate ~99% com o extrato. Importe a planilha no Financeiro pra ver o valor exato."
+                  style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 8px', cursor: 'help' }}>estimado ⓘ</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+                <span style={{ fontSize: 15, fontWeight: 700 }}>💰 Você recebe</span>
+                <span style={{ fontSize: 26, fontWeight: 900, color: '#16a34a' }}>{fmt(m.ifoodLiq.voceRecebe)}</span>
+              </div>
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 9 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5 }}>
+                  <span>🏦 Repasse na conta</span><strong>{fmt(m.ifoodLiq.repasse)}</strong>
+                </div>
+                {m.ifoodLiq.recebidoEntrega > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5 }}>
+                    <span>💵 Recebido na entrega <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>· na mão</span></span>
+                    <strong>{fmt(m.ifoodLiq.recebidoEntrega)}</strong>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5, color: '#ef4444', borderTop: '1px solid var(--border)', paddingTop: 9 }}>
+                  <span>🔻 iFood ficou com</span>
+                  <strong>{fmt(m.ifoodLiq.taxasTotal)} <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>({m.ifoodLiq.pctTaxa}%)</span></strong>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Meta do mês */}
           <div style={cardBox}>

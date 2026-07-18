@@ -14,7 +14,10 @@ export const IFOOD_TRANSACAO_PCT = 0.0452
 
 // pedidos: lista de pedidos_delivery do iFood, cada um com
 //   { subtotal, taxa_entrega, total, ifood_valores: { incentivo_loja, pago_online } }
-export function calcIfoodLiquido(pedidos = []) {
+// rates (opcional): taxa calibrada da loja { comissao, transacao }; sem isso usa o padrão.
+export function calcIfoodLiquido(pedidos = [], rates = {}) {
+  const PCT_COMISSAO  = Number(rates.comissao)  > 0 ? Number(rates.comissao)  : IFOOD_COMISSAO_PCT
+  const PCT_TRANSACAO = Number(rates.transacao) >= 0 && rates.transacao != null ? Number(rates.transacao) : IFOOD_TRANSACAO_PCT
   let vendas = 0            // o que os clientes pagaram (bruto)
   let comissao = 0          // comissão sobre os itens (todos os pedidos)
   let transacao = 0         // taxa de transação (só online)
@@ -30,8 +33,8 @@ export function calcIfoodLiquido(pedidos = []) {
     const pago   = Number(p.total || 0)
     const online = !!iv.pago_online
 
-    const com   = IFOOD_COMISSAO_PCT * itens
-    const trans = online ? IFOOD_TRANSACAO_PCT * pago : 0
+    const com   = PCT_COMISSAO * itens
+    const trans = online ? PCT_TRANSACAO * pago : 0
 
     vendas    += pago
     comissao  += com

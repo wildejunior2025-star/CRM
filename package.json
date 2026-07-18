@@ -19,7 +19,8 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-organizational-chart": "^2.2.1",
-    "react-router-dom": "^7.17.0"
+    "react-router-dom": "^7.17.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.40.2",
