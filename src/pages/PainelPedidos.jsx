@@ -16,6 +16,7 @@ import { separarItem } from '../lib/itensPedido'
 import PresencialSalao from './PresencialSalao'
 import PresencialReservas from './PresencialReservas'
 import PresencialMesas from './PresencialMesas'
+import PresencialHistorico from './PresencialHistorico'
 import './PainelPedidos.css'
 
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
@@ -4670,8 +4671,8 @@ export default function PainelPedidos() {
             {!buscaQ && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
               {[
-                { id: null, label: 'Todas origens', cor: '#7c3aed', count: pedidos.length + concluidosHoje.length + canceladosHoje.length + comandas.length + mesasFechadasHoje.length },
-                { id: 'mesa', label: 'Mesa (comandas)', cor: '#f59e0b', count: comandas.length + mesasFechadasHoje.length },
+                { id: null, label: 'Todas origens', cor: '#7c3aed', count: pedidos.length + concluidosHoje.length + canceladosHoje.length },
+                // "Mesa (comandas)" saiu daqui — mesas ficam só na seção Mesas.
                 { id: 'whatsapp', label: 'WhatsApp', cor: ORIGEM_CONFIG.whatsapp.bg, count: contaOrigem('whatsapp') },
                 { id: 'ifood', label: 'iFood', cor: ORIGEM_CONFIG.ifood.bg, count: contaOrigem('ifood') },
                 { id: 'balcao', label: 'Balcão', cor: ORIGEM_CONFIG.balcao.bg, count: contaOrigem('balcao') },
@@ -5569,6 +5570,7 @@ export default function PainelPedidos() {
             <span style={{ fontWeight: 800, fontSize: 15, margin: '0 8px' }}>🍽️ Salão</span>
             {[
               { id: 'salao', label: 'Salão / Mesas' },
+              { id: 'historico', label: 'Histórico' },
               { id: 'reservas', label: 'Reservas' },
               { id: 'mesas', label: 'Configurar mesas' },
             ].map(t => (
@@ -5584,6 +5586,7 @@ export default function PainelPedidos() {
           {/* Conteúdo da sub-aba */}
           <div style={{ flex: 1, overflow: 'auto' }}>
             {subAbaSalao === 'salao' && <PresencialSalao />}
+            {subAbaSalao === 'historico' && <PresencialHistorico />}
             {subAbaSalao === 'reservas' && <PresencialReservas />}
             {subAbaSalao === 'mesas' && <PresencialMesas />}
           </div>
