@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 
-const fmt = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+const fmt = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const pad = (n) => String(n).padStart(2, '0')
 const normForma = (f) => !f ? 'Outros' : f.startsWith('boleto') ? 'Boleto' : f === 'a_vista' ? 'À vista' : f === 'fiado' ? 'Fiado' : f
 const PERIODOS = [['hoje', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias'], ['mes', 'Mês']]
@@ -135,12 +135,13 @@ export default function Dashboard() {
         const { data: pf } = await supabase.from('profiles').select('ref_token').eq('id', user.id).single()
         if (pf?.ref_token) setRefToken(pf.ref_token)
       }
-      const [vRes, pRes, iRes, nRes, cnRes, ulRes, caRes, saRes, csRes, fiRes, empRes] = await Promise.all([
-        supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes').neq('status', 'cancelado').gte('created_at', desde.toISOString()),
-        supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens').gte('created_at', desde.toISOString()),
-        supabase.from('venda_itens').select('produto_id, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desde.toISOString()).limit(8000),
+      const desdeISO = desde.toISOString()
+      const [vData, pData, iData, cnData, nRes, ulRes, caRes, saRes, csRes, fiRes, empRes] = await Promise.all([
+        fetchAll(() => supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes').neq('status', 'cancelado').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
+        fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
+        fetchAll(() => supabase.from('venda_itens').select('produto_id, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desdeISO).order('id', { ascending: false })).then(r => r.data),
+        fetchAll(() => supabase.from('clientes').select('created_at').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         supabase.from('produtos').select('id, nome'),
-        supabase.from('clientes').select('created_at').gte('created_at', desde.toISOString()),
         supabase.from('vendas').select('id, total, forma_pagamento, created_at, clientes(nome)').neq('status', 'cancelado').order('created_at', { ascending: false }).limit(8),
         supabase.from('clientes').select('id', { count: 'exact', head: true }).eq('ativo', true),
         supabase.from('estoque_saldo').select('*'),
@@ -148,11 +149,11 @@ export default function Dashboard() {
         supabase.from('clientes_saldo_fiado').select('saldo_fiado'),
         empresaId ? supabase.from('empresas').select('meta_faturamento_mensal').eq('id', empresaId).single() : Promise.resolve({ data: null }),
       ])
-      setVendas(vRes.data ?? [])
-      setPedidos(pRes.data ?? [])
-      setItens(iRes.data ?? [])
+      setVendas(vData ?? [])
+      setPedidos(pData ?? [])
+      setItens(iData ?? [])
       setNomes(Object.fromEntries((nRes.data ?? []).map(p => [p.id, p.nome])))
-      setClientesNovos(cnRes.data ?? [])
+      setClientesNovos(cnData ?? [])
       setUltimas(ulRes.data ?? [])
       setOp({
         clientesAtivos: caRes.count ?? 0,

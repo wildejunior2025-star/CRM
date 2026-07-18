@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import { CONDICOES_PAGAMENTO, FORMAS_RECEBIMENTO } from '../lib/constants'
 import { sendWhatsApp, formatWaMessage } from '../lib/whatsapp'
 import '../components/Page.css'
@@ -71,15 +71,18 @@ export default function Financeiro() {
   async function loadDelivery() {
     setLoadingD(true)
     const { start, end } = getRangeDelivery(periodoD)
-    let q = supabase
-      .from('pedidos_delivery')
-      .select('origem, total, forma_pagamento')
-      .neq('status', 'cancelado')
-    if (start) q = q.gte('created_at', start)
-    if (end)   q = q.lt('created_at', end)
-
+    // Pagina pra não perder pedidos (Supabase corta em 1000/request) — num mês cheio passa disso.
     const [pedRes, cfgRes] = await Promise.all([
-      q,
+      fetchAll(() => {
+        let q = supabase
+          .from('pedidos_delivery')
+          .select('origem, total, forma_pagamento')
+          .neq('status', 'cancelado')
+          .order('created_at', { ascending: false })
+        if (start) q = q.gte('created_at', start)
+        if (end)   q = q.lt('created_at', end)
+        return q
+      }),
       supabase.from('configuracoes_plataforma').select('valor').eq('chave', 'taxa_plataforma_pct').maybeSingle(),
     ])
     setPedidos(pedRes.data ?? [])

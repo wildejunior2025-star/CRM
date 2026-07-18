@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import { exportToCsv } from '../lib/csv'
 import { CONDICOES_PAGAMENTO, STATUS_VENDA } from '../lib/constants'
 import '../components/Page.css'
@@ -40,18 +40,17 @@ export default function Relatorios() {
     const fimExclusivo = new Date(`${dataFim}T00:00:00`)
     fimExclusivo.setDate(fimExclusivo.getDate() + 1)
 
-    let vendasQuery = supabase
-      .from('vendas')
-      .select('*, clientes(nome)')
-      .gte('created_at', inicioISO)
-      .lt('created_at', fimExclusivo.toISOString())
-      .order('created_at', { ascending: false })
-
-    if (!incluirCancelados) {
-      vendasQuery = vendasQuery.neq('status', 'cancelado')
-    }
-
-    const vendasRes = await vendasQuery
+    // Pagina pra não perder vendas (Supabase corta em 1000/request) em intervalos grandes.
+    const vendasRes = await fetchAll(() => {
+      let vendasQuery = supabase
+        .from('vendas')
+        .select('*, clientes(nome)')
+        .gte('created_at', inicioISO)
+        .lt('created_at', fimExclusivo.toISOString())
+        .order('created_at', { ascending: false })
+      if (!incluirCancelados) vendasQuery = vendasQuery.neq('status', 'cancelado')
+      return vendasQuery
+    })
 
     if (vendasRes.error) {
       setError(vendasRes.error.message)
