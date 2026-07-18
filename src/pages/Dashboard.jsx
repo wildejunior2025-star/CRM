@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { calcIfoodLiquido, FORMA_ENTREGA_LABEL } from '../lib/ifoodLiquido'
+import IfoodIcon from '../components/IfoodIcon'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 
@@ -264,7 +265,7 @@ export default function Dashboard() {
   }
   const metaPct = meta > 0 ? Math.min(100, Math.round((m.fatMes / meta) * 100)) : 0
   const canais = [
-    { icon: '🍔', nome: 'iFood', value: m.canal.ifood },
+    { icon: <IfoodIcon size={24} />, nome: 'iFood', value: m.canal.ifood },
     { icon: '📱', nome: 'App', value: m.canal.app },
     { icon: '💬', nome: 'WhatsApp + Loja Online', value: m.canal.wpp },
     { icon: '🍽️', nome: 'Presencial', value: m.canal.presencial },
@@ -342,7 +343,7 @@ export default function Dashboard() {
           {m.canal.ifood > 0 && (
             <div style={cardBox}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <strong style={{ fontSize: 15 }}>🍔 iFood — quanto você recebe</strong>
+                <strong style={{ fontSize: 15, display: 'inline-flex', alignItems: 'center', gap: 7 }}><IfoodIcon size={20} /> iFood — quanto você recebe</strong>
                 <span title="Estimado com base nas taxas do iFood (comissão sobre itens + transação no pago online). Bate ~99% com o extrato. Importe a planilha no Financeiro pra ver o valor exato."
                   style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 8px', cursor: 'help' }}>estimado ⓘ</span>
               </div>

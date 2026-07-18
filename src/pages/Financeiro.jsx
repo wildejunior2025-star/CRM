@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { calcIfoodLiquido, FORMA_ENTREGA_LABEL } from '../lib/ifoodLiquido'
+import IfoodIcon from '../components/IfoodIcon'
 import { parseIfoodPlanilha } from '../lib/ifoodPlanilha'
 import { useAuth } from '../hooks/useAuth'
 import { CONDICOES_PAGAMENTO, FORMAS_RECEBIMENTO } from '../lib/constants'
@@ -404,7 +405,7 @@ export default function Financeiro() {
       {(pedIfood.length > 0 || temImportado) && (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
-            <span>🍔 iFood — seu dinheiro</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><IfoodIcon size={18} /> iFood — seu dinheiro</span>
             {temImportado ? (
               <span title="Valores exatos, do extrato do iFood que você importou."
                 style={{ fontSize: 10, fontWeight: 700, color: 'var(--success)', border: '1px solid var(--success)', borderRadius: 20, padding: '2px 8px', textTransform: 'none', letterSpacing: 0 }}>
