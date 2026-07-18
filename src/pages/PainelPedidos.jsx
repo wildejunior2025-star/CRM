@@ -2360,11 +2360,11 @@ function horarioHojeTexto(emp) {
 
 // ── Toggle reutilizável (liga/desliga) ─────────────────────
 // ── Impressora FWC: configuração DENTRO do gestor ────────────────────────────
-// O app FWC roda no PC e expõe uma API local (127.0.0.1:9110). Aqui o gestor
+// O app FWC roda no PC e expõe uma API local (localhost:9110). Aqui o gestor
 // fala com ela pra logar, escolher loja/impressora e imprimir teste — tudo sem
 // abrir o localhost. Se o app não estiver aberto, mostra o botão de baixar.
 const FWC_EXE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co/storage/v1/object/public/downloads/ImpressoraFWC.exe'
-const FWC_API = 'http://127.0.0.1:9110/api'
+const FWC_API = 'http://localhost:9110/api'
 
 function ImpressoraFWCPanel({ empresaId }) {
   const [online, setOnline] = useState(null) // null=checando | true | false
@@ -3295,7 +3295,7 @@ export default function PainelPedidos() {
       let on = false, pausado = false, versao = 0, filtros = null
       try {
         const c = new AbortController(); const t = setTimeout(() => c.abort(), 3000)
-        const r = await fetch('http://127.0.0.1:9110/api/status', { signal: c.signal, cache: 'no-store' })
+        const r = await fetch('http://localhost:9110/api/status', { signal: c.signal, cache: 'no-store' })
         clearTimeout(t)
         const j = await r.json().catch(() => null)
         on = !!(j && j.logado && j.impressora)
@@ -3323,7 +3323,7 @@ export default function PainelPedidos() {
     base[key] = !base[key]
     setFwcFiltros(base) // otimista
     try {
-      await fetch('http://127.0.0.1:9110/api/filtros', {
+      await fetch('http://localhost:9110/api/filtros', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ filtros: base }),
       })
@@ -3334,7 +3334,7 @@ export default function PainelPedidos() {
     const novo = !fwcPausado
     setFwcPausado(novo) // otimista
     try {
-      await fetch('http://127.0.0.1:9110/api/pausar', {
+      await fetch('http://localhost:9110/api/pausar', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ pausado: novo }),
       })

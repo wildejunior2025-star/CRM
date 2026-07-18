@@ -237,16 +237,16 @@ function imprimirCupomNavegador(pedido, empresa = {}) {
   }, 300)
 }
 
-// Tenta imprimir pelo app Impressora FWC (127.0.0.1:9110) — a térmica configurada.
+// Tenta imprimir pelo app Impressora FWC (localhost:9110) — a térmica configurada.
 // Retorna true se o app imprimiu. Falha rápido se o app não estiver rodando
 // (aí cai no QZ/navegador). É por aqui que TODA impressão vai pra térmica do FWC.
-// Diz se o app Impressora FWC está rodando NESTE aparelho (127.0.0.1:9110).
+// Diz se o app Impressora FWC está rodando NESTE aparelho (localhost:9110).
 // true = é o PC da loja (com térmica). false = celular/tablet sem impressora.
 export async function appFwcDisponivel() {
   try {
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), 2000)
-    const r = await fetch('http://127.0.0.1:9110/api/status', { signal: ctrl.signal })
+    const r = await fetch('http://localhost:9110/api/status', { signal: ctrl.signal })
     clearTimeout(t)
     return r.ok
   } catch { return false }
@@ -256,7 +256,7 @@ async function imprimirViaAppFwc(rota, corpo) {
   try {
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), 3500)
-    const r = await fetch('http://127.0.0.1:9110/api/' + rota, {
+    const r = await fetch('http://localhost:9110/api/' + rota, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify(corpo), signal: ctrl.signal,
     })

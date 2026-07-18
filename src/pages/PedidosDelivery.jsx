@@ -915,7 +915,7 @@ export default function PedidosDelivery() {
       let on = false
       try {
         const c = new AbortController(); const t = setTimeout(() => c.abort(), 3000)
-        const r = await fetch('http://127.0.0.1:9110/api/status', { signal: c.signal, cache: 'no-store' })
+        const r = await fetch('http://localhost:9110/api/status', { signal: c.signal, cache: 'no-store' })
         clearTimeout(t)
         const j = await r.json().catch(() => null)
         on = !!(j && j.logado && j.impressora)
