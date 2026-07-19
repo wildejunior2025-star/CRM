@@ -105,6 +105,7 @@ import Dashboard from './pages/Dashboard'
 import Clientes from './pages/Clientes'
 import Produtos from './pages/Produtos'
 import CategoriasComplemento from './pages/CategoriasComplemento'
+import FichaTecnica from './pages/FichaTecnica'
 import Estoque from './pages/Estoque'
 import Vendas from './pages/Vendas'
 import Caixa from './pages/Caixa'
@@ -253,6 +254,10 @@ export default function App() {
             <Route
               path="complementos"
               element={<ProtectedRoute roles={['admin']} modulo="produtos"><CategoriasComplemento /></ProtectedRoute>}
+            />
+            <Route
+              path="ficha-tecnica"
+              element={<ProtectedRoute roles={['admin']} modulo="produtos"><FichaTecnica /></ProtectedRoute>}
             />
             <Route
               path="estoque"

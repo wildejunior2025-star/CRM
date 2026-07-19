@@ -42,6 +42,7 @@ const links = [
   { group: 'Catálogo' },
   { to: '/produtos', label: 'Catálogo', roles: ['admin'], mod: 'produtos' },
   { to: '/complementos', label: 'Complementos', roles: ['admin'], mod: 'produtos' },
+  { to: '/ficha-tecnica', label: 'Ficha Técnica', roles: ['admin'], mod: 'produtos' },
   { to: '/estoque', label: 'Estoque', roles: ['admin'], mod: 'estoque' },
 
   { group: 'Delivery' },

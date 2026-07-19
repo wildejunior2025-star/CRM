@@ -1,0 +1,534 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { supabase } from '../lib/supabaseClient'
+import { useAuth } from '../hooks/useAuth'
+import '../components/Page.css'
+
+// ── Unidades e conversão ──────────────────────────────────────────────
+// Tudo é convertido pra uma "unidade base" (grama / ml / unidade) pra poder
+// somar e dividir sem erro. Peso e volume usam o mesmo fator (x1000), então
+// kg↔g e L↔ml funcionam igual. O importante é a loja não misturar peso com
+// volume na MESMA matéria-prima (ex.: cadastrar farinha em kg e usar em ml).
+const UNIDADES = ['kg', 'g', 'L', 'ml', 'un']
+const FATOR = { kg: 1000, g: 1, L: 1000, ml: 1, un: 1 }
+const emBase = (qtd, unidade) => Number(qtd || 0) * (FATOR[unidade] || 1)
+// Custo por 1 unidade base (grama/ml/un) de uma matéria-prima.
+const custoBase = (mp) => Number(mp?.custo || 0) / (FATOR[mp?.unidade] || 1)
+
+const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+// Valores muito pequenos (custo por grama) — mostra mais casas pra não virar R$0,00.
+const brl4 = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
+
+// Custo de uma linha de ingrediente (quantidade usada × custo por unidade base).
+const custoItem = (it) => emBase(it.quantidade, it.unidade) * Number(it.custo_unit || 0)
+
+// Calcula tudo de uma ficha: custo total, custo por porção e margem.
+function calcularFicha(ficha, itens, produto) {
+  const custoTotal = (itens || []).reduce((s, it) => s + custoItem(it), 0)
+  const rendBase = emBase(ficha.rendimento, ficha.unid_rendimento)
+  const custoPorBase = rendBase > 0 ? custoTotal / rendBase : 0
+  const porcaoBase = emBase(ficha.peso_porcao, ficha.unid_porcao)
+  const custoPorcao = custoPorBase * porcaoBase
+  const precoVenda = Number(produto?.preco_venda || 0)
+  const temVenda = !!produto && precoVenda > 0
+  const lucro = temVenda ? precoVenda - custoPorcao : 0
+  const margemPct = temVenda && precoVenda > 0 ? (lucro / precoVenda) * 100 : 0
+  return { custoTotal, custoPorBase, custoPorcao, precoVenda, temVenda, lucro, margemPct }
+}
+
+const emptyMateria = { nome: '', unidade: 'kg', custo: '', ativo: true }
+const linhaVazia = () => ({ materia_prima_id: '', nome: '', quantidade: '', unidade: 'g', custo_unit: 0 })
+const emptyFicha = {
+  nome: '', produto_id: '', rendimento: '', unid_rendimento: 'g',
+  peso_porcao: '', unid_porcao: 'g', observacoes: '', itens: [linhaVazia()],
+}
+
+export default function FichaTecnica() {
+  const { profile } = useAuth()
+  const empresaId = profile?.empresa_id ?? null
+
+  const [aba, setAba] = useState('fichas') // 'fichas' | 'materias'
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const [materias, setMaterias] = useState([])
+  const [fichas, setFichas] = useState([])
+  const [itensPorFicha, setItensPorFicha] = useState({}) // ficha_id -> [itens]
+  const [produtos, setProdutos] = useState([])
+
+  // modais
+  const [showMateria, setShowMateria] = useState(false)
+  const [materiaForm, setMateriaForm] = useState(emptyMateria)
+  const [materiaEdit, setMateriaEdit] = useState(null)
+
+  const [showFicha, setShowFicha] = useState(false)
+  const [fichaForm, setFichaForm] = useState(emptyFicha)
+  const [fichaEdit, setFichaEdit] = useState(null)
+  const [salvando, setSalvando] = useState(false)
+
+  const carregar = useCallback(async () => {
+    if (!empresaId) return
+    setLoading(true)
+    setError(null)
+    try {
+      const [mp, fi, it, pr] = await Promise.all([
+        supabase.from('materias_primas').select('*').eq('empresa_id', empresaId).order('nome'),
+        supabase.from('fichas_tecnicas').select('*, produtos(id, nome, preco_venda)').eq('empresa_id', empresaId).order('nome'),
+        supabase.from('ficha_itens').select('*').eq('empresa_id', empresaId),
+        supabase.from('produtos').select('id, nome, preco_venda').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
+      ])
+      if (mp.error) throw mp.error
+      if (fi.error) throw fi.error
+      if (it.error) throw it.error
+      if (pr.error) throw pr.error
+      setMaterias(mp.data || [])
+      setFichas(fi.data || [])
+      setProdutos(pr.data || [])
+      const grupos = {}
+      for (const linha of (it.data || [])) {
+        (grupos[linha.ficha_id] = grupos[linha.ficha_id] || []).push(linha)
+      }
+      setItensPorFicha(grupos)
+    } catch (e) {
+      setError(e.message || 'Erro ao carregar')
+    } finally {
+      setLoading(false)
+    }
+  }, [empresaId])
+
+  useEffect(() => { carregar() }, [carregar])
+
+  // ── Matérias-primas ──────────────────────────────────────────────
+  function abrirNovaMateria() {
+    setMateriaEdit(null); setMateriaForm(emptyMateria); setShowMateria(true)
+  }
+  function abrirEditarMateria(m) {
+    setMateriaEdit(m)
+    setMateriaForm({ nome: m.nome, unidade: m.unidade, custo: String(m.custo ?? ''), ativo: m.ativo })
+    setShowMateria(true)
+  }
+  async function salvarMateria(e) {
+    e.preventDefault()
+    if (!materiaForm.nome.trim()) return
+    const payload = {
+      empresa_id: empresaId,
+      nome: materiaForm.nome.trim(),
+      unidade: materiaForm.unidade,
+      custo: Number(String(materiaForm.custo).replace(',', '.')) || 0,
+      ativo: !!materiaForm.ativo,
+    }
+    const q = materiaEdit
+      ? supabase.from('materias_primas').update(payload).eq('id', materiaEdit.id)
+      : supabase.from('materias_primas').insert(payload)
+    const { error } = await q
+    if (error) { alert('Erro ao salvar: ' + error.message); return }
+    setShowMateria(false)
+    carregar()
+  }
+  async function excluirMateria(m) {
+    if (!confirm(`Excluir a matéria-prima "${m.nome}"?`)) return
+    const { error } = await supabase.from('materias_primas').delete().eq('id', m.id)
+    if (error) { alert('Erro ao excluir: ' + error.message); return }
+    carregar()
+  }
+
+  // ── Fichas técnicas ──────────────────────────────────────────────
+  function abrirNovaFicha() {
+    setFichaEdit(null); setFichaForm(emptyFicha); setShowFicha(true)
+  }
+  function abrirEditarFicha(f) {
+    setFichaEdit(f)
+    const itens = (itensPorFicha[f.id] || []).map(it => ({
+      materia_prima_id: it.materia_prima_id || '',
+      nome: it.nome,
+      quantidade: String(it.quantidade ?? ''),
+      unidade: it.unidade || 'g',
+      custo_unit: Number(it.custo_unit || 0),
+    }))
+    setFichaForm({
+      nome: f.nome,
+      produto_id: f.produto_id || '',
+      rendimento: String(f.rendimento ?? ''),
+      unid_rendimento: f.unid_rendimento || 'g',
+      peso_porcao: String(f.peso_porcao ?? ''),
+      unid_porcao: f.unid_porcao || 'g',
+      observacoes: f.observacoes || '',
+      itens: itens.length ? itens : [linhaVazia()],
+    })
+    setShowFicha(true)
+  }
+
+  // Ajusta uma linha de ingrediente do form. Ao escolher a matéria-prima,
+  // já puxa a unidade e o custo (snapshot) dela.
+  function setLinha(idx, patch) {
+    setFichaForm(f => {
+      const itens = f.itens.map((it, i) => (i === idx ? { ...it, ...patch } : it))
+      return { ...f, itens }
+    })
+  }
+  function escolherMateria(idx, materiaId) {
+    const mp = materias.find(m => m.id === materiaId)
+    if (!mp) { setLinha(idx, { materia_prima_id: '', custo_unit: 0 }); return }
+    setLinha(idx, {
+      materia_prima_id: mp.id,
+      nome: mp.nome,
+      unidade: mp.unidade,          // começa na mesma unidade da MP (pode trocar)
+      custo_unit: custoBase(mp),    // custo por unidade base (snapshot)
+    })
+  }
+  function addLinha() { setFichaForm(f => ({ ...f, itens: [...f.itens, linhaVazia()] })) }
+  function removerLinha(idx) {
+    setFichaForm(f => ({ ...f, itens: f.itens.length > 1 ? f.itens.filter((_, i) => i !== idx) : f.itens }))
+  }
+
+  async function salvarFicha(e) {
+    e.preventDefault()
+    if (!fichaForm.nome.trim()) { alert('Dê um nome pra ficha (ex.: Coxinha).'); return }
+    setSalvando(true)
+    try {
+      const dados = {
+        empresa_id: empresaId,
+        nome: fichaForm.nome.trim(),
+        produto_id: fichaForm.produto_id || null,
+        rendimento: Number(String(fichaForm.rendimento).replace(',', '.')) || 0,
+        unid_rendimento: fichaForm.unid_rendimento,
+        peso_porcao: Number(String(fichaForm.peso_porcao).replace(',', '.')) || 0,
+        unid_porcao: fichaForm.unid_porcao,
+        observacoes: fichaForm.observacoes.trim() || null,
+      }
+      let fichaId = fichaEdit?.id
+      if (fichaEdit) {
+        const { error } = await supabase.from('fichas_tecnicas').update(dados).eq('id', fichaEdit.id)
+        if (error) throw error
+      } else {
+        const { data, error } = await supabase.from('fichas_tecnicas').insert(dados).select('id').single()
+        if (error) throw error
+        fichaId = data.id
+      }
+      // Regrava os itens: apaga os antigos e insere os atuais (simples e seguro).
+      await supabase.from('ficha_itens').delete().eq('ficha_id', fichaId)
+      const linhas = fichaForm.itens
+        .filter(it => it.materia_prima_id && Number(String(it.quantidade).replace(',', '.')) > 0)
+        .map(it => ({
+          empresa_id: empresaId,
+          ficha_id: fichaId,
+          materia_prima_id: it.materia_prima_id,
+          nome: it.nome,
+          quantidade: Number(String(it.quantidade).replace(',', '.')) || 0,
+          unidade: it.unidade,
+          custo_unit: Number(it.custo_unit || 0),
+        }))
+      if (linhas.length) {
+        const { error } = await supabase.from('ficha_itens').insert(linhas)
+        if (error) throw error
+      }
+      setShowFicha(false)
+      carregar()
+    } catch (err) {
+      alert('Erro ao salvar a ficha: ' + (err.message || err))
+    } finally {
+      setSalvando(false)
+    }
+  }
+  async function excluirFicha(f) {
+    if (!confirm(`Excluir a ficha "${f.nome}"?`)) return
+    const { error } = await supabase.from('fichas_tecnicas').delete().eq('id', f.id)
+    if (error) { alert('Erro ao excluir: ' + error.message); return }
+    carregar()
+  }
+
+  // Prévia ao vivo dentro do modal de ficha.
+  const previa = useMemo(() => {
+    const itens = fichaForm.itens.map(it => ({ ...it, quantidade: Number(String(it.quantidade).replace(',', '.')) || 0 }))
+    const prod = produtos.find(p => p.id === fichaForm.produto_id)
+    return calcularFicha({
+      rendimento: Number(String(fichaForm.rendimento).replace(',', '.')) || 0,
+      unid_rendimento: fichaForm.unid_rendimento,
+      peso_porcao: Number(String(fichaForm.peso_porcao).replace(',', '.')) || 0,
+      unid_porcao: fichaForm.unid_porcao,
+    }, itens, prod)
+  }, [fichaForm, produtos])
+
+  if (!empresaId) {
+    return <div className="card">Selecione uma loja pra usar a Ficha Técnica.</div>
+  }
+
+  return (
+    <div>
+      <div className="page-header">
+        <h1>🧮 Ficha Técnica</h1>
+        {aba === 'fichas'
+          ? <button className="btn btn-primary" onClick={abrirNovaFicha}>+ Nova ficha</button>
+          : <button className="btn btn-primary" onClick={abrirNovaMateria}>+ Nova matéria-prima</button>}
+      </div>
+
+      {/* Abas internas */}
+      <div className="toolbar" style={{ gap: 4 }}>
+        <button
+          className={'btn ' + (aba === 'fichas' ? 'btn-primary' : 'btn-secondary')}
+          onClick={() => setAba('fichas')}
+        >Fichas técnicas</button>
+        <button
+          className={'btn ' + (aba === 'materias' ? 'btn-primary' : 'btn-secondary')}
+          onClick={() => setAba('materias')}
+        >Matérias-primas</button>
+      </div>
+
+      {error && <div className="card error-text" style={{ marginBottom: 16 }}>{error}</div>}
+      {loading && <div className="card">Carregando…</div>}
+
+      {/* ─────────────── ABA: FICHAS ─────────────── */}
+      {!loading && aba === 'fichas' && (
+        fichas.length === 0 ? (
+          <div className="card empty-state">
+            <strong>Nenhuma ficha técnica ainda</strong>
+            <p>Crie a receita de um produto (ex.: Coxinha) pra saber o custo real de cada porção.</p>
+            <button className="btn btn-primary" onClick={abrirNovaFicha} style={{ marginTop: 8 }}>+ Nova ficha</button>
+          </div>
+        ) : (
+          <div className="dashboard-grid">
+            {fichas.map(f => {
+              const c = calcularFicha(f, itensPorFicha[f.id] || [], f.produtos)
+              const negativo = c.temVenda && c.lucro < 0
+              return (
+                <div className="card" key={f.id} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 16 }}>{f.nome}</div>
+                      {f.produtos
+                        ? <span className="badge badge-primary" style={{ marginTop: 4 }}>🔗 {f.produtos.nome}</span>
+                        : <span className="badge badge-neutral" style={{ marginTop: 4 }}>sem produto vinculado</span>}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
+                    <div>
+                      <div className="label" style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>CUSTO P/ FAZER</div>
+                      <div style={{ fontWeight: 700 }}>{brl(c.custoTotal)}</div>
+                    </div>
+                    <div>
+                      <div className="label" style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>
+                        CUSTO POR PORÇÃO ({f.peso_porcao || 0}{f.unid_porcao})
+                      </div>
+                      <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--primary)' }}>{brl(c.custoPorcao)}</div>
+                    </div>
+                  </div>
+
+                  {c.temVenda && (
+                    <div style={{
+                      marginTop: 4, padding: '8px 10px', borderRadius: 8,
+                      background: negativo ? 'var(--danger-bg)' : 'var(--success-bg)',
+                      color: negativo ? 'var(--danger)' : 'var(--success)',
+                      fontSize: 13, fontWeight: 600,
+                    }}>
+                      Vende {brl(c.precoVenda)} · {negativo ? 'Prejuízo' : 'Lucro'} {brl(c.lucro)} ({c.margemPct.toFixed(0)}%)
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: 6, marginTop: 'auto', paddingTop: 8 }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => abrirEditarFicha(f)}>Editar</button>
+                    <button className="btn btn-danger btn-sm" onClick={() => excluirFicha(f)}>Excluir</button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )
+      )}
+
+      {/* ─────────────── ABA: MATÉRIAS-PRIMAS ─────────────── */}
+      {!loading && aba === 'materias' && (
+        materias.length === 0 ? (
+          <div className="card empty-state">
+            <strong>Nenhuma matéria-prima cadastrada</strong>
+            <p>Cadastre os insumos (farinha, frango, margarina…) com o custo. Eles NÃO aparecem no catálogo.</p>
+            <button className="btn btn-primary" onClick={abrirNovaMateria} style={{ marginTop: 8 }}>+ Nova matéria-prima</button>
+          </div>
+        ) : (
+          <div className="data-table">
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th>Matéria-prima</th>
+                  <th>Unidade</th>
+                  <th>Custo</th>
+                  <th>Status</th>
+                  <th style={{ width: 150 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {materias.map(m => (
+                  <tr key={m.id}>
+                    <td>{m.nome}</td>
+                    <td>{m.unidade}</td>
+                    <td>{brl(m.custo)} <span style={{ color: 'var(--text-muted)' }}>/ {m.unidade}</span></td>
+                    <td>{m.ativo ? <span className="badge badge-success">Ativo</span> : <span className="badge badge-neutral">Inativo</span>}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="btn btn-secondary btn-sm" onClick={() => abrirEditarMateria(m)}>Editar</button>
+                        <button className="btn btn-danger btn-sm" onClick={() => excluirMateria(m)}>Excluir</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+
+      {/* ─────────────── MODAL: MATÉRIA-PRIMA ─────────────── */}
+      {showMateria && (
+        <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowMateria(false) }}>
+          <form className="modal" onSubmit={salvarMateria}>
+            <h2>{materiaEdit ? 'Editar matéria-prima' : 'Nova matéria-prima'}</h2>
+            <div className="form-grid">
+              <div className="form-field full">
+                <label>Nome</label>
+                <input autoFocus placeholder="Ex.: Farinha de trigo" value={materiaForm.nome}
+                  onChange={e => setMateriaForm(f => ({ ...f, nome: e.target.value }))} />
+              </div>
+              <div className="form-field">
+                <label>Unidade de compra</label>
+                <select value={materiaForm.unidade} onChange={e => setMateriaForm(f => ({ ...f, unidade: e.target.value }))}>
+                  {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+              <div className="form-field">
+                <label>Custo por {materiaForm.unidade} (R$)</label>
+                <input inputMode="decimal" placeholder="Ex.: 5,00" value={materiaForm.custo}
+                  onChange={e => setMateriaForm(f => ({ ...f, custo: e.target.value }))} />
+              </div>
+              <div className="form-field full">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input type="checkbox" style={{ width: 'auto' }} checked={materiaForm.ativo}
+                    onChange={e => setMateriaForm(f => ({ ...f, ativo: e.target.checked }))} />
+                  Ativa (aparece na lista pra montar fichas)
+                </label>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowMateria(false)}>Cancelar</button>
+              <button type="submit" className="btn btn-primary">Salvar</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ─────────────── MODAL: FICHA TÉCNICA ─────────────── */}
+      {showFicha && (
+        <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowFicha(false) }}>
+          <form className="modal modal-lg" onSubmit={salvarFicha}>
+            <h2>{fichaEdit ? 'Editar ficha técnica' : 'Nova ficha técnica'}</h2>
+
+            <div className="form-grid">
+              <div className="form-field">
+                <label>Nome da ficha</label>
+                <input autoFocus placeholder="Ex.: Coxinha" value={fichaForm.nome}
+                  onChange={e => setFichaForm(f => ({ ...f, nome: e.target.value }))} />
+              </div>
+              <div className="form-field">
+                <label>Produto do catálogo (opcional)</label>
+                <select value={fichaForm.produto_id} onChange={e => setFichaForm(f => ({ ...f, produto_id: e.target.value }))}>
+                  <option value="">— não vincular —</option>
+                  {produtos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* Ingredientes */}
+            <div style={{ margin: '18px 0 6px', fontWeight: 700 }}>Matérias-primas usadas</div>
+            {materias.length === 0 && (
+              <div className="badge badge-warning" style={{ display: 'block', padding: 10, marginBottom: 8 }}>
+                Cadastre matérias-primas primeiro (aba "Matérias-primas").
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {fichaForm.itens.map((it, idx) => (
+                <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 70px 90px 34px', gap: 6, alignItems: 'center' }}>
+                  <select value={it.materia_prima_id} onChange={e => escolherMateria(idx, e.target.value)}
+                    style={{ padding: '9px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', color: 'var(--text)' }}>
+                    <option value="">— escolher —</option>
+                    {materias.filter(m => m.ativo).map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
+                  </select>
+                  <input inputMode="decimal" placeholder="Qtd" value={it.quantidade}
+                    onChange={e => setLinha(idx, { quantidade: e.target.value })}
+                    style={{ padding: '9px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', color: 'var(--text)' }} />
+                  <select value={it.unidade} onChange={e => setLinha(idx, { unidade: e.target.value })}
+                    style={{ padding: '9px 6px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', color: 'var(--text)' }}>
+                    {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                  <div style={{ fontSize: 13, fontWeight: 600, textAlign: 'right', color: 'var(--text-muted)' }}>
+                    {brl(custoItem({ ...it, quantidade: Number(String(it.quantidade).replace(',', '.')) || 0 }))}
+                  </div>
+                  <button type="button" className="btn btn-danger btn-sm" onClick={() => removerLinha(idx)} title="Remover"
+                    style={{ padding: '6px 8px' }}>✕</button>
+                </div>
+              ))}
+            </div>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={addLinha} style={{ marginTop: 8 }}>+ Adicionar matéria-prima</button>
+
+            {/* Rendimento e porção */}
+            <div className="form-grid" style={{ marginTop: 18 }}>
+              <div className="form-field">
+                <label>Rendeu quanto pronto?</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input inputMode="decimal" placeholder="Ex.: 5000" value={fichaForm.rendimento}
+                    onChange={e => setFichaForm(f => ({ ...f, rendimento: e.target.value }))} style={{ flex: 1 }} />
+                  <select value={fichaForm.unid_rendimento} onChange={e => setFichaForm(f => ({ ...f, unid_rendimento: e.target.value }))} style={{ width: 80 }}>
+                    {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="form-field">
+                <label>Peso/tamanho de cada porção</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input inputMode="decimal" placeholder="Ex.: 100" value={fichaForm.peso_porcao}
+                    onChange={e => setFichaForm(f => ({ ...f, peso_porcao: e.target.value }))} style={{ flex: 1 }} />
+                  <select value={fichaForm.unid_porcao} onChange={e => setFichaForm(f => ({ ...f, unid_porcao: e.target.value }))} style={{ width: 80 }}>
+                    {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="form-field full">
+                <label>Observações (opcional)</label>
+                <input placeholder="Ex.: modo de preparo, rendimento aproximado…" value={fichaForm.observacoes}
+                  onChange={e => setFichaForm(f => ({ ...f, observacoes: e.target.value }))} />
+              </div>
+            </div>
+
+            {/* Prévia do cálculo */}
+            <div className="card" style={{ marginTop: 16, background: 'var(--bg)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>CUSTO TOTAL PRA FAZER</div>
+                  <div style={{ fontSize: 20, fontWeight: 700 }}>{brl(previa.custoTotal)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>CUSTO POR PORÇÃO</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--primary)' }}>{brl(previa.custoPorcao)}</div>
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+                Custo por {fichaForm.unid_rendimento}: {brl4(previa.custoPorBase)}
+              </div>
+              {previa.temVenda && (
+                <div style={{
+                  marginTop: 10, padding: '8px 10px', borderRadius: 8, fontWeight: 700,
+                  background: previa.lucro < 0 ? 'var(--danger-bg)' : 'var(--success-bg)',
+                  color: previa.lucro < 0 ? 'var(--danger)' : 'var(--success)',
+                }}>
+                  Vende {brl(previa.precoVenda)} · {previa.lucro < 0 ? 'Prejuízo' : 'Lucro'} {brl(previa.lucro)} · margem {previa.margemPct.toFixed(0)}%
+                </div>
+              )}
+            </div>
+
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowFicha(false)}>Cancelar</button>
+              <button type="submit" className="btn btn-primary" disabled={salvando}>{salvando ? 'Salvando…' : 'Salvar ficha'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  )
+}
