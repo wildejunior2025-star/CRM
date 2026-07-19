@@ -80,7 +80,7 @@ export default function Financeiro() {
     setLoadingD(true)
     const { start, end } = rangeFin(periodoD, custIni, custFim)
     const pedRes = await fetchAll(() => {
-      let q = supabase.from('pedidos_delivery').select('origem, total')
+      let q = supabase.from('pedidos_delivery').select('origem, total, subtotal, taxa_entrega')
         .neq('status', 'cancelado').order('created_at', { ascending: false })
       if (start) q = q.gte('created_at', start)
       if (end)   q = q.lt('created_at', end)
