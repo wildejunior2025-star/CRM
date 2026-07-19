@@ -31,7 +31,7 @@ function custoPorBaseFicha(ficha, itens) {
 const emptyDespesa = { nome: '', categoria: 'energia', tipo: 'fixo', valor: '' }
 const emptyFunc = { nome: '', cargo: '', salario_mensal: '' }
 const emptyProd = () => ({ ficha_id: '', qtd_feita: '', qtd_sobrou: '', unidade: 'kg' })
-const emptyImprev = { descricao: '', valor: '' }
+const emptyImprev = { tipo: 'pedido', numero: '', descricao: '', valor: '', info: null }
 
 export default function DespesasLucro({ empresaId }) {
   const hoje = new Date()
@@ -64,6 +64,7 @@ export default function DespesasLucro({ empresaId }) {
   const [prodForm, setProdForm] = useState(emptyProd())
   const [showImprev, setShowImprev] = useState(false)
   const [imprevForm, setImprevForm] = useState(emptyImprev)
+  const [buscandoPed, setBuscandoPed] = useState(false)
 
   const carregar = useCallback(async () => {
     if (!empresaId) return
@@ -221,6 +222,25 @@ export default function DespesasLucro({ empresaId }) {
 
   // ── CRUD: custo imprevisto do dia ──
   function abrirNovoImprev() { setImprevForm(emptyImprev); setShowImprev(true) }
+  // Busca um pedido pelo número e traz o valor + os itens pro form.
+  async function buscarPedido() {
+    const n = String(imprevForm.numero || '').trim()
+    if (!n) { setImprevForm(f => ({ ...f, info: { erro: true, txt: 'Digite o número do pedido.' } })); return }
+    setBuscandoPed(true)
+    const { data, error } = await supabase.from('pedidos_delivery')
+      .select('numero_pedido, cliente_nome, total, itens, origem, status, created_at')
+      .eq('empresa_id', empresaId).eq('numero_pedido', n)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    setBuscandoPed(false)
+    if (error || !data) { setImprevForm(f => ({ ...f, info: { erro: true, txt: 'Pedido não encontrado.' } })); return }
+    const itensTxt = Array.isArray(data.itens) ? data.itens.map(it => `${it.quantidade ?? it.qtd ?? 1}x ${it.nome}`).join(', ') : ''
+    setImprevForm(f => ({
+      ...f,
+      descricao: `Pedido #${data.numero_pedido} cancelado${data.cliente_nome ? ' — ' + data.cliente_nome : ''}${itensTxt ? ' (' + itensTxt + ')' : ''}`,
+      valor: String(Number(data.total || 0)).replace('.', ','),
+      info: { erro: false, txt: `✓ ${data.cliente_nome || 'Cliente'} · ${brl(data.total)}${data.status === 'cancelado' ? ' · cancelado' : ' · status: ' + (data.status || '?')}` },
+    }))
+  }
   async function salvarImprev(e) {
     e.preventDefault()
     if (!imprevForm.descricao.trim()) { alert('Descreva o imprevisto (ex.: pedido cancelado).'); return }
@@ -488,12 +508,44 @@ export default function DespesasLucro({ empresaId }) {
       {/* ─── MODAL: custo imprevisto ─── */}
       {showImprev && (
         <Modal onClose={() => setShowImprev(false)} onSubmit={salvarImprev} titulo="Novo custo imprevisto">
+          {/* modo: pedido cancelado x outro gasto */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+            {[['pedido', '🧾 Pedido cancelado'], ['outro', '✍️ Outro gasto']].map(([id, lb]) => (
+              <button key={id} type="button" onClick={() => setImprevForm(f => ({ ...f, tipo: id, info: null }))}
+                style={{ flex: 1, padding: '9px 8px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                  background: imprevForm.tipo === id ? 'var(--primary)' : 'transparent', color: imprevForm.tipo === id ? '#fff' : 'var(--text)' }}>
+                {lb}
+              </button>
+            ))}
+          </div>
+
+          {imprevForm.tipo === 'pedido' && (
+            <div className="form-field full" style={{ marginBottom: 12 }}>
+              <label>Número do pedido</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input autoFocus inputMode="numeric" placeholder="Ex.: 1234" value={imprevForm.numero}
+                  onChange={e => setImprevForm(f => ({ ...f, numero: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); buscarPedido() } }} style={{ flex: 1 }} />
+                <button type="button" className="btn btn-secondary" onClick={buscarPedido} disabled={buscandoPed}>{buscandoPed ? 'Buscando…' : 'Buscar'}</button>
+              </div>
+              {imprevForm.info && (
+                <div style={{ fontSize: 12, marginTop: 6, color: imprevForm.info.erro ? 'var(--danger)' : 'var(--success)' }}>{imprevForm.info.txt}</div>
+              )}
+            </div>
+          )}
+
           <div className="form-grid">
-            <div className="form-field full"><label>O que aconteceu?</label>
-              <input autoFocus placeholder="Ex.: Pedido #123 cancelado — produto perdido" value={imprevForm.descricao} onChange={e => setImprevForm(f => ({ ...f, descricao: e.target.value }))} /></div>
+            <div className="form-field full"><label>{imprevForm.tipo === 'pedido' ? 'Descrição (veio do pedido — pode editar)' : 'O que aconteceu?'}</label>
+              <input placeholder={imprevForm.tipo === 'pedido' ? 'Busque o pedido acima…' : 'Ex.: Copo quebrou, compra de gás de emergência…'}
+                value={imprevForm.descricao} onChange={e => setImprevForm(f => ({ ...f, descricao: e.target.value }))} /></div>
             <div className="form-field full"><label>Valor perdido/gasto (R$)</label>
               <input inputMode="decimal" placeholder="Ex.: 25,00" value={imprevForm.valor} onChange={e => setImprevForm(f => ({ ...f, valor: e.target.value }))} /></div>
           </div>
+          {imprevForm.tipo === 'pedido' && (
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8 }}>
+              💡 Veio o valor de venda do pedido. Se só o custo do produto foi perdido, ajuste o valor pra baixo.
+            </div>
+          )}
         </Modal>
       )}
     </div>
