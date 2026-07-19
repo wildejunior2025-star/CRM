@@ -23,11 +23,14 @@ export async function parseRepassePdf(file) {
 
   const per = txt.match(/Per[ií]odo de apura[çc][ãa]o\s+(\d{2}\/\d{2}\/\d{4})\s+a\s+(\d{2}\/\d{2}\/\d{4})/)
   if (!per) throw new Error('Não parece o PDF de Repasse do iFood (não achei o "Período de apuração"). Exporte o repasse de UM período.')
-  const rep = txt.match(/Valor do repasse\s+(?:Pago|Em aberto|Em antecipa[çc][ãa]o)?\s*R\$\s*([\d.,]+)/i)
-  const anu = txt.match(/Pacote de an[úu]ncios\s*-?\s*R\$\s*([\d.,]+)/i)
-  const ven = txt.match(/itens e entrega pr[óo]pria da loja\s*R\$\s*([\d.,]+)/i)
+  // Regex tolerante: aceita qualquer coisa (situação "Pago"/"Em aberto", quebras de
+  // linha, espaços) entre o rótulo e o "R$ 0.000,00" — o pdf.js extrai a ordem/espaçamento
+  // de forma variável, então não dá pra exigir formato fixo.
+  const rep = txt.match(/Valor do repasse[\s\S]{0,40}?R\$\s*(-?[\d.,]+)/i)
+  const anu = txt.match(/Pacote de an[úu]ncios[\s\S]{0,40}?-?\s*R\$\s*([\d.,]+)/i)
+  const ven = txt.match(/itens e entrega pr[óo]pria da loja[\s\S]{0,40}?R\$\s*([\d.,]+)/i)
   const pag = txt.match(/Repasse de\s+(\d{2}\/\d{2}\/\d{4})/)
-  const situacao = /Valor do repasse\s+Pago/i.test(txt) ? 'pago' : 'em aberto'
+  const situacao = /Valor do repasse[\s\S]{0,40}?Pago/i.test(txt) ? 'pago' : 'em aberto'
 
   return {
     periodo_ini: toISO(per[1]),
