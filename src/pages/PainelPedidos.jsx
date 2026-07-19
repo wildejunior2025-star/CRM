@@ -1693,7 +1693,7 @@ function SeletorEntregador({ entregadores = [], onAtribuir, pedidoId }) {
   )
 }
 
-function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onAtribuir, onEditar, entregadores = [], nfceHabilitada = false, onEmitirNfce, nfceEmitindo }) {
+function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onImprimirCelular, onAtribuir, onEditar, entregadores = [], nfceHabilitada = false, onEmitirNfce, nfceEmitindo }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const pagamento = pedido.forma_pagamento || ''
   const endereco = enderecoCompleto(pedido)
@@ -1839,6 +1839,21 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
               <rect x="6" y="14" width="12" height="8"/>
             </svg>
           </button>
+          {/* Impressora do CELULAR (Bluetooth) — caminho separado, isolado */}
+          {onImprimirCelular && (
+            <button
+              type="button"
+              title="Imprimir na impressora do celular (Bluetooth)"
+              aria-label="Imprimir na impressora do celular (Bluetooth)"
+              onClick={() => onImprimirCelular(pedido)}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: 2,
+                display: 'flex', alignItems: 'center', color: '#2563eb',
+              }}
+            >
+              📱🖨️
+            </button>
+          )}
           {/* Emitir NFC-e — só aparece se a loja habilitou a nota fiscal */}
           {nfceHabilitada && onEmitirNfce && (
             <button
@@ -3366,6 +3381,17 @@ export default function PainelPedidos() {
     imprimirCupom(pedido, empresa)
   }
 
+  // Impressão pela térmica Bluetooth do CELULAR (Web Bluetooth) — caminho
+  // separado e isolado do sistema FWC/QZ. Carregado sob demanda (só quem usa).
+  async function handleImprimirCelular(pedido) {
+    try {
+      const mod = await import('../utils/imprimirBluetooth')
+      await mod.imprimirPedidoCelular(pedido, empresa)
+    } catch (e) {
+      alert('Impressora celular (Bluetooth): ' + (e?.message || e))
+    }
+  }
+
   // ── Painel lateral direito (Impressora / Pedidos) ─────────
   // Lembra a seção aberta (ex.: Mesas) ao sair e voltar do gestor.
   const [painelDireito, setPainelDireito] = useState(() => {
@@ -4740,7 +4766,7 @@ export default function PainelPedidos() {
                       onAvancar={handleAvancar}
                       onAtribuir={handleAtribuirEntregador}
                       onEnviarMensagem={(ped) => setPedidoMensagem(ped)}
-                      onImprimir={handleImprimir}
+                      onImprimir={handleImprimir} onImprimirCelular={handleImprimirCelular}
                       nfceHabilitada={nfceHabilitada}
                       onEmitirNfce={handleEmitirNfce}
                       nfceEmitindo={nfceEmitindo}
@@ -4893,7 +4919,7 @@ export default function PainelPedidos() {
               onAtribuir={handleAtribuirEntregador}
               onEditar={(p) => { setVendaEditando(p); setPedidoDetalhe(null) }}
               onEnviarMensagem={(p) => { setPedidoMensagem(p); setPedidoDetalhe(null) }}
-              onImprimir={handleImprimir}
+              onImprimir={handleImprimir} onImprimirCelular={handleImprimirCelular}
               entregadores={entregadores}
               nfceHabilitada={nfceHabilitada}
               onEmitirNfce={handleEmitirNfce}
