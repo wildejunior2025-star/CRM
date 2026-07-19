@@ -49,6 +49,7 @@ export default function DespesasLucro({ empresaId }) {
   const [diasAbertos, setDiasAbertos] = useState(26)
   const [receitaDia, setReceitaDia] = useState({ proprios: 0, ifood: 0 })
   const [fechando, setFechando] = useState(false)
+  const [histAberto, setHistAberto] = useState({}) // { [id]: bool } dias expandidos no histórico
 
   // modais
   const [showDespesa, setShowDespesa] = useState(false)
@@ -136,7 +137,8 @@ export default function DespesasLucro({ empresaId }) {
       const itens = producao.map(p => ({ nome: p.nome, qtd_feita: Number(p.qtd_feita || 0), qtd_sobrou: Number(p.qtd_sobrou || 0), unidade: p.unidade, custo: custoProdItem(p) }))
       const { error: upErr } = await supabase.from('historico_dia').upsert({
         empresa_id: empresaId, data: hojeYMD,
-        receita_liquida: receita, custo_fixo: fixoPorDia, custo_funcionarios: funcPorDia,
+        receita_liquida: receita, receita_proprios: receitaDia.proprios, receita_ifood: receitaDia.ifood,
+        custo_fixo: fixoPorDia, custo_funcionarios: funcPorDia,
         custo_producao: producaoHoje, lucro: lucroDia, itens,
       }, { onConflict: 'empresa_id,data' })
       if (upErr) throw upErr
@@ -311,25 +313,55 @@ export default function DespesasLucro({ empresaId }) {
                 <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Lucro acumulado <strong style={{ color: totalHistLucro >= 0 ? '#16a34a' : '#ef4444' }}>{brl(totalHistLucro)}</strong></span>
               </div>
               <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '2px 16px' }}>
-                {historico.map(h => (
+                {historico.map(h => {
+                  const aberto = !!histAberto[h.id]
+                  const custosTot = Number(h.custo_fixo) + Number(h.custo_funcionarios) + Number(h.custo_producao)
+                  return (
                   <div key={h.id} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700 }}>{ddmm(h.data)}</div>
-                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                          receita {brl(h.receita_liquida)} · custos {brl(Number(h.custo_fixo) + Number(h.custo_funcionarios) + Number(h.custo_producao))}
+                      {/* cabeçalho clicável (setinha) */}
+                      <div onClick={() => setHistAberto(m => ({ ...m, [h.id]: !m[h.id] }))} style={{ flex: 1, cursor: 'pointer', userSelect: 'none' }}>
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>
+                          <span style={{ display: 'inline-block', width: 15, color: 'var(--text-muted)', transform: aberto ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+                          {ddmm(h.data)}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginLeft: 15 }}>
+                          receita {brl(h.receita_liquida)} · custos {brl(custosTot)} · toque pra ver a tabela
                         </div>
                       </div>
                       <strong style={{ fontSize: 16, color: Number(h.lucro) >= 0 ? '#16a34a' : '#ef4444', whiteSpace: 'nowrap' }}>{brl(h.lucro)}</strong>
                       <button className="btn btn-danger btn-sm" onClick={() => excluirHistorico(h)}>✕</button>
                     </div>
-                    {Array.isArray(h.itens) && h.itens.length > 0 && (
-                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4, paddingLeft: 2 }}>
-                        {h.itens.map((it, i) => <span key={i}>{i > 0 ? ' · ' : ''}{it.nome} {brl(it.custo)}</span>)}
+
+                    {/* tabela completa (abre na setinha) — igual ao card do dia */}
+                    {aberto && (
+                      <div style={{ marginTop: 8, marginLeft: 15, paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
+                        <Linha label="Faturamento líquido (próprios + iFood)" valor={brl(h.receita_liquida)} bold />
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '-4px 0 8px 2px' }}>
+                          próprios {brl(h.receita_proprios)} · iFood {brl(h.receita_ifood)}
+                        </div>
+                        <Linha label="− Custos fixos (rateio do dia)" valor={`− ${brl(h.custo_fixo)}`} cor="var(--danger)" />
+                        <Linha label="− Funcionários (rateio do dia)" valor={`− ${brl(h.custo_funcionarios)}`} cor="var(--danger)" />
+                        <Linha label="− Custo de produção do dia" valor={`− ${brl(h.custo_producao)}`} cor="var(--danger)" />
+                        {Array.isArray(h.itens) && h.itens.length > 0 && (
+                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '2px 0 6px 12px' }}>
+                            {h.itens.map((it, i) => (
+                              <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span>▸ {it.nome} <span style={{ opacity: .8 }}>(fez {it.qtd_feita}{it.unidade} · sobrou {it.qtd_sobrou}{it.unidade})</span></span>
+                                <span>{brl(it.custo)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, marginTop: 4, borderTop: '2px solid var(--border)' }}>
+                          <span style={{ fontSize: 14.5, fontWeight: 900 }}>{Number(h.lucro) >= 0 ? '= Foi pro seu bolso' : '= Prejuízo'}</span>
+                          <span style={{ fontSize: 18, fontWeight: 900, color: Number(h.lucro) >= 0 ? '#16a34a' : '#ef4444' }}>{brl(h.lucro)}</span>
+                        </div>
                       </div>
                     )}
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </>
           )}
