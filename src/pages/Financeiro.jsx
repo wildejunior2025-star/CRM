@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { calcIfoodLiquido, FORMA_ENTREGA_LABEL } from '../lib/ifoodLiquido'
 import IfoodIcon from '../components/IfoodIcon'
+import DespesasLucro from './DespesasLucro'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 import './Financeiro.css'
@@ -58,6 +59,7 @@ export default function Financeiro() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id
 
+  const [aba, setAba] = useState('recebimentos') // 'recebimentos' | 'lucro'
   const [periodoD, setPeriodoD] = useState('mes')
   const [custIni, setCustIni]   = useState(ymd(new Date()))
   const [custFim, setCustFim]   = useState(ymd(new Date()))
@@ -273,6 +275,7 @@ export default function Financeiro() {
     <div>
       <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         <h1>Financeiro</h1>
+        {aba === 'recebimentos' && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           {periodoD === 'custom' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-muted)' }}>
@@ -294,7 +297,23 @@ export default function Financeiro() {
             ))}
           </div>
         </div>
+        )}
       </div>
+
+      {/* Abas do Financeiro */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
+        {[['recebimentos', '💵 Recebimentos'], ['lucro', '📊 Despesas & Lucro']].map(([id, lb]) => (
+          <button key={id} type="button" onClick={() => setAba(id)}
+            style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13.5, fontWeight: 700,
+              background: aba === id ? 'var(--primary)' : 'var(--card, var(--bg))', color: aba === id ? '#fff' : 'var(--text)' }}>
+            {lb}
+          </button>
+        ))}
+      </div>
+
+      {aba === 'lucro' && <DespesasLucro empresaId={empresaId} />}
+
+      {aba === 'recebimentos' && (<>
 
       {/* ── iFOOD — A RECEBER NA QUARTA (semana atual) ── */}
       {atual && atual.nped > 0 && (
@@ -469,6 +488,7 @@ export default function Financeiro() {
       </div>
 
       {loadingD && <p style={{ color: 'var(--text-muted)' }}>Carregando…</p>}
+      </>)}
     </div>
   )
 }
