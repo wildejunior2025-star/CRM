@@ -17,6 +17,13 @@ const custoBase = (mp) => Number(mp?.custo || 0) / (FATOR[mp?.unidade] || 1)
 const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 // Valores muito pequenos (custo por grama) — mostra mais casas pra não virar R$0,00.
 const brl4 = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
+// Mostra a quantidade de um jeito amigável: 2000 g vira "2 kg", 1500 ml vira "1,5 L".
+const fmtQtd = (qtd, unid) => {
+  const n = Number(qtd || 0)
+  if (unid === 'g' && n >= 1000) return (n / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 3 }) + ' kg'
+  if (unid === 'ml' && n >= 1000) return (n / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 3 }) + ' L'
+  return n.toLocaleString('pt-BR', { maximumFractionDigits: 3 }) + ' ' + unid
+}
 
 // Custo de uma linha de ingrediente (quantidade usada × custo por unidade base).
 const custoItem = (it) => emBase(it.quantidade, it.unidade) * Number(it.custo_unit || 0)
@@ -300,14 +307,18 @@ export default function FichaTecnica() {
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 4 }}>
+                    <div>
+                      <div className="label" style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>RENDEU PRONTO</div>
+                      <div style={{ fontWeight: 700 }}>{fmtQtd(f.rendimento, f.unid_rendimento)}</div>
+                    </div>
                     <div>
                       <div className="label" style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>CUSTO P/ FAZER</div>
                       <div style={{ fontWeight: 700 }}>{brl(c.custoTotal)}</div>
                     </div>
                     <div>
                       <div className="label" style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>
-                        CUSTO POR PORÇÃO ({f.peso_porcao || 0}{f.unid_porcao})
+                        CUSTO POR PORÇÃO ({fmtQtd(f.peso_porcao, f.unid_porcao)})
                       </div>
                       <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--primary)' }}>{brl(c.custoPorcao)}</div>
                     </div>
@@ -509,7 +520,7 @@ export default function FichaTecnica() {
                 </div>
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
-                Custo por {fichaForm.unid_rendimento}: {brl4(previa.custoPorBase)}
+                Rendeu {fmtQtd(fichaForm.rendimento, fichaForm.unid_rendimento)} → porção de {fmtQtd(fichaForm.peso_porcao, fichaForm.unid_porcao)} · custo por {fichaForm.unid_rendimento}: {brl4(previa.custoPorBase)}
               </div>
               {previa.temVenda && (
                 <div style={{
