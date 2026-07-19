@@ -174,6 +174,15 @@ export default function Financeiro() {
   const atual = semanas[0]
   const anteriores = semanas.slice(1)
 
+  // iFood JÁ recebido = dinheiro na mão (entrega) + repasses das semanas já pagas (a receber na quarta NÃO entra)
+  const ifoodRecebido = semanas.reduce((s, w) => {
+    const transf = w.situacao === 'pago' ? aReceberDe(w) : 0   // repasse que já caiu no banco
+    const mao = Number(w.liq?.recebidoEntrega || 0)            // dinheiro/cartão recebido na entrega
+    return s + transf + mao
+  }, 0)
+  const liquidoProprios = volTotal - taxaTotal
+  const liquidoGeral = liquidoProprios + ifoodRecebido
+
   return (
     <div>
       <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
@@ -371,11 +380,12 @@ export default function Financeiro() {
           )
         })}
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Total</div>
-          <div style={{ fontSize: 20, fontWeight: 900, color: '#16a34a' }}>{fmtBRL(volTotal - taxaTotal)}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{pedWA.length + pedApp.length + pedCat.length} pedidos · líquido</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
-            bruto {fmtBRL(volTotal)} · taxa {fmtBRL(taxaTotal)}
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Total líquido recebido</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: '#16a34a' }}>{fmtBRL(liquidoGeral)}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>canais próprios + iFood já recebido</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span>próprios <strong style={{ color: 'var(--text)' }}>{fmtBRL(liquidoProprios)}</strong></span>
+            <span><IfoodIcon size={11} /> iFood recebido <strong style={{ color: 'var(--text)' }}>{fmtBRL(ifoodRecebido)}</strong></span>
           </div>
         </div>
       </div>
