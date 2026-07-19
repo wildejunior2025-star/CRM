@@ -722,9 +722,9 @@ export default function PresencialSalao() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {produtosFiltrados.map(p => (
                     <button key={p.produto_id} type="button" onClick={() => addItem(p)}
-                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', textAlign: 'left' }}>
-                      <span style={{ fontSize: 17.5, fontWeight: 600 }}>{p.nome}</span>
-                      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--primary)' }}>+ {fmt(p.preco_venda)}</span>
+                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, minHeight: 48, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', textAlign: 'left' }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 15.5, fontWeight: 600, lineHeight: 1.3 }}>{p.nome}</span>
+                      <span style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: 14.5, fontWeight: 700, color: 'var(--primary)' }}>+ {fmt(p.preco_venda)}</span>
                     </button>
                   ))}
                   {produtosFiltrados.length === 0 && <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum produto encontrado.</p>}
