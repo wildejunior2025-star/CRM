@@ -19,6 +19,9 @@ const CATEGORIAS = [
 ]
 const catLabel = (c) => (CATEGORIAS.find(([k]) => k === c)?.[1]) || '📦 Outros'
 
+// Cargo amigável a partir do perfil do usuário cadastrado (quando não tem "cargo" preenchido).
+const PERFIL_LABEL = { admin: 'Gerente/Admin', vendedor: 'Vendedor', garcom: 'Garçom', cozinheiro: 'Cozinheiro', entregador: 'Entregador' }
+
 // custo por unidade base de uma ficha (custo total / rendimento em base)
 function custoPorBaseFicha(ficha, itens) {
   const custoTotal = (itens || []).reduce((s, it) => s + emBase(it.quantidade, it.unidade) * Number(it.custo_unit || 0), 0)
@@ -39,6 +42,7 @@ export default function DespesasLucro({ empresaId }) {
   const [funcionarios, setFuncionarios] = useState([])
   const [producao, setProducao] = useState([])
   const [fichas, setFichas] = useState([])         // [{id, nome, custoPorBase, unid_rendimento}]
+  const [usuarios, setUsuarios] = useState([])     // funcionários já cadastrados em Usuários
   const [diasAbertos, setDiasAbertos] = useState(26)
   const [receita, setReceita] = useState({ proprios: 0, ifood: 0 })
 
@@ -62,7 +66,7 @@ export default function DespesasLucro({ empresaId }) {
       const iniYMD = `${y}-${pad(m)}-01`
       const fimYMD = `${fim.getFullYear()}-${pad(fim.getMonth() + 1)}-01`
 
-      const [dp, fn, pd, fi, fit, emp, ped] = await Promise.all([
+      const [dp, fn, pd, fi, fit, emp, ped, us] = await Promise.all([
         supabase.from('despesas_loja').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('valor', { ascending: false }),
         supabase.from('funcionarios').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
         supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).gte('data', iniYMD).lt('data', fimYMD).order('data', { ascending: false }),
@@ -72,12 +76,15 @@ export default function DespesasLucro({ empresaId }) {
         fetchAll(() => supabase.from('pedidos_delivery')
           .select('origem, total, taxa_entrega, subtotal, ifood_valores, forma_pagamento, status')
           .neq('status', 'cancelado').gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())),
+        supabase.from('profiles').select('id, nome, perfil, cargo').eq('empresa_id', empresaId).eq('ativo', true)
+          .in('perfil', ['admin', 'vendedor', 'garcom', 'cozinheiro', 'entregador']).order('nome'),
       ])
       for (const r of [dp, fn, pd, fi, fit, ped]) if (r.error) throw r.error
 
       setDespesas(dp.data || [])
       setFuncionarios(fn.data || [])
       setProducao(pd.data || [])
+      setUsuarios(us.error ? [] : (us.data || []))  // se RLS bloquear, só ignora (segue no manual)
       setDiasAbertos(Number(emp.data?.dias_abertos_mes ?? 26) || 26)
 
       // custo por base de cada ficha
@@ -161,6 +168,15 @@ export default function DespesasLucro({ empresaId }) {
     if (!confirm(`Excluir "${f.nome}"?`)) return
     await supabase.from('funcionarios').delete().eq('id', f.id); carregar()
   }
+  // Puxa um usuário já cadastrado (Usuários) pro form — preenche nome e cargo.
+  function puxarUsuario(uid) {
+    const u = usuarios.find(x => x.id === uid)
+    if (!u) return
+    setFuncForm(f => ({ ...f, nome: u.nome || '', cargo: u.cargo || PERFIL_LABEL[u.perfil] || '' }))
+  }
+  // Usuários cadastrados que ainda não viraram funcionário (compara pelo nome).
+  const jaFunc = new Set(funcionarios.map(f => (f.nome || '').trim().toLowerCase()))
+  const usuariosDisponiveis = usuarios.filter(u => u.nome && !jaFunc.has(u.nome.trim().toLowerCase()))
 
   // ── CRUD: produção diária ──
   function abrirNovaProd() { setProdForm(emptyProd()); setShowProd(true) }
@@ -303,6 +319,17 @@ export default function DespesasLucro({ empresaId }) {
       {showFunc && (
         <Modal onClose={() => setShowFunc(false)} onSubmit={salvarFunc} titulo={funcEdit ? 'Editar funcionário' : 'Novo funcionário'}>
           <div className="form-grid">
+            {!funcEdit && usuariosDisponiveis.length > 0 && (
+              <div className="form-field full">
+                <label>Puxar de quem já é cadastrado (opcional)</label>
+                <select defaultValue="" onChange={e => { puxarUsuario(e.target.value); e.target.value = '' }}>
+                  <option value="">— escolher funcionário cadastrado —</option>
+                  {usuariosDisponiveis.map(u => (
+                    <option key={u.id} value={u.id}>{u.nome} ({u.cargo || PERFIL_LABEL[u.perfil] || 'funcionário'})</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="form-field full"><label>Nome</label>
               <input autoFocus placeholder="Ex.: Maria" value={funcForm.nome} onChange={e => setFuncForm(f => ({ ...f, nome: e.target.value }))} /></div>
             <div className="form-field"><label>Cargo (opcional)</label>
