@@ -1693,6 +1693,50 @@ function SeletorEntregador({ entregadores = [], onAtribuir, pedidoId }) {
   )
 }
 
+// Card de configuração da impressora do CELULAR (Bluetooth / Web Bluetooth).
+// Isolado do FWC — só conecta e testa a térmica Bluetooth pelo Chrome do Android.
+function ImpressoraCelularPanel({ empresa }) {
+  const [conectada, setConectada] = useState(false)
+  const [nome, setNome] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const semBt = typeof navigator !== 'undefined' && !navigator.bluetooth
+
+  async function rodar(fn, okTxt) {
+    setBusy(true); setMsg(null)
+    try {
+      const mod = await import('../utils/imprimirBluetooth')
+      await fn(mod)
+      setConectada(true); setNome(mod.nomeImpressora())
+      setMsg({ ok: true, txt: okTxt })
+    } catch (e) { setMsg({ ok: false, txt: e?.message || 'Falhou' }) }
+    finally { setBusy(false) }
+  }
+  const conectar = () => rodar(m => m.conectarImpressoraCelular(), 'Conectada! Agora use o botão 📱🖨️ nos pedidos.')
+  const testar = () => rodar(m => m.imprimirTesteCelular(empresa || {}), 'Enviei um cupom de teste!')
+
+  const btn = (bg, outline) => ({ padding: '10px 14px', borderRadius: 8, border: outline ? '1px solid #2563eb' : 'none', cursor: busy ? 'wait' : 'pointer', background: bg, color: outline ? '#2563eb' : '#fff', fontWeight: 800, fontSize: 13, opacity: (busy || semBt) ? .6 : 1 })
+  return (
+    <div style={{ border: '2px solid #2563eb', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 10, background: 'rgba(37,99,235,0.07)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 14, fontWeight: 800 }}>📱🖨️ Impressora do celular (Bluetooth)</span>
+        {conectada && <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 800 }}>● conectada</span>}
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+        Pra imprimir só pelo <b>celular</b> numa térmica Bluetooth, sem PC. Abra este gestor no <b>Chrome do Android</b> (não pelo app), ligue a impressora e conecte aqui.
+      </div>
+      {semBt && <div style={{ fontSize: 12, color: '#dc2626', fontWeight: 700 }}>⚠️ Este navegador não tem Bluetooth. Abra pelo Chrome no Android.</div>}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button type="button" disabled={busy || semBt} onClick={conectar} style={btn('#2563eb', false)}>{busy ? '…' : (conectada ? 'Reconectar' : 'Conectar impressora')}</button>
+        <button type="button" disabled={busy || semBt} onClick={testar} style={btn('transparent', true)}>Imprimir teste</button>
+      </div>
+      {nome && <div style={{ fontSize: 12, color: 'var(--text)' }}>Impressora: <b>{nome}</b></div>}
+      {msg && <div style={{ fontSize: 12, color: msg.ok ? '#16a34a' : '#dc2626', fontWeight: 600 }}>{msg.ok ? '✓ ' : '⚠️ '}{msg.txt}</div>}
+      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Se a impressora não aparecer na lista do Chrome, ela é Bluetooth "Classic" — aí usamos o app RawBT.</div>
+    </div>
+  )
+}
+
 function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onImprimirCelular, onAtribuir, onEditar, entregadores = [], nfceHabilitada = false, onEmitirNfce, nfceEmitindo }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const pagamento = pedido.forma_pagamento || ''
@@ -5021,6 +5065,9 @@ export default function PainelPedidos() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {/* Impressora FWC — configuração ao vivo dentro do gestor */}
               <ImpressoraFWCPanel empresaId={empresa?.id} />
+
+              {/* Impressora do celular (Bluetooth) — caminho separado, sem PC */}
+              <ImpressoraCelularPanel empresa={empresa} />
 
               <div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>Largura do cupom</div>
