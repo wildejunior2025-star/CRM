@@ -2742,16 +2742,6 @@ const RIGHTBAR_BOTOES = [
     ),
   },
   {
-    id: 'caixa', label: 'Caixa',
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="2" y="7" width="20" height="14" rx="2"/>
-        <path d="M2 11h20"/>
-        <circle cx="12" cy="16" r="1.5"/>
-      </svg>
-    ),
-  },
-  {
     id: 'chat', label: 'Mensagens',
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -5037,7 +5027,6 @@ export default function PainelPedidos() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
               {painelDireito === 'impressora' ? 'Impressora'
-                : painelDireito === 'caixa' ? 'Caixa'
                 : painelDireito === 'pedidos' ? 'Pedidos finalizados'
                 : painelDireito === 'hoje' ? 'Concluídos hoje'
                 : painelDireito === 'chat' ? 'Mensagens'
@@ -5106,9 +5095,6 @@ export default function PainelPedidos() {
               </div>
             )
           )}
-
-          {/* Painel: Caixa (mesmo caixa do portal, aqui dentro do gestor) */}
-          {painelDireito === 'caixa' && <Caixa />}
 
           {/* Painel: Impressora */}
           {painelDireito === 'impressora' && (
@@ -5696,6 +5682,7 @@ export default function PainelPedidos() {
             <span style={{ fontWeight: 800, fontSize: 15, margin: '0 8px' }}>🍽️ Salão</span>
             {[
               { id: 'salao', label: 'Salão / Mesas' },
+              { id: 'caixa', label: '💵 Caixa' },
               { id: 'historico', label: 'Histórico' },
               { id: 'reservas', label: 'Reservas' },
               { id: 'mesas', label: 'Configurar mesas' },
@@ -5712,6 +5699,7 @@ export default function PainelPedidos() {
           {/* Conteúdo da sub-aba */}
           <div style={{ flex: 1, overflow: 'auto' }}>
             {subAbaSalao === 'salao' && <PresencialSalao />}
+            {subAbaSalao === 'caixa' && <Caixa />}
             {subAbaSalao === 'historico' && <PresencialHistorico />}
             {subAbaSalao === 'reservas' && <PresencialReservas />}
             {subAbaSalao === 'mesas' && <PresencialMesas />}
