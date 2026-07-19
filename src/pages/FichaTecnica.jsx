@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
+
+// Normaliza pra busca: tira acento e deixa minúsculo. Assim "feijao" acha "Feijão".
+const normTxt = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
 
 // ── Unidades e conversão ──────────────────────────────────────────────
 // Tudo é convertido pra uma "unidade base" (grama / ml / unidade) pra poder
@@ -55,6 +58,68 @@ const linhaVazia = () => ({ materia_prima_id: '', nome: '', quantidade: '', unid
 const emptyFicha = {
   nome: '', produto_id: '', complemento_opcao_id: '', rendimento: '', unid_rendimento: 'g',
   peso_porcao: '', unid_porcao: 'g', observacoes: '', itens: [linhaVazia()],
+}
+
+// Campo de busca pra vincular (produto OU complemento). Digita e filtra;
+// ignora acento (feijao acha Feijão). Valor: "prod:<id>" | "comp:<id>" | "".
+function VinculoCombobox({ produtos, complementos, value, onChange }) {
+  const opcoes = useMemo(() => {
+    const arr = []
+    for (const p of produtos) arr.push({ key: 'prod:' + p.id, label: p.nome, tipo: 'Produto', norm: normTxt(p.nome) })
+    for (const c of complementos) {
+      const label = `${c.grupo ? c.grupo + ' · ' : ''}${c.nome}${c.preco > 0 ? ` (${brl(c.preco)})` : ''}`
+      arr.push({ key: 'comp:' + c.id, label, tipo: 'Complemento', norm: normTxt(`${c.grupo} ${c.nome}`) })
+    }
+    return arr
+  }, [produtos, complementos])
+  const selecionado = opcoes.find(o => o.key === value) || null
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const wrapRef = useRef(null)
+
+  useEffect(() => { setText(selecionado ? selecionado.label : '') }, [value]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    function onDoc(e) { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  const q = normTxt(text)
+  const exata = selecionado && normTxt(selecionado.label) === q
+  const filtradas = (q && !exata) ? opcoes.filter(o => o.norm.includes(q)) : opcoes
+
+  function escolher(o) { onChange(o ? o.key : ''); setText(o ? o.label : ''); setOpen(false) }
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <input type="text" value={text} autoComplete="off" placeholder="Digite pra buscar (ex.: feijao) ou escolha…"
+        onChange={e => { setText(e.target.value); setOpen(true) }}
+        onFocus={e => { e.target.select(); setOpen(true) }}
+        style={{ paddingRight: 28 }} />
+      <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)', fontSize: 11 }}>▼</span>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 60,
+          maxHeight: 280, overflowY: 'auto', background: 'var(--card-bg, var(--surface, var(--bg)))',
+          border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 10px 28px rgba(0,0,0,.22)', padding: 4,
+        }}>
+          <div onMouseDown={() => escolher(null)} style={{ padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: 'var(--text-muted)' }}>
+            — não vincular —
+          </div>
+          {filtradas.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, color: 'var(--text-muted)' }}>Nada encontrado.</div>}
+          {filtradas.map(o => (
+            <div key={o.key} onMouseDown={() => escolher(o)}
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13.5, background: o.key === value ? 'var(--primary-bg, rgba(124,58,237,.12))' : 'transparent' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover, rgba(0,0,0,.05))'}
+              onMouseLeave={e => e.currentTarget.style.background = o.key === value ? 'var(--primary-bg, rgba(124,58,237,.12))' : 'transparent'}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.label}</span>
+              <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 20, padding: '1px 7px' }}>{o.tipo}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function FichaTecnica() {
@@ -467,23 +532,7 @@ export default function FichaTecnica() {
               </div>
               <div className="form-field">
                 <label>Vincular a (opcional)</label>
-                <select value={vinculoValor} onChange={e => escolherVinculo(e.target.value)}>
-                  <option value="">— não vincular —</option>
-                  {produtos.length > 0 && (
-                    <optgroup label="Produtos do catálogo">
-                      {produtos.map(p => <option key={p.id} value={'prod:' + p.id}>{p.nome}</option>)}
-                    </optgroup>
-                  )}
-                  {complementos.length > 0 && (
-                    <optgroup label="Complementos">
-                      {complementos.map(c => (
-                        <option key={c.id} value={'comp:' + c.id}>
-                          {c.grupo ? c.grupo + ' · ' : ''}{c.nome}{c.preco > 0 ? ` (${brl(c.preco)})` : ''}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
+                <VinculoCombobox produtos={produtos} complementos={complementos} value={vinculoValor} onChange={escolherVinculo} />
               </div>
             </div>
 
