@@ -199,9 +199,9 @@ export default function Financeiro() {
           {atual.liq.recebidoEntrega > 0 && (
             <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '4px 20px', marginBottom: 24 }}>
               <div onClick={() => setEntExp(v => !v)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0', cursor: 'pointer', userSelect: 'none' }}>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ display: 'inline-block', width: 14, color: 'var(--text-muted)', transform: entExp ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
-                  💵 Já na sua mão <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>· na entrega, esta semana · toque pra abrir</span>
+                  <IfoodIcon size={16} /> Recebido na entrega iFood <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>· esta semana · toque pra abrir</span>
                 </div>
                 <span style={{ fontSize: 20, fontWeight: 900 }}>{fmtBRL(atual.liq.recebidoEntrega)}</span>
               </div>
