@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import QRCode from 'qrcode'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
@@ -25,6 +26,7 @@ export default function PresencialMesas() {
   const [nome, setNome]             = useState('')
   const [capacidade, setCapacidade] = useState(4)
   const [qrMesa, setQrMesa]         = useState(null)   // mesa do modal de QR
+  const [qrImg, setQrImg]           = useState('')     // dataURL do QR (gerado local)
   const [copiado, setCopiado]       = useState(false)
   const [editId, setEditId]         = useState(null)   // mesa com lugares em edição
   const [editCap, setEditCap]       = useState(4)
@@ -34,20 +36,54 @@ export default function PresencialMesas() {
   // Link/QR do cliente aponta SEMPRE pro domínio público da loja online
   // (não pro admin/gestor onde o dono está gerando o QR).
   const linkMesa = (m) => `https://lojaonline.fwcinter.com/mesa/${m.token}`
-  // QR em alta resolução (600px) pra imprimir com qualidade.
-  const qrUrl = (m, size = 600) => `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=20&data=${encodeURIComponent(linkMesa(m))}`
+  // QR gerado LOCALMENTE (lib qrcode) — não depende de serviço externo. Antes usava
+  // api.qrserver.com e vinha vazio quando o serviço falhava/era bloqueado.
+  const gerarQr = (m, size = 600) => QRCode.toDataURL(linkMesa(m), { width: size, margin: 2, errorCorrectionLevel: 'M' })
+
+  // Gera o QR do modal assim que uma mesa é aberta.
+  useEffect(() => {
+    if (!qrMesa) { setQrImg(''); return }
+    let cancel = false
+    gerarQr(qrMesa, 600).then(u => { if (!cancel) setQrImg(u) }).catch(() => { if (!cancel) setQrImg('') })
+    return () => { cancel = true }
+  }, [qrMesa]) // eslint-disable-line react-hooks/exhaustive-deps
+
   async function baixarQr(m) {
     try {
-      const resp = await fetch(qrUrl(m))
-      const blob = await resp.blob()
+      const url = await gerarQr(m, 600)
       const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = `qr-mesa-${m.numero}.png`
+      a.href = url; a.download = `qr-mesa-${m.numero}.png`
       document.body.appendChild(a); a.click(); a.remove()
-      setTimeout(() => URL.revokeObjectURL(a.href), 4000)
-    } catch {
-      window.open(qrUrl(m), '_blank') // fallback: abre pra salvar manual
-    }
+    } catch (e) { alert('Não consegui gerar o QR: ' + (e?.message || e)) }
+  }
+  // Gera uma folha (A4) com o NOME da mesa + o QR, pronta pra salvar como PDF/imprimir.
+  async function baixarPdf(m) {
+    let imgSrc
+    try { imgSrc = await gerarQr(m, 600) } catch (e) { alert('Não consegui gerar o QR: ' + (e?.message || e)); return }
+    const nome = m.nome ? ` · ${m.nome}` : ''
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>QR Mesa ${m.numero}</title>
+<style>
+  @page { size: A4; margin: 20mm; }
+  html,body { margin:0; padding:0; }
+  body { font-family: Arial, Helvetica, sans-serif; color:#111; text-align:center; padding:48px 24px; }
+  .mesa { font-size:56px; font-weight:800; margin:0 0 6px; }
+  .sub { font-size:20px; color:#555; margin:0 0 28px; }
+  img { width:340px; height:340px; }
+  .inst { font-size:22px; font-weight:700; margin-top:28px; }
+  .dica { font-size:15px; color:#666; margin-top:8px; }
+</style></head><body>
+  <div class="mesa">Mesa ${m.numero}${nome}</div>
+  <div class="sub">Cardápio & pedidos pelo celular</div>
+  <img src="${imgSrc}" alt="QR Mesa ${m.numero}">
+  <div class="inst">📱 Aponte a câmera do celular e peça pela mesa</div>
+  <div class="dica">Escaneie o QR code para ver o cardápio e pedir sozinho</div>
+</body></html>`
+    const w = window.open('', '_blank')
+    if (!w) { alert('Permita abrir a janela pra gerar o PDF.'); return }
+    w.document.open(); w.document.write(html); w.document.close()
+    const imprimir = () => { try { w.focus(); w.print() } catch { /* ignora */ } }
+    w.onload = imprimir
+    setTimeout(imprimir, 700) // fallback se o onload não disparar (imagem já embutida)
   }
 
   async function carregar() {
@@ -244,11 +280,9 @@ export default function PresencialMesas() {
             <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 16px' }}>
               Imprima e cole na mesa. O cliente escaneia e pede sozinho — vai direto pra cozinha.
             </p>
-            <img
-              alt={`QR Mesa ${qrMesa.numero}`}
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=10&data=${encodeURIComponent(linkMesa(qrMesa))}`}
-              style={{ width: 240, height: 240, borderRadius: 12, background: '#fff' }}
-            />
+            {qrImg
+              ? <img alt={`QR Mesa ${qrMesa.numero}`} src={qrImg} style={{ width: 240, height: 240, borderRadius: 12, background: '#fff' }} />
+              : <div style={{ width: 240, height: 240, borderRadius: 12, background: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: 13 }}>Gerando QR…</div>}
             <div style={{ wordBreak: 'break-all', fontSize: 12, color: 'var(--text-muted)', margin: '14px 0' }}>
               {linkMesa(qrMesa)}
             </div>
