@@ -48,11 +48,26 @@ export default function PresencialMesas() {
     return () => { cancel = true }
   }, [qrMesa]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Baixa uma imagem PNG com o NOME DA MESA em cima do QR (tudo numa figura só).
   async function baixarQr(m) {
     try {
-      const url = await gerarQr(m, 600)
+      const qrData = await gerarQr(m, 600)
+      const img = new Image()
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = qrData })
+      const W = 700, H = 840, QR = 540
+      const c = document.createElement('canvas'); c.width = W; c.height = H
+      const ctx = c.getContext('2d')
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H)
+      ctx.textAlign = 'center'
+      ctx.fillStyle = '#111111'; ctx.font = 'bold 60px Arial'
+      ctx.fillText(`Mesa ${m.numero}${m.nome ? ' · ' + m.nome : ''}`, W / 2, 96)
+      ctx.fillStyle = '#555555'; ctx.font = '26px Arial'
+      ctx.fillText('Cardápio & pedidos pelo celular', W / 2, 140)
+      ctx.drawImage(img, (W - QR) / 2, 175, QR, QR)
+      ctx.fillStyle = '#111111'; ctx.font = 'bold 28px Arial'
+      ctx.fillText('Aponte a câmera do celular e peça pela mesa', W / 2, 785)
       const a = document.createElement('a')
-      a.href = url; a.download = `qr-mesa-${m.numero}.png`
+      a.href = c.toDataURL('image/png'); a.download = `qr-mesa-${m.numero}.png`
       document.body.appendChild(a); a.click(); a.remove()
     } catch (e) { alert('Não consegui gerar o QR: ' + (e?.message || e)) }
   }
