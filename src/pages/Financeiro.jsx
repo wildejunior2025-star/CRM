@@ -351,8 +351,8 @@ export default function Financeiro() {
                 <span style={{ display: 'inline-block', width: 13, color: 'var(--text-muted)', transform: aberto ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
                 {label}
               </div>
-              <div style={{ fontSize: 20, fontWeight: 900 }}>{fmtBRL(vol)}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{peds.length} pedido{peds.length !== 1 ? 's' : ''}</div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: '#16a34a' }}>{fmtBRL(liq)}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{peds.length} pedido{peds.length !== 1 ? 's' : ''} · líquido</div>
             </div>
             {aberto && (
               <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -372,10 +372,10 @@ export default function Financeiro() {
         })}
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Total</div>
-          <div style={{ fontSize: 20, fontWeight: 900 }}>{fmtBRL(volTotal)}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{pedWA.length + pedApp.length + pedCat.length} pedidos</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: '#16a34a' }}>{fmtBRL(volTotal - taxaTotal)}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{pedWA.length + pedApp.length + pedCat.length} pedidos · líquido</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
-            − taxa {fmtBRL(taxaTotal)} · líquido <strong style={{ color: '#16a34a' }}>{fmtBRL(volTotal - taxaTotal)}</strong>
+            bruto {fmtBRL(volTotal)} · taxa {fmtBRL(taxaTotal)}
           </div>
         </div>
       </div>
