@@ -1737,6 +1737,39 @@ function ImpressoraCelularPanel({ empresa }) {
   )
 }
 
+// Botão "Atualizar o app agora" — força pegar a versão nova na hora (limpa os
+// caches do PWA e recarrega). Garantia manual caso a atualização automática
+// demore no celular. Igual ao "Atualizar agora" da Impressora FWC.
+function AtualizarAppCard() {
+  const [busy, setBusy] = useState(false)
+  async function atualizar() {
+    setBusy(true)
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(regs.map(r => r.update().catch(() => {})))
+      }
+      if (typeof caches !== 'undefined') {
+        const keys = await caches.keys()
+        await Promise.all(keys.map(k => caches.delete(k)))
+      }
+    } catch { /* ignora e recarrega mesmo assim */ }
+    window.location.reload()
+  }
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <button type="button" onClick={atualizar} disabled={busy} title="Pegar a versão mais nova agora"
+        style={{ width: 44, height: 44, borderRadius: '50%', border: 'none', cursor: busy ? 'wait' : 'pointer', background: '#2563eb', color: '#fff', fontSize: 20, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, opacity: busy ? .6 : 1 }}>
+        {busy ? '…' : '🔄'}
+      </button>
+      <div style={{ fontSize: 12.5 }}>
+        <b>Atualizar o app agora</b>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Pega a versão mais nova na hora, sem precisar limpar cache na mão.</div>
+      </div>
+    </div>
+  )
+}
+
 function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onImprimirCelular, onAtribuir, onEditar, entregadores = [], nfceHabilitada = false, onEmitirNfce, nfceEmitindo }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const pagamento = pedido.forma_pagamento || ''
@@ -5065,6 +5098,9 @@ export default function PainelPedidos() {
           {/* Painel: Impressora */}
           {painelDireito === 'impressora' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Atualizar o app (pegar versão nova na hora) */}
+              <AtualizarAppCard />
+
               {/* Impressora FWC — configuração ao vivo dentro do gestor */}
               <ImpressoraFWCPanel empresaId={empresa?.id} />
 
