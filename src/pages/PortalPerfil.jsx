@@ -149,6 +149,23 @@ export default function PortalPerfil() {
             <polyline points="9 18 15 12 9 6"/>
           </svg>
         </Link>
+        <Link to="/excluir-conta" style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '14px 16px', borderRadius: 10, marginTop: 8,
+          background: 'var(--card-bg)', border: '1px solid var(--border)',
+          textDecoration: 'none', color: 'var(--text)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 20 }}>🗑️</span>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>Excluir minha conta</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Apagar seus dados e a conta</div>
+            </div>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+        </Link>
         <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginTop: 20 }}>
           FWC Inter · FWC INTERMEDIAÇÕES LTDA · CNPJ 66.437.917/0001-66
         </p>

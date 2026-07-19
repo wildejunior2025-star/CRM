@@ -126,13 +126,13 @@ export default function PortalLayout() {
     ? [
         { to: `/portal/loja/${empresaParceira.id}`, label: 'Catálogo', end: false, Icon: IconLojas },
         { to: '/portal/pedidos', label: 'Pedidos', end: false, Icon: IconPedidos },
-        { to: '/portal/indicacoes', label: 'Indicar', end: false, Icon: IconIndicar },
+        { to: '/portal/indicacoes', label: 'Pontos', end: false, Icon: IconIndicar },
         { to: '/portal/perfil', label: 'Perfil', end: false, Icon: IconPerfil },
       ]
     : [
         { to: '/portal', label: 'Lojas', end: true, Icon: IconLojas },
         { to: '/portal/pedidos', label: 'Pedidos', end: false, Icon: IconPedidos },
-        { to: '/portal/indicacoes', label: 'Indicar', end: false, Icon: IconIndicar },
+        { to: '/portal/indicacoes', label: 'Pontos', end: false, Icon: IconIndicar },
         { to: '/portal/perfil', label: 'Perfil', end: false, Icon: IconPerfil },
       ]
 

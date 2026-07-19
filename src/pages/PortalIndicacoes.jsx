@@ -134,7 +134,19 @@ export default function PortalIndicacoes() {
         </p>
       </div>
 
-      {/* ”€”€ DOIS CONTADORES ”€”€ */}
+      {/* Aviso: os valores em R$ são apenas desconto — não é dinheiro */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', gap: 8,
+        background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.25)',
+        borderRadius: 12, padding: '10px 12px', marginBottom: 20, fontSize: 12, color: 'var(--text)',
+      }}>
+        <span style={{ fontSize: 15 }}>🏷️</span>
+        <span>
+          Os valores em R$ mostrados aqui são só o <strong style={{ color: 'var(--success)' }}>desconto que você tem para usar em compras dentro do app</strong>. Não é dinheiro: não pode ser sacado nem transferido.
+        </span>
+      </div>
+
+      {/* ── DOIS CONTADORES ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
 
         {/* Saldo disponível */}
@@ -208,7 +220,7 @@ export default function PortalIndicacoes() {
         )}
       </div>
 
-      {/* ”€”€ ABA CASHBACK ”€”€ */}
+      {/* ── ABA CASHBACK ── */}
       {aba === 'cashback' && cbAtivo && (
         <>
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 16, marginBottom: 16 }}>
@@ -223,7 +235,7 @@ export default function PortalIndicacoes() {
                 background: 'rgba(124,58,237,.08)', border: '1px solid rgba(124,58,237,.2)',
                 fontSize: 12, color: 'var(--text)',
               }}>
-                Toda compra feita por <strong>qualquer pessoa abaixo de você</strong> (qualquer nível) soma {spilloverPct}% no seu <span style={{ color: '#7c3aed', fontWeight: 700 }}>acumulado de prêmios</span> €” independente da profundidade.
+                Toda compra feita por <strong>qualquer pessoa abaixo de você</strong> (qualquer nível) soma {spilloverPct}% no seu <span style={{ color: '#7c3aed', fontWeight: 700 }}>acumulado de prêmios</span> — independente da profundidade.
               </div>
             )}
             <div style={{
@@ -231,8 +243,8 @@ export default function PortalIndicacoes() {
               background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.2)',
               fontSize: 12,
             }}>
-              Compra de <strong>R$ 100,00</strong> †’ <strong style={{ color: 'var(--success)' }}>{Math.floor(100 / valorGanho)} pontos</strong>
-              {' '}†’ {fmt(Math.floor(100 / valorGanho) * valorDesconto)} de desconto nas próximas compras
+              Compra de <strong>R$ 100,00</strong> → <strong style={{ color: 'var(--success)' }}>{Math.floor(100 / valorGanho)} pontos</strong>
+              {' '}→ {fmt(Math.floor(100 / valorGanho) * valorDesconto)} de desconto nas próximas compras
             </div>
           </div>
 
@@ -257,7 +269,7 @@ export default function PortalIndicacoes() {
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--success)' }}>+{fmtPts(c.pontos)} pts</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fmt(c.valor_cashback)}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fmt(c.valor_cashback)} em desconto</div>
                   </div>
                 </div>
               ))}
@@ -272,7 +284,7 @@ export default function PortalIndicacoes() {
         </>
       )}
 
-      {/* ”€”€ ABA INDICAÇÕES ”€”€ */}
+      {/* ── ABA INDICAÇÕES ── */}
       {aba === 'indicacoes' && mlmAtivo && (
         <>
           {/* Link */}
@@ -288,22 +300,22 @@ export default function PortalIndicacoes() {
                 background: copiado ? 'var(--success)' : 'var(--primary)',
                 color: '#fff', fontWeight: 700, fontSize: 13,
               }}>
-                {copiado ? 'œ“ Copiado!' : 'Copiar'}
+                {copiado ? '✓ Copiado!' : 'Copiar'}
               </button>
             </div>
             <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-              Quando seu indicado comprar, você ganha comissão em pontos €” e {spilloverPct}% dos pontos de cashback deles vai pro seu acumulado.
+              Quando seu indicado comprar, você ganha bônus em pontos — e {spilloverPct}% dos pontos de cashback deles vai pro seu acumulado.
             </p>
           </div>
 
-          {/* Rede €” tabela por nível */}
+          {/* Rede — tabela por nível */}
           {(() => {
             const totalPtsGanhos = niveisInfo.reduce((s, n) => s + (ganhos[n.nivel]?.totalPts ?? 0), 0)
             return (
               <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 16, marginBottom: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
                   <div style={{ fontSize: 13, fontWeight: 700 }}>
-                    Sua rede €” <span style={{ color: 'var(--primary)' }}>{totalRede} pessoa{totalRede !== 1 ? 's' : ''}</span>
+                    Sua rede — <span style={{ color: 'var(--primary)' }}>{totalRede} pessoa{totalRede !== 1 ? 's' : ''}</span>
                   </div>
                   {totalPtsGanhos > 0 && (
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
@@ -314,16 +326,16 @@ export default function PortalIndicacoes() {
 
                 {/* cabeçalho */}
                 <div style={{
-                  display: 'grid', gridTemplateColumns: '36px 1fr 44px 70px 70px',
+                  display: 'grid', gridTemplateColumns: '36px 1fr 44px 70px 78px',
                   gap: 0, padding: '5px 4px', marginBottom: 4,
                   borderBottom: '1.5px solid var(--border)',
                   fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.04em',
                 }}>
                   <span>NÍV.</span>
                   <span>PESSOAS</span>
-                  <span style={{ textAlign: 'right' }}>COM.</span>
+                  <span style={{ textAlign: 'right' }}>BÔNUS</span>
                   <span style={{ textAlign: 'right' }}>PTS</span>
-                  <span style={{ textAlign: 'right' }}>R$ GANHO</span>
+                  <span style={{ textAlign: 'right' }}>EM DESCONTO</span>
                 </div>
 
                 {/* linhas */}
@@ -334,7 +346,7 @@ export default function PortalIndicacoes() {
                   const isLast = i === niveisInfo.length - 1
                   return (
                     <div key={n.nivel} style={{
-                      display: 'grid', gridTemplateColumns: '36px 1fr 44px 70px 70px',
+                      display: 'grid', gridTemplateColumns: '36px 1fr 44px 70px 78px',
                       gap: 0, padding: '9px 4px',
                       borderBottom: isLast ? 'none' : '1px solid var(--border)',
                       alignItems: 'center',
@@ -356,29 +368,29 @@ export default function PortalIndicacoes() {
                       <div style={{ textAlign: 'right' }}>
                         {pts > 0
                           ? <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)' }}>{fmtPts(pts)}</span>
-                          : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>€”</span>
+                          : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</span>
                         }
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         {reais > 0
                           ? <span style={{ fontSize: 13, fontWeight: 800, color: '#16a34a' }}>{fmt(reais)}</span>
-                          : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>€”</span>
+                          : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</span>
                         }
                       </div>
                     </div>
                   )
                 })}
 
-                {/* total comissões */}
+                {/* total bônus */}
                 {totalPtsGanhos > 0 && (
                   <div style={{
-                    display: 'grid', gridTemplateColumns: '36px 1fr 44px 70px 70px',
+                    display: 'grid', gridTemplateColumns: '36px 1fr 44px 70px 78px',
                     gap: 0, padding: '9px 4px',
                     borderTop: '1.5px solid var(--border)', marginTop: 2,
                     alignItems: 'center',
                   }}>
                     <div />
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>COMISSÕES</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>BÔNUS INDICAÇÃO</div>
                     <div />
                     <div style={{ textAlign: 'right', fontSize: 14, fontWeight: 900, color: 'var(--primary)' }}>
                       {fmtPts(totalPtsGanhos)}
@@ -392,7 +404,7 @@ export default function PortalIndicacoes() {
                 {/* cashback próprio */}
                 {(totalCbPontos > 0 || totalCbValor > 0) && (
                   <div style={{
-                    display: 'grid', gridTemplateColumns: '36px 1fr 44px 70px 70px',
+                    display: 'grid', gridTemplateColumns: '36px 1fr 44px 70px 78px',
                     gap: 0, padding: '9px 4px',
                     borderTop: '1px solid var(--border)',
                     alignItems: 'center',
@@ -405,10 +417,10 @@ export default function PortalIndicacoes() {
                     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Cashback próprio</div>
                     <div />
                     <div style={{ textAlign: 'right', fontSize: 13, fontWeight: 800, color: 'var(--primary)' }}>
-                      {totalCbPontos > 0 ? fmtPts(totalCbPontos) : '€”'}
+                      {totalCbPontos > 0 ? fmtPts(totalCbPontos) : '—'}
                     </div>
                     <div style={{ textAlign: 'right', fontSize: 13, fontWeight: 800, color: '#16a34a' }}>
-                      {totalCbValor > 0 ? fmt(totalCbValor) : '€”'}
+                      {totalCbValor > 0 ? fmt(totalCbValor) : '—'}
                     </div>
                   </div>
                 )}
@@ -416,14 +428,14 @@ export default function PortalIndicacoes() {
                 {/* total geral */}
                 {(totalPtsGanhos > 0 || totalCbPontos > 0) && (
                   <div style={{
-                    display: 'grid', gridTemplateColumns: '36px 1fr 44px 70px 70px',
+                    display: 'grid', gridTemplateColumns: '36px 1fr 44px 70px 78px',
                     gap: 0, padding: '9px 4px',
                     borderTop: '2px solid var(--border)', marginTop: 2,
                     alignItems: 'center',
                     background: 'rgba(34,197,94,.05)', borderRadius: '0 0 8px 8px',
                   }}>
                     <div />
-                    <div style={{ fontSize: 12, fontWeight: 800 }}>TOTAL GERAL</div>
+                    <div style={{ fontSize: 12, fontWeight: 800 }}>TOTAL EM DESCONTO</div>
                     <div />
                     <div style={{ textAlign: 'right', fontSize: 14, fontWeight: 900, color: 'var(--primary)' }}>
                       {fmtPts(totalPtsGanhos + totalCbPontos)}
@@ -437,10 +449,10 @@ export default function PortalIndicacoes() {
             )
           })()}
 
-          {/* Últimas comissões */}
+          {/* Últimos bônus */}
           {recentes.length > 0 && (
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Últimas comissões</div>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Últimos bônus por indicação</div>
               {recentes.map((c, i) => (
                 <div key={i} style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -464,7 +476,7 @@ export default function PortalIndicacoes() {
                       background: c.status === 'pago' ? 'rgba(34,197,94,.15)' : 'rgba(245,158,11,.15)',
                       color: c.status === 'pago' ? 'var(--success)' : 'var(--warning)',
                     }}>
-                      {c.status === 'pago' ? 'Pago' : 'Pendente'}
+                      {c.status === 'pago' ? 'Creditado' : 'A creditar'}
                     </span>
                   </div>
                 </div>

@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-ro
 import { useEffect } from 'react'
 import { useAuth } from './hooks/useAuth'
 
-const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor', '/mesa/']
+const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/excluir-conta', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor', '/mesa/']
 
 // Domínios em que a raiz "/" mostra a landing de marketing (visitante deslogado).
 // Nos subdomínios (app./admin./gestor./lojaonline.) a raiz mantém o fluxo antigo.
@@ -152,6 +152,7 @@ import HorariosLoja from './pages/HorariosLoja'
 import WhatsAppCreditos from './pages/WhatsAppCreditos'
 import Termos from './pages/Termos'
 import Privacidade from './pages/Privacidade'
+import ExcluirConta from './pages/ExcluirConta'
 import ServicoPresencial from './pages/ServicoPresencial'
 import PresencialMesas from './pages/PresencialMesas'
 import PresencialSalao from './pages/PresencialSalao'
@@ -201,6 +202,7 @@ export default function App() {
           <Route path="/cadastro" element={<Cadastro />} />
           <Route path="/termos" element={<Termos />} />
           <Route path="/privacidade" element={<Privacidade />} />
+          <Route path="/excluir-conta" element={<ExcluirConta />} />
           <Route path="/lojas" element={<DeliveryLojas />} />
           <Route path="/loja/:id" element={<DeliveryLoja />} />
           <Route path="/checkout" element={<DeliveryCheckout />} />
