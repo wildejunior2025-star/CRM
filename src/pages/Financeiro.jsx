@@ -70,6 +70,7 @@ export default function Financeiro() {
   const [repImp, setRepImp]   = useState({})      // { [periodo_ini]: {valor_repasse, situacao, ...} } (PDF importado)
   const [abertoAtual, setAbertoAtual] = useState(false)
   const [abertoAnt, setAbertoAnt] = useState({})   // { [iniYMD]: bool } semanas anteriores expandidas
+  const [abertoCanal, setAbertoCanal] = useState({})   // { [canal]: bool } cards de canal próprio expandidos
   const [entExp, setEntExp]   = useState(false)
   const [importing, setImporting] = useState(false)
   const [importMsg, setImportMsg] = useState(null)
@@ -166,7 +167,9 @@ export default function Financeiro() {
   const pedApp = pedidos.filter(p => p.origem === 'app')
   const pedCat = pedidos.filter(p => !p.origem || p.origem === 'cardapio')
   const soma = arr => arr.reduce((s, p) => s + Number(p.total || 0), 0)
+  const somaTaxa = arr => arr.reduce((s, p) => s + Number(p.taxa_entrega || 0), 0)
   const volTotal = soma(pedWA) + soma(pedApp) + soma(pedCat)
+  const taxaTotal = somaTaxa(pedWA) + somaTaxa(pedApp) + somaTaxa(pedCat)
 
   const atual = semanas[0]
   const anteriores = semanas.slice(1)
@@ -334,22 +337,46 @@ export default function Financeiro() {
       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
         Vendas por canal próprio
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 24, alignItems: 'start' }}>
         {[
-          { label: 'WhatsApp',     vol: soma(pedWA),  qtd: pedWA.length,  cor: '#25d366' },
-          { label: 'App / Portal', vol: soma(pedApp), qtd: pedApp.length, cor: '#f97316' },
-          { label: 'Catálogo',     vol: soma(pedCat), qtd: pedCat.length, cor: 'var(--primary)' },
-        ].map(({ label, vol, qtd, cor }) => (
-          <div key={label} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderLeft: `4px solid ${cor}`, borderRadius: 12, padding: '14px 16px' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>{label}</div>
-            <div style={{ fontSize: 20, fontWeight: 900 }}>{fmtBRL(vol)}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{qtd} pedido{qtd !== 1 ? 's' : ''}</div>
+          { key: 'wa',  label: 'WhatsApp',     peds: pedWA,  cor: '#25d366' },
+          { key: 'app', label: 'App / Portal', peds: pedApp, cor: '#f97316' },
+          { key: 'cat', label: 'Catálogo',     peds: pedCat, cor: 'var(--primary)' },
+        ].map(({ key, label, peds, cor }) => {
+          const vol = soma(peds), taxa = somaTaxa(peds), liq = vol - taxa, aberto = !!abertoCanal[key]
+          return (
+          <div key={key} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderLeft: `4px solid ${cor}`, borderRadius: 12, padding: '14px 16px' }}>
+            <div onClick={() => setAbertoCanal(m => ({ ...m, [key]: !m[key] }))} style={{ cursor: 'pointer', userSelect: 'none' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>
+                <span style={{ display: 'inline-block', width: 13, color: 'var(--text-muted)', transform: aberto ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+                {label}
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 900 }}>{fmtBRL(vol)}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{peds.length} pedido{peds.length !== 1 ? 's' : ''}</div>
+            </div>
+            {aberto && (
+              <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                  <span>Total (com taxa)</span><strong style={{ color: 'var(--text)' }}>{fmtBRL(vol)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: 'var(--danger)' }}>
+                  <span>− Taxa de entrega</span><strong>− {fmtBRL(taxa)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 800, paddingTop: 4, borderTop: '1px dashed var(--border)' }}>
+                  <span>= Líquido (mercadoria)</span><strong style={{ color: '#16a34a' }}>{fmtBRL(liq)}</strong>
+                </div>
+              </div>
+            )}
           </div>
-        ))}
+          )
+        })}
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Total</div>
           <div style={{ fontSize: 20, fontWeight: 900 }}>{fmtBRL(volTotal)}</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{pedWA.length + pedApp.length + pedCat.length} pedidos</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+            − taxa {fmtBRL(taxaTotal)} · líquido <strong style={{ color: '#16a34a' }}>{fmtBRL(volTotal - taxaTotal)}</strong>
+          </div>
         </div>
       </div>
 
