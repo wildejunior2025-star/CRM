@@ -28,9 +28,16 @@ export async function parseRepassePdf(file) {
   // de forma variável, então não dá pra exigir formato fixo.
   const rep = txt.match(/Valor do repasse[\s\S]{0,40}?R\$\s*(-?[\d.,]+)/i)
   const anu = txt.match(/Pacote de an[úu]ncios[\s\S]{0,40}?-?\s*R\$\s*([\d.,]+)/i)
-  const ven = txt.match(/itens e entrega pr[óo]pria da loja[\s\S]{0,40}?R\$\s*([\d.,]+)/i)
   const pag = txt.match(/Repasse de\s+(\d{2}\/\d{2}\/\d{4})/)
   const situacao = /Valor do repasse[\s\S]{0,40}?Pago/i.test(txt) ? 'pago' : 'em aberto'
+
+  // Quebra do repasse (seção "Total" de cada bloco do PDF). São magnitudes positivas;
+  // os totais de seção são precedidos de "Total" — pegamos o 1º "Total R$ …" após o rótulo.
+  const vendasTot = txt.match(/Valor das vendas[\s\S]*?Total\s*-?\s*R\$\s*([\d.,]+)/i)
+  const vendasItens = txt.match(/itens e entrega pr[óo]pria da loja[\s\S]{0,40}?R\$\s*([\d.,]+)/i)
+  const comis = txt.match(/Taxas e comiss[õo]es[\s\S]*?Total\s*-?\s*R\$\s*([\d.,]+)/i)
+  const promo = txt.match(/Promo[çc][õo]es[\s\S]*?Total\s*-?\s*R\$\s*([\d.,]+)/i)
+  const receb = txt.match(/Valores recebidos direto pela loja[\s\S]{0,40}?R\$\s*([\d.,]+)/i)
 
   return {
     periodo_ini: toISO(per[1]),
@@ -39,6 +46,10 @@ export async function parseRepassePdf(file) {
     situacao,
     valor_repasse: rep ? num(rep[1]) : 0,
     anuncio: anu ? num(anu[1]) : 0,
-    vendas: ven ? num(ven[1]) : 0,
+    // vendas: usa o Total da seção "Valor das vendas" (já com cancelamentos); fallback = itens
+    vendas: vendasTot ? num(vendasTot[1]) : (vendasItens ? num(vendasItens[1]) : 0),
+    comissoes: comis ? num(comis[1]) : 0,
+    promocoes: promo ? num(promo[1]) : 0,
+    recebido_direto: receb ? num(receb[1]) : 0,
   }
 }

@@ -146,6 +146,7 @@ export default function Financeiro() {
         empresa_id: empresaId, periodo_ini: r.periodo_ini, periodo_fim: r.periodo_fim,
         previsao_pagamento: r.previsao_pagamento, situacao: r.situacao,
         vendas: r.vendas, anuncio: r.anuncio, valor_repasse: r.valor_repasse,
+        comissoes: r.comissoes, promocoes: r.promocoes, recebido_direto: r.recebido_direto,
         importado_em: new Date().toISOString(),
       }, { onConflict: 'empresa_id,periodo_ini' }).select().maybeSingle()
       if (upErr) throw new Error(`Não consegui salvar o repasse: ${upErr.message}`)
@@ -254,16 +255,22 @@ export default function Financeiro() {
             {/* Quebra (abre na seta) */}
             {abertoAtual && (
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: 2 }}>
-                <Linha label="Vendas (itens + entrega)" valor={fmtBRL(atual.liq.vendasOnline)} />
-                <Linha label="− Comissão + taxa" valor={`− ${fmtBRL(atual.liq.comissaoOnline)}`} cor="var(--danger)" />
-                <Linha label="− Promoções (seus cupons)" valor={`− ${fmtBRL(atual.liq.promocoesOnline)}`} cor="var(--danger)" />
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0 14px' }}>
-                  <div>
-                    <div style={{ fontSize: 13.5, color: 'var(--danger)' }}>− 📢 Anúncios <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(você informa — o iFood cobra à parte)</span></div>
-                    <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2 }}>pegue no "Pacote de anúncios" do app do iFood</div>
-                  </div>
-                  <AnuncioInput valor={ads[atual.iniYMD] || 0} onSalvar={v => salvarAnuncio(atual.iniYMD, v)} />
-                </div>
+                {ehExato(atual) ? (
+                  <QuebraRepasse rep={repImp[atual.iniYMD]} aReceber={aReceberDe(atual)} semTotal />
+                ) : (
+                  <>
+                    <Linha label="Vendas (itens + entrega)" valor={fmtBRL(atual.liq.vendasOnline)} />
+                    <Linha label="− Comissão + taxa" valor={`− ${fmtBRL(atual.liq.comissaoOnline)}`} cor="var(--danger)" />
+                    <Linha label="− Promoções (seus cupons)" valor={`− ${fmtBRL(atual.liq.promocoesOnline)}`} cor="var(--danger)" />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0 14px' }}>
+                      <div>
+                        <div style={{ fontSize: 13.5, color: 'var(--danger)' }}>− 📢 Anúncios <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(você informa — o iFood cobra à parte)</span></div>
+                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2 }}>pegue no "Pacote de anúncios" do app do iFood</div>
+                      </div>
+                      <AnuncioInput valor={ads[atual.iniYMD] || 0} onSalvar={v => salvarAnuncio(atual.iniYMD, v)} />
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -327,14 +334,7 @@ export default function Financeiro() {
                 </div>
                 {aberta && (
                   <div style={{ marginLeft: 14, paddingBottom: 6 }}>
-                    <Linha label="Vendas (itens + entrega)" valor={fmtBRL(s.liq.vendasOnline)} />
-                    <Linha label="− Comissão + taxa" valor={`− ${fmtBRL(s.liq.comissaoOnline)}`} cor="var(--danger)" />
-                    <Linha label="− Promoções (seus cupons)" valor={`− ${fmtBRL(s.liq.promocoesOnline)}`} cor="var(--danger)" />
-                    <Linha label="− 📢 Anúncios" valor={`− ${fmtBRL(ehExato(s) ? (s.liq.vendasOnline - s.liq.comissaoOnline - s.liq.promocoesOnline - aReceberDe(s)) : (ads[s.iniYMD] || 0))}`} cor="var(--danger)" />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0 4px' }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 800 }}>= A receber</span>
-                      <strong style={{ fontSize: 15, fontWeight: 900, color: '#16a34a' }}>{ehExato(s) ? '' : '≈ '}{fmtBRL(aReceberDe(s))}</strong>
-                    </div>
+                    <QuebraRepasse s={s} rep={repImp[s.iniYMD]} anuncio={ads[s.iniYMD] || 0} aReceber={aReceberDe(s)} />
                   </div>
                 )}
               </div>
@@ -406,6 +406,50 @@ function Linha({ label, valor, cor }) {
       <span style={{ fontSize: 13.5, color: cor || 'var(--text)' }}>{label}</span>
       <strong style={{ fontSize: 14, color: cor || 'var(--text)' }}>{valor}</strong>
     </div>
+  )
+}
+
+// Quebra do repasse iFood de uma semana.
+// - PDF importado (rep) → valores EXATOS do repasse (batem centavo com o iFood)
+// - sem PDF → estimativa dos pedidos (s.liq) + anúncio digitado
+function QuebraRepasse({ s, rep, anuncio = 0, aReceber, semTotal }) {
+  const exato = !!rep
+  let vendas, comissoes, promocoes, anuncios, recebidoDireto = 0, ajuste = 0
+  if (exato) {
+    vendas         = Number(rep.vendas || 0)
+    comissoes      = Number(rep.comissoes || 0)
+    promocoes      = Number(rep.promocoes || 0)
+    anuncios       = Number(rep.anuncio || 0)
+    recebidoDireto = Number(rep.recebido_direto || 0)
+    // resíduo pra fechar EXATO no repasse (cancelamentos, ajustes, arredondamentos)
+    ajuste = aReceber - (vendas - comissoes - promocoes - anuncios - recebidoDireto)
+  } else {
+    vendas    = s.liq.vendasOnline
+    comissoes = s.liq.comissaoOnline
+    promocoes = s.liq.promocoesOnline
+    anuncios  = anuncio
+  }
+  return (
+    <>
+      <Linha label="Vendas (itens + entrega)" valor={fmtBRL(vendas)} />
+      <Linha label="− Comissão + taxa" valor={`− ${fmtBRL(comissoes)}`} cor="var(--danger)" />
+      <Linha label="− Promoções (seus cupons)" valor={`− ${fmtBRL(promocoes)}`} cor="var(--danger)" />
+      <Linha label="− 📢 Anúncios" valor={`− ${fmtBRL(anuncios)}`} cor="var(--danger)" />
+      {exato && recebidoDireto > 0 && (
+        <Linha label="− Já recebido na entrega" valor={`− ${fmtBRL(recebidoDireto)}`} cor="var(--danger)" />
+      )}
+      {exato && Math.abs(ajuste) >= 0.01 && (
+        <Linha label={ajuste >= 0 ? '+ Ajustes' : '− Ajustes / débitos'}
+          valor={`${ajuste >= 0 ? '+' : '−'} ${fmtBRL(Math.abs(ajuste))}`}
+          cor={ajuste >= 0 ? 'var(--success)' : 'var(--danger)'} />
+      )}
+      {!semTotal && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0 4px' }}>
+          <span style={{ fontSize: 13.5, fontWeight: 800 }}>= {exato ? 'Repasse' : 'A receber'}</span>
+          <strong style={{ fontSize: 15, fontWeight: 900, color: '#16a34a' }}>{exato ? '' : '≈ '}{fmtBRL(aReceber)}</strong>
+        </div>
+      )}
+    </>
   )
 }
 
