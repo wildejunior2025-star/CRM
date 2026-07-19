@@ -29,23 +29,31 @@ const fmtQtd = (qtd, unid) => {
 const custoItem = (it) => emBase(it.quantidade, it.unidade) * Number(it.custo_unit || 0)
 
 // Calcula tudo de uma ficha: custo total, custo por porção e margem.
-function calcularFicha(ficha, itens, produto) {
+// precoVenda vem do que estiver vinculado (produto do catálogo OU complemento).
+function calcularFicha(ficha, itens, precoVenda = 0) {
   const custoTotal = (itens || []).reduce((s, it) => s + custoItem(it), 0)
   const rendBase = emBase(ficha.rendimento, ficha.unid_rendimento)
   const custoPorBase = rendBase > 0 ? custoTotal / rendBase : 0
   const porcaoBase = emBase(ficha.peso_porcao, ficha.unid_porcao)
   const custoPorcao = custoPorBase * porcaoBase
-  const precoVenda = Number(produto?.preco_venda || 0)
-  const temVenda = !!produto && precoVenda > 0
-  const lucro = temVenda ? precoVenda - custoPorcao : 0
-  const margemPct = temVenda && precoVenda > 0 ? (lucro / precoVenda) * 100 : 0
-  return { custoTotal, custoPorBase, custoPorcao, precoVenda, temVenda, lucro, margemPct }
+  const preco = Number(precoVenda || 0)
+  const temVenda = preco > 0
+  const lucro = temVenda ? preco - custoPorcao : 0
+  const margemPct = temVenda ? (lucro / preco) * 100 : 0
+  return { custoTotal, custoPorBase, custoPorcao, precoVenda: preco, temVenda, lucro, margemPct }
+}
+
+// Descobre o vínculo de uma ficha (produto ou complemento) já com nome e preço.
+function vinculoDe(f) {
+  if (f.produtos) return { tipo: 'produto', nome: f.produtos.nome, preco: Number(f.produtos.preco_venda || 0) }
+  if (f.complemento_opcoes) return { tipo: 'complemento', nome: f.complemento_opcoes.nome, preco: Number(f.complemento_opcoes.preco_adicional || 0) }
+  return null
 }
 
 const emptyMateria = { nome: '', unidade: 'kg', custo: '', ativo: true }
 const linhaVazia = () => ({ materia_prima_id: '', nome: '', quantidade: '', unidade: 'g', custo_unit: 0 })
 const emptyFicha = {
-  nome: '', produto_id: '', rendimento: '', unid_rendimento: 'g',
+  nome: '', produto_id: '', complemento_opcao_id: '', rendimento: '', unid_rendimento: 'g',
   peso_porcao: '', unid_porcao: 'g', observacoes: '', itens: [linhaVazia()],
 }
 
@@ -61,6 +69,7 @@ export default function FichaTecnica() {
   const [fichas, setFichas] = useState([])
   const [itensPorFicha, setItensPorFicha] = useState({}) // ficha_id -> [itens]
   const [produtos, setProdutos] = useState([])
+  const [complementos, setComplementos] = useState([]) // opções de complemento (com grupo)
 
   // modais
   const [showMateria, setShowMateria] = useState(false)
@@ -77,19 +86,22 @@ export default function FichaTecnica() {
     setLoading(true)
     setError(null)
     try {
-      const [mp, fi, it, pr] = await Promise.all([
+      const [mp, fi, it, pr, cp] = await Promise.all([
         supabase.from('materias_primas').select('*').eq('empresa_id', empresaId).order('nome'),
-        supabase.from('fichas_tecnicas').select('*, produtos(id, nome, preco_venda)').eq('empresa_id', empresaId).order('nome'),
+        supabase.from('fichas_tecnicas').select('*, produtos(id, nome, preco_venda), complemento_opcoes(id, nome, preco_adicional)').eq('empresa_id', empresaId).order('nome'),
         supabase.from('ficha_itens').select('*').eq('empresa_id', empresaId),
         supabase.from('produtos').select('id, nome, preco_venda').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
+        supabase.from('complemento_opcoes').select('id, nome, preco_adicional, complemento_grupos!inner(nome, empresa_id)').eq('complemento_grupos.empresa_id', empresaId).order('nome'),
       ])
       if (mp.error) throw mp.error
       if (fi.error) throw fi.error
       if (it.error) throw it.error
       if (pr.error) throw pr.error
+      if (cp.error) throw cp.error
       setMaterias(mp.data || [])
       setFichas(fi.data || [])
       setProdutos(pr.data || [])
+      setComplementos((cp.data || []).map(c => ({ id: c.id, nome: c.nome, preco: Number(c.preco_adicional || 0), grupo: c.complemento_grupos?.nome || '' })))
       const grupos = {}
       for (const linha of (it.data || [])) {
         (grupos[linha.ficha_id] = grupos[linha.ficha_id] || []).push(linha)
@@ -154,6 +166,7 @@ export default function FichaTecnica() {
     setFichaForm({
       nome: f.nome,
       produto_id: f.produto_id || '',
+      complemento_opcao_id: f.complemento_opcao_id || '',
       rendimento: String(f.rendimento ?? ''),
       unid_rendimento: f.unid_rendimento || 'g',
       peso_porcao: String(f.peso_porcao ?? ''),
@@ -186,6 +199,14 @@ export default function FichaTecnica() {
   function removerLinha(idx) {
     setFichaForm(f => ({ ...f, itens: f.itens.length > 1 ? f.itens.filter((_, i) => i !== idx) : f.itens }))
   }
+  // Vínculo: o dropdown manda "prod:<id>" ou "comp:<id>" (ou vazio). Só um vale por vez.
+  function escolherVinculo(valor) {
+    if (valor.startsWith('prod:')) setFichaForm(f => ({ ...f, produto_id: valor.slice(5), complemento_opcao_id: '' }))
+    else if (valor.startsWith('comp:')) setFichaForm(f => ({ ...f, complemento_opcao_id: valor.slice(5), produto_id: '' }))
+    else setFichaForm(f => ({ ...f, produto_id: '', complemento_opcao_id: '' }))
+  }
+  const vinculoValor = fichaForm.produto_id ? 'prod:' + fichaForm.produto_id
+    : fichaForm.complemento_opcao_id ? 'comp:' + fichaForm.complemento_opcao_id : ''
 
   async function salvarFicha(e) {
     e.preventDefault()
@@ -196,6 +217,7 @@ export default function FichaTecnica() {
         empresa_id: empresaId,
         nome: fichaForm.nome.trim(),
         produto_id: fichaForm.produto_id || null,
+        complemento_opcao_id: fichaForm.complemento_opcao_id || null,
         rendimento: Number(String(fichaForm.rendimento).replace(',', '.')) || 0,
         unid_rendimento: fichaForm.unid_rendimento,
         peso_porcao: Number(String(fichaForm.peso_porcao).replace(',', '.')) || 0,
@@ -247,13 +269,15 @@ export default function FichaTecnica() {
   const previa = useMemo(() => {
     const itens = fichaForm.itens.map(it => ({ ...it, quantidade: Number(String(it.quantidade).replace(',', '.')) || 0 }))
     const prod = produtos.find(p => p.id === fichaForm.produto_id)
+    const comp = complementos.find(c => c.id === fichaForm.complemento_opcao_id)
+    const preco = prod ? Number(prod.preco_venda || 0) : comp ? comp.preco : 0
     return calcularFicha({
       rendimento: Number(String(fichaForm.rendimento).replace(',', '.')) || 0,
       unid_rendimento: fichaForm.unid_rendimento,
       peso_porcao: Number(String(fichaForm.peso_porcao).replace(',', '.')) || 0,
       unid_porcao: fichaForm.unid_porcao,
-    }, itens, prod)
-  }, [fichaForm, produtos])
+    }, itens, preco)
+  }, [fichaForm, produtos, complementos])
 
   if (!empresaId) {
     return <div className="card">Selecione uma loja pra usar a Ficha Técnica.</div>
@@ -294,16 +318,20 @@ export default function FichaTecnica() {
         ) : (
           <div className="dashboard-grid">
             {fichas.map(f => {
-              const c = calcularFicha(f, itensPorFicha[f.id] || [], f.produtos)
+              const vinc = vinculoDe(f)
+              const c = calcularFicha(f, itensPorFicha[f.id] || [], vinc?.preco || 0)
               const negativo = c.temVenda && c.lucro < 0
               return (
                 <div className="card" key={f.id} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 16 }}>{f.nome}</div>
-                      {f.produtos
-                        ? <span className="badge badge-primary" style={{ marginTop: 4 }}>🔗 {f.produtos.nome}</span>
-                        : <span className="badge badge-neutral" style={{ marginTop: 4 }}>sem produto vinculado</span>}
+                      {vinc
+                        ? <span className="badge badge-primary" style={{ marginTop: 4 }}>
+                            {vinc.tipo === 'complemento' ? '➕' : '🔗'} {vinc.nome}
+                            {vinc.tipo === 'complemento' ? ' (complemento)' : ''}
+                          </span>
+                        : <span className="badge badge-neutral" style={{ marginTop: 4 }}>sem vínculo</span>}
                     </div>
                   </div>
 
@@ -438,10 +466,23 @@ export default function FichaTecnica() {
                   onChange={e => setFichaForm(f => ({ ...f, nome: e.target.value }))} />
               </div>
               <div className="form-field">
-                <label>Produto do catálogo (opcional)</label>
-                <select value={fichaForm.produto_id} onChange={e => setFichaForm(f => ({ ...f, produto_id: e.target.value }))}>
+                <label>Vincular a (opcional)</label>
+                <select value={vinculoValor} onChange={e => escolherVinculo(e.target.value)}>
                   <option value="">— não vincular —</option>
-                  {produtos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+                  {produtos.length > 0 && (
+                    <optgroup label="Produtos do catálogo">
+                      {produtos.map(p => <option key={p.id} value={'prod:' + p.id}>{p.nome}</option>)}
+                    </optgroup>
+                  )}
+                  {complementos.length > 0 && (
+                    <optgroup label="Complementos">
+                      {complementos.map(c => (
+                        <option key={c.id} value={'comp:' + c.id}>
+                          {c.grupo ? c.grupo + ' · ' : ''}{c.nome}{c.preco > 0 ? ` (${brl(c.preco)})` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </div>
             </div>
