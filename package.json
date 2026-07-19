@@ -16,6 +16,7 @@
     "@capacitor/core": "^8.4.0",
     "@supabase/supabase-js": "^2.108.1",
     "leaflet": "^1.9.4",
+    "pdfjs-dist": "^6.1.200",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-organizational-chart": "^2.2.1",
