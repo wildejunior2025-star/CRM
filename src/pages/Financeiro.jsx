@@ -69,6 +69,7 @@ export default function Financeiro() {
   const [ads, setAds]         = useState({})      // { [periodo_ini]: valor } (anúncio digitado)
   const [repImp, setRepImp]   = useState({})      // { [periodo_ini]: {valor_repasse, situacao, ...} } (PDF importado)
   const [abertoAtual, setAbertoAtual] = useState(false)
+  const [abertoAnt, setAbertoAnt] = useState({})   // { [iniYMD]: bool } semanas anteriores expandidas
   const [entExp, setEntExp]   = useState(false)
   const [importing, setImporting] = useState(false)
   const [importMsg, setImportMsg] = useState(null)
@@ -285,26 +286,46 @@ export default function Financeiro() {
             Semanas anteriores
           </div>
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '2px 16px', marginBottom: 28 }}>
-            {anteriores.map(s => (
-              <div key={s.iniYMD} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 12, alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
-                <div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{ddmm(s.inicio)} a {ddmm(s.fim)}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                    {s.situacao === 'pago'
-                      ? <>✅ pago em {ddmm(s.pagamento)}</>
-                      : <>🕒 cai {ddmm(s.pagamento)}</>} · {s.nped} pedidos
+            {anteriores.map(s => {
+              const aberta = !!abertoAnt[s.iniYMD]
+              return (
+              <div key={s.iniYMD} style={{ borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 12, alignItems: 'center', padding: '12px 0' }}>
+                  <div onClick={() => setAbertoAnt(m => ({ ...m, [s.iniYMD]: !m[s.iniYMD] }))} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+                      <span style={{ display: 'inline-block', width: 14, color: 'var(--text-muted)', transform: aberta ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+                      {ddmm(s.inicio)} a {ddmm(s.fim)}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, marginLeft: 14 }}>
+                      {s.situacao === 'pago'
+                        ? <>✅ pago em {ddmm(s.pagamento)}</>
+                        : <>🕒 cai {ddmm(s.pagamento)}</>} · {s.nped} pedidos
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, visibility: ehExato(s) ? 'hidden' : 'visible' }}>
+                    <span title="Anúncio da semana" style={{ fontSize: 11, color: 'var(--text-muted)' }}>📢</span>
+                    <AnuncioInput small valor={ads[s.iniYMD] || 0} onSalvar={v => salvarAnuncio(s.iniYMD, v)} />
+                  </div>
+                  <div style={{ textAlign: 'right', minWidth: 110 }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: '#16a34a' }}>{ehExato(s) ? '' : '≈ '}{fmtBRL(aReceberDe(s))}</div>
+                    <div style={{ fontSize: 10, color: ehExato(s) ? 'var(--success)' : 'var(--text-muted)' }}>{ehExato(s) ? 'exato ✔' : (ads[s.iniYMD] > 0 ? 'a receber' : 'informe o anúncio')}</div>
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, visibility: ehExato(s) ? 'hidden' : 'visible' }}>
-                  <span title="Anúncio da semana" style={{ fontSize: 11, color: 'var(--text-muted)' }}>📢</span>
-                  <AnuncioInput small valor={ads[s.iniYMD] || 0} onSalvar={v => salvarAnuncio(s.iniYMD, v)} />
-                </div>
-                <div style={{ textAlign: 'right', minWidth: 110 }}>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: '#16a34a' }}>{ehExato(s) ? '' : '≈ '}{fmtBRL(aReceberDe(s))}</div>
-                  <div style={{ fontSize: 10, color: ehExato(s) ? 'var(--success)' : 'var(--text-muted)' }}>{ehExato(s) ? 'exato ✔' : (ads[s.iniYMD] > 0 ? 'a receber' : 'informe o anúncio')}</div>
-                </div>
+                {aberta && (
+                  <div style={{ marginLeft: 14, paddingBottom: 6 }}>
+                    <Linha label="Vendas (itens + entrega)" valor={fmtBRL(s.liq.vendasOnline)} />
+                    <Linha label="− Comissão + taxa" valor={`− ${fmtBRL(s.liq.comissaoOnline)}`} cor="var(--danger)" />
+                    <Linha label="− Promoções (seus cupons)" valor={`− ${fmtBRL(s.liq.promocoesOnline)}`} cor="var(--danger)" />
+                    <Linha label="− 📢 Anúncios" valor={`− ${fmtBRL(ehExato(s) ? (s.liq.vendasOnline - s.liq.comissaoOnline - s.liq.promocoesOnline - aReceberDe(s)) : (ads[s.iniYMD] || 0))}`} cor="var(--danger)" />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0 4px' }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 800 }}>= A receber</span>
+                      <strong style={{ fontSize: 15, fontWeight: 900, color: '#16a34a' }}>{ehExato(s) ? '' : '≈ '}{fmtBRL(aReceberDe(s))}</strong>
+                    </div>
+                  </div>
+                )}
               </div>
-            ))}
+              )
+            })}
           </div>
         </>
       )}
