@@ -34,6 +34,21 @@ export default function PresencialMesas() {
   // Link/QR do cliente aponta SEMPRE pro domínio público da loja online
   // (não pro admin/gestor onde o dono está gerando o QR).
   const linkMesa = (m) => `https://lojaonline.fwcinter.com/mesa/${m.token}`
+  // QR em alta resolução (600px) pra imprimir com qualidade.
+  const qrUrl = (m, size = 600) => `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=20&data=${encodeURIComponent(linkMesa(m))}`
+  async function baixarQr(m) {
+    try {
+      const resp = await fetch(qrUrl(m))
+      const blob = await resp.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `qr-mesa-${m.numero}.png`
+      document.body.appendChild(a); a.click(); a.remove()
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000)
+    } catch {
+      window.open(qrUrl(m), '_blank') // fallback: abre pra salvar manual
+    }
+  }
 
   async function carregar() {
     if (!empresaId) return
@@ -237,10 +252,14 @@ export default function PresencialMesas() {
             <div style={{ wordBreak: 'break-all', fontSize: 12, color: 'var(--text-muted)', margin: '14px 0' }}>
               {linkMesa(qrMesa)}
             </div>
+            <button type="button" onClick={() => baixarQr(qrMesa)}
+              className="btn btn-primary" style={{ width: '100%', marginBottom: 8 }}>
+              ⬇️ Baixar QR (pra imprimir)
+            </button>
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button"
                 onClick={async () => { await navigator.clipboard.writeText(linkMesa(qrMesa)); setCopiado(true); setTimeout(() => setCopiado(false), 2000) }}
-                className="btn btn-primary" style={{ flex: 1 }}>
+                className="btn btn-secondary" style={{ flex: 1 }}>
                 {copiado ? '✓ Copiado!' : 'Copiar link'}
               </button>
               <button type="button" onClick={() => setQrMesa(null)}
