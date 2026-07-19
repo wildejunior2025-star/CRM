@@ -59,7 +59,9 @@ export default function Financeiro() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id
 
-  const [aba, setAba] = useState('recebimentos') // 'recebimentos' | 'lucro'
+  // Lembra a aba escolhida (não volta pro Recebimentos ao sair e voltar da tela).
+  const [aba, setAba] = useState(() => { try { return localStorage.getItem('fin_aba') || 'recebimentos' } catch { return 'recebimentos' } })
+  const trocarAba = (id) => { setAba(id); try { localStorage.setItem('fin_aba', id) } catch { /* ignora */ } }
   const [periodoD, setPeriodoD] = useState('mes')
   const [custIni, setCustIni]   = useState(ymd(new Date()))
   const [custFim, setCustFim]   = useState(ymd(new Date()))
@@ -303,7 +305,7 @@ export default function Financeiro() {
       {/* Abas do Financeiro */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
         {[['recebimentos', '💵 Recebimentos'], ['lucro', '📊 Despesas & Lucro']].map(([id, lb]) => (
-          <button key={id} type="button" onClick={() => setAba(id)}
+          <button key={id} type="button" onClick={() => trocarAba(id)}
             style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13.5, fontWeight: 700,
               background: aba === id ? 'var(--primary)' : 'var(--card, var(--bg))', color: aba === id ? '#fff' : 'var(--text)' }}>
             {lb}

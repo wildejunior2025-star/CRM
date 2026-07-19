@@ -6,7 +6,8 @@ import '../components/Page.css'
 // ── helpers ───────────────────────────────────────────────────────────
 const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const pad = (n) => String(n).padStart(2, '0')
-const mesAtual = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}` }
+const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+const ddmm = (s) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
 // Conversão pra unidade base (grama/ml/un), igual à Ficha Técnica.
 const FATOR = { kg: 1000, g: 1, L: 1000, ml: 1, un: 1 }
 const UNIDADES = ['kg', 'g', 'L', 'ml', 'un']
@@ -18,8 +19,6 @@ const CATEGORIAS = [
   ['internet', '🌐 Internet'], ['gas', '🔥 Gás'], ['outros', '📦 Outros'],
 ]
 const catLabel = (c) => (CATEGORIAS.find(([k]) => k === c)?.[1]) || '📦 Outros'
-
-// Cargo amigável a partir do perfil do usuário cadastrado (quando não tem "cargo" preenchido).
 const PERFIL_LABEL = { admin: 'Gerente/Admin', vendedor: 'Vendedor', garcom: 'Garçom', cozinheiro: 'Cozinheiro', entregador: 'Entregador' }
 
 // custo por unidade base de uma ficha (custo total / rendimento em base)
@@ -31,20 +30,25 @@ function custoPorBaseFicha(ficha, itens) {
 
 const emptyDespesa = { nome: '', categoria: 'energia', tipo: 'fixo', valor: '' }
 const emptyFunc = { nome: '', cargo: '', salario_mensal: '' }
-const emptyProd = () => ({ ficha_id: '', data: new Date().toISOString().slice(0, 10), qtd_feita: '', qtd_sobrou: '', unidade: 'kg' })
+const emptyProd = () => ({ ficha_id: '', qtd_feita: '', qtd_sobrou: '', unidade: 'kg' })
 
 export default function DespesasLucro({ empresaId }) {
-  const [mes, setMes] = useState(mesAtual())
+  const hoje = new Date()
+  const hojeYMD = ymd(hoje)
+
+  const [sub, setSub] = useState('hoje') // 'hoje' | 'historico'
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   const [despesas, setDespesas] = useState([])
   const [funcionarios, setFuncionarios] = useState([])
-  const [producao, setProducao] = useState([])
-  const [fichas, setFichas] = useState([])         // [{id, nome, custoPorBase, unid_rendimento}]
-  const [usuarios, setUsuarios] = useState([])     // funcionários já cadastrados em Usuários
+  const [producao, setProducao] = useState([])     // só de HOJE
+  const [fichas, setFichas] = useState([])          // [{id, nome, custoPorBase}]
+  const [usuarios, setUsuarios] = useState([])      // funcionários já cadastrados em Usuários
+  const [historico, setHistorico] = useState([])    // fechamentos diários
   const [diasAbertos, setDiasAbertos] = useState(26)
-  const [receita, setReceita] = useState({ proprios: 0, ifood: 0 })
+  const [receitaDia, setReceitaDia] = useState({ proprios: 0, ifood: 0 })
+  const [fechando, setFechando] = useState(false)
 
   // modais
   const [showDespesa, setShowDespesa] = useState(false)
@@ -60,16 +64,13 @@ export default function DespesasLucro({ empresaId }) {
     if (!empresaId) return
     setLoading(true); setError(null)
     try {
-      const [y, m] = mes.split('-').map(Number)
-      const ini = new Date(y, m - 1, 1)
-      const fim = new Date(y, m, 1)
-      const iniYMD = `${y}-${pad(m)}-01`
-      const fimYMD = `${fim.getFullYear()}-${pad(fim.getMonth() + 1)}-01`
+      const ini = new Date(hoje); ini.setHours(0, 0, 0, 0)
+      const fim = new Date(ini); fim.setDate(fim.getDate() + 1)
 
-      const [dp, fn, pd, fi, fit, emp, ped, us] = await Promise.all([
+      const [dp, fn, pd, fi, fit, emp, ped, us, hi] = await Promise.all([
         supabase.from('despesas_loja').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('valor', { ascending: false }),
         supabase.from('funcionarios').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
-        supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).gte('data', iniYMD).lt('data', fimYMD).order('data', { ascending: false }),
+        supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', hojeYMD).order('created_at', { ascending: false }),
         supabase.from('fichas_tecnicas').select('*').eq('empresa_id', empresaId).order('nome'),
         supabase.from('ficha_itens').select('ficha_id, quantidade, unidade, custo_unit').eq('empresa_id', empresaId),
         supabase.from('empresas').select('dias_abertos_mes, ifood_comissao_pct, ifood_transacao_pct').eq('id', empresaId).maybeSingle(),
@@ -78,52 +79,48 @@ export default function DespesasLucro({ empresaId }) {
           .neq('status', 'cancelado').gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())),
         supabase.from('profiles').select('id, nome, perfil, cargo').eq('empresa_id', empresaId).eq('ativo', true)
           .in('perfil', ['admin', 'vendedor', 'garcom', 'cozinheiro', 'entregador']).order('nome'),
+        supabase.from('historico_dia').select('*').eq('empresa_id', empresaId).order('data', { ascending: false }).limit(90),
       ])
-      for (const r of [dp, fn, pd, fi, fit, ped]) if (r.error) throw r.error
+      for (const r of [dp, fn, pd, fi, fit, ped, hi]) if (r.error) throw r.error
 
       setDespesas(dp.data || [])
       setFuncionarios(fn.data || [])
       setProducao(pd.data || [])
-      setUsuarios(us.error ? [] : (us.data || []))  // se RLS bloquear, só ignora (segue no manual)
+      setUsuarios(us.error ? [] : (us.data || []))
+      setHistorico(hi.data || [])
       setDiasAbertos(Number(emp.data?.dias_abertos_mes ?? 26) || 26)
 
-      // custo por base de cada ficha
       const itensPor = {}
       for (const it of (fit.data || [])) (itensPor[it.ficha_id] = itensPor[it.ficha_id] || []).push(it)
-      setFichas((fi.data || []).map(f => ({
-        id: f.id, nome: f.nome, unid_rendimento: f.unid_rendimento,
-        custoPorBase: custoPorBaseFicha(f, itensPor[f.id] || []),
-      })))
+      setFichas((fi.data || []).map(f => ({ id: f.id, nome: f.nome, custoPorBase: custoPorBaseFicha(f, itensPor[f.id] || []) })))
 
-      // receita líquida do mês (mesma conta do Financeiro)
       const peds = ped.data || []
       const proprios = peds.filter(p => ['whatsapp', 'app', 'cardapio'].includes(p.origem) || !p.origem)
         .reduce((s, p) => s + (Number(p.total || 0) - Number(p.taxa_entrega || 0)), 0)
-      const ifoodPeds = peds.filter(p => p.origem === 'ifood')
       const rates = { comissao: emp.data?.ifood_comissao_pct, transacao: emp.data?.ifood_transacao_pct }
-      const ifoodLiq = calcIfoodLiquido(ifoodPeds, rates)
-      setReceita({ proprios, ifood: Number(ifoodLiq.voceRecebe || 0) })
+      const ifoodLiq = calcIfoodLiquido(peds.filter(p => p.origem === 'ifood'), rates)
+      setReceitaDia({ proprios, ifood: Number(ifoodLiq.voceRecebe || 0) })
     } catch (e) {
       setError(e.message || 'Erro ao carregar')
     } finally {
       setLoading(false)
     }
-  }, [empresaId, mes])
+  }, [empresaId, hojeYMD])
 
   useEffect(() => { carregar() }, [carregar])
 
-  // ── cálculos ─────────────────────────────────────────────────────
+  // ── cálculos do DIA ──────────────────────────────────────────────
   const totalFixo = useMemo(() => despesas.reduce((s, d) => s + Number(d.valor || 0), 0), [despesas])
   const totalFunc = useMemo(() => funcionarios.reduce((s, f) => s + Number(f.salario_mensal || 0), 0), [funcionarios])
   const custoProdItem = (p) => emBase(Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0), p.unidade) * Number(p.custo_unit || 0)
-  const totalProducao = useMemo(() => producao.reduce((s, p) => s + custoProdItem(p), 0), [producao])
+  const producaoHoje = useMemo(() => producao.reduce((s, p) => s + custoProdItem(p), 0), [producao])
 
-  const receitaLiquida = receita.proprios + receita.ifood
-  const totalDespesas = totalFixo + totalFunc + totalProducao
-  const lucroReal = receitaLiquida - totalDespesas
   const dias = Math.max(1, diasAbertos)
-  const funcPorDia = totalFunc / dias
   const fixoPorDia = totalFixo / dias
+  const funcPorDia = totalFunc / dias
+  const receita = receitaDia.proprios + receitaDia.ifood
+  const custosDia = fixoPorDia + funcPorDia + producaoHoje
+  const lucroDia = receita - custosDia
 
   async function salvarDias(v) {
     const x = Math.max(1, Math.min(31, Math.round(Number(v) || 26)))
@@ -131,11 +128,33 @@ export default function DespesasLucro({ empresaId }) {
     if (empresaId) await supabase.from('empresas').update({ dias_abertos_mes: x }).eq('id', empresaId)
   }
 
+  // ── FECHAR O DIA: salva no histórico e limpa a produção do dia ──
+  async function fecharDia() {
+    if (!confirm(`Fechar o dia ${ddmm(hojeYMD)}?\n\nSalva o resumo no Histórico e LIMPA a produção de hoje (começa o próximo dia zerado).`)) return
+    setFechando(true)
+    try {
+      const itens = producao.map(p => ({ nome: p.nome, qtd_feita: Number(p.qtd_feita || 0), qtd_sobrou: Number(p.qtd_sobrou || 0), unidade: p.unidade, custo: custoProdItem(p) }))
+      const { error: upErr } = await supabase.from('historico_dia').upsert({
+        empresa_id: empresaId, data: hojeYMD,
+        receita_liquida: receita, custo_fixo: fixoPorDia, custo_funcionarios: funcPorDia,
+        custo_producao: producaoHoje, lucro: lucroDia, itens,
+      }, { onConflict: 'empresa_id,data' })
+      if (upErr) throw upErr
+      // limpa a produção do dia (já está guardada no snapshot do histórico)
+      const { error: delErr } = await supabase.from('producao_diaria').delete().eq('empresa_id', empresaId).eq('data', hojeYMD)
+      if (delErr) throw delErr
+      await carregar()
+      setSub('historico')
+    } catch (e) {
+      alert('Erro ao fechar o dia: ' + (e.message || e))
+    } finally {
+      setFechando(false)
+    }
+  }
+
   // ── CRUD: despesa ──
   function abrirNovaDespesa() { setDespesaEdit(null); setDespesaForm(emptyDespesa); setShowDespesa(true) }
-  function abrirEditarDespesa(d) {
-    setDespesaEdit(d); setDespesaForm({ nome: d.nome, categoria: d.categoria, tipo: d.tipo, valor: String(d.valor ?? '') }); setShowDespesa(true)
-  }
+  function abrirEditarDespesa(d) { setDespesaEdit(d); setDespesaForm({ nome: d.nome, categoria: d.categoria, tipo: d.tipo, valor: String(d.valor ?? '') }); setShowDespesa(true) }
   async function salvarDespesa(e) {
     e.preventDefault()
     if (!despesaForm.nome.trim()) return
@@ -145,16 +164,11 @@ export default function DespesasLucro({ empresaId }) {
     if (error) { alert('Erro: ' + error.message); return }
     setShowDespesa(false); carregar()
   }
-  async function excluirDespesa(d) {
-    if (!confirm(`Excluir "${d.nome}"?`)) return
-    await supabase.from('despesas_loja').delete().eq('id', d.id); carregar()
-  }
+  async function excluirDespesa(d) { if (!confirm(`Excluir "${d.nome}"?`)) return; await supabase.from('despesas_loja').delete().eq('id', d.id); carregar() }
 
   // ── CRUD: funcionário ──
   function abrirNovoFunc() { setFuncEdit(null); setFuncForm(emptyFunc); setShowFunc(true) }
-  function abrirEditarFunc(f) {
-    setFuncEdit(f); setFuncForm({ nome: f.nome, cargo: f.cargo || '', salario_mensal: String(f.salario_mensal ?? '') }); setShowFunc(true)
-  }
+  function abrirEditarFunc(f) { setFuncEdit(f); setFuncForm({ nome: f.nome, cargo: f.cargo || '', salario_mensal: String(f.salario_mensal ?? '') }); setShowFunc(true) }
   async function salvarFunc(e) {
     e.preventDefault()
     if (!funcForm.nome.trim()) return
@@ -164,17 +178,12 @@ export default function DespesasLucro({ empresaId }) {
     if (error) { alert('Erro: ' + error.message); return }
     setShowFunc(false); carregar()
   }
-  async function excluirFunc(f) {
-    if (!confirm(`Excluir "${f.nome}"?`)) return
-    await supabase.from('funcionarios').delete().eq('id', f.id); carregar()
-  }
-  // Puxa um usuário já cadastrado (Usuários) pro form — preenche nome e cargo.
+  async function excluirFunc(f) { if (!confirm(`Excluir "${f.nome}"?`)) return; await supabase.from('funcionarios').delete().eq('id', f.id); carregar() }
   function puxarUsuario(uid) {
     const u = usuarios.find(x => x.id === uid)
     if (!u) return
     setFuncForm(f => ({ ...f, nome: u.nome || '', cargo: u.cargo || PERFIL_LABEL[u.perfil] || '' }))
   }
-  // Usuários cadastrados que ainda não viraram funcionário (compara pelo nome).
   const jaFunc = new Set(funcionarios.map(f => (f.nome || '').trim().toLowerCase()))
   const usuariosDisponiveis = usuarios.filter(u => u.nome && !jaFunc.has(u.nome.trim().toLowerCase()))
 
@@ -184,10 +193,9 @@ export default function DespesasLucro({ empresaId }) {
   const prodPrevia = fichaSel ? emBase(num(prodForm.qtd_feita) - num(prodForm.qtd_sobrou), prodForm.unidade) * fichaSel.custoPorBase : 0
   async function salvarProd(e) {
     e.preventDefault()
-    if (!prodForm.ficha_id) { alert('Escolha o produto (ficha técnica).'); return }
-    if (!fichaSel) { alert('Ficha não encontrada.'); return }
+    if (!prodForm.ficha_id || !fichaSel) { alert('Escolha o produto (ficha técnica).'); return }
     const payload = {
-      empresa_id: empresaId, data: prodForm.data, ficha_id: prodForm.ficha_id, nome: fichaSel.nome,
+      empresa_id: empresaId, data: hojeYMD, ficha_id: prodForm.ficha_id, nome: fichaSel.nome,
       qtd_feita: num(prodForm.qtd_feita), qtd_sobrou: num(prodForm.qtd_sobrou),
       unidade: prodForm.unidade, custo_unit: fichaSel.custoPorBase,
     }
@@ -195,78 +203,90 @@ export default function DespesasLucro({ empresaId }) {
     if (error) { alert('Erro: ' + error.message); return }
     setShowProd(false); carregar()
   }
-  async function excluirProd(p) {
-    if (!confirm(`Excluir o lançamento de ${p.nome}?`)) return
-    await supabase.from('producao_diaria').delete().eq('id', p.id); carregar()
-  }
-
-  const nomeMes = new Date(mes + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
-  const mesesOpcoes = (() => {
-    const arr = []; const now = new Date()
-    for (let i = 0; i < 8; i++) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); arr.push([`${d.getFullYear()}-${pad(d.getMonth() + 1)}`, d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })]) }
-    return arr
-  })()
+  async function excluirProd(p) { if (!confirm(`Excluir o lançamento de ${p.nome}?`)) return; await supabase.from('producao_diaria').delete().eq('id', p.id); carregar() }
+  async function excluirHistorico(h) { if (!confirm(`Excluir o dia ${ddmm(h.data)} do histórico?`)) return; await supabase.from('historico_dia').delete().eq('id', h.id); carregar() }
 
   if (!empresaId) return <div className="card">Selecione uma loja.</div>
 
+  const totalHistLucro = historico.reduce((s, h) => s + Number(h.lucro || 0), 0)
+
   return (
     <div>
-      {/* seletor de mês */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Mês de referência:</span>
-        <select value={mes} onChange={e => setMes(e.target.value)}
-          style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', background: 'var(--input-bg, var(--bg))', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', textTransform: 'capitalize' }}>
-          {mesesOpcoes.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-        <span style={{ flex: 1 }} />
-        <label style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-          Dias abertos no mês
-          <input type="number" min="1" max="31" value={diasAbertos} onChange={e => setDiasAbertos(e.target.value)} onBlur={e => salvarDias(e.target.value)}
-            style={{ width: 60, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', textAlign: 'center' }} />
-        </label>
+      {/* sub-abas */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap' }}>
+        {[['hoje', '📊 Hoje'], ['historico', '📜 Histórico de despesas diárias']].map(([id, lb]) => (
+          <button key={id} type="button" onClick={() => setSub(id)}
+            style={{ padding: '7px 14px', borderRadius: 999, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+              background: sub === id ? 'var(--primary)' : 'transparent', color: sub === id ? '#fff' : 'var(--text-muted)' }}>
+            {lb}
+          </button>
+        ))}
       </div>
 
       {error && <div className="card error-text" style={{ marginBottom: 16 }}>{error}</div>}
       {loading && <div className="card">Carregando…</div>}
 
-      {!loading && (
+      {/* ═══════════════ HOJE ═══════════════ */}
+      {!loading && sub === 'hoje' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-          {/* ═══ LUCRO REAL ═══ */}
-          <div style={{ background: 'var(--card)', border: `2px solid ${lucroReal >= 0 ? '#16a34a' : '#ef4444'}`, borderRadius: 14, padding: 20 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 }}>
-              💰 Lucro real de {nomeMes}
-            </div>
-            <Linha label="Faturamento líquido (próprios + iFood)" valor={brl(receitaLiquida)} bold />
-            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '-4px 0 8px 2px' }}>
-              próprios {brl(receita.proprios)} · iFood {brl(receita.ifood)}
-            </div>
-            <Linha label="− Custos fixos (aluguel, energia…)" valor={`− ${brl(totalFixo)}`} cor="var(--danger)" />
-            <Linha label="− Funcionários" valor={`− ${brl(totalFunc)}`} cor="var(--danger)" />
-            <Linha label="− Custo de produção (ingredientes)" valor={`− ${brl(totalProducao)}`} cor="var(--danger)" />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, marginTop: 6, borderTop: '2px solid var(--border)' }}>
-              <span style={{ fontSize: 16, fontWeight: 900 }}>{lucroReal >= 0 ? '= Foi pro seu bolso' : '= Prejuízo no mês'}</span>
-              <span style={{ fontSize: 26, fontWeight: 900, color: lucroReal >= 0 ? '#16a34a' : '#ef4444' }}>{brl(lucroReal)}</span>
-            </div>
-            {receitaLiquida > 0 && (
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, textAlign: 'right' }}>
-                margem de {((lucroReal / receitaLiquida) * 100).toFixed(0)}% sobre o líquido
-              </div>
-            )}
+          {/* config dias abertos */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>
+            Dias que a loja abre no mês
+            <input type="number" min="1" max="31" value={diasAbertos} onChange={e => setDiasAbertos(e.target.value)} onBlur={e => salvarDias(e.target.value)}
+              style={{ width: 58, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', textAlign: 'center' }} />
           </div>
 
-          {/* ═══ CUSTOS FIXOS ═══ */}
-          <Secao titulo="💡 Custos fixos e variáveis" acao={<button className="btn btn-primary btn-sm" onClick={abrirNovaDespesa}>+ Novo custo</button>}
+          {/* LUCRO REAL DO DIA */}
+          <div style={{ background: 'var(--card)', border: `2px solid ${lucroDia >= 0 ? '#16a34a' : '#ef4444'}`, borderRadius: 14, padding: 20 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 }}>
+              💰 Lucro real de hoje ({ddmm(hojeYMD)})
+            </div>
+            <Linha label="Faturamento líquido do dia (próprios + iFood)" valor={brl(receita)} bold />
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '-4px 0 8px 2px' }}>
+              próprios {brl(receitaDia.proprios)} · iFood {brl(receitaDia.ifood)}
+            </div>
+            <Linha label={`− Custos fixos (rateio do dia: ${brl(totalFixo)}/${dias})`} valor={`− ${brl(fixoPorDia)}`} cor="var(--danger)" />
+            <Linha label={`− Funcionários (rateio do dia: ${brl(totalFunc)}/${dias})`} valor={`− ${brl(funcPorDia)}`} cor="var(--danger)" />
+            <Linha label="− Custo de produção de hoje" valor={`− ${brl(producaoHoje)}`} cor="var(--danger)" />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, marginTop: 6, borderTop: '2px solid var(--border)' }}>
+              <span style={{ fontSize: 16, fontWeight: 900 }}>{lucroDia >= 0 ? '= Foi pro seu bolso hoje' : '= Prejuízo hoje'}</span>
+              <span style={{ fontSize: 26, fontWeight: 900, color: lucroDia >= 0 ? '#16a34a' : '#ef4444' }}>{brl(lucroDia)}</span>
+            </div>
+          </div>
+
+          {/* PRODUÇÃO DO DIA (com botão fechar o dia) */}
+          <Secao titulo={`🍲 Custo de produção de hoje (${ddmm(hojeYMD)})`}
+            acao={<div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button className="btn btn-primary btn-sm" onClick={abrirNovaProd} disabled={fichas.length === 0}>+ Lançar produção</button>
+              <button className="btn btn-sm" onClick={fecharDia} disabled={fechando}
+                style={{ background: '#16a34a', color: '#fff' }}>{fechando ? 'Salvando…' : '💾 Fechar o dia'}</button>
+            </div>}
+            rodape={producao.length > 0 && <>Custo de produção de hoje <strong>{brl(producaoHoje)}</strong></>}>
+            {fichas.length === 0 && <Vazio texto="Crie fichas técnicas primeiro (Catálogo → Ficha Técnica) pra puxar o custo por kg." />}
+            {fichas.length > 0 && producao.length === 0 && <Vazio texto="Lance a produção do dia (ex.: fiz 10kg de feijão, sobrou 2kg)." />}
+            {producao.map(p => {
+              const consumido = Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0)
+              return (
+                <ItemLinha key={p.id} onDel={() => excluirProd(p)}
+                  titulo={p.nome}
+                  sub={`fez ${p.qtd_feita}${p.unidade} · sobrou ${p.qtd_sobrou}${p.unidade} · usou ${consumido}${p.unidade}`}
+                  valor={brl(custoProdItem(p))} />
+              )
+            })}
+          </Secao>
+
+          {/* CUSTOS FIXOS */}
+          <Secao titulo="💡 Custos fixos e variáveis (mensais)" acao={<button className="btn btn-primary btn-sm" onClick={abrirNovaDespesa}>+ Novo custo</button>}
             rodape={despesas.length > 0 && <>Total <strong>{brl(totalFixo)}</strong>/mês · <strong>{brl(fixoPorDia)}</strong>/dia</>}>
             {despesas.length === 0 ? <Vazio texto="Cadastre aluguel, energia, água, internet…" />
               : despesas.map(d => (
                 <ItemLinha key={d.id} onEdit={() => abrirEditarDespesa(d)} onDel={() => excluirDespesa(d)}
-                  titulo={<>{catLabel(d.categoria)} — {d.nome}</>}
-                  sub={d.tipo === 'variavel' ? 'variável' : 'fixo'} valor={brl(d.valor) + '/mês'} />
+                  titulo={<>{catLabel(d.categoria)} — {d.nome}</>} sub={d.tipo === 'variavel' ? 'variável' : 'fixo'} valor={brl(d.valor) + '/mês'} />
               ))}
           </Secao>
 
-          {/* ═══ FUNCIONÁRIOS ═══ */}
+          {/* FUNCIONÁRIOS */}
           <Secao titulo="👥 Funcionários" acao={<button className="btn btn-primary btn-sm" onClick={abrirNovoFunc}>+ Funcionário</button>}
             rodape={funcionarios.length > 0 && <>Total <strong>{brl(totalFunc)}</strong>/mês · custo por dia <strong>{brl(funcPorDia)}</strong> ({dias} dias)</>}>
             {funcionarios.length === 0 ? <Vazio texto="Cadastre cada funcionário com o salário." />
@@ -275,22 +295,44 @@ export default function DespesasLucro({ empresaId }) {
                   titulo={f.nome} sub={f.cargo || 'sem cargo'} valor={brl(f.salario_mensal) + '/mês'} />
               ))}
           </Secao>
+        </div>
+      )}
 
-          {/* ═══ PRODUÇÃO DIÁRIA ═══ */}
-          <Secao titulo={`🍲 Custo de produção — ${nomeMes}`} acao={<button className="btn btn-primary btn-sm" onClick={abrirNovaProd} disabled={fichas.length === 0}>+ Lançar produção</button>}
-            rodape={producao.length > 0 && <>Custo de produção do mês <strong>{brl(totalProducao)}</strong></>}>
-            {fichas.length === 0 && <Vazio texto="Crie fichas técnicas primeiro (Catálogo → Ficha Técnica) pra puxar o custo por kg." />}
-            {fichas.length > 0 && producao.length === 0 && <Vazio texto={"Lance a produção do dia (ex.: fiz 10kg de feijão, sobrou 2kg)."} />}
-            {producao.map(p => {
-              const consumido = Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0)
-              return (
-                <ItemLinha key={p.id} onDel={() => excluirProd(p)}
-                  titulo={<>{p.nome} <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>· {new Date(p.data + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span></>}
-                  sub={`fez ${p.qtd_feita}${p.unidade} · sobrou ${p.qtd_sobrou}${p.unidade} · usou ${consumido}${p.unidade}`}
-                  valor={brl(custoProdItem(p))} />
-              )
-            })}
-          </Secao>
+      {/* ═══════════════ HISTÓRICO ═══════════════ */}
+      {!loading && sub === 'historico' && (
+        <div>
+          {historico.length === 0 ? (
+            <div className="card empty-state"><strong>Nenhum dia fechado ainda</strong>
+              <p>Feche um dia na aba "Hoje" pra ele aparecer aqui no histórico.</p></div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <strong style={{ fontSize: 15 }}>📜 Histórico de despesas diárias</strong>
+                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Lucro acumulado <strong style={{ color: totalHistLucro >= 0 ? '#16a34a' : '#ef4444' }}>{brl(totalHistLucro)}</strong></span>
+              </div>
+              <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '2px 16px' }}>
+                {historico.map(h => (
+                  <div key={h.id} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>{ddmm(h.data)}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                          receita {brl(h.receita_liquida)} · custos {brl(Number(h.custo_fixo) + Number(h.custo_funcionarios) + Number(h.custo_producao))}
+                        </div>
+                      </div>
+                      <strong style={{ fontSize: 16, color: Number(h.lucro) >= 0 ? '#16a34a' : '#ef4444', whiteSpace: 'nowrap' }}>{brl(h.lucro)}</strong>
+                      <button className="btn btn-danger btn-sm" onClick={() => excluirHistorico(h)}>✕</button>
+                    </div>
+                    {Array.isArray(h.itens) && h.itens.length > 0 && (
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4, paddingLeft: 2 }}>
+                        {h.itens.map((it, i) => <span key={i}>{i > 0 ? ' · ' : ''}{it.nome} {brl(it.custo)}</span>)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -324,9 +366,7 @@ export default function DespesasLucro({ empresaId }) {
                 <label>Puxar de quem já é cadastrado (opcional)</label>
                 <select defaultValue="" onChange={e => { puxarUsuario(e.target.value); e.target.value = '' }}>
                   <option value="">— escolher funcionário cadastrado —</option>
-                  {usuariosDisponiveis.map(u => (
-                    <option key={u.id} value={u.id}>{u.nome} ({u.cargo || PERFIL_LABEL[u.perfil] || 'funcionário'})</option>
-                  ))}
+                  {usuariosDisponiveis.map(u => <option key={u.id} value={u.id}>{u.nome} ({u.cargo || PERFIL_LABEL[u.perfil] || 'funcionário'})</option>)}
                 </select>
               </div>
             )}
@@ -340,17 +380,15 @@ export default function DespesasLucro({ empresaId }) {
         </Modal>
       )}
 
-      {/* ─── MODAL: produção diária ─── */}
+      {/* ─── MODAL: produção do dia ─── */}
       {showProd && (
-        <Modal onClose={() => setShowProd(false)} onSubmit={salvarProd} titulo="Lançar produção do dia" submitLabel="Salvar lançamento">
+        <Modal onClose={() => setShowProd(false)} onSubmit={salvarProd} titulo="Lançar produção de hoje" submitLabel="Salvar lançamento">
           <div className="form-grid">
-            <div className="form-field"><label>Produto (ficha técnica)</label>
+            <div className="form-field full"><label>Produto (ficha técnica)</label>
               <select value={prodForm.ficha_id} onChange={e => setProdForm(f => ({ ...f, ficha_id: e.target.value }))}>
                 <option value="">— escolher —</option>
                 {fichas.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
               </select></div>
-            <div className="form-field"><label>Data</label>
-              <input type="date" value={prodForm.data} onChange={e => setProdForm(f => ({ ...f, data: e.target.value }))} /></div>
             <div className="form-field"><label>Quanto fez</label>
               <div style={{ display: 'flex', gap: 6 }}>
                 <input inputMode="decimal" placeholder="Ex.: 10" value={prodForm.qtd_feita} onChange={e => setProdForm(f => ({ ...f, qtd_feita: e.target.value }))} style={{ flex: 1 }} />
@@ -387,7 +425,7 @@ function Linha({ label, valor, cor, bold }) {
 function Secao({ titulo, acao, rodape, children }) {
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
         <strong style={{ fontSize: 15 }}>{titulo}</strong>
         {acao}
       </div>
