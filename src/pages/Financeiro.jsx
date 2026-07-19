@@ -10,7 +10,6 @@ const fmtBRL = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', 
 const pad = n => String(n).padStart(2, '0')
 const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const ddmm = d => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`
-// aceita "2.688,00", "2688,50" ou "2688.5"
 const parseValor = s => {
   let x = String(s ?? '').trim().replace(/[^\d.,]/g, '')
   if (!x) return 0
@@ -18,8 +17,7 @@ const parseValor = s => {
   return Number(x) || 0
 }
 
-// Ciclo do iFood: apuração de segunda a domingo; deposita na QUARTA seguinte
-// (domingo que fecha a semana + 3 dias). Ex: semana 13–19/07 → paga 22/07.
+// Ciclo iFood: apuração seg–dom; deposita na QUARTA seguinte (domingo + 3).
 function inicioSemana(d = new Date()) {
   const x = new Date(d); x.setHours(0, 0, 0, 0)
   const dow = x.getDay()
@@ -44,6 +42,8 @@ function rangeFin(periodo, custIni, custFim) {
   return { start: inicioDia(now).toISOString(), end: null }
 }
 
+const NUM_SEMANAS = 5
+
 export default function Financeiro() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id
@@ -54,21 +54,17 @@ export default function Financeiro() {
   const [pedidos, setPedidos]   = useState([])
   const [loadingD, setLoadingD] = useState(true)
 
-  // ── iFood: semana atual (a receber na quarta) + anúncio informado ──
-  const [ifoodRates, setIfoodRates] = useState({})
-  const [semana, setSemana]         = useState(null)
-  const [anuncioVal, setAnuncioVal] = useState(0)
-  const [anuncioInput, setAnuncioInput] = useState('')
-  const [salvandoAnuncio, setSalvandoAnuncio] = useState(false)
-  const [entExp, setEntExp]         = useState(false)
+  // ── iFood: semanas (a receber na quarta) + anúncio por semana ──
+  const [semanas, setSemanas] = useState([])     // [{iniYMD, inicio, fim, pagamento, situacao, liq, nped}]
+  const [ads, setAds]         = useState({})      // { [semana_ini]: valor }
+  const [abertoAtual, setAbertoAtual] = useState(false)
+  const [entExp, setEntExp]   = useState(false)
 
-  // Vendas por canal (próprios) — respeita o filtro de período
   async function loadDelivery() {
     setLoadingD(true)
     const { start, end } = rangeFin(periodoD, custIni, custFim)
     const pedRes = await fetchAll(() => {
-      let q = supabase.from('pedidos_delivery')
-        .select('origem, total')
+      let q = supabase.from('pedidos_delivery').select('origem, total')
         .neq('status', 'cancelado').order('created_at', { ascending: false })
       if (start) q = q.gte('created_at', start)
       if (end)   q = q.lt('created_at', end)
@@ -79,50 +75,56 @@ export default function Financeiro() {
   }
   useEffect(() => { loadDelivery() }, [periodoD, custIni, custFim])
 
-  // Semana atual do iFood (a receber na quarta) — independe do filtro
-  async function loadSemana() {
+  async function loadSemanas() {
     if (!empresaId) return
-    const ini = inicioSemana()
-    const iniYMD = ymd(ini)
-    const [empRes, anuRes, pedRes] = await Promise.all([
+    const ini0 = inicioSemana()
+    const desde = addDias(ini0, -7 * (NUM_SEMANAS - 1))
+    const [empRes, adsRes, pedRes] = await Promise.all([
       supabase.from('empresas').select('ifood_comissao_pct, ifood_transacao_pct').eq('id', empresaId).maybeSingle(),
-      supabase.from('ifood_anuncio').select('valor').eq('empresa_id', empresaId).eq('semana_ini', iniYMD).maybeSingle(),
+      supabase.from('ifood_anuncio').select('semana_ini, valor').eq('empresa_id', empresaId).gte('semana_ini', ymd(desde)),
       fetchAll(() => supabase.from('pedidos_delivery')
-        .select('total, subtotal, taxa_entrega, ifood_valores, forma_pagamento')
+        .select('created_at, total, subtotal, taxa_entrega, ifood_valores, forma_pagamento')
         .eq('origem', 'ifood').neq('status', 'cancelado')
-        .gte('created_at', ini.toISOString()).order('created_at', { ascending: false })),
+        .gte('created_at', desde.toISOString()).order('created_at', { ascending: false })),
     ])
     const rates = { comissao: empRes.data?.ifood_comissao_pct, transacao: empRes.data?.ifood_transacao_pct }
-    setIfoodRates(rates)
-    const liq = calcIfoodLiquido(pedRes.data ?? [], rates)
-    setSemana({ ...liq, inicio: ini, pedidos: (pedRes.data ?? []).length })
-    const val = Number(anuRes.data?.valor ?? 0)
-    setAnuncioVal(val)
-    setAnuncioInput(val > 0 ? String(val).replace('.', ',') : '')
-  }
-  useEffect(() => { loadSemana() }, [empresaId])
+    const adMap = {}; for (const a of (adsRes.data ?? [])) adMap[a.semana_ini] = Number(a.valor || 0)
 
-  async function salvarAnuncio() {
-    if (!empresaId || !semana) return
-    const val = parseValor(anuncioInput)
-    setAnuncioVal(val)
-    setSalvandoAnuncio(true)
+    const grupos = {}
+    for (const p of (pedRes.data ?? [])) {
+      const wi = inicioSemana(new Date(p.created_at)); const k = ymd(wi)
+      ;(grupos[k] || (grupos[k] = { inicio: wi, peds: [] })).peds.push(p)
+    }
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
+    const arr = Object.values(grupos).map(g => {
+      const pagamento = addDias(g.inicio, 9)
+      return {
+        iniYMD: ymd(g.inicio), inicio: g.inicio, fim: addDias(g.inicio, 6), pagamento,
+        situacao: pagamento <= hoje ? 'pago' : 'em aberto',
+        liq: calcIfoodLiquido(g.peds, rates), nped: g.peds.length,
+      }
+    }).sort((a, b) => b.inicio - a.inicio)
+    setSemanas(arr); setAds(adMap)
+  }
+  useEffect(() => { loadSemanas() }, [empresaId])
+
+  async function salvarAnuncio(iniYMD, val) {
+    setAds(prev => ({ ...prev, [iniYMD]: val }))
     await supabase.from('ifood_anuncio').upsert(
-      { empresa_id: empresaId, semana_ini: ymd(semana.inicio), valor: val, atualizado_em: new Date().toISOString() },
+      { empresa_id: empresaId, semana_ini: iniYMD, valor: val, atualizado_em: new Date().toISOString() },
       { onConflict: 'empresa_id,semana_ini' })
-    setSalvandoAnuncio(false)
   }
+  const aReceberDe = s => s.liq.repasse - (ads[s.iniYMD] || 0)
 
-  // Vendas por canal
+  // Vendas por canal próprio
   const pedWA  = pedidos.filter(p => p.origem === 'whatsapp')
   const pedApp = pedidos.filter(p => p.origem === 'app')
   const pedCat = pedidos.filter(p => !p.origem || p.origem === 'cardapio')
   const soma = arr => arr.reduce((s, p) => s + Number(p.total || 0), 0)
   const volTotal = soma(pedWA) + soma(pedApp) + soma(pedCat)
 
-  const aReceber = semana ? semana.repasse - anuncioVal : 0
-  const pagamento = semana ? addDias(semana.inicio, 9) : null   // domingo(+6) → quarta(+3)
-  const fimSem = semana ? addDias(semana.inicio, 6) : null
+  const atual = semanas[0]
+  const anteriores = semanas.slice(1)
 
   return (
     <div>
@@ -133,11 +135,10 @@ export default function Financeiro() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-muted)' }}>
               <input type="date" value={custIni} max={custFim || ymd(new Date())}
                 onChange={e => { setCustIni(e.target.value); if (e.target.value > custFim) setCustFim(e.target.value) }}
-                style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
+                style={inpDate} />
               <span>até</span>
               <input type="date" value={custFim} min={custIni} max={ymd(new Date())}
-                onChange={e => setCustFim(e.target.value)}
-                style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
+                onChange={e => setCustFim(e.target.value)} style={inpDate} />
             </div>
           )}
           <div style={{ display: 'flex', gap: 6, background: 'var(--card-bg, var(--bg))', border: '1px solid var(--border)', borderRadius: 999, padding: 4 }}>
@@ -153,59 +154,60 @@ export default function Financeiro() {
       </div>
 
       {/* ── iFOOD — A RECEBER NA QUARTA (semana atual) ── */}
-      {semana && semana.pedidos > 0 && (
+      {atual && atual.nped > 0 && (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><IfoodIcon size={18} /> iFood — a receber na quarta ({ddmm(pagamento)})</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><IfoodIcon size={18} /> iFood — a receber na quarta ({ddmm(atual.pagamento)})</span>
             <span title="Vendas e taxas calculadas dos seus pedidos; o anúncio você informa (o iFood cobra à parte). Bate ~99% com o repasse do iFood."
-              style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 8px', cursor: 'help', textTransform: 'none', letterSpacing: 0 }}>estimado ⓘ</span>
+              style={badge}>estimado ⓘ</span>
           </div>
-          <div style={{ background: 'var(--card)', border: '1px solid #16a34a', borderRadius: 12, padding: '8px 20px 4px', marginBottom: 24 }}>
-            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', padding: '6px 0 10px' }}>
-              semana {ddmm(semana.inicio)} a {ddmm(fimSem)} · em aberto · {semana.pedidos} pedido{semana.pedidos !== 1 ? 's' : ''}
-            </div>
-            {/* Vendas */}
-            <Linha label="Vendas (itens + entrega)" valor={fmtBRL(semana.vendasOnline)} />
-            <Linha label="− Comissão + taxa" valor={`− ${fmtBRL(semana.comissaoOnline)}`} cor="var(--danger)" />
-            <Linha label="− Promoções (seus cupons)" valor={`− ${fmtBRL(semana.promocoesOnline)}`} cor="var(--danger)" />
-            {/* Anúncio — editável */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ background: 'var(--card)', border: '1px solid #16a34a', borderRadius: 12, padding: '4px 20px', marginBottom: 20 }}>
+            {/* Headline (sempre visível) — clica pra abrir a quebra */}
+            <div onClick={() => setAbertoAtual(v => !v)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '14px 0', cursor: 'pointer', userSelect: 'none' }}>
               <div>
-                <div style={{ fontSize: 13.5, color: 'var(--danger)' }}>− 📢 Anúncios <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(você informa — o iFood cobra à parte)</span></div>
-                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2 }}>pegue o valor do "Pacote de anúncios" no app do iFood</div>
+                <div style={{ fontSize: 15, fontWeight: 800 }}>
+                  <span style={{ display: 'inline-block', width: 15, color: 'var(--text-muted)', transform: abertoAtual ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+                  = A receber na quarta
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 3, marginLeft: 15 }}>
+                  semana {ddmm(atual.inicio)} a {ddmm(atual.fim)} · em aberto · {atual.nped} pedido{atual.nped !== 1 ? 's' : ''}
+                </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>R$</span>
-                <input value={anuncioInput} onChange={e => setAnuncioInput(e.target.value)} onBlur={salvarAnuncio}
-                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} placeholder="0,00" inputMode="decimal"
-                  style={{ width: 100, textAlign: 'right', padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--danger)', fontWeight: 700, fontSize: 14 }} />
+              <span style={{ fontSize: 24, fontWeight: 900, color: '#16a34a', whiteSpace: 'nowrap' }}>≈ {fmtBRL(aReceberDe(atual))}</span>
+            </div>
+            {!(ads[atual.iniYMD] > 0) && (
+              <div style={{ fontSize: 11.5, color: '#f59e0b', padding: '0 0 12px', marginLeft: 15 }}>⚠️ Informe o anúncio da semana (toque pra abrir) — senão o valor fica alto.</div>
+            )}
+            {/* Quebra (abre na seta) */}
+            {abertoAtual && (
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 2 }}>
+                <Linha label="Vendas (itens + entrega)" valor={fmtBRL(atual.liq.vendasOnline)} />
+                <Linha label="− Comissão + taxa" valor={`− ${fmtBRL(atual.liq.comissaoOnline)}`} cor="var(--danger)" />
+                <Linha label="− Promoções (seus cupons)" valor={`− ${fmtBRL(atual.liq.promocoesOnline)}`} cor="var(--danger)" />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0 14px' }}>
+                  <div>
+                    <div style={{ fontSize: 13.5, color: 'var(--danger)' }}>− 📢 Anúncios <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(você informa — o iFood cobra à parte)</span></div>
+                    <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2 }}>pegue no "Pacote de anúncios" do app do iFood</div>
+                  </div>
+                  <AnuncioInput valor={ads[atual.iniYMD] || 0} onSalvar={v => salvarAnuncio(atual.iniYMD, v)} />
+                </div>
               </div>
-            </div>
-            {/* A receber */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0 12px' }}>
-              <span style={{ fontSize: 15, fontWeight: 800 }}>= A receber na quarta {salvandoAnuncio && <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>salvando…</span>}</span>
-              <span style={{ fontSize: 24, fontWeight: 900, color: '#16a34a' }}>≈ {fmtBRL(aReceber)}</span>
-            </div>
-            {anuncioVal === 0 && (
-              <div style={{ fontSize: 11.5, color: '#f59e0b', paddingBottom: 10 }}>⚠️ Informe o anúncio da semana pra ficar certo (senão o valor fica alto).</div>
             )}
           </div>
 
-          {/* Já na sua mão (recebido na entrega — semana) */}
-          {semana.recebidoEntrega > 0 && (
-            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '4px 20px', marginBottom: 28 }}>
+          {/* Já na sua mão (recebido na entrega — semana atual) */}
+          {atual.liq.recebidoEntrega > 0 && (
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '4px 20px', marginBottom: 24 }}>
               <div onClick={() => setEntExp(v => !v)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0', cursor: 'pointer', userSelect: 'none' }}>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>
-                    <span style={{ display: 'inline-block', width: 14, color: 'var(--text-muted)', transform: entExp ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
-                    💵 Já na sua mão <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>· na entrega, esta semana · toque pra abrir</span>
-                  </div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>
+                  <span style={{ display: 'inline-block', width: 14, color: 'var(--text-muted)', transform: entExp ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+                  💵 Já na sua mão <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>· na entrega, esta semana · toque pra abrir</span>
                 </div>
-                <span style={{ fontSize: 20, fontWeight: 900 }}>{fmtBRL(semana.recebidoEntrega)}</span>
+                <span style={{ fontSize: 20, fontWeight: 900 }}>{fmtBRL(atual.liq.recebidoEntrega)}</span>
               </div>
               {entExp && (
                 <div style={{ margin: '2px 0 12px 20px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {Object.entries(semana.entregaForma).sort((a, b) => b[1].total - a[1].total).map(([forma, d]) => (
+                  {Object.entries(atual.liq.entregaForma).sort((a, b) => b[1].total - a[1].total).map(([forma, d]) => (
                     <div key={forma} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--text-muted)' }}>
                       <span>{FORMA_ENTREGA_LABEL[forma] || forma} <span style={{ fontSize: 11.5 }}>· {d.qtd} pedido{d.qtd !== 1 ? 's' : ''}</span></span>
                       <strong style={{ color: 'var(--text)' }}>{fmtBRL(d.total)}</strong>
@@ -218,7 +220,38 @@ export default function Financeiro() {
         </>
       )}
 
-      {/* ── VENDAS POR CANAL (canal próprio, respeita o filtro) ── */}
+      {/* ── SEMANAS ANTERIORES ── */}
+      {anteriores.length > 0 && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
+            Semanas anteriores
+          </div>
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '2px 16px', marginBottom: 28 }}>
+            {anteriores.map(s => (
+              <div key={s.iniYMD} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 12, alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{ddmm(s.inicio)} a {ddmm(s.fim)}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {s.situacao === 'pago'
+                      ? <>✅ pago em {ddmm(s.pagamento)}</>
+                      : <>🕒 cai {ddmm(s.pagamento)}</>} · {s.nped} pedidos
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span title="Anúncio da semana" style={{ fontSize: 11, color: 'var(--text-muted)' }}>📢</span>
+                  <AnuncioInput small valor={ads[s.iniYMD] || 0} onSalvar={v => salvarAnuncio(s.iniYMD, v)} />
+                </div>
+                <div style={{ textAlign: 'right', minWidth: 110 }}>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: '#16a34a' }}>≈ {fmtBRL(aReceberDe(s))}</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{ads[s.iniYMD] > 0 ? 'a receber' : 'informe o anúncio'}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ── VENDAS POR CANAL PRÓPRIO ── */}
       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
         Vendas por canal próprio
       </div>
@@ -237,7 +270,7 @@ export default function Financeiro() {
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase' }}>Total</div>
           <div style={{ fontSize: 20, fontWeight: 900 }}>{fmtBRL(volTotal)}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{pedWA.length + pedApp.length + pedCat.length} pedido{(pedWA.length + pedApp.length + pedCat.length) !== 1 ? 's' : ''}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{pedWA.length + pedApp.length + pedCat.length} pedidos</div>
         </div>
       </div>
 
@@ -246,11 +279,37 @@ export default function Financeiro() {
   )
 }
 
+const inpDate = { padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }
+const badge = { fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 8px', cursor: 'help', textTransform: 'none', letterSpacing: 0 }
+
 function Linha({ label, valor, cor }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0', borderBottom: '1px solid var(--border)' }}>
       <span style={{ fontSize: 13.5, color: cor || 'var(--text)' }}>{label}</span>
       <strong style={{ fontSize: 14, color: cor || 'var(--text)' }}>{valor}</strong>
+    </div>
+  )
+}
+
+// Campo de anúncio por semana (estado local; salva no blur)
+function AnuncioInput({ valor, onSalvar, small }) {
+  const [v, setV] = useState(valor > 0 ? String(valor).replace('.', ',') : '')
+  const [saving, setSaving] = useState(false)
+  useEffect(() => { setV(valor > 0 ? String(valor).replace('.', ',') : '') }, [valor])
+  async function salvar() {
+    setSaving(true)
+    await onSalvar(parseValor(v))
+    setSaving(false)
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>R$</span>
+      <input value={v} onChange={e => setV(e.target.value)} onBlur={salvar}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+        placeholder="0,00" inputMode="decimal"
+        style={{ width: small ? 78 : 100, textAlign: 'right', padding: small ? '4px 6px' : '5px 8px', borderRadius: 8,
+          border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--danger)', fontWeight: 700, fontSize: small ? 13 : 14 }} />
+      {saving && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>…</span>}
     </div>
   )
 }
