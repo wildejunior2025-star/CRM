@@ -66,6 +66,8 @@ export default function Financeiro() {
 
   // ── iFood: semanas (a receber na quarta) + anúncio por semana ──
   const [semanas, setSemanas] = useState([])     // [{iniYMD, inicio, fim, pagamento, situacao, liq, nped}]
+  const [mesFiltro, setMesFiltro] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}` })  // padrão = mês atual; '' = recentes. Filtra SÓ as "semanas anteriores"
+  const [semanasMes, setSemanasMes] = useState(null)  // semanas do mês filtrado (null = sem filtro)
   const [ads, setAds]         = useState({})      // { [periodo_ini]: valor } (anúncio digitado)
   const [repImp, setRepImp]   = useState({})      // { [periodo_ini]: {valor_repasse, situacao, ...} } (PDF importado)
   const [abertoAtual, setAbertoAtual] = useState(false)
@@ -91,18 +93,22 @@ export default function Financeiro() {
   }
   useEffect(() => { loadDelivery() }, [periodoD, custIni, custFim])
 
-  async function loadSemanas() {
-    if (!empresaId) return
-    const ini0 = inicioSemana()
-    const desde = addDias(ini0, -7 * (NUM_SEMANAS - 1))
+  // Busca as semanas do iFood num intervalo [desde, ateh). ateh null = até hoje.
+  async function fetchSemanas(desde, ateh) {
+    const anuQ = supabase.from('ifood_anuncio').select('semana_ini, valor').eq('empresa_id', empresaId).gte('semana_ini', ymd(desde))
+    const impQ = supabase.from('ifood_repasse_semanal').select('*').eq('empresa_id', empresaId).gte('periodo_ini', ymd(desde))
     const [empRes, adsRes, impRes, pedRes] = await Promise.all([
       supabase.from('empresas').select('ifood_comissao_pct, ifood_transacao_pct').eq('id', empresaId).maybeSingle(),
-      supabase.from('ifood_anuncio').select('semana_ini, valor').eq('empresa_id', empresaId).gte('semana_ini', ymd(desde)),
-      supabase.from('ifood_repasse_semanal').select('*').eq('empresa_id', empresaId).gte('periodo_ini', ymd(desde)),
-      fetchAll(() => supabase.from('pedidos_delivery')
-        .select('created_at, total, subtotal, taxa_entrega, ifood_valores, forma_pagamento')
-        .eq('origem', 'ifood').neq('status', 'cancelado')
-        .gte('created_at', desde.toISOString()).order('created_at', { ascending: false })),
+      ateh ? anuQ.lt('semana_ini', ymd(ateh)) : anuQ,
+      ateh ? impQ.lt('periodo_ini', ymd(ateh)) : impQ,
+      fetchAll(() => {
+        let q = supabase.from('pedidos_delivery')
+          .select('created_at, total, subtotal, taxa_entrega, ifood_valores, forma_pagamento')
+          .eq('origem', 'ifood').neq('status', 'cancelado')
+          .gte('created_at', desde.toISOString()).order('created_at', { ascending: false })
+        if (ateh) q = q.lt('created_at', ateh.toISOString())
+        return q
+      }),
     ])
     const rates = { comissao: empRes.data?.ifood_comissao_pct, transacao: empRes.data?.ifood_transacao_pct }
     const adMap = {}; for (const a of (adsRes.data ?? [])) adMap[a.semana_ini] = Number(a.valor || 0)
@@ -121,10 +127,40 @@ export default function Financeiro() {
         situacao: pagamento <= hoje ? 'pago' : 'em aberto',
         liq: calcIfoodLiquido(g.peds, rates), nped: g.peds.length,
       }
-    }).sort((a, b) => b.inicio - a.inicio)
+    })
+    // semanas com repasse importado mas sem pedidos no banco também aparecem
+    for (const k of Object.keys(impMap)) {
+      if (arr.some(s => s.iniYMD === k)) continue
+      const r = impMap[k]
+      const ini = new Date(r.periodo_ini + 'T00:00:00')
+      const fim = r.periodo_fim ? new Date(r.periodo_fim + 'T00:00:00') : addDias(ini, 6)
+      const pagamento = r.previsao_pagamento ? new Date(r.previsao_pagamento + 'T00:00:00') : addDias(inicioSemana(ini), 9)
+      arr.push({ iniYMD: k, inicio: ini, fim, pagamento, situacao: r.situacao || 'pago', liq: calcIfoodLiquido([], rates), nped: 0 })
+    }
+    arr.sort((a, b) => b.inicio - a.inicio)
+    return { arr, adMap, impMap }
+  }
+
+  async function loadSemanas() {
+    if (!empresaId) return
+    const desde = addDias(inicioSemana(), -7 * (NUM_SEMANAS - 1))
+    const { arr, adMap, impMap } = await fetchSemanas(desde, null)
     setSemanas(arr); setAds(adMap); setRepImp(impMap)
   }
   useEffect(() => { loadSemanas() }, [empresaId])
+
+  // Filtro por mês (só afeta a tabela "Semanas anteriores")
+  async function loadSemanasMes(mes) {
+    if (!empresaId || !mes) { setSemanasMes(null); return }
+    const [y, m] = mes.split('-').map(Number)
+    const desde = new Date(y, m - 1, 1); desde.setHours(0, 0, 0, 0)
+    const ateh  = new Date(y, m, 1);     ateh.setHours(0, 0, 0, 0)   // início do mês seguinte (exclusivo)
+    const { arr, adMap, impMap } = await fetchSemanas(desde, ateh)
+    setSemanasMes(arr)
+    setAds(prev => ({ ...prev, ...adMap }))       // mescla p/ o anúncio/exato bater nas semanas do mês
+    setRepImp(prev => ({ ...prev, ...impMap }))
+  }
+  useEffect(() => { loadSemanasMes(mesFiltro) }, [empresaId, mesFiltro])
 
   async function salvarAnuncio(iniYMD, val) {
     setAds(prev => ({ ...prev, [iniYMD]: val }))
@@ -155,6 +191,7 @@ export default function Financeiro() {
       if (r.anuncio > 0) await salvarAnuncio(r.periodo_ini, r.anuncio)
       setImportMsg({ tipo: 'ok', txt: `Repasse de ${r.periodo_ini.split('-').reverse().join('/')} importado — R$ ${r.valor_repasse.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (exato).` })
       await loadSemanas()
+      await loadSemanasMes(mesFiltro)
     } catch (err) {
       setImportMsg({ tipo: 'erro', txt: err.message || 'Falha ao ler o PDF.' })
     }
@@ -185,6 +222,52 @@ export default function Financeiro() {
   }, 0)
   const liquidoProprios = volTotal - taxaTotal
   const liquidoGeral = liquidoProprios + ifoodRecebido
+
+  // Opções do filtro de mês (últimos 8 meses) — só afeta a tabela "Semanas anteriores"
+  const mesesOpcoes = (() => {
+    const arr = []; const now = new Date()
+    for (let i = 0; i < 8; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      arr.push([`${d.getFullYear()}-${pad(d.getMonth() + 1)}`, d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })])
+    }
+    return arr
+  })()
+  const labelMes = mesFiltro ? (mesesOpcoes.find(([v]) => v === mesFiltro)?.[1] || mesFiltro) : ''
+
+  // Renderiza uma linha de semana (usada nas "anteriores" e no filtro por mês)
+  const renderSemanaRow = s => {
+    const aberta = !!abertoAnt[s.iniYMD]
+    return (
+      <div key={s.iniYMD} style={{ borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 12, alignItems: 'center', padding: '12px 0' }}>
+          <div onClick={() => setAbertoAnt(m => ({ ...m, [s.iniYMD]: !m[s.iniYMD] }))} style={{ cursor: 'pointer', userSelect: 'none' }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+              <span style={{ display: 'inline-block', width: 14, color: 'var(--text-muted)', transform: aberta ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+              {ddmm(s.inicio)} a {ddmm(s.fim)}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, marginLeft: 14 }}>
+              {s.situacao === 'pago'
+                ? <>✅ pago em {ddmm(s.pagamento)}</>
+                : <>🕒 cai {ddmm(s.pagamento)}</>} · {s.nped} pedidos
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, visibility: ehExato(s) ? 'hidden' : 'visible' }}>
+            <span title="Anúncio da semana" style={{ fontSize: 11, color: 'var(--text-muted)' }}>📢</span>
+            <AnuncioInput small valor={ads[s.iniYMD] || 0} onSalvar={v => salvarAnuncio(s.iniYMD, v)} />
+          </div>
+          <div style={{ textAlign: 'right', minWidth: 110 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: '#16a34a' }}>{ehExato(s) ? '' : '≈ '}{fmtBRL(aReceberDe(s))}</div>
+            <div style={{ fontSize: 10, color: ehExato(s) ? 'var(--success)' : 'var(--text-muted)' }}>{ehExato(s) ? 'exato ✔' : (ads[s.iniYMD] > 0 ? 'a receber' : 'informe o anúncio')}</div>
+          </div>
+        </div>
+        {aberta && (
+          <div style={{ marginLeft: 14, paddingBottom: 6 }}>
+            <QuebraRepasse s={s} rep={repImp[s.iniYMD]} anuncio={ads[s.iniYMD] || 0} aReceber={aReceberDe(s)} />
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -300,49 +383,42 @@ export default function Financeiro() {
         </>
       )}
 
-      {/* ── SEMANAS ANTERIORES ── */}
-      {anteriores.length > 0 && (
+      {/* ── SEMANAS ANTERIORES (com filtro por mês) ── */}
+      {semanas.length > 0 && (() => {
+        // a semana atual já aparece no card "a receber na quarta" — tira da lista pra não duplicar
+        const lista = (mesFiltro ? (semanasMes || []) : anteriores).filter(s => s.iniYMD !== atual?.iniYMD)
+        const totalMes = lista.reduce((a, s) => a + aReceberDe(s), 0)
+        return (
         <>
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
-            Semanas anteriores
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>
+              {mesFiltro ? `Repasses de ${labelMes}` : 'Semanas anteriores'}
+            </span>
+            <span style={{ flex: 1 }} />
+            <select value={mesFiltro} onChange={e => setMesFiltro(e.target.value)}
+              style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', background: 'var(--input-bg, var(--bg))', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', textTransform: 'capitalize' }}>
+              <option value="">Recentes</option>
+              {mesesOpcoes.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
           </div>
-          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '2px 16px', marginBottom: 28 }}>
-            {anteriores.map(s => {
-              const aberta = !!abertoAnt[s.iniYMD]
-              return (
-              <div key={s.iniYMD} style={{ borderBottom: '1px solid var(--border)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 12, alignItems: 'center', padding: '12px 0' }}>
-                  <div onClick={() => setAbertoAnt(m => ({ ...m, [s.iniYMD]: !m[s.iniYMD] }))} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 700 }}>
-                      <span style={{ display: 'inline-block', width: 14, color: 'var(--text-muted)', transform: aberta ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
-                      {ddmm(s.inicio)} a {ddmm(s.fim)}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, marginLeft: 14 }}>
-                      {s.situacao === 'pago'
-                        ? <>✅ pago em {ddmm(s.pagamento)}</>
-                        : <>🕒 cai {ddmm(s.pagamento)}</>} · {s.nped} pedidos
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, visibility: ehExato(s) ? 'hidden' : 'visible' }}>
-                    <span title="Anúncio da semana" style={{ fontSize: 11, color: 'var(--text-muted)' }}>📢</span>
-                    <AnuncioInput small valor={ads[s.iniYMD] || 0} onSalvar={v => salvarAnuncio(s.iniYMD, v)} />
-                  </div>
-                  <div style={{ textAlign: 'right', minWidth: 110 }}>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: '#16a34a' }}>{ehExato(s) ? '' : '≈ '}{fmtBRL(aReceberDe(s))}</div>
-                    <div style={{ fontSize: 10, color: ehExato(s) ? 'var(--success)' : 'var(--text-muted)' }}>{ehExato(s) ? 'exato ✔' : (ads[s.iniYMD] > 0 ? 'a receber' : 'informe o anúncio')}</div>
-                  </div>
-                </div>
-                {aberta && (
-                  <div style={{ marginLeft: 14, paddingBottom: 6 }}>
-                    <QuebraRepasse s={s} rep={repImp[s.iniYMD]} anuncio={ads[s.iniYMD] || 0} aReceber={aReceberDe(s)} />
-                  </div>
-                )}
-              </div>
-              )
-            })}
-          </div>
+          {lista.length > 0 ? (
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '2px 16px', marginBottom: mesFiltro ? 10 : 28 }}>
+              {lista.map(renderSemanaRow)}
+            </div>
+          ) : (
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '20px 16px', marginBottom: 28, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+              Nenhum repasse do iFood em {labelMes}.
+            </div>
+          )}
+          {mesFiltro && lista.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 4px', marginBottom: 28 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Total do mês ({lista.length} semana{lista.length !== 1 ? 's' : ''})</span>
+              <strong style={{ fontSize: 18, fontWeight: 900, color: '#16a34a' }}>{fmtBRL(totalMes)}</strong>
+            </div>
+          )}
         </>
-      )}
+        )
+      })()}
 
       {/* ── VENDAS POR CANAL PRÓPRIO ── */}
       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
