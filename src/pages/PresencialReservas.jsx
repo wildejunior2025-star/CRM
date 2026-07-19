@@ -241,28 +241,28 @@ export default function PresencialReservas() {
       {aba === 'reservas' && (
         <>
           <form className="card" onSubmit={addReserva} style={{ marginBottom: 20 }}>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <div className="form-field" style={{ flex: 1, minWidth: 160 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, alignItems: 'end' }}>
+              <div className="form-field">
                 <label>Cliente *</label>
                 <input value={rNome} onChange={e => setRNome(e.target.value)} placeholder="Nome de quem reservou" />
               </div>
-              <div className="form-field" style={{ width: 150 }}>
+              <div className="form-field">
                 <label>Telefone</label>
                 <input value={rTel} onChange={e => setRTel(e.target.value)} placeholder="(opcional)" />
               </div>
-              <div className="form-field" style={{ width: 150 }}>
+              <div className="form-field">
                 <label>Data *</label>
                 <input type="date" value={rData} min={hoje} onChange={e => setRData(e.target.value)} />
               </div>
-              <div className="form-field" style={{ width: 110 }}>
+              <div className="form-field">
                 <label>Horário *</label>
                 <input type="time" value={rHora} onChange={e => setRHora(e.target.value)} />
               </div>
-              <div className="form-field" style={{ width: 90 }}>
+              <div className="form-field">
                 <label>Pessoas</label>
                 <input type="number" min="1" value={rPessoas} onChange={e => setRPessoas(e.target.value)} />
               </div>
-              <div className="form-field" style={{ width: 150 }}>
+              <div className="form-field">
                 <label>Mesa (opcional)</label>
                 <select value={rMesa} onChange={e => setRMesa(e.target.value)}>
                   <option value="">A definir</option>
@@ -271,13 +271,13 @@ export default function PresencialReservas() {
                   ))}
                 </select>
               </div>
-              <div className="form-field" style={{ width: 150 }}>
+              <div className="form-field">
                 <label>Ocasião</label>
                 <select value={rOcasiao} onChange={e => setROcasiao(e.target.value)}>
                   {OCASIOES.map(o => <option key={o.value} value={o.value}>{o.icon} {o.label}</option>)}
                 </select>
               </div>
-              <div className="form-field" style={{ flex: 1, minWidth: 160 }}>
+              <div className="form-field">
                 <label>Observações</label>
                 <input value={rObs} onChange={e => setRObs(e.target.value)} placeholder="Ex: perto da janela, bolo às 21h..." />
               </div>
@@ -362,20 +362,20 @@ export default function PresencialReservas() {
       {aba === 'fila' && (
         <>
           <form className="card" onSubmit={addFila} style={{ marginBottom: 20 }}>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <div className="form-field" style={{ flex: 1, minWidth: 160 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, alignItems: 'end' }}>
+              <div className="form-field">
                 <label>Cliente *</label>
                 <input value={fNome} onChange={e => setFNome(e.target.value)} placeholder="Nome de quem está esperando" />
               </div>
-              <div className="form-field" style={{ width: 150 }}>
+              <div className="form-field">
                 <label>Telefone</label>
                 <input value={fTel} onChange={e => setFTel(e.target.value)} placeholder="(opcional)" />
               </div>
-              <div className="form-field" style={{ width: 90 }}>
+              <div className="form-field">
                 <label>Pessoas</label>
                 <input type="number" min="1" value={fPessoas} onChange={e => setFPessoas(e.target.value)} />
               </div>
-              <div className="form-field" style={{ width: 170 }}>
+              <div className="form-field">
                 <label>Prioridade</label>
                 <select value={fPrioridade} onChange={e => setFPrioridade(e.target.value)}>
                   {PRIORIDADES.map(p => (
@@ -383,7 +383,7 @@ export default function PresencialReservas() {
                   ))}
                 </select>
               </div>
-              <div className="form-field" style={{ flex: 1, minWidth: 160 }}>
+              <div className="form-field">
                 <label>Observações</label>
                 <input value={fObs} onChange={e => setFObs(e.target.value)} placeholder="Ex: aceita mesa externa" />
               </div>
