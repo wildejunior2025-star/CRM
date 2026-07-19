@@ -238,8 +238,9 @@ export default function PresencialMesas() {
                 background: m.ativa ? cor.bg : 'transparent',
                 opacity: m.ativa ? 1 : 0.55,
               }}>
-                <div style={{ fontSize: 20, fontWeight: 800 }}>Mesa {m.numero}</div>
-                {m.nome && <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{m.nome}</div>}
+                <div style={{ fontSize: 20, fontWeight: 800 }}>{m.is_balcao ? '🛎️ Balcão' : `Mesa ${m.numero}`}</div>
+                {!m.is_balcao && m.nome && <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{m.nome}</div>}
+                {m.is_balcao && <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Venda de balcão (fixa)</div>}
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   {editId === m.id ? (
                     <>
@@ -274,10 +275,12 @@ export default function PresencialMesas() {
                     style={{ flex: 1, fontSize: 12, padding: '5px 0', borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)' }}>
                     {m.ativa ? 'Desativar' : 'Ativar'}
                   </button>
-                  <button type="button" onClick={() => remover(m.id)} aria-label="Remover"
-                    style={{ fontSize: 12, padding: '5px 10px', borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--danger)' }}>
-                    🗑
-                  </button>
+                  {!m.is_balcao && (
+                    <button type="button" onClick={() => remover(m.id)} aria-label="Remover"
+                      style={{ fontSize: 12, padding: '5px 10px', borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--danger)' }}>
+                      🗑
+                    </button>
+                  )}
                 </div>
               </div>
             )

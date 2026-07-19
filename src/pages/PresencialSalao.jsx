@@ -493,7 +493,7 @@ export default function PresencialSalao() {
                     background: '#22c55e', color: '#fff', borderRadius: 999, padding: '1px 5px',
                   }}>🔔{prontos}</span>
                 )}
-                <div style={{ fontSize: 14.5, fontWeight: 800, lineHeight: 1.1 }}>Mesa {mesa.numero}</div>
+                <div style={{ fontSize: 14.5, fontWeight: 800, lineHeight: 1.1 }}>{mesa.is_balcao ? '🛎️ Balcão' : `Mesa ${mesa.numero}`}</div>
                 <div style={{ fontSize: 9.5, marginTop: 2, color: cor.border, fontWeight: 700 }}>{cor.label}</div>
                 {c && <div style={{ fontSize: 11.5, marginTop: 1, fontWeight: 800 }}>{fmt(sub)}</div>}
               </div>
@@ -511,7 +511,7 @@ export default function PresencialSalao() {
             {/* header */}
             <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <div style={{ fontWeight: 800, fontSize: 18 }}>Mesa {mesaSel.numero}</div>
+                <div style={{ fontWeight: 800, fontSize: 18 }}>{mesaSel.is_balcao ? '🛎️ Balcão' : `Mesa ${mesaSel.numero}`}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{mesaSel.nome || `${mesaSel.capacidade} lugares`}</div>
                 {comandaSel?.garcom_id && garcons[comandaSel.garcom_id] ? (
                   <div style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600, marginTop: 2 }}>
@@ -795,7 +795,7 @@ export default function PresencialSalao() {
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
           <div onClick={e => e.stopPropagation()}
             style={{ width: '100%', maxWidth: 380, background: 'var(--bg)', borderRadius: 16, border: '1px solid var(--border)', padding: 20 }}>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>Fechar conta — Mesa {mesaSel.numero}</div>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>Fechar conta — {mesaSel.is_balcao ? 'Balcão' : `Mesa ${mesaSel.numero}`}</div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '4px 0' }}>
               <span>Subtotal</span><span>{fmt(subtotalSel)}</span>

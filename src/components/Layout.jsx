@@ -22,13 +22,13 @@ const links = [
       { to: '/entregadores', label: 'Entregadores', roles: ['admin'], mod: 'delivery' },
     ],
   },
-  { to: '/caixa', label: 'Caixa', roles: ['admin', 'vendedor'], mod: 'caixa' },
   { to: '/clientes', label: 'Clientes', roles: ['admin'], mod: 'clientes' },
   { to: '/usuarios', label: 'Funcionários', roles: ['admin'], mod: 'funcionarios' },
   {
     to: '/presencial', label: 'Serviço Presencial', roles: ['admin'], mod: 'presencial',
     children: [
       { to: '/presencial/salao', label: 'Salão', roles: ['admin'] },
+      { to: '/caixa', label: 'Caixa', roles: ['admin', 'vendedor'], mod: 'caixa' },
       { to: '/presencial/cozinha', label: 'Cozinha (KDS)', roles: ['admin'] },
       { to: '/presencial/reservas', label: 'Reservas e fila', roles: ['admin'] },
       { to: '/presencial/historico', label: 'Histórico', roles: ['admin'] },
