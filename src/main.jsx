@@ -12,7 +12,8 @@ registerSW({
   onRegisteredSW(_swUrl, registration) {
     if (!registration) return
     const checar = () => registration.update().catch(() => {})
-    setInterval(checar, 60 * 1000)
+    checar()                        // checa JÁ ao abrir (não espera o 1º intervalo)
+    setInterval(checar, 30 * 1000)  // e a cada 30s
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') checar()
     })
