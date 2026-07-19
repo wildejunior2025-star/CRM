@@ -53,21 +53,26 @@ export default function PresencialSalao() {
   const [invCatalogo, setInvCatalogo] = useState(false)
   const [invCategoria, setInvCategoria] = useState('')
   const [invSalvando, setInvSalvando] = useState(false)
+  const [ordemCat, setOrdemCat] = useState({}) // { nomeCategoria(minusculo): ordem } — mesma ordem do catálogo
 
   async function loadAll() {
     if (!empresaId) return
-    const [emp, ms, cs, ps, gs] = await Promise.all([
+    const [emp, ms, cs, ps, gs, cat] = await Promise.all([
       supabase.from('empresas').select('taxa_servico_pct, nome').eq('id', empresaId).single(),
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('comandas').select('*, comanda_itens(*)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
       supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria').eq('empresa_id', empresaId).order('nome').limit(500),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
+      supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId),
     ])
     if (emp.data) { setTaxaPct(Number(emp.data.taxa_servico_pct ?? 10)); setEmpresaNome(emp.data.nome || '') }
     setMesas(ms.data ?? [])
     setComandas(cs.data ?? [])
     setProdutos(ps.data ?? [])
     setGarcons(Object.fromEntries((gs.data ?? []).map(p => [p.id, p.nome])))
+    const om = {}
+    for (const c of (cat.data ?? [])) if (c?.nome != null) om[String(c.nome).trim().toLowerCase()] = c.ordem == null ? 9999 : c.ordem
+    setOrdemCat(om)
     setLoading(false)
   }
 
@@ -421,11 +426,13 @@ export default function PresencialSalao() {
   // Só produtos que TÊM categoria entram no menu (os "sem categoria" somem).
   const produtosComCategoria = produtos.filter(p => (p.categoria ?? '').trim() !== '')
 
-  // Lista de categorias (distintas, em ordem alfabética) pra mostrar como no cardápio.
+  // Lista de categorias (distintas) na MESMA ordem do catálogo (categorias.ordem).
+  // Categoria sem ordem definida vai pro fim; empate desempata por nome.
   const categorias = useMemo(() => {
     const set = new Set(produtosComCategoria.map(p => p.categoria.trim()))
-    return [...set].sort((a, b) => a.localeCompare(b, 'pt-BR'))
-  }, [produtos]) // eslint-disable-line react-hooks/exhaustive-deps
+    const ord = (n) => { const v = ordemCat[n.toLowerCase()]; return v == null ? 9999 : v }
+    return [...set].sort((a, b) => (ord(a) - ord(b)) || a.localeCompare(b, 'pt-BR'))
+  }, [produtos, ordemCat]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // O que a lista mostra:
   //  - Digitou algo → busca em TODAS as categorias, ignorando acento.
