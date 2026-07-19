@@ -4984,9 +4984,11 @@ export default function PainelPedidos() {
       {/* ── Gaveta lateral direita ── */}
       {painelDireito && (
         <aside style={{
-          position: 'fixed', top: 60, right: 56, bottom: 0, width: 'min(480px, 94vw)', zIndex: 39,
+          // right:56 reserva o menu de ícones; a largura precisa descontar isso
+          // (senão no celular 94vw + 56px estoura a tela e corta o lado esquerdo).
+          position: 'fixed', top: 60, right: 56, bottom: 0, width: 'min(480px, calc(100vw - 64px))', zIndex: 39,
           background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
-          boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowY: 'auto', padding: 16,
+          boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowY: 'auto', overflowX: 'hidden', padding: 16,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
