@@ -142,12 +142,14 @@ export default function Financeiro() {
       const { parseRepassePdf } = await import('../lib/ifoodRepassePdf')
       const r = await parseRepassePdf(file)
       if (!r.periodo_ini || !(r.valor_repasse > 0)) throw new Error('Não consegui ler o valor do repasse nesse PDF.')
-      await supabase.from('ifood_repasse_semanal').upsert({
+      const { data: salvo, error: upErr } = await supabase.from('ifood_repasse_semanal').upsert({
         empresa_id: empresaId, periodo_ini: r.periodo_ini, periodo_fim: r.periodo_fim,
         previsao_pagamento: r.previsao_pagamento, situacao: r.situacao,
         vendas: r.vendas, anuncio: r.anuncio, valor_repasse: r.valor_repasse,
         importado_em: new Date().toISOString(),
-      }, { onConflict: 'empresa_id,periodo_ini' })
+      }, { onConflict: 'empresa_id,periodo_ini' }).select().maybeSingle()
+      if (upErr) throw new Error(`Não consegui salvar o repasse: ${upErr.message}`)
+      if (!salvo) throw new Error('O repasse não foi salvo (sem permissão pra gravar nesta loja). Confira se você está logado na loja certa.')
       // guarda o anúncio junto (pra também alimentar a estimativa)
       if (r.anuncio > 0) await salvarAnuncio(r.periodo_ini, r.anuncio)
       setImportMsg({ tipo: 'ok', txt: `Repasse de ${r.periodo_ini.split('-').reverse().join('/')} importado — R$ ${r.valor_repasse.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (exato).` })
