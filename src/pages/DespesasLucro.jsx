@@ -31,6 +31,7 @@ function custoPorBaseFicha(ficha, itens) {
 const emptyDespesa = { nome: '', categoria: 'energia', tipo: 'fixo', valor: '' }
 const emptyFunc = { nome: '', cargo: '', salario_mensal: '' }
 const emptyProd = () => ({ ficha_id: '', qtd_feita: '', qtd_sobrou: '', unidade: 'kg' })
+const emptyImprev = { descricao: '', valor: '' }
 
 export default function DespesasLucro({ empresaId }) {
   const hoje = new Date()
@@ -43,6 +44,7 @@ export default function DespesasLucro({ empresaId }) {
   const [despesas, setDespesas] = useState([])
   const [funcionarios, setFuncionarios] = useState([])
   const [producao, setProducao] = useState([])     // só de HOJE
+  const [imprevistos, setImprevistos] = useState([]) // custos imprevistos de HOJE
   const [fichas, setFichas] = useState([])          // [{id, nome, custoPorBase}]
   const [usuarios, setUsuarios] = useState([])      // funcionários já cadastrados em Usuários
   const [historico, setHistorico] = useState([])    // fechamentos diários
@@ -60,6 +62,8 @@ export default function DespesasLucro({ empresaId }) {
   const [funcEdit, setFuncEdit] = useState(null)
   const [showProd, setShowProd] = useState(false)
   const [prodForm, setProdForm] = useState(emptyProd())
+  const [showImprev, setShowImprev] = useState(false)
+  const [imprevForm, setImprevForm] = useState(emptyImprev)
 
   const carregar = useCallback(async () => {
     if (!empresaId) return
@@ -68,7 +72,7 @@ export default function DespesasLucro({ empresaId }) {
       const ini = new Date(hoje); ini.setHours(0, 0, 0, 0)
       const fim = new Date(ini); fim.setDate(fim.getDate() + 1)
 
-      const [dp, fn, pd, fi, fit, emp, ped, us, hi] = await Promise.all([
+      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im] = await Promise.all([
         supabase.from('despesas_loja').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('valor', { ascending: false }),
         supabase.from('funcionarios').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
         supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', hojeYMD).order('created_at', { ascending: false }),
@@ -81,12 +85,14 @@ export default function DespesasLucro({ empresaId }) {
         supabase.from('profiles').select('id, nome, perfil, cargo').eq('empresa_id', empresaId).eq('ativo', true)
           .in('perfil', ['admin', 'vendedor', 'garcom', 'cozinheiro', 'entregador']).order('nome'),
         supabase.from('historico_dia').select('*').eq('empresa_id', empresaId).order('data', { ascending: false }).limit(90),
+        supabase.from('custos_imprevistos').select('*').eq('empresa_id', empresaId).eq('data', hojeYMD).order('created_at', { ascending: false }),
       ])
-      for (const r of [dp, fn, pd, fi, fit, ped, hi]) if (r.error) throw r.error
+      for (const r of [dp, fn, pd, fi, fit, ped, hi, im]) if (r.error) throw r.error
 
       setDespesas(dp.data || [])
       setFuncionarios(fn.data || [])
       setProducao(pd.data || [])
+      setImprevistos(im.data || [])
       setUsuarios(us.error ? [] : (us.data || []))
       setHistorico(hi.data || [])
       setDiasAbertos(Number(emp.data?.dias_abertos_mes ?? 26) || 26)
@@ -115,12 +121,13 @@ export default function DespesasLucro({ empresaId }) {
   const totalFunc = useMemo(() => funcionarios.reduce((s, f) => s + Number(f.salario_mensal || 0), 0), [funcionarios])
   const custoProdItem = (p) => emBase(Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0), p.unidade) * Number(p.custo_unit || 0)
   const producaoHoje = useMemo(() => producao.reduce((s, p) => s + custoProdItem(p), 0), [producao])
+  const imprevistoHoje = useMemo(() => imprevistos.reduce((s, i) => s + Number(i.valor || 0), 0), [imprevistos])
 
   const dias = Math.max(1, diasAbertos)
   const fixoPorDia = totalFixo / dias
   const funcPorDia = totalFunc / dias
   const receita = receitaDia.proprios + receitaDia.ifood
-  const custosDia = fixoPorDia + funcPorDia + producaoHoje
+  const custosDia = fixoPorDia + funcPorDia + producaoHoje + imprevistoHoje
   const lucroDia = receita - custosDia
 
   async function salvarDias(v) {
@@ -135,16 +142,20 @@ export default function DespesasLucro({ empresaId }) {
     setFechando(true)
     try {
       const itens = producao.map(p => ({ nome: p.nome, qtd_feita: Number(p.qtd_feita || 0), qtd_sobrou: Number(p.qtd_sobrou || 0), unidade: p.unidade, custo: custoProdItem(p) }))
+      const impSnap = imprevistos.map(i => ({ descricao: i.descricao, valor: Number(i.valor || 0) }))
       const { error: upErr } = await supabase.from('historico_dia').upsert({
         empresa_id: empresaId, data: hojeYMD,
         receita_liquida: receita, receita_proprios: receitaDia.proprios, receita_ifood: receitaDia.ifood,
         custo_fixo: fixoPorDia, custo_funcionarios: funcPorDia,
-        custo_producao: producaoHoje, lucro: lucroDia, itens,
+        custo_producao: producaoHoje, custo_imprevisto: imprevistoHoje,
+        lucro: lucroDia, itens, imprevistos: impSnap,
       }, { onConflict: 'empresa_id,data' })
       if (upErr) throw upErr
-      // limpa a produção do dia (já está guardada no snapshot do histórico)
+      // limpa a produção e os imprevistos do dia (já estão no snapshot do histórico)
       const { error: delErr } = await supabase.from('producao_diaria').delete().eq('empresa_id', empresaId).eq('data', hojeYMD)
       if (delErr) throw delErr
+      const { error: delImp } = await supabase.from('custos_imprevistos').delete().eq('empresa_id', empresaId).eq('data', hojeYMD)
+      if (delImp) throw delImp
       await carregar()
       setSub('historico')
     } catch (e) {
@@ -208,6 +219,17 @@ export default function DespesasLucro({ empresaId }) {
   async function excluirProd(p) { if (!confirm(`Excluir o lançamento de ${p.nome}?`)) return; await supabase.from('producao_diaria').delete().eq('id', p.id); carregar() }
   async function excluirHistorico(h) { if (!confirm(`Excluir o dia ${ddmm(h.data)} do histórico?`)) return; await supabase.from('historico_dia').delete().eq('id', h.id); carregar() }
 
+  // ── CRUD: custo imprevisto do dia ──
+  function abrirNovoImprev() { setImprevForm(emptyImprev); setShowImprev(true) }
+  async function salvarImprev(e) {
+    e.preventDefault()
+    if (!imprevForm.descricao.trim()) { alert('Descreva o imprevisto (ex.: pedido cancelado).'); return }
+    const { error } = await supabase.from('custos_imprevistos').insert({ empresa_id: empresaId, data: hojeYMD, descricao: imprevForm.descricao.trim(), valor: num(imprevForm.valor) })
+    if (error) { alert('Erro: ' + error.message); return }
+    setShowImprev(false); carregar()
+  }
+  async function excluirImprev(i) { if (!confirm(`Excluir "${i.descricao}"?`)) return; await supabase.from('custos_imprevistos').delete().eq('id', i.id); carregar() }
+
   if (!empresaId) return <div className="card">Selecione uma loja.</div>
 
   const totalHistLucro = historico.reduce((s, h) => s + Number(h.lucro || 0), 0)
@@ -251,6 +273,7 @@ export default function DespesasLucro({ empresaId }) {
             <Linha label={`− Custos fixos (rateio do dia: ${brl(totalFixo)}/${dias})`} valor={`− ${brl(fixoPorDia)}`} cor="var(--danger)" />
             <Linha label={`− Funcionários (rateio do dia: ${brl(totalFunc)}/${dias})`} valor={`− ${brl(funcPorDia)}`} cor="var(--danger)" />
             <Linha label="− Custo de produção de hoje" valor={`− ${brl(producaoHoje)}`} cor="var(--danger)" />
+            <Linha label="− Custos imprevistos de hoje" valor={`− ${brl(imprevistoHoje)}`} cor="var(--danger)" />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, marginTop: 6, borderTop: '2px solid var(--border)' }}>
               <span style={{ fontSize: 16, fontWeight: 900 }}>{lucroDia >= 0 ? '= Foi pro seu bolso hoje' : '= Prejuízo hoje'}</span>
               <span style={{ fontSize: 26, fontWeight: 900, color: lucroDia >= 0 ? '#16a34a' : '#ef4444' }}>{brl(lucroDia)}</span>
@@ -276,6 +299,16 @@ export default function DespesasLucro({ empresaId }) {
                   valor={brl(custoProdItem(p))} />
               )
             })}
+          </Secao>
+
+          {/* CUSTOS IMPREVISTOS DO DIA */}
+          <Secao titulo="⚠️ Custos imprevistos de hoje" acao={<button className="btn btn-primary btn-sm" onClick={abrirNovoImprev}>+ Imprevisto</button>}
+            rodape={imprevistos.length > 0 && <>Imprevistos de hoje <strong>{brl(imprevistoHoje)}</strong></>}>
+            {imprevistos.length === 0
+              ? <Vazio texto="Ex.: pedido cancelado que estragou o produto, algo que caiu/quebrou, compra de emergência…" />
+              : imprevistos.map(i => (
+                <ItemLinha key={i.id} onDel={() => excluirImprev(i)} titulo={i.descricao} valor={brl(i.valor)} />
+              ))}
           </Secao>
 
           {/* CUSTOS FIXOS */}
@@ -349,6 +382,16 @@ export default function DespesasLucro({ empresaId }) {
                               <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
                                 <span>▸ {it.nome} <span style={{ opacity: .8 }}>(fez {it.qtd_feita}{it.unidade} · sobrou {it.qtd_sobrou}{it.unidade})</span></span>
                                 <span>{brl(it.custo)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <Linha label="− Custos imprevistos do dia" valor={`− ${brl(h.custo_imprevisto)}`} cor="var(--danger)" />
+                        {Array.isArray(h.imprevistos) && h.imprevistos.length > 0 && (
+                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '2px 0 6px 12px' }}>
+                            {h.imprevistos.map((it, i) => (
+                              <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span>▸ {it.descricao}</span><span>{brl(it.valor)}</span>
                               </div>
                             ))}
                           </div>
@@ -438,6 +481,18 @@ export default function DespesasLucro({ empresaId }) {
                 <strong style={{ fontSize: 20, color: 'var(--primary)' }}>{brl(prodPrevia)}</strong>
               </div>
             ) : <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Escolha o produto pra ver o custo do dia.</span>}
+          </div>
+        </Modal>
+      )}
+
+      {/* ─── MODAL: custo imprevisto ─── */}
+      {showImprev && (
+        <Modal onClose={() => setShowImprev(false)} onSubmit={salvarImprev} titulo="Novo custo imprevisto">
+          <div className="form-grid">
+            <div className="form-field full"><label>O que aconteceu?</label>
+              <input autoFocus placeholder="Ex.: Pedido #123 cancelado — produto perdido" value={imprevForm.descricao} onChange={e => setImprevForm(f => ({ ...f, descricao: e.target.value }))} /></div>
+            <div className="form-field full"><label>Valor perdido/gasto (R$)</label>
+              <input inputMode="decimal" placeholder="Ex.: 25,00" value={imprevForm.valor} onChange={e => setImprevForm(f => ({ ...f, valor: e.target.value }))} /></div>
           </div>
         </Modal>
       )}
