@@ -24,6 +24,10 @@ export function calcIfoodLiquido(pedidos = [], rates = {}) {
   let repasse = 0           // líquido que cai na conta do iFood (só pedidos online)
   let recebidoEntrega = 0   // BRUTO recebido na mão (pago na entrega) — pra bater o caixa
   let comissaoEntrega = 0   // comissão desses pedidos, que o iFood cobra depois
+  // Quebra do repasse (só online, que é o que o iFood deposita) pra mostrar igual ao portal
+  let vendasOnline = 0      // itens + entrega própria (online)
+  let promocoesOnline = 0   // cupons que a loja bancou (online)
+  let comissaoOnline = 0    // comissão + transação (online)
   const entregaForma = {}   // quebra do "na entrega" por forma: { dinheiro:{qtd,total}, debito:{...}, ... }
 
   for (const p of pedidos) {
@@ -44,6 +48,9 @@ export function calcIfoodLiquido(pedidos = [], rates = {}) {
     if (online) {
       // repasse = itens + taxa de entrega (entrega própria volta inteira) − incentivo da loja − taxas
       repasse += itens + te - il - com - trans
+      vendasOnline += itens + te
+      promocoesOnline += il
+      comissaoOnline += com + trans
     } else {
       recebidoEntrega += pago
       comissaoEntrega += com
@@ -58,7 +65,8 @@ export function calcIfoodLiquido(pedidos = [], rates = {}) {
   const voceRecebe = repasse + recebidoEntrega - comissaoEntrega
   const pctTaxa = vendas > 0 ? Math.round((taxasTotal / vendas) * 100) : 0
 
-  return { vendas, repasse, recebidoEntrega, comissaoEntrega, comissao, transacao, taxasTotal, voceRecebe, pctTaxa, entregaForma }
+  return { vendas, repasse, recebidoEntrega, comissaoEntrega, comissao, transacao, taxasTotal, voceRecebe, pctTaxa, entregaForma,
+    vendasOnline, promocoesOnline, comissaoOnline }
 }
 
 // rótulo amigável da forma de pagamento na entrega
