@@ -39,11 +39,15 @@ const links = [
   { to: '/presencial/salao', label: 'Salão', roles: ['garcom'], mod: 'presencial' },
   { to: '/presencial/cozinha', label: 'Cozinha (KDS)', roles: ['cozinheiro'], mod: 'presencial' },
 
-  { group: 'Catálogo' },
-  { to: '/produtos', label: 'Catálogo', roles: ['admin'], mod: 'produtos' },
-  { to: '/complementos', label: 'Complementos', roles: ['admin'], mod: 'produtos' },
-  { to: '/ficha-tecnica', label: 'Ficha Técnica', roles: ['admin'], mod: 'produtos' },
-  { to: '/estoque', label: 'Estoque', roles: ['admin'], mod: 'estoque' },
+  {
+    to: '/produtos', label: 'Catálogo', roles: ['admin'], mod: 'produtos',
+    children: [
+      { to: '/produtos', label: 'Produtos', roles: ['admin'], mod: 'produtos' },
+      { to: '/complementos', label: 'Complementos', roles: ['admin'], mod: 'produtos' },
+      { to: '/ficha-tecnica', label: 'Ficha Técnica', roles: ['admin'], mod: 'produtos' },
+      { to: '/estoque', label: 'Estoque', roles: ['admin'], mod: 'estoque' },
+    ],
+  },
 
   { group: 'Delivery' },
   {
