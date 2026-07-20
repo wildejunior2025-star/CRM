@@ -12,16 +12,6 @@ function normBairro(s) {
     .replace(/^bairro\s+/, '').replace(/\s+/g, ' ')
 }
 
-// Sugestões de bairro — 36 bairros oficiais de Natal/RN (a cidade das lojas).
-// Bairro fora da lista pode ser digitado normalmente (texto livre).
-const BAIRROS_NATAL = [
-  'Alecrim', 'Areia Preta', 'Barro Vermelho', 'Bom Pastor', 'Candelária', 'Capim Macio',
-  'Cidade Alta', 'Cidade da Esperança', 'Cidade Nova', 'Dix-Sept Rosado', 'Felipe Camarão',
-  'Guarapes', 'Igapó', 'Lagoa Azul', 'Lagoa Nova', 'Lagoa Seca', 'Mãe Luiza', 'Neópolis',
-  'Nordeste', 'Nossa Senhora da Apresentação', 'Nossa Senhora de Nazaré', 'Nova Descoberta',
-  'Pajuçara', 'Petrópolis', 'Pitimbu', 'Planalto', 'Ponta Negra', 'Potengi', 'Praia do Meio',
-  'Quintas', 'Redinha', 'Ribeira', 'Rocas', 'Salinas', 'Santos Reis', 'Tirol',
-]
 
 export default function RaioEntrega() {
   const { profile, refreshProfile } = useAuth()
@@ -58,6 +48,40 @@ export default function RaioEntrega() {
   const [tempoMax,        setTempoMax]        = useState(60)
   const [categoria,       setCategoria]       = useState('')
   const [raio, setRaio] = useState(10)
+  const [sugestoesBairro, setSugestoesBairro] = useState([]) // bairros dentro do raio (OpenStreetMap)
+
+  // Puxa os bairros das cidades DENTRO do raio de entrega (via OpenStreetMap/Overpass).
+  // Genérico: funciona pra qualquer cidade — sem cadastrar lista fixa. Debounce pra
+  // não bombardear a API quando o dono ajusta o raio no mapa.
+  useEffect(() => {
+    if (!latitude || !longitude) { setSugestoesBairro([]); return }
+    let cancel = false
+    const metros = Math.round(Math.max(1, Number(raio) || 5) * 1000)
+    const q = `[out:json][timeout:20];node(around:${metros},${latitude},${longitude})["place"~"^(suburb|neighbourhood|quarter|borough)$"]["name"];out tags 600;`
+    const t = setTimeout(() => {
+      // POST (o GET retorna 406 no Overpass). Traz os bairros das cidades no raio.
+      fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'data=' + encodeURIComponent(q),
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => {
+          if (cancel || !d) return
+          const seen = new Set(); const out = []
+          for (const el of (d.elements || [])) {
+            const nm = el.tags?.name
+            if (!nm) continue
+            const n = normBairro(nm)
+            if (n && !seen.has(n)) { seen.add(n); out.push(nm) }
+          }
+          out.sort((a, b) => a.localeCompare(b, 'pt-BR'))
+          setSugestoesBairro(out)
+        })
+        .catch(() => { /* sem sugestões — dá pra digitar livre mesmo assim */ })
+    }, 700)
+    return () => { cancel = true; clearTimeout(t) }
+  }, [latitude, longitude, raio])
   const [taxasBairro, setTaxasBairro] = useState([]) // [{bairro, norm, modo:'km'|'taxa'|'bloqueio', taxa, tempo, total}]
   const [novoBairro, setNovoBairro] = useState('')
   const [bairroOpen, setBairroOpen] = useState(false) // dropdown de sugestões de bairro
@@ -748,7 +772,7 @@ export default function RaioEntrega() {
               {bairroOpen && (() => {
                 const q = normBairro(novoBairro)
                 const jaTem = new Set(taxasBairro.map(x => x.norm))
-                const sug = BAIRROS_NATAL.filter(b => !jaTem.has(normBairro(b)) && (!q || normBairro(b).includes(q))).slice(0, 40)
+                const sug = sugestoesBairro.filter(b => !jaTem.has(normBairro(b)) && (!q || normBairro(b).includes(q))).slice(0, 40)
                 if (sug.length === 0) return null
                 return (
                   <div style={{
