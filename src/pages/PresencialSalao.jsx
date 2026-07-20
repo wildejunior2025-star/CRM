@@ -9,6 +9,9 @@ const FORMAS = [
   { id: 'dinheiro', label: 'Dinheiro' },
   { id: 'pix',      label: 'PIX' },
   { id: 'cartao',   label: 'Cartão' },
+  // Fiado não gera linha em `pagamentos`: a dívida é a venda sem pagamento
+  // (view clientes_saldo_fiado). Por isso exige cliente — ver 0114_fiado_mesa.sql.
+  { id: 'fiado',    label: 'Fiado' },
 ]
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
@@ -41,6 +44,12 @@ export default function PresencialSalao() {
   const [precoEdit, setPrecoEdit] = useState({})  // preço em edição por item (só admin)
   const [modoPag, setModoPag] = useState('unico')   // 'unico' | 'dividir'
   const [pagamentos, setPagamentos] = useState([])  // [{ forma, valor(string) }] no modo dividir
+  // Fiado: quem fica devendo. Obrigatório quando alguma linha do pagamento é fiado.
+  const [clientes, setClientes] = useState([])
+  const [clienteSel, setClienteSel] = useState(null)  // { id, nome }
+  const [buscaCliente, setBuscaCliente] = useState('')
+  const [novoCliente, setNovoCliente] = useState(false)
+  const [salvandoCliente, setSalvandoCliente] = useState(false)
   // Rascunho: itens que o garçom monta mas que só vão pra cozinha (e pra impressora)
   // quando ele clica "Enviar" — assim o pedido inteiro sai numa impressão só.
   const [rascunho, setRascunho] = useState([]) // [{ produto_id, nome, preco_venda, quantidade }]
@@ -62,7 +71,7 @@ export default function PresencialSalao() {
 
   async function loadAll() {
     if (!empresaId) return
-    const [emp, ms, cs, ps, gs, cat, cx, cg] = await Promise.all([
+    const [emp, ms, cs, ps, gs, cat, cx, cg, cl] = await Promise.all([
       supabase.from('empresas').select('taxa_servico_pct, nome').eq('id', empresaId).single(),
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('comandas').select('*, comanda_itens(*)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
@@ -77,6 +86,8 @@ export default function PresencialSalao() {
       // vínculos de outras lojas não chegam nem a sair do banco.
       supabase.from('produto_complemento_grupos')
         .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))'),
+      // Clientes: usados só no fiado (quem fica devendo).
+      supabase.from('clientes').select('id, nome').eq('empresa_id', empresaId).order('nome').limit(1000),
     ])
     if (emp.data) { setTaxaPct(Number(emp.data.taxa_servico_pct ?? 10)); setEmpresaNome(emp.data.nome || '') }
     setCaixaAberto(!!(cx.data && cx.data.length))
@@ -105,6 +116,9 @@ export default function PresencialSalao() {
       })
     }
     setCompMap(cm)
+    // "Consumidor (Mesa)" é o cliente genérico que a função usa nas mesas pagas —
+    // não faz sentido oferecer como devedor no fiado.
+    setClientes((cl.data ?? []).filter(c => c.nome !== 'Consumidor (Mesa)'))
     setLoading(false)
   }
 
@@ -178,7 +192,17 @@ export default function PresencialSalao() {
   // Divisão da conta
   const somaPag = pagamentos.reduce((s, p) => s + (Number(p.valor) || 0), 0)
   const restante = Math.round((totalSel - somaPag) * 100) / 100
-  const podeReceber = modoPag === 'unico' || Math.abs(restante) < 0.05
+  // Fiado: no modo único é a forma escolhida; no dividir, as linhas marcadas como fiado.
+  const valorFiado = modoPag === 'unico'
+    ? (forma === 'fiado' ? totalSel : 0)
+    : pagamentos.filter(p => p.forma === 'fiado').reduce((s, p) => s + (Number(p.valor) || 0), 0)
+  const temFiadoNaTela = valorFiado > 0
+  const clientesFiltrados = buscaCliente.trim()
+    ? clientes.filter(c => semAcento(c.nome).includes(semAcento(buscaCliente))).slice(0, 20)
+    : []
+  // Sem cliente escolhido o fiado não fecha (a função no banco também recusa).
+  const podeReceber = (modoPag === 'unico' || Math.abs(restante) < 0.05)
+    && (!temFiadoNaTela || !!clienteSel)
 
   // ── Ações ────────────────────────────────────────────────────────────────
   async function abrirMesa(mesa) {
@@ -375,7 +399,22 @@ export default function PresencialSalao() {
     setModoPag('unico')
     setForma('dinheiro')
     setPagamentos([])
+    setClienteSel(null); setBuscaCliente(''); setNovoCliente(false)
     setFechando(true)
+  }
+
+  // Cadastra na hora quem ainda não está na base (o fiado precisa de um cliente real).
+  async function criarClienteFiado() {
+    const nome = buscaCliente.trim()
+    if (!nome) { window.alert('Digite o nome do cliente.'); return }
+    setSalvandoCliente(true)
+    const { data, error } = await supabase.from('clientes')
+      .insert({ empresa_id: empresaId, nome })
+      .select('id, nome').single()
+    setSalvandoCliente(false)
+    if (error) { window.alert('Erro ao cadastrar o cliente: ' + error.message); return }
+    setClientes(prev => [...prev, data].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')))
+    setClienteSel(data); setNovoCliente(false); setBuscaCliente('')
   }
 
   // Rachar igual entre n pessoas (ajusta a última linha p/ fechar o total)
@@ -429,6 +468,13 @@ export default function PresencialSalao() {
         return
       }
     }
+    // Fiado sem cliente não fecha: a dívida cairia no "Consumidor (Mesa)" e ninguém
+    // saberia de quem cobrar. A função no banco barra também, isto é só o aviso amigável.
+    const temFiado = lista.some(p => p.forma === 'fiado' && p.valor > 0)
+    if (temFiado && !clienteSel) {
+      window.alert('Escolha o cliente que vai ficar devendo.')
+      return
+    }
     setSalvando(true)
     // Só fecha DIRETO (gera a venda + libera a mesa + imprime) quem é ADM e está no
     // PC da loja (com o app FWC/térmica). ADM no CELULAR (sem impressora) NÃO fecha
@@ -440,6 +486,7 @@ export default function PresencialSalao() {
         p_comanda_id: comandaSel.id,
         p_pagamentos: lista,
         p_aplicar_taxa: aplicarTaxa,
+        p_cliente_id: clienteSel?.id ?? null,
       })
       setSalvando(false)
       if (error) { window.alert('Erro ao fechar a conta: ' + error.message); return }
@@ -451,7 +498,9 @@ export default function PresencialSalao() {
       // depois o ADM confere e libera a mesa lá no gestor.
       const { error } = await supabase.from('comandas').update({
         status: 'aguardando_conferencia',
-        fechamento_pendente: { pagamentos: lista, aplicar_taxa: aplicarTaxa },
+        // cliente_id vai junto: quem libera a mesa depois é o ADM, e sem isso o
+        // fiado perderia o dono no caminho.
+        fechamento_pendente: { pagamentos: lista, aplicar_taxa: aplicarTaxa, cliente_id: clienteSel?.id ?? null },
       }).eq('id', comandaSel.id)
       setSalvando(false)
       if (error) { window.alert('Erro ao enviar pro caixa: ' + error.message); return }
@@ -484,6 +533,7 @@ export default function PresencialSalao() {
       p_comanda_id: comandaSel.id,
       p_pagamentos: lista,
       p_aplicar_taxa: aplicar,
+      p_cliente_id: pend.cliente_id ?? null,
     })
     setSalvando(false)
     if (error) { window.alert('Erro ao liberar a mesa: ' + error.message); return }
@@ -914,10 +964,11 @@ export default function PresencialSalao() {
             </div>
 
             {modoPag === 'unico' ? (
-              <div style={{ display: 'flex', gap: 8 }}>
+              // wrap: com o Fiado são 4 formas e no celular não cabem numa linha só
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {FORMAS.map(f => (
                   <button key={f.id} type="button" onClick={() => setForma(f.id)}
-                    style={{ flex: 1, padding: '10px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                    style={{ flex: '1 1 calc(50% - 4px)', padding: '10px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 13,
                       border: `1.5px solid ${forma === f.id ? 'var(--primary)' : 'var(--border)'}`,
                       background: forma === f.id ? 'rgba(134,59,255,.1)' : 'transparent', color: 'var(--text)' }}>
                     {f.label}
@@ -966,6 +1017,62 @@ export default function PresencialSalao() {
               </div>
             )}
 
+            {/* Cliente do fiado — só aparece quando alguma forma escolhida é fiado */}
+            {temFiadoNaTela && (
+              <div style={{ marginTop: 14, padding: 12, borderRadius: 10, border: `1.5px solid ${clienteSel ? 'var(--border)' : '#d97706'}`, background: 'rgba(217,119,6,.06)' }}>
+                <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>
+                  🧾 Quem vai ficar devendo {fmt(valorFiado)}
+                </div>
+
+                {clienteSel ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ flex: 1, fontWeight: 700, fontSize: 14.5 }}>{clienteSel.nome}</span>
+                    <button type="button" onClick={() => { setClienteSel(null); setBuscaCliente('') }}
+                      style={{ padding: '6px 10px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 12.5, fontWeight: 700 }}>
+                      Trocar
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <input value={buscaCliente} onChange={e => setBuscaCliente(e.target.value)}
+                      placeholder="Buscar cliente pelo nome..."
+                      style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 14, boxSizing: 'border-box' }} />
+
+                    {buscaCliente.trim() && !novoCliente && (
+                      <div style={{ maxHeight: 150, overflowY: 'auto', marginTop: 6 }}>
+                        {clientesFiltrados.length === 0 ? (
+                          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '6px 0' }}>
+                            Nenhum cliente com esse nome.
+                          </div>
+                        ) : clientesFiltrados.map(c => (
+                          <button key={c.id} type="button" onClick={() => { setClienteSel(c); setBuscaCliente('') }}
+                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 6px', cursor: 'pointer',
+                              border: 'none', borderBottom: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 14 }}>
+                            {c.nome}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {novoCliente ? (
+                      <button type="button" onClick={criarClienteFiado} disabled={salvandoCliente || !buscaCliente.trim()}
+                        style={{ width: '100%', marginTop: 8, padding: '9px 0', borderRadius: 8, border: 'none',
+                          background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 800,
+                          cursor: salvandoCliente ? 'wait' : 'pointer', opacity: (salvandoCliente || !buscaCliente.trim()) ? .5 : 1 }}>
+                        {salvandoCliente ? 'Cadastrando...' : `Cadastrar "${buscaCliente.trim()}" e usar`}
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => setNovoCliente(true)}
+                        style={{ width: '100%', marginTop: 8, padding: '8px 0', borderRadius: 8, cursor: 'pointer',
+                          border: '1.5px dashed var(--primary)', background: 'transparent', color: 'var(--primary)', fontSize: 12.5, fontWeight: 700 }}>
+                        ➕ Cliente novo (cadastrar na hora)
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 18 }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button type="button" onClick={() => setFechando(false)}
@@ -979,7 +1086,12 @@ export default function PresencialSalao() {
               </div>
               <button type="button" onClick={confirmarFechamento} disabled={salvando || !podeReceber}
                 className="btn btn-primary" style={{ width: '100%', marginTop: 0, opacity: (salvando || !podeReceber) ? 0.5 : 1 }}>
-                {salvando ? 'Fechando...' : (ehAdmin ? `Receber ${fmt(totalSel)}` : `Fechar e enviar pro caixa · ${fmt(totalSel)}`)}
+                {salvando ? 'Fechando...'
+                  : !ehAdmin ? `Fechar e enviar pro caixa · ${fmt(totalSel)}`
+                  // No fiado não entra dinheiro agora: "Receber" mentiria no valor.
+                  : valorFiado >= totalSel - 0.05 ? `Fechar no fiado · ${fmt(totalSel)}`
+                  : temFiadoNaTela ? `Receber ${fmt(totalSel - valorFiado)} · fiado ${fmt(valorFiado)}`
+                  : `Receber ${fmt(totalSel)}`}
               </button>
             </div>
           </div>
