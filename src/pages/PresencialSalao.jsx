@@ -49,6 +49,7 @@ export default function PresencialSalao() {
   const [clienteSel, setClienteSel] = useState(null)  // { id, nome }
   const [buscaCliente, setBuscaCliente] = useState('')
   const [novoCliente, setNovoCliente] = useState(false)
+  const [novoTelefone, setNovoTelefone] = useState('') // telefone é obrigatório no cadastro do fiado
   const [salvandoCliente, setSalvandoCliente] = useState(false)
   // Rascunho: itens que o garçom monta mas que só vão pra cozinha (e pra impressora)
   // quando ele clica "Enviar" — assim o pedido inteiro sai numa impressão só.
@@ -399,22 +400,26 @@ export default function PresencialSalao() {
     setModoPag('unico')
     setForma('dinheiro')
     setPagamentos([])
-    setClienteSel(null); setBuscaCliente(''); setNovoCliente(false)
+    setClienteSel(null); setBuscaCliente(''); setNovoCliente(false); setNovoTelefone('')
     setFechando(true)
   }
 
   // Cadastra na hora quem ainda não está na base (o fiado precisa de um cliente real).
+  // Telefone obrigatório: é o que diferencia dois clientes de mesmo nome na hora
+  // de cobrar a dívida depois.
   async function criarClienteFiado() {
     const nome = buscaCliente.trim()
     if (!nome) { window.alert('Digite o nome do cliente.'); return }
+    const telDigitos = novoTelefone.replace(/\D/g, '')
+    if (telDigitos.length < 10) { window.alert('Digite o telefone (com DDD) — é obrigatório pra saber de quem é a dívida.'); return }
     setSalvandoCliente(true)
     const { data, error } = await supabase.from('clientes')
-      .insert({ empresa_id: empresaId, nome })
-      .select('id, nome').single()
+      .insert({ empresa_id: empresaId, nome, telefone: novoTelefone.trim() })
+      .select('id, nome, telefone').single()
     setSalvandoCliente(false)
     if (error) { window.alert('Erro ao cadastrar o cliente: ' + error.message); return }
     setClientes(prev => [...prev, data].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')))
-    setClienteSel(data); setNovoCliente(false); setBuscaCliente('')
+    setClienteSel(data); setNovoCliente(false); setBuscaCliente(''); setNovoTelefone('')
   }
 
   // Rachar igual entre n pessoas (ajusta a última linha p/ fechar o total)
@@ -1060,12 +1065,20 @@ export default function PresencialSalao() {
                     )}
 
                     {novoCliente ? (
-                      <button type="button" onClick={criarClienteFiado} disabled={salvandoCliente || !buscaCliente.trim()}
-                        style={{ width: '100%', marginTop: 8, padding: '9px 0', borderRadius: 8, border: 'none',
-                          background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 800,
-                          cursor: salvandoCliente ? 'wait' : 'pointer', opacity: (salvandoCliente || !buscaCliente.trim()) ? .5 : 1 }}>
-                        {salvandoCliente ? 'Cadastrando...' : `Cadastrar "${buscaCliente.trim()}" e usar`}
-                      </button>
+                      <>
+                        <input value={novoTelefone} onChange={e => setNovoTelefone(e.target.value)}
+                          type="tel" inputMode="tel" placeholder="Telefone com DDD (obrigatório)"
+                          style={{ width: '100%', marginTop: 8, padding: '9px 10px', borderRadius: 8, boxSizing: 'border-box',
+                            border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 14 }} />
+                        <button type="button" onClick={criarClienteFiado}
+                          disabled={salvandoCliente || !buscaCliente.trim() || novoTelefone.replace(/\D/g, '').length < 10}
+                          style={{ width: '100%', marginTop: 8, padding: '9px 0', borderRadius: 8, border: 'none',
+                            background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 800,
+                            cursor: salvandoCliente ? 'wait' : 'pointer',
+                            opacity: (salvandoCliente || !buscaCliente.trim() || novoTelefone.replace(/\D/g, '').length < 10) ? .5 : 1 }}>
+                          {salvandoCliente ? 'Cadastrando...' : `Cadastrar "${buscaCliente.trim()}" e usar`}
+                        </button>
+                      </>
                     ) : (
                       <button type="button" onClick={() => setNovoCliente(true)}
                         style={{ width: '100%', marginTop: 8, padding: '8px 0', borderRadius: 8, cursor: 'pointer',
