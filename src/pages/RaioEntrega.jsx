@@ -49,6 +49,7 @@ export default function RaioEntrega() {
   const [categoria,       setCategoria]       = useState('')
   const [raio, setRaio] = useState(10)
   const [sugestoesBairro, setSugestoesBairro] = useState([]) // bairros dentro do raio (OpenStreetMap)
+  const raioSyncTimer = useRef(null) // debounce pra faixas acompanharem o raio
 
   // Puxa os bairros das cidades DENTRO do raio de entrega (via OpenStreetMap/Overpass).
   // Genérico: funciona pra qualquer cidade — sem cadastrar lista fixa. Debounce pra
@@ -82,6 +83,30 @@ export default function RaioEntrega() {
     }, 700)
     return () => { cancel = true; clearTimeout(t) }
   }, [latitude, longitude, raio])
+
+  // Muda o raio E faz as faixas por km acompanharem: ao AUMENTAR, cria uma faixa
+  // no novo raio (copiando a última taxa/tempo); ao DIMINUIR, apaga as faixas que
+  // ficaram fora do raio. Só roda quando o DONO mexe (não no carregamento) e com
+  // debounce pra não bagunçar enquanto arrasta o slider.
+  function mudarRaio(novo) {
+    const r = Number(novo) || 0
+    setRaio(r)
+    if (!usarTaxasPorKm) return
+    clearTimeout(raioSyncTimer.current)
+    raioSyncTimer.current = setTimeout(() => {
+      setTaxasKm(prev => {
+        if (!prev.length || r <= 0) return prev
+        let next = prev.filter(f => Number(f.km) <= r + 0.001)         // apaga faixas além do raio
+        const ultima = next.length ? Number(next.at(-1).km) : 0
+        if (ultima < r - 0.001) {                                       // garante faixa no raio
+          const base = next.at(-1) || prev.at(-1) || { taxa: 0, tempo: null }
+          next = [...next, { km: r, taxa: base.taxa ?? 0, tempo: base.tempo ?? null }]
+        }
+        const igual = next.length === prev.length && next.every((f, i) => Number(f.km) === Number(prev[i].km))
+        return igual ? prev : next
+      })
+    }, 400)
+  }
   const [taxasBairro, setTaxasBairro] = useState([]) // [{bairro, norm, modo:'km'|'taxa'|'bloqueio', taxa, tempo, total}]
   const [novoBairro, setNovoBairro] = useState('')
   const [bairroOpen, setBairroOpen] = useState(false) // dropdown de sugestões de bairro
@@ -523,12 +548,12 @@ export default function RaioEntrega() {
             <div className="re-raio-slider-wrap">
               <input
                 type="range" min={1} max={50} step={0.5}
-                value={raio} onChange={e => setRaio(Number(e.target.value))}
+                value={raio} onChange={e => mudarRaio(Number(e.target.value))}
               />
               <div className="re-raio-input-row">
                 <input
                   type="number" min={1} max={100} step={0.5}
-                  value={raio} onChange={e => setRaio(Number(e.target.value))}
+                  value={raio} onChange={e => mudarRaio(Number(e.target.value))}
                   className="form-input re-raio-number"
                 />
                 <span className="re-raio-unit">km</span>
