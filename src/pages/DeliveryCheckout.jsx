@@ -282,6 +282,9 @@ export default function DeliveryCheckout() {
   const [loadingCidades, setLoadingCidades] = useState(false)
   const [buscandoCep, setBuscandoCep] = useState(false)
   const [erroCep, setErroCep]     = useState(null)
+  // O que o ViaCEP devolveu pro último CEP válido — pra avisar se a rua/bairro
+  // digitados não baterem (caso do endereço trocado na mão).
+  const [cepInfo, setCepInfo] = useState(null) // { cep, rua, bairro }
   const [userId, setUserId]         = useState(null)
   const [reconhecido, setReconhecido] = useState(false) // cadastro achado pelo telefone
   const [coordCliente, setCoordCliente] = useState(null) // {lat,lng} do ponto de entrega
@@ -427,6 +430,19 @@ export default function DeliveryCheckout() {
   })()
   // Precisa marcar o ponto pra saber a taxa? (só quando é por km — bairro com taxa fixa não precisa)
   const taxaPendente = tipo === 'entrega' && temFaixas && !coordCliente && !bairroTaxaFixa && !bairroBloqueado
+
+  // A rua/bairro digitados batem com o CEP? Se o cliente trocou na mão pra um
+  // endereço de outro bairro (caso do pedido torto), avisa — sem bloquear.
+  const cepDivergente = (() => {
+    if (!cepInfo || tipo !== 'entrega') return null
+    const tipoLogr = /^(r|rua|av|avenida|tv|travessa|al|alameda|pc|praca|rod|rodovia|estr|estrada)\.?\s+/
+    const soNome = s => normBairro(s).replace(tipoLogr, '')
+    const casa = (a, b) => { const x = soNome(a), y = soNome(b); return !x || !y || x.includes(y) || y.includes(x) }
+    const bairroBate = !cepInfo.bairro || !form.bairro.trim() || casa(form.bairro, cepInfo.bairro)
+    const ruaBate = !cepInfo.rua || !form.rua.trim() || casa(form.rua, cepInfo.rua)
+    if (bairroBate && ruaBate) return null
+    return { rua: cepInfo.rua, bairro: cepInfo.bairro }
+  })()
   const taxaAplicada = taxaCalculada
   const total = subtotal + taxaAplicada
 
@@ -493,9 +509,10 @@ export default function DeliveryCheckout() {
     try {
       const res = await fetch(`https://viacep.com.br/ws/${numeros}/json/`)
       const data = await res.json()
-      if (data.erro) { setErroCep('CEP não encontrado.'); return }
+      if (data.erro) { setErroCep('CEP não encontrado.'); setCepInfo(null); return }
       set('rua', data.logradouro || '')
       set('bairro', data.bairro || '')
+      setCepInfo({ cep: numeros, rua: data.logradouro || '', bairro: data.bairro || '' })
       if (data.uf) {
         set('estado', data.uf)
         await carregarCidades(data.uf, data.localidade || '')
@@ -545,9 +562,14 @@ export default function DeliveryCheckout() {
       return
     }
 
-    // Loja cobra por distância mas não sabemos o ponto → pede pra marcar no mapa
-    if (tipo === 'entrega' && temFaixas && !coordCliente) {
-      setErroGlobal('Toque em "Marcar meu local no mapa" pra calcular a taxa de entrega.')
+    // Toda entrega precisa do ponto no mapa. Antes só era exigido quando a taxa
+    // era por km; com taxa por bairro o cliente fechava sem marcar, e o entregador
+    // ficava sem coordenada pra abrir no GPS (caso do pedido com endereço torto).
+    // Só exige se a loja tem coordenada (senão o botão do mapa nem aparece e o
+    // cliente ficaria travado sem como marcar).
+    const lojaTemMapa = !!(lojaEndereco?.latitude && lojaEndereco?.longitude)
+    if (tipo === 'entrega' && lojaTemMapa && !coordCliente) {
+      setErroGlobal('Toque em "Marcar meu local no mapa" pra o entregador achar seu endereço.')
       setMapaAberto(true)
       return
     }
@@ -893,6 +915,15 @@ export default function DeliveryCheckout() {
                     />
                   </Field>
 
+                  {/* Aviso quando a rua/bairro não batem com o CEP digitado */}
+                  {cepDivergente && (
+                    <div style={{ marginTop: -4, marginBottom: 4, padding: '9px 11px', borderRadius: 10,
+                      border: '1px solid #eab308', background: 'rgba(234,179,8,.1)', fontSize: 12.5, color: '#a16207', lineHeight: 1.4 }}>
+                      ⚠️ Esse CEP é de{cepDivergente.rua ? ` ${cepDivergente.rua},` : ''}
+                      {cepDivergente.bairro ? ` bairro ${cepDivergente.bairro}` : ''}. Confere se o endereço está certo.
+                    </div>
+                  )}
+
                   {/* Localizador no mapa — ponto exato pra taxa certinha */}
                   {lojaEndereco?.latitude && lojaEndereco?.longitude && (
                     <div style={{ marginTop: 4 }}>
@@ -901,7 +932,7 @@ export default function DeliveryCheckout() {
                           border: `1.5px solid ${coordCliente ? '#16a34a' : '#7c3aed'}`,
                           background: coordCliente ? 'rgba(16,185,129,.12)' : 'rgba(124,58,237,.12)',
                           color: coordCliente ? '#34d399' : '#a78bfa' }}>
-                        {coordCliente ? '✓ Local marcado no mapa — toque para ajustar' : '📍 Marcar meu local no mapa (recomendado)'}
+                        {coordCliente ? '✓ Local marcado no mapa — toque para ajustar' : '📍 Marcar meu local no mapa (obrigatório)'}
                       </button>
                       {temFaixas && (
                         <div style={{ marginTop: 6, fontSize: 12.5, color: taxaPendente ? '#eab308' : 'var(--text-muted,#9aa)' }}>
