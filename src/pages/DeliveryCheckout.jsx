@@ -631,6 +631,9 @@ export default function DeliveryCheckout() {
         endereco_bairro:      tipo === 'entrega' ? form.bairro.trim() : null,
         endereco_cidade:      tipo === 'entrega' ? form.cidade : null,
         endereco_estado:      tipo === 'entrega' ? form.estado : null,
+        // O CEP ia só pro cadastro do cliente e sumia do pedido — o entregador
+        // ficava sem ele pra conferir endereço torto.
+        endereco_cep:         tipo === 'entrega' ? (form.cep.trim() || null) : null,
         observacoes:  form.observacoes.trim() || null,
       }
       let pixData = null, pixErr = null
@@ -664,6 +667,7 @@ export default function DeliveryCheckout() {
         endereco_estado:      tipo === 'entrega' ? form.estado : null,
         endereco_cidade:      tipo === 'entrega' ? form.cidade : null,
         endereco_bairro:      tipo === 'entrega' ? form.bairro.trim() : null,
+        endereco_cep:         tipo === 'entrega' ? (form.cep.trim() || null) : null,
         tipo_entrega:         tipo,
         origem: window.Capacitor?.isNativePlatform?.() ? 'app' : 'cardapio',
         itens: itensPedido,
