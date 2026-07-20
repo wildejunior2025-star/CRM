@@ -87,7 +87,7 @@ export default function PresencialSalao() {
       supabase.from('produto_complemento_grupos')
         .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))'),
       // Clientes: usados só no fiado (quem fica devendo).
-      supabase.from('clientes').select('id, nome').eq('empresa_id', empresaId).order('nome').limit(1000),
+      supabase.from('clientes').select('id, nome, telefone').eq('empresa_id', empresaId).order('nome').limit(1000),
     ])
     if (emp.data) { setTaxaPct(Number(emp.data.taxa_servico_pct ?? 10)); setEmpresaNome(emp.data.nome || '') }
     setCaixaAberto(!!(cx.data && cx.data.length))
@@ -1026,7 +1026,10 @@ export default function PresencialSalao() {
 
                 {clienteSel ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ flex: 1, fontWeight: 700, fontSize: 14.5 }}>{clienteSel.nome}</span>
+                    <span style={{ flex: 1, fontWeight: 700, fontSize: 14.5 }}>
+                      {clienteSel.nome}
+                      {clienteSel.telefone && <span style={{ color: 'var(--text-muted)', fontSize: 12.5, fontWeight: 500 }}> · {clienteSel.telefone}</span>}
+                    </span>
                     <button type="button" onClick={() => { setClienteSel(null); setBuscaCliente('') }}
                       style={{ padding: '6px 10px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 12.5, fontWeight: 700 }}>
                       Trocar
@@ -1049,6 +1052,8 @@ export default function PresencialSalao() {
                             style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 6px', cursor: 'pointer',
                               border: 'none', borderBottom: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 14 }}>
                             {c.nome}
+                            {/* Telefone diferencia dois clientes de mesmo nome */}
+                            {c.telefone && <span style={{ color: 'var(--text-muted)', fontSize: 12.5 }}> · {c.telefone}</span>}
                           </button>
                         ))}
                       </div>

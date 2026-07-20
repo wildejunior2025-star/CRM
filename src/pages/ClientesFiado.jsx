@@ -46,6 +46,23 @@ export default function ClientesFiado({ empresaId }) {
   // Linha aberta pra receber: { cliente_id, valor(string), forma }
   const [recebendo, setRecebendo] = useState(null)
   const [salvando, setSalvando] = useState(false)
+  // Histórico de compras aberto ao clicar no nome: { [cliente_id]: [vendas] | 'carregando' }
+  const [compras, setCompras] = useState({})
+
+  // Puxa o que o cliente comprou (vendas + itens) sob demanda ao clicar no nome.
+  // Só busca uma vez por cliente; clicar de novo fecha.
+  async function verCompras(clienteId) {
+    if (compras[clienteId]) { setCompras(p => { const n = { ...p }; delete n[clienteId]; return n }); return }
+    setCompras(p => ({ ...p, [clienteId]: 'carregando' }))
+    const { data, error } = await supabase.from('vendas')
+      .select('id, total, forma_pagamento, created_at, venda_itens(quantidade, preco_unitario, produtos(nome))')
+      .eq('empresa_id', empresaId)
+      .eq('cliente_id', clienteId)
+      .neq('status', 'cancelado')
+      .order('created_at', { ascending: false })
+      .limit(30)
+    setCompras(p => ({ ...p, [clienteId]: error ? [] : (data ?? []) }))
+  }
 
   async function load() {
     setLoading(true); setErro(null)
@@ -165,7 +182,12 @@ export default function ClientesFiado({ empresaId }) {
                   <Fragment key={l.cliente_id}>
                     <tr>
                       <td>
-                        <div style={{ fontWeight: 600 }}>{l.cliente_nome}</div>
+                        {/* Nome clicável: abre/fecha o histórico de compras */}
+                        <button type="button" onClick={() => verCompras(l.cliente_id)}
+                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left',
+                            fontWeight: 600, fontSize: 14.5, color: 'var(--primary)' }}>
+                          {compras[l.cliente_id] ? '▾ ' : '▸ '}{l.cliente_nome}
+                        </button>
                         {l.telefone && (
                           link
                             ? <a href={link} target="_blank" rel="noreferrer"
@@ -228,6 +250,40 @@ export default function ClientesFiado({ empresaId }) {
                               </span>
                             )}
                           </div>
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* Histórico de compras do cliente (abre ao clicar no nome) */}
+                    {compras[l.cliente_id] && (
+                      <tr>
+                        <td colSpan={3} style={{ background: 'var(--card, rgba(124,58,237,.04))' }}>
+                          {compras[l.cliente_id] === 'carregando' ? (
+                            <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '4px 0' }}>Carregando compras...</div>
+                          ) : compras[l.cliente_id].length === 0 ? (
+                            <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '4px 0' }}>Nenhuma compra registrada.</div>
+                          ) : (
+                            <div style={{ padding: '2px 0' }}>
+                              {compras[l.cliente_id].map(v => (
+                                <div key={v.id} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13 }}>
+                                    <span style={{ color: 'var(--text-muted)' }}>
+                                      {dataHora(v.created_at)}
+                                      {v.forma_pagamento === 'fiado' && <span style={{ color: '#d97706', fontWeight: 700 }}> · fiado</span>}
+                                    </span>
+                                    <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{fmtBRL(v.total)}</span>
+                                  </div>
+                                  {(v.venda_itens ?? []).length > 0 && (
+                                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                                      {v.venda_itens.map((it, i) => (
+                                        <span key={i}>{i > 0 ? ' · ' : ''}{it.quantidade}× {it.produtos?.nome ?? 'item'}</span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )}
