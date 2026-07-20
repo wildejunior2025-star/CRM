@@ -165,6 +165,14 @@ export default function Clientes() {
 
   async function handleSubmit(e) {
     e.preventDefault()
+
+    // Telefone obrigatório: é o que diferencia dois clientes de mesmo nome e
+    // permite cobrar fiado depois. Exige DDD + número (>=10 dígitos).
+    if (form.telefone.replace(/\D/g, '').length < 10) {
+      setError('Telefone com DDD é obrigatório.')
+      return
+    }
+
     setSaving(true)
     setError(null)
 
@@ -397,11 +405,13 @@ export default function Clientes() {
                 </div>
 
                 <div className="form-field">
-                  <label>Telefone</label>
+                  <label>Telefone <span style={{ color: 'var(--danger, #dc2626)' }}>*</span></label>
                   <input
                     name="telefone"
                     value={form.telefone}
                     onChange={handleChange}
+                    placeholder="(84) 99999-9999"
+                    required
                   />
                 </div>
 
