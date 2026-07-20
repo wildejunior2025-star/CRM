@@ -3,6 +3,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import { calcIfoodLiquido, FORMA_ENTREGA_LABEL } from '../lib/ifoodLiquido'
 import IfoodIcon from '../components/IfoodIcon'
 import DespesasLucro from './DespesasLucro'
+import ClientesFiado from './ClientesFiado'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 import './Financeiro.css'
@@ -304,7 +305,7 @@ export default function Financeiro() {
 
       {/* Abas do Financeiro */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
-        {[['recebimentos', '💵 Recebimentos'], ['lucro', '📊 Despesas & Lucro']].map(([id, lb]) => (
+        {[['recebimentos', '💵 Recebimentos'], ['lucro', '📊 Despesas & Lucro'], ['fiado', '🧾 Fiado']].map(([id, lb]) => (
           <button key={id} type="button" onClick={() => trocarAba(id)}
             style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13.5, fontWeight: 700,
               background: aba === id ? 'var(--primary)' : 'var(--card, var(--bg))', color: aba === id ? '#fff' : 'var(--text)' }}>
@@ -314,6 +315,8 @@ export default function Financeiro() {
       </div>
 
       {aba === 'lucro' && <DespesasLucro empresaId={empresaId} />}
+
+      {aba === 'fiado' && <ClientesFiado empresaId={empresaId} />}
 
       {aba === 'recebimentos' && (<>
 
