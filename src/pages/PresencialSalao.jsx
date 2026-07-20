@@ -54,18 +54,22 @@ export default function PresencialSalao() {
   const [invCategoria, setInvCategoria] = useState('')
   const [invSalvando, setInvSalvando] = useState(false)
   const [ordemCat, setOrdemCat] = useState({}) // { nomeCategoria(minusculo): ordem } — mesma ordem do catálogo
+  const [caixaAberto, setCaixaAberto] = useState(false) // só lança na mesa com o caixa aberto
 
   async function loadAll() {
     if (!empresaId) return
-    const [emp, ms, cs, ps, gs, cat] = await Promise.all([
+    const [emp, ms, cs, ps, gs, cat, cx] = await Promise.all([
       supabase.from('empresas').select('taxa_servico_pct, nome').eq('id', empresaId).single(),
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('comandas').select('*, comanda_itens(*)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
       supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria').eq('empresa_id', empresaId).order('nome').limit(500),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
       supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId),
+      // Caixa aberto por este usuário? (é o mesmo que recebe a venda — current_caixa_id)
+      supabase.from('caixas').select('id').eq('empresa_id', empresaId).eq('aberto_por', user?.id).eq('status', 'aberto').limit(1),
     ])
     if (emp.data) { setTaxaPct(Number(emp.data.taxa_servico_pct ?? 10)); setEmpresaNome(emp.data.nome || '') }
+    setCaixaAberto(!!(cx.data && cx.data.length))
     setMesas(ms.data ?? [])
     setComandas(cs.data ?? [])
     setProdutos(ps.data ?? [])
@@ -150,6 +154,11 @@ export default function PresencialSalao() {
 
   // ── Ações ────────────────────────────────────────────────────────────────
   async function abrirMesa(mesa) {
+    // Trava: só lança na mesa/balcão com o caixa aberto (senão a venda escaparia do caixa).
+    if (!caixaAberto) {
+      window.alert('⚠️ Abra o caixa primeiro (aba 💵 Caixa) pra lançar na mesa.')
+      return
+    }
     const existente = comandaPorMesa[mesa.id]
     if (!existente) {
       await supabase.from('comandas').insert({
@@ -465,6 +474,17 @@ export default function PresencialSalao() {
           <p className="page-subtitle">Toque numa mesa para abrir/gerenciar a comanda.</p>
         </div>
       </div>
+
+      {!caixaAberto && (
+        <div style={{
+          margin: '0 0 12px', padding: '12px 14px', borderRadius: 10,
+          border: '1px solid #f59e0b', background: 'rgba(245,158,11,.12)',
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          fontSize: 13.5, fontWeight: 600, color: 'var(--text)',
+        }}>
+          <span>⚠️ <b>Caixa fechado.</b> Abra o caixa (aba <b>💵 Caixa</b>) pra poder lançar nas mesas/balcão.</span>
+        </div>
+      )}
 
       {mesas.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
