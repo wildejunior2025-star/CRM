@@ -110,6 +110,22 @@
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
 }
+/* Loja sem imagem de capa: some a faixa roxa (vira barra da cor do fundo, só
+   pros botões do topo), e o logo/nome ficam ABAIXO — não sobre a capa. */
+.dloja-banner--vazio {
+  height: 56px;
+  background-image: none;
+  background-color: var(--dl-bg);
+}
+.dloja-banner--vazio .dloja-banner-btn {
+  background: var(--dl-surface);
+  border: 1px solid var(--dl-border);
+  color: var(--dl-text);
+}
+.dloja-banner--vazio + .dloja-store-head {
+  margin-top: 8px;
+}
+
 .dloja-banner-back { left: 12px; }
 .dloja-banner-cart { right: 12px; }
 .dloja-banner-cart .dloja-cart-count {

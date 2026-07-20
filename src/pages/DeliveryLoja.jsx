@@ -418,9 +418,10 @@ export default function DeliveryLoja() {
   return (
     <div className="dloja-root" data-tema={tema}>
       <header className="dloja-header">
-        {/* Banner da loja */}
+        {/* Banner da loja — sem imagem de capa vira uma barra simples (--vazio),
+            e o logo/nome descem pra baixo dela em vez de sobrepor. */}
         <div
-          className="dloja-banner"
+          className={`dloja-banner${loja.banner_url ? '' : ' dloja-banner--vazio'}`}
           style={loja.banner_url ? { backgroundImage: `url(${loja.banner_url})` } : undefined}
         >
           <button className="dloja-banner-btn dloja-banner-back" onClick={() => navigate(-1)} aria-label="Voltar">
