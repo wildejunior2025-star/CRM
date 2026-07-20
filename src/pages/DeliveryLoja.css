@@ -122,8 +122,13 @@
   border: 1px solid var(--dl-border);
   color: var(--dl-text);
 }
+/* Sem capa não há o que sobrepor: o logo não sobe (senão bateria nos botões da
+   barra), e o bloco desce um respiro. */
 .dloja-banner--vazio + .dloja-store-head {
-  margin-top: 8px;
+  margin-top: 4px;
+}
+.dloja-banner--vazio + .dloja-store-head .dloja-store-logo {
+  margin-top: 0;
 }
 
 .dloja-banner-back { left: 12px; }
@@ -140,10 +145,13 @@
 .dloja-banner-tema.com-cart { right: 60px; }
 
 /* Cabeçalho da loja: logo + nome sobre o banner */
+/* O bloco logo+nome fica ABAIXO do banner (sobre o fundo). Só o logo sobe pra
+   cima da capa (margin-top negativo dele), estilo iFood — assim o nome nunca
+   fica sobreposto/ilegível na capa. */
 .dloja-store-head {
   max-width: 1100px;
-  margin: -34px auto 0;
-  padding: 0 16px 14px;
+  margin: 0 auto;
+  padding: 10px 16px 14px;
   display: flex;
   align-items: flex-end;
   gap: 14px;
@@ -162,6 +170,9 @@
   align-items: center;
   justify-content: center;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  margin-top: -46px; /* só o logo sobe pra cima do banner */
+  position: relative;
+  z-index: 2;
 }
 .dloja-store-logo img {
   width: 100%;
