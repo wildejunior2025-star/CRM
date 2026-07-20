@@ -1,9 +1,48 @@
 /* ── DeliveryLoja — store menu + cart ── */
 
+/* Tema via variáveis. Escuro é o padrão (o que já estava no ar); o cliente troca
+   pra claro pelo botão no header — ver data-tema="claro" abaixo. O roxo da marca
+   (#7c3aed/#6d28d9) e as cores de status (verde/vermelho/laranja) valem nos dois. */
+.dloja-root {
+  --dl-bg: #0f172a;
+  --dl-surface: #1e293b;
+  --dl-surface-2: #334155;
+  --dl-border: #1e293b;
+  --dl-border-2: #475569;
+  --dl-card: #1e1b4b;
+  --dl-card-border: #312e81;
+  --dl-card-hover: #4c1d95;
+  --dl-photo-bg: #1a1a3e;
+  --dl-text: #f1f5f9;
+  --dl-text-muted: #94a3b8;
+  --dl-text-dim: #64748b;
+  --dl-price: #a78bfa;
+  --dl-primary: #7c3aed;
+  --dl-primary-hover: #6d28d9;
+}
+
+.dloja-root[data-tema="claro"] {
+  --dl-bg: #f6f7fb;
+  --dl-surface: #ffffff;
+  --dl-surface-2: #e2e8f0;
+  --dl-border: #e5e7eb;
+  --dl-border-2: #cbd5e1;
+  --dl-card: #ffffff;
+  --dl-card-border: #e5e7eb;
+  --dl-card-hover: #c4b5fd;
+  --dl-photo-bg: #f1f5f9;
+  --dl-text: #1e293b;
+  --dl-text-muted: #64748b;
+  --dl-text-dim: #94a3b8;
+  --dl-price: #7c3aed;
+  --dl-primary: #7c3aed;
+  --dl-primary-hover: #6d28d9;
+}
+
 .dloja-root {
   min-height: 100vh;
-  background: #0f172a;
-  color: #f1f5f9;
+  background: var(--dl-bg);
+  color: var(--dl-text);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -40,8 +79,8 @@
 
 /* ── Header ── */
 .dloja-header {
-  background: #0f172a;
-  border-bottom: 1px solid #1e293b;
+  background: var(--dl-bg);
+  border-bottom: 1px solid var(--dl-border);
 }
 
 /* Banner (estilo iFood) */
@@ -79,6 +118,11 @@
   right: -4px;
 }
 
+/* Botão de tema (claro/escuro) — fica sobre o banner, no canto. Desloca pra
+   esquerda quando o carrinho aparece, pra não sobrepor. */
+.dloja-banner-tema { right: 12px; font-size: 18px; }
+.dloja-banner-tema.com-cart { right: 60px; }
+
 /* Cabeçalho da loja: logo + nome sobre o banner */
 .dloja-store-head {
   max-width: 1100px;
@@ -95,7 +139,7 @@
   height: 72px;
   border-radius: 16px;
   background: #fff;
-  border: 3px solid #0f172a;
+  border: 3px solid var(--dl-bg);
   overflow: hidden;
   flex-shrink: 0;
   display: flex;
@@ -125,7 +169,7 @@
 .dloja-store-nome {
   font-size: 20px;
   font-weight: 800;
-  color: #f1f5f9;
+  color: var(--dl-text);
   letter-spacing: -0.02em;
   line-height: 1.15;
 }
@@ -142,7 +186,7 @@
 .dloja-logo {
   font-size: 18px;
   font-weight: 800;
-  color: #f1f5f9;
+  color: var(--dl-text);
   letter-spacing: -0.03em;
   line-height: 1;
   flex-shrink: 0;
@@ -155,7 +199,7 @@
 .dloja-header-sep {
   width: 1px;
   height: 18px;
-  background: #1e293b;
+  background: var(--dl-border);
   flex-shrink: 0;
 }
 
@@ -166,17 +210,17 @@
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  border: 1px solid #1e293b;
-  background: #1e293b;
-  color: #f1f5f9;
+  border: 1px solid var(--dl-border);
+  background: var(--dl-surface);
+  color: var(--dl-text);
   cursor: pointer;
   flex-shrink: 0;
   transition: background 140ms, border-color 140ms;
 }
 
 .dloja-back-btn:hover {
-  background: #334155;
-  border-color: #475569;
+  background: var(--dl-surface-2);
+  border-color: var(--dl-border-2);
 }
 
 .dloja-back-btn:focus-visible {
@@ -195,7 +239,7 @@
 .dloja-header-nome {
   font-size: 15px;
   font-weight: 700;
-  color: #f1f5f9;
+  color: var(--dl-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -212,7 +256,7 @@
 
 .dloja-status--open {
   background: rgba(22, 163, 74, 0.15);
-  color: #4ade80;
+  color: #16a34a;
 }
 
 .dloja-status--closed {
@@ -261,7 +305,7 @@
 .dloja-closed-banner {
   background: rgba(239, 68, 68, 0.1);
   border-bottom: 1px solid rgba(239, 68, 68, 0.2);
-  color: #fca5a5;
+  color: #ef4444;
   text-align: center;
   padding: 10px 16px;
   font-size: 13px;
@@ -281,8 +325,8 @@
 
 /* ── Barra de navegação de categorias ── */
 .dloja-cat-nav {
-  background: #0f172a;
-  border-bottom: 1px solid #1e293b;
+  background: var(--dl-bg);
+  border-bottom: 1px solid var(--dl-border);
   position: sticky;
   top: 65px;
   z-index: 90;
@@ -307,9 +351,9 @@
   flex-shrink: 0;
   padding: 6px 16px;
   border-radius: 99px;
-  border: 1.5px solid #1e293b;
+  border: 1.5px solid var(--dl-border);
   background: transparent;
-  color: #94a3b8;
+  color: var(--dl-text-muted);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -319,8 +363,8 @@
 }
 
 .dloja-cat-nav-btn:hover {
-  background: #1e293b;
-  color: #f1f5f9;
+  background: var(--dl-surface);
+  color: var(--dl-text);
 }
 
 .dloja-cat-nav-btn.ativo {
@@ -331,7 +375,7 @@
 
 .dloja-cat-nav-sep {
   width: 1px;
-  background: #1e293b;
+  background: var(--dl-border);
   flex-shrink: 0;
   margin: 4px 4px;
 }
@@ -355,13 +399,13 @@
 .dloja-cat-title {
   font-size: 16px;
   font-weight: 700;
-  color: #f1f5f9;
+  color: var(--dl-text);
   margin: 0 0 12px;
   padding: 8px 0;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--dl-border);
   position: sticky;
   top: 117px;
-  background: #0f172a;
+  background: var(--dl-bg);
   z-index: 10;
   letter-spacing: -0.01em;
 }
@@ -387,8 +431,8 @@
 
 /* ── Card de produto ── */
 .dloja-prod-card {
-  background: #1e1b4b;
-  border: 1px solid #312e81;
+  background: var(--dl-card);
+  border: 1px solid var(--dl-card-border);
   border-radius: 12px;
   overflow: hidden;
   display: flex;
@@ -397,14 +441,14 @@
 }
 
 .dloja-prod-card:hover {
-  border-color: #4c1d95;
+  border-color: var(--dl-card-hover);
 }
 
 .dloja-prod-foto {
   width: 100%;
   height: 130px;
   overflow: hidden;
-  background: #1a1a3e;
+  background: var(--dl-photo-bg);
   flex-shrink: 0;
 }
 
@@ -421,7 +465,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #4c1d95;
+  color: var(--dl-card-hover);
 }
 
 .dloja-prod-info {
@@ -432,14 +476,14 @@
 .dloja-prod-nome {
   font-size: 13px;
   font-weight: 600;
-  color: #f1f5f9;
+  color: var(--dl-text);
   margin: 0 0 4px;
   line-height: 1.3;
 }
 
 .dloja-prod-desc {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--dl-text-muted);
   margin: 0 0 8px;
   line-height: 1.5;
   display: -webkit-box;
@@ -451,7 +495,7 @@
 .dloja-prod-preco {
   font-size: 15px;
   font-weight: 700;
-  color: #a78bfa;
+  color: var(--dl-price);
   margin: 0;
 }
 
@@ -482,8 +526,8 @@
 }
 
 .dloja-btn-add:disabled {
-  background: #334155;
-  color: #64748b;
+  background: var(--dl-surface-2);
+  color: var(--dl-text-dim);
   cursor: not-allowed;
 }
 
@@ -511,9 +555,9 @@
   width: 28px;
   height: 28px;
   border-radius: 7px;
-  border: 1px solid #334155;
-  background: #1e293b;
-  color: #f1f5f9;
+  border: 1px solid var(--dl-surface-2);
+  background: var(--dl-surface);
+  color: var(--dl-text);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -523,8 +567,8 @@
 }
 
 .dloja-qty-btn:hover:not(:disabled) {
-  background: #334155;
-  border-color: #475569;
+  background: var(--dl-surface-2);
+  border-color: var(--dl-border-2);
 }
 
 .dloja-qty-btn:disabled {
@@ -548,7 +592,7 @@
   text-align: center;
   font-size: 13px;
   font-weight: 600;
-  color: #f1f5f9;
+  color: var(--dl-text);
 }
 
 /* ── Empty ── */
@@ -560,7 +604,7 @@
   gap: 12px;
   padding: 72px 24px;
   text-align: center;
-  color: #64748b;
+  color: var(--dl-text-dim);
   font-size: 14px;
 }
 
@@ -629,9 +673,9 @@
 }
 
 .dloja-drawer {
-  background: #0f172a;
-  border-left: 1px solid #1e293b;
-  border-top: 1px solid #1e293b;
+  background: var(--dl-bg);
+  border-left: 1px solid var(--dl-border);
+  border-top: 1px solid var(--dl-border);
   width: 100%;
   max-width: 420px;
   max-height: 90vh;
@@ -646,7 +690,7 @@
   .dloja-drawer {
     max-height: 100vh;
     border-radius: 0;
-    border-left: 1px solid #1e293b;
+    border-left: 1px solid var(--dl-border);
     border-top: none;
   }
 }
@@ -661,13 +705,13 @@
   align-items: center;
   justify-content: space-between;
   padding: 20px 20px 16px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--dl-border);
 }
 
 .dloja-drawer-title {
   font-size: 16px;
   font-weight: 700;
-  color: #f1f5f9;
+  color: var(--dl-text);
   margin: 0;
 }
 
@@ -675,9 +719,9 @@
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  border: 1px solid #1e293b;
-  background: #1e293b;
-  color: #94a3b8;
+  border: 1px solid var(--dl-border);
+  background: var(--dl-surface);
+  color: var(--dl-text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -686,8 +730,8 @@
 }
 
 .dloja-drawer-close:hover {
-  background: #334155;
-  color: #f1f5f9;
+  background: var(--dl-surface-2);
+  color: var(--dl-text);
 }
 
 .dloja-drawer-body {
@@ -704,7 +748,7 @@
   flex-direction: column;
   gap: 8px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--dl-border);
 }
 
 .dloja-drawer-item:last-child {
@@ -720,12 +764,12 @@
 .dloja-drawer-item-nome {
   font-size: 13px;
   font-weight: 600;
-  color: #f1f5f9;
+  color: var(--dl-text);
 }
 
 .dloja-drawer-item-preco {
   font-size: 11px;
-  color: #64748b;
+  color: var(--dl-text-dim);
 }
 
 .dloja-drawer-item-ctrl {
@@ -737,7 +781,7 @@
 .dloja-drawer-item-sub {
   font-size: 13px;
   font-weight: 600;
-  color: #a78bfa;
+  color: var(--dl-price);
   margin-left: auto;
 }
 
@@ -745,9 +789,9 @@
   width: 28px;
   height: 28px;
   border-radius: 7px;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--dl-border);
   background: transparent;
-  color: #64748b;
+  color: var(--dl-text-dim);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -764,7 +808,7 @@
 /* ── Footer do drawer ── */
 .dloja-drawer-footer {
   padding: 16px 20px 24px;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid var(--dl-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -775,20 +819,20 @@
   align-items: center;
   justify-content: space-between;
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--dl-text-muted);
 }
 
 .dloja-drawer-total {
   font-size: 15px;
   font-weight: 600;
-  color: #f1f5f9;
+  color: var(--dl-text);
   margin-top: 4px;
   padding-top: 8px;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid var(--dl-border);
 }
 
 .dloja-drawer-total strong {
-  color: #a78bfa;
+  color: var(--dl-price);
   font-size: 17px;
 }
 
@@ -817,7 +861,7 @@
 }
 
 .dloja-btn-finalizar:disabled {
-  background: #334155;
-  color: #64748b;
+  background: var(--dl-surface-2);
+  color: var(--dl-text-dim);
   cursor: not-allowed;
 }

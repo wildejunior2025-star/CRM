@@ -109,6 +109,12 @@ export default function DeliveryLoja() {
   const drawerRef = useRef(null)
   const [filtroEstoqueBaixo, setFiltroEstoqueBaixo] = useState(false)
   const [busca, setBusca] = useState('')
+  // Tema do cardápio (claro/escuro) — escolha do cliente, lembrada no navegador.
+  // Escuro é o padrão (o que já estava no ar).
+  const [tema, setTema] = useState(() => {
+    try { return localStorage.getItem('dloja-tema') || 'escuro' } catch { return 'escuro' }
+  })
+  useEffect(() => { try { localStorage.setItem('dloja-tema', tema) } catch { /* ignora */ } }, [tema])
 
   // Sincroniza carrinho com localStorage (chave = id real da loja)
   useEffect(() => {
@@ -410,7 +416,7 @@ export default function DeliveryLoja() {
   }
 
   return (
-    <div className="dloja-root">
+    <div className="dloja-root" data-tema={tema}>
       <header className="dloja-header">
         {/* Banner da loja */}
         <div
@@ -419,6 +425,15 @@ export default function DeliveryLoja() {
         >
           <button className="dloja-banner-btn dloja-banner-back" onClick={() => navigate(-1)} aria-label="Voltar">
             <IconArrowLeft />
+          </button>
+          {/* Alterna claro/escuro. Fica ao lado do carrinho (desloca com .com-cart). */}
+          <button
+            className={`dloja-banner-btn dloja-banner-tema${totalItens > 0 ? ' com-cart' : ''}`}
+            onClick={() => setTema(t => (t === 'escuro' ? 'claro' : 'escuro'))}
+            aria-label="Alternar tema claro ou escuro"
+            title={tema === 'escuro' ? 'Mudar para claro' : 'Mudar para escuro'}
+          >
+            {tema === 'escuro' ? '☀️' : '🌙'}
           </button>
           {totalItens > 0 && (
             <button className="dloja-banner-btn dloja-banner-cart" onClick={() => setDrawerOpen(true)} aria-label="Abrir carrinho">
@@ -446,8 +461,10 @@ export default function DeliveryLoja() {
             onClick={() => navigate(`/meus-pedidos?loja=${loja.id}`)}
             style={{
               marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6,
-              background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.15)',
-              color: '#fff', borderRadius: 10, padding: '8px 12px', cursor: 'pointer',
+              // Fica abaixo do banner (sobre o fundo da página) — usa as cores do
+              // tema, senão sumiria no claro.
+              background: 'var(--dl-surface)', border: '1px solid var(--dl-border)',
+              color: 'var(--dl-text)', borderRadius: 10, padding: '8px 12px', cursor: 'pointer',
               fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap',
             }}
           >
@@ -459,11 +476,11 @@ export default function DeliveryLoja() {
       {/* ── Busca flutuante (fixa no topo ao rolar) ── */}
       <div style={{
         position: 'sticky', top: 0, zIndex: 30,
-        background: 'var(--dloja-bg, #0f0f1a)',
-        padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,.06)',
+        background: 'var(--dl-bg)',
+        padding: '10px 12px', borderBottom: '1px solid var(--dl-border)',
       }}>
         <div style={{ position: 'relative', maxWidth: 720, margin: '0 auto' }}>
-          <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', pointerEvents: 'none' }}>
+          <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--dl-text-muted)', pointerEvents: 'none' }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           </span>
           <input
@@ -473,13 +490,13 @@ export default function DeliveryLoja() {
             placeholder="Buscar produto..."
             style={{
               width: '100%', boxSizing: 'border-box', padding: '11px 38px', borderRadius: 12,
-              border: '1.5px solid rgba(255,255,255,.12)', background: 'rgba(255,255,255,.06)',
-              color: '#fff', fontSize: 15, outline: 'none',
+              border: '1.5px solid var(--dl-border)', background: 'var(--dl-surface)',
+              color: 'var(--dl-text)', fontSize: 15, outline: 'none',
             }}
           />
           {busca && (
             <button type="button" onClick={() => setBusca('')} aria-label="Limpar busca"
-              style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4, display: 'flex' }}>
+              style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--dl-text-muted)', cursor: 'pointer', padding: 4, display: 'flex' }}>
               <IconX />
             </button>
           )}
@@ -625,7 +642,7 @@ export default function DeliveryLoja() {
                   <div className="dloja-drawer-item-info">
                     <span className="dloja-drawer-item-nome">{item.nome}</span>
                     {item.complementos?.length > 0 && (
-                      <span style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.4, display: 'block', marginTop: 2 }}>
+                      <span style={{ fontSize: 12, color: 'var(--dl-text-muted)', lineHeight: 1.4, display: 'block', marginTop: 2 }}>
                         {item.complementos.map(c => `${Number(c.qtd ?? 1)}× ${c.nome}`).join(', ')}
                       </span>
                     )}
@@ -706,7 +723,7 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
           <p className="dloja-prod-desc">{produto.descricao}</p>
         )}
         <p className="dloja-prod-preco">
-          {temComplementos && <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 500 }}>a partir de </span>}
+          {temComplementos && <span style={{ fontSize: 11, color: 'var(--dl-text-muted)', fontWeight: 500 }}>a partir de </span>}
           R$ {fmt(produto.preco)}
         </p>
       </div>
@@ -799,7 +816,7 @@ function OptionsModal({ produto, onClose, onConfirm }) {
 
         <div className="dloja-drawer-body">
           {produto.descricao && (
-            <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 12px' }}>{produto.descricao}</p>
+            <p style={{ fontSize: 13, color: 'var(--dl-text-muted)', margin: '0 0 12px' }}>{produto.descricao}</p>
           )}
           {grupos.map(grupo => {
             const qtdSel = sel[grupo.id]?.size ?? 0
@@ -808,11 +825,11 @@ function OptionsModal({ produto, onClose, onConfirm }) {
             return (
               <div key={grupo.id} style={{ marginBottom: 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <span style={{ fontWeight: 700, fontSize: 14.5, color: '#fff' }}>{grupo.nome}</span>
+                  <span style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--dl-text)' }}>{grupo.nome}</span>
                   <span style={{
                     fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6,
-                    background: incompleto ? 'rgba(239,68,68,.15)' : 'rgba(255,255,255,.08)',
-                    color: incompleto ? '#f87171' : '#94a3b8',
+                    background: incompleto ? 'rgba(239,68,68,.15)' : 'var(--dl-surface-2)',
+                    color: incompleto ? '#f87171' : 'var(--dl-text-muted)',
                   }}>
                     {obrig ? 'Obrigatório' : 'Opcional'}
                     {grupo.max > 1 ? ` · até ${grupo.max}` : ''}
@@ -831,14 +848,14 @@ function OptionsModal({ produto, onClose, onConfirm }) {
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
                           padding: '10px 12px', borderRadius: 10, cursor: bloqueado ? 'not-allowed' : 'pointer',
-                          border: `1.5px solid ${marcado ? '#22c55e' : 'rgba(255,255,255,.12)'}`,
-                          background: marcado ? 'rgba(34,197,94,.12)' : 'rgba(255,255,255,.04)',
-                          color: '#fff', opacity: bloqueado ? 0.4 : 1,
+                          border: `1.5px solid ${marcado ? '#22c55e' : 'var(--dl-border)'}`,
+                          background: marcado ? 'rgba(34,197,94,.12)' : 'var(--dl-surface)',
+                          color: 'var(--dl-text)', opacity: bloqueado ? 0.4 : 1,
                         }}
                       >
                         <span style={{
                           width: 20, height: 20, flexShrink: 0, borderRadius: grupo.max === 1 ? '50%' : 6,
-                          border: `2px solid ${marcado ? '#22c55e' : '#64748b'}`,
+                          border: `2px solid ${marcado ? '#22c55e' : 'var(--dl-text-dim)'}`,
                           background: marcado ? '#22c55e' : 'transparent',
                           display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#04120a',
                         }}>
