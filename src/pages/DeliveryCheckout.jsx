@@ -161,12 +161,18 @@ async function reverseGeocode(lat, lng) {
 }
 
 // ── Modal do mapa: cliente arrasta o pino até a casa (ponto exato) ───────────
-function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, onConfirm, onClose }) {
+function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco, onConfirm, onClose }) {
   const mapRef = useRef(null)
   const mapObj = useRef(null)
   const pinRef = useRef(null)
+  const interagiu = useRef(false) // cliente já mexeu no pino (arrasto/clique/GPS)?
   const [coord, setCoord] = useState(initial || (storeLat ? { lat: Number(storeLat), lng: Number(storeLng) } : null))
   const [locLoading, setLocLoading] = useState(false)
+  const [geoLoading, setGeoLoading] = useState(false)
+  // O pino saiu do ponto inicial (loja)? Só deixa confirmar depois que o local
+  // for definido de fato — pelo endereço geocodificado, por arrastar, clicar ou
+  // GPS. Sem isso o cliente confirmava o pino parado em cima da loja.
+  const [definido, setDefinido] = useState(!!initial)
 
   useEffect(() => {
     let cancelado = false
@@ -184,8 +190,23 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, onConfirm
       }
       const pinIcon = L.divIcon({ html: `<div style="width:34px;height:34px;background:#ef4444;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 3px 10px rgba(0,0,0,.4);"></div>`, className: '', iconSize: [34, 34], iconAnchor: [17, 32] })
       pinRef.current = L.marker([c.lat, c.lng], { icon: pinIcon, draggable: true }).addTo(map)
-      pinRef.current.on('dragend', e => { const { lat, lng } = e.target.getLatLng(); setCoord({ lat, lng }) })
-      map.on('click', e => { const { lat, lng } = e.latlng; pinRef.current.setLatLng([lat, lng]); setCoord({ lat, lng }) })
+      pinRef.current.on('dragend', e => { interagiu.current = true; const { lat, lng } = e.target.getLatLng(); setCoord({ lat, lng }); setDefinido(true) })
+      map.on('click', e => { interagiu.current = true; const { lat, lng } = e.latlng; pinRef.current.setLatLng([lat, lng]); setCoord({ lat, lng }); setDefinido(true) })
+
+      // Sem ponto ainda? Tenta achar pelo endereço digitado (CEP/rua) e já leva o
+      // pino pra lá — assim ele nasce perto da casa, não parado na loja.
+      if (!initial && endereco && (endereco.rua || endereco.cep)) {
+        setGeoLoading(true)
+        geocodeEndereco(endereco).then(g => {
+          setGeoLoading(false)
+          // Se o cliente já arrastou enquanto isto carregava, não desmancha o que ele fez.
+          if (cancelado || !g || !mapObj.current || interagiu.current) return
+          pinRef.current.setLatLng([g.lat, g.lng])
+          mapObj.current.setView([g.lat, g.lng], 16)
+          setCoord({ lat: g.lat, lng: g.lng })
+          setDefinido(true)
+        }).catch(() => setGeoLoading(false))
+      }
     }
     init()
     return () => { cancelado = true; if (mapObj.current) { mapObj.current.remove(); mapObj.current = null } }
@@ -197,8 +218,9 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, onConfirm
     setLocLoading(true)
     navigator.geolocation.getCurrentPosition(
       pos => {
+        interagiu.current = true
         const c = { lat: pos.coords.latitude, lng: pos.coords.longitude }
-        setCoord(c); setLocLoading(false)
+        setCoord(c); setLocLoading(false); setDefinido(true)
         if (pinRef.current) pinRef.current.setLatLng([c.lat, c.lng])
         if (mapObj.current) mapObj.current.setView([c.lat, c.lng], 17)
       },
@@ -225,12 +247,16 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, onConfirm
               {locLoading ? 'Localizando…' : '🎯 Usar minha localização'}
             </button>
             <div style={{ fontSize: 14, color: foraRaio ? '#f87171' : 'var(--text,#fff)', fontWeight: 600 }}>
-              {dist != null ? <>📏 {dist.toFixed(1)} km · <strong style={{ color: '#34d399' }}>Taxa {taxa != null ? `R$ ${fmt(taxa)}` : '—'}</strong>{foraRaio ? ' · ⚠️ fora do raio' : ''}</> : 'Arraste o pino até sua casa'}
+              {geoLoading ? 'Procurando o endereço…'
+                : !definido ? '👆 Arraste o pino até sua casa'
+                : dist != null ? <>📏 {dist.toFixed(1)} km · <strong style={{ color: '#34d399' }}>Taxa {taxa != null ? `R$ ${fmt(taxa)}` : '—'}</strong>{foraRaio ? ' · ⚠️ fora do raio' : ''}</> : 'Arraste o pino até sua casa'}
             </div>
           </div>
-          <button type="button" onClick={() => coord && onConfirm({ lat: coord.lat, lng: coord.lng, dist, taxa })} disabled={!coord}
-            style={{ width: '100%', padding: '13px', borderRadius: 12, border: 'none', background: coord ? '#7c3aed' : '#4b3a7a', color: '#fff', fontWeight: 800, fontSize: 15, cursor: coord ? 'pointer' : 'not-allowed' }}>
-            Confirmar este local
+          {/* Sem local definido = pino ainda parado na loja. Bloqueia pra não
+              gravar o endereço da loja no lugar do endereço do cliente. */}
+          <button type="button" onClick={() => coord && definido && onConfirm({ lat: coord.lat, lng: coord.lng, dist, taxa })} disabled={!coord || !definido}
+            style={{ width: '100%', padding: '13px', borderRadius: 12, border: 'none', background: (coord && definido) ? '#7c3aed' : '#4b3a7a', color: '#fff', fontWeight: 800, fontSize: 15, cursor: (coord && definido) ? 'pointer' : 'not-allowed' }}>
+            {definido ? 'Confirmar este local' : 'Arraste o pino até sua casa'}
           </button>
         </div>
       </div>
@@ -1078,6 +1104,7 @@ export default function DeliveryCheckout() {
           raioKm={lojaEndereco?.raio_entrega_km}
           taxas={lojaEndereco?.taxas_entrega_km}
           initial={coordCliente}
+          endereco={{ rua: form.rua, numero: form.numero, bairro: form.bairro, cidade: form.cidade, estado: form.estado, cep: form.cep }}
           onConfirm={confirmarMapa}
           onClose={() => setMapaAberto(false)}
         />
