@@ -1,27 +1,9 @@
 /* ── DeliveryLoja — store menu + cart ── */
 
-/* Tema via variáveis. Escuro é o padrão (o que já estava no ar); o cliente troca
-   pra claro pelo botão no header — ver data-tema="claro" abaixo. O roxo da marca
-   (#7c3aed/#6d28d9) e as cores de status (verde/vermelho/laranja) valem nos dois. */
+/* Tema via variáveis. CLARO é o padrão; o cliente troca pra escuro pela 🌙 no
+   header — ver data-tema="escuro" abaixo. O roxo da marca (#7c3aed/#6d28d9) e as
+   cores de status (verde/vermelho/laranja) valem nos dois. */
 .dloja-root {
-  --dl-bg: #0f172a;
-  --dl-surface: #1e293b;
-  --dl-surface-2: #334155;
-  --dl-border: #1e293b;
-  --dl-border-2: #475569;
-  --dl-card: #1e1b4b;
-  --dl-card-border: #312e81;
-  --dl-card-hover: #4c1d95;
-  --dl-photo-bg: #1a1a3e;
-  --dl-text: #f1f5f9;
-  --dl-text-muted: #94a3b8;
-  --dl-text-dim: #64748b;
-  --dl-price: #a78bfa;
-  --dl-primary: #7c3aed;
-  --dl-primary-hover: #6d28d9;
-}
-
-.dloja-root[data-tema="claro"] {
   --dl-bg: #f6f7fb;
   --dl-surface: #ffffff;
   --dl-surface-2: #e2e8f0;
@@ -35,6 +17,24 @@
   --dl-text-muted: #64748b;
   --dl-text-dim: #94a3b8;
   --dl-price: #7c3aed;
+  --dl-primary: #7c3aed;
+  --dl-primary-hover: #6d28d9;
+}
+
+.dloja-root[data-tema="escuro"] {
+  --dl-bg: #0f172a;
+  --dl-surface: #1e293b;
+  --dl-surface-2: #334155;
+  --dl-border: #1e293b;
+  --dl-border-2: #475569;
+  --dl-card: #1e1b4b;
+  --dl-card-border: #312e81;
+  --dl-card-hover: #4c1d95;
+  --dl-photo-bg: #1a1a3e;
+  --dl-text: #f1f5f9;
+  --dl-text-muted: #94a3b8;
+  --dl-text-dim: #64748b;
+  --dl-price: #a78bfa;
   --dl-primary: #7c3aed;
   --dl-primary-hover: #6d28d9;
 }
@@ -53,8 +53,8 @@
 /* ── Loading ── */
 .dloja-loading {
   min-height: 100vh;
-  background: #0f172a;
-  color: #94a3b8;
+  background: #f6f7fb;
+  color: #64748b;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -67,7 +67,7 @@
 .dloja-spinner {
   width: 28px;
   height: 28px;
-  border: 2.5px solid #1e293b;
+  border: 2.5px solid #e2e8f0;
   border-top-color: #7c3aed;
   border-radius: 50%;
   animation: dloja-spin 0.7s linear infinite;

@@ -110,9 +110,9 @@ export default function DeliveryLoja() {
   const [filtroEstoqueBaixo, setFiltroEstoqueBaixo] = useState(false)
   const [busca, setBusca] = useState('')
   // Tema do cardápio (claro/escuro) — escolha do cliente, lembrada no navegador.
-  // Escuro é o padrão (o que já estava no ar).
+  // Claro é o padrão; quem quiser escuro clica na 🌙.
   const [tema, setTema] = useState(() => {
-    try { return localStorage.getItem('dloja-tema') || 'escuro' } catch { return 'escuro' }
+    try { return localStorage.getItem('dloja-tema') || 'claro' } catch { return 'claro' }
   })
   useEffect(() => { try { localStorage.setItem('dloja-tema', tema) } catch { /* ignora */ } }, [tema])
 
