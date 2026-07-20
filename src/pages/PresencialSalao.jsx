@@ -55,10 +55,14 @@ export default function PresencialSalao() {
   const [invSalvando, setInvSalvando] = useState(false)
   const [ordemCat, setOrdemCat] = useState({}) // { nomeCategoria(minusculo): ordem } — mesma ordem do catálogo
   const [caixaAberto, setCaixaAberto] = useState(false) // só lança na mesa com o caixa aberto
+  // Complementos: { produto_id: [{ id, nome, min, max, opcoes:[{id,nome,preco_adicional}] }] }
+  // Mesma fonte do cardápio do QR (MesaCardapio) — produto com grupo abre o modal de montagem.
+  const [compMap, setCompMap] = useState({})
+  const [montando, setMontando] = useState(null) // produto que está sendo montado no modal
 
   async function loadAll() {
     if (!empresaId) return
-    const [emp, ms, cs, ps, gs, cat, cx] = await Promise.all([
+    const [emp, ms, cs, ps, gs, cat, cx, cg] = await Promise.all([
       supabase.from('empresas').select('taxa_servico_pct, nome').eq('id', empresaId).single(),
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('comandas').select('*, comanda_itens(*)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
@@ -67,6 +71,12 @@ export default function PresencialSalao() {
       supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId),
       // Caixa aberto por este usuário? (é o mesmo que recebe a venda — current_caixa_id)
       supabase.from('caixas').select('id').eq('empresa_id', empresaId).eq('aberto_por', user?.id).eq('status', 'aberto').limit(1),
+      // Complementos por produto. A tabela de vínculo não tem empresa_id e é lida por
+      // todos (policy le_publico_pcg), então o "!inner" é o que garante a separação:
+      // vira INNER JOIN com complemento_grupos, que a RLS já filtra por empresa — os
+      // vínculos de outras lojas não chegam nem a sair do banco.
+      supabase.from('produto_complemento_grupos')
+        .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))'),
     ])
     if (emp.data) { setTaxaPct(Number(emp.data.taxa_servico_pct ?? 10)); setEmpresaNome(emp.data.nome || '') }
     setCaixaAberto(!!(cx.data && cx.data.length))
@@ -77,6 +87,24 @@ export default function PresencialSalao() {
     const om = {}
     for (const c of (cat.data ?? [])) if (c?.nome != null) om[String(c.nome).trim().toLowerCase()] = c.ordem == null ? 9999 : c.ordem
     setOrdemCat(om)
+    // Monta { produto_id: [grupos] }, pulando grupo/opção pausados. min/max do vínculo
+    // (override) mandam mais que os do grupo, igual no cardápio do QR.
+    const cm = {}
+    for (const v of (cg.data ?? [])) {
+      const g = v.complemento_grupos
+      if (!g || g.disponivel === false) continue
+      const opcoes = (g.complemento_opcoes ?? [])
+        .filter(o => o.disponivel !== false)
+        .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+      if (!opcoes.length) continue
+      ;(cm[v.produto_id] ??= []).push({
+        id: g.id, nome: g.nome,
+        min: v.min_override ?? g.min ?? 0,
+        max: v.max_override ?? g.max ?? 1,
+        opcoes,
+      })
+    }
+    setCompMap(cm)
     setLoading(false)
   }
 
@@ -192,24 +220,55 @@ export default function PresencialSalao() {
   function addItem(produto) {
     if (!comandaSel) return
     if (comandaSel.status === 'aguardando_conferencia') { window.alert('Conta já fechada, aguardando o ADM liberar a mesa.'); return }
-    setRascunho(prev => {
-      const i = prev.findIndex(r => r.produto_id === produto.produto_id)
-      if (i >= 0) {
-        const c = prev.slice(); c[i] = { ...c[i], quantidade: c[i].quantidade + 1 }; return c
-      }
-      return [...prev, { produto_id: produto.produto_id, nome: produto.nome, preco_venda: Number(produto.preco_venda), quantidade: 1, observacao: '' }]
+    // Produto com complemento abre o modal de montagem em vez de cair direto no rascunho.
+    if (compMap[produto.produto_id]?.length) { setMontando(produto); return }
+    empilhar({
+      produto_id: produto.produto_id, linha: String(produto.produto_id),
+      nome: produto.nome, preco_venda: Number(produto.preco_venda),
+      complementos: [], quantidade: 1, observacao: '',
     })
   }
-  function mudarQtdRascunho(produtoId, delta) {
+
+  // Soma na linha igual se já existir; senão cria uma nova. Duas montagens diferentes do
+  // mesmo produto têm `linha` diferente, então ficam em linhas separadas (cada uma com
+  // seu preço) — é o que permite lançar marmitex de valores diferentes na mesma comanda.
+  function empilhar(novo) {
+    setRascunho(prev => {
+      const i = prev.findIndex(r => (r.linha ?? String(r.produto_id)) === novo.linha)
+      if (i >= 0) {
+        const c = prev.slice(); c[i] = { ...c[i], quantidade: c[i].quantidade + novo.quantidade }; return c
+      }
+      return [...prev, novo]
+    })
+  }
+
+  // Fecha o modal de complementos criando a linha montada.
+  function addMontado(produto, escolhas) {
+    const adicional = escolhas.reduce((s, e) => s + Number(e.preco_adicional || 0) * e.qtd, 0)
+    // "2× Marmitex Grande, Feijão" — o nome carrega a montagem, porque comanda_itens
+    // não tem coluna de complemento (mesmo jeito do cardápio do QR).
+    const resumo = escolhas.map(e => (e.qtd > 1 ? `${e.qtd}× ${e.nome}` : e.nome)).join(', ')
+    empilhar({
+      produto_id: produto.produto_id,
+      linha: `${produto.produto_id}::${resumo}`,
+      nome: resumo ? `${produto.nome} (${resumo})` : produto.nome,
+      preco_venda: Number(produto.preco_venda) + adicional,
+      complementos: escolhas,
+      quantidade: 1, observacao: '',
+    })
+    setMontando(null)
+  }
+
+  function mudarQtdRascunho(linha, delta) {
     setRascunho(prev => prev.flatMap(r => {
-      if (r.produto_id !== produtoId) return [r]
+      if ((r.linha ?? String(r.produto_id)) !== linha) return [r]
       const q = r.quantidade + delta
       return q <= 0 ? [] : [{ ...r, quantidade: q }]
     }))
   }
   // Observação do item AINDA no rascunho (antes de ir pra cozinha) — vai junto no envio.
-  function mudarObsRascunho(produtoId, texto) {
-    setRascunho(prev => prev.map(r => r.produto_id === produtoId ? { ...r, observacao: texto } : r))
+  function mudarObsRascunho(linha, texto) {
+    setRascunho(prev => prev.map(r => (r.linha ?? String(r.produto_id)) === linha ? { ...r, observacao: texto } : r))
   }
 
   // "Inventar produto": adiciona um item que não está no catálogo. Se o admin marcar
@@ -234,7 +293,7 @@ export default function PresencialSalao() {
       produtoId = data.id
       await loadAll()  // recarrega os produtos pra o novo aparecer na busca
     }
-    setRascunho(prev => [...prev, { produto_id: produtoId, nome, preco_venda: preco, quantidade: 1, observacao: '' }])
+    setRascunho(prev => [...prev, { produto_id: produtoId, linha: String(produtoId), nome, preco_venda: preco, complementos: [], quantidade: 1, observacao: '' }])
     setInvNome(''); setInvPreco(''); setInvCatalogo(false); setInvCategoria(''); setInvAberto(false)
   }
   // Nome já existe no catálogo? (ignora acento/maiúsculas) — pra avisar sem bloquear.
@@ -628,20 +687,20 @@ export default function PresencialSalao() {
                     🧾 A enviar — ainda não foi pra cozinha
                   </div>
                   {rascunho.map(r => (
-                    <div key={r.produto_id} style={{ padding: '5px 0' }}>
+                    <div key={r.linha ?? r.produto_id} style={{ padding: '5px 0' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 15.5, fontWeight: 700 }}>{r.nome}</div>
                           <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{fmt(r.preco_venda)}</div>
                         </div>
-                        <button type="button" onClick={() => mudarQtdRascunho(r.produto_id, -1)} style={qtdBtn}>−</button>
+                        <button type="button" onClick={() => mudarQtdRascunho(r.linha ?? String(r.produto_id), -1)} style={qtdBtn}>−</button>
                         <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{r.quantidade}</span>
-                        <button type="button" onClick={() => mudarQtdRascunho(r.produto_id, +1)} style={qtdBtn}>+</button>
+                        <button type="button" onClick={() => mudarQtdRascunho(r.linha ?? String(r.produto_id), +1)} style={qtdBtn}>+</button>
                         <span style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>{fmt(r.preco_venda * r.quantidade)}</span>
                       </div>
                       <input
                         value={r.observacao ?? ''}
-                        onChange={e => mudarObsRascunho(r.produto_id, e.target.value)}
+                        onChange={e => mudarObsRascunho(r.linha ?? String(r.produto_id), e.target.value)}
                         placeholder="📝 Observação (ex: sem cebola, ponto da carne...)"
                         style={{
                           width: '100%', marginTop: 6, padding: '8px 10px', fontSize: 14.5, fontWeight: 600, boxSizing: 'border-box',
@@ -809,6 +868,16 @@ export default function PresencialSalao() {
         </div>
       )}
 
+      {/* ── Modal de complementos (monta o item antes de ir pro rascunho) ── */}
+      {montando && (
+        <ModalComplementos
+          produto={montando}
+          grupos={compMap[montando.produto_id] ?? []}
+          onCancelar={() => setMontando(null)}
+          onConfirmar={escolhas => addMontado(montando, escolhas)}
+        />
+      )}
+
       {/* ── Modal de fechamento ── */}
       {fechando && comandaSel && (
         <div onClick={() => setFechando(false)}
@@ -924,4 +993,103 @@ const qtdBtn = {
   width: 28, height: 28, borderRadius: 6, cursor: 'pointer',
   border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)',
   fontSize: 16, lineHeight: 1, flexShrink: 0,
+}
+
+// Modal "montar o item": escolhe os complementos por grupo, com QUANTIDADE por opção
+// (a opção não some ao ser escolhida — dá pra somar no +). O `max` do grupo limita a
+// soma das quantidades daquele grupo; `min` obriga um mínimo antes de confirmar.
+function ModalComplementos({ produto, grupos, onCancelar, onConfirmar }) {
+  const [sel, setSel] = useState({}) // { grupoId: { opcaoId: qtd } }
+
+  const somaDe = (mapa) => Object.values(mapa ?? {}).reduce((s, q) => s + q, 0)
+  const somaGrupo = (gId) => somaDe(sel[gId])
+
+  function mudar(g, o, delta) {
+    setSel(prev => {
+      const atual = prev[g.id] ?? {}
+      const q = (atual[o.id] ?? 0) + delta
+      if (q < 0) return prev
+      // trava no máximo do grupo (só barra quando está aumentando).
+      // Conta a partir do `prev`, não do `sel` do render — senão dois cliques
+      // rápidos passariam do limite.
+      if (delta > 0 && g.max > 0 && somaDe(atual) >= g.max) return prev
+      const novo = { ...atual }
+      if (q === 0) delete novo[o.id]
+      else novo[o.id] = q
+      return { ...prev, [g.id]: novo }
+    })
+  }
+
+  const escolhas = grupos.flatMap(g =>
+    Object.entries(sel[g.id] ?? {}).map(([oId, qtd]) => {
+      const o = g.opcoes.find(x => String(x.id) === String(oId))
+      return { nome: o?.nome ?? '', preco_adicional: Number(o?.preco_adicional || 0), qtd }
+    })
+  )
+  const adicional = escolhas.reduce((s, e) => s + e.preco_adicional * e.qtd, 0)
+  const precoFinal = Number(produto.preco_venda) + adicional
+  const faltando = grupos.filter(g => (g.min ?? 0) > 0 && somaGrupo(g.id) < g.min)
+
+  return (
+    <div onClick={onCancelar}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ width: '100%', maxWidth: 460, background: 'var(--bg)', borderTopLeftRadius: 16, borderTopRightRadius: 16, border: '1px solid var(--border)', padding: 18, maxHeight: '85dvh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <div style={{ fontWeight: 800, fontSize: 17 }}>{produto.nome}</div>
+          <button type="button" onClick={onCancelar}
+            style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-muted)', lineHeight: 1 }}>×</button>
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>{fmt(produto.preco_venda)}</div>
+
+        {grupos.map(g => {
+          const conta = somaGrupo(g.id)
+          const falta = (g.min ?? 0) > 0 && conta < g.min
+          const cheio = g.max > 0 && conta >= g.max
+          return (
+            <div key={g.id} style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontWeight: 700, fontSize: 14.5 }}>{g.nome}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: falta ? '#d97706' : 'var(--text-muted)' }}>
+                  {conta}/{g.max}{g.min > 0 ? ' · obrigatório' : ''}
+                </span>
+              </div>
+              {g.opcoes.map(o => {
+                const q = sel[g.id]?.[o.id] ?? 0
+                return (
+                  <div key={o.id}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14.5, fontWeight: q > 0 ? 700 : 500 }}>{o.nome}</div>
+                      {Number(o.preco_adicional) > 0 && (
+                        <div style={{ fontSize: 12.5, color: 'var(--primary)', fontWeight: 700 }}>+{fmt(o.preco_adicional)}</div>
+                      )}
+                    </div>
+                    <button type="button" onClick={() => mudar(g, o, -1)} disabled={q === 0}
+                      style={{ ...qtdBtn, opacity: q === 0 ? .35 : 1, cursor: q === 0 ? 'default' : 'pointer' }}>−</button>
+                    <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{q}</span>
+                    <button type="button" onClick={() => mudar(g, o, +1)} disabled={cheio}
+                      style={{ ...qtdBtn, opacity: cheio ? .35 : 1, cursor: cheio ? 'default' : 'pointer' }}>+</button>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })}
+
+        {faltando.length > 0 && (
+          <div style={{ fontSize: 12.5, color: '#d97706', fontWeight: 700, marginBottom: 8 }}>
+            ⚠️ Falta escolher: {faltando.map(g => g.nome).join(', ')}
+          </div>
+        )}
+
+        <button type="button" onClick={() => onConfirmar(escolhas)} disabled={faltando.length > 0}
+          style={{ width: '100%', padding: '12px 0', borderRadius: 10, marginTop: 4,
+            border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 15, fontWeight: 800,
+            cursor: faltando.length > 0 ? 'default' : 'pointer', opacity: faltando.length > 0 ? .5 : 1 }}>
+          Adicionar · {fmt(precoFinal)}
+        </button>
+      </div>
+    </div>
+  )
 }
