@@ -152,5 +152,13 @@ $function$;
 
 -- O DROP acima levou junto as permissões da função antiga; devolve as mesmas
 -- (era: authenticated + service_role).
+--
+-- O REVOKE vem primeiro e é obrigatório: função recém-criada nasce com EXECUTE
+-- para PUBLIC (e portanto para o anon do Supabase). Sem isso, um anônimo poderia
+-- chamar uma função SECURITY DEFINER que escreve em vendas/pagamentos/estoque.
+-- Na prática ele não passaria do primeiro RAISE (current_empresa_id() é nulo sem
+-- login), mas o certo é não expor a superfície.
+REVOKE ALL ON FUNCTION public.fechar_conta_presencial(uuid, jsonb, boolean, uuid)
+  FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.fechar_conta_presencial(uuid, jsonb, boolean, uuid)
   TO authenticated, service_role;
