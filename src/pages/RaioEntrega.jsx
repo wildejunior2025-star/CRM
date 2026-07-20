@@ -12,6 +12,17 @@ function normBairro(s) {
     .replace(/^bairro\s+/, '').replace(/\s+/g, ' ')
 }
 
+// Sugestões de bairro — 36 bairros oficiais de Natal/RN (a cidade das lojas).
+// Bairro fora da lista pode ser digitado normalmente (texto livre).
+const BAIRROS_NATAL = [
+  'Alecrim', 'Areia Preta', 'Barro Vermelho', 'Bom Pastor', 'Candelária', 'Capim Macio',
+  'Cidade Alta', 'Cidade da Esperança', 'Cidade Nova', 'Dix-Sept Rosado', 'Felipe Camarão',
+  'Guarapes', 'Igapó', 'Lagoa Azul', 'Lagoa Nova', 'Lagoa Seca', 'Mãe Luiza', 'Neópolis',
+  'Nordeste', 'Nossa Senhora da Apresentação', 'Nossa Senhora de Nazaré', 'Nova Descoberta',
+  'Pajuçara', 'Petrópolis', 'Pitimbu', 'Planalto', 'Ponta Negra', 'Potengi', 'Praia do Meio',
+  'Quintas', 'Redinha', 'Ribeira', 'Rocas', 'Salinas', 'Santos Reis', 'Tirol',
+]
+
 export default function RaioEntrega() {
   const { profile, refreshProfile } = useAuth()
 
@@ -49,6 +60,16 @@ export default function RaioEntrega() {
   const [raio, setRaio] = useState(10)
   const [taxasBairro, setTaxasBairro] = useState([]) // [{bairro, norm, modo:'km'|'taxa'|'bloqueio', taxa, tempo, total}]
   const [novoBairro, setNovoBairro] = useState('')
+  const [bairroOpen, setBairroOpen] = useState(false) // dropdown de sugestões de bairro
+
+  // Adiciona um bairro à lista (sugestão ou digitado). Ignora acento pra não duplicar.
+  function adicionarBairro(nome) {
+    const b = (nome || '').trim(); if (!b) return
+    const n = normBairro(b)
+    setNovoBairro(''); setBairroOpen(false)
+    if (taxasBairro.some(x => x.norm === n)) return
+    setTaxasBairro(prev => [{ bairro: b, norm: n, modo: 'taxa', taxa: '', tempo: '', total: 0 }, ...prev])
+  }
 
   // UI
   const [geocodando, setGeocodando] = useState(false)
@@ -716,16 +737,38 @@ export default function RaioEntrega() {
             Puxei os bairros dos seus pedidos. Pra cada um: <b>cobrar taxa fixa</b>, <b>não entregar</b>, ou deixar no <b>cálculo por km</b> (padrão). Bairro fora da lista usa o km.
           </p>
           <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-            <input value={novoBairro} onChange={e => setNovoBairro(e.target.value)} placeholder="Adicionar outro bairro..."
-              style={{ flex: 1, minWidth: 180, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)' }} />
-            <button type="button" className="btn btn-secondary"
-              onClick={() => {
-                const b = novoBairro.trim(); if (!b) return
-                const n = normBairro(b)
-                if (taxasBairro.some(x => x.norm === n)) { setNovoBairro(''); return }
-                setTaxasBairro([{ bairro: b, norm: n, modo: 'taxa', taxa: '', tempo: '', total: 0 }, ...taxasBairro])
-                setNovoBairro('')
-              }}>+ Adicionar</button>
+            <div style={{ position: 'relative', flex: 1, minWidth: 180 }}>
+              <input value={novoBairro}
+                onChange={e => { setNovoBairro(e.target.value); setBairroOpen(true) }}
+                onFocus={() => setBairroOpen(true)}
+                onBlur={() => setTimeout(() => setBairroOpen(false), 150)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); adicionarBairro(novoBairro) } }}
+                placeholder="Buscar/adicionar bairro (ex.: potengi)..." autoComplete="off"
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', boxSizing: 'border-box' }} />
+              {bairroOpen && (() => {
+                const q = normBairro(novoBairro)
+                const jaTem = new Set(taxasBairro.map(x => x.norm))
+                const sug = BAIRROS_NATAL.filter(b => !jaTem.has(normBairro(b)) && (!q || normBairro(b).includes(q))).slice(0, 40)
+                if (sug.length === 0) return null
+                return (
+                  <div style={{
+                    position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 60,
+                    maxHeight: 260, overflowY: 'auto', background: 'var(--surface, #fff)',
+                    border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 10px 28px rgba(0,0,0,.18)', padding: 4,
+                  }}>
+                    {sug.map(b => (
+                      <div key={b} onMouseDown={() => adicionarBairro(b)}
+                        style={{ padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 14 }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover, rgba(0,0,0,.05))'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        {b}
+                      </div>
+                    ))}
+                  </div>
+                )
+              })()}
+            </div>
+            <button type="button" className="btn btn-secondary" onClick={() => adicionarBairro(novoBairro)}>+ Adicionar</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {taxasBairro.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Carregando bairros…</p>}
