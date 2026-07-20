@@ -706,6 +706,16 @@ export default function DeliveryLoja() {
 
 function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
   const temComplementos = produto.complementos?.length > 0
+  // Preço "a partir de" = base + as opções obrigatórias mais baratas (o `min` de
+  // cada grupo). Sem isso, um produto "monte" com base 0 (ex: pizza 2 sabores)
+  // mostraria "a partir de R$ 0,00".
+  const minExtra = (produto.complementos ?? []).reduce((s, g) => {
+    const n = g.min ?? 0
+    if (n <= 0) return s
+    const precos = (g.opcoes ?? []).map(o => Number(o.preco_adicional || 0)).sort((a, b) => a - b)
+    return s + precos.slice(0, n).reduce((a, b) => a + b, 0)
+  }, 0)
+  const precoBase = Number(produto.preco) + minExtra
   return (
     <div className="dloja-prod-card">
       <div className="dloja-prod-foto">
@@ -725,7 +735,7 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
         )}
         <p className="dloja-prod-preco">
           {temComplementos && <span style={{ fontSize: 11, color: 'var(--dl-text-muted)', fontWeight: 500 }}>a partir de </span>}
-          R$ {fmt(produto.preco)}
+          R$ {fmt(precoBase)}
         </p>
       </div>
       <div className="dloja-prod-acao">
