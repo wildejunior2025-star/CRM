@@ -313,6 +313,7 @@ export default function DeliveryCheckout() {
   const [cepInfo, setCepInfo] = useState(null) // { cep, rua, bairro }
   const [userId, setUserId]         = useState(null)
   const [reconhecido, setReconhecido] = useState(false) // cadastro achado pelo telefone
+  const [reconfirmar, setReconfirmar] = useState(false) // só a minoria com endereço errado: obriga remarcar o pino uma vez
   const [coordCliente, setCoordCliente] = useState(null) // {lat,lng} do ponto de entrega
   const [mapaAberto, setMapaAberto]     = useState(false)
   const pinManualRef = useRef(false) // true quando o cliente marcou no mapa (não sobrescreve com geocode)
@@ -400,6 +401,7 @@ export default function DeliveryCheckout() {
       if (!data) return
       reconhecidoRef.current = true
       setReconhecido(true)
+      setReconfirmar(!!data.reconfirmar_endereco) // marcado no banco → força remarcar o mapa
       setForm(prev => ({
         ...prev,
         nome:        prev.nome.trim()        ? prev.nome        : (data.nome || ''),
@@ -594,8 +596,14 @@ export default function DeliveryCheckout() {
     // Só exige se a loja tem coordenada (senão o botão do mapa nem aparece e o
     // cliente ficaria travado sem como marcar).
     const lojaTemMapa = !!(lojaEndereco?.latitude && lojaEndereco?.longitude)
-    if (tipo === 'entrega' && lojaTemMapa && !coordCliente) {
-      setErroGlobal('Toque em "Marcar meu local no mapa" pra o entregador achar seu endereço.')
+    // Cliente marcado pra reconfirmar (endereço estava errado) precisa marcar o pino
+    // MANUALMENTE — a coordenada que o geocode acha sozinho não vale pra ele. Pros
+    // demais clientes a condição extra é falsa, então o fluxo continua idêntico.
+    const precisaPino = !coordCliente || (reconfirmar && !pinManualRef.current)
+    if (tipo === 'entrega' && lojaTemMapa && precisaPino) {
+      setErroGlobal(reconfirmar
+        ? 'Pra confirmar seu endereço, toque em "Marcar meu local no mapa" e aponte onde você mora.'
+        : 'Toque em "Marcar meu local no mapa" pra o entregador achar seu endereço.')
       setMapaAberto(true)
       return
     }
