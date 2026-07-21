@@ -137,14 +137,17 @@ export default function WhatsAppConfig() {
       body: { action: 'status' },
     })
 
-    if (data?.state === 'open') {
+    // Só conta como conectado quando VEM O NÚMERO. "open" sem número é conexão
+    // fantasma (pareamento interrompido — ex.: atualizou a tela no meio do QR):
+    // aparece verde mas não recebe mensagem. Sem número → não é conectado.
+    if (data?.state === 'open' && data.phone) {
       setConnStatus('connected')
       setConnPhone(data.phone)
       return
     }
 
-    // Se deu erro ou estado transitório (close), tenta mais uma vez após 3s
-    if (retry && (error || !data || data.state === 'close' || data.state === 'error')) {
+    // Estados transitórios OU fantasma (open sem número): tenta mais uma vez após 3s
+    if (retry && (error || !data || data.state === 'close' || data.state === 'error' || (data.state === 'open' && !data.phone))) {
       await new Promise(r => setTimeout(r, 3000))
       return checkStatus(false)
     }
@@ -163,7 +166,9 @@ export default function WhatsAppConfig() {
       const { data } = await supabase.functions.invoke('whatsapp-connect', {
         body: { action: 'status' },
       })
-      if (data?.state === 'open') {
+      // Só encerra o pareamento como sucesso quando o número confirmar. "open"
+      // sem número ainda não firmou (segue tentando até o número vir ou o QR renovar).
+      if (data?.state === 'open' && data.phone) {
         stopPolling()
         setConnStatus('connected')
         setConnPhone(data.phone)
