@@ -26,6 +26,7 @@ const SERVICOS = [
 
 let _device = null
 let _car = null
+const LS_DEV = 'bt_printer_id' // id do aparelho autorizado — pra religar sozinho depois
 
 const suporta = () => typeof navigator !== 'undefined' && !!navigator.bluetooth
 const enc = (s) => new TextEncoder().encode(s)
@@ -49,6 +50,7 @@ async function acharCaracteristica(server) {
 export async function conectarImpressoraCelular() {
   if (!suporta()) throw new Error('Este navegador não tem Bluetooth. Abra pelo Chrome no Android (não pelo app).')
   _device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: SERVICOS })
+  try { localStorage.setItem(LS_DEV, _device.id) } catch { /* ok */ }
   _device.addEventListener('gattserverdisconnected', () => { _car = null })
   const server = await _device.gatt.connect()
   _car = await acharCaracteristica(server)
@@ -56,11 +58,37 @@ export async function conectarImpressoraCelular() {
   return true
 }
 
+// Religa SEM pedir de novo. Cobre os 2 casos de quando o Android derruba o BT:
+//  - aba só suspensa (device ainda na memória) → reconecta o gatt
+//  - aba recarregada (perdeu o device) → recupera pelo getDevices() (aparelhos
+//    que o site já autorizou), sem o prompt de seleção.
+// Retorna true se religou; false se não deu — nunca lança (não atrapalha nada).
+export async function reconectarSilencioso() {
+  if (!suporta()) return false
+  if (estaConectada()) return true
+  try {
+    if (_device?.gatt) {
+      const server = await _device.gatt.connect()
+      _car = await acharCaracteristica(server)
+      if (estaConectada()) return true
+    }
+    if (!navigator.bluetooth.getDevices) return false
+    const salvos = await navigator.bluetooth.getDevices()
+    if (!salvos?.length) return false
+    let alvoId = null; try { alvoId = localStorage.getItem(LS_DEV) } catch { /* ok */ }
+    const dev = salvos.find(d => d.id === alvoId) || salvos[0]
+    if (!dev) return false
+    _device = dev
+    _device.addEventListener('gattserverdisconnected', () => { _car = null })
+    const server = await _device.gatt.connect()
+    _car = await acharCaracteristica(server)
+    return estaConectada()
+  } catch { return false }
+}
+
 async function garantirConectado() {
   if (estaConectada()) return
-  if (_device?.gatt && !_device.gatt.connected) {
-    try { const server = await _device.gatt.connect(); _car = await acharCaracteristica(server); if (_car) return } catch { /* reconecta pedindo de novo */ }
-  }
+  if (await reconectarSilencioso()) return   // tenta religar sozinho antes de pedir
   await conectarImpressoraCelular()
 }
 

@@ -1703,6 +1703,28 @@ function ImpressoraCelularPanel({ empresa }) {
   const [msg, setMsg] = useState(null)
   const semBt = typeof navigator !== 'undefined' && !navigator.bluetooth
 
+  // Religa a impressora sozinho quando a tela volta a ficar visível (ex.: o dono
+  // saiu pro WhatsApp e voltou — o Android derruba o Bluetooth em background).
+  // Assim ele não precisa clicar "Conectar" de novo toda vez.
+  useEffect(() => {
+    let vivo = true
+    async function tentar() {
+      if (document.visibilityState !== 'visible') return
+      try {
+        const mod = await import('../utils/imprimirBluetooth')
+        if (mod.estaConectada()) { if (vivo) { setConectada(true); setNome(mod.nomeImpressora()) } return }
+        const ok = await mod.reconectarSilencioso()
+        if (!vivo) return
+        setConectada(ok)
+        if (ok) setNome(mod.nomeImpressora())
+      } catch { /* ignora */ }
+    }
+    tentar()
+    document.addEventListener('visibilitychange', tentar)
+    window.addEventListener('focus', tentar)
+    return () => { vivo = false; document.removeEventListener('visibilitychange', tentar); window.removeEventListener('focus', tentar) }
+  }, [])
+
   async function rodar(fn, okTxt) {
     setBusy(true); setMsg(null)
     try {
