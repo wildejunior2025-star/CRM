@@ -3492,6 +3492,22 @@ export default function PainelPedidos() {
     }
   }
 
+  // Auto-imprime um pedido novo. Se a térmica Bluetooth do CELULAR está conectada
+  // (ou reconecta sozinha), imprime por ela e para aqui — assim o papel sai sozinho
+  // sem precisar do botão 📱🖨️, e sem abrir o diálogo do navegador. Se não houver
+  // Bluetooth (ex.: no PC), cai no caminho normal (app FWC → QZ → navegador).
+  // Silencioso: no automático não mostra alerta se falhar (não atrapalha o painel).
+  async function autoImprimirPedido(pedido) {
+    try {
+      const mod = await import('../utils/imprimirBluetooth')
+      if (mod.estaConectada() || await mod.reconectarSilencioso()) {
+        await mod.imprimirPedidoCelular(pedido, empresa)
+        return
+      }
+    } catch { /* sem Bluetooth ou falhou — usa o caminho normal abaixo */ }
+    imprimirCupom(pedido, empresa, { auto: true })
+  }
+
   // ── Painel lateral direito (Impressora / Pedidos) ─────────
   // Lembra a seção aberta (ex.: Mesas) ao sair e voltar do gestor.
   const [painelDireito, setPainelDireito] = useState(() => {
@@ -4242,7 +4258,7 @@ export default function PainelPedidos() {
               // Imprime pedido novo (aguardando) OU venda de balcão (já confirmada).
               // Se o app Impressora FWC está imprimindo, o navegador não imprime (evita 2 vias).
               if (autoImprimirAtivo() && !fwcImprimeRef.current && (novo.status === 'aguardando' || novo.origem === 'balcao')) {
-                imprimirCupom(novo, empresa, { auto: true })
+                autoImprimirPedido(novo)
               }
               if (novo.status === 'aguardando') {
                 iniciarLoopSom()
@@ -4261,7 +4277,7 @@ export default function PainelPedidos() {
                   // Pedido chegou ao painel agora (ex: PIX confirmado)
                   if (novo.status === 'aguardando') {
                     iniciarLoopSom()
-                    if (autoImprimirAtivo() && !fwcImprimeRef.current) imprimirCupom(novo, empresa, { auto: true })
+                    if (autoImprimirAtivo() && !fwcImprimeRef.current) autoImprimirPedido(novo)
                     if (aceitarAutoAtivo()) handleConfirmar(novo.id, tempoPrevistoMin(novo, empresa))
                   }
                   return [...prev, novo]
