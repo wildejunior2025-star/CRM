@@ -12,6 +12,23 @@ const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate(
 const normForma = (f) => !f ? 'Outros' : f.startsWith('boleto') ? 'Boleto' : f === 'a_vista' ? 'À vista' : f === 'fiado' ? 'Fiado' : f
 const PERIODOS = [['hoje', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias'], ['mes', 'Mês'], ['custom', 'Personalizado']]
 
+// Rótulo + ícone de cada forma de pagamento, pro detalhe que abre ao clicar no canal.
+// 'online' = pago pelo próprio site (Pix ou cartão via Mercado Pago), o dinheiro
+// não passa pela mão de ninguém na loja.
+const FORMA_INFO = {
+  dinheiro: { icon: '💵', label: 'Dinheiro' },
+  cartao:   { icon: '💳', label: 'Cartão (maquineta)' },
+  credito:  { icon: '💳', label: 'Cartão de crédito' },
+  debito:   { icon: '💳', label: 'Cartão de débito' },
+  pix:      { icon: '📱', label: 'Pix' },
+  online:   { icon: '🌐', label: 'Pago online' },
+  vale:     { icon: '🎟️', label: 'Vale' },
+  a_vista:  { icon: '💰', label: 'À vista' },
+  fiado:    { icon: '📒', label: 'Fiado' },
+  outro:    { icon: '•',  label: 'Outro' },
+}
+const infoForma = (f) => FORMA_INFO[f] || { icon: '•', label: normForma(f) }
+
 function rangeFor(periodo, custIni, custFim) {
   const now = new Date()
   const start = new Date(now)
@@ -191,6 +208,13 @@ export default function Dashboard() {
     // eventos de venda no período (vendas + delivery)
     let fat = 0, n = 0, fatPrev = 0
     const canal = { ifood: 0, app: 0, wpp: 0, presencial: 0 }
+    // Mesmo recorte do canal, mas quebrado por forma de pagamento — é o que
+    // aparece quando você clica no card do canal.
+    const formas = { ifood: {}, app: {}, wpp: {}, presencial: {} }
+    const addForma = (ch, f, val) => {
+      const k = f || 'outro'
+      formas[ch][k] = (formas[ch][k] || 0) + val
+    }
     const horas = Array.from({ length: 24 }, (_, h) => ({ label: h, value: 0 }))
     const ehHoje = periodo === 'hoje'
     const umDia = (now - start) <= 26 * 3600 * 1000            // período de 1 dia → gráfico por hora
@@ -213,7 +237,10 @@ export default function Dashboard() {
     for (const v of vendas) {
       const val = Number(v.total)
       if (inRange(v.created_at, start, now) || (ehHoje && new Date(v.created_at) >= start)) {
-        if (new Date(v.created_at) >= start) { fat += val; n++; addBucket(v.created_at, val); if ((v.observacoes || '').startsWith('Presencial')) canal.presencial += val }
+        if (new Date(v.created_at) >= start) {
+          fat += val; n++; addBucket(v.created_at, val)
+          if ((v.observacoes || '').startsWith('Presencial')) { canal.presencial += val; addForma('presencial', v.forma_pagamento, val) }
+        }
       }
       if (inRange(v.created_at, prevStart, prevEnd)) fatPrev += val
     }
@@ -223,9 +250,9 @@ export default function Dashboard() {
       const val = Number(p.total)
       if (new Date(p.created_at) >= start && new Date(p.created_at) < now) {
         fat += val; n++; addBucket(p.created_at, val)
-        if (p.origem === 'ifood') { canal.ifood += val; ifoodPeds.push(p) }
-        else if (p.origem === 'app') canal.app += val
-        else if (p.origem === 'whatsapp' || p.origem === 'cardapio') canal.wpp += val
+        if (p.origem === 'ifood') { canal.ifood += val; ifoodPeds.push(p); addForma('ifood', p.forma_pagamento, val) }
+        else if (p.origem === 'app') { canal.app += val; addForma('app', p.forma_pagamento, val) }
+        else if (p.origem === 'whatsapp' || p.origem === 'cardapio') { canal.wpp += val; addForma('wpp', p.forma_pagamento, val) }
       }
       if (inRange(p.created_at, prevStart, prevEnd)) fatPrev += val
     }
@@ -256,7 +283,7 @@ export default function Dashboard() {
     for (const v of vendas) if (new Date(v.created_at) >= mStart) fatMes += Number(v.total)
     for (const p of pedidos) if (validPed(p) && new Date(p.created_at) >= mStart) fatMes += Number(p.total)
 
-    return { fat, fatPrev, n, ticket, canal, buckets, horas, top, novos, fatMes, ifoodLiq, porHora }
+    return { fat, fatPrev, n, ticket, canal, formas, buckets, horas, top, novos, fatMes, ifoodLiq, porHora }
   }, [periodo, custIni, custFim, vendas, pedidos, itens, nomes, clientesNovos, ifoodRates])
 
   async function salvarMeta(v) {
@@ -264,10 +291,12 @@ export default function Dashboard() {
     if (empresaId) await supabase.from('empresas').update({ meta_faturamento_mensal: x }).eq('id', empresaId)
   }
   const metaPct = meta > 0 ? Math.min(100, Math.round((m.fatMes / meta) * 100)) : 0
+  // Qual card de canal está aberto mostrando a quebra por forma de pagamento.
+  const [canalAberto, setCanalAberto] = useState(null)
   const canais = [
-    { icon: '📱', nome: 'App', value: m.canal.app },
-    { icon: '💬', nome: 'WhatsApp + Loja Online', value: m.canal.wpp },
-    { icon: '🍽️', nome: 'Presencial', value: m.canal.presencial },
+    { key: 'app', icon: '📱', nome: 'App', value: m.canal.app },
+    { key: 'wpp', icon: '💬', nome: 'WhatsApp + Loja Online', value: m.canal.wpp },
+    { key: 'presencial', icon: '🍽️', nome: 'Presencial', value: m.canal.presencial },
   ]
 
   return (
@@ -325,16 +354,59 @@ export default function Dashboard() {
           <div>
             <strong style={{ fontSize: 15, display: 'block', marginBottom: 10 }}>Vendas por canal</strong>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-              {canais.map(c => (
-                <div key={c.nome} style={cardBox}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 24 }}>{c.icon}</span>
-                    <span style={{ fontWeight: 700, fontSize: 13.5 }}>{c.nome}</span>
+              {canais.map(c => {
+                const aberto = canalAberto === c.key
+                const linhas = Object.entries(m.formas[c.key] || {}).sort((a, b) => b[1] - a[1])
+                return (
+                  <div key={c.nome}
+                    onClick={() => setCanalAberto(aberto ? null : c.key)}
+                    role="button" tabIndex={0} aria-expanded={aberto}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCanalAberto(aberto ? null : c.key) } }}
+                    style={{ ...cardBox, cursor: 'pointer', borderColor: aberto ? 'var(--primary)' : 'var(--border)', transition: 'border-color .15s' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 24 }}>{c.icon}</span>
+                      <span style={{ fontWeight: 700, fontSize: 13.5 }}>{c.nome}</span>
+                      <span aria-hidden style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', transform: aberto ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }}>▼</span>
+                    </div>
+                    <div style={{ fontSize: 24, fontWeight: 800, marginTop: 8 }}>{fmt(c.value)}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{m.fat > 0 ? Math.round(c.value / m.fat * 100) : 0}% do faturamento</div>
+
+                    {aberto && (
+                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                        {linhas.length === 0 ? (
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Nenhuma venda neste canal no período.</div>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 8 }}>Como entrou</div>
+                            {linhas.map(([forma, valor]) => {
+                              const inf = infoForma(forma)
+                              const pct = c.value > 0 ? Math.round(valor / c.value * 100) : 0
+                              return (
+                                <div key={forma} style={{ marginBottom: 8 }}>
+                                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 13 }}>
+                                    <span aria-hidden>{inf.icon}</span>
+                                    <span style={{ flex: 1 }}>{inf.label}</span>
+                                    <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(valor)}</strong>
+                                    <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 32, textAlign: 'right' }}>{pct}%</span>
+                                  </div>
+                                  <div style={{ height: 4, borderRadius: 4, background: 'var(--border)', marginTop: 4, overflow: 'hidden' }}>
+                                    <div style={{ height: '100%', width: `${pct}%`, background: 'var(--primary)' }} />
+                                  </div>
+                                </div>
+                              )
+                            })}
+                            {c.key === 'presencial' && (
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.5 }}>
+                                Venda de mesa é registrada só como <strong>à vista</strong> ou <strong>fiado</strong> — o sistema não guarda se o à vista foi dinheiro ou cartão.
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ fontSize: 24, fontWeight: 800, marginTop: 8 }}>{fmt(c.value)}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{m.fat > 0 ? Math.round(c.value / m.fat * 100) : 0}% do faturamento</div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
 
