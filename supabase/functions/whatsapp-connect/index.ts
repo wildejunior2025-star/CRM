@@ -105,7 +105,10 @@ serve(async (req) => {
             if (fetchRes.ok) {
               const fetchData = await fetchRes.json()
               const inst = Array.isArray(fetchData) ? fetchData[0] : fetchData
-              phone = inst?.owner?.replace(/@s\.whatsapp\.net$/, "")
+              // Evolution v2 usa "ownerJid"; v1 usava "owner". Tenta os dois.
+              phone = inst?.ownerJid?.replace(/@s\.whatsapp\.net$/, "")
+                ?? inst?.owner?.replace(/@s\.whatsapp\.net$/, "")
+                ?? inst?.instance?.ownerJid?.replace(/@s\.whatsapp\.net$/, "")
                 ?? inst?.instance?.owner?.replace(/@s\.whatsapp\.net$/, "")
                 ?? null
             }
@@ -159,7 +162,10 @@ serve(async (req) => {
               if (fetchRes.ok) {
                 const fetchData = await fetchRes.json()
                 const inst = Array.isArray(fetchData) ? fetchData[0] : fetchData
-                phone = inst?.owner?.replace(/@s\.whatsapp\.net$/, "")
+                // Evolution v2 usa "ownerJid"; v1 usava "owner". Tenta os dois.
+                phone = inst?.ownerJid?.replace(/@s\.whatsapp\.net$/, "")
+                  ?? inst?.owner?.replace(/@s\.whatsapp\.net$/, "")
+                  ?? inst?.instance?.ownerJid?.replace(/@s\.whatsapp\.net$/, "")
                   ?? inst?.instance?.owner?.replace(/@s\.whatsapp\.net$/, "")
                   ?? null
               }
