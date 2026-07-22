@@ -40,6 +40,9 @@ export default function RaioEntrega() {
 
   // Delivery
   const [aceitaDelivery,  setAceitaDelivery]  = useState(false)
+  // Retirada na loja: liga por padrão. Vale só pra loja online e portal —
+  // o bot do WhatsApp, o balcão, as mesas e o iFood não olham isso.
+  const [aceitaRetirada,  setAceitaRetirada]  = useState(true)
   const [taxaEntrega,     setTaxaEntrega]     = useState(0)
   const [pedidoMinimo,    setPedidoMinimo]    = useState(0)
   const [usarTaxasPorKm,  setUsarTaxasPorKm]  = useState(false)
@@ -134,6 +137,7 @@ export default function RaioEntrega() {
   function normSnap(o) {
     return JSON.stringify({
       aceitaDelivery: !!o.aceitaDelivery,
+      aceitaRetirada: o.aceitaRetirada !== false,
       taxaEntrega: String(o.taxaEntrega ?? ''),
       pedidoMinimo: String(o.pedidoMinimo ?? ''),
       usarTaxasPorKm: !!o.usarTaxasPorKm,
@@ -147,13 +151,14 @@ export default function RaioEntrega() {
     })
   }
   function snapshotAtual() {
-    return normSnap({ aceitaDelivery, taxaEntrega, pedidoMinimo, usarTaxasPorKm, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado })
+    return normSnap({ aceitaDelivery, aceitaRetirada, taxaEntrega, pedidoMinimo, usarTaxasPorKm, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado })
   }
   function descartarAlteracoes() {
     if (!baselineRef.current) return
     if (!window.confirm('Descartar as alterações não salvas e voltar ao que estava salvo?')) return
     const b = JSON.parse(baselineRef.current)
-    setAceitaDelivery(!!b.aceitaDelivery); setTaxaEntrega(b.taxaEntrega); setPedidoMinimo(b.pedidoMinimo)
+    setAceitaDelivery(!!b.aceitaDelivery); setAceitaRetirada(b.aceitaRetirada !== false)
+    setTaxaEntrega(b.taxaEntrega); setPedidoMinimo(b.pedidoMinimo)
     setUsarTaxasPorKm(!!b.usarTaxasPorKm); setTaxasKm(Array.isArray(b.taxasKm) ? b.taxasKm : [])
     setTempoMin(b.tempoMin); setTempoMax(b.tempoMax); setCategoria(b.categoria); setRaio(b.raio)
     setCep(b.cep); setRua(b.rua); setNumero(b.numero); setBairro(b.bairro); setCidade(b.cidade); setEstado(b.estado)
@@ -166,13 +171,14 @@ export default function RaioEntrega() {
     if (!profile?.empresa_id) return
     supabase
       .from('empresas')
-      .select('id, aceita_delivery, taxa_entrega, pedido_minimo, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, cep, endereco, numero, bairro, cidade, estado, categoria_delivery, raio_entrega_km, latitude, longitude')
+      .select('id, aceita_delivery, aceita_retirada, taxa_entrega, pedido_minimo, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, cep, endereco, numero, bairro, cidade, estado, categoria_delivery, raio_entrega_km, latitude, longitude')
       .eq('id', profile.empresa_id)
       .single()
       .then(({ data }) => {
         if (!data) return
         setEmpresaId(data.id)
         setAceitaDelivery(data.aceita_delivery ?? false)
+        setAceitaRetirada(data.aceita_retirada !== false)
         setTaxaEntrega(data.taxa_entrega ?? 0)
         setPedidoMinimo(data.pedido_minimo ?? 0)
         setTempoMin(data.tempo_entrega_min ?? 30)
@@ -196,6 +202,7 @@ export default function RaioEntrega() {
         // Baseline = valores salvos (referência pra detectar alteração).
         baselineRef.current = normSnap({
           aceitaDelivery: data.aceita_delivery ?? false,
+          aceitaRetirada: data.aceita_retirada !== false,
           taxaEntrega: data.taxa_entrega ?? 0,
           pedidoMinimo: data.pedido_minimo ?? 0,
           usarTaxasPorKm: faixas.length > 0,
@@ -212,7 +219,8 @@ export default function RaioEntrega() {
           const raw = draftKey && localStorage.getItem(draftKey)
           if (raw && raw !== baselineRef.current) {
             const d = JSON.parse(raw)
-            setAceitaDelivery(!!d.aceitaDelivery); setTaxaEntrega(d.taxaEntrega ?? 0); setPedidoMinimo(d.pedidoMinimo ?? 0)
+            setAceitaDelivery(!!d.aceitaDelivery); setAceitaRetirada(d.aceitaRetirada !== false)
+            setTaxaEntrega(d.taxaEntrega ?? 0); setPedidoMinimo(d.pedidoMinimo ?? 0)
             setUsarTaxasPorKm(!!d.usarTaxasPorKm); setTaxasKm(Array.isArray(d.taxasKm) ? d.taxasKm : [])
             setTempoMin(d.tempoMin ?? 30); setTempoMax(d.tempoMax ?? 60); setCategoria(d.categoria ?? ''); setRaio(d.raio ?? 10)
             setCep(d.cep ?? cepFmt); setRua(d.rua ?? ''); setNumero(d.numero ?? '')
@@ -233,7 +241,7 @@ export default function RaioEntrega() {
       try { mudou ? localStorage.setItem(draftKey, snap) : localStorage.removeItem(draftKey) } catch { /* ignore */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aceitaDelivery, taxaEntrega, pedidoMinimo, usarTaxasPorKm, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado])
+  }, [aceitaDelivery, aceitaRetirada, taxaEntrega, pedidoMinimo, usarTaxasPorKm, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado])
 
   // ── Carrega bairros: config salva + sugestões dos pedidos passados ──
   useEffect(() => {
@@ -406,6 +414,7 @@ export default function RaioEntrega() {
 
     const { error } = await supabase.from('empresas').update({
       aceita_delivery:      aceitaDelivery,
+      aceita_retirada:      aceitaRetirada,
       taxa_entrega:         usarTaxasPorKm ? 0 : (parseFloat(taxaEntrega) || 0),
       pedido_minimo:        parseFloat(pedidoMinimo) || 0,
       taxas_entrega_km:     usarTaxasPorKm
@@ -589,6 +598,36 @@ export default function RaioEntrega() {
                 className={`re-switch ${aceitaDelivery ? 'on' : 'off'}`}
                 onClick={() => setAceitaDelivery(v => !v)}
                 aria-label="Ativar delivery"
+              >
+                <span className="re-switch-thumb" />
+              </button>
+            </div>
+          </div>
+
+          {/* Retirada na loja — vale só pra loja online e portal do cliente.
+              O bot do WhatsApp, o balcão, as mesas e o iFood seguem oferecendo
+              retirada normalmente. */}
+          <div className="re-toggle-row" style={{ borderTop: '1px solid var(--border)' }}>
+            <div>
+              <div className="re-toggle-label">Permitir retirada na loja</div>
+              <div className="re-toggle-sub">
+                {aceitaRetirada
+                  ? 'O cliente pode escolher entre entrega e retirar na loja.'
+                  : 'Só entrega — a opção “Retirar na loja” some do cardápio online.'}
+                <br />
+                <span style={{ opacity: .75 }}>Vale para a loja online e o portal. Não muda o WhatsApp, o balcão, as mesas nem o iFood.</span>
+              </div>
+            </div>
+            <div className="re-toggle-controls">
+              <span className={`re-status-badge ${aceitaRetirada ? 'active' : 'inactive'}`}>
+                {aceitaRetirada ? 'Ativo' : 'Inativo'}
+              </span>
+              <button
+                type="button"
+                className={`re-switch ${aceitaRetirada ? 'on' : 'off'}`}
+                onClick={() => setAceitaRetirada(v => !v)}
+                aria-label="Permitir retirada na loja"
+                aria-pressed={aceitaRetirada}
               >
                 <span className="re-switch-thumb" />
               </button>

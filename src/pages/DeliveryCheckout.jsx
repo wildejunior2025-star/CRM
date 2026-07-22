@@ -361,11 +361,22 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo')
+      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
   }, [state?.empresaId])
+
+  // A loja pode desligar "Retirar na loja" nas configurações (Raio de entrega).
+  // Enquanto os dados não chegaram, deixa aparecer — assim o botão não pisca
+  // pra quem tem retirada ligada, que é a maioria.
+  const permiteRetirada = lojaEndereco ? lojaEndereco.aceita_retirada !== false : true
+
+  // Se a loja desligou a retirada e o cliente tinha um rascunho salvo com ela
+  // escolhida, volta pra entrega — senão ele fecharia um pedido inválido.
+  useEffect(() => {
+    if (!permiteRetirada && tipo === 'retirada') setTipo('entrega')
+  }, [permiteRetirada, tipo])
 
   // Opção A — pré-preenche com o cliente lembrado neste aparelho
   useEffect(() => {
@@ -610,14 +621,16 @@ export default function DeliveryCheckout() {
 
     // Pedido mínimo para entrega
     if (faltaMinimo) {
-      setErroGlobal(`Pedido mínimo para entrega é R$ ${fmt(pedidoMinimo)}. Faltam R$ ${fmt(faltamParaMinimo)} em produtos (ou escolha Retirada).`)
+      setErroGlobal(`Pedido mínimo para entrega é R$ ${fmt(pedidoMinimo)}. Faltam R$ ${fmt(faltamParaMinimo)} em produtos${permiteRetirada ? ' (ou escolha Retirada)' : ''}.`)
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
 
     // Bairro bloqueado (não entregamos)
     if (bairroBloqueado) {
-      setErroGlobal('Poxa, ainda não entregamos no seu bairro 😔. Você pode escolher Retirada, se disponível.')
+      setErroGlobal(permiteRetirada
+        ? 'Poxa, ainda não entregamos no seu bairro 😔. Você pode escolher Retirada, se disponível.'
+        : 'Poxa, ainda não entregamos no seu bairro 😔.')
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
@@ -816,7 +829,9 @@ export default function DeliveryCheckout() {
                 </div>
               </section>
 
-              {/* Tipo: entrega ou retirada */}
+              {/* Tipo: entrega ou retirada.
+                  Loja que desligou a retirada nas configurações só mostra entrega. */}
+              {permiteRetirada && (
               <section className="dco-section">
                 <h2 className="dco-section-title">Como você quer receber?</h2>
                 <div className="dco-payment-row">
@@ -848,6 +863,7 @@ export default function DeliveryCheckout() {
                   </div>
                 )}
               </section>
+              )}
 
               {/* Endereço (só na entrega) */}
               {tipo === 'entrega' && (
