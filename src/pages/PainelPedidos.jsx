@@ -3508,6 +3508,23 @@ export default function PainelPedidos() {
     imprimirCupom(pedido, empresa, { auto: true })
   }
 
+  // Reimpressão MANUAL (botão 🖨️ dos pedidos finalizados). Igual ao auto, mas
+  // mostra alerta se a Bluetooth falhar — é uma ação do usuário, ele quer saber.
+  // No PC (sem Bluetooth) cai no caminho normal (app FWC → QZ → navegador).
+  async function reimprimirPedido(pedido) {
+    try {
+      const mod = await import('../utils/imprimirBluetooth')
+      if (mod.estaConectada() || await mod.reconectarSilencioso()) {
+        await mod.imprimirPedidoCelular(pedido, empresa)
+        return
+      }
+    } catch (e) {
+      alert('Impressora celular (Bluetooth): ' + (e?.message || e))
+      return
+    }
+    imprimirCupom(pedido, empresa)
+  }
+
   // ── Painel lateral direito (Impressora / Pedidos) ─────────
   // Lembra a seção aberta (ex.: Mesas) ao sair e voltar do gestor.
   const [painelDireito, setPainelDireito] = useState(() => {
@@ -5252,7 +5269,7 @@ export default function PainelPedidos() {
                           {LABEL_STATUS[p.status] ?? p.status}
                         </span>
                       </div>
-                      <button type="button" onClick={() => imprimirCupom(p, empresa)} title="Reimprimir cupom"
+                      <button type="button" onClick={() => reimprimirPedido(p)} title="Reimprimir cupom"
                         style={{ background: 'none', border: '1px solid var(--border, #2a2a3a)', borderRadius: 8, cursor: 'pointer', padding: 6, color: 'var(--text-muted)', flexShrink: 0 }}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                           <polyline points="6 9 6 2 18 2 18 9"/>
@@ -5465,7 +5482,7 @@ export default function PainelPedidos() {
                             {oc.label}
                           </span>
                         </div>
-                        <button type="button" onClick={() => imprimirCupom(p, empresa)} title="Reimprimir cupom"
+                        <button type="button" onClick={() => reimprimirPedido(p)} title="Reimprimir cupom"
                           style={{ background: 'none', border: '1px solid var(--border, #2a2a3a)', borderRadius: 8, cursor: 'pointer', padding: 6, color: 'var(--text-muted)', flexShrink: 0 }}>
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                             <polyline points="6 9 6 2 18 2 18 9"/>
