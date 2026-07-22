@@ -1,4 +1,4 @@
-{
+﻿{
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "crm",
   // Desliga a URL de preview *.workers.dev — o sistema é acessado só pelos
@@ -8,8 +8,17 @@
   "observability": {
     "enabled": true
   },
+  // Worker que injeta as tags Open Graph da loja no HTML do cardápio online.
+  // Sem ele o WhatsApp mostrava a logo do FWC na prévia de qualquer loja.
+  "main": "src/worker/index.js",
   "assets": {
+    "binding": "ASSETS",
     "not_found_handling": "single-page-application"
+  },
+  "vars": {
+    // Chave pública (anon) — a mesma que já vai no bundle do front.
+    "SUPABASE_URL": "https://ycytrsqdvrviihkqfvno.supabase.co",
+    "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InljeXRyc3FkdnJ2aWloa3Fmdm5vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExMjc1NDcsImV4cCI6MjA5NjcwMzU0N30.zAq-8gaw2U9wvwBJCX_rK2jP-tnjOL5VPS23fFxf2Zc"
   },
   "compatibility_flags": [
     "nodejs_compat"
