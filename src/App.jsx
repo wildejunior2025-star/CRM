@@ -102,6 +102,7 @@ import Login from './pages/Login'
 import Cadastro from './pages/Cadastro'
 import CadastroCliente from './pages/CadastroCliente'
 import Dashboard from './pages/Dashboard'
+import Upgrade from './pages/Upgrade'
 import Clientes from './pages/Clientes'
 import Produtos from './pages/Produtos'
 import CategoriasComplemento from './pages/CategoriasComplemento'
@@ -243,6 +244,8 @@ export default function App() {
 
           <Route element={<LayoutOrLanding />}>
             <Route index element={<ProtectedRoute roles={['admin', 'vendedor']}><Dashboard /></ProtectedRoute>} />
+            {/* Convite de upgrade — sem `modulo`, senão bloquearia a si mesma. */}
+            <Route path="upgrade" element={<ProtectedRoute><Upgrade /></ProtectedRoute>} />
             <Route path="clientes" element={<ProtectedRoute modulo="clientes"><Clientes /></ProtectedRoute>} />
             <Route path="vendas" element={<ProtectedRoute modulo="vendas"><Vendas /></ProtectedRoute>} />
             <Route path="caixa" element={<ProtectedRoute modulo="caixa"><Caixa /></ProtectedRoute>} />

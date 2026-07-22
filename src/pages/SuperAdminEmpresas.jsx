@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { MODULOS, moduloAtivo } from '../lib/modulos'
+import { MODULOS, BLOQUEADO } from '../lib/modulos'
 import '../components/Page.css'
 import './SuperAdminEmpresas.css'
 
@@ -142,8 +142,12 @@ export default function SuperAdminEmpresas() {
   }
 
   function abrirModulos(emp) {
+    // Guarda os 3 estados como estão no banco: true | 'bloqueado' | false.
     const form = {}
-    for (const m of MODULOS) form[m.key] = moduloAtivo(emp, m.key)
+    for (const m of MODULOS) {
+      const v = emp?.modulos?.[m.key]
+      form[m.key] = v === false ? false : v === BLOQUEADO ? BLOQUEADO : true
+    }
     setModulosForm(form)
     setModulosModal({ id: emp.id, nome: emp.nome })
   }
@@ -887,44 +891,53 @@ export default function SuperAdminEmpresas() {
             <p style={{ marginBottom: 4, color: 'var(--text-muted)', fontSize: 14 }}>
               Empresa: <strong style={{ color: 'var(--text)' }}>{modulosModal.nome}</strong>
             </p>
-            <p style={{ marginBottom: 18, color: 'var(--text-muted)', fontSize: 13 }}>
-              A loja só vê (no menu e pela URL) o que estiver <strong>ligado</strong>. Desligue o que ela não usa para não poluir a tela.
+            <p style={{ marginBottom: 14, color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.6 }}>
+              <strong style={{ color: 'var(--success)' }}>Liberado</strong> — usa normalmente.<br />
+              <strong style={{ color: 'var(--primary)' }}>Bloqueado</strong> — aparece no menu com 🔒 e leva pra tela de upgrade. Use pra vender o plano de cima.<br />
+              <strong>Oculto</strong> — some do menu e da URL. Use quando a loja já sabe que existe e não quer.
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 20 }}>
               {MODULOS.map((m) => {
-                const ativo = modulosForm[m.key] !== false
+                const v = modulosForm[m.key]
+                const estado = v === false ? 'oculto' : v === BLOQUEADO ? 'bloqueado' : 'liberado'
+                const opcoes = [
+                  { id: 'liberado',  valor: true,      label: 'Liberado',  cor: 'var(--success)' },
+                  { id: 'bloqueado', valor: BLOQUEADO, label: '🔒 Bloqueado', cor: 'var(--primary)' },
+                  { id: 'oculto',    valor: false,     label: 'Oculto',    cor: 'var(--text-muted)' },
+                ]
                 return (
-                  <button
+                  <div
                     key={m.key}
-                    type="button"
-                    onClick={() => setModulosForm((prev) => ({ ...prev, [m.key]: !ativo }))}
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      gap: 12, width: '100%', textAlign: 'left',
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      padding: '10px 6px', borderBottom: '1px solid var(--border)',
+                      gap: 12, padding: '10px 6px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap',
                     }}
                   >
-                    <span style={{ flex: 1 }}>
+                    <span style={{ flex: 1, minWidth: 160 }}>
                       <span style={{ display: 'block', fontWeight: 600, color: 'var(--text)', fontSize: 14 }}>{m.label}</span>
                       <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: 12, marginTop: 2 }}>{m.descricao}</span>
                     </span>
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        flexShrink: 0, width: 42, height: 24, borderRadius: 999,
-                        background: ativo ? 'var(--success)' : 'var(--border)',
-                        position: 'relative', transition: 'background 150ms',
-                      }}
-                    >
-                      <span style={{
-                        position: 'absolute', top: 3, left: ativo ? 21 : 3,
-                        width: 18, height: 18, borderRadius: '50%', background: '#fff',
-                        transition: 'left 150ms', boxShadow: '0 1px 3px rgba(0,0,0,.3)',
-                      }} />
+                    <span style={{ display: 'flex', gap: 4, flexShrink: 0, border: '1px solid var(--border)', borderRadius: 999, padding: 3 }}>
+                      {opcoes.map(o => (
+                        <button
+                          key={o.id}
+                          type="button"
+                          onClick={() => setModulosForm(prev => ({ ...prev, [m.key]: o.valor }))}
+                          aria-pressed={estado === o.id}
+                          style={{
+                            border: 'none', cursor: 'pointer', borderRadius: 999,
+                            padding: '5px 10px', fontSize: 12, fontWeight: 700,
+                            background: estado === o.id ? o.cor : 'transparent',
+                            color: estado === o.id ? '#fff' : 'var(--text-muted)',
+                            transition: 'background 150ms',
+                          }}
+                        >
+                          {o.label}
+                        </button>
+                      ))}
                     </span>
-                  </button>
+                  </div>
                 )
               })}
             </div>

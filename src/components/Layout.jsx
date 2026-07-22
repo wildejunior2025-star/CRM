@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink, useLocation, useNavigate, useMatch } from 'react-router-dom'
 import { useTheme } from '../hooks/useTheme'
 import { useAuth } from '../hooks/useAuth'
-import { moduloAtivo } from '../lib/modulos'
+import { moduloVisivel, moduloBloqueado } from '../lib/modulos'
 import ThemeToggle from './ThemeToggle'
 import SubscriptionGate from './SubscriptionGate'
 import InstallPWA from './InstallPWA'
@@ -119,9 +119,11 @@ export default function Layout() {
     if (ok) navigate('/super-admin')
   }
 
-  // Filtra por papel do usuário E por funcionalidade ligada/desligada da loja.
+  // Filtra por papel do usuário E por funcionalidade da loja.
+  // Módulo BLOQUEADO continua aparecendo (com cadeado) — é o que faz o dono
+  // descobrir que existe e querer o upgrade. Só o OCULTO some daqui.
   const porPerfilEModulo = links.filter(
-    (link) => link.group || (link.roles?.includes(profile?.perfil) && moduloAtivo(empresa, link.mod))
+    (link) => link.group || (link.roles?.includes(profile?.perfil) && moduloVisivel(empresa, link.mod))
   )
   // Remove cabeçalhos de grupo que ficaram sem nenhum item visível abaixo.
   const visibleLinks = porPerfilEModulo.filter((link, i) => {
@@ -172,13 +174,14 @@ export default function Layout() {
               <div key={link.to}>
                 <div style={{ display: 'flex', alignItems: 'center' }}>
                   <NavLink
-                    to={link.to}
+                    to={moduloBloqueado(empresa, link.mod) ? `/upgrade?mod=${link.mod}` : link.to}
                     end={link.end}
                     className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
                     onClick={closeMenu}
-                    style={{ flex: 1 }}
+                    style={{ flex: 1, ...(moduloBloqueado(empresa, link.mod) ? { opacity: .6 } : null) }}
                   >
                     {link.label}
+                    {moduloBloqueado(empresa, link.mod) && <span style={{ marginLeft: 6 }} title="Não incluído no seu plano">🔒</span>}
                   </NavLink>
                   <button
                     type="button"
@@ -198,16 +201,18 @@ export default function Layout() {
                 {expandidos.has(link.to) && (
                   <div style={{ paddingLeft: 12 }}>
                     {link.children
-                      .filter(c => c.roles?.includes(profile?.perfil) && moduloAtivo(empresa, c.mod))
+                      .filter(c => c.roles?.includes(profile?.perfil) && moduloVisivel(empresa, c.mod))
                       .map(child => (
                         <NavLink
                           key={child.to}
-                          to={child.to}
+                          to={moduloBloqueado(empresa, child.mod) ? `/upgrade?mod=${child.mod}` : child.to}
                           className={({ isActive }) => isActive ? 'sidebar-link sidebar-sublink active' : 'sidebar-link sidebar-sublink'}
                           onClick={closeMenu}
+                          style={moduloBloqueado(empresa, child.mod) ? { opacity: .6 } : undefined}
                         >
                           <span style={{ marginRight: 6, opacity: 0.5, fontSize: 10 }}>└</span>
                           {child.label}
+                          {moduloBloqueado(empresa, child.mod) && <span style={{ marginLeft: 6 }} title="Não incluído no seu plano">🔒</span>}
                         </NavLink>
                       ))
                     }
@@ -217,12 +222,14 @@ export default function Layout() {
             ) : (
               <NavLink
                 key={link.to}
-                to={link.to}
+                to={moduloBloqueado(empresa, link.mod) ? `/upgrade?mod=${link.mod}` : link.to}
                 end={link.end}
                 className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
                 onClick={closeMenu}
+                style={moduloBloqueado(empresa, link.mod) ? { opacity: .6 } : undefined}
               >
                 {link.label}
+                {moduloBloqueado(empresa, link.mod) && <span style={{ marginLeft: 6 }} title="Não incluído no seu plano">🔒</span>}
               </NavLink>
             )
           )}

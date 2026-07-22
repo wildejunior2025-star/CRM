@@ -1,6 +1,6 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { moduloAtivo } from '../lib/modulos'
+import { moduloAtivo, moduloBloqueado } from '../lib/modulos'
 
 export default function ProtectedRoute({ children, roles, modulo }) {
   const { session, profile, empresa, loading, profileLoading } = useAuth()
@@ -33,7 +33,14 @@ export default function ProtectedRoute({ children, roles, modulo }) {
     return <Navigate to={home} replace />
   }
 
-  // Funcionalidade desligada para esta loja pelo Super Admin → fora.
+  // Bloqueado pelo plano → tela de upgrade (não é erro, é oferta).
+  // Vale também pra quem digita a URL na mão: o cadeado do menu sozinho não
+  // segura ninguém, o bloqueio de verdade é aqui.
+  if (modulo && moduloBloqueado(empresa, modulo)) {
+    return <Navigate to={`/upgrade?mod=${modulo}`} replace />
+  }
+
+  // Funcionalidade oculta para esta loja pelo Super Admin → fora, sem alarde.
   if (modulo && !moduloAtivo(empresa, modulo)) {
     return <Navigate to="/" replace />
   }
