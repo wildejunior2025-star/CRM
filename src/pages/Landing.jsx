@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import landingHtml from '../landing/landing.html?raw'
 import { supabase } from '../lib/supabaseClient'
 
@@ -16,6 +16,13 @@ export default function Landing() {
   const [videos, setVideos] = useState({})   // { chave: [ {id, titulo, descricao, youtube_id} ] }
   const [aberto, setAberto] = useState(null) // { chave, label, lista }
   const [atual, setAtual] = useState(0)      // índice do vídeo em exibição
+
+  // IMPORTANTE: o objeto do dangerouslySetInnerHTML precisa ter identidade
+  // ESTÁVEL. O React 19 compara os props por identidade — passando
+  // `{{ __html: ... }}` direto no JSX, ele enxerga um objeto novo a cada
+  // render e reescreve o HTML inteiro. Isso apagava os selos de ▶ e os
+  // cliques dos cards no instante em que o vídeo abria.
+  const html = useMemo(() => ({ __html: landingHtml }), [])
 
   useEffect(() => {
     const anterior = document.title
@@ -93,7 +100,7 @@ export default function Landing() {
 
   return (
     <>
-      <div ref={raizRef} dangerouslySetInnerHTML={{ __html: landingHtml }} />
+      <div ref={raizRef} dangerouslySetInnerHTML={html} />
 
       {aberto && (() => {
         const lista = aberto.lista
