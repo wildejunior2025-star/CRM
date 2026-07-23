@@ -13,20 +13,10 @@ function escapaHtml(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 }
 
-// Print interativo ("veja por dentro"): alguns cards, em vez de abrir um vídeo,
-// abrem as TELAS REAIS do sistema (prints anonimizados) em abas. As chaves são
-// as mesmas do data-video no landing.html. Card com demo tem prioridade sobre
-// vídeo. Imagens em /public/demo (servidas na raiz).
-const DEMOS = {
-  entregador: {
-    titulo: 'Aplicativo de Entregas — por dentro',
-    telas: [
-      { nome: 'Disponíveis', img: '/demo/entregas-1-disponiveis.png' },
-      { nome: 'Aceitas', img: '/demo/entregas-2-aceitas.png' },
-      { nome: 'Histórico', img: '/demo/entregas-3-historico.png' },
-    ],
-  },
-}
+// Print interativo em abas (mecanismo antigo). Hoje os 3 cards abrem a PÁGINA
+// "Ver por dentro" (menu → vídeo), então nenhum card usa demo. Fica vazio, mas
+// o mecanismo segue pronto caso algum dia queira mostrar telas em abas de novo.
+const DEMOS = {}
 
 // Landing pública de marketing servida em fwcinter.com (raiz), quando o
 // visitante não está logado. O HTML/CSS vem do site original (FWC geral/

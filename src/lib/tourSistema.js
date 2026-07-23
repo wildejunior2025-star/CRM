@@ -132,12 +132,55 @@ export const SISTEMAS = {
       { chave: 'portal-relatorios', label: 'Relatórios' },
     ],
   },
+
+  entregas: {
+    titulo: 'Aplicativo de Entregas',
+    emoji: '🛵',
+    subtitulo: 'O app do entregador — aceitar a corrida, seguir a rota, falar com o cliente e dar baixa. Clique em cada ação para ver como funciona.',
+    // Todos os botões do app (espelha PainelEntregador.jsx). Poda depois.
+    menu: [
+      { group: 'Abas' },
+      { chave: 'entregas-disponiveis', label: 'Disponíveis' },
+      { chave: 'entregas-aceitas', label: 'Aceitas' },
+      { chave: 'entregas-historico', label: 'Histórico' },
+
+      { group: 'Fila de chegada' },
+      { chave: 'entregas-online', label: 'Ficar online (entrar na fila)' },
+      { chave: 'entregas-pausar', label: 'Pausar / sair da fila' },
+
+      { group: 'Aceitar e sair' },
+      { chave: 'entregas-buscar', label: 'Buscar entrega' },
+      { chave: 'entregas-atualizar', label: 'Atualizar' },
+      { chave: 'entregas-aceitar', label: 'Aceitar entrega' },
+      { chave: 'entregas-sair', label: 'Sair para entrega' },
+      { chave: 'entregas-sair-todas', label: 'Sair com todas' },
+      { chave: 'entregas-largar', label: 'Largar entrega' },
+
+      { group: 'Rota' },
+      { chave: 'entregas-rota', label: 'Rota (uma entrega)' },
+      { chave: 'entregas-rota-todas', label: 'Rota de todas (várias paradas)' },
+      { chave: 'entregas-tirar-rota', label: 'Tirar da rota / voltar pra rota' },
+      { chave: 'entregas-posicao', label: 'Posição na rota (1ª parada, 2ª...)' },
+
+      { group: 'Contato e baixa' },
+      { chave: 'entregas-ligar', label: 'Ligar' },
+      { chave: 'entregas-zap', label: 'Zap (WhatsApp)' },
+      { chave: 'entregas-itens', label: 'Ver itens do pedido' },
+      { chave: 'entregas-confirmar', label: 'Confirmar entrega (código)' },
+      { chave: 'entregas-confirmar-ifood', label: 'Confirmar entrega iFood' },
+
+      { group: 'Ganhos' },
+      { chave: 'entregas-periodo', label: 'Período (Hoje / 7 / 30 / Tudo)' },
+      { chave: 'entregas-ganhos', label: 'A receber e recebido' },
+    ],
+  },
 }
 
 // Qual card da landing abre qual página. (chave do data-video → id do sistema)
 export const CARD_PARA_SISTEMA = {
   'gestor-pedidos': 'gestor',
   'portal': 'portal',
+  'entregador': 'entregas',
 }
 
 // Lista chata (chave + rótulo "Sistema · X") p/ o Super Admin de vídeos.
