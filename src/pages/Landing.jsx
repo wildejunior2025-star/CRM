@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import landingHtml from '../landing/landing.html?raw'
 import { supabase } from '../lib/supabaseClient'
 import AjudaIA from '../components/AjudaIA'
+import { CARD_PARA_SISTEMA } from '../lib/tourSistema'
 
 // O título/descrição do vídeo vêm do banco e entram via innerHTML no banner —
 // escapa pra ninguém conseguir injetar marcação pelo cadastro.
@@ -36,6 +38,7 @@ const DEMOS = {
 // clicáveis, ganhando um ▶. Card sem vídeo continua exatamente como era —
 // assim dá pra publicar um vídeo de cada vez, conforme grava.
 export default function Landing() {
+  const navigate = useNavigate()
   const raizRef = useRef(null)
   const [videos, setVideos] = useState({})   // { chave: [ {id, titulo, descricao, youtube_id} ] }
   const [aberto, setAberto] = useState(null) // { chave, label, lista }
@@ -79,24 +82,25 @@ export default function Landing() {
 
     cards.forEach(card => {
       const chave = card.getAttribute('data-video')
-      const demoCfg = DEMOS[chave]
-      const lista = videos[chave]
-      // Demo tem prioridade: clicar abre as telas por dentro. Sem demo, cai no
-      // vídeo. Sem nenhum dos dois, o card continua comum (não clicável).
-      if (!demoCfg && !lista?.length) return
+      const sistema = CARD_PARA_SISTEMA[chave]   // abre a página "Ver por dentro"
+      const demoCfg = DEMOS[chave]               // abre as telas em abas (print)
+      const lista = videos[chave]                // abre o vídeo
+      // Prioridade: página do sistema > print > vídeo. Sem nenhum, card comum.
+      if (!sistema && !demoCfg && !lista?.length) return
 
       const label = card.querySelector('.feature-title')?.textContent?.trim() || 'Como funciona'
+      const porDentro = sistema || demoCfg
 
       card.style.cursor = 'pointer'
       card.setAttribute('role', 'button')
       card.setAttribute('tabindex', '0')
-      card.setAttribute('aria-label', demoCfg ? `Ver por dentro: ${label}` : `Assistir vídeos: ${label}`)
+      card.setAttribute('aria-label', porDentro ? `Ver por dentro: ${label}` : `Assistir vídeos: ${label}`)
 
       // Selo de play — só uma vez por card.
       if (!card.querySelector('.fwc-video-selo')) {
         const selo = document.createElement('div')
         selo.className = 'fwc-video-selo'
-        selo.textContent = demoCfg
+        selo.textContent = porDentro
           ? '▶ Ver por dentro'
           : lista.length > 1
             ? `▶ Ver como funciona (${lista.length} vídeos)`
@@ -105,9 +109,11 @@ export default function Landing() {
         card.appendChild(selo)
       }
 
-      const abrir = demoCfg
-        ? () => setDemo({ titulo: demoCfg.titulo, telas: demoCfg.telas, atual: 0 })
-        : () => { setAtual(0); setAberto({ chave, label, lista }) }
+      const abrir = sistema
+        ? () => navigate(`/ver/${sistema}`)
+        : demoCfg
+          ? () => setDemo({ titulo: demoCfg.titulo, telas: demoCfg.telas, atual: 0 })
+          : () => { setAtual(0); setAberto({ chave, label, lista }) }
       const tecla = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir() } }
       card.addEventListener('click', abrir)
       card.addEventListener('keydown', tecla)
@@ -115,7 +121,7 @@ export default function Landing() {
     })
 
     return () => limpar.forEach(f => f())
-  }, [videos])
+  }, [videos, navigate])
 
   // Vídeo de apresentação — banner em destaque acima dos cards.
   useEffect(() => {

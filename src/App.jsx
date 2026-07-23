@@ -164,6 +164,7 @@ import PresencialHistorico from './pages/PresencialHistorico'
 import PresencialReservas from './pages/PresencialReservas'
 import MesaCardapio from './pages/MesaCardapio'
 import Landing from './pages/Landing'
+import TourSistema from './pages/TourSistema'
 
 export default function App() {
   // lojaonline.fwcinter.com — vitrine pública da loja (sem login).
@@ -204,6 +205,7 @@ export default function App() {
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/cadastro" element={<Cadastro />} />
           <Route path="/termos" element={<Termos />} />
+          <Route path="/ver/:sistema" element={<TourSistema />} />
           <Route path="/privacidade" element={<Privacidade />} />
           <Route path="/excluir-conta" element={<ExcluirConta />} />
           <Route path="/lojas" element={<DeliveryLojas />} />

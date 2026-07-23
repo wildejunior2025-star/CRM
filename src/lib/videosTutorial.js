@@ -1,3 +1,5 @@
+import { itensParaCatalogo } from './tourSistema'
+
 // Catálogo das funcionalidades que podem ter vídeo tutorial.
 //
 // A `chave` é a MESMA do atributo data-video nos cards do landing.html.
@@ -36,6 +38,9 @@ export const FUNCIONALIDADES = [
   { chave: 'reservas',               label: 'Reservas com Prioridade' },
   { chave: 'horarios',               label: 'Horários Inteligentes' },
   { chave: 'metas',                  label: 'Metas e Resumo Diário' },
+  // Itens das páginas "Ver por dentro" (fwcinter.com/ver/:sistema): um vídeo por
+  // botão do menu do sistema. Definidos em src/lib/tourSistema.js.
+  ...itensParaCatalogo(),
 ]
 
 // Aceita o que o YouTube der: link normal, encurtado, /embed, /shorts ou o ID
