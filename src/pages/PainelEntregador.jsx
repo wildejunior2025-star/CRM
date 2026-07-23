@@ -49,10 +49,13 @@ function enderecoTexto(p) {
 
 // Texto pro Google GEOCODIFICAR (≠ do texto que aparece na tela). Endereço curto
 // tipo "FRANCISCO DE BASTOS, São gonçalo" o Maps não acha e derruba a rota toda;
-// completar com a cidade/estado da loja dá contexto suficiente pra ele achar.
+// completar com ESTADO + país dá o contexto que falta pra ele achar.
+//
+// NÃO caia pra cidade da loja quando o pedido não tem cidade: muito bairro do
+// cadastro é na verdade uma cidade vizinha (o "São gonçalo" daqui é São Gonçalo
+// do Amarante, não Natal). Chutar "Natal" faz o Maps não achar NADA — testado.
 function enderecoBusca(p, empresa) {
-  const cidade = p.endereco_cidade || empresa?.cidade || null
-  const partes = [p.endereco_rua, p.endereco_numero, p.endereco_bairro, cidade, empresa?.estado, 'Brasil']
+  const partes = [p.endereco_rua, p.endereco_numero, p.endereco_bairro, p.endereco_cidade, empresa?.estado, 'Brasil']
   return partes.filter(Boolean).join(', ')
 }
 
