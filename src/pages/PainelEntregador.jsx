@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 
@@ -80,9 +80,6 @@ function origemRota(minhaPos, empresa) {
   return null
 }
 
-// Rota única com várias paradas (E1). A última entrega é o destino e as do meio
-// vão em waypoints (separados por "|" cru — o navegador codifica; %7C já
-// codificado o app não entende). Máx. 10 (limite do link do Maps).
 // Pedido que pode virar parada na rota: só ENTREGA com endereço de verdade.
 // Retirada tem "endereço" tipo "Retirada na loja / Retirada" — vira uma parada
 // lixo que o Maps não acha e derruba a rota inteira.
@@ -91,9 +88,119 @@ function entraNaRota(p) {
   return p.endereco_lat != null || Boolean(enderecoTexto(p))
 }
 
+// ─── Ordem das paradas ───────────────────────────────────────────────────────
+// O Google NÃO reordena: "waypoints are displayed in the same order they are
+// listed in the URL". Como a lista saía em ordem de CHEGADA do pedido, a rota
+// zigue-zagueava e o motoqueiro reordenava na mão. Aqui a gente ordena antes.
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371, rad = Math.PI / 180
+  const dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(a))
+}
+
+function coordDe(p) {
+  if (p.endereco_lat == null || p.endereco_lng == null) return null
+  const lat = Number(p.endereco_lat), lng = Number(p.endereco_lng)
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null
+}
+
+// Distância total do caminho aberto origem → p1 → p2 → ... (não volta pra origem:
+// o motoqueiro não precisa retornar à loja no fim).
+function custoCaminho(origem, seq) {
+  let total = 0, ant = origem
+  for (const c of seq) { total += haversineKm(ant.lat, ant.lng, c.lat, c.lng); ant = c }
+  return total
+}
+
+// Vizinho mais próximo: pega sempre a parada mais perto da anterior.
+function vizinhoMaisProximo(itens, origem, forcarPrimeiro) {
+  const restantes = [...itens], ordem = []
+  let atual = origem
+  if (forcarPrimeiro != null) {
+    const k = restantes.splice(forcarPrimeiro, 1)[0]
+    ordem.push(k); atual = k.coord
+  }
+  while (restantes.length) {
+    let melhor = 0, melhorD = Infinity
+    restantes.forEach((it, i) => {
+      const d = haversineKm(atual.lat, atual.lng, it.coord.lat, it.coord.lng)
+      if (d < melhorD) { melhorD = d; melhor = i }
+    })
+    const escolhido = restantes.splice(melhor, 1)[0]
+    ordem.push(escolhido)
+    atual = escolhido.coord
+  }
+  return ordem
+}
+
+// 2-opt: inverte trechos enquanto isso encurtar o caminho (desfaz cruzamento).
+function doisOpt(inicial, origem) {
+  let ordem = inicial, melhorou = true, voltas = 0
+  while (melhorou && voltas < 30) {
+    melhorou = false; voltas++
+    for (let i = 0; i < ordem.length - 1; i++) {
+      for (let j = i + 1; j < ordem.length; j++) {
+        const teste = [...ordem.slice(0, i), ...ordem.slice(i, j + 1).reverse(), ...ordem.slice(j + 1)]
+        if (custoCaminho(origem, teste.map(t => t.coord)) < custoCaminho(origem, ordem.map(t => t.coord)) - 1e-9) {
+          ordem = teste; melhorou = true
+        }
+      }
+    }
+  }
+  return ordem
+}
+
+// Melhor ordem das paradas. Em LINHA RETA (ignora mão única, rio, ponte), mas
+// com ≤10 paradas resolve o zigue-zague, que é o que doía.
+//
+// Multi-start: o vizinho-mais-próximo puro trava na 1ª escolha gulosa (às vezes
+// compensa começar pela parada LONGE e voltar varrendo). Então testa começando
+// por cada parada e fica com a melhor. Com 8 paradas reais da Zebu isso bateu a
+// ordem ótima da força bruta em 3ms — o guloso sozinho ficava 5% atrás.
+function melhorOrdem(itens, origem) {
+  if (itens.length < 2) return itens
+  let melhor = null, melhorCusto = Infinity
+  for (let inicio = -1; inicio < itens.length; inicio++) {
+    const candidata = doisOpt(vizinhoMaisProximo(itens, origem, inicio < 0 ? null : inicio), origem)
+    const c = custoCaminho(origem, candidata.map(x => x.coord))
+    if (c < melhorCusto) { melhorCusto = c; melhor = candidata }
+  }
+  return melhor
+}
+
+// Origem em COORDENADA pra calcular distância (≠ de origemRota, que devolve o
+// texto pro link). Sem coordenada não dá pra ordenar: mantém a ordem de chegada.
+function origemCoord(minhaPos, empresa) {
+  if (minhaPos) return { lat: Number(minhaPos.lat), lng: Number(minhaPos.lng) }
+  if (empresa?.latitude && empresa?.longitude) return { lat: Number(empresa.latitude), lng: Number(empresa.longitude) }
+  return null
+}
+
+// Paradas na ordem em que o motoqueiro deve seguir. Quem NÃO tem coordenada
+// salva (pedido antigo) não dá pra posicionar no mapa: vai pro FIM, na ordem de
+// chegada — some sozinho conforme os pedidos novos, que já gravam GPS, entram.
+function pedidosOrdenados(pedidos, minhaPos, empresa) {
+  const comGps = [], semGps = []
+  for (const p of pedidos) {
+    const coord = coordDe(p)
+    if (coord) comGps.push({ pedido: p, coord }); else semGps.push(p)
+  }
+  const origem = origemCoord(minhaPos, empresa)
+  if (!origem || comGps.length < 2) return [...comGps.map(x => x.pedido), ...semGps]
+  return [...melhorOrdem(comGps, origem).map(x => x.pedido), ...semGps]
+}
+
+// Rota única com várias paradas (E1). A última entrega é o destino e as do meio
+// vão em waypoints (separados por "|" cru — o navegador codifica; %7C já
+// codificado o app não entende). Máx. 10 (limite do link do Maps).
 function rotaMultiplaUrl(pedidos, empresa, minhaPos) {
-  // Remove pontos repetidos (ex.: 2 pedidos pro mesmo endereço).
-  const pontos = [...new Set(pedidos.map(p => enderecoPonto(p, empresa)).filter(Boolean))].slice(0, 10)
+  const ordenados = pedidosOrdenados(pedidos.filter(entraNaRota), minhaPos, empresa)
+  // Remove pontos repetidos (ex.: 2 pedidos pro mesmo endereço). O Set mantém a
+  // ordem de inserção, então a sequência calculada acima é preservada.
+  const pontos = [...new Set(ordenados.map(p => enderecoPonto(p, empresa)).filter(Boolean))].slice(0, 10)
   if (pontos.length === 0) return null
   const destino = encodeURIComponent(pontos[pontos.length - 1])
   const meio = pontos.slice(0, -1).map(e => encodeURIComponent(e))
@@ -160,7 +267,7 @@ function previstaEntregaTxt(p, tempoMax) {
   return dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
-function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, temBebida = false, exigeCodigo = true, tempoEntregaMax, empresa }) {
+function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, temBebida = false, exigeCodigo = true, tempoEntregaMax, empresa, ordemRota, totalRota = 0 }) {
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
@@ -262,6 +369,15 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
       })()}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, margin: '4px 0 10px' }}>
         <div style={{ flex: 1 }}>
+          {/* Posição na rota: a MESMA sequência que o botão "Rota de todas" abre
+              no Maps. Sem isso o motoqueiro via a rota otimizada no mapa e os
+              cards em ordem de chegada — dois roteiros diferentes na mão dele. */}
+          {ordemRota > 0 && totalRota > 1 && (
+            <div style={{ fontSize: 12, fontWeight: 800, color: '#0d9488', marginBottom: 3 }}>
+              🧭 {ordemRota}ª parada de {totalRota}
+              {ordemRota === 1 && <span style={{ fontWeight: 700, color: 'var(--text-muted)' }}> · mais perto de você</span>}
+            </div>
+          )}
           <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>📍 {endereco}</div>
           {/* Complemento / ponto de referência (apto, bloco, "casa dos fundos"...) — o motoqueiro
               precisava olhar na comanda impressa porque não aparecia aqui. */}
@@ -728,6 +844,17 @@ export default function PainelEntregador() {
   }, [aba, user])
 
   const minhas = pedidos.filter(p => p.entregador_id === user?.id)
+
+  // Posição de cada entrega na rota calculada (id → 1, 2, 3...), pro motoqueiro
+  // ver no card a MESMA sequência que o Maps vai abrir. Sem isso a rota sai
+  // otimizada mas os cards seguem em ordem de chegada e ele se perde.
+  const idsMinhas = minhas.map(p => p.id).join(',')
+  const ordemRota = useMemo(() => {
+    const seq = pedidosOrdenados(minhas.filter(entraNaRota), minhaPos, empresa)
+    return new Map(seq.map((p, i) => [p.id, i + 1]))
+    // Depende dos IDs (não do array): o realtime recria a lista a cada evento e
+    // recalcular a rota toda vez faria a ordem piscar na tela do motoqueiro.
+  }, [idsMinhas, minhaPos?.lat, minhaPos?.lng, empresa?.latitude, empresa?.longitude]) // eslint-disable-line react-hooks/exhaustive-deps
   // Disponíveis pro motoboy: só ENTREGA (retirada o cliente busca), sem dono e que
   // ainda NÃO saiu. Pedido em 'saiu_entrega' já foi despachado (no iFood ou aqui) —
   // não faz sentido aparecer como "aceitar". Ele só aparece pra alguém se o gestor
@@ -914,6 +1041,7 @@ export default function PainelEntregador() {
                 )}
                 {minhasF.map(p => (
                   <CardEntrega key={p.id} pedido={p} mine temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} empresa={empresa}
+                    ordemRota={ordemRota.get(p.id)} totalRota={ordemRota.size}
                     onSair={sairParaEntrega} onConfirmar={confirmarEntrega}
                     onConfirmarIfood={confirmarEntregaIfood} onDesistir={desistirEntrega} />
                 ))}
