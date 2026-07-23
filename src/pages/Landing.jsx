@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import landingHtml from '../landing/landing.html?raw'
 import { supabase } from '../lib/supabaseClient'
+import AjudaIA from '../components/AjudaIA'
+
+// O título/descrição do vídeo vêm do banco e entram via innerHTML no banner —
+// escapa pra ninguém conseguir injetar marcação pelo cadastro.
+function escapaHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
 
 // Landing pública de marketing servida em fwcinter.com (raiz), quando o
 // visitante não está logado. O HTML/CSS vem do site original (FWC geral/
@@ -85,6 +94,43 @@ export default function Landing() {
     return () => limpar.forEach(f => f())
   }, [videos])
 
+  // Vídeo de apresentação — banner em destaque acima dos cards.
+  useEffect(() => {
+    const alvo = raizRef.current?.querySelector('[data-video-apresentacao]')
+    if (!alvo) return
+    const lista = videos.apresentacao
+    alvo.innerHTML = ''
+    if (!lista?.length) return
+
+    const v = lista[0]
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.setAttribute('aria-label', `Assistir: ${v.titulo}`)
+    btn.style.cssText = [
+      'display:flex', 'align-items:center', 'gap:16px', 'width:100%',
+      'max-width:620px', 'margin:0 auto 34px', 'padding:14px 18px',
+      'border:1px solid rgba(124,58,237,.35)', 'border-radius:16px',
+      'background:rgba(124,58,237,.06)', 'cursor:pointer', 'text-align:left',
+      'font:inherit', 'color:inherit',
+    ].join(';')
+    btn.innerHTML = `
+      <span style="position:relative;flex-shrink:0">
+        <img src="https://img.youtube.com/vi/${v.youtube_id}/mqdefault.jpg" alt=""
+             width="132" height="74" style="border-radius:10px;object-fit:cover;display:block;background:#000" />
+        <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:26px;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.6)">▶</span>
+      </span>
+      <span>
+        <span style="display:block;font-weight:800;font-size:16px;line-height:1.3">${escapaHtml(v.titulo)}</span>
+        <span style="display:block;font-size:13.5px;opacity:.75;margin-top:4px;line-height:1.5">
+          ${escapaHtml(v.descricao || 'Comece por aqui — 2 minutos para entender como tudo funciona.')}
+        </span>
+      </span>`
+    const abrir = () => { setAtual(0); setAberto({ chave: 'apresentacao', label: v.titulo, lista }) }
+    btn.addEventListener('click', abrir)
+    alvo.appendChild(btn)
+    return () => btn.removeEventListener('click', abrir)
+  }, [videos])
+
   // Fecha no ESC e trava o rolar da página enquanto o vídeo está aberto.
   useEffect(() => {
     if (!aberto) return
@@ -101,6 +147,9 @@ export default function Landing() {
   return (
     <>
       <div ref={raizRef} dangerouslySetInnerHTML={html} />
+
+      {/* Ajuda por IA — traz o vídeo certo em vez de o visitante procurar entre os cards */}
+      <AjudaIA onAbrirVideo={v => { setAtual(0); setAberto({ chave: v.chave, label: v.titulo, lista: [v] }) }} />
 
       {aberto && (() => {
         const lista = aberto.lista

@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { FUNCIONALIDADES, extrairYoutubeId } from '../lib/videosTutorial'
+import { APRESENTACAO, FUNCIONALIDADES, extrairYoutubeId } from '../lib/videosTutorial'
 import '../components/Page.css'
 
 const vazio = { titulo: '', link: '' }
@@ -79,6 +79,7 @@ export default function SuperAdminVideos() {
     carregar()
   }
 
+  const TODAS = [APRESENTACAO, ...FUNCIONALIDADES]
   const totalVideos = Object.values(videos).flat().length
   const comVideo = Object.values(videos).filter(l => l.some(v => v.ativo)).length
 
@@ -89,7 +90,7 @@ export default function SuperAdminVideos() {
       <p style={{ color: 'var(--text-muted)', fontSize: 14, lineHeight: 1.6, maxWidth: 760, marginTop: 0 }}>
         Cada funcionalidade pode ter <strong>vários vídeos</strong> — um por botão, por exemplo.
         Eles aparecem no card da landing (fwcinter.com) na ordem definida aqui.
-        Hoje: <strong>{totalVideos} vídeo(s)</strong> em <strong>{comVideo} de {FUNCIONALIDADES.length}</strong> funcionalidades.
+        Hoje: <strong>{totalVideos} vídeo(s)</strong> em <strong>{comVideo} de {TODAS.length}</strong> funcionalidades.
       </p>
 
       {msg && (
@@ -103,7 +104,7 @@ export default function SuperAdminVideos() {
 
       {loading ? <p style={{ color: 'var(--text-muted)' }}>Carregando…</p> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 900 }}>
-          {FUNCIONALIDADES.map(f => {
+          {TODAS.map(f => {
             const lista = videos[f.chave] ?? []
             const exp = aberta === f.chave
             const dados = form[f.chave] ?? vazio

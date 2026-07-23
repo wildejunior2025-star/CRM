@@ -3,6 +3,14 @@
 // A `chave` é a MESMA do atributo data-video nos cards do landing.html.
 // Mexeu aqui? Confira lá também, senão o vídeo não acha o card.
 
+// Vídeo de apresentação — aparece em destaque no topo da seção de
+// funcionalidades, antes dos cards. É onde você explica que cada card tem
+// vídeo e que dá pra pedir ajuda à IA a qualquer momento.
+export const APRESENTACAO = {
+  chave: 'apresentacao',
+  label: 'Vídeo de apresentação (topo da página)',
+}
+
 export const FUNCIONALIDADES = [
   { chave: 'ifood',                  label: 'Integração iFood' },
   { chave: 'loja-online',            label: 'Loja Online' },
