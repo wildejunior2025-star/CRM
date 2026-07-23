@@ -103,6 +103,7 @@ import Cadastro from './pages/Cadastro'
 import CadastroCliente from './pages/CadastroCliente'
 import Dashboard from './pages/Dashboard'
 import Upgrade from './pages/Upgrade'
+import SuperAdminVideos from './pages/SuperAdminVideos'
 import Clientes from './pages/Clientes'
 import Produtos from './pages/Produtos'
 import CategoriasComplemento from './pages/CategoriasComplemento'
@@ -240,6 +241,7 @@ export default function App() {
             <Route path="/super-admin/empresa-rede" element={<SuperAdminEmpresaRede />} />
             <Route path="/super-admin/financeiro" element={<SuperAdminFinanceiro />} />
             <Route path="/super-admin/despesas" element={<SuperAdminDespesas />} />
+            <Route path="/super-admin/videos" element={<SuperAdminVideos />} />
           </Route>
 
           <Route element={<LayoutOrLanding />}>
