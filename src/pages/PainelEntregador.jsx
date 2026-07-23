@@ -47,36 +47,54 @@ function enderecoTexto(p) {
     .filter(Boolean).join(', ')
 }
 
+// Texto pro Google GEOCODIFICAR (≠ do texto que aparece na tela). Endereço curto
+// tipo "FRANCISCO DE BASTOS, São gonçalo" o Maps não acha e derruba a rota toda;
+// completar com a cidade/estado da loja dá contexto suficiente pra ele achar.
+function enderecoBusca(p, empresa) {
+  const cidade = p.endereco_cidade || empresa?.cidade || null
+  const partes = [p.endereco_rua, p.endereco_numero, p.endereco_bairro, cidade, empresa?.estado, 'Brasil']
+  return partes.filter(Boolean).join(', ')
+}
+
 // Ponto pra rota: prefere COORDENADAS (GPS) — nunca falha em geocodificar, ao
 // contrário do texto (um endereço que o Google não acha quebra a rota inteira).
-function enderecoPonto(p) {
+function enderecoPonto(p, empresa) {
   if (p.endereco_lat != null && p.endereco_lng != null) return `${p.endereco_lat},${p.endereco_lng}`
-  return enderecoTexto(p)
+  return enderecoBusca(p, empresa)
 }
 
-function mapsUrl(p) {
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(enderecoPonto(p))}`
+function mapsUrl(p, empresa) {
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(enderecoPonto(p, empresa))}`
 }
 
-// Rota única com várias paradas (E1). PRECISA de ponto de partida, senão o Maps
-// preenche os endereços mas não traça o caminho. Por isso a 1ª entrega vira a
-// ORIGEM, a última o destino, e as do meio vão em waypoints (separados por "|"
-// cru — o navegador codifica; %7C já codificado o app não entende). Máx. 10.
-function rotaMultiplaUrl(pedidos) {
+// Ponto de partida da rota: GPS do motoqueiro se ele deu permissão, senão a LOJA.
+// Sem origem explícita o Maps abre com "Local onde se encontra" vazio, preenche
+// as paradas e NÃO traça o caminho — que é exatamente o bug que o Wilde viu.
+function origemRota(minhaPos, empresa) {
+  if (minhaPos) return `${minhaPos.lat},${minhaPos.lng}`
+  if (empresa?.latitude && empresa?.longitude) return `${empresa.latitude},${empresa.longitude}`
+  if (empresa?.endereco) return [empresa.endereco, empresa.cidade, empresa.estado, 'Brasil'].filter(Boolean).join(', ')
+  return null
+}
+
+// Rota única com várias paradas (E1). A última entrega é o destino e as do meio
+// vão em waypoints (separados por "|" cru — o navegador codifica; %7C já
+// codificado o app não entende). Máx. 10 (limite do link do Maps).
+function rotaMultiplaUrl(pedidos, empresa, minhaPos) {
   // Remove pontos repetidos (ex.: 2 pedidos pro mesmo endereço).
-  const pontos = [...new Set(pedidos.map(enderecoPonto).filter(Boolean))].slice(0, 10)
+  const pontos = [...new Set(pedidos.map(p => enderecoPonto(p, empresa)).filter(Boolean))].slice(0, 10)
   if (pontos.length === 0) return null
-  // SEM origem fixa: o Google usa a SUA LOCALIZAÇÃO ATUAL como partida (igual ao
-  // botão "Rota" de cada card). Todos os pedidos viram paradas + destino final.
   const destino = encodeURIComponent(pontos[pontos.length - 1])
   const meio = pontos.slice(0, -1).map(e => encodeURIComponent(e))
   let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${destino}`
+  const origem = origemRota(minhaPos, empresa)
+  if (origem) url += `&origin=${encodeURIComponent(origem)}`
   if (meio.length) url += `&waypoints=${meio.join('|')}`
   return url
 }
 // Nº de paradas ÚNICAS (endereços distintos) — pro rótulo do botão "Rota de todas".
-function paradasUnicas(pedidos) {
-  return new Set(pedidos.map(enderecoPonto).filter(Boolean)).size
+function paradasUnicas(pedidos, empresa) {
+  return new Set(pedidos.map(p => enderecoPonto(p, empresa)).filter(Boolean)).size
 }
 
 // Só dígitos para o link do WhatsApp (wa.me abre a conversa, não gasta crédito).
@@ -131,7 +149,7 @@ function previstaEntregaTxt(p, tempoMax) {
   return dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
-function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, temBebida = false, exigeCodigo = true, tempoEntregaMax }) {
+function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, temBebida = false, exigeCodigo = true, tempoEntregaMax, empresa }) {
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
@@ -242,7 +260,7 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
             </div>
           )}
         </div>
-        <a href={mapsUrl(pedido)} target="_blank" rel="noopener noreferrer"
+        <a href={mapsUrl(pedido, empresa)} target="_blank" rel="noopener noreferrer"
           title="Ver o ponto no mapa"
           style={{ flexShrink: 0, fontSize: 12, fontWeight: 700, color: '#7c3aed', textDecoration: 'none',
             background: 'rgba(124,58,237,.12)', border: '1px solid #7c3aed', borderRadius: 8, padding: '5px 10px', whiteSpace: 'nowrap' }}>
@@ -466,6 +484,19 @@ export default function PainelEntregador() {
   // Fila (E4): null = ainda não carregou. { fila_ativa, online, pausado, na_vez, posicao, total_fila }
   const [fila, setFila] = useState(null)
   const [filaBusy, setFilaBusy] = useState(false)
+
+  // GPS do motoqueiro — só pra usar como PARTIDA da rota. Pede uma vez ao abrir;
+  // se ele negar, fica null e a rota parte da loja (ver origemRota).
+  const [minhaPos, setMinhaPos] = useState(null)
+  useEffect(() => {
+    if (!navigator.geolocation) return
+    const id = navigator.geolocation.watchPosition(
+      pos => setMinhaPos({ lat: pos.coords.latitude.toFixed(6), lng: pos.coords.longitude.toFixed(6) }),
+      () => setMinhaPos(null),
+      { enableHighAccuracy: true, maximumAge: 60000, timeout: 15000 }
+    )
+    return () => navigator.geolocation.clearWatch(id)
+  }, [])
 
   // Bebidas da loja (pra alertar o motoqueiro): carrega 1x os produtos das
   // categorias de bebida. Se não carregar (RLS), o fallback por palavra-chave cobre.
@@ -858,10 +889,10 @@ export default function PainelEntregador() {
               </div>
             ) : (
               <>
-                {paradasUnicas(minhas) >= 2 && (
-                  <a href={rotaMultiplaUrl(minhas.filter(p => enderecoTexto(p) || enderecoPonto(p)))} target="_blank" rel="noopener noreferrer"
+                {paradasUnicas(minhas, empresa) >= 2 && (
+                  <a href={rotaMultiplaUrl(minhas.filter(p => enderecoTexto(p) || p.endereco_lat != null), empresa, minhaPos)} target="_blank" rel="noopener noreferrer"
                     style={{ ...btnPrimario('#7c3aed'), display: 'block', textAlign: 'center', textDecoration: 'none' }}>
-                    🗺️ Rota de todas ({paradasUnicas(minhas)} paradas)
+                    🗺️ Rota de todas ({paradasUnicas(minhas, empresa)} paradas)
                   </a>
                 )}
                 {minhas.filter(p => p.status === 'confirmado' || p.status === 'em_preparo' || p.status === 'pronto').length >= 2 && (
@@ -871,7 +902,7 @@ export default function PainelEntregador() {
                   </button>
                 )}
                 {minhasF.map(p => (
-                  <CardEntrega key={p.id} pedido={p} mine temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max}
+                  <CardEntrega key={p.id} pedido={p} mine temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} empresa={empresa}
                     onSair={sairParaEntrega} onConfirmar={confirmarEntrega}
                     onConfirmarIfood={confirmarEntregaIfood} onDesistir={desistirEntrega} />
                 ))}
@@ -894,7 +925,7 @@ export default function PainelEntregador() {
                 Nenhum pedido encontrado pra <strong>“{busca}”</strong>.
               </div>
             ) : disponiveisF.map(p => (
-              <CardEntrega key={p.id} pedido={p} mine={false} temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} onAceitar={podeAceitar ? aceitar : undefined} />
+              <CardEntrega key={p.id} pedido={p} mine={false} temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} empresa={empresa} onAceitar={podeAceitar ? aceitar : undefined} />
             ))
           )
         ) : (
