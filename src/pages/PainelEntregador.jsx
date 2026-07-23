@@ -88,6 +88,70 @@ function entraNaRota(p) {
   return p.endereco_lat != null || Boolean(enderecoTexto(p))
 }
 
+// ─── Endereço que o mapa não acha ────────────────────────────────────────────
+// Uma parada que o mapa não encontra derruba a rota INTEIRA — o Maps abre e não
+// traça nada. Em vez de o motoqueiro descobrir isso na hora, a gente confere
+// antes e avisa no card, pra ele poder tirar esse pedido da rota.
+//
+// Só checa quem NÃO tem coordenada salva: com coordenada não existe o que errar.
+//
+// Duas armadilhas, as duas vistas em endereço real da Zebu:
+//  1) FALSO ALARME — "Av. Bacharel Tomaz Landim, 2466, Igapó, São Gonçalo do
+//     Amarante" falha, mas o nº 3010 da MESMA avenida com cidade "Natal" passa:
+//     o cliente misturou bairro de Natal com cidade vizinha. Por isso, se a
+//     busca completa falhar, tenta de novo mais solta (sem número, sem cidade).
+//  2) ACHOU ERRADO — "CASA DE JK" retorna "Casa Forte, Assu", a ~200 km. Vinha
+//     como "ok" e mandaria o motoqueiro pro outro lado do estado. Por isso o
+//     ponto achado também é conferido pela DISTÂNCIA até a loja.
+async function buscarPonto(q, signal) {
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`,
+    { signal }
+  )
+  if (!res.ok) throw new Error('busca falhou')
+  const d = await res.json()
+  if (!Array.isArray(d) || !d.length) return null
+  return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
+}
+
+async function conferirEndereco(p, empresa, signal) {
+  const uf = empresa?.estado
+  // Da mais específica pra mais solta. Sem número costuma achar a rua inteira,
+  // que já basta pra saber que o endereço existe.
+  const tentativas = [
+    [p.endereco_rua, p.endereco_numero, p.endereco_bairro, p.endereco_cidade, uf, 'Brasil'],
+    [p.endereco_rua, p.endereco_bairro, p.endereco_cidade, uf, 'Brasil'],
+    // Sem o BAIRRO: é o campo que o cliente mais erra ("Igapó" é bairro de Natal,
+    // mas vem com cidade São Gonçalo). Só a rua + cidade costuma achar.
+    [p.endereco_rua, p.endereco_cidade, uf, 'Brasil'],
+    [p.endereco_rua, p.endereco_bairro, uf, 'Brasil'],
+  ].map(partes => partes.filter(Boolean).join(', ')).filter(q => q && q !== `${uf}, Brasil`)
+  if (!tentativas.length) return 'nao_achado'
+
+  let ponto = null
+  try {
+    for (const q of [...new Set(tentativas)]) {
+      ponto = await buscarPonto(q, signal)
+      if (ponto) break
+      await new Promise(r => setTimeout(r, 1200)) // respeita o limite do serviço
+    }
+  } catch {
+    return 'erro' // sem internet / abortado: não acusa o endereço à toa
+  }
+  if (!ponto) return 'nao_achado'
+
+  // Achou — mas achou ONDE? Fora de um limite generoso em volta da loja, o mais
+  // provável é ter caído numa rua de nome parecido em outra cidade.
+  const lojaLat = Number(empresa?.latitude), lojaLng = Number(empresa?.longitude)
+  if (Number.isFinite(lojaLat) && Number.isFinite(lojaLng)) {
+    const raio = Number(empresa?.raio_entrega_km) > 0 ? Number(empresa.raio_entrega_km) : 15
+    const limite = Math.max(raio * 3, 25) // folga grande: só pega erro grosseiro
+    const km = haversineKm(lojaLat, lojaLng, ponto.lat, ponto.lng)
+    if (km > limite) return 'longe'
+  }
+  return 'ok'
+}
+
 // ─── Ordem das paradas ───────────────────────────────────────────────────────
 // O Google NÃO reordena: "waypoints are displayed in the same order they are
 // listed in the URL". Como a lista saía em ordem de CHEGADA do pedido, a rota
@@ -267,7 +331,7 @@ function previstaEntregaTxt(p, tempoMax) {
   return dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
-function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, temBebida = false, exigeCodigo = true, tempoEntregaMax, empresa, ordemRota, totalRota = 0 }) {
+function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, temBebida = false, exigeCodigo = true, tempoEntregaMax, empresa, ordemRota, totalRota = 0, checagemEndereco, foraDaRota = false, onAlternarRota }) {
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
@@ -378,6 +442,11 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
               {ordemRota === 1 && <span style={{ fontWeight: 700, color: 'var(--text-muted)' }}> · mais perto de você</span>}
             </div>
           )}
+          {foraDaRota && (
+            <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 3 }}>
+              ⛔ Fora da rota · você entrega por fora
+            </div>
+          )}
           <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>📍 {endereco}</div>
           {/* Complemento / ponto de referência (apto, bloco, "casa dos fundos"...) — o motoqueiro
               precisava olhar na comanda impressa porque não aparecia aqui. */}
@@ -394,6 +463,37 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
           🗺️ Rota
         </a>
       </div>
+
+      {/* Aviso de endereço que o mapa não acha + botão pra tirar da rota. Uma
+          parada não encontrada faz o Maps abrir SEM traçar nada — então é melhor
+          o motoqueiro saber qual é e poder deixar essa de fora. */}
+      {mine && (pedido.tipo_entrega || 'entrega') !== 'retirada' && (
+        <div style={{ margin: '-4px 0 10px' }}>
+          {(checagemEndereco === 'nao_achado' || checagemEndereco === 'longe') && (
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#b45309', background: 'rgba(245,158,11,.12)',
+              border: '1px solid #f59e0b', borderRadius: 8, padding: '7px 10px', marginBottom: 6 }}>
+              {checagemEndereco === 'longe'
+                ? <>⚠️ Este endereço só foi encontrado <strong>muito longe da loja</strong> — deve ser
+                    outra rua de nome parecido. Confirme o ponto com o cliente antes de sair.</>
+                : <>⚠️ <strong>Endereço duvidoso</strong> — não encontramos no mapa. Se o Google
+                    também não achar, ele derruba a rota das outras entregas: nesse caso tire da
+                    rota e confirme com o cliente.</>}
+            </div>
+          )}
+          {checagemEndereco === undefined && pedido.endereco_lat == null && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+              ⏳ Conferindo o endereço no mapa...
+            </div>
+          )}
+          {onAlternarRota && (
+            <button type="button" onClick={() => onAlternarRota(pedido.id)}
+              style={{ fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: '5px 10px', borderRadius: 8,
+                background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border, #2a2a3a)' }}>
+              {foraDaRota ? '↩️ Voltar pra rota' : '⛔ Tirar da rota'}
+            </button>
+          )}
+        </div>
+      )}
 
 
       {/* Itens do pedido — badge com a contagem; clica pra abrir e ver tudo (não esquecer nada) */}
@@ -844,17 +944,71 @@ export default function PainelEntregador() {
   }, [aba, user])
 
   const minhas = pedidos.filter(p => p.entregador_id === user?.id)
+  const idsMinhas = minhas.map(p => p.id).join(',')
+
+  // Paradas que o motoqueiro tirou da rota na mão. Fica só no aparelho dele
+  // (não é decisão da loja) e sobrevive a fechar o app — se sumisse no refresh
+  // ele teria que tirar de novo a cada vez.
+  const chaveFora = `fwc_fora_rota_${user?.id || ''}`
+  const [foraDaRota, setForaDaRota] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(chaveFora) || '[]')) } catch { return new Set() }
+  })
+  const alternarForaDaRota = useCallback((id) => {
+    setForaDaRota(atual => {
+      const novo = new Set(atual)
+      if (novo.has(id)) novo.delete(id); else novo.add(id)
+      try { localStorage.setItem(chaveFora, JSON.stringify([...novo])) } catch { /* ignore */ }
+      return novo
+    })
+  }, [chaveFora])
+  // Limpa ids de entregas que já saíram da lista, senão o localStorage cresce pra
+  // sempre e um pedido futuro poderia nascer "fora da rota" por reuso de id.
+  useEffect(() => {
+    const vivos = new Set(minhas.map(p => p.id))
+    setForaDaRota(atual => {
+      const limpo = new Set([...atual].filter(id => vivos.has(id)))
+      if (limpo.size === atual.size) return atual
+      try { localStorage.setItem(chaveFora, JSON.stringify([...limpo])) } catch { /* ignore */ }
+      return limpo
+    })
+  }, [idsMinhas, chaveFora]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Entregas que realmente entram na rota: fora as de retirada e as que o
+  // motoqueiro tirou na mão.
+  const naRota = minhas.filter(p => entraNaRota(p) && !foraDaRota.has(p.id))
+
+  // Confere no mapa os endereços SEM coordenada salva (pedido antigo). Um que o
+  // mapa não acha derruba a rota inteira — melhor o motoqueiro saber qual é.
+  // Uma consulta por vez, com pausa: o serviço é gratuito e limita rajadas.
+  const [checagem, setChecagem] = useState(() => new Map())
+  useEffect(() => {
+    if (aba !== 'minhas') return
+    const pendentes = minhas.filter(p => entraNaRota(p) && p.endereco_lat == null && !checagem.has(p.id))
+    if (pendentes.length === 0) return
+    const ctrl = new AbortController()
+    let cancelado = false
+    ;(async () => {
+      for (const p of pendentes) {
+        if (cancelado) return
+        const r = await conferirEndereco(p, empresa, ctrl.signal)
+        if (cancelado) return
+        setChecagem(m => new Map(m).set(p.id, r))
+        await new Promise(res => setTimeout(res, 1200)) // respeita o limite do serviço
+      }
+    })()
+    return () => { cancelado = true; ctrl.abort() }
+  }, [idsMinhas, aba, empresa?.estado]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Posição de cada entrega na rota calculada (id → 1, 2, 3...), pro motoqueiro
   // ver no card a MESMA sequência que o Maps vai abrir. Sem isso a rota sai
   // otimizada mas os cards seguem em ordem de chegada e ele se perde.
-  const idsMinhas = minhas.map(p => p.id).join(',')
+  const idsNaRota = naRota.map(p => p.id).join(',')
   const ordemRota = useMemo(() => {
-    const seq = pedidosOrdenados(minhas.filter(entraNaRota), minhaPos, empresa)
+    const seq = pedidosOrdenados(naRota, minhaPos, empresa)
     return new Map(seq.map((p, i) => [p.id, i + 1]))
     // Depende dos IDs (não do array): o realtime recria a lista a cada evento e
     // recalcular a rota toda vez faria a ordem piscar na tela do motoqueiro.
-  }, [idsMinhas, minhaPos?.lat, minhaPos?.lng, empresa?.latitude, empresa?.longitude]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [idsNaRota, minhaPos?.lat, minhaPos?.lng, empresa?.latitude, empresa?.longitude]) // eslint-disable-line react-hooks/exhaustive-deps
   // Disponíveis pro motoboy: só ENTREGA (retirada o cliente busca), sem dono e que
   // ainda NÃO saiu. Pedido em 'saiu_entrega' já foi despachado (no iFood ou aqui) —
   // não faz sentido aparecer como "aceitar". Ele só aparece pra alguém se o gestor
@@ -1027,10 +1181,15 @@ export default function PainelEntregador() {
               </div>
             ) : (
               <>
-                {paradasUnicas(minhas, empresa) >= 2 && (
-                  <a href={rotaMultiplaUrl(minhas.filter(entraNaRota), empresa, minhaPos)} target="_blank" rel="noopener noreferrer"
+                {paradasUnicas(naRota, empresa) >= 2 && (
+                  <a href={rotaMultiplaUrl(naRota, empresa, minhaPos)} target="_blank" rel="noopener noreferrer"
                     style={{ ...btnPrimario('#7c3aed'), display: 'block', textAlign: 'center', textDecoration: 'none' }}>
-                    🗺️ Rota de todas ({paradasUnicas(minhas, empresa)} paradas)
+                    🗺️ Rota de todas ({paradasUnicas(naRota, empresa)} paradas)
+                    {foraDaRota.size > 0 && (
+                      <span style={{ display: 'block', fontSize: 11.5, fontWeight: 700, opacity: .85, marginTop: 2 }}>
+                        {foraDaRota.size} fora da rota
+                      </span>
+                    )}
                   </a>
                 )}
                 {minhas.filter(p => p.status === 'confirmado' || p.status === 'em_preparo' || p.status === 'pronto').length >= 2 && (
@@ -1042,6 +1201,8 @@ export default function PainelEntregador() {
                 {minhasF.map(p => (
                   <CardEntrega key={p.id} pedido={p} mine temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} empresa={empresa}
                     ordemRota={ordemRota.get(p.id)} totalRota={ordemRota.size}
+                    checagemEndereco={checagem.get(p.id)}
+                    foraDaRota={foraDaRota.has(p.id)} onAlternarRota={alternarForaDaRota}
                     onSair={sairParaEntrega} onConfirmar={confirmarEntrega}
                     onConfirmarIfood={confirmarEntregaIfood} onDesistir={desistirEntrega} />
                 ))}
