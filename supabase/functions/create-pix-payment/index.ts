@@ -66,7 +66,8 @@ Deno.serve(async (req) => {
     // pedido: { empresa_id, empresa_nome, cliente_id, cliente_nome, cliente_telefone,
     //           itens, total, subtotal, taxa_entrega, forma_pagamento, tipo_entrega,
     //           endereco_rua, endereco_numero, endereco_complemento, endereco_bairro,
-    //           endereco_cidade, observacoes, troco_para, codigo_entrega, payer_email,
+    //           endereco_cidade, endereco_estado, endereco_cep, endereco_lat,
+    //           endereco_lng, observacoes, troco_para, codigo_entrega, payer_email,
     //           pontos_usados }
 
     const supabaseSrv = createClient(SUPABASE_URL, SUPABASE_KEY)
@@ -187,6 +188,13 @@ Deno.serve(async (req) => {
         endereco_complemento:  pedido.endereco_complemento,
         endereco_bairro:       pedido.endereco_bairro,
         endereco_cidade:       pedido.endereco_cidade,
+        // Estes 4 vinham no payload mas não eram repassados: pedido PIX nascia sem
+        // estado/CEP e sem COORDENADA (o de dinheiro/cartão salvava tudo). Sem a
+        // coordenada a rota do motoqueiro depende do Maps adivinhar o texto.
+        endereco_estado:       pedido.endereco_estado ?? null,
+        endereco_cep:          pedido.endereco_cep ?? null,
+        endereco_lat:          pedido.endereco_lat ?? null,
+        endereco_lng:          pedido.endereco_lng ?? null,
         observacoes:           pedido.observacoes ?? null,
         troco_para:            pedido.troco_para ?? null,
         codigo_entrega:        pedido.codigo_entrega,

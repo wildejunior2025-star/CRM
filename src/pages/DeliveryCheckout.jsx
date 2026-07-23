@@ -703,6 +703,11 @@ export default function DeliveryCheckout() {
         // O CEP ia só pro cadastro do cliente e sumia do pedido — o entregador
         // ficava sem ele pra conferir endereço torto.
         endereco_cep:         tipo === 'entrega' ? (form.cep.trim() || null) : null,
+        // COORDENADA do ponto de entrega (geocodificada ou pino no mapa). Já era
+        // calculada pra taxa por km e jogada fora; o motoqueiro ficava dependendo
+        // do Maps adivinhar o texto — e endereço torto derrubava a rota inteira.
+        endereco_lat:         tipo === 'entrega' ? (coordCliente?.lat ?? null) : null,
+        endereco_lng:         tipo === 'entrega' ? (coordCliente?.lng ?? null) : null,
         observacoes:  form.observacoes.trim() || null,
       }
       let pixData = null, pixErr = null
@@ -737,6 +742,9 @@ export default function DeliveryCheckout() {
         endereco_cidade:      tipo === 'entrega' ? form.cidade : null,
         endereco_bairro:      tipo === 'entrega' ? form.bairro.trim() : null,
         endereco_cep:         tipo === 'entrega' ? (form.cep.trim() || null) : null,
+        // Coordenada do ponto de entrega — ver comentário no payload do PIX.
+        endereco_lat:         tipo === 'entrega' ? (coordCliente?.lat ?? null) : null,
+        endereco_lng:         tipo === 'entrega' ? (coordCliente?.lng ?? null) : null,
         tipo_entrega:         tipo,
         origem: window.Capacitor?.isNativePlatform?.() ? 'app' : 'cardapio',
         itens: itensPedido,
