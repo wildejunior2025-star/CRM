@@ -83,6 +83,14 @@ function origemRota(minhaPos, empresa) {
 // Rota única com várias paradas (E1). A última entrega é o destino e as do meio
 // vão em waypoints (separados por "|" cru — o navegador codifica; %7C já
 // codificado o app não entende). Máx. 10 (limite do link do Maps).
+// Pedido que pode virar parada na rota: só ENTREGA com endereço de verdade.
+// Retirada tem "endereço" tipo "Retirada na loja / Retirada" — vira uma parada
+// lixo que o Maps não acha e derruba a rota inteira.
+function entraNaRota(p) {
+  if ((p.tipo_entrega || 'entrega') === 'retirada') return false
+  return p.endereco_lat != null || Boolean(enderecoTexto(p))
+}
+
 function rotaMultiplaUrl(pedidos, empresa, minhaPos) {
   // Remove pontos repetidos (ex.: 2 pedidos pro mesmo endereço).
   const pontos = [...new Set(pedidos.map(p => enderecoPonto(p, empresa)).filter(Boolean))].slice(0, 10)
@@ -97,7 +105,7 @@ function rotaMultiplaUrl(pedidos, empresa, minhaPos) {
 }
 // Nº de paradas ÚNICAS (endereços distintos) — pro rótulo do botão "Rota de todas".
 function paradasUnicas(pedidos, empresa) {
-  return new Set(pedidos.map(p => enderecoPonto(p, empresa)).filter(Boolean)).size
+  return new Set(pedidos.filter(entraNaRota).map(p => enderecoPonto(p, empresa)).filter(Boolean)).size
 }
 
 // Só dígitos para o link do WhatsApp (wa.me abre a conversa, não gasta crédito).
@@ -893,7 +901,7 @@ export default function PainelEntregador() {
             ) : (
               <>
                 {paradasUnicas(minhas, empresa) >= 2 && (
-                  <a href={rotaMultiplaUrl(minhas.filter(p => enderecoTexto(p) || p.endereco_lat != null), empresa, minhaPos)} target="_blank" rel="noopener noreferrer"
+                  <a href={rotaMultiplaUrl(minhas.filter(entraNaRota), empresa, minhaPos)} target="_blank" rel="noopener noreferrer"
                     style={{ ...btnPrimario('#7c3aed'), display: 'block', textAlign: 'center', textDecoration: 'none' }}>
                     🗺️ Rota de todas ({paradasUnicas(minhas, empresa)} paradas)
                   </a>
