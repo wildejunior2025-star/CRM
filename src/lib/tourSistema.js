@@ -36,10 +36,8 @@ export const SISTEMAS = {
       { chave: 'gestor-impressora', label: 'Impressora (configuração)' },
       { chave: 'gestor-pedidos-lista', label: 'Pedidos' },
       { chave: 'gestor-mesas', label: 'Mesas / Salão' },
-      { chave: 'gestor-mensagens', label: 'Mensagens' },
-      { chave: 'gestor-catalogo-atalho', label: 'Catálogo' },
-      { chave: 'gestor-hoje', label: 'Resumo de hoje' },
-      { chave: 'gestor-entregadores', label: 'Entregadores' },
+      // Um vídeo só pros 4 atalhos do rodapé do rail (a pedido do Wilde).
+      { chave: 'gestor-lateral-extras', label: 'Mensagens, Catálogo, Hoje e Entregadores' },
     ],
   },
 
