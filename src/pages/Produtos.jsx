@@ -245,6 +245,18 @@ export default function Produtos() {
   function updGrupo(gi, patch) {
     setGrupos(prev => prev.map((g, i) => (i === gi ? { ...g, ...patch } : g)))
   }
+
+  // Sobe/desce um grupo de complemento na ordem que aparece pro cliente.
+  // A ordem é salva (campo `ordem`) quando o produto é salvo.
+  function moverVinculo(i, dir) {
+    setVinculos(prev => {
+      const j = i + dir
+      if (j < 0 || j >= prev.length) return prev
+      const arr = [...prev]
+      ;[arr[i], arr[j]] = [arr[j], arr[i]]
+      return arr
+    })
+  }
   function updOpcao(gi, oi, patch) {
     setGrupos(prev => prev.map((g, i) =>
       i === gi ? { ...g, opcoes: g.opcoes.map((o, j) => (j === oi ? { ...o, ...patch } : o)) } : g))
@@ -1196,7 +1208,7 @@ export default function Produtos() {
                   )}
 
                   {vinculos.map((v, i) => (
-                    <div key={v.grupo_id} style={{ display: 'grid', gridTemplateColumns: '1fr 130px auto', gap: 8, alignItems: 'center', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px', marginTop: 8, background: 'var(--surface-hover)' }}>
+                    <div key={v.grupo_id} style={{ display: 'grid', gridTemplateColumns: '1fr 120px auto', gap: 8, alignItems: 'center', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px', marginTop: 8, background: 'var(--surface-hover)' }}>
                       <span style={{ fontWeight: 600 }}>{v.nome}</span>
                       <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
                         máx.:
@@ -1205,12 +1217,23 @@ export default function Produtos() {
                           placeholder={String(v.max_grupo)}
                           onChange={e => { const val = e.target.value; setVinculos(prev => prev.map((x, j) => j === i ? { ...x, max_override: val === '' ? null : (Number(val) || 1) } : x)) }} />
                       </label>
-                      <button type="button" className="btn btn-danger btn-sm"
-                        onClick={() => setVinculos(prev => prev.filter((_, j) => j !== i))}>
-                        Tirar
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Subir" disabled={i === 0}
+                          onClick={() => moverVinculo(i, -1)}>↑</button>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Descer" disabled={i === vinculos.length - 1}
+                          onClick={() => moverVinculo(i, 1)}>↓</button>
+                        <button type="button" className="btn btn-danger btn-sm"
+                          onClick={() => setVinculos(prev => prev.filter((_, j) => j !== i))}>
+                          Tirar
+                        </button>
+                      </div>
                     </div>
                   ))}
+                  {vinculos.length > 1 && (
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 0' }}>
+                      Use <b>↑ ↓</b> pra mudar a ordem que os grupos aparecem pro cliente (ex.: sabores em cima, bordas embaixo). Salve pra valer.
+                    </p>
+                  )}
 
                   {catsEmpresa.filter(c => !vinculos.some(v => v.grupo_id === c.id)).length > 0 && (
                     <select value="" style={{ marginTop: 10, maxWidth: 340 }}
