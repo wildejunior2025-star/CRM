@@ -17,7 +17,7 @@ export const FUNCIONALIDADES = [
   { chave: 'ifood',                  label: 'Integração iFood' },
   { chave: 'loja-online',            label: 'Loja Online' },
   { chave: 'app-cliente',            label: 'App do Cliente' },
-  { chave: 'gestor-pedidos',         label: 'Gestor de Pedidos' },
+  { chave: 'gestor-pedidos',         label: 'Gestor' },
   { chave: 'entregador',             label: 'Painel do Entregador' },
   { chave: 'salao',                  label: 'Atendimento no Salão' },
   { chave: 'crm-clientes',           label: 'CRM de Clientes' },

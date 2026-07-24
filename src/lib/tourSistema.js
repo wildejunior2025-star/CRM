@@ -12,7 +12,7 @@
 
 export const SISTEMAS = {
   gestor: {
-    titulo: 'Gestor de Pedidos',
+    titulo: 'Gestor',
     emoji: '📋',
     subtitulo: 'A tela onde os pedidos caem e andam — do iFood, WhatsApp, balcão e cardápio numa fila só. Clique em cada ação para ver como funciona.',
     // Todos os botões da tela (a pedido do Wilde). Depois a gente tira o que não
