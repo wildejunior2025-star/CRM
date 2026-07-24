@@ -19,11 +19,11 @@ export const SISTEMAS = {
     // precisar. Espelha PainelPedidos.jsx: topo, colunas, origens, ações do card
     // e a barra lateral direita.
     menu: [
-      // Um único vídeo explica TODOS os botões da barra de topo (Vender, Buscar,
-      // Auto-imprimir, Aceitar automático, Loja aberta/fechada, tema, Sair).
-      // Reaproveita a chave 'gestor-vender' (que já tem vídeo) pra não perdê-lo.
+      // Vender tem vídeo próprio; os demais botões do topo (Buscar, Auto-imprimir,
+      // Aceitar automático, Loja aberta/fechada, tema, Sair) ficam num vídeo só.
       { group: 'Barra de topo' },
-      { chave: 'gestor-vender', label: 'Barra de topo (Vender, Buscar, Auto-imprimir, Loja aberta, tema, Sair)' },
+      { chave: 'gestor-vender', label: 'Vender (balcão)' },
+      { chave: 'gestor-topo-outros', label: 'Buscar, Auto-imprimir, Loja aberta/fechada, tema e Sair' },
 
       // Colunas de status, filtros por origem e ações do pedido (aceitar, pronto,
       // cancelar…) saíram: são básicos e o vídeo principal do Gestor já explica.
