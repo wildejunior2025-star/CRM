@@ -769,6 +769,16 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* Reserva o espaço da barra de rolagem pra ela não ficar por cima dos
+     nomes/preços (no Windows a barra é sobreposta por padrão). */
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+.dloja-drawer-body::-webkit-scrollbar { width: 8px; }
+.dloja-drawer-body::-webkit-scrollbar-track { background: transparent; }
+.dloja-drawer-body::-webkit-scrollbar-thumb {
+  background: var(--dl-border);
+  border-radius: 8px;
 }
 
 .dloja-drawer-item {
