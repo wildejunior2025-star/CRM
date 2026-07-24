@@ -69,16 +69,32 @@ async function transcreverAudio(base64: string, mimetype: string): Promise<strin
   } catch (e) { console.error("[cloud whisper] exceção", String(e)); return null }
 }
 
+// ── 9º dígito do Brasil ───────────────────────────────────────────────────────
+// A Meta manda o wa_id de celular BR SEM o 9º dígito (ex.: 55 84 8180-774 →
+// 558498180774). Pra ENVIAR de volta, muitas vezes precisa do 9 (55 84 9 xxxx).
+// Só normaliza o número de ENVIO — não mexe no `from` usado no cérebro/banco.
+function normalizeBrNumber(n: string): string {
+  const d = String(n ?? "").replace(/\D/g, "")
+  // 55 + DDD(2) + 8 dígitos = 12 → celular sem o 9. Fixo (começa 2-5) não recebe o 9.
+  if (d.startsWith("55") && d.length === 12) {
+    const ddd = d.slice(2, 4)
+    const local = d.slice(4)
+    if (/^[6-9]/.test(local)) return `55${ddd}9${local}`
+  }
+  return d
+}
+
 // ── Envio de texto pela Graph API ────────────────────────────────────────────
 async function sendText(phoneNumberId: string, to: string, text: string) {
   try {
+    const dest = normalizeBrNumber(to)
     const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${CLOUD_TOKEN}` },
       body: JSON.stringify({
         messaging_product: "whatsapp",
         recipient_type: "individual",
-        to,
+        to: dest,
         type: "text",
         text: { body: text, preview_url: true },
       }),
