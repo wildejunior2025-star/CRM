@@ -2742,17 +2742,6 @@ const RIGHTBAR_BOTOES = [
     ),
   },
   {
-    id: 'pedidos', label: 'Pedidos',
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-        <polyline points="14 2 14 8 20 8"/>
-        <line x1="16" y1="13" x2="8" y2="13"/>
-        <line x1="16" y1="17" x2="8" y2="17"/>
-      </svg>
-    ),
-  },
-  {
     id: 'salao', label: 'Mesas',
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -3528,8 +3517,9 @@ export default function PainelPedidos() {
   // ── Painel lateral direito (Impressora / Pedidos) ─────────
   // Lembra a seção aberta (ex.: Mesas) ao sair e voltar do gestor.
   const [painelDireito, setPainelDireito] = useState(() => {
-    try { return localStorage.getItem('gestor-painel-direito') || null } catch { return null }
-  }) // null | 'impressora' | 'pedidos' | 'salao'
+    // 'pedidos' foi removido do rail — ignora valor antigo lembrado no navegador.
+    try { const v = localStorage.getItem('gestor-painel-direito'); return v === 'pedidos' ? null : (v || null) } catch { return null }
+  }) // null | 'impressora' | 'salao' | 'hoje' | 'chat' | 'catalogo' | 'entregadores'
   const [subAbaSalao, setSubAbaSalao] = useState(() => {
     try { return localStorage.getItem('gestor-subaba-salao') || 'salao' } catch { return 'salao' }
   }) // dentro de Mesas: 'salao' | 'reservas' | 'mesas'
@@ -5729,7 +5719,7 @@ export default function PainelPedidos() {
             display: 'flex', gap: 6, padding: '10px 14px', flexWrap: 'wrap', alignItems: 'center',
             borderBottom: '1px solid var(--border, #2a2a3a)', background: 'var(--surface, #16161f)',
           }}>
-            <button type="button" onClick={() => setPainelDireito('pedidos')}
+            <button type="button" onClick={() => setPainelDireito(null)}
               style={{
                 padding: '7px 14px', borderRadius: 9, fontWeight: 800, fontSize: 13, cursor: 'pointer',
                 border: '1.5px solid var(--primary, #7c3aed)', background: 'var(--primary, #7c3aed)', color: '#fff',
