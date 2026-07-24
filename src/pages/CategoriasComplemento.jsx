@@ -7,6 +7,59 @@ import './CategoriasComplemento.css'
 // Normaliza pra busca: tira acento e deixa minúsculo ("frango" acha "Frangão").
 const norm = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
 
+// Painel pra vincular VÁRIOS produtos de uma vez à categoria: abre uma listinha
+// com busca e caixinhas de seleção; marca quantos quiser e adiciona todos juntos.
+function ProdutoMultiAdd({ produtos, disabled, onConfirm }) {
+  const [aberto, setAberto] = useState(false)
+  const [sel, setSel] = useState(() => new Set())
+  const [q, setQ] = useState('')
+  const filtrados = q ? produtos.filter(p => norm(p.nome).includes(norm(q))) : produtos
+
+  function toggle(id) {
+    setSel(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+  function fechar() { setAberto(false); setSel(new Set()); setQ('') }
+  function confirmar() {
+    if (sel.size) onConfirm([...sel])
+    fechar()
+  }
+
+  if (!aberto) {
+    return (
+      <button type="button" className="cc-input cc-add-select cc-add-btn" disabled={disabled} onClick={() => setAberto(true)}>
+        + Adicionar a produtos…
+      </button>
+    )
+  }
+  const todosMarcados = filtrados.length > 0 && filtrados.every(p => sel.has(p.id))
+  return (
+    <div className="cc-multiadd">
+      <div className="cc-multiadd-head">
+        <input className="cc-input" autoFocus value={q} placeholder="Buscar produto…" onChange={e => setQ(e.target.value)} />
+        <button type="button" className="cc-iconbtn" title="Fechar" onClick={fechar}>✕</button>
+      </div>
+      <div className="cc-multiadd-list">
+        {filtrados.length === 0 && <p className="cc-empty">Nenhum produto encontrado.</p>}
+        {filtrados.map(p => (
+          <label key={p.id} className="cc-multiadd-item">
+            <input type="checkbox" checked={sel.has(p.id)} onChange={() => toggle(p.id)} />
+            <span>{p.nome}</span>
+          </label>
+        ))}
+      </div>
+      <div className="cc-multiadd-actions">
+        <button type="button" className="btn btn-secondary btn-sm"
+          onClick={() => setSel(todosMarcados ? new Set() : new Set(filtrados.map(p => p.id)))}>
+          {todosMarcados ? 'Desmarcar todos' : 'Marcar todos'}
+        </button>
+        <button type="button" className="btn btn-primary btn-sm" disabled={!sel.size} onClick={confirmar}>
+          Adicionar{sel.size ? ` ${sel.size}` : ''}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // Tela de CATEGORIAS DE COMPLEMENTO compartilhadas.
 // Uma categoria (ex.: "Proteínas") é criada UMA vez, com suas opções, e pode ser
 // casada em vários produtos (via a ponte produto_complemento_grupos). Pausar uma
@@ -124,11 +177,13 @@ export default function CategoriasComplemento() {
   }
 
   // ── Vínculos (quais produtos usam a categoria) ───────────────────────────
-  async function vincularProduto(cat, produtoId) {
-    if (!produtoId) return
+  // Vincula VÁRIOS produtos de uma vez (marca vários e adiciona todos juntos).
+  async function vincularProdutos(cat, produtoIds) {
+    const ids = (produtoIds ?? []).filter(Boolean)
+    if (!ids.length) return
     setBusy(cat.id)
-    const { error } = await supabase.from('produto_complemento_grupos')
-      .insert({ produto_id: produtoId, grupo_id: cat.id, ordem: 0 })
+    const rows = ids.map(pid => ({ produto_id: pid, grupo_id: cat.id, ordem: 0 }))
+    const { error } = await supabase.from('produto_complemento_grupos').insert(rows)
     setBusy(null)
     if (error) { setError(error.message); return }
     load()
@@ -292,13 +347,11 @@ export default function CategoriasComplemento() {
                   </div>
                 ))}
                 {naoVinculados.length > 0 && (
-                  <select
-                    className="cc-input cc-add-select"
-                    value=""
-                    onChange={e => { vincularProduto(cat, e.target.value); e.target.value = '' }}>
-                    <option value="">+ Adicionar a um produto…</option>
-                    {naoVinculados.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
-                  </select>
+                  <ProdutoMultiAdd
+                    produtos={naoVinculados}
+                    disabled={busy === cat.id}
+                    onConfirm={ids => vincularProdutos(cat, ids)}
+                  />
                 )}
               </div>
             </div>
