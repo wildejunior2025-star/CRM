@@ -3736,10 +3736,13 @@ export default function PainelPedidos() {
     if (!empresa) return
     let ativo = true
     ;(async () => {
+      // Só as conversas de HOJE — as de dias anteriores não aparecem no gestor.
+      const inicioHoje = new Date(); inicioHoje.setHours(0, 0, 0, 0)
       const { data } = await supabase
         .from('mensagens_chat')
         .select('*')
         .eq('empresa_id', empresa.id)
+        .gte('created_at', inicioHoje.toISOString())
         .order('created_at', { ascending: true })
         .limit(500)
       if (ativo) setChatMsgs(data || [])
