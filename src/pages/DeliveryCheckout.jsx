@@ -145,6 +145,19 @@ async function geocodeEndereco({ rua, numero, bairro, cidade, estado, cep } = {}
   } catch { /* ignora */ }
   return null
 }
+// Centro aproximado do bairro digitado — só pra CONFERIR se o pino não caiu
+// num bairro totalmente diferente (geocode errado da rua, GPS fora do lugar).
+// Não influencia a taxa; serve só pro aviso "pino longe do bairro".
+async function geocodeBairro({ bairro, cidade, estado } = {}) {
+  if (!bairro) return null
+  try {
+    const q = [bairro, cidade, estado, 'Brasil'].filter(s => s && String(s).trim()).join(', ')
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`, { headers: { 'User-Agent': 'CRM-FWC/1.0' } })
+    const d = await res.json()
+    if (d?.[0]) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
+  } catch { /* ignora — sem centro do bairro, simplesmente não avisa */ }
+  return null
+}
 async function reverseGeocode(lat, lng) {
   try {
     const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`, { headers: { 'User-Agent': 'CRM-FWC/1.0' } })
@@ -173,6 +186,16 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
   // for definido de fato — pelo endereço geocodificado, por arrastar, clicar ou
   // GPS. Sem isso o cliente confirmava o pino parado em cima da loja.
   const [definido, setDefinido] = useState(!!initial)
+  const [bairroCentro, setBairroCentro] = useState(null) // centro aprox. do bairro digitado
+
+  // Acha o centro do bairro que o cliente informou (uma vez), só p/ conferência.
+  useEffect(() => {
+    let cancelado = false
+    if (!endereco?.bairro) return
+    geocodeBairro(endereco).then(g => { if (!cancelado) setBairroCentro(g) })
+    return () => { cancelado = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endereco?.bairro, endereco?.cidade, endereco?.estado])
 
   useEffect(() => {
     let cancelado = false
@@ -232,6 +255,10 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
   const dist = coord && storeLat ? haversineKm(coord.lat, coord.lng, Number(storeLat), Number(storeLng)) : null
   const taxa = dist != null ? calcTaxaKm(taxas, dist) : null
   const foraRaio = dist != null && raioKm && dist > Number(raioKm)
+  // Pino caiu longe do bairro digitado? (protege contra geocode/GPS errado que
+  // infla a taxa). 3,5 km é folgado pra não reclamar de bairro grande.
+  const distBairro = coord && bairroCentro ? haversineKm(coord.lat, coord.lng, bairroCentro.lat, bairroCentro.lng) : null
+  const pinLongeDoBairro = definido && distBairro != null && distBairro > 3.5
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }} onClick={onClose}>
@@ -252,6 +279,11 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
                 : dist != null ? <>📏 {dist.toFixed(1)} km · <strong style={{ color: '#34d399' }}>Taxa {taxa != null ? `R$ ${fmt(taxa)}` : '—'}</strong>{foraRaio ? ' · ⚠️ fora do raio' : ''}</> : 'Arraste o pino até sua casa'}
             </div>
           </div>
+          {pinLongeDoBairro && (
+            <div style={{ fontSize: 12.5, lineHeight: 1.5, color: '#fbbf24', background: 'rgba(251,191,36,.12)', border: '1px solid rgba(251,191,36,.4)', borderRadius: 8, padding: '9px 11px' }}>
+              ⚠️ Esse ponto está a <strong>{distBairro.toFixed(1)} km</strong> do bairro <strong>{endereco?.bairro}</strong> que você informou. Confira se o pino está mesmo na sua casa — se estiver no lugar errado, a taxa de entrega sai errada.
+            </div>
+          )}
           {/* Sem local definido = pino ainda parado na loja. Bloqueia pra não
               gravar o endereço da loja no lugar do endereço do cliente. */}
           <button type="button" onClick={() => coord && definido && onConfirm({ lat: coord.lat, lng: coord.lng, dist, taxa })} disabled={!coord || !definido}
