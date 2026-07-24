@@ -82,7 +82,7 @@ export default function AjudaIA({ onAbrirVideo }) {
         position: 'fixed', right: 18, bottom: 18, zIndex: 9998,
         width: 'min(390px, calc(100vw - 36px))', maxHeight: 'min(620px, calc(100vh - 36px))',
         display: 'flex', flexDirection: 'column',
-        background: 'var(--card-bg, #fff)', color: 'var(--text, #111)',
+        background: '#fff', color: '#1f2937',
         border: '1px solid rgba(124,58,237,.3)', borderRadius: 16,
         boxShadow: '0 18px 50px rgba(0,0,0,.28)', overflow: 'hidden',
       }}
@@ -110,8 +110,8 @@ export default function AjudaIA({ onAbrirVideo }) {
                 <button key={s} type="button" onClick={() => perguntar(s)}
                   style={{
                     textAlign: 'left', padding: '9px 12px', borderRadius: 10, cursor: 'pointer',
-                    border: '1px solid var(--border, #ddd)', background: 'transparent',
-                    color: 'inherit', fontSize: 13.5, font: 'inherit',
+                    border: '1px solid #d0d3da', background: 'transparent',
+                    color: '#1f2937', fontSize: 13.5, font: 'inherit',
                   }}>
                   {s}
                 </button>
@@ -158,7 +158,7 @@ export default function AjudaIA({ onAbrirVideo }) {
 
       <form
         onSubmit={e => { e.preventDefault(); perguntar() }}
-        style={{ display: 'flex', gap: 7, padding: 12, borderTop: '1px solid var(--border, #eee)', flexShrink: 0 }}
+        style={{ display: 'flex', gap: 7, padding: 12, borderTop: '1px solid #eee', flexShrink: 0 }}
       >
         <input
           ref={inputRef} type="text" value={texto} maxLength={500}
@@ -166,7 +166,7 @@ export default function AjudaIA({ onAbrirVideo }) {
           placeholder="Digite sua dúvida…"
           style={{
             flex: 1, padding: '9px 12px', borderRadius: 10, fontSize: 14,
-            border: '1px solid var(--border, #ddd)', background: 'var(--input-bg, #fff)', color: 'inherit',
+            border: '1px solid #d0d3da', background: '#fff', color: '#1f2937',
           }}
         />
         <button type="submit" disabled={enviando || !texto.trim()}
