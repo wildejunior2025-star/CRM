@@ -19,23 +19,17 @@ export const SISTEMAS = {
     // precisar. Espelha PainelPedidos.jsx: topo, colunas, origens, ações do card
     // e a barra lateral direita.
     menu: [
+      // Um único vídeo explica TODOS os botões da barra de topo (Vender, Buscar,
+      // Auto-imprimir, Aceitar automático, Loja aberta/fechada, tema, Sair).
+      // Reaproveita a chave 'gestor-vender' (que já tem vídeo) pra não perdê-lo.
       { group: 'Barra de topo' },
-      { chave: 'gestor-vender', label: 'Vender (balcão)' },
-      { chave: 'gestor-buscar', label: 'Buscar pedido' },
-      { chave: 'gestor-auto-imprimir', label: 'Auto-imprimir (ligar/desligar)' },
-      { chave: 'gestor-aceitar-auto', label: 'Aceitar automático' },
-      { chave: 'gestor-loja-aberta', label: 'Loja aberta / fechada' },
-      { chave: 'gestor-tema', label: 'Modo claro / escuro' },
-      { chave: 'gestor-sair', label: 'Sair' },
+      { chave: 'gestor-vender', label: 'Barra de topo (Vender, Buscar, Auto-imprimir, Loja aberta, tema, Sair)' },
 
       // Colunas de status, filtros por origem e ações do pedido (aceitar, pronto,
       // cancelar…) saíram: são básicos e o vídeo principal do Gestor já explica.
 
       { group: 'Impressão' },
-      { chave: 'gestor-imprimir-cupom', label: 'Imprimir cupom' },
-      { chave: 'gestor-reimprimir', label: 'Reimprimir cupom' },
       { chave: 'gestor-imprimir-bluetooth', label: 'Impressora do celular (Bluetooth)' },
-      { chave: 'gestor-comanda-cozinha', label: 'Comanda na cozinha' },
       { chave: 'gestor-nfce', label: 'Emitir NFC-e (nota fiscal)' },
 
       { group: 'Barra lateral' },
