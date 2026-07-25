@@ -460,12 +460,10 @@ export default function DeliveryLoja() {
           <button
             type="button"
             onClick={() => navigate(`/meus-pedidos?loja=${loja.id}`)}
+            className="dloja-orders-btn"
             style={{
               marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6,
-              // Fica abaixo do banner (sobre o fundo da página) — usa as cores do
-              // tema, senão sumiria no claro.
-              background: 'var(--dl-surface)', border: '1px solid var(--dl-border)',
-              color: 'var(--dl-text)', borderRadius: 10, padding: '8px 12px', cursor: 'pointer',
+              borderRadius: 10, padding: '8px 12px', cursor: 'pointer',
               fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap',
             }}
           >
@@ -488,9 +486,9 @@ export default function DeliveryLoja() {
             value={busca}
             onChange={e => setBusca(e.target.value)}
             placeholder="Buscar produto..."
+            className="dloja-search-input"
             style={{
               width: '100%', boxSizing: 'border-box', padding: '11px 38px', borderRadius: 12,
-              border: '1.5px solid var(--dl-border)', background: 'var(--dl-surface)',
               color: 'var(--dl-text)', fontSize: 15, outline: 'none',
             }}
           />
