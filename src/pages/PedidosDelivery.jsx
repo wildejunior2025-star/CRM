@@ -59,10 +59,6 @@ function lerConfig() {
   }
 }
 
-function salvarConfig(cfg) {
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg))
-}
-
 function lerViewMode() {
   try {
     return localStorage.getItem(VIEW_MODE_KEY) || 'tabela'
@@ -453,9 +449,8 @@ function ModalCancelamento({ pedido, onConfirmar, onFechar }) {
   )
 }
 
-function ModalConfiguracoes({ config, onSalvar, onFechar }) {
+function ModalConfiguracoes({ onFechar }) {
   const { empresa } = useAuth()
-  const [cfg, setCfg] = useState({ ...config })
   const [zeraDiario, setZeraDiario] = useState(false) // config da loja (no banco)
   const [salvando, setSalvando] = useState(false)
 
@@ -466,14 +461,8 @@ function ModalConfiguracoes({ config, onSalvar, onFechar }) {
     return () => { vivo = false }
   }, [empresa.id])
 
-  function toggle(campo) {
-    setCfg(prev => ({ ...prev, [campo]: !prev[campo] }))
-  }
-
   async function handleSalvar() {
     setSalvando(true)
-    salvarConfig(cfg)
-    onSalvar(cfg)
     // Numeração diária é config da loja (vale em todos os aparelhos) → grava no banco.
     await supabase.from('empresas').update({ numero_pedido_zera_diario: zeraDiario }).eq('id', empresa.id)
     setSalvando(false)
@@ -483,98 +472,14 @@ function ModalConfiguracoes({ config, onSalvar, onFechar }) {
   return (
     <div className="modal-overlay" onClick={onFechar}>
       <div className="modal pd-modal-cfg" onClick={e => e.stopPropagation()}>
-        <h2>Configuracoes da loja</h2>
+        <h2>Numeração dos pedidos</h2>
 
-        {/* Pedidos */}
+        {/* Aceitar automático, som e impressão saíram daqui: já existem no
+            gestor (Painel de Pedidos), e cada tela guardava a sua — dava pra
+            ligar num lugar e continuar desligado no outro. Sobrou o que só
+            existe aqui: a numeração, que é config da loja e vale em todo
+            aparelho. */}
         <div className="pd-cfg-secao">
-          <div className="pd-cfg-titulo">Pedidos</div>
-          <div className="pd-cfg-item">
-            <div>
-              <div className="pd-cfg-item-nome">Aceitar pedidos automaticamente</div>
-              <div className="pd-cfg-item-desc">Ao chegar um novo pedido, confirma sem precisar clicar manualmente</div>
-            </div>
-            <button
-              type="button"
-              className={`pd-toggle ${cfg.autoAceitar ? 'ativo' : ''}`}
-              onClick={() => toggle('autoAceitar')}
-              aria-label="Toggle auto aceitar"
-            >
-              <span className="pd-toggle-thumb" />
-            </button>
-          </div>
-        </div>
-
-        {/* Som */}
-        <div className="pd-cfg-secao">
-          <div className="pd-cfg-titulo">Notificacao sonora</div>
-          <div className="pd-cfg-item">
-            <div>
-              <div className="pd-cfg-item-nome">Tocar som ao receber pedido</div>
-              <div className="pd-cfg-item-desc">Toca um aviso sonoro quando um novo pedido chegar</div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ padding: '4px 10px', fontSize: 12 }}
-                onClick={tocarSom}
-              >
-                Testar
-              </button>
-              <button
-                type="button"
-                className={`pd-toggle ${cfg.somAtivo ? 'ativo' : ''}`}
-                onClick={() => toggle('somAtivo')}
-                aria-label="Toggle som"
-              >
-                <span className="pd-toggle-thumb" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Impressora */}
-        <div className="pd-cfg-secao">
-          <div className="pd-cfg-titulo">Impressora termica</div>
-          <div className="pd-cfg-item">
-            <div>
-              <div className="pd-cfg-item-nome">Imprimir automaticamente ao chegar o pedido</div>
-              <div className="pd-cfg-item-desc">Assim que um pedido novo entra, o cupom já sai na impressora (não precisa aceitar). Precisa estar ligado no computador que tem a impressora.</div>
-            </div>
-            <button
-              type="button"
-              className={`pd-toggle ${cfg.imprimirAuto ? 'ativo' : ''}`}
-              onClick={() => toggle('imprimirAuto')}
-              aria-label="Toggle impressao auto"
-            >
-              <span className="pd-toggle-thumb" />
-            </button>
-          </div>
-          <div className="form-field" style={{ marginTop: 10 }}>
-            <label style={{ fontSize: 13 }}>URL da impressora</label>
-            <input
-              type="url"
-              placeholder="http://localhost:9100"
-              value={cfg.impressoraUrl}
-              onChange={e => setCfg(prev => ({ ...prev, impressoraUrl: e.target.value }))}
-            />
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-              Configure o PrintNode ou QZ Tray para impressao automatica
-            </span>
-          </div>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            style={{ fontSize: 12, marginTop: 6 }}
-            onClick={() => window.print()}
-          >
-            Testar impressao (janela atual)
-          </button>
-        </div>
-
-        {/* Numeração dos pedidos */}
-        <div className="pd-cfg-secao">
-          <div className="pd-cfg-titulo">Numeracao dos pedidos</div>
           <div className="pd-cfg-item">
             <div>
               <div className="pd-cfg-item-nome">Zerar a numeracao todo dia</div>
@@ -872,11 +777,9 @@ export default function PedidosDelivery() {
   const [pedidos, setPedidos] = useState([])
   const [carregando, setCarregando] = useState(true)
   const [abaAtiva, setAbaAtiva] = useState(() => localStorage.getItem(ABA_KEY) || 'aguardando')
-  const [lojaAberta, setLojaAberta] = useState(false)
-  const [togglingLoja, setTogglingLoja] = useState(false)
   const [pedidoCancelando, setPedidoCancelando] = useState(null)
   const [modalCfg, setModalCfg] = useState(false)
-  const [config, setConfig] = useState(lerConfig)
+  const [config] = useState(lerConfig) // so leitura: quem edita e o gestor
   const [viewMode, setViewMode] = useState(lerViewMode)
   // Nasce SEM filtro de data (mostra tudo). A pessoa escolhe o período se quiser.
   const [dataInicio, setDataInicio] = useState('')
@@ -958,11 +861,6 @@ export default function PedidosDelivery() {
     heartbeat()
     const timer = setInterval(heartbeat, 60_000)
     return () => clearInterval(timer)
-  }, [empresa])
-
-  useEffect(() => {
-    if (!empresa) return
-    setLojaAberta(empresa.delivery_ativo ?? false)
   }, [empresa])
 
   // ── Busca taxa da plataforma ──────────────────────────────
@@ -1133,18 +1031,6 @@ export default function PedidosDelivery() {
     }
   }
 
-  async function handleToggleLoja() {
-    if (!empresa || togglingLoja) return
-    setTogglingLoja(true)
-    const novoValor = !lojaAberta
-    const { error } = await supabase
-      .from('empresas')
-      .update({ delivery_ativo: novoValor })
-      .eq('id', empresa.id)
-    if (!error) setLojaAberta(novoValor)
-    setTogglingLoja(false)
-  }
-
   if (!empresa) return null
 
   const abaConfig = ABAS.find(a => a.id === abaAtiva)
@@ -1236,18 +1122,14 @@ export default function PedidosDelivery() {
           <button
             className="btn btn-secondary pd-btn-cfg"
             onClick={() => setModalCfg(true)}
-            title="Configuracoes"
+            title="Numeração dos pedidos"
           >
-            Conf.
+            Nº pedidos
           </button>
-          <button
-            className={`pd-toggle-loja ${lojaAberta ? 'aberta' : 'fechada'}`}
-            onClick={handleToggleLoja}
-            disabled={togglingLoja}
-          >
-            <span className="pd-toggle-dot" />
-            {lojaAberta ? 'Loja aberta' : 'Loja fechada'}
-          </button>
+          {/* "Loja aberta/fechada" saiu: o mesmo botão está no gestor (Painel
+              de Pedidos), que é a tela de operação. Dois interruptores pro
+              mesmo `delivery_ativo` é convite pra alguém achar que abriu a loja
+              numa tela enquanto a outra mostra outra coisa. */}
         </div>
       </div>
 
@@ -1449,11 +1331,7 @@ export default function PedidosDelivery() {
       )}
 
       {modalCfg && (
-        <ModalConfiguracoes
-          config={config}
-          onSalvar={setConfig}
-          onFechar={() => setModalCfg(false)}
-        />
+        <ModalConfiguracoes onFechar={() => setModalCfg(false)} />
       )}
 
       {/* Drawer de detalhe — visível apenas no modo tabela */}

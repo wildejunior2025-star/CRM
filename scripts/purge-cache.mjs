@@ -17,8 +17,11 @@
 import { readFileSync } from 'node:fs'
 
 const HOSTS = ['gestor.fwcinter.com', 'lojaonline.fwcinter.com']
-const TENTATIVAS = 6
-const ESPERA_MS = 8000
+// A borda às vezes leva mais de um minuto pra parar de servir o HTML antigo.
+// Com 6×8s (~48s) o script já deu alarme falso num deploy que estava certo —
+// e alarme falso ensina a ignorar o aviso, que é justamente o que não pode.
+const TENTATIVAS = 10
+const ESPERA_MS = 12000
 
 function envDoArquivo() {
   try {
