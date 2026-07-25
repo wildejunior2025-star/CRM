@@ -510,11 +510,29 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
       {verItens && (
         <ul style={{ listStyle: 'none', margin: '0 0 10px', padding: '8px 10px',
           background: 'rgba(0,0,0,.15)', border: '1px solid var(--border, #2a2a3a)', borderRadius: 8 }}>
-          {itensPedido.map((it, i) => (
-            <li key={i} style={{ fontSize: 13.5, color: 'var(--text)', padding: '3px 0' }}>
-              <strong>{it.quantidade ?? it.qtd ?? 1}×</strong> {String(it.nome || '—').replace(/\s*\([^()]*\)\s*$/, '')}
-            </li>
-          ))}
+          {itensPedido.map((it, i) => {
+            // A montagem da quentinha (arroz, feijão, salada...) vem com preço 0 e
+            // fica escondida — é coisa da cozinha, não do entregador. O que CUSTA
+            // a mais é porção extra: isso o motoqueiro precisa ver, senão sai sem
+            // levar. Ex: "1× Quentinha (M) + Churrasco extra".
+            const extras = (Array.isArray(it.complementos) ? it.complementos : [])
+              .filter(c => Number(c.preco ?? c.preco_adicional ?? 0) > 0)
+            return (
+              <li key={i} style={{ fontSize: 13.5, color: 'var(--text)', padding: '3px 0' }}>
+                <strong>{it.quantidade ?? it.qtd ?? 1}×</strong> {String(it.nome || '—').replace(/\s*\([^()]*\)\s*$/, '')}
+                {extras.map((c, j) => (
+                  <span key={j} style={{
+                    display: 'inline-block', marginLeft: 6,
+                    background: 'rgba(245,158,11,.18)', border: '1px solid #f59e0b',
+                    color: '#f59e0b', borderRadius: 6, padding: '1px 7px',
+                    fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap',
+                  }}>
+                    + {Number(c.qtd ?? 1) > 1 ? `${c.qtd}× ` : ''}{c.nome}
+                  </span>
+                ))}
+              </li>
+            )
+          })}
         </ul>
       )}
       {/* Pagamento: deixa MUITO claro se já pagou ou se o motoqueiro precisa cobrar */}
