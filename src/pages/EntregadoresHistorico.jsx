@@ -7,16 +7,52 @@ import './Entregadores.css'
 const fmt = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const num = v => Number(v || 0)
 
-const PERIODOS = [['hoje', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias'], ['tudo', 'Tudo']]
+const PERIODOS = [['hoje', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias'], ['tudo', 'Tudo'], ['datas', 'Escolher datas']]
 const ORDENS = [['devendo', 'Quem devo mais'], ['corridas', 'Mais corridas'], ['nome', 'Nome']]
 
-// Início do período no formato ISO (null = tudo). O corte é o mesmo no resumo do
-// banco e na lista de corridas, senão os dois números não fecham.
-function desdeDe(periodo) {
-  if (periodo === 'hoje') { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString() }
-  if (periodo === '7d') return new Date(Date.now() - 7 * 86400000).toISOString()
-  if (periodo === '30d') return new Date(Date.now() - 30 * 86400000).toISOString()
-  return null
+const hojeISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+
+// Início e fim do período em ISO (null = sem limite). O corte é o mesmo no resumo
+// do banco e na lista de corridas, senão os dois números não fecham.
+function faixaDe(periodo, de, ate) {
+  if (periodo === 'hoje') { const d = new Date(); d.setHours(0, 0, 0, 0); return { desde: d.toISOString(), ate: null } }
+  if (periodo === '7d') return { desde: new Date(Date.now() - 7 * 86400000).toISOString(), ate: null }
+  if (periodo === '30d') return { desde: new Date(Date.now() - 30 * 86400000).toISOString(), ate: null }
+  if (periodo === 'datas') {
+    return {
+      desde: de ? new Date(`${de}T00:00:00`).toISOString() : null,
+      ate: ate ? new Date(`${ate}T23:59:59.999`).toISOString() : null,
+    }
+  }
+  return { desde: null, ate: null }
+}
+
+const rotuloPeriodo = (periodo, de, ate) => {
+  if (periodo !== 'datas') return (PERIODOS.find(p => p[0] === periodo) || [])[1]
+  const br = s => s ? s.split('-').reverse().join('/') : ''
+  if (de && ate) return `${br(de)} a ${br(ate)}`
+  if (de) return `desde ${br(de)}`
+  if (ate) return `até ${br(ate)}`
+  return 'Escolher datas'
+}
+
+// Seletor de período — os mesmos botões na lista e no detalhe.
+function FiltroPeriodo({ periodo, setPeriodo, de, setDe, ate, setAte }) {
+  return (
+    <div className="ent-periodo">
+      <div className="ent-seg">
+        {PERIODOS.map(([val, lab]) => (
+          <button key={val} type="button" className={periodo === val ? 'on' : ''} onClick={() => setPeriodo(val)}>{lab}</button>
+        ))}
+      </div>
+      {periodo === 'datas' && (
+        <div className="ent-datas">
+          <label>De <input type="date" value={de} max={ate || hojeISO()} onChange={e => setDe(e.target.value)} /></label>
+          <label>Até <input type="date" value={ate} min={de || undefined} max={hojeISO()} onChange={e => setAte(e.target.value)} /></label>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // Como o cliente pagou: se o entregador ficou com o dinheiro na mão, é repasse pra loja.
@@ -41,24 +77,68 @@ const iniciais = nome => (nome || '?').trim().split(/\s+/).slice(0, 2).map(w => 
 
 const FORMAS = [['dinheiro', '💵 Dinheiro'], ['cartao', '💳 Cartão'], ['pix', '📱 PIX']]
 
+// Confirmação da casa — o confirm() do navegador é feio e não mostra o resumo.
+function Confirmacao({ pedido, ocupado, onFechar }) {
+  useEffect(() => {
+    const esc = e => { if (e.key === 'Escape') onFechar() }
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [onFechar])
+  if (!pedido) return null
+  const perigo = pedido.perigo
+  return (
+    <div className="ent-conf-overlay" onClick={onFechar} role="presentation">
+      <div className="ent-conf" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className={`ent-conf-icone ${perigo ? 'perigo' : ''}`}>{perigo ? '↩️' : '💰'}</div>
+        <h2>{pedido.titulo}</h2>
+        {pedido.texto && <p>{pedido.texto}</p>}
+        {pedido.resumo?.length > 0 && (
+          <div className="ent-conf-resumo">
+            {pedido.resumo.map(([lab, val]) => (
+              <div key={lab}><span>{lab}</span><strong>{val}</strong></div>
+            ))}
+          </div>
+        )}
+        <div className="ent-conf-acoes">
+          <button type="button" className="btn btn-secondary" onClick={onFechar} disabled={ocupado}>Cancelar</button>
+          <button type="button" className={`btn ${perigo ? 'btn-danger' : 'btn-ok'}`} disabled={ocupado} autoFocus
+            onClick={async () => { const fn = pedido.acao; await fn(); onFechar() }}>
+            {ocupado ? 'Salvando…' : (pedido.botao || 'Confirmar')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function EntregadoresHistorico() {
   const { empresa } = useAuth()
   const [resumo, setResumo] = useState([])
   const [loading, setLoading] = useState(true)
   const [sel, setSel] = useState(null)
-  const [periodo, setPeriodo] = useState('tudo')
+  const [periodo, setPeriodo] = useState('hoje')
+  const [de, setDe] = useState(hojeISO())
+  const [ate, setAte] = useState(hojeISO())
   const [busca, setBusca] = useState('')
   const [soDevendo, setSoDevendo] = useState(false)
   const [ordem, setOrdem] = useState('devendo')
   const [salvando, setSalvando] = useState(false)
+  const [confirmacao, setConfirmacao] = useState(null)
+  const [aviso, setAviso] = useState(null)
+
+  const avisar = useCallback((texto, erro = false) => {
+    setAviso({ texto, erro })
+    setTimeout(() => setAviso(a => (a?.texto === texto ? null : a)), 3200)
+  }, [])
 
   const carregarResumo = useCallback(async () => {
     if (!empresa) return
     setLoading(true)
-    const { data } = await supabase.rpc('entregadores_resumo', { p_empresa_id: empresa.id, p_desde: desdeDe(periodo) })
+    const faixa = faixaDe(periodo, de, ate)
+    const { data } = await supabase.rpc('entregadores_resumo', { p_empresa_id: empresa.id, p_desde: faixa.desde, p_ate: faixa.ate })
     setResumo(data || [])
     setLoading(false)
-  }, [empresa, periodo])
+  }, [empresa, periodo, de, ate])
 
   useEffect(() => { carregarResumo() }, [carregarResumo])
 
@@ -92,7 +172,7 @@ export default function EntregadoresHistorico() {
     setSalvando(true)
     const { error } = await supabase.from('pedidos_delivery').update(patchDe(pago)).in('id', ids)
     setSalvando(false)
-    if (error) { alert('Não deu pra salvar: ' + error.message); return false }
+    if (error) { avisar('Não deu pra salvar: ' + error.message, true); return false }
     return true
   }
 
@@ -100,16 +180,25 @@ export default function EntregadoresHistorico() {
   async function acertarTudo(entregadorId) {
     if (salvando) return false
     setSalvando(true)
-    const desde = desdeDe(periodo)
+    const faixa = faixaDe(periodo, de, ate)
     let q = supabase.from('pedidos_delivery').update(patchDe(true))
       .eq('empresa_id', empresa.id).eq('entregador_id', entregadorId).eq('status', 'entregue')
       .or('entregador_pago.is.null,entregador_pago.eq.false')
-    if (desde) q = q.gte('created_at', desde)
+    if (faixa.desde) q = q.gte('created_at', faixa.desde)
+    if (faixa.ate) q = q.lte('created_at', faixa.ate)
     const { error } = await q
     setSalvando(false)
-    if (error) { alert('Não deu pra salvar: ' + error.message); return false }
+    if (error) { avisar('Não deu pra salvar: ' + error.message, true); return false }
     return true
   }
+
+  // Modal e aviso ficam fora do fluxo da página, então valem pras duas telas.
+  const avulsos = (
+    <>
+      <Confirmacao pedido={confirmacao} ocupado={salvando} onFechar={() => setConfirmacao(null)} />
+      {aviso && <div className={`ent-toast ${aviso.erro ? 'erro' : ''}`}>{aviso.texto}</div>}
+    </>
+  )
 
   if (loading && !resumo.length) {
     return (
@@ -122,22 +211,31 @@ export default function EntregadoresHistorico() {
 
   if (sel) {
     return (
-      <DetalheEntregador
-        empresa={empresa}
-        id={sel}
-        entregador={resumo.find(e => e.entregador_id === sel)}
-        periodo={periodo}
-        setPeriodo={setPeriodo}
-        salvando={salvando}
-        onVoltar={() => setSel(null)}
-        marcarPago={marcarPago}
-        acertarTudo={acertarTudo}
-        recarregarResumo={carregarResumo}
-      />
+      <>
+        <DetalheEntregador
+          empresa={empresa}
+          id={sel}
+          entregador={resumo.find(e => e.entregador_id === sel)}
+          periodo={periodo}
+          setPeriodo={setPeriodo}
+          de={de}
+          setDe={setDe}
+          ate={ate}
+          setAte={setAte}
+          salvando={salvando}
+          onVoltar={() => setSel(null)}
+          marcarPago={marcarPago}
+          acertarTudo={acertarTudo}
+          recarregarResumo={carregarResumo}
+          pedirConfirmacao={setConfirmacao}
+          avisar={avisar}
+        />
+        {avulsos}
+      </>
     )
   }
 
-  const labelPeriodo = (PERIODOS.find(p => p[0] === periodo) || [])[1]
+  const labelPeriodo = rotuloPeriodo(periodo, de, ate)
 
   return (
     <div className="ent-wrap">
@@ -152,11 +250,7 @@ export default function EntregadoresHistorico() {
       </p>
 
       <div className="ent-toolbar">
-        <div className="ent-seg">
-          {PERIODOS.map(([val, lab]) => (
-            <button key={val} type="button" className={periodo === val ? 'on' : ''} onClick={() => setPeriodo(val)}>{lab}</button>
-          ))}
-        </div>
+        <FiltroPeriodo periodo={periodo} setPeriodo={setPeriodo} de={de} setDe={setDe} ate={ate} setAte={setAte} />
         <input className="ent-search" placeholder="Buscar entregador…" value={busca} onChange={e => setBusca(e.target.value)} />
         <label className={`ent-toggle ${soDevendo ? 'on' : ''}`}>
           <input type="checkbox" checked={soDevendo} onChange={e => setSoDevendo(e.target.checked)} />
@@ -248,10 +342,22 @@ export default function EntregadoresHistorico() {
                     type="button"
                     className="btn btn-ok btn-sm"
                     disabled={pendente === 0 || salvando}
-                    onClick={async () => {
-                      if (!confirm(`Marcar as ${num(e.corridas_pendentes)} corridas de ${e.nome} como pagas (${fmt(pendente)})?`)) return
-                      if (await acertarTudo(e.entregador_id)) carregarResumo()
-                    }}
+                    onClick={() => setConfirmacao({
+                      titulo: `Acertar com ${e.nome}?`,
+                      texto: 'As corridas ficam marcadas como pagas. Dá pra desfazer uma a uma em "Ver corridas".',
+                      botao: 'Confirmar pagamento',
+                      resumo: [
+                        ['Corridas a pagar', `${num(e.corridas_pendentes)}`],
+                        ['Valor pra ele', fmt(pendente)],
+                        ['Ele repassa pra loja', fmt(repasse)],
+                      ],
+                      acao: async () => {
+                        if (await acertarTudo(e.entregador_id)) {
+                          carregarResumo()
+                          avisar(`Acerto de ${e.nome} registrado · ${fmt(pendente)}`)
+                        }
+                      },
+                    })}
                   >
                     Acertar tudo
                   </button>
@@ -261,6 +367,7 @@ export default function EntregadoresHistorico() {
           })}
         </div>
       )}
+      {avulsos}
     </div>
   )
 }
@@ -269,7 +376,7 @@ export default function EntregadoresHistorico() {
 
 // `id` vem separado de `entregador` de propósito: se o filtro de período tirar
 // esse entregador do resumo, a tela de detalhe continua funcionando.
-function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, salvando, onVoltar, marcarPago, acertarTudo, recarregarResumo }) {
+function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, setDe, ate, setAte, salvando, onVoltar, marcarPago, acertarTudo, recarregarResumo, pedirConfirmacao, avisar }) {
   const [pedidos, setPedidos] = useState([])
   const [perfil, setPerfil] = useState(null)
   const [carregando, setCarregando] = useState(true)
@@ -277,13 +384,14 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, salva
   const carregar = useCallback(async () => {
     if (!empresa || !id) return
     setCarregando(true)
-    const desde = desdeDe(periodo)
+    const faixa = faixaDe(periodo, de, ate)
     const [{ data: pd }, { data: pf }] = await Promise.all([
       fetchAll(() => {
         let q = supabase.from('pedidos_delivery')
           .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, pix_status, mp_payment_status, created_at, origem, entregador_pago, entregador_pago_em')
           .eq('empresa_id', empresa.id).eq('entregador_id', id).eq('status', 'entregue')
-        if (desde) q = q.gte('created_at', desde)
+        if (faixa.desde) q = q.gte('created_at', faixa.desde)
+        if (faixa.ate) q = q.lte('created_at', faixa.ate)
         return q.order('created_at', { ascending: false })
       }),
       supabase.from('profiles').select('nome, entregador_desconto_ativo, entregador_desconto_valor').eq('id', id).maybeSingle(),
@@ -291,7 +399,7 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, salva
     setPedidos(pd || [])
     setPerfil(pf || null)
     setCarregando(false)
-  }, [empresa, id, periodo])
+  }, [empresa, id, periodo, de, ate])
 
   useEffect(() => { carregar() }, [carregar])
 
@@ -315,16 +423,15 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, salva
   const dataDe = p => new Date(p.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
   const porData = arr => { const g = {}; for (const p of arr) (g[dataDe(p)] ??= []).push(p); return Object.entries(g) }
 
-  async function pagar(ids, pago, pergunta) {
-    if (pergunta && !confirm(pergunta)) return
-    if (await marcarPago(ids, pago)) { await carregar(); recarregarResumo() }
+  async function pagar(ids, pago, ok) {
+    if (await marcarPago(ids, pago)) { await carregar(); recarregarResumo(); if (ok) avisar(ok) }
   }
 
   function copiarRecibo() {
     const nome = perfil?.nome || entregador?.nome || 'Entregador'
     const linhas = [
       `*Acerto — ${nome}*`,
-      `Período: ${(PERIODOS.find(p => p[0] === periodo) || [])[1]}`,
+      `Período: ${rotuloPeriodo(periodo, de, ate)}`,
       '',
       `Corridas a pagar: ${pendentes.length} = ${fmt(aPagar)}`,
       ...FORMAS.filter(([k]) => num(emMaos[k]) > 0).map(([k, lab]) => `${lab.replace(/^\S+\s/, '')} recebido: ${fmt(emMaos[k])}`),
@@ -333,8 +440,8 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, salva
       saldo >= 0 ? `➡️ Entregador repassa à loja: ${fmt(saldo)}` : `➡️ Loja paga ao entregador: ${fmt(-saldo)}`,
     ]
     navigator.clipboard?.writeText(linhas.join('\n'))
-      .then(() => alert('Recibo copiado! É só colar no WhatsApp.'))
-      .catch(() => alert('Não consegui copiar automaticamente.'))
+      .then(() => avisar('Recibo copiado! É só colar no WhatsApp.'))
+      .catch(() => avisar('Não consegui copiar automaticamente.', true))
   }
 
   const Corrida = (p, pago) => {
@@ -349,9 +456,16 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, salva
             {pago
               ? <button type="button" className="ent-chip ent-chip--ok" style={{ border: 'none', cursor: 'pointer' }}
                   title="Desfazer pagamento" disabled={salvando}
-                  onClick={() => pagar([p.id], false, 'Desfazer o pagamento dessa corrida?')}>✓ Pago ✕</button>
+                  onClick={() => pedirConfirmacao({
+                    titulo: 'Desfazer esse pagamento?',
+                    texto: 'A corrida volta pra lista de "a pagar".',
+                    botao: 'Desfazer',
+                    perigo: true,
+                    resumo: [['Corrida', `#${p.numero_pedido ?? p.id.slice(-4).toUpperCase()}`], ['Valor', fmt(ganho(p))]],
+                    acao: () => pagar([p.id], false, 'Pagamento desfeito.'),
+                  })}>✓ Pago ✕</button>
               : <button type="button" className="btn btn-ok btn-sm" style={{ fontSize: 11, padding: '4px 9px' }} disabled={salvando}
-                  onClick={() => pagar([p.id], true)}>Pagar</button>}
+                  onClick={() => pagar([p.id], true, `Corrida paga · ${fmt(ganho(p))}`)}>Pagar</button>}
           </div>
         </div>
         <div className="ent-corrida-meta">
@@ -373,10 +487,8 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, salva
       <div className="ent-det-head">
         <div className="ent-avatar">{iniciais(perfil?.nome || entregador?.nome)}</div>
         <h1>{perfil?.nome || entregador?.nome || 'Entregador'}</h1>
-        <div className="ent-seg" style={{ marginLeft: 'auto' }}>
-          {PERIODOS.map(([val, lab]) => (
-            <button key={val} type="button" className={periodo === val ? 'on' : ''} onClick={() => setPeriodo(val)}>{lab}</button>
-          ))}
+        <div style={{ marginLeft: 'auto' }}>
+          <FiltroPeriodo periodo={periodo} setPeriodo={setPeriodo} de={de} setDe={setDe} ate={ate} setAte={setAte} />
         </div>
       </div>
 
@@ -427,10 +539,19 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, salva
             <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
               <button type="button" className="btn btn-secondary btn-sm" onClick={copiarRecibo}>📋 Copiar recibo</button>
               <button type="button" className="btn btn-ok btn-sm" disabled={!pendentes.length || salvando}
-                onClick={async () => {
-                  if (!confirm(`Marcar as ${pendentes.length} corridas como pagas (${fmt(aPagar)})?`)) return
-                  if (await acertarTudo(id)) { await carregar(); recarregarResumo() }
-                }}>
+                onClick={() => pedirConfirmacao({
+                  titulo: `Acertar com ${perfil?.nome || entregador?.nome || 'o entregador'}?`,
+                  texto: 'As corridas do período ficam marcadas como pagas. Dá pra desfazer uma a uma.',
+                  botao: 'Confirmar pagamento',
+                  resumo: [
+                    ['Corridas a pagar', `${pendentes.length}`],
+                    ['Valor pra ele', fmt(aPagar)],
+                    [saldo >= 0 ? 'Ele repassa pra loja' : 'Loja completa em dinheiro', fmt(Math.abs(saldo))],
+                  ],
+                  acao: async () => {
+                    if (await acertarTudo(id)) { await carregar(); recarregarResumo(); avisar(`Acerto registrado · ${fmt(aPagar)}`) }
+                  },
+                })}>
                 Acertar tudo · {fmt(aPagar)}
               </button>
             </div>
@@ -444,7 +565,13 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, salva
                 <div className="ent-dia">
                   <span>{data} · {ps.length} corrida{ps.length === 1 ? '' : 's'} · {fmt(somaGanho(ps))}</span>
                   <button type="button" className="btn btn-ok btn-sm" style={{ fontSize: 11, padding: '4px 9px' }} disabled={salvando}
-                    onClick={() => pagar(ps.map(p => p.id), true, `Pagar as ${ps.length} corridas de ${data} (${fmt(somaGanho(ps))})?`)}>
+                    onClick={() => pedirConfirmacao({
+                      titulo: `Pagar as corridas de ${data}?`,
+                      texto: 'Só as corridas desse dia são marcadas como pagas.',
+                      botao: 'Confirmar pagamento',
+                      resumo: [['Corridas', `${ps.length}`], ['Valor', fmt(somaGanho(ps))]],
+                      acao: () => pagar(ps.map(p => p.id), true, `${ps.length} corridas pagas · ${fmt(somaGanho(ps))}`),
+                    })}>
                     Pagar o dia
                   </button>
                 </div>
