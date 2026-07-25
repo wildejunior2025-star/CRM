@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { adicionalComplementos } from '../lib/complementos'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
 
@@ -75,7 +76,7 @@ export default function MesaCardapio() {
       if (ids.length) {
         const { data: vinc } = await supabase
           .from('produto_complemento_grupos')
-          .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))')
+          .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))')
           .in('produto_id', ids)
           .order('ordem')
         const soSemOpcao = nome => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ''))
@@ -87,7 +88,10 @@ export default function MesaCardapio() {
             .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
           // Some se não tiver opção nenhuma OU só tiver "Sem/Não Quero" (nada real).
           if (!opcoes.some(o => !soSemOpcao(o.nome))) continue
-          ;(cm[v.produto_id] ??= []).push({ id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1, opcoes })
+          ;(cm[v.produto_id] ??= []).push({
+            id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1,
+            regra_preco: g.regra_preco ?? 'somar', opcoes,
+          })
         }
       }
       setCompMap(cm)
@@ -403,9 +407,12 @@ function ModalCompMesa({ produto, grupos, onClose, onConfirm }) {
 
   const selecionados = grupos.flatMap(g => (sel[g.id] ?? []).map(oid => {
     const o = g.opcoes.find(x => x.id === oid)
-    return { nome: o.nome, preco_adicional: Number(o.preco_adicional || 0) }
+    return { grupoId: g.id, nome: o.nome, preco_adicional: Number(o.preco_adicional || 0) }
   }))
-  const precoUnit = base + selecionados.reduce((s, c) => s + c.preco_adicional, 0)
+  const precoUnit = base + adicionalComplementos(
+    grupos,
+    selecionados.map(c => ({ grupoId: c.grupoId, preco: c.preco_adicional })),
+  )
   const faltando = grupos.filter(g => (g.min ?? 0) > 0 && (sel[g.id]?.length ?? 0) < g.min)
   const pode = faltando.length === 0
 

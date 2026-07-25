@@ -87,7 +87,7 @@ export default function CategoriasComplemento() {
     setLoading(true)
     const [gruposRes, prodRes, linkRes] = await Promise.all([
       supabase.from('complemento_grupos')
-        .select('id, nome, min, max, ordem, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
+        .select('id, nome, min, max, ordem, disponivel, regra_preco, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
         .eq('empresa_id', empresaId).order('nome'),
       supabase.from('produtos').select('id, nome').eq('empresa_id', empresaId).order('nome'),
       supabase.from('produto_complemento_grupos')
@@ -99,6 +99,7 @@ export default function CategoriasComplemento() {
     for (const l of (linkRes.data ?? [])) (linksPorGrupo[l.grupo_id] ??= []).push(l)
     const lista = (gruposRes.data ?? []).map(g => ({
       id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, disponivel: g.disponivel !== false,
+      regra_preco: g.regra_preco ?? 'somar',
       opcoes: (g.complemento_opcoes ?? []).sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0)),
       links: (linksPorGrupo[g.id] ?? []),
     }))
@@ -292,6 +293,19 @@ export default function CategoriasComplemento() {
                     onBlur={e => salvarCategoria(cat, { min: Number(e.target.value) || 0 })} />
                   máx <input className="cc-input" type="number" min="1" defaultValue={cat.max}
                     onBlur={e => salvarCategoria(cat, { max: Number(e.target.value) || 1 })} />
+                </span>
+                {/* Como cobrar: somar (adicional comum) ou pelo mais caro (pizza meio a meio) */}
+                <span className="cc-minmax" title="Somar: cada opção soma no preço. Mais caro: vale só a opção mais cara (pizza meio a meio).">
+                  cobrar
+                  <select
+                    className="cc-input"
+                    style={{ width: 'auto', minWidth: 118 }}
+                    value={cat.regra_preco}
+                    onChange={e => salvarCategoria(cat, { regra_preco: e.target.value })}
+                  >
+                    <option value="somar">somando tudo</option>
+                    <option value="maior">pelo mais caro</option>
+                  </select>
                 </span>
               </div>
               <div className="cc-head-actions">

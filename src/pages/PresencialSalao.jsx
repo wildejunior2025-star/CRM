@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
+import { adicionalComplementos } from '../lib/complementos'
 import { imprimirHtml, montarContaPresencialHtml, appFwcDisponivel } from '../utils/imprimirCupom'
 import '../components/Page.css'
 
@@ -86,7 +87,7 @@ export default function PresencialSalao() {
       // vira INNER JOIN com complemento_grupos, que a RLS já filtra por empresa — os
       // vínculos de outras lojas não chegam nem a sair do banco.
       supabase.from('produto_complemento_grupos')
-        .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))'),
+        .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))'),
       // Clientes: usados só no fiado (quem fica devendo).
       supabase.from('clientes').select('id, nome, telefone').eq('empresa_id', empresaId).order('nome').limit(1000),
     ])
@@ -113,6 +114,7 @@ export default function PresencialSalao() {
         id: g.id, nome: g.nome,
         min: v.min_override ?? g.min ?? 0,
         max: v.max_override ?? g.max ?? 1,
+        regra_preco: g.regra_preco ?? 'somar',
         opcoes,
       })
     }
@@ -269,7 +271,10 @@ export default function PresencialSalao() {
 
   // Fecha o modal de complementos criando a linha montada.
   function addMontado(produto, escolhas) {
-    const adicional = escolhas.reduce((s, e) => s + Number(e.preco_adicional || 0) * e.qtd, 0)
+    const adicional = adicionalComplementos(
+      compMap[produto.produto_id] ?? [],
+      escolhas.map(e => ({ grupoId: e.grupoId, preco: e.preco_adicional, qtd: e.qtd })),
+    )
     // "2× Marmitex Grande, Feijão" — o nome carrega a montagem, porque comanda_itens
     // não tem coluna de complemento (mesmo jeito do cardápio do QR).
     const resumo = escolhas.map(e => (e.qtd > 1 ? `${e.qtd}× ${e.nome}` : e.nome)).join(', ')
@@ -1153,10 +1158,13 @@ function ModalComplementos({ produto, grupos, onCancelar, onConfirmar }) {
   const escolhas = grupos.flatMap(g =>
     Object.entries(sel[g.id] ?? {}).map(([oId, qtd]) => {
       const o = g.opcoes.find(x => String(x.id) === String(oId))
-      return { nome: o?.nome ?? '', preco_adicional: Number(o?.preco_adicional || 0), qtd }
+      return { grupoId: g.id, nome: o?.nome ?? '', preco_adicional: Number(o?.preco_adicional || 0), qtd }
     })
   )
-  const adicional = escolhas.reduce((s, e) => s + e.preco_adicional * e.qtd, 0)
+  const adicional = adicionalComplementos(
+    grupos,
+    escolhas.map(e => ({ grupoId: e.grupoId, preco: e.preco_adicional, qtd: e.qtd })),
+  )
   const precoFinal = Number(produto.preco_venda) + adicional
   const faltando = grupos.filter(g => (g.min ?? 0) > 0 && somaGrupo(g.id) < g.min)
 

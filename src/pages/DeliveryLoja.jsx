@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
 import AvisoCookies from '../components/AvisoCookies'
+import { adicionalComplementos, cobraPeloMaior, rotuloPrecoOpcao } from '../lib/complementos'
 import './DeliveryLoja.css'
 
 // Loja dentro da grade semanal de funcionamento AGORA? (horário de Brasília).
@@ -173,7 +174,7 @@ export default function DeliveryLoja() {
         // Lê pela ponte produto↔grupo: uma mesma categoria pode estar em vários produtos.
         const { data: vinc } = await supabase
           .from('produto_complemento_grupos')
-          .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))')
+          .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))')
           .in('produto_id', ids)
         // Opção "opt-out" (Sem X / Não Quero): serve pra recusar a categoria.
         const soSemOpcao = nome => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ''))
@@ -187,7 +188,8 @@ export default function DeliveryLoja() {
           // Categoria que sobrou só com "Sem/Não Quero" (nenhuma opção real) não aparece.
           if (!opcoes.some(o => !soSemOpcao(o.nome))) continue
           ;(porProduto[v.produto_id] ??= []).push({
-            id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1, ordem: v.ordem ?? 0, opcoes,
+            id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1,
+            regra_preco: g.regra_preco ?? 'somar', ordem: v.ordem ?? 0, opcoes,
           })
         }
         produtosFinal = produtosFinal.map(p => ({
@@ -726,6 +728,8 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
     const n = g.min ?? 0
     if (n <= 0) return s
     const precos = (g.opcoes ?? []).map(o => Number(o.preco_adicional || 0)).sort((a, b) => a - b)
+    // Grupo que cobra pelo mais caro: pegar n opções baratas custa o preço de UMA.
+    if (cobraPeloMaior(g)) return s + (precos[0] ?? 0)
     return s + precos.slice(0, n).reduce((a, b) => a + b, 0)
   }, 0)
   const precoBase = Number(produto.preco) + minExtra
@@ -825,7 +829,7 @@ function OptionsModal({ produto, onClose, onConfirm }) {
       return { grupoId: g.id, grupo: g.nome, opcaoId: oid, nome: o?.nome ?? '', preco: Number(o?.preco_adicional ?? 0) }
     })
   )
-  const adicional = selecoes.reduce((s, x) => s + x.preco, 0)
+  const adicional = adicionalComplementos(grupos, selecoes)
   const precoUnit = Number(produto.preco) + adicional
   const faltando = grupos.filter(g => (sel[g.id]?.size ?? 0) < (g.min ?? 0))
   const podeAdd = faltando.length === 0
@@ -855,10 +859,16 @@ function OptionsModal({ produto, onClose, onConfirm }) {
                     background: incompleto ? 'rgba(239,68,68,.15)' : 'var(--dl-surface-2)',
                     color: incompleto ? '#f87171' : 'var(--dl-text-muted)',
                   }}>
-                    {obrig ? 'Obrigatório' : 'Opcional'}
-                    {grupo.max > 1 ? ` · até ${grupo.max}` : ''}
+                    {grupo.min > 0 && grupo.min === grupo.max
+                      ? `Escolha ${grupo.max}`
+                      : `${obrig ? 'Obrigatório' : 'Opcional'}${grupo.max > 1 ? ` · até ${grupo.max}` : ''}`}
                   </span>
                 </div>
+                {cobraPeloMaior(grupo) && (
+                  <p style={{ fontSize: 12, color: 'var(--dl-text-muted)', margin: '-2px 0 8px' }}>
+                    Você paga pelo sabor mais caro que escolher.
+                  </p>
+                )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {grupo.opcoes.map(opcao => {
                     const marcado = sel[grupo.id]?.has(opcao.id)
@@ -886,8 +896,10 @@ function OptionsModal({ produto, onClose, onConfirm }) {
                           {marcado && <IconCheckSmall />}
                         </span>
                         <span style={{ flex: 1, fontSize: 14 }}>{opcao.nome}</span>
-                        {Number(opcao.preco_adicional) > 0 && (
-                          <span style={{ fontSize: 13, color: '#22c55e', fontWeight: 700 }}>+ R$ {fmt(opcao.preco_adicional)}</span>
+                        {rotuloPrecoOpcao(grupo, opcao.preco_adicional, fmt) && (
+                          <span style={{ fontSize: 13, color: '#22c55e', fontWeight: 700 }}>
+                            {rotuloPrecoOpcao(grupo, opcao.preco_adicional, fmt)}
+                          </span>
                         )}
                       </button>
                     )

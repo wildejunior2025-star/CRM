@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { supabase } from '../lib/supabaseClient'
+import { adicionalComplementos } from '../lib/complementos'
 import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
 import Caixa from './Caixa'
 
@@ -743,7 +744,7 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
       return { grupoId: g.id, opcaoId: oid, nome: o?.nome ?? '', preco: Number(o?.preco_adicional ?? 0) }
     })
   )
-  const adicional = selecoes.reduce((s, x) => s + x.preco, 0)
+  const adicional = adicionalComplementos(grupos, selecoes)
   const precoUnit = Number(produto.preco_venda || 0) + adicional
   const faltando = grupos.filter(g => (sel[g.id]?.size ?? 0) < (g.min ?? 0))
   const podeAdd = faltando.length === 0
@@ -837,7 +838,7 @@ async function carregarCatalogo(empresaId) {
     supabase.from('produtos').select('id, nome, preco_venda, categoria')
       .eq('empresa_id', empresaId).order('nome', { ascending: true }),
     supabase.from('produto_complemento_grupos')
-      .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)), produtos!inner(empresa_id)')
+      .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, regra_preco, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)), produtos!inner(empresa_id)')
       .eq('produtos.empresa_id', empresaId).order('ordem'),
   ])
   if (prodRes.error) throw prodRes.error
@@ -849,7 +850,10 @@ async function carregarCatalogo(empresaId) {
       .filter(o => o.disponivel !== false)
       .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
     if (!opcoes.length) continue
-    ;(compMap[v.produto_id] = compMap[v.produto_id] || []).push({ id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1, opcoes })
+    ;(compMap[v.produto_id] = compMap[v.produto_id] || []).push({
+      id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1,
+      regra_preco: g.regra_preco ?? 'somar', opcoes,
+    })
   }
   const catalogo = { produtos: prodRes.data || [], compMap }
   catalogoCache[empresaId] = catalogo
@@ -3801,7 +3805,7 @@ export default function PainelPedidos() {
     // grupos ("subcategorias") e opções, cada um pausável individualmente.
     const { data: vinc } = await supabase
       .from('produto_complemento_grupos')
-      .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, complemento_opcoes(id, nome, preco_adicional, disponivel, ordem)), produtos!inner(empresa_id)')
+      .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, preco_adicional, disponivel, ordem)), produtos!inner(empresa_id)')
       .eq('produtos.empresa_id', empresa.id)
       .order('ordem')
     const porProduto = {}
@@ -3812,7 +3816,7 @@ export default function PainelPedidos() {
         .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
       ;(porProduto[v.produto_id] ??= []).push({
         id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1, ordem: v.ordem ?? 0,
-        disponivel: g.disponivel !== false, opcoes,
+        regra_preco: g.regra_preco ?? 'somar', disponivel: g.disponivel !== false, opcoes,
       })
     }
     for (const pid in porProduto) porProduto[pid].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
