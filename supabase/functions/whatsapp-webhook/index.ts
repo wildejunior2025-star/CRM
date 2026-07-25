@@ -1518,6 +1518,11 @@ ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "retirada", "forma_pagamento": "
 Escalar para humano (problema que a IA não resolve):
 ACAO: {"tipo": "escalar_humano", "problema": "descrição"}
 Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. 😊"
+
+Parar o robô / falar com humano (a pessoa pede CLARAMENTE pra parar — "para", "desativa", "não quero robô", "quero falar com atendente/humano" — ou é claramente alguém da loja mandando recado interno):
+Mande UMA despedida curta: "Ok! 👍 Vou avisar a loja pra te atender por aqui." e emita:
+ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
+⚠️ Só use quando for CLARO que a pessoa quer parar ou falar com humano. NUNCA por dúvida comum, reclamação leve ou pergunta sobre o pedido.
 `
 
     const primeiraMsg = !mensagens.some((m: any) => m.role === "assistant")
@@ -1786,6 +1791,33 @@ Após emitir: "Entendi! Já avisei a loja e em breve alguém entra em contato. �
             body: JSON.stringify({ number: `55${adminPhone}`, text: alertaMsg }),
           }).catch(e => console.error("[Escalar] erro ao notificar admin:", e))
           console.log(`[Escalar] alerta enviado para ${adminPhone}`)
+
+        } else if (acao.tipo === "pausar_bot") {
+          // A pessoa pediu pra PARAR / falar com humano (ou é recado interno da equipe).
+          // Pausa o robô neste número — MESMA tabela/checagem da pausa manual (linha ~1037),
+          // então nada muda no fluxo: a partir da próxima mensagem o robô fica quieto.
+          // Permanente: a loja religa reativando o número no painel. Avisa a loja.
+          await supabase.from("whatsapp_bot_pausado")
+            .upsert({ empresa_id: empresaId, phone, pausado_em: new Date().toISOString() },
+                    { onConflict: "empresa_id,phone" })
+          if (adminPhone) {
+            const resumoConversa = mensagens.slice(-6).map((m: any) =>
+              `${m.role === "user" ? "Cliente" : "Bot"}: ${m.content}`
+            ).join("\n")
+            const alertaMsg = `⏸️ *ROBÔ PAUSADO — ${empresaNome}*\n\n` +
+              `O robô parou de responder este número porque a pessoa pediu (parar / falar com humano). Assuma a conversa por aqui. 👇\n\n` +
+              `*Telefone:* ${phoneLocal}\n` +
+              `*Cliente:* ${clienteNome ?? "Não identificado"}\n` +
+              `*Motivo:* ${acao.motivo ?? "pediu parar/humano"}\n\n` +
+              `Pra religar o robô, reative o número no painel do WhatsApp.\n\n` +
+              `*Últimas mensagens:*\n${resumoConversa}`
+            fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+              body: JSON.stringify({ number: `55${adminPhone}`, text: alertaMsg }),
+            }).catch(e => console.error("[PausarBot] erro ao notificar:", e))
+          }
+          console.log(`[PausarBot] número ${phone} pausado (pediu parar/humano)`)
         }
       } catch (e) {
         console.error("[ACAO] erro ao processar:", e)

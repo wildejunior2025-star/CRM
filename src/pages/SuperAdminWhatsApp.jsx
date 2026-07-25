@@ -93,7 +93,7 @@ function ConversasModal({ empresa, onClose }) {
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 960, height: '86vh', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 960, height: '86vh', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,.4)' }}>
         {/* Cabeçalho */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
           <strong style={{ flex: 1, fontSize: 15 }}>💬 Conversas do robô · {empresa.nome}</strong>
@@ -103,7 +103,7 @@ function ConversasModal({ empresa, onClose }) {
 
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           {/* Lista de clientes */}
-          <div style={{ width: 280, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ width: 280, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--surface)' }}>
             <div style={{ padding: 10, borderBottom: '1px solid var(--border)' }}>
               <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar telefone…"
                 style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }} />
@@ -145,7 +145,7 @@ function ConversasModal({ empresa, onClose }) {
                     <div key={i} style={{ alignSelf: bot ? 'flex-end' : 'flex-start', maxWidth: '78%' }}>
                       <div style={{
                         padding: '8px 12px', borderRadius: 12, fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap',
-                        background: bot ? '#7c3aed1f' : 'var(--card)', border: '1px solid var(--border)',
+                        background: bot ? '#7c3aed1f' : 'var(--surface)', border: '1px solid var(--border)',
                         color: 'var(--text)',
                       }}>{m.content}</div>
                       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2, textAlign: bot ? 'right' : 'left' }}>
