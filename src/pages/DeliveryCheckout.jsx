@@ -98,9 +98,23 @@ function fmtTelefone(val) {
 
 // ── Taxa de entrega por distância (mesma regra do gestor/bot) ────────────────
 // Normaliza bairro pra casar cliente <-> config (mesma regra da tela Raio de Entrega).
+// Abreviações que a loja escreve de um jeito e o cliente de outro. Sem isto,
+// "Nossa Sra. da Apresentação" (como a loja cadastrou) não casa com "Nossa
+// Senhora da Apresentação" (como o cliente digita) e o pedido sai sem taxa.
+const ABREV_BAIRRO = {
+  sra: 'senhora', sr: 'senhor', sto: 'santo', sta: 'santa',
+  n: 'nossa', na: 'nossa', jd: 'jardim', pq: 'parque',
+  vl: 'vila', cj: 'conjunto', res: 'residencial', pres: 'presidente',
+}
 function normBairro(s) {
   return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
-    .replace(/^bairro\s+/, '').replace(/\s+/g, ' ')
+    .replace(/^bairro\s+/, '')
+    .replace(/\./g, ' ')            // "sra." → "sra "
+    .replace(/\s+/g, ' ')
+    .split(' ')
+    .map(p => ABREV_BAIRRO[p] ?? p)
+    .join(' ')
+    .trim()
 }
 function acharBairroCfg(lista, bairroCliente) {
   if (!Array.isArray(lista) || !bairroCliente) return null
@@ -510,6 +524,18 @@ export default function DeliveryCheckout() {
   // Precisa marcar o ponto pra saber a taxa? (só quando é por km — bairro com taxa fixa não precisa)
   const taxaPendente = tipo === 'entrega' && temFaixas && !coordCliente && !bairroTaxaFixa && !bairroBloqueado
 
+  // A taxa NÃO PODE sair no chute. Quando o cálculo não fecha, o código caía em
+  // `taxaEntrega` (a taxa fixa da loja) — e loja que cobra por km deixa esse
+  // campo em 0, então o pedido saía DE GRAÇA sem ninguém perceber. Aconteceu 4x
+  // na Zebu em 30 dias.
+  //
+  // Dois jeitos de não fechar:
+  //   1. a config da loja não carregou (rede falhou) → não dá pra saber a taxa;
+  //   2. cobra por km e o endereço ainda não virou ponto no mapa.
+  // Nos dois casos é melhor segurar o botão do que entregar grátis.
+  const configNaoCarregou = tipo === 'entrega' && lojaEndereco === null
+  const taxaIndefinida = !bairroBloqueado && (configNaoCarregou || taxaPendente)
+
   // A rua/bairro digitados batem com o CEP? Se o cliente trocou na mão pra um
   // endereço de outro bairro (caso do pedido torto), avisa — sem bloquear.
   const cepDivergente = (() => {
@@ -671,6 +697,16 @@ export default function DeliveryCheckout() {
       setErroGlobal(permiteRetirada
         ? 'Poxa, ainda não entregamos no seu bairro 😔. Você pode escolher Retirada, se disponível.'
         : 'Poxa, ainda não entregamos no seu bairro 😔.')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+
+    // Última trava antes de gravar: pedido NUNCA sai com taxa chutada. O botão
+    // já fica desabilitado, mas Enter no formulário passa por cima dele.
+    if (taxaIndefinida) {
+      setErroGlobal(configNaoCarregou
+        ? 'Ainda estou calculando a taxa de entrega. Aguarde um instante ou recarregue a página.'
+        : 'Marque seu endereço no mapa pra eu calcular a taxa de entrega.')
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
@@ -1144,11 +1180,21 @@ export default function DeliveryCheckout() {
                   </div>
                 )}
 
+                {taxaIndefinida && (
+                  <div className="dco-erro-global" style={{ background: 'rgba(234,179,8,.12)', border: '1px solid #eab308', color: '#eab308' }}>
+                    {configNaoCarregou
+                      ? '⏳ Carregando a taxa de entrega... se demorar, recarregue a página.'
+                      : <>📍 Falta marcar seu endereço no mapa pra calcular a taxa de entrega. Toque em <strong>“Marcar no mapa”</strong> acima.</>}
+                  </div>
+                )}
+
                 {erroGlobal && <div className="dco-erro-global">{erroGlobal}</div>}
 
-                <button type="submit" className="dco-btn-submit" disabled={enviando || faltaMinimo || bairroBloqueado}>
+                <button type="submit" className="dco-btn-submit" disabled={enviando || faltaMinimo || bairroBloqueado || taxaIndefinida}>
                   {enviando ? <><span className="dco-spinner" />Enviando pedido...</>
                     : bairroBloqueado ? 'Não entregamos no seu bairro'
+                    : configNaoCarregou ? 'Calculando a entrega...'
+                    : taxaPendente ? 'Marque seu endereço no mapa'
                     : faltaMinimo ? `Faltam R$ ${fmt(faltamParaMinimo)} p/ o mínimo` : 'Fazer pedido'}
                 </button>
               </div>
@@ -1157,10 +1203,27 @@ export default function DeliveryCheckout() {
 
           {erroGlobal && <div className="dco-erro-global dco-erro-mobile">{erroGlobal}</div>}
 
+          {/* Botão do celular — é por onde quase todo pedido sai. Tem que travar
+              pelos MESMOS motivos do botão do desktop; antes ele nem olhava o
+              bairro bloqueado. */}
           <div className="dco-submit-mobile">
-            <button type="submit" className="dco-btn-submit" disabled={enviando || faltaMinimo}>
+            {taxaIndefinida && (
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: '#eab308', textAlign: 'center', marginBottom: 8 }}>
+                {configNaoCarregou
+                  ? '⏳ Carregando a taxa de entrega...'
+                  : '📍 Marque seu endereço no mapa pra calcular a entrega'}
+              </div>
+            )}
+            <button type="submit" className="dco-btn-submit"
+              disabled={enviando || faltaMinimo || bairroBloqueado || taxaIndefinida}>
               {enviando
                 ? <><span className="dco-spinner" />Enviando pedido...</>
+                : bairroBloqueado
+                ? 'Não entregamos no seu bairro'
+                : configNaoCarregou
+                ? 'Calculando a entrega...'
+                : taxaPendente
+                ? 'Marque seu endereço no mapa'
                 : faltaMinimo
                 ? `Faltam R$ ${fmt(faltamParaMinimo)} p/ o mínimo`
                 : `Fazer pedido · R$ ${fmt(total)}`}
