@@ -475,9 +475,8 @@ export default function DeliveryLoja() {
       </header>
 
       {/* ── Busca flutuante (fixa no topo ao rolar) ── */}
-      <div style={{
+      <div className="dloja-searchbar" style={{
         position: 'sticky', top: 0, zIndex: 30,
-        background: 'var(--dl-bg)',
         padding: '10px 12px', borderBottom: '1px solid var(--dl-border)',
       }}>
         <div style={{ position: 'relative', maxWidth: 720, margin: '0 auto' }}>

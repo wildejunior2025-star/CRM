@@ -4,7 +4,7 @@
    header — ver data-tema="escuro" abaixo. O roxo da marca (#7c3aed/#6d28d9) e as
    cores de status (verde/vermelho/laranja) valem nos dois. */
 .dloja-root {
-  --dl-bg: #f6f7fb;
+  --dl-bg: #e9edf5;
   --dl-surface: #ffffff;
   --dl-surface-2: #e2e8f0;
   --dl-border: #e5e7eb;
@@ -44,6 +44,28 @@
   background: var(--dl-bg);
   color: var(--dl-text);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ── Profundidade no MODO CLARO ──────────────────────────────────────────────
+   O escuro já tem camadas (fundo, superfície, card roxo). No claro tudo era
+   branco no branco. Aqui o fundo vira cinza suave e os "painéis" (topo, busca,
+   categorias) e cards ficam brancos com sombra leve, criando separação. Tudo
+   escopado pra NÃO mexer no tema escuro. */
+.dloja-searchbar { background: var(--dl-bg); }
+
+.dloja-root:not([data-tema="escuro"]) .dloja-header,
+.dloja-root:not([data-tema="escuro"]) .dloja-searchbar,
+.dloja-root:not([data-tema="escuro"]) .dloja-cat-nav {
+  background: var(--dl-surface);
+}
+.dloja-root:not([data-tema="escuro"]) .dloja-cat-nav {
+  box-shadow: 0 4px 12px rgba(30, 41, 59, 0.05);
+}
+.dloja-root:not([data-tema="escuro"]) .dloja-prod-card {
+  box-shadow: 0 1px 2px rgba(30, 41, 59, 0.04), 0 6px 16px rgba(30, 41, 59, 0.06);
+}
+.dloja-root:not([data-tema="escuro"]) .dloja-prod-card:hover {
+  box-shadow: 0 6px 16px rgba(124, 58, 237, 0.16), 0 14px 32px rgba(30, 41, 59, 0.10);
 }
 
 .dloja-root *, .dloja-root *::before, .dloja-root *::after {
@@ -688,7 +710,9 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
-  z-index: 60;
+  /* Acima da barra de categorias (z-index 90), senão ela vazava por cima
+     dos itens do painel numa faixa. */
+  z-index: 200;
   display: flex;
   align-items: flex-end;
   justify-content: flex-end;
