@@ -134,30 +134,53 @@ function calcTaxaKm(faixas, distKm) {
   const faixa = arr.find(f => distKm <= Number(f.km)) ?? arr[arr.length - 1]
   return Number(faixa.taxa) || 0
 }
+// O Nominatim é gratuito e limita 1 consulta por segundo — ele engasga e às
+// vezes simplesmente não responde. Sem tempo limite, a promessa fica pendurada
+// e o cliente termina o pedido sem ponto nenhum (foi assim que pedido saiu com
+// frete zero). 5s é mais que suficiente quando o serviço está de pé.
+async function buscarJson(url, ms = 5000) {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), ms)
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': 'CRM-FWC/1.0' }, signal: ctrl.signal })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  } finally {
+    clearTimeout(t)
+  }
+}
+
 async function geocodeEndereco({ rua, numero, bairro, cidade, estado, cep } = {}) {
   const uf = estado || ''
   const cepLimpo = String(cep || '').replace(/\D/g, '')
   // 1) Busca ESTRUTURADA com o CEP — bem mais precisa que a busca por texto
   //    (ajuda em endereços que a busca livre erra, tipo em São Gonçalo/RN).
   if (cepLimpo.length === 8) {
-    try {
-      const params = new URLSearchParams({
-        street: [numero, rua].filter(Boolean).join(' '),
-        city: cidade || '', state: uf, postalcode: cepLimpo,
-        country: 'Brazil', format: 'json', limit: '1',
-      })
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, { headers: { 'User-Agent': 'CRM-FWC/1.0' } })
-      const d = await res.json()
-      if (d?.[0]) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
-    } catch { /* cai no fallback */ }
+    const params = new URLSearchParams({
+      street: [numero, rua].filter(Boolean).join(' '),
+      city: cidade || '', state: uf, postalcode: cepLimpo,
+      country: 'Brazil', format: 'json', limit: '1',
+    })
+    const d = await buscarJson(`https://nominatim.openstreetmap.org/search?${params}`)
+    if (d?.[0]) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
   }
   // 2) Fallback: busca livre por texto (com o CEP junto quando tiver)
-  try {
+  {
     const q = [rua, numero, bairro, cidade, uf, cepLimpo].filter(s => s && String(s).trim()).join(', ')
-    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Brasil')}&format=json&limit=1`, { headers: { 'User-Agent': 'CRM-FWC/1.0' } })
-    const d = await res.json()
+    const d = await buscarJson(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Brasil')}&format=json&limit=1`)
     if (d?.[0]) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
-  } catch { /* ignora */ }
+  }
+  // 3) O Nominatim limita 1 consulta por segundo e devolve vazio quando está
+  //    apertado. Uma repetida depois de 1,2s costuma passar — e é a diferença
+  //    entre calcular a taxa e obrigar o cliente a abrir o mapa.
+  await new Promise(r => setTimeout(r, 1200))
+  {
+    const q = [rua, numero, bairro, cidade, uf].filter(s => s && String(s).trim()).join(', ')
+    const d = await buscarJson(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Brasil')}&format=json&limit=1`)
+    if (d?.[0]) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
+  }
   return null
 }
 // Centro aproximado do bairro digitado — só pra CONFERIR se o pino não caiu
