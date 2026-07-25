@@ -41,16 +41,30 @@ function bundleEsperado() {
   } catch { return null }
 }
 
-/** Qual bundle o site está servindo agora? */
-async function bundleServido(host) {
-  try {
-    const r = await fetch(`https://${host}/`, {
-      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
-    })
-    const html = await r.text()
-    const m = html.match(/\/assets\/index-[\w-]+\.js/)
-    return m ? m[0] : null
-  } catch { return null }
+/**
+ * Confere um host de verdade: pede o HTML VÁRIAS vezes (cada nó da borda tem a
+ * sua cópia, e eles se atualizam em tempos diferentes — conferir uma vez só dá
+ * falso positivo) e, em cada uma, checa se o bundle que o HTML pede realmente
+ * BAIXA. Um 500/404 aqui é tela preta pro cliente: o HTML antigo aponta pra um
+ * arquivo que a versão nova não serve mais.
+ */
+async function hostOk(host, esperado, rodadas = 4) {
+  for (let i = 0; i < rodadas; i++) {
+    try {
+      const r = await fetch(`https://${host}/?v=${Date.now()}-${i}`, {
+        headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      })
+      const html = await r.text()
+      const bundle = (html.match(/\/assets\/index-[\w-]+\.js/) ?? [])[0]
+      if (bundle !== esperado) return { ok: false, motivo: `HTML pede ${bundle ?? '?'}` }
+
+      const a = await fetch(`https://${host}${bundle}`, { method: 'HEAD' })
+      if (!a.ok) return { ok: false, motivo: `${bundle} respondeu ${a.status}` }
+    } catch (e) {
+      return { ok: false, motivo: String(e.message ?? e) }
+    }
+  }
+  return { ok: true }
 }
 
 const espera = ms => new Promise(r => setTimeout(r, ms))
@@ -90,11 +104,11 @@ for (let i = 1; i <= TENTATIVAS; i++) {
   await purgar(token, zone)
   await espera(ESPERA_MS)
 
-  const servidos = await Promise.all(HOSTS.map(bundleServido))
-  const faltando = HOSTS.filter((_, k) => servidos[k] !== esperado)
+  const res = await Promise.all(HOSTS.map(h => hostOk(h, esperado)))
+  const ruins = HOSTS.map((h, k) => ({ h, ...res[k] })).filter(r => !r.ok)
 
-  if (faltando.length === 0) { ok = true; break }
-  console.log(`   tentativa ${i}/${TENTATIVAS} — ainda antigo em: ${faltando.join(', ')} (servindo ${servidos.find(s => s !== esperado) ?? '?'})`)
+  if (ruins.length === 0) { ok = true; break }
+  console.log(`   tentativa ${i}/${TENTATIVAS} — ${ruins.map(r => `${r.h}: ${r.motivo}`).join(' | ')}`)
 }
 
 if (ok) {
