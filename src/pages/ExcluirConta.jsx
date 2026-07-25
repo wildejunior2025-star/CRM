@@ -36,7 +36,7 @@ export default function ExcluirConta() {
         <p style={s.p}>Envie uma solicitação por um dos canais abaixo, informando o <strong>e-mail cadastrado</strong> na conta:</p>
         <ul style={s.ul}>
           <li>📧 E-mail: <a style={s.a} href="mailto:wildejunior2025@gmail.com?subject=Excluir%20minha%20conta%20FWC%20Inter">wildejunior2025@gmail.com</a></li>
-          <li>💬 WhatsApp: <a style={s.a} href="https://wa.me/5584999281009?text=Quero%20excluir%20minha%20conta%20FWC%20Inter">(84) 99928-1009</a></li>
+          <li>💬 WhatsApp: <a style={s.a} href="https://wa.me/5584998180774?text=Quero%20excluir%20minha%20conta%20FWC%20Inter">(84) 99818-0774</a></li>
         </ul>
         <p style={s.p}>Assunto/mensagem: <strong>"Excluir minha conta FWC Inter"</strong>.</p>
       </div>

@@ -1325,10 +1325,10 @@ export default function MinhaLoja({ secao = 'loja' }) {
             }}>
               💬 <strong>Não achou ou tem dúvida?</strong> Fale com a FWC no WhatsApp{' '}
               <a
-                href="https://wa.me/5584999281009?text=Ol%C3%A1%21%20Preciso%20de%20ajuda%20para%20pegar%20o%20Merchant%20ID%20da%20minha%20loja%20no%20iFood."
+                href="https://wa.me/5584998180774?text=Ol%C3%A1%21%20Preciso%20de%20ajuda%20para%20pegar%20o%20Merchant%20ID%20da%20minha%20loja%20no%20iFood."
                 target="_blank" rel="noopener noreferrer"
                 style={{ color: 'var(--primary)', fontWeight: 700 }}
-              >(84) 99928-1009</a> que a gente pega esse código pra você.
+              >(84) 99818-0774</a> que a gente pega esse código pra você.
             </div>
 
             <button
