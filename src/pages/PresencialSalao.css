@@ -1,0 +1,63 @@
+/* Comanda do salão — o painel que abre ao tocar numa mesa.
+ *
+ * No CELULAR ele é uma gaveta estreita e tudo rola numa coluna só: comanda em
+ * cima, "adicionar item" embaixo. É o certo pro garçom de celular na mão.
+ *
+ * No PC a tela inteira ficava vazia à esquerda enquanto as categorias se
+ * espremiam em 8 linhas na gaveta. Aí o painel abre largo e vira DUAS colunas —
+ * comanda à esquerda, produtos à direita — cada uma rolando sozinha. Lançar
+ * pedido deixa de exigir subir e descer a página.
+ */
+
+.sal-drawer {
+  width: min(460px, 100%);
+  height: 100%;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+}
+
+.sal-corpo {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+}
+
+/* Lista de produtos: uma coluna no celular. */
+.sal-produtos {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+@media (min-width: 1100px) {
+  .sal-drawer { width: min(1080px, 92vw); }
+
+  /* O corpo para de rolar como um bloco só: cada coluna rola por conta. */
+  .sal-corpo {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0;
+    overflow: hidden;
+    padding: 0;
+  }
+  .sal-col {
+    min-width: 0;
+    overflow-y: auto;
+    padding: 18px;
+  }
+  .sal-col + .sal-col {
+    border-left: 1px solid var(--border);
+  }
+  /* No PC o "Adicionar item" já é o título da coluna — não precisa do espaço
+     de respiro que separa as duas seções no celular. */
+  .sal-col + .sal-col > .sal-titulo-add { margin-top: 0; }
+
+  /* Produto em 2 colunas: cabe o dobro sem rolar. */
+  .sal-produtos {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+}

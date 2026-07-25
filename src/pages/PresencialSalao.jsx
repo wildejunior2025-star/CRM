@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 import { adicionalComplementos } from '../lib/complementos'
 import { imprimirHtml, montarContaPresencialHtml, appFwcDisponivel } from '../utils/imprimirCupom'
 import '../components/Page.css'
+import './PresencialSalao.css'
 
 const FORMAS = [
   { id: 'dinheiro', label: 'Dinheiro' },
@@ -645,8 +646,7 @@ export default function PresencialSalao() {
       {mesaSel && comandaSel && (
         <div onClick={sairDaMesa}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 900, display: 'flex', justifyContent: 'flex-end' }}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ width: 'min(460px, 100%)', height: '100%', background: 'var(--bg)', display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--border)' }}>
+          <div onClick={e => e.stopPropagation()} className="sal-drawer">
             {/* header */}
             <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
@@ -665,8 +665,9 @@ export default function PresencialSalao() {
               <button type="button" onClick={sairDaMesa} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-muted)' }}>×</button>
             </div>
 
-            {/* corpo */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: 18 }}>
+            {/* corpo — no PC vira 2 colunas (ver PresencialSalao.css) */}
+            <div className="sal-corpo">
+            <div className="sal-col">
               {/* itens lançados */}
               <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Comanda</div>
               {(comandaSel.comanda_itens ?? []).length === 0 ? (
@@ -773,8 +774,11 @@ export default function PresencialSalao() {
                 </div>
               )}
 
+            </div>
+
+            <div className="sal-col">
               {/* adicionar item */}
-              <div style={{ fontSize: 15, fontWeight: 700, margin: '18px 0 8px' }}>Adicionar item</div>
+              <div className="sal-titulo-add" style={{ fontSize: 15, fontWeight: 700, margin: '18px 0 8px' }}>Adicionar item</div>
 
               {/* ── Inventar produto (item fora do catálogo) ── */}
               {!invAberto ? (
@@ -858,7 +862,7 @@ export default function PresencialSalao() {
 
               {/* Produtos: quando há busca OU quando uma categoria está aberta. */}
               {(busca.trim() || categoriaSel) && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div className="sal-produtos">
                   {produtosFiltrados.map(p => (
                     <button key={p.produto_id} type="button" onClick={() => addItem(p)}
                       style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, minHeight: 48, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', textAlign: 'left' }}>
@@ -869,6 +873,7 @@ export default function PresencialSalao() {
                   {produtosFiltrados.length === 0 && <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum produto encontrado.</p>}
                 </div>
               )}
+            </div>
             </div>
 
             {/* rodapé */}
