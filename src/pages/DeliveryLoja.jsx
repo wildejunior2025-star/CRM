@@ -307,6 +307,13 @@ export default function DeliveryLoja() {
   const totalItens = itens.reduce((s, i) => s + i.quantidade, 0)
   const subtotal = itens.reduce((s, i) => s + i.quantidade * Number(i.preco), 0)
   const taxaEntrega = loja ? Number(loja.taxa_entrega ?? 0) : 0
+  // Loja que cobra por bairro ou por km só sabe a taxa depois do endereço (isso
+  // é feito no checkout). Aqui no carrinho a taxa fixa dessas lojas é 0 — e
+  // mostrar "Grátis" fazia o cliente achar que a entrega não custava nada.
+  const taxaPorEndereco =
+    (Array.isArray(loja?.taxas_entrega_km) && loja.taxas_entrega_km.length > 0) ||
+    (Array.isArray(loja?.taxas_entrega_bairro) && loja.taxas_entrega_bairro.length > 0)
+  const taxaIndefinida = taxaPorEndereco && taxaEntrega === 0
   const total = subtotal + taxaEntrega
 
   const produtosFiltrados = filtroEstoqueBaixo
@@ -688,11 +695,13 @@ export default function DeliveryLoja() {
               </div>
               <div className="dloja-drawer-linha">
                 <span>Taxa de entrega</span>
-                <span>{taxaEntrega === 0 ? 'Grátis' : `R$ ${fmt(taxaEntrega)}`}</span>
+                <span style={taxaIndefinida ? { color: 'var(--dl-text-muted)' } : undefined}>
+                  {taxaIndefinida ? 'A calcular' : taxaEntrega === 0 ? 'Grátis' : `R$ ${fmt(taxaEntrega)}`}
+                </span>
               </div>
               <div className="dloja-drawer-linha dloja-drawer-total">
                 <span>Total</span>
-                <strong>R$ {fmt(total)}</strong>
+                <strong>R$ {fmt(total)}{taxaIndefinida ? ' + entrega' : ''}</strong>
               </div>
               <button
                 className="dloja-btn-finalizar"
