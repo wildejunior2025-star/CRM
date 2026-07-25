@@ -75,6 +75,8 @@ function cobranca(p) {
 
 const iniciais = nome => (nome || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('')
 
+const dataHora = iso => iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
+
 const FORMAS = [['dinheiro', '💵 Dinheiro'], ['cartao', '💳 Cartão'], ['pix', '📱 PIX']]
 
 // Confirmação da casa — o confirm() do navegador é feio e não mostra o resumo.
@@ -125,6 +127,9 @@ export default function EntregadoresHistorico() {
   const [salvando, setSalvando] = useState(false)
   const [confirmacao, setConfirmacao] = useState(null)
   const [aviso, setAviso] = useState(null)
+  const [aba, setAba] = useState('acerto')
+  const [acertos, setAcertos] = useState([])
+  const [carregandoAcertos, setCarregandoAcertos] = useState(false)
 
   const avisar = useCallback((texto, erro = false) => {
     setAviso({ texto, erro })
@@ -141,6 +146,31 @@ export default function EntregadoresHistorico() {
   }, [empresa, periodo, de, ate])
 
   useEffect(() => { carregarResumo() }, [carregarResumo])
+
+  // Histórico: o período aqui filtra pela DATA DO PAGAMENTO, não pela da corrida.
+  const carregarAcertos = useCallback(async () => {
+    if (!empresa) return
+    setCarregandoAcertos(true)
+    const faixa = faixaDe(periodo, de, ate)
+    const { data } = await supabase.rpc('entregadores_acertos', { p_empresa_id: empresa.id, p_desde: faixa.desde, p_ate: faixa.ate })
+    setAcertos(data || [])
+    setCarregandoAcertos(false)
+  }, [empresa, periodo, de, ate])
+
+  useEffect(() => { if (aba === 'historico') carregarAcertos() }, [aba, carregarAcertos])
+
+  // Desfaz um acerto inteiro: as corridas daquele minuto voltam pra "a pagar".
+  async function desfazerAcerto(a) {
+    if (salvando) return false
+    setSalvando(true)
+    const fim = new Date(new Date(a.pago_em).getTime() + 60000).toISOString()
+    const { error } = await supabase.from('pedidos_delivery').update(patchDe(false))
+      .eq('empresa_id', empresa.id).eq('entregador_id', a.entregador_id)
+      .gte('entregador_pago_em', a.pago_em).lt('entregador_pago_em', fim)
+    setSalvando(false)
+    if (error) { avisar('Não deu pra desfazer: ' + error.message, true); return false }
+    return true
+  }
 
   const lista = useMemo(() => {
     const q = busca.trim().toLowerCase()
@@ -241,28 +271,56 @@ export default function EntregadoresHistorico() {
     <div className="ent-wrap">
       <div className="page-header">
         <h1>Entregadores</h1>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={carregarResumo} disabled={loading}>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => { carregarResumo(); if (aba === 'historico') carregarAcertos() }} disabled={loading}>
           {loading ? 'Atualizando…' : '↻ Atualizar'}
         </button>
       </div>
       <p style={{ color: 'var(--text-muted)', marginTop: -12, marginBottom: 16, maxWidth: 680 }}>
-        Acerto de contas: o que a loja deve de corrida e o que o entregador tem em mãos pra repassar.
+        {aba === 'acerto'
+          ? 'Acerto de contas: o que a loja deve de corrida e o que o entregador tem em mãos pra repassar.'
+          : 'Todo pagamento feito nesta tela, com data e hora. O período filtra pela data do pagamento.'}
       </p>
+
+      <div className="ent-abas">
+        <button type="button" className={aba === 'acerto' ? 'on' : ''} onClick={() => setAba('acerto')}>Acerto</button>
+        <button type="button" className={aba === 'historico' ? 'on' : ''} onClick={() => setAba('historico')}>Histórico de pagamentos</button>
+      </div>
 
       <div className="ent-toolbar">
         <FiltroPeriodo periodo={periodo} setPeriodo={setPeriodo} de={de} setDe={setDe} ate={ate} setAte={setAte} />
-        <input className="ent-search" placeholder="Buscar entregador…" value={busca} onChange={e => setBusca(e.target.value)} />
-        <label className={`ent-toggle ${soDevendo ? 'on' : ''}`}>
-          <input type="checkbox" checked={soDevendo} onChange={e => setSoDevendo(e.target.checked)} />
-          Só quem tem pendência
-        </label>
-        <div className="ent-seg">
-          {ORDENS.map(([val, lab]) => (
-            <button key={val} type="button" className={ordem === val ? 'on' : ''} onClick={() => setOrdem(val)}>{lab}</button>
-          ))}
-        </div>
+        {aba === 'acerto' && <>
+          <input className="ent-search" placeholder="Buscar entregador…" value={busca} onChange={e => setBusca(e.target.value)} />
+          <label className={`ent-toggle ${soDevendo ? 'on' : ''}`}>
+            <input type="checkbox" checked={soDevendo} onChange={e => setSoDevendo(e.target.checked)} />
+            Só quem tem pendência
+          </label>
+          <div className="ent-seg">
+            {ORDENS.map(([val, lab]) => (
+              <button key={val} type="button" className={ordem === val ? 'on' : ''} onClick={() => setOrdem(val)}>{lab}</button>
+            ))}
+          </div>
+        </>}
       </div>
 
+      {aba === 'historico' && (
+        <HistoricoPagamentos
+          acertos={acertos}
+          carregando={carregandoAcertos}
+          labelPeriodo={labelPeriodo}
+          salvando={salvando}
+          onVerEntregador={setSel}
+          onDesfazer={a => setConfirmacao({
+            titulo: 'Desfazer esse pagamento?',
+            texto: `As ${num(a.corridas)} corridas voltam pra lista de "a pagar" de ${a.nome}.`,
+            botao: 'Desfazer pagamento',
+            perigo: true,
+            resumo: [['Pago em', dataHora(a.pago_em)], ['Corridas', `${num(a.corridas)}`], ['Valor', fmt(a.valor)]],
+            acao: async () => { if (await desfazerAcerto(a)) { carregarAcertos(); carregarResumo(); avisar('Pagamento desfeito.') } },
+          })}
+        />
+      )}
+
+      {aba === 'acerto' && <>
       <div className="ent-stats">
         <div className="ent-stat ent-stat--warn">
           <div className="lab">A pagar aos entregadores</div>
@@ -367,8 +425,73 @@ export default function EntregadoresHistorico() {
           })}
         </div>
       )}
+      </>}
       {avulsos}
     </div>
+  )
+}
+
+// ───────────────────────── Histórico de pagamentos ─────────────────────────
+
+function HistoricoPagamentos({ acertos, carregando, labelPeriodo, salvando, onVerEntregador, onDesfazer }) {
+  const total = acertos.reduce((s, a) => s + num(a.valor), 0)
+  const corridas = acertos.reduce((s, a) => s + num(a.corridas), 0)
+
+  if (carregando && !acertos.length) {
+    return <div className="card"><div className="skeleton-row" /><div className="skeleton-row" style={{ width: '60%' }} /></div>
+  }
+
+  return (
+    <>
+      <div className="ent-stats">
+        <div className="ent-stat ent-stat--ok">
+          <div className="lab">Pago aos entregadores · {labelPeriodo}</div>
+          <div className="val c-ok">{fmt(total)}</div>
+          <div className="sub">{corridas} corrida{corridas === 1 ? '' : 's'} em {acertos.length} pagamento{acertos.length === 1 ? '' : 's'}</div>
+        </div>
+      </div>
+
+      {acertos.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-icon" style={{ fontSize: 22 }}>🧾</div>
+          <strong>Nenhum pagamento no período</strong>
+          <p>Escolha outro período ou "Tudo" pra ver os acertos anteriores.</p>
+        </div>
+      ) : (
+        <div className="data-table">
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th>Pago em</th>
+                <th>Entregador</th>
+                <th>Corridas</th>
+                <th style={{ textAlign: 'right' }}>Valor</th>
+                <th>Período das corridas</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {acertos.map(a => (
+                <tr key={`${a.entregador_id}-${a.pago_em}`}>
+                  <td style={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{dataHora(a.pago_em)}</td>
+                  <td>
+                    <button type="button" className="ent-link" onClick={() => onVerEntregador(a.entregador_id)}>{a.nome}</button>
+                  </td>
+                  <td>{num(a.corridas)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 800 }} className="c-ok">{fmt(a.valor)}</td>
+                  <td className="c-muted" style={{ fontSize: 12.5, whiteSpace: 'nowrap' }}>
+                    {new Date(a.primeira).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} a {new Date(a.ultima).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={salvando} onClick={() => onDesfazer(a)}>Desfazer</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -472,6 +595,9 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
           {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
           {p.origem === 'ifood' && descValor > 0 ? ` · iFood −${fmt(descValor)}` : ''}
         </div>
+        {pago && p.entregador_pago_em && (
+          <div className="ent-corrida-meta c-ok">🧾 Pago em {dataHora(p.entregador_pago_em)}</div>
+        )}
         <div className="ent-corrida-pag">
           <span className={naConta ? 'c-ok' : 'c-warn'}>{naConta ? '✓ Já na conta' : '💵 Recebeu na entrega'} · {cb.label}</span>
           <span>{fmt(p.total)}</span>
