@@ -79,13 +79,23 @@ const dataHora = iso => iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-di
 
 const FORMAS = [['dinheiro', '💵 Dinheiro'], ['cartao', '💳 Cartão'], ['pix', '📱 PIX']]
 
+// Corrida que o motoqueiro já pegou mas ainda não concluiu.
+const STATUS_LABEL = {
+  confirmado: 'Aceito',
+  em_preparo: 'Na cozinha',
+  pronto: 'Pronto, com ele',
+  saiu_entrega: 'Em rota',
+}
+
 // Confirmação da casa — o confirm() do navegador é feio e não mostra o resumo.
 function Confirmacao({ pedido, ocupado, onFechar }) {
+  const [opcao, setOpcao] = useState(false)
   useEffect(() => {
     const esc = e => { if (e.key === 'Escape') onFechar() }
     window.addEventListener('keydown', esc)
     return () => window.removeEventListener('keydown', esc)
   }, [onFechar])
+  useEffect(() => { setOpcao(false) }, [pedido])
   if (!pedido) return null
   const perigo = pedido.perigo
   return (
@@ -101,10 +111,29 @@ function Confirmacao({ pedido, ocupado, onFechar }) {
             ))}
           </div>
         )}
+        {pedido.alerta && (
+          <div className="ent-conf-alerta">
+            <div className="cab">⚠️ {pedido.alerta.titulo}</div>
+            <p>{pedido.alerta.texto}</p>
+            <div className="itens">
+              {pedido.alerta.itens.map(it => (
+                <div key={it.chave}>
+                  <span>{it.titulo}</span>
+                  <span className="c-muted">{it.detalhe}</span>
+                  <strong>{it.valor}</strong>
+                </div>
+              ))}
+            </div>
+            <label className="ent-conf-opcao">
+              <input type="checkbox" checked={opcao} onChange={e => setOpcao(e.target.checked)} />
+              <span>{pedido.alerta.opcao}</span>
+            </label>
+          </div>
+        )}
         <div className="ent-conf-acoes">
           <button type="button" className="btn btn-secondary" onClick={onFechar} disabled={ocupado}>Cancelar</button>
           <button type="button" className={`btn ${perigo ? 'btn-danger' : 'btn-ok'}`} disabled={ocupado} autoFocus
-            onClick={async () => { const fn = pedido.acao; await fn(); onFechar() }}>
+            onClick={async () => { const fn = pedido.acao; await fn(opcao); onFechar() }}>
             {ocupado ? 'Salvando…' : (pedido.botao || 'Confirmar')}
           </button>
         </div>
@@ -188,7 +217,9 @@ export default function EntregadoresHistorico() {
     dinheiro: t.dinheiro + num(e.repasse_dinheiro),
     cartao: t.cartao + num(e.repasse_cartao),
     pix: t.pix + num(e.repasse_pix),
-  }), { pagar: 0, corridas: 0, pendentes: 0, dinheiro: 0, cartao: 0, pix: 0 }), [resumo])
+    emRota: t.emRota + num(e.em_andamento),
+    emRotaValor: t.emRotaValor + num(e.valor_em_andamento),
+  }), { pagar: 0, corridas: 0, pendentes: 0, dinheiro: 0, cartao: 0, pix: 0, emRota: 0, emRotaValor: 0 }), [resumo])
 
   const repasseTotal = totais.dinheiro + totais.cartao + totais.pix
 
@@ -206,14 +237,42 @@ export default function EntregadoresHistorico() {
     return true
   }
 
+  // Antes de acertar, lista as corridas que o motoqueiro pegou mas ainda não
+  // concluiu, pra loja conferir se aquele pedido foi pago ou não.
+  async function alertaEmRota(entregadorId, qtd) {
+    const faixa = faixaDe(periodo, de, ate)
+    let q = supabase.from('pedidos_delivery')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, status, forma_pagamento, created_at')
+      .eq('empresa_id', empresa.id).eq('entregador_id', entregadorId)
+      .neq('status', 'entregue').neq('status', 'cancelado')
+      .or('entregador_pago.is.null,entregador_pago.eq.false')
+    if (faixa.desde) q = q.gte('created_at', faixa.desde)
+    if (faixa.ate) q = q.lte('created_at', faixa.ate)
+    const { data } = await q.order('created_at')
+    const itens = (data || []).map(p => ({
+      chave: p.id,
+      titulo: `#${p.numero_pedido ?? p.id.slice(-4).toUpperCase()} · ${p.cliente_nome || '—'}`,
+      detalhe: `${STATUS_LABEL[p.status] || p.status} · ${fmt(p.total)}`,
+      valor: fmt(p.taxa_entrega),
+    }))
+    return {
+      titulo: `${qtd} corrida${qtd === 1 ? '' : 's'} ainda não concluída${qtd === 1 ? '' : 's'}`,
+      texto: 'Confira com o entregador se o cliente já pagou. Elas não entram no acerto a menos que você marque abaixo.',
+      itens,
+      opcao: `Incluir essas ${qtd} corridas no pagamento`,
+    }
+  }
+
   // Acerto em lote: atualiza pelo filtro em vez de mandar centenas de ids na URL.
-  async function acertarTudo(entregadorId) {
+  async function acertarTudo(entregadorId, incluirEmAndamento = false) {
     if (salvando) return false
     setSalvando(true)
     const faixa = faixaDe(periodo, de, ate)
     let q = supabase.from('pedidos_delivery').update(patchDe(true))
-      .eq('empresa_id', empresa.id).eq('entregador_id', entregadorId).eq('status', 'entregue')
+      .eq('empresa_id', empresa.id).eq('entregador_id', entregadorId)
       .or('entregador_pago.is.null,entregador_pago.eq.false')
+    // Por padrão só corrida concluída é acertada; a loja pode incluir as em rota.
+    q = incluirEmAndamento ? q.neq('status', 'cancelado') : q.eq('status', 'entregue')
     if (faixa.desde) q = q.gte('created_at', faixa.desde)
     if (faixa.ate) q = q.lte('created_at', faixa.ate)
     const { error } = await q
@@ -342,7 +401,11 @@ export default function EntregadoresHistorico() {
         <div className="ent-stat">
           <div className="lab">Corridas · {labelPeriodo}</div>
           <div className="val">{totais.corridas}</div>
-          <div className="sub">{lista.length} entregador{lista.length === 1 ? '' : 'es'} na lista</div>
+          <div className="sub">
+            {totais.emRota > 0
+              ? <span className="c-info">🛵 {totais.emRota} em rota agora ({fmt(totais.emRotaValor)})</span>
+              : `${lista.length} entregador${lista.length === 1 ? '' : 'es'} na lista`}
+          </div>
         </div>
       </div>
 
@@ -357,8 +420,9 @@ export default function EntregadoresHistorico() {
           {lista.map(e => {
             const pendente = num(e.valor_pendente)
             const repasse = num(e.repasse_dinheiro) + num(e.repasse_cartao) + num(e.repasse_pix)
+            const emRota = num(e.em_andamento)
             return (
-              <div key={e.entregador_id} className={`ent-card ${pendente === 0 ? 'ent-card--quitado' : ''}`}>
+              <div key={e.entregador_id} className={`ent-card ${pendente === 0 && emRota === 0 ? 'ent-card--quitado' : ''}`}>
                 <div className="ent-card-top">
                   <div className="ent-avatar">{iniciais(e.nome)}</div>
                   <div style={{ minWidth: 0, flex: 1 }}>
@@ -378,6 +442,13 @@ export default function EntregadoresHistorico() {
                   </div>
                   <div className="qtd">{num(e.corridas_pendentes)} corrida{num(e.corridas_pendentes) === 1 ? '' : 's'}<br />sem acerto</div>
                 </div>
+
+                {emRota > 0 && (
+                  <div className="ent-rota">
+                    🛵 <strong>{emRota} corrida{emRota === 1 ? '' : 's'} em rota agora</strong>
+                    <span>{fmt(e.valor_em_andamento)} · entra no acerto quando concluir</span>
+                  </div>
+                )}
 
                 <div className="ent-box">
                   <div className="ent-box-head">
@@ -400,7 +471,7 @@ export default function EntregadoresHistorico() {
                     type="button"
                     className="btn btn-ok btn-sm"
                     disabled={pendente === 0 || salvando}
-                    onClick={() => setConfirmacao({
+                    onClick={async () => setConfirmacao({
                       titulo: `Acertar com ${e.nome}?`,
                       texto: 'As corridas ficam marcadas como pagas. Dá pra desfazer uma a uma em "Ver corridas".',
                       botao: 'Confirmar pagamento',
@@ -409,8 +480,9 @@ export default function EntregadoresHistorico() {
                         ['Valor pra ele', fmt(pendente)],
                         ['Ele repassa pra loja', fmt(repasse)],
                       ],
-                      acao: async () => {
-                        if (await acertarTudo(e.entregador_id)) {
+                      alerta: emRota > 0 ? await alertaEmRota(e.entregador_id, emRota) : null,
+                      acao: async incluir => {
+                        if (await acertarTudo(e.entregador_id, incluir)) {
                           carregarResumo()
                           avisar(`Acerto de ${e.nome} registrado · ${fmt(pendente)}`)
                         }
@@ -511,8 +583,8 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
     const [{ data: pd }, { data: pf }] = await Promise.all([
       fetchAll(() => {
         let q = supabase.from('pedidos_delivery')
-          .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, pix_status, mp_payment_status, created_at, origem, entregador_pago, entregador_pago_em')
-          .eq('empresa_id', empresa.id).eq('entregador_id', id).eq('status', 'entregue')
+          .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, pix_status, mp_payment_status, created_at, origem, status, entregador_pago, entregador_pago_em')
+          .eq('empresa_id', empresa.id).eq('entregador_id', id).neq('status', 'cancelado')
         if (faixa.desde) q = q.gte('created_at', faixa.desde)
         if (faixa.ate) q = q.lte('created_at', faixa.ate)
         return q.order('created_at', { ascending: false })
@@ -530,7 +602,9 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
   const ganho = p => Math.max(0, num(p.taxa_entrega) - (p.origem === 'ifood' ? descValor : 0))
   const somaGanho = arr => arr.reduce((s, p) => s + ganho(p), 0)
 
-  const pendentes = pedidos.filter(p => !p.entregador_pago)
+  const concluidas = pedidos.filter(p => p.status === 'entregue')
+  const emRota = pedidos.filter(p => p.status !== 'entregue' && !p.entregador_pago)
+  const pendentes = concluidas.filter(p => !p.entregador_pago)
   const pagos = pedidos.filter(p => p.entregador_pago)
 
   // Quanto ele tem em mãos, por forma de pagamento (só das corridas não acertadas).
@@ -570,10 +644,14 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
   const Corrida = (p, pago) => {
     const cb = cobranca(p)
     const naConta = cb.tipo === 'conta'
+    const aberta = p.status !== 'entregue'
     return (
-      <div key={p.id} className="ent-corrida">
+      <div key={p.id} className={`ent-corrida ${aberta ? 'ent-corrida--aberta' : ''}`}>
         <div className="ent-corrida-top">
-          <span className="ent-corrida-num">#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
+          <span className="ent-corrida-num">
+            #{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}
+            {aberta && <span className="ent-chip ent-chip--rota" style={{ marginLeft: 6 }}>{STATUS_LABEL[p.status] || p.status}</span>}
+          </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <strong style={{ fontSize: 13 }} className={pago ? 'c-ok' : 'c-warn'}>{fmt(ganho(p))}</strong>
             {pago
@@ -599,7 +677,9 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
           <div className="ent-corrida-meta c-ok">🧾 Pago em {dataHora(p.entregador_pago_em)}</div>
         )}
         <div className="ent-corrida-pag">
-          <span className={naConta ? 'c-ok' : 'c-warn'}>{naConta ? '✓ Já na conta' : '💵 Recebeu na entrega'} · {cb.label}</span>
+          <span className={aberta ? 'c-info' : naConta ? 'c-ok' : 'c-warn'}>
+            {aberta ? '🛵 Ainda não entregue' : naConta ? '✓ Já na conta' : '💵 Recebeu na entrega'} · {cb.label}
+          </span>
           <span>{fmt(p.total)}</span>
         </div>
       </div>
@@ -643,7 +723,7 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
             <div className="ent-stat">
               <div className="lab">Corridas</div>
               <div className="val">{pedidos.length}</div>
-              <div className="sub">no período</div>
+              <div className="sub">{emRota.length > 0 ? <span className="c-info">🛵 {emRota.length} em rota agora</span> : 'no período'}</div>
             </div>
           </div>
 
@@ -674,14 +754,37 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
                     ['Valor pra ele', fmt(aPagar)],
                     [saldo >= 0 ? 'Ele repassa pra loja' : 'Loja completa em dinheiro', fmt(Math.abs(saldo))],
                   ],
-                  acao: async () => {
-                    if (await acertarTudo(id)) { await carregar(); recarregarResumo(); avisar(`Acerto registrado · ${fmt(aPagar)}`) }
+                  alerta: emRota.length === 0 ? null : {
+                    titulo: `${emRota.length} corrida${emRota.length === 1 ? '' : 's'} ainda não concluída${emRota.length === 1 ? '' : 's'}`,
+                    texto: 'Confira com o entregador se o cliente já pagou. Elas não entram no acerto a menos que você marque abaixo.',
+                    itens: emRota.map(p => ({
+                      chave: p.id,
+                      titulo: `#${p.numero_pedido ?? p.id.slice(-4).toUpperCase()} · ${p.cliente_nome || '—'}`,
+                      detalhe: `${STATUS_LABEL[p.status] || p.status} · ${fmt(p.total)}`,
+                      valor: fmt(ganho(p)),
+                    })),
+                    opcao: `Incluir essas ${emRota.length} corridas no pagamento`,
+                  },
+                  acao: async incluir => {
+                    if (await acertarTudo(id, incluir)) { await carregar(); recarregarResumo(); avisar(`Acerto registrado · ${fmt(aPagar)}`) }
                   },
                 })}>
                 Acertar tudo · {fmt(aPagar)}
               </button>
             </div>
           </div>
+
+          {emRota.length > 0 && (
+            <>
+              <div className="ent-sec c-info">
+                🛵 Em rota agora · {emRota.length} corrida{emRota.length === 1 ? '' : 's'} · {fmt(somaGanho(emRota))}
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                  entram no acerto quando o entregador concluir
+                </span>
+              </div>
+              <div className="ent-corridas">{emRota.map(p => Corrida(p, false))}</div>
+            </>
+          )}
 
           <div className="ent-sec c-warn">A pagar · {fmt(aPagar)}</div>
           {pendentes.length === 0
