@@ -15,7 +15,6 @@
 // (ProtectedRoute.jsx), então tudo sai desta lista única.
 
 export const MODULOS = [
-  { key: 'vendas',       label: 'Vendas',             descricao: 'Registro de vendas / PDV' },
   { key: 'caixa',        label: 'Caixa',              descricao: 'Abertura e fechamento de caixa' },
   { key: 'clientes',     label: 'Clientes',           descricao: 'Cadastro de clientes' },
   { key: 'produtos',     label: 'Catálogo',           descricao: 'Produtos e categorias' },

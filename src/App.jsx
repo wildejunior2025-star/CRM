@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
 import { useAuth } from './hooks/useAuth'
 
@@ -109,7 +109,6 @@ import Produtos from './pages/Produtos'
 import CategoriasComplemento from './pages/CategoriasComplemento'
 import FichaTecnica from './pages/FichaTecnica'
 import Estoque from './pages/Estoque'
-import Vendas from './pages/Vendas'
 import Caixa from './pages/Caixa'
 import Financeiro from './pages/Financeiro'
 import Relatorios from './pages/Relatorios'
@@ -251,7 +250,10 @@ export default function App() {
             {/* Convite de upgrade — sem `modulo`, senão bloquearia a si mesma. */}
             <Route path="upgrade" element={<ProtectedRoute><Upgrade /></ProtectedRoute>} />
             <Route path="clientes" element={<ProtectedRoute modulo="clientes"><Clientes /></ProtectedRoute>} />
-            <Route path="vendas" element={<ProtectedRoute modulo="vendas"><Vendas /></ProtectedRoute>} />
+            {/* "Vendas física" saiu: as vendas presenciais são feitas por Mesa/Balcão
+                (Serviço Presencial). Link antigo e atalho salvo caem no painel em
+                vez de dar tela branca. */}
+            <Route path="vendas" element={<Navigate to="/painel" replace />} />
             <Route path="caixa" element={<ProtectedRoute modulo="caixa"><Caixa /></ProtectedRoute>} />
             <Route path="relatorios" element={<ProtectedRoute modulo="relatorios"><Relatorios /></ProtectedRoute>} />
             <Route

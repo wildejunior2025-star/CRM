@@ -15,9 +15,10 @@ const links = [
   { group: 'Operações' },
   { to: '/', label: 'Dashboard', end: true, roles: ['admin'] },
   {
-    to: '/vendas', label: 'Vendas', roles: ['admin', 'vendedor'], mod: 'vendas',
+    // "Vendas física" saiu: quem vende no balcão usa Mesa/Balcão (Serviço
+    // Presencial). O grupo agora abre direto no delivery.
+    to: '/pedidos-delivery', label: 'Vendas', roles: ['admin', 'vendedor'], mod: 'delivery',
     children: [
-      { to: '/vendas', label: 'Vendas física', roles: ['admin', 'vendedor'] },
       { to: '/pedidos-delivery', label: 'Vendas delivery', roles: ['admin'], mod: 'delivery' },
       { to: '/entregadores', label: 'Entregadores', roles: ['admin'], mod: 'delivery' },
     ],

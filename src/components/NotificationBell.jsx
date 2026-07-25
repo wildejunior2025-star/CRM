@@ -8,21 +8,17 @@ export default function NotificationBell() {
   const { profile } = useAuth()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
-  const [alerts, setAlerts] = useState({ pedidos: [], estoque: [], fiado: [] })
+  // "Pedidos do portal" saiu junto com a tela de Vendas física: o aviso só
+  // servia pra abrir aquela tela, e sem ela levaria a lugar nenhum.
+  const [alerts, setAlerts] = useState({ estoque: [], fiado: [] })
   const [dropdownStyle, setDropdownStyle] = useState({})
   const ref = useRef(null)
   const btnRef = useRef(null)
 
-  const total = alerts.pedidos.length + alerts.estoque.length + alerts.fiado.length
+  const total = alerts.estoque.length + alerts.fiado.length
 
   async function load() {
-    const [pedidosRes, estoqueRes, fiadoRes] = await Promise.all([
-      supabase
-        .from('vendas')
-        .select('id, total, created_at, clientes(nome)')
-        .eq('status', 'pedido')
-        .order('created_at', { ascending: false })
-        .limit(10),
+    const [estoqueRes, fiadoRes] = await Promise.all([
       supabase
         .from('estoque_baixo')
         .select('nome, quantidade_atual, estoque_minimo')
@@ -34,7 +30,6 @@ export default function NotificationBell() {
         .limit(10),
     ])
     setAlerts({
-      pedidos: pedidosRes.data ?? [],
       estoque: estoqueRes.data ?? [],
       fiado:   fiadoRes.data ?? [],
     })
@@ -107,27 +102,6 @@ export default function NotificationBell() {
             </div>
           ) : (
             <div className="notif-list">
-              {alerts.pedidos.length > 0 && (
-                <div className="notif-section">
-                  <div className="notif-section-title notif-pedidos">
-                    Pedidos do portal ({alerts.pedidos.length})
-                  </div>
-                  {alerts.pedidos.map(p => (
-                    <button
-                      key={p.id}
-                      className="notif-item"
-                      onClick={() => { navigate('/vendas'); setOpen(false) }}
-                    >
-                      <div className="notif-item-dot notif-dot-pedido" />
-                      <div className="notif-item-body">
-                        <span className="notif-item-title">{p.clientes?.nome ?? 'Cliente'}</span>
-                        <span className="notif-item-sub">{fmt(p.total)} · aguardando</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-
               {alerts.estoque.length > 0 && (
                 <div className="notif-section">
                   <div className="notif-section-title notif-estoque">
