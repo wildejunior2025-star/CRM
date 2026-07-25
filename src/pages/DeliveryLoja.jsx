@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
+import AvisoCookies from '../components/AvisoCookies'
 import './DeliveryLoja.css'
 
 // Loja dentro da grade semanal de funcionamento AGORA? (horário de Brasília).
@@ -710,6 +711,8 @@ export default function DeliveryLoja() {
           onConfirm={(selecoes, precoUnit) => addCombo(optProduto, selecoes, precoUnit)}
         />
       )}
+
+      <AvisoCookies loja={loja} />
     </div>
   )
 }

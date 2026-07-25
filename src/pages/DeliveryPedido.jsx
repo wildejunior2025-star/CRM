@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { iniciarTags, registrarCompra } from '../lib/tracking'
+import AvisoCookies from '../components/AvisoCookies'
 import './DeliveryPedido.css'
 
 const STATUS_STEPS = [
@@ -612,6 +613,9 @@ export default function DeliveryPedido() {
           Guarde este link para acompanhar seu pedido. Esta página atualiza automaticamente.
         </p>
       </main>
+
+      {/* Quem cai direto aqui (link do PIX, histórico) não passou pela vitrine */}
+      <AvisoCookies loja={loja} />
     </div>
   )
 }

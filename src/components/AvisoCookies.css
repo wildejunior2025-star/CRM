@@ -1,0 +1,101 @@
+/* Aviso de cookies da Loja Online (LGPD).
+   Usa as variáveis --dl-* da loja quando existem e cai num fallback claro
+   quando o componente é usado numa tela que não carrega o tema da vitrine. */
+
+.avc-wrap {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 900;
+  padding: 12px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.avc-box {
+  pointer-events: auto;
+  width: 100%;
+  max-width: 720px;
+  background: var(--dl-surface, #ffffff);
+  border: 1px solid var(--dl-border-2, #cbd5e1);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .22);
+  padding: 14px 16px;
+}
+
+.avc-texto {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--dl-text, #1e293b);
+}
+
+.avc-detalhe {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--dl-text-muted, #64748b);
+}
+
+.avc-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--dl-primary, #7c3aed);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.avc-botoes {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.avc-btn {
+  flex: 1;
+  padding: 11px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: filter .15s, background .15s;
+}
+
+.avc-btn:hover { filter: brightness(.96); }
+
+/* Recusar tem o mesmo peso visual de Aceitar — exigência de consentimento
+   válido: não pode ser mais difícil recusar do que aceitar. */
+.avc-btn-recusar {
+  background: transparent;
+  border-color: var(--dl-border-2, #cbd5e1);
+  color: var(--dl-text, #1e293b);
+}
+
+.avc-btn-aceitar {
+  background: var(--dl-primary, #7c3aed);
+  color: #fff;
+}
+
+@media (min-width: 560px) {
+  .avc-botoes { justify-content: flex-end; }
+  .avc-btn { flex: 0 0 auto; min-width: 130px; }
+}
+
+/* A tela de acompanhamento do pedido é escura fixa e não declara as --dl-*,
+   então o fallback claro cairia errado ali. */
+.dpd-root .avc-box {
+  background: #1e293b;
+  border-color: #475569;
+}
+.dpd-root .avc-texto { color: #f1f5f9; }
+.dpd-root .avc-detalhe { color: #94a3b8; }
+.dpd-root .avc-link { color: #a78bfa; }
+.dpd-root .avc-btn-recusar { color: #f1f5f9; border-color: #475569; }
+.dpd-root .avc-btn-aceitar { background: #7c3aed; }

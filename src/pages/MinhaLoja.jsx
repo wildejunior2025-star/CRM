@@ -1069,15 +1069,14 @@ export default function MinhaLoja({ secao = 'loja' }) {
 
             <div style={{
               marginTop: 16, padding: '12px 14px', borderRadius: 10,
-              background: 'var(--primary-bg, #f5f0ff)', border: '1px solid var(--primary)',
-              fontSize: 13, color: 'var(--text)',
+              background: 'var(--primary-bg, #f5f0ff)', border: '1px solid var(--border)',
+              fontSize: 13, color: 'var(--text)', lineHeight: 1.5,
             }}>
-              💬 <strong>Se embolar, a FWC faz pra você.</strong> Chame no WhatsApp{' '}
-              <a
-                href="https://wa.me/5584999281009?text=Ol%C3%A1%21%20Preciso%20de%20ajuda%20para%20configurar%20os%20an%C3%BAncios%20%28Google%20Ads%20%2F%20Meta%29%20na%20minha%20loja%20online."
-                target="_blank" rel="noopener noreferrer"
-                style={{ color: 'var(--primary)', fontWeight: 700 }}
-              >(84) 99928-1009</a>.
+              💬 <strong>Tem alguém cuidando dos seus anúncios?</strong> Peça esses códigos
+              direto a quem faz o tráfego da sua loja (agência ou gestor de tráfego) — é
+              trabalho de rotina pra eles, leva minutos. Diga que <strong>não precisa
+              instalar nenhuma tag no site</strong>: o rastreamento já está pronto aqui,
+              eles só precisam mandar os códigos pra você colar.
             </div>
 
             <button

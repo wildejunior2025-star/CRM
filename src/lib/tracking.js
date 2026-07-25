@@ -20,8 +20,21 @@
 // pagamento. Um pedido nunca conta duas vezes (trava em localStorage), mesmo se
 // o cliente recarregar a página ou voltar no link depois.
 
+// Consentimento (LGPD)
+// --------------------
+// Quem carrega o script de terceiro é a plataforma, então o pedido de
+// consentimento é responsabilidade nossa e não da loja. O aviso só aparece nas
+// lojas que realmente anunciam — loja sem tag não usa cookie de terceiro e não
+// tem o que perguntar.
+//
+// O Google entra em Consent Mode v2: a tag carrega desde o começo, mas em modo
+// negado (sem cookie, só um ping anônimo que o Google usa pra estimar a
+// conversão). Aceitando, sobe pra concedido. A Meta não tem modo equivalente,
+// então o Pixel só carrega depois do aceite.
+
 const MOEDA = 'BRL'
 const CHAVE_CONVERSAO = 'fwc_conv_'   // + id do pedido
+const CHAVE_CONSENT = 'fwc_consent_'  // + id da loja (cada loja é um anunciante diferente)
 
 // Estado do módulo: a Loja Online é SPA, então os scripts sobrevivem à
 // navegação entre vitrine → checkout → pedido. Guardamos o que já foi injetado
@@ -40,7 +53,12 @@ function injetarScript(src) {
   document.head.appendChild(s)
 }
 
-function iniciarGoogle(adsId) {
+function permissoes(aceito) {
+  const v = aceito ? 'granted' : 'denied'
+  return { ad_storage: v, ad_user_data: v, ad_personalization: v, analytics_storage: v }
+}
+
+function iniciarGoogle(adsId, aceito) {
   if (carregado.google.has(adsId)) return
   carregado.google.add(adsId)
 
@@ -48,8 +66,10 @@ function iniciarGoogle(adsId) {
   if (!window.gtag) {
     // Precisa ser `arguments` (o gtag guarda o objeto arguments cru na fila).
     window.gtag = function gtag() { window.dataLayer.push(arguments) }
-    window.gtag('js', new Date())
   }
+  // O consentimento padrão tem que ser declarado ANTES de carregar a tag.
+  window.gtag('consent', 'default', permissoes(aceito))
+  window.gtag('js', new Date())
   injetarScript(`https://www.googletagmanager.com/gtag/js?id=${adsId}`)
   window.gtag('config', adsId)
 }
@@ -83,15 +103,45 @@ function iniciarMeta(pixelId) {
  */
 export function iniciarTags(loja) {
   if (!ehNavegador() || !loja) return
+  const aceito = consentimento(loja) === 'aceito'
   const adsId = (loja.google_ads_id ?? '').trim()
   const pixelId = (loja.meta_pixel_id ?? '').trim()
-  if (adsId) iniciarGoogle(adsId)
-  if (pixelId) iniciarMeta(pixelId)
+  if (adsId) iniciarGoogle(adsId, aceito)
+  if (pixelId && aceito) iniciarMeta(pixelId)
 }
 
 /** Loja está com algum rastreamento ligado? */
 export function temTags(loja) {
   return Boolean((loja?.google_ads_id ?? '').trim() || (loja?.meta_pixel_id ?? '').trim())
+}
+
+/** 'aceito' | 'recusado' | null (ainda não respondeu) */
+export function consentimento(loja) {
+  if (!ehNavegador() || !loja?.id) return null
+  try {
+    return localStorage.getItem(CHAVE_CONSENT + loja.id)
+  } catch {
+    return null
+  }
+}
+
+/** Precisa mostrar o aviso? Só em loja que anuncia e cliente que não respondeu. */
+export function precisaPerguntar(loja) {
+  return temTags(loja) && consentimento(loja) === null
+}
+
+/** Guarda a resposta do cliente e aplica na hora. */
+export function registrarConsentimento(loja, aceito) {
+  if (!ehNavegador() || !loja?.id) return
+  try {
+    localStorage.setItem(CHAVE_CONSENT + loja.id, aceito ? 'aceito' : 'recusado')
+  } catch {
+    // Storage bloqueado: vale só nesta visita.
+  }
+  if (!aceito) return
+  if (window.gtag) window.gtag('consent', 'update', permissoes(true))
+  const pixelId = (loja.meta_pixel_id ?? '').trim()
+  if (pixelId) iniciarMeta(pixelId)
 }
 
 /** Evento de funil — só a Meta usa (ver comentário do topo). */
