@@ -1233,15 +1233,22 @@ function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onCon
   return (
     <div onClick={onCancelar}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      {/* Quentinha tem 9 grupos: se o modal rolasse inteiro, o botão de
+          adicionar ficava lá embaixo e o atendente tinha que descer a lista toda
+          só pra confirmar. Agora só a LISTA rola — título em cima e botão
+          embaixo ficam sempre à vista. */}
       <div onClick={e => e.stopPropagation()}
-        style={{ width: '100%', maxWidth: 460, background: 'var(--bg)', borderTopLeftRadius: 16, borderTopRightRadius: 16, border: '1px solid var(--border)', padding: 18, maxHeight: '85dvh', overflowY: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <div style={{ fontWeight: 800, fontSize: 17 }}>{produto.nome}</div>
-          <button type="button" onClick={onCancelar}
-            style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-muted)', lineHeight: 1 }}>×</button>
+        style={{ width: '100%', maxWidth: 460, background: 'var(--bg)', borderTopLeftRadius: 16, borderTopRightRadius: 16, border: '1px solid var(--border)', maxHeight: '85dvh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '18px 18px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>{produto.nome}</div>
+            <button type="button" onClick={onCancelar}
+              style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-muted)', lineHeight: 1 }}>×</button>
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{fmt(produto.preco_venda)}</div>
         </div>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>{fmt(produto.preco_venda)}</div>
 
+        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px 4px' }}>
         {grupos.map(g => {
           const conta = somaGrupo(g.id)
           const falta = !semObrigatorios && (g.min ?? 0) > 0 && conta < g.min
@@ -1277,18 +1284,25 @@ function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onCon
           )
         })}
 
-        {faltando.length > 0 && (
-          <div style={{ fontSize: 12.5, color: '#d97706', fontWeight: 700, marginBottom: 8 }}>
-            ⚠️ Falta escolher: {faltando.map(g => g.nome).join(', ')}
-          </div>
-        )}
+        </div>
 
-        <button type="button" onClick={() => onConfirmar(escolhas)} disabled={faltando.length > 0}
-          style={{ width: '100%', padding: '12px 0', borderRadius: 10, marginTop: 4,
-            border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 15, fontWeight: 800,
-            cursor: faltando.length > 0 ? 'default' : 'pointer', opacity: faltando.length > 0 ? .5 : 1 }}>
-          Adicionar · {fmt(precoFinal)}
-        </button>
+        <div style={{
+          flexShrink: 0, padding: '12px 18px calc(12px + env(safe-area-inset-bottom, 0px))',
+          borderTop: '1px solid var(--border)', background: 'var(--bg)',
+        }}>
+          {faltando.length > 0 && (
+            <div style={{ fontSize: 12.5, color: '#d97706', fontWeight: 700, marginBottom: 8 }}>
+              ⚠️ Falta escolher: {faltando.map(g => g.nome).join(', ')}
+            </div>
+          )}
+
+          <button type="button" onClick={() => onConfirmar(escolhas)} disabled={faltando.length > 0}
+            style={{ width: '100%', padding: '12px 0', borderRadius: 10,
+              border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 15, fontWeight: 800,
+              cursor: faltando.length > 0 ? 'default' : 'pointer', opacity: faltando.length > 0 ? .5 : 1 }}>
+            Adicionar · {fmt(precoFinal)}
+          </button>
+        </div>
       </div>
     </div>
   )

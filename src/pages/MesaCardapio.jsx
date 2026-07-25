@@ -423,12 +423,18 @@ function ModalCompMesa({ produto, grupos, semObrigatorios, onClose, onConfirm })
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 25, display: 'flex', alignItems: 'flex-end' }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: '100%', background: '#15102a', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, maxHeight: '85dvh', overflowY: 'auto', color: '#fff' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-          <strong style={{ fontSize: 17 }}>{produto.nome}</strong>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer' }}>×</button>
+      {/* Só a lista rola: com 9 grupos, o botão de adicionar ficava lá no fim e
+          o cliente tinha que descer tudo pra confirmar. */}
+      <div onClick={e => e.stopPropagation()} style={{ width: '100%', background: '#15102a', borderTopLeftRadius: 18, borderTopRightRadius: 18, maxHeight: '85dvh', display: 'flex', flexDirection: 'column', color: '#fff' }}>
+        <div style={{ padding: '18px 18px 12px', borderBottom: '1px solid #2c2350', flexShrink: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+            <strong style={{ fontSize: 17 }}>{produto.nome}</strong>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer' }}>×</button>
+          </div>
+          <p style={{ fontSize: 12.5, opacity: .7, margin: 0 }}>Monte do seu jeito 👇</p>
         </div>
-        <p style={{ fontSize: 12.5, opacity: .7, margin: '0 0 12px' }}>Monte do seu jeito 👇</p>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px 4px' }}>
         {grupos.map(g => {
           const conta = sel[g.id]?.length ?? 0
           const falta = !semObrigatorios && (g.min ?? 0) > 0 && conta < g.min
@@ -459,11 +465,18 @@ function ModalCompMesa({ produto, grupos, semObrigatorios, onClose, onConfirm })
             </div>
           )
         })}
-        <button onClick={() => pode && onConfirm(produto, selecionados, precoUnit)} disabled={!pode}
-          style={{ width: '100%', height: 52, borderRadius: 14, border: 'none', cursor: pode ? 'pointer' : 'not-allowed',
-            background: pode ? '#22c55e' : '#374151', color: '#fff', fontWeight: 800, fontSize: 15, marginTop: 6 }}>
-          {pode ? `Adicionar · ${fmt(precoUnit)}` : `Escolha: ${faltando.map(g => g.nome).join(', ')}`}
-        </button>
+        </div>
+
+        <div style={{
+          flexShrink: 0, padding: '12px 18px calc(12px + env(safe-area-inset-bottom, 0px))',
+          borderTop: '1px solid #2c2350', background: '#15102a',
+        }}>
+          <button onClick={() => pode && onConfirm(produto, selecionados, precoUnit)} disabled={!pode}
+            style={{ width: '100%', height: 52, borderRadius: 14, border: 'none', cursor: pode ? 'pointer' : 'not-allowed',
+              background: pode ? '#22c55e' : '#374151', color: '#fff', fontWeight: 800, fontSize: 15 }}>
+            {pode ? `Adicionar · ${fmt(precoUnit)}` : `Escolha: ${faltando.map(g => g.nome).join(', ')}`}
+          </button>
+        </div>
       </div>
     </div>
   )
