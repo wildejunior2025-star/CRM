@@ -313,6 +313,7 @@ export default function MesaCardapio() {
         <ModalCompMesa
           produto={montando}
           grupos={compMap[montando.produto_id]}
+          semObrigatorios={!!info?.sem_obrigatorios}
           onClose={() => setMontando(null)}
           onConfirm={addComplemento}
         />
@@ -388,7 +389,7 @@ const btnQ = {
 }
 
 // Modal "monte sua quentinha" — escolhe complementos por grupo (min/max)
-function ModalCompMesa({ produto, grupos, onClose, onConfirm }) {
+function ModalCompMesa({ produto, grupos, semObrigatorios, onClose, onConfirm }) {
   const [sel, setSel] = useState({}) // { grupoId: [opcaoId] }
   const base = Number(produto.preco_venda)
 
@@ -413,7 +414,11 @@ function ModalCompMesa({ produto, grupos, onClose, onConfirm }) {
     grupos,
     selecionados.map(c => ({ grupoId: c.grupoId, preco: c.preco_adicional })),
   )
-  const faltando = grupos.filter(g => (g.min ?? 0) > 0 && (sel[g.id]?.length ?? 0) < g.min)
+  // A loja pode liberar os obrigatórios no presencial (botão no Salão, mig 0121):
+  // aqui na mesa o atendimento é na hora, então o mínimo deixa de travar.
+  const faltando = semObrigatorios
+    ? []
+    : grupos.filter(g => (g.min ?? 0) > 0 && (sel[g.id]?.length ?? 0) < g.min)
   const pode = faltando.length === 0
 
   return (
@@ -426,13 +431,13 @@ function ModalCompMesa({ produto, grupos, onClose, onConfirm }) {
         <p style={{ fontSize: 12.5, opacity: .7, margin: '0 0 12px' }}>Monte do seu jeito 👇</p>
         {grupos.map(g => {
           const conta = sel[g.id]?.length ?? 0
-          const falta = (g.min ?? 0) > 0 && conta < g.min
+          const falta = !semObrigatorios && (g.min ?? 0) > 0 && conta < g.min
           return (
             <div key={g.id} style={{ marginBottom: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <strong style={{ fontSize: 14 }}>{g.nome}</strong>
                 <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: falta ? '#7f1d1d' : '#2c2350', color: falta ? '#fecaca' : '#a78bfa' }}>
-                  {g.max === 1 ? 'escolha 1' : `até ${g.max}`}{g.min > 0 ? ' · obrigatório' : ''}
+                  {g.max === 1 ? 'escolha 1' : `até ${g.max}`}{g.min > 0 && !semObrigatorios ? ' · obrigatório' : ''}
                 </span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

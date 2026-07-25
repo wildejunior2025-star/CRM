@@ -29,6 +29,11 @@ export default function PresencialSalao() {
 
   const [taxaPct, setTaxaPct] = useState(10)
   const [empresaNome, setEmpresaNome] = useState('')
+  // Presencial sem obrigatórios (mig 0121): no salão e no QR da mesa o atendente
+  // monta o prato junto com o cliente, então exigir os grupos só atrasa. Vale
+  // aqui e no cardápio da mesa — a Loja Online e a Nova venda seguem exigindo.
+  const [semObrigatorios, setSemObrigatorios] = useState(false)
+  const [salvandoObrig, setSalvandoObrig] = useState(false)
   const [mesas, setMesas]     = useState([])
   const [comandas, setComandas] = useState([])
   const [produtos, setProdutos] = useState([])
@@ -75,7 +80,7 @@ export default function PresencialSalao() {
   async function loadAll() {
     if (!empresaId) return
     const [emp, ms, cs, ps, gs, cat, cx, cg, cl] = await Promise.all([
-      supabase.from('empresas').select('taxa_servico_pct, nome').eq('id', empresaId).single(),
+      supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios').eq('id', empresaId).single(),
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('comandas').select('*, comanda_itens(*)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
       supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria').eq('empresa_id', empresaId).order('nome').limit(500),
@@ -92,7 +97,11 @@ export default function PresencialSalao() {
       // Clientes: usados só no fiado (quem fica devendo).
       supabase.from('clientes').select('id, nome, telefone').eq('empresa_id', empresaId).order('nome').limit(1000),
     ])
-    if (emp.data) { setTaxaPct(Number(emp.data.taxa_servico_pct ?? 10)); setEmpresaNome(emp.data.nome || '') }
+    if (emp.data) {
+      setTaxaPct(Number(emp.data.taxa_servico_pct ?? 10))
+      setEmpresaNome(emp.data.nome || '')
+      setSemObrigatorios(!!emp.data.presencial_sem_obrigatorios)
+    }
     setCaixaAberto(!!(cx.data && cx.data.length))
     setMesas(ms.data ?? [])
     setComandas(cs.data ?? [])
@@ -268,6 +277,23 @@ export default function PresencialSalao() {
       }
       return [...prev, novo]
     })
+  }
+
+  // Liga/desliga a exigência dos complementos no presencial. Atualiza a tela na
+  // hora e só depois grava — se o banco recusar, volta como estava.
+  async function alternarObrigatorios() {
+    if (!empresaId || salvandoObrig) return
+    const novo = !semObrigatorios
+    setSemObrigatorios(novo)
+    setSalvandoObrig(true)
+    const { error } = await supabase.from('empresas')
+      .update({ presencial_sem_obrigatorios: novo })
+      .eq('id', empresaId)
+    setSalvandoObrig(false)
+    if (error) {
+      setSemObrigatorios(!novo)
+      alert(`Não consegui salvar: ${error.message}`)
+    }
   }
 
   // Fecha o modal de complementos criando a linha montada.
@@ -593,6 +619,32 @@ export default function PresencialSalao() {
           <h1>Salão</h1>
           <p className="page-subtitle">Toque numa mesa para abrir/gerenciar a comanda.</p>
         </div>
+
+        {/* Só o ADM liga/desliga — muda como TODO garçom lança o pedido. */}
+        {ehAdmin && (
+          <button
+            type="button"
+            onClick={alternarObrigatorios}
+            disabled={salvandoObrig}
+            title="Vale no Salão e no cardápio do QR da mesa. A Loja Online e a Nova venda continuam exigindo."
+            style={{
+              alignSelf: 'flex-start', padding: '9px 14px', borderRadius: 10, cursor: salvandoObrig ? 'wait' : 'pointer',
+              border: `1.5px solid ${semObrigatorios ? '#f59e0b' : 'var(--border)'}`,
+              background: semObrigatorios ? 'rgba(245,158,11,.12)' : 'transparent',
+              color: semObrigatorios ? '#f59e0b' : 'var(--text-muted)',
+              fontSize: 13, fontWeight: 700, textAlign: 'left', lineHeight: 1.35,
+            }}
+          >
+            {semObrigatorios ? '🔓 Complementos livres' : '🔒 Complementos obrigatórios'}
+            <span style={{ display: 'block', fontSize: 11, fontWeight: 600, opacity: .85 }}>
+              {salvandoObrig
+                ? 'salvando...'
+                : semObrigatorios
+                  ? 'no salão e no QR dá pra lançar sem escolher'
+                  : 'no salão e no QR precisa escolher os grupos'}
+            </span>
+          </button>
+        )}
       </div>
 
       {!caixaAberto && (
@@ -938,6 +990,7 @@ export default function PresencialSalao() {
         <ModalComplementos
           produto={montando}
           grupos={compMap[montando.produto_id] ?? []}
+          semObrigatorios={semObrigatorios}
           onCancelar={() => setMontando(null)}
           onConfirmar={escolhas => addMontado(montando, escolhas)}
         />
@@ -1138,7 +1191,7 @@ const qtdBtn = {
 // Modal "montar o item": escolhe os complementos por grupo, com QUANTIDADE por opção
 // (a opção não some ao ser escolhida — dá pra somar no +). O `max` do grupo limita a
 // soma das quantidades daquele grupo; `min` obriga um mínimo antes de confirmar.
-function ModalComplementos({ produto, grupos, onCancelar, onConfirmar }) {
+function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onConfirmar }) {
   const [sel, setSel] = useState({}) // { grupoId: { opcaoId: qtd } }
 
   const somaDe = (mapa) => Object.values(mapa ?? {}).reduce((s, q) => s + q, 0)
@@ -1171,7 +1224,11 @@ function ModalComplementos({ produto, grupos, onCancelar, onConfirmar }) {
     escolhas.map(e => ({ grupoId: e.grupoId, preco: e.preco_adicional, qtd: e.qtd })),
   )
   const precoFinal = Number(produto.preco_venda) + adicional
-  const faltando = grupos.filter(g => (g.min ?? 0) > 0 && somaGrupo(g.id) < g.min)
+  // Com "complementos livres" ligado, o mínimo do grupo é ignorado: o garçom
+  // lança direto e monta o prato com o cliente. O máximo continua valendo.
+  const faltando = semObrigatorios
+    ? []
+    : grupos.filter(g => (g.min ?? 0) > 0 && somaGrupo(g.id) < g.min)
 
   return (
     <div onClick={onCancelar}
@@ -1187,14 +1244,14 @@ function ModalComplementos({ produto, grupos, onCancelar, onConfirmar }) {
 
         {grupos.map(g => {
           const conta = somaGrupo(g.id)
-          const falta = (g.min ?? 0) > 0 && conta < g.min
+          const falta = !semObrigatorios && (g.min ?? 0) > 0 && conta < g.min
           const cheio = g.max > 0 && conta >= g.max
           return (
             <div key={g.id} style={{ marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                 <span style={{ fontWeight: 700, fontSize: 14.5 }}>{g.nome}</span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: falta ? '#d97706' : 'var(--text-muted)' }}>
-                  {conta}/{g.max}{g.min > 0 ? ' · obrigatório' : ''}
+                  {conta}/{g.max}{g.min > 0 && !semObrigatorios ? ' · obrigatório' : ''}
                 </span>
               </div>
               {g.opcoes.map(o => {
