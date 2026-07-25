@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import '../components/Page.css'
 import './PedidosDelivery.css'
 import { imprimirCupom } from '../utils/imprimirCupom'
@@ -982,18 +982,38 @@ export default function PedidosDelivery() {
   const carregarPedidos = useCallback(async () => {
     if (!empresa) return
     setCarregando(true)
-    const { data } = await supabase
-      .from('pedidos_delivery')
-      .select('*')
-      .eq('empresa_id', empresa.id)
-      // PIX ainda não pago (aguardando_pagamento) NÃO aparece na loja — só entra
-      // quando o Mercado Pago confirmar (vira 'aguardando') ou some se expirar.
-      .neq('status', 'aguardando_pagamento')
-      .order('created_at', { ascending: false })
-      .limit(100)
-    setPedidos(data || [])
+
+    // Sem período escolhido: só os últimos 100, que é o dia a dia da loja e
+    // carrega rápido. COM período: busca no banco, senão o filtro de data
+    // peneiraria apenas esses 100 — numa loja de 60 pedidos/dia isso é ~2 dias,
+    // e escolher a semana passada mostrava "nada nesta data" com os pedidos lá.
+    const base = () => {
+      let q = supabase
+        .from('pedidos_delivery')
+        .select('*')
+        .eq('empresa_id', empresa.id)
+        // PIX ainda não pago (aguardando_pagamento) NÃO aparece na loja — só entra
+        // quando o Mercado Pago confirmar (vira 'aguardando') ou some se expirar.
+        .neq('status', 'aguardando_pagamento')
+        .order('created_at', { ascending: false })
+      // O input devolve 'aaaa-mm-dd' no fuso de quem está olhando; o banco guarda
+      // com fuso. Monta o dia inteiro local pra não perder o começo nem o fim.
+      if (dataInicio) q = q.gte('created_at', new Date(`${dataInicio}T00:00:00`).toISOString())
+      if (dataFim) q = q.lte('created_at', new Date(`${dataFim}T23:59:59.999`).toISOString())
+      return q
+    }
+
+    if (dataInicio || dataFim) {
+      // fetchAll pagina de 1000 em 1000 — sem ele o mês fecharia em 1000 e os
+      // totais sairiam menores que o real.
+      const { data } = await fetchAll(base)
+      setPedidos(data || [])
+    } else {
+      const { data } = await base().limit(100)
+      setPedidos(data || [])
+    }
     setCarregando(false)
-  }, [empresa])
+  }, [empresa, dataInicio, dataFim])
 
   useEffect(() => {
     if (!empresa) return
