@@ -532,7 +532,7 @@ export default function Dashboard() {
       <div className="card" style={{ marginTop: 24, padding: '18px 20px' }}>
         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>🤖 Avisos no WhatsApp</div>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-          Automático: <strong>resumo do dia às 22h</strong> e <strong>alerta de estoque às 8h</strong>. Quer testar agora?
+          Automático: <strong>resumo do dia às 22:10</strong> e <strong>alerta de estoque às 8h</strong>. Quer testar agora?
         </p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={enviarResumo} disabled={enviandoResumo} className="btn btn-primary">
