@@ -46,7 +46,13 @@ serve(async (req) => {
         const nomes: Record<string, string> = {}; for (const p of (prodRes.data ?? [])) nomes[p.id] = p.nome
 
         let fat = 0, fatMes = 0, n = 0
-        const canal: Record<string, number> = { "📱 App": 0, "💬 WhatsApp/Loja": 0, "🍽️ Presencial": 0, "🛒 Balcão": 0 }
+        // O iFood PRECISA ser um canal próprio. Antes ele caía no "else" e era
+        // somado ao Balcão: num dia real da Zebu o resumo disse "Canal campeão:
+        // Balcão R$ 1.013,55" quando o balcão tinha vendido R$ 152 e o iFood
+        // R$ 861. O dono lia o resumo e tirava a conclusão errada.
+        const canal: Record<string, number> = {
+          "📱 App": 0, "💬 WhatsApp/Loja": 0, "🍔 iFood": 0, "🍽️ Presencial": 0, "🛒 Balcão": 0,
+        }
         const vendaIdsHoje: string[] = []
         for (const v of vMes) {
           const val = Number(v.total); fatMes += val
@@ -63,6 +69,7 @@ serve(async (req) => {
             fat += val; n++
             if (p.origem === "app") canal["📱 App"] += val
             else if (p.origem === "whatsapp" || p.origem === "cardapio") canal["💬 WhatsApp/Loja"] += val
+            else if (p.origem === "ifood") canal["🍔 iFood"] += val
             else canal["🛒 Balcão"] += val
           }
         }
@@ -80,7 +87,7 @@ serve(async (req) => {
           }
         }
         const top = Object.entries(agg).sort((a, b) => b[1] - a[1])[0]
-        const canalTop = Object.entries(canal).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])[0]
+        const canaisAtivos = Object.entries(canal).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
         const ticket = n > 0 ? fat / n : 0
         const meta = Number(emp.meta_faturamento_mensal ?? 0)
         const metaPct = meta > 0 ? Math.min(100, Math.round((fatMes / meta) * 100)) : null
@@ -92,7 +99,12 @@ serve(async (req) => {
           msg += `💰 Faturamento: *${fmt(fat)}*\n`
           msg += `🧾 ${n} ${n === 1 ? "venda" : "vendas"} · 🎟️ Ticket ${fmt(ticket)}\n`
           if (top) msg += `🏆 Mais vendido: ${top[0]}\n`
-          if (canalTop) msg += `📊 Canal campeão: ${canalTop[0]} (${fmt(canalTop[1])})\n`
+          // Quebra por canal em vez de só o campeão: com um canal só, o dono não
+          // tem como saber de onde veio o resto do faturamento.
+          if (canaisAtivos.length) {
+            msg += `\n📊 Por canal:\n`
+            for (const [nome, val] of canaisAtivos) msg += `   ${nome}: ${fmt(val)}\n`
+          }
         }
         if (metaPct != null) msg += `🎯 Meta do mês: ${metaPct}% (${fmt(fatMes)} de ${fmt(meta)})\n`
         msg += `\n_FWC Inter_`
