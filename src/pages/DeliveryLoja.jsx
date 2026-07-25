@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
 import './DeliveryLoja.css'
 
 // Loja dentro da grade semanal de funcionamento AGORA? (horário de Brasília).
@@ -210,6 +211,10 @@ export default function DeliveryLoja() {
       let savedCart = {}
       try { savedCart = JSON.parse(localStorage.getItem(`sacola_${lojaData.id}`) || '{}') } catch { savedCart = {} }
 
+      // Tags de anúncio da loja (Google Ads / Pixel da Meta). Loja sem ID
+      // configurado não carrega script de terceiro nenhum.
+      iniciarTags(lojaData)
+
       setLoja(lojaData)
       setProdutos(produtosFinal)
       setCatOrdem(ordemMap)
@@ -232,6 +237,7 @@ export default function DeliveryLoja() {
   // Produto simples (sem complementos) — chave = id do produto
   function addOne(prod) {
     const key = String(prod.id)
+    adicionarAoCarrinho(prod, prod.preco)
     setCarrinho(prev => ({
       ...prev,
       [key]: {
@@ -241,11 +247,18 @@ export default function DeliveryLoja() {
     }))
   }
 
+  // Abrir a tela de complementos conta como "viu o produto" no funil da Meta
+  function abrirProduto(prod) {
+    verProduto(prod)
+    setOptProduto(prod)
+  }
+
   // Produto com complementos — chave = id + opções escolhidas (combos distintos = linhas distintas)
   function addCombo(prod, selecoes, precoUnit) {
     const key = selecoes.length
       ? `${prod.id}::${selecoes.map(s => s.opcaoId).sort().join('-')}`
       : String(prod.id)
+    adicionarAoCarrinho(prod, precoUnit)
     setCarrinho(prev => ({
       ...prev,
       [key]: {
@@ -551,7 +564,7 @@ export default function DeliveryLoja() {
                     produto={p}
                     quantidade={qtdProduto(p.id)}
                     lojaAberta={lojaAberta}
-                    onAdd={() => (p.complementos?.length ? setOptProduto(p) : addOne(p))}
+                    onAdd={() => (p.complementos?.length ? abrirProduto(p) : addOne(p))}
                     onRemove={() => removeOne(String(p.id))}
                   />
                 ))}
@@ -580,7 +593,7 @@ export default function DeliveryLoja() {
                       produto={p}
                       quantidade={qtdProduto(p.id)}
                       lojaAberta={lojaAberta}
-                      onAdd={() => (p.complementos?.length ? setOptProduto(p) : addOne(p))}
+                      onAdd={() => (p.complementos?.length ? abrirProduto(p) : addOne(p))}
                       onRemove={() => removeOne(String(p.id))}
                     />
                   ))}
@@ -598,7 +611,7 @@ export default function DeliveryLoja() {
                       produto={p}
                       quantidade={qtdProduto(p.id)}
                       lojaAberta={lojaAberta}
-                      onAdd={() => (p.complementos?.length ? setOptProduto(p) : addOne(p))}
+                      onAdd={() => (p.complementos?.length ? abrirProduto(p) : addOne(p))}
                       onRemove={() => removeOne(String(p.id))}
                     />
                   ))}

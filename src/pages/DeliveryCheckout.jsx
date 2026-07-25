@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { getEnderecoAtivo } from '../utils/enderecoPortal'
 import { registrarPedido } from '../lib/meusPedidos'
+import { iniciarCheckout } from '../lib/tracking'
 import 'leaflet/dist/leaflet.css'
 import './DeliveryCheckout.css'
 
@@ -474,6 +475,13 @@ export default function DeliveryCheckout() {
     }, 900)
     return () => clearTimeout(t)
   }, [form.rua, form.numero, form.bairro, form.cidade, form.estado, form.cep, tipo, state])
+
+  // Chegar no checkout já é sinal de intenção de compra (funil da Meta).
+  // As tags já foram carregadas na vitrine — aqui só dispara o evento.
+  useEffect(() => {
+    if (!state?.itens?.length) return
+    iniciarCheckout(state.itens, Number(state.subtotal ?? 0) + Number(state.taxaEntrega ?? 0))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!state?.itens?.length) {
     return <Navigate to="/lojas" replace />

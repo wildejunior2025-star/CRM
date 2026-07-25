@@ -47,6 +47,12 @@ export default function MinhaLoja({ secao = 'loja' }) {
   const [sucessoSenha, setSucessoSenha] = useState(false)
 
   // Integração iFood
+  // Tags de anúncio da loja (Google Ads / Pixel da Meta)
+  const [adsCfg, setAdsCfg] = useState({ google_ads_id: '', google_ads_label: '', meta_pixel_id: '' })
+  const [adsSalvando, setAdsSalvando] = useState(false)
+  const [adsMsg, setAdsMsg] = useState(null) // { tipo: 'ok'|'erro', texto }
+  const [adsAjuda, setAdsAjuda] = useState(null) // 'google' | 'meta' | null
+
   const [ifoodCfg, setIfoodCfg] = useState({
     client_id: '', client_secret: '', merchant_id: '', ambiente: 'producao', ativo: false,
     auto_criar_produtos: false,
@@ -155,6 +161,56 @@ export default function MinhaLoja({ secao = 'loja' }) {
     setFiscalMsg(error
       ? { tipo: 'erro', texto: error.message }
       : { tipo: 'ok', texto: 'Dados fiscais salvos.' })
+  }
+
+  async function handleSalvarAnuncios(e) {
+    e.preventDefault()
+    if (!empresa) return
+
+    // Tolerante com o que o cliente cola: o Google mostra o ID como "AW-123456789"
+    // e o rótulo às vezes vem colado ("AW-123/AbC-D_efG"). Aceita os dois jeitos.
+    let adsId = adsCfg.google_ads_id.trim()
+    let label = adsCfg.google_ads_label.trim()
+    if (adsId.includes('/')) {
+      const [pid, plabel] = adsId.split('/')
+      adsId = pid.trim()
+      if (!label) label = (plabel ?? '').trim()
+    }
+    if (adsId && !/^AW-\w+$/i.test(adsId)) {
+      setAdsMsg({ tipo: 'erro', texto: 'O ID do Google Ads começa com "AW-". Ex: AW-123456789' })
+      return
+    }
+    const pixelId = adsCfg.meta_pixel_id.trim()
+    if (pixelId && !/^\d{10,20}$/.test(pixelId)) {
+      setAdsMsg({ tipo: 'erro', texto: 'O ID do Pixel da Meta é só números (uns 15 dígitos).' })
+      return
+    }
+    if (adsId && !label) {
+      setAdsMsg({ tipo: 'erro', texto: 'Faltou o rótulo da conversão do Google Ads — sem ele o Google não registra a venda.' })
+      return
+    }
+
+    setAdsSalvando(true)
+    setAdsMsg(null)
+    const { error } = await supabase
+      .from('empresas')
+      .update({
+        google_ads_id: adsId || null,
+        google_ads_label: label || null,
+        meta_pixel_id: pixelId || null,
+      })
+      .eq('id', empresa.id)
+    setAdsSalvando(false)
+    if (error) { setAdsMsg({ tipo: 'erro', texto: error.message }); return }
+    setAdsCfg({ google_ads_id: adsId, google_ads_label: label, meta_pixel_id: pixelId })
+    await refreshProfile?.()
+    setAdsMsg({
+      tipo: 'ok',
+      texto: adsId || pixelId
+        ? 'Salvo! Faça um pedido de teste na sua loja online pra ver a conversão chegar.'
+        : 'Rastreamento desligado. Nenhum dado sai da sua loja.',
+    })
+    setTimeout(() => setAdsMsg(null), 6000)
   }
 
   async function handleSalvarIfood(e) {
@@ -303,6 +359,11 @@ export default function MinhaLoja({ secao = 'loja' }) {
     setChavePix(empresa.chave_pix ?? '')
     setPixNome(empresa.pix_nome ?? '')
     setPixCidade(empresa.pix_cidade ?? '')
+    setAdsCfg({
+      google_ads_id: empresa.google_ads_id ?? '',
+      google_ads_label: empresa.google_ads_label ?? '',
+      meta_pixel_id: empresa.meta_pixel_id ?? '',
+    })
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user?.email) setEmailLogin(user.email)
     })
@@ -842,6 +903,195 @@ export default function MinhaLoja({ secao = 'loja' }) {
 
       {secao === 'integracoes' && (
       <>
+      {/* Card de anúncios: Google Ads + Pixel da Meta */}
+      <form onSubmit={handleSalvarAnuncios} style={{ marginTop: 16 }}>
+        <div className="card" style={{ marginBottom: 16, borderTop: '3px solid #4285f4' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <span style={{
+              background: 'linear-gradient(90deg,#4285f4,#0866ff)', color: '#fff', borderRadius: 6,
+              padding: '3px 8px', fontSize: 12, fontWeight: 800, letterSpacing: '.02em',
+            }}>Anúncios</span>
+            <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Google Ads e Meta (Instagram/Facebook)</h2>
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
+            Anuncia sua loja online? Cole aqui os códigos da <strong>sua conta</strong> de anúncio.
+            A partir daí toda venda feita pela loja é avisada automaticamente ao Google e à Meta —
+            é assim que eles descobrem quais anúncios dão dinheiro e passam a mostrar pra mais gente
+            parecida com quem já comprou. <strong>Deixe em branco se você não anuncia.</strong>
+          </p>
+
+          {adsMsg && (
+            <div style={{
+              background: adsMsg.tipo === 'ok' ? 'var(--success-bg)' : 'var(--danger-bg)',
+              color: adsMsg.tipo === 'ok' ? 'var(--success)' : 'var(--danger)',
+              border: `1px solid ${adsMsg.tipo === 'ok' ? 'var(--success)' : 'var(--danger)'}`,
+              borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 14,
+            }}>
+              {adsMsg.texto}
+            </div>
+          )}
+
+          {/* Google Ads */}
+          <div style={{
+            border: '1px solid var(--border)', borderRadius: 10, padding: 14, marginBottom: 14,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              <strong style={{ fontSize: 14 }}>Google Ads</strong>
+              <button
+                type="button"
+                onClick={() => setAdsAjuda('google')}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  background: 'var(--primary-bg, #f5f0ff)', color: 'var(--primary)',
+                  border: '1px solid var(--primary)', borderRadius: 999,
+                  padding: '2px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                }}
+              >
+                ❓ Onde encontro?
+              </button>
+            </div>
+            <div className="form-grid">
+              <div className="form-field">
+                <label>ID de conversão</label>
+                <input
+                  type="text"
+                  value={adsCfg.google_ads_id}
+                  onChange={e => setAdsCfg(c => ({ ...c, google_ads_id: e.target.value }))}
+                  placeholder="AW-123456789"
+                />
+              </div>
+              <div className="form-field">
+                <label>Rótulo da conversão</label>
+                <input
+                  type="text"
+                  value={adsCfg.google_ads_label}
+                  onChange={e => setAdsCfg(c => ({ ...c, google_ads_label: e.target.value }))}
+                  placeholder="AbC-D_efG12345"
+                />
+              </div>
+            </div>
+            <small style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              Os dois aparecem juntos na tela de instalação da conversão no Google Ads.
+            </small>
+          </div>
+
+          {/* Meta */}
+          <div style={{
+            border: '1px solid var(--border)', borderRadius: 10, padding: 14, marginBottom: 16,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              <strong style={{ fontSize: 14 }}>Meta — Instagram e Facebook</strong>
+              <button
+                type="button"
+                onClick={() => setAdsAjuda('meta')}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  background: 'var(--primary-bg, #f5f0ff)', color: 'var(--primary)',
+                  border: '1px solid var(--primary)', borderRadius: 999,
+                  padding: '2px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                }}
+              >
+                ❓ Onde encontro?
+              </button>
+            </div>
+            <div className="form-grid">
+              <div className="form-field full">
+                <label>ID do Pixel</label>
+                <input
+                  type="text"
+                  value={adsCfg.meta_pixel_id}
+                  onChange={e => setAdsCfg(c => ({ ...c, meta_pixel_id: e.target.value }))}
+                  placeholder="1234567890123456"
+                />
+                <small style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Com o Pixel a Meta acompanha o caminho todo: quem entrou, quem colocou na sacola,
+                  quem foi pro checkout e quem comprou.
+                </small>
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            padding: '10px 14px', borderRadius: 10, marginBottom: 16, fontSize: 12.5,
+            background: 'var(--primary-bg, #f5f0ff)', border: '1px solid var(--border)',
+            color: 'var(--text-muted)', lineHeight: 1.5,
+          }}>
+            🔒 Cada loja usa a conta dela: o que acontece na sua loja só vai pra sua conta de anúncio.
+            Venda no PIX só é contada depois que o pagamento é confirmado, e pedido cancelado não conta.
+          </div>
+
+          <button type="submit" className="btn btn-primary" disabled={adsSalvando}>
+            {adsSalvando ? 'Salvando...' : 'Salvar códigos de anúncio'}
+          </button>
+        </div>
+      </form>
+
+      {/* Ajuda: onde achar os códigos */}
+      {adsAjuda && (
+        <div
+          onClick={() => setAdsAjuda(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 1000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="card"
+            style={{ maxWidth: 480, width: '100%', maxHeight: '85vh', overflowY: 'auto', margin: 0 }}
+          >
+            <h2 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 10 }}>
+              {adsAjuda === 'google' ? 'Pegando os códigos no Google Ads' : 'Pegando o ID do Pixel da Meta'}
+            </h2>
+
+            {adsAjuda === 'google' ? (
+              <ol style={{ margin: 0, paddingLeft: 20, fontSize: 14, lineHeight: 1.6, color: 'var(--text)' }}>
+                <li>Entre em <strong>ads.google.com</strong> com a conta que faz seus anúncios.</li>
+                <li>Menu <strong>“Metas”</strong> → <strong>“Conversões”</strong> → <strong>“Resumo”</strong>.</li>
+                <li>Clique em <strong>“Nova ação de conversão”</strong> → <strong>“Site”</strong>.</li>
+                <li>Digite o endereço da sua loja online e escolha <strong>configurar manualmente</strong>.</li>
+                <li>Categoria: <strong>“Compra”</strong>. Valor: marque <strong>“Usar valores diferentes”</strong> (o valor real de cada pedido é enviado pelo sistema).</li>
+                <li>Na tela de instalação, escolha <strong>“Instalar a tag manualmente”</strong>. Vão aparecer duas linhas:
+                  <br /><code style={{ fontSize: 12 }}>send_to: 'AW-123456789/AbC-D_efG12345'</code>
+                  <br />O que vem <strong>antes da barra</strong> é o ID, o que vem <strong>depois</strong> é o rótulo.
+                </li>
+                <li>Cole os dois aqui e salve. Pode colar tudo junto no campo do ID que o sistema separa sozinho.</li>
+              </ol>
+            ) : (
+              <ol style={{ margin: 0, paddingLeft: 20, fontSize: 14, lineHeight: 1.6, color: 'var(--text)' }}>
+                <li>Entre no <strong>Gerenciador de Anúncios</strong> em <strong>business.facebook.com</strong>.</li>
+                <li>Menu <strong>“Todas as ferramentas”</strong> → <strong>“Gerenciador de Eventos”</strong>.</li>
+                <li>Se ainda não tem, clique em <strong>“Conectar fontes de dados”</strong> → <strong>“Web”</strong> → <strong>“Pixel da Meta”</strong> e dê um nome (ex: nome da sua loja).</li>
+                <li>O <strong>ID do Pixel</strong> aparece embaixo do nome — é um número de uns 15 dígitos.</li>
+                <li>Copie e cole aqui. Não precisa instalar código nenhum no site: o sistema já faz isso.</li>
+              </ol>
+            )}
+
+            <div style={{
+              marginTop: 16, padding: '12px 14px', borderRadius: 10,
+              background: 'var(--primary-bg, #f5f0ff)', border: '1px solid var(--primary)',
+              fontSize: 13, color: 'var(--text)',
+            }}>
+              💬 <strong>Se embolar, a FWC faz pra você.</strong> Chame no WhatsApp{' '}
+              <a
+                href="https://wa.me/5584999281009?text=Ol%C3%A1%21%20Preciso%20de%20ajuda%20para%20configurar%20os%20an%C3%BAncios%20%28Google%20Ads%20%2F%20Meta%29%20na%20minha%20loja%20online."
+                target="_blank" rel="noopener noreferrer"
+                style={{ color: 'var(--primary)', fontWeight: 700 }}
+              >(84) 99928-1009</a>.
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setAdsAjuda(null)}
+              className="btn btn-primary"
+              style={{ width: '100%', marginTop: 16 }}
+            >
+              Entendi
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Card de integração com o iFood */}
       <form onSubmit={handleSalvarIfood} style={{ marginTop: 16 }}>
         <div className="card" style={{ marginBottom: 16, borderTop: '3px solid #ea1d2c' }}>

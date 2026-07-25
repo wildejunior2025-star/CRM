@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { iniciarTags, registrarCompra } from '../lib/tracking'
 import './DeliveryPedido.css'
 
 const STATUS_STEPS = [
@@ -253,11 +254,36 @@ export default function DeliveryPedido() {
     if (!pedido?.empresa_id) return
     supabase
       .from('empresas')
-      .select('id, nome, logo_url, slug')
+      .select('id, nome, logo_url, slug, google_ads_id, google_ads_label, meta_pixel_id')
       .eq('id', pedido.empresa_id)
       .maybeSingle()
-      .then(({ data }) => setLoja(data ?? null))
+      .then(({ data }) => {
+        setLoja(data ?? null)
+        // Quem abre o link do pedido direto (voltando do PIX, ou pelo histórico)
+        // não passou pela vitrine — carrega as tags aqui também.
+        iniciarTags(data)
+      })
   }, [pedido?.empresa_id])
+
+  // Conversão de compra pro Google Ads / Meta.
+  //
+  // Dispara aqui e não no checkout porque pedido no PIX só vale depois que o
+  // Mercado Pago confirma — senão a loja otimizaria o anúncio por pedido que
+  // nunca foi pago. Pedido cancelado não conta. `registrarCompra` trava por id
+  // do pedido, então recarregar a página não conta a venda duas vezes.
+  useEffect(() => {
+    if (!pedido || !loja) return
+    if (pedido.status === 'cancelado') return
+    const pixPago = pedido.pix_status === 'pago' || pedido.mp_payment_status === 'approved'
+    if (pedido.forma_pagamento === 'pix' && !pixPago) return
+    registrarCompra({
+      pedidoId: pedido.id,
+      valor: Number(pedido.total ?? 0),
+      itens: Array.isArray(pedido.itens) ? pedido.itens : [],
+      loja,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedido?.id, pedido?.status, pedido?.pix_status, pedido?.mp_payment_status, loja])
 
   async function handleCopiarPix() {
     if (!pedido?.pix_copia_cola) return
