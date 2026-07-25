@@ -45,6 +45,125 @@ function formatPhone(phone) {
   return `+${d}`
 }
 
+// Visualizador SOMENTE LEITURA das conversas do robô de uma loja.
+// Lista os clientes (por telefone, mais recente primeiro) e mostra a conversa
+// completa ao clicar. Não envia nem altera nada — só pra acompanhar a IA.
+function ConversasModal({ empresa, onClose }) {
+  const [threads, setThreads] = useState([])
+  const [loadingThreads, setLoadingThreads] = useState(true)
+  const [sel, setSel] = useState(null)
+  const [msgs, setMsgs] = useState([])
+  const [loadingMsgs, setLoadingMsgs] = useState(false)
+  const [busca, setBusca] = useState('')
+  const fimRef = useRef(null)
+
+  useEffect(() => {
+    let vivo = true
+    ;(async () => {
+      setLoadingThreads(true)
+      // Puxa as mensagens recentes e monta 1 thread por telefone (a 1ª = a última).
+      const { data } = await supabase.from('whatsapp_conversas')
+        .select('phone, role, content, created_at')
+        .eq('empresa_id', empresa.id)
+        .order('created_at', { ascending: false })
+        .limit(2000)
+      if (!vivo) return
+      const vistos = new Map()
+      for (const m of (data ?? [])) if (!vistos.has(m.phone)) vistos.set(m.phone, m)
+      setThreads([...vistos.values()])
+      setLoadingThreads(false)
+    })()
+    return () => { vivo = false }
+  }, [empresa.id])
+
+  useEffect(() => { fimRef.current?.scrollIntoView() }, [msgs])
+
+  async function abrir(phone) {
+    setSel(phone); setLoadingMsgs(true); setMsgs([])
+    const { data } = await supabase.from('whatsapp_conversas')
+      .select('role, content, created_at')
+      .eq('empresa_id', empresa.id).eq('phone', phone)
+      .order('created_at', { ascending: true })
+    setMsgs(data ?? []); setLoadingMsgs(false)
+  }
+
+  const bnum = busca.replace(/\D/g, '')
+  const lista = bnum ? threads.filter(t => t.phone.replace(/\D/g, '').includes(bnum)) : threads
+  const hora = d => new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 960, height: '86vh', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Cabeçalho */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
+          <strong style={{ flex: 1, fontSize: 15 }}>💬 Conversas do robô · {empresa.nome}</strong>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', background: '#f59e0b1a', padding: '3px 10px', borderRadius: 20 }}>somente leitura</span>
+          <button className="btn btn-secondary btn-sm" onClick={onClose} type="button">Fechar</button>
+        </div>
+
+        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+          {/* Lista de clientes */}
+          <div style={{ width: 280, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div style={{ padding: 10, borderBottom: '1px solid var(--border)' }}>
+              <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar telefone…"
+                style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }} />
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {loadingThreads ? (
+                <p style={{ padding: 16, color: 'var(--text-muted)', fontSize: 13 }}>Carregando…</p>
+              ) : lista.length === 0 ? (
+                <p style={{ padding: 16, color: 'var(--text-muted)', fontSize: 13 }}>Nenhuma conversa.</p>
+              ) : lista.map(t => (
+                <button key={t.phone} type="button" onClick={() => abrir(t.phone)}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', padding: '10px 12px', background: sel === t.phone ? 'var(--bg)' : 'transparent', color: 'var(--text)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{formatPhone(t.phone)}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {t.role === 'assistant' ? '🤖 ' : ''}{(t.content || '').replace(/\n/g, ' ').slice(0, 42)}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2 }}>{hora(t.created_at)}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)' }}>
+              {threads.length} cliente(s) recentes
+            </div>
+          </div>
+
+          {/* Conversa */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
+            {!sel ? (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                Escolha um cliente à esquerda pra ver a conversa.
+              </div>
+            ) : loadingMsgs ? (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Carregando…</div>
+            ) : (
+              <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {msgs.map((m, i) => {
+                  const bot = m.role === 'assistant'
+                  return (
+                    <div key={i} style={{ alignSelf: bot ? 'flex-end' : 'flex-start', maxWidth: '78%' }}>
+                      <div style={{
+                        padding: '8px 12px', borderRadius: 12, fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap',
+                        background: bot ? '#7c3aed1f' : 'var(--card)', border: '1px solid var(--border)',
+                        color: 'var(--text)',
+                      }}>{m.content}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2, textAlign: bot ? 'right' : 'left' }}>
+                        {bot ? '🤖 Robô' : '👤 Cliente'} · {hora(m.created_at)}
+                      </div>
+                    </div>
+                  )
+                })}
+                <div ref={fimRef} />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function SuperAdminWhatsApp() {
   const [promptPadrao, setPromptPadrao] = useState('')
   const [saving, setSaving] = useState(false)
@@ -70,6 +189,7 @@ export default function SuperAdminWhatsApp() {
 
   const [empresas, setEmpresas] = useState([])
   const [loading, setLoading] = useState(true)
+  const [verConversas, setVerConversas] = useState(null) // empresa cujas conversas estão abertas
 
   useEffect(() => {
     loadData()
@@ -340,7 +460,7 @@ export default function SuperAdminWhatsApp() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['EMPRESA', 'STATUS', 'VENCIMENTO', 'INSTÂNCIA', 'CONEXÃO WA', 'IA', 'CRÉDITOS'].map(h => (
+                  {['EMPRESA', 'STATUS', 'VENCIMENTO', 'INSTÂNCIA', 'CONEXÃO WA', 'IA', 'CRÉDITOS', 'CONVERSAS'].map(h => (
                     <th key={h} style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 600, fontSize: 12 }}>{h}</th>
                   ))}
                 </tr>
@@ -377,10 +497,15 @@ export default function SuperAdminWhatsApp() {
                           : <span style={{ background: '#64748b22', color: '#94a3b8', padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>Inativa</span>}
                       </td>
                       <td style={{ padding: '10px 12px', fontWeight: 700, color: creditColor }}>{creditos}</td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => setVerConversas(emp)}>
+                          💬 Ver
+                        </button>
+                      </td>
                     </tr>
                   )
                 })}
-                {empresas.length === 0 && <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Nenhuma empresa encontrada</td></tr>}
+                {empresas.length === 0 && <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Nenhuma empresa encontrada</td></tr>}
               </tbody>
             </table>
           </div>
@@ -409,6 +534,10 @@ export default function SuperAdminWhatsApp() {
           {saveMsg && <span style={{ color: saveMsg.startsWith('Erro') ? '#ef4444' : '#22c55e', fontSize: 14 }}>{saveMsg}</span>}
         </div>
       </div>
+
+      {verConversas && (
+        <ConversasModal empresa={verConversas} onClose={() => setVerConversas(null)} />
+      )}
     </div>
   )
 }
