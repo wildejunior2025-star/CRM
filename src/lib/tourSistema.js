@@ -50,7 +50,6 @@ export const SISTEMAS = {
       { chave: 'portal-dashboard', label: 'Dashboard' },
       {
         chave: 'portal-vendas', label: 'Vendas', children: [
-          { chave: 'portal-vendas-fisica', label: 'Vendas física' },
           { chave: 'portal-vendas-delivery', label: 'Vendas delivery' },
           { chave: 'portal-entregadores', label: 'Entregadores' },
         ],
