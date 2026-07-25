@@ -131,6 +131,49 @@ export default function CategoriasComplemento() {
     setCats(prev => prev.map(c => c.id === cat.id ? { ...c, disponivel: novo } : c))
     await supabase.from('complemento_grupos').update({ disponivel: novo }).eq('id', cat.id)
   }
+  // Copia a categoria com todas as opções (nome, preço, ordem e pausadas).
+  // NÃO copia os produtos em que ela é usada: a cópia nasce solta, pra você
+  // ajustar antes de pendurar. Se copiasse, o produto ficaria com dois grupos
+  // iguais e o cliente teria que escolher duas vezes.
+  async function duplicarCategoria(cat) {
+    setBusy(cat.id)
+    setError(null)
+    const { data: nova, error: erroGrupo } = await supabase.from('complemento_grupos')
+      .insert({
+        empresa_id: empresaId,
+        produto_id: null,
+        nome: `${cat.nome} (cópia)`,
+        min: cat.min,
+        max: cat.max,
+        disponivel: cat.disponivel,
+        regra_preco: cat.regra_preco,
+      })
+      .select('id')
+      .single()
+    if (erroGrupo) { setBusy(null); setError(erroGrupo.message); return }
+
+    if (cat.opcoes.length) {
+      const { error: erroOpcoes } = await supabase.from('complemento_opcoes').insert(
+        cat.opcoes.map(o => ({
+          grupo_id: nova.id,
+          nome: o.nome,
+          preco_adicional: o.preco_adicional,
+          ordem: o.ordem,
+          disponivel: o.disponivel,
+        }))
+      )
+      if (erroOpcoes) {
+        // Não deixa grupo pela metade: desfaz a cópia e avisa.
+        await supabase.from('complemento_grupos').delete().eq('id', nova.id)
+        setBusy(null)
+        setError(`Não consegui copiar as opções: ${erroOpcoes.message}`)
+        return
+      }
+    }
+    setBusy(null)
+    load()
+  }
+
   async function excluirCategoria(cat) {
     const usados = cat.links.length
     const onde = usados ? `\n\nEla está em ${usados} produto(s) e vai sumir de TODOS.` : ''
@@ -309,6 +352,14 @@ export default function CategoriasComplemento() {
                 </span>
               </div>
               <div className="cc-head-actions">
+                <button
+                  className="btn btn-secondary btn-sm"
+                  disabled={busy === cat.id}
+                  title="Cria uma cópia desta categoria com todas as opções (sem vincular a produtos)"
+                  onClick={() => duplicarCategoria(cat)}
+                >
+                  {busy === cat.id ? '⏳ Copiando...' : '⧉ Duplicar'}
+                </button>
                 <button className="btn btn-secondary btn-sm" onClick={() => pausarCategoria(cat)}>
                   {cat.disponivel ? '⏸ Pausar' : '▶ Reativar'}
                 </button>
