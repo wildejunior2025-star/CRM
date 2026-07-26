@@ -139,12 +139,16 @@ export default function Dashboard() {
 
   async function enviarResumo() {
     setEnviandoResumo(true); setResumoMsg(null)
-    const { data, error } = await supabase.functions.invoke('resumo-diario', { body: { empresa_id: empresaId } })
+    // forcar: o envio automático das 22h pula dia sem venda, mas quem clicou no
+    // botão quer receber de qualquer jeito.
+    const { data, error } = await supabase.functions.invoke('resumo-diario', { body: { empresa_id: empresaId, forcar: true } })
     setEnviandoResumo(false)
     if (error || !data?.ok) { setResumoMsg({ tipo: 'erro', txt: 'Erro ao enviar: ' + (error?.message ?? data?.error ?? 'falhou') }); return }
-    setResumoMsg(data.enviadas > 0
-      ? { tipo: 'ok', txt: 'Resumo enviado no seu WhatsApp! 📲' }
-      : { tipo: 'aviso', txt: 'Não enviou — confira o telefone de contato da loja em Minha Loja.' })
+    if (data.enviadas > 0) { setResumoMsg({ tipo: 'ok', txt: 'Resumo enviado no seu WhatsApp! 📲' }); return }
+    setResumoMsg({
+      tipo: data.erro ? 'erro' : 'aviso',
+      txt: data.erro ?? 'Não enviou — confira o telefone de contato da loja em Minha Loja.',
+    })
   }
   async function enviarAlerta() {
     setEnviandoResumo(true); setResumoMsg(null)

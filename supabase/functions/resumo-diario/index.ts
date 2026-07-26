@@ -25,20 +25,33 @@ serve(async (req) => {
     // telefone: destino alternativo (teste) — manda o resumo da loja pra outro
     // número sem mexer no telefone_contato cadastrado.
     let telefoneTeste: string | null = null
+    // data: "AAAA-MM-DD" pra reenviar o resumo de um dia passado.
+    let dataAlvo: string | null = null
+    // forcar: manda mesmo sem venda nenhuma (botão "Receber agora" da Dashboard,
+    // pra quem clicou não ficar achando que quebrou).
+    let forcar = false
     try {
       const body = await req.json()
       empresaId = body?.empresa_id ?? null
       telefoneTeste = body?.telefone ?? null
+      dataAlvo = body?.data ?? null
+      forcar = body?.forcar === true
     } catch { empresaId = null }
 
     const { data: cfg } = await sb.from("config_global").select("valor").eq("chave", "admin_sender_instance").maybeSingle()
     const INSTANCE = (cfg?.valor ?? "").trim() || FALLBACK_INSTANCE
 
-    // Janela de "hoje" e "mês" em horário de Brasília
+    // Janela do dia e do mês em horário de Brasília
     const nowUtc = new Date()
     const brt = new Date(nowUtc.getTime() - OFFSET * 3600 * 1000)
-    const y = brt.getUTCFullYear(), mo = brt.getUTCMonth(), d = brt.getUTCDate()
+    const alvo = (dataAlvo ?? "").match(/^\d{4}-\d{2}-\d{2}$/) ? dataAlvo!.split("-").map(Number) : null
+    const hoje = !alvo
+    const y = alvo ? alvo[0] : brt.getUTCFullYear()
+    const mo = alvo ? alvo[1] - 1 : brt.getUTCMonth()
+    const d = alvo ? alvo[2] : brt.getUTCDate()
     const dayStart = new Date(Date.UTC(y, mo, d) + OFFSET * 3600 * 1000).toISOString()
+    // Fim do dia: sem ele, um resumo de ontem pegaria as vendas de hoje junto.
+    const dayEnd = new Date(Date.UTC(y, mo, d + 1) + OFFSET * 3600 * 1000).toISOString()
     const monthStart = new Date(Date.UTC(y, mo, 1) + OFFSET * 3600 * 1000).toISOString()
     const dataBR = `${String(d).padStart(2, "0")}/${String(mo + 1).padStart(2, "0")}`
 
@@ -47,14 +60,14 @@ serve(async (req) => {
     if (empresaId) q = q.eq("id", empresaId)
     const { data: empresas } = await q
 
-    let enviadas = 0, falhas = 0, erro: string | null = null
+    let enviadas = 0, falhas = 0, puladas = 0, erro: string | null = null
     for (const emp of (empresas ?? [])) {
       const fone = ((telefoneTeste && empresaId) ? telefoneTeste : (emp.telefone_contato ?? "")).replace(/\D/g, "")
       if (fone.length < 10) continue
       try {
         const [vMesRes, pMesRes, prodRes] = await Promise.all([
-          sb.from("vendas").select("id, total, observacoes, created_at").eq("empresa_id", emp.id).neq("status", "cancelado").gte("created_at", monthStart),
-          sb.from("pedidos_delivery").select("total, origem, status, itens, created_at").eq("empresa_id", emp.id).gte("created_at", monthStart),
+          sb.from("vendas").select("id, total, observacoes, created_at").eq("empresa_id", emp.id).neq("status", "cancelado").gte("created_at", monthStart).lt("created_at", dayEnd),
+          sb.from("pedidos_delivery").select("total, origem, status, itens, created_at").eq("empresa_id", emp.id).gte("created_at", monthStart).lt("created_at", dayEnd),
           sb.from("produtos").select("id, nome").eq("empresa_id", emp.id),
         ])
         const vMes = vMesRes.data ?? [], pMes = pMesRes.data ?? []
@@ -107,9 +120,13 @@ serve(async (req) => {
         const meta = Number(emp.meta_faturamento_mensal ?? 0)
         const metaPct = meta > 0 ? Math.min(100, Math.round((fatMes / meta) * 100)) : null
 
-        let msg = `🏪 *${emp.nome}* — Resumo de hoje (${dataBR})\n\n`
+        // Dia sem venda nenhuma (loja fechada, folga): não enche o WhatsApp do
+        // dono com "nenhuma venda hoje". Só manda se ele pediu na mão.
+        if (n === 0 && !forcar) { puladas++; continue }
+
+        let msg = `🏪 *${emp.nome}* — Resumo ${hoje ? "de hoje" : "do dia"} (${dataBR})\n\n`
         if (n === 0) {
-          msg += "Nenhuma venda registrada hoje ainda. 💤\n"
+          msg += `Nenhuma venda registrada ${hoje ? "hoje ainda" : "nesse dia"}. 💤\n`
         } else {
           msg += `💰 Faturamento: *${fmt(fat)}*\n`
           msg += `🧾 ${n} ${n === 1 ? "venda" : "vendas"} · 🎟️ Ticket ${fmt(ticket)}\n`
@@ -138,7 +155,7 @@ serve(async (req) => {
         }
       } catch (e) { falhas++; erro = erro ?? String(e); console.error("erro empresa", emp.id, String(e)) }
     }
-    return json({ ok: true, enviadas, falhas, erro, instancia: INSTANCE })
+    return json({ ok: true, enviadas, puladas, falhas, erro, instancia: INSTANCE })
   } catch (e) {
     return json({ ok: false, error: String(e) }, 500)
   }
