@@ -36,6 +36,14 @@ const fmt = (v) => 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',')
 export const estaConectada = () => !!(_car && _device?.gatt?.connected)
 export const nomeImpressora = () => _device?.name || null
 
+// Bandeira lida pelo main.jsx: enquanto a impressora estiver ligada, o app NÃO
+// se atualiza sozinho. Recarregar a página mata a conexão BLE e reparear exige
+// um toque do dono — no meio do movimento a loja ficava sem imprimir sem saber
+// por quê (era isso que derrubava a impressora a cada deploy).
+function marcarEstado() {
+  try { window.__fwcBtConectada = estaConectada() } catch { /* ok */ }
+}
+
 async function acharCaracteristica(server) {
   const servicos = await server.getPrimaryServices()
   for (const s of servicos) {
@@ -51,9 +59,10 @@ export async function conectarImpressoraCelular() {
   if (!suporta()) throw new Error('Este navegador não tem Bluetooth. Abra pelo Chrome no Android (não pelo app).')
   _device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: SERVICOS })
   try { localStorage.setItem(LS_DEV, _device.id) } catch { /* ok */ }
-  _device.addEventListener('gattserverdisconnected', () => { _car = null })
+  _device.addEventListener('gattserverdisconnected', () => { _car = null; marcarEstado() })
   const server = await _device.gatt.connect()
   _car = await acharCaracteristica(server)
+  marcarEstado()
   if (!_car) throw new Error('Conectei, mas não achei o canal de impressão — pode ser Bluetooth "Classic". Nesse caso use o RawBT.')
   return true
 }
@@ -70,6 +79,7 @@ export async function reconectarSilencioso() {
     if (_device?.gatt) {
       const server = await _device.gatt.connect()
       _car = await acharCaracteristica(server)
+      marcarEstado()
       if (estaConectada()) return true
     }
     if (!navigator.bluetooth.getDevices) return false
@@ -79,11 +89,12 @@ export async function reconectarSilencioso() {
     const dev = salvos.find(d => d.id === alvoId) || salvos[0]
     if (!dev) return false
     _device = dev
-    _device.addEventListener('gattserverdisconnected', () => { _car = null })
+    _device.addEventListener('gattserverdisconnected', () => { _car = null; marcarEstado() })
     const server = await _device.gatt.connect()
     _car = await acharCaracteristica(server)
+    marcarEstado()
     return estaConectada()
-  } catch { return false }
+  } catch { marcarEstado(); return false }
 }
 
 async function garantirConectado() {

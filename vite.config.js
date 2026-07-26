@@ -8,7 +8,11 @@ export default defineConfig({
     react(),
     cloudflare(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt' e não 'autoUpdate': o service worker novo FICA ESPERANDO em vez
+      // de assumir na hora. Quem decide é o main.jsx — que aplica na hora pra
+      // todo mundo, menos quando a impressora Bluetooth do celular está ligada
+      // (aí o reload mataria a conexão no meio do movimento).
+      registerType: 'prompt',
       injectRegister: null, // registramos manualmente em main.jsx (com checagem periódica)
       devOptions: { enabled: false },
       includeAssets: ['favicon.png', 'apple-touch-icon.png', 'pwa-192.png', 'pwa-512.png'],
@@ -53,7 +57,7 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         navigateFallback: 'index.html',
-        skipWaiting: true,
+        // Sem skipWaiting: é o main.jsx que manda o SKIP_WAITING na hora certa.
         clientsClaim: true,
         cleanupOutdatedCaches: true,
         runtimeCaching: [
