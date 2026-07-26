@@ -37,12 +37,9 @@
 
   .re-coluna { flex: 1 1 0; }
 
-  /* Mapa acompanha a rolagem: dá pra conferir o raio enquanto mexe nas faixas */
-  .re-coluna > .re-map-wrapper {
-    position: sticky;
-    top: 16px;
-    height: 420px;
-  }
+  /* Nada de sticky aqui: com endereço e raio embaixo, o mapa fixo passava por
+     cima dos cards ao rolar. */
+  .re-coluna > .re-map-wrapper { height: 400px; }
 }
 
 /* ── Cabeçalho ── */
@@ -248,6 +245,12 @@
   gap: 16px;
 }
 
+/* Sem isso a linha divisória do segundo toggle encosta no texto do primeiro */
+.re-toggle-row + .re-toggle-row {
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
 .re-toggle-label {
   font-size: 15px;
   font-weight: 600;
@@ -371,10 +374,14 @@
 }
 
 /* Cabeçalho e linhas compartilham o mesmo grid */
+/* minmax(0, 1fr) e não 1fr: com 1fr a coluna nunca fica menor que o tamanho
+   natural do input number (uns 180px), então numa coluna estreita a linha
+   inteira vazava pra fora do card — o campo de tempo e o × ficavam por cima
+   da borda. */
 .re-faixas-header,
 .re-faixas-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 36px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 36px;
   gap: 8px;
   align-items: center;
 }
@@ -394,6 +401,9 @@
 
 .re-faixas-row input {
   text-align: center;
+  min-width: 0;   /* deixa o input encolher junto com a coluna */
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .re-faixas-remove {
@@ -491,6 +501,18 @@
   border-top: 1px solid var(--border);
   margin-top: 20px;
   padding-top: 20px;
+}
+
+/* Mesmo motivo das faixas: numa coluna estreita, 1fr não encolhe abaixo do
+   tamanho natural do input e o campo vaza pra fora do card. */
+.re-delivery-body .form-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.re-delivery-body .form-field input,
+.re-delivery-body .form-field select {
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 /* ══════════════════════════════════════════

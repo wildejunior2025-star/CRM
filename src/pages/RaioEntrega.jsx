@@ -555,10 +555,8 @@ export default function RaioEntrega() {
           </button>
         </div>
 
-        </div>{/* fim da coluna esquerda */}
-        <div className="re-coluna">
-
         {/* ── Raio de entrega ── */}
+        {/* Fica junto do mapa: mexeu no raio, vê o círculo mudar na hora. */}
         <div className="card">
           <h2 className="re-card-title">Raio de entrega</h2>
 
@@ -588,6 +586,9 @@ export default function RaioEntrega() {
             Clientes a mais de <strong>{raio} km</strong> não veem sua loja no app e não conseguem pedir entrega.
           </p>
         </div>
+
+        </div>{/* fim da coluna esquerda */}
+        <div className="re-coluna">
 
         {/* ── Configurações de Delivery ── */}
         <div className="card">
