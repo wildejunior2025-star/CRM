@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 
 function ItemSearch({ items, value, onChange, placeholder = 'Buscar...' }) {
@@ -53,6 +54,12 @@ const MOTIVOS_PADRAO = {
 }
 
 export default function Estoque() {
+  const { profile } = useAuth()
+  const empresaId = profile?.empresa_id
+  // Loja que não conta estoque (restaurante, lanchonete): desligado, nenhum
+  // movimento é gravado (trigger da migration 0126) e a tela some daqui.
+  const [usaEstoque, setUsaEstoque] = useState(true)
+  const [salvandoUso, setSalvandoUso] = useState(false)
   const [saldo, setSaldo] = useState([])
   const [produtos, setProdutos] = useState([])
   const [clientes, setClientes] = useState([])
@@ -111,6 +118,24 @@ export default function Estoque() {
     await loadMotivos()
   }
 
+  async function carregarUsoEstoque() {
+    if (!empresaId) return
+    const { data } = await supabase.from('empresas').select('estoque_ativo').eq('id', empresaId).single()
+    if (data) setUsaEstoque(data.estoque_ativo ?? true)
+  }
+
+  async function alternarUsoEstoque() {
+    if (!empresaId || salvandoUso) return
+    const novo = !usaEstoque
+    setSalvandoUso(true)
+    const { error: err } = await supabase.from('empresas').update({ estoque_ativo: novo }).eq('id', empresaId)
+    setSalvandoUso(false)
+    if (err) { setError(err.message); return }
+    setUsaEstoque(novo)
+    setError(null)
+    if (novo) loadAll()
+  }
+
   async function loadAll() {
     setLoading(true)
     setError(null)
@@ -142,6 +167,8 @@ export default function Estoque() {
     loadAll()
     loadMotivos()
   }, [])
+
+  useEffect(() => { carregarUsoEstoque() }, [empresaId])
 
   function openMovModal() {
     setMovForm({
@@ -235,21 +262,51 @@ export default function Estoque() {
     <div>
       <div className="page-header">
         <h1>Estoque</h1>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-secondary" onClick={() => setShowMotivosModal(true)}>
-            Motivos
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            className={`btn ${usaEstoque ? 'btn-secondary' : 'btn-primary'}`}
+            onClick={alternarUsoEstoque}
+            disabled={salvandoUso}
+            title={usaEstoque
+              ? 'Desligar o controle de estoque desta loja'
+              : 'Voltar a controlar estoque nesta loja'}
+          >
+            {salvandoUso ? 'Salvando...' : usaEstoque ? '🚫 Não trabalho com estoque' : '📦 Voltar a usar estoque'}
           </button>
-          <button className="btn btn-secondary" onClick={openCascoModal}>
-            + Movimento de casco
-          </button>
-          <button className="btn btn-primary" onClick={openMovModal}>
-            + Movimento de estoque
-          </button>
+          {usaEstoque && (
+            <>
+              <button className="btn btn-secondary" onClick={() => setShowMotivosModal(true)}>
+                Motivos
+              </button>
+              <button className="btn btn-secondary" onClick={openCascoModal}>
+                + Movimento de casco
+              </button>
+              <button className="btn btn-primary" onClick={openMovModal}>
+                + Movimento de estoque
+              </button>
+            </>
+          )}
         </div>
       </div>
 
       {error && <p className="error-text">{error}</p>}
 
+      {/* Loja sem estoque: nada de tabela zerada e "estoque baixo" em tudo. */}
+      {!usaEstoque && (
+        <div className="card" style={{ padding: 24, textAlign: 'center' }}>
+          <div style={{ fontSize: 34, marginBottom: 8 }}>🚫📦</div>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6 }}>
+            Esta loja não trabalha com estoque
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13.5, margin: '0 auto', maxWidth: 460 }}>
+            As vendas não descontam mais nada e você não recebe alerta de estoque baixo.
+            Os produtos continuam normais no cardápio e no gestor — só o controle de quantidade
+            fica desligado. É só clicar em <strong>Voltar a usar estoque</strong> pra ligar de novo.
+          </p>
+        </div>
+      )}
+
+      {usaEstoque && (<>
       <h2 style={{ fontSize: 16, marginBottom: 8 }}>Saldo por produto</h2>
       <div className="data-table" style={{ marginBottom: 24 }}>
         {loading ? (
@@ -269,7 +326,9 @@ export default function Estoque() {
             </thead>
             <tbody>
               {saldo.map((s) => {
-                const baixo = Number(s.quantidade_atual) <= Number(s.estoque_minimo)
+                // Sem mínimo definido não existe "baixo": era por isso que a
+                // tela pintava TODA linha de vermelho quando mínimo era 0.
+                const baixo = Number(s.estoque_minimo) > 0 && Number(s.quantidade_atual) <= Number(s.estoque_minimo)
                 return (
                   <tr key={s.produto_id}>
                     <td>{s.nome}</td>
@@ -328,6 +387,7 @@ export default function Estoque() {
           </table>
         )}
       </div>
+      </>)}
 
       {showMovModal && (
         <div className="modal-overlay" onClick={() => setShowMovModal(false)}>

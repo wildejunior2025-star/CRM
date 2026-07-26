@@ -129,6 +129,7 @@ export default function Dashboard() {
   const [op, setOp] = useState({ clientesAtivos: 0, estoqueBaixo: 0, cascosPendentes: 0, fiado: 0 })
   const [meta, setMeta] = useState(0)
   const [ifoodRates, setIfoodRates] = useState({})
+  const [usaEstoque, setUsaEstoque] = useState(true) // loja pode desligar em Estoque
   const [entExp, setEntExp] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refToken, setRefToken] = useState(null)
@@ -183,7 +184,7 @@ export default function Dashboard() {
         supabase.from('estoque_saldo').select('*'),
         supabase.from('casco_saldo').select('*'),
         supabase.from('clientes_saldo_fiado').select('saldo_fiado'),
-        empresaId ? supabase.from('empresas').select('meta_faturamento_mensal, ifood_comissao_pct, ifood_transacao_pct').eq('id', empresaId).single() : Promise.resolve({ data: null }),
+        empresaId ? supabase.from('empresas').select('meta_faturamento_mensal, ifood_comissao_pct, ifood_transacao_pct, estoque_ativo').eq('id', empresaId).single() : Promise.resolve({ data: null }),
       ])
       setVendas(vData ?? [])
       setPedidos(pData ?? [])
@@ -193,12 +194,15 @@ export default function Dashboard() {
       setUltimas(ulRes.data ?? [])
       setOp({
         clientesAtivos: caRes.count ?? 0,
-        estoqueBaixo: (saRes.data ?? []).filter(s => Number(s.quantidade_atual) <= Number(s.estoque_minimo)).length,
+        // Sem mínimo definido não é "baixo" — senão a loja que nunca mexeu no
+        // estoque via TODOS os produtos como alerta.
+        estoqueBaixo: (saRes.data ?? []).filter(s => Number(s.estoque_minimo) > 0 && Number(s.quantidade_atual) <= Number(s.estoque_minimo)).length,
         cascosPendentes: (csRes.data ?? []).filter(c => Number(c.saldo_cascos) > 0).length,
         fiado: (fiRes.data ?? []).reduce((s, f) => s + Number(f.saldo_fiado), 0),
       })
       setMeta(Number(empRes.data?.meta_faturamento_mensal ?? 0))
       setIfoodRates({ comissao: empRes.data?.ifood_comissao_pct, transacao: empRes.data?.ifood_transacao_pct })
+      setUsaEstoque(empRes.data?.estoque_ativo ?? true)
       setLoading(false)
     }
     if (empresaId !== undefined) load()
@@ -513,7 +517,7 @@ export default function Dashboard() {
               <strong style={{ fontSize: 15, display: 'block', marginBottom: 12 }}>📦 Operação</strong>
               <Op label="Fiado em aberto" to="/financeiro" value={fmt(op.fiado)} />
               <Op label="Clientes ativos" to="/clientes" value={op.clientesAtivos} />
-              <Op label="Estoque baixo" to="/estoque" value={op.estoqueBaixo} alerta={op.estoqueBaixo > 0} />
+              {usaEstoque && <Op label="Estoque baixo" to="/estoque" value={op.estoqueBaixo} alerta={op.estoqueBaixo > 0} />}
               <Op label="Cascos pendentes" to="/estoque" value={op.cascosPendentes} ultimo />
             </div>
             <div style={cardBox}>
@@ -536,15 +540,18 @@ export default function Dashboard() {
       <div className="card" style={{ marginTop: 24, padding: '18px 20px' }}>
         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>🤖 Avisos no WhatsApp</div>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-          Automático: <strong>resumo do dia às 22:10</strong> e <strong>alerta de estoque às 8h</strong>. Quer testar agora?
+          Automático: <strong>resumo do dia às 22:10</strong>
+          {usaEstoque && <> e <strong>alerta de estoque às 8h</strong></>}. Quer testar agora?
         </p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={enviarResumo} disabled={enviandoResumo} className="btn btn-primary">
             {enviandoResumo ? 'Enviando...' : '📲 Resumo do dia'}
           </button>
-          <button onClick={enviarAlerta} disabled={enviandoResumo} className="btn btn-secondary">
-            {enviandoResumo ? 'Enviando...' : '📦 Alerta de estoque'}
-          </button>
+          {usaEstoque && (
+            <button onClick={enviarAlerta} disabled={enviandoResumo} className="btn btn-secondary">
+              {enviandoResumo ? 'Enviando...' : '📦 Alerta de estoque'}
+            </button>
+          )}
         </div>
         {resumoMsg && (
           <div style={{ marginTop: 10, fontSize: 13, color: resumoMsg.tipo === 'ok' ? 'var(--success)' : resumoMsg.tipo === 'aviso' ? '#f59e0b' : 'var(--danger)' }}>

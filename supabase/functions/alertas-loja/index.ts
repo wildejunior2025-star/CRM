@@ -21,7 +21,10 @@ serve(async (req) => {
     const { data: cfg } = await sb.from("config_global").select("valor").eq("chave", "admin_sender_instance").maybeSingle()
     const INSTANCE = (cfg?.valor ?? "").trim() || FALLBACK_INSTANCE
 
-    let q = sb.from("empresas").select("id, nome, telefone_contato").in("status", ["ativo", "trial", "atrasado"])
+    // estoque_ativo = false: a loja disse que não trabalha com estoque, então
+    // alerta de estoque baixo pra ela é só barulho.
+    let q = sb.from("empresas").select("id, nome, telefone_contato, estoque_ativo")
+      .in("status", ["ativo", "trial", "atrasado"]).neq("estoque_ativo", false)
     if (empresaId) q = q.eq("id", empresaId)
     const { data: empresas } = await q
 
