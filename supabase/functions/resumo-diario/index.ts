@@ -14,6 +14,21 @@ const OFFSET = 3            // BRT = UTC-3
 const fmt = (v: number) => "R$ " + Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })
 const validPed = (s: string) => !["cancelado", "aguardando_pagamento"].includes(s)
 
+// O Supabase devolve no máximo 1000 linhas por consulta. A Zebu fez 1593
+// pedidos em julho: como as 1000 primeiras são as do começo do mês, o dia mais
+// recente vinha cortado — o resumo de 25/07 disse 16 pedidos quando foram 73,
+// e a meta do mês aparecia menor que a real. Sempre paginar.
+const PAGINA = 1000
+async function todos<T>(query: (de: number, ate: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[]> {
+  const saida: T[] = []
+  for (let de = 0; ; de += PAGINA) {
+    const { data, error } = await query(de, de + PAGINA - 1)
+    if (error) throw error
+    saida.push(...(data ?? []))
+    if (!data || data.length < PAGINA) return saida
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
   const json = (d: unknown, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { ...cors, "Content-Type": "application/json" } })
@@ -65,13 +80,16 @@ serve(async (req) => {
       const fone = ((telefoneTeste && empresaId) ? telefoneTeste : (emp.telefone_contato ?? "")).replace(/\D/g, "")
       if (fone.length < 10) continue
       try {
-        const [vMesRes, pMesRes, prodRes] = await Promise.all([
-          sb.from("vendas").select("id, total, observacoes, created_at").eq("empresa_id", emp.id).neq("status", "cancelado").gte("created_at", monthStart).lt("created_at", dayEnd),
-          sb.from("pedidos_delivery").select("total, origem, status, itens, created_at").eq("empresa_id", emp.id).gte("created_at", monthStart).lt("created_at", dayEnd),
-          sb.from("produtos").select("id, nome").eq("empresa_id", emp.id),
+        const [vMes, pMes, prods] = await Promise.all([
+          todos((de, ate) => sb.from("vendas").select("id, total, observacoes, created_at")
+            .eq("empresa_id", emp.id).neq("status", "cancelado")
+            .gte("created_at", monthStart).lt("created_at", dayEnd).order("created_at").range(de, ate)),
+          todos((de, ate) => sb.from("pedidos_delivery").select("total, origem, status, itens, created_at")
+            .eq("empresa_id", emp.id)
+            .gte("created_at", monthStart).lt("created_at", dayEnd).order("created_at").range(de, ate)),
+          todos((de, ate) => sb.from("produtos").select("id, nome").eq("empresa_id", emp.id).order("id").range(de, ate)),
         ])
-        const vMes = vMesRes.data ?? [], pMes = pMesRes.data ?? []
-        const nomes: Record<string, string> = {}; for (const p of (prodRes.data ?? [])) nomes[p.id] = p.nome
+        const nomes: Record<string, string> = {}; for (const p of prods) nomes[p.id] = p.nome
 
         let fat = 0, fatMes = 0, n = 0
         // O iFood PRECISA ser um canal próprio. Antes ele caía no "else" e era
@@ -105,8 +123,9 @@ serve(async (req) => {
         // top produto de hoje (venda_itens + itens do delivery)
         const agg: Record<string, number> = {}
         if (vendaIdsHoje.length) {
-          const { data: itens } = await sb.from("venda_itens").select("produto_id, subtotal").in("venda_id", vendaIdsHoje)
-          for (const it of (itens ?? [])) { const nm = nomes[it.produto_id] ?? "Produto"; agg[nm] = (agg[nm] || 0) + Number(it.subtotal) }
+          const itens = await todos((de, ate) => sb.from("venda_itens").select("produto_id, subtotal")
+            .in("venda_id", vendaIdsHoje).order("produto_id").range(de, ate))
+          for (const it of itens) { const nm = nomes[it.produto_id] ?? "Produto"; agg[nm] = (agg[nm] || 0) + Number(it.subtotal) }
         }
         for (const p of pMes) {
           if (!validPed(p.status) || p.created_at < dayStart) continue
