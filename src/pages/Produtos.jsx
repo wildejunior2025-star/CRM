@@ -13,6 +13,10 @@ const norm = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').to
 // eslint-disable-next-line no-unused-vars
 const EMBALAGENS = ['unidade', 'lata', 'garrafa', 'caixa', 'fardo']
 
+// Preço do app FWC: escondido enquanto o app não está no ar. O valor continua
+// gravado em produtos.preco_app — é só voltar pra true quando o app publicar.
+const MOSTRAR_PRECO_APP = false
+
 const emptyForm = {
   nome: '',
   categoria: '',
@@ -616,8 +620,8 @@ export default function Produtos() {
   const produtosPagina = produtosOrdenados.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
   const totalPaginas = Math.ceil(produtosOrdenados.length / PAGE_SIZE)
   const usaCasco = produtos.some((p) => p.controla_casco)
-  // Nome, Categoria, Custo, Venda, Venda App, Disponível e ações são fixas.
-  const totalColunas = 7 + (usaEstoque ? 3 : 0) + (usaCasco ? 1 : 0)
+  // Nome, Categoria, Custo, Venda, Disponível e ações são fixas.
+  const totalColunas = 6 + (MOSTRAR_PRECO_APP ? 1 : 0) + (usaEstoque ? 3 : 0) + (usaCasco ? 1 : 0)
 
   return (
     <div>
@@ -702,7 +706,7 @@ export default function Produtos() {
                 {usaCasco && <th>Casco</th>}
                 <th>Custo</th>
                 <th>Venda</th>
-                <th>Venda App</th>
+                {MOSTRAR_PRECO_APP && <th>Venda App</th>}
                 {usaEstoque && <th>Estoque mín.</th>}
                 <th>Disponível</th>
                 <th style={{ position: 'sticky', right: 0, background: 'var(--bg)' }}></th>
@@ -773,7 +777,7 @@ export default function Produtos() {
                   {usaCasco && <td>{p.controla_casco ? 'Sim' : 'Não'}</td>}
                   <td>R$ {Number(p.preco_custo).toFixed(2)}</td>
                   <td>R$ {Number(p.preco_venda).toFixed(2)}</td>
-                  <td>R$ {Number(p.preco_app || 0).toFixed(2)}</td>
+                  {MOSTRAR_PRECO_APP && <td>R$ {Number(p.preco_app || 0).toFixed(2)}</td>}
                   {usaEstoque && <td>{p.estoque_minimo}</td>}
                   <td>
                     <button
@@ -1067,8 +1071,7 @@ export default function Produtos() {
                   />
                 </div>
 
-                {/* Preço App escondido por enquanto (app FWC ainda não está funcionando) */}
-                {false && (
+                {MOSTRAR_PRECO_APP && (
                 <div className="form-field">
                   <label style={{color:'#a855f7'}}>Preço App (R$) <span style={{fontWeight:400, fontSize:'0.8em', color:'var(--text-muted)'}}>FWC Inter app</span></label>
                   <input
