@@ -10,6 +10,41 @@
   gap: 20px;
 }
 
+/* Colunas: empilhadas por padrão (celular), lado a lado no PC.
+   No monitor a página era uma fita de 760px no meio da tela — mapa, endereço,
+   raio e delivery um embaixo do outro, com o dono rolando pra achar as faixas. */
+.re-colunas {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.re-coluna {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0; /* sem isso o conteúdo largo (faixas) estoura a coluna */
+}
+
+@media (min-width: 1100px) {
+  .re-page { max-width: 1240px; }
+
+  .re-colunas {
+    flex-direction: row;
+    gap: 24px;
+    align-items: stretch; /* deixa a coluna esquerda alta o bastante pro sticky */
+  }
+
+  .re-coluna { flex: 1 1 0; }
+
+  /* Mapa acompanha a rolagem: dá pra conferir o raio enquanto mexe nas faixas */
+  .re-coluna > .re-map-wrapper {
+    position: sticky;
+    top: 16px;
+    height: 420px;
+  }
+}
+
 /* ── Cabeçalho ── */
 .re-header h1 {
   margin: 0 0 4px;

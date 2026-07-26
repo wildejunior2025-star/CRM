@@ -464,6 +464,12 @@ export default function RaioEntrega() {
           <p>Configure o endereço, raio e as opções de delivery da sua loja.</p>
         </div>
 
+        {/* Duas colunas no PC (mapa/endereço | raio/delivery) e uma só no
+            celular. No monitor a coluna da direita rolava sozinha enquanto
+            metade da tela ficava vazia. */}
+        <div className="re-colunas">
+        <div className="re-coluna">
+
         {/* ── Mapa ── */}
         <div className="re-map-wrapper">
           {temCoordenadas
@@ -548,6 +554,9 @@ export default function RaioEntrega() {
             {geocodando ? 'Buscando...' : 'Localizar no mapa'}
           </button>
         </div>
+
+        </div>{/* fim da coluna esquerda */}
+        <div className="re-coluna">
 
         {/* ── Raio de entrega ── */}
         <div className="card">
@@ -894,6 +903,9 @@ export default function RaioEntrega() {
           </p>
         </div>
         )}
+
+        </div>{/* fim da coluna direita */}
+        </div>{/* fim das colunas */}
 
         {/* ── Feedback ── */}
         {msg && (
