@@ -257,6 +257,11 @@ export default function Estoque() {
   }
 
   const produtosComCasco = produtos.filter((p) => p.controla_casco)
+  // Casco (vasilhame que volta) é coisa de distribuidora de bebida: o cliente
+  // leva a garrafa e devolve depois. Restaurante não tem isso, e a seção só
+  // ocupava espaço. Só aparece pra quem marcou "controla casco" em algum
+  // produto — ou pra quem ainda tem casco pendente de antes.
+  const usaCasco = produtosComCasco.length > 0 || cascoSaldo.length > 0
 
   return (
     <div>
@@ -278,9 +283,11 @@ export default function Estoque() {
               <button className="btn btn-secondary" onClick={() => setShowMotivosModal(true)}>
                 Motivos
               </button>
-              <button className="btn btn-secondary" onClick={openCascoModal}>
-                + Movimento de casco
-              </button>
+              {usaCasco && (
+                <button className="btn btn-secondary" onClick={openCascoModal}>
+                  + Movimento de casco
+                </button>
+              )}
               <button className="btn btn-primary" onClick={openMovModal}>
                 + Movimento de estoque
               </button>
@@ -349,7 +356,9 @@ export default function Estoque() {
           </table>
         )}
       </div>
+      </>)}
 
+      {usaEstoque && usaCasco && (<>
       <h2 style={{ fontSize: 16, marginBottom: 8 }}>
         Vasilhame (casco) pendente com clientes
       </h2>

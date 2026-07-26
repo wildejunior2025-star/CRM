@@ -130,6 +130,7 @@ export default function Dashboard() {
   const [meta, setMeta] = useState(0)
   const [ifoodRates, setIfoodRates] = useState({})
   const [usaEstoque, setUsaEstoque] = useState(true) // loja pode desligar em Estoque
+  const [usaCasco, setUsaCasco] = useState(false)    // só distribuidora de bebida usa
   const [entExp, setEntExp] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refToken, setRefToken] = useState(null)
@@ -178,7 +179,7 @@ export default function Dashboard() {
         fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens, subtotal, taxa_entrega, ifood_valores, forma_pagamento').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('venda_itens').select('produto_id, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desdeISO).order('id', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('clientes').select('created_at').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
-        supabase.from('produtos').select('id, nome'),
+        supabase.from('produtos').select('id, nome, controla_casco'),
         supabase.from('vendas').select('id, total, forma_pagamento, created_at, clientes(nome)').neq('status', 'cancelado').order('created_at', { ascending: false }).limit(8),
         supabase.from('clientes').select('id', { count: 'exact', head: true }).eq('ativo', true),
         supabase.from('estoque_saldo').select('*'),
@@ -203,6 +204,7 @@ export default function Dashboard() {
       setMeta(Number(empRes.data?.meta_faturamento_mensal ?? 0))
       setIfoodRates({ comissao: empRes.data?.ifood_comissao_pct, transacao: empRes.data?.ifood_transacao_pct })
       setUsaEstoque(empRes.data?.estoque_ativo ?? true)
+      setUsaCasco((nRes.data ?? []).some(p => p.controla_casco) || (csRes.data ?? []).some(c => Number(c.saldo_cascos) > 0))
       setLoading(false)
     }
     if (empresaId !== undefined) load()
@@ -518,7 +520,7 @@ export default function Dashboard() {
               <Op label="Fiado em aberto" to="/financeiro" value={fmt(op.fiado)} />
               <Op label="Clientes ativos" to="/clientes" value={op.clientesAtivos} />
               {usaEstoque && <Op label="Estoque baixo" to="/estoque" value={op.estoqueBaixo} alerta={op.estoqueBaixo > 0} />}
-              <Op label="Cascos pendentes" to="/estoque" value={op.cascosPendentes} ultimo />
+              {usaCasco && <Op label="Cascos pendentes" to="/estoque" value={op.cascosPendentes} ultimo />}
             </div>
             <div style={cardBox}>
               <strong style={{ fontSize: 15, display: 'block', marginBottom: 12 }}>🧾 Últimas vendas</strong>
