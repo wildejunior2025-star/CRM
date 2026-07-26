@@ -26,20 +26,32 @@
   min-width: 0; /* sem isso o conteúdo largo (faixas) estoura a coluna */
 }
 
+/* Coluna sem conteúdo (bairro só existe com delivery ligado) não pode roubar
+   espaço das outras. */
+.re-coluna:empty { display: none; }
+
 @media (min-width: 1100px) {
-  .re-page { max-width: 1240px; }
+  .re-page { max-width: 1280px; }
 
   .re-colunas {
     flex-direction: row;
+    flex-wrap: wrap;
     gap: 24px;
-    align-items: stretch; /* deixa a coluna esquerda alta o bastante pro sticky */
+    align-items: flex-start;
   }
 
-  .re-coluna { flex: 1 1 0; }
+  /* base 380px + wrap: em tela média entram 2 colunas e a terceira desce
+     ocupando a linha inteira; em tela grande as 3 ficam lado a lado. */
+  .re-coluna { flex: 1 1 380px; }
 
   /* Nada de sticky aqui: com endereço e raio embaixo, o mapa fixo passava por
      cima dos cards ao rolar. */
   .re-coluna > .re-map-wrapper { height: 400px; }
+}
+
+/* Monitor grande: cabem as 3 colunas (mapa/endereço/raio · delivery · bairro) */
+@media (min-width: 1500px) {
+  .re-page { max-width: 1820px; }
 }
 
 /* ── Cabeçalho ── */

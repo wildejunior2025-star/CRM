@@ -827,9 +827,12 @@ export default function RaioEntrega() {
           )}
         </div>
 
+        </div>{/* fim da coluna do meio */}
+        <div className="re-coluna">
+
         {/* ── Taxa por bairro (opcional) ── */}
         {aceitaDelivery && (
-        <div style={{ background: 'var(--surface, #fff)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginBottom: 16 }}>
+        <div style={{ background: 'var(--surface, #fff)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
           <h2 className="re-card-title">🏘️ Taxa por bairro (opcional)</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 14px' }}>
             Puxei os bairros dos seus pedidos. Pra cada um: <b>cobrar taxa fixa</b>, <b>não entregar</b>, ou deixar no <b>cálculo por km</b> (padrão). Bairro fora da lista usa o km.
@@ -907,6 +910,7 @@ export default function RaioEntrega() {
 
         </div>{/* fim da coluna direita */}
         </div>{/* fim das colunas */}
+
 
         {/* ── Feedback ── */}
         {msg && (
