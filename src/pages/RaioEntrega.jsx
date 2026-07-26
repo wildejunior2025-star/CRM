@@ -111,8 +111,14 @@ export default function RaioEntrega() {
     }, 400)
   }
   const [taxasBairro, setTaxasBairro] = useState([]) // [{bairro, norm, modo:'km'|'taxa'|'bloqueio', taxa, tempo, total}]
+  const [bairrosOcultos, setBairrosOcultos] = useState([]) // norms que a loja tirou da lista
   const [novoBairro, setNovoBairro] = useState('')
   const [bairroOpen, setBairroOpen] = useState(false) // dropdown de sugestões de bairro
+
+  // Formato que o checkout e o bot leem. Um só lugar pra não divergir do salvar.
+  const paraTaxasSalvas = (lista) => lista
+    .filter(b => b.modo === 'taxa' || b.modo === 'bloqueio')
+    .map(b => ({ bairro: b.bairro, entrega: b.modo !== 'bloqueio', taxa: b.modo === 'taxa' ? (parseFloat(b.taxa) || 0) : 0, tempo: b.modo === 'taxa' ? (parseInt(b.tempo) || null) : null }))
 
   // Adiciona um bairro à lista (sugestão ou digitado). Ignora acento pra não duplicar.
   function adicionarBairro(nome) {
@@ -121,6 +127,27 @@ export default function RaioEntrega() {
     setNovoBairro(''); setBairroOpen(false)
     if (taxasBairro.some(x => x.norm === n)) return
     setTaxasBairro(prev => [{ bairro: b, norm: n, modo: 'taxa', taxa: '', tempo: '', total: 0 }, ...prev])
+    // Se estava escondido, adicionar de novo desfaz o esconder.
+    if (bairrosOcultos.includes(n)) salvarOcultos(bairrosOcultos.filter(x => x !== n))
+  }
+
+  // Esconder grava na hora (não espera o "Salvar configurações"): é uma ação de
+  // limpeza da lista, não uma configuração de entrega.
+  async function salvarOcultos(novos, taxasTambem) {
+    setBairrosOcultos(novos)
+    if (!profile?.empresa_id) return
+    const patch = { bairros_ocultos: novos }
+    if (taxasTambem) patch.taxas_entrega_bairro = taxasTambem
+    await supabase.from('empresas').update(patch).eq('id', profile.empresa_id)
+  }
+
+  function esconderBairro(b) {
+    const restantes = taxasBairro.filter(x => x.norm !== b.norm)
+    setTaxasBairro(restantes)
+    // Bairro que tinha taxa/bloqueio configurado precisa sair também da config
+    // que o checkout lê — senão sumia da tela mas continuava cobrando.
+    const tinhaConfig = b.modo === 'taxa' || b.modo === 'bloqueio'
+    salvarOcultos([...new Set([...bairrosOcultos, b.norm])], tinhaConfig ? paraTaxasSalvas(restantes) : null)
   }
 
   // UI
@@ -249,11 +276,14 @@ export default function RaioEntrega() {
     let vivo = true
     ;(async () => {
       const [{ data: emp }, { data: peds }] = await Promise.all([
-        supabase.from('empresas').select('taxas_entrega_bairro').eq('id', profile.empresa_id).single(),
+        supabase.from('empresas').select('taxas_entrega_bairro, bairros_ocultos').eq('id', profile.empresa_id).single(),
         supabase.from('pedidos_delivery').select('endereco_bairro').eq('empresa_id', profile.empresa_id).not('endereco_bairro', 'is', null).limit(3000),
       ])
       if (!vivo) return
       const salvos = Array.isArray(emp?.taxas_entrega_bairro) ? emp.taxas_entrega_bairro : []
+      const ocultos = Array.isArray(emp?.bairros_ocultos) ? emp.bairros_ocultos : []
+      setBairrosOcultos(ocultos)
+      const escondido = new Set(ocultos)
       const cfg = new Map()
       for (const s of salvos) {
         const n = normBairro(s.bairro)
@@ -271,12 +301,13 @@ export default function RaioEntrega() {
       const lista = []
       const vistos = new Set()
       for (const [n, info] of [...cont.entries()].sort((a, b) => b[1].total - a[1].total)) {
+        if (escondido.has(n)) continue
         const display = [...info.grafias.entries()].sort((a, b) => b[1] - a[1])[0][0]
         if (cfg.has(n)) lista.push({ ...cfg.get(n), bairro: cfg.get(n).bairro || display, total: info.total })
         else lista.push({ bairro: display, norm: n, modo: 'km', taxa: '', tempo: '', total: info.total })
         vistos.add(n)
       }
-      for (const [n, c] of cfg) if (!vistos.has(n)) lista.push(c)
+      for (const [n, c] of cfg) if (!vistos.has(n) && !escondido.has(n)) lista.push(c)
       setTaxasBairro(lista)
     })()
     return () => { vivo = false }
@@ -432,9 +463,7 @@ export default function RaioEntrega() {
       raio_entrega_km:      parseFloat(raio) || 10,
       latitude:             latitude || null,
       longitude:            longitude || null,
-      taxas_entrega_bairro: taxasBairro
-        .filter(b => b.modo === 'taxa' || b.modo === 'bloqueio')
-        .map(b => ({ bairro: b.bairro, entrega: b.modo !== 'bloqueio', taxa: b.modo === 'taxa' ? (parseFloat(b.taxa) || 0) : 0, tempo: b.modo === 'taxa' ? (parseInt(b.tempo) || null) : null })),
+      taxas_entrega_bairro: paraTaxasSalvas(taxasBairro),
     }).eq('id', empresaId)
 
     setSalvando(false)
@@ -836,6 +865,7 @@ export default function RaioEntrega() {
           <h2 className="re-card-title">🏘️ Taxa por bairro (opcional)</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 14px' }}>
             Puxei os bairros dos seus pedidos. Pra cada um: <b>cobrar taxa fixa</b>, <b>não entregar</b>, ou deixar no <b>cálculo por km</b> (padrão). Bairro fora da lista usa o km.
+            {' '}Bairro repetido ou que você nem atende: tire da lista no <b>×</b>.
           </p>
           <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
             <div style={{ position: 'relative', flex: 1, minWidth: 180 }}>
@@ -899,6 +929,20 @@ export default function RaioEntrega() {
                   </>
                 )}
                 {b.modo === 'bloqueio' && <span style={{ fontSize: 13, fontWeight: 700, color: '#dc2626' }}>Cliente não consegue pedir</span>}
+                <button
+                  type="button"
+                  onClick={() => esconderBairro(b)}
+                  title={`Tirar "${b.bairro}" da lista`}
+                  aria-label={`Tirar ${b.bairro} da lista`}
+                  style={{
+                    width: 30, height: 30, flexShrink: 0, marginLeft: 'auto',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    borderRadius: 8, cursor: 'pointer', fontSize: 16, lineHeight: 1,
+                    border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = '#dc2626'; e.currentTarget.style.color = '#dc2626' }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)' }}
+                >×</button>
               </div>
             ))}
           </div>
