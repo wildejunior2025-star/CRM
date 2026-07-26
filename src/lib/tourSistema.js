@@ -52,18 +52,16 @@ export const SISTEMAS = {
         chave: 'portal-vendas', label: 'Vendas', children: [
           { chave: 'portal-vendas-delivery', label: 'Vendas delivery' },
           { chave: 'portal-entregadores', label: 'Entregadores' },
+          { chave: 'portal-presencial-historico', label: 'Vendas salão' },
         ],
       },
       { chave: 'portal-clientes', label: 'Clientes' },
       { chave: 'portal-funcionarios', label: 'Funcionários' },
       {
+        // Salão, Caixa, Reservas e Mesas saíram da lateral (estão no /painel,
+        // aba "Mesas") — por isso saíram daqui também.
         chave: 'portal-presencial', label: 'Serviço Presencial', children: [
-          { chave: 'portal-salao', label: 'Salão' },
-          { chave: 'portal-caixa', label: 'Caixa' },
           { chave: 'portal-cozinha', label: 'Cozinha (KDS)' },
-          { chave: 'portal-reservas', label: 'Reservas e fila' },
-          { chave: 'portal-presencial-historico', label: 'Histórico' },
-          { chave: 'portal-mesas', label: 'Mesas' },
         ],
       },
       {

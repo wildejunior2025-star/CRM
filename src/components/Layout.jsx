@@ -21,19 +21,19 @@ const links = [
     children: [
       { to: '/pedidos-delivery', label: 'Vendas delivery', roles: ['admin'], mod: 'delivery' },
       { to: '/entregadores', label: 'Entregadores', roles: ['admin'], mod: 'delivery' },
+      // Contas fechadas do salão: é venda, o lugar dele é aqui e não no presencial.
+      { to: '/presencial/historico', label: 'Vendas salão', roles: ['admin'], mod: 'presencial' },
     ],
   },
   { to: '/clientes', label: 'Clientes', roles: ['admin'], mod: 'clientes' },
   { to: '/usuarios', label: 'Funcionários', roles: ['admin'], mod: 'funcionarios' },
   {
+    // Salão, Caixa, Reservas e Mesas saíram daqui: são as MESMAS telas que já
+    // estão no /painel, na aba "Mesas". Ficou só a Cozinha (KDS), que o painel
+    // não tem. Todas continuam a um clique pelos cards de /presencial.
     to: '/presencial', label: 'Serviço Presencial', roles: ['admin'], mod: 'presencial',
     children: [
-      { to: '/presencial/salao', label: 'Salão', roles: ['admin'] },
-      { to: '/caixa', label: 'Caixa', roles: ['admin', 'vendedor'], mod: 'caixa' },
       { to: '/presencial/cozinha', label: 'Cozinha (KDS)', roles: ['admin'] },
-      { to: '/presencial/reservas', label: 'Reservas e fila', roles: ['admin'] },
-      { to: '/presencial/historico', label: 'Histórico', roles: ['admin'] },
-      { to: '/presencial/mesas', label: 'Mesas', roles: ['admin'] },
     ],
   },
   // Garçom vê o Salão; a Cozinha é só do cozinheiro (vendedor só usa o /painel)

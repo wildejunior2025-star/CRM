@@ -84,9 +84,9 @@ export default function PresencialHistorico() {
       <div className="page-header">
         <div>
           <p style={{ margin: 0, fontSize: 13 }}>
-            <Link to="/presencial" style={{ color: 'var(--primary)' }}>← Serviço Presencial</Link>
+            <Link to="/pedidos-delivery" style={{ color: 'var(--primary)' }}>← Vendas</Link>
           </p>
-          <h1>Histórico de contas</h1>
+          <h1>Vendas salão</h1>
           <p className="page-subtitle">Contas fechadas do salão.</p>
         </div>
       </div>

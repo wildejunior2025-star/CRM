@@ -2,20 +2,27 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
+import { moduloVisivel } from '../lib/modulos'
 import '../components/Page.css'
 
 // Sub-categorias do módulo presencial. `pronto:false` aparece como "Em breve".
+// Estes cards são a porta de entrada de verdade dessas telas: a lateral só
+// mostra a Cozinha, porque o resto já está no /painel (aba "Mesas").
+// `mod` esconde o card quando a loja não tem a funcionalidade ligada.
 const SUBAREAS = [
   { to: '/presencial/salao', icon: '🗺️', nome: 'Salão', desc: 'Abrir mesas, lançar comanda e fechar a conta', pronto: true },
+  { to: '/caixa', icon: '💵', nome: 'Caixa', desc: 'Abertura, sangria e fechamento do caixa', pronto: true, mod: 'caixa' },
   { to: '/presencial/cozinha', icon: '👨‍🍳', nome: 'Cozinha (KDS)', desc: 'Painel de preparo dos pedidos, ao vivo', pronto: true },
   { to: '/presencial/reservas', icon: '📅', nome: 'Reservas e fila', desc: 'Agende mesas e gerencie a fila de espera', pronto: true },
-  { to: '/presencial/historico', icon: '🧾', nome: 'Histórico', desc: 'Contas fechadas e total recebido', pronto: true },
+  { to: '/presencial/historico', icon: '🧾', nome: 'Vendas salão', desc: 'Contas fechadas e total recebido', pronto: true },
   { to: '/presencial/mesas', icon: '🪑', nome: 'Mesas', desc: 'Cadastre as mesas do salão', pronto: true },
 ]
 
 export default function ServicoPresencial() {
-  const { profile } = useAuth()
+  const { profile, empresa } = useAuth()
   const empresaId = profile?.empresa_id
+  // Card de módulo desligado vira link morto (a rota devolve pra home).
+  const areas = SUBAREAS.filter(a => !a.mod || moduloVisivel(empresa, a.mod))
 
   const [loading, setLoading]   = useState(true)
   const [ativo, setAtivo]       = useState(false)
@@ -108,7 +115,7 @@ export default function ServicoPresencial() {
       {/* Sub-áreas */}
       <h2 style={{ fontSize: 15, margin: '0 0 12px' }}>Áreas do presencial</h2>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
-        {SUBAREAS.map(area => {
+        {areas.map(area => {
           const conteudo = (
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
