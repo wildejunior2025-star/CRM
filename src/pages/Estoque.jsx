@@ -51,6 +51,9 @@ function ItemSearch({ items, value, onChange, placeholder = 'Buscar...' }) {
 const MOTIVOS_PADRAO = {
   entrada: ['compra', 'devolucao', 'ajuste_inventario'],
   saida: ['venda', 'perda', 'ajuste_inventario'],
+  // "Ajuste" não tinha motivo nenhum: a lista só ia até saída, então o campo
+  // abria vazio. Aqui o motivo responde "por que a contagem não bateu".
+  ajuste: ['ajuste_inventario', 'quebra', 'perda', 'erro_de_lancamento', 'sobra'],
 }
 
 export default function Estoque() {
@@ -96,9 +99,12 @@ export default function Estoque() {
   async function loadMotivos() {
     const { data } = await supabase.from('motivos_estoque').select('tipo, nome').order('nome')
     if (data && data.length > 0) {
+      // A tabela só guarda motivo de entrada/saída; o de ajuste é fixo, então
+      // preserva o padrão em vez de trocar o objeto inteiro e zerar a lista.
       setMotivos({
         entrada: data.filter(m => m.tipo === 'entrada').map(m => m.nome),
         saida: data.filter(m => m.tipo === 'saida').map(m => m.nome),
+        ajuste: MOTIVOS_PADRAO.ajuste,
       })
     }
   }
@@ -192,18 +198,47 @@ export default function Estoque() {
     })
   }
 
+  // Saldo que a tela mostra hoje pro produto escolhido (base do ajuste).
+  function saldoDoProduto(produtoId) {
+    const linha = saldo.find((s) => s.produto_id === produtoId)
+    return Number(linha?.quantidade_atual ?? 0)
+  }
+
   async function handleMovSubmit(e) {
     e.preventDefault()
     setSavingMov(true)
     setError(null)
 
-    const { error } = await supabase.from('estoque_movimentos').insert({
-      produto_id: movForm.produto_id,
-      tipo: movForm.tipo,
-      quantidade: Number(movForm.quantidade),
-      motivo: movForm.motivo,
-      observacao: movForm.observacao || null,
-    })
+    // Ajuste é contagem, não soma: o dono digita o que TEM na prateleira e a
+    // gente grava só a diferença. Antes o "ajuste" entrava somando igualzinho a
+    // uma entrada — quem contava 10 e digitava 10 ficava com 20.
+    let linha
+    if (movForm.tipo === 'ajuste') {
+      const contado = Number(movForm.quantidade)
+      const diferenca = contado - saldoDoProduto(movForm.produto_id)
+      if (diferenca === 0) {
+        setSavingMov(false)
+        setShowMovModal(false)
+        return
+      }
+      linha = {
+        produto_id: movForm.produto_id,
+        tipo: diferenca > 0 ? 'entrada' : 'saida',
+        quantidade: Math.abs(diferenca),
+        motivo: movForm.motivo || 'ajuste_inventario',
+        observacao: movForm.observacao || `Ajuste de inventário: contado ${contado}`,
+      }
+    } else {
+      linha = {
+        produto_id: movForm.produto_id,
+        tipo: movForm.tipo,
+        quantidade: Number(movForm.quantidade),
+        motivo: movForm.motivo,
+        observacao: movForm.observacao || null,
+      }
+    }
+
+    const { error } = await supabase.from('estoque_movimentos').insert(linha)
 
     setSavingMov(false)
 
@@ -439,7 +474,9 @@ export default function Estoque() {
                 </div>
 
                 <div className="form-field">
-                  <label>Quantidade</label>
+                  <label>
+                    {movForm.tipo === 'ajuste' ? 'Quantidade contada' : 'Quantidade'}
+                  </label>
                   <input
                     type="number"
                     step="0.01"
@@ -448,6 +485,12 @@ export default function Estoque() {
                     onChange={handleMovChange}
                     required
                   />
+                  {movForm.tipo === 'ajuste' && movForm.produto_id && (
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Digite quanto tem de verdade na prateleira. O sistema tem{' '}
+                      <strong>{saldoDoProduto(movForm.produto_id)}</strong> e grava só a diferença.
+                    </span>
+                  )}
                 </div>
 
                 <div className="form-field full">
