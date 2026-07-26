@@ -4,7 +4,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" }
 const EVOLUTION_API_URL = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$/, "")
 const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY") ?? ""
-const INSTANCE = "crmadmin" // WhatsApp da plataforma envia pro lojista
+// A instância do WhatsApp da plataforma vem do banco (config_global
+// .admin_sender_instance), que é onde o Super Admin salva ao parear o QR.
+// Estava fixo em "crmadmin" e a instância real se chama "CRM": a Evolution
+// respondia 404 e NENHUM resumo saía — sem ninguém perceber, porque a função
+// retornava ok:true com enviadas:0.
+const FALLBACK_INSTANCE = "crmadmin"
 const OFFSET = 3            // BRT = UTC-3
 const fmt = (v: number) => "R$ " + Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })
 const validPed = (s: string) => !["cancelado", "aguardando_pagamento"].includes(s)
@@ -17,7 +22,17 @@ serve(async (req) => {
     const sb = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "")
 
     let empresaId: string | null = null
-    try { empresaId = (await req.json())?.empresa_id ?? null } catch { empresaId = null }
+    // telefone: destino alternativo (teste) — manda o resumo da loja pra outro
+    // número sem mexer no telefone_contato cadastrado.
+    let telefoneTeste: string | null = null
+    try {
+      const body = await req.json()
+      empresaId = body?.empresa_id ?? null
+      telefoneTeste = body?.telefone ?? null
+    } catch { empresaId = null }
+
+    const { data: cfg } = await sb.from("config_global").select("valor").eq("chave", "admin_sender_instance").maybeSingle()
+    const INSTANCE = (cfg?.valor ?? "").trim() || FALLBACK_INSTANCE
 
     // Janela de "hoje" e "mês" em horário de Brasília
     const nowUtc = new Date()
@@ -32,9 +47,9 @@ serve(async (req) => {
     if (empresaId) q = q.eq("id", empresaId)
     const { data: empresas } = await q
 
-    let enviadas = 0
+    let enviadas = 0, falhas = 0, erro: string | null = null
     for (const emp of (empresas ?? [])) {
-      const fone = (emp.telefone_contato ?? "").replace(/\D/g, "")
+      const fone = ((telefoneTeste && empresaId) ? telefoneTeste : (emp.telefone_contato ?? "")).replace(/\D/g, "")
       if (fone.length < 10) continue
       try {
         const [vMesRes, pMesRes, prodRes] = await Promise.all([
@@ -115,10 +130,15 @@ serve(async (req) => {
           body: JSON.stringify({ number: num, text: msg }),
         })
         if (r.ok) enviadas++
-        else console.error("envio falhou", emp.nome, await r.text())
-      } catch (e) { console.error("erro empresa", emp.id, String(e)) }
+        else {
+          falhas++
+          const txt = await r.text()
+          erro = erro ?? `WhatsApp recusou (${r.status}): ${txt.slice(0, 200)}`
+          console.error("envio falhou", emp.nome, txt)
+        }
+      } catch (e) { falhas++; erro = erro ?? String(e); console.error("erro empresa", emp.id, String(e)) }
     }
-    return json({ ok: true, enviadas })
+    return json({ ok: true, enviadas, falhas, erro, instancia: INSTANCE })
   } catch (e) {
     return json({ ok: false, error: String(e) }, 500)
   }

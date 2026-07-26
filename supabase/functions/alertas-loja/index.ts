@@ -4,7 +4,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" }
 const EVOLUTION_API_URL = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$/, "")
 const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY") ?? ""
-const INSTANCE = "crmadmin"
+// Instância do WhatsApp da plataforma: vem do banco (config_global
+// .admin_sender_instance), não fixa no código — ver resumo-diario.
+const FALLBACK_INSTANCE = "crmadmin"
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
@@ -15,6 +17,9 @@ serve(async (req) => {
 
     let empresaId: string | null = null
     try { empresaId = (await req.json())?.empresa_id ?? null } catch { empresaId = null }
+
+    const { data: cfg } = await sb.from("config_global").select("valor").eq("chave", "admin_sender_instance").maybeSingle()
+    const INSTANCE = (cfg?.valor ?? "").trim() || FALLBACK_INSTANCE
 
     let q = sb.from("empresas").select("id, nome, telefone_contato").in("status", ["ativo", "trial", "atrasado"])
     if (empresaId) q = q.eq("id", empresaId)

@@ -34,10 +34,13 @@ serve(async (req) => {
     const { data: configs } = await supabaseAdmin
       .from("config_global")
       .select("chave, valor")
-      .in("chave", ["super_admin_phone", "alertas_mensalidade_ativo"])
+      .in("chave", ["super_admin_phone", "alertas_mensalidade_ativo", "admin_sender_instance"])
 
     const configMap: Record<string, string> = {}
     for (const row of configs ?? []) configMap[row.chave] = row.valor
+    // Instância do WhatsApp da plataforma: a que o Super Admin pareou, não fixa
+    // no código (a antiga "crmadmin" nem existe mais na Evolution).
+    const INSTANCE = (configMap.admin_sender_instance ?? "").trim() || ADMIN_INSTANCE
 
     const alertasAtivo = configMap["alertas_mensalidade_ativo"] !== "false"
     const adminPhone = (configMap["super_admin_phone"] ?? "").replace(/\D/g, "")
@@ -80,7 +83,7 @@ serve(async (req) => {
     const adminPhoneFormatado = adminPhone.startsWith("55") ? adminPhone : "55" + adminPhone
 
     // Envia mensagem consolidada para o admin
-    const adminRes = await fetch(`${EVOLUTION_API_URL}/message/sendText/${ADMIN_INSTANCE}`, {
+    const adminRes = await fetch(`${EVOLUTION_API_URL}/message/sendText/${INSTANCE}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -113,7 +116,7 @@ serve(async (req) => {
         `Para evitar a suspensão do serviço, entre em contato com nosso suporte.\n\n` +
         `_Atenciosamente, equipe FWC Inter_`
 
-      const empRes = await fetch(`${EVOLUTION_API_URL}/message/sendText/${ADMIN_INSTANCE}`, {
+      const empRes = await fetch(`${EVOLUTION_API_URL}/message/sendText/${INSTANCE}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
