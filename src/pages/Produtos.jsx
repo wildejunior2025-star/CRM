@@ -121,6 +121,10 @@ export default function Produtos() {
 
   const slug = empresa?.slug ?? null
   const linkCardapio = slug ? `${CATALOGO_BASE}/${slug}` : null
+  // Loja que desligou o estoque (botão em Estoque) não precisa ver "Estoque
+  // mín. 0" em 99 produtos, nem embalagem/un. por caixa — tudo isso é de
+  // distribuidora. Casco idem: só aparece pra quem marcou em algum produto.
+  const usaEstoque = empresa?.estoque_ativo ?? true
 
   function copiarLink() {
     if (!linkCardapio) return
@@ -611,6 +615,9 @@ export default function Produtos() {
   // Paginação client-side sobre a lista JÁ ordenada pelas categorias
   const produtosPagina = produtosOrdenados.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
   const totalPaginas = Math.ceil(produtosOrdenados.length / PAGE_SIZE)
+  const usaCasco = produtos.some((p) => p.controla_casco)
+  // Nome, Categoria, Custo, Venda, Venda App, Disponível e ações são fixas.
+  const totalColunas = 7 + (usaEstoque ? 3 : 0) + (usaCasco ? 1 : 0)
 
   return (
     <div>
@@ -690,13 +697,13 @@ export default function Produtos() {
               <tr>
                 <th>Nome</th>
                 <th>Categoria</th>
-                <th>Embalagem</th>
-                <th>Un./caixa</th>
-                <th>Casco</th>
+                {usaEstoque && <th>Embalagem</th>}
+                {usaEstoque && <th>Un./caixa</th>}
+                {usaCasco && <th>Casco</th>}
                 <th>Custo</th>
                 <th>Venda</th>
                 <th>Venda App</th>
-                <th>Estoque mín.</th>
+                {usaEstoque && <th>Estoque mín.</th>}
                 <th>Disponível</th>
                 <th style={{ position: 'sticky', right: 0, background: 'var(--bg)' }}></th>
               </tr>
@@ -709,7 +716,7 @@ export default function Produtos() {
                   <React.Fragment key={p.id}>
                     {mudouCategoria && (
                       <tr>
-                        <td colSpan={11} style={{
+                        <td colSpan={totalColunas} style={{
                           padding: '10px 12px 6px',
                           fontWeight: 700,
                           fontSize: 12,
@@ -761,13 +768,13 @@ export default function Produtos() {
                     </div>
                   </td>
                   <td>{p.categoria}</td>
-                  <td>{p.embalagem}</td>
-                  <td>{p.unidades_por_caixa}</td>
-                  <td>{p.controla_casco ? 'Sim' : 'Não'}</td>
+                  {usaEstoque && <td>{p.embalagem}</td>}
+                  {usaEstoque && <td>{p.unidades_por_caixa}</td>}
+                  {usaCasco && <td>{p.controla_casco ? 'Sim' : 'Não'}</td>}
                   <td>R$ {Number(p.preco_custo).toFixed(2)}</td>
                   <td>R$ {Number(p.preco_venda).toFixed(2)}</td>
                   <td>R$ {Number(p.preco_app || 0).toFixed(2)}</td>
-                  <td>{p.estoque_minimo}</td>
+                  {usaEstoque && <td>{p.estoque_minimo}</td>}
                   <td>
                     <button
                       type="button"
@@ -989,7 +996,7 @@ export default function Produtos() {
                 )}
 
                 {/* Unidades por caixa só faz sentido quando controla estoque (ex.: caixa de bebida) */}
-                {form.controla_estoque && (
+                {usaEstoque && form.controla_estoque && (
                 <div className="form-field">
                   <label>Unidades por caixa</label>
                   <input
@@ -1017,6 +1024,9 @@ export default function Produtos() {
                 </div>
                 )}
 
+                {/* A loja desligou o estoque inteiro: escolher produto por
+                    produto não faz mais sentido. */}
+                {usaEstoque && (
                 <div className="form-field">
                   <label>
                     <input
@@ -1031,6 +1041,7 @@ export default function Produtos() {
                     </span>
                   </label>
                 </div>
+                )}
 
                 <div className="form-field">
                   <label style={{color:'#f97316'}}>Preço de custo (R$)</label>
@@ -1152,7 +1163,7 @@ export default function Produtos() {
                 </div>
 
                 {/* Estoque mínimo só quando controla estoque */}
-                {form.controla_estoque && (
+                {usaEstoque && form.controla_estoque && (
                 <div className="form-field">
                   <label>Estoque mínimo</label>
                   <input
