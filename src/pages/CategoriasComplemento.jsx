@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { blocosDeOpcoes } from '../lib/complementos'
+import { criarBuscadorDescricao } from '../lib/descricaoSabor'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 import './CategoriasComplemento.css'
@@ -165,6 +166,10 @@ export default function CategoriasComplemento() {
   const [busy, setBusy] = useState(null)      // id em operação (desabilita botão)
   const [busca, setBusca] = useState('')      // pesquisa (categoria/opção, sem acento)
 
+  // Descrição que a opção HERDA do produto de mesmo nome quando o campo fica vazio.
+  // Mostrada como placeholder pra loja entender por que o site tem texto e o campo não.
+  const descricaoHerdada = useMemo(() => criarBuscadorDescricao(produtos), [produtos])
+
   const nomeProduto = useMemo(() => {
     const m = {}
     for (const p of produtos) m[p.id] = p.nome
@@ -178,7 +183,7 @@ export default function CategoriasComplemento() {
       supabase.from('complemento_grupos')
         .select('id, nome, min, max, ordem, disponivel, regra_preco, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel)')
         .eq('empresa_id', empresaId).order('nome'),
-      supabase.from('produtos').select('id, nome, categoria, preco_venda, ativo').eq('empresa_id', empresaId).order('nome'),
+      supabase.from('produtos').select('id, nome, categoria, descricao, preco_venda, ativo').eq('empresa_id', empresaId).order('nome'),
       supabase.from('produto_complemento_grupos')
         .select('id, produto_id, grupo_id, max_override, produtos!inner(empresa_id)')
         .eq('produtos.empresa_id', empresaId),
@@ -545,9 +550,17 @@ export default function CategoriasComplemento() {
                       {op.disponivel === false ? '▶' : '⏸'}
                     </button>
                     <button className="cc-iconbtn" title="Remover" onClick={() => removerOpcao(cat, op)}>✕</button>
-                    {/* Ingredientes do sabor — aparecem embaixo do nome na loja online. */}
-                    <input className="cc-input cc-opt-desc" defaultValue={op.descricao ?? ''}
-                      placeholder="Ingredientes (ex.: Mussarela, calabresa, cebola, molho de tomate, orégano)"
+                    {/* Ingredientes do sabor — aparecem embaixo do nome na loja online.
+                        Vazio não quer dizer sem texto: o placeholder mostra o que a loja
+                        está herdando do produto de mesmo nome. */}
+                    <input className={`cc-input cc-opt-desc${descricaoHerdada(op.nome) && !op.descricao ? ' herdado' : ''}`}
+                      key={op.nome} defaultValue={op.descricao ?? ''}
+                      title={descricaoHerdada(op.nome) && !op.descricao
+                        ? 'Está pegando a descrição do produto de mesmo nome no cardápio. Escreva aqui só se quiser um texto diferente.'
+                        : 'Aparece embaixo do nome do sabor na loja online'}
+                      placeholder={descricaoHerdada(op.nome)
+                        ? `Vem do cardápio: ${descricaoHerdada(op.nome)}`
+                        : 'Ingredientes (ex.: Mussarela, calabresa, cebola, molho de tomate, orégano)'}
                       onBlur={e => {
                         const v = e.target.value.trim()
                         if (v !== (op.descricao ?? '')) salvarOpcao(cat, op, { descricao: v || null })

@@ -140,6 +140,13 @@
   margin-top: -2px;
   font-size: 12.5px;
 }
+/* Campo vazio que está herdando o texto do produto: fica discreto e o
+   placeholder mostra o que vai sair na loja (não é "sem descrição"). */
+.cc-opt-desc.herdado {
+  border-style: dashed;
+  opacity: 0.9;
+}
+.cc-opt-desc.herdado::placeholder { font-style: italic; }
 .cc-price-wrap { position: relative; }
 .cc-price-wrap .cc-input { width: 100%; padding-left: 26px; }
 .cc-price-prefix {
