@@ -51,6 +51,33 @@ export function adicionalComplementos(grupos, itens) {
 }
 
 /**
+ * Separa as opções do grupo em blocos pelo sufixo entre parênteses do fim do nome:
+ * "Marguerita (Promoção)" e "Marguerita (Tradicional)" viram dois blocos, "Promoção"
+ * e "Tradicional", e o nome mostrado perde o sufixo (o subtítulo já diz de onde é).
+ *
+ * É só ORGANIZAÇÃO VISUAL: continua tudo dentro do mesmo grupo, então a regra de
+ * "escolha 2 sabores" segue valendo pro conjunto — diferente de quebrar em grupos
+ * de verdade (Borda Salgada/Borda Doce), onde daria pra escolher um de cada.
+ *
+ * Sem sufixo, ou com um sufixo só, devolve um bloco único sem título (lista normal).
+ */
+export function blocosDeOpcoes(opcoes) {
+  const lista = opcoes ?? []
+  const sufixo = o => (String(o?.nome || '').match(/\(([^()]*)\)\s*$/)?.[1] ?? '').trim()
+  const distintos = new Set(lista.map(sufixo).filter(Boolean))
+  if (distintos.size < 2) return [{ titulo: null, opcoes: lista }]
+  const blocos = []
+  for (const o of lista) {
+    const t = sufixo(o) || 'Outros'
+    let bloco = blocos.find(b => b.titulo === t)
+    if (!bloco) blocos.push(bloco = { titulo: t, opcoes: [] })
+    // nomeCurto é só pra tela: o carrinho e a cozinha continuam com o nome inteiro.
+    bloco.opcoes.push({ ...o, nomeCurto: String(o.nome).replace(/\s*\([^()]*\)\s*$/, '').trim() || o.nome })
+  }
+  return blocos
+}
+
+/**
  * Como mostrar o preço de uma opção na lista.
  * Grupo que soma mostra "+ R$ 5,00"; grupo que cobra pelo maior mostra
  * "R$ 35,00" — ali o valor não é acréscimo, é o preço daquele sabor.

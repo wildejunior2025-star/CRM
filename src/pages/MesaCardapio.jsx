@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
-import { adicionalComplementos } from '../lib/complementos'
+import { adicionalComplementos, blocosDeOpcoes } from '../lib/complementos'
 import { criarBuscadorDescricao, comDescricaoNasOpcoes } from '../lib/descricaoSabor'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
@@ -456,8 +456,14 @@ function ModalCompMesa({ produto, grupos, semObrigatorios, onClose, onConfirm })
                   {g.max === 1 ? 'escolha 1' : `até ${g.max}`}{g.min > 0 && !semObrigatorios ? ' · obrigatório' : ''}
                 </span>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {g.opcoes.map(o => {
+              {blocosDeOpcoes(g.opcoes).map(bloco => (
+              <div key={bloco.titulo ?? 'unico'} style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: bloco.titulo ? 10 : 0 }}>
+                {bloco.titulo && (
+                  <p style={{ fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .4, color: '#a89ec9', margin: '4px 0 0' }}>
+                    {bloco.titulo}
+                  </p>
+                )}
+                {bloco.opcoes.map(o => {
                   const marcado = (sel[g.id] ?? []).includes(o.id)
                   return (
                     <button key={o.id} onClick={() => toggle(g, o)} style={{
@@ -467,7 +473,7 @@ function ModalCompMesa({ produto, grupos, semObrigatorios, onClose, onConfirm })
                       background: marcado ? 'rgba(124,58,237,.18)' : 'transparent', color: '#fff', fontSize: 14,
                     }}>
                       <span style={{ minWidth: 0 }}>
-                        <span style={{ display: 'block' }}>{marcado ? '✓ ' : ''}{o.nome}</span>
+                        <span style={{ display: 'block' }}>{marcado ? '✓ ' : ''}{o.nomeCurto ?? o.nome}</span>
                         {o.descricao && (
                           <span style={{ display: 'block', fontSize: 12, lineHeight: 1.35, color: '#a89ec9', marginTop: 2 }}>{o.descricao}</span>
                         )}
@@ -477,6 +483,7 @@ function ModalCompMesa({ produto, grupos, semObrigatorios, onClose, onConfirm })
                   )
                 })}
               </div>
+              ))}
             </div>
           )
         })}

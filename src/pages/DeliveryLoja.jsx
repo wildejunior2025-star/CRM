@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
 import AvisoCookies from '../components/AvisoCookies'
-import { adicionalComplementos, cobraPeloMaior, rotuloPrecoOpcao } from '../lib/complementos'
+import { adicionalComplementos, blocosDeOpcoes, cobraPeloMaior, rotuloPrecoOpcao } from '../lib/complementos'
 import { criarBuscadorDescricao, comDescricaoNasOpcoes } from '../lib/descricaoSabor'
 import './DeliveryLoja.css'
 
@@ -889,8 +889,15 @@ function OptionsModal({ produto, onClose, onConfirm }) {
                     Você paga pelo sabor mais caro que escolher.
                   </p>
                 )}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {grupo.opcoes.map(opcao => {
+                {blocosDeOpcoes(grupo.opcoes).map(bloco => (
+                <div key={bloco.titulo ?? 'unico'} style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: bloco.titulo ? 12 : 0 }}>
+                  {bloco.titulo && (
+                    <p style={{
+                      fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .4,
+                      color: 'var(--dl-text-muted)', margin: '4px 0 0',
+                    }}>{bloco.titulo}</p>
+                  )}
+                  {bloco.opcoes.map(opcao => {
                     const marcado = sel[grupo.id]?.has(opcao.id)
                     const bloqueado = !marcado && grupo.max > 1 && qtdSel >= grupo.max
                     return (
@@ -917,7 +924,7 @@ function OptionsModal({ produto, onClose, onConfirm }) {
                           {marcado && <IconCheckSmall />}
                         </span>
                         <span style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{ display: 'block', fontSize: 14 }}>{opcao.nome}</span>
+                          <span style={{ display: 'block', fontSize: 14 }}>{opcao.nomeCurto ?? opcao.nome}</span>
                           {opcao.descricao && (
                             <span style={{ display: 'block', fontSize: 12, lineHeight: 1.35, color: 'var(--dl-text-muted)', marginTop: 2 }}>
                               {opcao.descricao}
@@ -933,6 +940,7 @@ function OptionsModal({ produto, onClose, onConfirm }) {
                     )
                   })}
                 </div>
+                ))}
               </div>
             )
           })}
