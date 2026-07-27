@@ -87,7 +87,7 @@ export default function CategoriasComplemento() {
     setLoading(true)
     const [gruposRes, prodRes, linkRes] = await Promise.all([
       supabase.from('complemento_grupos')
-        .select('id, nome, min, max, ordem, disponivel, regra_preco, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)')
+        .select('id, nome, min, max, ordem, disponivel, regra_preco, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel)')
         .eq('empresa_id', empresaId).order('nome'),
       supabase.from('produtos').select('id, nome').eq('empresa_id', empresaId).order('nome'),
       supabase.from('produto_complemento_grupos')
@@ -387,6 +387,13 @@ export default function CategoriasComplemento() {
                       {op.disponivel === false ? '▶' : '⏸'}
                     </button>
                     <button className="cc-iconbtn" title="Remover" onClick={() => removerOpcao(cat, op)}>✕</button>
+                    {/* Ingredientes do sabor — aparecem embaixo do nome na loja online. */}
+                    <input className="cc-input cc-opt-desc" defaultValue={op.descricao ?? ''}
+                      placeholder="Ingredientes (ex.: Mussarela, calabresa, cebola, molho de tomate, orégano)"
+                      onBlur={e => {
+                        const v = e.target.value.trim()
+                        if (v !== (op.descricao ?? '')) salvarOpcao(cat, op, { descricao: v || null })
+                      }} />
                   </div>
                 ))}
                 <button className="btn btn-secondary btn-sm" style={{ marginTop: 10 }} disabled={busy === cat.id} onClick={() => addOpcao(cat)}>

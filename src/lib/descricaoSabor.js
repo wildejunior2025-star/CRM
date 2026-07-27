@@ -45,7 +45,13 @@ export function criarBuscadorDescricao(produtos) {
   }
 }
 
-/** Copia a descrição do produto correspondente para cada opção do grupo. */
+/**
+ * Descrição de cada opção do grupo: manda o que a loja escreveu na própria opção;
+ * se estiver vazio, cai na descrição do produto de mesmo nome.
+ */
 export function comDescricaoNasOpcoes(opcoes, descricaoDaOpcao) {
-  return (opcoes ?? []).map(o => ({ ...o, descricao: o.descricao ?? descricaoDaOpcao(o.nome) }))
+  return (opcoes ?? []).map(o => ({
+    ...o,
+    descricao: String(o.descricao || '').trim() || descricaoDaOpcao(o.nome),
+  }))
 }

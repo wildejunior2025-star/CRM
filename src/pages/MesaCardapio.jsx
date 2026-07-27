@@ -83,7 +83,7 @@ export default function MesaCardapio() {
         const descricaoDaOpcao = criarBuscadorDescricao(descData)
         const { data: vinc } = await supabase
           .from('produto_complemento_grupos')
-          .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))')
+          .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
           .in('produto_id', ids)
           .order('ordem')
         const soSemOpcao = nome => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ''))

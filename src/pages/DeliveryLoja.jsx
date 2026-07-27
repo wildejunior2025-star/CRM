@@ -182,7 +182,7 @@ export default function DeliveryLoja() {
         // Lê pela ponte produto↔grupo: uma mesma categoria pode estar em vários produtos.
         const { data: vinc } = await supabase
           .from('produto_complemento_grupos')
-          .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))')
+          .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
           .in('produto_id', ids)
         // Opção "opt-out" (Sem X / Não Quero): serve pra recusar a categoria.
         const soSemOpcao = nome => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ''))
