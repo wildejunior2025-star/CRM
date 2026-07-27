@@ -12,7 +12,7 @@ function aceitarAutoAtivo() {
   try { return JSON.parse(localStorage.getItem('painelConfig') || '{}').aceitarAuto === true }
   catch { return false }
 }
-import { CONDICOES_PAGAMENTO } from '../lib/constants'
+import { CONDICOES_PAGAMENTO, FORMAS_PAGAMENTO, formasAtivas } from '../lib/constants'
 import { separarItem } from '../lib/itensPedido'
 // Sistema de salão embutido no gestor (Mesas): salão, reservas e config de mesas.
 import PresencialSalao from './PresencialSalao'
@@ -911,7 +911,13 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const [bairro, setBairro]     = useState(draft?.bairro ?? pedidoEdicao?.endereco_bairro ?? '')
   const [cidade, setCidade]     = useState(draft?.cidade ?? (pedidoEdicao?.endereco_cidade && pedidoEdicao.endereco_cidade !== 'Retirada' ? pedidoEdicao.endereco_cidade : ''))
   const [taxa, setTaxa]         = useState(draft?.taxa ?? (pedidoEdicao?.taxa_entrega ? String(pedidoEdicao.taxa_entrega) : ''))
-  const [pagamento, setPagamento] = useState(draft?.pagamento ?? pedidoEdicao?.forma_pagamento ?? 'dinheiro')
+  // Formas ligadas na loja. Se a que veio do rascunho/edição foi desligada
+  // depois, cai na primeira ativa — senão o botão sumiria com ela selecionada.
+  const formasLoja = formasAtivas(empresa)
+  const pagInicial = draft?.pagamento ?? pedidoEdicao?.forma_pagamento ?? 'dinheiro'
+  const [pagamento, setPagamento] = useState(
+    formasLoja.includes(pagInicial) ? pagInicial : formasLoja[0]
+  )
   const [troco, setTroco]       = useState(draft?.troco ?? (pedidoEdicao?.troco_para ? String(pedidoEdicao.troco_para) : ''))
   const [obs, setObs]           = useState(draft?.obs ?? (pedidoEdicao?.observacoes ?? ''))
   const [salvando, setSalvando] = useState(false)
@@ -1605,11 +1611,13 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
           </div>
         )}
 
-        {/* Pagamento */}
+        {/* Pagamento — só as formas ligadas em Minha Loja → Pagamento */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-          <button type="button" style={pagBtn('dinheiro')} onClick={() => setPagamento('dinheiro')}>Dinheiro</button>
-          <button type="button" style={pagBtn('pix')} onClick={() => setPagamento('pix')}>Pix</button>
-          <button type="button" style={pagBtn('cartao')} onClick={() => setPagamento('cartao')}>Cartão</button>
+          {FORMAS_PAGAMENTO.filter(f => formasLoja.includes(f.value)).map(f => (
+            <button key={f.value} type="button" style={pagBtn(f.value)} onClick={() => setPagamento(f.value)}>
+              {f.label}
+            </button>
+          ))}
         </div>
         {pagamento === 'dinheiro' && (
           <input value={troco} onChange={e => setTroco(e.target.value)} placeholder="Troco para (R$) — opcional" inputMode="decimal" style={{ ...inputSt, marginBottom: 10 }} />

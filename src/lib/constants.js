@@ -1,3 +1,22 @@
+// Formas que o cliente usa PRA PAGAR — as únicas do dia a dia da loja.
+// É esta lista que aparece em Minha Loja → Pagamento e nos botões da Nova venda
+// e do checkout da Loja Online. Marcar/desmarcar aqui liga/desliga o botão lá.
+export const FORMAS_PAGAMENTO = [
+  { value: 'dinheiro', label: 'Dinheiro' },
+  { value: 'pix',      label: 'PIX' },
+  { value: 'cartao',   label: 'Cartão' },
+]
+export const FORMAS_PAGAMENTO_PADRAO = FORMAS_PAGAMENTO.map(f => f.value)
+
+/** As formas ligadas na loja (com o padrão de todas quando nunca foi configurado). */
+export function formasAtivas(empresa) {
+  const salvas = (empresa?.formas_pagamento ?? []).filter(v => FORMAS_PAGAMENTO_PADRAO.includes(v))
+  return salvas.length ? salvas : FORMAS_PAGAMENTO_PADRAO
+}
+
+// CONDIÇÃO de pagamento do CLIENTE (à vista, fiado, prazo) — é outra coisa:
+// define como aquele cliente compra, não a máquina/meio usado no caixa.
+// 254 clientes já usam esses valores, então a lista continua inteira.
 export const CONDICOES_PAGAMENTO = [
   { value: 'a_vista',             label: 'À vista' },
   { value: 'fiado',               label: 'Fiado' },
@@ -17,6 +36,7 @@ export const CONDICOES_PAGAMENTO = [
 ]
 
 export const ICONE_PAGAMENTO = {
+  cartao:             { bg: '#7c3aed', text: '#fff', label: '💳' },
   a_vista:            { bg: '#16a34a', text: '#fff', label: '$' },
   fiado:              { bg: '#f97316', text: '#fff', label: 'F' },
   dinheiro:           { bg: '#16a34a', text: '#fff', label: '💵' },

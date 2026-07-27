@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
-import { CONDICOES_PAGAMENTO, ICONE_PAGAMENTO } from '../lib/constants'
+import { FORMAS_PAGAMENTO, ICONE_PAGAMENTO, formasAtivas } from '../lib/constants'
 import IfoodCatalogoManager from '../components/IfoodCatalogoManager'
 import '../components/Page.css'
 
@@ -355,7 +355,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
     setTelefoneContato(empresa.telefone_contato ?? '')
     setBannerUrl(empresa.banner_url ?? '')
     setLogoUrl(empresa.logo_url ?? '')
-    setFormasPagamento(empresa.formas_pagamento ?? ['a_vista', 'fiado', 'boleto_7d', 'boleto_14d', 'boleto_30d'])
+    setFormasPagamento(formasAtivas(empresa))
     setChavePix(empresa.chave_pix ?? '')
     setPixNome(empresa.pix_nome ?? '')
     setPixCidade(empresa.pix_cidade ?? '')
@@ -763,10 +763,11 @@ export default function MinhaLoja({ secao = 'loja' }) {
         <div className="card" style={{ marginBottom: 16 }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Formas de pagamento aceitas</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 14 }}>
-            Marque as formas que aparecem na hora de registrar uma venda.
+            Marque as formas que aparecem na Nova venda e no checkout da sua Loja Online.
+            Desmarcou, some do botão — e pelo menos uma precisa ficar ligada.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
-            {CONDICOES_PAGAMENTO.map((op) => {
+            {FORMAS_PAGAMENTO.map((op) => {
               const icone = ICONE_PAGAMENTO[op.value]
               const ativo = formasPagamento.includes(op.value)
               return (
@@ -781,9 +782,12 @@ export default function MinhaLoja({ secao = 'loja' }) {
                     type="checkbox"
                     checked={ativo}
                     onChange={(e) => {
-                      setFormasPagamento(prev =>
-                        e.target.checked ? [...prev, op.value] : prev.filter(v => v !== op.value)
-                      )
+                      setFormasPagamento(prev => {
+                        if (e.target.checked) return [...prev, op.value]
+                        // Loja sem forma nenhuma travaria a venda: segura a última.
+                        if (prev.length <= 1) return prev
+                        return prev.filter(v => v !== op.value)
+                      })
                     }}
                     style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
                   />

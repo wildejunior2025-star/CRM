@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { getEnderecoAtivo } from '../utils/enderecoPortal'
 import { registrarPedido } from '../lib/meusPedidos'
 import { iniciarCheckout } from '../lib/tracking'
+import { formasAtivas } from '../lib/constants'
 import 'leaflet/dist/leaflet.css'
 import './DeliveryCheckout.css'
 
@@ -431,7 +432,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada')
+      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, formas_pagamento')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -441,6 +442,15 @@ export default function DeliveryCheckout() {
   // Enquanto os dados não chegaram, deixa aparecer — assim o botão não pisca
   // pra quem tem retirada ligada, que é a maioria.
   const permiteRetirada = lojaEndereco ? lojaEndereco.aceita_retirada !== false : true
+
+  // Formas de pagamento ligadas pela loja (Minha Loja → Pagamento).
+  const formasLoja = formasAtivas(lojaEndereco)
+  // Se a loja desligou a forma que estava escolhida (ou salva no rascunho),
+  // troca pela primeira ativa — senão o cliente fecharia com um meio recusado.
+  useEffect(() => {
+    if (!lojaEndereco) return
+    if (!formasLoja.includes(form.pagamento)) set('pagamento', formasLoja[0])
+  }, [lojaEndereco, form.pagamento]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Se a loja desligou a retirada e o cliente tinha um rascunho salvo com ela
   // escolhida, volta pra entrega — senão ele fecharia um pedido inválido.
@@ -1108,28 +1118,35 @@ export default function DeliveryCheckout() {
               {/* Pagamento */}
               <section className="dco-section">
                 <h2 className="dco-section-title">Pagamento</h2>
+                {/* Só as formas que a loja aceita (Minha Loja → Pagamento) */}
                 <div className="dco-payment-row">
-                  <button type="button"
-                    className={`dco-pay-btn${form.pagamento === 'pix' ? ' dco-pay-btn--active' : ''}`}
-                    onClick={() => set('pagamento', 'pix')}>
-                    <IconPix />
-                    <span>Pix</span>
-                    {form.pagamento === 'pix' && <span className="dco-pay-check"><IconCheck /></span>}
-                  </button>
-                  <button type="button"
-                    className={`dco-pay-btn${form.pagamento === 'dinheiro' ? ' dco-pay-btn--active' : ''}`}
-                    onClick={() => set('pagamento', 'dinheiro')}>
-                    <IconMoney />
-                    <span>Dinheiro</span>
-                    {form.pagamento === 'dinheiro' && <span className="dco-pay-check"><IconCheck /></span>}
-                  </button>
-                  <button type="button"
-                    className={`dco-pay-btn${form.pagamento === 'cartao' ? ' dco-pay-btn--active' : ''}`}
-                    onClick={() => set('pagamento', 'cartao')}>
-                    <IconCard />
-                    <span>Cartão</span>
-                    {form.pagamento === 'cartao' && <span className="dco-pay-check"><IconCheck /></span>}
-                  </button>
+                  {formasLoja.includes('pix') && (
+                    <button type="button"
+                      className={`dco-pay-btn${form.pagamento === 'pix' ? ' dco-pay-btn--active' : ''}`}
+                      onClick={() => set('pagamento', 'pix')}>
+                      <IconPix />
+                      <span>Pix</span>
+                      {form.pagamento === 'pix' && <span className="dco-pay-check"><IconCheck /></span>}
+                    </button>
+                  )}
+                  {formasLoja.includes('dinheiro') && (
+                    <button type="button"
+                      className={`dco-pay-btn${form.pagamento === 'dinheiro' ? ' dco-pay-btn--active' : ''}`}
+                      onClick={() => set('pagamento', 'dinheiro')}>
+                      <IconMoney />
+                      <span>Dinheiro</span>
+                      {form.pagamento === 'dinheiro' && <span className="dco-pay-check"><IconCheck /></span>}
+                    </button>
+                  )}
+                  {formasLoja.includes('cartao') && (
+                    <button type="button"
+                      className={`dco-pay-btn${form.pagamento === 'cartao' ? ' dco-pay-btn--active' : ''}`}
+                      onClick={() => set('pagamento', 'cartao')}>
+                      <IconCard />
+                      <span>Cartão</span>
+                      {form.pagamento === 'cartao' && <span className="dco-pay-check"><IconCheck /></span>}
+                    </button>
+                  )}
                 </div>
                 {form.pagamento === 'dinheiro' && (
                   <Field label="Troco para R$" error={errors.troco}>
