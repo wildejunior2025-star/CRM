@@ -507,7 +507,9 @@ export default function MinhaLoja({ secao = 'loja' }) {
     setSalvando(true)
     setErro(null)
     setSucesso(false)
-    const { error } = await supabase
+    // .select() de volta: sem ele, um update barrado pela RLS não dá erro —
+    // afeta 0 linhas e a tela dizia "Salvo!" com nada gravado.
+    const { data, error } = await supabase
       .from('empresas')
       .update({
         nome,
@@ -521,8 +523,13 @@ export default function MinhaLoja({ secao = 'loja' }) {
         pix_cidade: pixCidade || null,
       })
       .eq('id', empresa.id)
+      .select('id')
     setSalvando(false)
     if (error) { setErro(error.message); return }
+    if (!data?.length) {
+      setErro('Não consegui salvar: seu usuário não tem permissão para alterar os dados da loja. Entre com o login do dono (admin).')
+      return
+    }
     await refreshProfile()
     setSucesso(true)
     setTimeout(() => setSucesso(false), 3000)
