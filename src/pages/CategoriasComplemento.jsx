@@ -60,6 +60,94 @@ function ProdutoMultiAdd({ produtos, disabled, onConfirm }) {
   )
 }
 
+// Rótulo sugerido pra uma categoria do cardápio: a última palavra dela.
+// "Pizzas Promoção" → "Promoção"; "Pizzas Tradicionais" → "Tradicionais".
+// Vira o sufixo do sabor ("Mussarela (Promoção)") e o subtítulo na loja online.
+function rotuloSugerido(categoria) {
+  const partes = String(categoria || '').trim().split(/\s+/)
+  return partes.length > 1 ? partes[partes.length - 1] : (partes[0] ?? '')
+}
+
+// Traz os sabores do próprio cardápio pra dentro da categoria de complemento.
+// Sem isso, montar uma "Pizza 2 Sabores" seria digitar 30, 40 sabores na mão.
+// Marca as categorias do cardápio (Pizzas Promoção, Tradicionais, Especiais…) e
+// cada produto delas vira uma opção, já com o preço do cardápio.
+function ImportarSabores({ produtos, disabled, onConfirm }) {
+  const [aberto, setAberto] = useState(false)
+  const [sel, setSel] = useState({})   // { categoria: rótulo }
+
+  const categorias = useMemo(() => {
+    const m = new Map()
+    for (const p of produtos) {
+      if (p.ativo === false) continue
+      const c = (p.categoria || '').trim()
+      if (!c) continue
+      m.set(c, (m.get(c) ?? 0) + 1)
+    }
+    return [...m.entries()].map(([nome, qtd]) => ({ nome, qtd })).sort((a, b) => a.nome.localeCompare(b.nome))
+  }, [produtos])
+
+  function toggle(cat) {
+    setSel(prev => {
+      const n = { ...prev }
+      if (cat.nome in n) delete n[cat.nome]
+      else n[cat.nome] = rotuloSugerido(cat.nome)
+      return n
+    })
+  }
+  function fechar() { setAberto(false); setSel({}) }
+  function confirmar() {
+    const escolhas = Object.entries(sel).map(([categoria, rotulo]) => ({ categoria, rotulo: rotulo.trim() }))
+    if (escolhas.length) onConfirm(escolhas)
+    fechar()
+  }
+
+  if (!aberto) {
+    return (
+      <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 10, marginLeft: 8 }}
+        disabled={disabled} onClick={() => setAberto(true)}
+        title="Traz os produtos do cardápio como opções (ex.: os sabores de pizza)">
+        ⬇ Trazer do cardápio
+      </button>
+    )
+  }
+  const qtdTotal = Object.keys(sel).reduce((s, c) => s + (categorias.find(x => x.nome === c)?.qtd ?? 0), 0)
+  return (
+    <div className="cc-multiadd" style={{ marginTop: 10 }}>
+      <div className="cc-multiadd-head">
+        <strong style={{ fontSize: 13 }}>Quais categorias do cardápio viram opções?</strong>
+        <button type="button" className="cc-iconbtn" title="Fechar" onClick={fechar}>✕</button>
+      </div>
+      <p className="cc-empty" style={{ margin: '0 0 8px' }}>
+        Cada produto vira uma opção com o preço do cardápio. O rótulo aparece entre parênteses no nome
+        e separa os sabores em blocos na loja — deixe vazio pra não marcar de onde veio.
+      </p>
+      <div className="cc-multiadd-list">
+        {categorias.length === 0 && <p className="cc-empty">Nenhuma categoria no cardápio ainda.</p>}
+        {categorias.map(c => {
+          const marcada = c.nome in sel
+          return (
+            <div key={c.nome} className="cc-multiadd-item" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input type="checkbox" checked={marcada} onChange={() => toggle(c)} />
+              <span style={{ flex: 1 }}>{c.nome} <span className="cc-empty" style={{ fontSize: 11 }}>· {c.qtd}</span></span>
+              {marcada && (
+                <input className="cc-input" style={{ width: 130 }} value={sel[c.nome]}
+                  placeholder="rótulo"
+                  onChange={e => setSel(prev => ({ ...prev, [c.nome]: e.target.value }))} />
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <div className="cc-multiadd-actions">
+        <button type="button" className="btn btn-primary btn-sm" disabled={!qtdTotal} onClick={confirmar}>
+          Trazer {qtdTotal || ''} opç{qtdTotal === 1 ? 'ão' : 'ões'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // Tela de CATEGORIAS DE COMPLEMENTO compartilhadas.
 // Uma categoria (ex.: "Proteínas") é criada UMA vez, com suas opções, e pode ser
 // casada em vários produtos (via a ponte produto_complemento_grupos). Pausar uma
@@ -89,7 +177,7 @@ export default function CategoriasComplemento() {
       supabase.from('complemento_grupos')
         .select('id, nome, min, max, ordem, disponivel, regra_preco, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel)')
         .eq('empresa_id', empresaId).order('nome'),
-      supabase.from('produtos').select('id, nome').eq('empresa_id', empresaId).order('nome'),
+      supabase.from('produtos').select('id, nome, categoria, preco_venda, ativo').eq('empresa_id', empresaId).order('nome'),
       supabase.from('produto_complemento_grupos')
         .select('id, produto_id, grupo_id, max_override, produtos!inner(empresa_id)')
         .eq('produtos.empresa_id', empresaId),
@@ -200,6 +288,38 @@ export default function CategoriasComplemento() {
     if (error) { setError(error.message); return }
     load()
   }
+  // Cria uma opção por produto das categorias escolhidas do cardápio.
+  // Preço = o do cardápio (a loja ajusta depois se quiser). Descrição fica vazia
+  // de propósito: assim o texto continua vindo do produto e acompanha as edições
+  // que a loja fizer no cardápio.
+  async function importarSabores(cat, escolhas) {
+    setBusy(cat.id)
+    setError(null)
+    const jaTem = new Set(cat.opcoes.map(o => norm(o.nome)))
+    let ordem = cat.opcoes.reduce((m, o) => Math.max(m, o.ordem ?? 0), 0)
+    const rows = []
+    for (const { categoria, rotulo } of escolhas) {
+      const daCategoria = produtos
+        .filter(p => p.ativo !== false && (p.categoria || '').trim() === categoria)
+        .sort((a, b) => a.nome.localeCompare(b.nome))
+      for (const p of daCategoria) {
+        const nome = rotulo ? `${p.nome} (${rotulo})` : p.nome
+        if (jaTem.has(norm(nome))) continue // já está na lista: não duplica
+        jaTem.add(norm(nome))
+        rows.push({ grupo_id: cat.id, nome, preco_adicional: Number(p.preco_venda) || 0, ordem: ++ordem })
+      }
+    }
+    if (!rows.length) {
+      setBusy(null)
+      setError('Esses produtos já estão na lista de opções.')
+      return
+    }
+    const { error } = await supabase.from('complemento_opcoes').insert(rows)
+    setBusy(null)
+    if (error) { setError(error.message); return }
+    load()
+  }
+
   async function salvarOpcao(cat, op, patch) {
     setCats(prev => prev.map(c => c.id !== cat.id ? c : {
       ...c, opcoes: c.opcoes.map(o => o.id === op.id ? { ...o, ...patch } : o),
@@ -399,6 +519,11 @@ export default function CategoriasComplemento() {
                 <button className="btn btn-secondary btn-sm" style={{ marginTop: 10 }} disabled={busy === cat.id} onClick={() => addOpcao(cat)}>
                   + Opção
                 </button>
+                <ImportarSabores
+                  produtos={produtos}
+                  disabled={busy === cat.id}
+                  onConfirm={escolhas => importarSabores(cat, escolhas)}
+                />
               </div>
 
               {/* Produtos que usam */}
