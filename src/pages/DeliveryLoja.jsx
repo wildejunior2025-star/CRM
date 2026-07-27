@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
 import AvisoCookies from '../components/AvisoCookies'
 import { adicionalComplementos, cobraPeloMaior, rotuloPrecoOpcao } from '../lib/complementos'
+import { criarBuscadorDescricao, comDescricaoNasOpcoes } from '../lib/descricaoSabor'
 import './DeliveryLoja.css'
 
 // Loja dentro da grade semanal de funcionamento AGORA? (horário de Brasília).
@@ -171,6 +172,13 @@ export default function DeliveryLoja() {
       let produtosFinal = produtosData ?? []
       const ids = produtosFinal.map(p => p.id)
       if (ids.length) {
+        // Sabor de pizza também é produto: puxa a descrição dele pra mostrar no que vai na pizza.
+        // Pega TODOS os ativos (tem sabor que só existe dentro da pizza, sem aparecer no cardápio).
+        const { data: descData } = await supabase.from('produtos')
+          .select('nome, categoria, descricao')
+          .eq('empresa_id', lojaData.id)
+          .eq('ativo', true)
+        const descricaoDaOpcao = criarBuscadorDescricao(descData)
         // Lê pela ponte produto↔grupo: uma mesma categoria pode estar em vários produtos.
         const { data: vinc } = await supabase
           .from('produto_complemento_grupos')
@@ -182,9 +190,12 @@ export default function DeliveryLoja() {
         for (const v of (vinc ?? [])) {
           const g = v.complemento_grupos
           if (!g || g.disponivel === false) continue // grupo pausado some da loja
-          const opcoes = (g.complemento_opcoes ?? [])
-            .filter(o => o.disponivel !== false)
-            .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+          const opcoes = comDescricaoNasOpcoes(
+            (g.complemento_opcoes ?? [])
+              .filter(o => o.disponivel !== false)
+              .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0)),
+            descricaoDaOpcao,
+          )
           // Categoria que sobrou só com "Sem/Não Quero" (nenhuma opção real) não aparece.
           if (!opcoes.some(o => !soSemOpcao(o.nome))) continue
           ;(porProduto[v.produto_id] ??= []).push({
@@ -889,7 +900,7 @@ function OptionsModal({ produto, onClose, onConfirm }) {
                         onClick={() => toggle(grupo, opcao)}
                         disabled={bloqueado}
                         style={{
-                          display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
+                          display: 'flex', alignItems: opcao.descricao ? 'flex-start' : 'center', gap: 10, width: '100%', textAlign: 'left',
                           padding: '10px 12px', borderRadius: 10, cursor: bloqueado ? 'not-allowed' : 'pointer',
                           border: `1.5px solid ${marcado ? '#22c55e' : 'var(--dl-border)'}`,
                           background: marcado ? 'rgba(34,197,94,.12)' : 'var(--dl-surface)',
@@ -898,15 +909,23 @@ function OptionsModal({ produto, onClose, onConfirm }) {
                       >
                         <span style={{
                           width: 20, height: 20, flexShrink: 0, borderRadius: grupo.max === 1 ? '50%' : 6,
+                          marginTop: opcao.descricao ? 1 : 0,
                           border: `2px solid ${marcado ? '#22c55e' : 'var(--dl-text-dim)'}`,
                           background: marcado ? '#22c55e' : 'transparent',
                           display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#04120a',
                         }}>
                           {marcado && <IconCheckSmall />}
                         </span>
-                        <span style={{ flex: 1, fontSize: 14 }}>{opcao.nome}</span>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ display: 'block', fontSize: 14 }}>{opcao.nome}</span>
+                          {opcao.descricao && (
+                            <span style={{ display: 'block', fontSize: 12, lineHeight: 1.35, color: 'var(--dl-text-muted)', marginTop: 2 }}>
+                              {opcao.descricao}
+                            </span>
+                          )}
+                        </span>
                         {rotuloPrecoOpcao(grupo, opcao.preco_adicional, fmt) && (
-                          <span style={{ fontSize: 13, color: '#22c55e', fontWeight: 700 }}>
+                          <span style={{ fontSize: 13, color: '#22c55e', fontWeight: 700, flexShrink: 0, marginTop: opcao.descricao ? 1 : 0 }}>
                             {rotuloPrecoOpcao(grupo, opcao.preco_adicional, fmt)}
                           </span>
                         )}

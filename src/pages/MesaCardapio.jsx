@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
+import { criarBuscadorDescricao, comDescricaoNasOpcoes } from '../lib/descricaoSabor'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
 
@@ -74,6 +75,12 @@ export default function MesaCardapio() {
       const ids = (ps ?? []).map(p => p.produto_id)
       const cm = {}
       if (ids.length) {
+        // Sabor de pizza também é produto: usa a descrição dele pra mostrar o que vai na pizza.
+        const { data: descData } = await supabase.from('produtos')
+          .select('nome, categoria, descricao')
+          .eq('empresa_id', data.empresa_id)
+          .eq('ativo', true)
+        const descricaoDaOpcao = criarBuscadorDescricao(descData)
         const { data: vinc } = await supabase
           .from('produto_complemento_grupos')
           .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))')
@@ -83,9 +90,12 @@ export default function MesaCardapio() {
         for (const v of (vinc ?? [])) {
           const g = v.complemento_grupos
           if (!g || g.disponivel === false) continue // grupo pausado some do cardápio da mesa
-          const opcoes = (g.complemento_opcoes ?? [])
-            .filter(o => o.disponivel !== false)
-            .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+          const opcoes = comDescricaoNasOpcoes(
+            (g.complemento_opcoes ?? [])
+              .filter(o => o.disponivel !== false)
+              .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0)),
+            descricaoDaOpcao,
+          )
           // Some se não tiver opção nenhuma OU só tiver "Sem/Não Quero" (nada real).
           if (!opcoes.some(o => !soSemOpcao(o.nome))) continue
           ;(cm[v.produto_id] ??= []).push({
@@ -456,8 +466,13 @@ function ModalCompMesa({ produto, grupos, semObrigatorios, onClose, onConfirm })
                       border: '1px solid ' + (marcado ? '#7c3aed' : '#2c2350'),
                       background: marcado ? 'rgba(124,58,237,.18)' : 'transparent', color: '#fff', fontSize: 14,
                     }}>
-                      <span>{marcado ? '✓ ' : ''}{o.nome}</span>
-                      {Number(o.preco_adicional) > 0 && <span style={{ color: '#a78bfa', fontSize: 13 }}>+{fmt(o.preco_adicional)}</span>}
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: 'block' }}>{marcado ? '✓ ' : ''}{o.nome}</span>
+                        {o.descricao && (
+                          <span style={{ display: 'block', fontSize: 12, lineHeight: 1.35, color: '#a89ec9', marginTop: 2 }}>{o.descricao}</span>
+                        )}
+                      </span>
+                      {Number(o.preco_adicional) > 0 && <span style={{ color: '#a78bfa', fontSize: 13, flexShrink: 0 }}>+{fmt(o.preco_adicional)}</span>}
                     </button>
                   )
                 })}
