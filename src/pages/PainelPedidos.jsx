@@ -2349,8 +2349,11 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         )}
 
         {/* Concluído: o gestor pode atribuir/trocar o entregador (ex.: a moto de
-            um quebrou e outro levou), pra o histórico refletir quem entregou. */}
-        {pedido.origem !== 'balcao' && !isRetirada && pedido.status === 'entregue' && (
+            um quebrou e outro levou), pra o histórico refletir quem entregou.
+            Vale pra QUALQUER origem que tenha saído pra entrega — venda de balcão
+            com entrega também vai de moto e conta no acerto do motoboy. Só some
+            na retirada, onde não existe entregador. */}
+        {!isRetirada && pedido.status === 'entregue' && (
           <div style={{ width: '100%' }}>
             <p style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, margin: '0 0 8px', color: '#16a34a' }}>
               {(() => {
