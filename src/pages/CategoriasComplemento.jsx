@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { blocosDeOpcoes } from '../lib/complementos'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 import './CategoriasComplemento.css'
@@ -320,6 +321,28 @@ export default function CategoriasComplemento() {
     load()
   }
 
+  // Renomeia o bloco = troca o que está entre parênteses em TODAS as opções dele
+  // ("Mussarela (Promoção)" → "Mussarela (Oferta)"). Vazio junta o bloco na lista
+  // corrida, sem subtítulo na loja.
+  async function renomearBloco(cat, bloco, valor) {
+    const novo = String(valor || '').trim()
+    if (novo === bloco.titulo) return
+    setBusy(cat.id)
+    setError(null)
+    const { error } = await (async () => {
+      for (const op of bloco.opcoes) {
+        const nome = novo ? `${op.nomeCurto} (${novo})` : op.nomeCurto
+        if (nome === op.nome) continue
+        const r = await supabase.from('complemento_opcoes').update({ nome }).eq('id', op.id)
+        if (r.error) return r
+      }
+      return {}
+    })()
+    setBusy(null)
+    if (error) { setError(error.message); return }
+    load()
+  }
+
   async function salvarOpcao(cat, op, patch) {
     setCats(prev => prev.map(c => c.id !== cat.id ? c : {
       ...c, opcoes: c.opcoes.map(o => o.id === op.id ? { ...o, ...patch } : o),
@@ -494,9 +517,24 @@ export default function CategoriasComplemento() {
               <div>
                 <p className="cc-section-title">Opções · {cat.opcoes.length}</p>
                 {cat.opcoes.length === 0 && <p className="cc-empty">Nenhuma opção ainda.</p>}
-                {cat.opcoes.map(op => (
+                {blocosDeOpcoes(cat.opcoes).map(bloco => (
+                <div key={bloco.titulo ?? 'unico'}>
+                  {/* Bloco = o que está entre parênteses no fim do nome. Vira subtítulo
+                      na loja, e renomear aqui renomeia todas as opções de uma vez. */}
+                  {bloco.titulo && (
+                    <div className="cc-bloco-head">
+                      <span className="cc-bloco-label">Bloco</span>
+                      <input className="cc-input" defaultValue={bloco.titulo} disabled={busy === cat.id}
+                        title="Aparece como título deste trecho na loja online"
+                        onBlur={e => renomearBloco(cat, bloco, e.target.value)} />
+                      <span className="cc-empty" style={{ fontSize: 11 }}>· {bloco.opcoes.length}</span>
+                    </div>
+                  )}
+                  {bloco.opcoes.map(op => (
                   <div key={op.id} className={`cc-opt${op.disponivel === false ? ' paused' : ''}`}>
-                    <input className="cc-input" defaultValue={op.nome}
+                    {/* key com o nome: sem isso o campo continuaria mostrando o nome
+                        antigo depois de renomear o bloco (defaultValue só vale ao montar). */}
+                    <input className="cc-input" key={op.nome} defaultValue={op.nome}
                       onBlur={e => { const v = e.target.value.trim(); if (v && v !== op.nome) salvarOpcao(cat, op, { nome: v }) }} />
                     <div className="cc-price-wrap">
                       <span className="cc-price-prefix">R$</span>
@@ -515,6 +553,8 @@ export default function CategoriasComplemento() {
                         if (v !== (op.descricao ?? '')) salvarOpcao(cat, op, { descricao: v || null })
                       }} />
                   </div>
+                  ))}
+                </div>
                 ))}
                 <button className="btn btn-secondary btn-sm" style={{ marginTop: 10 }} disabled={busy === cat.id} onClick={() => addOpcao(cat)}>
                   + Opção
