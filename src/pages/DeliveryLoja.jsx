@@ -891,12 +891,7 @@ function OptionsModal({ produto, onClose, onConfirm }) {
                 )}
                 {blocosDeOpcoes(grupo.opcoes).map(bloco => (
                 <div key={bloco.titulo ?? 'unico'} style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: bloco.titulo ? 12 : 0 }}>
-                  {bloco.titulo && (
-                    <p style={{
-                      fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .4,
-                      color: 'var(--dl-text-muted)', margin: '4px 0 0',
-                    }}>{bloco.titulo}</p>
-                  )}
+                  {bloco.titulo && <p className="dloja-opt-bloco-titulo">{bloco.titulo}</p>}
                   {bloco.opcoes.map(opcao => {
                     const marcado = sel[grupo.id]?.has(opcao.id)
                     const bloqueado = !marcado && grupo.max > 1 && qtdSel >= grupo.max

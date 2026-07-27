@@ -459,7 +459,13 @@ function ModalCompMesa({ produto, grupos, semObrigatorios, onClose, onConfirm })
               {blocosDeOpcoes(g.opcoes).map(bloco => (
               <div key={bloco.titulo ?? 'unico'} style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: bloco.titulo ? 10 : 0 }}>
                 {bloco.titulo && (
-                  <p style={{ fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .4, color: '#a89ec9', margin: '4px 0 0' }}>
+                  /* Cola no topo enquanto os sabores do bloco passam (o corpo do modal é
+                     quem rola); margem negativa pra o fundo tampar as laterais. */
+                  <p style={{
+                    position: 'sticky', top: -14, zIndex: 3, margin: '0 -18px',
+                    padding: '9px 18px 7px', background: '#15102a', boxShadow: '0 1px 0 #2c2350',
+                    fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .4, color: '#a89ec9',
+                  }}>
                     {bloco.titulo}
                   </p>
                 )}

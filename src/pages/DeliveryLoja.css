@@ -844,6 +844,28 @@
   border-radius: 8px;
 }
 
+/* Subtítulo dos blocos de sabor (PROMOÇÃO, TRADICIONAL…): fica colado no topo
+   enquanto os sabores daquele bloco passam, e o próximo empurra ele pra fora —
+   assim dá sempre pra saber de qual faixa é o sabor que você está olhando.
+   As margens negativas fazem o fundo sangrar até as bordas, senão os cards
+   apareceriam por baixo nas laterais. */
+.dloja-opt-bloco-titulo {
+  position: sticky;
+  /* -12px = o padding de cima da lista: sem isso o sabor aparecia numa fresta
+     acima do título quando ele estava colado. */
+  top: -12px;
+  z-index: 3;
+  margin: 0 -20px;
+  padding: 10px 20px 8px;
+  background: var(--dl-bg);
+  box-shadow: 0 1px 0 var(--dl-border);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--dl-text-muted);
+}
+
 .dloja-drawer-item {
   display: flex;
   flex-direction: column;
