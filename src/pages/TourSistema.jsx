@@ -138,10 +138,10 @@ export default function TourSistema() {
                   <h2>Comece por aqui</h2>
                   <p className="tour-start-sub">
                     {comVideo.length} vídeo{comVideo.length === 1 ? '' : 's'} curto{comVideo.length === 1 ? '' : 's'},
-                    direto ao ponto. Clique num atalho ou procure no menu completo.
+                    direto ao ponto. Clique num deles ou use o menu completo com todas as telas.
                   </p>
                   <div className="tour-cards">
-                    {comVideo.slice(0, 6).map(i => (
+                    {comVideo.map(i => (
                       <button key={i.chave} type="button" className="tour-card" onClick={() => abrir(i.chave)}>
                         <span className="tour-card-play">▶</span>
                         <span className="tour-card-txt">
@@ -151,11 +151,14 @@ export default function TourSistema() {
                       </button>
                     ))}
                   </div>
-                  {comVideo.length > 6 && (
-                    <p className="tour-start-mais">
-                      + {comVideo.length - 6} outros no menu completo
-                    </p>
-                  )}
+                  {/* Ocupa a sobra do card e ainda converte, em vez de branco vazio */}
+                  <div className="tour-start-cta">
+                    <div>
+                      <strong>Prefere testar você mesmo?</strong>
+                      <span>Abre a conta em 2 minutos e usa o sistema completo de graça.</span>
+                    </div>
+                    <a className="tour-cta" href={LINK_TESTE}>Começar teste grátis</a>
+                  </div>
                 </>
               ) : (
                 <div className="tour-vazio">
@@ -211,6 +214,16 @@ export default function TourSistema() {
         </main>
       </div>
 
+      {/* Faixa roxa fechando a página — mesma respiração da landing, e evita
+          que o conteúdo termine num vazio branco. */}
+      <section className="tour-band">
+        <div className="tour-band-in">
+          <h2>Veja funcionando na sua loja</h2>
+          <p>Teste o sistema inteiro de graça, com seus produtos e seus pedidos.</p>
+          <a className="tour-band-cta" href={LINK_TESTE}>Começar teste grátis</a>
+        </div>
+      </section>
+
       <footer className="tour-foot">
         <span>FWC Inter · Sistema de gestão para distribuidoras</span>
         <button type="button" onClick={() => navigate('/')}>Voltar ao site</button>
@@ -229,9 +242,14 @@ const S = {
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
-.tour-root{--pp:#7c3aed;--pp-dark:#5b21b6;--pp-soft:#f5f3ff;--ink:#111827;--muted:#6b7280;
-  --line:#e5e7eb;
-  min-height:100vh;background:#fff;color:var(--ink);line-height:1.6;
+.tour-root{--pp:#7c3aed;--pp-dark:#5b21b6;--pp-soft:#f5f3ff;--ink:#111827;--muted:#4b5563;
+  --line:#e3e0f0;--fundo:#f1eff9;
+  min-height:100vh;color:var(--ink);line-height:1.6;
+  /* Fundo lilás com um brilho roxo no topo: é ele que faz os cards brancos
+     "flutuarem". Tudo branco no branco não deixava ver onde uma coisa acaba. */
+  background:
+    radial-gradient(900px 420px at 50% -80px, rgba(124,58,237,.16), transparent 70%),
+    var(--fundo);
   font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;}
 .tour-root *{box-sizing:border-box}
 
@@ -253,10 +271,10 @@ const CSS = `
 .tour-cta.grande{margin:6px 0 0;padding:14px 30px;font-size:16px}
 
 /* ── Cabeçalho do sistema ── */
-.tour-head{background:linear-gradient(180deg,var(--pp-soft) 0%,#fff 100%);
-  padding:52px 24px 34px;text-align:center}
+.tour-head{padding:52px 24px 34px;text-align:center}
 .tour-head-in{max-width:720px;margin:0 auto}
-.tour-badge{display:inline-flex;align-items:center;gap:6px;background:#ede9fe;color:var(--pp);
+.tour-badge{display:inline-flex;align-items:center;gap:6px;background:#fff;color:var(--pp);
+  border:1px solid #ddd4fb;box-shadow:0 2px 8px rgba(124,58,237,.10);
   border-radius:999px;padding:6px 16px;font-size:13px;font-weight:700;margin-bottom:18px}
 .tour-head h1{font-size:clamp(30px,5vw,46px);font-weight:900;letter-spacing:-1.2px;
   line-height:1.1;margin:0 0 12px;display:flex;align-items:center;justify-content:center;gap:14px}
@@ -270,22 +288,28 @@ const CSS = `
 .tour-head.compacto p,.tour-head.compacto .tour-badge{display:none}
 
 /* ── Miolo: menu + palco, dentro de um cartão só ── */
+/* stretch: os dois cards terminam na mesma linha — com align:start sobrava um
+   buraco enorme embaixo do palco, que era metade da sensação de "página vazia". */
 .tour-shell{max-width:1180px;margin:0 auto 56px;padding:0 24px;
-  display:grid;grid-template-columns:296px 1fr;gap:24px;align-items:start}
-.tour-side{background:#fff;border:1px solid var(--line);border-radius:16px;padding:10px 10px 16px;
-  box-shadow:0 4px 20px rgba(17,24,39,.05);position:sticky;top:88px;
-  max-height:calc(100vh - 112px);overflow:auto}
-.tour-side-t{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;
-  color:var(--muted);padding:10px 12px 4px;margin:0}
-.tour-group{font-size:10.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;
-  color:#9aa0ad;padding:16px 12px 6px}
+  display:grid;grid-template-columns:296px 1fr;gap:24px;align-items:stretch}
+.tour-side{background:#fff;border:1px solid var(--line);border-radius:16px;padding:0 10px 14px;
+  box-shadow:0 1px 2px rgba(17,24,39,.06),0 14px 34px rgba(43,26,92,.10);
+  position:sticky;top:88px;max-height:calc(100vh - 112px);overflow:auto}
+/* Cabeçalho da lateral: barra própria pra lista não começar "solta" */
+.tour-side-t{position:sticky;top:0;z-index:2;background:#fff;margin:0 -10px 4px;
+  padding:14px 22px 10px;border-bottom:1px solid var(--line);
+  font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--pp)}
+.tour-group{display:flex;align-items:center;gap:8px;font-size:10.5px;font-weight:800;
+  letter-spacing:.8px;text-transform:uppercase;color:#8b8fa0;padding:16px 12px 6px}
+.tour-group::after{content:'';flex:1;height:1px;background:var(--line)}
 .tour-block{margin-bottom:2px}
 .tour-item{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
   background:none;border:none;cursor:pointer;padding:10px 12px;border-radius:10px;
   font:inherit;font-size:14px;font-weight:600;color:var(--ink);line-height:1.25;
   transition:background .13s,color .13s}
 .tour-item:hover{background:var(--pp-soft);color:var(--pp)}
-.tour-item.ativo{background:var(--pp);color:#fff}
+.tour-item.ativo{background:linear-gradient(90deg,var(--pp),#8b5cf6);color:#fff;
+  box-shadow:0 6px 16px rgba(124,58,237,.32)}
 .tour-item.filho{padding-left:24px;font-size:13.5px;font-weight:500;color:#4b5563;position:relative}
 .tour-item.filho::before{content:'';position:absolute;left:13px;top:50%;width:6px;height:1.5px;
   background:#d7d9e0;transform:translateY(-50%)}
@@ -294,29 +318,45 @@ const CSS = `
 .tour-item.ativo.filho::before{background:rgba(255,255,255,.6)}
 .tour-label{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tour-play{flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--pp-soft);
-  color:var(--pp);font-size:9px;display:inline-flex;align-items:center;justify-content:center}
+  border:1px solid #ddd4fb;color:var(--pp);font-size:9px;
+  display:inline-flex;align-items:center;justify-content:center}
 .tour-item.ativo .tour-play{background:rgba(255,255,255,.22);color:#fff}
 .tour-soon{flex-shrink:0;font-size:10px;font-weight:700;color:#9aa0ad;
   background:#f3f4f6;border-radius:999px;padding:2px 8px;text-transform:uppercase;letter-spacing:.3px}
 .tour-item.ativo .tour-soon{background:rgba(255,255,255,.2);color:#fff}
 
 .tour-stage{min-width:0;background:#fff;border:1px solid var(--line);border-radius:16px;
-  box-shadow:0 4px 20px rgba(17,24,39,.05);padding:28px}
+  box-shadow:0 1px 2px rgba(17,24,39,.06),0 14px 34px rgba(43,26,92,.10);padding:28px;
+  display:flex;flex-direction:column}
+.tour-start{display:flex;flex-direction:column;flex:1}
 
 /* Tela inicial do palco: atalhos pros vídeos que já existem */
 .tour-start h2{font-size:24px;font-weight:800;margin:0 0 6px;letter-spacing:-.4px}
-.tour-start-sub{color:var(--muted);font-size:15px;margin:0 0 22px}
-.tour-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
-.tour-card{display:flex;align-items:center;gap:12px;text-align:left;cursor:pointer;
-  background:#fff;border:1.5px solid var(--line);border-radius:12px;padding:14px;
+.tour-start-sub{color:var(--muted);font-size:15px;margin:0 0 22px;
+  padding-bottom:18px;border-bottom:1px solid var(--line)}
+.tour-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.tour-card{position:relative;display:flex;align-items:center;gap:12px;text-align:left;cursor:pointer;
+  background:linear-gradient(180deg,#fff,#faf9ff);border:1.5px solid var(--line);border-radius:14px;
+  padding:15px 15px 15px 18px;overflow:hidden;
   font:inherit;color:var(--ink);transition:border-color .15s,box-shadow .15s,transform .15s}
-.tour-card:hover{border-color:var(--pp);box-shadow:0 8px 20px rgba(124,58,237,.12);transform:translateY(-2px)}
-.tour-card-play{flex-shrink:0;width:38px;height:38px;border-radius:11px;background:var(--pp-soft);
-  color:var(--pp);font-size:13px;display:inline-flex;align-items:center;justify-content:center}
+/* Fita roxa na lateral do card — dá o "acabamento" que faltava */
+.tour-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;
+  background:linear-gradient(180deg,var(--pp),#a78bfa)}
+.tour-card:hover{border-color:#c4b5fd;box-shadow:0 10px 26px rgba(124,58,237,.20);transform:translateY(-2px)}
+.tour-card-play{flex-shrink:0;width:40px;height:40px;border-radius:12px;
+  background:linear-gradient(180deg,var(--pp),#8b5cf6);border:none;
+  box-shadow:0 6px 14px rgba(124,58,237,.35);
+  color:#fff;font-size:13px;display:inline-flex;align-items:center;justify-content:center}
 .tour-card-txt{display:flex;flex-direction:column;min-width:0}
 .tour-card-txt strong{font-size:14.5px;font-weight:700;line-height:1.3}
 .tour-card-txt small{font-size:12px;color:var(--muted)}
 .tour-start-mais{margin:16px 2px 0;font-size:13.5px;color:var(--muted)}
+.tour-start-cta{margin-top:auto;padding-top:22px;display:flex;align-items:center;gap:16px;
+  flex-wrap:wrap;justify-content:space-between}
+.tour-start-cta>div{display:flex;flex-direction:column;min-width:220px;flex:1}
+.tour-start-cta strong{font-size:15.5px;font-weight:800}
+.tour-start-cta span{font-size:14px;color:var(--muted)}
+.tour-start-cta .tour-cta{margin-left:0}
 
 /* Player */
 .tour-crumb{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13.5px;
@@ -354,8 +394,19 @@ const CSS = `
   padding:11px 22px;font:inherit;font-weight:700;cursor:pointer}
 .tour-btn-sec:hover{border-color:var(--pp);color:var(--pp)}
 
+/* Faixa roxa de fechamento */
+.tour-band{background:linear-gradient(135deg,var(--pp-dark),var(--pp));padding:44px 24px;
+  text-align:center;color:#fff}
+.tour-band-in{max-width:640px;margin:0 auto}
+.tour-band h2{font-size:clamp(22px,3.4vw,30px);font-weight:900;letter-spacing:-.6px;margin:0 0 8px}
+.tour-band p{font-size:15.5px;color:rgba(255,255,255,.86);margin:0 0 20px}
+.tour-band-cta{display:inline-block;background:#fff;color:var(--pp-dark);border-radius:10px;
+  padding:13px 30px;font-size:15.5px;font-weight:800;text-decoration:none;
+  box-shadow:0 10px 26px rgba(0,0,0,.18);transition:transform .15s}
+.tour-band-cta:hover{transform:translateY(-2px)}
+
 /* Rodapé */
-.tour-foot{border-top:1px solid var(--line);padding:22px 24px;display:flex;gap:12px;
+.tour-foot{background:#fff;border-top:1px solid var(--line);padding:22px 24px;display:flex;gap:12px;
   align-items:center;justify-content:center;flex-wrap:wrap;font-size:13.5px;color:var(--muted)}
 .tour-foot button{background:none;border:none;font:inherit;font-weight:700;color:var(--pp);cursor:pointer}
 .tour-foot button:hover{text-decoration:underline}
