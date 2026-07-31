@@ -60,6 +60,8 @@ export default function MinhaLoja({ secao = 'loja' }) {
   const [ifoodStatus, setIfoodStatus] = useState(null) // { ultimo_polling_em, ultimo_erro }
   const [ifoodSalvando, setIfoodSalvando] = useState(false)
   const [ifoodTestando, setIfoodTestando] = useState(false)
+  const [ifoodDetectando, setIfoodDetectando] = useState(false)
+  const [ifoodOpcoes, setIfoodOpcoes] = useState(null) // lojas autorizadas quando há mais de uma
   const [ifoodImportando, setIfoodImportando] = useState(false)
   const [ifoodMsg, setIfoodMsg] = useState(null) // { tipo: 'ok'|'erro', texto }
   // F3 — gerenciar itens do iFood (pausar/despausar)
@@ -231,6 +233,40 @@ export default function MinhaLoja({ secao = 'loja' }) {
     if (error) { setIfoodMsg({ tipo: 'erro', texto: error.message }); return }
     setIfoodMsg({ tipo: 'ok', texto: 'Configuração do iFood salva.' })
     setTimeout(() => setIfoodMsg(null), 3000)
+  }
+
+  // Descobre o Merchant ID sozinho: basta o lojista ter autorizado o CRM FWC
+  // no Portal do Parceiro dele. Quem procura o ID é a edge function.
+  async function handleDetectarLoja(escolhida) {
+    if (!empresa) return
+    setIfoodDetectando(true)
+    setIfoodMsg(null)
+    setIfoodOpcoes(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const url = `${import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'}/functions/v1/ifood-integration`
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token ?? ''}`,
+        },
+        body: JSON.stringify({ acao: 'detectar_merchant', empresa_id: empresa.id, merchant_id: escolhida }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setIfoodCfg(c => ({ ...c, merchant_id: data.merchant_id, ambiente: 'producao', ativo: true }))
+        setIfoodMsg({ tipo: 'ok', texto: 'Loja encontrada e integração ligada! Os pedidos do iFood já vão cair no painel.' })
+      } else if (data.escolher) {
+        setIfoodOpcoes(data.opcoes ?? [])
+        setIfoodMsg({ tipo: 'erro', texto: 'Achei mais de uma loja autorizada. Escolha qual é a sua abaixo.' })
+      } else {
+        setIfoodMsg({ tipo: 'erro', texto: data.error ?? 'Não consegui achar sua loja.' })
+      }
+    } catch (err) {
+      setIfoodMsg({ tipo: 'erro', texto: String(err.message ?? err) })
+    }
+    setIfoodDetectando(false)
   }
 
   async function handleTestarIfood() {
@@ -1113,9 +1149,9 @@ export default function MinhaLoja({ secao = 'loja' }) {
             <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Integração com o iFood</h2>
           </div>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
-            Os pedidos que caírem no iFood aparecem aqui no painel automaticamente. A integração
-            já está configurada pela FWC — você só precisa informar o <strong>ID da sua loja no
-            iFood (Merchant ID)</strong> e ativar.
+            Os pedidos que caírem no iFood aparecem aqui no painel automaticamente. Autorize o
+            aplicativo <strong>CRM FWC</strong> no Portal do Parceiro do iFood (Integrações →
+            Aplicativos) e clique no botão abaixo — o resto a gente acha sozinho.
           </p>
 
           {ifoodMsg && (
@@ -1128,6 +1164,58 @@ export default function MinhaLoja({ secao = 'loja' }) {
               {ifoodMsg.texto}
             </div>
           )}
+
+          {/* Caminho principal: o lojista não precisa saber o que é Merchant ID */}
+          <div style={{
+            border: '1.5px solid #ea1d2c', borderRadius: 10, padding: 16, marginBottom: 16,
+            background: 'rgba(234,29,44,.06)',
+          }}>
+            <p style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700 }}>
+              Já autorizou o CRM FWC no iFood?
+            </p>
+            <button
+              type="button"
+              onClick={() => handleDetectarLoja()}
+              disabled={ifoodDetectando}
+              style={{
+                padding: '10px 20px', borderRadius: 8, border: 'none',
+                background: '#ea1d2c', color: '#fff', fontWeight: 700, fontSize: 14,
+                cursor: ifoodDetectando ? 'wait' : 'pointer', opacity: ifoodDetectando ? 0.6 : 1,
+              }}
+            >
+              {ifoodDetectando ? 'Procurando sua loja...' : '🔎 Detectar minha loja e ligar'}
+            </button>
+            <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+              A gente descobre o código da sua loja no iFood e liga a integração. Você não
+              precisa copiar nada.
+            </p>
+
+            {ifoodOpcoes?.length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 700 }}>
+                  Qual dessas é a sua loja?
+                </p>
+                {ifoodOpcoes.map(id => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => handleDetectarLoja(id)}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left', marginBottom: 6,
+                      padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
+                      border: '1px solid var(--border)', background: 'var(--input-bg, transparent)',
+                      color: 'var(--text)', fontSize: 13, fontFamily: 'monospace',
+                    }}
+                  >
+                    {id}
+                  </button>
+                ))}
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                  Na dúvida, chame a FWC que a gente identifica pra você.
+                </p>
+              </div>
+            )}
+          </div>
 
           <label style={{
             display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',

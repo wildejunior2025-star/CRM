@@ -11,6 +11,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 //                   pelo /painel quando o lojista avança o pedido.
 // acao: "test"   -> { empresa_id }. Testa as credenciais (autentica) e
 //                   devolve ok/erro. Usado pelo botão "Testar conexão".
+// acao: "detectar_merchant" -> { empresa_id }. Descobre o Merchant ID da loja
+//                   lendo as lojas autorizadas dentro do token e liga a
+//                   integração sozinho. Botão "Detectar minha loja".
 // =====================================================================
 
 const cors = {
@@ -64,6 +67,7 @@ Deno.serve(async (req) => {
     if (acao === "catalogo_salvar_item") return json(await runSalvarItem(sb, body?.empresa_id, body?.payload))
     if (acao === "catalogo_itens") return json(await runCatalogoItensCompletos(sb, body?.empresa_id))
     if (acao === "catalogo_pausar_complemento") return json(await runPausarComplemento(sb, body?.empresa_id, body?.option_id, body?.pausar))
+    if (acao === "detectar_merchant") return json(await runDetectarMerchant(sb, body?.empresa_id, body?.merchant_id))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
   } catch (e) {
     return json({ ok: false, error: String(e?.message ?? e) }, 500)
@@ -886,6 +890,106 @@ async function runVerifyDeliveryCode(sb: any, pedidoId: string, codigo: string) 
 // ─────────────────────────────────────────────────────────────────────
 // TEST — valida as credenciais autenticando no iFood
 // ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
+// DETECTAR MERCHANT — descobre sozinho o ID da loja no iFood
+// ─────────────────────────────────────────────────────────────────────
+// O lojista autoriza o app CRM FWC no Portal do Parceiro dele e pronto: não
+// precisa caçar nem colar o "Merchant ID". O iFood devolve as lojas que
+// autorizaram o app dentro do próprio token (claim merchant_scope, no formato
+// "<merchant>:order" / "<merchant>:events"), então a gente lê de lá.
+//
+// Sobra o problema de saber QUAL das lojas autorizadas é esta empresa — o
+// módulo Merchant (que traria nome/CNPJ) ainda não está liberado pro nosso app.
+// Resolvemos por eliminação: tira as que já estão em outra empresa do CRM. Se
+// sobrar exatamente uma, liga sozinho. Se sobrar mais de uma (alguém autorizou
+// e nunca conectou), devolve a lista pro lojista escolher em vez de chutar.
+function merchantsDoToken(token: string): string[] {
+  const parte = token.split(".")[1]
+  if (!parte) return []
+  const b64 = parte.replace(/-/g, "+").replace(/_/g, "/")
+  const claims = JSON.parse(atob(b64 + "=".repeat((4 - b64.length % 4) % 4)))
+  const escopo = claims?.merchant_scope
+  const lista: string[] = Array.isArray(escopo)
+    ? escopo
+    : (escopo && typeof escopo === "object" ? Object.keys(escopo) : [])
+  const ids = lista.map((s) => String(s).split(":")[0]).filter(Boolean)
+  return [...new Set(ids)]
+}
+
+async function runDetectarMerchant(sb: any, empresaId: string, merchantEscolhido?: string) {
+  if (!empresaId) return { ok: false, error: "empresa_id obrigatório" }
+
+  // Autentica com as credenciais da plataforma (ou as da empresa, se tiver).
+  const { data: cfgAtual } = await sb
+    .from("ifood_config").select("*").eq("empresa_id", empresaId).maybeSingle()
+  const creds = await resolverCreds(sb, (cfgAtual ?? { empresa_id: empresaId }) as Config)
+  if (!creds.clientId || !creds.clientSecret) {
+    return { ok: false, error: "Credenciais do iFood não configuradas na plataforma" }
+  }
+
+  const form = new URLSearchParams()
+  form.set("grantType", "client_credentials")
+  form.set("clientId", creds.clientId)
+  form.set("clientSecret", creds.clientSecret)
+  const res = await fetch(`${IFOOD}/authentication/v1.0/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  })
+  if (!res.ok) {
+    return { ok: false, error: `Não consegui falar com o iFood (${res.status}). Tente de novo em instantes.` }
+  }
+  const token: string = (await res.json()).accessToken
+
+  const autorizados = merchantsDoToken(token)
+  if (!autorizados.length) {
+    return {
+      ok: false,
+      error: "Nenhuma loja autorizou o CRM FWC ainda. Autorize o app no Portal do Parceiro do iFood e tente de novo.",
+    }
+  }
+
+  // Merchants já vinculados a OUTRAS empresas do CRM
+  const { data: usados } = await sb
+    .from("ifood_config").select("empresa_id, merchant_id").not("merchant_id", "is", null)
+  const deOutros = new Set(
+    (usados ?? []).filter((u: any) => u.empresa_id !== empresaId).map((u: any) => u.merchant_id),
+  )
+  const livres = autorizados.filter((m) => !deOutros.has(m))
+
+  let merchantId: string | null = null
+  if (merchantEscolhido) {
+    if (!livres.includes(merchantEscolhido)) {
+      return { ok: false, error: "Essa loja não está mais disponível. Atualize a página e tente de novo." }
+    }
+    merchantId = merchantEscolhido
+  } else if (livres.length === 1) {
+    merchantId = livres[0]
+  } else if (livres.length === 0) {
+    return {
+      ok: false,
+      error: "As lojas autorizadas já estão ligadas a outras contas do CRM. Autorize o app no iFood com a loja certa.",
+    }
+  } else {
+    // Mais de uma candidata: quem escolhe é o lojista.
+    return { ok: false, escolher: true, opcoes: livres }
+  }
+
+  const { error } = await sb.from("ifood_config").upsert({
+    empresa_id: empresaId,
+    merchant_id: merchantId,
+    ambiente: "producao",
+    ativo: true,
+    polling_ativo: true,
+    access_token: null,
+    token_expira_em: null,
+    ultimo_erro: null,
+  }, { onConflict: "empresa_id" })
+  if (error) return { ok: false, error: error.message }
+
+  return { ok: true, merchant_id: merchantId }
+}
+
 async function runTest(sb: any, empresaId: string) {
   if (!empresaId) return { ok: false, error: "empresa_id obrigatório" }
   const { data: cfg } = await sb
