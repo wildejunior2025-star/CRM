@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
+import { formatCnpj, cnpjValido } from '../lib/cnpj'
 import ThemeToggle from '../components/ThemeToggle'
 import './Login.css'
 
@@ -11,6 +12,7 @@ export default function Cadastro() {
   const navigate = useNavigate()
 
   const [nomeEmpresa, setNomeEmpresa] = useState('')
+  const [cnpj, setCnpj] = useState('')
   const [nome, setNome] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -34,6 +36,11 @@ export default function Cadastro() {
       return
     }
 
+    if (!cnpjValido(cnpj)) {
+      setError('Informe um CNPJ válido — é ele que identifica sua loja nas integrações (iFood, nota fiscal).')
+      return
+    }
+
     if (password !== confirmPassword) {
       setError('As senhas não conferem.')
       return
@@ -49,6 +56,7 @@ export default function Cadastro() {
       nome,
       tipo_cadastro: 'empresa',
       nome_empresa: nomeEmpresa,
+      cnpj: cnpj.replace(/\D/g, ''),
     })
     setLoading(false)
 
@@ -108,6 +116,23 @@ export default function Cadastro() {
               autoComplete="organization"
               required
             />
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="cnpj">CNPJ</label>
+            <input
+              id="cnpj"
+              type="text"
+              placeholder="00.000.000/0000-00"
+              value={cnpj}
+              onChange={(e) => setCnpj(formatCnpj(e.target.value))}
+              maxLength={18}
+              inputMode="numeric"
+              required
+            />
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              É o CNPJ da loja. Usamos ele pra ligar sua loja ao iFood e pra emitir nota.
+            </span>
           </div>
 
           <div className="form-field">

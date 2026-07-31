@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { supabase } from '../lib/supabaseClient'
+import { formatCnpj, cnpjValido } from '../lib/cnpj'
 import ThemeToggle from '../components/ThemeToggle'
 import './Login.css'
 
@@ -70,15 +71,6 @@ export default function CadastroRef() {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
-  function formatCnpj(v) {
-    return v.replace(/\D/g, '')
-      .replace(/^(\d{2})(\d)/, '$1.$2')
-      .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
-      .replace(/\.(\d{3})(\d)/, '.$1/$2')
-      .replace(/(\d{4})(\d)/, '$1-$2')
-      .slice(0, 18)
-  }
-
   function handleCepChange(e) {
     const v = e.target.value.replace(/\D/g, '').slice(0, 8)
     const fmt = v.length > 5 ? `${v.slice(0, 5)}-${v.slice(5)}` : v
@@ -134,6 +126,7 @@ export default function CadastroRef() {
 
     if (!nomeLoja.trim()) { setLojaError('Informe o nome da loja.'); return }
     if (!nomeResp.trim()) { setLojaError('Informe o seu nome.'); return }
+    if (!cnpjValido(cnpjLoja)) { setLojaError('Informe um CNPJ válido — é ele que identifica sua loja nas integrações (iFood, nota fiscal).'); return }
     if (passLoja !== passLoja2) { setLojaError('As senhas não conferem.'); return }
     if (passLoja.length < 6) { setLojaError('A senha precisa ter pelo menos 6 caracteres.'); return }
 
@@ -147,7 +140,7 @@ export default function CadastroRef() {
       nome_empresa:        nomeLoja.trim(),
       tipo_cadastro:       'empresa',
       telefone:            telLoja || undefined,
-      cnpj:                cnpjLoja || undefined,
+      cnpj:                cnpjLoja.replace(/\D/g, ''),
       razao_social:        razaoLoja || undefined,
       endereco:            enderecoCompleto || undefined,
       ref_token_indicador: refToken || undefined,
@@ -310,11 +303,14 @@ export default function CadastroRef() {
 
             <div className="form-field">
               <label htmlFor="cnpj-loja">
-                CNPJ <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 12 }}>(opcional)</span>
+                CNPJ <span style={{ color: 'var(--danger)' }}>*</span>
               </label>
               <input id="cnpj-loja" type="text" placeholder="00.000.000/0000-00"
                 value={cnpjLoja} onChange={e => setCnpjLoja(formatCnpj(e.target.value))}
-                maxLength={18} inputMode="numeric" />
+                maxLength={18} inputMode="numeric" required />
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                É o CNPJ da loja. Usamos ele pra ligar sua loja ao iFood e pra emitir nota.
+              </span>
             </div>
 
             {/* ─ Endereço ─ */}
