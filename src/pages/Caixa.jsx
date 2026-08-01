@@ -41,9 +41,13 @@ export default function Caixa() {
     setLoading(true)
     setError(null)
 
-    const caixaAtivaQuery = isAdmin
-      ? supabase.from('caixas').select('*').eq('status', 'aberto').order('aberto_em', { ascending: false }).limit(1)
-      : supabase.from('caixas').select('*').eq('aberto_por', user.id).eq('status', 'aberto').limit(1)
+    // Caixa aberto é SEMPRE o do usuário logado — inclusive pro admin. Antes o admin
+    // via o caixa aberto por qualquer um da loja, e aí esta tela dizia "aberto"
+    // enquanto o Salão dizia "abra o caixa" (a venda usa current_caixa_id(), que é o
+    // caixa de quem está logado). O histórico abaixo continua mostrando todos pro admin.
+    const caixaAtivaQuery = supabase
+      .from('caixas').select('*')
+      .eq('aberto_por', user.id).eq('status', 'aberto').limit(1)
 
     const [caixaRes, historicoRes, usuariosRes] = await Promise.all([
       caixaAtivaQuery,

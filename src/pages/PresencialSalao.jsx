@@ -148,6 +148,28 @@ export default function PresencialSalao() {
     return () => { supabase.removeChannel(ch) }
   }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // O caixa costuma ser aberto em OUTRA aba (ou noutra janela do /caixa). Como o
+  // loadAll só roda ao montar a tela, o Salão ficava dizendo "caixa fechado" até
+  // alguém dar F5. Aqui ele reconfere sozinho toda vez que a aba volta pra frente.
+  useEffect(() => {
+    if (!empresaId || !user?.id) return
+    let vivo = true
+    async function checarCaixa() {
+      const { data } = await supabase.from('caixas').select('id')
+        .eq('empresa_id', empresaId).eq('aberto_por', user.id).eq('status', 'aberto').limit(1)
+      if (vivo) setCaixaAberto(!!(data && data.length))
+    }
+    checarCaixa()
+    const aoVoltar = () => { if (document.visibilityState === 'visible') checarCaixa() }
+    document.addEventListener('visibilitychange', aoVoltar)
+    window.addEventListener('focus', aoVoltar)
+    return () => {
+      vivo = false
+      document.removeEventListener('visibilitychange', aoVoltar)
+      window.removeEventListener('focus', aoVoltar)
+    }
+  }, [empresaId, user?.id])
+
   const comandaPorMesa = useMemo(() => {
     const map = {}
     for (const c of comandas) map[c.mesa_id] = c
