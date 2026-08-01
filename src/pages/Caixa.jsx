@@ -255,17 +255,12 @@ export default function Caixa() {
 
           {resumo && (
             <div className="dashboard-grid" style={{ marginBottom: 24 }}>
-              <div className="card dashboard-card">
-                <div className="label">Vendas à vista</div>
-                <div className="value">R$ {Number(resumo.vendas_a_vista).toFixed(2)}</div>
-              </div>
+              {/* Fora daqui de propósito (a view caixa_resumo continua calculando tudo):
+                  "Vendas à vista" repetia "Recebimentos em dinheiro" pro lojista, e
+                  boleto/transferência não existem na operação — é tudo PIX. */}
               <div className="card dashboard-card">
                 <div className="label">Vendas fiado</div>
                 <div className="value">R$ {Number(resumo.vendas_fiado).toFixed(2)}</div>
-              </div>
-              <div className="card dashboard-card">
-                <div className="label">Vendas boleto</div>
-                <div className="value">R$ {Number(resumo.vendas_boleto).toFixed(2)}</div>
               </div>
               <div className="card dashboard-card">
                 <div className="label">Recebimentos em dinheiro</div>
@@ -274,10 +269,6 @@ export default function Caixa() {
               <div className="card dashboard-card">
                 <div className="label">Recebimentos Pix</div>
                 <div className="value">R$ {Number(resumo.recebimentos_pix).toFixed(2)}</div>
-              </div>
-              <div className="card dashboard-card">
-                <div className="label">Recebimentos transferência</div>
-                <div className="value">R$ {Number(resumo.recebimentos_transferencia).toFixed(2)}</div>
               </div>
               <div className="card dashboard-card">
                 <div className="label">Recebimentos cartão</div>
