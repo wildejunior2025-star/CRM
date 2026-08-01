@@ -49,6 +49,9 @@ export default function PresencialSalao() {
   const [salvando, setSalvando] = useState(false)
   const [obsEdit, setObsEdit] = useState({})  // observação em edição por item
   const [precoEdit, setPrecoEdit] = useState({})  // preço em edição por item (só admin)
+  // Preço em edição no rascunho, por linha. Existe pra comida no peso: o atendente
+  // pesa o prato e digita o valor ANTES de mandar pra cozinha (antes só dava depois).
+  const [precoRascEdit, setPrecoRascEdit] = useState({})
   const [modoPag, setModoPag] = useState('unico')   // 'unico' | 'dividir'
   const [pagamentos, setPagamentos] = useState([])  // [{ forma, valor(string) }] no modo dividir
   // Fiado: quem fica devendo. Obrigatório quando alguma linha do pagamento é fiado.
@@ -348,6 +351,23 @@ export default function PresencialSalao() {
   // Observação do item AINDA no rascunho (antes de ir pra cozinha) — vai junto no envio.
   function mudarObsRascunho(linha, texto) {
     setRascunho(prev => prev.map(r => (r.linha ?? String(r.produto_id)) === linha ? { ...r, observacao: texto } : r))
+  }
+
+  // Preço do item ainda no rascunho. É assim que a loja que vende no peso trabalha:
+  // pesa o prato, digita o valor que deu e SÓ ENTÃO manda pra cozinha.
+  function salvarPrecoRascunho(linha) {
+    const txt = precoRascEdit[linha]
+    setPrecoRascEdit(prev => { const n = { ...prev }; delete n[linha]; return n })
+    if (txt === undefined) return
+    const preco = Number(String(txt).replace(',', '.'))
+    if (!Number.isFinite(preco) || preco < 0) return
+    setRascunho(prev => prev.map(r => {
+      const k = r.linha ?? String(r.produto_id)
+      if (k !== linha || Number(r.preco_venda) === preco) return r
+      // Preço digitado na mão vira uma linha ÚNICA: senão o próximo prato igual
+      // empilhava em cima desta e herdava o peso do prato anterior.
+      return { ...r, preco_venda: preco, linha: `${k}::p${Date.now()}` }
+    }))
   }
 
   // "Inventar produto": adiciona um item que não está no catálogo. Se o admin marcar
@@ -831,7 +851,28 @@ export default function PresencialSalao() {
                         <button type="button" onClick={() => mudarQtdRascunho(r.linha ?? String(r.produto_id), -1)} style={qtdBtn}>−</button>
                         <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{r.quantidade}</span>
                         <button type="button" onClick={() => mudarQtdRascunho(r.linha ?? String(r.produto_id), +1)} style={qtdBtn}>+</button>
-                        <span style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>{fmt(r.preco_venda * r.quantidade)}</span>
+                        {precoRascEdit[r.linha ?? String(r.produto_id)] !== undefined ? (
+                          <input
+                            autoFocus type="text" inputMode="decimal"
+                            value={precoRascEdit[r.linha ?? String(r.produto_id)]}
+                            onChange={e => setPrecoRascEdit(prev => ({ ...prev, [r.linha ?? String(r.produto_id)]: e.target.value }))}
+                            onBlur={() => salvarPrecoRascunho(r.linha ?? String(r.produto_id))}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') e.target.blur()
+                              else if (e.key === 'Escape') setPrecoRascEdit(prev => { const n = { ...prev }; delete n[r.linha ?? String(r.produto_id)]; return n })
+                            }}
+                            placeholder="0,00"
+                            style={{ minWidth: 70, width: 70, padding: '4px 6px', fontSize: 13, borderRadius: 6, textAlign: 'right',
+                              border: '1.5px solid var(--primary)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }}
+                          />
+                        ) : (
+                          <button type="button" title="Digitar o preço deste item (ex: o valor que deu no peso)"
+                            onClick={() => setPrecoRascEdit(prev => ({ ...prev, [r.linha ?? String(r.produto_id)]: String(r.preco_venda).replace('.', ',') }))}
+                            style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
+                              border: '1px dashed var(--border)', borderRadius: 6, padding: '3px 6px', background: 'transparent', color: 'var(--text)' }}>
+                            {fmt(r.preco_venda * r.quantidade)} ✎
+                          </button>
+                        )}
                       </div>
                       <input
                         value={r.observacao ?? ''}
