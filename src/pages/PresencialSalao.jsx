@@ -865,13 +865,18 @@ export default function PresencialSalao() {
                             style={{ minWidth: 70, width: 70, padding: '4px 6px', fontSize: 13, borderRadius: 6, textAlign: 'right',
                               border: '1.5px solid var(--primary)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }}
                           />
-                        ) : (
+                        ) : ehAdmin ? (
                           <button type="button" title="Digitar o preço deste item (ex: o valor que deu no peso)"
                             onClick={() => setPrecoRascEdit(prev => ({ ...prev, [r.linha ?? String(r.produto_id)]: String(r.preco_venda).replace('.', ',') }))}
                             style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
                               border: '1px dashed var(--border)', borderRadius: 6, padding: '3px 6px', background: 'transparent', color: 'var(--text)' }}>
                             {fmt(r.preco_venda * r.quantidade)} ✎
                           </button>
+                        ) : (
+                          // Garçom vê o valor, não mexe — mesma regra do item já enviado.
+                          <span style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>
+                            {fmt(r.preco_venda * r.quantidade)}
+                          </span>
                         )}
                       </div>
                       <input
