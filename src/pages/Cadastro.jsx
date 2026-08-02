@@ -135,7 +135,7 @@ export default function Cadastro() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="cnpj">CNPJ</label>
+            <label htmlFor="cnpj">CNPJ <span style={{ color: 'var(--danger)' }}>*</span></label>
             <input
               id="cnpj"
               type="text"
@@ -165,7 +165,7 @@ export default function Cadastro() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="telefone">WhatsApp</label>
+            <label htmlFor="telefone">WhatsApp <span style={{ color: 'var(--danger)' }}>*</span></label>
             <input
               id="telefone"
               type="tel"
