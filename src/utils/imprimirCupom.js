@@ -38,6 +38,7 @@ export function autoImprimirAtivo() {
 function labelPagamento(pedido) {
   const p = pedido.forma_pagamento || ''
   if (p === 'pix') return (pedido.pix_status === 'pago' || pedido.mp_payment_status === 'approved') ? 'PIX (pago)' : 'PIX'
+  if (p === 'pix_entrega') return 'PIX na entrega'
   if (p === 'dinheiro') return 'Dinheiro'
   // Formas que chegam dos pedidos do iFood
   if (p === 'online') return pedido.origem === 'ifood' ? 'PAGO ONLINE (iFood)' : 'Pago online'
@@ -133,6 +134,7 @@ export function montarCupomHtml(pedido, empresa = {}) {
   <hr>
   <div><span class="b">Pagamento:</span> ${esc(labelPagamento(pedido))}</div>
   ${pedido.forma_pagamento === 'dinheiro' && Number(pedido.troco_para) > 0 ? `<div>Troco para ${fmt(pedido.troco_para)}</div>` : ''}
+  ${pedido.forma_pagamento === 'pix_entrega' && empresa?.chave_pix ? `<div><span class="b">Chave PIX:</span> ${esc(empresa.chave_pix)}${empresa.pix_nome ? ` — ${esc(empresa.pix_nome)}` : ''}</div>` : ''}
   ${pedido.observacoes && showObs ? `<div style="margin-top:4px"><span class="b">Obs:</span> ${esc(pedido.observacoes)}</div>` : ''}
   ${pedido.codigo_entrega && showCodigo ? `<hr><div class="center b">Código de entrega: ${esc(pedido.codigo_entrega)}</div>` : ''}
   <hr>

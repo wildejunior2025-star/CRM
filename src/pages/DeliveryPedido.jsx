@@ -59,7 +59,9 @@ function shortId(uuid) {
 
 function paymLabel(forma) {
   if (forma === 'pix') return 'Pix'
+  if (forma === 'pix_entrega') return 'Pix na entrega'
   if (forma === 'dinheiro') return 'Dinheiro'
+  if (forma === 'cartao') return 'Cartão'
   return forma ?? '—'
 }
 
@@ -255,7 +257,7 @@ export default function DeliveryPedido() {
     if (!pedido?.empresa_id) return
     supabase
       .from('empresas')
-      .select('id, nome, logo_url, slug, google_ads_id, google_ads_label, meta_pixel_id')
+      .select('id, nome, logo_url, slug, google_ads_id, google_ads_label, meta_pixel_id, chave_pix, pix_nome')
       .eq('id', pedido.empresa_id)
       .maybeSingle()
       .then(({ data }) => {
@@ -286,16 +288,18 @@ export default function DeliveryPedido() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pedido?.id, pedido?.status, pedido?.pix_status, pedido?.mp_payment_status, loja])
 
-  async function handleCopiarPix() {
-    if (!pedido?.pix_copia_cola) return
+  async function copiar(texto) {
+    if (!texto) return
     try {
-      await navigator.clipboard.writeText(pedido.pix_copia_cola)
+      await navigator.clipboard.writeText(texto)
       setPixCopied(true)
       setTimeout(() => setPixCopied(false), 3000)
     } catch {
       // Fallback para ambientes sem clipboard API
     }
   }
+
+  const handleCopiarPix = () => copiar(pedido?.pix_copia_cola)
 
   async function enviarAvaliacao() {
     if (nota < 1) { setErroAval('Escolha de 1 a 5 estrelas.'); return }
@@ -537,6 +541,34 @@ export default function DeliveryPedido() {
                 <IconStore />
                 <p className="dpd-pix-msg">QR Code Pix em breve</p>
                 <p className="dpd-pix-sub">O código de pagamento Pix será gerado em instantes.</p>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* PIX na entrega — nada a pagar agora: o cliente transfere pra chave da
+            loja quando o pedido chegar. Sem gateway, sem QR gerado. */}
+        {pedido.forma_pagamento === 'pix_entrega' && !isCancelado && (
+          <section className="dpd-card dpd-card--pix">
+            <h2 className="dpd-card-title">Pix na entrega</h2>
+            <p className="dpd-pix-aviso" style={{ marginTop: 0 }}>
+              Você paga <strong>quando o pedido chegar</strong>, direto pra loja. Nada é cobrado agora.
+            </p>
+            {loja?.chave_pix && (
+              <div className="dpd-pix-copia-wrap">
+                <p className="dpd-pix-copia-label">
+                  Chave PIX da loja{loja.pix_nome ? ` — ${loja.pix_nome}` : ''}
+                </p>
+                <div className="dpd-pix-copia-row">
+                  <span className="dpd-pix-copia-code">{loja.chave_pix}</span>
+                  <button
+                    className={`dpd-pix-copy-btn${pixCopied ? ' dpd-pix-copy-btn--done' : ''}`}
+                    onClick={() => copiar(loja.chave_pix)}
+                    aria-label="Copiar chave Pix"
+                  >
+                    {pixCopied ? 'Copiado!' : 'Copiar'}
+                  </button>
+                </div>
               </div>
             )}
           </section>

@@ -432,7 +432,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, formas_pagamento')
+      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, formas_pagamento, chave_pix, pix_nome')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -1129,6 +1129,15 @@ export default function DeliveryCheckout() {
                       {form.pagamento === 'pix' && <span className="dco-pay-check"><IconCheck /></span>}
                     </button>
                   )}
+                  {formasLoja.includes('pix_entrega') && (
+                    <button type="button"
+                      className={`dco-pay-btn${form.pagamento === 'pix_entrega' ? ' dco-pay-btn--active' : ''}`}
+                      onClick={() => set('pagamento', 'pix_entrega')}>
+                      <IconPix />
+                      <span>Pix na entrega</span>
+                      {form.pagamento === 'pix_entrega' && <span className="dco-pay-check"><IconCheck /></span>}
+                    </button>
+                  )}
                   {formasLoja.includes('dinheiro') && (
                     <button type="button"
                       className={`dco-pay-btn${form.pagamento === 'dinheiro' ? ' dco-pay-btn--active' : ''}`}
@@ -1148,6 +1157,24 @@ export default function DeliveryCheckout() {
                     </button>
                   )}
                 </div>
+                {/* PIX na entrega: nada é cobrado agora — o cliente paga na chave
+                    da loja quando o pedido chegar. Mostra a chave já aqui pra ele
+                    saber pra quem vai pagar. */}
+                {form.pagamento === 'pix_entrega' && (
+                  <div style={{
+                    marginTop: 10, padding: '10px 12px', borderRadius: 10,
+                    background: 'rgba(0,180,216,.10)', border: '1px solid rgba(0,180,216,.35)',
+                    fontSize: 13, lineHeight: 1.5, color: 'var(--text,#e6e6f0)',
+                  }}>
+                    Você paga o PIX <strong>na hora que o pedido chegar</strong>, direto pra loja.
+                    {lojaEndereco?.chave_pix && (
+                      <div style={{ marginTop: 6 }}>
+                        Chave PIX: <strong style={{ wordBreak: 'break-all' }}>{lojaEndereco.chave_pix}</strong>
+                        {lojaEndereco.pix_nome ? ` — ${lojaEndereco.pix_nome}` : ''}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {form.pagamento === 'dinheiro' && (
                   <Field label="Troco para R$" error={errors.troco}>
                     <input

@@ -2174,6 +2174,11 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         {pagamento === 'pix' && (
           <span className="pp-badge pp-badge-pix">Pix</span>
         )}
+        {/* PIX na entrega: o cliente transfere na porta, direto pra chave da loja.
+            Não tem confirmação automática — por isso nunca vira "PIX pago" aqui. */}
+        {pagamento === 'pix_entrega' && (
+          <span className="pp-badge pp-badge-pix">Pix na entrega</span>
+        )}
         {pagamento === 'pix' && (pedido.pix_status === 'pago' || pedido.mp_payment_status === 'approved') && (
           <span className="pp-badge-pix-pago">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
@@ -2186,7 +2191,7 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         {pagamento === 'dinheiro' && pedido.troco_para > 0 && (
           <span className="pp-troco">Troco para {fmt(pedido.troco_para)}</span>
         )}
-        {pagamento !== 'pix' && pagamento !== 'dinheiro' && pagamento && (
+        {pagamento !== 'pix' && pagamento !== 'pix_entrega' && pagamento !== 'dinheiro' && pagamento && (
           <span className="pp-badge pp-badge-outro">{pagamento}</span>
         )}
         {/* Precisa cobrar na entrega? Pré-pago = "online" (iFood app) ou PIX confirmado.
@@ -5542,6 +5547,9 @@ export default function PainelPedidos() {
                 }
                 if (f === 'vale') return { pago: false, label: 'Vale' + (ehIfood ? ' (via iFood)' : '') }
                 if (f === 'pix') return (p.pix_status === 'pago' || p.mp_payment_status === 'approved') ? { pago: true, label: 'PIX pago' } : { pago: false, label: 'PIX não confirmado' }
+                // PIX na entrega cai direto na conta da loja — o motoqueiro não
+                // fica com nada na mão, então não entra no repasse.
+                if (f === 'pix_entrega') return { pago: true, label: 'PIX na entrega (direto pra loja)' }
                 // iFood com forma não mapeada ("outro") = cobrar na entrega, não "pago".
                 if (ehIfood && f !== 'online') return { pago: false, label: (f || 'via iFood') + ' (via iFood)' }
                 return { pago: true, label: ehIfood ? 'Pago no iFood' : (f || 'Pago') }

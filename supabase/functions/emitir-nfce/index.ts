@@ -163,7 +163,9 @@ async function registrarEmpresa(sb: any, empresaId: string, senhaCert: string) {
 // ─────────────────────────────────────────────────────────────────────
 const PAGAMENTO_FOCUS: Record<string, string> = {
   dinheiro: "01", credito: "03", debito: "04", cartao: "03",
-  pix: "17", online: "17", vale: "10", outro: "99",
+  // Pra SEFAZ os dois PIX são a mesma coisa (17 = pagamento instantâneo):
+  // muda só QUANDO o cliente paga, não o meio.
+  pix: "17", pix_entrega: "17", online: "17", vale: "10", outro: "99",
 }
 
 async function emitir(sb: any, pedidoId: string, cpf?: string) {

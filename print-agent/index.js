@@ -450,7 +450,7 @@ async function iniciarEscuta() {
   }
   // Guarda a loja resolvida pra sobreviver ao refresh / reabrir o app.
   if (empresaId) setConfig({ empresa_id: empresaId })
-  const { data: emp } = await supabase.from('empresas').select('nome, slug, endereco, numero, bairro, cidade, telefone_contato, rodape_cozinha').eq('id', empresaId).single()
+  const { data: emp } = await supabase.from('empresas').select('nome, slug, endereco, numero, bairro, cidade, telefone_contato, rodape_cozinha, chave_pix, pix_nome').eq('id', empresaId).single()
   empresa = emp || { nome: prof?.nome || 'Loja' }
   await carregarCategorias()   // pra saber o que é bebida (roteamento cozinha/bar)
   supabase.realtime.setAuth(sess.session.access_token)

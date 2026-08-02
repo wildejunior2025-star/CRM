@@ -335,6 +335,9 @@ function CardPedido({ pedido, onAtualizarStatus, onCancelar, onImprimirPedido, o
         {pagamento === 'pix' && (
           <span className="pd-badge pd-badge-pix">Pix</span>
         )}
+        {pagamento === 'pix_entrega' && (
+          <span className="pd-badge pd-badge-pix">Pix na entrega</span>
+        )}
         {pagamento === 'dinheiro' && (
           <span className="pd-badge pd-badge-dinheiro">Dinheiro</span>
         )}
@@ -638,11 +641,12 @@ function DrawerDetalhe({ pedido, onFechar, onAtualizarStatus, onCancelar }) {
         <div className="pd-drawer-secao-label">Forma de pagamento</div>
         <div className="pd-pagamento-row">
           {pagamento === 'pix' && <span className="pd-badge pd-badge-pix">Pix</span>}
+          {pagamento === 'pix_entrega' && <span className="pd-badge pd-badge-pix">Pix na entrega</span>}
           {pagamento === 'dinheiro' && <span className="pd-badge pd-badge-dinheiro">Dinheiro</span>}
           {pagamento === 'dinheiro' && pedido.troco_para != null && pedido.troco_para > 0 && (
             <span className="pd-troco">Troco para {fmt(pedido.troco_para)}</span>
           )}
-          {pagamento !== 'pix' && pagamento !== 'dinheiro' && pagamento && (
+          {pagamento !== 'pix' && pagamento !== 'pix_entrega' && pagamento !== 'dinheiro' && pagamento && (
             <span className="pd-badge pd-badge-outro">{pagamento}</span>
           )}
           {!pagamento && <span className="pd-troco">—</span>}

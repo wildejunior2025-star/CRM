@@ -306,6 +306,11 @@ function pagamentoInfo(p) {
     if (p.pix_status === 'pago' || p.mp_payment_status === 'approved') return { pago: true, titulo: 'JÁ PAGO', detalhe: 'PIX confirmado', cor: '#16a34a' }
     return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'PIX (não confirmado)', cor: '#f59e0b' }
   }
+  // PIX na entrega: o cliente paga na porta, na chave da LOJA. O motoqueiro
+  // cobra (tem que ver o comprovante), mas não fica com dinheiro nenhum.
+  if (forma === 'pix_entrega') {
+    return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'PIX na chave da loja', cor: '#f59e0b' }
+  }
   // Pré-pago só quando é "online" (pago no app do iFood). Qualquer outra forma
   // vinda do iFood (ex.: "outro"/método não mapeado) = cobrar na entrega.
   if (ehIfood && forma !== 'online') {

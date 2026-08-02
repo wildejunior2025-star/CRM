@@ -35,6 +35,8 @@ function formaPagamento(p) {
   let nome = 'Dinheiro'
   if (['cartao', 'cartao', 'credito', 'debito'].includes(f)) nome = f === 'debito' ? 'Debito' : f === 'credito' ? 'Credito' : 'Cartao'
   else if (f === 'pix') nome = 'PIX (nao confirmado)'
+  // Cliente paga na porta, na chave da loja — o motoqueiro so confere.
+  else if (f === 'pix_entrega') nome = 'PIX na entrega'
   else if (f === 'vale') nome = 'Vale'
   return { cobrar: true, label: nome + (ifood ? ' (via iFood)' : '') }
 }
@@ -113,6 +115,11 @@ function montarCupom(pedido, empresa) {
   } else {
     parts.push(linha('*** JA PAGO ***'))
     parts.push(SIZE(0), linha(pg.label))
+  }
+  // Chave PIX da loja no cupom: e o que o motoqueiro mostra pro cliente pagar.
+  if (p.forma_pagamento === 'pix_entrega' && e.chave_pix) {
+    parts.push(SIZE(0), linha('Chave PIX: ' + e.chave_pix))
+    if (e.pix_nome) parts.push(linha(e.pix_nome))
   }
   parts.push(BOLD(0), ALIGN(0))
 

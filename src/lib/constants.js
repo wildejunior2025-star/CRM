@@ -1,10 +1,16 @@
 // Formas que o cliente usa PRA PAGAR — as únicas do dia a dia da loja.
 // É esta lista que aparece em Minha Loja → Pagamento e nos botões da Nova venda
 // e do checkout da Loja Online. Marcar/desmarcar aqui liga/desliga o botão lá.
+// Os dois PIX são coisas diferentes:
+//   pix         → cobrança online (Mercado Pago). O cliente paga ANTES, o pedido
+//                 só cai na loja depois de confirmado. Exige MP conectado e tem taxa.
+//   pix_entrega → o cliente paga na hora da entrega, direto na chave PIX da loja.
+//                 Não passa por gateway nenhum: sem taxa e sem conectar o MP.
 export const FORMAS_PAGAMENTO = [
-  { value: 'dinheiro', label: 'Dinheiro' },
-  { value: 'pix',      label: 'PIX' },
-  { value: 'cartao',   label: 'Cartão' },
+  { value: 'dinheiro',    label: 'Dinheiro' },
+  { value: 'pix',         label: 'PIX' },
+  { value: 'pix_entrega', label: 'PIX na entrega' },
+  { value: 'cartao',      label: 'Cartão' },
 ]
 export const FORMAS_PAGAMENTO_PADRAO = FORMAS_PAGAMENTO.map(f => f.value)
 
@@ -41,6 +47,7 @@ export const ICONE_PAGAMENTO = {
   fiado:              { bg: '#f97316', text: '#fff', label: 'F' },
   dinheiro:           { bg: '#16a34a', text: '#fff', label: '💵' },
   pix:                { bg: '#00b4d8', text: '#fff', label: 'PIX' },
+  pix_entrega:        { bg: '#0891b2', text: '#fff', label: 'PIX' },
   visa_debito:        { bg: '#1a1f71', text: '#fff', label: 'VISA' },
   mastercard_debito:  { bg: '#eb001b', text: '#fff', label: 'MC' },
   elo_debito:         { bg: '#000', text: '#ffd700', label: 'elo' },

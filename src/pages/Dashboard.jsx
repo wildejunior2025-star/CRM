@@ -21,6 +21,7 @@ const FORMA_INFO = {
   credito:  { icon: '💳', label: 'Cartão de crédito' },
   debito:   { icon: '💳', label: 'Cartão de débito' },
   pix:      { icon: '📱', label: 'Pix' },
+  pix_entrega: { icon: '📱', label: 'Pix na entrega' },
   online:   { icon: '🌐', label: 'Pago online' },
   vale:     { icon: '🎟️', label: 'Vale' },
   a_vista:  { icon: '💰', label: 'À vista' },

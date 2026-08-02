@@ -849,6 +849,21 @@ export default function MinhaLoja({ secao = 'loja' }) {
               )
             })}
           </div>
+          <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 12, marginBottom: 0, lineHeight: 1.6 }}>
+            <strong>PIX</strong> é a cobrança online (Mercado Pago): o cliente paga antes e o pedido
+            só cai na loja depois de confirmado — precisa do Mercado Pago conectado e tem taxa.<br />
+            <strong>PIX na entrega</strong> é o cliente pagando na sua chave na hora que o pedido chega:
+            sem taxa, sem Mercado Pago, e o pedido cai na loja na hora (igual dinheiro).
+          </p>
+          {formasPagamento.includes('pix_entrega') && !chavePix.trim() && (
+            <p style={{
+              fontSize: 12.5, marginTop: 10, marginBottom: 0, padding: '9px 11px', borderRadius: 8,
+              background: 'rgba(234,179,8,.12)', border: '1px solid rgba(234,179,8,.4)', color: '#eab308',
+            }}>
+              ⚠️ Preencha sua <strong>chave PIX</strong> aqui embaixo — é ela que aparece pro cliente e no
+              cupom do entregador. Sem ela o cliente não sabe pra quem pagar.
+            </p>
+          )}
         </div>
 
         <div className="card" style={{ marginBottom: 16 }}>
@@ -901,6 +916,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
           <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Pagamento PIX (chave manual)</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
             Chave PIX exibida no checkout para seus clientes pagarem pedidos.
+            É ela que o cliente usa no <strong>PIX na entrega</strong> — aparece no pedido dele e no cupom do entregador.
           </p>
           <div className="form-grid">
             <div className="form-field full">

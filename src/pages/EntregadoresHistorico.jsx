@@ -69,6 +69,8 @@ function cobranca(p) {
       ? { tipo: 'conta', label: 'PIX pago' }
       : { tipo: 'pix', label: 'PIX não confirmado' }
   }
+  // Pago na porta, mas na chave da LOJA: não passou pela mão do motoqueiro.
+  if (f === 'pix_entrega') return { tipo: 'conta', label: 'PIX na entrega' }
   if (ehIfood && f !== 'online') return { tipo: 'dinheiro', label: (f || 'via iFood') + ' (via iFood)' }
   return { tipo: 'conta', label: ehIfood ? 'Pago no iFood' : (f || 'Pago') }
 }
