@@ -122,7 +122,7 @@ export default function Cadastro() {
 
         <form className="login-form" onSubmit={handleSubmit}>
           <div className="form-field">
-            <label htmlFor="nome-empresa">Nome da empresa</label>
+            <label htmlFor="nome-empresa">Nome da empresa <span style={{ color: 'var(--danger)' }}>*</span></label>
             <input
               id="nome-empresa"
               type="text"
@@ -152,7 +152,7 @@ export default function Cadastro() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="nome">Seu nome</label>
+            <label htmlFor="nome">Seu nome <span style={{ color: 'var(--danger)' }}>*</span></label>
             <input
               id="nome"
               type="text"
@@ -183,7 +183,7 @@ export default function Cadastro() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="email">E-mail</label>
+            <label htmlFor="email">E-mail <span style={{ color: 'var(--danger)' }}>*</span></label>
             <input
               id="email"
               type="email"
@@ -196,7 +196,7 @@ export default function Cadastro() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="password">Senha</label>
+            <label htmlFor="password">Senha <span style={{ color: 'var(--danger)' }}>*</span></label>
             <input
               id="password"
               type="password"
@@ -209,7 +209,7 @@ export default function Cadastro() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="confirm-password">Confirmar senha</label>
+            <label htmlFor="confirm-password">Confirmar senha <span style={{ color: 'var(--danger)' }}>*</span></label>
             <input
               id="confirm-password"
               type="password"
