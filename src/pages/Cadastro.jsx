@@ -6,6 +6,15 @@ import { formatCnpj, cnpjValido } from '../lib/cnpj'
 import ThemeToggle from '../components/ThemeToggle'
 import './Login.css'
 
+// (84) 99999-9999 — só pra ficar bonito enquanto digita
+function formatTelefone(v) {
+  const d = v.replace(/\D/g, '').slice(0, 11)
+  if (d.length <= 2) return d
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
+}
+
 export default function Cadastro() {
   const { session, signup } = useAuth()
   const { theme, toggleTheme } = useTheme()
@@ -14,6 +23,7 @@ export default function Cadastro() {
   const [nomeEmpresa, setNomeEmpresa] = useState('')
   const [cnpj, setCnpj] = useState('')
   const [nome, setNome] = useState('')
+  const [telefone, setTelefone] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -41,6 +51,11 @@ export default function Cadastro() {
       return
     }
 
+    if (telefone.replace(/\D/g, '').length < 10) {
+      setError('Informe um WhatsApp válido com DDD — é por ele que a gente fala com você.')
+      return
+    }
+
     if (password !== confirmPassword) {
       setError('As senhas não conferem.')
       return
@@ -57,6 +72,7 @@ export default function Cadastro() {
       tipo_cadastro: 'empresa',
       nome_empresa: nomeEmpresa,
       cnpj: cnpj.replace(/\D/g, ''),
+      telefone: telefone.replace(/\D/g, ''),
     })
     setLoading(false)
 
@@ -146,6 +162,24 @@ export default function Cadastro() {
               autoComplete="name"
               required
             />
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="telefone">WhatsApp</label>
+            <input
+              id="telefone"
+              type="tel"
+              placeholder="(84) 99999-9999"
+              value={telefone}
+              onChange={(e) => setTelefone(formatTelefone(e.target.value))}
+              maxLength={15}
+              inputMode="numeric"
+              autoComplete="tel"
+              required
+            />
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              É por aqui que a gente fala com você sobre a sua loja.
+            </span>
           </div>
 
           <div className="form-field">
