@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
@@ -126,7 +127,13 @@ export default function FichaTecnica() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id ?? null
 
-  const [aba, setAba] = useState('fichas') // 'fichas' | 'materias'
+  // Aba fica no LINK (?aba=materias) pra sobreviver a refresh / sair e voltar.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const aba = searchParams.get('aba') === 'materias' ? 'materias' : 'fichas'
+  const setAba = (v) => setSearchParams(
+    (p) => { const n = new URLSearchParams(p); n.set('aba', v); return n },
+    { replace: true },
+  )
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
