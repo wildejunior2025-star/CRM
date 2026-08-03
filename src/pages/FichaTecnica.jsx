@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import LancarNotaIA from '../components/LancarNotaIA'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 
@@ -400,7 +401,10 @@ export default function FichaTecnica() {
         <h1>🧮 Ficha Técnica</h1>
         {aba === 'fichas'
           ? <button className="btn btn-primary" onClick={abrirNovaFicha}>+ Nova ficha</button>
-          : <button className="btn btn-primary" onClick={abrirNovaMateria}>+ Nova matéria-prima</button>}
+          : <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <LancarNotaIA empresaId={empresaId} onDone={carregar} />
+              <button className="btn btn-primary" onClick={abrirNovaMateria}>+ Nova matéria-prima</button>
+            </div>}
       </div>
 
       {/* Abas internas */}
