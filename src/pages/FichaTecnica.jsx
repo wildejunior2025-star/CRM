@@ -124,6 +124,8 @@ function VinculoCombobox({ produtos, complementos, value, onChange }) {
   )
 }
 
+const stepBtn = { width: 28, height: 28, borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 16, lineHeight: 1, flexShrink: 0 }
+
 export default function FichaTecnica() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id ?? null
@@ -157,6 +159,12 @@ export default function FichaTecnica() {
   const [movQtd, setMovQtd] = useState('')
   const [savingMov, setSavingMov] = useState(false)
   const saldoDe = (id) => Number(saldoMat[id] ?? 0)
+
+  // Baixa rápida (carrinho): toca nos insumos e dá baixa em vários de uma vez.
+  const [showBaixa, setShowBaixa] = useState(false)
+  const [baixaBusca, setBaixaBusca] = useState('')
+  const [baixaCart, setBaixaCart] = useState([]) // [{ id, nome, unidade, qtd }]
+  const [salvandoBaixa, setSalvandoBaixa] = useState(false)
 
   const [showFicha, setShowFicha] = useState(false)
   const [fichaForm, setFichaForm] = useState(emptyFicha)
@@ -261,6 +269,44 @@ export default function FichaTecnica() {
     () => materias.reduce((s, m) => s + Number(saldoMat[m.id] ?? 0) * Number(m.custo || 0), 0),
     [materias, saldoMat],
   )
+
+  // ── Baixa rápida (carrinho de insumos usados) ──
+  function abrirBaixa() { setBaixaBusca(''); setBaixaCart([]); setShowBaixa(true) }
+  function addBaixa(m) {
+    setBaixaCart(prev => {
+      const i = prev.findIndex(x => x.id === m.id)
+      if (i >= 0) { const c = prev.slice(); c[i] = { ...c[i], qtd: Math.round((c[i].qtd + 1) * 1000) / 1000 }; return c }
+      return [...prev, { id: m.id, nome: m.nome, unidade: m.unidade, qtd: 1 }]
+    })
+  }
+  function mudarBaixaQtd(id, delta) {
+    setBaixaCart(prev => prev.flatMap(x => {
+      if (x.id !== id) return [x]
+      const q = Math.round((x.qtd + delta) * 1000) / 1000
+      return q <= 0 ? [] : [{ ...x, qtd: q }]
+    }))
+  }
+  function setBaixaQtd(id, val) {
+    const q = Number(String(val).replace(',', '.'))
+    setBaixaCart(prev => prev.map(x => x.id === id ? { ...x, qtd: Number.isFinite(q) ? q : x.qtd } : x))
+  }
+  function removerBaixa(id) { setBaixaCart(prev => prev.filter(x => x.id !== id)) }
+  const baixaFiltradas = useMemo(() => {
+    const q = normTxt(baixaBusca)
+    const ativas = materias.filter(m => m.ativo)
+    return q ? ativas.filter(m => normTxt(m.nome).includes(q)) : ativas
+  }, [materias, baixaBusca])
+  async function confirmarBaixa() {
+    const linhas = baixaCart.filter(x => x.qtd > 0).map(x => ({
+      empresa_id: empresaId, materia_prima_id: x.id, tipo: 'saida', quantidade: x.qtd,
+    }))
+    if (!linhas.length) return
+    setSalvandoBaixa(true)
+    const { error } = await supabase.from('materia_prima_movimentos').insert(linhas)
+    setSalvandoBaixa(false)
+    if (error) { alert('Erro ao dar baixa: ' + error.message); return }
+    setShowBaixa(false); carregar()
+  }
 
   // ── Fichas técnicas ──────────────────────────────────────────────
   function abrirNovaFicha() {
@@ -403,6 +449,7 @@ export default function FichaTecnica() {
           ? <button className="btn btn-primary" onClick={abrirNovaFicha}>+ Nova ficha</button>
           : <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <LancarNotaIA empresaId={empresaId} onDone={carregar} />
+              <button className="btn btn-secondary" onClick={abrirBaixa} title="Dar baixa rápida no que foi usado hoje">⬇️ Dar baixa</button>
               <button className="btn btn-primary" onClick={abrirNovaMateria}>+ Nova matéria-prima</button>
             </div>}
       </div>
@@ -619,6 +666,61 @@ export default function FichaTecnica() {
               <button type="submit" className="btn btn-primary" disabled={savingMov}>{savingMov ? 'Salvando…' : 'Confirmar'}</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* ─────────────── MODAL: BAIXA RÁPIDA (carrinho) ─────────────── */}
+      {showBaixa && (
+        <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowBaixa(false) }}>
+          <div className="modal modal-lg" style={{ maxWidth: 660, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            <h2>⬇️ Dar baixa rápida (insumos usados)</h2>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+              Toque no insumo pra adicionar, ajuste a quantidade e dê baixa em todos de uma vez.
+            </p>
+            <input autoFocus placeholder="Buscar insumo (ex.: feijao)..." value={baixaBusca}
+              onChange={e => setBaixaBusca(e.target.value)}
+              style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
+
+            <div style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0, flexWrap: 'wrap' }}>
+              {/* Lista de insumos (toca pra adicionar) */}
+              <div style={{ flex: '1 1 240px', minWidth: 0, maxHeight: 340, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+                {baixaFiltradas.length === 0 ? (
+                  <div style={{ padding: 12, color: 'var(--text-muted)', fontSize: 13 }}>Nenhum insumo. Cadastre em "+ Nova matéria-prima".</div>
+                ) : baixaFiltradas.map(m => (
+                  <button key={m.id} type="button" onClick={() => addBaixa(m)}
+                    style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '10px 12px', border: 'none', borderBottom: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', textAlign: 'left', fontSize: 14 }}>
+                    <span>{m.nome}</span>
+                    <span style={{ color: saldoDe(m.id) <= 0 ? 'var(--danger)' : 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>tem {fmtQtd(saldoDe(m.id), m.unidade)}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Carrinho de baixa */}
+              <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Vai dar baixa</div>
+                {baixaCart.length === 0 ? (
+                  <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Toque num insumo à esquerda.</div>
+                ) : baixaCart.map(x => (
+                  <div key={x.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.nome}</div>
+                    <button type="button" onClick={() => mudarBaixaQtd(x.id, -1)} style={stepBtn}>−</button>
+                    <input inputMode="decimal" value={x.qtd} onChange={e => setBaixaQtd(x.id, e.target.value)}
+                      style={{ width: 50, textAlign: 'center', padding: '5px 4px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 24 }}>{x.unidade}</span>
+                    <button type="button" onClick={() => mudarBaixaQtd(x.id, +1)} style={stepBtn}>+</button>
+                    <button type="button" onClick={() => removerBaixa(x.id)} className="btn btn-danger btn-sm" style={{ padding: '4px 8px' }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowBaixa(false)}>Cancelar</button>
+              <button type="button" className="btn btn-primary" onClick={confirmarBaixa} disabled={salvandoBaixa || baixaCart.length === 0}>
+                {salvandoBaixa ? 'Dando baixa…' : `Dar baixa (${baixaCart.length})`}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
