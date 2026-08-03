@@ -50,7 +50,7 @@ export default function DespesasLucro({ empresaId }) {
   const [usuarios, setUsuarios] = useState([])      // funcionários já cadastrados em Usuários
   const [historico, setHistorico] = useState([])    // fechamentos diários
   const [diasAbertos, setDiasAbertos] = useState(26)
-  const [receitaDia, setReceitaDia] = useState({ proprios: 0, ifood: 0 })
+  const [receitaDia, setReceitaDia] = useState({ proprios: 0, salao: 0, ifood: 0 })
   const [fechando, setFechando] = useState(false)
   const [histAberto, setHistAberto] = useState({}) // { [id]: bool } dias expandidos no histórico
 
@@ -74,7 +74,7 @@ export default function DespesasLucro({ empresaId }) {
       const ini = new Date(hoje); ini.setHours(0, 0, 0, 0)
       const fim = new Date(ini); fim.setDate(fim.getDate() + 1)
 
-      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im] = await Promise.all([
+      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im, vd] = await Promise.all([
         supabase.from('despesas_loja').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('valor', { ascending: false }),
         supabase.from('funcionarios').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
         supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', hojeYMD).order('created_at', { ascending: false }),
@@ -88,6 +88,9 @@ export default function DespesasLucro({ empresaId }) {
           .in('perfil', ['admin', 'vendedor', 'garcom', 'cozinheiro', 'entregador']).order('nome'),
         supabase.from('historico_dia').select('*').eq('empresa_id', empresaId).order('data', { ascending: false }).limit(90),
         supabase.from('custos_imprevistos').select('*').eq('empresa_id', empresaId).eq('data', hojeYMD).order('created_at', { ascending: false }),
+        // Vendas do SALÃO/balcão (fechar conta presencial) — não vivem em pedidos_delivery.
+        supabase.from('vendas').select('total').eq('empresa_id', empresaId).neq('status', 'cancelado')
+          .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString()),
       ])
       for (const r of [dp, fn, pd, fi, fit, ped, hi, im]) if (r.error) throw r.error
 
@@ -108,7 +111,8 @@ export default function DespesasLucro({ empresaId }) {
         .reduce((s, p) => s + (Number(p.total || 0) - Number(p.taxa_entrega || 0)), 0)
       const rates = { comissao: emp.data?.ifood_comissao_pct, transacao: emp.data?.ifood_transacao_pct }
       const ifoodLiq = calcIfoodLiquido(peds.filter(p => p.origem === 'ifood'), rates)
-      setReceitaDia({ proprios, ifood: Number(ifoodLiq.voceRecebe || 0) })
+      const salao = (vd.error ? [] : (vd.data || [])).reduce((s, v) => s + Number(v.total || 0), 0)
+      setReceitaDia({ proprios, salao, ifood: Number(ifoodLiq.voceRecebe || 0) })
     } catch (e) {
       setError(e.message || 'Erro ao carregar')
     } finally {
@@ -128,7 +132,7 @@ export default function DespesasLucro({ empresaId }) {
   const dias = Math.max(1, diasAbertos)
   const fixoPorDia = totalFixo / dias
   const funcPorDia = totalFunc / dias
-  const receita = receitaDia.proprios + receitaDia.ifood
+  const receita = receitaDia.proprios + (receitaDia.salao || 0) + receitaDia.ifood
   const custosDia = fixoPorDia + funcPorDia + producaoHoje + imprevistoHoje
   const lucroDia = receita - custosDia
 
@@ -147,7 +151,7 @@ export default function DespesasLucro({ empresaId }) {
       const impSnap = imprevistos.map(i => ({ descricao: i.descricao, valor: Number(i.valor || 0) }))
       const { error: upErr } = await supabase.from('historico_dia').upsert({
         empresa_id: empresaId, data: hojeYMD,
-        receita_liquida: receita, receita_proprios: receitaDia.proprios, receita_ifood: receitaDia.ifood,
+        receita_liquida: receita, receita_proprios: receitaDia.proprios + (receitaDia.salao || 0), receita_ifood: receitaDia.ifood,
         custo_fixo: fixoPorDia, custo_funcionarios: funcPorDia,
         custo_producao: producaoHoje, custo_imprevisto: imprevistoHoje,
         lucro: lucroDia, itens, imprevistos: impSnap,
@@ -287,9 +291,9 @@ export default function DespesasLucro({ empresaId }) {
             <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 }}>
               💰 Lucro real de hoje ({ddmm(hojeYMD)})
             </div>
-            <Linha label="Faturamento líquido do dia (próprios + iFood)" valor={brl(receita)} bold />
+            <Linha label="Faturamento líquido do dia (salão + delivery + iFood)" valor={brl(receita)} bold />
             <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '-4px 0 8px 2px' }}>
-              próprios {brl(receitaDia.proprios)} · iFood {brl(receitaDia.ifood)}
+              salão {brl(receitaDia.salao || 0)} · delivery {brl(receitaDia.proprios)} · iFood {brl(receitaDia.ifood)}
             </div>
             <Linha label={`− Custos fixos (rateio do dia: ${brl(totalFixo)}/${dias})`} valor={`− ${brl(fixoPorDia)}`} cor="var(--danger)" />
             <Linha label={`− Funcionários (rateio do dia: ${brl(totalFunc)}/${dias})`} valor={`− ${brl(funcPorDia)}`} cor="var(--danger)" />
@@ -393,9 +397,9 @@ export default function DespesasLucro({ empresaId }) {
                     {/* tabela completa (abre na setinha) — igual ao card do dia */}
                     {aberto && (
                       <div style={{ marginTop: 8, marginLeft: 15, paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
-                        <Linha label="Faturamento líquido (próprios + iFood)" valor={brl(h.receita_liquida)} bold />
+                        <Linha label="Faturamento líquido (salão + delivery + iFood)" valor={brl(h.receita_liquida)} bold />
                         <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '-4px 0 8px 2px' }}>
-                          próprios {brl(h.receita_proprios)} · iFood {brl(h.receita_ifood)}
+                          salão+delivery {brl(h.receita_proprios)} · iFood {brl(h.receita_ifood)}
                         </div>
                         <Linha label="− Custos fixos (rateio do dia)" valor={`− ${brl(h.custo_fixo)}`} cor="var(--danger)" />
                         <Linha label="− Funcionários (rateio do dia)" valor={`− ${brl(h.custo_funcionarios)}`} cor="var(--danger)" />
