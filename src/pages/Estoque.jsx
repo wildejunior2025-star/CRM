@@ -80,6 +80,15 @@ export default function Estoque() {
   })
   const [savingMov, setSavingMov] = useState(false)
 
+  // Lançar nota de compra pela IA (foto/PDF → entradas de estoque)
+  const [showNota, setShowNota] = useState(false)
+  const [notaStep, setNotaStep] = useState('upload') // 'upload' | 'lendo' | 'revisar'
+  const [notaItens, setNotaItens] = useState([])     // [{ produto_id, nome, quantidade, custo_unit, incluir }]
+  const [notaNaoEnc, setNotaNaoEnc] = useState([])
+  const [notaErro, setNotaErro] = useState(null)
+  const [atualizarCusto, setAtualizarCusto] = useState(true)
+  const [salvandoNota, setSalvandoNota] = useState(false)
+
   const [showCascoModal, setShowCascoModal] = useState(false)
   const [cascoForm, setCascoForm] = useState({
     cliente_id: '',
@@ -255,6 +264,81 @@ export default function Estoque() {
     loadAll()
   }
 
+  // ── Lançar nota de compra pela IA ──────────────────────────────────
+  function openNota() {
+    setNotaStep('upload'); setNotaItens([]); setNotaNaoEnc([]); setNotaErro(null); setAtualizarCusto(true); setShowNota(true)
+  }
+  async function lerNotaArquivo(file) {
+    if (!file) return
+    const ehPdf = file.type === 'application/pdf'
+    setNotaErro(null); setNotaStep('lendo')
+    try {
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader()
+        r.onload = () => res(String(r.result).split(',')[1] || '')
+        r.onerror = rej
+        r.readAsDataURL(file)
+      })
+      const { data, error } = await supabase.functions.invoke('ler-nota-estoque', {
+        body: {
+          imageBase64: base64,
+          mimetype: file.type || (ehPdf ? 'application/pdf' : 'image/png'),
+          produtos: produtos.map(p => ({ id: p.id, nome: p.nome })),
+        },
+      })
+      if (error) throw new Error(error.message)
+      if (!data?.ok) throw new Error(data?.error || 'Não consegui ler a nota.')
+      const itens = (data.itens || []).map(it => ({ ...it, quantidade: String(it.quantidade), custo_unit: it.custo_unit != null ? String(it.custo_unit).replace('.', ',') : '', incluir: true }))
+      setNotaItens(itens)
+      setNotaNaoEnc(data.nao_encontrados || [])
+      setNotaStep('revisar')
+    } catch (e) {
+      setNotaErro(e.message || 'Falha ao ler a nota.')
+      setNotaStep('upload')
+    }
+  }
+  // Colar (Ctrl+V) a foto da nota enquanto o modal está aberto.
+  useEffect(() => {
+    if (!showNota || notaStep !== 'upload') return
+    function onPaste(e) {
+      const item = [...(e.clipboardData?.items || [])].find(i => i.type?.startsWith('image/'))
+      if (!item) return
+      const file = item.getAsFile()
+      if (file) { e.preventDefault(); lerNotaArquivo(file) }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showNota, notaStep, produtos])
+
+  async function confirmarNota() {
+    const incluidos = notaItens.filter(it => it.incluir && Number(String(it.quantidade).replace(',', '.')) > 0)
+    if (incluidos.length === 0) { setNotaErro('Marque ao menos um item pra lançar.'); return }
+    setSalvandoNota(true); setNotaErro(null)
+    // Entradas de estoque (uma por item)
+    const linhas = incluidos.map(it => ({
+      produto_id: it.produto_id,
+      tipo: 'entrada',
+      quantidade: Number(String(it.quantidade).replace(',', '.')),
+      motivo: 'compra',
+      observacao: 'Nota de compra (IA)',
+    }))
+    const { error } = await supabase.from('estoque_movimentos').insert(linhas)
+    if (error) { setSalvandoNota(false); setNotaErro('Erro ao lançar: ' + error.message); return }
+    // Atualiza o custo dos produtos (opcional)
+    if (atualizarCusto) {
+      for (const it of incluidos) {
+        const custo = Number(String(it.custo_unit).replace(',', '.'))
+        if (Number.isFinite(custo) && custo > 0) {
+          await supabase.from('produtos').update({ preco_custo: custo }).eq('id', it.produto_id)
+        }
+      }
+    }
+    setSalvandoNota(false)
+    setShowNota(false)
+    loadAll()
+  }
+
   function openCascoModal() {
     setCascoForm({
       cliente_id: clientes[0]?.id ?? '',
@@ -327,6 +411,9 @@ export default function Estoque() {
                   + Movimento de casco
                 </button>
               )}
+              <button className="btn btn-secondary" onClick={openNota} title="Tira foto/PDF da nota de compra e a IA lança as entradas">
+                📄 Lançar nota (IA)
+              </button>
               <button className="btn btn-primary" onClick={openMovModal}>
                 + Movimento de estoque
               </button>
@@ -436,6 +523,89 @@ export default function Estoque() {
         )}
       </div>
       </>)}
+
+      {showNota && (
+        <div className="modal-overlay" onClick={() => setShowNota(false)}>
+          <div className="modal modal-lg" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720 }}>
+            <h2>📄 Lançar nota de compra (IA)</h2>
+
+            {notaErro && <p className="error-text">{notaErro}</p>}
+
+            {notaStep === 'upload' && (
+              <>
+                <p style={{ fontSize: 13.5, color: 'var(--text-muted)' }}>
+                  Tire foto da nota (ou PDF) e a IA lê e lança as entradas. Você confere antes de salvar.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+                  <label className="btn btn-primary" style={{ cursor: 'pointer', textAlign: 'center' }}>
+                    📷 Escolher foto ou PDF do PC
+                    <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
+                      onChange={e => { const f = e.target.files?.[0]; if (f) lerNotaArquivo(f) }} />
+                  </label>
+                  <div style={{ padding: '18px', border: '1.5px dashed var(--border)', borderRadius: 10, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13.5 }}>
+                    …ou aperte <strong>Ctrl+V</strong> aqui pra colar a foto da nota (print/foto copiada).
+                  </div>
+                </div>
+              </>
+            )}
+
+            {notaStep === 'lendo' && (
+              <div style={{ padding: '28px 0', textAlign: 'center' }}>
+                <div style={{ fontSize: 30, marginBottom: 8 }}>🤖</div>
+                <div style={{ fontWeight: 700 }}>Lendo a nota…</div>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>Pode levar alguns segundos.</div>
+              </div>
+            )}
+
+            {notaStep === 'revisar' && (
+              <>
+                <p style={{ fontSize: 13.5, color: 'var(--text-muted)' }}>Confira os itens, ajuste quantidade/custo e confirme. Só entra o que estiver marcado.</p>
+                {notaItens.length === 0 ? (
+                  <div className="empty-state">A IA não achou itens do seu catálogo nessa nota.</div>
+                ) : (
+                  <div className="data-table" style={{ marginTop: 8 }}>
+                    <table style={{ width: '100%' }}>
+                      <thead><tr><th style={{ width: 34 }}></th><th>Produto</th><th style={{ width: 84 }}>Qtd</th><th style={{ width: 110 }}>Custo un.</th></tr></thead>
+                      <tbody>
+                        {notaItens.map((it, idx) => (
+                          <tr key={idx} style={{ opacity: it.incluir ? 1 : .5 }}>
+                            <td><input type="checkbox" checked={it.incluir} onChange={e => setNotaItens(arr => arr.map((x, i) => i === idx ? { ...x, incluir: e.target.checked } : x))} /></td>
+                            <td>{it.nome}</td>
+                            <td><input inputMode="decimal" value={it.quantidade} onChange={e => setNotaItens(arr => arr.map((x, i) => i === idx ? { ...x, quantidade: e.target.value } : x))} style={{ width: 66 }} /></td>
+                            <td><input inputMode="decimal" placeholder="—" value={it.custo_unit} onChange={e => setNotaItens(arr => arr.map((x, i) => i === idx ? { ...x, custo_unit: e.target.value } : x))} style={{ width: 96 }} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {notaNaoEnc.length > 0 && (
+                  <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, background: 'rgba(217,119,6,.1)', border: '1px solid #d97706' }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#b45309', marginBottom: 4 }}>⚠️ Não achei no catálogo (não vão entrar):</div>
+                    <div style={{ fontSize: 12.5, color: 'var(--text)' }}>
+                      {notaNaoEnc.map((n, i) => (<div key={i}>• {n.quantidade}× {n.nome}</div>))}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>Cadastre esses no Catálogo e lance de novo, ou use "+ Movimento de estoque".</div>
+                  </div>
+                )}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 13.5, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={atualizarCusto} onChange={e => setAtualizarCusto(e.target.checked)} style={{ width: 'auto' }} />
+                  Atualizar o preço de custo dos produtos com o valor da nota
+                </label>
+              </>
+            )}
+
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowNota(false)}>Fechar</button>
+              {notaStep === 'revisar' && notaItens.length > 0 && (
+                <button type="button" className="btn btn-primary" onClick={confirmarNota} disabled={salvandoNota}>
+                  {salvandoNota ? 'Lançando…' : 'Lançar entradas'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {showMovModal && (
         <div className="modal-overlay" onClick={() => setShowMovModal(false)}>
