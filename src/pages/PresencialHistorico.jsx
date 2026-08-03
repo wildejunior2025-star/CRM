@@ -6,7 +6,9 @@ import ClientePicker from '../components/ClientePicker'
 import '../components/Page.css'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
-const FORMA_LABEL = { dinheiro: 'Dinheiro', pix: 'PIX', cartao: 'Cartão' }
+const FORMA_LABEL = { dinheiro: 'Dinheiro', pix: 'PIX', cartao: 'Cartão', fiado: 'Fiado', dividido: 'Dividido', transferencia: 'Transferência' }
+// Formas que dá pra escolher ao corrigir uma conta (o "dividido" não entra aqui).
+const FORMAS_EDIT = [['dinheiro', 'Dinheiro'], ['pix', 'PIX'], ['cartao', 'Cartão'], ['fiado', 'Fiado']]
 
 function horaBR(iso) {
   return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -23,6 +25,21 @@ export default function PresencialHistorico() {
   const [loading, setLoading]   = useState(true)
   const [aberta, setAberta]     = useState(null) // id da comanda expandida
   const [pickerComanda, setPickerComanda] = useState(null) // comanda em que se está ligando o cliente
+  const [editandoForma, setEditandoForma] = useState(null) // id da comanda com o seletor de forma aberto
+  const [salvandoForma, setSalvandoForma] = useState(false)
+
+  // Corrige a forma de pagamento de uma conta já fechada (lançou errado e fechou).
+  async function trocarForma(comanda, forma) {
+    if (forma === comanda.forma_pagamento) { setEditandoForma(null); return }
+    setSalvandoForma(true)
+    const { error } = await supabase.rpc('alterar_forma_pagamento_comanda', {
+      p_comanda_id: comanda.id, p_forma: forma,
+    })
+    setSalvandoForma(false)
+    setEditandoForma(null)
+    if (error) { window.alert('Não deu pra trocar a forma: ' + error.message); return }
+    setComandas(prev => prev.map(c => c.id === comanda.id ? { ...c, forma_pagamento: forma } : c))
+  }
 
   // Liga (ou tira) um cliente a uma conta já fechada. Propaga pra venda no banco.
   async function ligarCliente(comanda, cliente) {
@@ -213,6 +230,46 @@ export default function PresencialHistorico() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 800, paddingTop: 6 }}>
                       <span>Total</span><span>{fmt(c.total)}</span>
                     </div>
+
+                    {/* Forma de pagamento — mostra e deixa corrigir se lançou errado */}
+                    <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface-hover)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ fontSize: 13.5 }}>
+                          💳 Pagamento: <strong>{FORMA_LABEL[c.forma_pagamento] ?? c.forma_pagamento ?? '—'}</strong>
+                        </span>
+                        {editandoForma !== c.id && (
+                          <button type="button" onClick={() => setEditandoForma(c.id)}
+                            style={{ padding: '5px 12px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)',
+                              background: 'transparent', color: 'var(--primary)', fontSize: 12.5, fontWeight: 700 }}>
+                            Trocar
+                          </button>
+                        )}
+                      </div>
+                      {editandoForma === c.id && (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Escolha a forma correta:</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {FORMAS_EDIT.map(([id, lbl]) => (
+                              <button key={id} type="button" disabled={salvandoForma} onClick={() => trocarForma(c, id)}
+                                style={{ padding: '7px 12px', borderRadius: 8, cursor: salvandoForma ? 'wait' : 'pointer', fontWeight: 700, fontSize: 13,
+                                  border: `1.5px solid ${c.forma_pagamento === id ? 'var(--primary)' : 'var(--border)'}`,
+                                  background: c.forma_pagamento === id ? 'rgba(124,58,237,.1)' : 'transparent', color: 'var(--text)' }}>
+                                {lbl}
+                              </button>
+                            ))}
+                            <button type="button" onClick={() => setEditandoForma(null)}
+                              style={{ padding: '7px 12px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                                border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)' }}>
+                              Cancelar
+                            </button>
+                          </div>
+                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8 }}>
+                            Fiado precisa de um cliente ligado à conta (é dívida, não entra no caixa).
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Ligar/trocar o cliente deste pedido já fechado */}
                     <button type="button" onClick={() => setPickerComanda(c)}
                       style={{ width: '100%', marginTop: 12, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
