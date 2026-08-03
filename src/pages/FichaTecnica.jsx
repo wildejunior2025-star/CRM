@@ -141,6 +141,15 @@ export default function FichaTecnica() {
   const [materiaForm, setMateriaForm] = useState(emptyMateria)
   const [materiaEdit, setMateriaEdit] = useState(null)
 
+  // Estoque das matérias-primas
+  const [saldoMat, setSaldoMat] = useState({})   // materia_prima_id -> quantidade_atual
+  const [showMov, setShowMov] = useState(false)
+  const [movMateria, setMovMateria] = useState(null)
+  const [movTipo, setMovTipo] = useState('entrada') // 'entrada' | 'saida' | 'ajuste'
+  const [movQtd, setMovQtd] = useState('')
+  const [savingMov, setSavingMov] = useState(false)
+  const saldoDe = (id) => Number(saldoMat[id] ?? 0)
+
   const [showFicha, setShowFicha] = useState(false)
   const [fichaForm, setFichaForm] = useState(emptyFicha)
   const [fichaEdit, setFichaEdit] = useState(null)
@@ -151,12 +160,13 @@ export default function FichaTecnica() {
     setLoading(true)
     setError(null)
     try {
-      const [mp, fi, it, pr, cp] = await Promise.all([
+      const [mp, fi, it, pr, cp, sm] = await Promise.all([
         supabase.from('materias_primas').select('*').eq('empresa_id', empresaId).order('nome'),
         supabase.from('fichas_tecnicas').select('*, produtos(id, nome, preco_venda), complemento_opcoes(id, nome, preco_adicional)').eq('empresa_id', empresaId).order('nome'),
         supabase.from('ficha_itens').select('*').eq('empresa_id', empresaId),
         supabase.from('produtos').select('id, nome, preco_venda').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
         supabase.from('complemento_opcoes').select('id, nome, preco_adicional, complemento_grupos!inner(nome, empresa_id)').eq('complemento_grupos.empresa_id', empresaId).order('nome'),
+        supabase.from('materia_prima_saldo').select('materia_prima_id, quantidade_atual'),
       ])
       if (mp.error) throw mp.error
       if (fi.error) throw fi.error
@@ -167,6 +177,7 @@ export default function FichaTecnica() {
       setFichas(fi.data || [])
       setProdutos(pr.data || [])
       setComplementos((cp.data || []).map(c => ({ id: c.id, nome: c.nome, preco: Number(c.preco_adicional || 0), grupo: c.complemento_grupos?.nome || '' })))
+      setSaldoMat(Object.fromEntries((sm.data || []).map(r => [r.materia_prima_id, Number(r.quantidade_atual || 0)])))
       const grupos = {}
       for (const linha of (it.data || [])) {
         (grupos[linha.ficha_id] = grupos[linha.ficha_id] || []).push(linha)
@@ -214,6 +225,34 @@ export default function FichaTecnica() {
     if (error) { alert('Erro ao excluir: ' + error.message); return }
     carregar()
   }
+
+  // ── Estoque da matéria-prima (comprei / usei / acertar) ──
+  function abrirMov(m) { setMovMateria(m); setMovTipo('entrada'); setMovQtd(''); setShowMov(true) }
+  async function salvarMov(e) {
+    e.preventDefault()
+    const m = movMateria
+    const qtd = Number(String(movQtd).replace(',', '.'))
+    if (!Number.isFinite(qtd) || qtd < 0) { alert('Digite uma quantidade válida.'); return }
+    let quantidade = qtd
+    if (movTipo === 'ajuste') {
+      // "Acertar": o valor digitado é o total contado; gravamos só a diferença.
+      quantidade = qtd - saldoDe(m.id)
+    } else if (qtd <= 0) {
+      alert('Digite uma quantidade maior que zero.'); return
+    }
+    setSavingMov(true)
+    const { error } = await supabase.from('materia_prima_movimentos').insert({
+      empresa_id: empresaId, materia_prima_id: m.id, tipo: movTipo, quantidade,
+    })
+    setSavingMov(false)
+    if (error) { alert('Erro ao movimentar: ' + error.message); return }
+    setShowMov(false); carregar()
+  }
+  // Total de dinheiro parado em matéria-prima (saldo × custo).
+  const totalMaterias = useMemo(
+    () => materias.reduce((s, m) => s + Number(saldoMat[m.id] ?? 0) * Number(m.custo || 0), 0),
+    [materias, saldoMat],
+  )
 
   // ── Fichas técnicas ──────────────────────────────────────────────
   function abrirNovaFicha() {
@@ -448,35 +487,50 @@ export default function FichaTecnica() {
             <button className="btn btn-primary" onClick={abrirNovaMateria} style={{ marginTop: 8 }}>+ Nova matéria-prima</button>
           </div>
         ) : (
+          <>
+          {/* Total de dinheiro parado em matéria-prima */}
+          <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', border: '2px solid var(--primary)', background: 'var(--primary-bg, rgba(124,58,237,.08))' }}>
+            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1 }}>💰 Total parado em matérias-primas</span>
+            <strong style={{ fontSize: 24, color: 'var(--primary)' }}>{brl(totalMaterias)}</strong>
+          </div>
           <div className="data-table">
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
                   <th>Matéria-prima</th>
-                  <th>Unidade</th>
                   <th>Custo</th>
-                  <th>Status</th>
-                  <th style={{ width: 150 }}></th>
+                  <th>Estoque atual</th>
+                  <th>Valor em estoque</th>
+                  <th style={{ width: 220 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {materias.map(m => (
+                {materias.map(m => {
+                  const saldo = saldoDe(m.id)
+                  const valor = saldo * Number(m.custo || 0)
+                  return (
                   <tr key={m.id}>
-                    <td>{m.nome}</td>
-                    <td>{m.unidade}</td>
-                    <td>{brl(m.custo)} <span style={{ color: 'var(--text-muted)' }}>/ {m.unidade}</span></td>
-                    <td>{m.ativo ? <span className="badge badge-success">Ativo</span> : <span className="badge badge-neutral">Inativo</span>}</td>
                     <td>
-                      <div style={{ display: 'flex', gap: 6 }}>
+                      {m.nome}
+                      {!m.ativo && <span className="badge badge-neutral" style={{ marginLeft: 6 }}>inativa</span>}
+                    </td>
+                    <td>{brl(m.custo)} <span style={{ color: 'var(--text-muted)' }}>/ {m.unidade}</span></td>
+                    <td style={{ fontWeight: 700, color: saldo < 0 ? 'var(--danger)' : 'var(--text)' }}>{fmtQtd(saldo, m.unidade)}</td>
+                    <td style={{ fontWeight: 700 }}>{brl(valor)}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        <button className="btn btn-primary btn-sm" onClick={() => abrirMov(m)}>Movimentar</button>
                         <button className="btn btn-secondary btn-sm" onClick={() => abrirEditarMateria(m)}>Editar</button>
                         <button className="btn btn-danger btn-sm" onClick={() => excluirMateria(m)}>Excluir</button>
                       </div>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
+          </>
         )
       )}
 
@@ -513,6 +567,45 @@ export default function FichaTecnica() {
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShowMateria(false)}>Cancelar</button>
               <button type="submit" className="btn btn-primary">Salvar</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ─────────────── MODAL: MOVIMENTAR ESTOQUE DA MATÉRIA-PRIMA ─────────────── */}
+      {showMov && movMateria && (
+        <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowMov(false) }}>
+          <form className="modal" onSubmit={salvarMov}>
+            <h2>Estoque · {movMateria.nome}</h2>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+              Saldo atual: <strong>{fmtQtd(saldoDe(movMateria.id), movMateria.unidade)}</strong> · valor {brl(saldoDe(movMateria.id) * Number(movMateria.custo || 0))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+              {[['entrada', '⬆️ Comprei'], ['saida', '⬇️ Usei'], ['ajuste', '✏️ Acertar']].map(([id, lb]) => (
+                <button key={id} type="button" onClick={() => setMovTipo(id)}
+                  style={{ flex: 1, padding: '9px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                    border: `1.5px solid ${movTipo === id ? 'var(--primary)' : 'var(--border)'}`,
+                    background: movTipo === id ? 'rgba(124,58,237,.1)' : 'transparent', color: 'var(--text)' }}>
+                  {lb}
+                </button>
+              ))}
+            </div>
+
+            <div className="form-field full">
+              <label>{movTipo === 'ajuste' ? `Quantidade contada agora (${movMateria.unidade})` : `Quantidade (${movMateria.unidade})`}</label>
+              <input autoFocus inputMode="decimal" placeholder={`Ex.: 5 (em ${movMateria.unidade})`} value={movQtd}
+                onChange={e => setMovQtd(e.target.value)} />
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>
+                {movTipo === 'entrada' && 'Entra no estoque (compra de insumo).'}
+                {movTipo === 'saida' && 'Sai do estoque (usou na produção / perdeu).'}
+                {movTipo === 'ajuste' && 'Acerta o saldo pro que você contou (grava só a diferença).'}
+              </span>
+            </div>
+
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowMov(false)}>Cancelar</button>
+              <button type="submit" className="btn btn-primary" disabled={savingMov}>{savingMov ? 'Salvando…' : 'Confirmar'}</button>
             </div>
           </form>
         </div>
