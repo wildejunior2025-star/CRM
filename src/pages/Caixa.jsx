@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
@@ -40,6 +40,19 @@ export default function Caixa() {
 
   const [editandoMovId, setEditandoMovId] = useState(null) // movimento com seletor de forma aberto
   const [salvandoMovForma, setSalvandoMovForma] = useState(false)
+
+  // Histórico expandível: mostra o detalhamento por forma de pagamento de um caixa fechado.
+  const [histAberto, setHistAberto] = useState(null)      // id do caixa expandido
+  const [histResumo, setHistResumo] = useState({})        // { [caixaId]: resumo | 'loading' }
+  async function toggleHist(c) {
+    const abrir = histAberto !== c.id
+    setHistAberto(abrir ? c.id : null)
+    if (abrir && !histResumo[c.id]) {
+      setHistResumo(m => ({ ...m, [c.id]: 'loading' }))
+      const { data } = await supabase.from('caixa_resumo').select('*').eq('caixa_id', c.id).maybeSingle()
+      setHistResumo(m => ({ ...m, [c.id]: data || {} }))
+    }
+  }
 
   // Corrige a forma (dinheiro/pix) de uma sangria/suprimento já registrado.
   async function trocarFormaMovimento(m, forma) {
@@ -388,24 +401,79 @@ export default function Caixa() {
               </tr>
             </thead>
             <tbody>
-              {historico.map((c) => (
-                <tr key={c.id}>
-                  {isAdmin && <td>{nomeUsuario(c.aberto_por)}</td>}
-                  <td>{new Date(c.aberto_em).toLocaleString('pt-BR')}</td>
-                  <td>{c.fechado_em ? new Date(c.fechado_em).toLocaleString('pt-BR') : '-'}</td>
-                  <td className="caixa-amount-col">R$ {Number(c.valor_abertura).toFixed(2)}</td>
-                  <td className="caixa-amount-col">
-                    {c.valor_fechamento_informado != null
-                      ? `R$ ${Number(c.valor_fechamento_informado).toFixed(2)}`
-                      : '-'}
-                  </td>
-                  <td>
-                    <span className={`badge ${STATUS_BADGE[c.status] ?? 'badge-neutral'}`}>
-                      {c.status === 'aberto' ? 'Aberto' : 'Fechado'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {historico.map((c) => {
+                const aberto = histAberto === c.id
+                const r = histResumo[c.id]
+                const nCols = isAdmin ? 6 : 5
+                const espDin = r && r !== 'loading'
+                  ? Number(c.valor_abertura || 0) + Number(r.recebimentos_dinheiro || 0) + Number(r.total_suprimentos_dinheiro ?? r.total_suprimentos ?? 0) - Number(r.total_sangrias_dinheiro ?? r.total_sangrias ?? 0)
+                  : 0
+                const dif = (r && r !== 'loading' && c.valor_fechamento_informado != null) ? Number(c.valor_fechamento_informado) - espDin : null
+                return (
+                <Fragment key={c.id}>
+                  <tr onClick={() => toggleHist(c)} style={{ cursor: 'pointer' }} title="Toque para ver o detalhamento por forma de pagamento">
+                    {isAdmin && <td>{nomeUsuario(c.aberto_por)}</td>}
+                    <td>{new Date(c.aberto_em).toLocaleString('pt-BR')}</td>
+                    <td>{c.fechado_em ? new Date(c.fechado_em).toLocaleString('pt-BR') : '-'}</td>
+                    <td className="caixa-amount-col">R$ {Number(c.valor_abertura).toFixed(2)}</td>
+                    <td className="caixa-amount-col">
+                      {c.valor_fechamento_informado != null
+                        ? `R$ ${Number(c.valor_fechamento_informado).toFixed(2)}`
+                        : '-'}
+                    </td>
+                    <td>
+                      <span className={`badge ${STATUS_BADGE[c.status] ?? 'badge-neutral'}`}>
+                        {c.status === 'aberto' ? 'Aberto' : 'Fechado'}
+                      </span>
+                      <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontSize: 12 }}>{aberto ? '▲' : '▼'}</span>
+                    </td>
+                  </tr>
+                  {aberto && (
+                    <tr>
+                      <td colSpan={nCols} style={{ background: 'var(--surface-hover)', padding: '12px 16px' }}>
+                        {(!r || r === 'loading') ? (
+                          <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando detalhamento…</span>
+                        ) : (
+                          <>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+                              {[
+                                ['💵 Recebido em dinheiro', r.recebimentos_dinheiro],
+                                ['📱 Recebido em PIX', r.recebimentos_pix],
+                                ['💳 Recebido em cartão', r.recebimentos_cartao],
+                                (Number(r.recebimentos_transferencia) > 0 ? ['🔁 Transferência', r.recebimentos_transferencia] : null),
+                                ['🧾 Vendas no fiado', r.vendas_fiado],
+                                ['➖ Sangrias', r.total_sangrias],
+                                ['➕ Suprimentos', r.total_suprimentos],
+                                ['🪙 Esperado em dinheiro', espDin],
+                              ].filter(Boolean).map(([lb, v]) => (
+                                <div key={lb} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 11px' }}>
+                                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{lb}</div>
+                                  <div style={{ fontSize: 16, fontWeight: 800 }}>R$ {Number(v || 0).toFixed(2)}</div>
+                                </div>
+                              ))}
+                            </div>
+                            {(Number(r.total_sangrias_pix) > 0 || Number(r.total_suprimentos_pix) > 0) && (
+                              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+                                {Number(r.total_sangrias_pix) > 0 && <>Sangrias por PIX: R$ {Number(r.total_sangrias_pix).toFixed(2)} (não abatem do dinheiro). </>}
+                                {Number(r.total_suprimentos_pix) > 0 && <>Suprimentos por PIX: R$ {Number(r.total_suprimentos_pix).toFixed(2)}.</>}
+                              </div>
+                            )}
+                            {dif !== null && (
+                              <div style={{ marginTop: 10, fontSize: 13.5, fontWeight: 700 }}>
+                                Contado no fechamento: R$ {Number(c.valor_fechamento_informado).toFixed(2)} ·{' '}
+                                <span style={{ color: Math.abs(dif) < 0.005 ? 'var(--success, #16a34a)' : (dif > 0 ? 'var(--primary)' : 'var(--danger, #ef4444)') }}>
+                                  Diferença: R$ {dif.toFixed(2)}{Math.abs(dif) < 0.005 ? ' (confere)' : dif > 0 ? ' (sobra)' : ' (falta)'}
+                                </span>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+                )
+              })}
             </tbody>
           </table>
         )}
