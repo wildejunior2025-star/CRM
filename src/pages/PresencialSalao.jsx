@@ -23,6 +23,13 @@ const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractio
 // Tira acento e deixa minúsculo: assim "agua" acha "Água", "cafe" acha "Café" etc.
 const semAcento = (s) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 
+// Máscara de dinheiro estilo maquininha: digita só os números e os 2 últimos viram
+// os centavos (a vírgula entra sozinha). "1250" -> "12,50"; "5" -> "0,05".
+const soDigitos = (s) => String(s ?? '').replace(/\D/g, '')
+const maskMoeda = (s) => (Number(soDigitos(s)) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const valorMoeda = (s) => Number(soDigitos(s)) / 100                 // string mascarada -> número
+const numeroParaMoeda = (n) => maskMoeda(String(Math.round(Number(n || 0) * 100))) // número -> "12,50"
+
 export default function PresencialSalao() {
   const { profile, user } = useAuth()
   const empresaId = profile?.empresa_id
@@ -377,7 +384,7 @@ export default function PresencialSalao() {
     const txt = precoRascEdit[linha]
     setPrecoRascEdit(prev => { const n = { ...prev }; delete n[linha]; return n })
     if (txt === undefined) return
-    const preco = Number(String(txt).replace(',', '.'))
+    const preco = valorMoeda(txt)
     if (!Number.isFinite(preco) || preco < 0) return
     setRascunho(prev => prev.map(r => {
       const k = r.linha ?? String(r.produto_id)
@@ -395,7 +402,7 @@ export default function PresencialSalao() {
     if (!comandaSel) return
     if (comandaSel.status === 'aguardando_conferencia') { window.alert('Conta já fechada, aguardando o ADM liberar a mesa.'); return }
     const nome = invNome.trim()
-    const preco = Number(String(invPreco).replace(',', '.')) || 0
+    const preco = valorMoeda(invPreco)
     if (!nome) { window.alert('Digite o nome do produto.'); return }
     if (preco <= 0) { window.alert('Digite um preço válido.'); return }
 
@@ -459,7 +466,7 @@ export default function PresencialSalao() {
     const texto = precoEdit[item.id]
     setPrecoEdit(prev => { const n = { ...prev }; delete n[item.id]; return n })
     if (texto === undefined) return
-    const preco = Math.max(0, Math.round(Number(String(texto).replace(',', '.')) * 100) / 100)
+    const preco = Math.max(0, valorMoeda(texto))
     if (!Number.isFinite(preco) || preco === Number(item.preco_unitario)) return
     const { error } = await supabase.from('comanda_itens').update({ preco_unitario: preco }).eq('id', item.id)
     if (error) { window.alert('Erro ao salvar o preço: ' + error.message); return }
@@ -852,7 +859,7 @@ export default function PresencialSalao() {
                           <input
                             autoFocus type="text" inputMode="decimal"
                             value={precoEdit[item.id]}
-                            onChange={e => setPrecoEdit(prev => ({ ...prev, [item.id]: e.target.value }))}
+                            onChange={e => setPrecoEdit(prev => ({ ...prev, [item.id]: maskMoeda(e.target.value) }))}
                             onBlur={() => salvarPreco(item)}
                             onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); else if (e.key === 'Escape') setPrecoEdit(prev => { const n = { ...prev }; delete n[item.id]; return n }) }}
                             placeholder="0,00"
@@ -861,7 +868,7 @@ export default function PresencialSalao() {
                           />
                         ) : ehAdmin ? (
                           <button type="button" title="Editar preço deste item"
-                            onClick={() => setPrecoEdit(prev => ({ ...prev, [item.id]: String(item.preco_unitario).replace('.', ',') }))}
+                            onClick={() => setPrecoEdit(prev => ({ ...prev, [item.id]: numeroParaMoeda(item.preco_unitario) }))}
                             style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
                               border: '1px dashed var(--border)', borderRadius: 6, padding: '3px 6px', background: 'transparent', color: 'var(--text)' }}>
                             {fmt(item.preco_unitario * item.quantidade)} ✎
@@ -908,7 +915,7 @@ export default function PresencialSalao() {
                           <input
                             autoFocus type="text" inputMode="decimal"
                             value={precoRascEdit[r.linha ?? String(r.produto_id)]}
-                            onChange={e => setPrecoRascEdit(prev => ({ ...prev, [r.linha ?? String(r.produto_id)]: e.target.value }))}
+                            onChange={e => setPrecoRascEdit(prev => ({ ...prev, [r.linha ?? String(r.produto_id)]: maskMoeda(e.target.value) }))}
                             onBlur={() => salvarPrecoRascunho(r.linha ?? String(r.produto_id))}
                             onKeyDown={e => {
                               if (e.key === 'Enter') e.target.blur()
@@ -920,7 +927,7 @@ export default function PresencialSalao() {
                           />
                         ) : ehAdmin ? (
                           <button type="button" title="Digitar o preço deste item (ex: o valor que deu no peso)"
-                            onClick={() => setPrecoRascEdit(prev => ({ ...prev, [r.linha ?? String(r.produto_id)]: String(r.preco_venda).replace('.', ',') }))}
+                            onClick={() => setPrecoRascEdit(prev => ({ ...prev, [r.linha ?? String(r.produto_id)]: numeroParaMoeda(r.preco_venda) }))}
                             style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
                               border: '1px dashed var(--border)', borderRadius: 6, padding: '3px 6px', background: 'transparent', color: 'var(--text)' }}>
                             {fmt(r.preco_venda * r.quantidade)} ✎
@@ -974,7 +981,7 @@ export default function PresencialSalao() {
                       ⚠️ Já existe um produto com esse nome.
                     </div>
                   )}
-                  <input value={invPreco} onChange={e => setInvPreco(e.target.value)} type="number" step="0.01" min="0" inputMode="decimal" placeholder="Preço (ex: 12,00)"
+                  <input value={invPreco} onChange={e => setInvPreco(maskMoeda(e.target.value))} type="text" inputMode="numeric" placeholder="Preço (ex: 12,00)"
                     style={{ width: '100%', marginTop: 8, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }} />
 
                   {ehAdmin && (
