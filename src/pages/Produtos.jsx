@@ -277,6 +277,9 @@ export default function Produtos() {
   const [savingCateg, setSavingCateg] = useState(false)
   const [categError, setCategError] = useState(null)
   const [duplicandoCatId, setDuplicandoCatId] = useState(null)  // categoria sendo duplicada
+  const [editandoCatId, setEditandoCatId] = useState(null)      // categoria em edição de nome
+  const [editandoCatNome, setEditandoCatNome] = useState('')
+  const [salvandoRenome, setSalvandoRenome] = useState(false)
 
   const [embalagens, setEmbalagens] = useState([])
   const [showEmbalagensModal, setShowEmbalagensModal] = useState(false)
@@ -460,6 +463,31 @@ export default function Produtos() {
     if (error) { setCategError(error.message); return }
     setNovaCategoria('')
     loadCategorias()
+  }
+
+  function iniciarRenomear(c) {
+    setCategError(null)
+    setEditandoCatId(c.id)
+    setEditandoCatNome(c.nome)
+  }
+  function cancelarRenomear() {
+    setEditandoCatId(null)
+    setEditandoCatNome('')
+  }
+  // Renomeia a categoria e arrasta os produtos junto (RPC atômica no banco).
+  async function salvarRenomear(c) {
+    const nome = editandoCatNome.trim()
+    if (!nome || nome === c.nome) { cancelarRenomear(); return }
+    setSalvandoRenome(true)
+    setCategError(null)
+    const { error } = await supabase.rpc('renomear_categoria', { p_id: c.id, p_nome: nome })
+    setSalvandoRenome(false)
+    if (error) { setCategError(error.message); return }
+    cancelarRenomear()
+    await loadCategorias()
+    await loadProdutos(search, categoriaFiltro)
+    // Se o filtro estava nessa categoria, acompanha o nome novo.
+    if (categoriaFiltro === c.nome) setCategoriaFiltro(nome)
   }
 
   async function handleDeleteCategoria(id) {
@@ -1435,7 +1463,36 @@ export default function Produtos() {
                             ↓
                           </button>
                         </td>
-                        <td>{c.nome}</td>
+                        <td onDragStart={(e) => e.preventDefault()}>
+                          {editandoCatId === c.id ? (
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <input
+                                autoFocus
+                                value={editandoCatNome}
+                                onChange={(e) => setEditandoCatNome(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') salvarRenomear(c); else if (e.key === 'Escape') cancelarRenomear() }}
+                                draggable={false}
+                                style={{ flex: 1, minWidth: 120, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--primary)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }}
+                              />
+                              <button className="btn btn-primary btn-sm" disabled={salvandoRenome} onClick={() => salvarRenomear(c)} style={{ padding: '4px 9px' }}>
+                                {salvandoRenome ? '...' : 'Salvar'}
+                              </button>
+                              <button className="btn btn-secondary btn-sm" disabled={salvandoRenome} onClick={cancelarRenomear} style={{ padding: '4px 9px' }}>
+                                Cancelar
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => iniciarRenomear(c)}
+                              title="Renomear categoria"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', font: 'inherit', padding: 0, textAlign: 'left' }}
+                            >
+                              {c.nome}
+                              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>✎</span>
+                            </button>
+                          )}
+                        </td>
                         <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
                           <input
                             type="time"
