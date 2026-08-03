@@ -874,7 +874,7 @@ export default function PresencialSalao() {
                           />
                         ) : ehAdmin ? (
                           <button type="button" title="Editar preço deste item"
-                            onClick={() => setPrecoEdit(prev => ({ ...prev, [item.id]: numeroParaMoeda(item.preco_unitario) }))}
+                            onClick={() => setPrecoEdit(prev => ({ ...prev, [item.id]: Number(item.preco_unitario) > 0 ? numeroParaMoeda(item.preco_unitario) : '' }))}
                             style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
                               border: '1px dashed var(--border)', borderRadius: 6, padding: '3px 6px', background: 'transparent', color: 'var(--text)' }}>
                             {fmt(item.preco_unitario * item.quantidade)} ✎
@@ -933,7 +933,7 @@ export default function PresencialSalao() {
                           />
                         ) : ehAdmin ? (
                           <button type="button" title="Digitar o preço deste item (ex: o valor que deu no peso)"
-                            onClick={() => setPrecoRascEdit(prev => ({ ...prev, [r.linha ?? String(r.produto_id)]: numeroParaMoeda(r.preco_venda) }))}
+                            onClick={() => setPrecoRascEdit(prev => ({ ...prev, [r.linha ?? String(r.produto_id)]: Number(r.preco_venda) > 0 ? numeroParaMoeda(r.preco_venda) : '' }))}
                             style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
                               border: '1px dashed var(--border)', borderRadius: 6, padding: '3px 6px', background: 'transparent', color: 'var(--text)' }}>
                             {fmt(r.preco_venda * r.quantidade)} ✎
