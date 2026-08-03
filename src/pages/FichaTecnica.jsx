@@ -55,7 +55,7 @@ function vinculoDe(f) {
   return null
 }
 
-const emptyMateria = { nome: '', unidade: 'kg', custo: '', ativo: true }
+const emptyMateria = { nome: '', unidade: 'kg', custo: '', ativo: true, quantidade: '' }
 const linhaVazia = () => ({ materia_prima_id: '', nome: '', quantidade: '', unidade: 'g', custo_unit: 0 })
 const emptyFicha = {
   nome: '', produto_id: '', complemento_opcao_id: '', rendimento: '', unid_rendimento: 'g',
@@ -160,8 +160,9 @@ export default function FichaTecnica() {
   const [savingMov, setSavingMov] = useState(false)
   const saldoDe = (id) => Number(saldoMat[id] ?? 0)
 
-  // Baixa rápida (carrinho): toca nos insumos e dá baixa em vários de uma vez.
+  // Carrinho rápido (mesma tela pra dar BAIXA ou ENTRADA em vários insumos de uma vez).
   const [showBaixa, setShowBaixa] = useState(false)
+  const [cartTipo, setCartTipo] = useState('saida') // 'saida' (baixa) | 'entrada'
   const [baixaBusca, setBaixaBusca] = useState('')
   const [baixaCart, setBaixaCart] = useState([]) // [{ id, nome, unidade, qtd }]
   const [salvandoBaixa, setSalvandoBaixa] = useState(false)
@@ -227,11 +228,18 @@ export default function FichaTecnica() {
       custo: Number(String(materiaForm.custo).replace(',', '.')) || 0,
       ativo: !!materiaForm.ativo,
     }
-    const q = materiaEdit
-      ? supabase.from('materias_primas').update(payload).eq('id', materiaEdit.id)
-      : supabase.from('materias_primas').insert(payload)
-    const { error } = await q
-    if (error) { alert('Erro ao salvar: ' + error.message); return }
+    if (materiaEdit) {
+      const { error } = await supabase.from('materias_primas').update(payload).eq('id', materiaEdit.id)
+      if (error) { alert('Erro ao salvar: ' + error.message); return }
+    } else {
+      const { data, error } = await supabase.from('materias_primas').insert(payload).select('id').single()
+      if (error) { alert('Erro ao salvar: ' + error.message); return }
+      // Quantidade inicial informada no cadastro → já lança uma entrada de estoque.
+      const qtdIni = Number(String(materiaForm.quantidade ?? '').replace(',', '.'))
+      if (data?.id && Number.isFinite(qtdIni) && qtdIni > 0) {
+        await supabase.from('materia_prima_movimentos').insert({ empresa_id: empresaId, materia_prima_id: data.id, tipo: 'entrada', quantidade: qtdIni })
+      }
+    }
     setShowMateria(false)
     carregar()
   }
@@ -270,8 +278,8 @@ export default function FichaTecnica() {
     [materias, saldoMat],
   )
 
-  // ── Baixa rápida (carrinho de insumos usados) ──
-  function abrirBaixa() { setBaixaBusca(''); setBaixaCart([]); setShowBaixa(true) }
+  // ── Carrinho rápido (baixa ou entrada de insumos) ──
+  function abrirCarrinho(tipo) { setCartTipo(tipo); setBaixaBusca(''); setBaixaCart([]); setShowBaixa(true) }
   function addBaixa(m) {
     setBaixaCart(prev => {
       const i = prev.findIndex(x => x.id === m.id)
@@ -298,13 +306,13 @@ export default function FichaTecnica() {
   }, [materias, baixaBusca])
   async function confirmarBaixa() {
     const linhas = baixaCart.filter(x => x.qtd > 0).map(x => ({
-      empresa_id: empresaId, materia_prima_id: x.id, tipo: 'saida', quantidade: x.qtd,
+      empresa_id: empresaId, materia_prima_id: x.id, tipo: cartTipo, quantidade: x.qtd,
     }))
     if (!linhas.length) return
     setSalvandoBaixa(true)
     const { error } = await supabase.from('materia_prima_movimentos').insert(linhas)
     setSalvandoBaixa(false)
-    if (error) { alert('Erro ao dar baixa: ' + error.message); return }
+    if (error) { alert('Erro ao lançar: ' + error.message); return }
     setShowBaixa(false); carregar()
   }
 
@@ -449,7 +457,8 @@ export default function FichaTecnica() {
           ? <button className="btn btn-primary" onClick={abrirNovaFicha}>+ Nova ficha</button>
           : <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <LancarNotaIA empresaId={empresaId} onDone={carregar} />
-              <button className="btn btn-secondary" onClick={abrirBaixa} title="Dar baixa rápida no que foi usado hoje">⬇️ Dar baixa</button>
+              <button className="btn btn-secondary" onClick={() => abrirCarrinho('entrada')} title="Dar entrada rápida no que comprou/chegou">⬆️ Dar entrada</button>
+              <button className="btn btn-secondary" onClick={() => abrirCarrinho('saida')} title="Dar baixa rápida no que foi usado hoje">⬇️ Dar baixa</button>
               <button className="btn btn-primary" onClick={abrirNovaMateria}>+ Nova matéria-prima</button>
             </div>}
       </div>
@@ -614,6 +623,14 @@ export default function FichaTecnica() {
                 <input inputMode="decimal" placeholder="Ex.: 5,00" value={materiaForm.custo}
                   onChange={e => setMateriaForm(f => ({ ...f, custo: e.target.value }))} />
               </div>
+              {!materiaEdit && (
+                <div className="form-field full">
+                  <label>Quantidade em estoque agora ({materiaForm.unidade}) — opcional</label>
+                  <input inputMode="decimal" placeholder={`Ex.: 10 (em ${materiaForm.unidade})`} value={materiaForm.quantidade}
+                    onChange={e => setMateriaForm(f => ({ ...f, quantidade: e.target.value }))} />
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Já entra com esse estoque (você não precisa ir em Movimentar depois).</span>
+                </div>
+              )}
               <div className="form-field full">
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                   <input type="checkbox" style={{ width: 'auto' }} checked={materiaForm.ativo}
@@ -673,9 +690,9 @@ export default function FichaTecnica() {
       {showBaixa && (
         <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowBaixa(false) }}>
           <div className="modal modal-lg" style={{ maxWidth: 660, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-            <h2>⬇️ Dar baixa rápida (insumos usados)</h2>
+            <h2>{cartTipo === 'entrada' ? '⬆️ Dar entrada rápida (insumos que chegaram)' : '⬇️ Dar baixa rápida (insumos usados)'}</h2>
             <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 10px' }}>
-              Toque no insumo pra adicionar, ajuste a quantidade e dê baixa em todos de uma vez.
+              Toque no insumo pra adicionar, ajuste a quantidade e {cartTipo === 'entrada' ? 'dê entrada' : 'dê baixa'} em todos de uma vez.
             </p>
             <input autoFocus placeholder="Buscar insumo (ex.: feijao)..." value={baixaBusca}
               onChange={e => setBaixaBusca(e.target.value)}
@@ -697,7 +714,7 @@ export default function FichaTecnica() {
 
               {/* Carrinho de baixa */}
               <div style={{ flex: '1 1 240px', minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Vai dar baixa</div>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>{cartTipo === 'entrada' ? 'Vai dar entrada' : 'Vai dar baixa'}</div>
                 {baixaCart.length === 0 ? (
                   <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Toque num insumo à esquerda.</div>
                 ) : baixaCart.map(x => (
@@ -717,7 +734,7 @@ export default function FichaTecnica() {
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShowBaixa(false)}>Cancelar</button>
               <button type="button" className="btn btn-primary" onClick={confirmarBaixa} disabled={salvandoBaixa || baixaCart.length === 0}>
-                {salvandoBaixa ? 'Dando baixa…' : `Dar baixa (${baixaCart.length})`}
+                {salvandoBaixa ? 'Salvando…' : `${cartTipo === 'entrada' ? 'Dar entrada' : 'Dar baixa'} (${baixaCart.length})`}
               </button>
             </div>
           </div>
