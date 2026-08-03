@@ -768,6 +768,12 @@ export default function PresencialSalao() {
                 )}
                 <div style={{ fontSize: 14.5, fontWeight: 800, lineHeight: 1.1 }}>{mesa.is_balcao ? '🛎️ Balcão' : `Mesa ${mesa.numero}`}</div>
                 <div style={{ fontSize: 9.5, marginTop: 2, color: cor.border, fontWeight: 700 }}>{cor.label}</div>
+                {/* Nome do cliente ligado à mesa (quando cadastrado) — ajuda a saber de quem é a mesa. */}
+                {c?.cliente?.nome && (
+                  <div style={{ fontSize: 10.5, marginTop: 1, fontWeight: 700, color: 'var(--primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    🧑 {c.cliente.nome}
+                  </div>
+                )}
                 {c && <div style={{ fontSize: 11.5, marginTop: 1, fontWeight: 800 }}>{fmt(sub)}</div>}
               </div>
             )
