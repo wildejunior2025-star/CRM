@@ -38,6 +38,22 @@ export default function Caixa() {
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState(null)
 
+  const [editandoMovId, setEditandoMovId] = useState(null) // movimento com seletor de forma aberto
+  const [salvandoMovForma, setSalvandoMovForma] = useState(false)
+
+  // Corrige a forma (dinheiro/pix) de uma sangria/suprimento já registrado.
+  async function trocarFormaMovimento(m, forma) {
+    if (forma === (m.forma ?? 'dinheiro')) { setEditandoMovId(null); return }
+    setSalvandoMovForma(true)
+    const { error: rpcError } = await supabase.rpc('alterar_forma_movimento_caixa', {
+      p_id: m.id, p_forma: forma,
+    })
+    setSalvandoMovForma(false)
+    setEditandoMovId(null)
+    if (rpcError) { window.alert('Não deu pra trocar a forma: ' + rpcError.message); return }
+    loadAll()
+  }
+
   async function loadAll() {
     setLoading(true)
     setError(null)
@@ -320,7 +336,30 @@ export default function Caixa() {
                           {m.tipo === 'sangria' ? 'Sangria' : 'Suprimento'}
                         </span>
                       </td>
-                      <td>{(m.forma ?? 'dinheiro') === 'pix' ? '📱 PIX' : '💵 Dinheiro'}</td>
+                      <td>
+                        {editandoMovId === m.id ? (
+                          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                            {[['dinheiro', '💵 Dinheiro'], ['pix', '📱 PIX']].map(([id, lbl]) => (
+                              <button key={id} type="button" disabled={salvandoMovForma}
+                                onClick={() => trocarFormaMovimento(m, id)}
+                                style={{ padding: '4px 9px', borderRadius: 7, cursor: salvandoMovForma ? 'wait' : 'pointer', fontWeight: 700, fontSize: 12.5,
+                                  border: `1.5px solid ${(m.forma ?? 'dinheiro') === id ? 'var(--primary)' : 'var(--border)'}`,
+                                  background: (m.forma ?? 'dinheiro') === id ? 'rgba(124,58,237,.1)' : 'transparent', color: 'var(--text)' }}>
+                                {lbl}
+                              </button>
+                            ))}
+                            <button type="button" onClick={() => setEditandoMovId(null)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 13 }}>✕</button>
+                          </span>
+                        ) : (
+                          <button type="button" onClick={() => setEditandoMovId(m.id)} title="Trocar a forma"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: '1px dashed var(--border)',
+                              borderRadius: 7, padding: '3px 8px', cursor: 'pointer', color: 'var(--text)', font: 'inherit' }}>
+                            {(m.forma ?? 'dinheiro') === 'pix' ? '📱 PIX' : '💵 Dinheiro'}
+                            <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>✎</span>
+                          </button>
+                        )}
+                      </td>
                       <td className="caixa-amount-col">R$ {Number(m.valor).toFixed(2)}</td>
                       <td>{m.observacao ?? '-'}</td>
                     </tr>
