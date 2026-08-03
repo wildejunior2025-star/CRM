@@ -204,6 +204,10 @@ export default function Estoque() {
     return Number(linha?.quantidade_atual ?? 0)
   }
 
+  // "Saldo por produto" só lista quem tem o CONTROLE DE ESTOQUE ligado no catálogo.
+  // Produto sem controle (self-service, prato na hora) não faz sentido aparecer aqui.
+  const saldoControlado = saldo.filter((s) => s.controla_estoque !== false)
+
   async function handleMovSubmit(e) {
     e.preventDefault()
     setSavingMov(true)
@@ -353,8 +357,8 @@ export default function Estoque() {
       <div className="data-table" style={{ marginBottom: 24 }}>
         {loading ? (
           <div className="empty-state">Carregando...</div>
-        ) : saldo.length === 0 ? (
-          <div className="empty-state">Nenhum produto cadastrado.</div>
+        ) : saldoControlado.length === 0 ? (
+          <div className="empty-state">Nenhum produto com controle de estoque. Ligue o "Controla estoque" no produto (Catálogo) pra ele aparecer aqui.</div>
         ) : (
           <table>
             <thead>
@@ -367,7 +371,7 @@ export default function Estoque() {
               </tr>
             </thead>
             <tbody>
-              {saldo.map((s) => {
+              {saldoControlado.map((s) => {
                 // Sem mínimo definido não existe "baixo": era por isso que a
                 // tela pintava TODA linha de vermelho quando mínimo era 0.
                 const baixo = Number(s.estoque_minimo) > 0 && Number(s.quantidade_atual) <= Number(s.estoque_minimo)
