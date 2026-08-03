@@ -29,6 +29,7 @@ export default function Caixa() {
   const [showMovimento, setShowMovimento] = useState(null) // 'sangria' | 'suprimento' | null
   const [valorMovimento, setValorMovimento] = useState('')
   const [obsMovimento, setObsMovimento] = useState('')
+  const [formaMovimento, setFormaMovimento] = useState('dinheiro') // 'dinheiro' | 'pix'
 
   const [showFechamento, setShowFechamento] = useState(false)
   const [valorFechamento, setValorFechamento] = useState('')
@@ -127,6 +128,7 @@ export default function Caixa() {
   function openMovimento(tipo) {
     setValorMovimento('')
     setObsMovimento('')
+    setFormaMovimento('dinheiro')
     setFormError(null)
     setShowMovimento(tipo)
   }
@@ -147,6 +149,7 @@ export default function Caixa() {
       p_tipo: showMovimento,
       p_valor: valor,
       p_observacao: obsMovimento || null,
+      p_forma: formaMovimento,
     })
     setSaving(false)
 
@@ -193,11 +196,13 @@ export default function Caixa() {
     loadAll()
   }
 
+  // Só o que é EM DINHEIRO mexe no caixa físico. Sangria/suprimento por PIX não entra
+  // aqui (fica registrado, mas não altera o dinheiro esperado na gaveta).
   const valorEsperadoDinheiro = resumo
     ? Number(caixaAtual.valor_abertura) +
       Number(resumo.recebimentos_dinheiro) +
-      Number(resumo.total_suprimentos) -
-      Number(resumo.total_sangrias)
+      Number(resumo.total_suprimentos_dinheiro ?? resumo.total_suprimentos) -
+      Number(resumo.total_sangrias_dinheiro ?? resumo.total_sangrias)
     : 0
 
   const diferencaFechamento =
@@ -299,6 +304,7 @@ export default function Caixa() {
                   <tr>
                     <th>Data</th>
                     <th>Tipo</th>
+                    <th>Forma</th>
                     <th className="caixa-amount-col">Valor</th>
                     <th>Observação</th>
                   </tr>
@@ -314,6 +320,7 @@ export default function Caixa() {
                           {m.tipo === 'sangria' ? 'Sangria' : 'Suprimento'}
                         </span>
                       </td>
+                      <td>{(m.forma ?? 'dinheiro') === 'pix' ? '📱 PIX' : '💵 Dinheiro'}</td>
                       <td className="caixa-amount-col">R$ {Number(m.valor).toFixed(2)}</td>
                       <td>{m.observacao ?? '-'}</td>
                     </tr>
@@ -435,6 +442,24 @@ export default function Caixa() {
                     required
                     autoFocus
                   />
+                </div>
+                <div className="form-field full">
+                  <label>{showMovimento === 'sangria' ? 'Saiu como' : 'Entrou como'}</label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {[['dinheiro', '💵 Dinheiro'], ['pix', '📱 PIX']].map(([id, lbl]) => (
+                      <button key={id} type="button" onClick={() => setFormaMovimento(id)}
+                        style={{ flex: 1, padding: '10px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 14,
+                          border: `1.5px solid ${formaMovimento === id ? 'var(--primary)' : 'var(--border)'}`,
+                          background: formaMovimento === id ? 'rgba(124,58,237,.1)' : 'transparent', color: 'var(--text)' }}>
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+                    {formaMovimento === 'pix'
+                      ? 'Por PIX não altera o dinheiro esperado na gaveta — só fica registrado.'
+                      : 'Em dinheiro entra/sai da gaveta e ajusta o esperado em dinheiro.'}
+                  </span>
                 </div>
                 <div className="form-field full">
                   <label htmlFor="obs-movimento">Observação</label>
