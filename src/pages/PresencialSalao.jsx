@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { adicionalComplementos } from '../lib/complementos'
+import ClientePicker from '../components/ClientePicker'
 import { imprimirHtml, montarContaPresencialHtml, appFwcDisponivel } from '../utils/imprimirCupom'
 import '../components/Page.css'
 import './PresencialSalao.css'
@@ -79,13 +80,15 @@ export default function PresencialSalao() {
   // Mesma fonte do cardápio do QR (MesaCardapio) — produto com grupo abre o modal de montagem.
   const [compMap, setCompMap] = useState({})
   const [montando, setMontando] = useState(null) // produto que está sendo montado no modal
+  const [pickerCliente, setPickerCliente] = useState(false) // modal "ligar cliente à mesa"
+  const [ligandoCliente, setLigandoCliente] = useState(false)
 
   async function loadAll() {
     if (!empresaId) return
     const [emp, ms, cs, ps, gs, cat, cx, cg, cl] = await Promise.all([
       supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios').eq('id', empresaId).single(),
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
-      supabase.from('comandas').select('*, comanda_itens(*)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
+      supabase.from('comandas').select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
       supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria').eq('empresa_id', empresaId).order('nome').limit(500),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
       supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId),
@@ -259,6 +262,19 @@ export default function PresencialSalao() {
     }
     setMesaSel(mesa)
     setBusca(''); setCategoriaSel(null); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true)
+  }
+
+  // Liga (ou tira) o cliente da comanda desta mesa. cliente = null tira.
+  async function ligarClienteComanda(cliente) {
+    if (!comandaSel) return
+    setLigandoCliente(true)
+    const { error } = await supabase.rpc('vincular_cliente_comanda', {
+      p_comanda_id: comandaSel.id, p_cliente_id: cliente?.id ?? null,
+    })
+    setLigandoCliente(false)
+    setPickerCliente(false)
+    if (error) { window.alert('Erro ao ligar o cliente: ' + error.message); return }
+    await loadAll()
   }
 
   // Fecha o drawer da mesa. Se a mesa foi só ABERTA e não tem NADA (nenhum item
@@ -474,7 +490,8 @@ export default function PresencialSalao() {
     setModoPag('unico')
     setForma('dinheiro')
     setPagamentos([])
-    setClienteSel(null); setBuscaCliente(''); setNovoCliente(false); setNovoTelefone('')
+    // Já vem o cliente ligado à mesa (se houver) — assim a venda sai no nome dele.
+    setClienteSel(comandaSel?.cliente ?? null); setBuscaCliente(''); setNovoCliente(false); setNovoTelefone('')
     setFechando(true)
   }
 
@@ -755,6 +772,27 @@ export default function PresencialSalao() {
                     📱 Pedido pelo QR (autoatendimento)
                   </div>
                 ) : null}
+                {/* Cliente da mesa: liga um cliente a esta comanda (ou troca/tira). */}
+                {comandaSel && comandaSel.status !== 'fechada' && (
+                  comandaSel.cliente ? (
+                    <button type="button" onClick={() => setPickerCliente(true)} disabled={ligandoCliente}
+                      title="Trocar ou tirar o cliente"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4, padding: '3px 10px',
+                        borderRadius: 999, cursor: 'pointer', border: '1.5px solid var(--primary)',
+                        background: 'rgba(124,58,237,.1)', color: 'var(--primary)', fontSize: 12.5, fontWeight: 700 }}>
+                      🧑 {comandaSel.cliente.nome}
+                      {comandaSel.cliente.telefone ? ` · ${comandaSel.cliente.telefone}` : ''}
+                      <span style={{ fontWeight: 500, opacity: .8 }}>✎</span>
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setPickerCliente(true)} disabled={ligandoCliente}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4, padding: '3px 10px',
+                        borderRadius: 999, cursor: 'pointer', border: '1.5px dashed var(--border)',
+                        background: 'transparent', color: 'var(--text-muted)', fontSize: 12.5, fontWeight: 700 }}>
+                      ➕ Ligar cliente
+                    </button>
+                  )
+                )}
               </div>
               <button type="button" onClick={sairDaMesa} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-muted)' }}>×</button>
             </div>
@@ -1061,6 +1099,17 @@ export default function PresencialSalao() {
           semObrigatorios={semObrigatorios}
           onCancelar={() => setMontando(null)}
           onConfirmar={escolhas => addMontado(montando, escolhas)}
+        />
+      )}
+
+      {/* ── Ligar cliente à mesa ── */}
+      {pickerCliente && comandaSel && (
+        <ClientePicker
+          empresaId={empresaId}
+          titulo={mesaSel?.is_balcao ? 'Cliente do balcão' : `Cliente da Mesa ${mesaSel?.numero}`}
+          permitirTirar={!!comandaSel.cliente}
+          onPick={ligarClienteComanda}
+          onFechar={() => setPickerCliente(false)}
         />
       )}
 

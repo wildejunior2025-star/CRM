@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
+import ClientePicker from '../components/ClientePicker'
 import '../components/Page.css'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
@@ -21,13 +22,26 @@ export default function PresencialHistorico() {
   const [comissaoPct, setComissaoPct] = useState(0)
   const [loading, setLoading]   = useState(true)
   const [aberta, setAberta]     = useState(null) // id da comanda expandida
+  const [pickerComanda, setPickerComanda] = useState(null) // comanda em que se está ligando o cliente
+
+  // Liga (ou tira) um cliente a uma conta já fechada. Propaga pra venda no banco.
+  async function ligarCliente(comanda, cliente) {
+    const { error } = await supabase.rpc('vincular_cliente_comanda', {
+      p_comanda_id: comanda.id, p_cliente_id: cliente?.id ?? null,
+    })
+    setPickerComanda(null)
+    if (error) { window.alert('Erro ao ligar o cliente: ' + error.message); return }
+    setComandas(prev => prev.map(c => c.id === comanda.id
+      ? { ...c, cliente: cliente ? { id: cliente.id, nome: cliente.nome, telefone: cliente.telefone } : null }
+      : c))
+  }
 
   useEffect(() => {
     if (!empresaId) return
     const inicioHoje = new Date(); inicioHoje.setHours(0, 0, 0, 0)
     Promise.all([
       supabase.from('comandas')
-        .select('*, comanda_itens(*)')
+        .select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)')
         .eq('empresa_id', empresaId)
         .eq('status', 'fechada')
         .order('fechada_at', { ascending: false })
@@ -167,6 +181,11 @@ export default function PresencialHistorico() {
                         👤 {garcons[c.garcom_id]}
                       </div>
                     )}
+                    {c.cliente && (
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>
+                        🧑 Cliente: {c.cliente.nome}{c.cliente.telefone ? ` · ${c.cliente.telefone}` : ''}
+                      </div>
+                    )}
                   </div>
                   <strong style={{ fontSize: 16 }}>{fmt(c.total)}</strong>
                   <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{expandida ? '▲' : '▼'}</span>
@@ -194,12 +213,30 @@ export default function PresencialHistorico() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 800, paddingTop: 6 }}>
                       <span>Total</span><span>{fmt(c.total)}</span>
                     </div>
+                    {/* Ligar/trocar o cliente deste pedido já fechado */}
+                    <button type="button" onClick={() => setPickerComanda(c)}
+                      style={{ width: '100%', marginTop: 12, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
+                        border: `1.5px ${c.cliente ? 'solid var(--border)' : 'dashed var(--primary)'}`,
+                        background: c.cliente ? 'transparent' : 'rgba(124,58,237,.06)',
+                        color: c.cliente ? 'var(--text)' : 'var(--primary)', fontSize: 13.5, fontWeight: 700 }}>
+                      {c.cliente ? `🧑 ${c.cliente.nome} · trocar cliente` : '➕ Ligar cliente a este pedido'}
+                    </button>
                   </div>
                 )}
               </div>
             )
           })}
         </div>
+      )}
+
+      {pickerComanda && (
+        <ClientePicker
+          empresaId={empresaId}
+          titulo={pickerComanda.numero_mesa ? `Cliente da Mesa ${pickerComanda.numero_mesa}` : 'Cliente do pedido'}
+          permitirTirar={!!pickerComanda.cliente}
+          onPick={(cli) => ligarCliente(pickerComanda, cli)}
+          onFechar={() => setPickerComanda(null)}
+        />
       )}
     </div>
   )
