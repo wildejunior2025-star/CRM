@@ -7,12 +7,14 @@ import { supabase } from '../lib/supabaseClient'
 const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const num = (s) => Number(String(s ?? '').replace(',', '.')) || 0
 const semAcento = (s) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
-const emptyForm = { funcionario_id: '', tipo: 'produto', produto_id: '', busca: '', descricao: '', quantidade: '1', valor_unitario: '' }
+const emptyForm = { pessoaKey: '', tipo: 'produto', produto_id: '', busca: '', descricao: '', quantidade: '1', valor_unitario: '' }
+const PERFIL_LABEL = { admin: 'Adm', vendedor: 'Vendedor', garcom: 'Garçom', cozinheiro: 'Cozinheiro', entregador: 'Entregador' }
 
 export default function ConsumoFuncionario({ empresaId }) {
   const [consumos, setConsumos] = useState([])
   const [produtos, setProdutos] = useState([])
   const [funcionarios, setFuncionarios] = useState([])
+  const [usuarios, setUsuarios] = useState([])  // usuários do sistema (adm, garçom… inclui o dono)
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState(emptyForm)
@@ -22,19 +24,34 @@ export default function ConsumoFuncionario({ empresaId }) {
     if (!empresaId) return
     setLoading(true)
     const iniMes = new Date(); iniMes.setDate(1); iniMes.setHours(0, 0, 0, 0)
-    const [co, prc, fn] = await Promise.all([
+    const [co, prc, fn, us] = await Promise.all([
       supabase.from('consumo_funcionario').select('*').eq('empresa_id', empresaId).gte('created_at', iniMes.toISOString()).order('created_at', { ascending: false }),
       supabase.from('produtos').select('id, nome, preco_venda, controla_estoque').eq('empresa_id', empresaId).eq('ativo', true).order('nome').limit(1000),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
+      supabase.from('profiles').select('id, nome, perfil').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
     ])
     setConsumos(co.data || [])
     setProdutos(prc.data || [])
     setFuncionarios(fn.data || [])
+    setUsuarios(us.error ? [] : (us.data || []))
     setLoading(false)
   }
   useEffect(() => { load() }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const total = useMemo(() => consumos.reduce((s, c) => s + Number(c.valor_total || 0), 0), [consumos])
+  // Pessoas que podem consumir: funcionários cadastrados + usuários do sistema (adm,
+  // garçom… inclui o dono). Usuário que não é funcionário entra só pelo nome.
+  const pessoas = useMemo(() => {
+    const lista = funcionarios.map(f => ({ key: 'f:' + f.id, nome: f.nome, funcionario_id: f.id }))
+    const jaTem = new Set(funcionarios.map(f => semAcento(f.nome)))
+    for (const u of usuarios) {
+      if (u.nome && !jaTem.has(semAcento(u.nome))) {
+        lista.push({ key: 'u:' + u.id, nome: u.nome, sufixo: PERFIL_LABEL[u.perfil] || '', funcionario_id: null })
+        jaTem.add(semAcento(u.nome))
+      }
+    }
+    return lista.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+  }, [funcionarios, usuarios])
   const prodSel = produtos.find(p => p.id === form.produto_id)
   const filtrados = useMemo(() => {
     const q = semAcento(form.busca); if (!q) return []
@@ -52,14 +69,16 @@ export default function ConsumoFuncionario({ empresaId }) {
     e.preventDefault()
     if (form.tipo === 'produto' && !form.produto_id) { alert('Escolha o produto do estoque.'); return }
     if (form.tipo === 'avulso' && !form.descricao.trim()) { alert('Descreva o item (ex.: Almoço).'); return }
+    const pessoa = pessoas.find(p => p.key === form.pessoaKey)
     setSalvando(true)
     const { error } = await supabase.rpc('registrar_consumo_funcionario', {
-      p_funcionario_id: form.funcionario_id || null,
+      p_funcionario_id: pessoa?.funcionario_id || null,
       p_produto_id: form.tipo === 'produto' ? form.produto_id : null,
       p_descricao: form.descricao.trim() || null,
       p_quantidade: qtd,
       p_valor_unitario: form.valor_unitario === '' ? null : unit,
       p_observacao: null,
+      p_funcionario_nome: pessoa?.nome || null,
     })
     setSalvando(false)
     if (error) { window.alert('Erro ao lançar o consumo: ' + error.message); return }
@@ -110,17 +129,17 @@ export default function ConsumoFuncionario({ empresaId }) {
             <h2>Lançar consumo de funcionário</h2>
 
             <div className="form-grid">
-              <div className="form-field full"><label>Funcionário (opcional)</label>
-                <select value={form.funcionario_id} onChange={e => setForm(f => ({ ...f, funcionario_id: e.target.value }))}>
-                  <option value="">— sem funcionário / geral —</option>
-                  {funcionarios.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+              <div className="form-field full"><label>Quem consumiu (opcional)</label>
+                <select value={form.pessoaKey} onChange={e => setForm(f => ({ ...f, pessoaKey: e.target.value }))}>
+                  <option value="">— sem pessoa / geral —</option>
+                  {pessoas.map(p => <option key={p.key} value={p.key}>{p.nome}{p.sufixo ? ` (${p.sufixo})` : ''}</option>)}
                 </select>
               </div>
             </div>
 
             <div style={{ display: 'flex', gap: 6, margin: '4px 0 12px' }}>
               {[['produto', '📦 Item do estoque'], ['avulso', '🍽️ Refeição / avulso']].map(([id, lb]) => (
-                <button key={id} type="button" onClick={() => setForm(f => ({ ...emptyForm, funcionario_id: f.funcionario_id, tipo: id }))}
+                <button key={id} type="button" onClick={() => setForm(f => ({ ...emptyForm, pessoaKey: f.pessoaKey, tipo: id }))}
                   style={{ flex: 1, padding: '9px 8px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
                     background: form.tipo === id ? 'var(--primary)' : 'transparent', color: form.tipo === id ? '#fff' : 'var(--text)' }}>
                   {lb}
