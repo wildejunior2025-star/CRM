@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { calcIfoodLiquido } from '../lib/ifoodLiquido'
+import ConsumoFuncionario from '../components/ConsumoFuncionario'
 import '../components/Page.css'
 
 // ── helpers ───────────────────────────────────────────────────────────
@@ -32,9 +33,6 @@ const emptyDespesa = { nome: '', categoria: 'energia', tipo: 'fixo', valor: '' }
 const emptyFunc = { nome: '', cargo: '', salario_mensal: '' }
 const emptyProd = () => ({ ficha_id: '', qtd_feita: '', qtd_sobrou: '', unidade: 'kg' })
 const emptyImprev = { tipo: 'pedido', numero: '', descricao: '', valor: '', info: null }
-// Consumo de funcionário: item do estoque (baixa + valor da venda) OU refeição avulsa.
-const emptyConsumo = { funcionario_id: '', tipo: 'produto', produto_id: '', busca: '', descricao: '', quantidade: '1', valor_unitario: '' }
-const semAcentoDL = (s) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 
 export default function DespesasLucro({ empresaId }) {
   const hoje = new Date()
@@ -69,22 +67,14 @@ export default function DespesasLucro({ empresaId }) {
   const [imprevForm, setImprevForm] = useState(emptyImprev)
   const [buscandoPed, setBuscandoPed] = useState(false)
 
-  // Consumo de funcionário (alimentação) — relatório à parte, do mês corrente.
-  const [consumos, setConsumos] = useState([])
-  const [produtosCat, setProdutosCat] = useState([])   // catálogo pra escolher o item
-  const [showConsumo, setShowConsumo] = useState(false)
-  const [consumoForm, setConsumoForm] = useState(emptyConsumo)
-  const [salvandoConsumo, setSalvandoConsumo] = useState(false)
-
   const carregar = useCallback(async () => {
     if (!empresaId) return
     setLoading(true); setError(null)
     try {
       const ini = new Date(hoje); ini.setHours(0, 0, 0, 0)
       const fim = new Date(ini); fim.setDate(fim.getDate() + 1)
-      const iniMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1)
 
-      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im, co, prc] = await Promise.all([
+      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im] = await Promise.all([
         supabase.from('despesas_loja').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('valor', { ascending: false }),
         supabase.from('funcionarios').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
         supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', hojeYMD).order('created_at', { ascending: false }),
@@ -98,8 +88,6 @@ export default function DespesasLucro({ empresaId }) {
           .in('perfil', ['admin', 'vendedor', 'garcom', 'cozinheiro', 'entregador']).order('nome'),
         supabase.from('historico_dia').select('*').eq('empresa_id', empresaId).order('data', { ascending: false }).limit(90),
         supabase.from('custos_imprevistos').select('*').eq('empresa_id', empresaId).eq('data', hojeYMD).order('created_at', { ascending: false }),
-        supabase.from('consumo_funcionario').select('*').eq('empresa_id', empresaId).gte('created_at', iniMes.toISOString()).order('created_at', { ascending: false }),
-        supabase.from('produtos').select('id, nome, preco_venda, controla_estoque').eq('empresa_id', empresaId).eq('ativo', true).order('nome').limit(1000),
       ])
       for (const r of [dp, fn, pd, fi, fit, ped, hi, im]) if (r.error) throw r.error
 
@@ -108,8 +96,6 @@ export default function DespesasLucro({ empresaId }) {
       setProducao(pd.data || [])
       setImprevistos(im.data || [])
       setUsuarios(us.error ? [] : (us.data || []))
-      setConsumos(co.error ? [] : (co.data || []))
-      setProdutosCat(prc.error ? [] : (prc.data || []))
       setHistorico(hi.data || [])
       setDiasAbertos(Number(emp.data?.dias_abertos_mes ?? 26) || 26)
 
@@ -265,46 +251,6 @@ export default function DespesasLucro({ empresaId }) {
   }
   async function excluirImprev(i) { if (!confirm(`Excluir "${i.descricao}"?`)) return; await supabase.from('custos_imprevistos').delete().eq('id', i.id); carregar() }
 
-  // ── Consumo de funcionário (alimentação) ──
-  const totalConsumoMes = useMemo(() => consumos.reduce((s, c) => s + Number(c.valor_total || 0), 0), [consumos])
-  function abrirNovoConsumo() { setConsumoForm(emptyConsumo); setShowConsumo(true) }
-  const consProdSel = produtosCat.find(p => p.id === consumoForm.produto_id)
-  const consProdFiltrados = useMemo(() => {
-    const q = semAcentoDL(consumoForm.busca)
-    if (!q) return []
-    return produtosCat.filter(p => semAcentoDL(p.nome).includes(q)).slice(0, 20)
-  }, [produtosCat, consumoForm.busca])
-  // Prévia do valor total do consumo que está sendo lançado.
-  const consQtd = Math.max(1, num(consumoForm.quantidade) || 1)
-  const consUnit = num(consumoForm.valor_unitario)
-  const consTotalPrev = consUnit * consQtd
-  function escolherProdConsumo(p) {
-    setConsumoForm(f => ({ ...f, produto_id: p.id, descricao: p.nome, busca: p.nome, valor_unitario: String(Number(p.preco_venda || 0)).replace('.', ',') }))
-  }
-  async function salvarConsumo(e) {
-    e.preventDefault()
-    if (consumoForm.tipo === 'produto' && !consumoForm.produto_id) { alert('Escolha o produto do estoque.'); return }
-    if (consumoForm.tipo === 'avulso' && !consumoForm.descricao.trim()) { alert('Descreva o item (ex.: Almoço).'); return }
-    setSalvandoConsumo(true)
-    const { error } = await supabase.rpc('registrar_consumo_funcionario', {
-      p_funcionario_id: consumoForm.funcionario_id || null,
-      p_produto_id: consumoForm.tipo === 'produto' ? consumoForm.produto_id : null,
-      p_descricao: consumoForm.descricao.trim() || null,
-      p_quantidade: consQtd,
-      p_valor_unitario: consumoForm.valor_unitario === '' ? null : consUnit,
-      p_observacao: null,
-    })
-    setSalvandoConsumo(false)
-    if (error) { alert('Erro ao lançar o consumo: ' + error.message); return }
-    setShowConsumo(false); carregar()
-  }
-  async function excluirConsumo(c) {
-    if (!confirm(`Excluir o consumo "${c.descricao}"${c.baixou_estoque ? ' (o estoque será devolvido)' : ''}?`)) return
-    const { error } = await supabase.rpc('excluir_consumo_funcionario', { p_id: c.id })
-    if (error) { alert('Erro: ' + error.message); return }
-    carregar()
-  }
-
   if (!empresaId) return <div className="card">Selecione uma loja.</div>
 
   const totalHistLucro = historico.reduce((s, h) => s + Number(h.lucro || 0), 0)
@@ -407,18 +353,7 @@ export default function DespesasLucro({ empresaId }) {
           </Secao>
 
           {/* CONSUMO DE FUNCIONÁRIOS (alimentação) — relatório à parte, não entra no lucro */}
-          <Secao titulo="🍽️ Consumo de funcionários (alimentação — este mês)"
-            acao={<button className="btn btn-primary btn-sm" onClick={abrirNovoConsumo}>+ Lançar consumo</button>}
-            rodape={consumos.length > 0 && <>Gasto com alimentação no mês <strong>{brl(totalConsumoMes)}</strong> · não entra no lucro</>}>
-            {consumos.length === 0
-              ? <Vazio texto="Lance o que o funcionário pega (almoço, refri do estoque…). Dá baixa no estoque e soma o gasto do mês." />
-              : consumos.map(c => (
-                <ItemLinha key={c.id} onDel={() => excluirConsumo(c)}
-                  titulo={<>{Number(c.quantidade) > 1 ? `${c.quantidade}× ` : ''}{c.descricao}{c.baixou_estoque ? ' 📦' : ''}</>}
-                  sub={`${c.funcionario_nome || 'sem funcionário'} · ${new Date(c.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`}
-                  valor={brl(c.valor_total)} />
-              ))}
-          </Secao>
+          <ConsumoFuncionario empresaId={empresaId} />
         </div>
       )}
 
@@ -615,76 +550,6 @@ export default function DespesasLucro({ empresaId }) {
               💡 Veio o valor de venda do pedido. Se só o custo do produto foi perdido, ajuste o valor pra baixo.
             </div>
           )}
-        </Modal>
-      )}
-
-      {/* ─── MODAL: consumo de funcionário ─── */}
-      {showConsumo && (
-        <Modal onClose={() => setShowConsumo(false)} onSubmit={salvarConsumo}
-          titulo="Lançar consumo de funcionário" submitLabel={salvandoConsumo ? 'Salvando…' : 'Lançar'}>
-          <div className="form-grid">
-            <div className="form-field full"><label>Funcionário (opcional)</label>
-              <select value={consumoForm.funcionario_id} onChange={e => setConsumoForm(f => ({ ...f, funcionario_id: e.target.value }))}>
-                <option value="">— sem funcionário / geral —</option>
-                {funcionarios.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* tipo: item do estoque x refeição avulsa */}
-          <div style={{ display: 'flex', gap: 6, margin: '4px 0 12px' }}>
-            {[['produto', '📦 Item do estoque'], ['avulso', '🍽️ Refeição / avulso']].map(([id, lb]) => (
-              <button key={id} type="button" onClick={() => setConsumoForm(f => ({ ...emptyConsumo, funcionario_id: f.funcionario_id, tipo: id }))}
-                style={{ flex: 1, padding: '9px 8px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
-                  background: consumoForm.tipo === id ? 'var(--primary)' : 'transparent', color: consumoForm.tipo === id ? '#fff' : 'var(--text)' }}>
-                {lb}
-              </button>
-            ))}
-          </div>
-
-          {consumoForm.tipo === 'produto' ? (
-            <div className="form-field full" style={{ marginBottom: 12 }}>
-              <label>Produto do estoque</label>
-              {consProdSel ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ flex: 1, fontWeight: 700 }}>{consProdSel.nome}{consProdSel.controla_estoque ? '' : ' (sem controle de estoque)'}</span>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConsumoForm(f => ({ ...f, produto_id: '', busca: '', descricao: '' }))}>Trocar</button>
-                </div>
-              ) : (
-                <>
-                  <input autoFocus placeholder="Buscar produto..." value={consumoForm.busca}
-                    onChange={e => setConsumoForm(f => ({ ...f, busca: e.target.value }))} />
-                  {consProdFiltrados.length > 0 && (
-                    <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginTop: 4 }}>
-                      {consProdFiltrados.map(p => (
-                        <button key={p.id} type="button" onClick={() => escolherProdConsumo(p)}
-                          style={{ display: 'flex', width: '100%', justifyContent: 'space-between', gap: 8, textAlign: 'left', padding: '8px 10px', border: 'none', borderBottom: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontSize: 14 }}>
-                          <span>{p.nome}</span><span style={{ color: 'var(--text-muted)' }}>{brl(p.preco_venda)}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="form-field full" style={{ marginBottom: 12 }}>
-              <label>O que consumiu</label>
-              <input autoFocus placeholder="Ex.: Almoço" value={consumoForm.descricao}
-                onChange={e => setConsumoForm(f => ({ ...f, descricao: e.target.value }))} />
-            </div>
-          )}
-
-          <div className="form-grid">
-            <div className="form-field"><label>Quantidade</label>
-              <input inputMode="decimal" value={consumoForm.quantidade} onChange={e => setConsumoForm(f => ({ ...f, quantidade: e.target.value }))} /></div>
-            <div className="form-field"><label>Valor unitário (R$)</label>
-              <input inputMode="decimal" placeholder="0,00" value={consumoForm.valor_unitario} onChange={e => setConsumoForm(f => ({ ...f, valor_unitario: e.target.value }))} /></div>
-          </div>
-          <div className="card" style={{ marginTop: 12, background: 'var(--bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 13 }}>Total{consumoForm.tipo === 'produto' && consProdSel?.controla_estoque ? ' · dá baixa no estoque' : ''}</span>
-            <strong style={{ fontSize: 20, color: 'var(--primary)' }}>{brl(consTotalPrev)}</strong>
-          </div>
         </Modal>
       )}
     </div>

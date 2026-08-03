@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 import { adicionalComplementos } from '../lib/complementos'
 import ClientePicker from '../components/ClientePicker'
 import ClientesFiado from './ClientesFiado'
+import ConsumoFuncionario from '../components/ConsumoFuncionario'
 import { imprimirHtml, montarContaPresencialHtml, appFwcDisponivel } from '../utils/imprimirCupom'
 import '../components/Page.css'
 import './PresencialSalao.css'
@@ -91,6 +92,7 @@ export default function PresencialSalao() {
   const [pickerCliente, setPickerCliente] = useState(false) // modal "ligar cliente à mesa"
   const [ligandoCliente, setLigandoCliente] = useState(false)
   const [showFiado, setShowFiado] = useState(false) // modal "quem está devendo fiado"
+  const [showConsumoFunc, setShowConsumoFunc] = useState(false) // modal "consumo de funcionários"
 
   async function loadAll() {
     if (!empresaId) return
@@ -686,19 +688,33 @@ export default function PresencialSalao() {
           </p>
           <h1>Salão</h1>
           <p className="page-subtitle">Toque numa mesa para abrir/gerenciar a comanda.</p>
-          {/* Atalho pra ver quem está devendo fiado (e receber) sem sair do salão. */}
-          <button
-            type="button"
-            onClick={() => setShowFiado(true)}
-            style={{
-              marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '7px 14px', borderRadius: 10, cursor: 'pointer',
-              border: '1.5px solid #d97706', background: 'rgba(217,119,6,.1)',
-              color: '#b45309', fontSize: 13.5, fontWeight: 700,
-            }}
-          >
-            💳 Fiado — quem está devendo
-          </button>
+          {/* Atalhos rápidos sem sair do salão: fiado (quem deve) e consumo de funcionários. */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => setShowFiado(true)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '7px 14px', borderRadius: 10, cursor: 'pointer',
+                border: '1.5px solid #d97706', background: 'rgba(217,119,6,.1)',
+                color: '#b45309', fontSize: 13.5, fontWeight: 700,
+              }}
+            >
+              💳 Fiado — quem está devendo
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowConsumoFunc(true)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '7px 14px', borderRadius: 10, cursor: 'pointer',
+                border: '1.5px solid #16a34a', background: 'rgba(22,163,74,.1)',
+                color: '#15803d', fontSize: 13.5, fontWeight: 700,
+              }}
+            >
+              🍽️ Consumo de funcionários
+            </button>
+          </div>
         </div>
 
         {/* Só o ADM liga/desliga — muda como TODO garçom lança o pedido. */}
@@ -1141,6 +1157,21 @@ export default function PresencialSalao() {
                 style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-muted)', lineHeight: 1 }}>×</button>
             </div>
             <ClientesFiado empresaId={empresaId} />
+          </div>
+        </div>
+      )}
+
+      {/* ── Consumo de funcionários (alimentação) ── */}
+      {showConsumoFunc && (
+        <div className="modal-overlay" onClick={() => setShowConsumoFunc(false)} style={{ zIndex: 1100 }}>
+          <div className="modal" onClick={e => e.stopPropagation()}
+            style={{ maxWidth: 760, width: '100%', maxHeight: '88vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 14 }}>
+              <h2 style={{ margin: 0 }}>🍽️ Consumo de funcionários</h2>
+              <button type="button" onClick={() => setShowConsumoFunc(false)}
+                style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-muted)', lineHeight: 1 }}>×</button>
+            </div>
+            <ConsumoFuncionario empresaId={empresaId} />
           </div>
         </div>
       )}
