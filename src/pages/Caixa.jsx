@@ -33,6 +33,7 @@ export default function Caixa() {
 
   const [showFechamento, setShowFechamento] = useState(false)
   const [valorFechamento, setValorFechamento] = useState('')
+  const [valorFechamentoPix, setValorFechamentoPix] = useState('')
   const [obsFechamento, setObsFechamento] = useState('')
 
   const [saving, setSaving] = useState(false)
@@ -193,6 +194,7 @@ export default function Caixa() {
 
   function openFechamento() {
     setValorFechamento('')
+    setValorFechamentoPix('')
     setObsFechamento('')
     setFormError(null)
     setShowFechamento(true)
@@ -213,6 +215,7 @@ export default function Caixa() {
       p_caixa_id: caixaAtual.id,
       p_valor_fechamento: valor,
       p_observacoes: obsFechamento || null,
+      p_valor_fechamento_pix: valorFechamentoPix === '' ? null : Number(valorFechamentoPix),
     })
     setSaving(false)
 
@@ -238,6 +241,26 @@ export default function Caixa() {
     showFechamento && valorFechamento !== ''
       ? Number(valorFechamento) - valorEsperadoDinheiro
       : null
+
+  // PIX hoje é igual dinheiro: esperado em PIX = recebido em PIX + suprimentos − sangrias (por PIX).
+  const valorEsperadoPix = resumo
+    ? Number(resumo.recebimentos_pix || 0) +
+      Number(resumo.total_suprimentos_pix || 0) -
+      Number(resumo.total_sangrias_pix || 0)
+    : 0
+  const diferencaFechamentoPix =
+    showFechamento && valorFechamentoPix !== ''
+      ? Number(valorFechamentoPix) - valorEsperadoPix
+      : null
+
+  // Faturamento total do caixa: soma de TODAS as formas (dinheiro + pix + cartão + transferência + fiado).
+  const faturamentoTotal = resumo
+    ? Number(resumo.recebimentos_dinheiro || 0) +
+      Number(resumo.recebimentos_pix || 0) +
+      Number(resumo.recebimentos_cartao || 0) +
+      Number(resumo.recebimentos_transferencia || 0) +
+      Number(resumo.vendas_fiado || 0)
+    : 0
 
   return (
     <div>
@@ -288,6 +311,12 @@ export default function Caixa() {
           </div>
 
           {resumo && (
+            <>
+            {/* Faturamento total — soma de TODAS as formas, em destaque (cor diferente). */}
+            <div className="card" style={{ marginBottom: 14, border: '2px solid var(--primary)', background: 'var(--primary-bg, rgba(124,58,237,.08))', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1 }}>💰 Faturamento total (todas as formas)</div>
+              <div style={{ fontSize: 26, fontWeight: 900, color: 'var(--primary)' }}>R$ {faturamentoTotal.toFixed(2)}</div>
+            </div>
             <div className="dashboard-grid" style={{ marginBottom: 24 }}>
               {/* Fora daqui de propósito (a view caixa_resumo continua calculando tudo):
                   "Vendas à vista" repetia "Recebimentos em dinheiro" pro lojista, e
@@ -320,7 +349,12 @@ export default function Caixa() {
                 <div className="label">Esperado em dinheiro</div>
                 <div className="value">R$ {valorEsperadoDinheiro.toFixed(2)}</div>
               </div>
+              <div className="card dashboard-card">
+                <div className="label">Esperado em PIX</div>
+                <div className="value">R$ {valorEsperadoPix.toFixed(2)}</div>
+              </div>
             </div>
+            </>
           )}
 
           <h2 className="caixa-table-title">Sangrias e suprimentos</h2>
@@ -408,7 +442,14 @@ export default function Caixa() {
                 const espDin = r && r !== 'loading'
                   ? Number(c.valor_abertura || 0) + Number(r.recebimentos_dinheiro || 0) + Number(r.total_suprimentos_dinheiro ?? r.total_suprimentos ?? 0) - Number(r.total_sangrias_dinheiro ?? r.total_sangrias ?? 0)
                   : 0
+                const espPix = r && r !== 'loading'
+                  ? Number(r.recebimentos_pix || 0) + Number(r.total_suprimentos_pix || 0) - Number(r.total_sangrias_pix || 0)
+                  : 0
+                const fatTot = r && r !== 'loading'
+                  ? Number(r.recebimentos_dinheiro || 0) + Number(r.recebimentos_pix || 0) + Number(r.recebimentos_cartao || 0) + Number(r.recebimentos_transferencia || 0) + Number(r.vendas_fiado || 0)
+                  : 0
                 const dif = (r && r !== 'loading' && c.valor_fechamento_informado != null) ? Number(c.valor_fechamento_informado) - espDin : null
+                const difPix = (r && r !== 'loading' && c.valor_fechamento_pix != null) ? Number(c.valor_fechamento_pix) - espPix : null
                 return (
                 <Fragment key={c.id}>
                   <tr onClick={() => toggleHist(c)} style={{ cursor: 'pointer' }} title="Toque para ver o detalhamento por forma de pagamento">
@@ -435,6 +476,11 @@ export default function Caixa() {
                           <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando detalhamento…</span>
                         ) : (
                           <>
+                            {/* Faturamento total — todas as formas, em destaque */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 10, padding: '10px 12px', borderRadius: 10, border: '2px solid var(--primary)', background: 'var(--primary-bg, rgba(124,58,237,.08))' }}>
+                              <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1 }}>💰 Faturamento total (todas as formas)</span>
+                              <strong style={{ fontSize: 20, color: 'var(--primary)' }}>R$ {fatTot.toFixed(2)}</strong>
+                            </div>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
                               {[
                                 ['💵 Recebido em dinheiro', r.recebimentos_dinheiro],
@@ -445,6 +491,7 @@ export default function Caixa() {
                                 ['➖ Sangrias', r.total_sangrias],
                                 ['➕ Suprimentos', r.total_suprimentos],
                                 ['🪙 Esperado em dinheiro', espDin],
+                                ['🪙 Esperado em PIX', espPix],
                               ].filter(Boolean).map(([lb, v]) => (
                                 <div key={lb} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 11px' }}>
                                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{lb}</div>
@@ -460,9 +507,17 @@ export default function Caixa() {
                             )}
                             {dif !== null && (
                               <div style={{ marginTop: 10, fontSize: 13.5, fontWeight: 700 }}>
-                                Contado no fechamento: R$ {Number(c.valor_fechamento_informado).toFixed(2)} ·{' '}
+                                💵 Dinheiro contado: R$ {Number(c.valor_fechamento_informado).toFixed(2)} ·{' '}
                                 <span style={{ color: Math.abs(dif) < 0.005 ? 'var(--success, #16a34a)' : (dif > 0 ? 'var(--primary)' : 'var(--danger, #ef4444)') }}>
                                   Diferença: R$ {dif.toFixed(2)}{Math.abs(dif) < 0.005 ? ' (confere)' : dif > 0 ? ' (sobra)' : ' (falta)'}
+                                </span>
+                              </div>
+                            )}
+                            {difPix !== null && (
+                              <div style={{ marginTop: 4, fontSize: 13.5, fontWeight: 700 }}>
+                                📱 PIX conferido: R$ {Number(c.valor_fechamento_pix).toFixed(2)} ·{' '}
+                                <span style={{ color: Math.abs(difPix) < 0.005 ? 'var(--success, #16a34a)' : (difPix > 0 ? 'var(--primary)' : 'var(--danger, #ef4444)') }}>
+                                  Diferença: R$ {difPix.toFixed(2)}{Math.abs(difPix) < 0.005 ? ' (confere)' : difPix > 0 ? ' (sobra)' : ' (falta)'}
                                 </span>
                               </div>
                             )}
@@ -604,7 +659,9 @@ export default function Caixa() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>Fechar caixa</h2>
             <p className="caixa-esperado">
-              Valor esperado em dinheiro: <strong>R$ {valorEsperadoDinheiro.toFixed(2)}</strong>
+              Faturamento total: <strong style={{ color: 'var(--primary)' }}>R$ {faturamentoTotal.toFixed(2)}</strong><br />
+              Esperado em dinheiro: <strong>R$ {valorEsperadoDinheiro.toFixed(2)}</strong><br />
+              Esperado em PIX: <strong>R$ {valorEsperadoPix.toFixed(2)}</strong>
             </p>
             <form onSubmit={handleFechar}>
               <div className="form-grid">
@@ -633,10 +690,43 @@ export default function Caixa() {
                           : 'badge-danger'
                       }`}
                     >
-                      Diferença: R$ {diferencaFechamento.toFixed(2)}
+                      Diferença dinheiro: R$ {diferencaFechamento.toFixed(2)}
                       {diferencaFechamento > 0.005
                         ? ' (sobra)'
                         : diferencaFechamento < -0.005
+                        ? ' (falta)'
+                        : ' (confere)'}
+                    </span>
+                  </div>
+                )}
+                <div className="form-field full">
+                  <label htmlFor="valor-fechamento-pix">Valor conferido em PIX (R$) <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.85em' }}>opcional</span></label>
+                  <input
+                    id="valor-fechamento-pix"
+                    name="valor_fechamento_pix"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={valorFechamentoPix}
+                    onChange={(e) => setValorFechamentoPix(e.target.value)}
+                    placeholder={`Esperado: ${valorEsperadoPix.toFixed(2)}`}
+                  />
+                </div>
+                {diferencaFechamentoPix !== null && !Number.isNaN(diferencaFechamentoPix) && (
+                  <div className="form-field full">
+                    <span
+                      className={`badge ${
+                        Math.abs(diferencaFechamentoPix) < 0.005
+                          ? 'badge-success'
+                          : diferencaFechamentoPix > 0
+                          ? 'badge-primary'
+                          : 'badge-danger'
+                      }`}
+                    >
+                      Diferença PIX: R$ {diferencaFechamentoPix.toFixed(2)}
+                      {diferencaFechamentoPix > 0.005
+                        ? ' (sobra)'
+                        : diferencaFechamentoPix < -0.005
                         ? ' (falta)'
                         : ' (confere)'}
                     </span>
