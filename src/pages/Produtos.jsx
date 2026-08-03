@@ -152,6 +152,7 @@ export default function Produtos() {
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [uploadingFoto, setUploadingFoto] = useState(false)
+  const [duplicandoId, setDuplicandoId] = useState(null)        // produto sendo duplicado (spinner no botão)
 
   // Complementos / opções do produto (ex.: monte sua quentinha)
   const [grupos, setGrupos] = useState([])
@@ -275,6 +276,7 @@ export default function Produtos() {
   const [novaCategoria, setNovaCategoria] = useState('')
   const [savingCateg, setSavingCateg] = useState(false)
   const [categError, setCategError] = useState(null)
+  const [duplicandoCatId, setDuplicandoCatId] = useState(null)  // categoria sendo duplicada
 
   const [embalagens, setEmbalagens] = useState([])
   const [showEmbalagensModal, setShowEmbalagensModal] = useState(false)
@@ -608,6 +610,74 @@ export default function Produtos() {
     else loadProdutos(search, categoriaFiltro)
   }
 
+  // Cria uma cópia de um produto (com todos os campos + os vínculos de complementos).
+  // Se `novaCategoria` vier, a cópia vai pra essa categoria mantendo o nome (usado ao
+  // duplicar categoria inteira). Senão, mantém a categoria e acrescenta "(cópia)" no nome.
+  // Lança erro pra quem chamou tratar (não mexe em estado de UI aqui).
+  async function duplicarProdutoCore(p, novaCategoria = null) {
+    // Descarta id/created_at pra o banco gerar novos; o resto (inclusive empresa_id) copia igual.
+    // eslint-disable-next-line no-unused-vars
+    const { id, created_at, ...rest } = p
+    const novo = { ...rest }
+    if (novaCategoria != null) novo.categoria = novaCategoria
+    else novo.nome = `${p.nome} (cópia)`
+
+    const { data: saved, error } = await supabase
+      .from('produtos').insert(novo).select('id').single()
+    if (error) throw error
+
+    // Copia os vínculos de complementos (as opções são compartilhadas — só religamos os grupos).
+    const { data: links } = await supabase
+      .from('produto_complemento_grupos')
+      .select('grupo_id, max_override, min_override, ordem')
+      .eq('produto_id', p.id)
+    if (links?.length) {
+      const { error: le } = await supabase
+        .from('produto_complemento_grupos')
+        .insert(links.map(l => ({ ...l, produto_id: saved.id })))
+      if (le) throw le
+    }
+    return saved.id
+  }
+
+  async function handleDuplicarProduto(p) {
+    setDuplicandoId(p.id)
+    setError(null)
+    try {
+      await duplicarProdutoCore(p)
+      await loadProdutos(search, categoriaFiltro)
+    } catch (err) {
+      setError('Erro ao duplicar: ' + (err?.message ?? err))
+    } finally {
+      setDuplicandoId(null)
+    }
+  }
+
+  // Duplica a categoria inteira: cria "<nome> (cópia)" e replica todos os produtos dela.
+  async function handleDuplicarCategoria(c) {
+    const { data: prods, error: e0 } = await supabase
+      .from('produtos').select('*').eq('categoria', c.nome)
+    if (e0) { setCategError(e0.message); return }
+    const n = prods?.length ?? 0
+    const novoNome = `${c.nome} (cópia)`
+    if (!confirm(`Duplicar a categoria "${c.nome}" com ${n} produto(s)?\nSerá criada a categoria "${novoNome}" com uma cópia de cada item.`)) return
+
+    setDuplicandoCatId(c.id)
+    setCategError(null)
+    try {
+      const { error: e1 } = await supabase.rpc('add_categoria', { p_nome: novoNome })
+      if (e1) throw e1
+      // Um a um pra também copiar os complementos de cada produto.
+      for (const p of (prods ?? [])) await duplicarProdutoCore(p, novoNome)
+      await loadCategorias()
+      await loadProdutos(search, categoriaFiltro)
+    } catch (err) {
+      setCategError('Erro ao duplicar categoria: ' + (err?.message ?? err))
+    } finally {
+      setDuplicandoCatId(null)
+    }
+  }
+
   // Ordena os produtos exibidos seguindo a ordem personalizada das categorias
   const catOrdem = Object.fromEntries(categorias.map(c => [c.nome, c.ordem ?? 999]))
   const produtosOrdenados = [...produtos].sort((a, b) => {
@@ -801,6 +871,14 @@ export default function Produtos() {
                       onClick={() => openEdit(p)}
                     >
                       Editar
+                    </button>{' '}
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleDuplicarProduto(p)}
+                      disabled={duplicandoId === p.id}
+                      title="Criar uma cópia deste item"
+                    >
+                      {duplicandoId === p.id ? '...' : '⧉ Duplicar'}
                     </button>{' '}
                     <button
                       className="btn btn-danger btn-sm"
@@ -1375,7 +1453,15 @@ export default function Produtos() {
                             style={{ width: 96 }}
                           />
                         </td>
-                        <td style={{ textAlign: 'right' }}>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleDuplicarCategoria(c)}
+                            disabled={duplicandoCatId === c.id}
+                            title="Criar uma cópia desta categoria com todos os produtos"
+                          >
+                            {duplicandoCatId === c.id ? '...' : '⧉ Duplicar'}
+                          </button>{' '}
                           <button
                             className="btn btn-danger btn-sm"
                             onClick={() => handleDeleteCategoria(c.id)}
