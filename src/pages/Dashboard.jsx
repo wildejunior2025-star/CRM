@@ -115,6 +115,19 @@ function Delta({ atual, anterior }) {
 
 const cardBox = { background: 'var(--card-bg, var(--bg))', border: '1px solid var(--border)', borderRadius: 14, padding: 18 }
 
+// Nomes que não são pessoa e por isso ficam fora do ranking de clientes.
+const GENERICOS = ['consumidor (mesa)', 'consumidor', 'cliente']
+
+// Medalha do ranking: ouro/prata/bronze no pódio, cinza no resto.
+const MEDALHA = ['#d4a017', '#9aa3ad', '#c1743a']
+const posicao = (i) => ({
+  width: 22, height: 22, borderRadius: 999, flexShrink: 0,
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  fontSize: 11.5, fontWeight: 800,
+  background: i < 3 ? MEDALHA[i] : 'var(--border)',
+  color: i < 3 ? '#fff' : 'var(--text-muted)',
+})
+
 export default function Dashboard() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id
@@ -126,7 +139,6 @@ export default function Dashboard() {
   const [itens, setItens] = useState([])
   const [nomes, setNomes] = useState({})
   const [clientesNovos, setClientesNovos] = useState([])
-  const [ultimas, setUltimas] = useState([])
   const [op, setOp] = useState({ clientesAtivos: 0, estoqueBaixo: 0, cascosPendentes: 0, fiado: 0 })
   const [meta, setMeta] = useState(0)
   const [ifoodRates, setIfoodRates] = useState({})
@@ -175,13 +187,12 @@ export default function Dashboard() {
         if (pf?.ref_token) setRefToken(pf.ref_token)
       }
       const desdeISO = desde.toISOString()
-      const [vData, pData, iData, cnData, nRes, ulRes, caRes, saRes, csRes, fiRes, empRes] = await Promise.all([
-        fetchAll(() => supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes').neq('status', 'cancelado').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
-        fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens, subtotal, taxa_entrega, ifood_valores, forma_pagamento').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
+      const [vData, pData, iData, cnData, nRes, caRes, saRes, csRes, fiRes, empRes] = await Promise.all([
+        fetchAll(() => supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes, cliente_id, clientes(nome)').neq('status', 'cancelado').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
+        fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens, subtotal, taxa_entrega, ifood_valores, forma_pagamento, cliente_id, cliente_nome, cliente_telefone').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('venda_itens').select('produto_id, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desdeISO).order('id', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('clientes').select('created_at').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         supabase.from('produtos').select('id, nome, controla_casco'),
-        supabase.from('vendas').select('id, total, forma_pagamento, created_at, clientes(nome)').neq('status', 'cancelado').order('created_at', { ascending: false }).limit(8),
         supabase.from('clientes').select('id', { count: 'exact', head: true }).eq('ativo', true),
         supabase.from('estoque_saldo').select('*'),
         supabase.from('casco_saldo').select('*'),
@@ -193,7 +204,6 @@ export default function Dashboard() {
       setItens(iData ?? [])
       setNomes(Object.fromEntries((nRes.data ?? []).map(p => [p.id, p.nome])))
       setClientesNovos(cnData ?? [])
-      setUltimas(ulRes.data ?? [])
       setOp({
         clientesAtivos: caRes.count ?? 0,
         // Sem mínimo definido não é "baixo" — senão a loja que nunca mexeu no
@@ -285,6 +295,33 @@ export default function Dashboard() {
     }
     const top = Object.entries(agg).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 6)
 
+    // ranking de clientes (balcão + delivery). Venda sem cliente identificado fica
+    // de fora — senão "Consumidor" ganha de todo mundo e o ranking não serve pra nada.
+    // "Consumidor (Mesa)" é cliente cadastrado de verdade (o genérico que o salão
+    // usa pra fechar mesa), então precisa ser barrado pelo nome, igual ClientePicker.
+    const cli = {}
+    const addCli = (chave, nome, val, ts) => {
+      if (!chave || GENERICOS.includes((nome || '').trim().toLowerCase())) return
+      const c = cli[chave] || (cli[chave] = { nome: nome || 'Cliente', total: 0, compras: 0, ultima: null })
+      if (nome && c.nome === 'Cliente') c.nome = nome
+      c.total += val; c.compras++
+      const t = new Date(ts)
+      if (!c.ultima || t > c.ultima) c.ultima = t
+    }
+    for (const v of vendas) {
+      if (new Date(v.created_at) < start || new Date(v.created_at) >= now) continue
+      addCli(v.cliente_id, v.clientes?.nome, Number(v.total), v.created_at)
+    }
+    for (const p of pedidos) {
+      if (!validPed(p) || new Date(p.created_at) < start || new Date(p.created_at) >= now) continue
+      // delivery sem cadastro ainda dá pra agrupar pelo telefone
+      addCli(p.cliente_id || (p.cliente_telefone ? 'tel:' + p.cliente_telefone : null), p.cliente_nome, Number(p.total), p.created_at)
+    }
+    const todosCli = Object.values(cli)
+    const rank = todosCli.sort((a, b) => b.total - a.total).slice(0, 8)
+    const rankQtd = todosCli.length
+    const rankFat = todosCli.reduce((s, c) => s + c.total, 0)
+
     const novos = clientesNovos.filter(c => new Date(c.created_at) >= start).length
     const ticket = n > 0 ? fat / n : 0
 
@@ -294,7 +331,7 @@ export default function Dashboard() {
     for (const v of vendas) if (new Date(v.created_at) >= mStart) fatMes += Number(v.total)
     for (const p of pedidos) if (validPed(p) && new Date(p.created_at) >= mStart) fatMes += Number(p.total)
 
-    return { fat, fatPrev, n, ticket, canal, formas, buckets, horas, top, novos, fatMes, ifoodLiq, porHora }
+    return { fat, fatPrev, n, ticket, canal, formas, buckets, horas, top, novos, fatMes, ifoodLiq, porHora, rank, rankQtd, rankFat }
   }, [periodo, custIni, custFim, vendas, pedidos, itens, nomes, clientesNovos, ifoodRates])
 
   async function salvarMeta(v) {
@@ -514,7 +551,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Operacional + Últimas vendas */}
+          {/* Operacional + Ranking de clientes */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
             <div style={cardBox}>
               <strong style={{ fontSize: 15, display: 'block', marginBottom: 12 }}>📦 Operação</strong>
@@ -524,17 +561,38 @@ export default function Dashboard() {
               {usaCasco && <Op label="Cascos pendentes" to="/estoque" value={op.cascosPendentes} ultimo />}
             </div>
             <div style={cardBox}>
-              <strong style={{ fontSize: 15, display: 'block', marginBottom: 12 }}>🧾 Últimas vendas</strong>
-              {ultimas.length === 0 ? <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nenhuma venda ainda.</p>
-                : ultimas.map(v => (
-                  <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid var(--border)' }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 600 }}>{v.clientes?.nome ?? 'Consumidor'}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(v.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {normForma(v.forma_pagamento)}</div>
-                    </div>
-                    <strong style={{ fontSize: 14 }}>{fmt(v.total)}</strong>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 12 }}>
+                <strong style={{ fontSize: 15 }}>🥇 Ranking de clientes</strong>
+                <Link to="/clientes" style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary)', textDecoration: 'none' }}>ver todos →</Link>
+              </div>
+              {m.rank.length === 0 ? (
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+                  Nenhuma compra de cliente identificado {ehLabel(periodo)}. Venda de balcão sem cliente não entra no ranking.
+                </p>
+              ) : (
+                <>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+                    {m.rankQtd} {m.rankQtd === 1 ? 'cliente comprou' : 'clientes compraram'} {ehLabel(periodo)} · {fmt(m.rankFat)} no total
                   </div>
-                ))}
+                  {m.rank.map((c, i) => (
+                    <div key={i} style={{ padding: '9px 0', borderBottom: i === m.rank.length - 1 ? 'none' : '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={posicao(i)}>{i + 1}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.nome}</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                            {c.compras} {c.compras === 1 ? 'compra' : 'compras'} · ticket {fmt(c.total / c.compras)}
+                          </div>
+                        </div>
+                        <strong style={{ fontSize: 14 }}>{fmt(c.total)}</strong>
+                      </div>
+                      <div style={{ height: 5, borderRadius: 999, background: 'var(--border)', overflow: 'hidden', marginTop: 7 }}>
+                        <div style={{ height: '100%', width: `${(c.total / m.rank[0].total) * 100}%`, background: 'var(--primary)', borderRadius: 999, transition: 'width 400ms' }} />
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           </div>
         </div>
