@@ -80,7 +80,7 @@ export default function DespesasLucro({ empresaId }) {
         supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', hojeYMD).order('created_at', { ascending: false }),
         supabase.from('fichas_tecnicas').select('*').eq('empresa_id', empresaId).order('nome'),
         supabase.from('ficha_itens').select('ficha_id, quantidade, unidade, custo_unit').eq('empresa_id', empresaId),
-        supabase.from('empresas').select('dias_abertos_mes, ifood_comissao_pct, ifood_transacao_pct').eq('id', empresaId).maybeSingle(),
+        supabase.from('empresas').select('dias_abertos_mes, ifood_comissao_pct, ifood_transacao_pct, ifood_entrega_propria').eq('id', empresaId).maybeSingle(),
         fetchAll(() => supabase.from('pedidos_delivery')
           .select('origem, total, taxa_entrega, subtotal, ifood_valores, forma_pagamento, status')
           .neq('status', 'cancelado').gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())),
@@ -109,7 +109,7 @@ export default function DespesasLucro({ empresaId }) {
       const peds = ped.data || []
       const proprios = peds.filter(p => ['whatsapp', 'app', 'cardapio'].includes(p.origem) || !p.origem)
         .reduce((s, p) => s + (Number(p.total || 0) - Number(p.taxa_entrega || 0)), 0)
-      const rates = { comissao: emp.data?.ifood_comissao_pct, transacao: emp.data?.ifood_transacao_pct }
+      const rates = { comissao: emp.data?.ifood_comissao_pct, transacao: emp.data?.ifood_transacao_pct, entregaPropria: emp.data?.ifood_entrega_propria !== false }
       const ifoodLiq = calcIfoodLiquido(peds.filter(p => p.origem === 'ifood'), rates)
       const salao = (vd.error ? [] : (vd.data || [])).reduce((s, v) => s + Number(v.total || 0), 0)
       setReceitaDia({ proprios, salao, ifood: Number(ifoodLiq.voceRecebe || 0) })

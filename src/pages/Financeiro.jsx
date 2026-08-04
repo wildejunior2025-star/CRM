@@ -76,6 +76,7 @@ export default function Financeiro() {
   const [ads, setAds]         = useState({})      // { [periodo_ini]: valor } (anúncio digitado)
   const [repImp, setRepImp]   = useState({})      // { [periodo_ini]: {valor_repasse, situacao, ...} } (PDF importado)
   const [abertoAtual, setAbertoAtual] = useState(false)
+  const [entregaPropria, setEntregaPropria] = useState(true)  // no iFood: motoboy da loja x entrega parceira
   const [abertoAnt, setAbertoAnt] = useState({})   // { [iniYMD]: bool } semanas anteriores expandidas
   const [abertoCanal, setAbertoCanal] = useState({})   // { [canal]: bool } cards de canal próprio expandidos
   const [entExp, setEntExp]   = useState(false)
@@ -103,7 +104,7 @@ export default function Financeiro() {
     const anuQ = supabase.from('ifood_anuncio').select('semana_ini, valor').eq('empresa_id', empresaId).gte('semana_ini', ymd(desde))
     const impQ = supabase.from('ifood_repasse_semanal').select('*').eq('empresa_id', empresaId).gte('periodo_ini', ymd(desde))
     const [empRes, adsRes, impRes, pedRes] = await Promise.all([
-      supabase.from('empresas').select('ifood_comissao_pct, ifood_transacao_pct').eq('id', empresaId).maybeSingle(),
+      supabase.from('empresas').select('ifood_comissao_pct, ifood_transacao_pct, ifood_entrega_propria').eq('id', empresaId).maybeSingle(),
       ateh ? anuQ.lt('semana_ini', ymd(ateh)) : anuQ,
       ateh ? impQ.lt('periodo_ini', ymd(ateh)) : impQ,
       fetchAll(() => {
@@ -115,7 +116,9 @@ export default function Financeiro() {
         return q
       }),
     ])
-    const rates = { comissao: empRes.data?.ifood_comissao_pct, transacao: empRes.data?.ifood_transacao_pct }
+    const entregaPropria = empRes.data?.ifood_entrega_propria !== false
+    setEntregaPropria(entregaPropria)
+    const rates = { comissao: empRes.data?.ifood_comissao_pct, transacao: empRes.data?.ifood_transacao_pct, entregaPropria }
     const adMap = {}; for (const a of (adsRes.data ?? [])) adMap[a.semana_ini] = Number(a.valor || 0)
     const impMap = {}; for (const r of (impRes.data ?? [])) impMap[r.periodo_ini] = r
 
@@ -166,6 +169,16 @@ export default function Financeiro() {
     setRepImp(prev => ({ ...prev, ...impMap }))
   }
   useEffect(() => { loadSemanasMes(mesFiltro) }, [empresaId, mesFiltro])
+
+  // Quem entrega no iFood. Muda o que a loja recebe: com entrega parceira a taxa
+  // de entrega é do entregador do iFood e não volta no repasse.
+  async function salvarEntregaPropria(v) {
+    setEntregaPropria(v)
+    if (!empresaId) return
+    await supabase.from('empresas').update({ ifood_entrega_propria: v }).eq('id', empresaId)
+    await loadSemanas()
+    if (mesFiltro) await loadSemanasMes(mesFiltro)
+  }
 
   async function salvarAnuncio(iniYMD, val) {
     setAds(prev => ({ ...prev, [iniYMD]: val }))
@@ -335,6 +348,26 @@ export default function Financeiro() {
               {importing ? 'Lendo PDF…' : '📄 Importar PDF do repasse'}
             </button>
           </div>
+          {/* Quem entrega — muda se a taxa de entrega volta ou não pra loja */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12, padding: '10px 14px', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10 }}>
+            <div style={{ flex: '1 1 220px', minWidth: 180 }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>🛵 Quem entrega no iFood?</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                {entregaPropria
+                  ? 'Seu motoboy — a taxa de entrega volta no repasse.'
+                  : 'Entregador do iFood — a taxa de entrega é dele, não entra no seu repasse.'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 999, padding: 3 }}>
+              {[[true, 'Meu motoboy'], [false, 'Motoboy do iFood']].map(([v, lb]) => (
+                <button key={String(v)} type="button" onClick={() => salvarEntregaPropria(v)}
+                  style={{ padding: '6px 13px', borderRadius: 999, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap',
+                    background: entregaPropria === v ? 'var(--primary)' : 'transparent', color: entregaPropria === v ? '#fff' : 'var(--text-muted)' }}>
+                  {lb}
+                </button>
+              ))}
+            </div>
+          </div>
           {importMsg && (
             <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.5,
               background: importMsg.tipo === 'ok' ? 'rgba(22,163,74,.10)' : 'rgba(239,68,68,.10)',
@@ -366,7 +399,12 @@ export default function Financeiro() {
                   <QuebraRepasse rep={repImp[atual.iniYMD]} aReceber={aReceberDe(atual)} semTotal />
                 ) : (
                   <>
-                    <Linha label="Vendas (itens + entrega)" valor={fmtBRL(atual.liq.vendasOnline)} />
+                    <Linha label={atual.liq.freteIfood > 0 ? 'Vendas (só os itens)' : 'Vendas (itens + entrega)'} valor={fmtBRL(atual.liq.vendasOnline)} />
+                    {atual.liq.freteIfood > 0 && (
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '0 0 10px', marginTop: -6 }}>
+                        fora {fmtBRL(atual.liq.freteIfood)} de taxa de entrega — o cliente pagou, mas é do entregador do iFood
+                      </div>
+                    )}
                     <Linha label="− Comissão + taxa" valor={`− ${fmtBRL(atual.liq.comissaoOnline)}`} cor="var(--danger)" />
                     <Linha label="− Promoções (seus cupons)" valor={`− ${fmtBRL(atual.liq.promocoesOnline)}`} cor="var(--danger)" />
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0 14px' }}>

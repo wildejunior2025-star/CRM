@@ -197,7 +197,7 @@ export default function Dashboard() {
         supabase.from('estoque_saldo').select('*'),
         supabase.from('casco_saldo').select('*'),
         supabase.from('clientes_saldo_fiado').select('saldo_fiado'),
-        empresaId ? supabase.from('empresas').select('meta_faturamento_mensal, ifood_comissao_pct, ifood_transacao_pct, estoque_ativo').eq('id', empresaId).single() : Promise.resolve({ data: null }),
+        empresaId ? supabase.from('empresas').select('meta_faturamento_mensal, ifood_comissao_pct, ifood_transacao_pct, estoque_ativo, ifood_entrega_propria').eq('id', empresaId).single() : Promise.resolve({ data: null }),
       ])
       setVendas(vData ?? [])
       setPedidos(pData ?? [])
@@ -213,7 +213,7 @@ export default function Dashboard() {
         fiado: (fiRes.data ?? []).reduce((s, f) => s + Number(f.saldo_fiado), 0),
       })
       setMeta(Number(empRes.data?.meta_faturamento_mensal ?? 0))
-      setIfoodRates({ comissao: empRes.data?.ifood_comissao_pct, transacao: empRes.data?.ifood_transacao_pct })
+      setIfoodRates({ comissao: empRes.data?.ifood_comissao_pct, transacao: empRes.data?.ifood_transacao_pct, entregaPropria: empRes.data?.ifood_entrega_propria !== false })
       setUsaEstoque(empRes.data?.estoque_ativo ?? true)
       setUsaCasco((nRes.data ?? []).some(p => p.controla_casco) || (csRes.data ?? []).some(c => Number(c.saldo_cascos) > 0))
       setLoading(false)

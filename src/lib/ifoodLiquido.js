@@ -12,12 +12,25 @@
 export const IFOOD_COMISSAO_PCT  = 0.117
 export const IFOOD_TRANSACAO_PCT = 0.0452
 
+// Quem entregou o pedido. A taxa de entrega só volta pra loja quando o motoboy
+// é dela (entrega própria). Na "entrega parceira" o iFood cobra o frete do
+// cliente e paga o entregador dele — esse dinheiro nunca passa pela loja.
+// O pedido traz `ifood_valores.entregue_por` ("MERCHANT" | "IFOOD"); pedidos
+// antigos não têm o campo e caem no ajuste da loja (rates.entregaPropria).
+export function lojaEntregou(ifoodValores, entregaPropriaPadrao = true) {
+  const quem = String(ifoodValores?.entregue_por ?? '').toUpperCase()
+  if (quem === 'MERCHANT') return true
+  if (quem === 'IFOOD') return false
+  return entregaPropriaPadrao !== false
+}
+
 // pedidos: lista de pedidos_delivery do iFood, cada um com
-//   { subtotal, taxa_entrega, total, ifood_valores: { incentivo_loja, pago_online } }
-// rates (opcional): taxa calibrada da loja { comissao, transacao }; sem isso usa o padrão.
+//   { subtotal, taxa_entrega, total, ifood_valores: { incentivo_loja, pago_online, entregue_por } }
+// rates (opcional): { comissao, transacao, entregaPropria }; sem isso usa o padrão.
 export function calcIfoodLiquido(pedidos = [], rates = {}) {
   const PCT_COMISSAO  = Number(rates.comissao)  > 0 ? Number(rates.comissao)  : IFOOD_COMISSAO_PCT
   const PCT_TRANSACAO = Number(rates.transacao) >= 0 && rates.transacao != null ? Number(rates.transacao) : IFOOD_TRANSACAO_PCT
+  const ENTREGA_PROPRIA = rates.entregaPropria !== false
   let vendas = 0            // o que os clientes pagaram (bruto)
   let comissao = 0          // comissão sobre os itens (todos os pedidos)
   let transacao = 0         // taxa de transação (só online)
@@ -28,15 +41,21 @@ export function calcIfoodLiquido(pedidos = [], rates = {}) {
   let vendasOnline = 0      // itens + entrega própria (online)
   let promocoesOnline = 0   // cupons que a loja bancou (online)
   let comissaoOnline = 0    // comissão + transação (online)
+  let freteIfood = 0        // frete que ficou com o entregador do iFood (não é da loja)
+  let temEntregaIfood = false
   const entregaForma = {}   // quebra do "na entrega" por forma: { dinheiro:{qtd,total}, debito:{...}, ... }
 
   for (const p of pedidos) {
     const itens  = Number(p.subtotal || 0)
-    const te     = Number(p.taxa_entrega || 0)
+    const teBruto = Number(p.taxa_entrega || 0)
     const iv     = p.ifood_valores || {}
     const il     = Number(iv.incentivo_loja || 0)
     const pago   = Number(p.total || 0)
     const online = !!iv.pago_online
+    // Frete só entra no que a loja recebe se o motoboy for dela.
+    const daLoja = lojaEntregou(iv, ENTREGA_PROPRIA)
+    const te     = daLoja ? teBruto : 0
+    if (!daLoja) { freteIfood += teBruto; temEntregaIfood = true }
 
     const com   = PCT_COMISSAO * itens
     const trans = online ? PCT_TRANSACAO * pago : 0
@@ -46,7 +65,7 @@ export function calcIfoodLiquido(pedidos = [], rates = {}) {
     transacao += trans
 
     if (online) {
-      // repasse = itens + taxa de entrega (entrega própria volta inteira) − incentivo da loja − taxas
+      // repasse = itens + taxa de entrega (só se a loja entregou) − incentivo da loja − taxas
       repasse += itens + te - il - com - trans
       vendasOnline += itens + te
       promocoesOnline += il
@@ -66,7 +85,7 @@ export function calcIfoodLiquido(pedidos = [], rates = {}) {
   const pctTaxa = vendas > 0 ? Math.round((taxasTotal / vendas) * 100) : 0
 
   return { vendas, repasse, recebidoEntrega, comissaoEntrega, comissao, transacao, taxasTotal, voceRecebe, pctTaxa, entregaForma,
-    vendasOnline, promocoesOnline, comissaoOnline }
+    vendasOnline, promocoesOnline, comissaoOnline, freteIfood, temEntregaIfood }
 }
 
 // rótulo amigável da forma de pagamento na entrega

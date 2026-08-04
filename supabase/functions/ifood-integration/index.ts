@@ -275,9 +275,17 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     }
   }
   const incTotal = Number(total.benefits ?? (incLoja + incIfood))
+  // Quem faz a entrega decide de quem é a taxa de entrega:
+  //   MERCHANT = motoboy da loja  → o iFood devolve o frete no repasse
+  //   IFOOD    = entrega parceira → o frete é do entregador do iFood, a loja não vê esse dinheiro
+  // Sem o campo (pedido de retirada, ou payload antigo), o Financeiro cai no
+  // ajuste "quem entrega" da loja.
+  const entreguePor = String(o.delivery?.deliveredBy ?? "").toUpperCase() || null
   const ifoodValores = {
     itens: Number(total.subTotal ?? 0),
     taxa: Number(total.deliveryFee ?? 0),
+    entregue_por: entreguePor,
+    entrega_modo: o.delivery?.mode ?? null,
     incentivo_loja: Number(incLoja.toFixed(2)),
     incentivo_ifood: Number(incIfood.toFixed(2)),
     incentivos_total: Number(incTotal.toFixed(2)),
