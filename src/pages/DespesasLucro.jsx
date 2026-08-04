@@ -11,6 +11,7 @@ const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate(
 const ddmm = (s) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
 const addDia = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return ymd(d) }
 const diaSemana = (s) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR', { weekday: 'long' })
+const mesLabel = (s) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: '2-digit' })
 // Conversão pra unidade base (grama/ml/un), igual à Ficha Técnica.
 const FATOR = { kg: 1000, g: 1, L: 1000, ml: 1, un: 1 }
 const UNIDADES = ['kg', 'g', 'L', 'ml', 'un']
@@ -55,6 +56,26 @@ function novoHistorico(row, campo, valorNovo, hojeYMD) {
   return [...hist, { ate: addDia(hojeYMD, -1), valor: antigo }]
 }
 
+// ── Dias que a loja abre ─────────────────────────────────────────────
+// A grade semanal (Minha Loja → Horários) já diz em que dias a loja abre —
+// índice 0 = domingo, igual ao getDay() do JS. Contar os dias reais do mês é
+// melhor que um número fixo digitado: acerta mês a mês sozinho (agosto/26 tem
+// 21 dias úteis, setembro tem 22) e some com o risco de ficar desatualizado.
+const SIGLA_DIA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
+const gradeValida = (h) => Array.isArray(h) && h.length === 7 && h.some(d => d?.aberto)
+function diasAbertosNoMes(diaYMD, horarios) {
+  if (!gradeValida(horarios)) return null
+  const [y, m] = diaYMD.split('-').map(Number)
+  const ultimo = new Date(y, m, 0).getDate()
+  let n = 0
+  for (let d = 1; d <= ultimo; d++) if (horarios[new Date(y, m - 1, d).getDay()]?.aberto) n++
+  return n || null
+}
+const abreNoDia = (diaYMD, horarios) =>
+  !gradeValida(horarios) ? true : !!horarios[new Date(diaYMD + 'T00:00:00').getDay()]?.aberto
+const diasQueAbre = (horarios) =>
+  !gradeValida(horarios) ? '' : horarios.map((d, i) => (d?.aberto ? SIGLA_DIA[i] : null)).filter(Boolean).join(', ')
+
 // custo por unidade base de uma ficha (custo total / rendimento em base)
 function custoPorBaseFicha(ficha, itens) {
   const custoTotal = (itens || []).reduce((s, it) => s + emBase(it.quantidade, it.unidade) * Number(it.custo_unit || 0), 0)
@@ -88,6 +109,7 @@ export default function DespesasLucro({ empresaId }) {
   const [usuarios, setUsuarios] = useState([])      // funcionários já cadastrados em Usuários
   const [historico, setHistorico] = useState([])    // fechamentos diários
   const [diasAbertos, setDiasAbertos] = useState(26)
+  const [horarios, setHorarios] = useState(null)   // grade semanal da loja (Minha Loja → Horários)
   const [receitaDia, setReceitaDia] = useState({ proprios: 0, salao: 0, ifood: 0 })
   const [fechando, setFechando] = useState(false)
   const [histAberto, setHistAberto] = useState({}) // { [id]: bool } dias expandidos no histórico
@@ -119,7 +141,7 @@ export default function DespesasLucro({ empresaId }) {
         supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', dia).order('created_at', { ascending: false }),
         supabase.from('fichas_tecnicas').select('*').eq('empresa_id', empresaId).order('nome'),
         supabase.from('ficha_itens').select('ficha_id, quantidade, unidade, custo_unit').eq('empresa_id', empresaId),
-        supabase.from('empresas').select('dias_abertos_mes, ifood_comissao_pct, ifood_transacao_pct, ifood_entrega_propria').eq('id', empresaId).maybeSingle(),
+        supabase.from('empresas').select('dias_abertos_mes, ifood_comissao_pct, ifood_transacao_pct, ifood_entrega_propria, horarios_funcionamento').eq('id', empresaId).maybeSingle(),
         fetchAll(() => supabase.from('pedidos_delivery')
           .select('origem, total, taxa_entrega, subtotal, ifood_valores, forma_pagamento, status')
           .neq('status', 'cancelado').gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())),
@@ -140,6 +162,7 @@ export default function DespesasLucro({ empresaId }) {
       setUsuarios(us.error ? [] : (us.data || []))
       setHistorico(hi.data || [])
       setDiasAbertos(Number(emp.data?.dias_abertos_mes ?? 26) || 26)
+      setHorarios(emp.data?.horarios_funcionamento ?? null)
 
       const itensPor = {}
       for (const it of (fit.data || [])) (itensPor[it.ficha_id] = itensPor[it.ficha_id] || []).push(it)
@@ -169,9 +192,17 @@ export default function DespesasLucro({ empresaId }) {
   const producaoHoje = useMemo(() => producao.reduce((s, p) => s + custoProdItem(p), 0), [producao])
   const imprevistoHoje = useMemo(() => imprevistos.reduce((s, i) => s + Number(i.valor || 0), 0), [imprevistos])
 
-  const dias = Math.max(1, diasAbertos)
-  const fixoPorDia = totalFixo / dias
-  const funcPorDia = totalFunc / dias
+  // Divisor do rateio: conta os dias reais do mês pela grade da loja; só cai no
+  // número digitado se a loja ainda não configurou os horários.
+  const diasAuto = useMemo(() => diasAbertosNoMes(dia, horarios), [dia, horarios])
+  const dias = Math.max(1, diasAuto ?? diasAbertos)
+  const abre = abreNoDia(dia, horarios)
+  // Num dia que a loja não abre o rateio é zero: o custo do mês já foi dividido
+  // entre os dias em que ela abre, cobrar de novo aqui contaria duas vezes.
+  const fixoPorDiaBase = totalFixo / dias
+  const funcPorDiaBase = totalFunc / dias
+  const fixoPorDia = abre ? fixoPorDiaBase : 0
+  const funcPorDia = abre ? funcPorDiaBase : 0
   const receita = receitaDia.proprios + (receitaDia.salao || 0) + receitaDia.ifood
   const custosDia = fixoPorDia + funcPorDia + producaoHoje + imprevistoHoje
   const lucroDia = receita - custosDia
@@ -365,11 +396,23 @@ export default function DespesasLucro({ empresaId }) {
               <span style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'capitalize', marginLeft: 2 }}>{diaSemana(dia)}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>
-              Dias que a loja abre no mês
-              <input type="number" min="1" max="31" value={diasAbertos} onChange={e => setDiasAbertos(e.target.value)} onBlur={e => salvarDias(e.target.value)}
-                style={{ width: 58, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', textAlign: 'center' }} />
+              {diasAuto != null ? (
+                <span title={`Contado pelos horários da loja: ${diasQueAbre(horarios)}. Muda sozinho a cada mês.`}>
+                  A loja abre <strong style={{ color: 'var(--text)' }}>{diasAuto} dias</strong> em {mesLabel(dia)} · {diasQueAbre(horarios)}
+                </span>
+              ) : (<>
+                Dias que a loja abre no mês
+                <input type="number" min="1" max="31" value={diasAbertos} onChange={e => setDiasAbertos(e.target.value)} onBlur={e => salvarDias(e.target.value)}
+                  style={{ width: 58, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', textAlign: 'center' }} />
+              </>)}
             </div>
           </div>
+
+          {!abre && !fechado && (
+            <div style={{ padding: '10px 14px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.5, background: 'rgba(245,158,11,.10)', border: '1px solid rgba(245,158,11,.4)' }}>
+              🚪 <strong style={{ textTransform: 'capitalize' }}>{diaSemana(dia)}</strong> a loja não abre. Custo fixo e folha não entram nesse dia — eles já estão divididos entre os {dias} dias em que ela abre.
+            </div>
+          )}
 
           {fechado && (
             <div style={{ padding: '10px 14px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.5, background: 'rgba(22,163,74,.10)', border: '1px solid rgba(22,163,74,.4)' }}>
@@ -388,8 +431,8 @@ export default function DespesasLucro({ empresaId }) {
                 ? <>próprios {brl(fechado.receita_proprios)} · iFood {brl(fechado.receita_ifood)}</>
                 : <>salão {brl(receitaDia.salao || 0)} · delivery {brl(receitaDia.proprios)} · iFood {brl(receitaDia.ifood)}</>}
             </div>
-            <Linha label={fechado ? '− Custos fixos (rateio do dia)' : `− Custos fixos (rateio do dia: ${brl(totalFixo)}/${dias})`} valor={`− ${brl(v.fixo)}`} cor="var(--danger)" />
-            <Linha label={fechado ? '− Funcionários (rateio do dia)' : `− Funcionários (rateio do dia: ${brl(totalFunc)}/${dias})`} valor={`− ${brl(v.func)}`} cor="var(--danger)" />
+            <Linha label={fechado ? '− Custos fixos (rateio do dia)' : !abre ? '− Custos fixos (loja fechada nesse dia)' : `− Custos fixos (rateio do dia: ${brl(totalFixo)}/${dias})`} valor={`− ${brl(v.fixo)}`} cor="var(--danger)" />
+            <Linha label={fechado ? '− Funcionários (rateio do dia)' : !abre ? '− Funcionários (loja fechada nesse dia)' : `− Funcionários (rateio do dia: ${brl(totalFunc)}/${dias})`} valor={`− ${brl(v.func)}`} cor="var(--danger)" />
             <Linha label={`− Custo de produção ${rotuloDia}`} valor={`− ${brl(v.prod)}`} cor="var(--danger)" />
             <Linha label={`− Custos imprevistos ${rotuloDia}`} valor={`− ${brl(v.imprev)}`} cor="var(--danger)" />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, marginTop: 6, borderTop: '2px solid var(--border)' }}>
@@ -451,7 +494,7 @@ export default function DespesasLucro({ empresaId }) {
           {/* CUSTOS FIXOS */}
           <Secao titulo={ehHoje ? '💡 Custos fixos e variáveis (mensais)' : `💡 Custos fixos que existiam em ${ddmm(dia)}`}
             acao={ehHoje && <button className="btn btn-primary btn-sm" onClick={abrirNovaDespesa}>+ Novo custo</button>}
-            rodape={despesas.length > 0 && <>Total <strong>{brl(totalFixo)}</strong>/mês · <strong>{brl(fixoPorDia)}</strong>/dia</>}>
+            rodape={despesas.length > 0 && <>Total <strong>{brl(totalFixo)}</strong>/mês · <strong>{brl(fixoPorDiaBase)}</strong> por dia aberto ({dias} dias)</>}>
             {despesas.length === 0 ? <Vazio texto={ehHoje ? 'Cadastre aluguel, energia, água, internet…' : `Nenhum custo cadastrado até ${ddmm(dia)}.`} />
               : despesas.map(d => {
                 const val = valorNoDia(d, 'valor', dia)
@@ -468,7 +511,7 @@ export default function DespesasLucro({ empresaId }) {
           {/* FUNCIONÁRIOS */}
           <Secao titulo={ehHoje ? '👥 Funcionários' : `👥 Quem estava na folha em ${ddmm(dia)}`}
             acao={ehHoje && <button className="btn btn-primary btn-sm" onClick={abrirNovoFunc}>+ Funcionário</button>}
-            rodape={funcionarios.length > 0 && <>Total <strong>{brl(totalFunc)}</strong>/mês · custo por dia <strong>{brl(funcPorDia)}</strong> ({dias} dias)</>}>
+            rodape={funcionarios.length > 0 && <>Total <strong>{brl(totalFunc)}</strong>/mês · <strong>{brl(funcPorDiaBase)}</strong> por dia aberto ({dias} dias)</>}>
             {funcionarios.length === 0 ? <Vazio texto={ehHoje ? 'Cadastre cada funcionário com o salário.' : `Ninguém cadastrado na folha até ${ddmm(dia)}.`} />
               : funcionarios.map(f => {
                 const sal = valorNoDia(f, 'salario_mensal', dia)
