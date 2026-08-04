@@ -9,6 +9,8 @@ const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', c
 const pad = (n) => String(n).padStart(2, '0')
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const ddmm = (s) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+const addDia = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return ymd(d) }
+const diaSemana = (s) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR', { weekday: 'long' })
 // Conversão pra unidade base (grama/ml/un), igual à Ficha Técnica.
 const FATOR = { kg: 1000, g: 1, L: 1000, ml: 1, un: 1 }
 const UNIDADES = ['kg', 'g', 'L', 'ml', 'un']
@@ -21,6 +23,37 @@ const CATEGORIAS = [
 ]
 const catLabel = (c) => (CATEGORIAS.find(([k]) => k === c)?.[1]) || '📦 Outros'
 const PERFIL_LABEL = { admin: 'Gerente/Admin', vendedor: 'Vendedor', garcom: 'Garçom', cozinheiro: 'Cozinheiro', entregador: 'Entregador' }
+
+// ── Vigência: o que valia num dia passado ────────────────────────────
+// O que está cadastrado hoje vale também pros dias passados. NÃO dá pra usar
+// o created_at como "data de entrada": ele é quando a pessoa foi digitada no
+// sistema, não quando foi contratada — a loja cadastra tudo de uma vez no dia
+// que começa a usar, e aí todo dia anterior apareceria com folha zero.
+// O que muda a conta de um dia velho é só o que foi registrado explicitamente:
+// saída (inativado_em) e mudança de valor (valor_historico). E quando o dia é
+// fechado, ele congela e nada mais mexe nele.
+const soData = (ts) => (ts ? String(ts).slice(0, 10) : null)
+function vigenteNoDia(row, dia) {
+  const saiu = soData(row.inativado_em)
+  if (saiu) return dia < saiu
+  return row.ativo !== false
+}
+// valor_historico: [{ ate: 'YYYY-MM-DD', valor: n }] — n valeu ATÉ `ate` (inclusive).
+function valorNoDia(row, campo, dia) {
+  const hist = Array.isArray(row.valor_historico) ? row.valor_historico : []
+  const anteriores = hist
+    .filter(h => h && h.ate && dia <= String(h.ate))
+    .sort((a, b) => String(a.ate).localeCompare(String(b.ate)))
+  if (anteriores.length) return Number(anteriores[0].valor || 0)
+  return Number(row[campo] || 0)
+}
+// Anexa o valor antigo ao histórico quando ele muda hoje (valia até ontem).
+function novoHistorico(row, campo, valorNovo, hojeYMD) {
+  const antigo = Number(row[campo] || 0)
+  if (Number(valorNovo) === antigo) return undefined      // nada mudou
+  const hist = Array.isArray(row.valor_historico) ? row.valor_historico : []
+  return [...hist, { ate: addDia(hojeYMD, -1), valor: antigo }]
+}
 
 // custo por unidade base de uma ficha (custo total / rendimento em base)
 function custoPorBaseFicha(ficha, itens) {
@@ -37,6 +70,11 @@ const emptyImprev = { tipo: 'pedido', numero: '', descricao: '', valor: '', info
 export default function DespesasLucro({ empresaId }) {
   const hoje = new Date()
   const hojeYMD = ymd(hoje)
+
+  const [dia, setDia] = useState(hojeYMD)  // dia que está sendo olhado (nunca no futuro)
+  const ehHoje = dia === hojeYMD
+  const ontemYMD = addDia(hojeYMD, -1)
+  const rotuloDia = ehHoje ? 'de hoje' : dia === ontemYMD ? 'de ontem' : 'do dia'
 
   const [sub, setSub] = useState('hoje') // 'hoje' | 'historico'
   const [loading, setLoading] = useState(true)
@@ -71,13 +109,14 @@ export default function DespesasLucro({ empresaId }) {
     if (!empresaId) return
     setLoading(true); setError(null)
     try {
-      const ini = new Date(hoje); ini.setHours(0, 0, 0, 0)
+      const ini = new Date(dia + 'T00:00:00')
       const fim = new Date(ini); fim.setDate(fim.getDate() + 1)
 
+      // Traz inativos também: quem saiu depois ainda conta nos dias em que estava lá.
       const [dp, fn, pd, fi, fit, emp, ped, us, hi, im, vd] = await Promise.all([
-        supabase.from('despesas_loja').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('valor', { ascending: false }),
-        supabase.from('funcionarios').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
-        supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', hojeYMD).order('created_at', { ascending: false }),
+        supabase.from('despesas_loja').select('*').eq('empresa_id', empresaId).order('valor', { ascending: false }),
+        supabase.from('funcionarios').select('*').eq('empresa_id', empresaId).order('nome'),
+        supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', dia).order('created_at', { ascending: false }),
         supabase.from('fichas_tecnicas').select('*').eq('empresa_id', empresaId).order('nome'),
         supabase.from('ficha_itens').select('ficha_id, quantidade, unidade, custo_unit').eq('empresa_id', empresaId),
         supabase.from('empresas').select('dias_abertos_mes, ifood_comissao_pct, ifood_transacao_pct, ifood_entrega_propria').eq('id', empresaId).maybeSingle(),
@@ -87,15 +126,15 @@ export default function DespesasLucro({ empresaId }) {
         supabase.from('profiles').select('id, nome, perfil, cargo').eq('empresa_id', empresaId).eq('ativo', true)
           .in('perfil', ['admin', 'vendedor', 'garcom', 'cozinheiro', 'entregador']).order('nome'),
         supabase.from('historico_dia').select('*').eq('empresa_id', empresaId).order('data', { ascending: false }).limit(90),
-        supabase.from('custos_imprevistos').select('*').eq('empresa_id', empresaId).eq('data', hojeYMD).order('created_at', { ascending: false }),
+        supabase.from('custos_imprevistos').select('*').eq('empresa_id', empresaId).eq('data', dia).order('created_at', { ascending: false }),
         // Vendas do SALÃO/balcão (fechar conta presencial) — não vivem em pedidos_delivery.
         supabase.from('vendas').select('total').eq('empresa_id', empresaId).neq('status', 'cancelado')
           .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString()),
       ])
       for (const r of [dp, fn, pd, fi, fit, ped, hi, im]) if (r.error) throw r.error
 
-      setDespesas(dp.data || [])
-      setFuncionarios(fn.data || [])
+      setDespesas((dp.data || []).filter(d => vigenteNoDia(d, dia)))
+      setFuncionarios((fn.data || []).filter(f => vigenteNoDia(f, dia)))
       setProducao(pd.data || [])
       setImprevistos(im.data || [])
       setUsuarios(us.error ? [] : (us.data || []))
@@ -118,13 +157,14 @@ export default function DespesasLucro({ empresaId }) {
     } finally {
       setLoading(false)
     }
-  }, [empresaId, hojeYMD])
+  }, [empresaId, dia])
 
   useEffect(() => { carregar() }, [carregar])
 
   // ── cálculos do DIA ──────────────────────────────────────────────
-  const totalFixo = useMemo(() => despesas.reduce((s, d) => s + Number(d.valor || 0), 0), [despesas])
-  const totalFunc = useMemo(() => funcionarios.reduce((s, f) => s + Number(f.salario_mensal || 0), 0), [funcionarios])
+  // Usa o valor que valia NAQUELE dia, não o de hoje.
+  const totalFixo = useMemo(() => despesas.reduce((s, d) => s + valorNoDia(d, 'valor', dia), 0), [despesas, dia])
+  const totalFunc = useMemo(() => funcionarios.reduce((s, f) => s + valorNoDia(f, 'salario_mensal', dia), 0), [funcionarios, dia])
   const custoProdItem = (p) => emBase(Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0), p.unidade) * Number(p.custo_unit || 0)
   const producaoHoje = useMemo(() => producao.reduce((s, p) => s + custoProdItem(p), 0), [producao])
   const imprevistoHoje = useMemo(() => imprevistos.reduce((s, i) => s + Number(i.valor || 0), 0), [imprevistos])
@@ -136,6 +176,16 @@ export default function DespesasLucro({ empresaId }) {
   const custosDia = fixoPorDia + funcPorDia + producaoHoje + imprevistoHoje
   const lucroDia = receita - custosDia
 
+  // Dia já fechado: vale o retrato salvo. Recalcular seria errado — a produção
+  // daquele dia foi apagada no fechamento, então daria custo zero.
+  const fechado = useMemo(() => historico.find(h => h.data === dia) || null, [historico, dia])
+  const v = fechado
+    ? { receita: Number(fechado.receita_liquida || 0), fixo: Number(fechado.custo_fixo || 0), func: Number(fechado.custo_funcionarios || 0),
+        prod: Number(fechado.custo_producao || 0), imprev: Number(fechado.custo_imprevisto || 0), lucro: Number(fechado.lucro || 0) }
+    : { receita, fixo: fixoPorDia, func: funcPorDia, prod: producaoHoje, imprev: imprevistoHoje, lucro: lucroDia }
+  const itensFechado = Array.isArray(fechado?.itens) ? fechado.itens : []
+  const imprevFechado = Array.isArray(fechado?.imprevistos) ? fechado.imprevistos : []
+
   async function salvarDias(v) {
     const x = Math.max(1, Math.min(31, Math.round(Number(v) || 26)))
     setDiasAbertos(x)
@@ -144,13 +194,13 @@ export default function DespesasLucro({ empresaId }) {
 
   // ── FECHAR O DIA: salva no histórico e limpa a produção do dia ──
   async function fecharDia() {
-    if (!confirm(`Fechar o dia ${ddmm(hojeYMD)}?\n\nSalva o resumo no Histórico e LIMPA a produção de hoje (começa o próximo dia zerado).`)) return
+    if (!confirm(`Fechar o dia ${ddmm(dia)}?\n\nCongela o resumo desse dia no Histórico e LIMPA a produção dele (o valor não muda mais, mesmo que você mexa nos custos depois).`)) return
     setFechando(true)
     try {
       const itens = producao.map(p => ({ nome: p.nome, qtd_feita: Number(p.qtd_feita || 0), qtd_sobrou: Number(p.qtd_sobrou || 0), unidade: p.unidade, custo: custoProdItem(p) }))
       const impSnap = imprevistos.map(i => ({ descricao: i.descricao, valor: Number(i.valor || 0) }))
       const { error: upErr } = await supabase.from('historico_dia').upsert({
-        empresa_id: empresaId, data: hojeYMD,
+        empresa_id: empresaId, data: dia,
         receita_liquida: receita, receita_proprios: receitaDia.proprios + (receitaDia.salao || 0), receita_ifood: receitaDia.ifood,
         custo_fixo: fixoPorDia, custo_funcionarios: funcPorDia,
         custo_producao: producaoHoje, custo_imprevisto: imprevistoHoje,
@@ -158,9 +208,9 @@ export default function DespesasLucro({ empresaId }) {
       }, { onConflict: 'empresa_id,data' })
       if (upErr) throw upErr
       // limpa a produção e os imprevistos do dia (já estão no snapshot do histórico)
-      const { error: delErr } = await supabase.from('producao_diaria').delete().eq('empresa_id', empresaId).eq('data', hojeYMD)
+      const { error: delErr } = await supabase.from('producao_diaria').delete().eq('empresa_id', empresaId).eq('data', dia)
       if (delErr) throw delErr
-      const { error: delImp } = await supabase.from('custos_imprevistos').delete().eq('empresa_id', empresaId).eq('data', hojeYMD)
+      const { error: delImp } = await supabase.from('custos_imprevistos').delete().eq('empresa_id', empresaId).eq('data', dia)
       if (delImp) throw delImp
       await carregar()
       setSub('historico')
@@ -178,12 +228,23 @@ export default function DespesasLucro({ empresaId }) {
     e.preventDefault()
     if (!despesaForm.nome.trim()) return
     const payload = { empresa_id: empresaId, nome: despesaForm.nome.trim(), categoria: despesaForm.categoria, tipo: despesaForm.tipo, valor: num(despesaForm.valor) }
+    // Mudou o valor? guarda o antigo com a data até quando ele valeu, senão os
+    // dias já passados passariam a ser recalculados com o valor novo.
+    if (despesaEdit) {
+      const hist = novoHistorico(despesaEdit, 'valor', payload.valor, hojeYMD)
+      if (hist) payload.valor_historico = hist
+    }
     const q = despesaEdit ? supabase.from('despesas_loja').update(payload).eq('id', despesaEdit.id) : supabase.from('despesas_loja').insert(payload)
     const { error } = await q
     if (error) { alert('Erro: ' + error.message); return }
     setShowDespesa(false); carregar()
   }
-  async function excluirDespesa(d) { if (!confirm(`Excluir "${d.nome}"?`)) return; await supabase.from('despesas_loja').delete().eq('id', d.id); carregar() }
+  // Não apaga: marca a data em que o custo deixou de existir, pra não sumir dos dias passados.
+  async function excluirDespesa(d) {
+    if (!confirm(`Tirar "${d.nome}" da conta a partir de hoje?\n\nOs dias anteriores continuam contando com ele.`)) return
+    await supabase.from('despesas_loja').update({ ativo: false, inativado_em: new Date().toISOString() }).eq('id', d.id)
+    carregar()
+  }
 
   // ── CRUD: funcionário ──
   function abrirNovoFunc() { setFuncEdit(null); setFuncForm(emptyFunc); setShowFunc(true) }
@@ -192,12 +253,23 @@ export default function DespesasLucro({ empresaId }) {
     e.preventDefault()
     if (!funcForm.nome.trim()) return
     const payload = { empresa_id: empresaId, nome: funcForm.nome.trim(), cargo: funcForm.cargo.trim() || null, salario_mensal: num(funcForm.salario_mensal) }
+    // Aumento de salário vale de hoje em diante; o salário antigo fica guardado
+    // pros dias em que ele era o que estava valendo.
+    if (funcEdit) {
+      const hist = novoHistorico(funcEdit, 'salario_mensal', payload.salario_mensal, hojeYMD)
+      if (hist) payload.valor_historico = hist
+    }
     const q = funcEdit ? supabase.from('funcionarios').update(payload).eq('id', funcEdit.id) : supabase.from('funcionarios').insert(payload)
     const { error } = await q
     if (error) { alert('Erro: ' + error.message); return }
     setShowFunc(false); carregar()
   }
-  async function excluirFunc(f) { if (!confirm(`Excluir "${f.nome}"?`)) return; await supabase.from('funcionarios').delete().eq('id', f.id); carregar() }
+  // Demissão: sai da folha de hoje em diante, mas continua contando nos dias em que trabalhou.
+  async function excluirFunc(f) {
+    if (!confirm(`Tirar "${f.nome}" da folha a partir de hoje?\n\nOs dias em que ele trabalhou continuam contando com o salário dele.`)) return
+    await supabase.from('funcionarios').update({ ativo: false, inativado_em: new Date().toISOString() }).eq('id', f.id)
+    carregar()
+  }
   function puxarUsuario(uid) {
     const u = usuarios.find(x => x.id === uid)
     if (!u) return
@@ -214,7 +286,7 @@ export default function DespesasLucro({ empresaId }) {
     e.preventDefault()
     if (!prodForm.ficha_id || !fichaSel) { alert('Escolha o produto (ficha técnica).'); return }
     const payload = {
-      empresa_id: empresaId, data: hojeYMD, ficha_id: prodForm.ficha_id, nome: fichaSel.nome,
+      empresa_id: empresaId, data: dia, ficha_id: prodForm.ficha_id, nome: fichaSel.nome,
       qtd_feita: num(prodForm.qtd_feita), qtd_sobrou: num(prodForm.qtd_sobrou),
       unidade: prodForm.unidade, custo_unit: fichaSel.custoPorBase,
     }
@@ -249,7 +321,7 @@ export default function DespesasLucro({ empresaId }) {
   async function salvarImprev(e) {
     e.preventDefault()
     if (!imprevForm.descricao.trim()) { alert('Descreva o imprevisto (ex.: pedido cancelado).'); return }
-    const { error } = await supabase.from('custos_imprevistos').insert({ empresa_id: empresaId, data: hojeYMD, descricao: imprevForm.descricao.trim(), valor: num(imprevForm.valor) })
+    const { error } = await supabase.from('custos_imprevistos').insert({ empresa_id: empresaId, data: dia, descricao: imprevForm.descricao.trim(), valor: num(imprevForm.valor) })
     if (error) { alert('Erro: ' + error.message); return }
     setShowImprev(false); carregar()
   }
@@ -263,7 +335,7 @@ export default function DespesasLucro({ empresaId }) {
     <div>
       {/* sub-abas */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap' }}>
-        {[['hoje', '📊 Hoje'], ['historico', '📜 Histórico de despesas diárias']].map(([id, lb]) => (
+        {[['hoje', '📊 Dia a dia'], ['historico', '📜 Histórico de despesas diárias']].map(([id, lb]) => (
           <button key={id} type="button" onClick={() => setSub(id)}
             style={{ padding: '7px 14px', borderRadius: 999, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
               background: sub === id ? 'var(--primary)' : 'transparent', color: sub === id ? '#fff' : 'var(--text-muted)' }}>
@@ -279,81 +351,135 @@ export default function DespesasLucro({ empresaId }) {
       {!loading && sub === 'hoje' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-          {/* config dias abertos */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>
-            Dias que a loja abre no mês
-            <input type="number" min="1" max="31" value={diasAbertos} onChange={e => setDiasAbertos(e.target.value)} onBlur={e => salvarDias(e.target.value)}
-              style={{ width: 58, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', textAlign: 'center' }} />
+          {/* escolher o dia + config dias abertos */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <button type="button" onClick={() => setDia(addDia(dia, -1))} title="Dia anterior" style={navBtn}>◀</button>
+              <input type="date" value={dia} max={hojeYMD}
+                onChange={e => { if (e.target.value && e.target.value <= hojeYMD) setDia(e.target.value) }}
+                style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13 }} />
+              <button type="button" onClick={() => setDia(addDia(dia, 1))} disabled={ehHoje} title="Próximo dia"
+                style={{ ...navBtn, opacity: ehHoje ? .35 : 1, cursor: ehHoje ? 'default' : 'pointer' }}>▶</button>
+              {!ehHoje && <button type="button" onClick={() => setDia(hojeYMD)} style={chipBtn}>Hoje</button>}
+              {dia !== ontemYMD && <button type="button" onClick={() => setDia(ontemYMD)} style={chipBtn}>Ontem</button>}
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'capitalize', marginLeft: 2 }}>{diaSemana(dia)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>
+              Dias que a loja abre no mês
+              <input type="number" min="1" max="31" value={diasAbertos} onChange={e => setDiasAbertos(e.target.value)} onBlur={e => salvarDias(e.target.value)}
+                style={{ width: 58, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', textAlign: 'center' }} />
+            </div>
           </div>
 
+          {fechado && (
+            <div style={{ padding: '10px 14px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.5, background: 'rgba(22,163,74,.10)', border: '1px solid rgba(22,163,74,.4)' }}>
+              🔒 <strong>Dia fechado.</strong> Os valores abaixo são o retrato que foi congelado quando você fechou — não mudam mais, mesmo mexendo nos custos hoje.
+            </div>
+          )}
+
           {/* LUCRO REAL DO DIA */}
-          <div style={{ background: 'var(--card)', border: `2px solid ${lucroDia >= 0 ? '#16a34a' : '#ef4444'}`, borderRadius: 14, padding: 20 }}>
+          <div style={{ background: 'var(--card)', border: `2px solid ${v.lucro >= 0 ? '#16a34a' : '#ef4444'}`, borderRadius: 14, padding: 20 }}>
             <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 }}>
-              💰 Lucro real de hoje ({ddmm(hojeYMD)})
+              💰 Lucro real {rotuloDia} ({ddmm(dia)}) {fechado && <span style={{ color: '#16a34a' }}>🔒</span>}
             </div>
-            <Linha label="Faturamento líquido do dia (salão + delivery + iFood)" valor={brl(receita)} bold />
+            <Linha label="Faturamento líquido do dia (salão + delivery + iFood)" valor={brl(v.receita)} bold />
             <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '-4px 0 8px 2px' }}>
-              salão {brl(receitaDia.salao || 0)} · delivery {brl(receitaDia.proprios)} · iFood {brl(receitaDia.ifood)}
+              {fechado
+                ? <>próprios {brl(fechado.receita_proprios)} · iFood {brl(fechado.receita_ifood)}</>
+                : <>salão {brl(receitaDia.salao || 0)} · delivery {brl(receitaDia.proprios)} · iFood {brl(receitaDia.ifood)}</>}
             </div>
-            <Linha label={`− Custos fixos (rateio do dia: ${brl(totalFixo)}/${dias})`} valor={`− ${brl(fixoPorDia)}`} cor="var(--danger)" />
-            <Linha label={`− Funcionários (rateio do dia: ${brl(totalFunc)}/${dias})`} valor={`− ${brl(funcPorDia)}`} cor="var(--danger)" />
-            <Linha label="− Custo de produção de hoje" valor={`− ${brl(producaoHoje)}`} cor="var(--danger)" />
-            <Linha label="− Custos imprevistos de hoje" valor={`− ${brl(imprevistoHoje)}`} cor="var(--danger)" />
+            <Linha label={fechado ? '− Custos fixos (rateio do dia)' : `− Custos fixos (rateio do dia: ${brl(totalFixo)}/${dias})`} valor={`− ${brl(v.fixo)}`} cor="var(--danger)" />
+            <Linha label={fechado ? '− Funcionários (rateio do dia)' : `− Funcionários (rateio do dia: ${brl(totalFunc)}/${dias})`} valor={`− ${brl(v.func)}`} cor="var(--danger)" />
+            <Linha label={`− Custo de produção ${rotuloDia}`} valor={`− ${brl(v.prod)}`} cor="var(--danger)" />
+            <Linha label={`− Custos imprevistos ${rotuloDia}`} valor={`− ${brl(v.imprev)}`} cor="var(--danger)" />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, marginTop: 6, borderTop: '2px solid var(--border)' }}>
-              <span style={{ fontSize: 16, fontWeight: 900 }}>{lucroDia >= 0 ? '= Foi pro seu bolso hoje' : '= Prejuízo hoje'}</span>
-              <span style={{ fontSize: 26, fontWeight: 900, color: lucroDia >= 0 ? '#16a34a' : '#ef4444' }}>{brl(lucroDia)}</span>
+              <span style={{ fontSize: 16, fontWeight: 900 }}>
+                {v.lucro >= 0 ? `= Foi pro seu bolso ${ehHoje ? 'hoje' : 'nesse dia'}` : `= Prejuízo ${ehHoje ? 'hoje' : 'nesse dia'}`}
+              </span>
+              <span style={{ fontSize: 26, fontWeight: 900, color: v.lucro >= 0 ? '#16a34a' : '#ef4444' }}>{brl(v.lucro)}</span>
             </div>
           </div>
 
           {/* PRODUÇÃO DO DIA (com botão fechar o dia) */}
-          <Secao titulo={`🍲 Custo de produção de hoje (${ddmm(hojeYMD)})`}
-            acao={<div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <Secao titulo={`🍲 Custo de produção ${rotuloDia} (${ddmm(dia)})`}
+            acao={!fechado && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               <button className="btn btn-primary btn-sm" onClick={abrirNovaProd} disabled={fichas.length === 0}>+ Lançar produção</button>
               <button className="btn btn-sm" onClick={fecharDia} disabled={fechando}
-                style={{ background: '#16a34a', color: '#fff' }}>{fechando ? 'Salvando…' : '💾 Fechar o dia'}</button>
+                style={{ background: '#16a34a', color: '#fff' }}>{fechando ? 'Salvando…' : `💾 Fechar ${ehHoje ? 'o dia' : ddmm(dia)}`}</button>
             </div>}
-            rodape={producao.length > 0 && <>Custo de produção de hoje <strong>{brl(producaoHoje)}</strong></>}>
-            {fichas.length === 0 && <Vazio texto="Crie fichas técnicas primeiro (Catálogo → Ficha Técnica) pra puxar o custo por kg." />}
-            {fichas.length > 0 && producao.length === 0 && <Vazio texto="Lance a produção do dia (ex.: fiz 10kg de feijão, sobrou 2kg)." />}
-            {producao.map(p => {
-              const consumido = Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0)
-              return (
-                <ItemLinha key={p.id} onDel={() => excluirProd(p)}
-                  titulo={p.nome}
-                  sub={`fez ${p.qtd_feita}${p.unidade} · sobrou ${p.qtd_sobrou}${p.unidade} · usou ${consumido}${p.unidade}`}
-                  valor={brl(custoProdItem(p))} />
-              )
-            })}
+            rodape={(fechado ? itensFechado.length > 0 : producao.length > 0) && <>Custo de produção {rotuloDia} <strong>{brl(v.prod)}</strong></>}>
+            {fechado ? (
+              itensFechado.length === 0
+                ? <Vazio texto="Esse dia foi fechado sem lançamento de produção." />
+                : itensFechado.map((p, i) => (
+                  <ItemLinha key={i} titulo={p.nome}
+                    sub={`fez ${p.qtd_feita}${p.unidade} · sobrou ${p.qtd_sobrou}${p.unidade} · usou ${Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0)}${p.unidade}`}
+                    valor={brl(p.custo)} />
+                ))
+            ) : (<>
+              {fichas.length === 0 && <Vazio texto="Crie fichas técnicas primeiro (Catálogo → Ficha Técnica) pra puxar o custo por kg." />}
+              {fichas.length > 0 && producao.length === 0 && <Vazio texto={`Lance a produção ${rotuloDia} (ex.: fiz 10kg de feijão, sobrou 2kg).`} />}
+              {producao.map(p => {
+                const consumido = Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0)
+                return (
+                  <ItemLinha key={p.id} onDel={() => excluirProd(p)}
+                    titulo={p.nome}
+                    sub={`fez ${p.qtd_feita}${p.unidade} · sobrou ${p.qtd_sobrou}${p.unidade} · usou ${consumido}${p.unidade}`}
+                    valor={brl(custoProdItem(p))} />
+                )
+              })}
+            </>)}
           </Secao>
 
           {/* CUSTOS IMPREVISTOS DO DIA */}
-          <Secao titulo="⚠️ Custos imprevistos de hoje" acao={<button className="btn btn-primary btn-sm" onClick={abrirNovoImprev}>+ Imprevisto</button>}
-            rodape={imprevistos.length > 0 && <>Imprevistos de hoje <strong>{brl(imprevistoHoje)}</strong></>}>
-            {imprevistos.length === 0
-              ? <Vazio texto="Ex.: pedido cancelado que estragou o produto, algo que caiu/quebrou, compra de emergência…" />
-              : imprevistos.map(i => (
-                <ItemLinha key={i.id} onDel={() => excluirImprev(i)} titulo={i.descricao} valor={brl(i.valor)} />
-              ))}
+          <Secao titulo={`⚠️ Custos imprevistos ${rotuloDia}`}
+            acao={!fechado && <button className="btn btn-primary btn-sm" onClick={abrirNovoImprev}>+ Imprevisto</button>}
+            rodape={(fechado ? imprevFechado.length > 0 : imprevistos.length > 0) && <>Imprevistos {rotuloDia} <strong>{brl(v.imprev)}</strong></>}>
+            {fechado ? (
+              imprevFechado.length === 0
+                ? <Vazio texto="Nenhum imprevisto nesse dia." />
+                : imprevFechado.map((i, k) => <ItemLinha key={k} titulo={i.descricao} valor={brl(i.valor)} />)
+            ) : (
+              imprevistos.length === 0
+                ? <Vazio texto="Ex.: pedido cancelado que estragou o produto, algo que caiu/quebrou, compra de emergência…" />
+                : imprevistos.map(i => (
+                  <ItemLinha key={i.id} onDel={() => excluirImprev(i)} titulo={i.descricao} valor={brl(i.valor)} />
+                ))
+            )}
           </Secao>
 
           {/* CUSTOS FIXOS */}
-          <Secao titulo="💡 Custos fixos e variáveis (mensais)" acao={<button className="btn btn-primary btn-sm" onClick={abrirNovaDespesa}>+ Novo custo</button>}
+          <Secao titulo={ehHoje ? '💡 Custos fixos e variáveis (mensais)' : `💡 Custos fixos que existiam em ${ddmm(dia)}`}
+            acao={ehHoje && <button className="btn btn-primary btn-sm" onClick={abrirNovaDespesa}>+ Novo custo</button>}
             rodape={despesas.length > 0 && <>Total <strong>{brl(totalFixo)}</strong>/mês · <strong>{brl(fixoPorDia)}</strong>/dia</>}>
-            {despesas.length === 0 ? <Vazio texto="Cadastre aluguel, energia, água, internet…" />
-              : despesas.map(d => (
-                <ItemLinha key={d.id} onEdit={() => abrirEditarDespesa(d)} onDel={() => excluirDespesa(d)}
-                  titulo={<>{catLabel(d.categoria)} — {d.nome}</>} sub={d.tipo === 'variavel' ? 'variável' : 'fixo'} valor={brl(d.valor) + '/mês'} />
-              ))}
+            {despesas.length === 0 ? <Vazio texto={ehHoje ? 'Cadastre aluguel, energia, água, internet…' : `Nenhum custo cadastrado até ${ddmm(dia)}.`} />
+              : despesas.map(d => {
+                const val = valorNoDia(d, 'valor', dia)
+                const mudou = val !== Number(d.valor || 0)
+                return (
+                  <ItemLinha key={d.id} onEdit={ehHoje ? () => abrirEditarDespesa(d) : undefined} onDel={ehHoje ? () => excluirDespesa(d) : undefined}
+                    titulo={<>{catLabel(d.categoria)} — {d.nome}</>}
+                    sub={<>{d.tipo === 'variavel' ? 'variável' : 'fixo'}{mudou && ` · valor da época (hoje é ${brl(d.valor)})`}</>}
+                    valor={brl(val) + '/mês'} />
+                )
+              })}
           </Secao>
 
           {/* FUNCIONÁRIOS */}
-          <Secao titulo="👥 Funcionários" acao={<button className="btn btn-primary btn-sm" onClick={abrirNovoFunc}>+ Funcionário</button>}
+          <Secao titulo={ehHoje ? '👥 Funcionários' : `👥 Quem estava na folha em ${ddmm(dia)}`}
+            acao={ehHoje && <button className="btn btn-primary btn-sm" onClick={abrirNovoFunc}>+ Funcionário</button>}
             rodape={funcionarios.length > 0 && <>Total <strong>{brl(totalFunc)}</strong>/mês · custo por dia <strong>{brl(funcPorDia)}</strong> ({dias} dias)</>}>
-            {funcionarios.length === 0 ? <Vazio texto="Cadastre cada funcionário com o salário." />
-              : funcionarios.map(f => (
-                <ItemLinha key={f.id} onEdit={() => abrirEditarFunc(f)} onDel={() => excluirFunc(f)}
-                  titulo={f.nome} sub={f.cargo || 'sem cargo'} valor={brl(f.salario_mensal) + '/mês'} />
-              ))}
+            {funcionarios.length === 0 ? <Vazio texto={ehHoje ? 'Cadastre cada funcionário com o salário.' : `Ninguém cadastrado na folha até ${ddmm(dia)}.`} />
+              : funcionarios.map(f => {
+                const sal = valorNoDia(f, 'salario_mensal', dia)
+                const mudou = sal !== Number(f.salario_mensal || 0)
+                return (
+                  <ItemLinha key={f.id} onEdit={ehHoje ? () => abrirEditarFunc(f) : undefined} onDel={ehHoje ? () => excluirFunc(f) : undefined}
+                    titulo={f.nome}
+                    sub={<>{f.cargo || 'sem cargo'}{mudou && ` · salário da época (hoje é ${brl(f.salario_mensal)})`}</>}
+                    valor={brl(sal) + '/mês'} />
+                )
+              })}
           </Secao>
 
           {/* CONSUMO DE FUNCIONÁRIOS (alimentação) — relatório à parte, não entra no lucro */}
@@ -366,7 +492,7 @@ export default function DespesasLucro({ empresaId }) {
         <div>
           {historico.length === 0 ? (
             <div className="card empty-state"><strong>Nenhum dia fechado ainda</strong>
-              <p>Feche um dia na aba "Hoje" pra ele aparecer aqui no histórico.</p></div>
+              <p>Feche um dia na aba "Dia a dia" pra ele aparecer aqui congelado. Sem fechar, você ainda consegue olhar qualquer dia por lá — só que o valor é recalculado na hora.</p></div>
           ) : (
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -561,6 +687,9 @@ export default function DespesasLucro({ empresaId }) {
 }
 
 // ── componentes auxiliares ────────────────────────────────────────────
+const navBtn = { width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', cursor: 'pointer', fontSize: 12, lineHeight: 1 }
+const chipBtn = { padding: '6px 12px', borderRadius: 999, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, fontWeight: 700 }
+
 function Linha({ label, valor, cor, bold }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0' }}>
@@ -593,7 +722,7 @@ function ItemLinha({ titulo, sub, valor, onEdit, onDel }) {
       <strong style={{ fontSize: 14, whiteSpace: 'nowrap' }}>{valor}</strong>
       <div style={{ display: 'flex', gap: 6 }}>
         {onEdit && <button className="btn btn-secondary btn-sm" onClick={onEdit}>Editar</button>}
-        <button className="btn btn-danger btn-sm" onClick={onDel}>✕</button>
+        {onDel && <button className="btn btn-danger btn-sm" onClick={onDel}>✕</button>}
       </div>
     </div>
   )
