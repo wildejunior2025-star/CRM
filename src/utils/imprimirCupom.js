@@ -423,7 +423,9 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
   <div class="row b lg"><span>TOTAL</span> <span>${fmt(total)}</span></div>
   ${Array.isArray(pagamentos) && pagamentos.length > 1
     ? `<div class="hr">${tracos}</div><div class="b">DIVISAO DA CONTA</div>` +
-      pagamentos.map((p, i) => `<div class="row"><span>Pessoa ${i + 1} (${esc(formaContaLabel(p.forma))})</span> <span>${fmt(p.valor)}</span></div>`).join('') +
+      // No fiado sai o NOME de quem ficou devendo (a conta dividida pode ter um
+      // devedor por linha); nas outras formas segue "Pessoa 1, 2, 3...".
+      pagamentos.map((p, i) => `<div class="row"><span>${esc(p.nome || ('Pessoa ' + (i + 1)))} (${esc(formaContaLabel(p.forma))})</span> <span>${fmt(p.valor)}</span></div>`).join('') +
       `<div class="row b"><span>Total pago</span> <span>${fmt(pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0))}</span></div>`
     : formaPagamento ? `<div class="hr">${tracos}</div><div><span class="b">Pagamento:</span> ${esc(formaContaLabel(formaPagamento))}</div>` : ''}
   <div class="hr">${tracos}</div>

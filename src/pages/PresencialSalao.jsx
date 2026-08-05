@@ -63,7 +63,11 @@ export default function PresencialSalao() {
   // pesa o prato e digita o valor ANTES de mandar pra cozinha (antes só dava depois).
   const [precoRascEdit, setPrecoRascEdit] = useState({})
   const [modoPag, setModoPag] = useState('unico')   // 'unico' | 'dividir'
-  const [pagamentos, setPagamentos] = useState([])  // [{ forma, valor(string) }] no modo dividir
+  // [{ forma, valor(string), cliente }] no modo dividir. `cliente` só vale nas linhas
+  // de fiado: cada pedaço fiado tem o SEU devedor (mig 0141) — é o que separa a
+  // dívida da Maria da do João quando os dois racham a mesma mesa.
+  const [pagamentos, setPagamentos] = useState([])
+  const [pickerFiadoIdx, setPickerFiadoIdx] = useState(null) // linha escolhendo o devedor
   // Fiado: quem fica devendo. Obrigatório quando alguma linha do pagamento é fiado.
   const [clientes, setClientes] = useState([])
   const [clienteSel, setClienteSel] = useState(null)  // { id, nome }
@@ -252,9 +256,13 @@ export default function PresencialSalao() {
   const clientesFiltrados = buscaCliente.trim()
     ? clientes.filter(c => semAcento(c.nome).includes(semAcento(buscaCliente))).slice(0, 20)
     : []
-  // Sem cliente escolhido o fiado não fecha (a função no banco também recusa).
-  const podeReceber = (modoPag === 'unico' || Math.abs(restante) < 0.05)
-    && (!temFiadoNaTela || !!clienteSel)
+  // Todo pedaço de fiado precisa de dono (a função no banco também recusa). No modo
+  // único é o cliente da tela; no dividir é o cliente de cada linha. As outras formas
+  // (dinheiro/pix/cartão) não pedem cliente nenhum.
+  const fiadoSemDono = modoPag === 'unico'
+    ? (forma === 'fiado' && !clienteSel)
+    : pagamentos.some(p => p.forma === 'fiado' && Number(p.valor) > 0 && !p.cliente)
+  const podeReceber = (modoPag === 'unico' || Math.abs(restante) < 0.05) && !fiadoSemDono
 
   // ── Ações ────────────────────────────────────────────────────────────────
   async function abrirMesa(mesa) {
@@ -273,6 +281,9 @@ export default function PresencialSalao() {
     }
     setMesaSel(mesa)
     setBusca(''); setCategoriaSel(null); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true)
+    // Zera o fechamento anterior: linha de fiado com o devedor da OUTRA mesa ainda
+    // na tela é o tipo de sobra que joga dívida no nome errado.
+    setModoPag('unico'); setPagamentos([]); setPickerFiadoIdx(null); setClienteSel(null); setBuscaCliente('')
   }
 
   // Liga (ou tira) o cliente da comanda desta mesa. cliente = null tira.
@@ -527,17 +538,29 @@ export default function PresencialSalao() {
   // Rachar igual entre n pessoas (ajusta a última linha p/ fechar o total)
   function dividirIgual(n) {
     const cada = Math.floor((totalSel / n) * 100) / 100
-    const arr = Array.from({ length: n }, () => ({ forma: 'dinheiro', valor: cada.toFixed(2) }))
+    const arr = Array.from({ length: n }, () => ({ forma: 'dinheiro', valor: cada.toFixed(2), cliente: null }))
     const resto = Math.round((totalSel - cada * n) * 100) / 100
     if (arr.length) arr[arr.length - 1].valor = (cada + resto).toFixed(2)
     setPagamentos(arr)
   }
   function addPagamento() {
     const falta = Math.max(0, Math.round((totalSel - somaPag) * 100) / 100)
-    setPagamentos(prev => [...prev, { forma: 'dinheiro', valor: falta > 0 ? falta.toFixed(2) : '' }])
+    setPagamentos(prev => [...prev, { forma: 'dinheiro', valor: falta > 0 ? falta.toFixed(2) : '', cliente: null }])
   }
   function updatePagamento(i, campo, val) {
-    setPagamentos(prev => prev.map((p, idx) => idx === i ? { ...p, [campo]: val } : p))
+    setPagamentos(prev => prev.map((p, idx) => {
+      if (idx !== i) return p
+      const novo = { ...p, [campo]: val }
+      // Virou fiado: já sugere o cliente ligado à mesa (dá pra trocar). Saiu do fiado:
+      // limpa o dono, senão sobraria um devedor numa linha que foi paga.
+      if (campo === 'forma') novo.cliente = val === 'fiado' ? (p.cliente ?? comandaSel?.cliente ?? null) : null
+      return novo
+    }))
+  }
+  // Quem fica devendo NESTA linha do fiado.
+  function setClienteLinha(i, cliente) {
+    setPagamentos(prev => prev.map((p, idx) => idx === i ? { ...p, cliente } : p))
+    setPickerFiadoIdx(null)
   }
   function removePagamento(i) {
     setPagamentos(prev => prev.filter((_, idx) => idx !== i))
@@ -545,7 +568,10 @@ export default function PresencialSalao() {
 
   function imprimirConta() {
     const pags = modoPag === 'dividir'
-      ? pagamentos.map(p => ({ forma: p.forma, valor: Number(p.valor) || 0 })).filter(p => p.valor > 0)
+      ? pagamentos
+        // nome do devedor sai impresso na conta: o cliente confere de quem é a dívida
+        .map(p => ({ forma: p.forma, valor: Number(p.valor) || 0, nome: p.cliente?.nome || '' }))
+        .filter(p => p.valor > 0)
       : []
     // soApp: a conta do salão só sai na térmica da loja (app FWC). Se quem fechou está
     // no CELULAR (sem app), NÃO imprime no navegador do aparelho — retorna sem imprimir.
@@ -566,7 +592,13 @@ export default function PresencialSalao() {
       lista = [{ forma, valor: Math.round(totalSel * 100) / 100 }]
     } else {
       lista = pagamentos
-        .map(p => ({ forma: p.forma, valor: Math.round((Number(p.valor) || 0) * 100) / 100 }))
+        .map(p => ({
+          forma: p.forma,
+          valor: Math.round((Number(p.valor) || 0) * 100) / 100,
+          // Só a linha de fiado leva dono. Dinheiro/pix/cartão vão sem cliente —
+          // a função no banco só exige cliente onde a dívida vai ficar.
+          ...(p.forma === 'fiado' && p.cliente ? { cliente_id: p.cliente.id } : {}),
+        }))
         .filter(p => p.valor > 0)
       const soma = lista.reduce((s, p) => s + p.valor, 0)
       if (lista.length === 0) { window.alert('Adicione ao menos um pagamento.'); return }
@@ -578,8 +610,12 @@ export default function PresencialSalao() {
     // Fiado sem cliente não fecha: a dívida cairia no "Consumidor (Mesa)" e ninguém
     // saberia de quem cobrar. A função no banco barra também, isto é só o aviso amigável.
     const temFiado = lista.some(p => p.forma === 'fiado' && p.valor > 0)
-    if (temFiado && !clienteSel) {
+    if (temFiado && modoPag === 'unico' && !clienteSel) {
       window.alert('Escolha o cliente que vai ficar devendo.')
+      return
+    }
+    if (temFiado && modoPag === 'dividir' && lista.some(p => p.forma === 'fiado' && !p.cliente_id)) {
+      window.alert('Escolha quem fica devendo em cada linha do fiado.')
       return
     }
     setSalvando(true)
@@ -593,7 +629,9 @@ export default function PresencialSalao() {
         p_comanda_id: comandaSel.id,
         p_pagamentos: lista,
         p_aplicar_taxa: aplicarTaxa,
-        p_cliente_id: clienteSel?.id ?? null,
+        // No dividir, cada linha de fiado já leva o seu cliente_id; aqui vai só o
+        // cliente da conta (o que fica na comanda e paga a parte à vista).
+        p_cliente_id: (modoPag === 'unico' ? clienteSel?.id : null) ?? comandaSel.cliente_id ?? null,
       })
       setSalvando(false)
       if (error) { window.alert('Erro ao fechar a conta: ' + error.message); return }
@@ -607,7 +645,13 @@ export default function PresencialSalao() {
         status: 'aguardando_conferencia',
         // cliente_id vai junto: quem libera a mesa depois é o ADM, e sem isso o
         // fiado perderia o dono no caminho.
-        fechamento_pendente: { pagamentos: lista, aplicar_taxa: aplicarTaxa, cliente_id: clienteSel?.id ?? null },
+        // `lista` já carrega o cliente_id de cada linha de fiado; o cliente_id de fora
+        // é o dono da conta (usado no modo único e como reserva).
+        fechamento_pendente: {
+          pagamentos: lista,
+          aplicar_taxa: aplicarTaxa,
+          cliente_id: (modoPag === 'unico' ? clienteSel?.id : null) ?? comandaSel.cliente_id ?? null,
+        },
       }).eq('id', comandaSel.id)
       setSalvando(false)
       if (error) { window.alert('Erro ao enviar pro caixa: ' + error.message); return }
@@ -1187,6 +1231,17 @@ export default function PresencialSalao() {
         />
       )}
 
+      {/* ── Quem fica devendo NESTA linha do fiado (modo "Dividir conta") ── */}
+      {pickerFiadoIdx != null && pagamentos[pickerFiadoIdx] && (
+        <ClientePicker
+          empresaId={empresaId}
+          titulo={`Quem fica devendo ${fmt(Number(pagamentos[pickerFiadoIdx].valor) || 0)}`}
+          permitirTirar={!!pagamentos[pickerFiadoIdx].cliente}
+          onPick={(c) => setClienteLinha(pickerFiadoIdx, c)}
+          onFechar={() => setPickerFiadoIdx(null)}
+        />
+      )}
+
       {/* ── Modal de fechamento ── */}
       {fechando && comandaSel && (
         <div onClick={() => setFechando(false)}
@@ -1250,16 +1305,30 @@ export default function PresencialSalao() {
                 </div>
 
                 {pagamentos.map((p, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-                    <select value={p.forma} onChange={e => updatePagamento(i, 'forma', e.target.value)}
-                      style={{ padding: '8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13 }}>
-                      {FORMAS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-                    </select>
-                    <input type="number" step="0.01" min="0" inputMode="decimal" value={p.valor}
-                      onChange={e => updatePagamento(i, 'valor', e.target.value)} placeholder="0,00"
-                      style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13 }} />
-                    <button type="button" onClick={() => removePagamento(i)}
-                      style={{ width: 30, height: 34, borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--danger)', fontSize: 16 }}>×</button>
+                  <div key={i} style={{ marginBottom: 6 }}>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <select value={p.forma} onChange={e => updatePagamento(i, 'forma', e.target.value)}
+                        style={{ padding: '8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13 }}>
+                        {FORMAS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+                      </select>
+                      <input type="number" step="0.01" min="0" inputMode="decimal" value={p.valor}
+                        onChange={e => updatePagamento(i, 'valor', e.target.value)} placeholder="0,00"
+                        style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13 }} />
+                      <button type="button" onClick={() => removePagamento(i)}
+                        style={{ width: 30, height: 34, borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--danger)', fontSize: 16 }}>×</button>
+                    </div>
+
+                    {/* Só a linha de fiado pede cliente — as outras já foram pagas. */}
+                    {p.forma === 'fiado' && (
+                      <button type="button" onClick={() => setPickerFiadoIdx(i)}
+                        style={{ width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 8, textAlign: 'left', cursor: 'pointer',
+                          border: p.cliente ? '1px solid var(--border)' : '1.5px dashed #d97706',
+                          background: 'rgba(217,119,6,.06)', color: 'var(--text)', fontSize: 12.5, fontWeight: 700 }}>
+                        {p.cliente
+                          ? <>🧾 Fica devendo: {p.cliente.nome}{p.cliente.telefone && <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}> · {p.cliente.telefone}</span>} <span style={{ color: 'var(--primary)' }}>(trocar)</span></>
+                          : '🧾 Escolher quem fica devendo (obrigatório)'}
+                      </button>
+                    )}
                   </div>
                 ))}
 
@@ -1276,8 +1345,9 @@ export default function PresencialSalao() {
               </div>
             )}
 
-            {/* Cliente do fiado — só aparece quando alguma forma escolhida é fiado */}
-            {temFiadoNaTela && (
+            {/* Cliente do fiado — no modo único é um devedor só pra conta inteira.
+                No "Dividir conta" cada linha escolhe o seu (botão dentro da linha). */}
+            {temFiadoNaTela && modoPag === 'unico' && (
               <div style={{ marginTop: 14, padding: 12, borderRadius: 10, border: `1.5px solid ${clienteSel ? 'var(--border)' : '#d97706'}`, background: 'rgba(217,119,6,.06)' }}>
                 <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>
                   🧾 Quem vai ficar devendo {fmt(valorFiado)}
