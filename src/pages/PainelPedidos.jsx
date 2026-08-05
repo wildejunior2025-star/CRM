@@ -14,6 +14,7 @@ function aceitarAutoAtivo() {
 }
 import { CONDICOES_PAGAMENTO, FORMAS_PAGAMENTO, formasAtivas } from '../lib/constants'
 import { separarItem } from '../lib/itensPedido'
+import { abertaAgora, comoFicaNoDia, carregarExcecoes, hojeBR } from '../lib/feriados'
 // Sistema de salão embutido no gestor (Mesas): salão, reservas e config de mesas.
 import PresencialSalao from './PresencialSalao'
 import PresencialReservas from './PresencialReservas'
@@ -2454,25 +2455,11 @@ function somAtivoConfig() {
 // ── Verifica se a loja deveria estar aberta pelo horário ────
 // Prioriza a GRADE SEMANAL nova (horarios_funcionamento); só cai no horário único
 // legado (horario_abertura/fechamento) se não houver grade.
-function diaDaGradeHoje(grade) {
-  if (!Array.isArray(grade) || grade.length !== 7) return null
-  const map = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
-  const diaAbrev = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Fortaleza', weekday: 'short' }).format(new Date())
-  const dow = map[diaAbrev] ?? new Date().getDay()
-  return grade[dow] ?? null
-}
-function lojaAbertaPorHorario(emp) {
-  const dia = diaDaGradeHoje(emp?.horarios_funcionamento)
-  if (dia) {
-    if (!dia.aberto || !Array.isArray(dia.periodos) || dia.periodos.length === 0) return false
-    const hm = new Date().toLocaleTimeString('en-GB', { hour12: false, timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit' })
-    const toMin = t => { const [h, m] = String(t).slice(0, 5).split(':').map(Number); return (h || 0) * 60 + (m || 0) }
-    const now = toMin(hm)
-    return dia.periodos.some(p => {
-      if (!p?.i || !p?.f) return false
-      const a = toMin(p.i), b = toMin(p.f)
-      return a <= b ? (now >= a && now < b) : (now >= a || now < b)  // virada da madrugada
-    })
+// `excecoes` traz os feriados/folgas marcados (mig 0142) — é o que faz a loja
+// fechar sozinha no feriado, e continuar abrindo no feriado que ela não folga.
+function lojaAbertaPorHorario(emp, excecoes = {}) {
+  if (Array.isArray(emp?.horarios_funcionamento) && emp.horarios_funcionamento.length === 7) {
+    return abertaAgora({ grade: emp.horarios_funcionamento, excecoes, fechaFeriado: !!emp?.feriados_fecha })
   }
   // Fallback: horário único legado
   if (!emp?.horario_abertura || !emp?.horario_fechamento) return true
@@ -2482,13 +2469,15 @@ function lojaAbertaPorHorario(emp) {
   const [fH, fM] = emp.horario_fechamento.slice(0, 5).split(':').map(Number)
   return minuto >= aH * 60 + aM && minuto < fH * 60 + fM
 }
-function horarioHojeTexto(emp) {
-  const dia = diaDaGradeHoje(emp?.horarios_funcionamento)
-  if (dia) {
-    if (dia.aberto && Array.isArray(dia.periodos) && dia.periodos.length) {
-      return dia.periodos.map(p => `${String(p.i).slice(0, 5)} às ${String(p.f).slice(0, 5)}`).join(' e ')
+function horarioHojeTexto(emp, excecoes = {}) {
+  if (Array.isArray(emp?.horarios_funcionamento) && emp.horarios_funcionamento.length === 7) {
+    const hoje = comoFicaNoDia(hojeBR(), {
+      grade: emp.horarios_funcionamento, excecoes, fechaFeriado: !!emp?.feriados_fecha,
+    })
+    if (hoje.aberto && hoje.periodos.length) {
+      return hoje.periodos.map(p => `${String(p.i).slice(0, 5)} às ${String(p.f).slice(0, 5)}`).join(' e ')
     }
-    return 'fechado hoje'
+    return hoje.motivo ? `fechado hoje (${hoje.motivo})` : 'fechado hoje'
   }
   const ab = emp?.horario_abertura?.slice(0, 5), fe = emp?.horario_fechamento?.slice(0, 5)
   return (ab && fe) ? `${ab} às ${fe}` : ''
@@ -3349,6 +3338,7 @@ export default function PainelPedidos() {
   const [entregadores, setEntregadores] = useState([])
   const [carregando, setCarregando] = useState(true)
   const [lojaAberta, setLojaAberta] = useState(false)
+  const [excecoesLoja, setExcecoesLoja] = useState({}) // feriados/folgas (mig 0142)
   const [togglingLoja, setTogglingLoja] = useState(false)
   const [avisoHorario, setAvisoHorario] = useState(null)
   const [pedidoRecusando, setPedidoRecusando] = useState(null)
@@ -3962,11 +3952,19 @@ export default function PainelPedidos() {
     if (empresa) setLojaAberta(empresa.delivery_ativo ?? false)
   }, [empresa])
 
+  // Feriados/folgas da loja: entram na conta do "auto-fecha pelo horário" logo abaixo.
+  useEffect(() => {
+    if (!empresa?.id) return
+    let vivo = true
+    carregarExcecoes(supabase, empresa.id).then(e => { if (vivo) setExcecoesLoja(e) })
+    return () => { vivo = false }
+  }, [empresa?.id])
+
   // ── Auto-fecha pelo horário de funcionamento ───────────────
   useEffect(() => {
     if (!empresa) return
     function verificarHorario() {
-      if (!lojaAbertaPorHorario(empresa)) {
+      if (!lojaAbertaPorHorario(empresa, excecoesLoja)) {
         setLojaAberta(prev => {
           if (prev) {
             supabase.from('empresas').update({ delivery_ativo: false }).eq('id', empresa.id).then(() => {})
@@ -3978,7 +3976,9 @@ export default function PainelPedidos() {
     verificarHorario()
     const id = setInterval(verificarHorario, 60_000)
     return () => clearInterval(id)
-  }, [empresa]) // eslint-disable-line react-hooks/exhaustive-deps
+    // excecoesLoja entra na lista: elas chegam depois da empresa e mudam a resposta
+    // (num feriado marcado, o auto-fecha só age quando a lista já carregou).
+  }, [empresa, excecoesLoja]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Heartbeat: sinaliza que o painel está online ───────────
   // Atualiza last_heartbeat_at a cada 60s enquanto a aba estiver aberta.
@@ -4545,8 +4545,8 @@ export default function PainelPedidos() {
     if (!empresa || togglingLoja) return
     const tentandoAbrir = !lojaAberta
     // Bloqueia abertura manual fora do horário
-    if (tentandoAbrir && !lojaAbertaPorHorario(empresa)) {
-      setAvisoHorario(`Horário de funcionamento: ${horarioHojeTexto(empresa)}. Ajuste em Minha Loja para abrir fora do horário.`)
+    if (tentandoAbrir && !lojaAbertaPorHorario(empresa, excecoesLoja)) {
+      setAvisoHorario(`Horário de funcionamento: ${horarioHojeTexto(empresa, excecoesLoja)}. Ajuste em Minha Loja para abrir fora do horário.`)
       setTimeout(() => setAvisoHorario(null), 5000)
       return
     }

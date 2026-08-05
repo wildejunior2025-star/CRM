@@ -5,26 +5,11 @@ import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
 import AvisoCookies from '../components/AvisoCookies'
 import { adicionalComplementos, blocosDeOpcoes, cobraPeloMaior, rotuloPrecoOpcao } from '../lib/complementos'
 import { criarBuscadorDescricao, comDescricaoNasOpcoes } from '../lib/descricaoSabor'
+import { abertaAgora, comoFicaNoDia, carregarExcecoes, hojeBR } from '../lib/feriados'
 import './DeliveryLoja.css'
 
-// Loja dentro da grade semanal de funcionamento AGORA? (horário de Brasília).
-// Grade ausente/vazia = sem restrição de horário (mantém comportamento antigo).
-function dentroDaGradeAgora(horarios) {
-  if (!Array.isArray(horarios) || horarios.length !== 7) return true
-  const map = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
-  const diaAbrev = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Fortaleza', weekday: 'short' }).format(new Date())
-  const dow = map[diaAbrev] ?? new Date().getDay()
-  const dia = horarios[dow]
-  if (!dia?.aberto || !Array.isArray(dia.periodos) || dia.periodos.length === 0) return false
-  const hm = new Date().toLocaleTimeString('en-GB', { hour12: false, timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit' })
-  const toMin = t => { const [h, m] = String(t).slice(0, 5).split(':').map(Number); return (h || 0) * 60 + (m || 0) }
-  const now = toMin(hm)
-  return dia.periodos.some(p => {
-    if (!p?.i || !p?.f) return false
-    const a = toMin(p.i), b = toMin(p.f)
-    return a <= b ? (now >= a && now < b) : (now >= a || now < b)  // trata virada da madrugada
-  })
-}
+// A regra de "a loja está aberta agora?" mora em src/lib/feriados.js — grade da
+// semana + feriado + folga marcada, a MESMA conta que o gestor e o Despesas & Lucro.
 
 function IconArrowLeft() {
   return (
@@ -99,6 +84,7 @@ export default function DeliveryLoja() {
 
   const [loja, setLoja] = useState(null)
   const [produtos, setProdutos] = useState([])
+  const [excecoes, setExcecoes] = useState({})  // feriados/folgas da loja (mig 0142)
   const [catOrdem, setCatOrdem] = useState({}) // { nomeCategoria: ordem }
   const [catHorario, setCatHorario] = useState({}) // { nomeCategoria: { inicio, fim } }
   const [loading, setLoading] = useState(true)
@@ -228,6 +214,10 @@ export default function DeliveryLoja() {
       // Tags de anúncio da loja (Google Ads / Pixel da Meta). Loja sem ID
       // configurado não carrega script de terceiro nenhum.
       iniciarTags(lojaData)
+
+      // Feriados/folgas da loja (mig 0142): sem isso a loja aparece aberta num
+      // feriado em que ninguém vai atender e o cliente monta a sacola à toa.
+      setExcecoes(await carregarExcecoes(supabase, lojaData.id))
 
       setLoja(lojaData)
       setProdutos(produtosFinal)
@@ -364,7 +354,13 @@ export default function DeliveryLoja() {
     : null
 
   // Loja aberta = pausa manual ligada (delivery_ativo) E dentro da grade semanal de horário.
-  const lojaAberta = !!loja?.delivery_ativo && dentroDaGradeAgora(loja?.horarios_funcionamento)
+  const lojaAberta = !!loja?.delivery_ativo && abertaAgora({
+    grade: loja?.horarios_funcionamento, excecoes, fechaFeriado: !!loja?.feriados_fecha,
+  })
+  // Por que fechou (feriado, folga) — vira o texto do aviso pro cliente.
+  const motivoFechada = comoFicaNoDia(hojeBR(), {
+    grade: loja?.horarios_funcionamento, excecoes, fechaFeriado: !!loja?.feriados_fecha,
+  }).motivo
 
   // Define categoria ativa inicial
   useEffect(() => {
@@ -564,7 +560,7 @@ export default function DeliveryLoja() {
 
       {!lojaAberta && (
         <div className="dloja-closed-banner">
-          <strong>Loja fechada no momento</strong> — você pode ver o cardápio, mas não é possível fazer pedidos.
+          <strong>Loja fechada{motivoFechada ? ` · ${motivoFechada}` : ' no momento'}</strong> — você pode ver o cardápio, mas não é possível fazer pedidos.
         </div>
       )}
 

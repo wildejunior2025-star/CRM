@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
+import FeriadosLoja from '../components/FeriadosLoja'
 import './RaioEntrega.css'
 
 const DIAS_SEMANA = ['Domingo', 'Segunda-Feira', 'Terça-Feira', 'Quarta-Feira', 'Quinta-Feira', 'Sexta-Feira', 'Sábado']
@@ -168,6 +169,9 @@ export default function HorariosLoja() {
           {salvando ? 'Salvando...' : 'Salvar horários'}
         </button>
       </div>
+
+      {/* Exceções por data (feriado, folga). Salva sozinho, sem o botão acima. */}
+      <FeriadosLoja empresaId={empresaId} grade={horarios} />
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { calcIfoodLiquido } from '../lib/ifoodLiquido'
+import { diasAbertosNoMes, comoFicaNoDia, carregarExcecoes } from '../lib/feriados'
 import ConsumoFuncionario from '../components/ConsumoFuncionario'
 import '../components/Page.css'
 
@@ -61,18 +62,11 @@ function novoHistorico(row, campo, valorNovo, hojeYMD) {
 // índice 0 = domingo, igual ao getDay() do JS. Contar os dias reais do mês é
 // melhor que um número fixo digitado: acerta mês a mês sozinho (agosto/26 tem
 // 21 dias úteis, setembro tem 22) e some com o risco de ficar desatualizado.
+//
+// A contagem em si mora em src/lib/feriados.js, porque desde a mig 0142 ela também
+// desconta feriado e folga — e a Loja Online precisa da MESMA resposta.
 const SIGLA_DIA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
 const gradeValida = (h) => Array.isArray(h) && h.length === 7 && h.some(d => d?.aberto)
-function diasAbertosNoMes(diaYMD, horarios) {
-  if (!gradeValida(horarios)) return null
-  const [y, m] = diaYMD.split('-').map(Number)
-  const ultimo = new Date(y, m, 0).getDate()
-  let n = 0
-  for (let d = 1; d <= ultimo; d++) if (horarios[new Date(y, m - 1, d).getDay()]?.aberto) n++
-  return n || null
-}
-const abreNoDia = (diaYMD, horarios) =>
-  !gradeValida(horarios) ? true : !!horarios[new Date(diaYMD + 'T00:00:00').getDay()]?.aberto
 const diasQueAbre = (horarios) =>
   !gradeValida(horarios) ? '' : horarios.map((d, i) => (d?.aberto ? SIGLA_DIA[i] : null)).filter(Boolean).join(', ')
 
@@ -110,6 +104,9 @@ export default function DespesasLucro({ empresaId }) {
   const [historico, setHistorico] = useState([])    // fechamentos diários
   const [diasAbertos, setDiasAbertos] = useState(26)
   const [horarios, setHorarios] = useState(null)   // grade semanal da loja (Minha Loja → Horários)
+  // Feriados/folgas: exceções por data e o padrão da casa (mig 0142).
+  const [excecoes, setExcecoes] = useState({})
+  const [fechaFeriado, setFechaFeriado] = useState(false)
   const [receitaDia, setReceitaDia] = useState({ proprios: 0, salao: 0, ifood: 0 })
   const [fechando, setFechando] = useState(false)
   const [histAberto, setHistAberto] = useState({}) // { [id]: bool } dias expandidos no histórico
@@ -141,7 +138,7 @@ export default function DespesasLucro({ empresaId }) {
         supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', dia).order('created_at', { ascending: false }),
         supabase.from('fichas_tecnicas').select('*').eq('empresa_id', empresaId).order('nome'),
         supabase.from('ficha_itens').select('ficha_id, quantidade, unidade, custo_unit').eq('empresa_id', empresaId),
-        supabase.from('empresas').select('dias_abertos_mes, ifood_comissao_pct, ifood_transacao_pct, ifood_entrega_propria, horarios_funcionamento').eq('id', empresaId).maybeSingle(),
+        supabase.from('empresas').select('dias_abertos_mes, ifood_comissao_pct, ifood_transacao_pct, ifood_entrega_propria, horarios_funcionamento, feriados_fecha').eq('id', empresaId).maybeSingle(),
         fetchAll(() => supabase.from('pedidos_delivery')
           .select('origem, total, taxa_entrega, subtotal, ifood_valores, forma_pagamento, status')
           .neq('status', 'cancelado').gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())),
@@ -163,6 +160,8 @@ export default function DespesasLucro({ empresaId }) {
       setHistorico(hi.data || [])
       setDiasAbertos(Number(emp.data?.dias_abertos_mes ?? 26) || 26)
       setHorarios(emp.data?.horarios_funcionamento ?? null)
+      setFechaFeriado(!!emp.data?.feriados_fecha)
+      setExcecoes(await carregarExcecoes(supabase, empresaId))
 
       const itensPor = {}
       for (const it of (fit.data || [])) (itensPor[it.ficha_id] = itensPor[it.ficha_id] || []).push(it)
@@ -194,9 +193,12 @@ export default function DespesasLucro({ empresaId }) {
 
   // Divisor do rateio: conta os dias reais do mês pela grade da loja; só cai no
   // número digitado se a loja ainda não configurou os horários.
-  const diasAuto = useMemo(() => diasAbertosNoMes(dia, horarios), [dia, horarios])
+  const regraDias = useMemo(() => ({ grade: horarios, excecoes, fechaFeriado }), [horarios, excecoes, fechaFeriado])
+  const diasAuto = useMemo(() => diasAbertosNoMes(dia, regraDias), [dia, regraDias])
   const dias = Math.max(1, diasAuto ?? diasAbertos)
-  const abre = abreNoDia(dia, horarios)
+  // `motivo` diz POR QUE fechou (feriado, folga) — vira o texto do aviso amarelo.
+  const situacaoDia = useMemo(() => comoFicaNoDia(dia, regraDias), [dia, regraDias])
+  const abre = situacaoDia.aberto
   // Num dia que a loja não abre o rateio é zero: o custo do mês já foi dividido
   // entre os dias em que ela abre, cobrar de novo aqui contaria duas vezes.
   const fixoPorDiaBase = totalFixo / dias
@@ -397,7 +399,7 @@ export default function DespesasLucro({ empresaId }) {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>
               {diasAuto != null ? (
-                <span title={`Contado pelos horários da loja: ${diasQueAbre(horarios)}. Muda sozinho a cada mês.`}>
+                <span title={`Contado pelos horários da loja: ${diasQueAbre(horarios)}. Já desconta feriado e folga marcados em Minha Loja → Horários. Muda sozinho a cada mês.`}>
                   A loja abre <strong style={{ color: 'var(--text)' }}>{diasAuto} dias</strong> em {mesLabel(dia)} · {diasQueAbre(horarios)}
                 </span>
               ) : (<>
@@ -410,7 +412,10 @@ export default function DespesasLucro({ empresaId }) {
 
           {!abre && !fechado && (
             <div style={{ padding: '10px 14px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.5, background: 'rgba(245,158,11,.10)', border: '1px solid rgba(245,158,11,.4)' }}>
-              🚪 <strong style={{ textTransform: 'capitalize' }}>{diaSemana(dia)}</strong> a loja não abre. Custo fixo e folha não entram nesse dia — eles já estão divididos entre os {dias} dias em que ela abre.
+              🚪 {situacaoDia.motivo
+                ? <><strong>{situacaoDia.motivo}</strong> — a loja não abre nesse dia.</>
+                : <><strong style={{ textTransform: 'capitalize' }}>{diaSemana(dia)}</strong> a loja não abre.</>}
+              {' '}Custo fixo e folha não entram nesse dia — eles já estão divididos entre os {dias} dias em que ela abre.
             </div>
           )}
 
