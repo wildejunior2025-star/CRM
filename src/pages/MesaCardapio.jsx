@@ -141,7 +141,11 @@ export default function MesaCardapio() {
     })
     .sort((a, b) => {
       const oa = ordemCat(a.categoria), ob = ordemCat(b.categoria)
-      return oa !== ob ? oa - ob : (a.nome ?? '').localeCompare(b.nome ?? '')
+      if (oa !== ob) return oa - ob
+      // Duas categorias com a mesma ordem: agrupa por categoria antes do nome,
+      // senão os itens das duas ficam intercalados na lista.
+      const porCategoria = (a.categoria ?? '').localeCompare(b.categoria ?? '')
+      return porCategoria !== 0 ? porCategoria : (a.nome ?? '').localeCompare(b.nome ?? '')
     })
 
   const itens = Object.entries(carrinho).map(([id, v]) => ({ id, ...v }))

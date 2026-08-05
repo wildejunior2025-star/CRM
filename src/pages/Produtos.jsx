@@ -137,6 +137,9 @@ export default function Produtos() {
     setTimeout(() => setCopiadoLink(false), 2000)
   }
   const fileInputRef = useRef(null)
+  // Renumeração da ordem das categorias só pode acontecer uma vez por sessão
+  // (se o update falhar, não pode ficar tentando em loop).
+  const renumerouRef = useRef(false)
 
   const [produtos, setProdutos] = useState([])
   const [categorias, setCategorias] = useState([])
@@ -293,7 +296,17 @@ export default function Produtos() {
       .select('id, nome, ordem, hora_inicio, hora_fim')
       .order('ordem', { ascending: true })
       .order('nome', { ascending: true })
-    setCategorias(data ?? [])
+    const lista = data ?? []
+    setCategorias(lista)
+    // Conserta lista antiga com ordem 0 ou empatada (categoria criada antes do
+    // fix). Renumera 1..n mantendo a ordem que já está aparecendo na tela.
+    const ordens = lista.map(c => c.ordem ?? 0)
+    const empatadaOuZerada = ordens.some(o => o < 1) || new Set(ordens).size !== ordens.length
+    if (lista.length && empatadaOuZerada && !renumerouRef.current) {
+      renumerouRef.current = true
+      await persistOrdem(lista)
+    }
+    return lista
   }
 
   // Salva o horário de disponibilidade da categoria (hora_inicio/hora_fim).
@@ -462,7 +475,11 @@ export default function Produtos() {
     setSavingCateg(false)
     if (error) { setCategError(error.message); return }
     setNovaCategoria('')
-    loadCategorias()
+    // A RPC cria a categoria com ordem 0: sem isso ela pularia pro topo do
+    // cardápio e empataria com as outras recém-criadas. Entra no fim da fila.
+    const lista = await loadCategorias()
+    const nova = lista.find(c => c.nome === nome)
+    if (nova) await persistOrdem([...lista.filter(c => c.id !== nova.id), nova])
   }
 
   function iniciarRenomear(c) {
@@ -706,12 +723,17 @@ export default function Produtos() {
     }
   }
 
-  // Ordena os produtos exibidos seguindo a ordem personalizada das categorias
+  // Ordena os produtos exibidos seguindo a ordem personalizada das categorias.
+  // O desempate é SEMPRE pelo nome da categoria antes do nome do produto: duas
+  // categorias com a mesma `ordem` iam se misturar item a item e a lista repetia
+  // o cabeçalho de cada uma (PICOLES / DOCES / PICOLES / DOCES...).
   const catOrdem = Object.fromEntries(categorias.map(c => [c.nome, c.ordem ?? 999]))
   const produtosOrdenados = [...produtos].sort((a, b) => {
     const oa = catOrdem[a.categoria] ?? 999
     const ob = catOrdem[b.categoria] ?? 999
     if (oa !== ob) return oa - ob
+    const porCategoria = (a.categoria ?? '').localeCompare(b.categoria ?? '')
+    if (porCategoria !== 0) return porCategoria
     return (a.nome ?? '').localeCompare(b.nome ?? '')
   })
   // Paginação client-side sobre a lista JÁ ordenada pelas categorias
