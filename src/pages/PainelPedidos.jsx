@@ -4186,7 +4186,8 @@ export default function PainelPedidos() {
   async function handleFecharConta({ comanda, forma, aplicarTaxa, total }) {
     const { error } = await supabase.rpc('fechar_conta_presencial', {
       p_comanda_id: comanda.id,
-      p_pagamentos: [{ forma, valor: total }],
+      // Sem valor: quem reconta a mesa e fecha o número é o servidor (mig 0144).
+      p_pagamentos: [{ forma, valor: null }],
       p_aplicar_taxa: aplicarTaxa,
     })
     if (error) { alert('Erro ao fechar a conta: ' + error.message); return }
@@ -4215,7 +4216,9 @@ export default function PainelPedidos() {
   async function handleAjustarTaxaMesa(comanda, aplicar) {
     const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
     const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
-    const pct = Number(empresa?.taxa_servico_pct ?? 10)
+    // ?? 0 e não ?? 10: chutar 10% quando a config da loja não veio já inventou taxa
+    // de serviço numa loja que cobra 0% e travou a mesa na hora de liberar (mig 0144).
+    const pct = Number(empresa?.taxa_servico_pct ?? 0)
     const taxa = aplicar ? Math.round(subtotal * pct / 100 * 100) / 100 : 0
     const novoTotal = Math.round((subtotal + taxa) * 100) / 100
     const pend = comanda.fechamento_pendente || {}
@@ -4253,10 +4256,15 @@ export default function PainelPedidos() {
       setComandaFechando(comanda); return
     }
     const total = (comanda.comanda_itens ?? []).reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
+    // Pagamento único: manda SEM valor pro servidor recontar a mesa na hora. Era aqui
+    // que a mesa travava com "a soma dos pagamentos não confere com o total" quando o
+    // valor guardado pelo garçom tinha ficado velho (mig 0144).
+    const pags = pend.pagamentos.length === 1 ? [{ ...pend.pagamentos[0], valor: null }] : pend.pagamentos
     const { error } = await supabase.rpc('fechar_conta_presencial', {
       p_comanda_id: comanda.id,
-      p_pagamentos: pend.pagamentos,
+      p_pagamentos: pags,
       p_aplicar_taxa: pend.aplicar_taxa ?? true,
+      p_cliente_id: pend.cliente_id ?? null,
     })
     if (error) { alert('Erro ao liberar a mesa: ' + error.message); return }
     setComandas(cs => cs.filter(c => c.id !== comanda.id))
@@ -5045,7 +5053,7 @@ export default function PainelPedidos() {
       {comandaFechando && (
         <ModalFecharConta
           comanda={comandaFechando}
-          taxaPct={Number(empresa?.taxa_servico_pct ?? 10)}
+          taxaPct={Number(empresa?.taxa_servico_pct ?? 0)}
           onFechar={() => setComandaFechando(null)}
           onConfirmar={handleFecharConta}
         />

@@ -38,7 +38,10 @@ export default function PresencialSalao() {
   // Só o ADM confere o pagamento e libera a mesa. Garçom fecha, mas não libera.
   const ehAdmin = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
 
-  const [taxaPct, setTaxaPct] = useState(10)
+  // Começa em 0, NUNCA em 10: chutar 10% enquanto a config da loja não chegou já
+  // colocou taxa de serviço numa loja que cobra 0% e travou a mesa na hora de
+  // liberar (mig 0144). Sem valor carregado, o certo é não cobrar nada.
+  const [taxaPct, setTaxaPct] = useState(0)
   const [empresaNome, setEmpresaNome] = useState('')
   // Presencial sem obrigatórios (mig 0121): no salão e no QR da mesa o atendente
   // monta o prato junto com o cliente, então exigir os grupos só atrasa. Vale
@@ -126,7 +129,7 @@ export default function PresencialSalao() {
       supabase.from('clientes').select('id, nome, telefone').eq('empresa_id', empresaId).order('nome').limit(1000),
     ])
     if (emp.data) {
-      setTaxaPct(Number(emp.data.taxa_servico_pct ?? 10))
+      setTaxaPct(Number(emp.data.taxa_servico_pct ?? 0))
       setEmpresaNome(emp.data.nome || '')
       setSemObrigatorios(!!emp.data.presencial_sem_obrigatorios)
       setComandaBalcaoAtiva(!!emp.data.comanda_balcao_ativa)
@@ -683,9 +686,13 @@ export default function PresencialSalao() {
         return
       }
     }
+    // Pagamento único: quem diz QUANTO é o servidor (ele reconta os itens da mesa na
+    // hora). O valor calculado aqui vai só pro papel e pro gestor conferir — se os
+    // dois divergirem, vale a conta do servidor e a mesa não trava mais (mig 0144).
+    const listaRpc = modoPag === 'unico' ? [{ forma, valor: null }] : lista
     // Fiado sem cliente não fecha: a dívida cairia no "Consumidor (Mesa)" e ninguém
     // saberia de quem cobrar. A função no banco barra também, isto é só o aviso amigável.
-    const temFiado = lista.some(p => p.forma === 'fiado' && p.valor > 0)
+    const temFiado = lista.some(p => p.forma === 'fiado' && (p.valor ?? 1) > 0)
     if (temFiado && modoPag === 'unico' && !clienteSel) {
       window.alert('Escolha o cliente que vai ficar devendo.')
       return
@@ -703,7 +710,7 @@ export default function PresencialSalao() {
       // ADM no PC da loja: fecha de vez (gera a venda e libera a mesa) e imprime aqui.
       const { error } = await supabase.rpc('fechar_conta_presencial', {
         p_comanda_id: comandaSel.id,
-        p_pagamentos: lista,
+        p_pagamentos: listaRpc,
         p_aplicar_taxa: aplicarTaxa,
         // No dividir, cada linha de fiado já leva o seu cliente_id; aqui vai só o
         // cliente da conta (o que fica na comanda e paga a parte à vista).
@@ -751,9 +758,13 @@ export default function PresencialSalao() {
       return
     }
     const pend = comandaSel.fechamento_pendente || {}
-    const lista = Array.isArray(pend.pagamentos) && pend.pagamentos.length
+    const pags = Array.isArray(pend.pagamentos) && pend.pagamentos.length
       ? pend.pagamentos
-      : [{ forma: 'dinheiro', valor: Math.round(totalSel * 100) / 100 }]
+      : [{ forma: 'dinheiro' }]
+    // Pagamento único: manda SEM valor e deixa o servidor recontar a mesa. É o que
+    // impede a mesa de travar quando o valor guardado no fechamento ficou velho
+    // (item removido, preço corrigido, taxa diferente) — mig 0144.
+    const lista = pags.length === 1 ? [{ ...pags[0], valor: null }] : pags
     const aplicar = pend.aplicar_taxa ?? true
     setSalvando(true)
     const { error } = await supabase.rpc('fechar_conta_presencial', {
