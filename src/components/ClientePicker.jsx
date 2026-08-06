@@ -17,6 +17,10 @@ export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', p
   const [novo, setNovo] = useState(false)
   const [telefone, setTelefone] = useState('')
   const [salvando, setSalvando] = useState(false)
+  // Telefone de quem já está cadastrado SEM telefone: { id, valor }. No balcão o
+  // cliente é cadastrado no aperto e o telefone fica pra depois — "depois" é aqui,
+  // na próxima vez que alguém puxa o nome dele.
+  const [telEdit, setTelEdit] = useState(null)
   const buscaRef = useRef(null)
 
   useEffect(() => {
@@ -29,6 +33,18 @@ export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', p
   const filtrados = busca.trim()
     ? clientes.filter(c => semAcento(c.nome).includes(semAcento(busca))).slice(0, 25)
     : []
+
+  // Completa o cadastro de quem ficou sem telefone, sem sair daqui.
+  async function salvarTelefone(cliente) {
+    const tel = String(telEdit?.valor ?? '').trim()
+    if (tel.replace(/\D/g, '').length < 10) { window.alert('Digite o telefone com DDD.'); return }
+    setSalvando(true)
+    const { error } = await supabase.from('clientes').update({ telefone: tel }).eq('id', cliente.id)
+    setSalvando(false)
+    if (error) { window.alert('Erro ao salvar o telefone: ' + error.message); return }
+    setClientes(prev => prev.map(c => c.id === cliente.id ? { ...c, telefone: tel } : c))
+    setTelEdit(null)
+  }
 
   async function criar() {
     const nome = busca.trim()
@@ -64,12 +80,38 @@ export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', p
                 Nenhum cliente com esse nome. Cadastre embaixo. 👇
               </div>
             ) : filtrados.map(c => (
-              <button key={c.id} type="button" onClick={() => onPick(c)}
-                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 8px', cursor: 'pointer',
-                  border: 'none', borderBottom: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 14.5 }}>
-                {c.nome}
-                {c.telefone && <span style={{ color: 'var(--text-muted)', fontSize: 12.5 }}> · {c.telefone}</span>}
-              </button>
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6, borderBottom: '1px solid var(--border)' }}>
+                <button type="button" onClick={() => onPick(c)}
+                  style={{ flex: 1, minWidth: 0, textAlign: 'left', padding: '10px 8px', cursor: 'pointer',
+                    border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 14.5 }}>
+                  {c.nome}
+                  {c.telefone && <span style={{ color: 'var(--text-muted)', fontSize: 12.5 }}> · {c.telefone}</span>}
+                </button>
+                {/* Cadastrado sem telefone da primeira vez? Põe agora, aqui mesmo. */}
+                {!c.telefone && (
+                  telEdit?.id === c.id ? (
+                    <div style={{ display: 'flex', gap: 4, alignItems: 'center', padding: '4px 0' }}>
+                      <input value={telEdit.valor} type="tel" inputMode="tel" autoFocus placeholder="DDD + número"
+                        onChange={e => setTelEdit(t => ({ ...t, valor: e.target.value }))}
+                        onKeyDown={e => { if (e.key === 'Enter') salvarTelefone(c) }}
+                        style={{ width: 120, padding: '5px 7px', borderRadius: 6, border: '1px solid var(--border)',
+                          background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 12.5 }} />
+                      <button type="button" onClick={() => salvarTelefone(c)} disabled={salvando}
+                        style={{ padding: '5px 8px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                          background: 'var(--primary)', color: '#fff', fontSize: 11.5, fontWeight: 800 }}>ok</button>
+                      <button type="button" onClick={() => setTelEdit(null)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 15 }}>×</button>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => setTelEdit({ id: c.id, valor: '' })}
+                      title="Pôr o telefone deste cliente"
+                      style={{ background: 'none', border: '1px dashed var(--border)', borderRadius: 6, padding: '4px 8px',
+                        cursor: 'pointer', color: 'var(--text-muted)', fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                      ➕ 📞
+                    </button>
+                  )
+                )}
+              </div>
             ))}
           </div>
         )}

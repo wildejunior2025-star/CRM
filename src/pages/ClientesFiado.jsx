@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 
 const fmtBRL = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -38,6 +39,11 @@ const FORMAS = [
 const OBS_FIADO = 'Recebimento de fiado'
 
 export default function ClientesFiado({ empresaId }) {
+  // Esta tela abre no Financeiro (ADM) e também no Salão (garçom). Só o ADM apaga
+  // dívida — a função no banco recusa de qualquer jeito, isto é só pra não mostrar
+  // um botão que o garçom não pode usar.
+  const { profile } = useAuth()
+  const ehAdmin = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
   const [linhas, setLinhas] = useState([])
   const [historico, setHistorico] = useState([])
   const [loading, setLoading] = useState(true)
@@ -48,6 +54,40 @@ export default function ClientesFiado({ empresaId }) {
   const [salvando, setSalvando] = useState(false)
   // Histórico de compras aberto ao clicar no nome: { [cliente_id]: [vendas] | 'carregando' }
   const [compras, setCompras] = useState({})
+  // Telefone em edição: { cliente_id, valor }. Cliente cadastrado às pressas no
+  // balcão costuma ficar sem telefone — e sem telefone não dá pra cobrar no zap.
+  const [editTel, setEditTel] = useState(null)
+  const [salvandoTel, setSalvandoTel] = useState(false)
+
+  // Grava o telefone de quem foi cadastrado sem ele.
+  async function salvarTelefone(clienteId) {
+    const tel = String(editTel?.valor ?? '').trim()
+    if (tel.replace(/\D/g, '').length < 10) {
+      window.alert('Digite o telefone com DDD (10 ou 11 números).')
+      return
+    }
+    setSalvandoTel(true)
+    const { error } = await supabase.from('clientes').update({ telefone: tel }).eq('id', clienteId)
+    setSalvandoTel(false)
+    if (error) { window.alert('Erro ao salvar o telefone: ' + error.message); return }
+    setEditTel(null)
+    await load()
+  }
+
+  // Apaga um fiado lançado errado (conta salva sem querer, valor trocado...).
+  // Quem decide se pode é o banco (mig 0146): só ADM, só fiado, e só se ninguém
+  // já tiver lançado recebimento em cima dessa dívida.
+  async function apagarFiado(venda, clienteId) {
+    const motivo = window.prompt(
+      `Apagar este fiado de ${fmtBRL(venda.total)}?\n\nEle vai sumir da dívida do cliente.\nEscreva o porquê (fica registrado):`,
+      'lançamento errado',
+    )
+    if (motivo === null) return
+    const { error } = await supabase.rpc('cancelar_venda_fiado', { p_venda_id: venda.id, p_motivo: motivo })
+    if (error) { window.alert('Não deu pra apagar: ' + error.message); return }
+    setCompras(p => { const n = { ...p }; delete n[clienteId]; return n })
+    await load()
+  }
 
   // Puxa o que o cliente comprou (vendas + itens) sob demanda ao clicar no nome.
   // Só busca uma vez por cliente; clicar de novo fecha.
@@ -188,13 +228,36 @@ export default function ClientesFiado({ empresaId }) {
                             fontWeight: 600, fontSize: 14.5, color: 'var(--primary)' }}>
                           {compras[l.cliente_id] ? '▾ ' : '▸ '}{l.cliente_nome}
                         </button>
-                        {l.telefone && (
+                        {l.telefone ? (
                           link
                             ? <a href={link} target="_blank" rel="noreferrer"
                                 style={{ fontSize: 12.5, color: 'var(--primary)', textDecoration: 'none' }}>
                                 💬 {l.telefone}
                               </a>
                             : <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{l.telefone}</span>
+                        ) : editTel?.cliente_id === l.cliente_id ? (
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 3 }}>
+                            <input value={editTel.valor} type="tel" inputMode="tel" autoFocus
+                              placeholder="Telefone com DDD"
+                              onChange={e => setEditTel(t => ({ ...t, valor: e.target.value }))}
+                              onKeyDown={e => { if (e.key === 'Enter') salvarTelefone(l.cliente_id) }}
+                              style={{ width: 150, padding: '5px 8px', borderRadius: 7, border: '1px solid var(--border)',
+                                background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13 }} />
+                            <button type="button" onClick={() => salvarTelefone(l.cliente_id)} disabled={salvandoTel}
+                              style={{ padding: '5px 10px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                                background: 'var(--primary)', color: '#fff', fontSize: 12, fontWeight: 800 }}>
+                              {salvandoTel ? '...' : 'Salvar'}
+                            </button>
+                            <button type="button" onClick={() => setEditTel(null)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16 }}>×</button>
+                          </div>
+                        ) : (
+                          // Cadastrou no aperto e não pegou o telefone? Põe agora.
+                          <button type="button" onClick={() => setEditTel({ cliente_id: l.cliente_id, valor: '' })}
+                            style={{ display: 'block', background: 'none', border: 'none', padding: 0, marginTop: 2,
+                              cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12.5, textDecoration: 'underline' }}>
+                            ➕ pôr o telefone
+                          </button>
                         )}
                         {estourou && (
                           <div style={{ fontSize: 12, color: '#d97706', fontWeight: 700 }}>
@@ -271,7 +334,18 @@ export default function ClientesFiado({ empresaId }) {
                                       {dataHora(v.created_at)}
                                       {v.forma_pagamento === 'fiado' && <span style={{ color: '#d97706', fontWeight: 700 }}> · fiado</span>}
                                     </span>
-                                    <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{fmtBRL(v.total)}</span>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+                                      <span style={{ fontWeight: 700 }}>{fmtBRL(v.total)}</span>
+                                      {/* Fiado lançado errado: o ADM apaga aqui (mig 0146). */}
+                                      {ehAdmin && v.forma_pagamento === 'fiado' && (
+                                        <button type="button" onClick={() => apagarFiado(v, l.cliente_id)}
+                                          title="Apagar este fiado (lançamento errado)"
+                                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                                            fontSize: 14, lineHeight: 1, color: 'var(--danger)' }}>
+                                          🗑️
+                                        </button>
+                                      )}
+                                    </span>
                                   </div>
                                   {(v.venda_itens ?? []).length > 0 && (
                                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
