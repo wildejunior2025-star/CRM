@@ -460,6 +460,18 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
               🏠 {pedido.endereco_complemento}
             </div>
           )}
+          {/* Observação da entrega ("portão azul", "Referência: loja da Yamaha",
+              "ligar ao chegar"). Estava só no cupom impresso e no gestor — o
+              motoqueiro no celular não via. */}
+          {String(pedido.observacoes || '').trim() && (
+            <div style={{
+              fontSize: 13.5, fontWeight: 700, color: '#f59e0b', marginTop: 5,
+              background: 'rgba(245,158,11,.12)', border: '1px solid #f59e0b',
+              borderRadius: 8, padding: '6px 9px',
+            }}>
+              📝 {pedido.observacoes}
+            </div>
+          )}
         </div>
         <a href={mapsUrl(pedido, empresa)} target="_blank" rel="noopener noreferrer"
           title="Ver o ponto no mapa"

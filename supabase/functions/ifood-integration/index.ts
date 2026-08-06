@@ -1,4 +1,6 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+// Versão fixa: o "@2" hoje cai na 2.112.2, que está quebrada no esm.sh
+// (postgrest-js 404) e faz o deploy falhar no bundle.
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.111.0"
 
 // =====================================================================
 // ifood-integration
@@ -254,6 +256,21 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     }
   })
 
+  // Observação da ENTREGA. O iFood não manda nada em `observations` na raiz do
+  // pedido (era o que a gente lia — por isso chegava sempre vazio). O recado do
+  // cliente vem espalhado: o ponto de referência em deliveryAddress.reference
+  // ("Loja da Yamaha"), o recado da entrega em delivery.observations e, em
+  // alguns pedidos, em extraInfo. Junta tudo pro motoboy ver na tela e no cupom.
+  const obsPartes = [
+    addr.reference ? `Referência: ${addr.reference}` : null,
+    o.delivery?.observations ?? null,
+    o.extraInfo ?? null,
+    o.observations ?? null,
+  ]
+    .map((s: unknown) => (typeof s === "string" ? s.trim() : null))
+    .filter((s): s is string => Boolean(s))
+  const observacoes = obsPartes.length ? [...new Set(obsPartes)].join(" · ") : null
+
   const total = o.total ?? {}
   const { forma, troco, pago: pagoOnline } = mapearPagamento(o.payments)
 
@@ -306,7 +323,9 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
 
     endereco_rua: ehEntrega ? (addr.streetName ?? "Endereço iFood") : "Retirada na loja",
     endereco_numero: ehEntrega ? (addr.streetNumber ?? null) : null,
-    endereco_complemento: addr.complement ?? null,
+    // O iFood manda complemento vazio ("") quando não tem — vira null pra não
+    // aparecer uma linha em branco no card do entregador.
+    endereco_complemento: (typeof addr.complement === "string" ? addr.complement.trim() : "") || null,
     endereco_bairro: addr.neighborhood ?? null,
     endereco_cidade: ehEntrega ? (addr.city ?? "—") : "Retirada",
     endereco_lat: ehEntrega ? lat : null,
@@ -320,7 +339,7 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     forma_pagamento: forma,
     troco_para: troco,
 
-    observacoes: o.observations ?? null,
+    observacoes,
 
     ifood_order_id: o.id ?? orderId,
     ifood_display_id: o.displayId ?? null,
