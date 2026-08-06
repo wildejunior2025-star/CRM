@@ -7,7 +7,11 @@ const semAcento = (s) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
 // Modal pra escolher um cliente já cadastrado OU cadastrar um novo na hora (nome +
 // telefone). Usado no Salão (ligar cliente à mesa) e no histórico de contas fechadas.
 // Chama onPick(cliente) ao escolher/criar e onPick(null) se clicar "Tirar cliente".
-export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', permitirTirar = false, onPick, onFechar }) {
+// `permitirSemCadastro` é pra comanda de balcão: o cliente que pede em pé quase
+// nunca é cadastrado, e parar pra cadastrar todo mundo atrasa a fila (e enche a
+// lista de clientes). Nesse modo dá pra usar só o nome digitado — chama
+// onPick({ id: null, nome }), então quem recebe grava o nome sem ligar cliente.
+export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', permitirTirar = false, permitirSemCadastro = false, onPick, onFechar }) {
   const [clientes, setClientes] = useState([])
   const [busca, setBusca] = useState('')
   const [novo, setNovo] = useState(false)
@@ -68,6 +72,14 @@ export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', p
               </button>
             ))}
           </div>
+        )}
+
+        {permitirSemCadastro && busca.trim() && !novo && (
+          <button type="button" onClick={() => onPick({ id: null, nome: busca.trim() })}
+            style={{ width: '100%', marginTop: 10, padding: '10px 0', borderRadius: 8, cursor: 'pointer',
+              border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 13.5, fontWeight: 800 }}>
+            Usar só o nome “{busca.trim()}”
+          </button>
         )}
 
         {novo ? (

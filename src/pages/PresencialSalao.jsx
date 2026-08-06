@@ -53,8 +53,6 @@ export default function PresencialSalao() {
   // Comanda de balcão (mig 0143): comanda numerada que não é de mesa nenhuma —
   // pro cliente que pede em pé no balcão. Número zera todo dia. Ligado por loja.
   const [comandaBalcaoAtiva, setComandaBalcaoAtiva] = useState(false)
-  const [novaComanda, setNovaComanda] = useState(false)   // modal "+ Nova comanda"
-  const [novaComandaNome, setNovaComandaNome] = useState('')
   const [abrindoComanda, setAbrindoComanda] = useState(false)
   const [produtos, setProdutos] = useState([])
   const [garcons, setGarcons] = useState({})   // { profile_id: nome }
@@ -321,8 +319,10 @@ export default function PresencialSalao() {
     setModoPag('unico'); setPagamentos([]); setPickerFiadoIdx(null); setClienteSel(null); setBuscaCliente('')
   }
 
-  // Abre uma comanda de BALCÃO. Quem dá o número é o banco (abrir_comanda_balcao):
-  // dois atendentes clicando junto não podem receber o mesmo número.
+  // Abre uma comanda de BALCÃO e já cai na tela de lançar o pedido, igual à mesa —
+  // sem perguntar nada antes. Quem dá o número é o banco (abrir_comanda_balcao):
+  // dois atendentes clicando junto não podem receber o mesmo número. O nome do
+  // cliente entra depois, lá dentro, pelo mesmo "Ligar cliente" das mesas.
   async function criarComandaBalcao() {
     if (!caixaAberto) {
       window.alert('⚠️ Abra o caixa primeiro (aba 💵 Caixa) pra abrir comanda.')
@@ -330,12 +330,9 @@ export default function PresencialSalao() {
     }
     if (abrindoComanda) return
     setAbrindoComanda(true)
-    const { data, error } = await supabase.rpc('abrir_comanda_balcao', {
-      p_nome: novaComandaNome.trim() || null, p_cliente_id: null,
-    })
+    const { data, error } = await supabase.rpc('abrir_comanda_balcao', { p_nome: null, p_cliente_id: null })
     setAbrindoComanda(false)
     if (error) { window.alert('Erro ao abrir a comanda: ' + error.message); return }
-    setNovaComanda(false); setNovaComandaNome('')
     // Recarrega e já abre o drawer da comanda nova (o atendente vai lançar agora).
     const { data: nova } = await supabase.from('comandas')
       .select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)').eq('id', data).single()
@@ -347,19 +344,6 @@ export default function PresencialSalao() {
     }
   }
 
-  // Troca o nome escrito na comanda de balcão ("Maria", "moço da moto").
-  async function renomearComanda() {
-    if (!comandaSel || comandaSel.tipo !== 'balcao') return
-    const novo = window.prompt('Nome nesta comanda:', comandaSel.nome_cliente || '')
-    if (novo === null) return
-    const { error } = await supabase.rpc('renomear_comanda_balcao', {
-      p_comanda_id: comandaSel.id, p_nome: novo,
-    })
-    if (error) { window.alert('Erro ao renomear: ' + error.message); return }
-    setMesaSel(prev => prev ? { ...prev, nome: novo.trim() } : prev)
-    await loadAll()
-  }
-
   // Liga (ou tira) o cliente da comanda desta mesa. cliente = null tira.
   async function ligarClienteComanda(cliente) {
     if (!comandaSel) return
@@ -367,6 +351,12 @@ export default function PresencialSalao() {
     const { error } = await supabase.rpc('vincular_cliente_comanda', {
       p_comanda_id: comandaSel.id, p_cliente_id: cliente?.id ?? null,
     })
+    // Na comanda de balcão o nome também é gravado na própria comanda: é ele que
+    // sai escrito na comanda da cozinha, no cupom e no histórico ("Comanda 03 · Maria").
+    if (!error && comandaSel.tipo === 'balcao') {
+      await supabase.from('comandas')
+        .update({ nome_cliente: cliente?.nome ?? null }).eq('id', comandaSel.id)
+    }
     setLigandoCliente(false)
     setPickerCliente(false)
     if (error) { window.alert('Erro ao ligar o cliente: ' + error.message); return }
@@ -894,15 +884,17 @@ export default function PresencialSalao() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))', gap: 7 }}>
           {/* Comandas de balcão: nascem no botão, vêm antes das mesas e somem ao fechar. */}
           {comandaBalcaoAtiva && (
-            <div role="button" tabIndex={0} onClick={() => { setNovaComandaNome(''); setNovaComanda(true) }}
-              onKeyDown={ev => { if (ev.key === 'Enter') { setNovaComandaNome(''); setNovaComanda(true) } }}
+            <div role="button" tabIndex={0} onClick={criarComandaBalcao}
+              onKeyDown={ev => { if (ev.key === 'Enter') criarComandaBalcao() }}
               style={{
-                borderRadius: 9, padding: '7px 8px', cursor: 'pointer', textAlign: 'center',
+                borderRadius: 9, padding: '7px 8px', cursor: abrindoComanda ? 'wait' : 'pointer', textAlign: 'center',
                 border: '1.5px dashed var(--primary)', background: 'rgba(124,58,237,.08)',
                 color: 'var(--primary)', display: 'flex', flexDirection: 'column', justifyContent: 'center',
               }}>
               <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>＋</div>
-              <div style={{ fontSize: 10.5, fontWeight: 800, marginTop: 3 }}>Nova comanda</div>
+              <div style={{ fontSize: 10.5, fontWeight: 800, marginTop: 3 }}>
+                {abrindoComanda ? 'Abrindo...' : 'Nova comanda'}
+              </div>
             </div>
           )}
           {comandasBalcao.map(c => {
@@ -988,12 +980,7 @@ export default function PresencialSalao() {
                   {mesaSel.is_comanda ? `🧾 ${rotuloMesa(mesaSel)}` : mesaSel.is_balcao ? '🛎️ Balcão' : `Mesa ${mesaSel.numero}`}
                 </div>
                 {mesaSel.is_comanda ? (
-                  <button type="button" onClick={renomearComanda}
-                    title="Trocar o nome escrito na comanda"
-                    style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                      fontSize: 12, color: comandaSel?.nome_cliente ? 'var(--text)' : 'var(--text-muted)' }}>
-                    {comandaSel?.nome_cliente || 'sem nome'} ✎
-                  </button>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Comanda de balcão</div>
                 ) : (
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{mesaSel.nome || `${mesaSel.capacidade} lugares`}</div>
                 )}
@@ -1008,14 +995,14 @@ export default function PresencialSalao() {
                 ) : null}
                 {/* Cliente da mesa: liga um cliente a esta comanda (ou troca/tira). */}
                 {comandaSel && comandaSel.status !== 'fechada' && (
-                  comandaSel.cliente ? (
+                  (comandaSel.cliente || comandaSel.nome_cliente) ? (
                     <button type="button" onClick={() => setPickerCliente(true)} disabled={ligandoCliente}
                       title="Trocar ou tirar o cliente"
                       style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4, padding: '3px 10px',
                         borderRadius: 999, cursor: 'pointer', border: '1.5px solid var(--primary)',
                         background: 'rgba(124,58,237,.1)', color: 'var(--primary)', fontSize: 12.5, fontWeight: 700 }}>
-                      🧑 {comandaSel.cliente.nome}
-                      {comandaSel.cliente.telefone ? ` · ${comandaSel.cliente.telefone}` : ''}
+                      🧑 {comandaSel.cliente?.nome || comandaSel.nome_cliente}
+                      {comandaSel.cliente?.telefone ? ` · ${comandaSel.cliente.telefone}` : ''}
                       <span style={{ fontWeight: 500, opacity: .8 }}>✎</span>
                     </button>
                   ) : (
@@ -1023,7 +1010,7 @@ export default function PresencialSalao() {
                       style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4, padding: '3px 10px',
                         borderRadius: 999, cursor: 'pointer', border: '1.5px dashed var(--border)',
                         background: 'transparent', color: 'var(--text-muted)', fontSize: 12.5, fontWeight: 700 }}>
-                      ➕ Ligar cliente
+                      ➕ {mesaSel.is_comanda ? 'Pôr o nome do cliente' : 'Ligar cliente'}
                     </button>
                   )
                 )}
@@ -1336,33 +1323,6 @@ export default function PresencialSalao() {
         />
       )}
 
-      {/* ── Nova comanda de balcão ── */}
-      {novaComanda && (
-        <div className="modal-overlay" onClick={() => setNovaComanda(false)} style={{ zIndex: 1100 }}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 380, width: '100%' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12 }}>
-              <h2 style={{ margin: 0, fontSize: 18 }}>🧾 Nova comanda</h2>
-              <button type="button" onClick={() => setNovaComanda(false)}
-                style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-muted)', lineHeight: 1 }}>×</button>
-            </div>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 12px' }}>
-              O número sai automático (01, 02, 03...) e zera todo dia. O nome é só pra
-              achar a comanda depois — dá pra deixar em branco e escrever mais tarde.
-            </p>
-            <div className="form-field">
-              <label>Nome do cliente (opcional)</label>
-              <input type="text" autoFocus value={novaComandaNome} placeholder="Ex: Maria, moço da moto"
-                onChange={e => setNovaComandaNome(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') criarComandaBalcao() }} />
-            </div>
-            <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: 14 }}
-              onClick={criarComandaBalcao} disabled={abrindoComanda}>
-              {abrindoComanda ? 'Abrindo...' : 'Abrir comanda'}
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* ── Fiado: quem está devendo (lista + receber) ── */}
       {showFiado && (
         <div className="modal-overlay" onClick={() => setShowFiado(false)} style={{ zIndex: 1100 }}>
@@ -1398,7 +1358,8 @@ export default function PresencialSalao() {
         <ClientePicker
           empresaId={empresaId}
           titulo={mesaSel?.is_balcao ? 'Cliente do balcão' : `Cliente da ${rotuloMesa(mesaSel)}`}
-          permitirTirar={!!comandaSel.cliente}
+          permitirSemCadastro={mesaSel?.is_comanda}
+          permitirTirar={!!(comandaSel.cliente || comandaSel.nome_cliente)}
           onPick={ligarClienteComanda}
           onFechar={() => setPickerCliente(false)}
         />
