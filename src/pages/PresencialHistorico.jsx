@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import ClientePicker from '../components/ClientePicker'
+import { rotuloComanda } from '../lib/comanda'
 import '../components/Page.css'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
@@ -187,7 +188,7 @@ export default function PresencialHistorico() {
                   style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left', color: 'var(--text)' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700, fontSize: 15 }}>
-                      {c.numero_mesa ? `Mesa ${c.numero_mesa}` : 'Balcão'}
+                      {c.numero_mesa ? rotuloComanda(c) : 'Balcão'}
                     </div>
                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
                       {horaBR(c.fechada_at)} · {FORMA_LABEL[c.forma_pagamento] ?? c.forma_pagamento ?? '—'}
@@ -289,7 +290,7 @@ export default function PresencialHistorico() {
       {pickerComanda && (
         <ClientePicker
           empresaId={empresaId}
-          titulo={pickerComanda.numero_mesa ? `Cliente da Mesa ${pickerComanda.numero_mesa}` : 'Cliente do pedido'}
+          titulo={pickerComanda.numero_mesa ? `Cliente da ${rotuloComanda(pickerComanda, { comNome: false })}` : 'Cliente do pedido'}
           permitirTirar={!!pickerComanda.cliente}
           onPick={(cli) => ligarCliente(pickerComanda, cli)}
           onFechar={() => setPickerComanda(null)}

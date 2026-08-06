@@ -4,6 +4,7 @@ import { useTheme } from '../hooks/useTheme'
 import { supabase } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
 import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
+import { rotuloComanda } from '../lib/comanda'
 import Caixa from './Caixa'
 
 // Aceitar pedidos automaticamente (lido do localStorage pra não pegar estado
@@ -3099,7 +3100,7 @@ function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarL
   return (
     <div className="pp-mini" style={{ borderLeft: `3px solid ${aguardando ? '#3b82f6' : '#db2777'}`, cursor: 'default' }}>
       <div className="pp-mini-top" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span className="pp-mini-num" style={{ flex: 1, minWidth: 0 }}>🍽️ Mesa {comanda.numero_mesa} · {fmt(total)}</span>
+        <span className="pp-mini-num" style={{ flex: 1, minWidth: 0 }}>🍽️ {rotuloComanda(comanda)} · {fmt(total)}</span>
         {onImprimir && itens.length > 0 && (
           <button type="button" title="Imprimir comanda na cozinha" aria-label="Imprimir comanda"
             onClick={() => onImprimir(comanda)}
@@ -3176,7 +3177,7 @@ function ModalFecharConta({ comanda, taxaPct, onFechar, onConfirmar }) {
   return (
     <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 130 }}>
       <div className="pp-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 380, width: '92vw' }}>
-        <p className="pp-modal-titulo">Fechar conta · Mesa {comanda.numero_mesa}</p>
+        <p className="pp-modal-titulo">Fechar conta · {rotuloComanda(comanda)}</p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13, marginBottom: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
           <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
@@ -3725,7 +3726,7 @@ export default function PainelPedidos() {
     // G3 — mesas (comandas) com conta fechada hoje também entram nos concluídos
     const { data: mesas } = await supabase
       .from('comandas')
-      .select('id, numero_mesa, total, forma_pagamento, fechada_at')
+      .select('id, numero_mesa, tipo, nome_cliente, total, forma_pagamento, fechada_at')
       .eq('empresa_id', empresa.id)
       .eq('status', 'fechada')
       .gte('fechada_at', inicio.toISOString())
@@ -4037,7 +4038,7 @@ export default function PainelPedidos() {
     async function carregarComandas() {
       const { data } = await supabase
         .from('comandas')
-        .select('id, numero_mesa, created_at, status, fechamento_pendente, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao)')
+        .select('id, numero_mesa, tipo, nome_cliente, created_at, status, fechamento_pendente, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao)')
         .eq('empresa_id', empresa.id)
         .in('status', ['aberta', 'aguardando_conferencia'])
         .order('numero_mesa')
@@ -4114,11 +4115,12 @@ export default function PainelPedidos() {
   }
   // Dados extras pro cabeçalho da comanda da cozinha (salão, atendente, pessoas, rodapé).
   async function infoComandaCozinha(cid) {
-    const info = { numero: '?', area: '', atendente: '', pessoas: 0, rodape: empresa?.rodape_cozinha || '' }
+    const info = { numero: '?', rotulo: '', area: '', atendente: '', pessoas: 0, rodape: empresa?.rodape_cozinha || '' }
     try {
-      const { data: c } = await supabase.from('comandas').select('numero_mesa, num_pessoas, garcom_id, mesa_id').eq('id', cid).maybeSingle()
+      const { data: c } = await supabase.from('comandas').select('numero_mesa, tipo, nome_cliente, num_pessoas, garcom_id, mesa_id').eq('id', cid).maybeSingle()
       if (c) {
         if (c.numero_mesa != null) info.numero = c.numero_mesa
+        info.rotulo = rotuloComanda(c)
         info.pessoas = c.num_pessoas || 0
         if (c.garcom_id) { const { data: g } = await supabase.from('profiles').select('nome').eq('id', c.garcom_id).maybeSingle(); if (g?.nome) info.atendente = String(g.nome).split(' ')[0] }
         if (c.mesa_id) { const { data: m } = await supabase.from('mesas').select('nome').eq('id', c.mesa_id).maybeSingle(); if (m?.nome) info.area = m.nome }
@@ -4134,7 +4136,7 @@ export default function PainelPedidos() {
     if (!entry?.itens?.length) return
     const info = await infoComandaCozinha(cid)
     imprimirHtml(montarComandaCozinhaHtml({
-      numeroMesa: info.numero,
+      numeroMesa: info.numero, rotulo: info.rotulo,
       nomeLoja: empresa?.nome,
       area: info.area, atendente: info.atendente, pessoas: info.pessoas, rodape: info.rodape,
       itens: entry.itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao })),
@@ -4160,7 +4162,7 @@ export default function PainelPedidos() {
     const taxa = Math.max(0, Math.round((total - subtotal) * 100) / 100)
     const forma = pagamentos.length > 1 ? 'Dividido' : (pagamentos[0]?.forma ?? '')
     imprimirContaSeMesa(montarContaPresencialHtml({
-      numeroMesa: c.numero_mesa, itens, subtotal, taxa, total, formaPagamento: forma, pagamentos, empresa,
+      numeroMesa: c.numero_mesa, rotulo: rotuloComanda(c), itens, subtotal, taxa, total, formaPagamento: forma, pagamentos, empresa,
     }), empresa?.nome)
   }
 
@@ -4172,6 +4174,7 @@ export default function PainelPedidos() {
     const info = await infoComandaCozinha(comanda.id)
     imprimirComandaMesaApp({
       numeroMesa: comanda.numero_mesa ?? info.numero ?? '?',
+      rotulo: rotuloComanda(comanda),
       comandaId: comanda.id,
       nomeLoja: empresa?.nome,
       area: info.area, atendente: info.atendente, pessoas: info.pessoas, rodape: info.rodape,
@@ -4192,7 +4195,7 @@ export default function PainelPedidos() {
       const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
       const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
       imprimirContaSeMesa(montarContaPresencialHtml({
-        numeroMesa: comanda.numero_mesa,
+        numeroMesa: comanda.numero_mesa, rotulo: rotuloComanda(comanda),
         itens, subtotal, taxa: Math.max(0, total - subtotal), total,
         formaPagamento: forma, empresa,
       }))
@@ -4201,7 +4204,7 @@ export default function PainelPedidos() {
     setComandas(cs => cs.filter(c => c.id !== comanda.id))
     // G3 — mostra na coluna "Concluídos hoje" na hora (o reload confirma depois)
     setMesasFechadasHoje(prev => [
-      { id: comanda.id, numero_mesa: comanda.numero_mesa, total, forma_pagamento: forma, fechada_at: new Date().toISOString() },
+      { id: comanda.id, numero_mesa: comanda.numero_mesa, tipo: comanda.tipo, nome_cliente: comanda.nome_cliente, total, forma_pagamento: forma, fechada_at: new Date().toISOString() },
       ...prev.filter(m => m.id !== comanda.id),
     ])
   }
@@ -4238,7 +4241,7 @@ export default function PainelPedidos() {
     // reimprime a conta com o novo valor
     const forma = novos.length > 1 ? 'Dividido' : (novos[0]?.forma ?? '')
     imprimirContaSeMesa(montarContaPresencialHtml({
-      numeroMesa: comanda.numero_mesa, itens, subtotal, taxa, total: novoTotal, formaPagamento: forma, pagamentos: novos, empresa,
+      numeroMesa: comanda.numero_mesa, rotulo: rotuloComanda(comanda), itens, subtotal, taxa, total: novoTotal, formaPagamento: forma, pagamentos: novos, empresa,
     }), empresa?.nome)
   }
 
@@ -4258,7 +4261,7 @@ export default function PainelPedidos() {
     if (error) { alert('Erro ao liberar a mesa: ' + error.message); return }
     setComandas(cs => cs.filter(c => c.id !== comanda.id))
     setMesasFechadasHoje(prev => [
-      { id: comanda.id, numero_mesa: comanda.numero_mesa, total, forma_pagamento: (pend.pagamentos[0]?.forma ?? 'dinheiro'), fechada_at: new Date().toISOString() },
+      { id: comanda.id, numero_mesa: comanda.numero_mesa, tipo: comanda.tipo, nome_cliente: comanda.nome_cliente, total, forma_pagamento: (pend.pagamentos[0]?.forma ?? 'dinheiro'), fechada_at: new Date().toISOString() },
       ...prev.filter(m => m.id !== comanda.id),
     ])
   }
@@ -4961,7 +4964,7 @@ export default function PainelPedidos() {
                   {mesasFechadasHojeView.map(m => (
                     <div key={m.id} className="pp-mini" style={{ borderLeft: '3px solid #db2777', cursor: 'default' }}>
                       <div className="pp-mini-top">
-                        <span className="pp-mini-num">🍽️ Mesa {m.numero_mesa} · {fmt(m.total)}</span>
+                        <span className="pp-mini-num">🍽️ {rotuloComanda(m)} · {fmt(m.total)}</span>
                       </div>
                       <div className="pp-mini-sub">
                         {m.fechada_at ? new Date(m.fechada_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''} · conta fechada

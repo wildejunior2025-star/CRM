@@ -26,6 +26,9 @@ export default function ServicoPresencial() {
 
   const [loading, setLoading]   = useState(true)
   const [ativo, setAtivo]       = useState(false)
+  // Comanda de balcão (mig 0143): libera o botão "+ Nova comanda" no Salão, pra loja
+  // em que o cliente pede em pé no balcão. Convive com as mesas de verdade.
+  const [comandaBalcao, setComandaBalcao] = useState(false)
   const [taxa, setTaxa]         = useState(10)
   const [salvando, setSalvando] = useState(false)
   const [msg, setMsg]           = useState(null)
@@ -33,12 +36,13 @@ export default function ServicoPresencial() {
   useEffect(() => {
     if (!empresaId) return
     supabase.from('empresas')
-      .select('presencial_ativo, taxa_servico_pct')
+      .select('presencial_ativo, taxa_servico_pct, comanda_balcao_ativa')
       .eq('id', empresaId).single()
       .then(({ data }) => {
         if (data) {
           setAtivo(data.presencial_ativo ?? false)
           setTaxa(data.taxa_servico_pct ?? 10)
+          setComandaBalcao(data.comanda_balcao_ativa ?? false)
         }
         setLoading(false)
       })
@@ -48,7 +52,7 @@ export default function ServicoPresencial() {
     if (!empresaId) return
     setSalvando(true); setMsg(null)
     const { error } = await supabase.from('empresas')
-      .update({ presencial_ativo: ativo, taxa_servico_pct: Number(taxa) || 0 })
+      .update({ presencial_ativo: ativo, taxa_servico_pct: Number(taxa) || 0, comanda_balcao_ativa: comandaBalcao })
       .eq('id', empresaId)
     setSalvando(false)
     setMsg(error ? { tipo: 'erro', texto: error.message } : { tipo: 'ok', texto: 'Configurações salvas.' })
@@ -87,6 +91,33 @@ export default function ServicoPresencial() {
           >
             <span style={{
               position: 'absolute', top: 3, left: ativo ? 25 : 3, width: 24, height: 24,
+              borderRadius: '50%', background: '#fff', transition: 'left 150ms',
+            }} />
+          </button>
+        </div>
+
+        {/* Comanda de balcão: pro cliente que pede em pé e leva um número (01, 02...). */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+          <div style={{ maxWidth: 520 }}>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>Comandas de balcão</div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
+              Põe o botão <b>“+ Nova comanda”</b> no Salão. A comanda não é de mesa nenhuma:
+              nasce com número automático (01, 02, 03...) que <b>zera todo dia</b> e leva o nome
+              do cliente. Serve pra quem pede em pé no balcão. As mesas continuam funcionando igual.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setComandaBalcao(v => !v)}
+            aria-label="Ativar comandas de balcão"
+            style={{
+              width: 52, height: 30, borderRadius: 999, border: 'none', cursor: 'pointer',
+              position: 'relative', flexShrink: 0,
+              background: comandaBalcao ? 'var(--primary)' : 'var(--border)', transition: 'background 150ms',
+            }}
+          >
+            <span style={{
+              position: 'absolute', top: 3, left: comandaBalcao ? 25 : 3, width: 24, height: 24,
               borderRadius: '50%', background: '#fff', transition: 'left 150ms',
             }} />
           </button>

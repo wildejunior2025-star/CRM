@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { imprimirHtml, montarComandaCozinhaHtml } from '../utils/imprimirCupom'
+import { rotuloComanda } from '../lib/comanda'
 import { separarItem } from '../lib/itensPedido'
 import '../components/Page.css'
 
@@ -220,7 +221,7 @@ export default function PresencialCozinha() {
     const [mesasRes, entregasRes] = await Promise.all([
       supabase
         .from('comanda_itens')
-        .select('*, comandas!inner(numero_mesa, status)')
+        .select('*, comandas!inner(numero_mesa, status, tipo, nome_cliente)')
         .eq('empresa_id', empresaId)
         .eq('comandas.status', 'aberta')
         .in('status', ['pendente', 'pronto'])
@@ -340,13 +341,19 @@ export default function PresencialCozinha() {
     todos:      ent.todos.length + mesa.todos.length,
   }
 
+  // A comanda de balcão tem numeração PRÓPRIA, então a Comanda 3 e a Mesa 3 podem
+  // existir ao mesmo tempo — por isso o agrupamento leva o tipo na chave.
   const agruparPorMesa = lista => {
     const map = {}
     for (const it of lista) {
-      const k = it.comandas?.numero_mesa ?? '—'
-      ;(map[k] = map[k] || []).push(it)
+      const c = it.comandas
+      const k = `${c?.tipo === 'balcao' ? 'b' : 'a'}:${c?.numero_mesa ?? '—'}`
+      if (!map[k]) map[k] = { rotulo: rotuloComanda(c), numero: Number(c?.numero_mesa) || 0, itens: [] }
+      map[k].itens.push(it)
     }
-    return Object.entries(map).sort((a, b) => Number(a[0]) - Number(b[0]))
+    // Mesas primeiro, comandas de balcão depois; cada grupo em ordem de número.
+    return Object.entries(map).sort((a, b) =>
+      a[0][0].localeCompare(b[0][0]) || a[1].numero - b[1].numero)
   }
   // Busca (loja com muito pedido): filtra por nº do pedido, código de entrega,
   // nº do iFood, cliente, endereço ou mesa.
@@ -366,7 +373,8 @@ export default function PresencialCozinha() {
       const base = buscaLimpa
         ? dedupById(ehAdmin ? [...mesa.todos, ...mesa.historico] : [...mesa.afazer, ...mesa.preparando, ...mesa.historico])
         : mesa[aba]
-      return agruparPorMesa(base.filter(i => casaBusca([i.comandas?.numero_mesa, 'mesa ' + (i.comandas?.numero_mesa ?? ''), i.nome, i.preparando_nome])))
+      // A busca acha tanto por "mesa 4" quanto por "comanda 07" / nome escrito nela.
+      return agruparPorMesa(base.filter(i => casaBusca([i.comandas?.numero_mesa, rotuloComanda(i.comandas), i.comandas?.nome_cliente, i.nome, i.preparando_nome])))
     },
     [itens, aba, meuId, buscaLimpa] // eslint-disable-line react-hooks/exhaustive-deps
   )
@@ -451,18 +459,18 @@ export default function PresencialCozinha() {
           ))}
 
           {/* Itens de mesa, agrupados por mesa */}
-          {mesaAba.map(([numeroMesa, lista]) => (
-            <div key={numeroMesa} style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+          {mesaAba.map(([chave, grupo]) => (
+            <div key={chave} style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
               <div style={{ background: aba === 'historico' ? '#16a34a' : 'var(--primary)', color: '#fff', padding: '10px 14px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>Mesa {numeroMesa}</span>
+                <span>{grupo.rotulo}</span>
                 <button type="button" title="Imprimir comanda"
-                  onClick={() => imprimirHtml(montarComandaCozinhaHtml({ numeroMesa, itens: lista }))}
+                  onClick={() => imprimirHtml(montarComandaCozinhaHtml({ rotulo: grupo.rotulo, itens: grupo.itens }))}
                   style={{ background: 'rgba(255,255,255,.2)', border: 'none', color: '#fff', borderRadius: 8, cursor: 'pointer', fontSize: 16, padding: '2px 8px' }}>
                   🖨️
                 </button>
               </div>
               <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {lista.map(item => {
+                {grupo.itens.map(item => {
                   const { nome, complementos: comps } = separarItem(item)
                   // Ao buscar, o layout segue o estado real do item (não a aba).
                   const itemHist = buscaLimpa ? item.status === 'pronto' : aba === 'historico'

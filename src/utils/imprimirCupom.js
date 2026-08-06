@@ -336,19 +336,22 @@ export async function imprimirHtml(html, titulo, opts = {}) {
 // Comanda de MESA: pede pro app FWC montar nativamente (nome da loja + MESA grandes,
 // data, itens com valor). Se o app não responder (ou for versão antiga), cai no HTML
 // pelo navegador/QZ. Assim o botão manual do gestor sai igual ao automático.
-export async function imprimirComandaMesaApp({ numeroMesa, itens = [], nomeLoja = '', comandaId, area = '', atendente = '', pessoas = 0, rodape = '' }) {
+export async function imprimirComandaMesaApp({ numeroMesa, itens = [], nomeLoja = '', comandaId, area = '', atendente = '', pessoas = 0, rodape = '', rotulo = '' }) {
   if (await imprimirViaAppFwc('imprimir-mesa', { numeroMesa, itens, nomeLoja, comandaId })) return
   // Comanda de mesa NUNCA cai no navegador (Chrome). Quem imprime é o app FWC — que já
   // recebe o pedido em tempo real e filtra por PC (botões de origem). Se não há app FWC
   // neste aparelho, não imprime aqui (evita o Chrome abrindo e a 2ª via no outro PC).
-  imprimirHtml(montarComandaCozinhaHtml({ numeroMesa, itens, nomeLoja, area, atendente, pessoas, rodape }), null, { soApp: true })
+  imprimirHtml(montarComandaCozinhaHtml({ numeroMesa, itens, nomeLoja, area, atendente, pessoas, rodape, rotulo }), null, { soApp: true })
 }
 
 // Comanda da COZINHA (fonte grande) — "pedido sai na cozinha". SEM preço (o preço sai
 // depois, na conta). Cabeçalho completo: loja, mesa+salão, data/hora com segundos,
 // atendente, nº de pessoas; itens grandes com espaço; rodapé opcional da loja.
-export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = '', nomeLoja = '', area = '', atendente = '', pessoas = 0, rodape = '' }) {
+// `rotulo` troca o "Mesa: X" do cabeçalho — é o que faz a comanda de balcão sair
+// escrita "Comanda 07 · Maria" em vez de "Mesa 7" (mig 0143). Sem ele, tudo igual.
+export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = '', nomeLoja = '', area = '', atendente = '', pessoas = 0, rodape = '', rotulo = '' }) {
   const largura = larguraCupom()
+  const titulo = rotulo || `Mesa: ${numeroMesa}`
   const hora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
   // Comanda da COZINHA: só o que preparar, SEM preço (o preço sai depois, na conta).
   // Cada item tem um tracejado embaixo (espaço bom entre um e outro).
@@ -356,7 +359,7 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
     const q = it.quantidade ?? it.qtd ?? 1
     return `<li><div class="it">${esc(q)} ${esc(it.nome)}</div>${it.observacao ? `<div class="obs">▸ ${esc(it.observacao)}</div>` : ''}<div class="sep"></div></li>`
   }).join('')
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Cozinha Mesa ${esc(numeroMesa)}</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Cozinha ${esc(titulo)}</title>
 <style>
   @page { size: ${largura} auto; margin: 0; }
   html, body { margin: 0; padding: 0; }
@@ -373,7 +376,7 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
   .rodape { text-align: center; font-size: 14px; margin-top: 8px; }
 </style></head><body>
   ${nomeLoja ? `<div class="titulo-loja loja">${esc(nomeLoja)}</div>` : ''}
-  <div class="mesa">~ Mesa: ${esc(numeroMesa)}${area ? ` (${esc(area)})` : ''} ~</div>
+  <div class="mesa">~ ${esc(titulo)}${area ? ` (${esc(area)})` : ''} ~</div>
   <div class="cab">
     ${esc(hora)}
     ${atendente ? `<br>Atendente: ${esc(atendente)}` : ''}
@@ -390,8 +393,10 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
 // Conta do PRESENCIAL (com preços, taxa e total)
 const formaContaLabel = (f) => ({ dinheiro: 'Dinheiro', pix: 'PIX', cartao: 'Cartao', dividido: 'Dividido' }[String(f || '').toLowerCase()] || (f || ''))
 
-export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0, taxa = 0, total = 0, formaPagamento = '', pagamentos = [], empresa = {} }) {
+export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0, taxa = 0, total = 0, formaPagamento = '', pagamentos = [], empresa = {}, rotulo = '' }) {
   const largura = larguraCupom()
+  // Igual à comanda da cozinha: `rotulo` troca o "MESA X" (comanda de balcão).
+  const titulo = (rotulo || `MESA ${numeroMesa}`).toUpperCase()
   const hora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
   // Mesmo tamanho de fonte do cupom de pedido/teste (respeita a config da loja).
   const fontePx = (painelConfig().cupom || {}).fonte === 'grande' ? 15 : 12
@@ -403,7 +408,7 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
     const sub = it.subtotal != null ? Number(it.subtotal) : q * Number(it.preco_unitario ?? it.preco ?? 0)
     return `<li><div class="row"><span>${esc(q)}x ${esc(it.nome)}</span> <span>${fmt(sub)}</span></div></li>`
   }).join('')
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Conta Mesa ${esc(numeroMesa)}</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Conta ${esc(titulo)}</title>
 <style>
   @page { size: ${largura} auto; margin: 0; }
   html, body { margin: 0; padding: 0; }
@@ -414,7 +419,7 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
   ul { list-style: none; margin: 0; padding: 0; } li { margin-bottom: 3px; }
 </style></head><body>
   <div class="titulo-loja center b lg">${esc(empresa.nome || 'Conta')}</div>
-  <div class="b">MESA ${esc(numeroMesa)} - ${esc(hora)}</div>
+  <div class="b">${esc(titulo)} - ${esc(hora)}</div>
   <div class="hr">${tracos}</div>
   <ul>${linhas || '<li>—</li>'}</ul>
   <div class="hr">${tracos}</div>
