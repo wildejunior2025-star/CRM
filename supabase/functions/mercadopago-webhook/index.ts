@@ -14,12 +14,20 @@ type SB = any
 // O pagamento pertence à conta da LOJA (marketplace); pra consultá-lo é preciso
 // o token dela. Descobre a empresa pelo mp_payment_id e devolve o token certo
 // (renovando se expirou). Sem loja conectada → token da conta central.
+// Dois lugares podem ter gerado o pagamento: um pedido de delivery ou um PIX do
+// fiado feito pelo link do cliente (mig 0149).
 async function tokenDoPagamento(sb: SB, paymentId: string): Promise<string> {
   const { data: pedido } = await sb.from('pedidos_delivery')
     .select('empresa_id').eq('mp_payment_id', String(paymentId)).maybeSingle()
-  if (!pedido?.empresa_id) return MP_ACCESS_TOKEN
+  let empresaId: string | null = pedido?.empresa_id ?? null
+  if (!empresaId) {
+    const { data: cob } = await sb.from('cliente_pix_cobrancas')
+      .select('empresa_id').eq('mp_payment_id', String(paymentId)).maybeSingle()
+    empresaId = cob?.empresa_id ?? null
+  }
+  if (!empresaId) return MP_ACCESS_TOKEN
   const { data: conta } = await sb.from('mercadopago_contas')
-    .select('access_token, refresh_token, expires_at').eq('empresa_id', pedido.empresa_id).maybeSingle()
+    .select('access_token, refresh_token, expires_at').eq('empresa_id', empresaId).maybeSingle()
   if (!conta?.access_token) return MP_ACCESS_TOKEN
   const expMs = conta.expires_at ? new Date(conta.expires_at).getTime() : 0
   if (expMs && expMs < Date.now() + 60_000 && conta.refresh_token) {
@@ -36,7 +44,7 @@ async function tokenDoPagamento(sb: SB, paymentId: string): Promise<string> {
       await sb.from('mercadopago_contas').update({
         access_token: tk.access_token, refresh_token: tk.refresh_token ?? conta.refresh_token,
         expires_at: expiresAt, updated_at: new Date().toISOString(),
-      }).eq('empresa_id', pedido.empresa_id)
+      }).eq('empresa_id', empresaId)
       return tk.access_token
     }
   }
@@ -81,6 +89,57 @@ Deno.serve(async (req) => {
           await supabase
             .from('whatsapp_credito_pagamentos')
             .update({ status: 'cancelado' })
+            .eq('mp_payment_id', String(paymentId))
+            .eq('status', 'pendente')
+        }
+        return new Response('ok', { status: 200 })
+      }
+    }
+
+    // ── PIX DO FIADO PELO LINK DO CLIENTE (mig 0149) ──
+    // Também não cruza com os pedidos: o mp_payment_id de uma cobrança de fiado
+    // nunca existe em pedidos_delivery. Quem lança o recebimento é a RPC, que é
+    // atômica e idempotente (webhook repetido não dá baixa duas vezes).
+    {
+      const { data: cob } = await supabase
+        .from('cliente_pix_cobrancas')
+        .select('id, status, empresa_id')
+        .eq('mp_payment_id', String(paymentId))
+        .maybeSingle()
+
+      if (cob) {
+        if (payment.status === 'approved') {
+          const { data: res } = await supabase.rpc('confirmar_pix_fiado', { p_mp_payment_id: String(paymentId) })
+
+          // Avisa a loja no WhatsApp (número de contato da empresa, pela instância
+          // da plataforma — mesmo caminho do alertas-loja).
+          if (res?.ok && res?.telefone_loja) {
+            const fone = String(res.telefone_loja).replace(/\D/g, '')
+            if (fone.length >= 10) {
+              const { data: cfgG } = await supabase.from('config_global')
+                .select('valor').eq('chave', 'admin_sender_instance').maybeSingle()
+              const instance = (cfgG?.valor ?? '').trim() || 'crmadmin'
+              const brl = (v: number) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+              const restante = Number(res.saldo_restante ?? 0)
+              let msg = `💰 *PIX do fiado recebido!*\n\n`
+              msg += `*${res.cliente_nome}* acabou de pagar *${brl(Number(res.valor))}* pelo link.\n`
+              msg += restante > 0.004
+                ? `Ainda deve ${brl(restante)}.\n`
+                : `Ficou *quitado* ✅\n`
+              msg += res.caixa_aberto
+                ? `\nJá entrou no caixa aberto como "fiado em PIX".`
+                : `\n⚠️ Não tinha caixa aberto — a dívida foi abatida, mas esse valor não entra em caixa nenhum.`
+              msg += `\n\n_FWC Inter_`
+              await fetch(`${EVOLUTION_API_URL}/message/sendText/${instance}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY },
+                body: JSON.stringify({ number: fone.startsWith('55') ? fone : `55${fone}`, text: msg }),
+              })
+            }
+          }
+        } else if (['cancelled', 'rejected', 'expired'].includes(payment.status)) {
+          await supabase.from('cliente_pix_cobrancas')
+            .update({ status: 'expirado' })
             .eq('mp_payment_id', String(paymentId))
             .eq('status', 'pendente')
         }

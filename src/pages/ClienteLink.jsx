@@ -40,6 +40,16 @@ export default function ClienteLink() {
   const [notif, setNotif] = useState(null)
   const prevPronto = useRef(new Set())
 
+  // PIX do fiado (mig 0149): ele escolhe o valor, o sistema gera o QR e fica
+  // esperando o Mercado Pago confirmar. A baixa é automática, no webhook.
+  const [showPix, setShowPix] = useState(false)
+  const [pixValor, setPixValor] = useState('')
+  const [pixGerando, setPixGerando] = useState(false)
+  const [pixErro, setPixErro] = useState(null)
+  const [pix, setPix] = useState(null)            // { cobranca_id, valor, qr_code, qr_code_base64 }
+  const [pixPago, setPixPago] = useState(false)
+  const [copiado, setCopiado] = useState(false)
+
   function avisar() {
     try { navigator.vibrate?.([200, 100, 200]) } catch { /* sem vibração */ }
     try {
@@ -155,6 +165,38 @@ export default function ClienteLink() {
     setCarrinho({}); setDrawer(false); setSucesso(true)
     fetchConta()
   }
+
+  // ── PIX do fiado ────────────────────────────────────────────────────────
+  function abrirPix(totalDevendo) {
+    setPix(null); setPixPago(false); setPixErro(null); setCopiado(false)
+    setPixValor(String(Number(totalDevendo || 0).toFixed(2)).replace('.', ','))
+    setShowPix(true)
+  }
+  async function gerarPix() {
+    const v = Number(String(pixValor).replace(/\./g, '').replace(',', '.'))
+    if (!Number.isFinite(v) || v < 1) { setPixErro('O valor mínimo é R$ 1,00.'); return }
+    setPixGerando(true); setPixErro(null)
+    const { data, error } = await supabase.functions.invoke('cliente-pix', { body: { token, valor: v } })
+    setPixGerando(false)
+    if (error || data?.error) { setPixErro(data?.error || 'Não deu pra gerar o PIX agora.'); return }
+    setPix(data)
+  }
+  async function copiarPix() {
+    try {
+      await navigator.clipboard.writeText(pix.qr_code)
+      setCopiado(true); setTimeout(() => setCopiado(false), 2500)
+    } catch { window.prompt('Copie o código do PIX:', pix.qr_code) }
+  }
+  // Enquanto o QR está na tela, pergunta ao banco se o Mercado Pago já confirmou.
+  useEffect(() => {
+    if (!pix?.cobranca_id || pixPago) return
+    const t = setInterval(async () => {
+      const { data } = await supabase.rpc('cliente_pix_status', { p_token: token, p_cobranca: pix.cobranca_id })
+      if (data?.status === 'pago') { setPixPago(true); avisar(); fetchConta() }
+      if (data?.status === 'expirado') { setPixErro('Esse código venceu. Gere outro.'); setPix(null) }
+    }, 4000)
+    return () => clearInterval(t)
+  }, [pix, pixPago]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const C = {
     page: { minHeight: '100dvh', background: '#0f0a1e', color: '#fff', paddingBottom: 90, fontFamily: 'system-ui, sans-serif' },
@@ -324,7 +366,16 @@ export default function ClienteLink() {
             <div style={{ fontSize: 30, fontWeight: 800, marginTop: 2, color: devendo > 0 ? '#fbbf24' : '#22c55e' }}>
               {devendo > 0 ? fmt(devendo) : 'em dia ✓'}
             </div>
-            {devendo > 0 && <div style={{ fontSize: 12, opacity: .8, marginTop: 4 }}>Pague na loja quando puder 🙂</div>}
+            {devendo > 0 && (
+              <>
+                <button onClick={() => abrirPix(devendo)}
+                  style={{ marginTop: 12, width: '100%', height: 48, borderRadius: 12, border: 'none', cursor: 'pointer',
+                    background: '#22c55e', color: '#fff', fontWeight: 800, fontSize: 15.5 }}>
+                  📱 Pagar no PIX
+                </button>
+                <div style={{ fontSize: 12, opacity: .8, marginTop: 6 }}>Ou pague na loja quando puder 🙂</div>
+              </>
+            )}
           </div>
 
           <div style={C.bloco}>
@@ -411,6 +462,80 @@ export default function ClienteLink() {
                 background: situacao.aberto ? '#22c55e' : '#374151', color: '#fff', fontWeight: 800, fontSize: 16 }}>
               {!situacao.aberto ? '🌙 A loja está fechada' : enviando ? 'Enviando…' : 'Enviar pedido'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── PIX DO FIADO: escolhe o valor → QR + copia e cola → confirma sozinho ── */}
+      {showPix && (
+        <div onClick={() => setShowPix(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 25, display: 'flex', alignItems: 'flex-end' }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: '100%', background: '#15102a', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 20, maxHeight: '92dvh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <strong style={{ fontSize: 17 }}>📱 Pagar no PIX</strong>
+              <button onClick={() => setShowPix(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 26, cursor: 'pointer', lineHeight: 1 }}>×</button>
+            </div>
+
+            {pixErro && <p style={{ color: '#f87171', fontSize: 13.5, marginTop: 0 }}>{pixErro}</p>}
+
+            {pixPago ? (
+              <div style={{ textAlign: 'center', padding: '18px 0' }}>
+                <div style={{ fontSize: 48 }}>✅</div>
+                <h2 style={{ margin: '10px 0 4px' }}>Pagamento confirmado!</h2>
+                <p style={{ opacity: .8, fontSize: 14 }}>
+                  Recebemos {fmt(pix?.valor)}. Sua conta já foi atualizada.
+                </p>
+                <button onClick={() => setShowPix(false)}
+                  style={{ marginTop: 18, width: '100%', height: 48, borderRadius: 12, border: 'none', cursor: 'pointer', background: '#7c3aed', color: '#fff', fontWeight: 800 }}>
+                  Fechar
+                </button>
+              </div>
+            ) : !pix ? (
+              <>
+                <label style={{ fontSize: 13, opacity: .85, display: 'block', marginBottom: 6 }}>Quanto você quer pagar?</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#1b1430', border: '1px solid #2c2350', borderRadius: 12, padding: '12px 14px' }}>
+                  <span style={{ fontSize: 18, opacity: .7 }}>R$</span>
+                  <input inputMode="decimal" value={pixValor} onChange={e => setPixValor(e.target.value)}
+                    style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: '#fff', fontSize: 24, fontWeight: 800 }} />
+                </div>
+                <button type="button" onClick={() => setPixValor(String(devendo.toFixed(2)).replace('.', ','))}
+                  style={{ marginTop: 10, padding: '8px 14px', borderRadius: 999, cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                    border: '1px solid #2c2350', background: 'transparent', color: '#fff' }}>
+                  Pagar tudo · {fmt(devendo)}
+                </button>
+                <p style={{ fontSize: 12.5, opacity: .7, marginTop: 12 }}>
+                  Dá pra pagar só uma parte. O que sobrar continua anotado.
+                </p>
+                <button onClick={gerarPix} disabled={pixGerando}
+                  style={{ marginTop: 8, width: '100%', height: 52, borderRadius: 14, border: 'none', cursor: pixGerando ? 'wait' : 'pointer',
+                    background: '#22c55e', color: '#fff', fontWeight: 800, fontSize: 16 }}>
+                  {pixGerando ? 'Gerando…' : 'Gerar o PIX'}
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 13, opacity: .8 }}>Valor</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: '#22c55e' }}>{fmt(pix.valor)}</div>
+                </div>
+                {pix.qr_code_base64 && (
+                  <img src={`data:image/png;base64,${pix.qr_code_base64}`} alt="QR Code do PIX"
+                    style={{ display: 'block', width: 230, maxWidth: '100%', margin: '14px auto', borderRadius: 12, background: '#fff', padding: 8 }} />
+                )}
+                <p style={{ fontSize: 13, opacity: .8, textAlign: 'center', margin: '0 0 12px' }}>
+                  Abra o app do seu banco, escolha PIX → <strong>Ler QR Code</strong>.<br />
+                  Ou use o copia e cola:
+                </p>
+                <button onClick={copiarPix}
+                  style={{ width: '100%', height: 48, borderRadius: 12, border: '1px solid #7c3aed', cursor: 'pointer',
+                    background: copiado ? '#7c3aed' : 'transparent', color: '#fff', fontWeight: 800, fontSize: 14.5 }}>
+                  {copiado ? '✅ Código copiado!' : '📋 Copiar código do PIX'}
+                </button>
+                <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 10, background: 'rgba(124,58,237,.15)', border: '1px solid #7c3aed', fontSize: 12.5, textAlign: 'center' }}>
+                  ⏳ Esperando o pagamento cair… <br />
+                  <span style={{ opacity: .8 }}>Pode deixar essa tela aberta — ela avisa sozinha. O código vale por 30 minutos.</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

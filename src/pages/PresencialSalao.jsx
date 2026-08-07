@@ -105,6 +105,10 @@ export default function PresencialSalao() {
   const [ligandoCliente, setLigandoCliente] = useState(false)
   const [showFiado, setShowFiado] = useState(false) // modal "quem está devendo fiado"
   const [showConsumoFunc, setShowConsumoFunc] = useState(false) // modal "consumo de funcionários"
+  // PIX de fiado que o cliente pagou sozinho pelo link dele (mig 0149). A baixa já
+  // foi dada pelo webhook — isto aqui é só o aviso pra equipe ficar sabendo.
+  const [pixRecebidos, setPixRecebidos] = useState([])
+  const [pixVistos, setPixVistos] = useState(() => new Set())
 
   async function loadAll() {
     if (!empresaId) return
@@ -166,6 +170,23 @@ export default function PresencialSalao() {
   }
 
   useEffect(() => { loadAll() }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Avisa quando cai um PIX de fiado pago pelo link do cliente (últimos 30 min).
+  useEffect(() => {
+    if (!empresaId) return
+    let vivo = true
+    async function checarPix() {
+      const desde = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+      const { data } = await supabase.from('cliente_pix_cobrancas')
+        .select('id, valor, pago_em, clientes(nome)')
+        .eq('empresa_id', empresaId).eq('status', 'pago').gte('pago_em', desde)
+        .order('pago_em', { ascending: false })
+      if (vivo) setPixRecebidos(data ?? [])
+    }
+    checarPix()
+    const t = setInterval(checarPix, 20000)
+    return () => { vivo = false; clearInterval(t) }
+  }, [empresaId])
 
   // Realtime: atualiza quando outro garçom mexe nas comandas
   useEffect(() => {
@@ -820,6 +841,27 @@ export default function PresencialSalao() {
 
   return (
     <div className="page">
+      {/* PIX de fiado que caiu sozinho — a dívida já foi abatida, é só pra saber. */}
+      {pixRecebidos.filter(p => !pixVistos.has(p.id)).map(p => (
+        <div key={p.id} style={{
+          display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10,
+          padding: '12px 14px', borderRadius: 12,
+          border: '1.5px solid #16a34a', background: 'rgba(22,163,74,.12)',
+        }}>
+          <span style={{ fontSize: 22 }}>💰</span>
+          <div style={{ flex: 1, minWidth: 0, fontSize: 14 }}>
+            <strong>{p.clientes?.nome ?? 'Cliente'}</strong> pagou{' '}
+            <strong>{fmt(p.valor)}</strong> do fiado pelo PIX do link.
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              A dívida já foi abatida sozinha — não precisa lançar nada.
+            </div>
+          </div>
+          <button type="button" onClick={() => setPixVistos(s => new Set(s).add(p.id))}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: 'var(--text-muted)', lineHeight: 1 }}
+            title="Já vi">×</button>
+        </div>
+      ))}
+
       <div className="page-header">
         <div>
           <p style={{ margin: 0, fontSize: 13 }}>
