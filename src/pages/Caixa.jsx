@@ -337,6 +337,19 @@ export default function Caixa() {
                 <div className="label">Recebimentos cartão</div>
                 <div className="value">R$ {Number(resumo.recebimentos_cartao).toFixed(2)}</div>
               </div>
+              {/* Quanto do que entrou é freguês pagando o que já devia. Esse dinheiro
+                  está DENTRO dos recebimentos acima, mas NÃO é venda de hoje — a venda
+                  dele foi contada no dia em que o cliente comeu. Sem essa linha, o dono
+                  compara "entrou" com "vendi", não bate, e não sabe por quê. */}
+              {Number(resumo.recebimentos_fiado) > 0 && (
+                <div className="card dashboard-card" style={{ borderLeft: '3px solid #d97706' }}>
+                  <div className="label">Fiado antigo recebido</div>
+                  <div className="value" style={{ color: '#d97706' }}>R$ {Number(resumo.recebimentos_fiado).toFixed(2)}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.35 }}>
+                    já está somado nos recebimentos acima · não é venda de hoje
+                  </div>
+                </div>
+              )}
               <div className="card dashboard-card">
                 <div className="label">Sangrias</div>
                 <div className="value">R$ {Number(resumo.total_sangrias).toFixed(2)}</div>
@@ -488,6 +501,9 @@ export default function Caixa() {
                                 ['💳 Recebido em cartão', r.recebimentos_cartao],
                                 (Number(r.recebimentos_transferencia) > 0 ? ['🔁 Transferência', r.recebimentos_transferencia] : null),
                                 ['🧾 Vendas no fiado', r.vendas_fiado],
+                                // Dívida velha que entrou neste caixa: está DENTRO dos
+                                // recebidos acima e não é venda deste dia.
+                                (Number(r.recebimentos_fiado) > 0 ? ['🤝 Fiado antigo recebido', r.recebimentos_fiado] : null),
                                 ['➖ Sangrias', r.total_sangrias],
                                 ['➕ Suprimentos', r.total_suprimentos],
                                 ['🪙 Esperado em dinheiro', espDin],
