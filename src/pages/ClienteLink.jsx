@@ -16,6 +16,8 @@ import { comoFicaNoDia } from '../lib/feriados'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
 const dataBR = (iso) => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+// Quantidade vem numérica do banco ("2.00") — mostra 2, e 0,5 quando for meio.
+const qtdBR = (n) => Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 })
 const DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']
 
 export default function ClienteLink() {
@@ -330,9 +332,20 @@ export default function ClienteLink() {
             {(conta?.fiados ?? []).length === 0 ? (
               <p style={{ fontSize: 13, opacity: .7, margin: 0 }}>Nada anotado.</p>
             ) : (conta.fiados).map((f, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid #2c2350', fontSize: 13.5 }}>
-                <span style={{ opacity: .8 }}>{dataBR(f.data)}</span>
-                <span style={{ fontWeight: 700 }}>{fmt(f.valor)}</span>
+              <div key={i} style={{ padding: '9px 0', borderBottom: '1px solid #2c2350' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13.5 }}>
+                  <span style={{ opacity: .8 }}>
+                    {dataBR(f.data)}{f.origem ? ` · ${f.origem}` : ''}
+                  </span>
+                  <span style={{ fontWeight: 700 }}>{fmt(f.valor)}</span>
+                </div>
+                {/* O que ele comprou naquele dia — sem isso o fiado era só um valor solto */}
+                {(f.itens ?? []).map((it, j) => (
+                  <div key={j} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12.5, opacity: .72, marginTop: 3 }}>
+                    <span>{qtdBR(it.quantidade)}× {String(it.nome ?? '').trim()}</span>
+                    <span style={{ whiteSpace: 'nowrap' }}>{fmt(it.valor)}</span>
+                  </div>
+                ))}
               </div>
             ))}
           </div>
