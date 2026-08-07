@@ -2504,6 +2504,17 @@ function ImpressoraFWCPanel({ empresaId }) {
   const [atzMsg, setAtzMsg] = useState('')      // mensagem do botão "Atualizar agora"
   const [atzBusy, setAtzBusy] = useState(false)
   const adotouRef = useRef(false)
+  // Permissão "rede local" do Chrome novo (150+). O gestor é https e o app é
+  // http://localhost: sem essa permissão o navegador SEGURA a chamada até estourar
+  // o tempo, e o card jurava que o app estava fechado. Foi o que travou duas lojas.
+  const [permLocal, setPermLocal] = useState(null) // 'granted' | 'prompt' | 'denied' | null (Chrome antigo)
+  useEffect(() => {
+    let vivo = true
+    navigator.permissions?.query?.({ name: 'local-network-access' })
+      .then(p => { if (vivo) setPermLocal(p.state) })
+      .catch(() => { /* Chrome antigo: não existe essa permissão, segue a vida */ })
+    return () => { vivo = false }
+  }, [])
 
   const chamar = useCallback(async (path, opts) => {
     const ctrl = new AbortController()
@@ -2582,6 +2593,22 @@ function ImpressoraFWCPanel({ empresaId }) {
           <span style={{ fontSize: 14, fontWeight: 800 }}>🖨️ Impressora FWC</span>
           <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 800 }}>● App fechado</span>
         </div>
+
+        {/* Chrome 150+ pede permissão pra um site https falar com o localhost. Sem ela
+            a chamada fica pendurada e o card jura que o app está fechado — mesmo com o
+            app rodando. Como o navegador conta isso ANTES de tentar, avisa aqui em cima. */}
+        {(permLocal === 'prompt' || permLocal === 'denied') && (
+          <div style={{ border: '1.5px solid #f59e0b', background: 'rgba(245,158,11,.12)', borderRadius: 8, padding: '10px 12px', fontSize: 12.5, lineHeight: 1.5 }}>
+            <b>⚠️ Pode não ser o app.</b> Este Chrome ainda {permLocal === 'denied' ? 'está BLOQUEANDO' : 'não liberou'} o
+            acesso do site aos aparelhos da <b>rede local</b> — sem isso ele nem chega no app, e aparece "App fechado"
+            mesmo com tudo certo.
+            <div style={{ marginTop: 6 }}>
+              Clique no <b>ícone à esquerda do endereço</b> (cadeado) → <b>Configurações do site</b> →
+              <b> Rede local</b> → <b>Permitir</b>. Depois recarregue a página (F5).
+            </div>
+          </div>
+        )}
+
         <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
           Baixe e <b>abra o arquivo uma vez</b> — ele se <b>instala sozinho</b>: vai pra Área de Trabalho, liga junto com o Windows e começa a rodar escondido. Depois a configuração da impressora aparece aqui mesmo.
         </div>
