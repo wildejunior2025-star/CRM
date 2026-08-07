@@ -345,6 +345,18 @@ export default function Caixa() {
                 <div className="card dashboard-card" style={{ borderLeft: '3px solid #d97706' }}>
                   <div className="label">Fiado antigo recebido</div>
                   <div className="value" style={{ color: '#d97706' }}>R$ {Number(resumo.recebimentos_fiado).toFixed(2)}</div>
+                  {/* Em que forma foi pago: o que veio em dinheiro está na gaveta,
+                      o resto não. Sem isso a conferência da gaveta não fecha. */}
+                  <div style={{ fontSize: 12, color: 'var(--text)', marginTop: 3, lineHeight: 1.45 }}>
+                    {[
+                      ['💵 dinheiro', resumo.recebimentos_fiado_dinheiro],
+                      ['📱 pix', resumo.recebimentos_fiado_pix],
+                      ['💳 cartão', resumo.recebimentos_fiado_cartao],
+                      ['🔁 transf.', resumo.recebimentos_fiado_transferencia],
+                    ].filter(([, v]) => Number(v) > 0)
+                      .map(([lb, v]) => `${lb} R$ ${Number(v).toFixed(2)}`)
+                      .join(' · ')}
+                  </div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.35 }}>
                     já está somado nos recebimentos acima · não é venda de hoje
                   </div>
@@ -504,6 +516,9 @@ export default function Caixa() {
                                 // Dívida velha que entrou neste caixa: está DENTRO dos
                                 // recebidos acima e não é venda deste dia.
                                 (Number(r.recebimentos_fiado) > 0 ? ['🤝 Fiado antigo recebido', r.recebimentos_fiado] : null),
+                                (Number(r.recebimentos_fiado_dinheiro) > 0 ? ['↳ fiado em dinheiro', r.recebimentos_fiado_dinheiro] : null),
+                                (Number(r.recebimentos_fiado_pix) > 0 ? ['↳ fiado em PIX', r.recebimentos_fiado_pix] : null),
+                                (Number(r.recebimentos_fiado_cartao) > 0 ? ['↳ fiado em cartão', r.recebimentos_fiado_cartao] : null),
                                 ['➖ Sangrias', r.total_sangrias],
                                 ['➕ Suprimentos', r.total_suprimentos],
                                 ['🪙 Esperado em dinheiro', espDin],
