@@ -6,6 +6,7 @@
 //  2) Fallback do navegador (window.print num iframe oculto): usado quando
 //     nenhuma impressora foi escolhida ou o QZ Tray não está rodando.
 
+import { fwcFetch } from '../lib/appFwc'
 import { separarItem } from '../lib/itensPedido'
 
 const QZ_CDN = 'https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js'
@@ -246,23 +247,18 @@ function imprimirCupomNavegador(pedido, empresa = {}) {
 // true = é o PC da loja (com térmica). false = celular/tablet sem impressora.
 export async function appFwcDisponivel() {
   try {
-    const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), 2000)
-    const r = await fetch('http://localhost:9110/api/status', { signal: ctrl.signal })
-    clearTimeout(t)
+    const r = await fwcFetch('/api/status', { timeout: 2000 })
     return r.ok
   } catch { return false }
 }
 
 async function imprimirViaAppFwc(rota, corpo) {
   try {
-    const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), 3500)
-    const r = await fetch('http://localhost:9110/api/' + rota, {
+    const r = await fwcFetch('/api/' + rota, {
+      timeout: 3500,
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(corpo), signal: ctrl.signal,
+      body: JSON.stringify(corpo),
     })
-    clearTimeout(t)
     const j = await r.json().catch(() => ({}))
     return !!(j && j.ok)
   } catch { return false }

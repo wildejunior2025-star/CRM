@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
 import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
 import { rotuloComanda } from '../lib/comanda'
+import { fwcFetch, explicaErroFwc } from '../lib/appFwc'
 import Caixa from './Caixa'
 
 // Aceitar pedidos automaticamente (lido do localStorage pra não pegar estado
@@ -2490,7 +2491,6 @@ function horarioHojeTexto(emp, excecoes = {}) {
 // fala com ela pra logar, escolher loja/impressora e imprimir teste — tudo sem
 // abrir o localhost. Se o app não estiver aberto, mostra o botão de baixar.
 const FWC_EXE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co/storage/v1/object/public/downloads/ImpressoraFWC.exe'
-const FWC_API = 'http://localhost:9110/api'
 
 function ImpressoraFWCPanel({ empresaId }) {
   const [online, setOnline] = useState(null) // null=checando | true | false
@@ -2503,6 +2503,7 @@ function ImpressoraFWCPanel({ empresaId }) {
   const [nomeManual, setNomeManual] = useState('')
   const [atzMsg, setAtzMsg] = useState('')      // mensagem do botão "Atualizar agora"
   const [atzBusy, setAtzBusy] = useState(false)
+  const [motivo, setMotivo] = useState('')      // por que não chegou no app (em português)
   const adotouRef = useRef(false)
   // Permissão "rede local" do Chrome novo (150+). O gestor é https e o app é
   // http://localhost: sem essa permissão o navegador SEGURA a chamada até estourar
@@ -2517,17 +2518,13 @@ function ImpressoraFWCPanel({ empresaId }) {
   }, [])
 
   const chamar = useCallback(async (path, opts) => {
-    const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), 8000)
-    try {
-      const r = await fetch(FWC_API + path, { ...opts, signal: ctrl.signal })
-      return await r.json().catch(() => ({}))
-    } finally { clearTimeout(t) }
+    const r = await fwcFetch('/api' + path, { timeout: 8000, ...opts })
+    return await r.json().catch(() => ({}))
   }, [])
 
   const carregar = useCallback(async () => {
-    try { const s = await chamar('/status'); setSt(s); setOnline(true) }
-    catch (e) { setOnline(false) }
+    try { const s = await chamar('/status'); setSt(s); setOnline(true); setMotivo('') }
+    catch (e) { setOnline(false); setMotivo(explicaErroFwc(e)) }
   }, [chamar])
 
   useEffect(() => { carregar(); const id = setInterval(carregar, 5000); return () => clearInterval(id) }, [carregar])
@@ -2617,6 +2614,12 @@ function ImpressoraFWCPanel({ empresaId }) {
           ⬇️ Baixar Impressora FWC (Windows)
         </a>
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Se o Windows avisar, clique em "Mais informações → Executar assim mesmo". Aparece um aviso "instalada!" e pronto.</div>
+        {/* O erro cru ("Failed to fetch") não ajuda ninguém no balcão — aqui sai traduzido. */}
+        {motivo && (
+          <div style={{ fontSize: 11.5, color: '#f59e0b', fontWeight: 700, lineHeight: 1.45 }}>
+            Motivo: {motivo}
+          </div>
+        )}
         {/* Teste direto: separa "o app não está rodando" de "o app roda mas algo bloqueia
             a conexão" (antivírus/firewall). Sem isso o suporte fica no escuro. */}
         <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5, borderTop: '1px dashed var(--border)', paddingTop: 8, marginTop: 2 }}>
@@ -3451,9 +3454,7 @@ export default function PainelPedidos() {
     const ping = async () => {
       let on = false, pausado = false, versao = 0, filtros = null
       try {
-        const c = new AbortController(); const t = setTimeout(() => c.abort(), 3000)
-        const r = await fetch('http://localhost:9110/api/status', { signal: c.signal, cache: 'no-store' })
-        clearTimeout(t)
+        const r = await fwcFetch('/api/status', { timeout: 3000, cache: 'no-store' })
         const j = await r.json().catch(() => null)
         on = !!(j && j.logado && j.impressora)
         pausado = !!(j && j.pausado)
@@ -3480,7 +3481,7 @@ export default function PainelPedidos() {
     base[key] = !base[key]
     setFwcFiltros(base) // otimista
     try {
-      await fetch('http://localhost:9110/api/filtros', {
+      await fwcFetch('/api/filtros', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ filtros: base }),
       })
@@ -3491,7 +3492,7 @@ export default function PainelPedidos() {
     const novo = !fwcPausado
     setFwcPausado(novo) // otimista
     try {
-      await fetch('http://localhost:9110/api/pausar', {
+      await fwcFetch('/api/pausar', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ pausado: novo }),
       })
