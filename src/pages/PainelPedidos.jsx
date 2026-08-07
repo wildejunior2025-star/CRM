@@ -4104,7 +4104,9 @@ export default function PainelPedidos() {
       const aguardando = lista.filter(c => c.status === 'aguardando_conferencia')
       const primeira = contaMesaImpressaRef.current === null
       if (primeira) contaMesaImpressaRef.current = new Set()
-      const novas = aguardando.filter(c => !contaMesaImpressaRef.current.has(c.id))
+      // `conta_impressa` = quem fechou já imprimiu a conta na própria tela do Salão.
+      // Sem isso, com o painel aberto noutra aba, sairiam duas vias da mesma conta.
+      const novas = aguardando.filter(c => !contaMesaImpressaRef.current.has(c.id) && !c.fechamento_pendente?.conta_impressa)
       novas.forEach(c => contaMesaImpressaRef.current.add(c.id))
       if (!primeira && (fwcImprimeRef.current || autoImprimirAtivo())) novas.forEach(imprimirContaMesa)
       if (ativo) setComandas(lista)

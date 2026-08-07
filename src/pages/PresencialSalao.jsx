@@ -631,7 +631,7 @@ export default function PresencialSalao() {
     setPagamentos(prev => prev.filter((_, idx) => idx !== i))
   }
 
-  function imprimirConta() {
+  function imprimirConta({ soApp = true } = {}) {
     const pags = modoPag === 'dividir'
       ? pagamentos
         // nome do devedor sai impresso na conta: o cliente confere de quem é a dívida
@@ -651,8 +651,15 @@ export default function PresencialSalao() {
       formaPagamento: modoPag === 'unico' ? forma : 'Dividido',
       pagamentos: pags,
       empresa: { nome: empresaNome },
-    }), empresaNome, { soApp: true, origem: 'mesa' }) // app filtra por origem (PC não-mesa não imprime)
+    }), empresaNome, { soApp, origem: 'mesa' }) // app filtra por origem (PC não-mesa não imprime)
   }
+
+  // Celular/tablet não tem impressora: nesses a conta só sai pelo app FWC (soApp).
+  // Num PC a gente deixa cair no navegador — antes o PC ficava sem conta nenhuma
+  // quando o app não era alcançado, e ninguém percebia que nada foi enviado.
+  const ehCelular = typeof navigator !== 'undefined' && (
+    navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')
+  )
 
   async function confirmarFechamento() {
     if (!comandaSel) return
@@ -711,9 +718,14 @@ export default function PresencialSalao() {
       try { imprimirConta() } catch { /* best-effort */ }
     } else {
       // Garçom, OU ADM no celular (sem impressora): NÃO libera a mesa. Marca
-      // "aguardando_conferencia" e guarda o pagamento. Quem IMPRIME a conta é o
-      // GESTOR da loja (detecta a mesa em "aguardando" e manda pra térmica/app FWC);
-      // depois o ADM confere e libera a mesa lá no gestor.
+      // "aguardando_conferencia" e guarda o pagamento; depois o ADM confere e libera.
+      //
+      // A conta é impressa AQUI, por quem fechou. Antes dependia do Painel de Pedidos
+      // estar aberto pra perceber a mesa em "aguardando" e mandar imprimir — se a
+      // loja fechava a conta pela tela do Salão com o painel fechado, o comando nunca
+      // era criado: não dava erro, não ia pra fila, e ninguém entendia por que só a
+      // conta não saía (Estação, 07/08/2026). No celular continua sem imprimir.
+      const vaiImprimirAqui = !ehCelular
       const { error } = await supabase.from('comandas').update({
         status: 'aguardando_conferencia',
         // cliente_id vai junto: quem libera a mesa depois é o ADM, e sem isso o
@@ -724,10 +736,16 @@ export default function PresencialSalao() {
           pagamentos: lista,
           aplicar_taxa: aplicarTaxa,
           cliente_id: (modoPag === 'unico' ? clienteSel?.id : null) ?? comandaSel.cliente_id ?? null,
+          // Avisa o Painel de Pedidos que a conta já saiu aqui — senão, com o painel
+          // aberto noutra aba, sairiam duas vias da mesma conta.
+          conta_impressa: vaiImprimirAqui,
         },
       }).eq('id', comandaSel.id)
       setSalvando(false)
       if (error) { window.alert('Erro ao enviar pro caixa: ' + error.message); return }
+      // soApp: false num PC — se o app FWC não responder, sai pelo navegador em vez
+      // de a conta simplesmente não existir.
+      if (vaiImprimirAqui) { try { imprimirConta({ soApp: false }) } catch { /* best-effort */ } }
     }
     setFechando(false)
     setMesaSel(null)
