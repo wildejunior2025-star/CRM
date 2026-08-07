@@ -2590,6 +2590,20 @@ function ImpressoraFWCPanel({ empresaId }) {
           ⬇️ Baixar Impressora FWC (Windows)
         </a>
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Se o Windows avisar, clique em "Mais informações → Executar assim mesmo". Aparece um aviso "instalada!" e pronto.</div>
+        {/* Teste direto: separa "o app não está rodando" de "o app roda mas algo bloqueia
+            a conexão" (antivírus/firewall). Sem isso o suporte fica no escuro. */}
+        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5, borderTop: '1px dashed var(--border)', paddingTop: 8, marginTop: 2 }}>
+          <b>Diz "App fechado" mas você já instalou?</b> Abre este endereço numa aba nova <b>deste PC</b>:
+          <br />
+          <a href="http://localhost:9110/api/status" target="_blank" rel="noreferrer"
+            style={{ color: 'var(--primary, #a78bfa)', fontWeight: 800, wordBreak: 'break-all' }}>
+            http://localhost:9110/api/status
+          </a>
+          <br />
+          <b>Abriu um monte de texto</b> = o app está rodando (o bloqueio é do antivírus/firewall).
+          {' '}<b>Deu erro</b> = o app não subiu: abre o ícone <b>Impressora FWC</b> na Área de Trabalho
+          (ou na setinha ▲ perto do relógio) e clica em "Já abri o app" aqui embaixo.
+        </div>
         <button type="button" onClick={carregar} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary, #a78bfa)', fontSize: 12, fontWeight: 700, padding: 0, marginTop: 2 }}>
           ↻ Já abri o app — detectar de novo
         </button>
