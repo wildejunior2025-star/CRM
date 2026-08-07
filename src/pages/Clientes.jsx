@@ -53,6 +53,11 @@ export default function Clientes() {
   const [linkAtivo, setLinkAtivo] = useState(false)
   const [linkCliente, setLinkCliente] = useState(null)
   const [copiado, setCopiado] = useState(false)
+  // WhatsApp da loja conectado? Se estiver, o link sai direto do zap dela;
+  // se não (ou se o envio falhar), abre a conversa pra mandar na mão.
+  const [zapConectado, setZapConectado] = useState(false)
+  const [enviandoZap, setEnviandoZap] = useState(false)
+  const [zapAviso, setZapAviso] = useState(null)  // { ok: bool, texto }
 
   const [tipos, setTipos] = useState(TIPOS_PADRAO)
   const [showTiposModal, setShowTiposModal] = useState(false)
@@ -101,6 +106,12 @@ export default function Clientes() {
     if (!empresaId) return
     supabase.from('empresas').select('link_cliente_ativo').eq('id', empresaId).maybeSingle()
       .then(({ data }) => setLinkAtivo(!!data?.link_cliente_ativo))
+  }, [empresaId])
+
+  useEffect(() => {
+    if (!empresaId) return
+    supabase.from('whatsapp_config').select('ativo').eq('empresa_id', empresaId).eq('ativo', true).maybeSingle()
+      .then(({ data }) => setZapConectado(!!data))
   }, [empresaId])
 
   // Catálogo de produtos (pro seletor de preço especial)
@@ -705,13 +716,33 @@ export default function Clientes() {
         // Sempre o domínio público — o cliente não entra no gestor.
         const url = `https://lojaonline.fwcinter.com/c/${linkCliente.token}`
         const tel = String(linkCliente.telefone ?? '').replace(/\D/g, '')
-        const texto = encodeURIComponent(
+        const mensagem =
           `Oi ${linkCliente.nome}! Esse é o seu link pra fazer pedido direto com a gente 👇\n${url}\n\n` +
           `Por ele você monta o pedido, acompanha quando fica pronto e vê o que está devendo.`
-        )
-        const zap = tel.length >= 10 ? `https://wa.me/${tel.startsWith('55') ? tel : '55' + tel}?text=${texto}` : null
+        const zap = tel.length >= 10
+          ? `https://wa.me/${tel.startsWith('55') ? tel : '55' + tel}?text=${encodeURIComponent(mensagem)}`
+          : null
+
+        // Manda pelo WhatsApp que a loja já tem conectado. Se não tiver conectado,
+        // ou se o envio falhar (sem crédito, instância caída…), abre a conversa
+        // pro atendente mandar na mão — nunca fica sem saída.
+        function abrirManual() { if (zap) window.open(zap, '_blank', 'noopener') }
+        async function mandarNoZap() {
+          if (!zapConectado) { abrirManual(); return }
+          setEnviandoZap(true); setZapAviso(null)
+          const { data, error } = await supabase.functions.invoke('send-whatsapp', {
+            body: { phone: tel, message: mensagem, empresa_id: empresaId },
+          })
+          setEnviandoZap(false)
+          if (!error && !data?.error) {
+            setZapAviso({ ok: true, texto: `✅ Enviado pro WhatsApp de ${linkCliente.nome}.` })
+            return
+          }
+          setZapAviso({ ok: false, texto: (data?.error || 'Não deu pra enviar pelo zap da loja') + ' — abri a conversa pra você mandar na mão.' })
+          abrirManual()
+        }
         return (
-          <div className="modal-overlay" onClick={() => { setLinkCliente(null); setCopiado(false) }}>
+          <div className="modal-overlay" onClick={() => { setLinkCliente(null); setCopiado(false); setZapAviso(null) }}>
             <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
               <h2 style={{ marginTop: 0 }}>🔗 Link de {linkCliente.nome}</h2>
               <p style={{ color: 'var(--text-muted)', fontSize: 13.5, lineHeight: 1.5, marginTop: 0 }}>
@@ -730,13 +761,32 @@ export default function Clientes() {
                   {copiado ? '✓ Copiado!' : '📋 Copiar link'}
                 </button>
                 {zap
-                  ? <a className="btn btn-secondary" href={zap} target="_blank" rel="noreferrer">💬 Mandar no WhatsApp</a>
+                  ? <button className="btn btn-secondary" onClick={mandarNoZap} disabled={enviandoZap}>
+                      {enviandoZap ? 'Enviando…' : zapConectado ? '💬 Enviar no WhatsApp' : '💬 Mandar no WhatsApp'}
+                    </button>
                   : <span style={{ fontSize: 12.5, color: 'var(--text-muted)', alignSelf: 'center' }}>
                       Sem telefone cadastrado — só dá pra copiar.
                     </span>}
               </div>
+              {zap && (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+                  {zapConectado
+                    ? 'Sai direto do WhatsApp da loja (gasta 1 crédito). Se falhar, abre a conversa pra mandar na mão.'
+                    : 'O WhatsApp da loja não está conectado — abre a conversa pra você mandar na mão.'}
+                </div>
+              )}
+              {zapAviso && (
+                <div style={{
+                  marginTop: 10, padding: '9px 11px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                  background: zapAviso.ok ? 'var(--success-bg, rgba(34,197,94,.12))' : 'var(--danger-bg, rgba(220,38,38,.1))',
+                  color: zapAviso.ok ? 'var(--success, #16a34a)' : 'var(--danger, #dc2626)',
+                  border: `1px solid ${zapAviso.ok ? 'var(--success, #16a34a)' : 'var(--danger, #dc2626)'}`,
+                }}>
+                  {zapAviso.texto}
+                </div>
+              )}
               <div className="modal-actions" style={{ marginTop: 16 }}>
-                <button className="btn btn-secondary" onClick={() => { setLinkCliente(null); setCopiado(false) }}>Fechar</button>
+                <button className="btn btn-secondary" onClick={() => { setLinkCliente(null); setCopiado(false); setZapAviso(null) }}>Fechar</button>
               </div>
             </div>
           </div>
