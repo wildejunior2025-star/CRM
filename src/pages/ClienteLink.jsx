@@ -343,7 +343,8 @@ export default function ClienteLink() {
                 {(f.itens ?? []).map((it, j) => (
                   <div key={j} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12.5, opacity: .72, marginTop: 3 }}>
                     <span>{qtdBR(it.quantidade)}× {String(it.nome ?? '').trim()}</span>
-                    <span style={{ whiteSpace: 'nowrap' }}>{fmt(it.valor)}</span>
+                    {/* Item único: o valor dele é o total, já mostrado acima — não repete */}
+                    {(f.itens ?? []).length > 1 && <span style={{ whiteSpace: 'nowrap' }}>{fmt(it.valor)}</span>}
                   </div>
                 ))}
               </div>
