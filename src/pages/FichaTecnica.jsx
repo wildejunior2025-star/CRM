@@ -150,6 +150,7 @@ export default function FichaTecnica() {
   const [showMateria, setShowMateria] = useState(false)
   const [materiaForm, setMateriaForm] = useState(emptyMateria)
   const [materiaEdit, setMateriaEdit] = useState(null)
+  const [salvandoMateria, setSalvandoMateria] = useState(false)
 
   // Estoque das matérias-primas
   const [saldoMat, setSaldoMat] = useState({})   // materia_prima_id -> quantidade_atual
@@ -210,6 +211,14 @@ export default function FichaTecnica() {
   useEffect(() => { carregar() }, [carregar])
 
   // ── Matérias-primas ──────────────────────────────────────────────
+  // Avisa (em vermelho) se já existe uma matéria-prima com esse nome — ignorando
+  // acento e maiúscula, então "Creme de Leite" acha "creme de leite".
+  const materiaRepetida = useMemo(() => {
+    const q = normTxt(materiaForm.nome)
+    if (!q) return null
+    return materias.find(m => normTxt(m.nome) === q && m.id !== materiaEdit?.id) || null
+  }, [materiaForm.nome, materias, materiaEdit])
+
   function abrirNovaMateria() {
     setMateriaEdit(null); setMateriaForm(emptyMateria); setShowMateria(true)
   }
@@ -220,7 +229,9 @@ export default function FichaTecnica() {
   }
   async function salvarMateria(e) {
     e.preventDefault()
+    if (salvandoMateria) return   // trava o clique repetido no Salvar (era o que criava cópias)
     if (!materiaForm.nome.trim()) return
+    if (materiaRepetida && !confirm(`Já existe "${materiaRepetida.nome}" na sua lista.\n\nCadastrar mesmo assim (vai ficar repetido)?`)) return
     const payload = {
       empresa_id: empresaId,
       nome: materiaForm.nome.trim(),
@@ -228,20 +239,25 @@ export default function FichaTecnica() {
       custo: Number(String(materiaForm.custo).replace(',', '.')) || 0,
       ativo: !!materiaForm.ativo,
     }
-    if (materiaEdit) {
-      const { error } = await supabase.from('materias_primas').update(payload).eq('id', materiaEdit.id)
-      if (error) { alert('Erro ao salvar: ' + error.message); return }
-    } else {
-      const { data, error } = await supabase.from('materias_primas').insert(payload).select('id').single()
-      if (error) { alert('Erro ao salvar: ' + error.message); return }
-      // Quantidade inicial informada no cadastro → já lança uma entrada de estoque.
-      const qtdIni = Number(String(materiaForm.quantidade ?? '').replace(',', '.'))
-      if (data?.id && Number.isFinite(qtdIni) && qtdIni > 0) {
-        await supabase.from('materia_prima_movimentos').insert({ empresa_id: empresaId, materia_prima_id: data.id, tipo: 'entrada', quantidade: qtdIni })
+    setSalvandoMateria(true)
+    try {
+      if (materiaEdit) {
+        const { error } = await supabase.from('materias_primas').update(payload).eq('id', materiaEdit.id)
+        if (error) { alert('Erro ao salvar: ' + error.message); return }
+      } else {
+        const { data, error } = await supabase.from('materias_primas').insert(payload).select('id').single()
+        if (error) { alert('Erro ao salvar: ' + error.message); return }
+        // Quantidade inicial informada no cadastro → já lança uma entrada de estoque.
+        const qtdIni = Number(String(materiaForm.quantidade ?? '').replace(',', '.'))
+        if (data?.id && Number.isFinite(qtdIni) && qtdIni > 0) {
+          await supabase.from('materia_prima_movimentos').insert({ empresa_id: empresaId, materia_prima_id: data.id, tipo: 'entrada', quantidade: qtdIni })
+        }
       }
+      setShowMateria(false)
+      carregar()
+    } finally {
+      setSalvandoMateria(false)
     }
-    setShowMateria(false)
-    carregar()
   }
   async function excluirMateria(m) {
     if (!confirm(`Excluir a matéria-prima "${m.nome}"?`)) return
@@ -610,7 +626,21 @@ export default function FichaTecnica() {
               <div className="form-field full">
                 <label>Nome</label>
                 <input autoFocus placeholder="Ex.: Farinha de trigo" value={materiaForm.nome}
-                  onChange={e => setMateriaForm(f => ({ ...f, nome: e.target.value }))} />
+                  onChange={e => setMateriaForm(f => ({ ...f, nome: e.target.value }))}
+                  style={materiaRepetida ? { borderColor: 'var(--danger, #dc2626)' } : undefined} />
+                {materiaRepetida && (
+                  <div style={{
+                    marginTop: 6, padding: '8px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                    background: 'var(--danger-bg, rgba(220,38,38,.1))', color: 'var(--danger, #dc2626)',
+                    border: '1px solid var(--danger, #dc2626)',
+                  }}>
+                    ⚠️ Você já tem "{materiaRepetida.nome}" cadastrada
+                    {materiaRepetida.ativo ? '' : ' (está pausada)'} — {brl(materiaRepetida.custo)} / {materiaRepetida.unidade}.
+                    <div style={{ fontWeight: 400, marginTop: 2 }}>
+                      Não cadastre de novo: feche aqui e clique em <strong>Editar</strong> nela, senão o estoque fica dividido em duas.
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="form-field">
                 <label>Unidade de compra</label>
@@ -641,7 +671,7 @@ export default function FichaTecnica() {
             </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShowMateria(false)}>Cancelar</button>
-              <button type="submit" className="btn btn-primary">Salvar</button>
+              <button type="submit" className="btn btn-primary" disabled={salvandoMateria}>{salvandoMateria ? 'Salvando…' : 'Salvar'}</button>
             </div>
           </form>
         </div>
