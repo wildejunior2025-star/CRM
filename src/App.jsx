@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from
 import { useEffect } from 'react'
 import { useAuth } from './hooks/useAuth'
 
-const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/excluir-conta', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor', '/mesa/']
+const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/excluir-conta', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor', '/mesa/', '/c/']
 
 // Domínios em que a raiz "/" mostra a landing de marketing (visitante deslogado).
 // Nos subdomínios (app./admin./gestor./lojaonline.) a raiz mantém o fluxo antigo.
@@ -162,6 +162,7 @@ import PresencialCozinha from './pages/PresencialCozinha'
 import PresencialHistorico from './pages/PresencialHistorico'
 import PresencialReservas from './pages/PresencialReservas'
 import MesaCardapio from './pages/MesaCardapio'
+import ClienteLink from './pages/ClienteLink'
 import Landing from './pages/Landing'
 import TourSistema from './pages/TourSistema'
 
@@ -184,6 +185,7 @@ export default function App() {
             <Route path="/pedido/:id" element={<DeliveryPedido />} />
             <Route path="/meus-pedidos" element={<MeusPedidos />} />
             <Route path="/mesa/:token" element={<MesaCardapio />} />
+            <Route path="/c/:token" element={<ClienteLink />} />
             {/* Link antigo por id (ex: loja sem slug) — resolve por id no DeliveryLoja */}
             <Route path="/loja/:id" element={<DeliveryLoja />} />
             <Route path="/:slug" element={<DeliveryLoja />} />
@@ -214,6 +216,8 @@ export default function App() {
           <Route path="/meus-pedidos" element={<MeusPedidos />} />
           {/* Autoatendimento por QR da mesa (público, sem login) */}
           <Route path="/mesa/:token" element={<MesaCardapio />} />
+          {/* Link do cliente: pedido + conta do fiado, sem login (mig 0147) */}
+          <Route path="/c/:token" element={<ClienteLink />} />
           {/* Link de indicação unificado — pergunta "sou cliente ou loja" */}
           <Route path="/entrar" element={<CadastroRef />} />
           {/* Cadastro de cliente livre (sem empresa) */}

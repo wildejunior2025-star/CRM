@@ -48,6 +48,11 @@ export default function Clientes() {
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [historicoCliente, setHistoricoCliente] = useState(null)
+  // Link do cliente (mig 0147): cada cliente tem um endereço só dele pra fazer
+  // pedido e ver o que está devendo. Só aparece se a loja ligou a função.
+  const [linkAtivo, setLinkAtivo] = useState(false)
+  const [linkCliente, setLinkCliente] = useState(null)
+  const [copiado, setCopiado] = useState(false)
 
   const [tipos, setTipos] = useState(TIPOS_PADRAO)
   const [showTiposModal, setShowTiposModal] = useState(false)
@@ -91,6 +96,12 @@ export default function Clientes() {
     loadClientes()
     loadTipos()
   }, [])
+
+  useEffect(() => {
+    if (!empresaId) return
+    supabase.from('empresas').select('link_cliente_ativo').eq('id', empresaId).maybeSingle()
+      .then(({ data }) => setLinkAtivo(!!data?.link_cliente_ativo))
+  }, [empresaId])
 
   // Catálogo de produtos (pro seletor de preço especial)
   useEffect(() => {
@@ -337,6 +348,17 @@ export default function Clientes() {
                     </span>
                   </td>
                   <td>
+                    {linkAtivo && c.token && (
+                      <>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          title="Link do cliente: ele pede sozinho e vê o que está devendo"
+                          onClick={() => setLinkCliente(c)}
+                        >
+                          🔗 Link
+                        </button>{' '}
+                      </>
+                    )}
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={() => setHistoricoCliente(c)}
@@ -677,6 +699,49 @@ export default function Clientes() {
           </div>
         </div>
       )}
+
+      {/* Link do cliente: manda no zap e ele pede sozinho (mig 0147) */}
+      {linkCliente && (() => {
+        // Sempre o domínio público — o cliente não entra no gestor.
+        const url = `https://lojaonline.fwcinter.com/c/${linkCliente.token}`
+        const tel = String(linkCliente.telefone ?? '').replace(/\D/g, '')
+        const texto = encodeURIComponent(
+          `Oi ${linkCliente.nome}! Esse é o seu link pra fazer pedido direto com a gente 👇\n${url}\n\n` +
+          `Por ele você monta o pedido, acompanha quando fica pronto e vê o que está devendo.`
+        )
+        const zap = tel.length >= 10 ? `https://wa.me/${tel.startsWith('55') ? tel : '55' + tel}?text=${texto}` : null
+        return (
+          <div className="modal-overlay" onClick={() => { setLinkCliente(null); setCopiado(false) }}>
+            <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
+              <h2 style={{ marginTop: 0 }}>🔗 Link de {linkCliente.nome}</h2>
+              <p style={{ color: 'var(--text-muted)', fontSize: 13.5, lineHeight: 1.5, marginTop: 0 }}>
+                Só dele. Por esse link o cliente monta o pedido (que cai como comanda na cozinha,
+                no nome dele), acompanha quando fica pronto e vê quanto está devendo de fiado.
+              </p>
+              <div style={{ padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                background: 'var(--input-bg, var(--bg))', fontSize: 13, wordBreak: 'break-all', marginBottom: 12 }}>
+                {url}
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button className="btn btn-primary" onClick={async () => {
+                  try { await navigator.clipboard.writeText(url); setCopiado(true); setTimeout(() => setCopiado(false), 2500) }
+                  catch { window.prompt('Copie o link:', url) }
+                }}>
+                  {copiado ? '✓ Copiado!' : '📋 Copiar link'}
+                </button>
+                {zap
+                  ? <a className="btn btn-secondary" href={zap} target="_blank" rel="noreferrer">💬 Mandar no WhatsApp</a>
+                  : <span style={{ fontSize: 12.5, color: 'var(--text-muted)', alignSelf: 'center' }}>
+                      Sem telefone cadastrado — só dá pra copiar.
+                    </span>}
+              </div>
+              <div className="modal-actions" style={{ marginTop: 16 }}>
+                <button className="btn btn-secondary" onClick={() => { setLinkCliente(null); setCopiado(false) }}>Fechar</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
