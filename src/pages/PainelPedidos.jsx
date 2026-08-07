@@ -3134,7 +3134,7 @@ function LinhaItemMesa({ comanda, it, onItemPronto, onEditarPreco, podeEditarPre
   )
 }
 
-function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarLiberar, onImprimir, onEditarPreco, podeEditarPreco, onAjustarTaxa }) {
+function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarLiberar, onImprimir, onImprimirConta, onEditarPreco, podeEditarPreco, onAjustarTaxa }) {
   const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
   const total = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
   const hora = new Date(comanda.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
@@ -3180,6 +3180,16 @@ function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarL
               style={{ marginTop: 6, width: '100%', padding: '7px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12,
                 border: `1.5px solid ${taxaAplicada ? '#f59e0b' : '#16a34a'}`, background: 'transparent', color: taxaAplicada ? '#d97706' : '#16a34a' }}>
               {taxaAplicada ? '➖ Cliente não quer os 10% (tirar e reimprimir)' : '➕ Voltar os 10% (reimprimir)'}
+            </button>
+          )}
+          {/* Reimprimir a conta na mão. A impressão automática da conta depende do
+              gestor ENXERGAR o app FWC; quando ele não enxerga, ela não sai e ninguém
+              percebe. Este botão não depende disso: tenta app → QZ → navegador. */}
+          {onImprimirConta && (
+            <button type="button" onClick={() => onImprimirConta(comanda)}
+              style={{ marginTop: 6, width: '100%', padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12.5,
+                border: '1.5px solid #7c3aed', background: 'transparent', color: '#a78bfa' }}>
+              🧾 Imprimir conta
             </button>
           )}
           {onConfirmarLiberar && (
@@ -4208,6 +4218,24 @@ export default function PainelPedidos() {
     }), empresa?.nome)
   }
 
+  // Impressão MANUAL da CONTA (botão no card, mesa aguardando conferência).
+  // Aqui NÃO passa pelo filtro nem pela detecção do app: quem clicou quer o papel
+  // agora. Vai por onde der — app FWC, QZ ou navegador. É a rede de segurança pra
+  // quando a conta automática não sai e a loja fica sem saber.
+  function handleImprimirContaMesa(c) {
+    const itens = Array.isArray(c.comanda_itens) ? c.comanda_itens : []
+    const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
+    const pend = c.fechamento_pendente || {}
+    const pagamentos = Array.isArray(pend.pagamentos) ? pend.pagamentos : []
+    const total = pagamentos.length ? pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0) : subtotal
+    const taxa = Math.max(0, Math.round((total - subtotal) * 100) / 100)
+    const forma = pagamentos.length > 1 ? 'Dividido' : (pagamentos[0]?.forma ?? '')
+    imprimirHtml(montarContaPresencialHtml({
+      numeroMesa: c.numero_mesa, rotulo: rotuloComanda(c), itens, subtotal, taxa, total,
+      formaPagamento: forma, pagamentos, empresa,
+    }), empresa?.nome, { origem: 'mesa' })
+  }
+
   // Impressão MANUAL da comanda da mesa (botão no card). Imprime todos os itens
   // pelo navegador, independente do app FWC — pro caso do automático não ter saído.
   async function handleImprimirMesa(comanda) {
@@ -4944,7 +4972,7 @@ export default function PainelPedidos() {
               {(!filtroColuna || filtroColuna === 'mesas') && comandasView.length > 0 && (
                 <Coluna titulo="Mesas" cor="#db2777" count={comandasView.length} vazio="Nenhuma mesa aberta">
                   {comandasView.map(c => (
-                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} onConfirmarLiberar={handleConfirmarLiberarMesa} onImprimir={handleImprimirMesa} onEditarPreco={handleEditarPrecoMesaItem} podeEditarPreco={podeFinanceiro} onAjustarTaxa={podeFinanceiro ? handleAjustarTaxaMesa : null} />
+                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} onConfirmarLiberar={handleConfirmarLiberarMesa} onImprimir={handleImprimirMesa} onImprimirConta={handleImprimirContaMesa} onEditarPreco={handleEditarPrecoMesaItem} podeEditarPreco={podeFinanceiro} onAjustarTaxa={podeFinanceiro ? handleAjustarTaxaMesa : null} />
                   ))}
                 </Coluna>
               )}
