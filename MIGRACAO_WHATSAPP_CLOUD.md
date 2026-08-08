@@ -4,8 +4,29 @@
 
 ## Onde estamos
 
-A Meta **aprovou** o app em 06/08/2026. O cano novo já está construído, deployado e ligado.
-O que falta é **um número de telefone real** — só isso.
+A Meta **aprovou** o app em 06/08/2026 e o **número real já está cadastrado e conectado**.
+
+### Número de produção ✅
+
+| Dado | Valor |
+|---|---|
+| Número | **+55 84 99821-4212** (chip novo, comprado 07/08/2026) |
+| Nome de exibição | **FWC Inter** |
+| Categoria | Serviços profissionais |
+| Status | 🟢 Conectado |
+| **WABA** | `FWC Inter` — id `1703146970738801` |
+| **Phone Number ID** | `1149971294875569` |
+| PIN (2 etapas) | `101520` |
+
+Gravado em `whatsapp_config` da **Estação do Sabor** (`39c20133-3272-4ee5-add3-7a54895d4f29`,
+loja do próprio usuário) com `ia_ativo = true`, e em `config_global` nas chaves `admin_cloud_*`.
+
+O Evolution dessa loja está morto — o número antigo `558498146380` foi excluído do WhatsApp,
+então o `connected_phone` foi limpo. A loja roda **só na Cloud API**.
+
+⚠️ `whatsapp_config` tem `UNIQUE (empresa_id)` — uma linha por loja. Não dá pra ter uma linha
+"de teste" e outra "de produção" na mesma empresa; a CDBom usa um `instance_name` sintético
+(`cloud_test_cdbom`) justamente por isso.
 
 ### Aprovado ✅
 
@@ -38,8 +59,47 @@ inteiro: Claude, carrinho, cadastro, CEP, fechar pedido) → devolve a resposta 
 
 ### Falta ❌
 
-- **Número real.** Só existe a WABA de teste `Test WhatsApp Business Account`
-  (id `1710227020074071`) com o número `+1 555-148-0029`.
+1. **Atribuir a WABA `FWC Inter` ao usuário de sistema `botatende`** com controle total.
+   Sem isso o token permanente não envia por ela e o log só mostra um `[cloud send] erro`
+   genérico. Caminho: Usuários do sistema → `botatende` → Ativos atribuídos → Gerenciar →
+   Contas do WhatsApp → FWC Inter.
+2. **Forma de pagamento.** Nenhuma cadastrada. ⚠️ A conta de cobrança mostra saldo em `$` e
+   moeda vazia — **a moeda trava no momento do cadastro e não muda depois**. Conferir que
+   está **BRL** antes de confirmar o cartão.
+3. **Templates para a cobrança de mensalidade** (ver seção abaixo).
+
+## A regra das 24 horas (importante)
+
+Na Cloud API, **texto livre só sai dentro de 24h** desde a última mensagem do destinatário.
+Fora da janela, só passa **template aprovado**.
+
+Isso significa que o bot funciona de graça e sem template (o cliente sempre manda "oi"
+primeiro), mas **todo envio iniciado pela FWC precisa de template**. Hoje mandam texto livre:
+
+| Função | O que manda | Pra quem |
+|---|---|---|
+| `resumo-diario` | resumo do dia | `empresas.telefone_contato` |
+| `admin-alertas` | alerta de mensalidade | super admin |
+| `alertas-loja` | alertas operacionais | lojista |
+| `notify-admin` | texto livre | qualquer número |
+| `mercadopago-webhook` | aviso de pagamento | lojista |
+
+**Objetivo do usuário para este número: disparo de cobrança de mensalidade aos clientes.**
+Cobrança de mensalidade cai na categoria **Utilidade** — a mais barata e a de aprovação mais
+rápida. Rascunho do template:
+
+> Olá {{1}}! Sua mensalidade FWC Inter de {{2}} no valor de {{3}} vence em {{4}}.
+> Para pagar, é só responder esta mensagem.
+
+Depois de aprovado, trocar o `admin-alertas` (e depois os outros) para disparar template em
+vez de texto livre pelo Evolution.
+
+### Sobrou de teste
+
+A WABA de teste `Test WhatsApp Business Account` (id `1710227020074071`, número
+`+1 555-148-0029`) segue existindo e está apontada na loja **CDBom**
+(`cloud_phone_number_id = 1135024189705181`). Usar ela — ou uma conta de sandbox — para
+qualquer experimento, nunca a WABA de produção.
 
 ---
 
