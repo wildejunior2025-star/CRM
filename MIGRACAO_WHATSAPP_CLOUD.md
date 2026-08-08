@@ -88,12 +88,33 @@ Sintoma para reconhecer o problema de novo: **zero linhas** de `whatsapp-cloud` 
 Obs.: o envio funcionou sem precisar atribuir a WABA ao usuário de sistema `botatende` —
 o token do app já deu conta. Não mexer no que está funcionando.
 
+### Feito em 08/08/2026 ✅
+
+1. **Forma de pagamento cadastrada** — MasterCard ···· 7010 na conta da WABA `FWC Inter`,
+   **Brasil / Dólar americano (USD)**, fuso São Paulo. Foi USD porque o Real não é oferecido
+   (ver a seção "A moeda não deixa escolher Real" logo abaixo). Decisão do usuário: abrir em
+   USD agora e migrar para BRL depois, dentro do prazo da Meta.
+2. **Template `cobranca_mensalidade` enviado para análise** — categoria **Utilidade**,
+   idioma **Portuguese (BR)**, status **Em análise**. Texto:
+
+   > Olá {{1}}, aqui é a FWC Inter. Sua fatura de {{2}}, no valor de {{3}}, vence em {{4}}.
+   > Responda esta mensagem se precisar do código PIX ou da segunda via.
+
+   Variáveis: {{1}} nome da loja, {{2}} mês de referência, {{3}} valor, {{4}} vencimento.
+   Amostras usadas na análise: `Estação do Sabor`, `agosto/2026`, `R$ 149,90`, `15/08/2026`.
+
+**⚠️ Pegadinha do template (guardar):** ao enviar, a Meta abre o diálogo **"A categoria não
+corresponde"** com Marketing marcado como *Recommended* e o aviso **"Este modelo de mensagem
+será rejeitado"**. O primeiro texto (*"É só responder esta mensagem que eu te mando o PIX na
+hora"*) foi classificado como Marketing. Reescrever em linguagem de fatura — "aqui é a FWC
+Inter", "sua fatura de", "segunda via" — passou direto, sem o diálogo. Sintoma de que o envio
+não concluiu: o botão fica em *Carregando* para sempre porque o diálogo está esperando
+resposta atrás da tela.
+
 ### Falta ❌
 
-1. **Forma de pagamento.** Nenhuma cadastrada — ver a seção "A moeda não deixa escolher
-   Real" logo abaixo. Só é necessária para mensagens iniciadas pela empresa; o bot
-   (cliente inicia) roda sem ela.
-2. **Templates para a cobrança de mensalidade** (ver seção abaixo).
+1. **Trocar os disparos de texto livre por template** depois que o `cobranca_mensalidade`
+   for aprovado (começar pelo `admin-alertas`).
 
 ## A moeda não deixa escolher Real (apurado 08/08/2026)
 
