@@ -72,15 +72,34 @@ async function hostOk(host, esperado, rodadas = 4) {
 
 const espera = ms => new Promise(r => setTimeout(r, ms))
 
-async function purgar(token, zone) {
+// Rotas que a borda costuma segurar: são as URLs que o pessoal abre direto.
+// Uma rota nunca acessada já vem certa — o problema é sempre a entrada velha.
+const ROTAS_PRESAS = ['/', '/index.html', '/login', '/painel', '/whatsapp', '/vendas', '/caixa']
+
+async function chamarPurge(token, zone, body) {
   const res = await fetch(`https://api.cloudflare.com/client/v4/zones/${zone}/purge_cache`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ purge_everything: true }),
+    body: JSON.stringify(body),
   })
-  const json = await res.json()
+  const json = await res.json().catch(() => ({}))
   if (!json.success) console.warn('⚠️  Purge não confirmado:', JSON.stringify(json.errors ?? json))
   return json.success
+}
+
+/**
+ * Purga duas vezes, e a segunda é a que resolve.
+ *
+ * Em 08/08/2026 o `purge_everything` respondeu success dez vezes seguidas e o
+ * `/` continuou servindo o index.html antigo — enquanto uma rota nunca acessada
+ * já vinha com o bundle novo, provando que o deploy estava certo e o preso era
+ * só a entrada de cache daquelas URLs. O purge POR URL soltou na hora.
+ */
+async function purgar(token, zone) {
+  const tudo = await chamarPurge(token, zone, { purge_everything: true })
+  const files = HOSTS.flatMap(h => ROTAS_PRESAS.map(r => `https://${h}${r}`))
+  const porUrl = await chamarPurge(token, zone, { files })
+  return tudo || porUrl
 }
 
 const env = { ...envDoArquivo(), ...process.env }
