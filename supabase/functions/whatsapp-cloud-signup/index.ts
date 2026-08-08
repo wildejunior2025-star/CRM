@@ -146,6 +146,22 @@ serve(async (req) => {
       return json({ error: "Conectou na Meta mas falhou ao salvar. Contate o suporte." }, 500)
     }
 
+    // ── 5. Guarda o token DESTA loja ──
+    // Vai numa tabela sem policy (só service_role) porque o lojista consegue ler
+    // a linha dele em whatsapp_config, e o token não pode vazar. É ele que o
+    // whatsapp-cloud usa para responder por este número.
+    const { error: tokErr } = await supabaseAdmin
+      .from("whatsapp_cloud_tokens")
+      .upsert({
+        empresa_id: empresaId,
+        token:      bizToken,
+        waba_id:    waba_id,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "empresa_id" })
+
+    // Não é fatal: o token global do app ainda atende as WABAs compartilhadas.
+    if (tokErr) console.error("[signup] salvar token falhou", tokErr.message)
+
     return json({
       ok: true,
       phone_number_id,

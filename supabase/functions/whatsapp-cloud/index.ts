@@ -25,11 +25,12 @@ const GRAPH_VERSION = Deno.env.get("WHATSAPP_GRAPH_VERSION") ?? "v21.0"
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? ""            // Whisper (transcrição de áudio)
 
 // ── Baixa mídia da Graph API (por media id) → base64 + mimetype ───────────────
-async function baixarMidiaCloud(mediaId: string): Promise<{ base64: string; mimetype: string } | null> {
+// `token` é o da loja quando ela veio pelo Cadastro Incorporado; senão o global.
+async function baixarMidiaCloud(mediaId: string, token: string): Promise<{ base64: string; mimetype: string } | null> {
   try {
     // 1. pega a URL temporária da mídia
     const metaRes = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${mediaId}`, {
-      headers: { "Authorization": `Bearer ${CLOUD_TOKEN}` },
+      headers: { "Authorization": `Bearer ${token}` },
     })
     if (!metaRes.ok) { console.error("[cloud media] meta erro", metaRes.status, (await metaRes.text()).slice(0, 300)); return null }
     const meta = await metaRes.json()
@@ -37,7 +38,7 @@ async function baixarMidiaCloud(mediaId: string): Promise<{ base64: string; mime
     const mimetype = String(meta?.mime_type ?? "audio/ogg").split(";")[0]
     if (!mediaUrl) return null
     // 2. baixa o binário (a URL da Meta também exige o token)
-    const binRes = await fetch(mediaUrl, { headers: { "Authorization": `Bearer ${CLOUD_TOKEN}` } })
+    const binRes = await fetch(mediaUrl, { headers: { "Authorization": `Bearer ${token}` } })
     if (!binRes.ok) { console.error("[cloud media] download erro", binRes.status); return null }
     const buf = new Uint8Array(await binRes.arrayBuffer())
     let bin = ""
@@ -85,12 +86,12 @@ function normalizeBrNumber(n: string): string {
 }
 
 // ── Envio de texto pela Graph API ────────────────────────────────────────────
-async function sendText(phoneNumberId: string, to: string, text: string) {
+async function sendText(phoneNumberId: string, to: string, text: string, token: string) {
   try {
     const dest = normalizeBrNumber(to)
     const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/messages`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${CLOUD_TOKEN}` },
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
       body: JSON.stringify({
         messaging_product: "whatsapp",
         recipient_type: "individual",
@@ -120,12 +121,25 @@ async function processar(body: any) {
   // Acha a loja dona desse número
   const { data: cfg } = await supabase
     .from("whatsapp_config")
-    .select("instance_name, cloud_phone_number_id, ativo")
+    .select("empresa_id, instance_name, cloud_phone_number_id, ativo")
     .eq("cloud_phone_number_id", phoneNumberId)
     .eq("ativo", true)
     .maybeSingle()
   if (!cfg) { console.error("[cloud] nenhuma loja para phone_number_id", phoneNumberId); return }
   const instanceName = cfg.instance_name ?? `cloud_${phoneNumberId}`
+
+  // Token: o da loja (Cadastro Incorporado) quando existir; senão o do app.
+  // Sem isso, número conectado pela própria loja não responderia.
+  let token = CLOUD_TOKEN
+  if (cfg.empresa_id) {
+    const { data: tok } = await supabase
+      .from("whatsapp_cloud_tokens")
+      .select("token")
+      .eq("empresa_id", cfg.empresa_id)
+      .maybeSingle()
+    if (tok?.token) token = tok.token
+  }
+  if (!token) { console.error("[cloud] sem token para phone_number_id", phoneNumberId); return }
 
   // Extrai o texto (MVP: texto e botões/listas)
   let text = ""
@@ -139,18 +153,18 @@ async function processar(body: any) {
   } else if (message.type === "audio") {
     // Áudio/nota de voz: baixa da Graph API e transcreve com Whisper.
     const mediaId = message.audio?.id
-    const midia = mediaId ? await baixarMidiaCloud(String(mediaId)) : null
+    const midia = mediaId ? await baixarMidiaCloud(String(mediaId), token) : null
     const transcricao = midia ? await transcreverAudio(midia.base64, midia.mimetype) : null
     if (transcricao?.trim()) {
       text = transcricao.trim()
       console.log("[cloud audio] transcrito:", text)
     } else {
-      await sendText(phoneNumberId, from, "Oi! 😊 Não consegui entender o áudio. Pode escrever por texto?")
+      await sendText(phoneNumberId, from, "Oi! 😊 Não consegui entender o áudio. Pode escrever por texto?", token)
       return
     }
   } else {
     // imagem/documento ainda não suportados por aqui
-    await sendText(phoneNumberId, from, "Oi! 😊 Por enquanto consigo te atender melhor por *texto*. Pode escrever o que você precisa?")
+    await sendText(phoneNumberId, from, "Oi! 😊 Por enquanto consigo te atender melhor por *texto*. Pode escrever o que você precisa?", token)
     return
   }
   if (!text) return
@@ -197,7 +211,7 @@ async function processar(body: any) {
     console.error("[cloud] erro ao chamar o cérebro", String(e))
   }
 
-  if (resposta) await sendText(phoneNumberId, from, resposta)
+  if (resposta) await sendText(phoneNumberId, from, resposta, token)
 }
 
 // ── serve ────────────────────────────────────────────────────────────────────

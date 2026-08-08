@@ -10,6 +10,16 @@ const APP_ID        = import.meta.env.VITE_WA_APP_ID || ''
 const CONFIG_ID     = import.meta.env.VITE_WA_CONFIG_ID || ''
 const GRAPH_VERSION = import.meta.env.VITE_WA_GRAPH_VERSION || 'v21.0'
 
+// Coexistência: a loja continua usando o WhatsApp Business no celular dela e o
+// robô roda no MESMO número — mesmas conversas, mesmos contatos. Sem isso o
+// número sai do aparelho, que é a objeção nº 1 de quem já tem cliente no zap.
+// Vazio (VITE_WA_FEATURE_TYPE=none) volta ao cadastro comum.
+const FEATURE_TYPE = (() => {
+  const v = import.meta.env.VITE_WA_FEATURE_TYPE
+  if (v === 'none') return ''
+  return v || 'whatsapp_business_app_onboarding'
+})()
+
 let sdkPromise = null
 
 function carregarSDK() {
@@ -96,7 +106,12 @@ export async function conectarWhatsAppCloud() {
       config_id: CONFIG_ID,
       response_type: 'code',
       override_default_response_type: true,
-      extras: { setup: {}, featureType: '', sessionInfoVersion: '3' },
+      extras: {
+        setup: {},
+        featureType: FEATURE_TYPE,
+        sessionInfoVersion: '3',
+        version: 'v4',
+      },
     })
   })
 }
