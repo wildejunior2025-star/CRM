@@ -198,6 +198,48 @@ qualquer experimento, nunca a WABA de produção.
 
 ---
 
+## Coexistência — a loja NÃO precisa perder o WhatsApp dela
+
+Pesquisado na documentação oficial em 08/08/2026. **Confirmado que está liberado na nossa
+conta**: no *Configurador de cadastro incorporado* → campo **"Tipo de recurso"** aparece a
+opção **"Integração do app WhatsApp Business"** (é a coexistência). Requer ser Provedor de
+Tecnologia — nós somos.
+
+Sem coexistência, o número sai do app do celular (foi o que aconteceu com o número da FWC).
+Com coexistência, o dono continua usando o **WhatsApp Business** no celular E o robô funciona
+no mesmo número. Isso derruba a maior objeção de venda: *"não quero abrir mão do meu zap que
+já tem cliente"*.
+
+### A loja mantém
+- O app WhatsApp Business funcionando normalmente no celular
+- Histórico dos últimos **6 meses** sincronizado (se autorizar)
+- Todos os contatos sincronizados
+- Mensagens espelhadas nos dois sentidos (API ↔ app)
+- Editar/apagar mensagem
+- Mensagem enviada pelo app continua **grátis** e não cria/estende a janela de 24h da API
+
+### Limitações
+| Item | O que acontece |
+|---|---|
+| App | Tem que ser o **WhatsApp Business** v2.24.17+. O WhatsApp **comum não serve** |
+| **Listas de transmissão** | Viram **somente leitura** — não cria novas |
+| Mensagens temporárias / ver uma vez / localização ao vivo | Desligadas nas conversas 1:1 |
+| Grupos | Não sincronizam com a API |
+| Catálogo, pedidos, etiquetas, respostas rápidas, saudação/ausência | Continuam só no app, não gerenciáveis pela API |
+| Aparelhos conectados (WhatsApp Web etc.) | **Desconectam uma vez** no onboarding; dá pra reconectar depois |
+| Windows / WearOS | Não suportados |
+| Chamada de voz/vídeo | Não existem na API (no app seguem normais) |
+| Throughput | Fixo em **20 msg/s** (1.200/min — folgado pro nosso uso) |
+| Sincronização do histórico | A loja tem **24h** pra concluir, senão precisa refazer o flow |
+| Cliente que escreve antes do onboarding terminar | Só dá pra responder com template (não há janela aberta) |
+
+A perda da lista de transmissão é o único ponto que dói — e é justamente o que fazia a loja
+tomar ban. Em troca ela ganha o disparo oficial por template. Vira argumento de venda.
+
+Fontes:
+- https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-business-app-users/
+- https://developers.facebook.com/docs/whatsapp/embedded-signup/custom-flows/onboarding-business-app-users/
+
 ## Fase 2 — Cadastro Incorporado (as lojas)
 
 Com o Provedor de Tecnologia verificado, dá pra fazer o modelo SaaS certo: a loja clica em
