@@ -151,6 +151,7 @@ export default function FichaTecnica() {
   const [materiaForm, setMateriaForm] = useState(emptyMateria)
   const [materiaEdit, setMateriaEdit] = useState(null)
   const [salvandoMateria, setSalvandoMateria] = useState(false)
+  const [buscaMateria, setBuscaMateria] = useState('')
 
   // Estoque das matérias-primas
   const [saldoMat, setSaldoMat] = useState({})   // materia_prima_id -> quantidade_atual
@@ -219,8 +220,18 @@ export default function FichaTecnica() {
     return materias.find(m => normTxt(m.nome) === q && m.id !== materiaEdit?.id) || null
   }, [materiaForm.nome, materias, materiaEdit])
 
-  function abrirNovaMateria() {
-    setMateriaEdit(null); setMateriaForm(emptyMateria); setShowMateria(true)
+  // Busca da lista: sem acento e sem maiúscula, então "feijao" acha "Feijão".
+  const materiasFiltradas = useMemo(() => {
+    const q = normTxt(buscaMateria)
+    return q ? materias.filter(m => normTxt(m.nome).includes(q)) : materias
+  }, [materias, buscaMateria])
+
+  function abrirNovaMateria(nome) {
+    // Chamada direta no onClick manda o evento do clique — só aceita texto mesmo.
+    const inicial = typeof nome === 'string' ? nome.trim() : ''
+    setMateriaEdit(null)
+    setMateriaForm(inicial ? { ...emptyMateria, nome: inicial } : emptyMateria)
+    setShowMateria(true)
   }
   function abrirEditarMateria(m) {
     setMateriaEdit(m)
@@ -576,6 +587,36 @@ export default function FichaTecnica() {
             <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1 }}>💰 Total parado em matérias-primas</span>
             <strong style={{ fontSize: 24, color: 'var(--primary)' }}>{brl(totalMaterias)}</strong>
           </div>
+          {/* Busca: pra saber se o insumo já está cadastrado antes de criar de novo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', flex: '1 1 260px', minWidth: 0 }}>
+              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', opacity: .6 }}>🔎</span>
+              <input
+                value={buscaMateria}
+                onChange={e => setBuscaMateria(e.target.value)}
+                placeholder="Procurar matéria-prima (ex.: feijão, óleo, frango)"
+                style={{ width: '100%', padding: '10px 34px 10px 32px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-input, transparent)', color: 'var(--text)', fontSize: 14 }}
+              />
+              {buscaMateria && (
+                <button type="button" onClick={() => setBuscaMateria('')} title="Limpar"
+                  style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 4 }}>×</button>
+              )}
+            </div>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+              {buscaMateria
+                ? `${materiasFiltradas.length} de ${materias.length}`
+                : `${materias.length} cadastrada${materias.length === 1 ? '' : 's'}`}
+            </span>
+          </div>
+
+          {materiasFiltradas.length === 0 ? (
+            <div className="card empty-state">
+              <strong>Não achei "{buscaMateria}"</strong>
+              <p>Essa matéria-prima ainda não está cadastrada.</p>
+              <button className="btn btn-primary" style={{ marginTop: 8 }}
+                onClick={() => abrirNovaMateria(buscaMateria)}>+ Cadastrar "{buscaMateria.trim()}"</button>
+            </div>
+          ) : (
           <div className="data-table">
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
@@ -588,7 +629,7 @@ export default function FichaTecnica() {
                 </tr>
               </thead>
               <tbody>
-                {materias.map(m => {
+                {materiasFiltradas.map(m => {
                   const saldo = saldoDe(m.id)
                   const valor = saldo * Number(m.custo || 0)
                   return (
@@ -613,6 +654,7 @@ export default function FichaTecnica() {
               </tbody>
             </table>
           </div>
+          )}
           </>
         )
       )}
