@@ -466,8 +466,8 @@ export default function WhatsAppConfig() {
                 {cloudName ? <> — {cloudName}</> : null}
               </p>
               <p className="wa-hint">
-                O robô responde os clientes por este número. Ele fica dedicado ao atendimento
-                (não abre no WhatsApp normal do celular).
+                O robô responde os clientes por este número — e você continua usando o
+                WhatsApp Business no celular normalmente, com as mesmas conversas.
               </p>
               <button
                 type="button"
@@ -481,10 +481,15 @@ export default function WhatsAppConfig() {
             </div>
           ) : (
             <div className="wa-conn-disconnected">
+              <p className="wa-hint" style={{ marginBottom: 8 }}>
+                Conecte o <strong>WhatsApp da sua loja</strong> — o mesmo número que você já usa.
+                Você continua atendendo pelo celular, com as mesmas conversas e contatos, e o robô
+                responde junto quando você não puder.
+              </p>
               <p className="wa-hint" style={{ marginBottom: 16 }}>
-                Conecte um número <strong>dedicado ao robô</strong> (separado do seu WhatsApp pessoal).
-                Você faz login na Meta, escolhe o número e pronto — o robô passa a atender os clientes
-                automaticamente por ele.
+                Antes de começar, deixe à mão: a <strong>senha do seu Facebook</strong> e o
+                <strong> celular do número</strong> (a Meta manda um código por SMS). Leva uns 3 minutos.
+                O app tem que ser o <strong>WhatsApp Business</strong>, não o WhatsApp comum.
               </p>
               {cloudError && (
                 <div className="wa-test-result error" style={{ marginBottom: 12 }}>
