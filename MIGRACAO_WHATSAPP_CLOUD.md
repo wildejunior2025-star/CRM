@@ -90,11 +90,37 @@ o token do app já deu conta. Não mexer no que está funcionando.
 
 ### Falta ❌
 
-1. **Forma de pagamento.** Nenhuma cadastrada. ⚠️ A conta de cobrança mostra saldo em `$` e
-   moeda vazia — **a moeda trava no momento do cadastro e não muda depois**. Conferir que
-   está **BRL** antes de confirmar o cartão. Só é necessária para mensagens iniciadas pela
-   empresa; o bot (cliente inicia) roda sem ela.
+1. **Forma de pagamento.** Nenhuma cadastrada — ver a seção "A moeda não deixa escolher
+   Real" logo abaixo. Só é necessária para mensagens iniciadas pela empresa; o bot
+   (cliente inicia) roda sem ela.
 2. **Templates para a cobrança de mensalidade** (ver seção abaixo).
+
+## A moeda não deixa escolher Real (apurado 08/08/2026)
+
+Em *Cobrança e pagamentos → Contas do WhatsApp Business → Adicionar forma de pagamento*, o
+modal abre com País = **Brasil** e Moeda = **Dirham dos EAU**, e a lista tem **15 moedas sem
+o Real**: Dirham EAU, Dólar americano/australiano/de Singapura, Euro, Libra esterlina, Novo
+Sol peruano, Peso argentino/chileno/colombiano/mexicano, Rial saudita, Ringgit malaio, Rupia
+indiana, Rúpia indonésia. **A lista é fixa — não muda ao trocar o país** (testado indo para
+Argentina e voltando). O aviso *"A localização e a moeda não poderão ser alteradas após serem
+definidas"* é para valer.
+
+Motivo: desde **01/07/2026** a Meta só permite WABA em BRL para quem tem **Sold-To country =
+Brasil no Billing Hub**, que na prática é fatura mensal com linha de crédito paga por **boleto
+pela Facebook Brasil**. Em *Linhas de crédito* o painel diz "Nenhuma linha de crédito foi
+alocada" e **"A opção de pedir acesso a esta página não está mais disponível"** — não sai por
+autosserviço. Quem é elegível a BRL tem que migrar até **30/06/2027**; a partir de
+**01/07/2027** a Meta **para de entregar** mensagens de WABA fora de BRL. Há APIs de migração
+de moeda desde 01/06/2026, então dá para abrir em USD agora e migrar depois.
+
+Corrigido no caminho: o Billing Hub acusava **"Permissões de edição ausentes"** — resolvido em
+*Linhas de crédito → Modificar permissões → Atribuir a mim* ("Você se tornou editor
+financeiro"). Era bloqueio real para mexer em cobrança, mas **não** era a causa da falta do
+BRL — a lista continuou sem Real depois.
+
+**Nada disso trava o robô:** mensagem do cliente para a empresa **não é cobrada** e **template
+de utilidade dentro da janela de atendimento aberta é grátis**. Só custa o template disparado
+**fora** da janela de 24h — a cobrança de mensalidade.
 
 ## A regra das 24 horas (importante)
 
