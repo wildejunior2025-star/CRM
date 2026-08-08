@@ -57,16 +57,44 @@ inteiro: Claude, carrinho, cadastro, CEP, fechar pedido) → devolve a resposta 
 **O cérebro não é duplicado e o Evolution não é tocado.** Trata texto, botões/listas e áudio
 (baixa da Graph API e transcreve no Whisper).
 
+## ✅ TESTADO E FUNCIONANDO — 08/08/2026 01:53
+
+Primeiro "oi" real respondido pela Cloud API, sem o Evolution em nenhum ponto:
+
+| Hora | Quem | Mensagem |
+|---|---|---|
+| 01:53:17.15 | cliente (`558498180774`) | `oi` |
+| 01:53:17.53 | robô | "😴 Estamos fechados no momento! Hoje atendemos das *07:00* às *14:00*…" + link da loja online |
+
+Ida e volta em **~380 ms**; a função respondeu `200` em 281 ms. O cérebro rodou completo
+(inclusive a grade de horário da loja), provando o desenho de reaproveitar o
+`whatsapp-webhook` em modo `_test`.
+
+### ⚠️ A pegadinha que travou o primeiro teste
+
+O primeiro "oi" **não gerou nenhuma invocação** da função — a mensagem morria na Meta.
+Causa: o toggle **"Assinar webhooks"** da WABA estava **desligado**.
+
+Configurar o webhook no app **não basta**: cada WABA precisa assinar o app separadamente. A
+WABA de teste já vinha assinada porque nasceu dentro do app; a `FWC Inter` foi criada pelo
+Gerenciador de Negócios e nasceu solta.
+
+**Onde liga:** painel do app → WhatsApp → *Etapa 2. Configuração da produção* → *Registre seu
+número de telefone do WhatsApp* → toggle **"Assinar webhooks"** ao lado do nome da WABA.
+
+Sintoma para reconhecer o problema de novo: **zero linhas** de `whatsapp-cloud` no
+`get_logs`. Se a função for invocada mas não responder, o problema é outro (envio/token).
+
+Obs.: o envio funcionou sem precisar atribuir a WABA ao usuário de sistema `botatende` —
+o token do app já deu conta. Não mexer no que está funcionando.
+
 ### Falta ❌
 
-1. **Atribuir a WABA `FWC Inter` ao usuário de sistema `botatende`** com controle total.
-   Sem isso o token permanente não envia por ela e o log só mostra um `[cloud send] erro`
-   genérico. Caminho: Usuários do sistema → `botatende` → Ativos atribuídos → Gerenciar →
-   Contas do WhatsApp → FWC Inter.
-2. **Forma de pagamento.** Nenhuma cadastrada. ⚠️ A conta de cobrança mostra saldo em `$` e
+1. **Forma de pagamento.** Nenhuma cadastrada. ⚠️ A conta de cobrança mostra saldo em `$` e
    moeda vazia — **a moeda trava no momento do cadastro e não muda depois**. Conferir que
-   está **BRL** antes de confirmar o cartão.
-3. **Templates para a cobrança de mensalidade** (ver seção abaixo).
+   está **BRL** antes de confirmar o cartão. Só é necessária para mensagens iniciadas pela
+   empresa; o bot (cliente inicia) roda sem ela.
+2. **Templates para a cobrança de mensalidade** (ver seção abaixo).
 
 ## A regra das 24 horas (importante)
 
