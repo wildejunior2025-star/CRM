@@ -287,14 +287,31 @@ Fontes:
 - https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-business-app-users/
 - https://developers.facebook.com/docs/whatsapp/embedded-signup/custom-flows/onboarding-business-app-users/
 
-## Fase 2 — Cadastro Incorporado (as lojas)
+## Fase 2 — Cadastro Incorporado (as lojas) — LIGADO em 08/08/2026 ✅
 
-Com o Provedor de Tecnologia verificado, dá pra fazer o modelo SaaS certo: a loja clica em
-"Conectar meu WhatsApp" no gestor, loga no Facebook dela e pluga o número próprio. Cada loja
-com o número dela, a FWC não gerencia número de ninguém, e o risco de ban some.
+A loja clica em "Conectar meu WhatsApp" no gestor, loga no Facebook dela e pluga o número
+próprio. Cada loja com o número dela, a FWC não gerencia número de ninguém, e o risco de ban
+some. O que foi feito hoje para tirar isso do papel:
 
-Ponto de partida: `supabase/functions/whatsapp-cloud-signup/index.ts` e o
-"Configurador de cadastro incorporado" no painel do app.
+- **Configuração de login criada** no *Configurador de cadastro incorporado*:
+  `config_id = 1528456732413918`, nome "FWC Inter - lojas", **não expira**. Antes não existia
+  nenhuma — era por isso que o `VITE_WA_CONFIG_ID` estava vazio e o botão não abria o popup.
+- **Domínios liberados** para o SDK do JavaScript (só https): `gestor.fwcinter.com`,
+  `admin.fwcinter.com`, `app.fwcinter.com`.
+- **Coexistência ligada no código.** O painel confirma o valor exato:
+  `featureType: "whatsapp_business_app_onboarding"` (é o "Tipo de recurso → Integração do app
+  WhatsApp Business"). Fica em `VITE_WA_FEATURE_TYPE`; `none` volta ao cadastro comum.
+  O `extras` também passou a mandar `version: "v4"`.
+- **Token por loja**: tabela `whatsapp_cloud_tokens` (migração 0150). Ela tem RLS ligada e
+  **nenhuma policy de propósito** — só service_role alcança. Não dá pra guardar em
+  `whatsapp_config` porque a policy de lá deixa o próprio lojista ler a linha dele, e o token
+  dá acesso à integração. O `whatsapp-cloud` usa o token da loja quando existe e cai no
+  global (`WHATSAPP_CLOUD_TOKEN`) quando não.
+- Secrets `WHATSAPP_APP_ID` / `WHATSAPP_APP_SECRET` conferidos no Supabase (a função passa da
+  checagem e para no login).
+
+**Falta testar com uma loja de verdade** — o fluxo inteiro nunca rodou ponta a ponta. Fazer
+com uma loja parceira, não com a WABA de produção da FWC.
 
 Atenção nesse modelo: o token deixa de ser um só (o do `botatende`) e passa a ser **um por
 cliente**, trocado no fluxo do OAuth. O `whatsapp-cloud` vai precisar buscar o token da loja
