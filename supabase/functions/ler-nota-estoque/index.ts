@@ -66,7 +66,13 @@ serve(async (req) => {
       "}",
       "",
       "Regras:",
-      "- 'quantidade' = quantas UNIDADES foram compradas daquele item (>= 1, número).",
+      "- 'quantidade' = quanto entrou no estoque daquele item. PODE TER CASA DECIMAL.",
+      "- ATENÇÃO COM ITEM VENDIDO POR PESO (carne, frango, queijo — unidade KG/G/L):",
+      "  a nota traz 'Qtde 1' (é 1 peça) e uma coluna PESO com o que importa de verdade.",
+      "  Nesses casos 'quantidade' = O PESO, com os decimais (6,6 é 6.6 — NUNCA 6 nem 66).",
+      "- CONFIRA CADA LINHA pela conta: quantidade x custo_unit tem que bater com o TOTAL da",
+      "  linha. Se não bater, você leu o número errado — refaça. Ex.: total 79,13 e unitário",
+      "  11,99 → a quantidade é 6.6, não 6.",
       "- 'custo_unit' = valor UNITÁRIO de compra (o que pagou por 1 unidade), só o número. Se a nota",
       "  só tiver o total da linha, divida pelo total de unidades. Se não der pra saber, use null.",
       "- Use ponto como separador decimal (ex.: 4.50).",
@@ -117,11 +123,19 @@ serve(async (req) => {
       return json({ ok: false, error: "Não consegui interpretar a nota." }, 422)
     }
 
+    // Quantidade PODE ser fracionada — carne vem em 6,6 kg. Arredondar pra inteiro aqui
+    // perdia o peso da nota (6,6 virava 6). Guarda 3 casas, que cobre grama e mililitro.
+    const qtd = (v: unknown) => {
+      const n = Number(v)
+      if (!Number.isFinite(n) || n <= 0) return 1
+      return Math.round(n * 1000) / 1000
+    }
+
     const itens: { tipo: string; id: string; nome: string; quantidade: number; custo_unit: number | null }[] = []
     for (const it of (Array.isArray(parsed.itens) ? parsed.itens : [])) {
       const c = cat[Number(it?.indice)]
       if (!c) continue
-      const q = Math.max(1, Math.floor(Number(it?.quantidade) || 1))
+      const q = qtd(it?.quantidade)
       const custo = it?.custo_unit != null && Number.isFinite(Number(it.custo_unit)) ? Number(it.custo_unit) : null
       itens.push({ tipo: c.tipo, id: c.id, nome: c.nome, quantidade: q, custo_unit: custo })
     }
@@ -129,7 +143,7 @@ serve(async (req) => {
     const nao_encontrados = (Array.isArray(parsed.nao_encontrados) ? parsed.nao_encontrados : [])
       .map((n: any) => ({
         nome: String(n?.nome ?? "").slice(0, 120),
-        quantidade: Math.max(1, Math.floor(Number(n?.quantidade) || 1)),
+        quantidade: qtd(n?.quantidade),
         custo_unit: n?.custo_unit != null && Number.isFinite(Number(n.custo_unit)) ? Number(n.custo_unit) : null,
       }))
       .filter((n: any) => n.nome)
