@@ -361,6 +361,36 @@ export default function CategoriasComplemento() {
     load()
   }
 
+  // Sobe/desce um bloco inteiro na lista (ex.: pôr "Especiais" na frente de
+  // "Promoção"). A ordem que o cliente vê é a coluna `ordem` de cada opção, então
+  // mover o bloco é renumerar as opções na sequência nova — só as que mudaram
+  // de lugar viram update.
+  async function moverBloco(cat, blocos, idx, direcao) {
+    const alvo = idx + direcao
+    if (alvo < 0 || alvo >= blocos.length) return
+    const nova = [...blocos]
+    ;[nova[idx], nova[alvo]] = [nova[alvo], nova[idx]]
+
+    let ordem = 0
+    const mudou = []
+    for (const b of nova) {
+      for (const o of b.opcoes) {
+        ordem++
+        if ((o.ordem ?? 0) !== ordem) mudou.push({ id: o.id, ordem })
+      }
+    }
+    if (!mudou.length) return
+
+    setBusy(cat.id)
+    setError(null)
+    for (const u of mudou) {
+      const r = await supabase.from('complemento_opcoes').update({ ordem: u.ordem }).eq('id', u.id)
+      if (r.error) { setBusy(null); setError(r.error.message); return }
+    }
+    setBusy(null)
+    load()
+  }
+
   // Apaga o bloco inteiro de uma vez. Acontece de a loja trazer o cardápio duas
   // vezes com rótulos diferentes ("Especial" e "Especiais") e ficar com a lista
   // dobrada — sem isso seriam 10, 15 exclusões uma a uma, cada uma com aviso.
@@ -584,7 +614,7 @@ export default function CategoriasComplemento() {
               <div>
                 <p className="cc-section-title">Opções · {cat.opcoes.length}</p>
                 {cat.opcoes.length === 0 && <p className="cc-empty">Nenhuma opção ainda.</p>}
-                {blocosDeOpcoes(cat.opcoes).map(bloco => (
+                {(() => { const blocos = blocosDeOpcoes(cat.opcoes); return blocos.map((bloco, iBloco) => (
                 <div key={bloco.titulo ?? 'unico'}>
                   {/* Bloco = o que está entre parênteses no fim do nome. Vira subtítulo
                       na loja, e renomear aqui renomeia todas as opções de uma vez. */}
@@ -595,6 +625,15 @@ export default function CategoriasComplemento() {
                         title="Aparece como título deste trecho na loja online"
                         onBlur={e => renomearBloco(cat, bloco, e.target.value)} />
                       <span className="cc-empty" style={{ fontSize: 11 }}>· {bloco.opcoes.length}</span>
+                      {/* Setas: mudam a ordem em que os blocos aparecem pro cliente. */}
+                      <span className="cc-bloco-mover">
+                        <button type="button" disabled={busy === cat.id || iBloco === 0}
+                          title="Subir este bloco (aparece antes pro cliente)"
+                          onClick={() => moverBloco(cat, blocos, iBloco, -1)}>↑</button>
+                        <button type="button" disabled={busy === cat.id || iBloco === blocos.length - 1}
+                          title="Descer este bloco (aparece depois pro cliente)"
+                          onClick={() => moverBloco(cat, blocos, iBloco, 1)}>↓</button>
+                      </span>
                       <button type="button" className="cc-bloco-del" disabled={busy === cat.id}
                         title={`Apagar o bloco "${bloco.titulo}" e as ${bloco.opcoes.length} opções dele`}
                         onClick={() => excluirBloco(cat, bloco)}>
@@ -635,7 +674,7 @@ export default function CategoriasComplemento() {
                   </div>
                   ))}
                 </div>
-                ))}
+                )) })()}
                 <button className="btn btn-secondary btn-sm" style={{ marginTop: 10 }} disabled={busy === cat.id} onClick={() => addOpcao(cat)}>
                   + Opção
                 </button>
