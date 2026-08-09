@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { blocosDeOpcoes } from '../lib/complementos'
 import { criarBuscadorDescricao } from '../lib/descricaoSabor'
+import { useConfirmar } from '../hooks/useConfirmar'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 import './CategoriasComplemento.css'
@@ -157,6 +158,7 @@ function ImportarSabores({ produtos, disabled, onConfirm }) {
 export default function CategoriasComplemento() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id ?? null
+  const [confirmar, avisoConfirmar] = useConfirmar()
 
   const [cats, setCats] = useState([])       // [{id, nome, min, max, disponivel, opcoes:[], links:[{id,produto_id,max_override}]}]
   const [produtos, setProdutos] = useState([]) // [{id, nome}]
@@ -279,12 +281,14 @@ export default function CategoriasComplemento() {
 
   async function excluirCategoria(cat) {
     const usados = cat.links.length
-    const onde = usados ? `\n\nEla está em ${usados} produto(s) e vai sumir de TODOS.` : ''
-    const msg = `⚠️ EXCLUIR a categoria "${cat.nome}" DE VEZ?\n\n`
-      + `Isso APAGA a categoria e todas as opções dela do sistema — NÃO dá pra desfazer.`
-      + onde
-      + `\n\n👉 Se você só quer que ela pare de aparecer, use o botão PAUSAR (não o Excluir).\n\nTem certeza que quer EXCLUIR?`
-    if (!confirm(msg)) return
+    const ok = await confirmar({
+      titulo: `Excluir a categoria “${cat.nome}”?`,
+      texto: `Apaga a categoria e as ${cat.opcoes.length} opções dela de vez — não dá pra desfazer.`
+        + (usados ? `\nEla está em ${usados} produto${usados === 1 ? '' : 's'} e vai sumir de todos.` : ''),
+      aviso: 'Se você só quer que ela pare de aparecer pro cliente, use o botão Pausar — aí dá pra voltar depois.',
+      textoOk: 'Sim, excluir',
+    })
+    if (!ok) return
     setBusy(cat.id)
     // apaga vínculos, opções e a categoria (opções caem por cascade, mas garantimos)
     await supabase.from('produto_complemento_grupos').delete().eq('grupo_id', cat.id)
@@ -361,13 +365,14 @@ export default function CategoriasComplemento() {
   // vezes com rótulos diferentes ("Especial" e "Especiais") e ficar com a lista
   // dobrada — sem isso seriam 10, 15 exclusões uma a uma, cada uma com aviso.
   async function excluirBloco(cat, bloco) {
-    const nomes = bloco.opcoes.slice(0, 5).map(o => `• ${o.nomeCurto ?? o.nome}`).join('\n')
-    const resto = bloco.opcoes.length > 5 ? `\n… e mais ${bloco.opcoes.length - 5}` : ''
-    const msg = `⚠️ EXCLUIR o bloco "${bloco.titulo}" INTEIRO?\n\n`
-      + `Isso APAGA de vez as ${bloco.opcoes.length} opções dele:\n${nomes}${resto}\n\n`
-      + `Os produtos do cardápio NÃO são apagados — só somem daqui, da lista de escolha.\n\n`
-      + `NÃO dá pra desfazer. Tem certeza?`
-    if (!confirm(msg)) return
+    const ok = await confirmar({
+      titulo: `Excluir o bloco “${bloco.titulo}” inteiro?`,
+      texto: `Apaga de vez as ${bloco.opcoes.length} opções dele, e não dá pra desfazer:`,
+      itens: bloco.opcoes.map(o => o.nomeCurto ?? o.nome),
+      aviso: 'Os produtos do cardápio não são apagados — eles só somem daqui, da lista de escolha.',
+      textoOk: `Excluir as ${bloco.opcoes.length}`,
+    })
+    if (!ok) return
     setBusy(cat.id)
     setError(null)
     const { error } = await supabase.from('complemento_opcoes')
@@ -388,11 +393,13 @@ export default function CategoriasComplemento() {
     salvarOpcao(cat, op, { disponivel: novo })
   }
   async function removerOpcao(cat, op) {
-    const msg = `⚠️ EXCLUIR a opção "${op.nome}" DE VEZ?\n\n`
-      + `Isso APAGA a opção do sistema — NÃO é o mesmo que pausar e NÃO dá pra desfazer.\n\n`
-      + `👉 Se você só quer que ela pare de aparecer, use o botão PAUSAR (⏸), não o ✕.\n\n`
-      + `Tem certeza que quer EXCLUIR?`
-    if (!confirm(msg)) return
+    const ok = await confirmar({
+      titulo: `Excluir “${op.nome}”?`,
+      texto: 'Apaga a opção do sistema de vez — não dá pra desfazer.',
+      aviso: 'Se você só quer que ela pare de aparecer pro cliente, use o botão Pausar (⏸) em vez do ✕ — aí dá pra voltar depois.',
+      textoOk: 'Sim, excluir',
+    })
+    if (!ok) return
     setCats(prev => prev.map(c => c.id !== cat.id ? c : { ...c, opcoes: c.opcoes.filter(o => o.id !== op.id) }))
     await supabase.from('complemento_opcoes').delete().eq('id', op.id)
   }
@@ -439,6 +446,7 @@ export default function CategoriasComplemento() {
 
   return (
     <div>
+      {avisoConfirmar}
       <div className="page-header">
         <h1>Complementos</h1>
         <span className="badge badge-neutral">{cats.length} categoria{cats.length === 1 ? '' : 's'}</span>

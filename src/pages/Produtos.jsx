@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import React from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { useConfirmar } from '../hooks/useConfirmar'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 
@@ -121,6 +122,7 @@ function CategoriaCombobox({ categorias, value, onChange }) {
 
 export default function Produtos() {
   const { profile, empresa } = useAuth()
+  const [confirmar, avisoConfirmar] = useConfirmar()
   const [copiadoLink, setCopiadoLink] = useState(false)
 
   const slug = empresa?.slug ?? null
@@ -507,8 +509,14 @@ export default function Produtos() {
     if (categoriaFiltro === c.nome) setCategoriaFiltro(nome)
   }
 
-  async function handleDeleteCategoria(id) {
-    if (!confirm('Excluir esta categoria?')) return
+  async function handleDeleteCategoria(id, nome) {
+    const ok = await confirmar({
+      titulo: `Excluir a categoria “${nome}”?`,
+      texto: 'A categoria some da lista — não dá pra desfazer.',
+      aviso: 'Os produtos que estão nela não são apagados: eles ficam sem categoria até você escolher outra.',
+      textoOk: 'Sim, excluir',
+    })
+    if (!ok) return
     const { error } = await supabase.from('categorias').delete().eq('id', id)
     if (error) { setCategError(error.message); return }
     loadCategorias()
@@ -527,8 +535,13 @@ export default function Produtos() {
     loadEmbalagens()
   }
 
-  async function handleDeleteEmbalagem(id) {
-    if (!confirm('Excluir esta embalagem?')) return
+  async function handleDeleteEmbalagem(id, nome) {
+    const ok = await confirmar({
+      titulo: `Excluir a embalagem “${nome}”?`,
+      texto: 'Ela some da lista de escolha — não dá pra desfazer.',
+      textoOk: 'Sim, excluir',
+    })
+    if (!ok) return
     const { error } = await supabase.from('embalagens').delete().eq('id', id)
     if (error) { setEmbError(error.message); return }
     loadEmbalagens()
@@ -648,9 +661,15 @@ export default function Produtos() {
     loadProdutos(search, categoriaFiltro)
   }
 
-  async function handleDelete(id) {
-    if (!confirm('Excluir este produto?')) return
-    const { error } = await supabase.from('produtos').delete().eq('id', id)
+  async function handleDelete(p) {
+    const ok = await confirmar({
+      titulo: `Excluir “${p.nome}”?`,
+      texto: 'Apaga o item do cardápio de vez — não dá pra desfazer.',
+      aviso: 'Se é só uma pausa (acabou o ingrediente, por exemplo), use o botão Pausar — o cliente para de ver e você reativa quando quiser.',
+      textoOk: 'Sim, excluir',
+    })
+    if (!ok) return
+    const { error } = await supabase.from('produtos').delete().eq('id', p.id)
     if (error) setError(error.message)
     else loadProdutos(search, categoriaFiltro)
   }
@@ -705,7 +724,14 @@ export default function Produtos() {
     if (e0) { setCategError(e0.message); return }
     const n = prods?.length ?? 0
     const novoNome = `${c.nome} (cópia)`
-    if (!confirm(`Duplicar a categoria "${c.nome}" com ${n} produto(s)?\nSerá criada a categoria "${novoNome}" com uma cópia de cada item.`)) return
+    const ok = await confirmar({
+      titulo: `Duplicar a categoria “${c.nome}”?`,
+      texto: `Cria a categoria “${novoNome}” com uma cópia de cada um dos ${n} produto${n === 1 ? '' : 's'} dela.`,
+      textoOk: 'Duplicar',
+      perigo: false,
+      icone: '⧉',
+    })
+    if (!ok) return
 
     setDuplicandoCatId(c.id)
     setCategError(null)
@@ -745,6 +771,7 @@ export default function Produtos() {
 
   return (
     <div>
+      {avisoConfirmar}
       <div className="page-header">
         <h1>Produtos</h1>
         <div className="prod-header-acoes">
@@ -930,7 +957,7 @@ export default function Produtos() {
                       </button>
                       <button
                         className="btn btn-danger btn-sm"
-                        onClick={() => handleDelete(p.id)}
+                        onClick={() => handleDelete(p)}
                         title="Excluir"
                       >
                         🗑<span className="btn-label"> Excluir</span>
@@ -1543,7 +1570,7 @@ export default function Produtos() {
                           </button>{' '}
                           <button
                             className="btn btn-danger btn-sm"
-                            onClick={() => handleDeleteCategoria(c.id)}
+                            onClick={() => handleDeleteCategoria(c.id, c.nome)}
                           >
                             Excluir
                           </button>
@@ -1596,7 +1623,7 @@ export default function Produtos() {
                         <td style={{ textAlign: 'right' }}>
                           <button
                             className="btn btn-danger btn-sm"
-                            onClick={() => handleDeleteEmbalagem(e.id)}
+                            onClick={() => handleDeleteEmbalagem(e.id, e.nome)}
                           >
                             Excluir
                           </button>

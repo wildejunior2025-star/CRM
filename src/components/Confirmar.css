@@ -1,0 +1,132 @@
+/* Aviso de confirmação — visual do sistema no lugar do confirm() do navegador. */
+
+.confirmar-fundo {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;              /* acima dos modais das telas */
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: confirmar-fade 140ms ease;
+}
+
+.confirmar {
+  width: 100%;
+  max-width: 430px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.32);
+  padding: 22px;
+  animation: confirmar-sobe 160ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+.confirmar-topo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.confirmar-topo h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+/* Bolinha com o ícone: vermelha quando é coisa que apaga. */
+.confirmar-icone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  font-size: 20px;
+  background: var(--bg-hover);
+}
+.confirmar.perigo .confirmar-icone {
+  background: var(--danger-bg);
+}
+
+.confirmar-texto {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  white-space: pre-line;      /* deixa a tela quebrar linha com \n */
+}
+
+/* Lista do que vai sumir — rola se for grande, pra caixa não virar uma parede. */
+.confirmar-itens {
+  display: flex;
+  flex-direction: column;
+  margin: 14px 0 0;
+  max-height: 190px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+.confirmar-itens span {
+  padding: 9px 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.confirmar-itens span:last-child { border-bottom: none; }
+
+/* Observação que acalma: "o cardápio não é apagado". */
+.confirmar-aviso {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-hover);
+  border-left: 3px solid var(--primary);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.confirmar-botoes {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+.confirmar-botoes .btn { flex: 1; padding: 12px 16px; font-size: 15px; }
+
+@keyframes confirmar-fade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes confirmar-sobe {
+  from { opacity: 0; transform: translateY(14px) scale(0.98) }
+  to   { opacity: 1; transform: none }
+}
+
+/* ── Celular: vira folha colada embaixo, perto do dedo ── */
+@media (max-width: 640px) {
+  .confirmar-fundo { align-items: flex-end; padding: 0; }
+  .confirmar {
+    max-width: 100%;
+    border-radius: 18px 18px 0 0;
+    border-bottom: none;
+    padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+    max-height: 88dvh;
+    overflow-y: auto;
+    animation: confirmar-folha 180ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  .confirmar-itens { max-height: 160px; }
+  /* Confirmar em cima, cancelar embaixo: o polegar alcança os dois sem
+     esticar, e o botão que apaga fica longe da borda de voltar. */
+  .confirmar-botoes { flex-direction: column-reverse; gap: 8px; }
+  .confirmar-botoes .btn { padding: 14px 16px; font-size: 16px; }
+}
+
+@keyframes confirmar-folha {
+  from { transform: translateY(100%) }
+  to   { transform: none }
+}
