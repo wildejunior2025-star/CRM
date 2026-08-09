@@ -165,6 +165,10 @@ export default function CategoriasComplemento() {
   const [novaCat, setNovaCat] = useState('')
   const [busy, setBusy] = useState(null)      // id em operação (desabilita botão)
   const [busca, setBusca] = useState('')      // pesquisa (categoria/opção, sem acento)
+  // Sanfona: só UMA categoria aberta por vez. Com 3, 10 categorias de 40 sabores
+  // cada, deixar tudo aberto vira uma página quilométrica — a loja abre só a que
+  // vai mexer. null = todas fechadas.
+  const [abertaId, setAbertaId] = useState(null)
 
   // Descrição que a opção HERDA do produto de mesmo nome quando o campo fica vazio.
   // Mostrada como placeholder pra loja entender por que o site tem texto e o campo não.
@@ -209,11 +213,15 @@ export default function CategoriasComplemento() {
     const nome = novaCat.trim()
     if (!nome) return
     setBusy('nova')
-    const { error } = await supabase.from('complemento_grupos')
+    const { data, error } = await supabase.from('complemento_grupos')
       .insert({ empresa_id: empresaId, produto_id: null, nome, min: 1, max: 1 })
+      .select('id')
+      .single()
     setBusy(null)
     if (error) { setError(error.message); return }
     setNovaCat('')
+    // Categoria nova nasce aberta: é pra ela que a loja vai jogar as opções agora.
+    if (data?.id) setAbertaId(data.id)
     load()
   }
   async function salvarCategoria(cat, patch) {
@@ -265,6 +273,7 @@ export default function CategoriasComplemento() {
       }
     }
     setBusy(null)
+    setAbertaId(nova.id)   // a cópia já abre pra loja ajustar o que mudou
     load()
   }
 
@@ -469,10 +478,35 @@ export default function CategoriasComplemento() {
 
       {catsFiltradas.map(cat => {
         const naoVinculados = produtos.filter(p => !cat.links.some(l => l.produto_id === p.id))
+        // Pesquisa que sobrou UMA categoria já abre sozinha — a loja pesquisou
+        // justamente pra chegar nela.
+        const aberta = cat.id === abertaId || (!!nt && catsFiltradas.length === 1)
+        const casouPeloNome = !nt || norm(cat.nome).includes(nt)
+
+        if (!aberta) return (
+          <div key={cat.id} className={`card cc-card cc-card-fechado${cat.disponivel ? '' : ' paused'}`}>
+            <button type="button" className="cc-fechada" onClick={() => setAbertaId(cat.id)}>
+              <span className="cc-chevron">▸</span>
+              <span className="cc-fechada-nome">{cat.nome}</span>
+              <span className={`badge ${cat.disponivel ? 'badge-success' : 'badge-danger'}`}>
+                {cat.disponivel ? 'Ativa' : 'Pausada'}
+              </span>
+              <span className="cc-fechada-resumo">
+                {casouPeloNome
+                  ? `${cat.opcoes.length} opç${cat.opcoes.length === 1 ? 'ão' : 'ões'} · ${cat.links.length} produto${cat.links.length === 1 ? '' : 's'}`
+                  : `${cat.opcoes.length} opç${cat.opcoes.length === 1 ? 'ão' : 'ões'} com “${busca}”`}
+              </span>
+              <span className="cc-fechada-abrir">Editar</span>
+            </button>
+          </div>
+        )
+
         return (
           <div key={cat.id} className={`card cc-card${cat.disponivel ? '' : ' paused'}`}>
             {/* Cabeçalho da categoria */}
             <div className="cc-head">
+              <button type="button" className="cc-chevron cc-chevron-btn" title="Fechar"
+                onClick={() => setAbertaId(null)}>▾</button>
               <div className="cc-head-left">
                 <input className="cc-name" defaultValue={cat.nome}
                   onBlur={e => { const v = e.target.value.trim(); if (v && v !== cat.nome) salvarCategoria(cat, { nome: v }) }} />
