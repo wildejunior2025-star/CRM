@@ -747,7 +747,7 @@ export default function Produtos() {
     <div>
       <div className="page-header">
         <h1>Produtos</h1>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div className="prod-header-acoes">
           <button className="btn btn-secondary" onClick={() => { setCategError(null); setShowCategModal(true) }}>
             ☰ Categorias
           </button>
@@ -810,7 +810,9 @@ export default function Produtos() {
 
       {error && <p className="error-text">{error}</p>}
 
-      <div className="data-table">
+      {/* tabela-produtos: no celular esconde as colunas de detalhe (col-extra) e
+          deixa os botões só com o ícone — o nome do produto é o que importa lá. */}
+      <div className="data-table tabela-produtos">
         {loading ? (
           <div className="empty-state">Carregando...</div>
         ) : produtos.length === 0 ? (
@@ -820,16 +822,16 @@ export default function Produtos() {
             <thead>
               <tr>
                 <th>Nome</th>
-                <th>Categoria</th>
-                {usaEstoque && <th>Embalagem</th>}
-                {usaEstoque && <th>Un./caixa</th>}
-                {usaCasco && <th>Casco</th>}
-                <th>Custo</th>
+                <th className="col-extra">Categoria</th>
+                {usaEstoque && <th className="col-extra">Embalagem</th>}
+                {usaEstoque && <th className="col-extra">Un./caixa</th>}
+                {usaCasco && <th className="col-extra">Casco</th>}
+                <th className="col-extra">Custo</th>
                 <th>Venda</th>
-                {MOSTRAR_PRECO_APP && <th>Venda App</th>}
-                {usaEstoque && <th>Estoque mín.</th>}
+                {MOSTRAR_PRECO_APP && <th className="col-extra">Venda App</th>}
+                {usaEstoque && <th className="col-extra">Estoque mín.</th>}
                 <th>Disponível</th>
-                <th style={{ position: 'sticky', right: 0, background: 'var(--bg)' }}></th>
+                <th className="prod-acoes-th"></th>
               </tr>
             </thead>
             <tbody>
@@ -856,19 +858,13 @@ export default function Produtos() {
                     )}
                     <tr>
                   <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div className="prod-nome">
                       {p.foto_url ? (
-                        <img
-                          src={p.foto_url}
-                          alt={p.nome}
-                          style={{ width: 52, height: 52, borderRadius: 8, objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border)' }}
-                        />
+                        <img className="prod-foto" src={p.foto_url} alt={p.nome} />
                       ) : (
-                        <div style={{ width: 52, height: 52, borderRadius: 8, background: 'var(--bg-hover)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 20 }}>
-                          📷
-                        </div>
+                        <div className="prod-foto prod-foto-vazia">📷</div>
                       )}
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, minWidth: 0 }}>
                         <span>{p.nome}</span>
                         {(compProd[p.id]?.length > 0) && (
                           <button
@@ -891,14 +887,14 @@ export default function Produtos() {
                       </div>
                     </div>
                   </td>
-                  <td>{p.categoria}</td>
-                  {usaEstoque && <td>{p.embalagem}</td>}
-                  {usaEstoque && <td>{p.unidades_por_caixa}</td>}
-                  {usaCasco && <td>{p.controla_casco ? 'Sim' : 'Não'}</td>}
-                  <td>R$ {Number(p.preco_custo).toFixed(2)}</td>
+                  <td className="col-extra">{p.categoria}</td>
+                  {usaEstoque && <td className="col-extra">{p.embalagem}</td>}
+                  {usaEstoque && <td className="col-extra">{p.unidades_por_caixa}</td>}
+                  {usaCasco && <td className="col-extra">{p.controla_casco ? 'Sim' : 'Não'}</td>}
+                  <td className="col-extra">R$ {Number(p.preco_custo).toFixed(2)}</td>
                   <td>R$ {Number(p.preco_venda).toFixed(2)}</td>
-                  {MOSTRAR_PRECO_APP && <td>R$ {Number(p.preco_app || 0).toFixed(2)}</td>}
-                  {usaEstoque && <td>{p.estoque_minimo}</td>}
+                  {MOSTRAR_PRECO_APP && <td className="col-extra">R$ {Number(p.preco_app || 0).toFixed(2)}</td>}
+                  {usaEstoque && <td className="col-extra">{p.estoque_minimo}</td>}
                   <td>
                     <button
                       type="button"
@@ -912,37 +908,41 @@ export default function Produtos() {
                         color: p.ativo ? '#16a34a' : '#a16207',
                       }}
                     >
-                      {p.ativo ? '⏸ Pausar' : '▶ Ativar'}
+                      {p.ativo ? '⏸' : '▶'}<span className="btn-label">{p.ativo ? ' Pausar' : ' Ativar'}</span>
                     </button>
                   </td>
-                  <td style={{ position: 'sticky', right: 0, background: 'var(--surface)', boxShadow: '-4px 0 8px rgba(0,0,0,0.15)' }}>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => openEdit(p)}
-                    >
-                      Editar
-                    </button>{' '}
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => handleDuplicarProduto(p)}
-                      disabled={duplicandoId === p.id}
-                      title="Criar uma cópia deste item"
-                    >
-                      {duplicandoId === p.id ? '...' : '⧉ Duplicar'}
-                    </button>{' '}
-                    <button
-                      className="btn btn-danger btn-sm"
-                      onClick={() => handleDelete(p.id)}
-                    >
-                      Excluir
-                    </button>
+                  <td className="prod-acoes-cell">
+                    <div className="prod-acoes">
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => openEdit(p)}
+                        title="Editar"
+                      >
+                        ✏️<span className="btn-label"> Editar</span>
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleDuplicarProduto(p)}
+                        disabled={duplicandoId === p.id}
+                        title="Criar uma cópia deste item"
+                      >
+                        {duplicandoId === p.id ? '...' : <>⧉<span className="btn-label"> Duplicar</span></>}
+                      </button>
+                      <button
+                        className="btn btn-danger btn-sm"
+                        onClick={() => handleDelete(p.id)}
+                        title="Excluir"
+                      >
+                        🗑<span className="btn-label"> Excluir</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
                 {/* Complementos aninhados (grupos + opções) — estilo iFood */}
                 {compAberto.has(p.id) && (compProd[p.id]?.length > 0) && (
                   <tr>
                     <td colSpan={11} style={{ padding: 0, background: 'var(--bg-hover)' }}>
-                      <div style={{ padding: '8px 12px 12px 74px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div className="prod-comp-lista" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {(() => {
                           // Ao buscar, mostra só as opções que casam com o termo (sem acento).
                           // Se o termo casa o NOME da categoria, mostra a categoria inteira.

@@ -119,6 +119,35 @@
   border-bottom: none;
 }
 
+/* ── Catálogo (Produtos) ──────────────────────────────────────────────────
+   A tabela é larga demais pro celular. Aqui ficam as peças que o bloco
+   responsivo lá embaixo encolhe: colunas de detalhe (.col-extra), rótulo dos
+   botões (.btn-label) e a foto do item. */
+.prod-header-acoes { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+.prod-nome { display: flex; align-items: center; gap: 10px; }
+.prod-foto {
+  width: 52px; height: 52px; border-radius: 8px; object-fit: cover;
+  flex-shrink: 0; border: 1px solid var(--border);
+}
+.prod-foto-vazia {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-hover); color: var(--text-muted); font-size: 20px;
+}
+
+/* Lista de complementos que abre embaixo do item: recuada pra ficar claro que
+   pertence ao produto de cima (no celular o recuo encolhe). */
+.prod-comp-lista { padding: 8px 12px 12px 74px; }
+
+.prod-acoes { display: flex; align-items: center; gap: 6px; }
+/* Coluna de ações colada na direita: no desktop a tabela rola na horizontal
+   e os botões precisam continuar à vista. */
+.prod-acoes-th { position: sticky; right: 0; background: var(--bg); }
+.prod-acoes-cell {
+  position: sticky; right: 0; background: var(--surface);
+  box-shadow: -4px 0 8px rgba(0, 0, 0, 0.15);
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -442,6 +471,30 @@ a.dashboard-card-link:hover {
     font-size: 13px;
     white-space: nowrap;
   }
+
+  /* ── Catálogo no celular ──────────────────────────────────────────────
+     Antes a tabela inteira ia pro celular e o nome do produto ficava cortado
+     fora da tela. Agora sobram só Nome, Venda, Disponível e as ações: as
+     colunas de detalhe continuam no botão Editar, e os botões viram ícone. */
+  .tabela-produtos table { min-width: 0; width: 100%; }
+  .tabela-produtos .col-extra { display: none; }
+  .tabela-produtos table th,
+  .tabela-produtos table td { padding: 8px 6px; white-space: normal; }
+  .tabela-produtos .btn-label { display: none; }
+  .tabela-produtos .btn-sm { padding: 8px 9px; font-size: 14px; }
+  .tabela-produtos .prod-acoes { gap: 4px; }
+  /* Sem colunas escondidas não há rolagem lateral: a sombra da coluna colada
+     só sujaria a tela. */
+  .tabela-produtos .prod-acoes-cell { position: static; box-shadow: none; }
+  .tabela-produtos .prod-acoes-th { position: static; }
+  .tabela-produtos .prod-nome { gap: 8px; }
+  .tabela-produtos .prod-foto { width: 40px; height: 40px; font-size: 16px; }
+  .prod-comp-lista { padding: 8px 8px 12px 14px; }
+
+  /* Botões do topo do Catálogo: no celular quebram em linha e dividem espaço
+     em vez de escaparem pra fora da tela. */
+  .prod-header-acoes { width: 100%; gap: 6px; }
+  .prod-header-acoes .btn { flex: 1; min-width: 0; padding: 10px 8px; font-size: 13px; }
 
   /* Modal ocupa tela inteira no mobile */
   .modal-overlay {
