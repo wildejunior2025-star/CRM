@@ -70,16 +70,16 @@ serve(async (req) => {
       .from("profiles").select("empresa_id, perfil").eq("id", user.id).single()
 
     const body = await req.json().catch(() => ({}))
-    const { code, waba_id, phone_number_id } = body as Record<string, string>
+    const { code } = body as Record<string, string>
+    let waba_id = body.waba_id ? String(body.waba_id) : ""
+    let phone_number_id = body.phone_number_id ? String(body.phone_number_id) : ""
 
     // super_admin pode conectar em nome de uma loja específica; lojista usa a dele
     const empresaId = (profile?.perfil === "super_admin" && body.empresa_id)
       ? String(body.empresa_id)
       : profile?.empresa_id
-    if (!empresaId)        return json({ error: "Empresa não encontrada" }, 400)
-    if (!code)             return json({ error: "Faltou o código do cadastro (code)." }, 400)
-    if (!waba_id)          return json({ error: "Faltou o WABA (waba_id)." }, 400)
-    if (!phone_number_id)  return json({ error: "Faltou o número (phone_number_id)." }, 400)
+    if (!empresaId) return json({ error: "Empresa não encontrada" }, 400)
+    if (!code)      return json({ error: "Faltou o código do cadastro (code)." }, 400)
 
     // ── 1. Troca o code por um token da integração ──
     const tokenRes = await fetch(
@@ -93,6 +93,52 @@ serve(async (req) => {
       return json({ error: "Não consegui validar a conexão com a Meta. Tente conectar de novo." }, 400)
     }
 
+    // ── 1b. Descobre a WABA e o número quando o popup não mandou ──
+    // O popup manda os IDs por um evento à parte, que às vezes se perde (ele
+    // termina numa página em branco e o aviso nunca chega ao navegador). O
+    // token que acabamos de trocar sabe a quais WABAs ele dá acesso, então dá
+    // pra achar tudo por aqui em vez de mandar a loja refazer o cadastro.
+    if (!waba_id || !phone_number_id) {
+      const dbg = await fetch(
+        `https://graph.facebook.com/${GRAPH_VERSION}/debug_token`
+          + `?input_token=${encodeURIComponent(bizToken)}`
+          + `&access_token=${APP_ID}|${APP_SECRET}`,
+      )
+      const dbgData = await dbg.json().catch(() => ({}))
+      const escopos = dbgData?.data?.granular_scopes ?? []
+      const candidatas: string[] = waba_id ? [waba_id] : [...new Set(
+        escopos
+          .filter((s: { scope: string }) => s.scope?.startsWith("whatsapp_business_"))
+          .flatMap((s: { target_ids?: string[] }) => s.target_ids ?? []),
+      )] as string[]
+
+      if (!candidatas.length) {
+        console.error("[signup] sem waba no token", JSON.stringify(dbgData).slice(0, 400))
+        return json({ error: "A Meta não disse qual conta foi conectada. Refaça a conexão até o fim." }, 400)
+      }
+
+      // A loja pode ter mais de uma conta compartilhada — inclusive uma recém
+      // criada e VAZIA, se ela repetiu o cadastro. A que vale é a que tem número:
+      // conta sem número não recebe mensagem nenhuma.
+      for (const cand of candidatas) {
+        const nums = await graph(`${cand}/phone_numbers?fields=id,display_phone_number`, bizToken)
+        const primeiro = nums.data?.data?.[0]?.id
+        if (primeiro) {
+          waba_id = cand
+          phone_number_id = phone_number_id || primeiro
+          break
+        }
+      }
+
+      if (!waba_id || !phone_number_id) {
+        console.error("[signup] nenhuma waba com número", JSON.stringify(candidatas))
+        return json({
+          error: "A conta conectou mas ainda não tem número dentro dela. "
+            + "Refaça a conexão escolhendo o número da loja até o fim.",
+        }, 400)
+      }
+    }
+
     // ── 2. Assina o app na WABA do lojista (pra receber os webhooks) ──
     const sub = await graph(`${waba_id}/subscribed_apps`, bizToken, "POST")
     if (!sub.ok) console.error("[signup] subscribe falhou", sub.status, JSON.stringify(sub.data).slice(0, 300))
@@ -103,9 +149,16 @@ serve(async (req) => {
       messaging_product: "whatsapp",
       pin,
     })
-    // "já registrado" também é sucesso pra gente
-    const jaRegistrado = !reg.ok && JSON.stringify(reg.data).includes("already")
-    if (!reg.ok && !jaRegistrado) {
+    // Nem toda recusa aqui é problema:
+    //  • "already"  — número já registrado, que é o que a gente queria mesmo.
+    //  • "not available for SMB businesses" — CONEXÃO POR COEXISTÊNCIA. Quando a
+    //    loja pluga o número lendo o QR com o WhatsApp Business do celular, quem
+    //    registra é o próprio app; esse endpoint nem existe pra ela. Tratar como
+    //    falha derrubava justamente o caminho que as lojas vão usar.
+    const textoReg = JSON.stringify(reg.data)
+    const registroDispensado = !reg.ok
+      && (textoReg.includes("already") || textoReg.includes("not available for SMB"))
+    if (!reg.ok && !registroDispensado) {
       console.error("[signup] register falhou", reg.status, JSON.stringify(reg.data).slice(0, 400))
       const userMsg = reg.data?.error?.error_user_msg
       return json({

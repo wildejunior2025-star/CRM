@@ -253,27 +253,48 @@ export default function WhatsAppConfig() {
     }
   }
 
-  async function handleConnectCloud() {
+  // Fecha a conexão a partir do que a Meta devolveu. Fica separado porque roda
+  // em dois momentos: no fluxo normal e quando o código chega atrasado, depois
+  // de a tela já ter avisado que desistiu de esperar.
+  async function finalizarConexaoCloud({ code, phone_number_id, waba_id }) {
     setCloudBusy(true)
     setCloudError(null)
     try {
-      // 1. Popup da Meta — lojista conecta o próprio número
-      const { code, phone_number_id, waba_id } = await conectarWhatsAppCloud()
-
-      // 2. Backend finaliza: assina o app na WABA, registra o número e salva
       const { data, error } = await supabase.functions.invoke('whatsapp-cloud-signup', {
         body: { code, phone_number_id, waba_id },
       })
       if (error || data?.error) {
-        throw new Error(data?.error ?? error?.message ?? 'Erro ao conectar.')
+        // Em erro HTTP o supabase-js devolve só "non-2xx status code" e joga o
+        // corpo pra dentro do `context` — que é onde está a explicação de
+        // verdade. Sem isto a loja (e o suporte) ficam sem saber o que houve.
+        let msg = data?.error ?? error?.message ?? 'Erro ao conectar.'
+        try {
+          const corpo = await error?.context?.json?.()
+          if (corpo?.error) msg = corpo.error
+        } catch { /* corpo não era JSON — fica a mensagem genérica */ }
+        throw new Error(msg)
       }
-
       setCloudPhone(data.display_number ?? null)
       setCloudName(data.verified_name ?? null)
       loadConfig()
     } catch (e) {
       setCloudError(e.message ?? String(e))
     } finally {
+      setCloudBusy(false)
+    }
+  }
+
+  async function handleConnectCloud() {
+    setCloudBusy(true)
+    setCloudError(null)
+    try {
+      // Popup da Meta — lojista conecta o próprio número. `onCodigo` recolhe o
+      // código que chegar tarde demais pra promessa, pra loja não perder o que
+      // já fez só porque demorou.
+      const dados = await conectarWhatsAppCloud({ onCodigo: finalizarConexaoCloud })
+      await finalizarConexaoCloud(dados)
+    } catch (e) {
+      setCloudError(e.message ?? String(e))
       setCloudBusy(false)
     }
   }

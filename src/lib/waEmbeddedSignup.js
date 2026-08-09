@@ -49,8 +49,14 @@ function carregarSDK() {
   return sdkPromise
 }
 
-// Abre o popup e resolve com { code, phone_number_id, waba_id }.
-export async function conectarWhatsAppCloud() {
+/**
+ * Abre o popup e resolve com { code, phone_number_id, waba_id }.
+ *
+ * @param onCodigo  chamado assim que o código chega — inclusive DEPOIS do
+ *   tempo limite. Sem isso, uma conexão que demorou (a loja lendo a tela,
+ *   procurando o QR no celular) era jogada fora justamente quando dava certo.
+ */
+export async function conectarWhatsAppCloud({ onCodigo } = {}) {
   if (!CONFIG_ID) {
     throw new Error('Conexão via Meta ainda não liberada (config_id ausente). Fale com o suporte.')
   }
@@ -58,6 +64,27 @@ export async function conectarWhatsAppCloud() {
 
   return new Promise((resolve, reject) => {
     let sessionInfo = null
+    let pronto = false
+    let desistiu = false
+
+    // O popup às vezes termina numa página em branco e nunca fecha: a Meta
+    // registra a conexão do lado dela (o número já aparece plugado no celular),
+    // mas o aviso de volta pro navegador se perde e o FB.login nunca chama.
+    // Sem isto a tela ficava em "Conectando..." pra sempre, sem dizer nada.
+    //
+    // Só que desistir aqui NÃO pode significar largar o código: quem estoura o
+    // tempo é justamente quem está com dificuldade, e o código costuma chegar
+    // logo depois. Por isso a gente avisa a loja mas continua ouvindo — quando
+    // chegar, `onCodigo` conclui a conexão do mesmo jeito.
+    const limite = setTimeout(() => {
+      if (pronto) return
+      desistiu = true
+      reject(new Error(
+        'A janela da Meta está demorando. Pode terminar por ela mesmo assim — '
+        + 'se você concluir, a conexão entra sozinha aqui. Se ela ficou em branco, '
+        + 'feche-a e clique em Conectar de novo.'
+      ))
+    }, 15 * 60 * 1000)
 
     function onMessage(event) {
       if (
@@ -83,6 +110,8 @@ export async function conectarWhatsAppCloud() {
     }
 
     function cleanup() {
+      pronto = true
+      clearTimeout(limite)
       window.removeEventListener('message', onMessage)
     }
 
@@ -92,16 +121,21 @@ export async function conectarWhatsAppCloud() {
       const code = response?.authResponse?.code
       cleanup()
       if (!code) {
+        if (desistiu) return
         return reject(new Error('Você não concluiu a conexão. Tente de novo.'))
       }
-      if (!sessionInfo?.phone_number_id || !sessionInfo?.waba_id) {
-        return reject(new Error('A Meta não devolveu o número. Refaça a conexão até o final.'))
-      }
-      resolve({
+      // Os IDs vêm por um evento separado do popup e às vezes se perdem no
+      // caminho. Com o `code` na mão o backend descobre a WABA e o número
+      // sozinho (pelo próprio token), então não vale barrar a loja por isso.
+      const dados = {
         code,
-        phone_number_id: sessionInfo.phone_number_id,
-        waba_id: sessionInfo.waba_id,
-      })
+        phone_number_id: sessionInfo?.phone_number_id ?? null,
+        waba_id: sessionInfo?.waba_id ?? null,
+      }
+      // Chegou depois do tempo limite: a promessa já foi recusada, então quem
+      // conclui é o callback — do contrário a loja teria feito tudo à toa.
+      if (desistiu) return onCodigo?.(dados)
+      resolve(dados)
     }, {
       config_id: CONFIG_ID,
       response_type: 'code',

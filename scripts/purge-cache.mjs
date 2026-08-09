@@ -16,7 +16,18 @@
 // dizer que deu certo.
 import { readFileSync } from 'node:fs'
 
-const HOSTS = ['gestor.fwcinter.com', 'lojaonline.fwcinter.com']
+// TODOS os domínios do app. Faltar um aqui não dá erro nenhum no deploy — o host
+// esquecido simplesmente continua servindo o HTML velho na borda, apontando pra
+// um bundle antigo, e a tela nova "não existe" só ali. Foi o que aconteceu com o
+// `portal`: ficou meses servindo um index.html anterior ao Cadastro Incorporado,
+// então o botão de conectar pela Meta nunca aparecia — e parecia problema da Meta.
+const HOSTS = [
+  'gestor.fwcinter.com',
+  'lojaonline.fwcinter.com',
+  'portal.fwcinter.com',
+  'admin.fwcinter.com',
+  'app.fwcinter.com',
+]
 // A borda às vezes leva mais de um minuto pra parar de servir o HTML antigo.
 // Com 6×8s (~48s) o script já deu alarme falso num deploy que estava certo —
 // e alarme falso ensina a ignorar o aviso, que é justamente o que não pode.
