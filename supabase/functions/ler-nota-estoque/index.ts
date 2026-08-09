@@ -92,7 +92,9 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 3000,
+        // Nota de PDF (DANFE) tem MUITO mais linha que foto de cupom. Com 3000 a resposta
+        // vinha cortada no meio e o JSON não abria — o usuário só via "erro na função".
+        max_tokens: 16000,
         system,
         messages: [
           {
@@ -113,14 +115,39 @@ serve(async (req) => {
     }
 
     const data = await claudeRes.json()
-    const texto: string = data?.content?.[0]?.text ?? ""
-    const ini = texto.indexOf("{")
-    const fim = texto.lastIndexOf("}")
-    if (ini === -1 || fim === -1) return json({ ok: false, error: "Não consegui interpretar a nota." }, 422)
+    const texto: string = (Array.isArray(data?.content) ? data.content : [])
+      .filter((b: any) => b?.type === "text").map((b: any) => b?.text ?? "").join("")
+    const stop: string = data?.stop_reason ?? ""
+    console.log("ler-nota-estoque: stop_reason", stop, "| chars", texto.length)
 
-    let parsed: any
-    try { parsed = JSON.parse(texto.slice(ini, fim + 1)) } catch {
-      return json({ ok: false, error: "Não consegui interpretar a nota." }, 422)
+    const ini = texto.indexOf("{")
+    if (ini === -1) {
+      console.error("Sem JSON na resposta:", texto.slice(0, 300))
+      return json({ ok: false, error: "Não consegui interpretar a nota. Tente uma foto/PDF mais nítido." }, 422)
+    }
+    const bruto = texto.slice(ini)
+
+    // Se a resposta veio cortada (nota gigante), o JSON não fecha. Em vez de perder tudo,
+    // cata os itens que JÁ vieram inteiros — melhor lançar 30 de 40 do que nenhum.
+    let parsed: any = null
+    let truncado = false
+    try {
+      parsed = JSON.parse(bruto.slice(0, bruto.lastIndexOf("}") + 1))
+    } catch {
+      truncado = true
+      const pega = (re: RegExp) => {
+        const out: any[] = []
+        for (const m of bruto.matchAll(re)) { try { out.push(JSON.parse(m[0])) } catch { /* objeto pela metade */ } }
+        return out
+      }
+      const itensSalvos = pega(/\{[^{}]*"indice"[^{}]*\}/g)
+      const naoSalvos = pega(/\{[^{}]*"nome"\s*:[^{}]*\}/g)
+      if (itensSalvos.length || naoSalvos.length) parsed = { itens: itensSalvos, nao_encontrados: naoSalvos }
+    }
+
+    if (!parsed) {
+      console.error("JSON não abriu. Trecho:", bruto.slice(0, 300), "...", bruto.slice(-200))
+      return json({ ok: false, error: "Não consegui interpretar a nota. Tente uma foto/PDF mais nítido." }, 422)
     }
 
     // Quantidade PODE ser fracionada — carne vem em 6,6 kg. Arredondar pra inteiro aqui
@@ -148,7 +175,11 @@ serve(async (req) => {
       }))
       .filter((n: any) => n.nome)
 
-    return json({ ok: true, itens, nao_encontrados })
+    // Avisa o lojista quando a nota era grande demais e pode ter sobrado item de fora.
+    const aviso = (truncado || stop === "max_tokens")
+      ? "A nota é grande e pode ter ficado item de fora. Confira a lista contra o papel."
+      : null
+    return json({ ok: true, itens, nao_encontrados, aviso })
   } catch (e) {
     console.error("ler-nota-estoque:", e)
     return json({ ok: false, error: String((e as Error)?.message ?? e) }, 500)

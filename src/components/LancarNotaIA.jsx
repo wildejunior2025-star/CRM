@@ -12,11 +12,12 @@ export default function LancarNotaIA({ empresaId, onDone }) {
   const [itens, setItens] = useState([])   // [{ tipo, id, nome, quantidade, custo_unit, incluir }]
   const [naoEnc, setNaoEnc] = useState([])
   const [erro, setErro] = useState(null)
+  const [aviso, setAviso] = useState(null)
   const [atualizarCusto, setAtualizarCusto] = useState(true)
   const [salvando, setSalvando] = useState(false)
 
   async function abrir() {
-    setStep('upload'); setItens([]); setNaoEnc([]); setErro(null); setAtualizarCusto(true); setShow(true)
+    setStep('upload'); setItens([]); setNaoEnc([]); setErro(null); setAviso(null); setAtualizarCusto(true); setShow(true)
     const [pr, mp] = await Promise.all([
       supabase.from('produtos').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
       supabase.from('materias_primas').select('id, nome, unidade').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
@@ -44,8 +45,18 @@ export default function LancarNotaIA({ empresaId, onDone }) {
           materias: materias.map(m => ({ id: m.id, nome: m.nome })),
         },
       })
-      if (error) throw new Error(error.message)
+      // Em erro, o supabase-js devolve só "non-2xx status code" e esconde o motivo no
+      // corpo da resposta — abre pra mostrar o recado de verdade pro lojista.
+      if (error) {
+        let msg = error.message
+        try {
+          const corpo = await error.context?.json?.()
+          if (corpo?.error) msg = corpo.error
+        } catch { /* sem corpo legível, fica a mensagem genérica */ }
+        throw new Error(msg)
+      }
       if (!data?.ok) throw new Error(data?.error || 'Não consegui ler a nota.')
+      setAviso(data.aviso || null)
       setItens((data.itens || []).map(it => ({
         ...it,
         quantidade: String(it.quantidade),
@@ -154,6 +165,12 @@ export default function LancarNotaIA({ empresaId, onDone }) {
             {step === 'revisar' && (
               <>
                 <p style={{ fontSize: 13.5, color: 'var(--text-muted)' }}>Confira os itens, ajuste quantidade/custo e confirme. Só entra o que estiver marcado.</p>
+                {aviso && (
+                  <div style={{
+                    margin: '8px 0', padding: '8px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                    background: 'rgba(217,119,6,.12)', color: '#b45309', border: '1px solid rgba(217,119,6,.4)',
+                  }}>⚠️ {aviso}</div>
+                )}
                 {itens.length === 0 ? (
                   <div className="empty-state">A IA não achou itens do seu catálogo nessa nota.</div>
                 ) : (
