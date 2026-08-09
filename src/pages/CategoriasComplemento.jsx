@@ -357,6 +357,26 @@ export default function CategoriasComplemento() {
     load()
   }
 
+  // Apaga o bloco inteiro de uma vez. Acontece de a loja trazer o cardápio duas
+  // vezes com rótulos diferentes ("Especial" e "Especiais") e ficar com a lista
+  // dobrada — sem isso seriam 10, 15 exclusões uma a uma, cada uma com aviso.
+  async function excluirBloco(cat, bloco) {
+    const nomes = bloco.opcoes.slice(0, 5).map(o => `• ${o.nomeCurto ?? o.nome}`).join('\n')
+    const resto = bloco.opcoes.length > 5 ? `\n… e mais ${bloco.opcoes.length - 5}` : ''
+    const msg = `⚠️ EXCLUIR o bloco "${bloco.titulo}" INTEIRO?\n\n`
+      + `Isso APAGA de vez as ${bloco.opcoes.length} opções dele:\n${nomes}${resto}\n\n`
+      + `Os produtos do cardápio NÃO são apagados — só somem daqui, da lista de escolha.\n\n`
+      + `NÃO dá pra desfazer. Tem certeza?`
+    if (!confirm(msg)) return
+    setBusy(cat.id)
+    setError(null)
+    const { error } = await supabase.from('complemento_opcoes')
+      .delete().in('id', bloco.opcoes.map(o => o.id))
+    setBusy(null)
+    if (error) { setError(error.message); return }
+    load()
+  }
+
   async function salvarOpcao(cat, op, patch) {
     setCats(prev => prev.map(c => c.id !== cat.id ? c : {
       ...c, opcoes: c.opcoes.map(o => o.id === op.id ? { ...o, ...patch } : o),
@@ -567,6 +587,11 @@ export default function CategoriasComplemento() {
                         title="Aparece como título deste trecho na loja online"
                         onBlur={e => renomearBloco(cat, bloco, e.target.value)} />
                       <span className="cc-empty" style={{ fontSize: 11 }}>· {bloco.opcoes.length}</span>
+                      <button type="button" className="cc-bloco-del" disabled={busy === cat.id}
+                        title={`Apagar o bloco "${bloco.titulo}" e as ${bloco.opcoes.length} opções dele`}
+                        onClick={() => excluirBloco(cat, bloco)}>
+                        🗑 Apagar bloco
+                      </button>
                     </div>
                   )}
                   {bloco.opcoes.map(op => (

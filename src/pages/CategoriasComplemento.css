@@ -159,6 +159,17 @@
   margin: 12px 0 4px;
 }
 .cc-bloco-head .cc-input { width: 150px; font-weight: 600; }
+/* Apagar o bloco todo: o caso comum é a loja ter trazido o cardápio duas vezes
+   e ficar com a lista dobrada. Discreto, pra não competir com o renomear. */
+.cc-bloco-del {
+  margin-left: auto;
+  background: none; border: 1px solid var(--border); border-radius: 7px;
+  color: var(--danger); cursor: pointer;
+  font-size: 12px; font-weight: 600; padding: 6px 10px; white-space: nowrap;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.cc-bloco-del:hover:not(:disabled) { background: var(--danger-bg); border-color: var(--danger); }
+.cc-bloco-del:disabled { opacity: 0.5; cursor: default; }
 .cc-bloco-label {
   font-size: 11px;
   font-weight: 700;
@@ -229,4 +240,47 @@
 .cc-multiadd-actions {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 8px; border-top: 1px solid var(--border); background: var(--surface);
+}
+
+/* ══════════════════════════════════════════
+   CELULAR
+   A linha da opção era "nome | preço | ⏸ | ✕" lado a lado. Input tem largura
+   natural de ~170px, então a linha não cabia em 360px e a tela escapava pro
+   lado — dava pra ver, mas não dava pra alcançar o ✕. Aqui o preço e os botões
+   descem pra uma segunda linha e tudo passa a caber.
+══════════════════════════════════════════ */
+@media (max-width: 640px) {
+  /* Sem isso o input segura a largura dele e estoura a grade. */
+  .cc-input { min-width: 0; }
+
+  .cc-opt {
+    grid-template-columns: 1fr auto auto;
+    grid-template-areas:
+      'nome  nome  nome'
+      'preco pausa excluir'
+      'desc  desc  desc';
+    gap: 6px;
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--border);
+  }
+  .cc-opt > .cc-input:first-child { grid-area: nome; }
+  .cc-opt .cc-price-wrap { grid-area: preco; width: 120px; }
+  .cc-opt > .btn { grid-area: pausa; }
+  .cc-opt > .cc-iconbtn { grid-area: excluir; font-size: 18px; padding: 8px 12px; }
+  .cc-opt-desc { grid-area: desc; margin-top: 2px; }
+
+  /* Cabeçalho do bloco: o "Apagar bloco" desce e ocupa a linha inteira, pra
+     ninguém errar o toque e apagar o bloco sem querer. */
+  .cc-bloco-head { flex-wrap: wrap; }
+  .cc-bloco-head .cc-input { width: auto; flex: 1; }
+  .cc-bloco-del { margin-left: 0; width: 100%; padding: 9px 10px; }
+
+  /* Cabeçalho da categoria e barra de criar: cada coisa na sua linha. */
+  .cc-head { padding: 12px; }
+  .cc-head-left { width: 100%; }
+  .cc-name { width: 100%; min-width: 0; }
+  .cc-head-actions { width: 100%; }
+  .cc-head-actions .btn { flex: 1; }
+  .cc-body { padding: 12px; gap: 18px; }
+  .cc-create .btn { width: 100%; }
 }
