@@ -62,7 +62,7 @@ serve(async (req) => {
       "Responda SOMENTE com um JSON válido, sem texto antes ou depois:",
       "{",
       '  "itens": [ { "indice": number, "quantidade": number, "custo_unit": number | null } ],',
-      '  "nao_encontrados": [ { "nome": string, "quantidade": number, "custo_unit": number | null } ]',
+      '  "nao_encontrados": [ { "nome": string, "quantidade": number, "custo_unit": number | null, "unidade": "kg"|"g"|"L"|"ml"|"un" } ]',
       "}",
       "",
       "Regras:",
@@ -77,6 +77,9 @@ serve(async (req) => {
       "  só tiver o total da linha, divida pelo total de unidades. Se não der pra saber, use null.",
       "- Use ponto como separador decimal (ex.: 4.50).",
       "- Só use índices que existam no catálogo. Não invente itens que não estão na nota.",
+      "- Em 'nao_encontrados', escreva o 'nome' POR EXTENSO e em minúsculo, desabreviando o que",
+      "  a nota encurtou (ex.: 'COXA S/C FGO' -> 'coxa sobre coxa de frango'). Esse nome vai",
+      "  ser cadastrado do jeito que você escrever. E diga a 'unidade' pela nota: kg, g, L, ml ou un.",
       "- Ignore linhas que não são produto (impostos, frete, subtotais, dados do fornecedor).",
       "",
       "CATÁLOGO DA LOJA (indice<TAB>[TIPO] nome):",
@@ -172,6 +175,7 @@ serve(async (req) => {
         nome: String(n?.nome ?? "").slice(0, 120),
         quantidade: qtd(n?.quantidade),
         custo_unit: n?.custo_unit != null && Number.isFinite(Number(n.custo_unit)) ? Number(n.custo_unit) : null,
+        unidade: ["kg", "g", "L", "ml", "un"].includes(String(n?.unidade)) ? String(n.unidade) : "un",
       }))
       .filter((n: any) => n.nome)
 

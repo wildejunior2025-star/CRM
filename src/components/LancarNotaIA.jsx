@@ -63,7 +63,14 @@ export default function LancarNotaIA({ empresaId, onDone }) {
         custo_unit: it.custo_unit != null ? String(it.custo_unit).replace('.', ',') : '',
         incluir: true,
       })))
-      setNaoEnc(data.nao_encontrados || [])
+      // Item que não está no cadastro vira uma linha editável pra criar na hora como insumo.
+      setNaoEnc((data.nao_encontrados || []).map(n => ({
+        nome: n.nome || '',
+        unidade: n.unidade || 'un',
+        quantidade: String(n.quantidade ?? ''),
+        custo_unit: n.custo_unit != null ? String(n.custo_unit).replace('.', ',') : '',
+        criar: true,
+      })))
       setStep('revisar')
     } catch (e) {
       setErro(e.message || 'Falha ao ler a nota.')
@@ -87,10 +94,41 @@ export default function LancarNotaIA({ empresaId, onDone }) {
 
   const uniMateria = (id) => materias.find(m => m.id === id)?.unidade || ''
   const setItem = (idx, patch) => setItens(arr => arr.map((x, i) => i === idx ? { ...x, ...patch } : x))
+  const setNovo = (idx, patch) => setNaoEnc(arr => arr.map((x, i) => i === idx ? { ...x, ...patch } : x))
+  const num = (v) => Number(String(v).replace(',', '.'))
+
+  // Cadastra como matéria-prima os itens que a IA não achou e o lojista marcou.
+  // Devolve as linhas prontas pra entrada de estoque. Se o nome já existir, reusa o
+  // cadastro em vez de criar repetido.
+  async function criarNovosInsumos() {
+    const criar = naoEnc.filter(n => n.criar && n.nome.trim() && num(n.quantidade) > 0)
+    if (!criar.length) return []
+    const norm = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
+    const linhas = []
+    for (const n of criar) {
+      const nome = n.nome.trim()
+      const custo = num(n.custo_unit)
+      const jaTem = materias.find(m => norm(m.nome) === norm(nome))
+      let id = jaTem?.id
+      if (id && atualizarCusto && Number.isFinite(custo) && custo > 0) {
+        await supabase.from('materias_primas').update({ custo }).eq('id', id)
+      }
+      if (!id) {
+        const { data, error } = await supabase.from('materias_primas')
+          .insert({ empresa_id: empresaId, nome, unidade: n.unidade, custo: Number.isFinite(custo) && custo > 0 ? custo : 0 })
+          .select('id').single()
+        if (error) throw new Error(`Não deu pra criar "${nome}": ${error.message}`)
+        id = data.id
+      }
+      linhas.push({ empresa_id: empresaId, materia_prima_id: id, tipo: 'entrada', quantidade: num(n.quantidade) })
+    }
+    return linhas
+  }
 
   async function confirmar() {
-    const inc = itens.filter(it => it.incluir && Number(String(it.quantidade).replace(',', '.')) > 0)
-    if (!inc.length) { setErro('Marque ao menos um item pra lançar.'); return }
+    const inc = itens.filter(it => it.incluir && num(it.quantidade) > 0)
+    const novos = naoEnc.filter(n => n.criar && n.nome.trim() && num(n.quantidade) > 0)
+    if (!inc.length && !novos.length) { setErro('Marque ao menos um item pra lançar.'); return }
     setSalvando(true); setErro(null)
     const prodLinhas = inc.filter(it => it.tipo === 'produto').map(it => ({
       produto_id: it.id, tipo: 'entrada', quantidade: Number(String(it.quantidade).replace(',', '.')),
@@ -101,8 +139,10 @@ export default function LancarNotaIA({ empresaId, onDone }) {
       quantidade: Number(String(it.quantidade).replace(',', '.')),
     }))
     try {
+      const linhasNovas = await criarNovosInsumos()
+      const todasMat = [...matLinhas, ...linhasNovas]
       if (prodLinhas.length) { const { error } = await supabase.from('estoque_movimentos').insert(prodLinhas); if (error) throw error }
-      if (matLinhas.length) { const { error } = await supabase.from('materia_prima_movimentos').insert(matLinhas); if (error) throw error }
+      if (todasMat.length) { const { error } = await supabase.from('materia_prima_movimentos').insert(todasMat); if (error) throw error }
       if (atualizarCusto) {
         for (const it of inc) {
           const custo = Number(String(it.custo_unit).replace(',', '.'))
@@ -121,6 +161,7 @@ export default function LancarNotaIA({ empresaId, onDone }) {
 
   const nProd = itens.filter(it => it.incluir && it.tipo === 'produto').length
   const nMat = itens.filter(it => it.incluir && it.tipo === 'materia').length
+  const nNovo = naoEnc.filter(n => n.criar && n.nome.trim() && num(n.quantidade) > 0).length
 
   return (
     <>
@@ -172,7 +213,10 @@ export default function LancarNotaIA({ empresaId, onDone }) {
                   }}>⚠️ {aviso}</div>
                 )}
                 {itens.length === 0 ? (
-                  <div className="empty-state">A IA não achou itens do seu catálogo nessa nota.</div>
+                  <div className="empty-state">
+                    Nenhum item da nota bateu com o que você já tem cadastrado.
+                    {naoEnc.length > 0 && ' Dá pra criar tudo abaixo.'}
+                  </div>
                 ) : (
                   <div className="data-table" style={{ marginTop: 8 }}>
                     <table style={{ width: '100%' }}>
@@ -205,11 +249,34 @@ export default function LancarNotaIA({ empresaId, onDone }) {
 
                 {naoEnc.length > 0 && (
                   <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, background: 'rgba(217,119,6,.1)', border: '1px solid #d97706' }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#b45309', marginBottom: 4 }}>⚠️ Não achei no catálogo (não vão entrar):</div>
-                    <div style={{ fontSize: 12.5, color: 'var(--text)' }}>
-                      {naoEnc.map((n, i) => (<div key={i}>• {n.quantidade}× {n.nome}</div>))}
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#b45309', marginBottom: 6 }}>
+                      ⚠️ Não achei no seu cadastro — marque pra criar como insumo já com a entrada:
                     </div>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>Cadastre no Catálogo (produto) ou em Matérias-primas e lance de novo.</div>
+                    <div className="data-table">
+                      <table style={{ width: '100%' }}>
+                        <thead><tr>
+                          <th style={{ width: 34 }}></th><th>Nome (dá pra corrigir)</th><th style={{ width: 70 }}>Un.</th><th style={{ width: 80 }}>Qtd</th><th style={{ width: 104 }}>Custo un.</th>
+                        </tr></thead>
+                        <tbody>
+                          {naoEnc.map((n, i) => (
+                            <tr key={i} style={{ opacity: n.criar ? 1 : .5 }}>
+                              <td><input type="checkbox" checked={!!n.criar} onChange={e => setNovo(i, { criar: e.target.checked })} /></td>
+                              <td><input value={n.nome} onChange={e => setNovo(i, { nome: e.target.value })} style={{ width: '100%' }} /></td>
+                              <td>
+                                <select value={n.unidade} onChange={e => setNovo(i, { unidade: e.target.value })} style={{ width: '100%' }}>
+                                  {['kg', 'g', 'L', 'ml', 'un'].map(u => <option key={u} value={u}>{u}</option>)}
+                                </select>
+                              </td>
+                              <td><input inputMode="decimal" value={n.quantidade} onChange={e => setNovo(i, { quantidade: e.target.value })} style={{ width: '100%' }} /></td>
+                              <td><input inputMode="decimal" placeholder="—" value={n.custo_unit} onChange={e => setNovo(i, { custo_unit: e.target.value })} style={{ width: '100%' }} /></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>
+                      Entram como <strong>insumo</strong> (matéria-prima). Produto de revenda precisa de preço e categoria — esse tem que ser cadastrado no Catálogo.
+                    </div>
                   </div>
                 )}
 
@@ -222,9 +289,9 @@ export default function LancarNotaIA({ empresaId, onDone }) {
 
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShow(false)}>Fechar</button>
-              {step === 'revisar' && itens.length > 0 && (
+              {step === 'revisar' && (itens.length > 0 || naoEnc.length > 0) && (
                 <button type="button" className="btn btn-primary" onClick={confirmar} disabled={salvando}>
-                  {salvando ? 'Lançando…' : `Lançar ${nProd + nMat} entrada(s)`}
+                  {salvando ? 'Lançando…' : `Lançar ${nProd + nMat + nNovo} entrada(s)${nNovo ? ` (${nNovo} novo${nNovo > 1 ? 's' : ''})` : ''}`}
                 </button>
               )}
             </div>
