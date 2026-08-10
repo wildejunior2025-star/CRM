@@ -552,6 +552,22 @@ export default function PresencialSalao() {
     await loadAll()
   }
 
+  // Dar o "pronto" sem depender do app da cozinha. Loja que não usa a tela da
+  // cozinha (é o caso da Estação) tinha que abrir o Painel só pra isso.
+  async function marcarItemPronto(item) {
+    const { error } = await supabase.from('comanda_itens').update({ status: 'pronto' }).eq('id', item.id)
+    if (error) { window.alert('Erro ao marcar pronto: ' + error.message); return }
+    await loadAll()
+  }
+  async function marcarTudoPronto() {
+    const ids = (comandaSel?.comanda_itens ?? [])
+      .filter(it => it.status !== 'pronto' && it.status !== 'entregue').map(it => it.id)
+    if (!ids.length) return
+    const { error } = await supabase.from('comanda_itens').update({ status: 'pronto' }).in('id', ids)
+    if (error) { window.alert('Erro ao marcar pronto: ' + error.message); return }
+    await loadAll()
+  }
+
   async function entregarItem(item) {
     // registra QUEM entregou (quem clicou) — atribuição por entrega
     await supabase.from('comanda_itens')
@@ -1082,7 +1098,16 @@ export default function PresencialSalao() {
             <div className="sal-corpo">
             <div className="sal-col">
               {/* itens lançados */}
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Comanda</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>Comanda</div>
+                {(comandaSel.comanda_itens ?? []).some(i => i.status !== 'pronto' && i.status !== 'entregue') && (
+                  <button type="button" onClick={marcarTudoPronto}
+                    style={{ fontSize: 12, fontWeight: 800, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
+                      border: '1.5px solid #3b82f6', background: 'rgba(59,130,246,.12)', color: '#2563eb' }}>
+                    🔔 Marcar tudo pronto
+                  </button>
+                )}
+              </div>
               {(comandaSel.comanda_itens ?? []).length === 0 ? (
                 <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum item ainda. Adicione abaixo.</p>
               ) : (
@@ -1102,6 +1127,13 @@ export default function PresencialSalao() {
                                 : '⏳ preparando'
                               }
                             </span>
+                            {item.status !== 'pronto' && item.status !== 'entregue' && (
+                              <button type="button" onClick={() => marcarItemPronto(item)}
+                                style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
+                                  border: '1.5px solid #3b82f6', background: 'rgba(59,130,246,.15)', color: '#2563eb' }}>
+                                🔔 Marcar pronto
+                              </button>
+                            )}
                             {item.status === 'pronto' && (
                               <button type="button" onClick={() => entregarItem(item)}
                                 style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
