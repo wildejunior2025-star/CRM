@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { calcIfoodLiquido } from '../lib/ifoodLiquido'
 import { diasAbertosNoMes, comoFicaNoDia, carregarExcecoes } from '../lib/feriados'
+import BuscaSelect from '../components/BuscaSelect'
 import ConsumoFuncionario from '../components/ConsumoFuncionario'
 import '../components/Page.css'
 
@@ -79,7 +80,9 @@ function custoPorBaseFicha(ficha, itens) {
 
 const emptyDespesa = { nome: '', categoria: 'energia', tipo: 'fixo', valor: '' }
 const emptyFunc = { nome: '', cargo: '', salario_mensal: '' }
-const emptyProd = () => ({ ficha_id: '', qtd_feita: '', qtd_sobrou: '', unidade: 'kg' })
+// Produção do dia: 'cadastrado' é receita (ficha) ou insumo (matéria-prima);
+// 'avulso' é o que não está cadastrado em lugar nenhum (digita nome + valor).
+const emptyProd = () => ({ modo: 'cadastrado', item: '', qtd_feita: '', qtd_sobrou: '', unidade: 'kg', nome: '', valor: '' })
 const emptyImprev = { tipo: 'pedido', numero: '', descricao: '', valor: '', info: null }
 
 export default function DespesasLucro({ empresaId }) {
@@ -100,6 +103,7 @@ export default function DespesasLucro({ empresaId }) {
   const [producao, setProducao] = useState([])     // só de HOJE
   const [imprevistos, setImprevistos] = useState([]) // custos imprevistos de HOJE
   const [fichas, setFichas] = useState([])          // [{id, nome, custoPorBase}]
+  const [materias, setMaterias] = useState([])      // insumos, pra lançar sem ficha técnica
   const [usuarios, setUsuarios] = useState([])      // funcionários já cadastrados em Usuários
   const [historico, setHistorico] = useState([])    // fechamentos diários
   const [diasAbertos, setDiasAbertos] = useState(26)
@@ -132,7 +136,7 @@ export default function DespesasLucro({ empresaId }) {
       const fim = new Date(ini); fim.setDate(fim.getDate() + 1)
 
       // Traz inativos também: quem saiu depois ainda conta nos dias em que estava lá.
-      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im, vd] = await Promise.all([
+      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im, vd, mp] = await Promise.all([
         supabase.from('despesas_loja').select('*').eq('empresa_id', empresaId).order('valor', { ascending: false }),
         supabase.from('funcionarios').select('*').eq('empresa_id', empresaId).order('nome'),
         supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', dia).order('created_at', { ascending: false }),
@@ -149,6 +153,8 @@ export default function DespesasLucro({ empresaId }) {
         // Vendas do SALÃO/balcão (fechar conta presencial) — não vivem em pedidos_delivery.
         supabase.from('vendas').select('total').eq('empresa_id', empresaId).neq('status', 'cancelado')
           .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString()),
+        // Insumos: dá pra lançar a batata doce direto, sem inventar uma ficha pra ela.
+        supabase.from('materias_primas').select('id, nome, unidade, custo').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
       ])
       for (const r of [dp, fn, pd, fi, fit, ped, hi, im]) if (r.error) throw r.error
 
@@ -166,6 +172,7 @@ export default function DespesasLucro({ empresaId }) {
       const itensPor = {}
       for (const it of (fit.data || [])) (itensPor[it.ficha_id] = itensPor[it.ficha_id] || []).push(it)
       setFichas((fi.data || []).map(f => ({ id: f.id, nome: f.nome, custoPorBase: custoPorBaseFicha(f, itensPor[f.id] || []) })))
+      setMaterias(mp.error ? [] : (mp.data || []))
 
       const peds = ped.data || []
       const proprios = peds.filter(p => ['whatsapp', 'app', 'cardapio'].includes(p.origem) || !p.origem)
@@ -313,15 +320,51 @@ export default function DespesasLucro({ empresaId }) {
 
   // ── CRUD: produção diária ──
   function abrirNovaProd() { setProdForm(emptyProd()); setShowProd(true) }
-  const fichaSel = fichas.find(f => f.id === prodForm.ficha_id)
-  const prodPrevia = fichaSel ? emBase(num(prodForm.qtd_feita) - num(prodForm.qtd_sobrou), prodForm.unidade) * fichaSel.custoPorBase : 0
+
+  // O que dá pra lançar: receita pronta (ficha) ou insumo do estoque.
+  const opcoesProd = useMemo(() => [
+    ...fichas.map(f => ({ key: 'fi:' + f.id, label: f.nome, tag: 'Receita' })),
+    ...materias.map(m => ({ key: 'mp:' + m.id, label: m.nome, sub: `${brl(m.custo)} / ${m.unidade}`, tag: 'Insumo' })),
+  ], [fichas, materias])
+
+  // Item escolhido, já com o custo por unidade base (o mesmo cálculo dos dois lados).
+  const itemProd = useMemo(() => {
+    const k = prodForm.item
+    if (!k) return null
+    if (k.startsWith('fi:')) {
+      const f = fichas.find(x => x.id === k.slice(3))
+      return f ? { tipo: 'ficha', id: f.id, nome: f.nome, custoPorBase: f.custoPorBase, unidade: null } : null
+    }
+    const m = materias.find(x => x.id === k.slice(3))
+    return m ? { tipo: 'materia', id: m.id, nome: m.nome, custoPorBase: Number(m.custo || 0) / (FATOR[m.unidade] || 1), unidade: m.unidade } : null
+  }, [prodForm.item, fichas, materias])
+
+  const prodPrevia = prodForm.modo === 'avulso'
+    ? num(prodForm.valor)
+    : itemProd ? emBase(num(prodForm.qtd_feita) - num(prodForm.qtd_sobrou), prodForm.unidade) * itemProd.custoPorBase : 0
   async function salvarProd(e) {
     e.preventDefault()
-    if (!prodForm.ficha_id || !fichaSel) { alert('Escolha o produto (ficha técnica).'); return }
-    const payload = {
-      empresa_id: empresaId, data: dia, ficha_id: prodForm.ficha_id, nome: fichaSel.nome,
-      qtd_feita: num(prodForm.qtd_feita), qtd_sobrou: num(prodForm.qtd_sobrou),
-      unidade: prodForm.unidade, custo_unit: fichaSel.custoPorBase,
+    let payload
+    if (prodForm.modo === 'avulso') {
+      // Não tem ficha nem cadastro (batata doce, salada): o valor gasto é o custo.
+      // Vira 1 "un" pelo valor digitado, então a conta do dia sai igual.
+      const nome = prodForm.nome.trim()
+      if (!nome) { alert('Escreva o que você fez/usou (ex.: Batata doce).'); return }
+      if (num(prodForm.valor) <= 0) { alert('Digite quanto você gastou nesse item.'); return }
+      payload = {
+        empresa_id: empresaId, data: dia, ficha_id: null, materia_prima_id: null, nome,
+        qtd_feita: 1, qtd_sobrou: 0, unidade: 'un', custo_unit: num(prodForm.valor),
+      }
+    } else {
+      if (!itemProd) { alert('Escolha a receita ou o insumo.'); return }
+      payload = {
+        empresa_id: empresaId, data: dia,
+        ficha_id: itemProd.tipo === 'ficha' ? itemProd.id : null,
+        materia_prima_id: itemProd.tipo === 'materia' ? itemProd.id : null,
+        nome: itemProd.nome,
+        qtd_feita: num(prodForm.qtd_feita), qtd_sobrou: num(prodForm.qtd_sobrou),
+        unidade: prodForm.unidade, custo_unit: itemProd.custoPorBase,
+      }
     }
     const { error } = await supabase.from('producao_diaria').insert(payload)
     if (error) { alert('Erro: ' + error.message); return }
@@ -451,7 +494,7 @@ export default function DespesasLucro({ empresaId }) {
           {/* PRODUÇÃO DO DIA (com botão fechar o dia) */}
           <Secao titulo={`🍲 Custo de produção ${rotuloDia} (${ddmm(dia)})`}
             acao={!fechado && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <button className="btn btn-primary btn-sm" onClick={abrirNovaProd} disabled={fichas.length === 0}>+ Lançar produção</button>
+              <button className="btn btn-primary btn-sm" onClick={abrirNovaProd}>+ Lançar produção</button>
               <button className="btn btn-sm" onClick={fecharDia} disabled={fechando}
                 style={{ background: '#16a34a', color: '#fff' }}>{fechando ? 'Salvando…' : `💾 Fechar ${ehHoje ? 'o dia' : ddmm(dia)}`}</button>
             </div>}
@@ -465,14 +508,15 @@ export default function DespesasLucro({ empresaId }) {
                     valor={brl(p.custo)} />
                 ))
             ) : (<>
-              {fichas.length === 0 && <Vazio texto="Crie fichas técnicas primeiro (Catálogo → Ficha Técnica) pra puxar o custo por kg." />}
-              {fichas.length > 0 && producao.length === 0 && <Vazio texto={`Lance a produção ${rotuloDia} (ex.: fiz 10kg de feijão, sobrou 2kg).`} />}
+              {producao.length === 0 && <Vazio texto={`Lance a produção ${rotuloDia} (ex.: fiz 10kg de feijão, sobrou 2kg). Não precisa ter ficha técnica: dá pra lançar insumo ou digitar na hora.`} />}
               {producao.map(p => {
                 const consumido = Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0)
+                // Item digitado na hora não tem "fez/sobrou" — é só o valor gasto.
+                const avulso = !p.ficha_id && !p.materia_prima_id
                 return (
                   <ItemLinha key={p.id} onDel={() => excluirProd(p)}
                     titulo={p.nome}
-                    sub={`fez ${p.qtd_feita}${p.unidade} · sobrou ${p.qtd_sobrou}${p.unidade} · usou ${consumido}${p.unidade}`}
+                    sub={avulso ? 'digitado na hora' : `fez ${p.qtd_feita}${p.unidade} · sobrou ${p.qtd_sobrou}${p.unidade} · usou ${consumido}${p.unidade}`}
                     valor={brl(custoProdItem(p))} />
                 )
               })}
@@ -660,29 +704,67 @@ export default function DespesasLucro({ empresaId }) {
       {/* ─── MODAL: produção do dia ─── */}
       {showProd && (
         <Modal onClose={() => setShowProd(false)} onSubmit={salvarProd} titulo="Lançar produção de hoje" submitLabel="Salvar lançamento">
-          <div className="form-grid">
-            <div className="form-field full"><label>Produto (ficha técnica)</label>
-              <select value={prodForm.ficha_id} onChange={e => setProdForm(f => ({ ...f, ficha_id: e.target.value }))}>
-                <option value="">— escolher —</option>
-                {fichas.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
-              </select></div>
-            <div className="form-field"><label>Quanto fez</label>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input inputMode="decimal" placeholder="Ex.: 10" value={prodForm.qtd_feita} onChange={e => setProdForm(f => ({ ...f, qtd_feita: e.target.value }))} style={{ flex: 1 }} />
-                <select value={prodForm.unidade} onChange={e => setProdForm(f => ({ ...f, unidade: e.target.value }))} style={{ width: 70 }}>
-                  {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-              </div></div>
-            <div className="form-field"><label>Quanto sobrou</label>
-              <input inputMode="decimal" placeholder="Ex.: 2" value={prodForm.qtd_sobrou} onChange={e => setProdForm(f => ({ ...f, qtd_sobrou: e.target.value }))} /></div>
+          {/* Nem tudo que a cozinha faz tem receita: a batata doce e a salada
+              entram como insumo ou digitadas na hora. */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+            {[['cadastrado', '🍲 Receita ou insumo'], ['avulso', '✍️ Digitar na hora']].map(([id, lb]) => (
+              <button key={id} type="button" onClick={() => setProdForm(f => ({ ...f, modo: id }))}
+                style={{ flex: 1, padding: '9px 8px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                  background: prodForm.modo === id ? 'var(--primary)' : 'transparent', color: prodForm.modo === id ? '#fff' : 'var(--text)' }}>
+                {lb}
+              </button>
+            ))}
           </div>
+
+          {prodForm.modo === 'avulso' ? (
+            <div className="form-grid">
+              <div className="form-field full"><label>O que você fez / usou</label>
+                <input autoFocus placeholder="Ex.: Batata doce cozida" value={prodForm.nome}
+                  onChange={e => setProdForm(f => ({ ...f, nome: e.target.value }))} /></div>
+              <div className="form-field full"><label>Quanto gastou nisso (R$)</label>
+                <input inputMode="decimal" placeholder="Ex.: 35,00" value={prodForm.valor}
+                  onChange={e => setProdForm(f => ({ ...f, valor: e.target.value }))} />
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Pra coisa que não tem ficha técnica nem cadastro de insumo. Entra direto no custo do dia.
+                </span></div>
+            </div>
+          ) : (
+            <div className="form-grid">
+              <div className="form-field full"><label>Receita ou insumo</label>
+                <BuscaSelect opcoes={opcoesProd} value={prodForm.item}
+                  onChange={key => setProdForm(f => {
+                    const m = key.startsWith('mp:') ? materias.find(x => x.id === key.slice(3)) : null
+                    return { ...f, item: key, unidade: m?.unidade || f.unidade }   // insumo já vem na unidade dele
+                  })}
+                  placeholder="Digite o nome (ex.: feijao)…" vazioLabel="— escolher —"
+                  semResultado="Não achei. Use “Digitar na hora” aqui em cima." />
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Receita puxa o custo da ficha; insumo puxa o custo do cadastro dele.
+                </span></div>
+              <div className="form-field"><label>Quanto fez / usou</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input inputMode="decimal" placeholder="Ex.: 10" value={prodForm.qtd_feita} onChange={e => setProdForm(f => ({ ...f, qtd_feita: e.target.value }))} style={{ flex: 1 }} />
+                  <select value={prodForm.unidade} onChange={e => setProdForm(f => ({ ...f, unidade: e.target.value }))} style={{ width: 70 }}>
+                    {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div></div>
+              <div className="form-field"><label>Quanto sobrou</label>
+                <input inputMode="decimal" placeholder="Ex.: 2" value={prodForm.qtd_sobrou} onChange={e => setProdForm(f => ({ ...f, qtd_sobrou: e.target.value }))} /></div>
+            </div>
+          )}
+
           <div className="card" style={{ marginTop: 16, background: 'var(--bg)' }}>
-            {fichaSel ? (
+            {prodForm.modo === 'avulso' ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 13 }}>{prodForm.nome.trim() || 'Item digitado'} · custo do dia</span>
+                <strong style={{ fontSize: 20, color: 'var(--primary)' }}>{brl(prodPrevia)}</strong>
+              </div>
+            ) : itemProd ? (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 13 }}>Usou {Math.max(0, num(prodForm.qtd_feita) - num(prodForm.qtd_sobrou))}{prodForm.unidade} · custo do dia</span>
                 <strong style={{ fontSize: 20, color: 'var(--primary)' }}>{brl(prodPrevia)}</strong>
               </div>
-            ) : <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Escolha o produto pra ver o custo do dia.</span>}
+            ) : <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Escolha a receita ou o insumo pra ver o custo do dia.</span>}
           </div>
         </Modal>
       )}
