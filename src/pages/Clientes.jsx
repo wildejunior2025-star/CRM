@@ -53,6 +53,7 @@ export default function Clientes() {
   const [linkAtivo, setLinkAtivo] = useState(false)
   const [linkCliente, setLinkCliente] = useState(null)
   const [copiado, setCopiado] = useState(false)
+  const [copiadoUrl, setCopiadoUrl] = useState(false)
 
   const [tipos, setTipos] = useState(TIPOS_PADRAO)
   const [showTiposModal, setShowTiposModal] = useState(false)
@@ -725,16 +726,25 @@ export default function Clientes() {
                 Só dele. Por esse link o cliente monta o pedido (que cai como comanda na cozinha,
                 no nome dele), acompanha quando fica pronto e vê quanto está devendo de fiado.
               </p>
+              {/* Prévia do que vai ser copiado: o texto explicando + o link. Copiar
+                  só a URL deixava o cliente sem entender o que era aquilo. */}
               <div style={{ padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)',
-                background: 'var(--input-bg, var(--bg))', fontSize: 13, wordBreak: 'break-all', marginBottom: 12 }}>
-                {url}
+                background: 'var(--input-bg, var(--bg))', fontSize: 13, lineHeight: 1.5,
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: 12 }}>
+                {mensagem}
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button className="btn btn-primary" onClick={async () => {
-                  try { await navigator.clipboard.writeText(url); setCopiado(true); setTimeout(() => setCopiado(false), 2500) }
-                  catch { window.prompt('Copie o link:', url) }
+                  try { await navigator.clipboard.writeText(mensagem); setCopiado(true); setTimeout(() => setCopiado(false), 2500) }
+                  catch { window.prompt('Copie a mensagem:', mensagem) }
                 }}>
-                  {copiado ? '✓ Copiado!' : '📋 Copiar link'}
+                  {copiado ? '✓ Copiado!' : '📋 Copiar mensagem'}
+                </button>
+                <button className="btn btn-secondary" onClick={async () => {
+                  try { await navigator.clipboard.writeText(url); setCopiadoUrl(true); setTimeout(() => setCopiadoUrl(false), 2500) }
+                  catch { window.prompt('Copie o link:', url) }
+                }} title="Só o endereço, sem o texto">
+                  {copiadoUrl ? '✓ Copiado!' : '🔗 Só o link'}
                 </button>
                 {zap
                   ? <a className="btn btn-secondary" href={zap} target="_blank" rel="noreferrer">💬 Mandar no WhatsApp</a>
