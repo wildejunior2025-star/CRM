@@ -869,9 +869,12 @@ export default function MinhaLoja({ secao = 'loja' }) {
             <strong>PIX na entrega</strong> é o cliente pagando na sua chave na hora que o pedido chega:
             sem taxa, sem Mercado Pago, e o pedido cai na loja na hora (igual dinheiro).
           </p>
-          {/* Taxa da maquineta: aparece só pras formas de cartão que a loja ligou.
-              Crédito e débito têm taxa diferente — é por isso que são separados. */}
-          {FORMAS_CARTAO.some(f => formasPagamento.includes(f.value)) && (
+          {/* Taxa da maquineta. Crédito e débito aparecem SEMPRE: as marcações
+              acima valem pro delivery/Loja Online, mas no salão o garçom recebe
+              no cartão de qualquer jeito — e a taxa precisa estar preenchida pro
+              Caixa saber quanto cai na conta. O "cartão sem separar" só aparece
+              quando a loja usa ele. */}
+          {(
             <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
               <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px' }}>Taxa da maquineta</h3>
               <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.5 }}>
@@ -879,7 +882,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
                 <strong> quanto cai na sua conta de verdade</strong> em cada forma. Deixe 0 se não souber ainda.
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
-                {FORMAS_CARTAO.filter(f => formasPagamento.includes(f.value)).map(f => (
+                {FORMAS_CARTAO.filter(f => f.value !== 'cartao' || formasPagamento.includes('cartao') || pctNum(taxasCartao.taxa_cartao_pct) > 0).map(f => (
                   <label key={f.value} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
                     <span style={{ flex: 1 }}>{f.label}</span>
                     <input value={taxasCartao[f.campoTaxa]} inputMode="decimal" placeholder="0"
