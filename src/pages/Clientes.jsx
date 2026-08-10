@@ -727,6 +727,31 @@ export default function Clientes() {
         // ou se o envio falhar (sem crédito, instância caída…), abre a conversa
         // pro atendente mandar na mão — nunca fica sem saída.
         function abrirManual() { if (zap) window.open(zap, '_blank', 'noopener') }
+
+        // Fica ~20s perguntando ao banco o que a Meta respondeu sobre a entrega.
+        async function acompanharEntrega(messageId, nome) {
+          for (let i = 0; i < 10; i++) {
+            await new Promise(r => setTimeout(r, 2000))
+            const { data: e } = await supabase.from('whatsapp_envios')
+              .select('status, erro_msg, erro_code, wa_id, telefone')
+              .eq('message_id', messageId).maybeSingle()
+            if (!e) continue
+            if (e.status === 'falhou') {
+              setZapAviso({ ok: false, texto:
+                `❌ Não chegou em ${nome}: ${e.erro_msg || 'o WhatsApp recusou'}${e.erro_code ? ` (${e.erro_code})` : ''}. ` +
+                `Abri a conversa pra você mandar na mão.` })
+              abrirManual()
+              return
+            }
+            if (['delivered', 'read'].includes(e.status)) {
+              setZapAviso({ ok: true, texto: `✅ Entregue no WhatsApp de ${nome}.` })
+              return
+            }
+          }
+          setZapAviso({ ok: false, texto:
+            `⏳ O WhatsApp aceitou, mas ainda não confirmou a entrega em ${nome}. ` +
+            `Se ele disser que não recebeu, mande pela conversa.` })
+        }
         async function mandarNoZap() {
           if (!zapConectado) { abrirManual(); return }
           setEnviandoZap(true); setZapAviso(null)
@@ -735,7 +760,11 @@ export default function Clientes() {
           })
           setEnviandoZap(false)
           if (!error && !data?.error) {
-            setZapAviso({ ok: true, texto: `✅ Enviado pro WhatsApp de ${linkCliente.nome}.` })
+            setZapAviso({ ok: true, texto: `📨 Enviado — conferindo se chegou…` })
+            // A Meta responde "aceitei" na hora e só depois diz se ENTREGOU. Sem
+            // esperar esse retorno a tela mentia: dizia "enviado" pra mensagem que
+            // não chegou (número errado, 9º dígito, bloqueio…).
+            if (data?.message_id) acompanharEntrega(data.message_id, linkCliente.nome)
             return
           }
           setZapAviso({ ok: false, texto: (data?.error || 'Não deu pra enviar pelo zap da loja') + ' — abri a conversa pra você mandar na mão.' })

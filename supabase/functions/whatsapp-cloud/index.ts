@@ -112,8 +112,30 @@ async function processar(body: any) {
 
   const value   = body?.entry?.[0]?.changes?.[0]?.value
   const phoneNumberId = value?.metadata?.phone_number_id
+
+  // ── Aviso de entrega (mig 0150) ──
+  // A Meta responde 200 na hora ("aceitei") e só aqui diz se ENTREGOU ou falhou,
+  // com o motivo. Antes isto era descartado, então a tela dizia "enviado" pra
+  // mensagem que morreu no caminho (número errado, 9º dígito, bloqueio, 24h).
+  const statuses = value?.statuses
+  if (Array.isArray(statuses) && statuses.length) {
+    for (const st of statuses) {
+      const err = st.errors?.[0]
+      await supabase.from("whatsapp_envios").update({
+        status:    st.status === "failed" ? "falhou" : st.status,
+        erro_code: err?.code ?? null,
+        erro_msg:  err ? (err.error_data?.details ?? err.title ?? err.message ?? null) : null,
+        updated_at: new Date().toISOString(),
+      }).eq("message_id", st.id)
+      if (st.status === "failed") {
+        console.error("[cloud] mensagem falhou", st.id, JSON.stringify(err))
+      }
+    }
+    return
+  }
+
   const message = value?.messages?.[0]
-  if (!phoneNumberId || !message) return          // status de entrega / outros eventos: ignora
+  if (!phoneNumberId || !message) return          // outros eventos: ignora
 
   const from = String(message.from ?? "").replace(/\D/g, "")
   if (!from) return

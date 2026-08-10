@@ -128,6 +128,8 @@ serve(async (req) => {
       })
     }
 
+    let cloudMsgId: string | null = null   // wamid, pra tela acompanhar a entrega
+
     // A loja pode estar em dois canos: Cloud API da Meta (quem tem
     // cloud_phone_number_id) ou Evolution (o antigo). Sem esta bifurcação, loja
     // migrada pro Cloud caía na Evolution, que não conhece a instância "cloud_*"
@@ -144,6 +146,22 @@ serve(async (req) => {
           }),
         }
       )
+      if (cloudRes.ok) {
+        // A Meta responde 200 = "aceitei", não "entregou". Guarda o wamid e o
+        // wa_id (o número que ELA resolveu — no RN o WhatsApp usa sem o 9, então
+        // se o cadastro tiver o 9 é aqui que a diferença aparece). O resultado de
+        // verdade chega depois, no whatsapp-webhook.
+        const okJson = await cloudRes.json().catch(() => null)
+        cloudMsgId = okJson?.messages?.[0]?.id ?? null
+        await supabaseAdmin.from("whatsapp_envios").insert({
+          empresa_id: targetEmpresaId,
+          message_id: cloudMsgId,
+          telefone:   cleanPhone,
+          wa_id:      okJson?.contacts?.[0]?.wa_id ?? null,
+          assunto:    body.assunto ?? null,
+        })
+      }
+
       if (!cloudRes.ok) {
         const errJson = await cloudRes.json().catch(() => null)
         const code = errJson?.error?.code
@@ -179,7 +197,7 @@ serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ ok: true }), {
+    return new Response(JSON.stringify({ ok: true, message_id: cloudMsgId }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     })
   } catch (err) {
