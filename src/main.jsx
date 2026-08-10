@@ -8,26 +8,53 @@ import App from './App.jsx'
 // O app se atualiza sozinho: celular preso em cache antigo já deu dor de cabeça
 // demais. A checagem continua ao abrir, a cada 30s e quando o app volta ao foco.
 //
-// A ÚNICA exceção é a impressora Bluetooth do celular. Recarregar a página mata
-// a conexão BLE (o aparelho vive na memória da aba) e reparear exige um toque do
-// dono, porque o navegador não deixa código chamar requestDevice sozinho. Era
-// isso que derrubava a impressora da pizzaria a cada deploy, no meio do
-// movimento e sem explicação.
+// Mas atualizar RECARREGA a página, e recarregar no meio do serviço estraga
+// coisa. Por isso a versão nova espera quando:
 //
-// Com a impressora ligada, a versão nova fica ESPERANDO e aparece um aviso pra
-// ele atualizar na hora que quiser. Como a impressora só conecta depois que a
-// tela abre, a atualização entra sozinha na próxima vez que ele abrir o app.
+// 1) A impressora Bluetooth do celular está conectada. Recarregar mata a conexão
+//    BLE (o aparelho vive na memória da aba) e reparear exige um toque do dono,
+//    porque o navegador não deixa código chamar requestDevice sozinho. Era isso
+//    que derrubava a impressora da pizzaria a cada deploy, no meio do movimento.
+//
+// 2) A pessoa está preenchendo alguma coisa (aconteceu com o Wilde 10/08/2026:
+//    a tela recarregou sozinha duas vezes no meio do cadastro e apagou tudo).
+//    Formulário aberto some sem aviso e a pessoa tem que digitar de novo.
+//
+// Nos dois casos aparece um aviso pra atualizar na hora que quiser — e, no caso
+// do formulário, o app tenta de novo sozinho quando a tela ficar parada.
 const impressoraBtConectada = () => window.__fwcBtConectada === true
 
+// Última vez que a pessoa digitou/mexeu num campo (captura na fase de captura
+// pra pegar também o que acontece dentro de modal).
+let ultimoMexeu = 0
+for (const evt of ['input', 'keydown', 'paste']) {
+  document.addEventListener(evt, () => { ultimoMexeu = Date.now() }, true)
+}
+const ESFRIAR_MS = 3 * 60 * 1000   // 3 min sem digitar = pode recarregar
+
+// Está no meio de alguma coisa? (cursor num campo, digitou faz pouco, ou tem
+// um modal aberto na frente — que é sempre formulário ou confirmação)
+function ocupadoPreenchendo() {
+  const el = document.activeElement
+  const tag = el?.tagName?.toLowerCase()
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || el?.isContentEditable) return true
+  if (Date.now() - ultimoMexeu < ESFRIAR_MS) return true
+  if (document.querySelector('.modal-overlay, dialog[open], .confirmar-fundo')) return true
+  return false
+}
+
 let updateSW = () => {}
+let esperandoTelaLivre = null   // timer que fica tentando quando a tela desocupar
 
 function aplicarAtualizacao() {
+  if (esperandoTelaLivre) { clearInterval(esperandoTelaLivre); esperandoTelaLivre = null }
+  document.getElementById('fwc-update-bar')?.remove()
   try { updateSW(true) } catch { /* ignora */ }
   // Cinto de segurança: se o service worker não devolver o controle, recarrega.
   setTimeout(() => window.location.reload(), 5000)
 }
 
-function mostrarAvisoAtualizacao() {
+function mostrarAvisoAtualizacao(motivo = 'impressora') {
   if (document.getElementById('fwc-update-bar')) return
 
   const barra = document.createElement('div')
@@ -43,10 +70,13 @@ function mostrarAvisoAtualizacao() {
 
   const texto = document.createElement('span')
   texto.style.flex = '1 1 200px'
-  texto.innerHTML =
-    'Tem versão nova do sistema.<br>' +
-    '<span style="font-weight:400;opacity:.75">Atualizar desliga a impressora do celular — ' +
-    'depois é só tocar em Conectar de novo. Pode deixar pro fim do movimento.</span>'
+  texto.innerHTML = motivo === 'impressora'
+    ? 'Tem versão nova do sistema.<br>' +
+      '<span style="font-weight:400;opacity:.75">Atualizar desliga a impressora do celular — ' +
+      'depois é só tocar em Conectar de novo. Pode deixar pro fim do movimento.</span>'
+    : 'Tem versão nova do sistema.<br>' +
+      '<span style="font-weight:400;opacity:.75">Não vou atualizar agora pra não apagar o que você está ' +
+      'preenchendo. Termine e salve — ela entra sozinha depois.</span>'
 
   const depois = document.createElement('button')
   depois.type = 'button'
@@ -75,8 +105,20 @@ function mostrarAvisoAtualizacao() {
 updateSW = registerSW({
   immediate: true,
   onNeedRefresh() {
-    if (impressoraBtConectada()) mostrarAvisoAtualizacao()
-    else aplicarAtualizacao()
+    // Impressora BT: só o dono decide (recarregar derruba o pareamento).
+    if (impressoraBtConectada()) { mostrarAvisoAtualizacao('impressora'); return }
+    if (!ocupadoPreenchendo()) { aplicarAtualizacao(); return }
+
+    // Está preenchendo: avisa e fica de olho. Assim que a tela ficar parada
+    // (nada digitado por 3 min, sem modal aberto), atualiza sozinho.
+    mostrarAvisoAtualizacao('preenchendo')
+    if (esperandoTelaLivre) return
+    esperandoTelaLivre = setInterval(() => {
+      if (impressoraBtConectada() || ocupadoPreenchendo()) return
+      clearInterval(esperandoTelaLivre)
+      esperandoTelaLivre = null
+      aplicarAtualizacao()
+    }, 20 * 1000)
   },
   onRegisteredSW(_swUrl, registration) {
     if (!registration) return
