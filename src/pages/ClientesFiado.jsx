@@ -58,6 +58,8 @@ export default function ClientesFiado({ empresaId }) {
   // balcão costuma ficar sem telefone — e sem telefone não dá pra cobrar no zap.
   const [editTel, setEditTel] = useState(null)
   const [salvandoTel, setSalvandoTel] = useState(false)
+  // Recebimento com a forma trocada na hora do aperto: id do pagamento em edição.
+  const [formaEdit, setFormaEdit] = useState(null)
 
   // Grava o telefone de quem foi cadastrado sem ele.
   async function salvarTelefone(clienteId) {
@@ -77,6 +79,18 @@ export default function ClientesFiado({ empresaId }) {
   // Apaga um fiado lançado errado (conta salva sem querer, valor trocado...).
   // Quem decide se pode é o banco (mig 0146): só ADM, só fiado, e só se ninguém
   // já tiver lançado recebimento em cima dessa dívida.
+  // Recebeu no PIX e anotou dinheiro (ou o contrário)? O valor está certo, só a
+  // forma está errada — e é a forma que decide em qual card do caixa o dinheiro
+  // entra. Trocar aqui acerta a conferência sem apagar e relançar o recebimento.
+  async function trocarFormaPagamento(pagamento, novaForma) {
+    if (novaForma === pagamento.forma_pagamento) return
+    const { error } = await supabase.from('pagamentos')
+      .update({ forma_pagamento: novaForma }).eq('id', pagamento.id)
+    if (error) { window.alert('Erro ao trocar a forma: ' + error.message); return }
+    setFormaEdit(null)
+    await load()
+  }
+
   async function apagarFiado(venda, clienteId) {
     const motivo = window.prompt(
       `Apagar este fiado de ${fmtBRL(venda.total)}?\n\nEle vai sumir da dívida do cliente.\nEscreva o porquê (fica registrado):`,
@@ -393,7 +407,26 @@ export default function ClientesFiado({ empresaId }) {
                   <td style={{ fontWeight: 600 }}>{p.clientes?.nome ?? '—'}</td>
                   <td style={{ whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: 13 }}>{dataHora(p.created_at)}</td>
                   <td style={{ fontSize: 13 }}>
-                    {FORMAS.find(f => f.id === p.forma_pagamento)?.label ?? p.forma_pagamento}
+                    {/* Anotou dinheiro e foi PIX? O ADM troca aqui — o valor não muda,
+                        só em qual card do caixa ele entra. */}
+                    {formaEdit === p.id ? (
+                      <select autoFocus value={p.forma_pagamento}
+                        onChange={e => trocarFormaPagamento(p, e.target.value)}
+                        onBlur={() => setFormaEdit(null)}
+                        style={{ padding: '4px 6px', borderRadius: 6, fontSize: 12.5,
+                          border: '1.5px solid var(--primary)', background: 'var(--bg)', color: 'var(--text)' }}>
+                        {FORMAS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+                      </select>
+                    ) : ehAdmin ? (
+                      <button type="button" onClick={() => setFormaEdit(p.id)}
+                        title="Trocar a forma deste recebimento"
+                        style={{ padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 12.5,
+                          border: '1px dashed var(--border)', background: 'transparent', color: 'var(--text)' }}>
+                        {FORMAS.find(f => f.id === p.forma_pagamento)?.label ?? p.forma_pagamento} ✎
+                      </button>
+                    ) : (
+                      FORMAS.find(f => f.id === p.forma_pagamento)?.label ?? p.forma_pagamento
+                    )}
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', color: 'var(--success, #16a34a)' }}>
                     {fmtBRL(p.valor)}
