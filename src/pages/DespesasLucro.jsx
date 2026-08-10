@@ -104,6 +104,8 @@ export default function DespesasLucro({ empresaId }) {
   const [imprevistos, setImprevistos] = useState([]) // custos imprevistos de HOJE
   const [fichas, setFichas] = useState([])          // [{id, nome, custoPorBase}]
   const [materias, setMaterias] = useState([])      // insumos, pra lançar sem ficha técnica
+  const [revenda, setRevenda] = useState([])        // [{id, nome, qtd, custo_unit}] vendido do estoque hoje
+  const [revendaAberta, setRevendaAberta] = useState(false)
   const [usuarios, setUsuarios] = useState([])      // funcionários já cadastrados em Usuários
   const [historico, setHistorico] = useState([])    // fechamentos diários
   const [diasAbertos, setDiasAbertos] = useState(26)
@@ -136,7 +138,7 @@ export default function DespesasLucro({ empresaId }) {
       const fim = new Date(ini); fim.setDate(fim.getDate() + 1)
 
       // Traz inativos também: quem saiu depois ainda conta nos dias em que estava lá.
-      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im, vd, mp] = await Promise.all([
+      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im, vd, mp, sai, prd] = await Promise.all([
         supabase.from('despesas_loja').select('*').eq('empresa_id', empresaId).order('valor', { ascending: false }),
         supabase.from('funcionarios').select('*').eq('empresa_id', empresaId).order('nome'),
         supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', dia).order('created_at', { ascending: false }),
@@ -155,6 +157,12 @@ export default function DespesasLucro({ empresaId }) {
           .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString()),
         // Insumos: dá pra lançar a batata doce direto, sem inventar uma ficha pra ela.
         supabase.from('materias_primas').select('id, nome, unidade, custo').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
+        // Revenda (refri, picolé, doce): o custo entra sozinho pelo que SAIU do
+        // estoque vendido no dia — o sistema já grava essa saída em toda venda.
+        supabase.from('estoque_movimentos').select('produto_id, quantidade')
+          .eq('empresa_id', empresaId).eq('tipo', 'saida').eq('motivo', 'venda')
+          .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString()),
+        supabase.from('produtos').select('id, nome, preco_custo').eq('empresa_id', empresaId),
       ])
       for (const r of [dp, fn, pd, fi, fit, ped, hi, im]) if (r.error) throw r.error
 
@@ -173,6 +181,21 @@ export default function DespesasLucro({ empresaId }) {
       for (const it of (fit.data || [])) (itensPor[it.ficha_id] = itensPor[it.ficha_id] || []).push(it)
       setFichas((fi.data || []).map(f => ({ id: f.id, nome: f.nome, custoPorBase: custoPorBaseFicha(f, itensPor[f.id] || []) })))
       setMaterias(mp.error ? [] : (mp.data || []))
+
+      // Junta as saídas do dia por produto e casa com o custo ATUAL do cadastro.
+      // É de propósito que seja o custo de hoje: quem cadastrou o refri com custo
+      // zero corrige o preço depois e o dia (ainda não fechado) se ajeita sozinho.
+      const custoPorProduto = {}
+      for (const p of (prd.error ? [] : (prd.data || []))) custoPorProduto[p.id] = p
+      const porProd = {}
+      for (const s of (sai.error ? [] : (sai.data || []))) {
+        if (!s.produto_id) continue
+        porProd[s.produto_id] = (porProd[s.produto_id] || 0) + Number(s.quantidade || 0)
+      }
+      setRevenda(Object.entries(porProd).map(([id, qtd]) => {
+        const p = custoPorProduto[id]
+        return { id, nome: p?.nome || 'Produto', qtd, custo_unit: Number(p?.preco_custo || 0) }
+      }).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')))
 
       const peds = ped.data || []
       const proprios = peds.filter(p => ['whatsapp', 'app', 'cardapio'].includes(p.origem) || !p.origem)
@@ -196,6 +219,10 @@ export default function DespesasLucro({ empresaId }) {
   const totalFunc = useMemo(() => funcionarios.reduce((s, f) => s + valorNoDia(f, 'salario_mensal', dia), 0), [funcionarios, dia])
   const custoProdItem = (p) => emBase(Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0), p.unidade) * Number(p.custo_unit || 0)
   const producaoHoje = useMemo(() => producao.reduce((s, p) => s + custoProdItem(p), 0), [producao])
+  // Revenda: refri/picolé/doce que saiu do estoque vendido hoje, pelo custo do cadastro.
+  const revendaHoje = useMemo(() => revenda.reduce((s, r) => s + r.qtd * r.custo_unit, 0), [revenda])
+  const revendaSemCusto = useMemo(() => revenda.filter(r => r.custo_unit <= 0), [revenda])
+  const custoProducaoDia = producaoHoje + revendaHoje
   const imprevistoHoje = useMemo(() => imprevistos.reduce((s, i) => s + Number(i.valor || 0), 0), [imprevistos])
 
   // Divisor do rateio: conta os dias reais do mês pela grade da loja; só cai no
@@ -213,7 +240,7 @@ export default function DespesasLucro({ empresaId }) {
   const fixoPorDia = abre ? fixoPorDiaBase : 0
   const funcPorDia = abre ? funcPorDiaBase : 0
   const receita = receitaDia.proprios + (receitaDia.salao || 0) + receitaDia.ifood
-  const custosDia = fixoPorDia + funcPorDia + producaoHoje + imprevistoHoje
+  const custosDia = fixoPorDia + funcPorDia + custoProducaoDia + imprevistoHoje
   const lucroDia = receita - custosDia
 
   // Dia já fechado: vale o retrato salvo. Recalcular seria errado — a produção
@@ -222,7 +249,7 @@ export default function DespesasLucro({ empresaId }) {
   const v = fechado
     ? { receita: Number(fechado.receita_liquida || 0), fixo: Number(fechado.custo_fixo || 0), func: Number(fechado.custo_funcionarios || 0),
         prod: Number(fechado.custo_producao || 0), imprev: Number(fechado.custo_imprevisto || 0), lucro: Number(fechado.lucro || 0) }
-    : { receita, fixo: fixoPorDia, func: funcPorDia, prod: producaoHoje, imprev: imprevistoHoje, lucro: lucroDia }
+    : { receita, fixo: fixoPorDia, func: funcPorDia, prod: custoProducaoDia, imprev: imprevistoHoje, lucro: lucroDia }
   const itensFechado = Array.isArray(fechado?.itens) ? fechado.itens : []
   const imprevFechado = Array.isArray(fechado?.imprevistos) ? fechado.imprevistos : []
 
@@ -237,13 +264,18 @@ export default function DespesasLucro({ empresaId }) {
     if (!confirm(`Fechar o dia ${ddmm(dia)}?\n\nCongela o resumo desse dia no Histórico e LIMPA a produção dele (o valor não muda mais, mesmo que você mexa nos custos depois).`)) return
     setFechando(true)
     try {
-      const itens = producao.map(p => ({ nome: p.nome, qtd_feita: Number(p.qtd_feita || 0), qtd_sobrou: Number(p.qtd_sobrou || 0), unidade: p.unidade, custo: custoProdItem(p) }))
+      const itens = [
+        ...producao.map(p => ({ nome: p.nome, qtd_feita: Number(p.qtd_feita || 0), qtd_sobrou: Number(p.qtd_sobrou || 0), unidade: p.unidade, custo: custoProdItem(p) })),
+        // A revenda entra congelada no snapshot: depois de fechado, mexer no preço
+        // de custo do refri não muda mais o dia que já foi fechado.
+        ...revenda.map(r => ({ nome: r.nome, qtd_feita: r.qtd, qtd_sobrou: 0, unidade: 'un', custo: r.qtd * r.custo_unit, revenda: true })),
+      ]
       const impSnap = imprevistos.map(i => ({ descricao: i.descricao, valor: Number(i.valor || 0) }))
       const { error: upErr } = await supabase.from('historico_dia').upsert({
         empresa_id: empresaId, data: dia,
         receita_liquida: receita, receita_proprios: receitaDia.proprios + (receitaDia.salao || 0), receita_ifood: receitaDia.ifood,
         custo_fixo: fixoPorDia, custo_funcionarios: funcPorDia,
-        custo_producao: producaoHoje, custo_imprevisto: imprevistoHoje,
+        custo_producao: custoProducaoDia, custo_imprevisto: imprevistoHoje,
         lucro: lucroDia, itens, imprevistos: impSnap,
       }, { onConflict: 'empresa_id,data' })
       if (upErr) throw upErr
@@ -498,17 +530,60 @@ export default function DespesasLucro({ empresaId }) {
               <button className="btn btn-sm" onClick={fecharDia} disabled={fechando}
                 style={{ background: '#16a34a', color: '#fff' }}>{fechando ? 'Salvando…' : `💾 Fechar ${ehHoje ? 'o dia' : ddmm(dia)}`}</button>
             </div>}
-            rodape={(fechado ? itensFechado.length > 0 : producao.length > 0) && <>Custo de produção {rotuloDia} <strong>{brl(v.prod)}</strong></>}>
+            rodape={(fechado ? itensFechado.length > 0 : (producao.length > 0 || revenda.length > 0)) && <>Custo de produção {rotuloDia} <strong>{brl(v.prod)}</strong></>}>
             {fechado ? (
               itensFechado.length === 0
                 ? <Vazio texto="Esse dia foi fechado sem lançamento de produção." />
                 : itensFechado.map((p, i) => (
                   <ItemLinha key={i} titulo={p.nome}
-                    sub={`fez ${p.qtd_feita}${p.unidade} · sobrou ${p.qtd_sobrou}${p.unidade} · usou ${Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0)}${p.unidade}`}
+                    sub={p.revenda
+                      ? `🧃 revenda · ${p.qtd_feita} un vendidas`
+                      : `fez ${p.qtd_feita}${p.unidade} · sobrou ${p.qtd_sobrou}${p.unidade} · usou ${Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0)}${p.unidade}`}
                     valor={brl(p.custo)} />
                 ))
             ) : (<>
-              {producao.length === 0 && <Vazio texto={`Lance a produção ${rotuloDia} (ex.: fiz 10kg de feijão, sobrou 2kg). Não precisa ter ficha técnica: dá pra lançar insumo ou digitar na hora.`} />}
+              {/* REVENDA: entra sozinho, sem ninguém lançar. Tudo que saiu do
+                  estoque vendido no dia (refri, picolé, doce) × o custo que está
+                  no cadastro do produto agora. */}
+              {revenda.length > 0 && (
+                <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', marginBottom: 10, background: 'var(--bg)' }}>
+                  <div onClick={() => setRevendaAberta(v => !v)}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, cursor: 'pointer' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>🧃 Revenda vendida {rotuloDia} {revendaAberta ? '▲' : '▼'}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        entra sozinho pelo que saiu do estoque · {revenda.length} produto{revenda.length === 1 ? '' : 's'}
+                      </div>
+                    </div>
+                    <strong style={{ fontSize: 17 }}>{brl(revendaHoje)}</strong>
+                  </div>
+
+                  {revendaAberta && (
+                    <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                      {revenda.map(r => (
+                        <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '4px 0', fontSize: 13 }}>
+                          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {r.nome} <span style={{ color: 'var(--text-muted)' }}>· {r.qtd} un × {brl(r.custo_unit)}</span>
+                          </span>
+                          <strong>{brl(r.qtd * r.custo_unit)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {revendaSemCusto.length > 0 && (
+                    <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, lineHeight: 1.45,
+                      background: 'rgba(217,119,6,.1)', color: '#d97706', border: '1px solid #d97706' }}>
+                      ⚠️ Sem preço de custo (entra como R$ 0,00): <strong>{revendaSemCusto.map(r => r.nome).join(', ')}</strong>.
+                      <div style={{ color: 'var(--text)', marginTop: 2 }}>
+                        Ponha o custo em Catálogo → Produtos. Enquanto o dia não for fechado, o valor aqui se acerta sozinho.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {producao.length === 0 && revenda.length === 0 && <Vazio texto={`Lance a produção ${rotuloDia} (ex.: fiz 10kg de feijão, sobrou 2kg). Não precisa ter ficha técnica: dá pra lançar insumo ou digitar na hora.`} />}
               {producao.map(p => {
                 const consumido = Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0)
                 // Item digitado na hora não tem "fez/sobrou" — é só o valor gasto.
