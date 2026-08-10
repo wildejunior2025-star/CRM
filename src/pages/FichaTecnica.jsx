@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import BuscaSelect from '../components/BuscaSelect'
 import LancarNotaIA from '../components/LancarNotaIA'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
@@ -31,12 +32,18 @@ const fmtQtd = (qtd, unid) => {
 }
 
 // Custo de uma linha de ingrediente (quantidade usada × custo por unidade base).
-const custoItem = (it) => emBase(it.quantidade, it.unidade) * Number(it.custo_unit || 0)
+// A linha pode ser um insumo comprado (custo_unit gravado) ou uma SUB-RECEITA —
+// nesse caso o custo vem da ficha de baixo, calculada na hora, pra receita de
+// cima acompanhar quando o preço da farinha muda lá embaixo.
+const custoItem = (it, custoDeFicha) => {
+  const unit = (it.ficha_ref_id && custoDeFicha) ? custoDeFicha(it.ficha_ref_id) : Number(it.custo_unit || 0)
+  return emBase(it.quantidade, it.unidade) * unit
+}
 
 // Calcula tudo de uma ficha: custo total, custo por porção e margem.
 // precoVenda vem do que estiver vinculado (produto do catálogo OU complemento).
-function calcularFicha(ficha, itens, precoVenda = 0) {
-  const custoTotal = (itens || []).reduce((s, it) => s + custoItem(it), 0)
+function calcularFicha(ficha, itens, precoVenda = 0, custoDeFicha = null) {
+  const custoTotal = (itens || []).reduce((s, it) => s + custoItem(it, custoDeFicha), 0)
   const rendBase = emBase(ficha.rendimento, ficha.unid_rendimento)
   const custoPorBase = rendBase > 0 ? custoTotal / rendBase : 0
   const porcaoBase = emBase(ficha.peso_porcao, ficha.unid_porcao)
@@ -55,73 +62,20 @@ function vinculoDe(f) {
   return null
 }
 
+// Uma ficha usa outra? (em qualquer nível). Serve pra não deixar a Massa entrar
+// na Coxinha e a Coxinha entrar na Massa — o custo ficaria rodando em círculo.
+function fichaUsa(id, alvo, itensPorFicha, vistos = new Set()) {
+  if (id === alvo) return true
+  if (vistos.has(id)) return false
+  vistos.add(id)
+  return (itensPorFicha[id] || []).some(it => it.ficha_ref_id && fichaUsa(it.ficha_ref_id, alvo, itensPorFicha, vistos))
+}
+
 const emptyMateria = { nome: '', unidade: 'kg', custo: '', ativo: true, quantidade: '' }
-const linhaVazia = () => ({ materia_prima_id: '', nome: '', quantidade: '', unidade: 'g', custo_unit: 0 })
+const linhaVazia = () => ({ materia_prima_id: '', ficha_ref_id: '', nome: '', quantidade: '', unidade: 'g', custo_unit: 0 })
 const emptyFicha = {
   nome: '', produto_id: '', complemento_opcao_id: '', rendimento: '', unid_rendimento: 'g',
   peso_porcao: '', unid_porcao: 'g', observacoes: '', itens: [linhaVazia()],
-}
-
-// Campo de busca pra vincular (produto OU complemento). Digita e filtra;
-// ignora acento (feijao acha Feijão). Valor: "prod:<id>" | "comp:<id>" | "".
-function VinculoCombobox({ produtos, complementos, value, onChange }) {
-  const opcoes = useMemo(() => {
-    const arr = []
-    for (const p of produtos) arr.push({ key: 'prod:' + p.id, label: p.nome, tipo: 'Produto', norm: normTxt(p.nome) })
-    for (const c of complementos) {
-      const label = `${c.grupo ? c.grupo + ' · ' : ''}${c.nome}${c.preco > 0 ? ` (${brl(c.preco)})` : ''}`
-      arr.push({ key: 'comp:' + c.id, label, tipo: 'Complemento', norm: normTxt(`${c.grupo} ${c.nome}`) })
-    }
-    return arr
-  }, [produtos, complementos])
-  const selecionado = opcoes.find(o => o.key === value) || null
-  const [open, setOpen] = useState(false)
-  const [text, setText] = useState('')
-  const wrapRef = useRef(null)
-
-  useEffect(() => { setText(selecionado ? selecionado.label : '') }, [value]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    function onDoc(e) { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [])
-
-  const q = normTxt(text)
-  const exata = selecionado && normTxt(selecionado.label) === q
-  const filtradas = (q && !exata) ? opcoes.filter(o => o.norm.includes(q)) : opcoes
-
-  function escolher(o) { onChange(o ? o.key : ''); setText(o ? o.label : ''); setOpen(false) }
-
-  return (
-    <div ref={wrapRef} style={{ position: 'relative' }}>
-      <input type="text" value={text} autoComplete="off" placeholder="Digite pra buscar (ex.: feijao) ou escolha…"
-        onChange={e => { setText(e.target.value); setOpen(true) }}
-        onFocus={e => { e.target.select(); setOpen(true) }}
-        style={{ paddingRight: 28 }} />
-      <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)', fontSize: 11 }}>▼</span>
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 60,
-          maxHeight: 280, overflowY: 'auto', background: 'var(--card-bg, var(--surface, var(--bg)))',
-          border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 10px 28px rgba(0,0,0,.22)', padding: 4,
-        }}>
-          <div onMouseDown={() => escolher(null)} style={{ padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: 'var(--text-muted)' }}>
-            — não vincular —
-          </div>
-          {filtradas.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, color: 'var(--text-muted)' }}>Nada encontrado.</div>}
-          {filtradas.map(o => (
-            <div key={o.key} onMouseDown={() => escolher(o)}
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13.5, background: o.key === value ? 'var(--primary-bg, rgba(124,58,237,.12))' : 'transparent' }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover, rgba(0,0,0,.05))'}
-              onMouseLeave={e => e.currentTarget.style.background = o.key === value ? 'var(--primary-bg, rgba(124,58,237,.12))' : 'transparent'}>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.label}</span>
-              <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 20, padding: '1px 7px' }}>{o.tipo}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
 
 const stepBtn = { width: 28, height: 28, borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 16, lineHeight: 1, flexShrink: 0 }
@@ -344,6 +298,56 @@ export default function FichaTecnica() {
   }
 
   // ── Fichas técnicas ──────────────────────────────────────────────
+  // Quanto custa 1 unidade base (g / ml / un) do que a ficha PRODUZ. É por aqui
+  // que uma receita entra dentro da outra: a Coxinha pega o custo da Massa aqui.
+  // Calcula na hora (não usa o custo gravado) pra receita de cima acompanhar
+  // quando o insumo lá de baixo muda de preço.
+  const custoDeFicha = useMemo(() => {
+    const memo = new Map()
+    function calc(fichaId, caminho = []) {
+      if (caminho.includes(fichaId)) return 0        // rede de segurança contra círculo
+      if (memo.has(fichaId)) return memo.get(fichaId)
+      const f = fichas.find(x => x.id === fichaId)
+      if (!f) return 0
+      const abaixo = (id) => calc(id, [...caminho, fichaId])
+      const total = (itensPorFicha[fichaId] || []).reduce((s, it) => s + custoItem(it, abaixo), 0)
+      const rend = emBase(f.rendimento, f.unid_rendimento)
+      const valor = rend > 0 ? total / rend : 0
+      memo.set(fichaId, valor)
+      return valor
+    }
+    return calc
+  }, [fichas, itensPorFicha])
+
+  // O que pode entrar numa linha da receita: insumo comprado OU outra ficha.
+  // Fica de fora a própria ficha e quem já usa ela (senão o custo roda em círculo).
+  const opcoesIngrediente = useMemo(() => {
+    const arr = materias.filter(m => m.ativo).map(m => ({
+      key: 'mp:' + m.id, label: m.nome, sub: `${brl(m.custo)} / ${m.unidade}`, tag: 'Insumo',
+    }))
+    for (const f of fichas) {
+      if (fichaEdit && fichaUsa(f.id, fichaEdit.id, itensPorFicha)) continue
+      const porUnid = custoDeFicha(f.id) * (FATOR[f.unid_rendimento] || 1)
+      arr.push({
+        key: 'fi:' + f.id, label: f.nome, tag: 'Receita',
+        sub: Number(f.rendimento) > 0 ? `${brl(porUnid)} / ${f.unid_rendimento}` : 'falta o rendimento',
+      })
+    }
+    return arr
+  }, [materias, fichas, itensPorFicha, fichaEdit, custoDeFicha])
+
+  // Vincular a ficha a um produto do catálogo ou a um complemento (pra ver margem).
+  const opcoesVinculo = useMemo(() => {
+    const arr = produtos.map(p => ({ key: 'prod:' + p.id, label: p.nome, tag: 'Produto' }))
+    for (const c of complementos) {
+      arr.push({
+        key: 'comp:' + c.id, tag: 'Complemento',
+        label: `${c.grupo ? c.grupo + ' · ' : ''}${c.nome}${c.preco > 0 ? ` (${brl(c.preco)})` : ''}`,
+      })
+    }
+    return arr
+  }, [produtos, complementos])
+
   function abrirNovaFicha() {
     setFichaEdit(null); setFichaForm(emptyFicha); setShowFicha(true)
   }
@@ -351,6 +355,7 @@ export default function FichaTecnica() {
     setFichaEdit(f)
     const itens = (itensPorFicha[f.id] || []).map(it => ({
       materia_prima_id: it.materia_prima_id || '',
+      ficha_ref_id: it.ficha_ref_id || '',
       nome: it.nome,
       quantidade: String(it.quantidade ?? ''),
       unidade: it.unidade || 'g',
@@ -378,14 +383,29 @@ export default function FichaTecnica() {
       return { ...f, itens }
     })
   }
-  function escolherMateria(idx, materiaId) {
-    const mp = materias.find(m => m.id === materiaId)
-    if (!mp) { setLinha(idx, { materia_prima_id: '', custo_unit: 0 }); return }
+  // A linha aceita insumo ("mp:<id>") ou outra ficha como ingrediente ("fi:<id>").
+  function escolherIngrediente(idx, key) {
+    if (!key) { setLinha(idx, { materia_prima_id: '', ficha_ref_id: '', nome: '', custo_unit: 0 }); return }
+    if (key.startsWith('mp:')) {
+      const mp = materias.find(m => m.id === key.slice(3))
+      if (!mp) return
+      setLinha(idx, {
+        materia_prima_id: mp.id,
+        ficha_ref_id: '',
+        nome: mp.nome,
+        unidade: mp.unidade,          // começa na mesma unidade da MP (pode trocar)
+        custo_unit: custoBase(mp),    // custo por unidade base (snapshot)
+      })
+      return
+    }
+    const f = fichas.find(x => x.id === key.slice(3))
+    if (!f) return
     setLinha(idx, {
-      materia_prima_id: mp.id,
-      nome: mp.nome,
-      unidade: mp.unidade,          // começa na mesma unidade da MP (pode trocar)
-      custo_unit: custoBase(mp),    // custo por unidade base (snapshot)
+      materia_prima_id: '',
+      ficha_ref_id: f.id,
+      nome: f.nome,
+      unidade: f.unid_rendimento,     // a sub-receita entra na unidade que ela rende
+      custo_unit: custoDeFicha(f.id),
     })
   }
   function addLinha() { setFichaForm(f => ({ ...f, itens: [...f.itens, linhaVazia()] })) }
@@ -429,11 +449,12 @@ export default function FichaTecnica() {
       // Regrava os itens: apaga os antigos e insere os atuais (simples e seguro).
       await supabase.from('ficha_itens').delete().eq('ficha_id', fichaId)
       const linhas = fichaForm.itens
-        .filter(it => it.materia_prima_id && Number(String(it.quantidade).replace(',', '.')) > 0)
+        .filter(it => (it.materia_prima_id || it.ficha_ref_id) && Number(String(it.quantidade).replace(',', '.')) > 0)
         .map(it => ({
           empresa_id: empresaId,
           ficha_id: fichaId,
-          materia_prima_id: it.materia_prima_id,
+          materia_prima_id: it.materia_prima_id || null,
+          ficha_ref_id: it.ficha_ref_id || null,
           nome: it.nome,
           quantidade: Number(String(it.quantidade).replace(',', '.')) || 0,
           unidade: it.unidade,
@@ -452,6 +473,13 @@ export default function FichaTecnica() {
     }
   }
   async function excluirFicha(f) {
+    // Ficha que é ingrediente de outra não pode sumir: a receita de cima ficaria
+    // com um buraco no custo, sem ninguém perceber.
+    const usadaPor = fichas.filter(x => (itensPorFicha[x.id] || []).some(it => it.ficha_ref_id === f.id))
+    if (usadaPor.length) {
+      alert(`Não dá pra excluir "${f.nome}": ela é ingrediente de ${usadaPor.map(x => `"${x.nome}"`).join(', ')}.\n\nTire ela dessa(s) receita(s) primeiro.`)
+      return
+    }
     if (!confirm(`Excluir a ficha "${f.nome}"?`)) return
     const { error } = await supabase.from('fichas_tecnicas').delete().eq('id', f.id)
     if (error) { alert('Erro ao excluir: ' + error.message); return }
@@ -469,8 +497,8 @@ export default function FichaTecnica() {
       unid_rendimento: fichaForm.unid_rendimento,
       peso_porcao: Number(String(fichaForm.peso_porcao).replace(',', '.')) || 0,
       unid_porcao: fichaForm.unid_porcao,
-    }, itens, preco)
-  }, [fichaForm, produtos, complementos])
+    }, itens, preco, custoDeFicha)
+  }, [fichaForm, produtos, complementos, custoDeFicha])
 
   if (!empresaId) {
     return <div className="card">Selecione uma loja pra usar a Ficha Técnica.</div>
@@ -517,8 +545,10 @@ export default function FichaTecnica() {
           <div className="dashboard-grid">
             {fichas.map(f => {
               const vinc = vinculoDe(f)
-              const c = calcularFicha(f, itensPorFicha[f.id] || [], vinc?.preco || 0)
+              const c = calcularFicha(f, itensPorFicha[f.id] || [], vinc?.preco || 0, custoDeFicha)
               const negativo = c.temVenda && c.lucro < 0
+              // Receitas que entram nesta (ex.: a Coxinha leva a Massa).
+              const subReceitas = (itensPorFicha[f.id] || []).filter(it => it.ficha_ref_id)
               return (
                 <div className="card" key={f.id} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
@@ -549,6 +579,12 @@ export default function FichaTecnica() {
                       <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--primary)' }}>{brl(c.custoPorcao)}</div>
                     </div>
                   </div>
+
+                  {subReceitas.length > 0 && (
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      🧩 Leva a receita de {subReceitas.map(it => `${it.nome} (${fmtQtd(it.quantidade, it.unidade)})`).join(', ')}
+                    </div>
+                  )}
 
                   {c.temVenda && (
                     <div style={{
@@ -827,12 +863,17 @@ export default function FichaTecnica() {
               </div>
               <div className="form-field">
                 <label>Vincular a (opcional)</label>
-                <VinculoCombobox produtos={produtos} complementos={complementos} value={vinculoValor} onChange={escolherVinculo} />
+                <BuscaSelect opcoes={opcoesVinculo} value={vinculoValor} onChange={escolherVinculo}
+                  placeholder="Digite pra buscar (ex.: coxinha)…" vazioLabel="— não vincular —" />
               </div>
             </div>
 
             {/* Ingredientes */}
-            <div style={{ margin: '18px 0 6px', fontWeight: 700 }}>Matérias-primas usadas</div>
+            <div style={{ margin: '18px 0 2px', fontWeight: 700 }}>O que leva</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+              Digite o nome que a lista já filtra. Pode ser um insumo (farinha) ou
+              outra ficha pronta (ex.: a massa que você já cadastrou).
+            </div>
             {materias.length === 0 && (
               <div className="badge badge-warning" style={{ display: 'block', padding: 10, marginBottom: 8 }}>
                 Cadastre matérias-primas primeiro (aba "Matérias-primas").
@@ -841,11 +882,13 @@ export default function FichaTecnica() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {fichaForm.itens.map((it, idx) => (
                 <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 70px 90px 34px', gap: 6, alignItems: 'center' }}>
-                  <select value={it.materia_prima_id} onChange={e => escolherMateria(idx, e.target.value)}
-                    style={{ padding: '9px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', color: 'var(--text)' }}>
-                    <option value="">— escolher —</option>
-                    {materias.filter(m => m.ativo).map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
-                  </select>
+                  <BuscaSelect
+                    opcoes={opcoesIngrediente}
+                    value={it.ficha_ref_id ? 'fi:' + it.ficha_ref_id : it.materia_prima_id ? 'mp:' + it.materia_prima_id : ''}
+                    onChange={key => escolherIngrediente(idx, key)}
+                    placeholder="Digite o nome (ex.: feijao)…"
+                    vazioLabel="— tirar —"
+                    semResultado="Não achei esse insumo nem receita." />
                   <input inputMode="decimal" placeholder="Qtd" value={it.quantidade}
                     onChange={e => setLinha(idx, { quantidade: e.target.value })}
                     style={{ padding: '9px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', color: 'var(--text)' }} />
@@ -854,7 +897,7 @@ export default function FichaTecnica() {
                     {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
                   </select>
                   <div style={{ fontSize: 13, fontWeight: 600, textAlign: 'right', color: 'var(--text-muted)' }}>
-                    {brl(custoItem({ ...it, quantidade: Number(String(it.quantidade).replace(',', '.')) || 0 }))}
+                    {brl(custoItem({ ...it, quantidade: Number(String(it.quantidade).replace(',', '.')) || 0 }, custoDeFicha))}
                   </div>
                   <button type="button" className="btn btn-danger btn-sm" onClick={() => removerLinha(idx)} title="Remover"
                     style={{ padding: '6px 8px' }}>✕</button>
