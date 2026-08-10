@@ -46,12 +46,21 @@ export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', p
     setTelEdit(null)
   }
 
+  // Cadastro EXIGE telefone (decisão do Wilde, 10/08/2026). Antes ele era
+  // opcional aqui, e era por onde entravam os clientes sem telefone: nome
+  // repetido não dá pra diferenciar e a dívida do fiado fica sem dono.
+  // Sem telefone, o nome vai só pra conta (quando o modo permite) — não vira ficha.
   async function criar() {
     const nome = busca.trim()
     if (!nome) { window.alert('Digite o nome do cliente.'); return }
+    if (telefone.replace(/\D/g, '').length < 10) {
+      if (permitirSemCadastro) { onPick({ id: null, nome }); return }
+      window.alert('Digite o telefone com DDD.\n\nSem telefone não dá pra cadastrar: dois clientes de mesmo nome ficam iguais e a dívida do fiado fica sem dono.')
+      return
+    }
     setSalvando(true)
     const { data, error } = await supabase.from('clientes')
-      .insert({ empresa_id: empresaId, nome, telefone: telefone.trim() || null })
+      .insert({ empresa_id: empresaId, nome, telefone: telefone.trim() })
       .select('id, nome, telefone').single()
     setSalvando(false)
     if (error) { window.alert('Erro ao cadastrar o cliente: ' + error.message); return }
@@ -130,8 +139,13 @@ export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', p
             <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Nome"
               style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 14, boxSizing: 'border-box' }} />
             <input value={telefone} onChange={e => setTelefone(e.target.value)} type="tel" inputMode="tel"
-              placeholder="Telefone com DDD (opcional)"
+              placeholder="Telefone com DDD (obrigatório)"
               style={{ width: '100%', marginTop: 8, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 14, boxSizing: 'border-box' }} />
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
+              {permitirSemCadastro
+                ? 'Sem telefone o nome fica só nesta conta, sem virar cadastro.'
+                : 'É o telefone que diferencia dois clientes de mesmo nome e diz de quem é a dívida.'}
+            </div>
             <button type="button" onClick={criar} disabled={salvando || !busca.trim()}
               style={{ width: '100%', marginTop: 10, padding: '10px 0', borderRadius: 8, border: 'none',
                 background: 'var(--primary)', color: '#fff', fontSize: 13.5, fontWeight: 800,
