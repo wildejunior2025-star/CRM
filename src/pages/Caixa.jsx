@@ -42,6 +42,24 @@ export default function Caixa() {
   const [editandoMovId, setEditandoMovId] = useState(null) // movimento com seletor de forma aberto
   const [salvandoMovForma, setSalvandoMovForma] = useState(false)
 
+  // ── Taxa da maquineta ──
+  // O cartão não cai inteiro na conta: a maquineta come uma % (a da Estação é 2%).
+  // A loja põe a taxa aqui mesmo e o card do cartão passa a mostrar o que sobra.
+  const [taxaCartao, setTaxaCartao] = useState(0)
+  const [editTaxa, setEditTaxa] = useState(null)     // texto do campo enquanto edita
+  const [salvandoTaxa, setSalvandoTaxa] = useState(false)
+
+  async function salvarTaxaCartao() {
+    const pct = Number(String(editTaxa).replace(',', '.'))
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) { window.alert('Digite a taxa em %, de 0 a 100 (ex.: 2 ou 2,5).'); return }
+    setSalvandoTaxa(true)
+    const { error: err } = await supabase.from('empresas').update({ taxa_cartao_pct: pct }).eq('id', profile.empresa_id)
+    setSalvandoTaxa(false)
+    if (err) { window.alert('Não deu pra salvar a taxa: ' + err.message); return }
+    setTaxaCartao(pct)
+    setEditTaxa(null)
+  }
+
   // Histórico expandível: mostra o detalhamento por forma de pagamento de um caixa fechado.
   const [histAberto, setHistAberto] = useState(null)      // id do caixa expandido
   const [histResumo, setHistResumo] = useState({})        // { [caixaId]: resumo | 'loading' }
@@ -80,11 +98,15 @@ export default function Caixa() {
       .from('caixas').select('*')
       .eq('aberto_por', user.id).eq('status', 'aberto').limit(1)
 
-    const [caixaRes, historicoRes, usuariosRes] = await Promise.all([
+    const [caixaRes, historicoRes, usuariosRes, empresaRes] = await Promise.all([
       caixaAtivaQuery,
       supabase.from('caixas').select('*').order('aberto_em', { ascending: false }).limit(20),
       isAdmin ? supabase.from('profiles').select('id, nome, email') : Promise.resolve({ data: [] }),
+      profile?.empresa_id
+        ? supabase.from('empresas').select('taxa_cartao_pct').eq('id', profile.empresa_id).maybeSingle()
+        : Promise.resolve({ data: null }),
     ])
+    setTaxaCartao(Number(empresaRes.data?.taxa_cartao_pct ?? 0))
 
     const firstError = caixaRes.error || historicoRes.error || usuariosRes.error
     if (firstError) setError(firstError.message)
@@ -333,9 +355,52 @@ export default function Caixa() {
                 <div className="label">Recebimentos Pix</div>
                 <div className="value">R$ {Number(resumo.recebimentos_pix).toFixed(2)}</div>
               </div>
+              {/* Cartão: mostra o bruto e, com a taxa preenchida, o que sobra
+                  depois da maquineta — que é o que cai na conta de verdade. */}
               <div className="card dashboard-card">
                 <div className="label">Recebimentos cartão</div>
                 <div className="value">R$ {Number(resumo.recebimentos_cartao).toFixed(2)}</div>
+
+                {editTaxa !== null ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Taxa</span>
+                    <input value={editTaxa} inputMode="decimal" autoFocus placeholder="2"
+                      onChange={e => setEditTaxa(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') salvarTaxaCartao(); if (e.key === 'Escape') setEditTaxa(null) }}
+                      style={{ width: 60, padding: '5px 7px', borderRadius: 6, border: '1px solid var(--border)',
+                        background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }} />
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>%</span>
+                    <button type="button" onClick={salvarTaxaCartao} disabled={salvandoTaxa}
+                      style={{ padding: '5px 9px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                        background: 'var(--primary)', color: '#fff', fontSize: 11.5, fontWeight: 800 }}>
+                      {salvandoTaxa ? '...' : 'ok'}
+                    </button>
+                    <button type="button" onClick={() => setEditTaxa(null)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 15 }}>×</button>
+                  </div>
+                ) : taxaCartao > 0 ? (
+                  <div style={{ marginTop: 6, lineHeight: 1.5 }}>
+                    <div style={{ fontSize: 12, color: '#d97706' }}>
+                      − maquineta {String(taxaCartao).replace('.', ',')}% = R$ {(Number(resumo.recebimentos_cartao) * taxaCartao / 100).toFixed(2)}
+                    </div>
+                    <div style={{ fontSize: 14.5, fontWeight: 800 }}>
+                      Cai na conta: R$ {(Number(resumo.recebimentos_cartao) * (1 - taxaCartao / 100)).toFixed(2)}
+                    </div>
+                    {isAdmin && (
+                      <button type="button" onClick={() => setEditTaxa(String(taxaCartao).replace('.', ','))}
+                        style={{ marginTop: 3, background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                          color: 'var(--primary)', fontSize: 11.5, fontWeight: 700 }}>
+                        ✏️ mudar a taxa
+                      </button>
+                    )}
+                  </div>
+                ) : isAdmin ? (
+                  <button type="button" onClick={() => setEditTaxa('')}
+                    style={{ marginTop: 5, background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                      color: 'var(--primary)', fontSize: 12, fontWeight: 700, textAlign: 'left' }}>
+                    ➕ pôr a taxa da maquineta (ex.: 2%)
+                  </button>
+                ) : null}
               </div>
               {/* Quanto do que entrou é freguês pagando o que já devia. Esse dinheiro
                   está DENTRO dos recebimentos acima, mas NÃO é venda de hoje — a venda
@@ -511,6 +576,10 @@ export default function Caixa() {
                                 ['💵 Recebido em dinheiro', r.recebimentos_dinheiro],
                                 ['📱 Recebido em PIX', r.recebimentos_pix],
                                 ['💳 Recebido em cartão', r.recebimentos_cartao],
+                                // O que sobra do cartão depois da maquineta (usa a taxa de hoje).
+                                (taxaCartao > 0 && Number(r.recebimentos_cartao) > 0
+                                  ? [`↳ cai na conta (−${String(taxaCartao).replace('.', ',')}%)`, Number(r.recebimentos_cartao) * (1 - taxaCartao / 100)]
+                                  : null),
                                 (Number(r.recebimentos_transferencia) > 0 ? ['🔁 Transferência', r.recebimentos_transferencia] : null),
                                 ['🧾 Vendas no fiado', r.vendas_fiado],
                                 // Dívida velha que entrou neste caixa: está DENTRO dos
