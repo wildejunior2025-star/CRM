@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { clienteComMesmoNome } from '../lib/clientes'
 
 // Tira acento e deixa minúsculo: "jose" acha "José".
 const semAcento = (s) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 
-// Modal pra escolher um cliente já cadastrado OU cadastrar um novo na hora (nome +
-// telefone). Usado no Salão (ligar cliente à mesa) e no histórico de contas fechadas.
+// Modal pra escolher um cliente já cadastrado OU cadastrar um novo na hora (só o
+// nome basta; o telefone é opcional). Usado no Salão (ligar cliente à mesa) e no histórico de contas fechadas.
 // Chama onPick(cliente) ao escolher/criar e onPick(null) se clicar "Tirar cliente".
 // `permitirSemCadastro` é pra comanda de balcão: o cliente que pede em pé quase
 // nunca é cadastrado, e parar pra cadastrar todo mundo atrasa a fila (e enche a
@@ -21,6 +22,8 @@ export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', p
   // cliente é cadastrado no aperto e o telefone fica pra depois — "depois" é aqui,
   // na próxima vez que alguém puxa o nome dele.
   const [telEdit, setTelEdit] = useState(null)
+  // Cliente que já usa o nome digitado — trava o cadastro e aparece pra ser usado.
+  const [duplicado, setDuplicado] = useState(null)
   const buscaRef = useRef(null)
 
   useEffect(() => {
@@ -46,21 +49,18 @@ export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', p
     setTelEdit(null)
   }
 
-  // Cadastro EXIGE telefone (decisão do Wilde, 10/08/2026). Antes ele era
-  // opcional aqui, e era por onde entravam os clientes sem telefone: nome
-  // repetido não dá pra diferenciar e a dívida do fiado fica sem dono.
-  // Sem telefone, o nome vai só pra conta (quando o modo permite) — não vira ficha.
+  // Cadastro grava só com o nome — o telefone é opcional (decisão do Wilde,
+  // 10/08/2026: exigir o número travava o atendimento na mesa). Em troca, o
+  // NOME não pode repetir: é ele que diz de quem é a dívida do fiado depois.
+  // Achou xará, a tela oferece o cliente que já existe em vez de criar outro.
   async function criar() {
     const nome = busca.trim()
     if (!nome) { window.alert('Digite o nome do cliente.'); return }
-    if (telefone.replace(/\D/g, '').length < 10) {
-      if (permitirSemCadastro) { onPick({ id: null, nome }); return }
-      window.alert('Digite o telefone com DDD.\n\nSem telefone não dá pra cadastrar: dois clientes de mesmo nome ficam iguais e a dívida do fiado fica sem dono.')
-      return
-    }
     setSalvando(true)
+    const jaExiste = await clienteComMesmoNome(empresaId, nome, clientes)
+    if (jaExiste) { setSalvando(false); setDuplicado(jaExiste); return }
     const { data, error } = await supabase.from('clientes')
-      .insert({ empresa_id: empresaId, nome, telefone: telefone.trim() })
+      .insert({ empresa_id: empresaId, nome, telefone: telefone.trim() || null })
       .select('id, nome, telefone').single()
     setSalvando(false)
     if (error) { window.alert('Erro ao cadastrar o cliente: ' + error.message); return }
@@ -136,20 +136,39 @@ export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', p
         {novo ? (
           <div style={{ marginTop: 10, padding: 12, borderRadius: 10, border: '1.5px solid var(--primary)', background: 'rgba(124,58,237,.05)' }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>Cadastrar cliente novo</div>
-            <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Nome"
-              style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 14, boxSizing: 'border-box' }} />
+            <input value={busca} onChange={e => { setBusca(e.target.value); setDuplicado(null) }} placeholder="Nome"
+              style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: `1px solid ${duplicado ? '#d97706' : 'var(--border)'}`, background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 14, boxSizing: 'border-box' }} />
             <input value={telefone} onChange={e => setTelefone(e.target.value)} type="tel" inputMode="tel"
-              placeholder="Telefone com DDD (obrigatório)"
+              placeholder="Telefone com DDD (opcional)"
               style={{ width: '100%', marginTop: 8, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 14, boxSizing: 'border-box' }} />
-            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
-              {permitirSemCadastro
-                ? 'Sem telefone o nome fica só nesta conta, sem virar cadastro.'
-                : 'É o telefone que diferencia dois clientes de mesmo nome e diz de quem é a dívida.'}
-            </div>
-            <button type="button" onClick={criar} disabled={salvando || !busca.trim()}
+
+            {/* Nome repetido: o sistema não cria o xará — ou usa quem já existe,
+                ou o atendente põe um apelido que diferencie os dois. */}
+            {duplicado ? (
+              <div style={{ marginTop: 8, padding: 10, borderRadius: 8, border: '1.5px solid #d97706', background: 'rgba(217,119,6,.08)' }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.4 }}>
+                  ⚠️ Já tem um cliente com esse nome
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.4 }}>
+                  É o mesmo? Use ele. Se for outra pessoa, mude o nome (ex.: “{duplicado.nome} da esquina”) —
+                  dois nomes iguais ninguém sabe depois de quem é a dívida.
+                </div>
+                <button type="button" onClick={() => onPick(duplicado)}
+                  style={{ width: '100%', marginTop: 8, padding: '8px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
+                    background: '#d97706', color: '#fff', fontSize: 12.5, fontWeight: 800 }}>
+                  Usar “{duplicado.nome}”{duplicado.telefone ? ` · ${duplicado.telefone}` : ''}
+                </button>
+              </div>
+            ) : (
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
+                O telefone pode ficar pra depois. Só não dá pra ter dois clientes com o mesmo nome.
+              </div>
+            )}
+
+            <button type="button" onClick={criar} disabled={salvando || !busca.trim() || !!duplicado}
               style={{ width: '100%', marginTop: 10, padding: '10px 0', borderRadius: 8, border: 'none',
                 background: 'var(--primary)', color: '#fff', fontSize: 13.5, fontWeight: 800,
-                cursor: salvando ? 'wait' : 'pointer', opacity: (salvando || !busca.trim()) ? .5 : 1 }}>
+                cursor: salvando ? 'wait' : 'pointer', opacity: (salvando || !busca.trim() || duplicado) ? .5 : 1 }}>
               {salvando ? 'Cadastrando...' : `Cadastrar "${busca.trim() || '...'}" e usar`}
             </button>
           </div>
@@ -157,7 +176,7 @@ export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', p
           <button type="button" onClick={() => setNovo(true)}
             style={{ width: '100%', marginTop: 10, padding: '9px 0', borderRadius: 8, cursor: 'pointer',
               border: '1.5px dashed var(--primary)', background: 'transparent', color: 'var(--primary)', fontSize: 13.5, fontWeight: 700 }}>
-            ➕ Cadastrar cliente novo (nome + telefone)
+            ➕ Cadastrar cliente novo (só o nome já vale)
           </button>
         )}
 

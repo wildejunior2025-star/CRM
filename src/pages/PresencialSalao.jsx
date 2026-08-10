@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { adicionalComplementos } from '../lib/complementos'
 import { rotuloComanda } from '../lib/comanda'
+import { clienteComMesmoNome } from '../lib/clientes'
 import ClientePicker from '../components/ClientePicker'
 import ClientesFiado from './ClientesFiado'
 import ConsumoFuncionario from '../components/ConsumoFuncionario'
@@ -81,7 +82,7 @@ export default function PresencialSalao() {
   const [clienteSel, setClienteSel] = useState(null)  // { id, nome }
   const [buscaCliente, setBuscaCliente] = useState('')
   const [novoCliente, setNovoCliente] = useState(false)
-  const [novoTelefone, setNovoTelefone] = useState('') // telefone é obrigatório no cadastro do fiado
+  const [novoTelefone, setNovoTelefone] = useState('') // opcional no cadastro do fiado (o nome é que não repete)
   const [salvandoCliente, setSalvandoCliente] = useState(false)
   // Rascunho: itens que o garçom monta mas que só vão pra cozinha (e pra impressora)
   // quando ele clica "Enviar" — assim o pedido inteiro sai numa impressão só.
@@ -620,16 +621,21 @@ export default function PresencialSalao() {
   }
 
   // Cadastra na hora quem ainda não está na base (o fiado precisa de um cliente real).
-  // Telefone obrigatório: é o que diferencia dois clientes de mesmo nome na hora
-  // de cobrar a dívida depois.
+  // O telefone é opcional — o que não pode é nome repetido: é o nome que diz de
+  // quem é a dívida. Se já existe um xará, o sistema usa o que já está cadastrado.
   async function criarClienteFiado() {
     const nome = buscaCliente.trim()
     if (!nome) { window.alert('Digite o nome do cliente.'); return }
-    const telDigitos = novoTelefone.replace(/\D/g, '')
-    if (telDigitos.length < 10) { window.alert('Digite o telefone (com DDD) — é obrigatório pra saber de quem é a dívida.'); return }
     setSalvandoCliente(true)
+    const jaExiste = await clienteComMesmoNome(empresaId, nome, clientes)
+    if (jaExiste) {
+      setSalvandoCliente(false)
+      const usar = window.confirm(`Já tem um cliente chamado "${jaExiste.nome}"${jaExiste.telefone ? ` (${jaExiste.telefone})` : ''}.\n\nÉ essa mesma pessoa? OK usa ela.\n\nSe for outra, cancele e mude o nome (ex.: "${jaExiste.nome} da esquina") — dois nomes iguais ninguém sabe depois de quem é a dívida.`)
+      if (usar) { setClienteSel(jaExiste); setNovoCliente(false); setBuscaCliente(''); setNovoTelefone('') }
+      return
+    }
     const { data, error } = await supabase.from('clientes')
-      .insert({ empresa_id: empresaId, nome, telefone: novoTelefone.trim() })
+      .insert({ empresa_id: empresaId, nome, telefone: novoTelefone.trim() || null })
       .select('id, nome, telefone').single()
     setSalvandoCliente(false)
     if (error) { window.alert('Erro ao cadastrar o cliente: ' + error.message); return }
@@ -1617,15 +1623,18 @@ export default function PresencialSalao() {
                     {novoCliente ? (
                       <>
                         <input value={novoTelefone} onChange={e => setNovoTelefone(e.target.value)}
-                          type="tel" inputMode="tel" placeholder="Telefone com DDD (obrigatório)"
+                          type="tel" inputMode="tel" placeholder="Telefone com DDD (opcional)"
                           style={{ width: '100%', marginTop: 8, padding: '9px 10px', borderRadius: 8, boxSizing: 'border-box',
                             border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 14 }} />
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
+                          O telefone pode ficar pra depois. Só não dá pra ter dois clientes com o mesmo nome.
+                        </div>
                         <button type="button" onClick={criarClienteFiado}
-                          disabled={salvandoCliente || !buscaCliente.trim() || novoTelefone.replace(/\D/g, '').length < 10}
+                          disabled={salvandoCliente || !buscaCliente.trim()}
                           style={{ width: '100%', marginTop: 8, padding: '9px 0', borderRadius: 8, border: 'none',
                             background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 800,
                             cursor: salvandoCliente ? 'wait' : 'pointer',
-                            opacity: (salvandoCliente || !buscaCliente.trim() || novoTelefone.replace(/\D/g, '').length < 10) ? .5 : 1 }}>
+                            opacity: (salvandoCliente || !buscaCliente.trim()) ? .5 : 1 }}>
                           {salvandoCliente ? 'Cadastrando...' : `Cadastrar "${buscaCliente.trim()}" e usar`}
                         </button>
                       </>
