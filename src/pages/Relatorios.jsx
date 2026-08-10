@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { exportToCsv } from '../lib/csv'
-import { CONDICOES_PAGAMENTO, STATUS_VENDA } from '../lib/constants'
+import { CONDICOES_PAGAMENTO, FORMAS_PAGAMENTO, STATUS_VENDA } from '../lib/constants'
 import '../components/Page.css'
 import './Relatorios.css'
 
@@ -18,7 +18,11 @@ function primeiroDiaDoMes() {
 }
 
 function formaPagamentoLabel(value) {
-  return CONDICOES_PAGAMENTO.find((o) => o.value === value)?.label || value
+  // Procura nas duas listas: condição do cliente (à vista, fiado) e forma de
+  // pagamento (dinheiro, crédito, débito) — senão "credito" apareceria cru.
+  return CONDICOES_PAGAMENTO.find((o) => o.value === value)?.label
+    || FORMAS_PAGAMENTO.find((o) => o.value === value)?.label
+    || value
 }
 
 export default function Relatorios() {

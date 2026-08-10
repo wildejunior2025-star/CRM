@@ -387,7 +387,7 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
 }
 
 // Conta do PRESENCIAL (com preços, taxa e total)
-const formaContaLabel = (f) => ({ dinheiro: 'Dinheiro', pix: 'PIX', cartao: 'Cartao', dividido: 'Dividido' }[String(f || '').toLowerCase()] || (f || ''))
+const formaContaLabel = (f) => ({ dinheiro: 'Dinheiro', pix: 'PIX', credito: 'Credito', debito: 'Debito', cartao: 'Cartao', dividido: 'Dividido' }[String(f || '').toLowerCase()] || (f || ''))
 
 export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0, taxa = 0, total = 0, formaPagamento = '', pagamentos = [], empresa = {}, rotulo = '' }) {
   const largura = larguraCupom()

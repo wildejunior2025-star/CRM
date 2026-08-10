@@ -31,7 +31,8 @@ const zap = (tel) => {
 const FORMAS = [
   { id: 'dinheiro', label: 'Dinheiro' },
   { id: 'pix', label: 'PIX' },
-  { id: 'cartao', label: 'Cartão' },
+  { id: 'credito', label: 'Crédito' },
+  { id: 'debito', label: 'Débito' },
   { id: 'transferencia', label: 'Transferência' },
 ]
 

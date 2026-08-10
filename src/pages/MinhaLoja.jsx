@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
-import { FORMAS_PAGAMENTO, ICONE_PAGAMENTO, formasAtivas } from '../lib/constants'
+import { FORMAS_PAGAMENTO, FORMAS_CARTAO, ICONE_PAGAMENTO, formasAtivas } from '../lib/constants'
+
+// "2,5" → 2.5, e nunca fora de 0–100 (taxa de maquineta não passa disso).
+const pctNum = (s) => Math.min(100, Math.max(0, Number(String(s ?? '').replace(',', '.')) || 0))
 import IfoodCatalogoManager from '../components/IfoodCatalogoManager'
 import '../components/Page.css'
 
@@ -26,6 +29,9 @@ export default function MinhaLoja({ secao = 'loja' }) {
   const [formasPagamento, setFormasPagamento] = useState(['a_vista', 'fiado', 'boleto_7d', 'boleto_14d', 'boleto_30d'])
 
   const [chavePix, setChavePix] = useState('')
+  // Taxa da maquineta por forma de cartão: o que a máquina desconta antes de
+  // cair na conta. É o que o Caixa usa pra mostrar o valor real do dia.
+  const [taxasCartao, setTaxasCartao] = useState({ taxa_credito_pct: '', taxa_debito_pct: '', taxa_cartao_pct: '' })
   const [pixNome, setPixNome] = useState('')
   const [pixCidade, setPixCidade] = useState('')
 
@@ -392,6 +398,11 @@ export default function MinhaLoja({ secao = 'loja' }) {
     setBannerUrl(empresa.banner_url ?? '')
     setLogoUrl(empresa.logo_url ?? '')
     setFormasPagamento(formasAtivas(empresa))
+    setTaxasCartao({
+      taxa_credito_pct: String(empresa.taxa_credito_pct ?? 0).replace('.', ','),
+      taxa_debito_pct: String(empresa.taxa_debito_pct ?? 0).replace('.', ','),
+      taxa_cartao_pct: String(empresa.taxa_cartao_pct ?? 0).replace('.', ','),
+    })
     setChavePix(empresa.chave_pix ?? '')
     setPixNome(empresa.pix_nome ?? '')
     setPixCidade(empresa.pix_cidade ?? '')
@@ -554,6 +565,9 @@ export default function MinhaLoja({ secao = 'loja' }) {
         banner_url: bannerUrl,
         logo_url: logoUrl,
         formas_pagamento: formasPagamento,
+        taxa_credito_pct: pctNum(taxasCartao.taxa_credito_pct),
+        taxa_debito_pct: pctNum(taxasCartao.taxa_debito_pct),
+        taxa_cartao_pct: pctNum(taxasCartao.taxa_cartao_pct),
         chave_pix: chavePix || null,
         pix_nome: pixNome || null,
         pix_cidade: pixCidade || null,
@@ -855,6 +869,30 @@ export default function MinhaLoja({ secao = 'loja' }) {
             <strong>PIX na entrega</strong> é o cliente pagando na sua chave na hora que o pedido chega:
             sem taxa, sem Mercado Pago, e o pedido cai na loja na hora (igual dinheiro).
           </p>
+          {/* Taxa da maquineta: aparece só pras formas de cartão que a loja ligou.
+              Crédito e débito têm taxa diferente — é por isso que são separados. */}
+          {FORMAS_CARTAO.some(f => formasPagamento.includes(f.value)) && (
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px' }}>Taxa da maquineta</h3>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.5 }}>
+                Quanto a máquina desconta de cada venda. Com isso preenchido, o Caixa mostra
+                <strong> quanto cai na sua conta de verdade</strong> em cada forma. Deixe 0 se não souber ainda.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
+                {FORMAS_CARTAO.filter(f => formasPagamento.includes(f.value)).map(f => (
+                  <label key={f.value} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+                    <span style={{ flex: 1 }}>{f.label}</span>
+                    <input value={taxasCartao[f.campoTaxa]} inputMode="decimal" placeholder="0"
+                      onChange={e => setTaxasCartao(t => ({ ...t, [f.campoTaxa]: e.target.value }))}
+                      style={{ width: 70, padding: '7px 9px', borderRadius: 8, border: '1px solid var(--border)',
+                        background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 14, textAlign: 'right' }} />
+                    <span style={{ color: 'var(--text-muted)' }}>%</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
           {formasPagamento.includes('pix_entrega') && !chavePix.trim() && (
             <p style={{
               fontSize: 12.5, marginTop: 10, marginBottom: 0, padding: '9px 11px', borderRadius: 8,

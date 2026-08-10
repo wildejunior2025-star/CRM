@@ -6,12 +6,26 @@
 //                 só cai na loja depois de confirmado. Exige MP conectado e tem taxa.
 //   pix_entrega → o cliente paga na hora da entrega, direto na chave PIX da loja.
 //                 Não passa por gateway nenhum: sem taxa e sem conectar o MP.
+// Crédito e débito são separados porque a maquineta cobra taxa diferente em cada
+// um (decisão do Wilde, 10/08/2026) — só assim dá pra saber quanto cai na conta.
+// "Cartão" continua na lista: é o que está gravado no histórico e serve pra loja
+// que não quer separar.
 export const FORMAS_PAGAMENTO = [
   { value: 'dinheiro',    label: 'Dinheiro' },
   { value: 'pix',         label: 'PIX' },
   { value: 'pix_entrega', label: 'PIX na entrega' },
-  { value: 'cartao',      label: 'Cartão' },
+  { value: 'credito',     label: 'Cartão de crédito' },
+  { value: 'debito',      label: 'Cartão de débito' },
+  { value: 'cartao',      label: 'Cartão (sem separar)' },
 ]
+
+// Formas de cartão e em qual coluna de empresas mora a taxa de cada uma.
+export const FORMAS_CARTAO = [
+  { value: 'credito', label: 'Cartão de crédito', campoTaxa: 'taxa_credito_pct' },
+  { value: 'debito',  label: 'Cartão de débito',  campoTaxa: 'taxa_debito_pct' },
+  { value: 'cartao',  label: 'Cartão (sem separar)', campoTaxa: 'taxa_cartao_pct' },
+]
+export const ehCartao = (forma) => ['credito', 'debito', 'cartao'].includes(forma)
 export const FORMAS_PAGAMENTO_PADRAO = FORMAS_PAGAMENTO.map(f => f.value)
 
 /** As formas ligadas na loja (com o padrão de todas quando nunca foi configurado). */
@@ -43,6 +57,8 @@ export const CONDICOES_PAGAMENTO = [
 
 export const ICONE_PAGAMENTO = {
   cartao:             { bg: '#7c3aed', text: '#fff', label: '💳' },
+  credito:            { bg: '#7c3aed', text: '#fff', label: 'CRÉD' },
+  debito:             { bg: '#0ea5e9', text: '#fff', label: 'DÉB' },
   a_vista:            { bg: '#16a34a', text: '#fff', label: '$' },
   fiado:              { bg: '#f97316', text: '#fff', label: 'F' },
   dinheiro:           { bg: '#16a34a', text: '#fff', label: '💵' },
@@ -71,5 +87,7 @@ export const FORMAS_RECEBIMENTO = [
   { value: 'dinheiro', label: 'Dinheiro' },
   { value: 'pix', label: 'Pix' },
   { value: 'transferencia', label: 'Transferência' },
+  { value: 'credito', label: 'Crédito' },
+  { value: 'debito', label: 'Débito' },
   { value: 'cartao', label: 'Cartão' },
 ]

@@ -3222,7 +3222,8 @@ function ModalFecharConta({ comanda, taxaPct, onFechar, onConfirmar }) {
   const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
   const taxa = aplicarTaxa ? Math.round(subtotal * taxaPct / 100 * 100) / 100 : 0
   const total = subtotal + taxa
-  const FORMAS = [['dinheiro', '💵 Dinheiro'], ['pix', '⚡ Pix'], ['cartao', '💳 Cartão']]
+  // Crédito e débito separados: cada um tem a taxa da maquineta dele (ver Caixa).
+  const FORMAS = [['dinheiro', '💵 Dinheiro'], ['pix', '⚡ Pix'], ['credito', '💳 Crédito'], ['debito', '💳 Débito']]
   async function confirmar() {
     setSalvando(true)
     await onConfirmar({ comanda, forma, aplicarTaxa, total })

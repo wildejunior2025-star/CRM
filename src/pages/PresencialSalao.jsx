@@ -12,10 +12,13 @@ import { imprimirHtml, montarContaPresencialHtml, appFwcDisponivel } from '../ut
 import '../components/Page.css'
 import './PresencialSalao.css'
 
+// Crédito e débito são formas separadas porque a maquineta cobra taxa diferente
+// em cada uma — é assim que o Caixa mostra quanto cai na conta de verdade.
 const FORMAS = [
   { id: 'dinheiro', label: 'Dinheiro' },
   { id: 'pix',      label: 'PIX' },
-  { id: 'cartao',   label: 'Cartão' },
+  { id: 'credito',  label: 'Crédito' },
+  { id: 'debito',   label: 'Débito' },
   // Fiado não gera linha em `pagamentos`: a dívida é a venda sem pagamento
   // (view clientes_saldo_fiado). Por isso exige cliente — ver 0114_fiado_mesa.sql.
   { id: 'fiado',    label: 'Fiado' },

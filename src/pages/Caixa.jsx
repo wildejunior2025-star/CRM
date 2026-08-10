@@ -43,22 +43,11 @@ export default function Caixa() {
   const [salvandoMovForma, setSalvandoMovForma] = useState(false)
 
   // ── Taxa da maquineta ──
-  // O cartão não cai inteiro na conta: a maquineta come uma % (a da Estação é 2%).
-  // A loja põe a taxa aqui mesmo e o card do cartão passa a mostrar o que sobra.
-  const [taxaCartao, setTaxaCartao] = useState(0)
-  const [editTaxa, setEditTaxa] = useState(null)     // texto do campo enquanto edita
-  const [salvandoTaxa, setSalvandoTaxa] = useState(false)
-
-  async function salvarTaxaCartao() {
-    const pct = Number(String(editTaxa).replace(',', '.'))
-    if (!Number.isFinite(pct) || pct < 0 || pct > 100) { window.alert('Digite a taxa em %, de 0 a 100 (ex.: 2 ou 2,5).'); return }
-    setSalvandoTaxa(true)
-    const { error: err } = await supabase.from('empresas').update({ taxa_cartao_pct: pct }).eq('id', profile.empresa_id)
-    setSalvandoTaxa(false)
-    if (err) { window.alert('Não deu pra salvar a taxa: ' + err.message); return }
-    setTaxaCartao(pct)
-    setEditTaxa(null)
-  }
+  // O cartão não cai inteiro na conta: a maquineta come uma % — e ela é
+  // DIFERENTE no crédito e no débito. A loja põe cada taxa em Minha Loja →
+  // Pagamento; aqui o Caixa só mostra quanto sobra de cada uma.
+  const [taxas, setTaxas] = useState({ credito: 0, debito: 0, cartao: 0 })
+  const liquido = (bruto, pct) => Number(bruto || 0) * (1 - Number(pct || 0) / 100)
 
   // Histórico expandível: mostra o detalhamento por forma de pagamento de um caixa fechado.
   const [histAberto, setHistAberto] = useState(null)      // id do caixa expandido
@@ -103,10 +92,14 @@ export default function Caixa() {
       supabase.from('caixas').select('*').order('aberto_em', { ascending: false }).limit(20),
       isAdmin ? supabase.from('profiles').select('id, nome, email') : Promise.resolve({ data: [] }),
       profile?.empresa_id
-        ? supabase.from('empresas').select('taxa_cartao_pct').eq('id', profile.empresa_id).maybeSingle()
+        ? supabase.from('empresas').select('taxa_cartao_pct, taxa_credito_pct, taxa_debito_pct').eq('id', profile.empresa_id).maybeSingle()
         : Promise.resolve({ data: null }),
     ])
-    setTaxaCartao(Number(empresaRes.data?.taxa_cartao_pct ?? 0))
+    setTaxas({
+      credito: Number(empresaRes.data?.taxa_credito_pct ?? 0),
+      debito: Number(empresaRes.data?.taxa_debito_pct ?? 0),
+      cartao: Number(empresaRes.data?.taxa_cartao_pct ?? 0),
+    })
 
     const firstError = caixaRes.error || historicoRes.error || usuariosRes.error
     if (firstError) setError(firstError.message)
@@ -275,6 +268,13 @@ export default function Caixa() {
       ? Number(valorFechamentoPix) - valorEsperadoPix
       : null
 
+  // O que sobra de TODO o cartão depois das taxas (cada forma com a taxa dela).
+  const totalCartaoLiquido = resumo
+    ? liquido(resumo.recebimentos_credito, taxas.credito) +
+      liquido(resumo.recebimentos_debito, taxas.debito) +
+      liquido(resumo.recebimentos_cartao_generico, taxas.cartao)
+    : 0
+
   // Faturamento total do caixa: soma de TODAS as formas (dinheiro + pix + cartão + transferência + fiado).
   const faturamentoTotal = resumo
     ? Number(resumo.recebimentos_dinheiro || 0) +
@@ -355,53 +355,46 @@ export default function Caixa() {
                 <div className="label">Recebimentos Pix</div>
                 <div className="value">R$ {Number(resumo.recebimentos_pix).toFixed(2)}</div>
               </div>
-              {/* Cartão: mostra o bruto e, com a taxa preenchida, o que sobra
-                  depois da maquineta — que é o que cai na conta de verdade. */}
-              <div className="card dashboard-card">
-                <div className="label">Recebimentos cartão</div>
-                <div className="value">R$ {Number(resumo.recebimentos_cartao).toFixed(2)}</div>
+              {/* Cartão aberto por forma: crédito e débito têm taxa diferente,
+                  então cada um mostra o que sobra depois da maquineta. O card só
+                  aparece se entrou dinheiro naquela forma. */}
+              {[
+                ['Recebimentos crédito', resumo.recebimentos_credito, taxas.credito],
+                ['Recebimentos débito', resumo.recebimentos_debito, taxas.debito],
+                ['Recebimentos cartão', resumo.recebimentos_cartao_generico, taxas.cartao],
+              ].filter(([, bruto]) => Number(bruto || 0) > 0).map(([titulo, bruto, pct]) => (
+                <div className="card dashboard-card" key={titulo}>
+                  <div className="label">{titulo}</div>
+                  <div className="value">R$ {Number(bruto).toFixed(2)}</div>
+                  {pct > 0 ? (
+                    <div style={{ marginTop: 6, lineHeight: 1.5 }}>
+                      <div style={{ fontSize: 12, color: '#d97706' }}>
+                        − maquineta {String(pct).replace('.', ',')}% = R$ {(Number(bruto) * pct / 100).toFixed(2)}
+                      </div>
+                      <div style={{ fontSize: 14.5, fontWeight: 800 }}>
+                        Cai na conta: R$ {liquido(bruto, pct).toFixed(2)}
+                      </div>
+                    </div>
+                  ) : isAdmin ? (
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
+                      Ponha a taxa da maquineta em <strong>Minha Loja → Pagamento</strong> pra ver quanto cai na conta.
+                    </div>
+                  ) : null}
+                </div>
+              ))}
 
-                {editTaxa !== null ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Taxa</span>
-                    <input value={editTaxa} inputMode="decimal" autoFocus placeholder="2"
-                      onChange={e => setEditTaxa(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') salvarTaxaCartao(); if (e.key === 'Escape') setEditTaxa(null) }}
-                      style={{ width: 60, padding: '5px 7px', borderRadius: 6, border: '1px solid var(--border)',
-                        background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }} />
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>%</span>
-                    <button type="button" onClick={salvarTaxaCartao} disabled={salvandoTaxa}
-                      style={{ padding: '5px 9px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                        background: 'var(--primary)', color: '#fff', fontSize: 11.5, fontWeight: 800 }}>
-                      {salvandoTaxa ? '...' : 'ok'}
-                    </button>
-                    <button type="button" onClick={() => setEditTaxa(null)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 15 }}>×</button>
+              {/* Quando as três formas de cartão aparecem juntas, o total ajuda a
+                  conferir com o extrato da maquineta de uma vez. */}
+              {Number(resumo.recebimentos_cartao || 0) > 0 && totalCartaoLiquido !== Number(resumo.recebimentos_cartao) && (
+                <div className="card dashboard-card" style={{ borderLeft: '3px solid var(--primary)' }}>
+                  <div className="label">💳 Total no cartão</div>
+                  <div className="value">R$ {Number(resumo.recebimentos_cartao).toFixed(2)}</div>
+                  <div style={{ fontSize: 14.5, fontWeight: 800, marginTop: 6 }}>
+                    Cai na conta: R$ {totalCartaoLiquido.toFixed(2)}
                   </div>
-                ) : taxaCartao > 0 ? (
-                  <div style={{ marginTop: 6, lineHeight: 1.5 }}>
-                    <div style={{ fontSize: 12, color: '#d97706' }}>
-                      − maquineta {String(taxaCartao).replace('.', ',')}% = R$ {(Number(resumo.recebimentos_cartao) * taxaCartao / 100).toFixed(2)}
-                    </div>
-                    <div style={{ fontSize: 14.5, fontWeight: 800 }}>
-                      Cai na conta: R$ {(Number(resumo.recebimentos_cartao) * (1 - taxaCartao / 100)).toFixed(2)}
-                    </div>
-                    {isAdmin && (
-                      <button type="button" onClick={() => setEditTaxa(String(taxaCartao).replace('.', ','))}
-                        style={{ marginTop: 3, background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                          color: 'var(--primary)', fontSize: 11.5, fontWeight: 700 }}>
-                        ✏️ mudar a taxa
-                      </button>
-                    )}
-                  </div>
-                ) : isAdmin ? (
-                  <button type="button" onClick={() => setEditTaxa('')}
-                    style={{ marginTop: 5, background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                      color: 'var(--primary)', fontSize: 12, fontWeight: 700, textAlign: 'left' }}>
-                    ➕ pôr a taxa da maquineta (ex.: 2%)
-                  </button>
-                ) : null}
-              </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>crédito + débito + cartão, já com as taxas</div>
+                </div>
+              )}
               {/* Quanto do que entrou é freguês pagando o que já devia. Esse dinheiro
                   está DENTRO dos recebimentos acima, mas NÃO é venda de hoje — a venda
                   dele foi contada no dia em que o cliente comeu. Sem essa linha, o dono
@@ -576,9 +569,12 @@ export default function Caixa() {
                                 ['💵 Recebido em dinheiro', r.recebimentos_dinheiro],
                                 ['📱 Recebido em PIX', r.recebimentos_pix],
                                 ['💳 Recebido em cartão', r.recebimentos_cartao],
-                                // O que sobra do cartão depois da maquineta (usa a taxa de hoje).
-                                (taxaCartao > 0 && Number(r.recebimentos_cartao) > 0
-                                  ? [`↳ cai na conta (−${String(taxaCartao).replace('.', ',')}%)`, Number(r.recebimentos_cartao) * (1 - taxaCartao / 100)]
+                                (Number(r.recebimentos_credito) > 0 ? ['↳ crédito', r.recebimentos_credito] : null),
+                                (Number(r.recebimentos_debito) > 0 ? ['↳ débito', r.recebimentos_debito] : null),
+                                // O que sobra do cartão depois da maquineta (com as taxas de hoje).
+                                (Number(r.recebimentos_cartao) > 0 && (taxas.credito > 0 || taxas.debito > 0 || taxas.cartao > 0)
+                                  ? ['↳ cai na conta (já com as taxas)',
+                                     liquido(r.recebimentos_credito, taxas.credito) + liquido(r.recebimentos_debito, taxas.debito) + liquido(r.recebimentos_cartao_generico, taxas.cartao)]
                                   : null),
                                 (Number(r.recebimentos_transferencia) > 0 ? ['🔁 Transferência', r.recebimentos_transferencia] : null),
                                 ['🧾 Vendas no fiado', r.vendas_fiado],
