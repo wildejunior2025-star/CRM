@@ -839,7 +839,7 @@ const catalogoCache = {} // { [empresaId]: { produtos, compMap } }
 async function carregarCatalogo(empresaId) {
   const [prodRes, vincRes] = await Promise.all([
     supabase.from('produtos').select('id, nome, preco_venda, categoria')
-      .eq('empresa_id', empresaId).order('nome', { ascending: true }),
+      .eq('empresa_id', empresaId).is('arquivado_em', null).order('nome', { ascending: true }),
     supabase.from('produto_complemento_grupos')
       .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, regra_preco, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)), produtos!inner(empresa_id)')
       .eq('produtos.empresa_id', empresaId).order('ordem'),
@@ -3859,6 +3859,7 @@ export default function PainelPedidos() {
       .from('produtos')
       .select('id, nome, preco_venda, categoria, disponivel_delivery')
       .eq('empresa_id', empresa.id)
+      .is('arquivado_em', null)
       .order('nome', { ascending: true })
     setCatalogo(data || [])
     // Complementos aninhados por produto (estilo iFood): cada produto abre seus
