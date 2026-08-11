@@ -24,6 +24,7 @@ export default function Caixa() {
 
   const [showAbertura, setShowAbertura] = useState(false)
   const [valorAbertura, setValorAbertura] = useState('')
+  const [valorAberturaPix, setValorAberturaPix] = useState('')
   const [obsAbertura, setObsAbertura] = useState('')
 
   const [showMovimento, setShowMovimento] = useState(null) // 'sangria' | 'suprimento' | null
@@ -139,6 +140,7 @@ export default function Caixa() {
 
   function openAbertura() {
     setValorAbertura('')
+    setValorAberturaPix('')
     setObsAbertura('')
     setFormError(null)
     setShowAbertura(true)
@@ -154,10 +156,17 @@ export default function Caixa() {
       return
     }
 
+    const valorPix = valorAberturaPix === '' ? 0 : Number(valorAberturaPix)
+    if (!(valorPix >= 0)) {
+      setFormError('Informe um valor de abertura em PIX válido.')
+      return
+    }
+
     setSaving(true)
     const { error: rpcError } = await supabase.rpc('abrir_caixa', {
       p_valor_abertura: valor,
       p_observacoes: obsAbertura || null,
+      p_valor_abertura_pix: valorPix,
     })
     setSaving(false)
 
@@ -257,9 +266,11 @@ export default function Caixa() {
       ? Number(valorFechamento) - valorEsperadoDinheiro
       : null
 
-  // PIX hoje é igual dinheiro: esperado em PIX = recebido em PIX + suprimentos − sangrias (por PIX).
+  // PIX é igual dinheiro: esperado em PIX = saldo que já estava na conta na abertura
+  // + recebido em PIX + suprimentos − sangrias (por PIX).
   const valorEsperadoPix = resumo
-    ? Number(resumo.recebimentos_pix || 0) +
+    ? Number(caixaAtual.valor_abertura_pix || 0) +
+      Number(resumo.recebimentos_pix || 0) +
       Number(resumo.total_suprimentos_pix || 0) -
       Number(resumo.total_sangrias_pix || 0)
     : 0
@@ -309,8 +320,12 @@ export default function Caixa() {
               <div className="value-sm">{new Date(caixaAtual.aberto_em).toLocaleString('pt-BR')}</div>
             </div>
             <div>
-              <div className="label">Valor de abertura</div>
+              <div className="label">💵 Dinheiro inicial</div>
               <div className="value-sm">R$ {Number(caixaAtual.valor_abertura).toFixed(2)}</div>
+            </div>
+            <div>
+              <div className="label">📱 PIX inicial</div>
+              <div className="value-sm">R$ {Number(caixaAtual.valor_abertura_pix || 0).toFixed(2)}</div>
             </div>
             {caixaAtual.observacoes_abertura && (
               <div>
@@ -526,7 +541,7 @@ export default function Caixa() {
                   ? Number(c.valor_abertura || 0) + Number(r.recebimentos_dinheiro || 0) + Number(r.total_suprimentos_dinheiro ?? r.total_suprimentos ?? 0) - Number(r.total_sangrias_dinheiro ?? r.total_sangrias ?? 0)
                   : 0
                 const espPix = r && r !== 'loading'
-                  ? Number(r.recebimentos_pix || 0) + Number(r.total_suprimentos_pix || 0) - Number(r.total_sangrias_pix || 0)
+                  ? Number(c.valor_abertura_pix || 0) + Number(r.recebimentos_pix || 0) + Number(r.total_suprimentos_pix || 0) - Number(r.total_sangrias_pix || 0)
                   : 0
                 const fatTot = r && r !== 'loading'
                   ? Number(r.recebimentos_dinheiro || 0) + Number(r.recebimentos_pix || 0) + Number(r.recebimentos_cartao || 0) + Number(r.recebimentos_transferencia || 0) + Number(r.vendas_fiado || 0)
@@ -566,6 +581,7 @@ export default function Caixa() {
                             </div>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
                               {[
+                                (Number(c.valor_abertura_pix) > 0 ? ['📱 PIX inicial (abertura)', c.valor_abertura_pix] : null),
                                 ['💵 Recebido em dinheiro', r.recebimentos_dinheiro],
                                 ['📱 Recebido em PIX', r.recebimentos_pix],
                                 ['💳 Recebido em cartão', r.recebimentos_cartao],
@@ -637,7 +653,7 @@ export default function Caixa() {
             <form onSubmit={handleAbrir}>
               <div className="form-grid">
                 <div className="form-field full">
-                  <label htmlFor="valor-abertura">Valor de abertura (R$)</label>
+                  <label htmlFor="valor-abertura">💵 Dinheiro inicial no caixa (R$)</label>
                   <input
                     id="valor-abertura"
                     name="valor_abertura"
@@ -648,6 +664,21 @@ export default function Caixa() {
                     onChange={(e) => setValorAbertura(e.target.value)}
                     required
                     autoFocus
+                  />
+                </div>
+                {/* PIX começa igual ao dinheiro: se já tem saldo na conta do PIX ao abrir,
+                    ele entra aqui — senão o conferido no fechamento aparece sobrando. */}
+                <div className="form-field full">
+                  <label htmlFor="valor-abertura-pix">📱 PIX inicial (R$) <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.85em' }}>deixe vazio se começa do zero</span></label>
+                  <input
+                    id="valor-abertura-pix"
+                    name="valor_abertura_pix"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={valorAberturaPix}
+                    onChange={(e) => setValorAberturaPix(e.target.value)}
+                    placeholder="0,00"
                   />
                 </div>
                 <div className="form-field full">
@@ -715,7 +746,7 @@ export default function Caixa() {
                   </div>
                   <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
                     {formaMovimento === 'pix'
-                      ? 'Por PIX não altera o dinheiro esperado na gaveta — só fica registrado.'
+                      ? 'Por PIX não mexe na gaveta — entra/sai do esperado em PIX.'
                       : 'Em dinheiro entra/sai da gaveta e ajusta o esperado em dinheiro.'}
                   </span>
                 </div>
