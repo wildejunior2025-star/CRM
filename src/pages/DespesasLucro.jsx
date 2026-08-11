@@ -55,7 +55,12 @@ function novoHistorico(row, campo, valorNovo, hojeYMD) {
   const antigo = Number(row[campo] || 0)
   if (Number(valorNovo) === antigo) return undefined      // nada mudou
   const hist = Array.isArray(row.valor_historico) ? row.valor_historico : []
-  return [...hist, { ate: addDia(hojeYMD, -1), valor: antigo }]
+  const ate = addDia(hojeYMD, -1)
+  // Corrigir o valor duas vezes no MESMO dia não pode empilhar duas entradas com a
+  // mesma data: o que valia até ontem é o primeiro valor, os do meio nunca valeram
+  // em dia nenhum. Sem isto o histórico enchia de lixo a cada correção de digitação.
+  if (hist.some(h => h && h.ate === ate)) return hist
+  return [...hist, { ate, valor: antigo }]
 }
 
 // ── Dias que a loja abre ─────────────────────────────────────────────
@@ -317,6 +322,52 @@ export default function DespesasLucro({ empresaId }) {
     }
   }
 
+  // ── REABRIR O DIA: tira o retrato congelado e volta a calcular ao vivo ──
+  // O snapshot guarda a PRODUÇÃO lançada à mão, e fechar apaga ela da tabela do
+  // dia. Então reabrir devolve a produção pro lugar — senão o custo dela sumia.
+  // Revenda, prato no peso e item sem estoque não precisam: são recalculados
+  // sozinhos a partir das vendas.
+  async function reabrirDia() {
+    const lancados = itensFechado.filter(i => !i.revenda && !i.pct && !i.semEstoque)
+    if (!confirm(
+      `Reabrir o dia ${ddmm(dia)}?\n\n`
+      + 'O dia volta a calcular ao vivo: salário, preço de custo e % que você mudou depois de fechar passam a valer.\n\n'
+      + (lancados.length ? `A produção lançada à mão (${lancados.length} item) volta pro dia.\n\n` : '')
+      + 'Quando terminar, é só fechar de novo.'
+    )) return
+    setFechando(true)
+    try {
+      if (lancados.length) {
+        const { error: insErr } = await supabase.from('producao_diaria').insert(
+          lancados.map(i => ({
+            empresa_id: empresaId, data: dia, nome: i.nome,
+            qtd_feita: Number(i.qtd_feita || 0), qtd_sobrou: Number(i.qtd_sobrou || 0),
+            unidade: i.unidade || 'un',
+            // O snapshot guarda o custo TOTAL do item; aqui volta como custo unitário.
+            custo_unit: emBase(Number(i.qtd_feita || 0) - Number(i.qtd_sobrou || 0), i.unidade) > 0
+              ? Number(i.custo || 0) / emBase(Number(i.qtd_feita || 0) - Number(i.qtd_sobrou || 0), i.unidade)
+              : 0,
+          }))
+        )
+        if (insErr) throw insErr
+      }
+      if (imprevFechado.length) {
+        const { error: impErr } = await supabase.from('custos_imprevistos').insert(
+          imprevFechado.map(i => ({ empresa_id: empresaId, data: dia, descricao: i.descricao, valor: Number(i.valor || 0) }))
+        )
+        if (impErr) throw impErr
+      }
+      const { error: delErr } = await supabase.from('historico_dia').delete().eq('empresa_id', empresaId).eq('data', dia)
+      if (delErr) throw delErr
+      await carregar()
+      setSub('hoje')
+    } catch (e) {
+      alert('Erro ao reabrir o dia: ' + (e.message || e))
+    } finally {
+      setFechando(false)
+    }
+  }
+
   // ── CRUD: despesa ──
   function abrirNovaDespesa() { setDespesaEdit(null); setDespesaForm(emptyDespesa); setShowDespesa(true) }
   function abrirEditarDespesa(d) { setDespesaEdit(d); setDespesaForm({ nome: d.nome, categoria: d.categoria, tipo: d.tipo, valor: String(d.valor ?? '') }); setShowDespesa(true) }
@@ -519,8 +570,18 @@ export default function DespesasLucro({ empresaId }) {
           )}
 
           {fechado && (
-            <div style={{ padding: '10px 14px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.5, background: 'rgba(22,163,74,.10)', border: '1px solid rgba(22,163,74,.4)' }}>
+            <div style={{ padding: '10px 14px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.5, background: 'rgba(22,163,74,.10)', border: '1px solid rgba(22,163,74,.4)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <span>
               🔒 <strong>Dia fechado.</strong> Os valores abaixo são o retrato que foi congelado quando você fechou — não mudam mais, mesmo mexendo nos custos hoje.
+              {' '}Mudou salário, custo ou preço depois de fechar? Reabra pra recalcular.
+            </span>
+            {/* Sem isto o dia fechado sem querer (ou fechado antes da hora) virava
+                um número errado pra sempre — não havia como voltar atrás. */}
+            <button className="btn btn-secondary btn-sm" onClick={reabrirDia} disabled={fechando}
+              style={{ whiteSpace: 'nowrap' }}>
+              {fechando ? 'Abrindo…' : '🔓 Reabrir o dia'}
+            </button>
             </div>
           )}
 
