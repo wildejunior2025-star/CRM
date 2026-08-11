@@ -26,6 +26,8 @@ const emptyForm = {
   controla_casco: false,
   controla_estoque: true,
   preco_custo: 0,
+  custo_modo: 'fixo',      // 'fixo' = R$ por unidade | 'pct' = % do valor vendido
+  custo_pct_venda: '',
   preco_venda: 0,
   preco_app: 0,
   faixas_preco: [],
@@ -577,6 +579,8 @@ export default function Produtos() {
       controla_casco: produto.controla_casco ?? false,
       controla_estoque: produto.controla_estoque ?? true,
       preco_custo: produto.preco_custo ?? 0,
+      custo_modo: produto.custo_pct_venda != null ? 'pct' : 'fixo',
+      custo_pct_venda: produto.custo_pct_venda ?? '',
       preco_venda: produto.preco_venda ?? 0,
       preco_app: produto.preco_app ?? 0,
       faixas_preco: produto.faixas_preco ?? [],
@@ -628,12 +632,18 @@ export default function Produtos() {
     const payload = {
       ...form,
       unidades_por_caixa: Number(form.unidades_por_caixa) || 1,
-      preco_custo: Number(form.preco_custo) || 0,
+      // Só um dos dois vale: no modo % o custo em R$ vai a zero pra não somar duas vezes.
+      preco_custo: form.custo_modo === 'pct' ? 0 : (Number(form.preco_custo) || 0),
+      custo_pct_venda: form.custo_modo === 'pct' && form.custo_pct_venda !== ''
+        ? Math.max(0, Math.min(100, Number(form.custo_pct_venda) || 0))
+        : null,
       preco_venda: Number(form.preco_venda) || 0,
       preco_app: Number(form.preco_app) || 0,
       estoque_minimo: Number(form.estoque_minimo) || 0,
       faixas_preco: form.faixas_preco ?? [],
     }
+    // `custo_modo` é só da tela (escolhe R$ ou %) — não existe coluna pra ele.
+    delete payload.custo_modo
 
     const { data: saved, error } = editingId
       ? await supabase.from('produtos').update(payload).eq('id', editingId).select('id').single()
@@ -1000,7 +1010,11 @@ export default function Produtos() {
                   {usaEstoque && <td className="col-extra">{p.embalagem}</td>}
                   {usaEstoque && <td className="col-extra">{p.unidades_por_caixa}</td>}
                   {usaCasco && <td className="col-extra">{p.controla_casco ? 'Sim' : 'Não'}</td>}
-                  <td className="col-extra">R$ {Number(p.preco_custo).toFixed(2)}</td>
+                  <td className="col-extra">
+                    {p.custo_pct_venda != null
+                      ? <span title="Custo estimado como % do valor vendido">{Number(p.custo_pct_venda)}% do vendido</span>
+                      : `R$ ${Number(p.preco_custo).toFixed(2)}`}
+                  </td>
                   <td>R$ {Number(p.preco_venda).toFixed(2)}</td>
                   {MOSTRAR_PRECO_APP && <td className="col-extra">R$ {Number(p.preco_app || 0).toFixed(2)}</td>}
                   {usaEstoque && <td className="col-extra">{p.estoque_minimo}</td>}
@@ -1298,16 +1312,57 @@ export default function Produtos() {
                 </div>
                 )}
 
+                {/* Custo em R$ ou em % do que for cobrado. O % existe pro prato sem
+                    preço fixo (comida no peso): a atendente digita o valor na mesa,
+                    então o custo só pode ser uma fatia desse valor. */}
                 <div className="form-field">
-                  <label style={{color:'#f97316'}}>Preço de custo (R$)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    name="preco_custo"
-                    value={form.preco_custo}
-                    onChange={handleChange}
-                  />
+                  <label style={{color:'#f97316'}}>Preço de custo</label>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                    {[['fixo', 'R$ por unidade'], ['pct', '% do valor vendido']].map(([id, lbl]) => (
+                      <button key={id} type="button"
+                        onClick={() => setForm(f => ({
+                          ...f,
+                          custo_modo: id,
+                          // Trocar de modo zera o outro campo — senão o produto ficaria
+                          // com custo em R$ E em %, e ninguém sabe qual vale.
+                          preco_custo: id === 'pct' ? 0 : f.preco_custo,
+                          custo_pct_venda: id === 'fixo' ? '' : (f.custo_pct_venda || ''),
+                        }))}
+                        style={{ flex: 1, padding: '8px 0', borderRadius: 9, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                          border: `1.5px solid ${(form.custo_modo || 'fixo') === id ? '#f97316' : 'var(--border)'}`,
+                          background: (form.custo_modo || 'fixo') === id ? 'rgba(249,115,22,.12)' : 'transparent',
+                          color: (form.custo_modo || 'fixo') === id ? '#f97316' : 'var(--text)' }}>
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                  {(form.custo_modo || 'fixo') === 'pct' ? (
+                    <>
+                      <input
+                        type="number"
+                        step="1"
+                        min="0"
+                        max="100"
+                        name="custo_pct_venda"
+                        value={form.custo_pct_venda}
+                        onChange={handleChange}
+                        placeholder="40"
+                      />
+                      <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '6px 0 0', lineHeight: 1.45 }}>
+                        Pra comida no peso e prato sem preço fixo. Ex.: <strong>40</strong> = de cada
+                        R$ 100 vendidos deste item, R$ 40 entram como custo no Lucro do dia.
+                      </p>
+                    </>
+                  ) : (
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      name="preco_custo"
+                      value={form.preco_custo}
+                      onChange={handleChange}
+                    />
+                  )}
                 </div>
 
                 <div className="form-field">
