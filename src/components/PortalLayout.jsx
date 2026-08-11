@@ -185,15 +185,18 @@ export default function PortalLayout() {
                 alt="FWC Inter"
                 style={{ height: 44, width: 44, objectFit: 'contain', flexShrink: 0, borderRadius: 12 }}
               />
-              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1, minWidth: 0 }}>
                 <span style={{
-                  fontSize: 26, fontWeight: 900, letterSpacing: '-0.5px',
-                  color: '#fff',
+                  fontSize: 22, fontWeight: 900, letterSpacing: '-0.5px',
+                  color: '#fff', whiteSpace: 'nowrap',
                 }}>
                   FWC <span style={{ color: '#c4b5fd' }}>Inter</span>
                 </span>
                 {pageTitle !== 'FWC Inter' && (
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, marginTop: 1 }}>
+                  <span style={{
+                    fontSize: 12, color: 'rgba(255,255,255,0.85)', fontWeight: 500, marginTop: 1,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
                     {pageTitle}
                   </span>
                 )}
