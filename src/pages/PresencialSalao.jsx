@@ -86,6 +86,7 @@ export default function PresencialSalao() {
   const [buscaCliente, setBuscaCliente] = useState('')
   const [novoCliente, setNovoCliente] = useState(false)
   const [novoTelefone, setNovoTelefone] = useState('') // opcional no cadastro do fiado (o nome é que não repete)
+  const [preContaMsg, setPreContaMsg] = useState('')   // aviso depois de mandar a pré-conta pra impressora
   const [salvandoCliente, setSalvandoCliente] = useState(false)
   // Rascunho: itens que o garçom monta mas que só vão pra cozinha (e pra impressora)
   // quando ele clica "Enviar" — assim o pedido inteiro sai numa impressão só.
@@ -675,6 +676,30 @@ export default function PresencialSalao() {
   }
   function removePagamento(i) {
     setPagamentos(prev => prev.filter((_, idx) => idx !== i))
+  }
+
+  // PRÉ-CONTA: sai antes de escolher a forma de pagamento, pra mesa conferir o
+  // que consumiu e quanto deu. Sem isso o atendente era obrigado a entrar no
+  // fechamento (que já pede a forma) só pra mostrar o valor ao cliente.
+  // Não mexe em nada da conta: só imprime.
+  async function imprimirPreConta() {
+    if (!comandaSel) return
+    setPreContaMsg('')
+    const ok = await imprimirHtml(montarContaPresencialHtml({
+      numeroMesa: mesaSel?.numero,
+      rotulo: mesaSel?.is_comanda
+        ? `${rotuloMesa(mesaSel)}${comandaSel?.nome_cliente ? ' · ' + comandaSel.nome_cliente : ''}`
+        : null,
+      itens: comandaSel?.comanda_itens ?? [],
+      subtotal: subtotalSel, taxa: taxaSel, total: totalSel,
+      empresa: { nome: empresaNome },
+      preConta: true,
+      // A pré-conta não fala em pagamento: ele ainda vai ser escolhido.
+      formaPagamento: '', pagamentos: [],
+      // No celular não tem impressora: só sai se o app FWC da loja atender.
+    }), empresaNome, { soApp: ehCelular, origem: 'mesa' })
+    setPreContaMsg(ok ? '🧾 Pré-conta enviada pra impressora.' : '⚠️ Não achei a impressora. Abra o app FWC no PC da loja.')
+    setTimeout(() => setPreContaMsg(''), 6000)
   }
 
   function imprimirConta({ soApp = true } = {}) {
@@ -1397,15 +1422,29 @@ export default function PresencialSalao() {
                   )}
                 </div>
               ) : (
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button type="button" onClick={cancelarMesa}
-                    style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}>
-                    Cancelar
-                  </button>
-                  <button type="button" onClick={abrirFechamento} disabled={subtotalSel <= 0}
-                    className="btn btn-primary" style={{ flex: 1, marginTop: 0, opacity: subtotalSel <= 0 ? 0.5 : 1 }}>
-                    {ehAdmin ? 'Fechar conta' : 'Fechar conta'}
-                  </button>
+                <div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button type="button" onClick={cancelarMesa}
+                      style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}>
+                      Cancelar
+                    </button>
+                    {/* Pré-conta: o cliente vê o que consumiu e quanto deu ANTES
+                        de decidir como paga. Não fecha nada. */}
+                    <button type="button" onClick={imprimirPreConta} disabled={subtotalSel <= 0}
+                      title="Imprimir a conta pra mesa conferir, sem fechar"
+                      style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--border)',
+                        background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontWeight: 700,
+                        opacity: subtotalSel <= 0 ? 0.5 : 1 }}>
+                      🧾 Pré-conta
+                    </button>
+                    <button type="button" onClick={abrirFechamento} disabled={subtotalSel <= 0}
+                      className="btn btn-primary" style={{ flex: 1, marginTop: 0, opacity: subtotalSel <= 0 ? 0.5 : 1 }}>
+                      Fechar conta
+                    </button>
+                  </div>
+                  {preContaMsg && (
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'center', marginTop: 6 }}>{preContaMsg}</div>
+                  )}
                 </div>
               )}
             </div>

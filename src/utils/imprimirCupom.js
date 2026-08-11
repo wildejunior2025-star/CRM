@@ -389,7 +389,11 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
 // Conta do PRESENCIAL (com preços, taxa e total)
 const formaContaLabel = (f) => ({ dinheiro: 'Dinheiro', pix: 'PIX', credito: 'Credito', debito: 'Debito', cartao: 'Cartao', dividido: 'Dividido' }[String(f || '').toLowerCase()] || (f || ''))
 
-export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0, taxa = 0, total = 0, formaPagamento = '', pagamentos = [], empresa = {}, rotulo = '' }) {
+// preConta = a conta que vai pra MESA antes de pagar: o cliente confere o que
+// consumiu e quanto deu, e só depois escolhe como paga. Sai sem forma de
+// pagamento e avisando que não é comprovante — senão vira recibo de algo que
+// ainda não foi pago.
+export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0, taxa = 0, total = 0, formaPagamento = '', pagamentos = [], empresa = {}, rotulo = '', preConta = false }) {
   const largura = larguraCupom()
   // Igual à comanda da cozinha: `rotulo` troca o "MESA X" (comanda de balcão).
   const titulo = (rotulo || `MESA ${numeroMesa}`).toUpperCase()
@@ -415,6 +419,7 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
   ul { list-style: none; margin: 0; padding: 0; } li { margin-bottom: 3px; }
 </style></head><body>
   <div class="titulo-loja center b lg">${esc(empresa.nome || 'Conta')}</div>
+  ${preConta ? '<div class="center b lg">** PRE-CONTA **</div>' : ''}
   <div class="b">${esc(titulo)} - ${esc(hora)}</div>
   <div class="hr">${tracos}</div>
   <ul>${linhas || '<li>—</li>'}</ul>
@@ -428,9 +433,11 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
       // devedor por linha); nas outras formas segue "Pessoa 1, 2, 3...".
       pagamentos.map((p, i) => `<div class="row"><span>${esc(p.nome || ('Pessoa ' + (i + 1)))} (${esc(formaContaLabel(p.forma))})</span> <span>${fmt(p.valor)}</span></div>`).join('') +
       `<div class="row b"><span>Total pago</span> <span>${fmt(pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0))}</span></div>`
-    : formaPagamento ? `<div class="hr">${tracos}</div><div><span class="b">Pagamento:</span> ${esc(formaContaLabel(formaPagamento))}</div>` : ''}
+    : (formaPagamento && !preConta) ? `<div class="hr">${tracos}</div><div><span class="b">Pagamento:</span> ${esc(formaContaLabel(formaPagamento))}</div>` : ''}
   <div class="hr">${tracos}</div>
-  <div class="center">Obrigado pela preferencia!</div>
+  ${preConta
+    ? '<div class="center b">CONFERENCIA - NAO E COMPROVANTE</div><div class="center">Confira os itens antes de pagar</div>'
+    : '<div class="center">Obrigado pela preferencia!</div>'}
   <div style="height:10mm"></div>
 </body></html>`
 }
