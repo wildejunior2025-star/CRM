@@ -167,6 +167,14 @@ export default function Produtos() {
   const [uploadingFoto, setUploadingFoto] = useState(false)
   const [duplicandoId, setDuplicandoId] = useState(null)        // produto sendo duplicado (spinner no botão)
 
+  // Quantidade em estoque direto no cadastro do produto. Antes só dava pra
+  // lançar na tela Estoque: cadastrava o item e tinha que ir lá só pra dizer
+  // quantos tem. Aqui o dono já digita a contagem e a gente grava a
+  // movimentação (entrada na criação, ajuste na edição) depois de salvar.
+  const [estoqueQtd, setEstoqueQtd] = useState('')          // o que o dono digitou (vazio = não mexer)
+  const [estoqueSaldo, setEstoqueSaldo] = useState(0)       // saldo atual do produto (0 em produto novo)
+  const [carregandoSaldo, setCarregandoSaldo] = useState(false)
+
   // Complementos / opções do produto (ex.: monte sua quentinha)
   const [grupos, setGrupos] = useState([])
   // Novo modelo: o produto só ESCOLHE categorias já criadas (as opções vivem na
@@ -196,6 +204,8 @@ export default function Produtos() {
         setEditingId(d.editingId ?? null)
         setForm(d.form)
         setVinculos(Array.isArray(d.vinculos) ? d.vinculos : [])
+        setEstoqueQtd(''); setEstoqueSaldo(0)
+        if (d.editingId) loadSaldoProduto(d.editingId)
         loadCategoriasEmpresa()
         setShowModal(true)
       }
@@ -561,6 +571,7 @@ export default function Produtos() {
   function openNew() {
     setEditingId(null)
     setVinculos([]); setVincOriginais([])
+    setEstoqueQtd(''); setEstoqueSaldo(0)
     loadCategoriasEmpresa()
     setForm({ ...emptyForm, categoria: categorias[0]?.nome ?? '' })
     setShowModal(true)
@@ -569,8 +580,10 @@ export default function Produtos() {
   function openEdit(produto) {
     setEditingId(produto.id)
     setVinculos([]); setVincOriginais([])
+    setEstoqueQtd(''); setEstoqueSaldo(0)
     loadCategoriasEmpresa()
     loadComplementos(produto.id)
+    loadSaldoProduto(produto.id)
     setForm({
       nome: produto.nome ?? '',
       categoria: produto.categoria ?? categorias[0]?.nome ?? '',
@@ -590,6 +603,43 @@ export default function Produtos() {
       descricao: produto.descricao ?? '',
     })
     setShowModal(true)
+  }
+
+  // Saldo atual do produto (mesma view que a tela Estoque usa) pra mostrar
+  // "tem X hoje" e calcular a diferença quando o dono digitar a contagem nova.
+  async function loadSaldoProduto(produtoId) {
+    if (!usaEstoque || !produtoId) return
+    setCarregandoSaldo(true)
+    const { data } = await supabase
+      .from('estoque_saldo')
+      .select('quantidade_atual')
+      .eq('produto_id', produtoId)
+      .maybeSingle()
+    setEstoqueSaldo(Number(data?.quantidade_atual ?? 0))
+    setCarregandoSaldo(false)
+  }
+
+  // Grava a movimentação do que foi digitado no cadastro. É CONTAGEM, não soma:
+  // guardamos só a diferença pro saldo atual (igual o "ajuste" da tela Estoque),
+  // senão quem edita o produto de novo dobraria o estoque.
+  async function gravarMovimentoEstoque(produtoId, novoEditando) {
+    if (!usaEstoque || !form.controla_estoque) return null
+    if (estoqueQtd === '' || estoqueQtd == null) return null
+    const contado = Number(estoqueQtd)
+    if (!Number.isFinite(contado) || contado < 0) return null
+    const atual = novoEditando ? estoqueSaldo : 0
+    const diferenca = contado - atual
+    if (diferenca === 0) return null
+    const { error } = await supabase.from('estoque_movimentos').insert({
+      produto_id: produtoId,
+      tipo: diferenca > 0 ? 'entrada' : 'saida',
+      quantidade: Math.abs(diferenca),
+      motivo: novoEditando ? 'ajuste_inventario' : 'compra',
+      observacao: novoEditando
+        ? `Ajuste pelo cadastro do produto: contado ${contado}`
+        : `Estoque inicial no cadastro: ${contado}`,
+    })
+    return error?.message ?? null
   }
 
   function handleChange(e) {
@@ -672,6 +722,14 @@ export default function Produtos() {
     } catch (err) {
       setSaving(false)
       setError('Produto salvo, mas houve erro nos complementos: ' + (err?.message ?? err))
+      return
+    }
+
+    // Estoque digitado no próprio cadastro (entrada no produto novo, ajuste na edição).
+    const erroEstoque = await gravarMovimentoEstoque(produtoId, Boolean(editingId))
+    if (erroEstoque) {
+      setSaving(false)
+      setError('Produto salvo, mas o estoque não foi lançado: ' + erroEstoque)
       return
     }
 
@@ -1470,6 +1528,38 @@ export default function Produtos() {
                     + Adicionar faixa de preço
                   </button>
                 </div>
+
+                {/* Quantidade em estoque direto aqui: cadastrou o item, já diz quantos
+                    tem — sem precisar abrir a tela Estoque só pra isso. */}
+                {usaEstoque && form.controla_estoque && (
+                <div className="form-field">
+                  <label style={{ color: '#0ea5e9' }}>
+                    {editingId ? 'Quantidade em estoque (contagem)' : 'Quantidade em estoque'}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={estoqueQtd}
+                    onChange={(e) => setEstoqueQtd(e.target.value)}
+                    placeholder={editingId
+                      ? (carregandoSaldo ? 'carregando saldo...' : `tem ${estoqueSaldo} hoje — deixe vazio pra não mexer`)
+                      : 'ex.: 20 (deixe vazio se não quiser lançar agora)'}
+                  />
+                  <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '6px 0 0' }}>
+                    {editingId
+                      ? <>Digite <b>quanto tem na prateleira agora</b>. A gente lança só a diferença pro saldo atual ({carregandoSaldo ? '...' : estoqueSaldo}) como ajuste de inventário.</>
+                      : <>Entra como <b>entrada de estoque</b> assim que salvar. Depois é só usar a tela Estoque pra novas compras.</>}
+                  </p>
+                  {estoqueQtd !== '' && Number(estoqueQtd) !== (editingId ? estoqueSaldo : 0) && Number.isFinite(Number(estoqueQtd)) && (
+                    <p style={{ fontSize: 12.5, margin: '4px 0 0', fontWeight: 700,
+                      color: Number(estoqueQtd) > (editingId ? estoqueSaldo : 0) ? '#16a34a' : '#e11d48' }}>
+                      {Number(estoqueQtd) > (editingId ? estoqueSaldo : 0) ? '↑ entrada de ' : '↓ saída de '}
+                      {Math.abs(Number(estoqueQtd) - (editingId ? estoqueSaldo : 0))}
+                    </p>
+                  )}
+                </div>
+                )}
 
                 {/* Estoque mínimo só quando controla estoque */}
                 {usaEstoque && form.controla_estoque && (
