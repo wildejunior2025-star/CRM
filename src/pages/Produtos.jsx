@@ -14,6 +14,35 @@ const norm = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').to
 // eslint-disable-next-line no-unused-vars
 const EMBALAGENS = ['unidade', 'lata', 'garrafa', 'caixa', 'fardo']
 
+// Celular? Só nele faz sentido o botão "Tirar foto" (no PC o `capture` é
+// ignorado e abriria o mesmo seletor de arquivo, confundindo o dono).
+const EH_CELULAR = typeof navigator !== 'undefined' &&
+  (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+   (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent)))   // iPad novo se diz Mac
+
+// Foto de câmera de celular vem com 4-8 MB. Encolhe pra no máximo 1200px e
+// JPEG 82% antes de subir: a vitrine mostra a foto pequena mesmo, e o upload
+// no 4G da loja deixa de demorar/estourar.
+async function comprimirImagem(file, maxLado = 1200, qualidade = 0.82) {
+  if (!file.type?.startsWith('image/') || file.type === 'image/gif') return file
+  try {
+    const bitmap = await createImageBitmap(file)
+    const escala = Math.min(1, maxLado / Math.max(bitmap.width, bitmap.height))
+    // Já é pequena e leve: sobe do jeito que veio.
+    if (escala === 1 && file.size < 900 * 1024) { bitmap.close?.(); return file }
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(bitmap.width * escala)
+    canvas.height = Math.round(bitmap.height * escala)
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    bitmap.close?.()
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', qualidade))
+    if (!blob || blob.size >= file.size) return file
+    return new File([blob], 'foto.jpg', { type: 'image/jpeg' })
+  } catch {
+    return file   // navegador antigo: sobe original, melhor do que travar o cadastro
+  }
+}
+
 // Preço do app FWC: escondido enquanto o app não está no ar. O valor continua
 // gravado em produtos.preco_app — é só voltar pra true quando o app publicar.
 const MOSTRAR_PRECO_APP = false
@@ -141,6 +170,7 @@ export default function Produtos() {
     setTimeout(() => setCopiadoLink(false), 2000)
   }
   const fileInputRef = useRef(null)
+  const camInputRef = useRef(null)     // input separado com `capture` — abre a câmera direto no celular
   // Renumeração da ordem das categorias só pode acontecer uma vez por sessão
   // (se o update falhar, não pode ficar tentando em loop).
   const renumerouRef = useRef(false)
@@ -658,10 +688,14 @@ export default function Produtos() {
     setUploadingFoto(true)
     setError(null)
 
-    const path = `${profile.empresa_id}/${Date.now()}_${file.name}`
+    const arquivo = await comprimirImagem(file)
+    // Nome vindo da câmera/galeria pode ter acento e espaço — o storage recusa.
+    const nomeSeguro = (arquivo.name || 'foto.jpg')
+      .normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^\w.-]+/g, '_')
+    const path = `${profile.empresa_id}/${Date.now()}_${nomeSeguro}`
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('produto-fotos')
-      .upload(path, file, { upsert: true })
+      .upload(path, arquivo, { upsert: true })
 
     setUploadingFoto(false)
 
@@ -672,6 +706,8 @@ export default function Produtos() {
       .getPublicUrl(uploadData.path)
 
     setForm(prev => ({ ...prev, foto_url: urlData.publicUrl }))
+    // Zera o input: sem isso, escolher/tirar a mesma foto de novo não dispara o onChange.
+    e.target.value = ''
   }
 
   async function handleSubmit(e) {
@@ -1281,14 +1317,38 @@ export default function Produtos() {
                     style={{ display: 'none' }}
                     onChange={handleFotoChange}
                   />
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploadingFoto}
-                  >
-                    {uploadingFoto ? 'Enviando...' : 'Escolher foto'}
-                  </button>
+                  {/* No celular a câmera precisa de um input PRÓPRIO com `capture`:
+                      o mesmo input não consegue ser "galeria" e "câmera" ao mesmo tempo. */}
+                  {EH_CELULAR && (
+                    <input
+                      ref={camInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      style={{ display: 'none' }}
+                      onChange={handleFotoChange}
+                    />
+                  )}
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingFoto}
+                    >
+                      {uploadingFoto ? 'Enviando...' : (EH_CELULAR ? '🖼 Escolher da galeria' : 'Escolher foto')}
+                    </button>
+                    {EH_CELULAR && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => camInputRef.current?.click()}
+                        disabled={uploadingFoto}
+                      >
+                        {uploadingFoto ? 'Enviando...' : '📷 Tirar foto agora'}
+                      </button>
+                    )}
+                  </div>
                   {form.foto_url && (
                     <img
                       src={form.foto_url}
