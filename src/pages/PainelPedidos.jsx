@@ -4654,13 +4654,28 @@ export default function PainelPedidos() {
     )
   }
 
+  const buscaCat = buscaCatalogo.trim().toLowerCase()
+  const bateProduto = (p) => !!p.nome?.toLowerCase().includes(buscaCat)
+  // Grupos/opções que interessam pra busca atual. Se o próprio produto bate (ou
+  // não há busca), mostra o cardápio inteiro dele; senão só o que casou — assim
+  // procurar "camarão" não devolve as 38 opções do grupo junto.
+  const gruposDaBusca = (produtoId, produtoBate) => {
+    const grupos = complementosPorProduto[produtoId] ?? []
+    if (!buscaCat || produtoBate) return grupos
+    const out = []
+    for (const g of grupos) {
+      if (g.nome?.toLowerCase().includes(buscaCat)) { out.push(g); continue }
+      const opcoes = (g.opcoes ?? []).filter(o => o.nome?.toLowerCase().includes(buscaCat))
+      if (opcoes.length) out.push({ ...g, opcoes, totalOpcoes: (g.opcoes ?? []).length })
+    }
+    return out
+  }
+
   const catalogoFiltrado = catalogo.filter(p => {
-    const t = buscaCatalogo.trim().toLowerCase()
-    if (!t) return true
-    if (p.nome?.toLowerCase().includes(t)) return true
+    if (!buscaCat) return true
+    if (bateProduto(p)) return true
     // casa também se algum complemento do produto bate na busca
-    return (complementosPorProduto[p.id] ?? []).some(g =>
-      g.nome.toLowerCase().includes(t) || g.opcoes.some(o => o.nome.toLowerCase().includes(t)))
+    return gruposDaBusca(p.id, false).length > 0
   })
 
   // Agrupa as mensagens em conversas (canal + cliente)
@@ -5409,9 +5424,13 @@ export default function PainelPedidos() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {catalogoFiltrado.map(prod => {
                     const pausado = prod.disponivel_delivery === false
-                    const grupos = complementosPorProduto[prod.id] ?? []
+                    const prodBate = bateProduto(prod)
+                    const grupos = gruposDaBusca(prod.id, prodBate)
                     const temComp = grupos.length > 0
-                    const aberto = catExpandido.has(prod.id)
+                    // Quando o produto entrou na lista por causa de um complemento,
+                    // já abre o accordion — senão o lojista busca e não vê o que achou.
+                    const achouNoComp = !!buscaCat && !prodBate && temComp
+                    const aberto = catExpandido.has(prod.id) || achouNoComp
                     return (
                       <div key={prod.id} style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, overflow: 'hidden' }}>
                         {/* Linha do produto */}
@@ -5482,7 +5501,10 @@ export default function PainelPedidos() {
                                         {g.nome}
                                         {gPausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
                                       </div>
-                                      <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{qtd} · {g.opcoes.length} {g.opcoes.length === 1 ? 'opção' : 'opções'}</div>
+                                      <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
+                                        {qtd} · {g.opcoes.length}
+                                        {g.totalOpcoes ? ` de ${g.totalOpcoes}` : ''} {g.opcoes.length === 1 ? 'opção' : 'opções'}
+                                      </div>
                                     </div>
                                     <button
                                       type="button"
