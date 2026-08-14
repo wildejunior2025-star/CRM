@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 // ============================================================================
@@ -43,15 +43,53 @@ function grupoVazio() { return { grupoId: uuid(), nome: '', min: 0, max: 1, opco
 function opcaoVazia() { return { opcaoId: uuid(), produtoId: uuid(), nome: '', preco: '', imagePath: null, imgPreview: null, status: 'AVAILABLE' } }
 function itemVazio() { return { itemId: uuid(), productId: uuid(), categoriaId: '', nome: '', preco: '', imagePath: null, imgPreview: null, status: 'AVAILABLE', grupos: [] } }
 
+// ---------------------------------------------------------------------------
+// Rascunho: o que ainda NÃO foi salvo no iFood fica guardado no navegador, pra
+// não perder o item meio montado ao sair da página / dar F5.
+// As fotos são guardadas só pelo imagePath (o preview é remontado pela URL do
+// iFood) — data-uri em base64 estouraria o localStorage.
+// ---------------------------------------------------------------------------
+const CHAVE_RASCUNHO = (id) => `ifood_catalogo_rascunho_${id || 'sem-empresa'}`
+const CHAVE_CATS = (id) => `ifood_catalogo_cats_${id || 'sem-empresa'}`
+const IMG_BASE = 'https://static-images.ifood.com.br/pratos/'
+const previewDe = (p) => (!p ? null : (p.startsWith('http') || p.startsWith('data:') ? p : IMG_BASE + p))
+const mapOpcoes = (it, fn) => ({ ...it, grupos: (it.grupos ?? []).map(g => ({ ...g, opcoes: (g.opcoes ?? []).map(fn) })) })
+const semPreview = (it) => ({ ...mapOpcoes(it, o => ({ ...o, imgPreview: null })), imgPreview: null })
+const comPreview = (it) => ({ ...mapOpcoes(it, o => ({ ...o, imgPreview: previewDe(o.imagePath) })), imgPreview: previewDe(it.imagePath) })
+const itemEmBranco = (it) => !it || (!it.nome?.trim() && !it.imagePath && (it.grupos ?? []).length === 0 && !it.preco)
+
+function lerJson(chave) {
+  try { const raw = localStorage.getItem(chave); return raw ? JSON.parse(raw) : null } catch { return null }
+}
+function gravarJson(chave, valor) {
+  try { valor == null ? localStorage.removeItem(chave) : localStorage.setItem(chave, JSON.stringify(valor)) } catch { /* cota cheia: rascunho é só conforto */ }
+}
+
 export default function IfoodCatalogoManager({ empresaId, merchantOk }) {
-  const [categorias, setCategorias] = useState(null)   // null = não carregado
+  const [categorias, setCategorias] = useState(() => lerJson(CHAVE_CATS(empresaId)))
   const [novaCat, setNovaCat] = useState('')
-  const [item, setItem] = useState(itemVazio())
+  const [item, setItem] = useState(() => { const r = lerJson(CHAVE_RASCUNHO(empresaId)); return r ? comPreview(r) : itemVazio() })
   const [salvos, setSalvos] = useState([])             // itens já mandados (pra pausar/editar)
   const [busy, setBusy] = useState('')                 // rótulo da ação em curso
   const [msg, setMsg] = useState(null)                 // { tipo, texto }
 
   const notify = (tipo, texto) => setMsg({ tipo, texto })
+
+  // Empresa chegou depois (ou o lojista trocou de loja): recarrega o rascunho dela.
+  useEffect(() => {
+    const r = lerJson(CHAVE_RASCUNHO(empresaId))
+    setItem(r ? comPreview(r) : itemVazio())
+    setCategorias(lerJson(CHAVE_CATS(empresaId)))
+    setSalvos([])
+  }, [empresaId])
+
+  // Guarda o rascunho a cada tecla — sair da página não perde mais o item.
+  useEffect(() => {
+    gravarJson(CHAVE_RASCUNHO(empresaId), itemEmBranco(item) ? null : semPreview(item))
+  }, [item, empresaId])
+
+  // Guarda as categorias já carregadas, pra caixinha não voltar vazia no F5.
+  useEffect(() => { gravarJson(CHAVE_CATS(empresaId), categorias) }, [categorias, empresaId])
 
   async function carregarCategorias() {
     setBusy('cats'); setMsg(null)
@@ -145,7 +183,7 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk }) {
     setMsg({ tipo: 'ok', texto: `Item "${it.nome}" carregado no formulário — altere e clique em "Salvar no iFood".` })
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
-  function novo() { setItem(itemVazio()); setMsg(null) }
+  function novo() { setItem(itemVazio()); gravarJson(CHAVE_RASCUNHO(empresaId), null); setMsg(null) }
 
   async function pausarItem(it, pausar) {
     setBusy('pausa-' + it.itemId)
@@ -198,6 +236,9 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <strong style={{ fontSize: 13 }}>Item</strong>
           <button type="button" style={{ ...btnOut, border: '1.5px solid var(--border)', color: 'var(--text-muted)' }} onClick={novo}>Limpar / novo item</button>
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+          O que você digita aqui fica guardado neste navegador — pode sair da página ou atualizar que o item volta do jeito que estava. Só some com "Limpar / novo item".
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', gap: 8, marginBottom: 8 }}>
           <input style={inp} placeholder='Nome do item (ex.: Produto Teste)' value={item.nome} onChange={e => setItem(it => ({ ...it, nome: e.target.value }))} />
