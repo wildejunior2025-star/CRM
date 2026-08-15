@@ -122,6 +122,19 @@ function acharBairroCfg(lista, bairroCliente) {
   const n = normBairro(bairroCliente)
   return lista.find(b => normBairro(b.bairro) === n) || null
 }
+// Chave do endereço — tem que dar a MESMA string que a chave_endereco() do banco
+// (mig 0160), senão o pino salvo nunca casaria com o endereço da tela.
+function chaveEndereco({ rua, numero, bairro, cidade } = {}) {
+  const junto = [rua, numero, bairro, cidade]
+    .map(v => String(v ?? '').trim())
+    .filter(Boolean)
+    .join(' ')
+  return junto
+    .normalize('NFD').replace(/[̀-ͯ]/g, '') // tira acento, igual ao unaccent
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim() || null
+}
 function haversineKm(lat1, lng1, lat2, lng2) {
   const R = 6371
   const dLat = (lat2 - lat1) * Math.PI / 180
@@ -213,11 +226,15 @@ async function reverseGeocode(lat, lng) {
 }
 
 // ── Modal do mapa: cliente arrasta o pino até a casa (ponto exato) ───────────
-function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco, onConfirm, onClose }) {
+function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco, exigeManual, onConfirm, onClose }) {
   const mapRef = useRef(null)
   const mapObj = useRef(null)
   const pinRef = useRef(null)
   const interagiu = useRef(false) // cliente já mexeu no pino (arrasto/clique/GPS)?
+  // Mesma informação do ref, mas em estado: o botão de confirmar precisa
+  // re-renderizar quando o cliente finalmente mexe no pino.
+  const [mexeu, setMexeu] = useState(false)
+  const marcarMexeu = () => { interagiu.current = true; setMexeu(true) }
   const [coord, setCoord] = useState(initial || (storeLat ? { lat: Number(storeLat), lng: Number(storeLng) } : null))
   const [locLoading, setLocLoading] = useState(false)
   const [geoLoading, setGeoLoading] = useState(false)
@@ -252,8 +269,8 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
       }
       const pinIcon = L.divIcon({ html: `<div style="width:34px;height:34px;background:#ef4444;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 3px 10px rgba(0,0,0,.4);"></div>`, className: '', iconSize: [34, 34], iconAnchor: [17, 32] })
       pinRef.current = L.marker([c.lat, c.lng], { icon: pinIcon, draggable: true }).addTo(map)
-      pinRef.current.on('dragend', e => { interagiu.current = true; const { lat, lng } = e.target.getLatLng(); setCoord({ lat, lng }); setDefinido(true) })
-      map.on('click', e => { interagiu.current = true; const { lat, lng } = e.latlng; pinRef.current.setLatLng([lat, lng]); setCoord({ lat, lng }); setDefinido(true) })
+      pinRef.current.on('dragend', e => { marcarMexeu(); const { lat, lng } = e.target.getLatLng(); setCoord({ lat, lng }); setDefinido(true) })
+      map.on('click', e => { marcarMexeu(); const { lat, lng } = e.latlng; pinRef.current.setLatLng([lat, lng]); setCoord({ lat, lng }); setDefinido(true) })
 
       // Sem ponto ainda? Tenta achar pelo endereço digitado (CEP/rua) e já leva o
       // pino pra lá — assim ele nasce perto da casa, não parado na loja.
@@ -280,7 +297,7 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
     setLocLoading(true)
     navigator.geolocation.getCurrentPosition(
       pos => {
-        interagiu.current = true
+        marcarMexeu()
         const c = { lat: pos.coords.latitude, lng: pos.coords.longitude }
         setCoord(c); setLocLoading(false); setDefinido(true)
         if (pinRef.current) pinRef.current.setLatLng([c.lat, c.lng])
@@ -298,6 +315,9 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
   // infla a taxa). 3,5 km é folgado pra não reclamar de bairro grande.
   const distBairro = coord && bairroCentro ? haversineKm(coord.lat, coord.lng, bairroCentro.lat, bairroCentro.lng) : null
   const pinLongeDoBairro = definido && distBairro != null && distBairro > 3.5
+  // Pode confirmar? Precisa de ponto definido — e, pra quem está reconfirmando,
+  // o ponto tem que ter saído do dedo dele, não do buscador.
+  const liberado = !!coord && definido && (!exigeManual || mexeu)
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }} onClick={onClose}>
@@ -324,10 +344,19 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
             </div>
           )}
           {/* Sem local definido = pino ainda parado na loja. Bloqueia pra não
-              gravar o endereço da loja no lugar do endereço do cliente. */}
-          <button type="button" onClick={() => coord && definido && onConfirm({ lat: coord.lat, lng: coord.lng, dist, taxa })} disabled={!coord || !definido}
-            style={{ width: '100%', padding: '13px', borderRadius: 12, border: 'none', background: (coord && definido) ? '#7c3aed' : '#4b3a7a', color: '#fff', fontWeight: 800, fontSize: 15, cursor: (coord && definido) ? 'pointer' : 'not-allowed' }}>
-            {definido ? 'Confirmar este local' : 'Arraste o pino até sua casa'}
+              gravar o endereço da loja no lugar do endereço do cliente.
+              `exigeManual` é o cliente marcado pra reconfirmar: pra ele o pino
+              do buscador não serve, tem que apontar a casa com o dedo. */}
+          {exigeManual && !mexeu && (
+            <div style={{ fontSize: 12.5, lineHeight: 1.5, color: '#a78bfa', background: 'rgba(124,58,237,.12)', border: '1px solid rgba(124,58,237,.4)', borderRadius: 8, padding: '9px 11px' }}>
+              📍 <strong>Arraste o pino até a sua casa.</strong> O ponto que o mapa achou sozinho já errou o seu endereço antes — por isso precisamos que você aponte.
+            </div>
+          )}
+          <button type="button" onClick={() => liberado && onConfirm({ lat: coord.lat, lng: coord.lng, dist, taxa, manual: interagiu.current })} disabled={!liberado}
+            style={{ width: '100%', padding: '13px', borderRadius: 12, border: 'none', background: liberado ? '#7c3aed' : '#4b3a7a', color: '#fff', fontWeight: 800, fontSize: 15, cursor: liberado ? 'pointer' : 'not-allowed' }}>
+            {!definido ? 'Arraste o pino até sua casa'
+              : (exigeManual && !mexeu) ? 'Arraste o pino até sua casa'
+              : 'Confirmar este local'}
           </button>
         </div>
       </div>
@@ -388,6 +417,9 @@ export default function DeliveryCheckout() {
   const [coordCliente, setCoordCliente] = useState(null) // {lat,lng} do ponto de entrega
   const [mapaAberto, setMapaAberto]     = useState(false)
   const pinManualRef = useRef(false) // true quando o cliente marcou no mapa (não sobrescreve com geocode)
+  // Pino que o cliente já apontou em pedido anterior, vindo do cadastro dele.
+  // {lat, lng, ref} — `ref` é o endereço a que ele pertence (mig 0160).
+  const [pinSalvo, setPinSalvo] = useState(null)
 
   // Salva o rascunho a cada mudança (sobrevive a sair/voltar da tela).
   useEffect(() => {
@@ -493,6 +525,13 @@ export default function DeliveryCheckout() {
       reconhecidoRef.current = true
       setReconhecido(true)
       setReconfirmar(!!data.reconfirmar_endereco) // marcado no banco → força remarcar o mapa
+      // Pino que ESTE cliente já apontou no mapa (mig 0160). Só o manual volta:
+      // ponto que o buscador chutou não é confiável pra calcular taxa — foi ele
+      // que cobrou R$ 8 de quem morava a 500 m. Quem aplica é o efeito abaixo,
+      // depois de conferir que o endereço na tela é o mesmo do pino.
+      if (data.endereco_pin_manual && data.endereco_lat != null && data.endereco_lng != null) {
+        setPinSalvo({ lat: Number(data.endereco_lat), lng: Number(data.endereco_lng), ref: data.endereco_pin_ref || null })
+      }
       setForm(prev => ({
         ...prev,
         nome:        prev.nome.trim()        ? prev.nome        : (data.nome || ''),
@@ -509,6 +548,17 @@ export default function DeliveryCheckout() {
     }, 700)
     return () => clearTimeout(t)
   }, [form.telefone, state])
+
+  // Reaproveita o pino que o cliente já apontou, desde que o endereço na tela
+  // ainda seja o mesmo a que aquele pino pertence. É isto que impede o buscador
+  // de mapa de reescrever, a cada pedido, um acerto que o cliente já fez à mão.
+  useEffect(() => {
+    if (!pinSalvo || tipo !== 'entrega') return
+    if (chaveEndereco(form) !== pinSalvo.ref) return
+    if (coordCliente && pinManualRef.current) return
+    pinManualRef.current = true
+    setCoordCliente({ lat: pinSalvo.lat, lng: pinSalvo.lng })
+  }, [pinSalvo, form.rua, form.numero, form.bairro, form.cidade, tipo, coordCliente]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Geocodifica o endereço (debounced) pra estimar a taxa por distância mesmo sem
   // abrir o mapa. Se o cliente já marcou o ponto no mapa, não sobrescreve.
@@ -589,14 +639,28 @@ export default function DeliveryCheckout() {
   const faltaMinimo = tipo === 'entrega' && pedidoMinimo > 0 && subtotal < pedidoMinimo
   const faltamParaMinimo = faltaMinimo ? (pedidoMinimo - subtotal) : 0
 
+  // Campos que definem ONDE o pino está. Mexeu num deles, o pino que estava
+  // valendo não vale mais — senão o cliente muda de casa (ou corrige o número)
+  // e continua pagando a taxa do endereço velho.
+  const CAMPOS_DO_PINO = ['rua', 'numero', 'bairro', 'cidade', 'estado', 'cep']
+
   function set(field, value) {
+    // Só invalida em mudança de verdade: carregarCidades reescreve a mesma
+    // cidade ao voltar do cadastro e derrubaria o pino recuperado à toa.
+    if (CAMPOS_DO_PINO.includes(field) && form[field] !== value) {
+      setCoordCliente(null)
+      pinManualRef.current = false
+    }
     setForm(prev => ({ ...prev, [field]: value }))
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: null }))
   }
 
-  // Cliente confirmou o ponto no mapa: fixa o pino, calcula a taxa e preenche o endereço
-  function confirmarMapa({ lat, lng }) {
-    pinManualRef.current = true
+  // Cliente confirmou o ponto no mapa: fixa o pino, calcula a taxa e preenche o endereço.
+  // `manual` diz se o ponto saiu do DEDO do cliente ou se ele só confirmou o que
+  // o buscador de mapa tinha chutado — só o primeiro é bom o bastante pra virar
+  // o pino oficial do cadastro dele (mig 0160).
+  function confirmarMapa({ lat, lng, manual }) {
+    pinManualRef.current = !!manual
     setCoordCliente({ lat, lng })
     setMapaAberto(false)
     reverseGeocode(lat, lng).then(a => {
@@ -625,7 +689,13 @@ export default function DeliveryCheckout() {
       setCidades(lista)
       if (cidadeParaSelecionar) {
         const match = lista.find(c => c.toLowerCase() === cidadeParaSelecionar.toLowerCase())
-        if (match) set('cidade', match)
+        // setForm direto, NÃO o set(): isto é preenchimento automático (cadastro
+        // do cliente, CEP, ponto do mapa), não o cliente trocando de cidade — se
+        // passasse pelo set() derrubaria o pino que acabou de ser marcado.
+        if (match) {
+          setForm(prev => (prev.cidade === match ? prev : { ...prev, cidade: match }))
+          setErrors(prev => (prev.cidade ? { ...prev, cidade: null } : prev))
+        }
       }
     } catch {
       setCidades([])
@@ -761,6 +831,12 @@ export default function DeliveryCheckout() {
         p_bairro:      form.bairro.trim(),
         p_cidade:      form.cidade,
         p_estado:      form.estado,
+        // Guarda o ponto no cadastro pro próximo pedido não geocodificar de novo.
+        // `p_pin_manual` separa o que o cliente apontou do que o buscador chutou:
+        // o banco só deixa o chute entrar quando não há pino apontado (mig 0160).
+        p_lat:         tipo === 'entrega' ? (coordCliente?.lat ?? null) : null,
+        p_lng:         tipo === 'entrega' ? (coordCliente?.lng ?? null) : null,
+        p_pin_manual:  tipo === 'entrega' && !!coordCliente && pinManualRef.current,
       })
       clienteId = cid ?? null
     } catch { /* não bloqueia o pedido */ }
@@ -1307,6 +1383,7 @@ export default function DeliveryCheckout() {
           taxas={lojaEndereco?.taxas_entrega_km}
           initial={coordCliente}
           endereco={{ rua: form.rua, numero: form.numero, bairro: form.bairro, cidade: form.cidade, estado: form.estado, cep: form.cep }}
+          exigeManual={reconfirmar}
           onConfirm={confirmarMapa}
           onClose={() => setMapaAberto(false)}
         />
