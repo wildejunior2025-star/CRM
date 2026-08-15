@@ -124,8 +124,12 @@ function acharBairroCfg(lista, bairroCliente) {
 }
 // Chave do endereço — tem que dar a MESMA string que a chave_endereco() do banco
 // (mig 0160), senão o pino salvo nunca casaria com o endereço da tela.
-function chaveEndereco({ rua, numero, bairro, cidade } = {}) {
-  const junto = [rua, numero, bairro, cidade]
+// O BAIRRO fica de fora de propósito (mig 0162): é o campo que o cliente escreve
+// diferente a cada pedido ("Potengi" e "Panatis _1" pra mesma casa), e uma
+// digitação nova descartaria o pino certo. Rua + número + cidade já identifica a
+// casa, porque a chave só decide se o pino DAQUELE cliente ainda serve.
+function chaveEndereco({ rua, numero, cidade } = {}) {
+  const junto = [rua, numero, cidade]
     .map(v => String(v ?? '').trim())
     .filter(Boolean)
     .join(' ')
