@@ -140,6 +140,9 @@ export default function FichaTecnica() {
   const [compraAte, setCompraAte] = useState(hojeYMD)
   const [compras, setCompras] = useState([])
   const [loadingCompras, setLoadingCompras] = useState(false)
+  // Dia aberto na lista. Nasce tudo recolhido: num dia de feira dá 20+ linhas e
+  // quem só quer saber o total do dia não precisa rolar tudo isso.
+  const [diaAberto, setDiaAberto] = useState(null)
 
   const [showFicha, setShowFicha] = useState(false)
   const [fichaForm, setFichaForm] = useState(emptyFicha)
@@ -872,10 +875,18 @@ export default function FichaTecnica() {
               <strong>Nenhuma entrada nesse período</strong>
               <p>Aqui aparece tudo que entrou no estoque — insumo e produto de revenda — com a data e o valor pago.</p>
             </div>
-          ) : comprasPorDia.map(g => (
+          ) : comprasPorDia.map(g => {
+            const aberto = diaAberto === g.dia
+            return (
             <div className="card" key={g.dia} style={{ marginBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
+              <div
+                onClick={() => setDiaAberto(aberto ? null : g.dia)}
+                title={aberto ? 'Fechar' : 'Toque pra ver o que entrou nesse dia'}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', cursor: 'pointer',
+                  marginBottom: aberto ? 8 : 0, paddingBottom: aberto ? 8 : 0, borderBottom: aberto ? '1px solid var(--border)' : 'none' }}
+              >
                 <strong style={{ fontSize: 15 }}>
+                  <span style={{ color: 'var(--text-muted)', marginRight: 6 }}>{aberto ? '▲' : '▼'}</span>
                   📅 {g.dia}
                   <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 13 }}> · {g.itens.length} entrada{g.itens.length === 1 ? '' : 's'}</span>
                 </strong>
@@ -884,7 +895,7 @@ export default function FichaTecnica() {
                   {g.semValor > 0 && <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)' }}> (+{g.semValor} sem valor)</span>}
                 </strong>
               </div>
-              <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ display: aberto ? 'grid' : 'none', gap: 6 }}>
                 {g.itens.map(c => (
                   <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 14 }}>
                     <span style={{ color: 'var(--text-muted)', fontSize: 12.5, width: 44 }}>
@@ -910,7 +921,8 @@ export default function FichaTecnica() {
                 ))}
               </div>
             </div>
-          ))}
+            )
+          })}
         </>
       )}
 
