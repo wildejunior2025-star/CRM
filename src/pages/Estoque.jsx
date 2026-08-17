@@ -184,9 +184,17 @@ export default function Estoque() {
       quantidade: '',
       motivo: 'compra',
       observacao: '',
+      valor_pago: '',
     })
     setShowMovModal(true)
   }
+
+  // Preço por unidade da entrada que está sendo digitada (pago ÷ quantidade).
+  const movUnitEstoque = (() => {
+    const qtd = Number(String(movForm.quantidade ?? '').replace(',', '.'))
+    const pago = Number(String(movForm.valor_pago ?? '').replace(',', '.'))
+    return qtd > 0 && pago > 0 ? pago / qtd : null
+  })()
 
   function handleMovChange(e) {
     const { name, value } = e.target
@@ -240,6 +248,8 @@ export default function Estoque() {
         quantidade: Number(movForm.quantidade),
         motivo: movForm.motivo,
         observacao: movForm.observacao || null,
+        custo_unit: movUnitEstoque,
+        valor_total: movUnitEstoque != null ? Number(String(movForm.valor_pago).replace(',', '.')) : null,
       }
     }
 
@@ -498,6 +508,26 @@ export default function Estoque() {
                     </span>
                   )}
                 </div>
+
+                {/* Compra: o valor pago fica gravado na linha, pro histórico de
+                    compras saber quanto se gastou no dia. */}
+                {movForm.tipo === 'entrada' && (
+                  <div className="form-field">
+                    <label>Quanto pagou no total (R$) — opcional</label>
+                    <input
+                      inputMode="decimal"
+                      name="valor_pago"
+                      placeholder="Ex.: 120,00"
+                      value={movForm.valor_pago}
+                      onChange={handleMovChange}
+                    />
+                    {movUnitEstoque != null && (
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        Sai a <strong>R$ {movUnitEstoque.toFixed(2)}</strong> a unidade.
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 <div className="form-field full">
                   <label>Observação</label>

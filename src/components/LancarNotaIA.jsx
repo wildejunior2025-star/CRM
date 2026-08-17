@@ -120,7 +120,13 @@ export default function LancarNotaIA({ empresaId, onDone }) {
         if (error) throw new Error(`Não deu pra criar "${nome}": ${error.message}`)
         id = data.id
       }
-      linhas.push({ empresa_id: empresaId, materia_prima_id: id, tipo: 'entrada', quantidade: num(n.quantidade) })
+      const qtdNova = num(n.quantidade)
+      const unitNovo = Number.isFinite(custo) && custo > 0 ? custo : null
+      linhas.push({
+        empresa_id: empresaId, materia_prima_id: id, tipo: 'entrada', quantidade: qtdNova,
+        custo_unit: unitNovo, valor_total: unitNovo ? unitNovo * qtdNova : null,
+        observacao: 'Nota de compra (IA)',
+      })
     }
     return linhas
   }
@@ -130,14 +136,30 @@ export default function LancarNotaIA({ empresaId, onDone }) {
     const novos = naoEnc.filter(n => n.criar && n.nome.trim() && num(n.quantidade) > 0)
     if (!inc.length && !novos.length) { setErro('Marque ao menos um item pra lançar.'); return }
     setSalvando(true); setErro(null)
-    const prodLinhas = inc.filter(it => it.tipo === 'produto').map(it => ({
-      produto_id: it.id, tipo: 'entrada', quantidade: Number(String(it.quantidade).replace(',', '.')),
-      motivo: 'compra', observacao: 'Nota de compra (IA)',
-    }))
-    const matLinhas = inc.filter(it => it.tipo === 'materia').map(it => ({
-      empresa_id: empresaId, materia_prima_id: it.id, tipo: 'entrada',
-      quantidade: Number(String(it.quantidade).replace(',', '.')),
-    }))
+    // O preço da nota vai junto NA LINHA da entrada — é o que sustenta o
+    // histórico de compras (quanto gastei no dia / o insumo subiu?).
+    const precoDe = (it) => {
+      const c = Number(String(it.custo_unit ?? '').replace(',', '.'))
+      return Number.isFinite(c) && c > 0 ? c : null
+    }
+    const prodLinhas = inc.filter(it => it.tipo === 'produto').map(it => {
+      const qtd = Number(String(it.quantidade).replace(',', '.'))
+      const unit = precoDe(it)
+      return {
+        produto_id: it.id, tipo: 'entrada', quantidade: qtd,
+        motivo: 'compra', observacao: 'Nota de compra (IA)',
+        custo_unit: unit, valor_total: unit ? unit * qtd : null,
+      }
+    })
+    const matLinhas = inc.filter(it => it.tipo === 'materia').map(it => {
+      const qtd = Number(String(it.quantidade).replace(',', '.'))
+      const unit = precoDe(it)
+      return {
+        empresa_id: empresaId, materia_prima_id: it.id, tipo: 'entrada', quantidade: qtd,
+        custo_unit: unit, valor_total: unit ? unit * qtd : null,
+        observacao: 'Nota de compra (IA)',
+      }
+    })
     try {
       const linhasNovas = await criarNovosInsumos()
       const todasMat = [...matLinhas, ...linhasNovas]

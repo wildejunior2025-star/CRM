@@ -86,7 +86,8 @@ export default function FichaTecnica() {
 
   // Aba fica no LINK (?aba=materias) pra sobreviver a refresh / sair e voltar.
   const [searchParams, setSearchParams] = useSearchParams()
-  const aba = searchParams.get('aba') === 'materias' ? 'materias' : 'fichas'
+  const abaUrl = searchParams.get('aba')
+  const aba = abaUrl === 'materias' || abaUrl === 'compras' ? abaUrl : 'fichas'
   const setAba = (v) => setSearchParams(
     (p) => { const n = new URLSearchParams(p); n.set('aba', v); return n },
     { replace: true },
@@ -113,6 +114,10 @@ export default function FichaTecnica() {
   const [movMateria, setMovMateria] = useState(null)
   const [movTipo, setMovTipo] = useState('entrada') // 'entrada' | 'saida' | 'ajuste'
   const [movQtd, setMovQtd] = useState('')
+  // Quanto pagou nessa compra. Fica na linha do movimento, que ninguém reescreve
+  // depois — é isso que dá o histórico "no dia 17/08 gastei tanto".
+  const [movPago, setMovPago] = useState('')
+  const [movAtualizaCusto, setMovAtualizaCusto] = useState(true)
   const [savingMov, setSavingMov] = useState(false)
   const saldoDe = (id) => Number(saldoMat[id] ?? 0)
 
@@ -120,8 +125,21 @@ export default function FichaTecnica() {
   const [showBaixa, setShowBaixa] = useState(false)
   const [cartTipo, setCartTipo] = useState('saida') // 'saida' (baixa) | 'entrada'
   const [baixaBusca, setBaixaBusca] = useState('')
-  const [baixaCart, setBaixaCart] = useState([]) // [{ id, nome, unidade, qtd }]
+  const [baixaCart, setBaixaCart] = useState([]) // [{ id, nome, unidade, qtd, pago }]
+  const [cartAtualizaCusto, setCartAtualizaCusto] = useState(true)
   const [salvandoBaixa, setSalvandoBaixa] = useState(false)
+
+  // ── Aba COMPRAS: o histórico do que ENTROU (insumo e produto de revenda) ──
+  // O saldo só diz quanto tem hoje; aqui fica o "de onde veio" — dia, item,
+  // quantidade e quanto foi pago, que agora vive na própria linha do movimento.
+  const hojeYMD = () => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  const [compraDe, setCompraDe] = useState(hojeYMD)
+  const [compraAte, setCompraAte] = useState(hojeYMD)
+  const [compras, setCompras] = useState([])
+  const [loadingCompras, setLoadingCompras] = useState(false)
 
   const [showFicha, setShowFicha] = useState(false)
   const [fichaForm, setFichaForm] = useState(emptyFicha)
@@ -164,6 +182,75 @@ export default function FichaTecnica() {
   }, [empresaId])
 
   useEffect(() => { carregar() }, [carregar])
+
+  // Busca as entradas do período nas DUAS tabelas (insumo e produto) e junta
+  // numa lista só, da mais nova pra mais velha.
+  const carregarCompras = useCallback(async () => {
+    if (!empresaId) return
+    setLoadingCompras(true)
+    const ini = new Date(`${compraDe}T00:00:00`)
+    const fim = new Date(`${compraAte}T00:00:00`)
+    fim.setDate(fim.getDate() + 1)   // o "até" entra inteiro
+    const [mp, pr] = await Promise.all([
+      supabase.from('materia_prima_movimentos')
+        .select('id, created_at, quantidade, custo_unit, valor_total, observacao, materias_primas(nome, unidade)')
+        .eq('empresa_id', empresaId).eq('tipo', 'entrada')
+        .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())
+        .order('created_at', { ascending: false }),
+      supabase.from('estoque_movimentos')
+        .select('id, created_at, quantidade, custo_unit, valor_total, observacao, motivo, produtos(nome)')
+        .eq('empresa_id', empresaId).eq('tipo', 'entrada')
+        .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())
+        .order('created_at', { ascending: false }),
+    ])
+    const lista = [
+      ...(mp.data || []).map(r => ({
+        id: 'mp:' + r.id, quando: r.created_at, origem: 'insumo',
+        nome: r.materias_primas?.nome || '(insumo apagado)', unidade: r.materias_primas?.unidade || '',
+        quantidade: Number(r.quantidade || 0), custo_unit: r.custo_unit, valor_total: r.valor_total,
+        observacao: r.observacao, motivo: null,
+      })),
+      ...(pr.data || []).map(r => ({
+        id: 'pr:' + r.id, quando: r.created_at, origem: 'produto',
+        nome: r.produtos?.nome || '(produto apagado)', unidade: 'un',
+        quantidade: Number(r.quantidade || 0), custo_unit: r.custo_unit, valor_total: r.valor_total,
+        observacao: r.observacao, motivo: r.motivo,
+      })),
+    ].sort((a, b) => (a.quando < b.quando ? 1 : -1))
+    setCompras(lista)
+    setLoadingCompras(false)
+  }, [empresaId, compraDe, compraAte])
+
+  useEffect(() => { if (aba === 'compras') carregarCompras() }, [aba, carregarCompras])
+
+  // Agrupa por dia e soma o que foi pago (linha sem valor entra como zero no total,
+  // mas a tela avisa que ela existe pra ninguém achar que gastou menos).
+  const comprasPorDia = useMemo(() => {
+    const dias = new Map()
+    for (const c of compras) {
+      const chave = new Date(c.quando).toLocaleDateString('pt-BR')
+      if (!dias.has(chave)) dias.set(chave, { dia: chave, itens: [], total: 0, semValor: 0 })
+      const g = dias.get(chave)
+      g.itens.push(c)
+      if (c.valor_total != null) g.total += Number(c.valor_total)
+      else g.semValor++
+    }
+    return [...dias.values()]
+  }, [compras])
+  const totalPeriodo = useMemo(
+    () => compras.reduce((s, c) => s + Number(c.valor_total || 0), 0),
+    [compras],
+  )
+  const semValorPeriodo = useMemo(() => compras.filter(c => c.valor_total == null).length, [compras])
+
+  // Atalhos de período (o dono não quer digitar data).
+  function periodoRapido(qual) {
+    const d = new Date()
+    const ymd = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`
+    if (qual === 'hoje') { setCompraDe(ymd(d)); setCompraAte(ymd(d)); return }
+    if (qual === '7') { const a = new Date(d); a.setDate(a.getDate() - 6); setCompraDe(ymd(a)); setCompraAte(ymd(d)); return }
+    if (qual === 'mes') { setCompraDe(ymd(new Date(d.getFullYear(), d.getMonth(), 1))); setCompraAte(ymd(d)) }
+  }
 
   // ── Matérias-primas ──────────────────────────────────────────────
   // Avisa (em vermelho) se já existe uma matéria-prima com esse nome — ignorando
@@ -215,7 +302,13 @@ export default function FichaTecnica() {
         // Quantidade inicial informada no cadastro → já lança uma entrada de estoque.
         const qtdIni = Number(String(materiaForm.quantidade ?? '').replace(',', '.'))
         if (data?.id && Number.isFinite(qtdIni) && qtdIni > 0) {
-          await supabase.from('materia_prima_movimentos').insert({ empresa_id: empresaId, materia_prima_id: data.id, tipo: 'entrada', quantidade: qtdIni })
+          // O custo informado no cadastro vale como preço dessa primeira entrada.
+          const custoIni = payload.custo > 0 ? payload.custo : null
+          await supabase.from('materia_prima_movimentos').insert({
+            empresa_id: empresaId, materia_prima_id: data.id, tipo: 'entrada', quantidade: qtdIni,
+            custo_unit: custoIni, valor_total: custoIni ? custoIni * qtdIni : null,
+            observacao: 'Estoque inicial no cadastro',
+          })
         }
       }
       setShowMateria(false)
@@ -232,7 +325,14 @@ export default function FichaTecnica() {
   }
 
   // ── Estoque da matéria-prima (comprei / usei / acertar) ──
-  function abrirMov(m) { setMovMateria(m); setMovTipo('entrada'); setMovQtd(''); setShowMov(true) }
+  function abrirMov(m) { setMovMateria(m); setMovTipo('entrada'); setMovQtd(''); setMovPago(''); setMovAtualizaCusto(true); setShowMov(true) }
+  // Preço por unidade da compra que está sendo digitada (o que pagou ÷ quantidade).
+  const movUnit = useMemo(() => {
+    const qtd = Number(String(movQtd).replace(',', '.'))
+    const pago = Number(String(movPago).replace(',', '.'))
+    if (!(qtd > 0) || !(pago > 0)) return null
+    return pago / qtd
+  }, [movQtd, movPago])
   async function salvarMov(e) {
     e.preventDefault()
     const m = movMateria
@@ -245,10 +345,19 @@ export default function FichaTecnica() {
     } else if (qtd <= 0) {
       alert('Digite uma quantidade maior que zero.'); return
     }
+    const pago = Number(String(movPago).replace(',', '.'))
+    const temPago = movTipo === 'entrada' && Number.isFinite(pago) && pago > 0
     setSavingMov(true)
     const { error } = await supabase.from('materia_prima_movimentos').insert({
       empresa_id: empresaId, materia_prima_id: m.id, tipo: movTipo, quantidade,
+      custo_unit: temPago ? movUnit : null,
+      valor_total: temPago ? pago : null,
     })
+    // O custo do cadastro é o que a ficha técnica usa pra calcular o prato. Se o
+    // preço mudou na compra, ele tem que acompanhar — mas só se o dono deixar.
+    if (!error && temPago && movAtualizaCusto && movUnit > 0) {
+      await supabase.from('materias_primas').update({ custo: movUnit }).eq('id', m.id)
+    }
     setSavingMov(false)
     if (error) { alert('Erro ao movimentar: ' + error.message); return }
     setShowMov(false); carregar()
@@ -260,13 +369,16 @@ export default function FichaTecnica() {
   )
 
   // ── Carrinho rápido (baixa ou entrada de insumos) ──
-  function abrirCarrinho(tipo) { setCartTipo(tipo); setBaixaBusca(''); setBaixaCart([]); setShowBaixa(true) }
+  function abrirCarrinho(tipo) { setCartTipo(tipo); setBaixaBusca(''); setBaixaCart([]); setCartAtualizaCusto(true); setShowBaixa(true) }
   function addBaixa(m) {
     setBaixaCart(prev => {
       const i = prev.findIndex(x => x.id === m.id)
       if (i >= 0) { const c = prev.slice(); c[i] = { ...c[i], qtd: Math.round((c[i].qtd + 1) * 1000) / 1000 }; return c }
-      return [...prev, { id: m.id, nome: m.nome, unidade: m.unidade, qtd: 1 }]
+      return [...prev, { id: m.id, nome: m.nome, unidade: m.unidade, qtd: 1, pago: '' }]
     })
+  }
+  function setBaixaPago(id, val) {
+    setBaixaCart(prev => prev.map(x => x.id === id ? { ...x, pago: val } : x))
   }
   function mudarBaixaQtd(id, delta) {
     setBaixaCart(prev => prev.flatMap(x => {
@@ -285,13 +397,31 @@ export default function FichaTecnica() {
     const ativas = materias.filter(m => m.ativo)
     return q ? ativas.filter(m => normTxt(m.nome).includes(q)) : ativas
   }, [materias, baixaBusca])
+  // Quanto foi digitado de preço em cada linha do carrinho (só faz sentido na entrada).
+  const cartComPreco = useMemo(() => baixaCart.map(x => {
+    const pago = Number(String(x.pago ?? '').replace(',', '.'))
+    const temPago = cartTipo === 'entrada' && Number.isFinite(pago) && pago > 0 && x.qtd > 0
+    return { ...x, pagoNum: temPago ? pago : null, unit: temPago ? pago / x.qtd : null }
+  }), [baixaCart, cartTipo])
+  const cartTotal = useMemo(
+    () => cartComPreco.reduce((s, x) => s + (x.pagoNum ?? 0), 0),
+    [cartComPreco],
+  )
+
   async function confirmarBaixa() {
-    const linhas = baixaCart.filter(x => x.qtd > 0).map(x => ({
+    const itens = cartComPreco.filter(x => x.qtd > 0)
+    const linhas = itens.map(x => ({
       empresa_id: empresaId, materia_prima_id: x.id, tipo: cartTipo, quantidade: x.qtd,
+      custo_unit: x.unit, valor_total: x.pagoNum,
     }))
     if (!linhas.length) return
     setSalvandoBaixa(true)
     const { error } = await supabase.from('materia_prima_movimentos').insert(linhas)
+    if (!error && cartTipo === 'entrada' && cartAtualizaCusto) {
+      for (const x of itens) {
+        if (x.unit > 0) await supabase.from('materias_primas').update({ custo: x.unit }).eq('id', x.id)
+      }
+    }
     setSalvandoBaixa(false)
     if (error) { alert('Erro ao lançar: ' + error.message); return }
     setShowBaixa(false); carregar()
@@ -528,6 +658,11 @@ export default function FichaTecnica() {
           className={'btn ' + (aba === 'materias' ? 'btn-primary' : 'btn-secondary')}
           onClick={() => setAba('materias')}
         >Matérias-primas</button>
+        <button
+          className={'btn ' + (aba === 'compras' ? 'btn-primary' : 'btn-secondary')}
+          onClick={() => setAba('compras')}
+          title="O histórico do que entrou: dia, item, quantidade e quanto foi pago"
+        >📥 Compras</button>
       </div>
 
       {error && <div className="card error-text" style={{ marginBottom: 16 }}>{error}</div>}
@@ -695,6 +830,90 @@ export default function FichaTecnica() {
         )
       )}
 
+      {/* ─────────────── ABA: COMPRAS (o que entrou) ─────────────── */}
+      {aba === 'compras' && (
+        <>
+          <div className="card" style={{ marginBottom: 12, display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>De</label>
+              <input type="date" value={compraDe} max={compraAte} onChange={e => setCompraDe(e.target.value)}
+                style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Até</label>
+              <input type="date" value={compraAte} min={compraDe} onChange={e => setCompraAte(e.target.value)}
+                style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('hoje')}>Hoje</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('7')}>Últimos 7 dias</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('mes')}>Este mês</button>
+            </div>
+          </div>
+
+          <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', border: '2px solid var(--primary)', background: 'var(--primary-bg, rgba(124,58,237,.08))' }}>
+            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1 }}>
+              🧾 Gasto em compras no período
+            </span>
+            <strong style={{ fontSize: 24, color: 'var(--primary)' }}>{brl(totalPeriodo)}</strong>
+          </div>
+
+          {semValorPeriodo > 0 && (
+            <div className="card" style={{ marginBottom: 12, fontSize: 13, color: 'var(--text-muted)' }}>
+              ⚠️ {semValorPeriodo} entrada{semValorPeriodo === 1 ? '' : 's'} sem valor informado — {semValorPeriodo === 1 ? 'ela não entra' : 'elas não entram'} nesse total.
+              Na hora de dar entrada, preencha "quanto pagou" pro número ficar completo.
+            </div>
+          )}
+
+          {loadingCompras ? (
+            <div className="card">Carregando…</div>
+          ) : comprasPorDia.length === 0 ? (
+            <div className="card empty-state">
+              <strong>Nenhuma entrada nesse período</strong>
+              <p>Aqui aparece tudo que entrou no estoque — insumo e produto de revenda — com a data e o valor pago.</p>
+            </div>
+          ) : comprasPorDia.map(g => (
+            <div className="card" key={g.dia} style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
+                <strong style={{ fontSize: 15 }}>
+                  📅 {g.dia}
+                  <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 13 }}> · {g.itens.length} entrada{g.itens.length === 1 ? '' : 's'}</span>
+                </strong>
+                <strong style={{ fontSize: 16 }}>
+                  {brl(g.total)}
+                  {g.semValor > 0 && <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)' }}> (+{g.semValor} sem valor)</span>}
+                </strong>
+              </div>
+              <div style={{ display: 'grid', gap: 6 }}>
+                {g.itens.map(c => (
+                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 14 }}>
+                    <span style={{ color: 'var(--text-muted)', fontSize: 12.5, width: 44 }}>
+                      {new Date(c.quando).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <span className={'badge ' + (c.origem === 'insumo' ? 'badge-primary' : 'badge-neutral')}>
+                      {c.origem === 'insumo' ? 'Insumo' : 'Produto'}
+                    </span>
+                    <span style={{ flex: '1 1 140px', minWidth: 0, fontWeight: 600 }}>{c.nome}</span>
+                    <span style={{ color: 'var(--text-muted)' }}>{fmtQtd(c.quantidade, c.unidade)}</span>
+                    <span style={{ color: 'var(--text-muted)', fontSize: 12.5 }}>
+                      {c.custo_unit != null ? `${brl(c.custo_unit)}/${c.unidade}` : ''}
+                    </span>
+                    <strong style={{ marginLeft: 'auto' }}>
+                      {c.valor_total != null
+                        ? brl(c.valor_total)
+                        : <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 12.5 }}>sem valor</span>}
+                    </strong>
+                    {c.observacao && (
+                      <span style={{ flexBasis: '100%', fontSize: 12, color: 'var(--text-muted)', paddingLeft: 52 }}>{c.observacao}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
       {/* ─────────────── MODAL: MATÉRIA-PRIMA ─────────────── */}
       {showMateria && (
         <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowMateria(false) }}>
@@ -786,6 +1005,39 @@ export default function FichaTecnica() {
               </span>
             </div>
 
+            {/* Preço pago: fica gravado NESTA compra, então dá pra ver depois
+                quanto se gastou no dia e como o preço do insumo foi mudando. */}
+            {movTipo === 'entrada' && (
+              <div className="form-field full" style={{ marginTop: 10 }}>
+                <label>Quanto pagou no total (R$) — opcional</label>
+                <input inputMode="decimal" placeholder="Ex.: 90,00 (o que veio na nota)" value={movPago}
+                  onChange={e => setMovPago(e.target.value)} />
+                {movUnit != null ? (
+                  <span style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>
+                    Sai a <strong style={{ color: 'var(--text)' }}>{brl(movUnit)}</strong> por {movMateria.unidade}
+                    {Number(movMateria.custo) > 0 && Math.abs(movUnit - Number(movMateria.custo)) > 0.004 && (
+                      <> · antes estava {brl(movMateria.custo)}{' '}
+                        <strong style={{ color: movUnit > Number(movMateria.custo) ? 'var(--danger, #dc2626)' : 'var(--success, #16a34a)' }}>
+                          ({movUnit > Number(movMateria.custo) ? '▲ subiu' : '▼ baixou'})
+                        </strong>
+                      </>
+                    )}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>
+                    Deixe vazio se não souber — a entrada é gravada do mesmo jeito, só sem o valor.
+                  </span>
+                )}
+                {movUnit != null && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 8, fontSize: 13 }}>
+                    <input type="checkbox" style={{ width: 'auto' }} checked={movAtualizaCusto}
+                      onChange={e => setMovAtualizaCusto(e.target.checked)} />
+                    Atualizar o custo do cadastro pra {brl(movUnit)} (a ficha técnica passa a usar esse)
+                  </label>
+                )}
+              </div>
+            )}
+
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShowMov(false)}>Cancelar</button>
               <button type="submit" className="btn btn-primary" disabled={savingMov}>{savingMov ? 'Salvando…' : 'Confirmar'}</button>
@@ -825,17 +1077,43 @@ export default function FichaTecnica() {
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>{cartTipo === 'entrada' ? 'Vai dar entrada' : 'Vai dar baixa'}</div>
                 {baixaCart.length === 0 ? (
                   <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Toque num insumo à esquerda.</div>
-                ) : baixaCart.map(x => (
-                  <div key={x.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
-                    <div style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.nome}</div>
-                    <button type="button" onClick={() => mudarBaixaQtd(x.id, -1)} style={stepBtn}>−</button>
-                    <input inputMode="decimal" value={x.qtd} onChange={e => setBaixaQtd(x.id, e.target.value)}
-                      style={{ width: 50, textAlign: 'center', padding: '5px 4px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 24 }}>{x.unidade}</span>
-                    <button type="button" onClick={() => mudarBaixaQtd(x.id, +1)} style={stepBtn}>+</button>
-                    <button type="button" onClick={() => removerBaixa(x.id)} className="btn btn-danger btn-sm" style={{ padding: '4px 8px' }}>✕</button>
+                ) : cartComPreco.map(x => (
+                  <div key={x.id} style={{ padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.nome}</div>
+                      <button type="button" onClick={() => mudarBaixaQtd(x.id, -1)} style={stepBtn}>−</button>
+                      <input inputMode="decimal" value={x.qtd} onChange={e => setBaixaQtd(x.id, e.target.value)}
+                        style={{ width: 50, textAlign: 'center', padding: '5px 4px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 24 }}>{x.unidade}</span>
+                      <button type="button" onClick={() => mudarBaixaQtd(x.id, +1)} style={stepBtn}>+</button>
+                      <button type="button" onClick={() => removerBaixa(x.id)} className="btn btn-danger btn-sm" style={{ padding: '4px 8px' }}>✕</button>
+                    </div>
+                    {/* Só na entrada: quanto pagou nesse item. Fica opcional. */}
+                    {cartTipo === 'entrada' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, paddingLeft: 2 }}>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>R$ pago</span>
+                        <input inputMode="decimal" placeholder="opcional" value={x.pago ?? ''}
+                          onChange={e => setBaixaPago(x.id, e.target.value)}
+                          style={{ width: 78, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }} />
+                        {x.unit != null && (
+                          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>= {brl(x.unit)}/{x.unidade}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
+                {cartTipo === 'entrada' && cartTotal > 0 && (
+                  <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 800, fontSize: 15 }}>
+                    <span>Total da compra</span><span style={{ color: 'var(--primary)' }}>{brl(cartTotal)}</span>
+                  </div>
+                )}
+                {cartTipo === 'entrada' && cartTotal > 0 && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 8, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                    <input type="checkbox" style={{ width: 'auto' }} checked={cartAtualizaCusto}
+                      onChange={e => setCartAtualizaCusto(e.target.checked)} />
+                    Atualizar o custo dos insumos com o preço que paguei agora
+                  </label>
+                )}
               </div>
             </div>
 

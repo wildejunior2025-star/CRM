@@ -660,6 +660,10 @@ export default function Produtos() {
     const atual = novoEditando ? estoqueSaldo : 0
     const diferenca = contado - atual
     if (diferenca === 0) return null
+    // Estoque inicial do cadastro: o custo digitado ali vale como preço de compra,
+    // pro histórico de compras não nascer sem valor.
+    const custoCad = Number(String(form.preco_custo ?? '').replace(',', '.'))
+    const unit = !novoEditando && Number.isFinite(custoCad) && custoCad > 0 ? custoCad : null
     const { error } = await supabase.from('estoque_movimentos').insert({
       produto_id: produtoId,
       tipo: diferenca > 0 ? 'entrada' : 'saida',
@@ -668,6 +672,8 @@ export default function Produtos() {
       observacao: novoEditando
         ? `Ajuste pelo cadastro do produto: contado ${contado}`
         : `Estoque inicial no cadastro: ${contado}`,
+      custo_unit: unit,
+      valor_total: unit ? unit * Math.abs(diferenca) : null,
     })
     return error?.message ?? null
   }
