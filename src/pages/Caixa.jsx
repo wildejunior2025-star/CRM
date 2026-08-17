@@ -53,13 +53,20 @@ export default function Caixa() {
   // Histórico expandível: mostra o detalhamento por forma de pagamento de um caixa fechado.
   const [histAberto, setHistAberto] = useState(null)      // id do caixa expandido
   const [histResumo, setHistResumo] = useState({})        // { [caixaId]: resumo | 'loading' }
+  // Sangrias/suprimentos de um caixa JÁ FECHADO. O total some no resumo, mas o
+  // motivo de cada saída continua salvo — aqui ele volta pra tela.
+  const [histMovs, setHistMovs] = useState({})            // { [caixaId]: movimentos[] }
   async function toggleHist(c) {
     const abrir = histAberto !== c.id
     setHistAberto(abrir ? c.id : null)
     if (abrir && !histResumo[c.id]) {
       setHistResumo(m => ({ ...m, [c.id]: 'loading' }))
-      const { data } = await supabase.from('caixa_resumo').select('*').eq('caixa_id', c.id).maybeSingle()
-      setHistResumo(m => ({ ...m, [c.id]: data || {} }))
+      const [resumoRes, movsRes] = await Promise.all([
+        supabase.from('caixa_resumo').select('*').eq('caixa_id', c.id).maybeSingle(),
+        supabase.from('caixa_movimentos').select('*').eq('caixa_id', c.id).order('created_at', { ascending: false }),
+      ])
+      setHistMovs(m => ({ ...m, [c.id]: movsRes.data ?? [] }))
+      setHistResumo(m => ({ ...m, [c.id]: resumoRes.data || {} }))
     }
   }
 
@@ -633,6 +640,45 @@ export default function Caixa() {
                                 </span>
                               </div>
                             )}
+
+                            {/* Cada sangria/suprimento com o MOTIVO — é aqui que se
+                                descobre pra onde foi o dinheiro depois do caixa fechado. */}
+                            <div style={{ marginTop: 14 }}>
+                              <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                                Sangrias e suprimentos deste caixa
+                              </div>
+                              {(histMovs[c.id] ?? []).length === 0 ? (
+                                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nenhum movimento registrado.</div>
+                              ) : (
+                                <div style={{ display: 'grid', gap: 8 }}>
+                                  {(histMovs[c.id] ?? []).map((m) => (
+                                    <div key={m.id} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 11px' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                        <span className={`badge ${m.tipo === 'sangria' ? 'badge-danger' : 'badge-success'}`}>
+                                          {m.tipo === 'sangria' ? 'Sangria' : 'Suprimento'}
+                                        </span>
+                                        <strong style={{ fontSize: 15 }}>R$ {Number(m.valor).toFixed(2)}</strong>
+                                        <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                                          {(m.forma ?? 'dinheiro') === 'pix' ? '📱 PIX' : '💵 Dinheiro'}
+                                        </span>
+                                        <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                                          {new Date(m.created_at).toLocaleString('pt-BR')}
+                                        </span>
+                                        {isAdmin && (
+                                          <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                                            por {nomeUsuario(m.created_by)}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div style={{ fontSize: 13.5, marginTop: 4 }}>
+                                        <span style={{ color: 'var(--text-muted)' }}>Motivo: </span>
+                                        {m.observacao ? m.observacao : <span style={{ color: 'var(--text-muted)' }}>não informado</span>}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           </>
                         )}
                       </td>
