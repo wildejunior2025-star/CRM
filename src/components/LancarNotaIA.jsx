@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import BuscaSelect from './BuscaSelect'
 
 // Botão "Lançar nota (IA)": tira foto/PDF da nota de compra, a IA lê e casa cada item
 // com PRODUTO (revenda) ou MATÉRIA-PRIMA (insumo), dando entrada no estoque certo.
@@ -9,15 +10,18 @@ export default function LancarNotaIA({ empresaId, onDone }) {
   const [step, setStep] = useState('upload') // 'upload' | 'lendo' | 'revisar'
   const [produtos, setProdutos] = useState([])
   const [materias, setMaterias] = useState([])
-  const [itens, setItens] = useState([])   // [{ tipo, id, nome, quantidade, custo_unit, incluir }]
-  const [naoEnc, setNaoEnc] = useState([])
+  // Uma lista só. Cada linha da nota aponta pra um DESTINO, que a loja pode
+  // trocar: 'prod:<id>' (produto de revenda), 'mat:<id>' (insumo) ou 'novo'
+  // (cadastra na hora). A IA chuta o destino; quem manda é quem confere.
+  // [{ descricao, destino, nomeNovo, unidadeNovo, quantidade, custo_unit, incluir }]
+  const [itens, setItens] = useState([])
   const [erro, setErro] = useState(null)
   const [aviso, setAviso] = useState(null)
   const [atualizarCusto, setAtualizarCusto] = useState(true)
   const [salvando, setSalvando] = useState(false)
 
   async function abrir() {
-    setStep('upload'); setItens([]); setNaoEnc([]); setErro(null); setAviso(null); setAtualizarCusto(true); setShow(true)
+    setStep('upload'); setItens([]); setErro(null); setAviso(null); setAtualizarCusto(true); setShow(true)
     const [pr, mp] = await Promise.all([
       supabase.from('produtos').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
       supabase.from('materias_primas').select('id, nome, unidade').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
@@ -57,20 +61,30 @@ export default function LancarNotaIA({ empresaId, onDone }) {
       }
       if (!data?.ok) throw new Error(data?.error || 'Não consegui ler a nota.')
       setAviso(data.aviso || null)
-      setItens((data.itens || []).map(it => ({
-        ...it,
-        quantidade: String(it.quantidade),
-        custo_unit: it.custo_unit != null ? String(it.custo_unit).replace('.', ',') : '',
-        incluir: true,
-      })))
-      // Item que não está no cadastro vira uma linha editável pra criar na hora como insumo.
-      setNaoEnc((data.nao_encontrados || []).map(n => ({
-        nome: n.nome || '',
-        unidade: n.unidade || 'un',
-        quantidade: String(n.quantidade ?? ''),
-        custo_unit: n.custo_unit != null ? String(n.custo_unit).replace('.', ',') : '',
-        criar: true,
-      })))
+      const din = (v) => (v != null ? String(v).replace('.', ',') : '')
+      setItens([
+        // O que a IA conseguiu casar com o cadastro.
+        ...(data.itens || []).map(it => ({
+          descricao: it.descricao || it.nome || '',
+          destino: (it.tipo === 'produto' ? 'prod:' : 'mat:') + it.id,
+          nomeNovo: it.descricao || it.nome || '',
+          unidadeNovo: 'un',
+          quantidade: String(it.quantidade),
+          custo_unit: din(it.custo_unit),
+          incluir: true,
+        })),
+        // O que ela não achou já vem no modo "criar na hora" — mas dá pra apontar
+        // pra um item existente, que é o caso do nome abreviado na nota.
+        ...(data.nao_encontrados || []).map(n => ({
+          descricao: n.descricao || n.nome || '',
+          destino: 'novo',
+          nomeNovo: n.nome || '',
+          unidadeNovo: n.unidade || 'un',
+          quantidade: String(n.quantidade ?? ''),
+          custo_unit: din(n.custo_unit),
+          incluir: true,
+        })),
+      ])
       setStep('revisar')
     } catch (e) {
       setErro(e.message || 'Falha ao ler a nota.')
@@ -92,86 +106,87 @@ export default function LancarNotaIA({ empresaId, onDone }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show, step, produtos, materias])
 
-  const uniMateria = (id) => materias.find(m => m.id === id)?.unidade || ''
   const setItem = (idx, patch) => setItens(arr => arr.map((x, i) => i === idx ? { ...x, ...patch } : x))
-  const setNovo = (idx, patch) => setNaoEnc(arr => arr.map((x, i) => i === idx ? { ...x, ...patch } : x))
   const num = (v) => Number(String(v).replace(',', '.'))
+  const normTxt = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
 
-  // Cadastra como matéria-prima os itens que a IA não achou e o lojista marcou.
-  // Devolve as linhas prontas pra entrada de estoque. Se o nome já existir, reusa o
-  // cadastro em vez de criar repetido.
-  async function criarNovosInsumos() {
-    const criar = naoEnc.filter(n => n.criar && n.nome.trim() && num(n.quantidade) > 0)
-    if (!criar.length) return []
-    const norm = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
-    const linhas = []
-    for (const n of criar) {
-      const nome = n.nome.trim()
-      const custo = num(n.custo_unit)
-      const jaTem = materias.find(m => norm(m.nome) === norm(nome))
-      let id = jaTem?.id
-      if (id && atualizarCusto && Number.isFinite(custo) && custo > 0) {
-        await supabase.from('materias_primas').update({ custo }).eq('id', id)
+  // O que dá pra escolher em cada linha: qualquer produto, qualquer insumo, ou
+  // cadastrar um insumo novo com o nome que a loja escrever.
+  const opcoesDestino = useMemo(() => [
+    { key: 'novo', label: '➕ Cadastrar como insumo novo', tag: 'Novo' },
+    ...produtos.map(p => ({ key: 'prod:' + p.id, label: p.nome, tag: 'Produto' })),
+    ...materias.map(m => ({ key: 'mat:' + m.id, label: m.nome, sub: m.unidade, tag: 'Insumo' })),
+  ], [produtos, materias])
+
+  const unidadeDe = (l) => {
+    if (l.destino === 'novo') return l.unidadeNovo
+    if (l.destino?.startsWith('mat:')) return materias.find(m => 'mat:' + m.id === l.destino)?.unidade || ''
+    return 'un'
+  }
+
+  // Cria os insumos marcados como "novo". Se já existir um com o mesmo nome,
+  // reusa em vez de criar repetido — senão o estoque nasce dividido em dois.
+  async function resolverNovos(incluidas) {
+    const mapa = new Map()   // índice da linha -> id do insumo criado/achado
+    for (const { l, i } of incluidas) {
+      if (l.destino !== 'novo') continue
+      const nome = (l.nomeNovo || '').trim()
+      if (!nome) throw new Error('Uma linha ficou sem nome pra cadastrar.')
+      const custo = num(l.custo_unit)
+      const jaTem = materias.find(m => normTxt(m.nome) === normTxt(nome))
+      if (jaTem) {
+        if (atualizarCusto && custo > 0) await supabase.from('materias_primas').update({ custo }).eq('id', jaTem.id)
+        mapa.set(i, jaTem.id)
+        continue
       }
-      if (!id) {
-        const { data, error } = await supabase.from('materias_primas')
-          .insert({ empresa_id: empresaId, nome, unidade: n.unidade, custo: Number.isFinite(custo) && custo > 0 ? custo : 0 })
-          .select('id').single()
-        if (error) throw new Error(`Não deu pra criar "${nome}": ${error.message}`)
-        id = data.id
-      }
-      const qtdNova = num(n.quantidade)
-      const unitNovo = Number.isFinite(custo) && custo > 0 ? custo : null
-      linhas.push({
-        empresa_id: empresaId, materia_prima_id: id, tipo: 'entrada', quantidade: qtdNova,
-        custo_unit: unitNovo, valor_total: unitNovo ? unitNovo * qtdNova : null,
-        observacao: 'Nota de compra (IA)',
-      })
+      const { data, error } = await supabase.from('materias_primas')
+        .insert({ empresa_id: empresaId, nome, unidade: l.unidadeNovo || 'un', custo: custo > 0 ? custo : 0 })
+        .select('id').single()
+      if (error) throw new Error(`Não deu pra criar "${nome}": ${error.message}`)
+      mapa.set(i, data.id)
     }
-    return linhas
+    return mapa
   }
 
   async function confirmar() {
-    const inc = itens.filter(it => it.incluir && num(it.quantidade) > 0)
-    const novos = naoEnc.filter(n => n.criar && n.nome.trim() && num(n.quantidade) > 0)
-    if (!inc.length && !novos.length) { setErro('Marque ao menos um item pra lançar.'); return }
+    const incluidas = itens.map((l, i) => ({ l, i })).filter(({ l }) => l.incluir && num(l.quantidade) > 0)
+    if (!incluidas.length) { setErro('Marque ao menos um item pra lançar.'); return }
+    const semDestino = incluidas.find(({ l }) => !l.destino || (l.destino === 'novo' && !(l.nomeNovo || '').trim()))
+    if (semDestino) { setErro('Tem linha sem destino escolhido. Aponte pra um item ou dê um nome pro novo.'); return }
     setSalvando(true); setErro(null)
     // O preço da nota vai junto NA LINHA da entrada — é o que sustenta o
     // histórico de compras (quanto gastei no dia / o insumo subiu?).
-    const precoDe = (it) => {
-      const c = Number(String(it.custo_unit ?? '').replace(',', '.'))
-      return Number.isFinite(c) && c > 0 ? c : null
-    }
-    const prodLinhas = inc.filter(it => it.tipo === 'produto').map(it => {
-      const qtd = Number(String(it.quantidade).replace(',', '.'))
-      const unit = precoDe(it)
-      return {
-        produto_id: it.id, tipo: 'entrada', quantidade: qtd,
-        motivo: 'compra', observacao: 'Nota de compra (IA)',
-        custo_unit: unit, valor_total: unit ? unit * qtd : null,
-      }
-    })
-    const matLinhas = inc.filter(it => it.tipo === 'materia').map(it => {
-      const qtd = Number(String(it.quantidade).replace(',', '.'))
-      const unit = precoDe(it)
-      return {
-        empresa_id: empresaId, materia_prima_id: it.id, tipo: 'entrada', quantidade: qtd,
-        custo_unit: unit, valor_total: unit ? unit * qtd : null,
-        observacao: 'Nota de compra (IA)',
-      }
-    })
+    const precoDe = (l) => { const c = num(l.custo_unit); return Number.isFinite(c) && c > 0 ? c : null }
     try {
-      const linhasNovas = await criarNovosInsumos()
-      const todasMat = [...matLinhas, ...linhasNovas]
+      const novos = await resolverNovos(incluidas)
+      const prodLinhas = [], matLinhas = []
+      for (const { l, i } of incluidas) {
+        const qtd = num(l.quantidade)
+        const unit = precoDe(l)
+        const valor = unit ? unit * qtd : null
+        if (l.destino.startsWith('prod:')) {
+          prodLinhas.push({
+            produto_id: l.destino.slice(5), tipo: 'entrada', quantidade: qtd,
+            motivo: 'compra', observacao: 'Nota de compra (IA)',
+            custo_unit: unit, valor_total: valor,
+          })
+        } else {
+          const id = l.destino === 'novo' ? novos.get(i) : l.destino.slice(4)
+          matLinhas.push({
+            empresa_id: empresaId, materia_prima_id: id, tipo: 'entrada', quantidade: qtd,
+            custo_unit: unit, valor_total: valor, observacao: 'Nota de compra (IA)',
+          })
+        }
+      }
       if (prodLinhas.length) { const { error } = await supabase.from('estoque_movimentos').insert(prodLinhas); if (error) throw error }
-      if (todasMat.length) { const { error } = await supabase.from('materia_prima_movimentos').insert(todasMat); if (error) throw error }
+      if (matLinhas.length) { const { error } = await supabase.from('materia_prima_movimentos').insert(matLinhas); if (error) throw error }
+      // Atualiza o custo do cadastro de quem JÁ existia (o novo já nasceu com ele).
       if (atualizarCusto) {
-        for (const it of inc) {
-          const custo = Number(String(it.custo_unit).replace(',', '.'))
-          if (Number.isFinite(custo) && custo > 0) {
-            if (it.tipo === 'produto') await supabase.from('produtos').update({ preco_custo: custo }).eq('id', it.id)
-            else await supabase.from('materias_primas').update({ custo }).eq('id', it.id)
-          }
+        for (const { l } of incluidas) {
+          const custo = precoDe(l)
+          if (!custo) continue
+          if (l.destino.startsWith('prod:')) await supabase.from('produtos').update({ preco_custo: custo }).eq('id', l.destino.slice(5))
+          else if (l.destino.startsWith('mat:')) await supabase.from('materias_primas').update({ custo }).eq('id', l.destino.slice(4))
         }
       }
     } catch (e) {
@@ -181,9 +196,10 @@ export default function LancarNotaIA({ empresaId, onDone }) {
     if (onDone) onDone()
   }
 
-  const nProd = itens.filter(it => it.incluir && it.tipo === 'produto').length
-  const nMat = itens.filter(it => it.incluir && it.tipo === 'materia').length
-  const nNovo = naoEnc.filter(n => n.criar && n.nome.trim() && num(n.quantidade) > 0).length
+  const marcadas = itens.filter(l => l.incluir && num(l.quantidade) > 0)
+  const nProd = marcadas.filter(l => l.destino?.startsWith('prod:')).length
+  const nMat = marcadas.filter(l => l.destino?.startsWith('mat:')).length
+  const nNovo = marcadas.filter(l => l.destino === 'novo').length
 
   return (
     <>
@@ -227,7 +243,11 @@ export default function LancarNotaIA({ empresaId, onDone }) {
 
             {step === 'revisar' && (
               <>
-                <p style={{ fontSize: 13.5, color: 'var(--text-muted)' }}>Confira os itens, ajuste quantidade/custo e confirme. Só entra o que estiver marcado.</p>
+                <p style={{ fontSize: 13.5, color: 'var(--text-muted)' }}>
+                  Em cima de cada linha está o que veio <strong>escrito na nota</strong>. Se a IA mandou pro item
+                  errado, troque no campo <strong>"Lançar em"</strong> — dá pra apontar pra qualquer produto ou insumo
+                  que você já tem, ou cadastrar um novo na hora. Só entra o que estiver marcado.
+                </p>
                 {aviso && (
                   <div style={{
                     margin: '8px 0', padding: '8px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600,
@@ -235,72 +255,77 @@ export default function LancarNotaIA({ empresaId, onDone }) {
                   }}>⚠️ {aviso}</div>
                 )}
                 {itens.length === 0 ? (
-                  <div className="empty-state">
-                    Nenhum item da nota bateu com o que você já tem cadastrado.
-                    {naoEnc.length > 0 && ' Dá pra criar tudo abaixo.'}
-                  </div>
+                  <div className="empty-state">Não consegui achar nenhum item nessa nota.</div>
                 ) : (
-                  <div className="data-table" style={{ marginTop: 8 }}>
-                    <table style={{ width: '100%' }}>
-                      <thead><tr>
-                        <th style={{ width: 34 }}></th><th>Item</th><th style={{ width: 96 }}>Tipo</th><th style={{ width: 96 }}>Qtd</th><th style={{ width: 110 }}>Custo un.</th>
-                      </tr></thead>
-                      <tbody>
-                        {itens.map((it, idx) => (
-                          <tr key={idx} style={{ opacity: it.incluir ? 1 : .5 }}>
-                            <td><input type="checkbox" checked={it.incluir} onChange={e => setItem(idx, { incluir: e.target.checked })} /></td>
-                            <td>{it.nome}</td>
-                            <td>
-                              <span className="badge" style={{ background: it.tipo === 'produto' ? 'rgba(37,99,235,.12)' : 'rgba(22,163,74,.12)', color: it.tipo === 'produto' ? '#2563eb' : '#15803d', fontWeight: 700 }}>
-                                {it.tipo === 'produto' ? 'Produto' : 'Insumo'}
-                              </span>
-                            </td>
-                            <td>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <input inputMode="decimal" value={it.quantidade} onChange={e => setItem(idx, { quantidade: e.target.value })} style={{ width: 56 }} />
-                                {it.tipo === 'materia' && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{uniMateria(it.id)}</span>}
-                              </div>
-                            </td>
-                            <td><input inputMode="decimal" placeholder="—" value={it.custo_unit} onChange={e => setItem(idx, { custo_unit: e.target.value })} style={{ width: 96 }} /></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+                    {itens.map((l, idx) => (
+                      <div key={idx} style={{
+                        border: '1px solid var(--border)', borderRadius: 10, padding: '9px 11px',
+                        opacity: l.incluir ? 1 : .5,
+                        background: l.destino === 'novo' ? 'rgba(217,119,6,.07)' : 'transparent',
+                      }}>
+                        {/* O que veio ESCRITO na nota, abreviação e tudo. É por aqui
+                            que a loja confere se a IA casou com o item certo. */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <input type="checkbox" checked={l.incluir} style={{ width: 'auto' }}
+                            onChange={e => setItem(idx, { incluir: e.target.checked })} />
+                          <span style={{ fontSize: 13, fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            📄 {l.descricao || '(sem descrição na nota)'}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                          <div style={{ flex: '2 1 220px', minWidth: 0 }}>
+                            <label style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 3 }}>Lançar em</label>
+                            <BuscaSelect
+                              opcoes={opcoesDestino}
+                              value={l.destino}
+                              onChange={key => setItem(idx, { destino: key || 'novo' })}
+                              placeholder="Digite pra achar o item…"
+                              permitirVazio={false}
+                            />
+                          </div>
+                          <div style={{ flex: '0 1 92px' }}>
+                            <label style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 3 }}>
+                              Qtd {unidadeDe(l) && <span>({unidadeDe(l)})</span>}
+                            </label>
+                            <input inputMode="decimal" value={l.quantidade} style={{ width: '100%' }}
+                              onChange={e => setItem(idx, { quantidade: e.target.value })} />
+                          </div>
+                          <div style={{ flex: '0 1 104px' }}>
+                            <label style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 3 }}>Custo un.</label>
+                            <input inputMode="decimal" placeholder="—" value={l.custo_unit} style={{ width: '100%' }}
+                              onChange={e => setItem(idx, { custo_unit: e.target.value })} />
+                          </div>
+                        </div>
+
+                        {/* Só quando vai cadastrar: o nome que vai ficar no sistema
+                            (a nota abrevia, aqui escreve por extenso) e a unidade. */}
+                        {l.destino === 'novo' && (
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 7 }}>
+                            <div style={{ flex: '2 1 220px', minWidth: 0 }}>
+                              <label style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 3 }}>Nome do insumo novo</label>
+                              <input value={l.nomeNovo} style={{ width: '100%' }}
+                                onChange={e => setItem(idx, { nomeNovo: e.target.value })} />
+                            </div>
+                            <div style={{ flex: '0 1 92px' }}>
+                              <label style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 3 }}>Unidade</label>
+                              <select value={l.unidadeNovo} style={{ width: '100%' }}
+                                onChange={e => setItem(idx, { unidadeNovo: e.target.value })}>
+                                {['kg', 'g', 'L', 'ml', 'un'].map(u => <option key={u} value={u}>{u}</option>)}
+                              </select>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
 
-                {naoEnc.length > 0 && (
-                  <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, background: 'rgba(217,119,6,.1)', border: '1px solid #d97706' }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#b45309', marginBottom: 6 }}>
-                      ⚠️ Não achei no seu cadastro — marque pra criar como insumo já com a entrada:
-                    </div>
-                    <div className="data-table">
-                      <table style={{ width: '100%' }}>
-                        <thead><tr>
-                          <th style={{ width: 34 }}></th><th>Nome (dá pra corrigir)</th><th style={{ width: 70 }}>Un.</th><th style={{ width: 80 }}>Qtd</th><th style={{ width: 104 }}>Custo un.</th>
-                        </tr></thead>
-                        <tbody>
-                          {naoEnc.map((n, i) => (
-                            <tr key={i} style={{ opacity: n.criar ? 1 : .5 }}>
-                              <td><input type="checkbox" checked={!!n.criar} onChange={e => setNovo(i, { criar: e.target.checked })} /></td>
-                              <td><input value={n.nome} onChange={e => setNovo(i, { nome: e.target.value })} style={{ width: '100%' }} /></td>
-                              <td>
-                                <select value={n.unidade} onChange={e => setNovo(i, { unidade: e.target.value })} style={{ width: '100%' }}>
-                                  {['kg', 'g', 'L', 'ml', 'un'].map(u => <option key={u} value={u}>{u}</option>)}
-                                </select>
-                              </td>
-                              <td><input inputMode="decimal" value={n.quantidade} onChange={e => setNovo(i, { quantidade: e.target.value })} style={{ width: '100%' }} /></td>
-                              <td><input inputMode="decimal" placeholder="—" value={n.custo_unit} onChange={e => setNovo(i, { custo_unit: e.target.value })} style={{ width: '100%' }} /></td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>
-                      Entram como <strong>insumo</strong> (matéria-prima). Produto de revenda precisa de preço e categoria — esse tem que ser cadastrado no Catálogo.
-                    </div>
-                  </div>
-                )}
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8 }}>
+                  Item novo entra como <strong>insumo</strong>. Produto de revenda precisa de preço e categoria — esse
+                  tem que ser cadastrado no Catálogo antes.
+                </div>
 
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 13.5, cursor: 'pointer' }}>
                   <input type="checkbox" checked={atualizarCusto} onChange={e => setAtualizarCusto(e.target.checked)} style={{ width: 'auto' }} />
@@ -311,7 +336,7 @@ export default function LancarNotaIA({ empresaId, onDone }) {
 
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShow(false)}>Fechar</button>
-              {step === 'revisar' && (itens.length > 0 || naoEnc.length > 0) && (
+              {step === 'revisar' && itens.length > 0 && (
                 <button type="button" className="btn btn-primary" onClick={confirmar} disabled={salvando}>
                   {salvando ? 'Lançando…' : `Lançar ${nProd + nMat + nNovo} entrada(s)${nNovo ? ` (${nNovo} novo${nNovo > 1 ? 's' : ''})` : ''}`}
                 </button>

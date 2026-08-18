@@ -61,8 +61,8 @@ serve(async (req) => {
       "",
       "Responda SOMENTE com um JSON válido, sem texto antes ou depois:",
       "{",
-      '  "itens": [ { "indice": number, "quantidade": number, "custo_unit": number | null } ],',
-      '  "nao_encontrados": [ { "nome": string, "quantidade": number, "custo_unit": number | null, "unidade": "kg"|"g"|"L"|"ml"|"un" } ]',
+      '  "itens": [ { "indice": number, "descricao": string, "quantidade": number, "custo_unit": number | null } ],',
+      '  "nao_encontrados": [ { "nome": string, "descricao": string, "quantidade": number, "custo_unit": number | null, "unidade": "kg"|"g"|"L"|"ml"|"un" } ]',
       "}",
       "",
       "Regras:",
@@ -81,6 +81,8 @@ serve(async (req) => {
       "  a nota encurtou (ex.: 'COXA S/C FGO' -> 'coxa sobre coxa de frango'). Esse nome vai",
       "  ser cadastrado do jeito que você escrever. E diga a 'unidade' pela nota: kg, g, L, ml ou un.",
       "- Ignore linhas que não são produto (impostos, frete, subtotais, dados do fornecedor).",
+      "- 'descricao' = o texto da linha COMO ESTÁ NA NOTA, abreviação e tudo (ex.: 'B MAIZN ESTRL 307G').",
+      "  É o que a loja vê pra conferir se você casou com o item certo. Vale pra TODO item de 'itens'.",
       "",
       "CATÁLOGO DA LOJA (indice<TAB>[TIPO] nome):",
       catalogoTxt || "(vazio)",
@@ -161,18 +163,19 @@ serve(async (req) => {
       return Math.round(n * 1000) / 1000
     }
 
-    const itens: { tipo: string; id: string; nome: string; quantidade: number; custo_unit: number | null }[] = []
+    const itens: { tipo: string; id: string; nome: string; descricao: string; quantidade: number; custo_unit: number | null }[] = []
     for (const it of (Array.isArray(parsed.itens) ? parsed.itens : [])) {
       const c = cat[Number(it?.indice)]
       if (!c) continue
       const q = qtd(it?.quantidade)
       const custo = it?.custo_unit != null && Number.isFinite(Number(it.custo_unit)) ? Number(it.custo_unit) : null
-      itens.push({ tipo: c.tipo, id: c.id, nome: c.nome, quantidade: q, custo_unit: custo })
+      itens.push({ tipo: c.tipo, id: c.id, nome: c.nome, descricao: String(it?.descricao ?? "").slice(0, 120), quantidade: q, custo_unit: custo })
     }
 
     const nao_encontrados = (Array.isArray(parsed.nao_encontrados) ? parsed.nao_encontrados : [])
       .map((n: any) => ({
         nome: String(n?.nome ?? "").slice(0, 120),
+        descricao: String(n?.descricao ?? "").slice(0, 120),
         quantidade: qtd(n?.quantidade),
         custo_unit: n?.custo_unit != null && Number.isFinite(Number(n.custo_unit)) ? Number(n.custo_unit) : null,
         unidade: ["kg", "g", "L", "ml", "un"].includes(String(n?.unidade)) ? String(n.unidade) : "un",
