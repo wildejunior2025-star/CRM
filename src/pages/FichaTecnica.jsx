@@ -21,6 +21,32 @@ const emBase = (qtd, unidade) => Number(qtd || 0) * (FATOR[unidade] || 1)
 const custoBase = (mp) => Number(mp?.custo || 0) / (FATOR[mp?.unidade] || 1)
 
 const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+// ── Trio da compra: quantidade × preço por unidade = total pago ──
+// Os campos guardam TEXTO, não número. Guardar número quebrava a digitação de
+// "5,66": ao teclar a vírgula o valor virava 5 e a vírgula sumia.
+const numOuNulo = (s) => {
+  const v = Number(String(s ?? '').replace(',', '.'))
+  return Number.isFinite(v) && v > 0 ? v : null
+}
+const txtNum = (v, casas) => String(Math.round(v * 10 ** casas) / 10 ** casas).replace('.', ',')
+// Sabendo dois dos três, o terceiro sai sozinho. Recalcula sempre o campo que
+// foi mexido HÁ MAIS TEMPO — assim o número que a pessoa acabou de digitar
+// nunca é reescrito na cara dela. Digitou "paguei 17" com o preço do quilo
+// cadastrado? Ele responde quantos quilos vieram.
+const ORDEM_PADRAO = ['unit', 'qtd', 'total']
+function recalcTrio(linha, campoEditado) {
+  const ordem = [campoEditado, ...(linha.ordem || ORDEM_PADRAO).filter(c => c !== campoEditado)]
+  const alvo = ordem[2]
+  const q = numOuNulo(linha.qtdTxt)
+  const u = numOuNulo(linha.unitTxt)
+  const t = numOuNulo(linha.totalTxt)
+  const out = { ...linha, ordem }
+  if (alvo === 'total' && q && u) out.totalTxt = txtNum(q * u, 2)
+  if (alvo === 'unit' && q && t) out.unitTxt = txtNum(t / q, 2)
+  if (alvo === 'qtd' && u && t) out.qtdTxt = txtNum(t / u, 3)
+  return out
+}
 // Valores muito pequenos (custo por grama) — mostra mais casas pra não virar R$0,00.
 const brl4 = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
 // Mostra a quantidade de um jeito amigável: 2000 g vira "2 kg", 1500 ml vira "1,5 L".
@@ -71,7 +97,7 @@ function fichaUsa(id, alvo, itensPorFicha, vistos = new Set()) {
   return (itensPorFicha[id] || []).some(it => it.ficha_ref_id && fichaUsa(it.ficha_ref_id, alvo, itensPorFicha, vistos))
 }
 
-const emptyMateria = { nome: '', unidade: 'kg', custo: '', ativo: true, quantidade: '' }
+const emptyMateria = { nome: '', unidade: 'kg', custo: '', ativo: true, quantidade: '', pago: '' }
 const linhaVazia = () => ({ materia_prima_id: '', ficha_ref_id: '', nome: '', quantidade: '', unidade: 'g', custo_unit: 0 })
 const emptyFicha = {
   nome: '', produto_id: '', complemento_opcao_id: '', rendimento: '', unid_rendimento: 'g',
@@ -113,10 +139,10 @@ export default function FichaTecnica() {
   const [showMov, setShowMov] = useState(false)
   const [movMateria, setMovMateria] = useState(null)
   const [movTipo, setMovTipo] = useState('entrada') // 'entrada' | 'saida' | 'ajuste'
-  const [movQtd, setMovQtd] = useState('')
-  // Quanto pagou nessa compra. Fica na linha do movimento, que ninguém reescreve
-  // depois — é isso que dá o histórico "no dia 17/08 gastei tanto".
-  const [movPago, setMovPago] = useState('')
+  // Quantidade, preço por unidade e total pago da compra. Preencheu dois, o
+  // terceiro sai sozinho. O valor fica na linha do movimento, que ninguém
+  // reescreve depois — é isso que dá o histórico "no dia 17/08 gastei tanto".
+  const [movTrio, setMovTrio] = useState({ qtdTxt: '', unitTxt: '', totalTxt: '', ordem: ORDEM_PADRAO })
   const [movAtualizaCusto, setMovAtualizaCusto] = useState(true)
   const [savingMov, setSavingMov] = useState(false)
   const saldoDe = (id) => Number(saldoMat[id] ?? 0)
@@ -284,6 +310,14 @@ export default function FichaTecnica() {
     return materias.find(m => normTxt(m.nome) === q && m.id !== materiaEdit?.id) || null
   }, [materiaForm.nome, materias, materiaEdit])
 
+  // Preço por unidade da compra que está sendo cadastrada (pagou ÷ quantidade).
+  const materiaUnit = useMemo(() => {
+    const qtd = Number(String(materiaForm.quantidade ?? '').replace(',', '.'))
+    const pago = Number(String(materiaForm.pago ?? '').replace(',', '.'))
+    if (!(qtd > 0) || !(pago > 0)) return null
+    return pago / qtd
+  }, [materiaForm.quantidade, materiaForm.pago])
+
   // Busca da lista: sem acento e sem maiúscula, então "feijao" acha "Feijão".
   const materiasFiltradas = useMemo(() => {
     const q = normTxt(buscaMateria)
@@ -307,11 +341,14 @@ export default function FichaTecnica() {
     if (salvandoMateria) return   // trava o clique repetido no Salvar (era o que criava cópias)
     if (!materiaForm.nome.trim()) return
     if (materiaRepetida && !confirm(`Já existe "${materiaRepetida.nome}" na sua lista.\n\nCadastrar mesmo assim (vai ficar repetido)?`)) return
+    // Se ele disse quanto pagou pela quantidade que está entrando, esse é o custo
+    // por unidade — não precisa digitar o preço duas vezes.
+    const custoDigitado = Number(String(materiaForm.custo).replace(',', '.')) || 0
     const payload = {
       empresa_id: empresaId,
       nome: materiaForm.nome.trim(),
       unidade: materiaForm.unidade,
-      custo: Number(String(materiaForm.custo).replace(',', '.')) || 0,
+      custo: custoDigitado > 0 ? custoDigitado : (materiaUnit ?? 0),
       ativo: !!materiaForm.ativo,
     }
     setSalvandoMateria(true)
@@ -322,15 +359,15 @@ export default function FichaTecnica() {
       } else {
         const { data, error } = await supabase.from('materias_primas').insert(payload).select('id').single()
         if (error) { alert('Erro ao salvar: ' + error.message); return }
-        // Quantidade inicial informada no cadastro → já lança uma entrada de estoque.
+        // Cadastrou já com a quantidade → a compra de hoje entra junto, no mesmo
+        // clique. É o que evita cadastrar agora e ter que dar entrada depois.
         const qtdIni = Number(String(materiaForm.quantidade ?? '').replace(',', '.'))
         if (data?.id && Number.isFinite(qtdIni) && qtdIni > 0) {
-          // O custo informado no cadastro vale como preço dessa primeira entrada.
-          const custoIni = payload.custo > 0 ? payload.custo : null
+          const unit = materiaUnit ?? (payload.custo > 0 ? payload.custo : null)
           await supabase.from('materia_prima_movimentos').insert({
             empresa_id: empresaId, materia_prima_id: data.id, tipo: 'entrada', quantidade: qtdIni,
-            custo_unit: custoIni, valor_total: custoIni ? custoIni * qtdIni : null,
-            observacao: 'Estoque inicial no cadastro',
+            custo_unit: unit, valor_total: unit ? unit * qtdIni : null,
+            observacao: 'Compra lançada no cadastro do insumo',
           })
         }
       }
@@ -348,18 +385,23 @@ export default function FichaTecnica() {
   }
 
   // ── Estoque da matéria-prima (comprei / usei / acertar) ──
-  function abrirMov(m) { setMovMateria(m); setMovTipo('entrada'); setMovQtd(''); setMovPago(''); setMovAtualizaCusto(true); setShowMov(true) }
-  // Preço por unidade da compra que está sendo digitada (o que pagou ÷ quantidade).
-  const movUnit = useMemo(() => {
-    const qtd = Number(String(movQtd).replace(',', '.'))
-    const pago = Number(String(movPago).replace(',', '.'))
-    if (!(qtd > 0) || !(pago > 0)) return null
-    return pago / qtd
-  }, [movQtd, movPago])
+  function abrirMov(m) {
+    setMovMateria(m)
+    setMovTipo('entrada')
+    const custo = Number(m.custo || 0)
+    setMovTrio({ qtdTxt: '', unitTxt: custo > 0 ? txtNum(custo, 2) : '', totalTxt: '', ordem: ORDEM_PADRAO })
+    setMovAtualizaCusto(true)
+    setShowMov(true)
+  }
+  function setMovCampo(campo, val) {
+    const chave = campo === 'qtd' ? 'qtdTxt' : campo === 'unit' ? 'unitTxt' : 'totalTxt'
+    setMovTrio(t => recalcTrio({ ...t, [chave]: val }, campo))
+  }
+  const movUnit = numOuNulo(movTrio.unitTxt)
   async function salvarMov(e) {
     e.preventDefault()
     const m = movMateria
-    const qtd = Number(String(movQtd).replace(',', '.'))
+    const qtd = Number(String(movTrio.qtdTxt).replace(',', '.'))
     if (!Number.isFinite(qtd) || qtd < 0) { alert('Digite uma quantidade válida.'); return }
     let quantidade = qtd
     if (movTipo === 'ajuste') {
@@ -368,8 +410,9 @@ export default function FichaTecnica() {
     } else if (qtd <= 0) {
       alert('Digite uma quantidade maior que zero.'); return
     }
-    const pago = Number(String(movPago).replace(',', '.'))
-    const temPago = movTipo === 'entrada' && Number.isFinite(pago) && pago > 0
+    const pagoBruto = numOuNulo(movTrio.totalTxt) ?? (movUnit && qtd > 0 ? movUnit * qtd : null)
+    const pago = pagoBruto ?? 0
+    const temPago = movTipo === 'entrada' && pago > 0
     setSavingMov(true)
     const { error } = await supabase.from('materia_prima_movimentos').insert({
       empresa_id: empresaId, materia_prima_id: m.id, tipo: movTipo, quantidade,
@@ -396,35 +439,64 @@ export default function FichaTecnica() {
   function addBaixa(m) {
     setBaixaCart(prev => {
       const i = prev.findIndex(x => x.id === m.id)
-      if (i >= 0) { const c = prev.slice(); c[i] = { ...c[i], qtd: Math.round((c[i].qtd + 1) * 1000) / 1000 }; return c }
-      return [...prev, { id: m.id, nome: m.nome, unidade: m.unidade, qtd: 1, pago: '' }]
+      if (i >= 0) {
+        const c = prev.slice()
+        c[i] = recalcTrio({ ...c[i], qtdTxt: txtNum((numOuNulo(c[i].qtdTxt) ?? 0) + 1, 3) }, 'qtd')
+        return c
+      }
+      // Preço do cadastro já entra preenchido: com ele, digitar só o total pago
+      // resolve a quantidade sozinha. O total nasce VAZIO de propósito — se
+      // viesse preenchido, ele contaria como "campo recente" e o primeiro valor
+      // digitado recalcularia a coisa errada.
+      const custo = Number(m.custo || 0)
+      const unitTxt = custo > 0 ? txtNum(custo, 2) : ''
+      return [...prev, { id: m.id, nome: m.nome, unidade: m.unidade, qtdTxt: '1', unitTxt, totalTxt: '', ordem: ORDEM_PADRAO }]
     })
   }
-  function setBaixaPago(id, val) {
-    setBaixaCart(prev => prev.map(x => x.id === id ? { ...x, pago: val } : x))
+  // Um único caminho pros três campos: escreve o texto e deixa o trio se ajustar.
+  function setBaixaCampo(id, campo, val) {
+    const chave = campo === 'qtd' ? 'qtdTxt' : campo === 'unit' ? 'unitTxt' : 'totalTxt'
+    setBaixaCart(prev => prev.map(x => x.id === id ? recalcTrio({ ...x, [chave]: val }, campo) : x))
   }
   function mudarBaixaQtd(id, delta) {
     setBaixaCart(prev => prev.flatMap(x => {
       if (x.id !== id) return [x]
-      const q = Math.round((x.qtd + delta) * 1000) / 1000
-      return q <= 0 ? [] : [{ ...x, qtd: q }]
+      const q = Math.round(((numOuNulo(x.qtdTxt) ?? 0) + delta) * 1000) / 1000
+      return q <= 0 ? [] : [recalcTrio({ ...x, qtdTxt: txtNum(q, 3) }, 'qtd')]
     }))
   }
-  function setBaixaQtd(id, val) {
-    const q = Number(String(val).replace(',', '.'))
-    setBaixaCart(prev => prev.map(x => x.id === id ? { ...x, qtd: Number.isFinite(q) ? q : x.qtd } : x))
-  }
   function removerBaixa(id) { setBaixaCart(prev => prev.filter(x => x.id !== id)) }
+
+  // Cadastrar um insumo novo SEM sair do carrinho. Chegou da feira com uma coisa
+  // que não estava na lista? Cadastra e já cai no carrinho, no mesmo lugar.
+  const [novoUnid, setNovoUnid] = useState('kg')
+  const [criandoNoCarrinho, setCriandoNoCarrinho] = useState(false)
+  async function cadastrarNoCarrinho() {
+    const nome = baixaBusca.trim()
+    if (!nome) return
+    const ja = materias.find(m => normTxt(m.nome) === normTxt(nome))
+    if (ja) { addBaixa(ja); setBaixaBusca(''); return }   // já existia: só joga no carrinho
+    setCriandoNoCarrinho(true)
+    const { data, error } = await supabase.from('materias_primas')
+      .insert({ empresa_id: empresaId, nome, unidade: novoUnid, custo: 0, ativo: true })
+      .select('*').single()
+    setCriandoNoCarrinho(false)
+    if (error) { alert('Não deu pra cadastrar: ' + error.message); return }
+    setMaterias(prev => [...prev, data].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')))
+    addBaixa(data)
+    setBaixaBusca('')
+  }
   const baixaFiltradas = useMemo(() => {
     const q = normTxt(baixaBusca)
     const ativas = materias.filter(m => m.ativo)
     return q ? ativas.filter(m => normTxt(m.nome).includes(q)) : ativas
   }, [materias, baixaBusca])
-  // Quanto foi digitado de preço em cada linha do carrinho (só faz sentido na entrada).
+  // Números de verdade a partir do texto de cada linha (o preço só vale na entrada).
   const cartComPreco = useMemo(() => baixaCart.map(x => {
-    const pago = Number(String(x.pago ?? '').replace(',', '.'))
-    const temPago = cartTipo === 'entrada' && Number.isFinite(pago) && pago > 0 && x.qtd > 0
-    return { ...x, pagoNum: temPago ? pago : null, unit: temPago ? pago / x.qtd : null }
+    const qtd = numOuNulo(x.qtdTxt)
+    const unit = cartTipo === 'entrada' ? numOuNulo(x.unitTxt) : null
+    const total = cartTipo === 'entrada' ? numOuNulo(x.totalTxt) : null
+    return { ...x, qtd: qtd ?? 0, unit, pagoNum: total ?? (qtd && unit ? qtd * unit : null) }
   }), [baixaCart, cartTipo])
   const cartTotal = useMemo(
     () => cartComPreco.reduce((s, x) => s + (x.pagoNum ?? 0), 0),
@@ -984,15 +1056,41 @@ export default function FichaTecnica() {
               </div>
               <div className="form-field">
                 <label>Custo por {materiaForm.unidade} (R$)</label>
-                <input inputMode="decimal" placeholder="Ex.: 5,00" value={materiaForm.custo}
+                <input inputMode="decimal" placeholder={materiaUnit != null ? brl(materiaUnit) : 'Ex.: 5,00'} value={materiaForm.custo}
                   onChange={e => setMateriaForm(f => ({ ...f, custo: e.target.value }))} />
+                {materiaUnit != null && !materiaForm.custo && (
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Vai entrar com {brl(materiaUnit)}, tirado da compra abaixo.</span>
+                )}
               </div>
+              {/* Cadastrar e dar entrada no mesmo clique: quem acabou de chegar da
+                  feira com um item novo não quer fazer as duas coisas separadas. */}
               {!materiaEdit && (
                 <div className="form-field full">
-                  <label>Quantidade em estoque agora ({materiaForm.unidade}) — opcional</label>
-                  <input inputMode="decimal" placeholder={`Ex.: 10 (em ${materiaForm.unidade})`} value={materiaForm.quantidade}
-                    onChange={e => setMateriaForm(f => ({ ...f, quantidade: e.target.value }))} />
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Já entra com esse estoque (você não precisa ir em Movimentar depois).</span>
+                  <div style={{ border: '1.5px dashed var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+                    <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 2 }}>🛒 Já comprei — lançar a entrada de hoje</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+                      Preencha e o insumo já nasce com esse estoque e essa compra no dia de hoje. Deixe vazio se é só cadastro.
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <div style={{ flex: '1 1 130px' }}>
+                        <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Quantidade ({materiaForm.unidade})</label>
+                        <input inputMode="decimal" placeholder={`Ex.: 10`} value={materiaForm.quantidade}
+                          onChange={e => setMateriaForm(f => ({ ...f, quantidade: e.target.value }))}
+                          style={{ width: '100%' }} />
+                      </div>
+                      <div style={{ flex: '1 1 130px' }}>
+                        <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Quanto pagou (R$)</label>
+                        <input inputMode="decimal" placeholder="Ex.: 50,00" value={materiaForm.pago}
+                          onChange={e => setMateriaForm(f => ({ ...f, pago: e.target.value }))}
+                          style={{ width: '100%' }} />
+                      </div>
+                    </div>
+                    {materiaUnit != null && (
+                      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8 }}>
+                        Sai a <strong style={{ color: 'var(--text)' }}>{brl(materiaUnit)}</strong> por {materiaForm.unidade} — vira o custo do cadastro e aparece na aba Compras de hoje.
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
               <div className="form-field full">
@@ -1033,8 +1131,8 @@ export default function FichaTecnica() {
 
             <div className="form-field full">
               <label>{movTipo === 'ajuste' ? `Quantidade contada agora (${movMateria.unidade})` : `Quantidade (${movMateria.unidade})`}</label>
-              <input autoFocus inputMode="decimal" placeholder={`Ex.: 5 (em ${movMateria.unidade})`} value={movQtd}
-                onChange={e => setMovQtd(e.target.value)} />
+              <input autoFocus inputMode="decimal" placeholder={`Ex.: 5,66 (em ${movMateria.unidade})`} value={movTrio.qtdTxt}
+                onChange={e => setMovCampo('qtd', e.target.value)} />
               <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>
                 {movTipo === 'entrada' && 'Entra no estoque (compra de insumo).'}
                 {movTipo === 'saida' && 'Sai do estoque (usou na produção / perdeu).'}
@@ -1043,12 +1141,23 @@ export default function FichaTecnica() {
             </div>
 
             {/* Preço pago: fica gravado NESTA compra, então dá pra ver depois
-                quanto se gastou no dia e como o preço do insumo foi mudando. */}
+                quanto se gastou no dia e como o preço do insumo foi mudando.
+                Dois campos preenchidos resolvem o terceiro — inclusive a
+                quantidade, pra quem só sabe o total que pagou. */}
             {movTipo === 'entrada' && (
               <div className="form-field full" style={{ marginTop: 10 }}>
-                <label>Quanto pagou no total (R$) — opcional</label>
-                <input inputMode="decimal" placeholder="Ex.: 90,00 (o que veio na nota)" value={movPago}
-                  onChange={e => setMovPago(e.target.value)} />
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ flex: '1 1 130px' }}>
+                    <label>Preço por {movMateria.unidade} (R$)</label>
+                    <input inputMode="decimal" placeholder="Ex.: 2,99" value={movTrio.unitTxt}
+                      onChange={e => setMovCampo('unit', e.target.value)} style={{ width: '100%' }} />
+                  </div>
+                  <div style={{ flex: '1 1 130px' }}>
+                    <label>Paguei no total (R$)</label>
+                    <input inputMode="decimal" placeholder="Ex.: 17,00" value={movTrio.totalTxt}
+                      onChange={e => setMovCampo('total', e.target.value)} style={{ width: '100%' }} />
+                  </div>
+                </div>
                 {movUnit != null ? (
                   <span style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>
                     Sai a <strong style={{ color: 'var(--text)' }}>{brl(movUnit)}</strong> por {movMateria.unidade}
@@ -1062,7 +1171,8 @@ export default function FichaTecnica() {
                   </span>
                 ) : (
                   <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>
-                    Deixe vazio se não souber — a entrada é gravada do mesmo jeito, só sem o valor.
+                    Preencha dois dos três (quantidade, preço, total) que o outro sai sozinho.
+                    Deixe tudo vazio se não souber — a entrada é gravada do mesmo jeito, só sem o valor.
                   </span>
                 )}
                 {movUnit != null && (
@@ -1098,7 +1208,25 @@ export default function FichaTecnica() {
             <div style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0, flexWrap: 'wrap' }}>
               {/* Lista de insumos (toca pra adicionar) */}
               <div style={{ flex: '1 1 240px', minWidth: 0, maxHeight: 340, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
-                {baixaFiltradas.length === 0 ? (
+                {/* Chegou uma coisa que não está cadastrada: cadastra e joga no
+                    carrinho aqui mesmo, sem fechar a tela e começar de novo. */}
+                {cartTipo === 'entrada' && baixaBusca.trim() && !materias.some(m => normTxt(m.nome) === normTxt(baixaBusca)) && (
+                  <div style={{ padding: 10, borderBottom: '1px solid var(--border)', background: 'var(--surface-hover, rgba(124,58,237,.06))' }}>
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 6 }}>Não achou? Cadastre agora:</div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <strong style={{ fontSize: 13.5 }}>{baixaBusca.trim()}</strong>
+                      <select value={novoUnid} onChange={e => setNovoUnid(e.target.value)}
+                        style={{ padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }}>
+                        {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                      <button type="button" className="btn btn-primary btn-sm" disabled={criandoNoCarrinho}
+                        onClick={cadastrarNoCarrinho}>
+                        {criandoNoCarrinho ? 'Criando…' : '+ Cadastrar e adicionar'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {baixaFiltradas.length === 0 && !baixaBusca.trim() ? (
                   <div style={{ padding: 12, color: 'var(--text-muted)', fontSize: 13 }}>Nenhum insumo. Cadastre em "+ Nova matéria-prima".</div>
                 ) : baixaFiltradas.map(m => (
                   <button key={m.id} type="button" onClick={() => addBaixa(m)}
@@ -1119,22 +1247,24 @@ export default function FichaTecnica() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <div style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.nome}</div>
                       <button type="button" onClick={() => mudarBaixaQtd(x.id, -1)} style={stepBtn}>−</button>
-                      <input inputMode="decimal" value={x.qtd} onChange={e => setBaixaQtd(x.id, e.target.value)}
-                        style={{ width: 50, textAlign: 'center', padding: '5px 4px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
+                      <input inputMode="decimal" value={x.qtdTxt} onChange={e => setBaixaCampo(x.id, 'qtd', e.target.value)}
+                        style={{ width: 60, textAlign: 'center', padding: '5px 4px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
                       <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 24 }}>{x.unidade}</span>
                       <button type="button" onClick={() => mudarBaixaQtd(x.id, +1)} style={stepBtn}>+</button>
                       <button type="button" onClick={() => removerBaixa(x.id)} className="btn btn-danger btn-sm" style={{ padding: '4px 8px' }}>✕</button>
                     </div>
-                    {/* Só na entrada: quanto pagou nesse item. Fica opcional. */}
+                    {/* Só na entrada: preço por unidade e total pago. Preencheu dois,
+                        o terceiro sai sozinho — inclusive a quantidade. */}
                     {cartTipo === 'entrada' && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, paddingLeft: 2 }}>
-                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>R$ pago</span>
-                        <input inputMode="decimal" placeholder="opcional" value={x.pago ?? ''}
-                          onChange={e => setBaixaPago(x.id, e.target.value)}
-                          style={{ width: 78, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }} />
-                        {x.unit != null && (
-                          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>= {brl(x.unit)}/{x.unidade}</span>
-                        )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, paddingLeft: 2, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>R$/{x.unidade}</span>
+                        <input inputMode="decimal" placeholder="preço" value={x.unitTxt ?? ''}
+                          onChange={e => setBaixaCampo(x.id, 'unit', e.target.value)}
+                          style={{ width: 66, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }} />
+                        <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>paguei R$</span>
+                        <input inputMode="decimal" placeholder="total" value={x.totalTxt ?? ''}
+                          onChange={e => setBaixaCampo(x.id, 'total', e.target.value)}
+                          style={{ width: 72, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }} />
                       </div>
                     )}
                   </div>
