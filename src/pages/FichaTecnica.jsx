@@ -246,6 +246,26 @@ export default function FichaTecnica() {
   )
   const semValorPeriodo = useMemo(() => compras.filter(c => c.valor_total == null).length, [compras])
 
+  // Apagar uma entrada lançada errado. O saldo é a soma dos movimentos, então
+  // tirar a linha já devolve o estoque pro que era antes — não precisa de acerto.
+  const [apagando, setApagando] = useState(null)
+  async function apagarEntrada(c) {
+    const quanto = c.valor_total != null ? ` (${brl(c.valor_total)})` : ''
+    if (!confirm(
+      `Apagar esta entrada?\n\n${c.nome} · ${fmtQtd(c.quantidade, c.unidade)}${quanto}\n` +
+      `Lançada em ${new Date(c.quando).toLocaleString('pt-BR')}.\n\n` +
+      `O estoque volta ao que era antes desse lançamento.`
+    )) return
+    const [tipo, id] = c.id.split(':')
+    setApagando(c.id)
+    const tabela = tipo === 'mp' ? 'materia_prima_movimentos' : 'estoque_movimentos'
+    const { error } = await supabase.from(tabela).delete().eq('id', id)
+    setApagando(null)
+    if (error) { alert('Não deu pra apagar: ' + error.message); return }
+    carregarCompras()
+    carregar()   // o saldo da lista de insumos muda junto
+  }
+
   // Atalhos de período (o dono não quer digitar data).
   function periodoRapido(qual) {
     const d = new Date()
@@ -914,6 +934,11 @@ export default function FichaTecnica() {
                         ? brl(c.valor_total)
                         : <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 12.5 }}>sem valor</span>}
                     </strong>
+                    <button type="button" onClick={() => apagarEntrada(c)} disabled={apagando === c.id}
+                      title="Apagar esta entrada (lancei errado)"
+                      style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 15, padding: '2px 4px', lineHeight: 1 }}>
+                      {apagando === c.id ? '…' : '🗑'}
+                    </button>
                     {c.observacao && (
                       <span style={{ flexBasis: '100%', fontSize: 12, color: 'var(--text-muted)', paddingLeft: 52 }}>{c.observacao}</span>
                     )}
