@@ -136,6 +136,7 @@ export default function FichaTecnica() {
 
   // Estoque das matérias-primas
   const [saldoMat, setSaldoMat] = useState({})   // materia_prima_id -> quantidade_atual
+  const [saldoProd, setSaldoProd] = useState({}) // produto_id -> quantidade_atual
   const [showMov, setShowMov] = useState(false)
   const [movMateria, setMovMateria] = useState(null)
   const [movTipo, setMovTipo] = useState('entrada') // 'entrada' | 'saida' | 'ajuste'
@@ -180,13 +181,15 @@ export default function FichaTecnica() {
     setLoading(true)
     setError(null)
     try {
-      const [mp, fi, it, pr, cp, sm] = await Promise.all([
+      const [mp, fi, it, pr, cp, sm, sp] = await Promise.all([
         supabase.from('materias_primas').select('*').eq('empresa_id', empresaId).order('nome'),
         supabase.from('fichas_tecnicas').select('*, produtos(id, nome, preco_venda), complemento_opcoes(id, nome, preco_adicional)').eq('empresa_id', empresaId).order('nome'),
         supabase.from('ficha_itens').select('*').eq('empresa_id', empresaId),
-        supabase.from('produtos').select('id, nome, preco_venda').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
+        supabase.from('produtos').select('id, nome, preco_venda, preco_custo, controla_estoque').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
         supabase.from('complemento_opcoes').select('id, nome, preco_adicional, complemento_grupos!inner(nome, empresa_id)').eq('complemento_grupos.empresa_id', empresaId).order('nome'),
         supabase.from('materia_prima_saldo').select('materia_prima_id, quantidade_atual'),
+        // Saldo dos produtos de revenda: o carrinho de entrada aceita os dois.
+        supabase.from('estoque_saldo').select('produto_id, quantidade_atual'),
       ])
       if (mp.error) throw mp.error
       if (fi.error) throw fi.error
@@ -198,6 +201,7 @@ export default function FichaTecnica() {
       setProdutos(pr.data || [])
       setComplementos((cp.data || []).map(c => ({ id: c.id, nome: c.nome, preco: Number(c.preco_adicional || 0), grupo: c.complemento_grupos?.nome || '' })))
       setSaldoMat(Object.fromEntries((sm.data || []).map(r => [r.materia_prima_id, Number(r.quantidade_atual || 0)])))
+      setSaldoProd(Object.fromEntries((sp.data || []).map(r => [r.produto_id, Number(r.quantidade_atual || 0)])))
       const grupos = {}
       for (const linha of (it.data || [])) {
         (grupos[linha.ficha_id] = grupos[linha.ficha_id] || []).push(linha)
@@ -436,9 +440,26 @@ export default function FichaTecnica() {
 
   // ── Carrinho rápido (baixa ou entrada de insumos) ──
   function abrirCarrinho(tipo) { setCartTipo(tipo); setBaixaBusca(''); setBaixaCart([]); setCartAtualizaCusto(true); setShowBaixa(true) }
+  // A lista do carrinho de ENTRADA mistura insumo e produto de revenda: quem
+  // chega da compra tem tudo no mesmo saco. Cada opção carrega de onde veio, e na
+  // hora de salvar cada uma vai pro estoque certo. Na BAIXA só entra insumo — dar
+  // baixa de produto é venda/quebra, isso é da tela de Estoque.
+  const opcoesCarrinho = useMemo(() => {
+    const ins = materias.filter(m => m.ativo).map(m => ({
+      key: 'mat:' + m.id, id: m.id, origem: 'mat', nome: m.nome,
+      unidade: m.unidade, custo: Number(m.custo || 0), saldo: Number(saldoMat[m.id] ?? 0),
+    }))
+    if (cartTipo !== 'entrada') return ins
+    const prods = produtos.filter(p => p.controla_estoque !== false).map(p => ({
+      key: 'prod:' + p.id, id: p.id, origem: 'prod', nome: p.nome,
+      unidade: 'un', custo: Number(p.preco_custo || 0), saldo: Number(saldoProd[p.id] ?? 0),
+    }))
+    return [...ins, ...prods].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+  }, [materias, produtos, saldoMat, saldoProd, cartTipo])
+
   function addBaixa(m) {
     setBaixaCart(prev => {
-      const i = prev.findIndex(x => x.id === m.id)
+      const i = prev.findIndex(x => x.key === m.key)
       if (i >= 0) {
         const c = prev.slice()
         c[i] = recalcTrio({ ...c[i], qtdTxt: txtNum((numOuNulo(c[i].qtdTxt) ?? 0) + 1, 3) }, 'qtd')
@@ -448,33 +469,36 @@ export default function FichaTecnica() {
       // resolve a quantidade sozinha. O total nasce VAZIO de propósito — se
       // viesse preenchido, ele contaria como "campo recente" e o primeiro valor
       // digitado recalcularia a coisa errada.
-      const custo = Number(m.custo || 0)
-      const unitTxt = custo > 0 ? txtNum(custo, 2) : ''
-      return [...prev, { id: m.id, nome: m.nome, unidade: m.unidade, qtdTxt: '1', unitTxt, totalTxt: '', ordem: ORDEM_PADRAO }]
+      const unitTxt = m.custo > 0 ? txtNum(m.custo, 2) : ''
+      return [...prev, {
+        key: m.key, id: m.id, origem: m.origem, nome: m.nome, unidade: m.unidade,
+        qtdTxt: '1', unitTxt, totalTxt: '', ordem: ORDEM_PADRAO,
+      }]
     })
   }
   // Um único caminho pros três campos: escreve o texto e deixa o trio se ajustar.
-  function setBaixaCampo(id, campo, val) {
+  function setBaixaCampo(key, campo, val) {
     const chave = campo === 'qtd' ? 'qtdTxt' : campo === 'unit' ? 'unitTxt' : 'totalTxt'
-    setBaixaCart(prev => prev.map(x => x.id === id ? recalcTrio({ ...x, [chave]: val }, campo) : x))
+    setBaixaCart(prev => prev.map(x => x.key === key ? recalcTrio({ ...x, [chave]: val }, campo) : x))
   }
-  function mudarBaixaQtd(id, delta) {
+  function mudarBaixaQtd(key, delta) {
     setBaixaCart(prev => prev.flatMap(x => {
-      if (x.id !== id) return [x]
+      if (x.key !== key) return [x]
       const q = Math.round(((numOuNulo(x.qtdTxt) ?? 0) + delta) * 1000) / 1000
       return q <= 0 ? [] : [recalcTrio({ ...x, qtdTxt: txtNum(q, 3) }, 'qtd')]
     }))
   }
-  function removerBaixa(id) { setBaixaCart(prev => prev.filter(x => x.id !== id)) }
+  function removerBaixa(key) { setBaixaCart(prev => prev.filter(x => x.key !== key)) }
 
-  // Cadastrar um insumo novo SEM sair do carrinho. Chegou da feira com uma coisa
+  // Cadastrar um INSUMO novo sem sair do carrinho. Chegou da feira com uma coisa
   // que não estava na lista? Cadastra e já cai no carrinho, no mesmo lugar.
+  // Produto de revenda não dá: precisa de preço de venda e categoria (Catálogo).
   const [novoUnid, setNovoUnid] = useState('kg')
   const [criandoNoCarrinho, setCriandoNoCarrinho] = useState(false)
   async function cadastrarNoCarrinho() {
     const nome = baixaBusca.trim()
     if (!nome) return
-    const ja = materias.find(m => normTxt(m.nome) === normTxt(nome))
+    const ja = opcoesCarrinho.find(o => normTxt(o.nome) === normTxt(nome))
     if (ja) { addBaixa(ja); setBaixaBusca(''); return }   // já existia: só joga no carrinho
     setCriandoNoCarrinho(true)
     const { data, error } = await supabase.from('materias_primas')
@@ -483,14 +507,13 @@ export default function FichaTecnica() {
     setCriandoNoCarrinho(false)
     if (error) { alert('Não deu pra cadastrar: ' + error.message); return }
     setMaterias(prev => [...prev, data].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')))
-    addBaixa(data)
+    addBaixa({ key: 'mat:' + data.id, id: data.id, origem: 'mat', nome: data.nome, unidade: data.unidade, custo: 0 })
     setBaixaBusca('')
   }
   const baixaFiltradas = useMemo(() => {
     const q = normTxt(baixaBusca)
-    const ativas = materias.filter(m => m.ativo)
-    return q ? ativas.filter(m => normTxt(m.nome).includes(q)) : ativas
-  }, [materias, baixaBusca])
+    return q ? opcoesCarrinho.filter(o => normTxt(o.nome).includes(q)) : opcoesCarrinho
+  }, [opcoesCarrinho, baixaBusca])
   // Números de verdade a partir do texto de cada linha (o preço só vale na entrada).
   const cartComPreco = useMemo(() => baixaCart.map(x => {
     const qtd = numOuNulo(x.qtdTxt)
@@ -503,22 +526,39 @@ export default function FichaTecnica() {
     [cartComPreco],
   )
 
+
   async function confirmarBaixa() {
     const itens = cartComPreco.filter(x => x.qtd > 0)
-    const linhas = itens.map(x => ({
+    if (!itens.length) return
+    // Mesmo carrinho, dois destinos: insumo vai pro estoque de matéria-prima,
+    // produto de revenda vai pro estoque do catálogo (que é o que baixa na venda).
+    const linhasMat = itens.filter(x => x.origem === 'mat').map(x => ({
       empresa_id: empresaId, materia_prima_id: x.id, tipo: cartTipo, quantidade: x.qtd,
       custo_unit: x.unit, valor_total: x.pagoNum,
     }))
-    if (!linhas.length) return
+    const linhasProd = itens.filter(x => x.origem === 'prod').map(x => ({
+      empresa_id: empresaId, produto_id: x.id, tipo: cartTipo, quantidade: x.qtd,
+      motivo: 'compra', custo_unit: x.unit, valor_total: x.pagoNum,
+    }))
     setSalvandoBaixa(true)
-    const { error } = await supabase.from('materia_prima_movimentos').insert(linhas)
-    if (!error && cartTipo === 'entrada' && cartAtualizaCusto) {
+    let erro = null
+    if (linhasMat.length) {
+      const { error } = await supabase.from('materia_prima_movimentos').insert(linhasMat)
+      erro = erro || error
+    }
+    if (!erro && linhasProd.length) {
+      const { error } = await supabase.from('estoque_movimentos').insert(linhasProd)
+      erro = erro || error
+    }
+    if (!erro && cartTipo === 'entrada' && cartAtualizaCusto) {
       for (const x of itens) {
-        if (x.unit > 0) await supabase.from('materias_primas').update({ custo: x.unit }).eq('id', x.id)
+        if (!(x.unit > 0)) continue
+        if (x.origem === 'prod') await supabase.from('produtos').update({ preco_custo: x.unit }).eq('id', x.id)
+        else await supabase.from('materias_primas').update({ custo: x.unit }).eq('id', x.id)
       }
     }
     setSalvandoBaixa(false)
-    if (error) { alert('Erro ao lançar: ' + error.message); return }
+    if (erro) { alert('Erro ao lançar: ' + erro.message); return }
     setShowBaixa(false); carregar()
   }
 
@@ -1197,11 +1237,13 @@ export default function FichaTecnica() {
       {showBaixa && (
         <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowBaixa(false) }}>
           <div className="modal modal-lg" style={{ maxWidth: 660, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-            <h2>{cartTipo === 'entrada' ? '⬆️ Dar entrada rápida (insumos que chegaram)' : '⬇️ Dar baixa rápida (insumos usados)'}</h2>
+            <h2>{cartTipo === 'entrada' ? '⬆️ Dar entrada rápida (o que chegou)' : '⬇️ Dar baixa rápida (insumos usados)'}</h2>
             <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 10px' }}>
-              Toque no insumo pra adicionar, ajuste a quantidade e {cartTipo === 'entrada' ? 'dê entrada' : 'dê baixa'} em todos de uma vez.
+              {cartTipo === 'entrada'
+                ? 'Insumo e produto de revenda na mesma lista — toque pra adicionar e lance tudo de uma vez. Cada um vai pro estoque certo.'
+                : 'Toque no insumo pra adicionar, ajuste a quantidade e dê baixa em todos de uma vez.'}
             </p>
-            <input autoFocus placeholder="Buscar insumo (ex.: feijao)..." value={baixaBusca}
+            <input autoFocus placeholder={cartTipo === 'entrada' ? 'Buscar (ex.: feijao, coca, agua)...' : 'Buscar insumo (ex.: feijao)...'} value={baixaBusca}
               onChange={e => setBaixaBusca(e.target.value)}
               style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
 
@@ -1210,9 +1252,9 @@ export default function FichaTecnica() {
               <div style={{ flex: '1 1 240px', minWidth: 0, maxHeight: 340, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
                 {/* Chegou uma coisa que não está cadastrada: cadastra e joga no
                     carrinho aqui mesmo, sem fechar a tela e começar de novo. */}
-                {cartTipo === 'entrada' && baixaBusca.trim() && !materias.some(m => normTxt(m.nome) === normTxt(baixaBusca)) && (
+                {cartTipo === 'entrada' && baixaBusca.trim() && !opcoesCarrinho.some(o => normTxt(o.nome) === normTxt(baixaBusca)) && (
                   <div style={{ padding: 10, borderBottom: '1px solid var(--border)', background: 'var(--surface-hover, rgba(124,58,237,.06))' }}>
-                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 6 }}>Não achou? Cadastre agora:</div>
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 6 }}>Não achou? Cadastre como <strong>insumo</strong> (produto novo é no Catálogo):</div>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                       <strong style={{ fontSize: 13.5 }}>{baixaBusca.trim()}</strong>
                       <select value={novoUnid} onChange={e => setNovoUnid(e.target.value)}
@@ -1227,12 +1269,20 @@ export default function FichaTecnica() {
                   </div>
                 )}
                 {baixaFiltradas.length === 0 && !baixaBusca.trim() ? (
-                  <div style={{ padding: 12, color: 'var(--text-muted)', fontSize: 13 }}>Nenhum insumo. Cadastre em "+ Nova matéria-prima".</div>
-                ) : baixaFiltradas.map(m => (
-                  <button key={m.id} type="button" onClick={() => addBaixa(m)}
+                  <div style={{ padding: 12, color: 'var(--text-muted)', fontSize: 13 }}>Nada cadastrado ainda. Crie em "+ Nova matéria-prima".</div>
+                ) : baixaFiltradas.map(o => (
+                  <button key={o.key} type="button" onClick={() => addBaixa(o)}
                     style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '10px 12px', border: 'none', borderBottom: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', textAlign: 'left', fontSize: 14 }}>
-                    <span>{m.nome}</span>
-                    <span style={{ color: saldoDe(m.id) <= 0 ? 'var(--danger)' : 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>tem {fmtQtd(saldoDe(m.id), m.unidade)}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                      {/* A etiqueta evita o erro de lançar a água no lugar errado. */}
+                      <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 5px', borderRadius: 5, whiteSpace: 'nowrap',
+                        background: o.origem === 'prod' ? 'rgba(37,99,235,.14)' : 'rgba(22,163,74,.14)',
+                        color: o.origem === 'prod' ? '#2563eb' : '#15803d' }}>
+                        {o.origem === 'prod' ? 'PRODUTO' : 'INSUMO'}
+                      </span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.nome}</span>
+                    </span>
+                    <span style={{ color: o.saldo <= 0 ? 'var(--danger)' : 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>tem {fmtQtd(o.saldo, o.unidade)}</span>
                   </button>
                 ))}
               </div>
@@ -1241,17 +1291,20 @@ export default function FichaTecnica() {
               <div style={{ flex: '1 1 240px', minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>{cartTipo === 'entrada' ? 'Vai dar entrada' : 'Vai dar baixa'}</div>
                 {baixaCart.length === 0 ? (
-                  <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Toque num insumo à esquerda.</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Toque num item à esquerda.</div>
                 ) : cartComPreco.map(x => (
-                  <div key={x.id} style={{ padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                  <div key={x.key} style={{ padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.nome}</div>
-                      <button type="button" onClick={() => mudarBaixaQtd(x.id, -1)} style={stepBtn}>−</button>
-                      <input inputMode="decimal" value={x.qtdTxt} onChange={e => setBaixaCampo(x.id, 'qtd', e.target.value)}
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {x.origem === 'prod' && <span title="Produto de revenda" style={{ color: '#2563eb', fontWeight: 800, fontSize: 11 }}>▪ </span>}
+                        {x.nome}
+                      </div>
+                      <button type="button" onClick={() => mudarBaixaQtd(x.key, -1)} style={stepBtn}>−</button>
+                      <input inputMode="decimal" value={x.qtdTxt} onChange={e => setBaixaCampo(x.key, 'qtd', e.target.value)}
                         style={{ width: 60, textAlign: 'center', padding: '5px 4px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
                       <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 24 }}>{x.unidade}</span>
-                      <button type="button" onClick={() => mudarBaixaQtd(x.id, +1)} style={stepBtn}>+</button>
-                      <button type="button" onClick={() => removerBaixa(x.id)} className="btn btn-danger btn-sm" style={{ padding: '4px 8px' }}>✕</button>
+                      <button type="button" onClick={() => mudarBaixaQtd(x.key, +1)} style={stepBtn}>+</button>
+                      <button type="button" onClick={() => removerBaixa(x.key)} className="btn btn-danger btn-sm" style={{ padding: '4px 8px' }}>✕</button>
                     </div>
                     {/* Só na entrada: preço por unidade e total pago. Preencheu dois,
                         o terceiro sai sozinho — inclusive a quantidade. */}
