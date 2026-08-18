@@ -9,16 +9,27 @@ const CLOUD_TOKEN       = Deno.env.get("WHATSAPP_CLOUD_TOKEN") ?? ""   // Meta C
 const GRAPH_VERSION     = Deno.env.get("WHATSAPP_GRAPH_VERSION") ?? "v21.0"
 
 // Envia texto pela Cloud API (Meta Graph). Usado quando a loja está no cano Cloud.
-async function sendViaCloud(phoneNumberId: string, to: string, text: string) {
-  const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/messages`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${CLOUD_TOKEN}` },
-    body: JSON.stringify({
-      messaging_product: "whatsapp", recipient_type: "individual",
-      to, type: "text", text: { body: text, preview_url: false },
-    }),
-  })
-  if (!res.ok) console.error("[notify cloud] erro", res.status, (await res.text()).slice(0, 300))
+// Devolve null quando a Meta aceitou, ou o motivo da recusa.
+// Atenção: texto livre só é entregue dentro da janela de 24h desde a última
+// mensagem do cliente. Fora dela a Meta recusa (erro 131047) e só um template
+// aprovado passa — quem pediu pelo site e nunca escreveu no zap não recebe.
+async function sendViaCloud(phoneNumberId: string, to: string, text: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${CLOUD_TOKEN}` },
+      body: JSON.stringify({
+        messaging_product: "whatsapp", recipient_type: "individual",
+        to, type: "text", text: { body: text, preview_url: false },
+      }),
+    })
+    if (res.ok) return null
+    const corpo = (await res.text()).slice(0, 250)
+    console.error("[notify cloud] erro", res.status, corpo)
+    return `cloud ${res.status}: ${corpo}`
+  } catch (e) {
+    return `cloud inacessivel: ${String(e).slice(0, 200)}`
+  }
 }
 
 function getMensagem(status: string, tipoEntrega: string, num: string, codigo: string, motivo: string): string | null {
@@ -84,22 +95,36 @@ serve(async (req) => {
       ? phoneWpp.slice(0, 4) + phoneWpp.slice(5)
       : phoneWpp
 
-    // Cloud API (Meta) quando a loja está no cano Cloud; senão, Evolution (compat)
+    // Cloud API (Meta) quando a loja está no cano Cloud; senão, Evolution (compat).
+    // A resposta do envio IMPORTA: número desconectado ou servidor fora devolvem
+    // erro, e sem olhar isso a gente gravava o aviso como enviado e o cliente
+    // ficava sem receber, ninguém sabendo.
+    let erro: string | null = null
     if (waCfg.cloud_phone_number_id) {
-      await sendViaCloud(String(waCfg.cloud_phone_number_id), phoneWpp, mensagem)
+      erro = await sendViaCloud(String(waCfg.cloud_phone_number_id), phoneWpp, mensagem)
     } else {
-      await fetch(`${EVOLUTION_API_URL}/message/sendText/${waCfg.instance_name}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
-        body: JSON.stringify({ number: phoneWpp, text: mensagem }),
-      })
+      try {
+        const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${waCfg.instance_name}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+          body: JSON.stringify({ number: phoneWpp, text: mensagem }),
+        })
+        if (!res.ok) {
+          erro = `evolution ${res.status}: ${(await res.text()).slice(0, 250)}`
+        }
+      } catch (e) {
+        erro = `evolution inacessivel: ${String(e).slice(0, 200)}`
+      }
     }
+    if (erro) console.error("[notify] aviso NAO enviado", waCfg.instance_name, phoneWpp, erro)
 
     await supabase.from("whatsapp_conversas").insert({
       empresa_id: pedido.empresa_id,
       phone:      phoneHistory,
       role:       "assistant",
       content:    mensagem,
+      falhou:     !!erro,
+      erro,
     })
 
     return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } })
