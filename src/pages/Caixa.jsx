@@ -42,6 +42,9 @@ export default function Caixa() {
   const [showFechamento, setShowFechamento] = useState(false)
   const [valorFechamento, setValorFechamento] = useState('')
   const [valorFechamentoPix, setValorFechamentoPix] = useState('')
+  // Total que a maquineta fechou no dia. Ela liquida na hora, então dá pra bater
+  // o papel dela com o que foi lançado — é o que pega a venda esquecida.
+  const [valorFechamentoCartao, setValorFechamentoCartao] = useState('')
   const [obsFechamento, setObsFechamento] = useState('')
 
   const [saving, setSaving] = useState(false)
@@ -240,6 +243,7 @@ export default function Caixa() {
   function openFechamento() {
     setValorFechamento('')
     setValorFechamentoPix('')
+    setValorFechamentoCartao('')
     setObsFechamento('')
     setFormError(null)
     setShowFechamento(true)
@@ -261,6 +265,7 @@ export default function Caixa() {
       p_valor_fechamento: valor,
       p_observacoes: obsFechamento || null,
       p_valor_fechamento_pix: valorFechamentoPix === '' ? null : Number(valorFechamentoPix),
+      p_valor_fechamento_cartao: valorFechamentoCartao === '' ? null : Number(valorFechamentoCartao),
     })
     setSaving(false)
 
@@ -298,6 +303,14 @@ export default function Caixa() {
   const diferencaFechamentoPix =
     showFechamento && valorFechamentoPix !== ''
       ? Number(valorFechamentoPix) - valorEsperadoPix
+      : null
+
+  // Cartão NÃO entra no esperado em dinheiro — não fica na gaveta. Aqui é só
+  // comparação: o que a maquineta imprimiu × o que foi lançado no sistema.
+  const totalCartaoSistema = resumo ? Number(resumo.recebimentos_cartao || 0) : 0
+  const diferencaFechamentoCartao =
+    showFechamento && valorFechamentoCartao !== ''
+      ? Number(valorFechamentoCartao) - totalCartaoSistema
       : null
 
   // O que sobra de TODO o cartão depois das taxas (cada forma com a taxa dela).
@@ -569,6 +582,10 @@ export default function Caixa() {
                   : 0
                 const dif = (r && r !== 'loading' && c.valor_fechamento_informado != null) ? Number(c.valor_fechamento_informado) - espDin : null
                 const difPix = (r && r !== 'loading' && c.valor_fechamento_pix != null) ? Number(c.valor_fechamento_pix) - espPix : null
+                // Cartão: maquineta × sistema. Não tem abertura nem sangria — o
+                // dinheiro do cartão não passa pela gaveta.
+                const cartaoSist = (r && r !== 'loading') ? Number(r.recebimentos_cartao || 0) : 0
+                const difCartao = (r && r !== 'loading' && c.valor_fechamento_cartao != null) ? Number(c.valor_fechamento_cartao) - cartaoSist : null
                 return (
                 <Fragment key={c.id}>
                   <tr onClick={() => toggleHist(c)} style={{ cursor: 'pointer' }} title="Toque para ver o detalhamento por forma de pagamento">
@@ -643,6 +660,14 @@ export default function Caixa() {
                                 💵 Dinheiro contado: R$ {Number(c.valor_fechamento_informado).toFixed(2)} ·{' '}
                                 <span style={{ color: Math.abs(dif) < 0.005 ? 'var(--success, #16a34a)' : (dif > 0 ? 'var(--primary)' : 'var(--danger, #ef4444)') }}>
                                   Diferença: R$ {dif.toFixed(2)}{Math.abs(dif) < 0.005 ? ' (confere)' : dif > 0 ? ' (sobra)' : ' (falta)'}
+                                </span>
+                              </div>
+                            )}
+                            {difCartao !== null && (
+                              <div style={{ marginTop: 4, fontSize: 13.5, fontWeight: 700 }}>
+                                💳 Maquineta: R$ {Number(c.valor_fechamento_cartao).toFixed(2)} · sistema R$ {cartaoSist.toFixed(2)} ·{' '}
+                                <span style={{ color: Math.abs(difCartao) < 0.005 ? 'var(--success, #16a34a)' : (difCartao > 0 ? 'var(--primary)' : 'var(--danger, #ef4444)') }}>
+                                  Diferença: R$ {difCartao.toFixed(2)}{Math.abs(difCartao) < 0.005 ? ' (confere)' : difCartao > 0 ? ' (venda não lançada)' : ' (lançada a mais)'}
                                 </span>
                               </div>
                             )}
@@ -947,6 +972,49 @@ export default function Caixa() {
                         ? ' (falta)'
                         : ' (confere)'}
                     </span>
+                  </div>
+                )}
+                {/* Cartão: compara com o papel da maquineta. Não mexe no dinheiro
+                    esperado da gaveta — é conferência pura, pra achar no mesmo dia
+                    a venda que passou na maquineta e ninguém lançou. */}
+                <div className="form-field full">
+                  <label htmlFor="valor-fechamento-cartao">💳 Total da maquineta (R$) <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.85em' }}>opcional — o que saiu no fechamento dela</span></label>
+                  <input
+                    id="valor-fechamento-cartao"
+                    name="valor_fechamento_cartao"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={valorFechamentoCartao}
+                    onChange={(e) => setValorFechamentoCartao(e.target.value)}
+                    placeholder={`Lançado no sistema: ${totalCartaoSistema.toFixed(2)}`}
+                  />
+                </div>
+                {diferencaFechamentoCartao !== null && !Number.isNaN(diferencaFechamentoCartao) && (
+                  <div className="form-field full">
+                    <span
+                      className={`badge ${
+                        Math.abs(diferencaFechamentoCartao) < 0.005
+                          ? 'badge-success'
+                          : diferencaFechamentoCartao > 0
+                          ? 'badge-primary'
+                          : 'badge-danger'
+                      }`}
+                    >
+                      Diferença cartão: R$ {diferencaFechamentoCartao.toFixed(2)}
+                      {diferencaFechamentoCartao > 0.005
+                        ? ' (venda na maquineta que não foi lançada)'
+                        : diferencaFechamentoCartao < -0.005
+                        ? ' (lançado no sistema e não passou na maquineta)'
+                        : ' (confere)'}
+                    </span>
+                    {Math.abs(diferencaFechamentoCartao) >= 0.005 && (
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+                        No sistema: {Number(resumo?.recebimentos_credito || 0) > 0 && <>crédito R$ {Number(resumo.recebimentos_credito).toFixed(2)} · </>}
+                        {Number(resumo?.recebimentos_debito || 0) > 0 && <>débito R$ {Number(resumo.recebimentos_debito).toFixed(2)} · </>}
+                        total R$ {totalCartaoSistema.toFixed(2)}.
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="form-field full">
