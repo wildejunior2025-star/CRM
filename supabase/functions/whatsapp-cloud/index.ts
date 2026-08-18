@@ -143,11 +143,15 @@ async function processar(body: any) {
   // Acha a loja dona desse número
   const { data: cfg } = await supabase
     .from("whatsapp_config")
-    .select("empresa_id, instance_name, cloud_phone_number_id, ativo")
+    .select("empresa_id, instance_name, cloud_phone_number_id, ativo, ia_ativo")
     .eq("cloud_phone_number_id", phoneNumberId)
     .eq("ativo", true)
     .maybeSingle()
   if (!cfg) { console.error("[cloud] nenhuma loja para phone_number_id", phoneNumberId); return }
+  // Vendedor IA desligado: não responde NADA. Sem esta linha, as respostas de
+  // "só entendo texto" (áudio e foto) saíam mesmo com o interruptor desligado,
+  // porque elas são enviadas aqui, antes de chamar o cérebro.
+  if (!cfg.ia_ativo) return
   const instanceName = cfg.instance_name ?? `cloud_${phoneNumberId}`
 
   // Token: o da loja (Cadastro Incorporado) quando existir; senão o do app.

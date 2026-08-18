@@ -951,6 +951,20 @@ serve(async (req) => {
       || payload._test === true
       || phoneEarly === "5500000000001"
 
+    // Vendedor IA desligado: cala a boca AQUI, antes de qualquer coisa.
+    // A checagem ficava lá embaixo, depois do tratamento de áudio/imagem — e
+    // essas partes já respondiam ("não consegui ouvir o áudio") com o bot
+    // desligado. Pro dono, isso é o bot ignorando o interruptor.
+    {
+      const { data: liga } = await supabase
+        .from("whatsapp_config")
+        .select("ia_ativo")
+        .eq("instance_name", instanceName)
+        .eq("ativo", true)
+        .maybeSingle()
+      if (!liga?.ia_ativo) return new Response("ok", { headers: corsHeaders })
+    }
+
     let text = ""
     let imageBase64: string | null = null
     let imageMimetype = "image/jpeg"
