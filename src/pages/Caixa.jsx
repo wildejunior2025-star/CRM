@@ -22,6 +22,13 @@ export default function Caixa() {
   const [historico, setHistorico] = useState([])
   const [usuarios, setUsuarios] = useState([])
 
+  // Regra "abre com o que fechou" (por loja). Quando está ligada, a abertura não
+  // é digitada: vem do último caixa fechado. O banco trava do mesmo jeito — isto
+  // aqui é só pra tela não pedir um número que seria ignorado.
+  const [regraFechamento, setRegraFechamento] = useState(false)
+  const [ultimoFech, setUltimoFech] = useState(null) // { fechado_em, valor_dinheiro, valor_pix }
+  const aberturaTravada = regraFechamento && !!ultimoFech
+
   const [showAbertura, setShowAbertura] = useState(false)
   const [valorAbertura, setValorAbertura] = useState('')
   const [valorAberturaPix, setValorAberturaPix] = useState('')
@@ -100,9 +107,14 @@ export default function Caixa() {
       supabase.from('caixas').select('*').order('aberto_em', { ascending: false }).limit(20),
       isAdmin ? supabase.from('profiles').select('id, nome, email') : Promise.resolve({ data: [] }),
       profile?.empresa_id
-        ? supabase.from('empresas').select('taxa_cartao_pct, taxa_credito_pct, taxa_debito_pct').eq('id', profile.empresa_id).maybeSingle()
+        ? supabase.from('empresas').select('taxa_cartao_pct, taxa_credito_pct, taxa_debito_pct, caixa_abre_com_fechamento').eq('id', profile.empresa_id).maybeSingle()
         : Promise.resolve({ data: null }),
     ])
+    setRegraFechamento(!!empresaRes.data?.caixa_abre_com_fechamento)
+    // RPC (e não select) porque pela RLS o vendedor não enxerga o caixa que
+    // outra pessoa fechou — e é justamente esse valor que ele precisa ver.
+    const { data: fech } = await supabase.rpc('ultimo_fechamento_caixa')
+    setUltimoFech(Array.isArray(fech) ? (fech[0] ?? null) : (fech ?? null))
     setTaxas({
       credito: Number(empresaRes.data?.taxa_credito_pct ?? 0),
       debito: Number(empresaRes.data?.taxa_debito_pct ?? 0),
@@ -146,8 +158,10 @@ export default function Caixa() {
   }
 
   function openAbertura() {
-    setValorAbertura('')
-    setValorAberturaPix('')
+    // Com a regra ligada os campos já vêm preenchidos com o fechamento anterior
+    // (e nem aparecem pra digitar).
+    setValorAbertura(aberturaTravada ? String(ultimoFech.valor_dinheiro ?? 0) : '')
+    setValorAberturaPix(aberturaTravada ? String(ultimoFech.valor_pix ?? 0) : '')
     setObsAbertura('')
     setFormError(null)
     setShowAbertura(true)
@@ -698,6 +712,34 @@ export default function Caixa() {
             <h2>Abrir caixa</h2>
             <form onSubmit={handleAbrir}>
               <div className="form-grid">
+                {aberturaTravada ? (
+                  /* Loja com a regra ligada: nada de digitar. Mostra o que fechou
+                     e abre com isso — se o valor de verdade não bater, o certo é
+                     sangria/suprimento, não mexer na abertura. */
+                  <div className="form-field full">
+                    <div style={{ padding: '12px 14px', borderRadius: 10, border: '2px solid var(--primary)', background: 'var(--primary-bg, rgba(124,58,237,.08))' }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                        Abre com o que fechou
+                      </div>
+                      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+                        <div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>💵 Dinheiro</div>
+                          <div style={{ fontSize: 20, fontWeight: 800 }}>R$ {Number(ultimoFech.valor_dinheiro || 0).toFixed(2)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>📱 PIX</div>
+                          <div style={{ fontSize: 20, fontWeight: 800 }}>R$ {Number(ultimoFech.valor_pix || 0).toFixed(2)}</div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8 }}>
+                        Foi o fechamento de {new Date(ultimoFech.fechado_em).toLocaleString('pt-BR')}.
+                        Se faltar ou sobrar dinheiro de verdade, abra assim mesmo e registre uma
+                        <strong> sangria</strong> ou <strong>suprimento</strong> — assim fica a explicação do que aconteceu.
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                <>
                 <div className="form-field full">
                   <label htmlFor="valor-abertura">💵 Dinheiro inicial no caixa (R$)</label>
                   <input
@@ -727,6 +769,8 @@ export default function Caixa() {
                     placeholder="0,00"
                   />
                 </div>
+                </>
+                )}
                 <div className="form-field full">
                   <label htmlFor="obs-abertura">Observações</label>
                   <textarea
@@ -750,7 +794,7 @@ export default function Caixa() {
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={saving}>
-                  {saving ? 'Abrindo...' : 'Abrir caixa'}
+                  {saving ? 'Abrindo...' : aberturaTravada ? 'Abrir com esses valores' : 'Abrir caixa'}
                 </button>
               </div>
             </form>
