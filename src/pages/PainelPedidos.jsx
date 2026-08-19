@@ -4898,7 +4898,7 @@ export default function PainelPedidos() {
 
             {/* Filtro de colunas — some quando está buscando */}
             {!buscaQ && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+            <div className="pp-chips" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
               {[
                 { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidosView.length + concluidosHojeView.length + mesasFechadasHojeView.length + canceladosHojeView.length },
                 // "Mesas" só aparece quando há mesa aberta (autoatendimento por QR)
@@ -4941,7 +4941,7 @@ export default function PainelPedidos() {
 
             {/* Filtro por origem — só aparece quando há mais de uma origem hoje */}
             {!buscaQ && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+            <div className="pp-chips" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
               {[
                 { id: null, label: 'Todas origens', cor: '#7c3aed', count: pedidos.length + concluidosHoje.length + canceladosHoje.length },
                 // "Mesa (comandas)" saiu daqui — mesas ficam só na seção Mesas.
@@ -5185,7 +5185,7 @@ export default function PainelPedidos() {
 
       {/* ── Gaveta lateral direita ── */}
       {painelDireito && (
-        <aside style={{
+        <aside className="pp-drawer" style={{
           // right:56 reserva o menu de ícones; a largura precisa descontar isso
           // (senão no celular 94vw + 56px estoura a tela e corta o lado esquerdo).
           position: 'fixed', top: 60, right: 56, bottom: 0, width: 'min(480px, calc(100vw - 64px))', zIndex: 39,
@@ -5807,8 +5807,10 @@ export default function PainelPedidos() {
         </aside>
       )}
 
-      {/* ── Barra lateral direita (ações do gestor) ── */}
-      <nav style={{
+      {/* ── Barra de ações do gestor. No computador fica na lateral direita;
+           no celular o CSS vira barra INFERIOR, que é onde o polegar alcança
+           (ver .pp-rail em PainelPedidos.css). ── */}
+      <nav className="pp-rail" style={{
         position: 'fixed', top: 60, right: 0, bottom: 0, width: 56, zIndex: 40,
         background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '10px 0',
@@ -5843,12 +5845,13 @@ export default function PainelPedidos() {
       {/* ── MESAS / SALÃO em painel. Cobre da esquerda até ANTES da barra de menu
            da direita (56px), pra ela continuar acessível. "← Pedidos" volta pro grid. ── */}
       {painelDireito === 'salao' && (
-        <div style={{
+        <div className="pp-salao" style={{
           position: 'fixed', top: 0, left: 0, right: 56, bottom: 0, zIndex: 60,
           background: 'var(--bg, #0f1420)', display: 'flex', flexDirection: 'column',
         }}>
-          {/* Sub-abas + voltar: tudo do salão no mesmo canto */}
-          <div style={{
+          {/* Sub-abas + voltar: tudo do salão no mesmo canto. No celular vira
+              uma faixa só, que rola na horizontal (ver .pp-salao-tabs no CSS). */}
+          <div className="pp-salao-tabs" style={{
             display: 'flex', gap: 6, padding: '10px 14px', flexWrap: 'wrap', alignItems: 'center',
             borderBottom: '1px solid var(--border, #2a2a3a)', background: 'var(--surface, #16161f)',
           }}>
@@ -5875,7 +5878,7 @@ export default function PainelPedidos() {
             ))}
           </div>
           {/* Conteúdo da sub-aba */}
-          <div style={{ flex: 1, overflow: 'auto' }}>
+          <div className="pp-salao-body" style={{ flex: 1, overflow: 'auto' }}>
             {subAbaSalao === 'salao' && <PresencialSalao />}
             {subAbaSalao === 'caixa' && <Caixa />}
             {subAbaSalao === 'historico' && <PresencialHistorico />}

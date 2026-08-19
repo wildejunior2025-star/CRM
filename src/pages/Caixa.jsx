@@ -551,7 +551,7 @@ export default function Caixa() {
       )}
 
       <h2 className="caixa-table-title">Histórico de caixas</h2>
-      <div className="data-table">
+      <div className="data-table caixa-hist">
         {historico.length === 0 ? (
           <div className="empty-state">Nenhum caixa registrado.</div>
         ) : (
@@ -589,16 +589,16 @@ export default function Caixa() {
                 return (
                 <Fragment key={c.id}>
                   <tr onClick={() => toggleHist(c)} style={{ cursor: 'pointer' }} title="Toque para ver o detalhamento por forma de pagamento">
-                    {isAdmin && <td>{nomeUsuario(c.aberto_por)}</td>}
-                    <td>{new Date(c.aberto_em).toLocaleString('pt-BR')}</td>
-                    <td>{c.fechado_em ? new Date(c.fechado_em).toLocaleString('pt-BR') : '-'}</td>
-                    <td className="caixa-amount-col">R$ {Number(c.valor_abertura).toFixed(2)}</td>
-                    <td className="caixa-amount-col">
+                    {isAdmin && <td data-label="Usuário">{nomeUsuario(c.aberto_por)}</td>}
+                    <td data-label="Abertura">{new Date(c.aberto_em).toLocaleString('pt-BR')}</td>
+                    <td data-label="Fechamento">{c.fechado_em ? new Date(c.fechado_em).toLocaleString('pt-BR') : '-'}</td>
+                    <td data-label="Valor abertura" className="caixa-amount-col">R$ {Number(c.valor_abertura).toFixed(2)}</td>
+                    <td data-label="Valor fechamento" className="caixa-amount-col">
                       {c.valor_fechamento_informado != null
                         ? `R$ ${Number(c.valor_fechamento_informado).toFixed(2)}`
                         : '-'}
                     </td>
-                    <td>
+                    <td data-label="Status">
                       <span className={`badge ${STATUS_BADGE[c.status] ?? 'badge-neutral'}`}>
                         {c.status === 'aberto' ? 'Aberto' : 'Fechado'}
                       </span>
@@ -607,7 +607,7 @@ export default function Caixa() {
                   </tr>
                   {aberto && (
                     <tr>
-                      <td colSpan={nCols} style={{ background: 'var(--surface-hover)', padding: '12px 16px' }}>
+                      <td colSpan={nCols} className="caixa-hist-detalhe" style={{ background: 'var(--surface-hover)', padding: '12px 16px' }}>
                         {(!r || r === 'loading') ? (
                           <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando detalhamento…</span>
                         ) : (

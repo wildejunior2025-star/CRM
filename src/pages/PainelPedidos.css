@@ -986,9 +986,11 @@
     padding: 0 14px;
   }
 
+  /* O nome da loja sai do topo no celular: o lojista sabe em que loja está,
+     e o espaço faz falta pro botão de abrir/fechar a loja, que é o que o
+     aviso vermelho manda clicar. */
   .pp-loja-nome {
-    max-width: 120px;
-    font-size: 16px;
+    display: none;
   }
 
   .pp-body {
@@ -1000,8 +1002,11 @@
     gap: 12px;
   }
 
+  /* ...e por isso o rótulo "Loja aberta/fechada" VOLTA a aparecer:
+     escondê-lo deixava o aviso vermelho mandando clicar num botão sem nome. */
   .pp-toggle-loja span:last-child {
-    display: none;
+    display: inline;
+    font-size: 12px;
   }
 
   .pp-back-link span {
@@ -1136,4 +1141,151 @@
     min-width: 0;
     max-height: none;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   CELULAR — o gestor com cara de aplicativo
+   A barra de ações vivia grudada na lateral direita: comia 56px de uma tela
+   de 390px, cortava o texto dos avisos e deixava os rótulos ("Entregadores")
+   espremidos. No celular ela vira barra INFERIOR, que é onde o polegar
+   alcança, e o conteúdo ganha a largura inteira.
+   ══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  .pp-rail {
+    top: auto !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    height: 60px;
+    flex-direction: row !important;
+    justify-content: space-around;
+    gap: 0 !important;
+    padding: 4px 2px !important;
+    border-left: none !important;
+    border-top: 1px solid var(--border, #2a2a3a);
+    /* fica acima de tudo: é o menu principal do celular */
+    z-index: 70 !important;
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, .28);
+    /* respeita a faixa de gestos do iPhone */
+    padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px)) !important;
+    height: calc(60px + env(safe-area-inset-bottom, 0px));
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .pp-rail::-webkit-scrollbar { display: none; }
+
+  .pp-rail > button {
+    flex: 1 1 0;
+    min-width: 56px;
+    height: 52px !important;
+    gap: 2px !important;
+  }
+  .pp-rail > button > span {
+    font-size: 9px !important;
+    line-height: 1.1;
+  }
+
+  /* Gaveta e painel do salão param ACIMA da barra de baixo, não ao lado dela */
+  .pp-drawer {
+    right: 0 !important;
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px)) !important;
+    width: 100% !important;
+    border-left: none !important;
+  }
+  .pp-salao {
+    right: 0 !important;
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Abas do salão: uma faixa só que desliza na horizontal, em vez de
+     quebrar em três linhas e comer meia tela */
+  .pp-salao-tabs {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 8px 12px !important;
+    scroll-snap-type: x proximity;
+  }
+  .pp-salao-tabs::-webkit-scrollbar { display: none; }
+  .pp-salao-tabs > * {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    scroll-snap-align: start;
+  }
+
+  /* Conteúdo do salão: respiro nas bordas (o texto estava colado na tela)
+     e folga no fim pra última linha não sumir atrás da barra de baixo */
+  .pp-salao-body {
+    padding: 0 4px 24px;
+  }
+
+  /* Tabelas (histórico de caixa, por exemplo) rolam DENTRO do próprio bloco.
+     Antes elas empurravam a página inteira pro lado e cortavam os títulos. */
+  .pp-salao-body table,
+  .pp-drawer table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+
+  /* O corpo do painel também precisa de folga pra barra de baixo */
+  .pp-body {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+/* Celular: os filtros viram uma faixa que desliza pro lado, em vez de
+   quebrar em quatro linhas e empurrar a lista de pedidos pra fora da tela */
+@media (max-width: 640px) {
+  .pp-chips {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+    margin-bottom: 8px !important;
+    scroll-snap-type: x proximity;
+    /* sangra até a borda da tela: dá a dica visual de que rola */
+    margin-left: -14px;
+    margin-right: -14px;
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .pp-chips::-webkit-scrollbar { display: none; }
+  .pp-chips > button {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+  }
+}
+
+/* Topo no celular: os 6 controles não cabem em 390px de largura. Em vez de
+   escondê-los (o que fazia o aviso vermelho apontar pra um botão invisível),
+   a faixa desliza pro lado — e o controle de ABRIR/FECHAR A LOJA, que é o
+   mais importante, vem sempre primeiro. */
+@media (max-width: 640px) {
+  .pp-header {
+    overflow: hidden;
+  }
+  .pp-header-right {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: flex-start;
+    gap: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+  }
+  .pp-header-right::-webkit-scrollbar { display: none; }
+  .pp-header-right > * {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+  }
+  /* abrir/fechar a loja na frente de tudo */
+  .pp-header-right > *:last-child { order: -1; }
 }

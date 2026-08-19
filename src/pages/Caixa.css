@@ -42,3 +42,73 @@
   font-size: 14px;
   color: var(--text-muted);
 }
+
+/* ── Celular: o histórico de caixas vira lista de cartões ──────────────
+   Tabela de 6 colunas numa tela de 390px obriga o lojista a arrastar pro
+   lado e ainda corta os títulos. Cada caixa vira um bloco, com o rótulo
+   ao lado do valor (o rótulo vem do data-label de cada célula).
+   ─────────────────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .caixa-hist table,
+  .caixa-hist thead,
+  .caixa-hist tbody,
+  .caixa-hist tr,
+  .caixa-hist td {
+    display: block;
+    width: 100%;
+    /* o !important derruba duas heranças: o min-width de 500px que a tabela
+       genérica (.data-table) carrega e o nowrap das tabelas do painel — as
+       duas juntas cortavam os valores no lado direito do cartão */
+    min-width: 0 !important;
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-x: visible !important;
+  }
+  .caixa-hist {
+    overflow-x: visible !important;
+  }
+
+  /* cabeçalho não faz sentido em cartão */
+  .caixa-hist thead { display: none; }
+
+  .caixa-hist tbody tr {
+    margin-bottom: 10px;
+    border: 1px solid var(--border, #2a2a3a);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--surface, #16161f);
+  }
+
+  .caixa-hist tbody td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 12px !important;
+    border: none;
+    border-bottom: 1px solid var(--border, #2a2a3a);
+    text-align: right;
+    font-size: 13.5px;
+  }
+  .caixa-hist tbody td:last-child { border-bottom: none; }
+
+  /* o rótulo da coluna vira legenda à esquerda */
+  .caixa-hist tbody td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    text-align: left;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+    color: var(--text-muted, #9aa0b5);
+  }
+
+  /* a linha de detalhamento ocupa o cartão inteiro, sem rótulo */
+  .caixa-hist tbody td.caixa-hist-detalhe {
+    display: block;
+    text-align: left;
+    padding: 12px !important;
+  }
+  .caixa-hist tbody td.caixa-hist-detalhe::before { content: none; }
+}
