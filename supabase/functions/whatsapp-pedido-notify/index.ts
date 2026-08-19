@@ -62,6 +62,21 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
+    // Trava de duplicata: o mesmo pedido+status só avisa UMA vez. Duas gravações
+    // quase simultâneas (painel + sincronismo do iFood, por exemplo) disparavam o
+    // trigger duas vezes e o cliente recebia a mesma mensagem repetida — agora
+    // que o aviso custa crédito, repetir cobraria em dobro. A chave é PK, então
+    // quem chegar em segundo lugar leva erro de duplicidade e sai fora.
+    {
+      const { error: errDedup } = await supabase
+        .from("whatsapp_notify_dedup")
+        .insert({ id: `${pedido_id}:${novo_status}` })
+      if (errDedup) {
+        console.log("[notify] duplicata ignorada", pedido_id, novo_status)
+        return new Response("ok")
+      }
+    }
+
     const { data: pedido } = await supabase
       .from("pedidos_delivery")
       .select("numero_pedido, cliente_telefone, empresa_id, codigo_entrega, tipo_entrega, motivo_cancelamento")
@@ -78,6 +93,13 @@ serve(async (req) => {
       .single()
 
     if (!waCfg?.instance_name && !waCfg?.cloud_phone_number_id) return new Response("ok")
+
+    // Aviso de pedido também consome crédito (1 por aviso entregue), igual à
+    // conversa do robô. Sem saldo, não manda — senão a loja usaria o canal de
+    // graça, e no cano oficial da Meta cada aviso desses é template cobrado.
+    const { data: empresaCred } = await supabase
+      .from("empresas").select("whatsapp_creditos").eq("id", pedido.empresa_id).single()
+    const saldo = Number(empresaCred?.whatsapp_creditos ?? 0)
 
     const mensagem = getMensagem(
       novo_status,
@@ -100,7 +122,12 @@ serve(async (req) => {
     // erro, e sem olhar isso a gente gravava o aviso como enviado e o cliente
     // ficava sem receber, ninguém sabendo.
     let erro: string | null = null
-    if (waCfg.cloud_phone_number_id) {
+    if (saldo <= 0) {
+      // Fica registrado no histórico pra loja entender por que o cliente não
+      // recebeu — e pro dono ver que é falta de crédito, não falha técnica.
+      erro = "sem credito: aviso nao enviado"
+      console.error("[notify] sem credito", pedido.empresa_id, phoneWpp)
+    } else if (waCfg.cloud_phone_number_id) {
       erro = await sendViaCloud(String(waCfg.cloud_phone_number_id), phoneWpp, mensagem)
     } else {
       try {
@@ -117,6 +144,16 @@ serve(async (req) => {
       }
     }
     if (erro) console.error("[notify] aviso NAO enviado", waCfg.instance_name, phoneWpp, erro)
+
+    // Só cobra o que realmente saiu: Evolution fora do ar ou número inválido
+    // não debitam crédito nenhum.
+    if (!erro) {
+      const { error: errCred } = await supabase.rpc("descontar_credito_whatsapp", {
+        p_empresa_id: pedido.empresa_id,
+        p_descricao: `Aviso de pedido #${pedido.numero_pedido ?? ""} (${novo_status})`,
+      })
+      if (errCred) console.error("[notify] falha ao debitar credito:", errCred.message)
+    }
 
     await supabase.from("whatsapp_conversas").insert({
       empresa_id: pedido.empresa_id,
