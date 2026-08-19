@@ -94,12 +94,13 @@ serve(async (req) => {
 
     if (!waCfg?.instance_name && !waCfg?.cloud_phone_number_id) return new Response("ok")
 
-    // Aviso de pedido também consome crédito (1 por aviso entregue), igual à
-    // conversa do robô. Sem saldo, não manda — senão a loja usaria o canal de
-    // graça, e no cano oficial da Meta cada aviso desses é template cobrado.
-    const { data: empresaCred } = await supabase
-      .from("empresas").select("whatsapp_creditos").eq("id", pedido.empresa_id).single()
-    const saldo = Number(empresaCred?.whatsapp_creditos ?? 0)
+    // Aviso de status é módulo de mensalidade, NÃO consome crédito: o texto é
+    // pronto, não passa por IA. Crédito continua sendo só do robô, que gasta
+    // IA a cada mensagem lida. Quem não contratou o módulo tem `avisos: false`
+    // em empresas.modulos — ausente = ligado, pra não quebrar quem já usa.
+    const { data: empresaMod } = await supabase
+      .from("empresas").select("modulos").eq("id", pedido.empresa_id).single()
+    const avisosAtivos = (empresaMod?.modulos ?? {}).avisos !== false
 
     const mensagem = getMensagem(
       novo_status,
@@ -122,11 +123,11 @@ serve(async (req) => {
     // erro, e sem olhar isso a gente gravava o aviso como enviado e o cliente
     // ficava sem receber, ninguém sabendo.
     let erro: string | null = null
-    if (saldo <= 0) {
+    if (!avisosAtivos) {
       // Fica registrado no histórico pra loja entender por que o cliente não
-      // recebeu — e pro dono ver que é falta de crédito, não falha técnica.
-      erro = "sem credito: aviso nao enviado"
-      console.error("[notify] sem credito", pedido.empresa_id, phoneWpp)
+      // recebeu — e pro dono ver que é módulo desligado, não falha técnica.
+      erro = "modulo de avisos desligado para esta loja"
+      console.error("[notify] modulo avisos off", pedido.empresa_id, phoneWpp)
     } else if (waCfg.cloud_phone_number_id) {
       erro = await sendViaCloud(String(waCfg.cloud_phone_number_id), phoneWpp, mensagem)
     } else {
@@ -145,15 +146,6 @@ serve(async (req) => {
     }
     if (erro) console.error("[notify] aviso NAO enviado", waCfg.instance_name, phoneWpp, erro)
 
-    // Só cobra o que realmente saiu: Evolution fora do ar ou número inválido
-    // não debitam crédito nenhum.
-    if (!erro) {
-      const { error: errCred } = await supabase.rpc("descontar_credito_whatsapp", {
-        p_empresa_id: pedido.empresa_id,
-        p_descricao: `Aviso de pedido #${pedido.numero_pedido ?? ""} (${novo_status})`,
-      })
-      if (errCred) console.error("[notify] falha ao debitar credito:", errCred.message)
-    }
 
     await supabase.from("whatsapp_conversas").insert({
       empresa_id: pedido.empresa_id,
