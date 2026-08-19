@@ -945,6 +945,23 @@ serve(async (req) => {
     const instanceName: string = payload.instance ?? ""
     if (!instanceName) return new Response("ok", { headers: corsHeaders })
 
+    // ── Mensagem VELHA não é atendida ──────────────────────────────────────
+    // Quando o Evolution reinicia, ele ressincroniza a conversa e dispara
+    // messages.upsert de mensagens antigas. Sem essa trava o robô responde
+    // gente que falou dias atrás: em 19/08/2026, depois do restart, 360
+    // mensagens antigas viraram 73 respostas para 21 clientes da Zebu — o
+    // lojista viu como "disparo" pros clientes dele.
+    {
+      const ts = msg.messageTimestamp
+      let seg = Number(typeof ts === "object" && ts !== null ? (ts.low ?? 0) : (ts ?? 0))
+      if (seg > 1e12) seg = seg / 1000            // veio em milissegundos
+      const idadeSeg = seg > 0 ? (Date.now() / 1000) - seg : 0
+      if (idadeSeg > 600) {
+        console.log("[webhook] mensagem antiga ignorada:", Math.round(idadeSeg / 60), "min", instanceName)
+        return new Response("ok", { headers: corsHeaders })
+      }
+    }
+
     const phoneEarly = msg.key.remoteJid.replace("@s.whatsapp.net", "").replace(/\D/g, "")
     const isTest = url.searchParams.get("test") === "true"
       || req.headers.get("x-bot-test") === "1"
