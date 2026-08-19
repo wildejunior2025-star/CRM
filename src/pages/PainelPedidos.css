@@ -1199,22 +1199,24 @@
     bottom: calc(60px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
-  /* Abas do salão: uma faixa só que desliza na horizontal, em vez de
-     quebrar em três linhas e comer meia tela */
+  /* Abas do salão: TODAS visíveis, sem precisar arrastar. Com o nome
+     inteiro elas não cabiam e o "Histórico" ficava escondido fora da tela —
+     por isso cada botão tem um rótulo curto só pro celular. */
   .pp-salao-tabs {
-    flex-wrap: nowrap !important;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    padding: 8px 12px !important;
-    scroll-snap-type: x proximity;
+    flex-wrap: wrap !important;
+    gap: 5px !important;
+    padding: 8px 10px !important;
   }
-  .pp-salao-tabs::-webkit-scrollbar { display: none; }
-  .pp-salao-tabs > * {
+  .pp-salao-tabs > button {
     flex: 0 0 auto;
     white-space: nowrap;
-    scroll-snap-align: start;
+    padding: 7px 11px !important;
+    font-size: 12.5px !important;
   }
+
+  /* troca o rótulo longo pelo curto */
+  .pp-rot-longo { display: none !important; }
+  .pp-rot-curto { display: inline !important; }
 
   /* Conteúdo do salão: respiro nas bordas (o texto estava colado na tela)
      e folga no fim pra última linha não sumir atrás da barra de baixo */
@@ -1289,3 +1291,6 @@
   /* abrir/fechar a loja na frente de tudo */
   .pp-header-right > *:last-child { order: -1; }
 }
+
+/* Rótulos curtos existem só pro celular (ver .pp-salao-tabs no bloco mobile) */
+.pp-rot-curto { display: none; }

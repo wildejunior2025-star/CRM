@@ -5859,14 +5859,19 @@ export default function PainelPedidos() {
               style={{
                 padding: '7px 14px', borderRadius: 9, fontWeight: 800, fontSize: 13, cursor: 'pointer',
                 border: '1.5px solid var(--primary, #7c3aed)', background: 'var(--primary, #7c3aed)', color: '#fff',
-              }}>← Pedidos</button>
-            <span style={{ fontWeight: 800, fontSize: 15, margin: '0 8px' }}>🍽️ Salão</span>
+              }}>
+              <span className="pp-rot-longo">← Pedidos</span>
+              <span className="pp-rot-curto">←</span>
+            </button>
+            <span className="pp-rot-longo" style={{ fontWeight: 800, fontSize: 15, margin: '0 8px' }}>🍽️ Salão</span>
             {[
-              { id: 'salao', label: 'Salão / Mesas' },
-              { id: 'caixa', label: '💵 Caixa' },
-              { id: 'historico', label: 'Histórico' },
-              { id: 'reservas', label: 'Reservas' },
-              { id: 'mesas', label: 'Configurar mesas' },
+              // `curto` é o que aparece no celular: com o nome inteiro os botões
+              // não cabiam na tela e "Histórico" ficava escondido fora da borda.
+              { id: 'salao', label: 'Salão / Mesas', curto: '🍽️ Mesas' },
+              { id: 'caixa', label: '💵 Caixa', curto: '💵 Caixa' },
+              { id: 'historico', label: 'Histórico', curto: 'Histórico' },
+              { id: 'reservas', label: 'Reservas', curto: 'Reservas' },
+              { id: 'mesas', label: 'Configurar mesas', curto: '⚙️ Config.' },
             ].map(t => (
               <button key={t.id} type="button" onClick={() => setSubAbaSalao(t.id)}
                 style={{
@@ -5874,7 +5879,10 @@ export default function PainelPedidos() {
                   border: `1.5px solid ${subAbaSalao === t.id ? 'var(--primary, #7c3aed)' : 'var(--border, #2a2a3a)'}`,
                   background: subAbaSalao === t.id ? 'rgba(124,58,237,.15)' : 'transparent',
                   color: subAbaSalao === t.id ? 'var(--primary, #a78bfa)' : 'var(--text)',
-                }}>{t.label}</button>
+                }}>
+                <span className="pp-rot-longo">{t.label}</span>
+                <span className="pp-rot-curto">{t.curto}</span>
+              </button>
             ))}
           </div>
           {/* Conteúdo da sub-aba */}
