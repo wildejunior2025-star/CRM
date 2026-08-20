@@ -96,3 +96,85 @@
     gap: 6px;
   }
 }
+
+/* ── Teclado aberto ─────────────────────────────────────────────────────
+ * O CSS não enxerga o teclado do celular: 100dvh continua sendo a tela toda,
+ * então a lista de produtos nascia debaixo dele. O JS mede o que sobrou com o
+ * visualViewport e marca aqui; a gaveta encolhe e a lista volta a caber.
+ * Vence a regra do painel do salão (que empurra pra cima da barra) porque a
+ * barra também está debaixo do teclado — não há o que respeitar.
+ */
+html[data-teclado='aberto'] .sal-overlay {
+  height: var(--sal-altura, 100dvh) !important;
+  bottom: auto !important;
+}
+
+/* ── Lista de categorias do "Adicionar item" ────────────────────────────
+ * Era uma parede de pílulas grandes que enchia a tela — com 19 categorias o
+ * garçom rolava três telas pra achar "Petiscos". Virou lista: uma linha por
+ * categoria, com a quantidade de produtos no fim, do jeito que app de celular
+ * mostra menu.
+ */
+.sal-cats {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.sal-cat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  padding: 0 12px;
+  cursor: pointer;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.sal-cat:first-child { border-top: none; }
+.sal-cat:active { background: rgba(124, 58, 237, .08); }
+
+.sal-cat-nome {
+  flex: 1;
+  min-width: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* a contagem fica discreta: informa sem competir com o nome */
+.sal-cat-qtd {
+  flex-shrink: 0;
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--border);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.sal-cat-seta {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 19px;
+  line-height: 1;
+}
+
+/* No PC a gaveta é larga: duas colunas de categorias em vez de uma lista
+   comprida e vazia à direita. */
+@media (min-width: 1100px) {
+  .sal-cats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sal-cat:nth-child(2) { border-top: none; }
+  .sal-cat:nth-child(even) { border-left: 1px solid var(--border); }
+}

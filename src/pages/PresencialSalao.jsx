@@ -226,6 +226,36 @@ export default function PresencialSalao() {
     }
   }, [empresaId, user?.id])
 
+  // ── Teclado do celular ────────────────────────────────────────────────
+  // O CSS não enxerga o teclado: pra ele a tela continua inteira (100dvh), e
+  // por isso a lista de produtos nascia POR BAIXO do teclado — o garçom
+  // digitava "Itaipava", via o resultado aparecer e não conseguia tocar nele
+  // sem antes fechar o teclado.
+  //
+  // O visualViewport sabe quanto de tela REALMENTE sobrou. A gente joga essa
+  // altura numa variável e marca no <html> que o teclado está aberto; o CSS
+  // encolhe a gaveta pro espaço livre e a lista volta a caber.
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const raiz = document.documentElement
+    const ajustar = () => {
+      raiz.style.setProperty('--sal-altura', Math.round(vv.height) + 'px')
+      // margem de 120px: barra do navegador entrando/saindo mexe uns poucos
+      // pixels e isso NÃO é teclado. Teclado come bem mais que isso.
+      raiz.dataset.teclado = (window.innerHeight - vv.height) > 120 ? 'aberto' : ''
+    }
+    ajustar()
+    vv.addEventListener('resize', ajustar)
+    vv.addEventListener('scroll', ajustar)
+    return () => {
+      vv.removeEventListener('resize', ajustar)
+      vv.removeEventListener('scroll', ajustar)
+      raiz.style.removeProperty('--sal-altura')
+      delete raiz.dataset.teclado
+    }
+  }, [])
+
   // Comanda de balcão não tem mesa, então ela entra no mapa com uma chave própria
   // ('bal:<id>'). Assim TODO o resto da tela (drawer, fechamento, impressão) segue
   // funcionando igual, sem saber que aquilo não é mesa.
@@ -869,6 +899,17 @@ export default function PresencialSalao() {
     return [...set].sort((a, b) => (ord(a) - ord(b)) || a.localeCompare(b, 'pt-BR'))
   }, [produtos, ordemCat]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Quantos produtos cada categoria tem — vai no fim da linha, pra pessoa saber
+  // o que espera lá dentro antes de tocar.
+  const qtdPorCategoria = useMemo(() => {
+    const m = {}
+    for (const p of produtosComCategoria) {
+      const c = p.categoria.trim()
+      m[c] = (m[c] || 0) + 1
+    }
+    return m
+  }, [produtos]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // O que a lista mostra:
   //  - Digitou algo → busca em TODAS as categorias, ignorando acento.
   //  - Sem busca + categoria escolhida → produtos daquela categoria.
@@ -1345,11 +1386,12 @@ export default function PresencialSalao() {
               </div>
               {/* Sem busca e sem categoria escolhida: mostra as CATEGORIAS (como no cardápio). */}
               {!busca.trim() && !categoriaSel && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <div className="sal-cats">
                   {categorias.map(cat => (
-                    <button key={cat} type="button" onClick={() => setCategoriaSel(cat)}
-                      style={{ padding: '12px 18px', borderRadius: 999, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 17.5, fontWeight: 700 }}>
-                      {cat}
+                    <button key={cat} type="button" className="sal-cat" onClick={() => setCategoriaSel(cat)}>
+                      <span className="sal-cat-nome">{cat}</span>
+                      <span className="sal-cat-qtd">{qtdPorCategoria[cat]}</span>
+                      <span className="sal-cat-seta" aria-hidden="true">›</span>
                     </button>
                   ))}
                   {categorias.length === 0 && <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhuma categoria com produtos.</p>}
