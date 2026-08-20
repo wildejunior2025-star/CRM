@@ -126,20 +126,20 @@ import Layout from './components/Layout'
 import PortalLayout from './components/PortalLayout'
 import SuperAdminLayout from './components/SuperAdminLayout'
 import Login from './pages/Login'
-import Cadastro from './pages/Cadastro'
-import CadastroCliente from './pages/CadastroCliente'
-import Dashboard from './pages/Dashboard'
-import Upgrade from './pages/Upgrade'
+const Cadastro = lazy(() => import('./pages/Cadastro'))
+const CadastroCliente = lazy(() => import('./pages/CadastroCliente'))
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Upgrade = lazy(() => import('./pages/Upgrade'))
 const SuperAdminVideos = lazy(() => import('./pages/SuperAdminVideos'))
-import Clientes from './pages/Clientes'
-import Produtos from './pages/Produtos'
-import CategoriasComplemento from './pages/CategoriasComplemento'
-import FichaTecnica from './pages/FichaTecnica'
-import Estoque from './pages/Estoque'
-import Caixa from './pages/Caixa'
-import Financeiro from './pages/Financeiro'
-import Relatorios from './pages/Relatorios'
-import Usuarios from './pages/Usuarios'
+const Clientes = lazy(() => import('./pages/Clientes'))
+const Produtos = lazy(() => import('./pages/Produtos'))
+const CategoriasComplemento = lazy(() => import('./pages/CategoriasComplemento'))
+const FichaTecnica = lazy(() => import('./pages/FichaTecnica'))
+const Estoque = lazy(() => import('./pages/Estoque'))
+const Caixa = lazy(() => import('./pages/Caixa'))
+const Financeiro = lazy(() => import('./pages/Financeiro'))
+const Relatorios = lazy(() => import('./pages/Relatorios'))
+const Usuarios = lazy(() => import('./pages/Usuarios'))
 const PortalHome = lazy(() => import('./pages/PortalHome'))
 const PortalLoja = lazy(() => import('./pages/PortalLoja'))
 const PortalPedidos = lazy(() => import('./pages/PortalPedidos'))
@@ -158,36 +158,36 @@ const SuperAdminRedeMapa = lazy(() => import('./pages/SuperAdminRedeMapa'))
 const SuperAdminEmpresaRede = lazy(() => import('./pages/SuperAdminEmpresaRede'))
 const SuperAdminFinanceiro = lazy(() => import('./pages/SuperAdminFinanceiro'))
 const SuperAdminDespesas = lazy(() => import('./pages/SuperAdminDespesas'))
-import CadastroRef from './pages/CadastroRef'
-import CadastroAdmin from './pages/CadastroAdmin'
-import CadastroVendedor from './pages/CadastroVendedor'
-import MinhaLoja from './pages/MinhaLoja'
-import PedidosDelivery from './pages/PedidosDelivery'
-import PainelPedidos from './pages/PainelPedidos'
+const CadastroRef = lazy(() => import('./pages/CadastroRef'))
+const CadastroAdmin = lazy(() => import('./pages/CadastroAdmin'))
+const CadastroVendedor = lazy(() => import('./pages/CadastroVendedor'))
+const MinhaLoja = lazy(() => import('./pages/MinhaLoja'))
+const PedidosDelivery = lazy(() => import('./pages/PedidosDelivery'))
+const PainelPedidos = lazy(() => import('./pages/PainelPedidos'))
 const PainelEntregador = lazy(() => import('./pages/PainelEntregador'))
-import ResetPassword from './pages/ResetPassword'
-import WhatsAppConfig from './pages/WhatsAppConfig'
-import WhatsAppConversas from './pages/WhatsAppConversas'
-import EntregadoresHistorico from './pages/EntregadoresHistorico'
-import BotTeste from './pages/BotTeste'
+const ResetPassword = lazy(() => import('./pages/ResetPassword'))
+const WhatsAppConfig = lazy(() => import('./pages/WhatsAppConfig'))
+const WhatsAppConversas = lazy(() => import('./pages/WhatsAppConversas'))
+const EntregadoresHistorico = lazy(() => import('./pages/EntregadoresHistorico'))
+const BotTeste = lazy(() => import('./pages/BotTeste'))
 const DeliveryLojas = lazy(() => import('./pages/DeliveryLojas'))
 const DeliveryLoja = lazy(() => import('./pages/DeliveryLoja'))
 const DeliveryCheckout = lazy(() => import('./pages/DeliveryCheckout'))
 const DeliveryPedido = lazy(() => import('./pages/DeliveryPedido'))
 const MeusPedidos = lazy(() => import('./pages/MeusPedidos'))
 const LojaOnlineHome = lazy(() => import('./pages/LojaOnlineHome'))
-import RaioEntrega from './pages/RaioEntrega'
-import HorariosLoja from './pages/HorariosLoja'
-import WhatsAppCreditos from './pages/WhatsAppCreditos'
-import Termos from './pages/Termos'
-import Privacidade from './pages/Privacidade'
-import ExcluirConta from './pages/ExcluirConta'
-import ServicoPresencial from './pages/ServicoPresencial'
-import PresencialMesas from './pages/PresencialMesas'
-import PresencialSalao from './pages/PresencialSalao'
-import PresencialCozinha from './pages/PresencialCozinha'
-import PresencialHistorico from './pages/PresencialHistorico'
-import PresencialReservas from './pages/PresencialReservas'
+const RaioEntrega = lazy(() => import('./pages/RaioEntrega'))
+const HorariosLoja = lazy(() => import('./pages/HorariosLoja'))
+const WhatsAppCreditos = lazy(() => import('./pages/WhatsAppCreditos'))
+const Termos = lazy(() => import('./pages/Termos'))
+const Privacidade = lazy(() => import('./pages/Privacidade'))
+const ExcluirConta = lazy(() => import('./pages/ExcluirConta'))
+const ServicoPresencial = lazy(() => import('./pages/ServicoPresencial'))
+const PresencialMesas = lazy(() => import('./pages/PresencialMesas'))
+const PresencialSalao = lazy(() => import('./pages/PresencialSalao'))
+const PresencialCozinha = lazy(() => import('./pages/PresencialCozinha'))
+const PresencialHistorico = lazy(() => import('./pages/PresencialHistorico'))
+const PresencialReservas = lazy(() => import('./pages/PresencialReservas'))
 const MesaCardapio = lazy(() => import('./pages/MesaCardapio'))
 const ClienteLink = lazy(() => import('./pages/ClienteLink'))
 const Landing = lazy(() => import('./pages/Landing'))
