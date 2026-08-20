@@ -62,6 +62,52 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // ── Socorro pra tela branca depois de uma publicação ─────────────────
+      // Cada publicação troca o nome dos arquivos do app. Se o aparelho ainda
+      // tem ESTE html guardado pelo PWA, ele pede um arquivo que já não existe:
+      // o servidor devolve a página de erro em HTML, o navegador recusa pelo
+      // tipo errado e a tela fica BRANCA, sem mensagem nenhuma.
+      //
+      // Não dá pra resolver lá dentro do app: quando o arquivo principal falha,
+      // o app nem chega a começar a rodar. Por isso a proteção mora aqui, solta
+      // no HTML, e roda antes de tudo.
+      //
+      // Ao perceber a falha: joga fora o service worker e os caches, e recarrega.
+      // Aí o navegador busca o html novo, com os nomes certos.
+      (function () {
+        var LIMITE = 'fwc_socorro_recarga'
+        window.addEventListener('error', function (e) {
+          var alvo = e && e.target
+          if (!alvo || alvo.tagName !== 'SCRIPT' || !alvo.src) return
+
+          // Uma vez só a cada 30s. Se o motivo for outro (internet caiu no meio
+          // do download), recarregar não resolve e ficaria em laço eterno.
+          var agora = Date.now()
+          try {
+            if (agora - Number(sessionStorage.getItem(LIMITE) || 0) < 30000) return
+            sessionStorage.setItem(LIMITE, String(agora))
+          } catch (_) { /* aba anônima sem storage: segue e recarrega */ }
+
+          var limpar = []
+          if (navigator.serviceWorker) {
+            limpar.push(
+              navigator.serviceWorker.getRegistrations()
+                .then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister() })) })
+                .catch(function () {})
+            )
+          }
+          if (window.caches) {
+            limpar.push(
+              caches.keys()
+                .then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k) })) })
+                .catch(function () {})
+            )
+          }
+          Promise.all(limpar).then(function () { location.reload() })
+        }, true)
+      })()
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
