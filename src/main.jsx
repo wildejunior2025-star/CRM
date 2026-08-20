@@ -4,6 +4,27 @@ import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App.jsx'
 
+// ── Tela branca depois de um deploy ─────────────────────────────────────────
+// Cada tela virou um pedaço de arquivo com nome próprio, e o nome muda a cada
+// publicação. Se o aparelho ainda tem o HTML velho guardado (o PWA guarda), ele
+// pede um pedaço que não existe mais no servidor: o pedido volta com a página
+// de erro em HTML, o navegador recusa e a tela fica BRANCA, sem mensagem.
+//
+// Aqui a gente recarrega uma vez. Recarregar traz o HTML novo, com os nomes
+// certos, e o app abre normal — a pessoa vê um piscar, não uma tela morta.
+//
+// A trava de 20s existe pra não entrar em laço: se o problema for outro (a
+// internet caiu no meio do download, por exemplo), recarregar não resolve e
+// ficaria recarregando pra sempre.
+window.addEventListener('vite:preloadError', (evento) => {
+  evento.preventDefault()
+  const agora = Date.now()
+  const ultima = Number(sessionStorage.getItem('fwc_reload_pedaco') || 0)
+  if (agora - ultima < 20_000) return
+  sessionStorage.setItem('fwc_reload_pedaco', String(agora))
+  window.location.reload()
+})
+
 // ── Atualização do app ──────────────────────────────────────────────────────
 // O app se atualiza sozinho: celular preso em cache antigo já deu dor de cabeça
 // demais. A checagem continua ao abrir, a cada 30s e quando o app volta ao foco.
