@@ -460,13 +460,17 @@ export default function Caixa() {
                 <div className="value">R$ {Number(resumo.recebimentos_pix).toFixed(2)}</div>
               </div>
               {/* Cartão aberto por forma: crédito e débito têm taxa diferente,
-                  então cada um mostra o que sobra depois da maquineta. O card só
-                  aparece se entrou dinheiro naquela forma. */}
+                  então cada um mostra o que sobra depois da maquineta.
+                  Crédito e débito aparecem SEMPRE, zerados inclusive — igual a
+                  dinheiro e PIX. Antes eles só surgiam depois da primeira venda
+                  na forma, e numa loja nova parecia que o sistema não tinha
+                  cartão. O "cartão" genérico segue escondido no zero: é forma
+                  antiga, quem usa crédito/débito nunca vai ver essa linha. */}
               {[
-                ['Recebimentos crédito', resumo.recebimentos_credito, taxas.credito],
-                ['Recebimentos débito', resumo.recebimentos_debito, taxas.debito],
-                ['Recebimentos cartão', resumo.recebimentos_cartao_generico, taxas.cartao],
-              ].filter(([, bruto]) => Number(bruto || 0) > 0).map(([titulo, bruto, pct]) => (
+                ['Recebimentos crédito', resumo.recebimentos_credito, taxas.credito, true],
+                ['Recebimentos débito', resumo.recebimentos_debito, taxas.debito, true],
+                ['Recebimentos cartão', resumo.recebimentos_cartao_generico, taxas.cartao, false],
+              ].filter(([, bruto, , sempre]) => sempre || Number(bruto || 0) > 0).map(([titulo, bruto, pct]) => (
                 <div className="card dashboard-card" key={titulo}>
                   <div className="label">{titulo}</div>
                   <div className="value">R$ {Number(bruto).toFixed(2)}</div>
