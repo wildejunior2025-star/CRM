@@ -1218,6 +1218,21 @@
     padding-bottom: 16px;
   }
 
+  /* O MESMO vale pros modais comuns abertos de dentro do salão — abrir caixa,
+     fechar caixa, sangria, reservas. No celular eles sobem de baixo pra cima
+     (viram uma folha colada no rodapé), e é lá embaixo que ficam os botões de
+     confirmar. Presos no z-index 60 do .pp-salao, nasciam por baixo da barra:
+     dava pra preencher o formulário inteiro e não dava pra clicar em "Fechar
+     caixa". Agora o modal termina onde a barra começa, e a altura máxima passa
+     a ser a do espaço que sobrou — não 90dvh da tela cheia, que estouraria. */
+  .pp-root .modal-overlay {
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  .pp-root .modal-overlay .modal,
+  .pp-root .modal-overlay .modal.modal-lg {
+    max-height: 100% !important;
+  }
+
   /* Abas do salão: TODAS visíveis, sem precisar arrastar. Com o nome
      inteiro elas não cabiam e o "Histórico" ficava escondido fora da tela —
      por isso cada botão tem um rótulo curto só pro celular. */
