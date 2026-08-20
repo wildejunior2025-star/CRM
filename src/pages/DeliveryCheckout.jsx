@@ -468,7 +468,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, formas_pagamento, chave_pix, pix_nome')
+      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -478,6 +478,9 @@ export default function DeliveryCheckout() {
   // Enquanto os dados não chegaram, deixa aparecer — assim o botão não pisca
   // pra quem tem retirada ligada, que é a maioria.
   const permiteRetirada = lojaEndereco ? lojaEndereco.aceita_retirada !== false : true
+  // Bar que so atende no balcao: desliga a entrega e o cardapio online passa
+  // a oferecer so retirada. Nao mexe em WhatsApp, balcao, mesas nem iFood.
+  const permiteEntrega  = lojaEndereco ? lojaEndereco.aceita_entrega  !== false : true
 
   // Formas de pagamento ligadas pela loja (Minha Loja → Pagamento).
   const formasLoja = formasAtivas(lojaEndereco)
@@ -492,7 +495,10 @@ export default function DeliveryCheckout() {
   // escolhida, volta pra entrega — senão ele fecharia um pedido inválido.
   useEffect(() => {
     if (!permiteRetirada && tipo === 'retirada') setTipo('entrega')
-  }, [permiteRetirada, tipo])
+    // E o contrário: loja que não entrega força a retirada, senão o cliente
+    // chegaria no fim com um pedido de entrega que a loja não faz.
+    if (!permiteEntrega && tipo === 'entrega') setTipo('retirada')
+  }, [permiteRetirada, permiteEntrega, tipo])
 
   // Opção A — pré-preenche com o cliente lembrado neste aparelho
   useEffect(() => {
@@ -1027,10 +1033,16 @@ export default function DeliveryCheckout() {
               </section>
 
               {/* Tipo: entrega ou retirada.
-                  Loja que desligou a retirada nas configurações só mostra entrega. */}
-              {permiteRetirada && (
+                  Loja que desligou a retirada nas configurações só mostra entrega.
+                  Loja que desligou a ENTREGA (bar que só atende no balcão) some
+                  com os dois botões — não há o que escolher — mas a seção fica,
+                  porque é dentro dela que aparece o endereço pra retirar. */}
+              {(permiteRetirada || permiteEntrega) && (
               <section className="dco-section">
-                <h2 className="dco-section-title">Como você quer receber?</h2>
+                <h2 className="dco-section-title">
+                  {permiteEntrega ? 'Como você quer receber?' : 'Retirada na loja'}
+                </h2>
+                {permiteRetirada && permiteEntrega && (
                 <div className="dco-payment-row">
                   <button type="button"
                     className={`dco-pay-btn${tipo === 'entrega' ? ' dco-pay-btn--active' : ''}`}
@@ -1045,6 +1057,7 @@ export default function DeliveryCheckout() {
                     {tipo === 'retirada' && <span className="dco-pay-check"><IconCheck /></span>}
                   </button>
                 </div>
+                )}
                 {tipo === 'retirada' && (
                   <div style={{
                     marginTop: 12, padding: '12px 14px', borderRadius: 10,
