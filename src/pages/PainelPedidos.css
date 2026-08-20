@@ -1213,6 +1213,13 @@
   .pp-root .sal-modal-overlay {
     bottom: calc(60px + env(safe-area-inset-bottom, 0px)) !important;
   }
+  /* A folha de complementos sobe de baixo e pede 85dvh — 85% da tela CHEIA.
+     Com o fundo dela agora terminando onde a barra começa, esses 85% passavam
+     do espaço disponível e o botão "Adicionar" voltava a nascer escondido.
+     Aqui ela passa a caber no que sobrou. */
+  .pp-root .sal-modal-overlay .sal-modal-folha {
+    max-height: 100% !important;
+  }
   /* A barra já reserva a faixa de gesto do iPhone; o rodapé não reserva de novo. */
   .pp-root .sal-rodape {
     padding-bottom: 16px;

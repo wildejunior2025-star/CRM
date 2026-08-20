@@ -1822,13 +1822,16 @@ function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onCon
     : grupos.filter(g => (g.min ?? 0) > 0 && somaGrupo(g.id) < g.min)
 
   return (
-    <div onClick={onCancelar}
+    <div onClick={onCancelar} className="sal-modal-overlay"
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
       {/* Quentinha tem 9 grupos: se o modal rolasse inteiro, o botão de
           adicionar ficava lá embaixo e o atendente tinha que descer a lista toda
           só pra confirmar. Agora só a LISTA rola — título em cima e botão
-          embaixo ficam sempre à vista. */}
-      <div onClick={e => e.stopPropagation()}
+          embaixo ficam sempre à vista.
+          A classe sal-modal-overlay faz esta folha parar acima da barra de menu
+          do celular quando o salão está dentro do painel — senão o "Adicionar"
+          nasce por baixo dela e não dá pra confirmar o sabor do suco. */}
+      <div onClick={e => e.stopPropagation()} className="sal-modal-folha"
         style={{ width: '100%', maxWidth: 460, background: 'var(--bg)', borderTopLeftRadius: 16, borderTopRightRadius: 16, border: '1px solid var(--border)', maxHeight: '85dvh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '18px 18px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
