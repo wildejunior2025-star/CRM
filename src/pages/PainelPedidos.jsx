@@ -4052,9 +4052,16 @@ export default function PainelPedidos() {
   }, [empresa])
 
   // ── Busca inicial: todos os pedidos ativos (não finalizados) ──
+  // Esta função roda MUITO: na abertura, a cada 30s no polling, toda vez que o
+  // dono volta pra aba e sempre que o realtime reconecta. Só a PRIMEIRA carga
+  // de cada loja mostra o esqueleto; as outras trocam os dados por baixo, com
+  // o quadro no lugar. Antes ela acendia o esqueleto sempre, então o painel
+  // piscava inteiro de 30 em 30 segundos e a cada volta pra tela — parecia
+  // que o sistema tinha recarregado sozinho.
+  const carregadoDe = useRef(null)
   const carregarPedidos = useCallback(async () => {
     if (!empresa) return
-    setCarregando(true)
+    if (carregadoDe.current !== empresa.id) setCarregando(true)
     const { data } = await supabase
       .from('pedidos_delivery')
       .select('*')
@@ -4062,6 +4069,7 @@ export default function PainelPedidos() {
       .not('status', 'in', '("entregue","cancelado","aguardando_pagamento")')
       .order('created_at', { ascending: true }) // mais antigos primeiro — urgência visual natural
     setPedidos(data || [])
+    carregadoDe.current = empresa.id
     setCarregando(false)
   }, [empresa])
 
