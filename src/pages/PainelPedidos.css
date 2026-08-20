@@ -1199,6 +1199,25 @@
     bottom: calc(60px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
+  /* A comanda da mesa também. Ela mora DENTRO do .pp-salao, que é position
+     fixed com z-index 60 — ou seja, um contexto de empilhamento próprio. Por
+     mais que a gaveta peça z-index 900, ela nunca sobe acima da barra (70):
+     os 900 só valem lá dentro. Resultado no celular: a barra desenhava por
+     cima do rodapé e o "Fechar conta" ficava embaixo dela, sem jeito de
+     alcançar — dava pra lançar item na mesa, mas não dava pra fechar a conta.
+     Agora a gaveta e o modal de fechamento param onde a barra começa. */
+  .pp-root .sal-overlay {
+    height: auto !important;
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  .pp-root .sal-modal-overlay {
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  /* A barra já reserva a faixa de gesto do iPhone; o rodapé não reserva de novo. */
+  .pp-root .sal-rodape {
+    padding-bottom: 16px;
+  }
+
   /* Abas do salão: TODAS visíveis, sem precisar arrastar. Com o nome
      inteiro elas não cabiam e o "Histórico" ficava escondido fora da tela —
      por isso cada botão tem um rótulo curto só pro celular. */

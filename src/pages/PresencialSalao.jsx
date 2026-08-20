@@ -1517,7 +1517,7 @@ export default function PresencialSalao() {
 
       {/* ── Modal de fechamento ── */}
       {fechando && comandaSel && (
-        <div onClick={() => setFechando(false)}
+        <div onClick={() => setFechando(false)} className="sal-modal-overlay"
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
           {/* Dividir a conta, o fiado e o cadastro de cliente na hora deixam este
               modal mais alto que a tela do celular. Sem altura máxima ele
