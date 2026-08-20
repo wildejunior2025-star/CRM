@@ -1,6 +1,33 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import { useAuth } from './hooks/useAuth'
+
+/* ── Telas que só carregam quando alguém entra nelas ────────────────────
+ * O sistema inteiro era UM arquivo de 2 MB: quem abria o gestor baixava
+ * junto o cardápio do cliente, o checkout, o app do entregador, o portal e
+ * o super admin — telas que ele nunca abre. No celular e em internet ruim
+ * isso é a demora da abertura.
+ *
+ * Estas 30 estão marcadas com `lazy`: ficam num pedaço separado, buscado só
+ * quando a rota é aberta. Todas são de OUTRO perfil (cliente, entregador,
+ * super admin) ou de outro subdomínio, então nenhuma delas divide sessão com
+ * o gestor. As telas do gestor continuam vindo juntas, como antes.
+ *
+ * De quebra: com o código em pedaços, mudar uma tela troca só o pedaço dela.
+ * Antes qualquer mudança renomeava o arquivo único e TODO aparelho baixava
+ * os 2 MB outra vez a cada deploy.
+ */
+
+// Enquanto o pedaço da tela chega. Fica no lugar do conteúdo, sem piscar a
+// página inteira nem mexer no que já está desenhado em volta.
+function TelaCarregando() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
+      minHeight: '60vh', padding: 24, color: 'var(--text-muted, #9aa0b5)', fontSize: 14 }}>
+      Carregando...
+    </div>
+  )
+}
 
 const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/excluir-conta', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor', '/mesa/', '/c/']
 
@@ -103,7 +130,7 @@ import Cadastro from './pages/Cadastro'
 import CadastroCliente from './pages/CadastroCliente'
 import Dashboard from './pages/Dashboard'
 import Upgrade from './pages/Upgrade'
-import SuperAdminVideos from './pages/SuperAdminVideos'
+const SuperAdminVideos = lazy(() => import('./pages/SuperAdminVideos'))
 import Clientes from './pages/Clientes'
 import Produtos from './pages/Produtos'
 import CategoriasComplemento from './pages/CategoriasComplemento'
@@ -113,42 +140,42 @@ import Caixa from './pages/Caixa'
 import Financeiro from './pages/Financeiro'
 import Relatorios from './pages/Relatorios'
 import Usuarios from './pages/Usuarios'
-import PortalHome from './pages/PortalHome'
-import PortalLoja from './pages/PortalLoja'
-import PortalPedidos from './pages/PortalPedidos'
-import PortalPerfil from './pages/PortalPerfil'
-import PortalFiado from './pages/PortalFiado'
-import PortalIndicacoes from './pages/PortalIndicacoes'
-import SuperAdminDashboard from './pages/SuperAdminDashboard'
-import SuperAdminMLM from './pages/SuperAdminMLM'
-import SuperAdminEmpresas from './pages/SuperAdminEmpresas'
-import SuperAdminClientes from './pages/SuperAdminClientes'
-import SuperAdminComissoes from './pages/SuperAdminComissoes'
-import SuperAdminWhatsApp from './pages/SuperAdminWhatsApp'
-import SuperAdminConfig from './pages/SuperAdminConfig'
-import SuperAdminPagamentos from './pages/SuperAdminPagamentos'
-import SuperAdminRedeMapa from './pages/SuperAdminRedeMapa'
-import SuperAdminEmpresaRede from './pages/SuperAdminEmpresaRede'
-import SuperAdminFinanceiro from './pages/SuperAdminFinanceiro'
-import SuperAdminDespesas from './pages/SuperAdminDespesas'
+const PortalHome = lazy(() => import('./pages/PortalHome'))
+const PortalLoja = lazy(() => import('./pages/PortalLoja'))
+const PortalPedidos = lazy(() => import('./pages/PortalPedidos'))
+const PortalPerfil = lazy(() => import('./pages/PortalPerfil'))
+const PortalFiado = lazy(() => import('./pages/PortalFiado'))
+const PortalIndicacoes = lazy(() => import('./pages/PortalIndicacoes'))
+const SuperAdminDashboard = lazy(() => import('./pages/SuperAdminDashboard'))
+const SuperAdminMLM = lazy(() => import('./pages/SuperAdminMLM'))
+const SuperAdminEmpresas = lazy(() => import('./pages/SuperAdminEmpresas'))
+const SuperAdminClientes = lazy(() => import('./pages/SuperAdminClientes'))
+const SuperAdminComissoes = lazy(() => import('./pages/SuperAdminComissoes'))
+const SuperAdminWhatsApp = lazy(() => import('./pages/SuperAdminWhatsApp'))
+const SuperAdminConfig = lazy(() => import('./pages/SuperAdminConfig'))
+const SuperAdminPagamentos = lazy(() => import('./pages/SuperAdminPagamentos'))
+const SuperAdminRedeMapa = lazy(() => import('./pages/SuperAdminRedeMapa'))
+const SuperAdminEmpresaRede = lazy(() => import('./pages/SuperAdminEmpresaRede'))
+const SuperAdminFinanceiro = lazy(() => import('./pages/SuperAdminFinanceiro'))
+const SuperAdminDespesas = lazy(() => import('./pages/SuperAdminDespesas'))
 import CadastroRef from './pages/CadastroRef'
 import CadastroAdmin from './pages/CadastroAdmin'
 import CadastroVendedor from './pages/CadastroVendedor'
 import MinhaLoja from './pages/MinhaLoja'
 import PedidosDelivery from './pages/PedidosDelivery'
 import PainelPedidos from './pages/PainelPedidos'
-import PainelEntregador from './pages/PainelEntregador'
+const PainelEntregador = lazy(() => import('./pages/PainelEntregador'))
 import ResetPassword from './pages/ResetPassword'
 import WhatsAppConfig from './pages/WhatsAppConfig'
 import WhatsAppConversas from './pages/WhatsAppConversas'
 import EntregadoresHistorico from './pages/EntregadoresHistorico'
 import BotTeste from './pages/BotTeste'
-import DeliveryLojas from './pages/DeliveryLojas'
-import DeliveryLoja from './pages/DeliveryLoja'
-import DeliveryCheckout from './pages/DeliveryCheckout'
-import DeliveryPedido from './pages/DeliveryPedido'
-import MeusPedidos from './pages/MeusPedidos'
-import LojaOnlineHome from './pages/LojaOnlineHome'
+const DeliveryLojas = lazy(() => import('./pages/DeliveryLojas'))
+const DeliveryLoja = lazy(() => import('./pages/DeliveryLoja'))
+const DeliveryCheckout = lazy(() => import('./pages/DeliveryCheckout'))
+const DeliveryPedido = lazy(() => import('./pages/DeliveryPedido'))
+const MeusPedidos = lazy(() => import('./pages/MeusPedidos'))
+const LojaOnlineHome = lazy(() => import('./pages/LojaOnlineHome'))
 import RaioEntrega from './pages/RaioEntrega'
 import HorariosLoja from './pages/HorariosLoja'
 import WhatsAppCreditos from './pages/WhatsAppCreditos'
@@ -161,10 +188,10 @@ import PresencialSalao from './pages/PresencialSalao'
 import PresencialCozinha from './pages/PresencialCozinha'
 import PresencialHistorico from './pages/PresencialHistorico'
 import PresencialReservas from './pages/PresencialReservas'
-import MesaCardapio from './pages/MesaCardapio'
-import ClienteLink from './pages/ClienteLink'
-import Landing from './pages/Landing'
-import TourSistema from './pages/TourSistema'
+const MesaCardapio = lazy(() => import('./pages/MesaCardapio'))
+const ClienteLink = lazy(() => import('./pages/ClienteLink'))
+const Landing = lazy(() => import('./pages/Landing'))
+const TourSistema = lazy(() => import('./pages/TourSistema'))
 
 export default function App() {
   // lojaonline.fwcinter.com — vitrine pública da loja (sem login).
@@ -177,6 +204,7 @@ export default function App() {
       <BrandingProvider>
       <AuthProvider>
         <BrowserRouter>
+          <Suspense fallback={<TelaCarregando />}>
           <Routes>
             {/* Sem marketplace: cada cliente só acessa a loja pelo link dela */}
             <Route path="/" element={<LojaOnlineHome />} />
@@ -190,6 +218,7 @@ export default function App() {
             <Route path="/loja/:id" element={<DeliveryLoja />} />
             <Route path="/:slug" element={<DeliveryLoja />} />
           </Routes>
+          </Suspense>
         </BrowserRouter>
       </AuthProvider>
       </BrandingProvider>
@@ -201,7 +230,8 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <HostnameRedirect />
-        <Routes>
+        <Suspense fallback={<TelaCarregando />}>
+          <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/cadastro" element={<Cadastro />} />
@@ -398,6 +428,7 @@ export default function App() {
             <Route path="indicacoes" element={<PortalIndicacoes />} />
           </Route>
         </Routes>
+          </Suspense>
       </BrowserRouter>
     </AuthProvider>
     </BrandingProvider>

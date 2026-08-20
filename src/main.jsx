@@ -123,8 +123,12 @@ updateSW = registerSW({
   onRegisteredSW(_swUrl, registration) {
     if (!registration) return
     const checar = () => registration.update().catch(() => {})
-    checar()                        // checa JÁ ao abrir (não espera o 1º intervalo)
-    setInterval(checar, 30 * 1000)  // e a cada 30s
+    checar()                             // checa JÁ ao abrir (não espera o 1º intervalo)
+    // De 30 em 30 segundos era pedido demais: cada checagem é uma ida ao
+    // servidor, e numa internet ruim ela briga com o trabalho de verdade
+    // (carregar pedido, fechar conta). 5 minutos + a checagem de quando a
+    // pessoa volta pra tela pega a versão nova igual, sem atrapalhar.
+    setInterval(checar, 5 * 60 * 1000)
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') checar()
     })
