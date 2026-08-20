@@ -9,6 +9,30 @@
  * pedido deixa de exigir subir e descer a página.
  */
 
+/* Fundo escuro atrás da gaveta.
+ *
+ * Aqui era só `position: fixed; inset: 0` no JSX. No CELULAR isso mede a
+ * viewport GRANDE — a altura que a tela teria se a barra do Chrome estivesse
+ * escondida. Com a barra à vista, o fim da gaveta ficava POR BAIXO dela, e é
+ * exatamente lá que mora o rodapé com o botão "Fechar conta". Como a gaveta não
+ * rola por fora (só o miolo rola), não tinha como alcançar o botão: no PC
+ * funcionava, no celular não dava pra fechar a mesa.
+ *
+ * `100dvh` mede o que está REALMENTE visível agora, com barra e tudo.
+ */
+.sal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100vh;   /* navegador antigo, sem dvh */
+  height: 100dvh;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, .55);
+  z-index: 900;
+}
+
 .sal-drawer {
   width: min(460px, 100%);
   height: 100%;
@@ -20,8 +44,19 @@
 
 .sal-corpo {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 18px;
+}
+
+/* O rodapé é a barra que sempre fica à vista, com o subtotal e o "Fechar
+ * conta". Não pode encolher quando a comanda tem item demais, nem sumir atrás
+ * da barrinha de gesto do iPhone. */
+.sal-rodape {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
 }
 
 /* Lista de produtos: uma coluna no celular. */

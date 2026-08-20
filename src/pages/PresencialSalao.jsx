@@ -1080,8 +1080,7 @@ export default function PresencialSalao() {
 
       {/* ── Drawer da comanda ── */}
       {mesaSel && comandaSel && (
-        <div onClick={sairDaMesa}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 900, display: 'flex', justifyContent: 'flex-end' }}>
+        <div onClick={sairDaMesa} className="sal-overlay">
           <div onClick={e => e.stopPropagation()} className="sal-drawer">
             {/* header */}
             <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1381,8 +1380,8 @@ export default function PresencialSalao() {
             </div>
             </div>
 
-            {/* rodapé */}
-            <div style={{ borderTop: '1px solid var(--border)', padding: 16 }}>
+            {/* rodapé — sempre à vista (ver .sal-rodape no PresencialSalao.css) */}
+            <div className="sal-rodape">
               {comandaSel.status !== 'aguardando_conferencia' && rascunho.length > 0 && (
                 <button type="button" onClick={enviarCozinha} disabled={enviando}
                   style={{ width: '100%', marginBottom: 12, padding: '12px 0', borderRadius: 10, border: 'none', cursor: enviando ? 'wait' : 'pointer',
@@ -1520,9 +1519,18 @@ export default function PresencialSalao() {
       {fechando && comandaSel && (
         <div onClick={() => setFechando(false)}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          {/* Dividir a conta, o fiado e o cadastro de cliente na hora deixam este
+              modal mais alto que a tela do celular. Sem altura máxima ele
+              transbordava pra cima E pra baixo ao mesmo tempo (o overlay centraliza),
+              e o botão de receber ficava fora da tela sem rolagem nenhuma pra
+              alcançar. Mesmo remédio do ModalComplementos aqui embaixo: só o
+              miolo rola, título e botão ficam sempre parados à vista. */}
           <div onClick={e => e.stopPropagation()}
-            style={{ width: '100%', maxWidth: 380, background: 'var(--bg)', borderRadius: 16, border: '1px solid var(--border)', padding: 20 }}>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>Fechar conta — {rotuloMesa(mesaSel)}</div>
+            style={{ width: '100%', maxWidth: 380, background: 'var(--bg)', borderRadius: 16, border: '1px solid var(--border)',
+              maxHeight: '85dvh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flexShrink: 0, padding: '20px 20px 0', fontWeight: 800, fontSize: 17 }}>Fechar conta — {rotuloMesa(mesaSel)}</div>
+
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 20px 0' }}>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '4px 0' }}>
               <span>Subtotal</span><span>{fmt(subtotalSel)}</span>
@@ -1692,7 +1700,10 @@ export default function PresencialSalao() {
               </div>
             )}
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 18 }}>
+            </div>
+
+            <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8,
+              padding: '14px 20px calc(20px + env(safe-area-inset-bottom, 0px))' }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button type="button" onClick={() => setFechando(false)}
                   style={{ flex: 1, padding: '10px 0', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontWeight: 700 }}>
