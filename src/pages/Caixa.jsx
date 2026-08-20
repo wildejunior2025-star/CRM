@@ -9,6 +9,33 @@ const STATUS_BADGE = {
   fechado: 'badge-neutral',
 }
 
+// ── Semana do histórico ────────────────────────────────────────────────
+// O histórico trazia os 20 últimos caixas de uma vez: uma parede de linhas
+// que ninguém lê, e quase sempre a pessoa quer ver só a semana. Agora vem
+// uma semana por vez (segunda a domingo) e as setas andam pra trás.
+// offset 0 = esta semana, -1 = a passada, e assim por diante.
+function semanaDe(offset) {
+  const inicio = new Date()
+  inicio.setHours(0, 0, 0, 0)
+  const diaDaSemana = (inicio.getDay() + 6) % 7   // getDay(): 0=domingo; aqui 0=segunda
+  inicio.setDate(inicio.getDate() - diaDaSemana + offset * 7)
+  const fim = new Date(inicio)
+  fim.setDate(inicio.getDate() + 7)
+  return { inicio, fim }
+}
+
+const ddmm = (d) => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+
+function rotuloSemana(offset) {
+  const { inicio, fim } = semanaDe(offset)
+  const ultimo = new Date(fim)
+  ultimo.setDate(ultimo.getDate() - 1)
+  const faixa = `${ddmm(inicio)} a ${ddmm(ultimo)}`
+  if (offset === 0) return `Esta semana · ${faixa}`
+  if (offset === -1) return `Semana passada · ${faixa}`
+  return faixa
+}
+
 export default function Caixa() {
   const { user, profile } = useAuth()
   const isAdmin = profile?.perfil === 'admin'
@@ -20,6 +47,8 @@ export default function Caixa() {
   const [resumo, setResumo] = useState(null)
   const [movimentos, setMovimentos] = useState([])
   const [historico, setHistorico] = useState([])
+  const [semanaOffset, setSemanaOffset] = useState(0)   // 0 = esta semana
+  const [carregandoHist, setCarregandoHist] = useState(false)
   const [usuarios, setUsuarios] = useState([])
 
   // Regra "abre com o que fechou" (por loja). Quando está ligada, a abertura não
@@ -61,6 +90,7 @@ export default function Caixa() {
   const liquido = (bruto, pct) => Number(bruto || 0) * (1 - Number(pct || 0) / 100)
 
   // Histórico expandível: mostra o detalhamento por forma de pagamento de um caixa fechado.
+  const [histVersao, setHistVersao] = useState(0)         // sobe quando abre/fecha caixa → recarrega a semana
   const [histAberto, setHistAberto] = useState(null)      // id do caixa expandido
   const [histResumo, setHistResumo] = useState({})        // { [caixaId]: resumo | 'loading' }
   // Sangrias/suprimentos de um caixa JÁ FECHADO. O total some no resumo, mas o
@@ -105,9 +135,11 @@ export default function Caixa() {
       .from('caixas').select('*')
       .eq('aberto_por', user.id).eq('status', 'aberto').limit(1)
 
-    const [caixaRes, historicoRes, usuariosRes, empresaRes] = await Promise.all([
+    // O histórico não vem mais aqui: ele tem carregamento próprio, por semana
+    // (ver carregarHistorico), pra andar entre as semanas sem recarregar a tela
+    // inteira e pra não puxar caixa que ninguém vai olhar.
+    const [caixaRes, usuariosRes, empresaRes] = await Promise.all([
       caixaAtivaQuery,
-      supabase.from('caixas').select('*').order('aberto_em', { ascending: false }).limit(20),
       isAdmin ? supabase.from('profiles').select('id, nome, email') : Promise.resolve({ data: [] }),
       profile?.empresa_id
         ? supabase.from('empresas').select('taxa_cartao_pct, taxa_credito_pct, taxa_debito_pct, caixa_abre_com_fechamento').eq('id', profile.empresa_id).maybeSingle()
@@ -124,11 +156,10 @@ export default function Caixa() {
       cartao: Number(empresaRes.data?.taxa_cartao_pct ?? 0),
     })
 
-    const firstError = caixaRes.error || historicoRes.error || usuariosRes.error
+    const firstError = caixaRes.error || usuariosRes.error
     if (firstError) setError(firstError.message)
 
     setCaixaAtual(caixaRes.data?.[0] ?? null)
-    setHistorico(historicoRes.data ?? [])
     setUsuarios(usuariosRes.data ?? [])
 
     if (caixaRes.data?.[0]) {
@@ -147,6 +178,7 @@ export default function Caixa() {
       setMovimentos([])
     }
 
+    setHistVersao(v => v + 1)   // abrir/fechar caixa muda a lista da semana
     setLoading(false)
   }
 
@@ -154,6 +186,29 @@ export default function Caixa() {
     if (user?.id) loadAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id])
+
+  // Histórico: uma semana por vez. Roda ao abrir a tela, ao trocar de semana e
+  // depois de abrir/fechar um caixa (loadAll mexe no histVersao).
+  useEffect(() => {
+    if (!user?.id) return
+    let vivo = true
+    async function carregarHistorico() {
+      setCarregandoHist(true)
+      const { inicio, fim } = semanaDe(semanaOffset)
+      const { data, error: err } = await supabase
+        .from('caixas').select('*')
+        .gte('aberto_em', inicio.toISOString())
+        .lt('aberto_em', fim.toISOString())
+        .order('aberto_em', { ascending: false })
+      if (!vivo) return
+      if (err) setError(err.message)
+      setHistorico(data ?? [])
+      setHistAberto(null)          // a linha aberta era de outra semana
+      setCarregandoHist(false)
+    }
+    carregarHistorico()
+    return () => { vivo = false }
+  }, [user?.id, semanaOffset, histVersao])
 
   function nomeUsuario(id) {
     const u = usuarios.find((x) => x.id === id)
@@ -551,9 +606,36 @@ export default function Caixa() {
       )}
 
       <h2 className="caixa-table-title">Histórico de caixas</h2>
+
+      {/* Uma semana por vez. As setas andam; "Hoje" volta pra semana atual e
+          some quando você já está nela. */}
+      <div className="caixa-hist-nav">
+        <button type="button" className="caixa-hist-seta"
+          onClick={() => setSemanaOffset(o => o - 1)}
+          title="Semana anterior">←</button>
+
+        <span className="caixa-hist-semana">
+          {rotuloSemana(semanaOffset)}
+          {carregandoHist && <span className="caixa-hist-carregando"> · carregando...</span>}
+        </span>
+
+        <button type="button" className="caixa-hist-seta"
+          onClick={() => setSemanaOffset(o => o + 1)}
+          disabled={semanaOffset >= 0}
+          title={semanaOffset >= 0 ? 'Você já está na semana atual' : 'Semana seguinte'}>→</button>
+
+        {semanaOffset !== 0 && (
+          <button type="button" className="caixa-hist-hoje" onClick={() => setSemanaOffset(0)}>
+            Voltar pra esta semana
+          </button>
+        )}
+      </div>
+
       <div className="data-table caixa-hist">
         {historico.length === 0 ? (
-          <div className="empty-state">Nenhum caixa registrado.</div>
+          <div className="empty-state">
+            {carregandoHist ? 'Carregando...' : 'Nenhum caixa nesta semana.'}
+          </div>
         ) : (
           <table>
             <thead>

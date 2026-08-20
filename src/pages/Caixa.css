@@ -112,3 +112,56 @@
   }
   .caixa-hist tbody td.caixa-hist-detalhe::before { content: none; }
 }
+
+/* ── Navegação por semana do histórico ──────────────────────────────────
+ * O histórico mostrava os 20 últimos caixas de enfiada. Agora vem uma
+ * semana por vez e esta barra anda entre elas.
+ */
+.caixa-hist-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+
+.caixa-hist-seta {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+.caixa-hist-seta:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.caixa-hist-seta:disabled { opacity: .35; cursor: default; }
+
+.caixa-hist-semana {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.caixa-hist-carregando { font-weight: 400; color: var(--text-muted); }
+
+.caixa-hist-hoje {
+  margin-left: auto;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--primary);
+  background: transparent;
+  color: var(--primary);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  /* No celular o "voltar pra esta semana" desce pra linha de baixo inteira,
+     em vez de espremer o rótulo da semana. */
+  .caixa-hist-hoje { margin-left: 0; width: 100%; }
+}
