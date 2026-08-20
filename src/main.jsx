@@ -2,6 +2,15 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
 import './index.css'
+// Page.css é o estilo COMPARTILHADO (.btn, .btn-primary, .modal, .card...).
+// 38 telas importam ele, mas nem todas — o Login, por exemplo, usa .btn-primary
+// sem importar. Enquanto era tudo um arquivo só isso funcionava de carona: o
+// estilo vinha junto de qualquer jeito. Com as telas em pedaços separados, o
+// Page.css passou a viajar num pedaço que o Login não carrega, e o botão
+// "Entrar" ficou cinza de navegador, sem estilo nenhum.
+//
+// Aqui ele vira global: entra sempre, em qualquer rota, como era antes.
+import './components/Page.css'
 import App from './App.jsx'
 
 // ── Tela branca depois de um deploy ─────────────────────────────────────────
