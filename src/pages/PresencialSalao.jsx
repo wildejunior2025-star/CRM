@@ -87,6 +87,7 @@ export default function PresencialSalao() {
   const [novoCliente, setNovoCliente] = useState(false)
   const [novoTelefone, setNovoTelefone] = useState('') // opcional no cadastro do fiado (o nome é que não repete)
   const [preContaMsg, setPreContaMsg] = useState('')   // aviso depois de mandar a pré-conta pra impressora
+  const [enviandoZap, setEnviandoZap] = useState(false) // pré-conta indo pro WhatsApp do cliente
   const [salvandoCliente, setSalvandoCliente] = useState(false)
   // Rascunho: itens que o garçom monta mas que só vão pra cozinha (e pra impressora)
   // quando ele clica "Enviar" — assim o pedido inteiro sai numa impressão só.
@@ -730,6 +731,60 @@ export default function PresencialSalao() {
     }), empresaNome, { soApp: ehCelular, origem: 'mesa' })
     setPreContaMsg(ok ? '🧾 Pré-conta enviada pra impressora.' : '⚠️ Não achei a impressora. Abra o app FWC no PC da loja.')
     setTimeout(() => setPreContaMsg(''), 6000)
+  }
+
+  // PRÉ-CONTA NO WHATSAPP: mesma conferência da pré-conta impressa, só que no
+  // zap do cliente. Nasceu de loja sem impressora — o cliente confere no próprio
+  // celular. O número é o do cliente ligado à comanda; sem ele não tem pra onde
+  // mandar, então o botão pede pra ligar o cliente antes.
+  async function mandarPreContaZap() {
+    if (!comandaSel) return
+    const tel = String(comandaSel.cliente?.telefone ?? '').replace(/\D/g, '')
+    if (tel.length < 10) {
+      setPreContaMsg('⚠️ Essa comanda não tem cliente com telefone. Toque no nome do cliente lá em cima pra ligar um.')
+      setTimeout(() => setPreContaMsg(''), 8000)
+      return
+    }
+
+    const linhas = (comandaSel.comanda_itens ?? [])
+      .slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .map(i => {
+        const qtd = Number(i.quantidade) || 1
+        const total = Number(i.preco_unitario) * qtd
+        return `${qtd}x ${i.nome} — ${fmt(total)}`
+      })
+
+    const texto = [
+      `*${empresaNome}*`,
+      `Conferência da sua conta — ${mesaSel?.is_comanda ? rotuloMesa(mesaSel) : `Mesa ${mesaSel?.numero}`}`,
+      '',
+      ...linhas,
+      '',
+      `Subtotal: ${fmt(subtotalSel)}`,
+      ...(taxaSel > 0 ? [`Serviço (${taxaPct}%): ${fmt(taxaSel)}`] : []),
+      `*Total: ${fmt(totalSel)}*`,
+      '',
+      'Confere pra mim? Qualquer coisa é só falar com a gente.',
+    ].join('\n')
+
+    setEnviandoZap(true)
+    setPreContaMsg('')
+    try {
+      const { data, error } = await supabase.functions.invoke('send-whatsapp', {
+        body: { phone: tel, message: texto, empresa_id: empresaId, assunto: 'pre-conta' },
+      })
+      // A edge function devolve o motivo no corpo mesmo quando dá erro HTTP —
+      // sem ler isso, a tela mostrava "erro" e o atendente não sabia o porquê.
+      const motivo = data?.error ?? (error ? (await error.context?.json?.().catch(() => null))?.error : null)
+      if (motivo) setPreContaMsg(`⚠️ ${motivo}`)
+      else if (error) setPreContaMsg('⚠️ Não consegui mandar. Tente de novo.')
+      else setPreContaMsg(`✅ Conta enviada no WhatsApp de ${comandaSel.cliente?.nome || 'cliente'}.`)
+    } catch {
+      setPreContaMsg('⚠️ Não consegui mandar. Tente de novo.')
+    } finally {
+      setEnviandoZap(false)
+      setTimeout(() => setPreContaMsg(''), 9000)
+    }
   }
 
   function imprimirConta({ soApp = true } = {}) {
@@ -1477,6 +1532,18 @@ export default function PresencialSalao() {
                         background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontWeight: 700,
                         opacity: subtotalSel <= 0 ? 0.5 : 1 }}>
                       🧾 Pré-conta
+                    </button>
+                    {/* Mesma pré-conta, no zap do cliente: loja sem impressora
+                        manda o cliente conferir pelo próprio celular. */}
+                    <button type="button" onClick={mandarPreContaZap}
+                      disabled={subtotalSel <= 0 || enviandoZap}
+                      title={comandaSel?.cliente?.telefone
+                        ? `Mandar a conta no WhatsApp de ${comandaSel.cliente.nome}`
+                        : 'Ligue um cliente à comanda pra poder mandar'}
+                      style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid #16a34a',
+                        background: 'rgba(22,163,74,.12)', color: '#16a34a', cursor: 'pointer', fontWeight: 700,
+                        opacity: (subtotalSel <= 0 || enviandoZap) ? 0.5 : 1 }}>
+                      {enviandoZap ? 'Enviando…' : '📲 Mandar no zap'}
                     </button>
                     <button type="button" onClick={abrirFechamento} disabled={subtotalSel <= 0}
                       className="btn btn-primary" style={{ flex: 1, marginTop: 0, opacity: subtotalSel <= 0 ? 0.5 : 1 }}>
