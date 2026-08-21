@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { calcIfoodLiquido } from '../lib/ifoodLiquido'
 import { diasAbertosNoMes, comoFicaNoDia, carregarExcecoes } from '../lib/feriados'
+import { semanaDe, rotuloSemana } from '../lib/semana'
 import BuscaSelect from '../components/BuscaSelect'
 import ConsumoFuncionario from '../components/ConsumoFuncionario'
 import '../components/Page.css'
@@ -12,28 +13,6 @@ const pad = (n) => String(n).padStart(2, '0')
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const ddmm = (s) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
 
-// ── Semana do histórico (mesma navegação do Caixa) ─────────────────────
-// A lista vinha com todos os dias fechados de uma vez: rolagem sem fim e
-// nenhuma noção de "como foi a semana". Agora vem uma semana por vez
-// (segunda a domingo) e as setas andam pra trás.
-// offset 0 = esta semana, -1 = a passada, e assim por diante.
-function semanaDe(offset) {
-  const inicio = new Date()
-  inicio.setHours(0, 0, 0, 0)
-  const diaDaSemana = (inicio.getDay() + 6) % 7   // getDay(): 0=domingo; aqui 0=segunda
-  inicio.setDate(inicio.getDate() - diaDaSemana + offset * 7)
-  const fim = new Date(inicio)
-  fim.setDate(inicio.getDate() + 6)               // domingo da mesma semana
-  return { inicio: ymd(inicio), fim: ymd(fim) }
-}
-
-function rotuloSemana(offset) {
-  const { inicio, fim } = semanaDe(offset)
-  const faixa = `${ddmm(inicio).slice(0, 5)} a ${ddmm(fim).slice(0, 5)}`
-  if (offset === 0) return `Esta semana · ${faixa}`
-  if (offset === -1) return `Semana passada · ${faixa}`
-  return faixa
-}
 const addDia = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return ymd(d) }
 const diaSemana = (s) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR', { weekday: 'long' })
 const mesLabel = (s) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: '2-digit' })

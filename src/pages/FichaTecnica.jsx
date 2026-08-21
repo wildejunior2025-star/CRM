@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import BuscaSelect from '../components/BuscaSelect'
 import LancarNotaIA from '../components/LancarNotaIA'
 import { useAuth } from '../hooks/useAuth'
+import { semanaDe, rotuloSemana, offsetDaSemana } from '../lib/semana'
 import '../components/Page.css'
 
 // Normaliza pra busca: tira acento e deixa minúsculo. Assim "feijao" acha "Feijão".
@@ -295,6 +296,21 @@ export default function FichaTecnica() {
     carregarCompras()
     carregar()   // o saldo da lista de insumos muda junto
   }
+
+  // Semana a semana, como no histórico de despesas e no caixa: as setas andam
+  // e o período segue junto. Quem escolhe data na mão sai do modo semana — aí
+  // o rótulo some, senão diria "esta semana" mostrando outro intervalo.
+  function irParaSemana(offset) {
+    const { inicio, fim } = semanaDe(offset)
+    setCompraDe(inicio)
+    setCompraAte(fim)
+  }
+  // Só é "semana cheia" quando as duas pontas batem com segunda e domingo.
+  const semanaAtualSel = (() => {
+    const off = offsetDaSemana(compraDe)
+    const s = semanaDe(off)
+    return (s.inicio === compraDe && s.fim === compraAte) ? off : null
+  })()
 
   // Atalhos de período (o dono não quer digitar data).
   function periodoRapido(qual) {
@@ -983,6 +999,20 @@ export default function FichaTecnica() {
               <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('hoje')}>Hoje</button>
               <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('7')}>Últimos 7 dias</button>
               <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('mes')}>Este mês</button>
+            </div>
+
+            {/* Uma semana por vez. As setas andam; a da direita para na semana
+                atual, que é até onde existe compra pra ver. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+              <button type="button" className="btn btn-secondary btn-sm" title="Semana anterior"
+                onClick={() => irParaSemana((semanaAtualSel ?? 0) - 1)}>←</button>
+              <span style={{ fontSize: 13, fontWeight: 700, minWidth: 175, textAlign: 'center' }}>
+                {semanaAtualSel !== null ? rotuloSemana(semanaAtualSel) : 'Período escolhido'}
+              </span>
+              <button type="button" className="btn btn-secondary btn-sm"
+                disabled={semanaAtualSel !== null && semanaAtualSel >= 0}
+                title={semanaAtualSel !== null && semanaAtualSel >= 0 ? 'Você já está na semana atual' : 'Semana seguinte'}
+                onClick={() => irParaSemana(Math.min(0, (semanaAtualSel ?? -1) + 1))}>→</button>
             </div>
           </div>
 
