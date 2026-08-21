@@ -18,6 +18,10 @@ const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractio
 const dataBR = (iso) => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
 // Quantidade vem numérica do banco ("2.00") — mostra 2, e 0,5 quando for meio.
 const qtdBR = (n) => Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 })
+// No histórico a hora importa: é assim que ele acha a compra na fatura do cartão.
+const dataHoraBR = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+const FORMAS = { debito: 'débito', credito: 'crédito', dinheiro: 'dinheiro', pix: 'PIX', a_vista: 'à vista', fiado: 'fiado', voucher: 'voucher' }
+const formaBR = (f) => FORMAS[f] ?? String(f ?? '').replace(/_/g, ' ')
 const DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']
 
 export default function ClienteLink() {
@@ -37,6 +41,7 @@ export default function ClienteLink() {
   const [enviando, setEnviando] = useState(false)
   const [sucesso, setSucesso] = useState(false)
   const [conta, setConta] = useState(null)        // cliente_conta(): comanda + fiado
+  const [histAberto, setHistAberto] = useState(null)  // qual compra do histórico está aberta
   const [notif, setNotif] = useState(null)
   const prevPronto = useRef(new Set())
 
@@ -412,6 +417,42 @@ export default function ClienteLink() {
                 <span style={{ fontWeight: 700, color: '#22c55e' }}>{fmt(p.valor)}</span>
               </div>
             ))}
+          </div>
+
+          {/* Tudo que ele já comprou, pagando como for (mig 0171). O fiado acima
+              é só o que ficou anotado; aqui entra cartão, dinheiro e PIX também —
+              é o que responde o "que cobrança é essa na minha fatura?". */}
+          <div style={C.bloco}>
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>🕘 Suas últimas compras</div>
+            {(conta?.historico ?? []).length === 0 ? (
+              <p style={{ fontSize: 13, opacity: .7, margin: 0 }}>Você ainda não comprou com a gente.</p>
+            ) : (conta.historico).map((h, i) => {
+              const aberto = histAberto === i
+              return (
+                <div key={i} style={{ borderBottom: '1px solid #2c2350', padding: '9px 0' }}>
+                  <div onClick={() => setHistAberto(aberto ? null : i)}
+                    style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13.5, cursor: 'pointer' }}>
+                    <span style={{ opacity: .85 }}>
+                      {dataHoraBR(h.data)}
+                      {h.forma ? ` · ${formaBR(h.forma)}` : ''}
+                      {h.origem ? ` · ${h.origem}` : ''}
+                    </span>
+                    <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
+                      {fmt(h.valor)} <span style={{ opacity: .5, fontWeight: 600 }}>{aberto ? '▲' : '▼'}</span>
+                    </span>
+                  </div>
+                  {aberto && (h.itens ?? []).map((it, j) => (
+                    <div key={j} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12.5, opacity: .72, marginTop: 4 }}>
+                      <span>{qtdBR(it.quantidade)}× {String(it.nome ?? '').trim()}</span>
+                      <span style={{ whiteSpace: 'nowrap' }}>{fmt(it.valor)}</span>
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
+            {(conta?.historico ?? []).length > 0 && (
+              <p style={{ fontSize: 11.5, opacity: .6, margin: '9px 0 0' }}>Toque numa compra pra ver o que veio nela.</p>
+            )}
           </div>
 
           <p style={{ fontSize: 11.5, opacity: .6, textAlign: 'center' }}>
