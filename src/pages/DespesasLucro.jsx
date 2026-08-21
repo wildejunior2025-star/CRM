@@ -11,6 +11,29 @@ const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', c
 const pad = (n) => String(n).padStart(2, '0')
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const ddmm = (s) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+
+// ── Semana do histórico (mesma navegação do Caixa) ─────────────────────
+// A lista vinha com todos os dias fechados de uma vez: rolagem sem fim e
+// nenhuma noção de "como foi a semana". Agora vem uma semana por vez
+// (segunda a domingo) e as setas andam pra trás.
+// offset 0 = esta semana, -1 = a passada, e assim por diante.
+function semanaDe(offset) {
+  const inicio = new Date()
+  inicio.setHours(0, 0, 0, 0)
+  const diaDaSemana = (inicio.getDay() + 6) % 7   // getDay(): 0=domingo; aqui 0=segunda
+  inicio.setDate(inicio.getDate() - diaDaSemana + offset * 7)
+  const fim = new Date(inicio)
+  fim.setDate(inicio.getDate() + 6)               // domingo da mesma semana
+  return { inicio: ymd(inicio), fim: ymd(fim) }
+}
+
+function rotuloSemana(offset) {
+  const { inicio, fim } = semanaDe(offset)
+  const faixa = `${ddmm(inicio).slice(0, 5)} a ${ddmm(fim).slice(0, 5)}`
+  if (offset === 0) return `Esta semana · ${faixa}`
+  if (offset === -1) return `Semana passada · ${faixa}`
+  return faixa
+}
 const addDia = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return ymd(d) }
 const diaSemana = (s) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR', { weekday: 'long' })
 const mesLabel = (s) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: '2-digit' })
@@ -127,6 +150,7 @@ export default function DespesasLucro({ empresaId }) {
   const [receitaDia, setReceitaDia] = useState({ proprios: 0, salao: 0, ifood: 0 })
   const [fechando, setFechando] = useState(false)
   const [histAberto, setHistAberto] = useState({}) // { [id]: bool } dias expandidos no histórico
+  const [semanaOffset, setSemanaOffset] = useState(0)  // 0 = esta semana; as setas andam pra trás
 
   // modais
   const [showDespesa, setShowDespesa] = useState(false)
@@ -514,6 +538,17 @@ export default function DespesasLucro({ empresaId }) {
 
   const totalHistLucro = historico.reduce((s, h) => s + Number(h.lucro || 0), 0)
 
+  // Os dias fechados da semana escolhida. O filtro é em cima do que já veio do
+  // banco (os últimos fechamentos), então andar entre as semanas não recarrega.
+  // Sem useMemo de propósito: aqui já passamos do return de "selecione a loja",
+  // e hook depois de return condicional quebra a ordem dos hooks.
+  const { inicio: semIni, fim: semFim } = semanaDe(semanaOffset)
+  const histSemana = historico.filter(h => h.data >= semIni && h.data <= semFim)
+  const lucroSemana = histSemana.reduce((s, h) => s + Number(h.lucro || 0), 0)
+  // Até onde as setas podem ir: o dia mais antigo que veio do banco.
+  const maisAntigo = historico.length ? historico[historico.length - 1].data : null
+  const temAnterior = maisAntigo ? maisAntigo < semIni : false
+
   return (
     <div>
       {/* sub-abas */}
@@ -817,12 +852,52 @@ export default function DespesasLucro({ empresaId }) {
               <p>Feche um dia na aba "Dia a dia" pra ele aparecer aqui congelado. Sem fechar, você ainda consegue olhar qualquer dia por lá — só que o valor é recalculado na hora.</p></div>
           ) : (
             <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
                 <strong style={{ fontSize: 15 }}>📜 Histórico de despesas diárias</strong>
                 <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Lucro acumulado <strong style={{ color: totalHistLucro >= 0 ? '#16a34a' : '#ef4444' }}>{brl(totalHistLucro)}</strong></span>
               </div>
+
+              {/* Uma semana por vez, como no Caixa. A seta da direita para na
+                  semana atual; a da esquerda para quando acaba o histórico. */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                <button type="button" onClick={() => setSemanaOffset(o => o - 1)} disabled={!temAnterior}
+                  title={temAnterior ? 'Semana anterior' : 'Não há dia fechado antes disso'}
+                  style={{ width: 34, height: 34, borderRadius: 9, cursor: temAnterior ? 'pointer' : 'not-allowed',
+                    border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)',
+                    fontSize: 16, opacity: temAnterior ? 1 : .4 }}>←</button>
+
+                <span style={{ fontSize: 14, fontWeight: 700, minWidth: 190, textAlign: 'center' }}>
+                  {rotuloSemana(semanaOffset)}
+                </span>
+
+                <button type="button" onClick={() => setSemanaOffset(o => o + 1)} disabled={semanaOffset >= 0}
+                  title={semanaOffset >= 0 ? 'Você já está na semana atual' : 'Semana seguinte'}
+                  style={{ width: 34, height: 34, borderRadius: 9, cursor: semanaOffset >= 0 ? 'not-allowed' : 'pointer',
+                    border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)',
+                    fontSize: 16, opacity: semanaOffset >= 0 ? .4 : 1 }}>→</button>
+
+                {semanaOffset !== 0 && (
+                  <button type="button" onClick={() => setSemanaOffset(0)}
+                    style={{ padding: '6px 12px', borderRadius: 9, cursor: 'pointer', border: '1px solid var(--border)',
+                      background: 'transparent', color: 'var(--text-muted)', fontSize: 12.5, fontWeight: 700 }}>
+                    Voltar pra esta semana
+                  </button>
+                )}
+
+                {/* O que a semana deu, somado — é a leitura que a lista solta não dava */}
+                <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--text-muted)' }}>
+                  {histSemana.length} dia{histSemana.length === 1 ? '' : 's'} · lucro da semana{' '}
+                  <strong style={{ color: lucroSemana >= 0 ? '#16a34a' : '#ef4444' }}>{brl(lucroSemana)}</strong>
+                </span>
+              </div>
+
               <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '2px 16px' }}>
-                {historico.map(h => {
+                {histSemana.length === 0 && (
+                  <div style={{ padding: '22px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+                    Nenhum dia fechado nesta semana.
+                  </div>
+                )}
+                {histSemana.map(h => {
                   const aberto = !!histAberto[h.id]
                   const custosTot = Number(h.custo_fixo) + Number(h.custo_funcionarios) + Number(h.custo_producao)
                   return (
