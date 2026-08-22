@@ -181,14 +181,17 @@ html[data-teclado='aberto'] .sal-overlay {
 
 /* Barra de ações da comanda.
  *
- * Eram quatro botões numa linha só, sem quebra: no celular o "Fechar conta"
- * era empurrado pra FORA da gaveta e o garçom não tinha como fechar a mesa —
- * só via o "Mandar no zap" cortado na borda. Agora a linha quebra e a ação
- * principal fica sozinha embaixo, larga, que é a que mais se usa. No PC, onde
- * a gaveta abre em 1080px, tudo volta pra uma linha só.
+ * Eram quatro botões com texto numa linha só, sem quebra: na gaveta estreita
+ * do celular o "Fechar conta" era empurrado pra FORA da tela e o garçom não
+ * tinha como fechar a mesa — só via o "Mandar no zap" cortado na borda.
  *
- * O min-height é o que segura os secundários: sem ele, quando o "Fechar conta"
- * desce de linha, os de cima perdem o esticão e viram tirinhas de 0 de altura.
+ * Quebrar a linha resolvia, mas comia dois andares do rodapé. No CELULAR os
+ * três secundários viram ícone quadrado (X, impressora, zap) e sobra a linha
+ * inteira pro "Fechar conta" — que é o botão que o garçom mais aperta. No PC,
+ * onde a gaveta abre em 1080px, o texto volta: lá cabe e é mais claro.
+ *
+ * O wrap fica de rede de segurança pra tela muito estreita; o min-height é o
+ * que segura os ícones, que não têm padding vertical pra esticar sozinhos.
  */
 .sal-acoes {
   display: flex;
@@ -197,13 +200,43 @@ html[data-teclado='aberto'] .sal-overlay {
 }
 
 .sal-acoes > button {
-  min-height: 42px;
+  min-height: 44px;
 }
 
+/* Celular: quadrado fixo, sem texto. O title/aria-label é que diz o que faz. */
+.sal-acoes .sal-acao-icone {
+  flex: 0 0 auto;
+  width: 46px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.sal-acoes .sal-acao-icone:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+/* O rótulo só existe no PC. */
+.sal-acoes .sal-acao-txt {
+  display: none;
+  font-size: 14.5px;
+}
+
+/* Come o espaço que sobrar, mas não desce de linha por 10px a menos. */
 .sal-acoes .sal-acao-principal {
-  flex: 1 1 100%;
+  flex: 1 1 150px;
 }
 
 @media (min-width: 1100px) {
-  .sal-acoes .sal-acao-principal { flex: 1 1 auto; }
+  .sal-acoes .sal-acao-icone {
+    width: auto;
+    padding: 0 14px;
+  }
+  .sal-acoes .sal-acao-txt { display: inline; }
 }
