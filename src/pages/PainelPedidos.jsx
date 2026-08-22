@@ -16,6 +16,7 @@ function aceitarAutoAtivo() {
 }
 import { CONDICOES_PAGAMENTO, FORMAS_PAGAMENTO, formasAtivas } from '../lib/constants'
 import { separarItem } from '../lib/itensPedido'
+import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { abertaAgora, comoFicaNoDia, carregarExcecoes, hojeBR } from '../lib/feriados'
 // Sistema de salão embutido no gestor (Mesas): salão, reservas e config de mesas.
 import PresencialSalao from './PresencialSalao'
@@ -4515,10 +4516,16 @@ export default function PainelPedidos() {
 
     // Gera código de confirmação de 4 dígitos ao despachar (SÓ entrega). Retirada
     // mantém o código que já veio (ex.: o código de retirada do iFood) — não regera.
+    //
+    // Só gera se a loja usa código. Esta tela gerava sempre, ignorando o ajuste:
+    // desligado, o código continuava nascendo aqui e a confirmação — que só olha
+    // se o pedido TEM código — seguia exigindo. Era por isso que desligar não
+    // fazia efeito nenhum.
     if (novoStatus === 'saiu_entrega') {
       const pAtual = pedidos.find(x => x.id === id)
       const ehRet = pAtual && (pAtual.tipo_entrega || 'entrega') === 'retirada'
-      if (!ehRet) update.codigo_entrega = String(Math.floor(1000 + Math.random() * 9000))
+      const cod = ehRet ? null : novoCodigoEntrega(await exigeCodigoEntrega())
+      if (cod) update.codigo_entrega = cod
       // Marca quando saiu para entrega — usado pelo auto-conclusão de 6h.
       update.saiu_entrega_at = new Date().toISOString()
     }

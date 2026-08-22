@@ -5,6 +5,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import '../components/Page.css'
 import './PedidosDelivery.css'
 import { imprimirCupom } from '../utils/imprimirCupom'
+import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 
 const TIMER_LIMITE_MS = 7 * 60 * 1000 // 7 minutos
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
@@ -985,10 +986,13 @@ export default function PedidosDelivery() {
   async function handleAtualizarStatus(id, novoStatus) {
     const update = { status: novoStatus }
 
-    // Gera código de confirmação de 4 dígitos ao despachar para entrega/retirada.
-    // O cliente mostra esse código ao entregador (ou na retirada) para confirmar o pedido.
+    // Código de confirmação de 4 dígitos ao despachar — só quando a loja usa.
+    // Esta tela gerava sempre, ignorando o ajuste: a loja desligava o código e
+    // continuava sendo obrigada a digitar um, porque a confirmação só olha se o
+    // pedido TEM código guardado.
     if (novoStatus === 'saiu_entrega') {
-      update.codigo_entrega = String(Math.floor(1000 + Math.random() * 9000))
+      const cod = novoCodigoEntrega(await exigeCodigoEntrega())
+      if (cod) update.codigo_entrega = cod
     }
 
     await supabase

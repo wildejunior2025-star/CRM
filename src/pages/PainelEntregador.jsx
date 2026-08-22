@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
+import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? ''
@@ -790,8 +791,7 @@ export default function PainelEntregador() {
   const [exigeCodigo, setExigeCodigo] = useState(true)
   useEffect(() => {
     let vivo = true
-    supabase.from('configuracoes_plataforma').select('valor').eq('chave', 'exigir_codigo_entrega').maybeSingle()
-      .then(({ data }) => { if (vivo) setExigeCodigo(data ? data.valor !== 'false' : true) })
+    exigeCodigoEntrega().then(v => { if (vivo) setExigeCodigo(v) })
     return () => { vivo = false }
   }, [])
 
@@ -886,7 +886,7 @@ export default function PainelEntregador() {
 
   async function sairParaEntrega(pedido) {
     const update = { status: 'saiu_entrega', saiu_entrega_at: new Date().toISOString() }
-    if (exigeCodigo && !pedido.codigo_entrega) update.codigo_entrega = String(Math.floor(1000 + Math.random() * 9000))
+    if (exigeCodigo && !pedido.codigo_entrega) update.codigo_entrega = novoCodigoEntrega(true)
     // Se ninguém deu o "Pronto" ainda, a SAÍDA do motoboy registra o pronto
     // (ele já está com o pedido na bag e vai sair = está pronto). Fica no nome dele.
     if (!pedido.pronto_por) {
