@@ -251,6 +251,17 @@ export default function DespesasLucro({ empresaId }) {
   const custoProducaoDia = producaoHoje + revendaHoje + custoPctHoje + custoUnHoje
   const imprevistoHoje = useMemo(() => imprevistos.reduce((s, i) => s + Number(i.valor || 0), 0), [imprevistos])
 
+  // Quanto o programa de indicação custou hoje (mig 0179). Sai do extrato de
+  // créditos, não de lançamento manual.
+  const [cashbackHoje, setCashbackHoje] = useState(0)
+  useEffect(() => {
+    if (!empresaId || !dia) return
+    let vivo = true
+    supabase.rpc('fidelidade_custo_dia', { p_data: dia })
+      .then(({ data }) => { if (vivo) setCashbackHoje(Number(data ?? 0)) })
+    return () => { vivo = false }
+  }, [empresaId, dia])
+
   // Divisor do rateio: conta os dias reais do mês pela grade da loja; só cai no
   // número digitado se a loja ainda não configurou os horários.
   const regraDias = useMemo(() => ({ grade: horarios, excecoes, fechaFeriado }), [horarios, excecoes, fechaFeriado])
@@ -266,7 +277,14 @@ export default function DespesasLucro({ empresaId }) {
   const fixoPorDia = abre ? fixoPorDiaBase : 0
   const funcPorDia = abre ? funcPorDiaBase : 0
   const receita = receitaDia.proprios + (receitaDia.salao || 0) + receitaDia.ifood
-  const custosDia = fixoPorDia + funcPorDia + custoProducaoDia + imprevistoHoje
+  // Crédito de indicação/cashback gasto hoje (mig 0179). É custo da loja: a
+  // venda entrou cheia e o desconto saiu do bolso dela.
+  //
+  // Linha PRÓPRIA, e não jogada nos "imprevistos": aquela é uma lista que o
+  // lojista edita e apaga à mão, e o fechar-o-dia limpa a tabela inteira. Uma
+  // linha automática ali seria apagada por engano na primeira semana e ninguém
+  // entenderia por que o lucro subiu. Calculada do extrato, é sempre certa.
+  const custosDia = fixoPorDia + funcPorDia + custoProducaoDia + imprevistoHoje + cashbackHoje
   const lucroDia = receita - custosDia
 
   // Dia já fechado: vale o retrato salvo. Recalcular seria errado — a produção
@@ -274,8 +292,10 @@ export default function DespesasLucro({ empresaId }) {
   const fechado = useMemo(() => historico.find(h => h.data === dia) || null, [historico, dia])
   const v = fechado
     ? { receita: Number(fechado.receita_liquida || 0), fixo: Number(fechado.custo_fixo || 0), func: Number(fechado.custo_funcionarios || 0),
-        prod: Number(fechado.custo_producao || 0), imprev: Number(fechado.custo_imprevisto || 0), lucro: Number(fechado.lucro || 0) }
-    : { receita, fixo: fixoPorDia, func: funcPorDia, prod: custoProducaoDia, imprev: imprevistoHoje, lucro: lucroDia }
+        prod: Number(fechado.custo_producao || 0), imprev: Number(fechado.custo_imprevisto || 0),
+        cashback: Number(fechado.custo_cashback || 0), lucro: Number(fechado.lucro || 0) }
+    : { receita, fixo: fixoPorDia, func: funcPorDia, prod: custoProducaoDia, imprev: imprevistoHoje,
+        cashback: cashbackHoje, lucro: lucroDia }
   const itensFechado = Array.isArray(fechado?.itens) ? fechado.itens : []
   const imprevFechado = Array.isArray(fechado?.imprevistos) ? fechado.imprevistos : []
 
@@ -308,6 +328,7 @@ export default function DespesasLucro({ empresaId }) {
         receita_liquida: receita, receita_proprios: receitaDia.proprios + (receitaDia.salao || 0), receita_ifood: receitaDia.ifood,
         custo_fixo: fixoPorDia, custo_funcionarios: funcPorDia,
         custo_producao: custoProducaoDia, custo_imprevisto: imprevistoHoje,
+        custo_cashback: cashbackHoje,
         lucro: lucroDia, itens, imprevistos: impSnap,
       }, { onConflict: 'empresa_id,data' })
       if (upErr) throw upErr
@@ -614,6 +635,9 @@ export default function DespesasLucro({ empresaId }) {
             <Linha label={fechado ? '− Funcionários (rateio do dia)' : !abre ? '− Funcionários (loja fechada nesse dia)' : `− Funcionários (rateio do dia: ${brl(totalFunc)}/${dias})`} valor={`− ${brl(v.func)}`} cor="var(--danger)" />
             <Linha label={`− Custo de produção ${rotuloDia}`} valor={`− ${brl(v.prod)}`} cor="var(--danger)" />
             <Linha label={`− Custos imprevistos ${rotuloDia}`} valor={`− ${brl(v.imprev)}`} cor="var(--danger)" />
+            {v.cashback > 0 && (
+              <Linha label={`− Cashback e indicação ${rotuloDia}`} valor={`− ${brl(v.cashback)}`} cor="var(--danger)" />
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, marginTop: 6, borderTop: '2px solid var(--border)' }}>
               <span style={{ fontSize: 16, fontWeight: 900 }}>
                 {v.lucro >= 0 ? `= Foi pro seu bolso ${ehHoje ? 'hoje' : 'nesse dia'}` : `= Prejuízo ${ehHoje ? 'hoje' : 'nesse dia'}`}

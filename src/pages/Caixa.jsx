@@ -396,6 +396,10 @@ export default function Caixa() {
       Number(resumo.recebimentos_pix || 0) +
       Number(resumo.recebimentos_cartao || 0) +
       Number(resumo.recebimentos_transferencia || 0) +
+      // Crédito da loja (mig 0179): a venda foi CHEIA, então ele faz parte do
+      // faturamento. Não entra em nenhum "esperado" porque não é dinheiro que
+      // caiu em lugar nenhum — o custo dele aparece no Despesas & Lucro.
+      Number(resumo.recebimentos_cashback || 0) +
       Number(resumo.vendas_fiado || 0)
     : 0
 

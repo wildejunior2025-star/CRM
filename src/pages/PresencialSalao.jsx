@@ -22,6 +22,10 @@ const FORMAS = [
   // Fiado não gera linha em `pagamentos`: a dívida é a venda sem pagamento
   // (view clientes_saldo_fiado). Por isso exige cliente — ver 0114_fiado_mesa.sql.
   { id: 'fiado',    label: 'Fiado' },
+  // Crédito da loja (mig 0179). Entra na venda como o fiado — não é dinheiro na
+  // gaveta —, mas vira DESPESA em vez de "a receber". Só aparece pra loja que
+  // ligou o programa e pro cliente que tem saldo; ver `cashbackSaldo`.
+  { id: 'cashback', label: 'Crédito' },
 ]
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
@@ -94,6 +98,11 @@ export default function PresencialSalao() {
   // Fiado: quem fica devendo. Obrigatório quando alguma linha do pagamento é fiado.
   const [clientes, setClientes] = useState([])
   const [clienteSel, setClienteSel] = useState(null)  // { id, nome }
+
+  // Crédito da loja do cliente ligado à comanda (mig 0179). Zero quando a loja
+  // não ligou o programa ou não há cliente — e é isso que esconde a forma de
+  // pagamento "Crédito" das lojas que não usam.
+  const [cashbackSaldo, setCashbackSaldo] = useState(0)
   const [buscaCliente, setBuscaCliente] = useState('')
   const [novoCliente, setNovoCliente] = useState(false)
   const [novoTelefone, setNovoTelefone] = useState('') // opcional no cadastro do fiado (o nome é que não repete)
@@ -342,6 +351,21 @@ export default function PresencialSalao() {
   const subtotalRascunho = rascunho.reduce((s, r) => s + Number(r.preco_venda) * r.quantidade, 0)
 
   const subtotalSel = subtotalDe(comandaSel)
+
+  // Sem saldo, "Crédito" sai da lista de formas.
+  const formasDisponiveis = cashbackSaldo > 0 ? FORMAS : FORMAS.filter(f => f.id !== 'cashback')
+
+  // Busca o crédito sempre que muda o cliente da comanda aberta. A conta pode
+  // ficar aberta por horas e ele pode ter gasto noutra mesa nesse meio-tempo —
+  // por isso é consulta, e não algo guardado quando o cliente foi ligado.
+  useEffect(() => {
+    const cli = comandaSel?.cliente_id ?? clienteSel?.id ?? null
+    if (!cli) { setCashbackSaldo(0); return }
+    let vivo = true
+    supabase.rpc('cashback_do_cliente', { p_cliente_id: cli })
+      .then(({ data }) => { if (vivo) setCashbackSaldo(Number(data?.saldo ?? 0)) })
+    return () => { vivo = false }
+  }, [comandaSel?.cliente_id, clienteSel?.id, fechando])
   const taxaSel = aplicarTaxa ? Math.round(subtotalSel * (taxaPct / 100) * 100) / 100 : 0
   const totalSel = subtotalSel + taxaSel
 
@@ -1684,10 +1708,21 @@ export default function PresencialSalao() {
               ))}
             </div>
 
+            {/* Crédito do cliente (mig 0179): aparece só quando a loja ligou o
+                programa E o cliente ligado tem saldo. Forma que só dá erro ao
+                clicar é pior do que forma que não existe. */}
+            {cashbackSaldo > 0 && (
+              <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 8,
+                background: 'rgba(22,163,74,.12)', border: '1px solid #16a34a', fontSize: 13 }}>
+                🎟️ <b>{comandaSel?.cliente?.nome ?? 'O cliente'}</b> tem{' '}
+                <b>{fmt(cashbackSaldo)}</b> de crédito. Lance como <b>Crédito</b> pra descontar.
+              </div>
+            )}
+
             {modoPag === 'unico' ? (
               // wrap: com o Fiado são 4 formas e no celular não cabem numa linha só
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {FORMAS.map(f => (
+                {formasDisponiveis.map(f => (
                   <button key={f.id} type="button" onClick={() => setForma(f.id)}
                     style={{ flex: '1 1 calc(50% - 4px)', padding: '10px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 13,
                       border: `1.5px solid ${forma === f.id ? 'var(--primary)' : 'var(--border)'}`,
@@ -1716,7 +1751,7 @@ export default function PresencialSalao() {
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       <select value={p.forma} onChange={e => updatePagamento(i, 'forma', e.target.value)}
                         style={{ padding: '8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13 }}>
-                        {FORMAS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+                        {formasDisponiveis.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
                       </select>
                       <input type="number" step="0.01" min="0" inputMode="decimal" value={p.valor}
                         onChange={e => updatePagamento(i, 'valor', e.target.value)} placeholder="0,00"
