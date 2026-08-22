@@ -68,6 +68,7 @@ export default function Financeiro() {
   const [custFim, setCustFim]   = useState(ymd(new Date()))
   const [pedidos, setPedidos]   = useState([])
   const [loadingD, setLoadingD] = useState(true)
+  const [cashbackPeriodo, setCashbackPeriodo] = useState(0)
 
   // ── iFood: semanas (a receber na quarta) + anúncio por semana ──
   const [semanas, setSemanas] = useState([])     // [{iniYMD, inicio, fim, pagamento, situacao, liq, nped}]
@@ -95,6 +96,18 @@ export default function Financeiro() {
       return q
     })
     setPedidos(pedRes.data ?? [])
+
+    // Crédito de indicação/cashback gasto no período (mig 0179). É dinheiro que
+    // a loja deu de desconto: entrou no faturamento, mas não chegou em caixa
+    // nenhum. Sem esta linha o "líquido recebido" fica maior do que o que de
+    // fato caiu na mão.
+    let qc = supabase.from('creditos_movimentos').select('tipo, valor').in('tipo', ['debito', 'estorno'])
+    if (start) qc = qc.gte('created_at', start)
+    if (end)   qc = qc.lt('created_at', end)
+    const { data: movs } = await qc
+    setCashbackPeriodo((movs ?? []).reduce(
+      (acc, m) => acc + (m.tipo === 'debito' ? Number(m.valor) : -Number(m.valor)), 0))
+
     setLoadingD(false)
   }
   useEffect(() => { loadDelivery() }, [periodoD, custIni, custFim])
@@ -526,6 +539,11 @@ export default function Financeiro() {
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span>próprios <strong style={{ color: 'var(--text)' }}>{fmtBRL(liquidoProprios)}</strong></span>
             <span><IfoodIcon size={11} /> iFood recebido <strong style={{ color: 'var(--text)' }}>{fmtBRL(ifoodRecebido)}</strong></span>
+            {cashbackPeriodo > 0 && (
+              <span title="Crédito que os clientes gastaram. Entrou no faturamento, mas não chegou em caixa nenhum — é desconto que a loja deu.">
+                🎟️ cashback usado <strong style={{ color: 'var(--danger)' }}>− {fmtBRL(cashbackPeriodo)}</strong>
+              </span>
+            )}
           </div>
         </div>
       </div>

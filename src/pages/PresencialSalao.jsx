@@ -22,11 +22,15 @@ const FORMAS = [
   // Fiado não gera linha em `pagamentos`: a dívida é a venda sem pagamento
   // (view clientes_saldo_fiado). Por isso exige cliente — ver 0114_fiado_mesa.sql.
   { id: 'fiado',    label: 'Fiado' },
-  // Crédito da loja (mig 0179). Entra na venda como o fiado — não é dinheiro na
-  // gaveta —, mas vira DESPESA em vez de "a receber". Só aparece pra loja que
-  // ligou o programa e pro cliente que tem saldo; ver `cashbackSaldo`.
-  { id: 'cashback', label: 'Crédito' },
 ]
+
+// O crédito da loja (mig 0179) NÃO entra aqui de propósito. Ele nasceu como
+// forma de pagamento e estava errado por dois motivos: ficava um segundo botão
+// "Crédito" ao lado do cartão de crédito — indistinguíveis —, e obrigava o
+// garçom a fazer conta de cabeça (conta 3,60, crédito 1,95, lança 1,65 na
+// outra forma). Na prática o cliente SEMPRE paga a diferença em dinheiro, PIX
+// ou cartão. Então virou uma caixinha de abatimento: marca, o total cai, e ele
+// escolhe uma forma só pro que sobrou.
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
 
@@ -103,6 +107,7 @@ export default function PresencialSalao() {
   // não ligou o programa ou não há cliente — e é isso que esconde a forma de
   // pagamento "Crédito" das lojas que não usam.
   const [cashbackSaldo, setCashbackSaldo] = useState(0)
+  const [usarCashbackConta, setUsarCashbackConta] = useState(false)
   const [buscaCliente, setBuscaCliente] = useState('')
   const [novoCliente, setNovoCliente] = useState(false)
   const [novoTelefone, setNovoTelefone] = useState('') // opcional no cadastro do fiado (o nome é que não repete)
@@ -352,14 +357,22 @@ export default function PresencialSalao() {
 
   const subtotalSel = subtotalDe(comandaSel)
 
-  // Sem saldo, "Crédito" sai da lista de formas.
-  const formasDisponiveis = cashbackSaldo > 0 ? FORMAS : FORMAS.filter(f => f.id !== 'cashback')
+  // Quanto do crédito cabe nesta conta. Nunca cobre tudo: a loja precisa
+  // receber alguma coisa, e o servidor recusa — melhor a tela já oferecer só o
+  // que vai passar. Um centavo é o bastante pra conta não fechar em zero.
+  const cashbackAplicado = usarCashbackConta
+    ? Math.max(0, Math.min(cashbackSaldo, Math.round((totalSel - 0.01) * 100) / 100))
+    : 0
+  const totalAPagar = Math.max(0, Math.round((totalSel - cashbackAplicado) * 100) / 100)
 
   // Busca o crédito sempre que muda o cliente da comanda aberta. A conta pode
   // ficar aberta por horas e ele pode ter gasto noutra mesa nesse meio-tempo —
   // por isso é consulta, e não algo guardado quando o cliente foi ligado.
   useEffect(() => {
     const cli = comandaSel?.cliente_id ?? clienteSel?.id ?? null
+    // Desmarca ao trocar de cliente/comanda: marcado por herança, o garçom
+    // abateria o crédito de outra pessoa na mesa seguinte sem perceber.
+    setUsarCashbackConta(false)
     if (!cli) { setCashbackSaldo(0); return }
     let vivo = true
     supabase.rpc('cashback_do_cliente', { p_cliente_id: cli })
@@ -854,9 +867,16 @@ export default function PresencialSalao() {
 
   async function confirmarFechamento() {
     if (!comandaSel) return
+    // A linha do crédito é montada AQUI, não escolhida pelo garçom: ele marca a
+    // caixinha e a tela compõe o pagamento. Vai primeiro na lista pra a linha
+    // seguinte poder vir sem valor e o servidor jogar o resto nela.
+    const linhaCashback = cashbackAplicado > 0
+      ? [{ forma: 'cashback', valor: Math.round(cashbackAplicado * 100) / 100 }]
+      : []
+
     let lista
     if (modoPag === 'unico') {
-      lista = [{ forma, valor: Math.round(totalSel * 100) / 100 }]
+      lista = [...linhaCashback, { forma, valor: Math.round(totalAPagar * 100) / 100 }]
     } else {
       lista = pagamentos
         .map(p => ({
@@ -869,15 +889,19 @@ export default function PresencialSalao() {
         .filter(p => p.valor > 0)
       const soma = lista.reduce((s, p) => s + p.valor, 0)
       if (lista.length === 0) { window.alert('Adicione ao menos um pagamento.'); return }
-      if (Math.abs(soma - totalSel) > 0.05) {
-        window.alert(`A soma (R$ ${soma.toFixed(2)}) não bate com o total (R$ ${totalSel.toFixed(2)}).`)
+      // Dividindo a conta, as linhas cobrem só o que sobrou depois do crédito.
+      if (Math.abs(soma - totalAPagar) > 0.05) {
+        window.alert(`A soma (R$ ${soma.toFixed(2)}) não bate com o total a receber (R$ ${totalAPagar.toFixed(2)}).`)
         return
       }
+      lista = [...linhaCashback, ...lista]
     }
     // Pagamento único: quem diz QUANTO é o servidor (ele reconta os itens da mesa na
     // hora). O valor calculado aqui vai só pro papel e pro gestor conferir — se os
     // dois divergirem, vale a conta do servidor e a mesa não trava mais (mig 0144).
-    const listaRpc = modoPag === 'unico' ? [{ forma, valor: null }] : lista
+    const listaRpc = modoPag === 'unico'
+      ? [...linhaCashback, { forma, valor: null }]
+      : lista
     // Fiado sem cliente não fecha: a dívida cairia no "Consumidor (Mesa)" e ninguém
     // saberia de quem cobrar. A função no banco barra também, isto é só o aviso amigável.
     const temFiado = lista.some(p => p.forma === 'fiado' && (p.valor ?? 1) > 0)
@@ -1694,6 +1718,16 @@ export default function PresencialSalao() {
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, fontWeight: 800, padding: '10px 0', borderTop: '1px dashed var(--border)', marginTop: 6 }}>
               <span>Total</span><span style={{ color: 'var(--primary)' }}>{fmt(totalSel)}</span>
             </div>
+            {cashbackAplicado > 0 && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5, color: '#16a34a', marginTop: 4 }}>
+                  <span>🎟️ Cashback</span><span>− {fmt(cashbackAplicado)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 16, marginTop: 4 }}>
+                  <span>A receber</span><span style={{ color: 'var(--primary)' }}>{fmt(totalAPagar)}</span>
+                </div>
+              </>
+            )}
 
             {/* Modo: pagamento único × dividir */}
             <div style={{ display: 'flex', gap: 8, margin: '14px 0 10px' }}>
@@ -1708,21 +1742,44 @@ export default function PresencialSalao() {
               ))}
             </div>
 
-            {/* Crédito do cliente (mig 0179): aparece só quando a loja ligou o
-                programa E o cliente ligado tem saldo. Forma que só dá erro ao
-                clicar é pior do que forma que não existe. */}
+            {/* Crédito do cliente (mig 0179): caixinha de abatimento, não forma
+                de pagamento. Marca, o total cai, e as formas abaixo cobrem só a
+                diferença — que é o que acontece na prática. */}
             {cashbackSaldo > 0 && (
-              <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 8,
-                background: 'rgba(22,163,74,.12)', border: '1px solid #16a34a', fontSize: 13 }}>
-                🎟️ <b>{comandaSel?.cliente?.nome ?? 'O cliente'}</b> tem{' '}
-                <b>{fmt(cashbackSaldo)}</b> de crédito. Lance como <b>Crédito</b> pra descontar.
-              </div>
+              <button
+                type="button"
+                onClick={() => setUsarCashbackConta(v => !v)}
+                style={{
+                  width: '100%', textAlign: 'left', cursor: 'pointer', marginBottom: 10,
+                  padding: '11px 13px', borderRadius: 10,
+                  border: `1.5px solid ${usarCashbackConta ? '#16a34a' : 'var(--border)'}`,
+                  background: usarCashbackConta ? 'rgba(22,163,74,.12)' : 'transparent',
+                  display: 'flex', alignItems: 'center', gap: 11, color: 'var(--text)',
+                }}
+              >
+                <span style={{
+                  width: 20, height: 20, borderRadius: 5, flexShrink: 0,
+                  border: `2px solid ${usarCashbackConta ? '#16a34a' : 'var(--border)'}`,
+                  background: usarCashbackConta ? '#16a34a' : 'transparent',
+                  color: '#fff', fontSize: 13, lineHeight: '17px', textAlign: 'center', fontWeight: 800,
+                }}>{usarCashbackConta ? '✓' : ''}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontWeight: 700, fontSize: 13.5 }}>
+                    🎟️ Usar o cashback de {comandaSel?.cliente?.nome ?? 'do cliente'} · {fmt(cashbackSaldo)}
+                  </span>
+                  <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>
+                    {usarCashbackConta
+                      ? `Abate ${fmt(cashbackAplicado)} · falta receber ${fmt(totalAPagar)}`
+                      : 'Abate do total e ele paga só a diferença.'}
+                  </span>
+                </span>
+              </button>
             )}
 
             {modoPag === 'unico' ? (
               // wrap: com o Fiado são 4 formas e no celular não cabem numa linha só
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {formasDisponiveis.map(f => (
+                {FORMAS.map(f => (
                   <button key={f.id} type="button" onClick={() => setForma(f.id)}
                     style={{ flex: '1 1 calc(50% - 4px)', padding: '10px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 13,
                       border: `1.5px solid ${forma === f.id ? 'var(--primary)' : 'var(--border)'}`,
@@ -1751,7 +1808,7 @@ export default function PresencialSalao() {
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       <select value={p.forma} onChange={e => updatePagamento(i, 'forma', e.target.value)}
                         style={{ padding: '8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13 }}>
-                        {formasDisponiveis.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+                        {FORMAS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
                       </select>
                       <input type="number" step="0.01" min="0" inputMode="decimal" value={p.valor}
                         onChange={e => updatePagamento(i, 'valor', e.target.value)} placeholder="0,00"

@@ -478,6 +478,22 @@ export default function Caixa() {
                 <div className="label">Recebimentos Pix</div>
                 <div className="value">R$ {Number(resumo.recebimentos_pix).toFixed(2)}</div>
               </div>
+
+              {/* Cashback (mig 0179): a venda entrou cheia, mas este pedaço NÃO
+                  é dinheiro em lugar nenhum — é desconto que a loja deu. Fica
+                  fora de todo "esperado" e some quando é zero, pra não poluir a
+                  tela de quem não usa o programa. */}
+              {Number(resumo.recebimentos_cashback || 0) > 0 && (
+                <div className="card dashboard-card" style={{ borderLeft: '3px solid #16a34a' }}>
+                  <div className="label">🎟️ Cashback usado</div>
+                  <div className="value">R$ {Number(resumo.recebimentos_cashback).toFixed(2)}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
+                    Crédito que os clientes gastaram. Está no faturamento, mas
+                    <strong> não entra em nenhum esperado</strong> — vira despesa
+                    no Despesas &amp; Lucro.
+                  </div>
+                </div>
+              )}
               {/* Cartão aberto por forma: crédito e débito têm taxa diferente,
                   então cada um mostra o que sobra depois da maquineta.
                   Crédito e débito aparecem SEMPRE, zerados inclusive — igual a
