@@ -357,13 +357,6 @@ export default function PresencialSalao() {
 
   const subtotalSel = subtotalDe(comandaSel)
 
-  // Quanto do crédito cabe nesta conta. Nunca cobre tudo: a loja precisa
-  // receber alguma coisa, e o servidor recusa — melhor a tela já oferecer só o
-  // que vai passar. Um centavo é o bastante pra conta não fechar em zero.
-  const cashbackAplicado = usarCashbackConta
-    ? Math.max(0, Math.min(cashbackSaldo, Math.round((totalSel - 0.01) * 100) / 100))
-    : 0
-  const totalAPagar = Math.max(0, Math.round((totalSel - cashbackAplicado) * 100) / 100)
 
   // Busca o crédito sempre que muda o cliente da comanda aberta. A conta pode
   // ficar aberta por horas e ele pode ter gasto noutra mesa nesse meio-tempo —
@@ -381,6 +374,14 @@ export default function PresencialSalao() {
   }, [comandaSel?.cliente_id, clienteSel?.id, fechando])
   const taxaSel = aplicarTaxa ? Math.round(subtotalSel * (taxaPct / 100) * 100) / 100 : 0
   const totalSel = subtotalSel + taxaSel
+
+  // Quanto do crédito cabe nesta conta. Nunca cobre tudo: a loja precisa
+  // receber alguma coisa, e o servidor recusa — melhor a tela já oferecer só o
+  // que vai passar. Um centavo é o bastante pra conta não fechar em zero.
+  const cashbackAplicado = usarCashbackConta
+    ? Math.max(0, Math.min(cashbackSaldo, Math.round((totalSel - 0.01) * 100) / 100))
+    : 0
+  const totalAPagar = Math.max(0, Math.round((totalSel - cashbackAplicado) * 100) / 100)
 
   // Divisão da conta
   const somaPag = pagamentos.reduce((s, p) => s + (Number(p.valor) || 0), 0)
