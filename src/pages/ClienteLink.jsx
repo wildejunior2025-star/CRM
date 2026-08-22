@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import ModalComplementos, { btnQtd as btnQ } from '../components/ModalComplementos'
+import SenhaCliente from '../components/SenhaCliente'
 import { carregarCardapio, itensParaPedido } from '../lib/cardapioPublico'
 import { comoFicaNoDia } from '../lib/feriados'
 
@@ -44,6 +45,10 @@ export default function ClienteLink() {
   const [histAberto, setHistAberto] = useState(null)  // qual compra do histórico está aberta
   const [notif, setNotif] = useState(null)
   const prevPronto = useRef(new Set())
+
+  // Senha de 6 números (mig 0175). `senhaModo` null = popup fechado.
+  const [senhaModo, setSenhaModo] = useState(null)   // null | 'criar' | 'digitar'
+  const [senhaErro, setSenhaErro] = useState(null)
 
   // PIX do fiado (mig 0149): ele escolhe o valor, o sistema gera o QR e fica
   // esperando o Mercado Pago confirmar. A baixa é automática, no webhook.
@@ -162,13 +167,52 @@ export default function ClienteLink() {
     })
   }
 
-  async function enviar() {
-    setEnviando(true)
-    const { data, error } = await supabase.rpc('cliente_pedir', { p_token: token, p_itens: itensParaPedido(itens) })
+  // ── Envio do pedido, com a senha de 6 números (mig 0175) ─────────────────
+  //
+  // A senha é pedida AQUI, no fim, e não na abertura da página: com o carrinho
+  // montado quase ninguém desiste por seis números, então na prática todo mundo
+  // acaba criando uma. Pedir na entrada derrubaria o pedido por link.
+  //
+  // O servidor é quem manda: devolve SENHA_AUSENTE (nunca criou) ou SENHA_ERRADA
+  // (errou), e a tela só decide qual popup abrir. Assim a regra mora num lugar
+  // só e não dá pra pular a senha mexendo no navegador.
+  async function enviar(senha) {
+    setEnviando(true); setSenhaErro(null)
+    const { data, error } = await supabase.rpc('cliente_pedir', {
+      p_token: token, p_itens: itensParaPedido(itens), p_senha: senha ?? null,
+    })
     setEnviando(false)
-    if (error || !data?.ok) { window.alert('Não deu pra enviar: ' + (error?.message ?? 'erro')); return }
+
+    if (error) {
+      const m = error.message || ''
+      if (m.includes('SENHA_AUSENTE')) { setSenhaModo('criar');   return }
+      if (m.includes('SENHA_ERRADA')) {
+        setSenhaModo('digitar')
+        // Primeira batida vai sem senha só pra descobrir se ele tem uma: aí não
+        // é erro dele, é a tela perguntando. Só acusa se ele tiver digitado.
+        if (senha) setSenhaErro('Senha errada. Tente de novo.')
+        return
+      }
+      // A trava por tentativa vem com a mensagem pronta do banco.
+      if (m.includes('tentativas erradas')) { setSenhaModo('digitar'); setSenhaErro(m); return }
+      if (senhaModo) { setSenhaErro(m) } else { window.alert('Não deu pra enviar: ' + m) }
+      return
+    }
+    if (!data?.ok) { window.alert('Não deu pra enviar. Tente de novo.'); return }
+
+    setSenhaModo(null); setSenhaErro(null)
     setCarrinho({}); setDrawer(false); setSucesso(true)
     fetchConta()
+  }
+
+  // Criou a senha: já manda o pedido na sequência, sem obrigar a digitar de
+  // novo o que ele acabou de escolher duas vezes.
+  async function criarSenha(senha) {
+    setEnviando(true); setSenhaErro(null)
+    const { error } = await supabase.rpc('cliente_criar_senha', { p_token: token, p_senha: senha })
+    setEnviando(false)
+    if (error) { setSenhaErro(error.message); return }
+    enviar(senha)
   }
 
   // ── PIX do fiado ────────────────────────────────────────────────────────
@@ -497,7 +541,7 @@ export default function ClienteLink() {
               <span>Total</span><span style={{ color: '#a78bfa' }}>{fmt(totalValor)}</span>
             </div>
             <p style={{ fontSize: 12, opacity: .7, marginBottom: 12 }}>💳 O pagamento é feito com a equipe da loja.</p>
-            <button onClick={enviar} disabled={enviando || !situacao.aberto}
+            <button onClick={() => enviar()} disabled={enviando || !situacao.aberto}
               style={{ width: '100%', height: 52, borderRadius: 14, border: 'none',
                 cursor: (enviando || !situacao.aberto) ? 'not-allowed' : 'pointer',
                 background: situacao.aberto ? '#22c55e' : '#374151', color: '#fff', fontWeight: 800, fontSize: 16 }}>
@@ -588,6 +632,18 @@ export default function ClienteLink() {
           semObrigatorios={!!info?.sem_obrigatorios}
           onClose={() => setMontando(null)}
           onConfirm={addComplemento}
+        />
+      )}
+
+      {/* Senha de 6 números — só aparece na hora de enviar o pedido (mig 0175) */}
+      {senhaModo && (
+        <SenhaCliente
+          modo={senhaModo}
+          erro={senhaErro}
+          ocupado={enviando}
+          onCriar={criarSenha}
+          onDigitar={enviar}
+          onFechar={() => { setSenhaModo(null); setSenhaErro(null) }}
         />
       )}
 
