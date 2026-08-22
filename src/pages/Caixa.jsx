@@ -26,6 +26,9 @@ function semanaDe(offset) {
 
 const ddmm = (d) => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
 
+// Como cada forma aparece na lista de sangrias/suprimentos.
+const rotuloForma = (f) => (f === 'pix' ? '📱 PIX' : f === 'cartao' ? '💳 Cartão' : '💵 Dinheiro')
+
 function rotuloSemana(offset) {
   const { inicio, fim } = semanaDe(offset)
   const ultimo = new Date(fim)
@@ -61,6 +64,7 @@ export default function Caixa() {
   const [showAbertura, setShowAbertura] = useState(false)
   const [valorAbertura, setValorAbertura] = useState('')
   const [valorAberturaPix, setValorAberturaPix] = useState('')
+  const [valorAberturaCartao, setValorAberturaCartao] = useState('')
   const [obsAbertura, setObsAbertura] = useState('')
 
   const [showMovimento, setShowMovimento] = useState(null) // 'sangria' | 'suprimento' | null
@@ -220,6 +224,8 @@ export default function Caixa() {
     // (e nem aparecem pra digitar).
     setValorAbertura(aberturaTravada ? String(ultimoFech.valor_dinheiro ?? 0) : '')
     setValorAberturaPix(aberturaTravada ? String(ultimoFech.valor_pix ?? 0) : '')
+    setValorAberturaCartao(aberturaTravada ? String(ultimoFech.valor_cartao ?? 0) : '')
+    setValorAberturaCartao(aberturaTravada ? String(ultimoFech.valor_cartao ?? 0) : '')
     setObsAbertura('')
     setFormError(null)
     setShowAbertura(true)
@@ -246,6 +252,7 @@ export default function Caixa() {
       p_valor_abertura: valor,
       p_observacoes: obsAbertura || null,
       p_valor_abertura_pix: valorPix,
+      p_valor_abertura_cartao: valorAberturaCartao === '' ? 0 : Number(valorAberturaCartao),
     })
     setSaving(false)
 
@@ -360,12 +367,20 @@ export default function Caixa() {
       ? Number(valorFechamentoPix) - valorEsperadoPix
       : null
 
-  // Cartão NÃO entra no esperado em dinheiro — não fica na gaveta. Aqui é só
-  // comparação: o que a maquineta imprimiu × o que foi lançado no sistema.
+  // Cartão agora funciona igual PIX (mig 0173): o dinheiro cai na hora na conta
+  // da maquineta, fica lá de um dia pro outro e a loja tira dali pra pagar
+  // compra. Então tem saldo de abertura, desconta sangria e tem esperado.
+  // Não entra no esperado da GAVETA — cartão nenhum fica em dinheiro vivo.
   const totalCartaoSistema = resumo ? Number(resumo.recebimentos_cartao || 0) : 0
+  const valorEsperadoCartao = resumo
+    ? Number(caixaAtual.valor_abertura_cartao || 0) +
+      totalCartaoSistema +
+      Number(resumo.total_suprimentos_cartao || 0) -
+      Number(resumo.total_sangrias_cartao || 0)
+    : 0
   const diferencaFechamentoCartao =
     showFechamento && valorFechamentoCartao !== ''
-      ? Number(valorFechamentoCartao) - totalCartaoSistema
+      ? Number(valorFechamentoCartao) - valorEsperadoCartao
       : null
 
   // O que sobra de TODO o cartão depois das taxas (cada forma com a taxa dela).
@@ -577,7 +592,7 @@ export default function Caixa() {
                       <td>
                         {editandoMovId === m.id ? (
                           <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                            {[['dinheiro', '💵 Dinheiro'], ['pix', '📱 PIX']].map(([id, lbl]) => (
+                            {[['dinheiro', '💵 Dinheiro'], ['pix', '📱 PIX'], ['cartao', '💳 Cartão']].map(([id, lbl]) => (
                               <button key={id} type="button" disabled={salvandoMovForma}
                                 onClick={() => trocarFormaMovimento(m, id)}
                                 style={{ padding: '4px 9px', borderRadius: 7, cursor: salvandoMovForma ? 'wait' : 'pointer', fontWeight: 700, fontSize: 12.5,
@@ -593,7 +608,7 @@ export default function Caixa() {
                           <button type="button" onClick={() => setEditandoMovId(m.id)} title="Trocar a forma"
                             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: '1px dashed var(--border)',
                               borderRadius: 7, padding: '3px 8px', cursor: 'pointer', color: 'var(--text)', font: 'inherit' }}>
-                            {(m.forma ?? 'dinheiro') === 'pix' ? '📱 PIX' : '💵 Dinheiro'}
+                            {rotuloForma(m.forma)}
                             <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>✎</span>
                           </button>
                         )}
@@ -671,7 +686,13 @@ export default function Caixa() {
                 // Cartão: maquineta × sistema. Não tem abertura nem sangria — o
                 // dinheiro do cartão não passa pela gaveta.
                 const cartaoSist = (r && r !== 'loading') ? Number(r.recebimentos_cartao || 0) : 0
-                const difCartao = (r && r !== 'loading' && c.valor_fechamento_cartao != null) ? Number(c.valor_fechamento_cartao) - cartaoSist : null
+                // Esperado em cartão = o que abriu + recebido + suprimentos − sangrias
+                // (mesma conta do PIX; o caixa aberto usa valorEsperadoCartao).
+                const espCartao = (r && r !== 'loading')
+                  ? Number(c.valor_abertura_cartao || 0) + cartaoSist +
+                    Number(r.total_suprimentos_cartao || 0) - Number(r.total_sangrias_cartao || 0)
+                  : 0
+                const difCartao = (r && r !== 'loading' && c.valor_fechamento_cartao != null) ? Number(c.valor_fechamento_cartao) - espCartao : null
                 return (
                 <Fragment key={c.id}>
                   <tr onClick={() => toggleHist(c)} style={{ cursor: 'pointer' }} title="Toque para ver o detalhamento por forma de pagamento">
@@ -751,7 +772,7 @@ export default function Caixa() {
                             )}
                             {difCartao !== null && (
                               <div style={{ marginTop: 4, fontSize: 13.5, fontWeight: 700 }}>
-                                💳 Maquineta: R$ {Number(c.valor_fechamento_cartao).toFixed(2)} · sistema R$ {cartaoSist.toFixed(2)} ·{' '}
+                                💳 Maquineta: R$ {Number(c.valor_fechamento_cartao).toFixed(2)} · esperado R$ {espCartao.toFixed(2)} ·{' '}
                                 <span style={{ color: Math.abs(difCartao) < 0.005 ? 'var(--success, #16a34a)' : (difCartao > 0 ? 'var(--primary)' : 'var(--danger, #ef4444)') }}>
                                   Diferença: R$ {difCartao.toFixed(2)}{Math.abs(difCartao) < 0.005 ? ' (confere)' : difCartao > 0 ? ' (venda não lançada)' : ' (lançada a mais)'}
                                 </span>
@@ -784,7 +805,7 @@ export default function Caixa() {
                                         </span>
                                         <strong style={{ fontSize: 15 }}>R$ {Number(m.valor).toFixed(2)}</strong>
                                         <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                                          {(m.forma ?? 'dinheiro') === 'pix' ? '📱 PIX' : '💵 Dinheiro'}
+                                          {rotuloForma(m.forma)}
                                         </span>
                                         <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
                                           {new Date(m.created_at).toLocaleString('pt-BR')}
@@ -841,6 +862,10 @@ export default function Caixa() {
                           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>📱 PIX</div>
                           <div style={{ fontSize: 20, fontWeight: 800 }}>R$ {Number(ultimoFech.valor_pix || 0).toFixed(2)}</div>
                         </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>💳 Cartão</div>
+                          <div style={{ fontSize: 20, fontWeight: 800 }}>R$ {Number(ultimoFech.valor_cartao || 0).toFixed(2)}</div>
+                        </div>
                       </div>
                       <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8 }}>
                         Foi o fechamento de {new Date(ultimoFech.fechado_em).toLocaleString('pt-BR')}.
@@ -877,6 +902,21 @@ export default function Caixa() {
                     step="0.01"
                     value={valorAberturaPix}
                     onChange={(e) => setValorAberturaPix(e.target.value)}
+                    placeholder="0,00"
+                  />
+                </div>
+                {/* Cartão também tem saldo: a maquineta liquida na hora e o que
+                    não foi gasto fica lá pro dia seguinte. */}
+                <div className="form-field full">
+                  <label htmlFor="valor-abertura-cartao">💳 Saldo inicial na maquineta (R$) <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.85em' }}>deixe vazio se começa do zero</span></label>
+                  <input
+                    id="valor-abertura-cartao"
+                    name="valor_abertura_cartao"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={valorAberturaCartao}
+                    onChange={(e) => setValorAberturaCartao(e.target.value)}
                     placeholder="0,00"
                   />
                 </div>
@@ -936,7 +976,7 @@ export default function Caixa() {
                 <div className="form-field full">
                   <label>{showMovimento === 'sangria' ? 'Saiu como' : 'Entrou como'}</label>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    {[['dinheiro', '💵 Dinheiro'], ['pix', '📱 PIX']].map(([id, lbl]) => (
+                    {[['dinheiro', '💵 Dinheiro'], ['pix', '📱 PIX'], ['cartao', '💳 Cartão']].map(([id, lbl]) => (
                       <button key={id} type="button" onClick={() => setFormaMovimento(id)}
                         style={{ flex: 1, padding: '10px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 14,
                           border: `1.5px solid ${formaMovimento === id ? 'var(--primary)' : 'var(--border)'}`,
@@ -948,6 +988,8 @@ export default function Caixa() {
                   <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
                     {formaMovimento === 'pix'
                       ? 'Por PIX não mexe na gaveta — entra/sai do esperado em PIX.'
+                      : formaMovimento === 'cartao'
+                      ? 'Saiu da conta da maquineta — entra/sai do esperado em cartão, não da gaveta.'
                       : 'Em dinheiro entra/sai da gaveta e ajusta o esperado em dinheiro.'}
                   </span>
                 </div>
@@ -1060,11 +1102,11 @@ export default function Caixa() {
                     </span>
                   </div>
                 )}
-                {/* Cartão: compara com o papel da maquineta. Não mexe no dinheiro
-                    esperado da gaveta — é conferência pura, pra achar no mesmo dia
-                    a venda que passou na maquineta e ninguém lançou. */}
+                {/* Cartão: o saldo que ficou na conta da maquineta, como o PIX.
+                    Ele anda de um dia pro outro (abre com o que fechou) e desconta
+                    a sangria que a loja tira dali pra pagar compra. */}
                 <div className="form-field full">
-                  <label htmlFor="valor-fechamento-cartao">💳 Total da maquineta (R$) <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.85em' }}>opcional — o que saiu no fechamento dela</span></label>
+                  <label htmlFor="valor-fechamento-cartao">💳 Saldo na conta da maquineta (R$) <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.85em' }}>quanto ficou lá</span></label>
                   <input
                     id="valor-fechamento-cartao"
                     name="valor_fechamento_cartao"
@@ -1073,8 +1115,12 @@ export default function Caixa() {
                     step="0.01"
                     value={valorFechamentoCartao}
                     onChange={(e) => setValorFechamentoCartao(e.target.value)}
-                    placeholder={`Lançado no sistema: ${totalCartaoSistema.toFixed(2)}`}
+                    placeholder={`Esperado: ${valorEsperadoCartao.toFixed(2)}`}
                   />
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                    Abriu com R$ {Number(caixaAtual.valor_abertura_cartao || 0).toFixed(2)} · recebeu R$ {totalCartaoSistema.toFixed(2)}
+                    {Number(resumo?.total_sangrias_cartao || 0) > 0 && ` · sangrou R$ ${Number(resumo.total_sangrias_cartao).toFixed(2)}`}
+                  </span>
                 </div>
                 {diferencaFechamentoCartao !== null && !Number.isNaN(diferencaFechamentoCartao) && (
                   <div className="form-field full">
