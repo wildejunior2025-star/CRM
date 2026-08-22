@@ -72,6 +72,12 @@ export default function ClienteLink() {
   const [indic, setIndic] = useState(null)
   const [linkCopiado, setLinkCopiado] = useState(false)
 
+  // Saldo pra caixinha do pedido (mig 0181). O desconto NAO sai agora: pelo
+  // link ele monta a comanda e paga com a loja depois, e ate la pode pedir mais
+  // coisa. Aqui vai só a intenção, que a loja confirma no fechamento.
+  const [saldoLink, setSaldoLink] = useState(0)
+  const [usarSaldoPedido, setUsarSaldoPedido] = useState(false)
+
   // PIX do fiado (mig 0149): ele escolhe o valor, o sistema gera o QR e fica
   // esperando o Mercado Pago confirmar. A baixa é automática, no webhook.
   const [showPix, setShowPix] = useState(false)
@@ -138,6 +144,8 @@ export default function ClienteLink() {
   async function fetchIndic() {
     const { data } = await supabase.rpc('cliente_indicacao', { p_token: token })
     setIndic(data || null)
+    const { data: saldo } = await supabase.rpc('cliente_saldo_link', { p_token: token })
+    setSaldoLink(Number(saldo ?? 0))
   }
   useEffect(() => { if (info) fetchIndic() }, [info])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -238,6 +246,7 @@ export default function ClienteLink() {
     setEnviando(true); setSenhaErro(null)
     const { data, error } = await supabase.rpc('cliente_pedir', {
       p_token: token, p_itens: itensParaPedido(itens), p_senha: senha ?? null,
+      p_usar_cashback: usarSaldoPedido && saldoLink > 0,
     })
     setEnviando(false)
 
@@ -260,7 +269,8 @@ export default function ClienteLink() {
 
     setSenhaModo(null); setSenhaErro(null)
     setCarrinho({}); setDrawer(false); setSucesso(true)
-    fetchConta()
+    setUsarSaldoPedido(false)
+    fetchConta(); fetchIndic()
   }
 
   // Criou a senha: já manda o pedido na sequência, sem obrigar a digitar de
@@ -711,6 +721,36 @@ export default function ClienteLink() {
             <div style={{ display: 'flex', justifyContent: 'space-between', margin: '14px 0', fontSize: 16, fontWeight: 800 }}>
               <span>Total</span><span style={{ color: '#a78bfa' }}>{fmt(totalValor)}</span>
             </div>
+            {/* Crédito (mig 0181): pedido, não desconto. A conta ainda pode
+                crescer, então quem abate é a loja no fechamento. */}
+            {saldoLink > 0 && (
+              <button
+                type="button"
+                onClick={() => setUsarSaldoPedido(v => !v)}
+                style={{
+                  width: '100%', textAlign: 'left', cursor: 'pointer', marginBottom: 12,
+                  padding: '12px 14px', borderRadius: 12,
+                  border: `1.5px solid ${usarSaldoPedido ? '#22c55e' : '#2c2350'}`,
+                  background: usarSaldoPedido ? 'rgba(34,197,94,.12)' : 'transparent',
+                  color: '#fff', display: 'flex', alignItems: 'center', gap: 11,
+                }}
+              >
+                <span style={{
+                  width: 20, height: 20, borderRadius: 5, flexShrink: 0,
+                  border: `2px solid ${usarSaldoPedido ? '#22c55e' : '#4c3f7a'}`,
+                  background: usarSaldoPedido ? '#22c55e' : 'transparent',
+                  fontSize: 13, lineHeight: '17px', textAlign: 'center', fontWeight: 800,
+                }}>{usarSaldoPedido ? '✓' : ''}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontWeight: 800, fontSize: 14 }}>
+                    🎟️ Usar meu crédito · {fmt(saldoLink)}
+                  </span>
+                  <span style={{ display: 'block', fontSize: 11.5, color: '#8b7bb8', marginTop: 1 }}>
+                    A loja desconta na hora de fechar sua conta.
+                  </span>
+                </span>
+              </button>
+            )}
             <p style={{ fontSize: 12, opacity: .7, marginBottom: 12 }}>💳 O pagamento é feito com a equipe da loja.</p>
             <button onClick={() => enviar()} disabled={enviando || !situacao.aberto}
               style={{ width: '100%', height: 52, borderRadius: 14, border: 'none',

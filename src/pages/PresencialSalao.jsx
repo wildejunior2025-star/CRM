@@ -363,9 +363,10 @@ export default function PresencialSalao() {
   // por isso é consulta, e não algo guardado quando o cliente foi ligado.
   useEffect(() => {
     const cli = comandaSel?.cliente_id ?? clienteSel?.id ?? null
-    // Desmarca ao trocar de cliente/comanda: marcado por herança, o garçom
-    // abateria o crédito de outra pessoa na mesa seguinte sem perceber.
-    setUsarCashbackConta(false)
+    // Já vem marcado quando o cliente pediu isso pelo link dele (mig 0181);
+    // fora esse caso, desmarca ao trocar de cliente/comanda — marcado por
+    // herança, o garçom abateria o crédito de outra pessoa sem perceber.
+    setUsarCashbackConta(!!comandaSel?.usar_cashback)
     if (!cli) { setCashbackSaldo(0); return }
     let vivo = true
     supabase.rpc('cashback_do_cliente', { p_cliente_id: cli })
@@ -1767,6 +1768,9 @@ export default function PresencialSalao() {
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ display: 'block', fontWeight: 700, fontSize: 13.5 }}>
                     🎟️ Usar o cashback de {comandaSel?.cliente?.nome ?? 'do cliente'} · {fmt(cashbackSaldo)}
+                    {comandaSel?.usar_cashback && (
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#16a34a' }}> · o cliente pediu</span>
+                    )}
                   </span>
                   <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>
                     {usarCashbackConta
