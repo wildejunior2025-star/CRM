@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
@@ -55,7 +56,15 @@ export default function Fidelidade() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id
 
-  const [aba, setAba]         = useState('regras')
+  // Aba na URL: voltar pra tela não perde o lugar, e dá pra mandar o link já
+  // aberto na aba certa.
+  const [params, setParams] = useSearchParams()
+  const aba = params.get('aba') === 'clientes' ? 'clientes' : 'regras'
+  const setAba = (id) => {
+    const p = new URLSearchParams(params)
+    if (id === 'regras') p.delete('aba'); else p.set('aba', id)
+    setParams(p)
+  }
   const [loading, setLoading] = useState(true)
   const [cfg, setCfg]         = useState(PADRAO)
   const [salvando, setSalvando] = useState(false)

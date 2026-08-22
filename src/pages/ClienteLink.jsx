@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import ModalComplementos, { btnQtd as btnQ } from '../components/ModalComplementos'
 import SenhaCliente from '../components/SenhaCliente'
@@ -7,10 +7,13 @@ import { carregarCardapio, itensParaPedido } from '../lib/cardapioPublico'
 import { comoFicaNoDia } from '../lib/feriados'
 
 // LINK DO CLIENTE (mig 0147) — a página que o freguês abre pelo link só dele.
-// Sem login: quem identifica é o token na URL. Três abas:
+// Sem login: quem identifica é o token na URL. Quatro abas:
 //   Cardápio     → monta o pedido; ao enviar vira uma comanda no nome dele
 //   Meu pedido   → o que está na cozinha agora, ao vivo
 //   Minha conta  → o que ele deve e o que já pagou (o fiado, sem precisar perguntar)
+//   Indicar      → o link dele, o saldo, quem ele trouxe e o extrato (mig 0176)
+//
+// A aba escolhida vai pra URL (?aba=), então voltar pra página não perde o lugar.
 //
 // Mesmo cardápio e mesmo modal de montagem do QR da mesa (lib/cardapioPublico e
 // components/ModalComplementos) — se mudar o cardápio, muda nos dois.
@@ -33,7 +36,21 @@ export default function ClienteLink() {
   const [compMap, setCompMap] = useState({})
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState(null)
-  const [aba, setAba] = useState('cardapio')      // cardapio | pedido | conta
+  // A aba mora na URL (?aba=indicar), não só na memória da tela. Sem isso,
+  // sair da página e voltar — ou dar F5, ou usar o botão voltar do celular —
+  // sempre jogava o cliente de volta no Cardápio, mesmo que ele estivesse
+  // olhando o saldo. Como é query param, também dá pra mandar o link já aberto
+  // na aba certa.
+  const [params, setParams] = useSearchParams()
+  const ABAS_VALIDAS = ['cardapio', 'pedido', 'conta', 'indicar']
+  const abaUrl = params.get('aba')
+  const aba = ABAS_VALIDAS.includes(abaUrl) ? abaUrl : 'cardapio'
+  function setAba(id) {
+    const p = new URLSearchParams(params)
+    // O Cardápio é o padrão: sai da URL pra o link continuar limpo.
+    if (id === 'cardapio') p.delete('aba'); else p.set('aba', id)
+    setParams(p)
+  }
   const [busca, setBusca] = useState('')
   const [cat, setCat] = useState('Todos')
   const [carrinho, setCarrinho] = useState({})
