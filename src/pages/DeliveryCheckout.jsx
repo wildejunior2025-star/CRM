@@ -524,6 +524,23 @@ export default function DeliveryCheckout() {
     } catch { /* ignora */ }
   }, [])
 
+  // Crédito da loja pelo telefone (mig 0178). Mesma deixa do reconhecimento
+  // abaixo: assim que o telefone fica completo, pergunta quanto ele tem.
+  const [saldoCashback, setSaldoCashback] = useState(0)
+  const [usarCashback, setUsarCashback]   = useState(true)
+  useEffect(() => {
+    const empId = state?.empresaId
+    const tel = form.telefone.replace(/\D/g, '')
+    if (!empId || tel.length < 10) { setSaldoCashback(0); return }
+    const t = setTimeout(async () => {
+      const { data } = await supabase.rpc('cashback_por_telefone', {
+        p_empresa_id: empId, p_telefone: tel,
+      })
+      setSaldoCashback(Number(data ?? 0))
+    }, 700)
+    return () => clearTimeout(t)
+  }, [form.telefone, state])
+
   // Reconhece o cliente pelo telefone (recuperar em outro aparelho, sem senha)
   const reconhecidoRef = useRef(false)
   useEffect(() => {
@@ -643,7 +660,18 @@ export default function DeliveryCheckout() {
     return { rua: cepInfo.rua, bairro: cepInfo.bairro }
   })()
   const taxaAplicada = taxaCalculada
-  const total = subtotal + taxaAplicada
+  const totalBruto = subtotal + taxaAplicada
+
+  // Crédito da loja (mig 0178). O saldo aparece pelo telefone porque no
+  // checkout da loja online nao existe login: o cliente so e criado no momento
+  // do envio, e o telefone e a unica chave que ja esta na tela.
+  //
+  // Nunca cobre a conta inteira - a loja precisa receber alguma coisa, e pedido
+  // de R$ 0 quebra o PIX. O servidor recusa tambem, isto aqui e so pra tela nao
+  // oferecer o que vai ser negado.
+  const cashbackMax = Math.max(0, Math.round((totalBruto - 0.01) * 100) / 100)
+  const cashbackUsado = usarCashback ? Math.min(saldoCashback, cashbackMax) : 0
+  const total = Math.max(0, Math.round((totalBruto - cashbackUsado) * 100) / 100)
 
   // Pedido mínimo (só entrega, conta o subtotal dos produtos — sem a taxa)
   const pedidoMinimo = Number(lojaEndereco?.pedido_minimo ?? 0)
@@ -892,6 +920,7 @@ export default function DeliveryCheckout() {
         itens:        itensPedido,
         subtotal,
         taxa_entrega: taxaAplicada,
+        cashback_usado: cashbackUsado,
         total,
         tipo_entrega: tipo,
         endereco_rua:         tipo === 'entrega' ? form.rua.trim() : null,
@@ -950,6 +979,7 @@ export default function DeliveryCheckout() {
         itens: itensPedido,
         subtotal,
         taxa_entrega:   taxaAplicada,
+        cashback_usado: cashbackUsado,
         total,
         forma_pagamento: form.pagamento,
         troco_para: form.pagamento === 'dinheiro' && form.troco
@@ -1318,6 +1348,37 @@ export default function DeliveryCheckout() {
                     </div>
                   ))}
                 </div>
+                {saldoCashback > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setUsarCashback(v => !v)}
+                    style={{
+                      width: '100%', textAlign: 'left', cursor: 'pointer', marginBottom: 12,
+                      padding: '12px 14px', borderRadius: 10,
+                      border: `1px solid ${usarCashback ? '#16a34a' : 'var(--border, #334155)'}`,
+                      background: usarCashback ? 'rgba(22,163,74,.10)' : 'transparent',
+                      display: 'flex', alignItems: 'center', gap: 11,
+                    }}
+                  >
+                    <span style={{
+                      width: 20, height: 20, borderRadius: 5, flexShrink: 0,
+                      border: `2px solid ${usarCashback ? '#16a34a' : '#64748b'}`,
+                      background: usarCashback ? '#16a34a' : 'transparent',
+                      color: '#fff', fontSize: 13, lineHeight: '17px', textAlign: 'center', fontWeight: 800,
+                    }}>{usarCashback ? '✓' : ''}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'block', fontWeight: 700, fontSize: 14 }}>
+                        Usar meu crédito · R$ {fmt(saldoCashback)}
+                      </span>
+                      <span style={{ display: 'block', fontSize: 12, opacity: .75, marginTop: 1 }}>
+                        {cashbackUsado < saldoCashback && usarCashback
+                          ? `Dá pra usar R$ ${fmt(cashbackUsado)} neste pedido; o resto fica guardado.`
+                          : 'Desconta agora do total deste pedido.'}
+                      </span>
+                    </span>
+                  </button>
+                )}
+
                 <div className="dco-resumo-totais">
                   <div className="dco-resumo-linha">
                     <span>Subtotal</span>
@@ -1327,6 +1388,12 @@ export default function DeliveryCheckout() {
                     <span>{tipo === 'retirada' ? 'Retirada na loja' : 'Taxa de entrega'}</span>
                     <span>{tipo === 'retirada' ? 'Grátis' : taxaPendente ? 'a calcular' : taxaAplicada === 0 ? 'Grátis' : `R$ ${fmt(taxaAplicada)}`}</span>
                   </div>
+                  {cashbackUsado > 0 && (
+                    <div className="dco-resumo-linha" style={{ color: '#16a34a' }}>
+                      <span>Seu crédito</span>
+                      <span>− R$ {fmt(cashbackUsado)}</span>
+                    </div>
+                  )}
                   <div className="dco-resumo-linha dco-resumo-total">
                     <span>Total</span>
                     <strong>{taxaPendente ? `R$ ${fmt(subtotal)}+` : `R$ ${fmt(total)}`}</strong>
