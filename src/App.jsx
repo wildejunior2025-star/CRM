@@ -138,6 +138,7 @@ const FichaTecnica = lazy(() => import('./pages/FichaTecnica'))
 const Estoque = lazy(() => import('./pages/Estoque'))
 const Caixa = lazy(() => import('./pages/Caixa'))
 const Financeiro = lazy(() => import('./pages/Financeiro'))
+const Fidelidade = lazy(() => import('./pages/Fidelidade'))
 const Relatorios = lazy(() => import('./pages/Relatorios'))
 const Usuarios = lazy(() => import('./pages/Usuarios'))
 const PortalHome = lazy(() => import('./pages/PortalHome'))
@@ -309,6 +310,10 @@ export default function App() {
             <Route
               path="financeiro"
               element={<ProtectedRoute roles={['admin']} modulo="financeiro"><Financeiro /></ProtectedRoute>}
+            />
+            <Route
+              path="fidelidade"
+              element={<ProtectedRoute roles={['admin']} modulo="fidelidade"><Fidelidade /></ProtectedRoute>}
             />
             <Route
               path="minha-loja"

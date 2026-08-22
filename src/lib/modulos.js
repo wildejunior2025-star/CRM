@@ -22,6 +22,7 @@ export const MODULOS = [
   { key: 'presencial',   label: 'Serviço Presencial', descricao: 'Mesas, Salão e Cozinha (KDS)' },
   { key: 'delivery',     label: 'Delivery',           descricao: 'Minha Loja, raio de entrega e pedidos delivery' },
   { key: 'whatsapp',     label: 'WhatsApp / Bot',     descricao: 'WhatsApp, créditos do bot e teste do bot' },
+  { key: 'fidelidade',   label: 'Indicação e Cashback', descricao: 'Cliente indica cliente e ganha crédito na loja' },
   { key: 'financeiro',   label: 'Financeiro',         descricao: 'Contas, despesas e fluxo de caixa' },
   { key: 'relatorios',   label: 'Relatórios',         descricao: 'Relatórios e curva ABC' },
   { key: 'funcionarios', label: 'Funcionários',       descricao: 'Gestão dos usuários da loja' },

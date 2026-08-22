@@ -74,6 +74,7 @@ const links = [
   },
 
   { group: 'Financeiro' },
+  { to: '/fidelidade', label: 'Indicação e Cashback', roles: ['admin'], mod: 'fidelidade' },
   { to: '/financeiro', label: 'Financeiro', roles: ['admin'], mod: 'financeiro' },
   { to: '/relatorios', label: 'Relatórios', roles: ['admin'], mod: 'relatorios' },
 ]
