@@ -178,3 +178,32 @@ html[data-teclado='aberto'] .sal-overlay {
   .sal-cat:nth-child(2) { border-top: none; }
   .sal-cat:nth-child(even) { border-left: 1px solid var(--border); }
 }
+
+/* Barra de ações da comanda.
+ *
+ * Eram quatro botões numa linha só, sem quebra: no celular o "Fechar conta"
+ * era empurrado pra FORA da gaveta e o garçom não tinha como fechar a mesa —
+ * só via o "Mandar no zap" cortado na borda. Agora a linha quebra e a ação
+ * principal fica sozinha embaixo, larga, que é a que mais se usa. No PC, onde
+ * a gaveta abre em 1080px, tudo volta pra uma linha só.
+ *
+ * O min-height é o que segura os secundários: sem ele, quando o "Fechar conta"
+ * desce de linha, os de cima perdem o esticão e viram tirinhas de 0 de altura.
+ */
+.sal-acoes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sal-acoes > button {
+  min-height: 42px;
+}
+
+.sal-acoes .sal-acao-principal {
+  flex: 1 1 100%;
+}
+
+@media (min-width: 1100px) {
+  .sal-acoes .sal-acao-principal { flex: 1 1 auto; }
+}

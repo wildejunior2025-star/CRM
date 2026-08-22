@@ -1495,7 +1495,7 @@ export default function PresencialSalao() {
                     🔵 Conta fechada pelo garçom — aguardando o ADM conferir o pagamento e liberar a mesa.
                   </div>
                   {ehAdmin ? (
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div className="sal-acoes">
                       <button type="button" onClick={cancelarMesa}
                         style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}>
                         Cancelar
@@ -1507,7 +1507,7 @@ export default function PresencialSalao() {
                         </button>
                       )}
                       <button type="button" onClick={confirmarLiberarAdm} disabled={salvando}
-                        className="btn btn-primary" style={{ flex: 1, marginTop: 0 }}>
+                        className="btn btn-primary sal-acao-principal" style={{ marginTop: 0 }}>
                         {salvando ? 'Liberando...' : (subtotalSel <= 0 ? '✅ Liberar mesa (sem itens)' : '✅ Confirmar e liberar mesa')}
                       </button>
                     </div>
@@ -1519,7 +1519,7 @@ export default function PresencialSalao() {
                 </div>
               ) : (
                 <div>
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div className="sal-acoes">
                     <button type="button" onClick={cancelarMesa}
                       style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}>
                       Cancelar
@@ -1546,7 +1546,7 @@ export default function PresencialSalao() {
                       {enviandoZap ? 'Enviando…' : '📲 Mandar no zap'}
                     </button>
                     <button type="button" onClick={abrirFechamento} disabled={subtotalSel <= 0}
-                      className="btn btn-primary" style={{ flex: 1, marginTop: 0, opacity: subtotalSel <= 0 ? 0.5 : 1 }}>
+                      className="btn btn-primary sal-acao-principal" style={{ marginTop: 0, opacity: subtotalSel <= 0 ? 0.5 : 1 }}>
                       Fechar conta
                     </button>
                   </div>
