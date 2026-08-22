@@ -102,7 +102,7 @@ serve(async (req) => {
       .from("empresas").select("modulos").eq("id", pedido.empresa_id).single()
     const avisosAtivos = (empresaMod?.modulos ?? {}).avisos !== false
 
-    const mensagem = getMensagem(
+    let mensagem = getMensagem(
       novo_status,
       pedido.tipo_entrega ?? "entrega",
       String(pedido.numero_pedido ?? ""),
@@ -110,6 +110,46 @@ serve(async (req) => {
       String(pedido.motivo_cancelamento ?? "")
     )
     if (!mensagem) return new Response("ok")
+
+    // Cashback e indicacao (mig 0177): so no "entregue", e so quando a loja
+    // ligou o programa. Vai anexado ao aviso que ele ja ia receber - mandar uma
+    // segunda mensagem gastaria outra janela de 24h e pareceria spam.
+    //
+    // Quem NAO ganhou nada tambem recebe: e o convite pra indicar. Sem isso o
+    // cliente so descobre que tem um link se o lojista mandar um por um, e o
+    // programa nunca sai do lugar.
+    //
+    // O link e sempre do lojaonline: a rota /c/<token> existe nos dois
+    // dominios, mas quem recebe precisa de um endereco que funcione sozinho.
+    if (novo_status === "entregue") {
+      try {
+        const { data: cb } = await supabase.rpc("pedido_cashback", { p_pedido_id: pedido_id })
+        if (cb?.ativo && cb?.token) {
+          const link   = `https://lojaonline.fwcinter.com/c/${cb.token}`
+          const ganhou = Number(cb.ganhou ?? 0)
+          const reais  = (v: number) => Number(v ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })
+
+          mensagem += ganhou > 0
+            ? [
+                "",
+                `🎁 *Voce ganhou R$ ${reais(ganhou)} de cashback!*`,
+                `Seu saldo na loja: *R$ ${reais(cb.saldo)}*. E so avisar na hora de pagar que a gente desconta.`,
+                "",
+                "Veja seu saldo e indique amigos pra ganhar mais:",
+                link,
+              ].join("\n")
+            : [
+                "",
+                `🎟️ *Indique e ganhe ${Number(cb.pct_indicacao ?? 0).toLocaleString("pt-BR")}%*`,
+                "Chame um amigo pelo seu link: quando ele fizer a primeira compra, voces dois ganham credito aqui.",
+                link,
+              ].join("\n")
+        }
+      } catch (e) {
+        // Aviso de pedido nao pode cair por causa do cashback.
+        console.error("[notify] cashback falhou", String(e).slice(0, 200))
+      }
+    }
 
     const phone = pedido.cliente_telefone.replace(/\D/g, "")
     const phoneWpp = phone.startsWith("55") ? phone : `55${phone}`

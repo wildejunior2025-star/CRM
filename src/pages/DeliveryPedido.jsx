@@ -202,6 +202,10 @@ export default function DeliveryPedido() {
   const [comentario, setComentario] = useState('')
   const [enviandoAval, setEnviandoAval] = useState(false)
   const [erroAval, setErroAval] = useState(null)
+
+  // Cashback e indicação (mig 0177). Buscado só quando o pedido conclui — antes
+  // disso não há o que mostrar, e a consulta varre indicações e carteira.
+  const [cashback, setCashback] = useState(null)
   const intervalRef = useRef(null)
 
   const fetchPedido = async () => {
@@ -287,6 +291,15 @@ export default function DeliveryPedido() {
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pedido?.id, pedido?.status, pedido?.pix_status, pedido?.mp_payment_status, loja])
+
+  // Cashback e indicação (mig 0177). Só quando o pedido conclui: antes disso
+  // não há o que mostrar, e a consulta varre indicações e carteira. Roda uma
+  // vez — o crédito daquele pedido não muda depois de entregue.
+  useEffect(() => {
+    if (pedido?.status !== 'entregue' || cashback) return
+    supabase.rpc('pedido_cashback', { p_pedido_id: pedido.id })
+      .then(({ data }) => setCashback(data ?? null))
+  }, [pedido?.id, pedido?.status, cashback])
 
   async function copiar(texto) {
     if (!texto) return
@@ -503,6 +516,55 @@ export default function DeliveryPedido() {
                 </button>
               </div>
             )}
+          </section>
+        )}
+
+        {/* Cashback e indicação (mig 0177) — logo abaixo do "entregue", que é
+            onde ele já está olhando. Aparece só se a loja ligou o programa. */}
+        {pedido.status === 'entregue' && cashback?.ativo && cashback?.token && (
+          <section className="dpd-card" style={{
+            border: '2px solid #7c3aed',
+            background: 'linear-gradient(135deg, rgba(124,58,237,.14), rgba(124,58,237,.05))',
+            textAlign: 'center',
+          }}>
+            {Number(cashback.ganhou) > 0 ? (
+              <>
+                <div style={{ fontSize: 34, lineHeight: 1 }}>🎁</div>
+                <h2 className="dpd-card-title" style={{ margin: '8px 0 4px' }}>
+                  Parabéns! Você ganhou R$ {fmt(cashback.ganhou)} de cashback
+                </h2>
+                <p style={{ fontSize: 14, color: '#94a3b8', margin: '0 0 4px' }}>
+                  Seu saldo na loja é de <b style={{ color: '#a78bfa' }}>R$ {fmt(cashback.saldo)}</b>.
+                  É só avisar na hora de pagar que a loja desconta.
+                </p>
+                <p style={{ fontSize: 13.5, color: '#94a3b8', margin: '0 0 14px' }}>
+                  Quer ganhar mais? Indique um amigo — quando ele fizer a primeira compra,
+                  vocês dois ganham.
+                </p>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 34, lineHeight: 1 }}>🎟️</div>
+                <h2 className="dpd-card-title" style={{ margin: '8px 0 4px' }}>
+                  Indique um amigo e ganhe {Number(cashback.pct_indicacao).toLocaleString('pt-BR')}%
+                </h2>
+                <p style={{ fontSize: 13.5, color: '#94a3b8', margin: '0 0 14px' }}>
+                  Quando ele fizer a primeira compra, vocês dois ganham crédito pra
+                  gastar aqui na loja.
+                </p>
+              </>
+            )}
+
+            <a
+              href={`/c/${cashback.token}`}
+              style={{
+                display: 'block', padding: '14px 18px', borderRadius: 12,
+                background: '#7c3aed', color: '#fff', fontWeight: 800, fontSize: 15,
+                textDecoration: 'none',
+              }}
+            >
+              {Number(cashback.ganhou) > 0 ? 'Ver meu saldo e indicar' : 'Pegar meu link'}
+            </a>
           </section>
         )}
 
