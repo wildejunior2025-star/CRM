@@ -6,6 +6,7 @@ import AvisoCookies from '../components/AvisoCookies'
 import { adicionalComplementos, blocosDeOpcoes, cobraPeloMaior, rotuloPrecoOpcao } from '../lib/complementos'
 import { criarBuscadorDescricao, comDescricaoNasOpcoes } from '../lib/descricaoSabor'
 import { abertaAgora, comoFicaNoDia, carregarExcecoes, hojeBR } from '../lib/feriados'
+import { capturarIndicacao } from '../lib/indicacao'
 import './DeliveryLoja.css'
 
 // A regra de "a loja está aberta agora?" mora em src/lib/feriados.js — grade da
@@ -105,6 +106,11 @@ export default function DeliveryLoja() {
     try { return localStorage.getItem('dloja-tema') || 'claro' } catch { return 'claro' }
   })
   useEffect(() => { try { localStorage.setItem('dloja-tema', tema) } catch { /* ignora */ } }, [tema])
+
+  // Chegou por `?ind=`? Guarda quem indicou (mig 0176). Roda na abertura porque
+  // o cliente quase nunca compra na mesma visita: ele olha o cardápio, sai, e
+  // volta depois direto — sem o parâmetro na URL.
+  useEffect(() => { capturarIndicacao() }, [])
 
   // Sincroniza carrinho com localStorage (chave = id real da loja)
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { registrarIndicacao } from '../lib/indicacao'
 import { getEnderecoAtivo } from '../utils/enderecoPortal'
 import { registrarPedido } from '../lib/meusPedidos'
 import { iniciarCheckout } from '../lib/tracking'
@@ -850,6 +851,10 @@ export default function DeliveryCheckout() {
       })
       clienteId = cid ?? null
     } catch { /* não bloqueia o pedido */ }
+
+    // Chegou pelo link de alguém? Amarra o vínculo (mig 0176). O crédito dos
+    // dois só cai quando ESTE pedido for entregue.
+    await registrarIndicacao(clienteId)
 
     const itensPedido = itens.map(i => ({
       produto_id:    i.id,
