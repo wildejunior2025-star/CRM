@@ -171,6 +171,11 @@ export default function PortalLoja() {
   const dominioExclusivo = !!empresaParceira
 
   const SACOLA_KEY = `sacola_portal_${empresaId}`
+  // Token de quem indicou, guardado por loja. Fica no localStorage porque o
+  // cliente quase nunca compra na mesma visita em que abre o link: ele olha o
+  // cardápio, sai, e volta depois — direto, sem o `?ind=`. Sem guardar, a
+  // indicação morria justamente nos casos mais comuns.
+  const INDICACAO_KEY = `indicacao_portal_${empresaId}`
 
   const [empresa, setEmpresa] = useState(null)
   const [produtos, setProdutos] = useState([])
@@ -216,6 +221,19 @@ export default function PortalLoja() {
   const [valorPonto, setValorPonto]   = useState(0.02)
   const [minResgate, setMinResgate]   = useState(100)
   const [usarSaldo, setUsarSaldo]     = useState(false)
+
+  /* ── Chegou por indicação? Guarda quem mandou (mig 0176) ──
+     Roda uma vez, na abertura. Não sobrescreve um token já guardado: quem
+     indicou primeiro é quem leva, senão o último link aberto roubaria a
+     indicação de quem realmente trouxe o cliente. */
+  useEffect(() => {
+    try {
+      const ind = new URLSearchParams(window.location.search).get('ind')
+      if (ind && /^[a-f0-9]{10}$/.test(ind) && !localStorage.getItem(INDICACAO_KEY)) {
+        localStorage.setItem(INDICACAO_KEY, ind)
+      }
+    } catch { /* localStorage indisponível (modo privado restrito) */ }
+  }, [INDICACAO_KEY])
 
   /* ── Persistir carrinho no localStorage ── */
   useEffect(() => {
@@ -464,6 +482,23 @@ export default function PortalLoja() {
         })
         clienteId = data ?? null
       }
+    }
+
+    // Indicação (mig 0176): quem chegou por `?ind=<token>` vira indicado de
+    // quem mandou o link. Só amarra o vínculo — o crédito dos dois só cai
+    // quando ESTE pedido for entregue.
+    //
+    // Best-effort de propósito: indicação recusada (auto-indicação, mesmo
+    // telefone, já era cliente) não pode derrubar o pedido, que é o que
+    // realmente importa aqui. A função devolve o motivo em vez de estourar.
+    if (clienteId) {
+      try {
+        const ind = localStorage.getItem(INDICACAO_KEY)
+        if (ind) {
+          await supabase.rpc('indicacao_registrar', { p_token_indicador: ind, p_cliente_id: clienteId })
+          localStorage.removeItem(INDICACAO_KEY)
+        }
+      } catch { /* sem localStorage ou RPC fora do ar: segue o pedido */ }
     }
 
     const itens = itensCarrinho.map(i => ({

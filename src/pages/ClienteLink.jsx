@@ -50,6 +50,11 @@ export default function ClienteLink() {
   const [senhaModo, setSenhaModo] = useState(null)   // null | 'criar' | 'digitar'
   const [senhaErro, setSenhaErro] = useState(null)
 
+  // Indicação e cashback (mig 0176). `ativo:false` = a loja não ligou o
+  // programa, e a aba nem aparece.
+  const [indic, setIndic] = useState(null)
+  const [linkCopiado, setLinkCopiado] = useState(false)
+
   // PIX do fiado (mig 0149): ele escolhe o valor, o sistema gera o QR e fica
   // esperando o Mercado Pago confirmar. A baixa é automática, no webhook.
   const [showPix, setShowPix] = useState(false)
@@ -110,6 +115,30 @@ export default function ClienteLink() {
     return () => clearTimeout(t)
   }, [notif])
 
+  // Painel de indicação: link, saldo, quem ele trouxe e o extrato, numa
+  // chamada só. Recarrega quando um pedido é enviado, porque o crédito pode
+  // ter caído nesse meio-tempo.
+  async function fetchIndic() {
+    const { data } = await supabase.rpc('cliente_indicacao', { p_token: token })
+    setIndic(data || null)
+  }
+  useEffect(() => { if (info) fetchIndic() }, [info])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function copiarLink() {
+    const url = linkIndicacao
+    try {
+      await navigator.clipboard.writeText(url)
+    } catch {
+      // clipboard bloqueado (http, navegador antigo): cai no seleciona-e-copia
+      const el = document.createElement('textarea')
+      el.value = url; document.body.appendChild(el); el.select()
+      try { document.execCommand('copy') } catch { /* desistiu */ }
+      document.body.removeChild(el)
+    }
+    setLinkCopiado(true)
+    setTimeout(() => setLinkCopiado(false), 2200)
+  }
+
   // Loja aberta? Quem manda é o banco (a RPC recusa fora do horário); aqui é só
   // pra avisar antes, e pra tratar o feriado, que é calculado no app.
   const situacao = useMemo(() => {
@@ -139,6 +168,18 @@ export default function ClienteLink() {
       const porCategoria = (a.categoria ?? '').localeCompare(b.categoria ?? '')
       return porCategoria !== 0 ? porCategoria : (a.nome ?? '').localeCompare(b.nome ?? '')
     })
+
+  // Link de indicação: a vitrine pública da loja com o token dele no fim.
+  //
+  // O domínio é SEMPRE o da loja online, nunca `window.location.origin`: esta
+  // página abre nos dois domínios, mas a rota `/{slug}` só existe no
+  // lojaonline. Gerado pelo portal, o link daria 404 na mão do amigo — e quem
+  // descobriria seria o cliente, não a gente.
+  const linkIndicacao = indic?.ativo
+    ? `${window.location.hostname === 'lojaonline.fwcinter.com'
+        ? window.location.origin
+        : 'https://lojaonline.fwcinter.com'}/${indic.slug}?ind=${indic.token}`
+    : ''
 
   const itens = Object.entries(carrinho).map(([id, v]) => ({ id, ...v }))
   const totalItens = itens.reduce((s, i) => s + i.qtd, 0)
@@ -289,6 +330,8 @@ export default function ClienteLink() {
           ['cardapio', '🍽️ Cardápio'],
           ['pedido', `📋 Meu pedido${comanda?.itens?.length ? ` (${comanda.itens.length})` : ''}`],
           ['conta', devendo > 0 ? `🧾 Devo ${fmt(devendo)}` : '🧾 Minha conta'],
+          // Só existe se a loja ligou o programa (mig 0176 devolve ativo:false).
+          ...(indic?.ativo ? [['indicar', Number(indic.saldo) > 0 ? `🎟️ ${fmt(indic.saldo)}` : '🎟️ Indicar']] : []),
         ].map(([id, lb]) => (
           <button key={id} onClick={() => setAba(id)}
             style={{ flex: 1, padding: '9px 6px', borderRadius: 10, cursor: 'pointer', fontSize: 12.5, fontWeight: 800,
@@ -502,6 +545,117 @@ export default function ClienteLink() {
           <p style={{ fontSize: 11.5, opacity: .6, textAlign: 'center' }}>
             Alguma coisa errada? Fale com a loja — quem lança é a equipe.
           </p>
+        </div>
+      )}
+
+      {/* ── Indicar (mig 0176) ────────────────────────────────────────────── */}
+      {aba === 'indicar' && indic?.ativo && (
+        <div style={{ padding: '14px 14px 90px', display: 'grid', gap: 14 }}>
+
+          {/* Saldo primeiro: é o que ele abre a aba pra ver */}
+          <div style={{ background: 'linear-gradient(135deg,#7c3aed,#5b21b6)', borderRadius: 16, padding: '20px 18px', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, opacity: .85, letterSpacing: .4 }}>SEU CRÉDITO NA LOJA</div>
+            <div style={{ fontSize: 36, fontWeight: 800, margin: '4px 0 2px' }}>{fmt(indic.saldo)}</div>
+            <div style={{ fontSize: 12, opacity: .85 }}>
+              {Number(indic.saldo) > 0
+                ? 'É só avisar na hora de pagar que a loja desconta.'
+                : 'Indique um amigo e seu crédito começa aqui.'}
+            </div>
+          </div>
+
+          {/* O link */}
+          <div style={{ background: '#1b1436', borderRadius: 14, padding: 16 }}>
+            <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>Seu link de indicação</div>
+            <p style={{ fontSize: 13, color: '#c4b5fd', lineHeight: 1.5, margin: '0 0 12px' }}>
+              Mande pros amigos. Quando um deles fizer a <b>primeira compra</b>, você ganha{' '}
+              <b>{Number(indic.pct_indicacao).toLocaleString('pt-BR')}%</b> em crédito
+              {Number(indic.pct_cashback) > 0 && <> — e ele ganha <b>{Number(indic.pct_cashback).toLocaleString('pt-BR')}%</b> de volta</>}.
+            </p>
+
+            <div style={{
+              background: '#0f0b22', border: '1px solid #2c2350', borderRadius: 10,
+              padding: '11px 13px', fontSize: 12.5, color: '#a78bfa',
+              wordBreak: 'break-all', marginBottom: 10,
+            }}>
+              {linkIndicacao}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={copiarLink}
+                style={{ flex: 1, height: 46, borderRadius: 12, border: '1px solid #7c3aed', cursor: 'pointer',
+                  background: linkCopiado ? '#22c55e' : 'transparent', color: '#fff', fontWeight: 800, fontSize: 14 }}>
+                {linkCopiado ? '✓ Copiado!' : '📋 Copiar link'}
+              </button>
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(
+                  `Faço meus pedidos na ${info?.empresa_nome} e é muito bom! Pede pelo meu link que você ganha desconto na primeira compra: ${linkIndicacao}`
+                )}`}
+                target="_blank" rel="noreferrer"
+                style={{ flex: 1, height: 46, borderRadius: 12, border: 'none', textDecoration: 'none',
+                  background: '#16a34a', color: '#fff', fontWeight: 800, fontSize: 14,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>
+                Mandar no zap
+              </a>
+            </div>
+          </div>
+
+          {/* Quem ele já trouxe */}
+          <div style={{ background: '#1b1436', borderRadius: 14, padding: 16 }}>
+            <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10 }}>
+              Seus indicados {indic.indicados.length > 0 && `(${indic.indicados.length})`}
+            </div>
+            {indic.indicados.length === 0 ? (
+              <p style={{ fontSize: 13, color: '#8b7bb8', margin: 0 }}>
+                Ninguém ainda. Manda seu link pra alguém que goste de comer bem. 😉
+              </p>
+            ) : (
+              <div style={{ display: 'grid', gap: 8 }}>
+                {indic.indicados.map((a, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+                    padding: '10px 12px', background: '#0f0b22', borderRadius: 10 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600 }}>{a.nome}</div>
+                      <div style={{ fontSize: 11.5, color: '#8b7bb8' }}>
+                        {a.status === 'pago' ? 'já comprou' : 'ainda não comprou'}
+                      </div>
+                    </div>
+                    <div style={{ fontWeight: 800, fontSize: 14, whiteSpace: 'nowrap',
+                      color: a.status === 'pago' ? '#22c55e' : '#8b7bb8' }}>
+                      {a.status === 'pago' ? `+ ${fmt(a.credito)}` : '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Extrato */}
+          {indic.extrato.length > 0 && (
+            <div style={{ background: '#1b1436', borderRadius: 14, padding: 16 }}>
+              <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10 }}>Seu extrato</div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {indic.extrato.map((m, i) => {
+                  const entra = m.tipo === 'credito' || m.tipo === 'estorno'
+                  return (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10,
+                      paddingBottom: 8, borderBottom: i < indic.extrato.length - 1 ? '1px solid #2c2350' : 'none' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5 }}>{m.descricao || m.tipo}</div>
+                        <div style={{ fontSize: 11, color: '#8b7bb8' }}>
+                          {dataBR(m.quando)}
+                          {m.expira_em && entra && ` · vence ${dataBR(m.expira_em + 'T12:00')}`}
+                        </div>
+                      </div>
+                      <div style={{ fontWeight: 800, fontSize: 13.5, whiteSpace: 'nowrap',
+                        color: entra ? '#22c55e' : '#f87171' }}>
+                        {entra ? '+' : '−'} {fmt(m.valor)}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
