@@ -1804,6 +1804,13 @@ function ImpressoraCelularPanel({ empresa }) {
         <button type="button" disabled={busy || semBt} onClick={testar} style={btn('transparent', true)}>Imprimir teste</button>
       </div>
       {nome && <div style={{ fontSize: 12, color: 'var(--text)' }}>Impressora: <b>{nome}</b></div>}
+      {conectada && (
+        <div style={{ fontSize: 12, lineHeight: 1.5, color: '#a16207', background: 'rgba(234,179,8,.10)', border: '1px solid #eab308', borderRadius: 8, padding: '9px 11px' }}>
+          📌 <b>Este aparelho é a impressora da loja.</b> O garçom lança do celular dele e o papel sai <b>aqui</b> —
+          então deixe esta tela aberta e o aparelho <b>na tomada</b>. Enquanto a impressora estiver ligada a tela fica
+          acesa sozinha; se você fechar o gestor ou o celular desligar, o pedido não sai.
+        </div>
+      )}
       {msg && <div style={{ fontSize: 12, color: msg.ok ? '#16a34a' : '#dc2626', fontWeight: 600 }}>{msg.ok ? '✓ ' : '⚠️ '}{msg.txt}</div>}
       <div style={{ borderTop: '1px solid var(--border, #2a2a3a)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <span style={{ fontSize: 13, fontWeight: 800 }}>O que ESTA impressora imprime</span>
@@ -3631,6 +3638,15 @@ export default function PainelPedidos() {
     } catch { setFwcPausado(!novo) /* reverte se falhou */ }
   }
 
+  // Este aparelho TEM uma térmica pareada e conectada? Então ele é a estação de
+  // impressão da loja — o garçom lança do celular dele, e quem cospe o papel é
+  // este aqui. Parear impressora é ato explícito: ninguém pareia pra não
+  // imprimir. Por isso a térmica conectada vale por si, sem depender do
+  // interruptor "Auto-imprimir" (que nasceu pro caminho do navegador, onde a
+  // impressão abre janela e atrapalha).
+  const ehEstacaoDeImpressao = () => window.__fwcBtConectada === true
+  const deveAutoImprimir = () => autoImprimirAtivo() || ehEstacaoDeImpressao()
+
   function patchConfigLocal(patch) {
     try {
       const cfg = JSON.parse(localStorage.getItem('painelConfig') || '{}')
@@ -4259,7 +4275,7 @@ export default function PainelPedidos() {
       // Sem isso, com o painel aberto noutra aba, sairiam duas vias da mesma conta.
       const novas = aguardando.filter(c => !contaMesaImpressaRef.current.has(c.id) && !c.fechamento_pendente?.conta_impressa)
       novas.forEach(c => contaMesaImpressaRef.current.add(c.id))
-      if (!primeira && (fwcImprimeRef.current || autoImprimirAtivo())) novas.forEach(imprimirContaMesa)
+      if (!primeira && (fwcImprimeRef.current || deveAutoImprimir())) novas.forEach(imprimirContaMesa)
       if (ativo) setComandas(lista)
     }
     carregarComandas()
@@ -4314,7 +4330,7 @@ export default function PainelPedidos() {
     // do envio. Sem esta marca sairiam duas vias da mesma comanda.
     const jaSaiu = window.__fwcMesaImpressa
     if (jaSaiu?.has(item.id)) { jaSaiu.delete(item.id); return }
-    if (!autoImprimirAtivo() || fwcImprimeRef.current || (item.status && item.status !== 'pendente')) return
+    if (!deveAutoImprimir() || fwcImprimeRef.current || (item.status && item.status !== 'pendente')) return
     const cid = item.comanda_id
     const buf = mesaPrintRef.current
     if (!buf[cid]) buf[cid] = { itens: [], timer: null }
@@ -4550,7 +4566,7 @@ export default function PainelPedidos() {
               setPedidos(prev => [...prev, novo])
               // Imprime pedido novo (aguardando) OU venda de balcão (já confirmada).
               // Se o app Impressora FWC está imprimindo, o navegador não imprime (evita 2 vias).
-              if (autoImprimirAtivo() && !fwcImprimeRef.current && (novo.status === 'aguardando' || novo.origem === 'balcao')) {
+              if (deveAutoImprimir() && !fwcImprimeRef.current && (novo.status === 'aguardando' || novo.origem === 'balcao')) {
                 autoImprimirPedido(novo)
               }
               if (novo.status === 'aguardando') {
@@ -4570,7 +4586,7 @@ export default function PainelPedidos() {
                   // Pedido chegou ao painel agora (ex: PIX confirmado)
                   if (novo.status === 'aguardando') {
                     iniciarLoopSom()
-                    if (autoImprimirAtivo() && !fwcImprimeRef.current) autoImprimirPedido(novo)
+                    if (deveAutoImprimir() && !fwcImprimeRef.current) autoImprimirPedido(novo)
                     if (aceitarAutoAtivo()) handleConfirmar(novo.id, tempoPrevistoMin(novo, empresa))
                   }
                   return [...prev, novo]

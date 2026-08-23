@@ -81,6 +81,8 @@ function ouvirQueda(dev) {
     marcarEstado()
     agendarReligar(0)
   })
+  // Impressora ligada = estação de impressão = tela acesa.
+  segurarTela()
 }
 
 function agendarReligar(tentativa = 0) {
@@ -94,11 +96,43 @@ function agendarReligar(tentativa = 0) {
   }, espera)
 }
 
+// ── Tela acesa enquanto a impressora estiver ligada ─────────────────────────
+// O celular da impressora é a ESTAÇÃO: o garçom lança do aparelho dele e quem
+// imprime é este. Só que Android com a tela apagada suspende a aba — e aba
+// suspensa não recebe o aviso do pedido novo nem mantém a conexão Bluetooth.
+// O papel simplesmente não sai, sem erro nenhum na tela.
+//
+// Enquanto a térmica estiver conectada, seguramos a tela acesa. É a mesma coisa
+// que o app de GPS faz. Sem impressora conectada, o celular dorme normal.
+let _telaPresa = null
+
+async function segurarTela() {
+  try {
+    if (!('wakeLock' in navigator)) return          // navegador antigo: sem isso
+    if (_telaPresa && !_telaPresa.released) return  // já está segura
+    if (document.visibilityState !== 'visible') return
+    _telaPresa = await navigator.wakeLock.request('screen')
+    _telaPresa.addEventListener('release', () => { _telaPresa = null })
+  } catch { /* negado pelo usuário/sistema — segue sem */ }
+}
+
+function soltarTela() {
+  try { _telaPresa?.release() } catch { /* ok */ }
+  _telaPresa = null
+}
+
+export const telaEstaPresa = () => !!(_telaPresa && !_telaPresa.released)
+
 // Vigia global (uma vez só na vida da página).
 function vigiar() {
   if (_vigiando || typeof window === 'undefined') return
   _vigiando = true
-  const acordar = () => { if (temImpressoraConhecida() && !estaConectada()) agendarReligar(0) }
+  const acordar = () => {
+    if (!temImpressoraConhecida()) { soltarTela(); return }
+    // O sistema solta a trava sozinho quando a tela some; reconquista ao voltar.
+    if (estaConectada()) { segurarTela(); return }
+    agendarReligar(0)
+  }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') acordar() })
   window.addEventListener('focus', acordar)
   window.addEventListener('online', acordar)
