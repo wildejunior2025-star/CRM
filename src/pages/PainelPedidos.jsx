@@ -1751,6 +1751,17 @@ function ImpressoraCelularPanel({ empresa }) {
     } catch (e) { setMsg({ ok: false, txt: e?.message || 'Falhou' }) }
     finally { setBusy(false) }
   }
+  // Papel desta impressora (mig 0184). Fica no navegador DESTE aparelho, igual
+  // ao pareamento — é o que faz um celular ser o da cozinha e outro o da frente.
+  const [setor, setSetorLocal] = useState('tudo')
+  useEffect(() => {
+    import('../utils/imprimirBluetooth').then(m => setSetorLocal(m.setorDaImpressora())).catch(() => {})
+  }, [])
+  async function escolherSetor(v) {
+    setSetorLocal(v)
+    try { const m = await import('../utils/imprimirBluetooth'); m.definirSetorDaImpressora(v) } catch { /* ok */ }
+  }
+
   const conectar = () => rodar(m => m.conectarImpressoraCelular(), 'Conectada! Agora use o botão 📱🖨️ nos pedidos.')
   const testar = () => rodar(m => m.imprimirTesteCelular(empresa || {}), 'Enviei um cupom de teste!')
 
@@ -1771,6 +1782,30 @@ function ImpressoraCelularPanel({ empresa }) {
       </div>
       {nome && <div style={{ fontSize: 12, color: 'var(--text)' }}>Impressora: <b>{nome}</b></div>}
       {msg && <div style={{ fontSize: 12, color: msg.ok ? '#16a34a' : '#dc2626', fontWeight: 600 }}>{msg.ok ? '✓ ' : '⚠️ '}{msg.txt}</div>}
+      <div style={{ borderTop: '1px solid var(--border, #2a2a3a)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <span style={{ fontSize: 13, fontWeight: 800 }}>O que ESTA impressora imprime</span>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {[
+            { v: 'tudo', lbl: '📄 Tudo' },
+            { v: 'cozinha', lbl: '🍳 Só cozinha' },
+            { v: 'frente', lbl: '🧾 Só frente' },
+          ].map(o => (
+            <button key={o.v} type="button" onClick={() => escolherSetor(o.v)} style={{
+              flex: '1 1 100px', padding: '9px 8px', borderRadius: 9, cursor: 'pointer', fontWeight: 700, fontSize: 12.5,
+              border: `1.5px solid ${setor === o.v ? '#2563eb' : 'var(--border, #2a2a3a)'}`,
+              background: setor === o.v ? 'rgba(37,99,235,.14)' : 'transparent',
+              color: setor === o.v ? '#2563eb' : 'var(--text)',
+            }}>{o.lbl}</button>
+          ))}
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+          {setor === 'cozinha'
+            ? 'Só os itens de categoria marcada como Cozinha. Conta, pré-conta e fechamento NÃO saem aqui.'
+            : setor === 'frente'
+              ? 'Tudo que NÃO é da cozinha, mais conta, pré-conta e fechamento.'
+              : 'Uma impressora só: sai tudo, como sempre. Marque o setor de cada categoria em Produtos → Categorias antes de dividir.'}
+        </div>
+      </div>
       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Se a impressora não aparecer na lista do Chrome, ela é Bluetooth "Classic" — aí usamos o app RawBT.</div>
     </div>
   )
@@ -4245,7 +4280,7 @@ export default function PainelPedidos() {
       numeroMesa: info.numero, rotulo: info.rotulo,
       nomeLoja: empresa?.nome,
       area: info.area, atendente: info.atendente, pessoas: info.pessoas, rodape: info.rodape,
-      itens: entry.itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao })),
+      itens: entry.itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao, setor: i.setor })),
     }
     if (await viaBluetooth('comanda', dados)) return
     imprimirHtml(montarComandaCozinhaHtml(dados))

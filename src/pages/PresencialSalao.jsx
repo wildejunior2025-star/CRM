@@ -684,7 +684,10 @@ export default function PresencialSalao() {
       atendente: (comandaSel?.garcom_id && garcons[comandaSel.garcom_id])
         ? String(garcons[comandaSel.garcom_id]).split(' ')[0] : '',
       pessoas: comandaSel?.num_pessoas || 0,
-      itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao })),
+      // `setor` vem do gatilho do banco (mig 0184) — é o que diz se este item
+      // é da cozinha ou do salão. Sem ele aqui, o filtro por impressora não teria
+      // como separar.
+      itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao, setor: i.setor })),
     })
   }
 
@@ -845,6 +848,16 @@ export default function PresencialSalao() {
   // faz a MESMA tela servir no PC da loja (app FWC) e no celular do dono (BLE),
   // sem dois códigos diferentes. Devolve false quando não tem — aí segue o
   // caminho de sempre.
+  // Papel da impressora DESTE aparelho (mig 0184). Lido do navegador na hora
+  // porque o dono pode trocar no painel da Impressora com esta tela aberta.
+  // Quem define é `definirSetorDaImpressora` em utils/imprimirBluetooth.js.
+  const papelImpressora = () => {
+    try {
+      const v = localStorage.getItem('impressora_setor')
+      return v === 'cozinha' || v === 'frente' ? v : 'tudo'
+    } catch { return 'tudo' }
+  }
+
   async function viaBluetooth(tipo, dados) {
     try {
       const mod = await import('../utils/imprimirBluetooth')
@@ -859,6 +872,13 @@ export default function PresencialSalao() {
   async function imprimirPreConta() {
     if (!comandaSel) return
     setPreContaMsg('')
+    // Cobrar é papel do caixa. Neste aparelho só sai comanda de cozinha — dizer
+    // "enviada" e não sair papel nenhum seria pior do que avisar.
+    if (papelImpressora() === 'cozinha') {
+      setPreContaMsg('🍳 Esta impressora é a da cozinha. A pré-conta sai na impressora da frente.')
+      setTimeout(() => setPreContaMsg(''), 6000)
+      return
+    }
     const dados = {
       numeroMesa: mesaSel?.numero,
       rotulo: mesaSel?.is_comanda
@@ -1043,7 +1063,8 @@ export default function PresencialSalao() {
       // Celular COM térmica Bluetooth imprime aqui igual a um PC — era essa a
       // premissa velha ("celular não tem impressora") que deixava a loja que só
       // usa o celular sem a conta da mesa.
-      const vaiImprimirAqui = !ehCelular || window.__fwcBtConectada === true
+      const vaiImprimirAqui = (!ehCelular || window.__fwcBtConectada === true)
+        && papelImpressora() !== 'cozinha'   // a da cozinha não tira conta
       const { error } = await supabase.from('comandas').update({
         status: 'aguardando_conferencia',
         // cliente_id vai junto: quem libera a mesa depois é o ADM, e sem isso o

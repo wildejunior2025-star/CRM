@@ -343,7 +343,7 @@ export default function Produtos() {
   async function loadCategorias() {
     const { data } = await supabase
       .from('categorias')
-      .select('id, nome, ordem, hora_inicio, hora_fim')
+      .select('id, nome, ordem, hora_inicio, hora_fim, setor')
       .order('ordem', { ascending: true })
       .order('nome', { ascending: true })
     const lista = data ?? []
@@ -365,6 +365,15 @@ export default function Produtos() {
     const v = valor ? valor : null
     setCategorias(cs => cs.map(c => (c.id === id ? { ...c, [campo]: v } : c)))
     await supabase.from('categorias').update({ [campo]: v }).eq('id', id)
+  }
+
+  // Marca a categoria como COZINHA ou SALÃO (mig 0184). Quem lê isso é a
+  // impressão da comanda de mesa: a térmica da cozinha só imprime os itens de
+  // categoria 'cozinha', a da frente imprime o resto. A regra é salão sai tudo
+  // menos o que é da cozinha, por isso o padrão é salão.
+  async function salvarSetorCategoria(id, setor) {
+    setCategorias(cs => cs.map(c => (c.id === id ? { ...c, setor } : c)))
+    await supabase.from('categorias').update({ setor }).eq('id', id)
   }
 
   // Persiste a ordem 1..n de uma nova lista de categorias (otimista)
@@ -1775,6 +1784,12 @@ export default function Produtos() {
               🕒 Defina o horário que cada categoria fica disponível para venda. Deixe <strong>em branco</strong> = sempre disponível.
               Ex.: Quentinhas <strong>10:00 às 14:00</strong>, Janta <strong>17:00 às 22:00</strong>.
             </p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+              🍳 <strong>Cozinha ou Salão</strong> — só vale pra quem tem <strong>duas impressoras</strong>. Marque como
+              <strong> Cozinha</strong> o que é preparado lá dentro (quentinhas, tapiocas, porções): esses itens saem na
+              térmica da cozinha. Todo o resto sai na da frente, junto com a conta. Com uma impressora só, tanto faz —
+              ela imprime tudo.
+            </p>
 
             <div className="data-table">
               {categorias.length === 0 ? (
@@ -1848,6 +1863,17 @@ export default function Produtos() {
                               <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>✎</span>
                             </button>
                           )}
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
+                          <select
+                            value={c.setor === 'cozinha' ? 'cozinha' : 'salao'}
+                            onChange={(e) => salvarSetorCategoria(c.id, e.target.value)}
+                            title="Em que impressora sai o pedido desta categoria"
+                            style={{ width: 130 }}
+                          >
+                            <option value="salao">🧾 Salão</option>
+                            <option value="cozinha">🍳 Cozinha</option>
+                          </select>
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
                           <input

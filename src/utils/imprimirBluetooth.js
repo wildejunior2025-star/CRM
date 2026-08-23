@@ -343,7 +343,50 @@ export async function imprimirContaMesaCelular(dados) {
 export async function imprimirMesaSeConectada(tipo, dados) {
   try {
     if (!estaConectada() && !(await reconectarSilencioso())) return false
-    await escrever(tipo === 'comanda' ? montarComandaMesaBytes(dados) : montarContaMesaBytes(dados))
+    if (tipo === 'comanda') {
+      // Só o que é desta impressora. Se não sobrou nada (a cozinha não tem o
+      // que preparar neste pedido), não gasta papel — mas responde "sim, tratei
+      // isto", senão quem chamou tentaria imprimir tudo pelo caminho antigo.
+      const meus = itensDoSetor(dados.itens ?? [])
+      if (!meus.length) return true
+      await escrever(montarComandaMesaBytes({ ...dados, itens: meus }))
+    } else {
+      if (!imprimeConta()) return true   // conta é papel da frente
+      await escrever(montarContaMesaBytes(dados))
+    }
     return true
   } catch { return false }
 }
+
+// ── Papel deste aparelho (mig 0184) ─────────────────────────────────────────
+// Loja com duas térmicas: um celular fica na frente com a impressora do salão,
+// outro na cozinha com a dela. Cada aparelho guarda no próprio navegador o que
+// imprime — igual ao pareamento, que também é por aparelho.
+//
+// 'tudo' é o padrão e é o comportamento de sempre (uma impressora só). Ninguém
+// que já usa precisa configurar nada.
+const LS_SETOR = 'impressora_setor'   // 'tudo' | 'cozinha' | 'frente'
+
+export function setorDaImpressora() {
+  try {
+    const v = localStorage.getItem(LS_SETOR)
+    return v === 'cozinha' || v === 'frente' ? v : 'tudo'
+  } catch { return 'tudo' }
+}
+
+export function definirSetorDaImpressora(v) {
+  try { localStorage.setItem(LS_SETOR, v === 'cozinha' || v === 'frente' ? v : 'tudo') } catch { /* ok */ }
+}
+
+// Dos itens que acabaram de ser pedidos, quais são DESTA impressora?
+// Item sem setor (pedido antigo, produto sem categoria) conta como salão — a
+// regra é "salão sai tudo, menos o que é da cozinha", então nada some.
+export function itensDoSetor(itens = []) {
+  const papel = setorDaImpressora()
+  if (papel === 'tudo') return itens
+  return itens.filter(i => (i.setor === 'cozinha' ? 'cozinha' : 'frente') === papel)
+}
+
+// Conta, pré-conta e fechamento são papel da FRENTE: quem cobra é o caixa, não
+// a cozinha. Numa impressora só ('tudo'), sai aqui mesmo como sempre.
+export const imprimeConta = () => setorDaImpressora() !== 'cozinha'
