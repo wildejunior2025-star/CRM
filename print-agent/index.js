@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 18
+const APP_VERSION = 19
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -51,31 +51,54 @@ function log(...a) {
 let empresa = null, empresaId = null, canal = null
 let sessionAtiva = false, empresasDisponiveis = []
 
-// ---- classificação bebida x comida (roteamento cozinha/bar) ----
+// ---- pra onde vai cada item: cozinha, salão (bar) ou nenhuma ----
+//
+// Quem manda é a marcação da CATEGORIA (categorias.setor, mig 0184/0185): o
+// lojista marca Espetinhos = cozinha, Cerveja = salão, e pronto. Antes o app
+// ADIVINHAVA o que era bebida por palavra-chave no nome da categoria — acertava
+// muito, mas errava calado: "Caldos" não é bebida e "Água de coco" da cozinha
+// ia pro bar. Pior, não tinha como o lojista corrigir sem mexer em arquivo.
+//
+// A adivinhação continua viva como RESERVA, pra loja que ainda não marcou nada:
+// sem isso, quem já usa 2 impressoras hoje veria tudo virar comida da noite pro
+// dia. Assim que a loja marcar UMA categoria como cozinha ou não-imprime, a
+// marcação assume e a palavra-chave sai de cena.
 let mapaCategoria = {}     // norm(nome do produto) -> categoria
-let catBebida = new Set()  // categorias tratadas como "bebida" (vão pra impressora do bar)
+let catSetor = {}          // nome da categoria -> 'cozinha' | 'salao' | 'nenhum'
+let lojaMarcouSetor = false
+let catBebida = new Set()  // reserva: categorias que "parecem" bebida
 const KW_BEBIDA = ['refriger', 'suco', 'bebid', 'cerveja', 'agua', 'drink', 'tonic', 'energetic', 'chopp', 'vinho', 'destilad', 'whisky', 'cachaca', 'caipir', 'gin', 'vodka', 'licor']
 function norm(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim() }
-// Carrega os produtos/categorias da loja pra saber o que é bebida (pra rotear).
 async function carregarCategorias() {
-  mapaCategoria = {}; catBebida = new Set()
+  mapaCategoria = {}; catBebida = new Set(); catSetor = {}; lojaMarcouSetor = false
   try {
     const { data: prods } = await supabase.from('produtos').select('nome, categoria').eq('empresa_id', empresaId)
     for (const p of (prods || [])) if (p && p.nome) mapaCategoria[norm(p.nome)] = p.categoria || ''
-    const { data: cats } = await supabase.from('categorias').select('nome').eq('empresa_id', empresaId)
+    const { data: cats } = await supabase.from('categorias').select('nome, setor').eq('empresa_id', empresaId)
     const extra = (config().categoriasBebida || []).map(norm)   // override opcional (nomes de categoria)
     for (const c of (cats || [])) {
       const n = norm(c.nome)
+      const st = (c.setor === 'cozinha' || c.setor === 'nenhum') ? c.setor : 'salao'
+      catSetor[c.nome] = st
+      if (st !== 'salao') lojaMarcouSetor = true
       if (KW_BEBIDA.some(k => n.includes(k)) || extra.includes(n)) catBebida.add(c.nome)
     }
-    log('Categorias carregadas (bebida: ' + ([...catBebida].join(', ') || 'nenhuma') + ')')
+    log(lojaMarcouSetor
+      ? 'Categorias carregadas (setor marcado na loja)'
+      : 'Categorias carregadas (loja sem setor marcado — usando palavra-chave; bebida: ' + ([...catBebida].join(', ') || 'nenhuma') + ')')
   } catch (e) { log('  ! erro ao carregar categorias: ' + e.message) }
 }
-// Um item é "bebida" se a categoria do seu produto está marcada como bebida.
-function ehBebida(nome) {
+
+// 'cozinha' | 'salao' | 'nenhum'. Item sem categoria conhecida vai pro salão —
+// a regra da loja é "salão sai tudo, menos o que é da cozinha", então nada some.
+function setorDoItem(nome) {
   const cat = mapaCategoria[norm(nome)]
-  return cat ? catBebida.has(cat) : false
+  if (lojaMarcouSetor) return (cat && catSetor[cat]) || 'salao'
+  if (cat && catBebida.has(cat)) return 'salao'   // reserva
+  return 'cozinha'
 }
+function ehBebida(nome) { return setorDoItem(nome) === 'salao' }
+function naoImprime(nome) { return setorDoItem(nome) === 'nenhum' }
 const config = () => { try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) } catch (e) { return {} } }
 const setConfig = o => fs.writeFileSync(CONFIG_FILE, JSON.stringify({ ...config(), ...o }, null, 2))
 
@@ -383,14 +406,18 @@ async function imprimirComandaMesa(cid, itens) {
   const base = { area: info.area, atendente: info.atendente, pessoas: info.pessoas }
   const nomeLoja = empresa?.nome || ''
   const bar = config().printerBar
+  // Categoria marcada como "nao imprime" nao vira papel em impressora nenhuma,
+  // nem quando a loja so tem uma. A loja disse que ali nao precisa.
+  const paraPapel = itens.filter(it => !naoImprime(it.nome))
+  if (!paraPapel.length) return
   if (bar) {
-    const comida = itens.filter(it => !ehBebida(it.nome))
-    const bebida = itens.filter(it => ehBebida(it.nome))
-    if (comida.length) imprimirBytes(comandaMesaBytes(numero, comida, nomeLoja, base), 'mesa-' + cid)
-    if (bebida.length) imprimirBytes(comandaMesaBytes(numero, bebida, nomeLoja, { ...base, sufixo: ' - BEBIDAS' }), 'mesa-bar-' + cid, bar)
+    const cozinha = paraPapel.filter(it => setorDoItem(it.nome) === 'cozinha')
+    const salao = paraPapel.filter(it => setorDoItem(it.nome) !== 'cozinha')
+    if (cozinha.length) imprimirBytes(comandaMesaBytes(numero, cozinha, nomeLoja, base), 'mesa-' + cid)
+    if (salao.length) imprimirBytes(comandaMesaBytes(numero, salao, nomeLoja, { ...base, sufixo: ' - BEBIDAS' }), 'mesa-bar-' + cid, bar)
     return
   }
-  imprimirBytes(comandaMesaBytes(numero, itens, nomeLoja, base), 'mesa-' + cid)
+  imprimirBytes(comandaMesaBytes(numero, paraPapel, nomeLoja, base), 'mesa-' + cid)
 }
 function agendarComandaMesa(it) {
   if (!it || (it.status && it.status !== 'pendente')) return
@@ -510,7 +537,7 @@ function paginaHtml() {
       value="${(c.printer || '').replace(/"/g, '&quot;')}" style="width:100%;padding:9px;border-radius:8px;border:1px solid #2a3444;background:#0f1420;color:#e5e7eb">` : ''}
     <button>Salvar impressora</button>
   </form>
-  <div class="sub" style="margin:8px 0 0">${semLista ? '⚠️ Nenhuma impressora foi detectada. Copie o nome EXATO (Windows: Configurações → Impressoras) e cole no campo acima.' : 'Com 2 impressoras: as <b>bebidas</b> saem no bar e a <b>comida</b> na cozinha.'}</div>
+  <div class="sub" style="margin:8px 0 0">${semLista ? '⚠️ Nenhuma impressora foi detectada. Copie o nome EXATO (Windows: Configurações → Impressoras) e cole no campo acima.' : 'Com 2 impressoras: sai na <b>cozinha</b> o que estiver marcado como Cozinha em Produtos &rarr; Categorias, e o resto no <b>bar</b>. Categoria marcada como <b>Nao imprime</b> nao sai em nenhuma das duas.'}</div>
   <form method="POST" action="/teste"><button style="background:#16a34a">Imprimir cupom de teste</button></form>
   <script>(function(){var cb=document.getElementById('duasImp'),row=document.getElementById('rowBar'),lbl=document.getElementById('lblCoz');if(!cb)return;function u(){var on=cb.checked;row.style.display=on?'block':'none';lbl.textContent=on?'Impressora da COZINHA (comida)':'Impressora (tudo sai aqui)';if(!on){var s=row.querySelector('select');if(s)s.value='';}}cb.addEventListener('change',u);u();})();</script>
 </div>`
