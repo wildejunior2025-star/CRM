@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
@@ -123,6 +123,52 @@ export default function DeliveryLoja() {
       }
     } catch { /* localStorage indisponível */ }
   }, [carrinho, cartKey])
+
+  // ── Rascunho da montagem ("monte sua quentinha" pela metade) ──────────────
+  // A sacola já sobrevive a um recarregamento (fica no localStorage), mas o
+  // produto que estava sendo MONTADO não: as escolhas moram só no modal. Quem
+  // estava na metade da quentinha perdia tudo e recomeçava do zero.
+  //
+  // Aqui a montagem em andamento também fica guardada, e ao voltar o modal
+  // reabre no mesmo produto com o que já tinha sido marcado.
+  const draftKey = loja?.id ? `montagem_${loja.id}` : null
+  const [rascunho, setRascunho] = useState(null)
+  const rascunhoLido = useRef(false)
+
+  const limparRascunho = useCallback(() => {
+    setRascunho(null)
+    try { if (draftKey) localStorage.removeItem(draftKey) } catch { /* ignora */ }
+  }, [draftKey])
+
+  useEffect(() => {
+    if (rascunhoLido.current || !draftKey || produtos.length === 0) return
+    rascunhoLido.current = true
+    let salvo = null
+    try { salvo = JSON.parse(localStorage.getItem(draftKey) || 'null') } catch { salvo = null }
+    if (!salvo?.produtoId) return
+    // Rascunho velho é lixo: quem volta horas depois quer começar limpo.
+    if (Date.now() - (salvo.ts ?? 0) > 30 * 60 * 1000) {
+      try { localStorage.removeItem(draftKey) } catch { /* ignora */ }
+      return
+    }
+    const prod = produtos.find(p => String(p.id) === String(salvo.produtoId))
+    if (!prod?.complementos?.length) return
+    setRascunho({ produtoId: prod.id, sel: salvo.sel ?? {} })
+    setOptProduto(prod)
+  }, [produtos, draftKey])
+
+  // ── Não recarregue por cima do pedido do cliente ──────────────────────────
+  // O app se atualiza sozinho (main.jsx) e atualizar RECARREGA a página. No
+  // gestor isso é um piscar; aqui é o cliente perdendo a sacola no meio da
+  // escolha — e cliente que perde o pedido não refaz, desiste.
+  //
+  // Enquanto tem item na sacola ou o "monte seu produto" está aberto, a tela se
+  // declara ocupada e a versão nova espera (entra sozinha depois, quando a
+  // pessoa fechar tudo ou sair).
+  useEffect(() => {
+    window.__fwcOcupado = Object.keys(carrinho).length > 0 || optProduto != null || drawerOpen
+    return () => { window.__fwcOcupado = false }
+  }, [carrinho, optProduto, drawerOpen])
 
   // Após produtos carregarem, filtra itens do carrinho restaurado:
   // remove produtos que não existem mais e atualiza preços
@@ -730,9 +776,12 @@ export default function DeliveryLoja() {
 
       {optProduto && (
         <OptionsModal
+          key={optProduto.id}
           produto={optProduto}
-          onClose={() => setOptProduto(null)}
-          onConfirm={(selecoes, precoUnit) => addCombo(optProduto, selecoes, precoUnit)}
+          draftKey={draftKey}
+          rascunho={rascunho?.produtoId === optProduto.id ? rascunho.sel : null}
+          onClose={() => { limparRascunho(); setOptProduto(null) }}
+          onConfirm={(selecoes, precoUnit) => { limparRascunho(); addCombo(optProduto, selecoes, precoUnit) }}
         />
       )}
 
@@ -822,14 +871,35 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
 }
 
 // ── Modal "monte seu produto" (complementos: proteínas, saladas, etc.) ──
-function OptionsModal({ produto, onClose, onConfirm }) {
+function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
   const grupos = produto.complementos ?? []
-  // seleção: { [grupoId]: Set(opcaoId) }
+  // seleção: { [grupoId]: Set(opcaoId) } — começa do rascunho, se voltou de um
+  // recarregamento no meio da montagem.
   const [sel, setSel] = useState(() => {
     const init = {}
-    for (const g of grupos) init[g.id] = new Set()
+    for (const g of grupos) init[g.id] = new Set(rascunho?.[g.id] ?? [])
     return init
   })
+
+  // Guarda a montagem a cada escolha. É o que faz a quentinha pela metade
+  // voltar inteira se a página recarregar (atualização do app, aba descartada
+  // pelo celular, toque sem querer no voltar).
+  useEffect(() => {
+    if (!draftKey) return
+    try {
+      const plano = {}
+      let temAlgo = false
+      for (const [gid, marcados] of Object.entries(sel)) {
+        plano[gid] = [...marcados]
+        if (marcados.size > 0) temAlgo = true
+      }
+      if (temAlgo) {
+        localStorage.setItem(draftKey, JSON.stringify({ produtoId: produto.id, sel: plano, ts: Date.now() }))
+      } else {
+        localStorage.removeItem(draftKey)
+      }
+    } catch { /* localStorage indisponível */ }
+  }, [sel, draftKey, produto.id])
 
   function toggle(grupo, opcao) {
     setSel(prev => {

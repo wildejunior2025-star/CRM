@@ -54,22 +54,33 @@ window.addEventListener('vite:preloadError', (evento) => {
 // do formulário, o app tenta de novo sozinho quando a tela ficar parada.
 const impressoraBtConectada = () => window.__fwcBtConectada === true
 
-// Última vez que a pessoa digitou/mexeu num campo (captura na fase de captura
-// pra pegar também o que acontece dentro de modal).
+// Última vez que a pessoa mexeu na tela (captura na fase de captura pra pegar
+// também o que acontece dentro de modal).
+//
+// Clique conta como mexer. Antes só digitar contava, e por isso o cliente que
+// montava uma quentinha na Loja Online — que é só CLICAR nos complementos, sem
+// digitar nada — era tratado como tela parada: a atualização entrou no meio da
+// escolha e levou a sacola junto (aconteceu com o Wilde 23/08/2026 no Zebu).
 let ultimoMexeu = 0
-for (const evt of ['input', 'keydown', 'paste']) {
+for (const evt of ['input', 'keydown', 'paste', 'pointerdown', 'click']) {
   document.addEventListener(evt, () => { ultimoMexeu = Date.now() }, true)
 }
-const ESFRIAR_MS = 3 * 60 * 1000   // 3 min sem digitar = pode recarregar
+const ESFRIAR_MS = 3 * 60 * 1000   // 3 min sem mexer = pode recarregar
 
-// Está no meio de alguma coisa? (cursor num campo, digitou faz pouco, ou tem
-// um modal aberto na frente — que é sempre formulário ou confirmação)
+// Está no meio de alguma coisa? (cursor num campo, mexeu faz pouco, tem um
+// modal/gaveta aberto na frente, ou a tela avisou que está ocupada)
 function ocupadoPreenchendo() {
+  // Qualquer tela pode se declarar ocupada (a Loja Online faz isso enquanto o
+  // cliente tem itens na sacola ou está montando um produto).
+  if (window.__fwcOcupado === true) return true
   const el = document.activeElement
   const tag = el?.tagName?.toLowerCase()
   if (tag === 'input' || tag === 'textarea' || tag === 'select' || el?.isContentEditable) return true
   if (Date.now() - ultimoMexeu < ESFRIAR_MS) return true
-  if (document.querySelector('.modal-overlay, dialog[open], .confirmar-fundo')) return true
+  // Lista genérica: modal é modal em qualquer tela. A lista antiga só citava
+  // .modal-overlay/.confirmar-fundo e deixava de fora a gaveta da Loja Online
+  // (.dloja-overlay), que é exatamente onde o cliente monta o pedido.
+  if (document.querySelector('[aria-modal="true"], [role="dialog"], dialog[open], .modal-overlay, .confirmar-fundo, .dloja-overlay')) return true
   return false
 }
 
@@ -141,7 +152,11 @@ updateSW = registerSW({
 
     // Está preenchendo: avisa e fica de olho. Assim que a tela ficar parada
     // (nada digitado por 3 min, sem modal aberto), atualiza sozinho.
-    mostrarAvisoAtualizacao('preenchendo')
+    //
+    // Exceção: quem está do lado do CLIENTE (cardápio da Loja Online) não tem
+    // nada a ver com versão de sistema. Pra essa pessoa a barra roxa é só um
+    // susto no meio do pedido — então a atualização espera calada.
+    if (window.__fwcOcupado !== true) mostrarAvisoAtualizacao('preenchendo')
     if (esperandoTelaLivre) return
     esperandoTelaLivre = setInterval(() => {
       if (impressoraBtConectada() || ocupadoPreenchendo()) return
