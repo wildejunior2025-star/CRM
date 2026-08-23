@@ -4257,7 +4257,7 @@ export default function PainelPedidos() {
     async function carregarComandas() {
       const { data } = await supabase
         .from('comandas')
-        .select('id, numero_mesa, tipo, nome_cliente, created_at, status, fechamento_pendente, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao)')
+        .select('id, numero_mesa, tipo, nome_cliente, created_at, status, fechamento_pendente, preconta_pedida_em, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao, setor)')
         .eq('empresa_id', empresa.id)
         .in('status', ['aberta', 'aguardando_conferencia'])
         .order('numero_mesa')
@@ -4268,6 +4268,19 @@ export default function PainelPedidos() {
       // Imprime se HÁ como imprimir: app FWC ativo OU auto do navegador ligado —
       // a conta não tem impressão pelo app (ele não escuta status da comanda), então
       // quem dispara é sempre o gestor (imprimirHtml roteia pro app ou navegador).
+      // Pré-conta pedida pelo garçom (mig 0186): o celular dele não tem
+      // impressora, então ele carimba a comanda e QUEM TIRA O PAPEL É AQUI.
+      // Só carimbo posterior à abertura desta tela — senão, a cada F5 sairia de
+      // novo a pré-conta de todas as mesas do dia.
+      for (const c of lista) {
+        if (!c.preconta_pedida_em) continue
+        const quando = new Date(c.preconta_pedida_em).getTime()
+        if (!Number.isFinite(quando) || quando < abertoEmRef.current) continue
+        if (precontaFeitaRef.current.get(c.id) === quando) continue
+        precontaFeitaRef.current.set(c.id, quando)
+        imprimirPreContaMesa(c)
+      }
+
       const aguardando = lista.filter(c => c.status === 'aguardando_conferencia')
       const primeira = contaMesaImpressaRef.current === null
       if (primeira) contaMesaImpressaRef.current = new Set()
@@ -4389,6 +4402,27 @@ export default function PainelPedidos() {
   // A CONTA da mesa também respeita o filtro "Mesa" deste PC: se a Mesa está
   // DESLIGADA aqui, este PC não imprime nem a comanda da cozinha nem a conta.
   // (fwcFiltros null = sem filtro = imprime tudo, como antes.)
+  // Pré-conta pedida do celular do garçom: guarda o que já saiu (por comanda e
+  // por carimbo) pra não repetir a cada recarga da lista, que roda de 30 em 30s.
+  const precontaFeitaRef = useRef(new Map())
+  const abertoEmRef = useRef(Date.now())
+
+  async function imprimirPreContaMesa(c) {
+    const itens = Array.isArray(c.comanda_itens) ? c.comanda_itens : []
+    if (!itens.length) return
+    const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
+    const pct = Number(empresa?.taxa_servico_pct ?? 0)
+    const taxa = Math.round(subtotal * pct / 100 * 100) / 100
+    const dados = {
+      numeroMesa: c.numero_mesa, rotulo: rotuloComanda(c),
+      itens, subtotal, taxa, total: subtotal + taxa,
+      // Pré-conta não fala em pagamento: a mesa ainda vai escolher.
+      formaPagamento: '', pagamentos: [], empresa, preConta: true,
+    }
+    if (await viaBluetooth('conta', dados)) return
+    imprimirHtml(montarContaPresencialHtml(dados), empresa?.nome, { origem: 'mesa' })
+  }
+
   // Recebe os DADOS da conta (não o HTML pronto): a Bluetooth monta em ESC/POS,
   // o app FWC / navegador monta em HTML. Cada um no seu formato.
   async function imprimirContaSeMesa(dados, titulo) {

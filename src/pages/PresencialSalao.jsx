@@ -891,11 +891,25 @@ export default function PresencialSalao() {
       // A pré-conta não fala em pagamento: ele ainda vai ser escolhido.
       formaPagamento: '', pagamentos: [],
     }
-    // Térmica do celular primeiro (o caso da loja que só tem o celular); senão
-    // o app FWC da loja. No celular sem Bluetooth continua só o app (soApp).
+    // 1) Impressora aqui mesmo (térmica pareada neste aparelho, ou app FWC no PC).
     const ok = await viaBluetooth('conta', dados)
       || await imprimirHtml(montarContaPresencialHtml(dados), empresaNome, { soApp: ehCelular, origem: 'mesa' })
-    setPreContaMsg(ok ? '🧾 Pré-conta enviada pra impressora.' : '⚠️ Não achei a impressora. Ligue a térmica Bluetooth ou abra o app FWC no PC da loja.')
+    if (ok) {
+      setPreContaMsg('🧾 Pré-conta enviada pra impressora.')
+      setTimeout(() => setPreContaMsg(''), 6000)
+      return
+    }
+
+    // 2) Sem impressora AQUI (é o caso do garçom, que lança do celular dele):
+    // carimba o pedido na comanda e quem tira o papel é a estação da loja — o
+    // celular do balcão com a térmica, ou o PC com o app FWC. Ele só vai buscar.
+    const { error } = await supabase
+      .from('comandas')
+      .update({ preconta_pedida_em: new Date().toISOString() })
+      .eq('id', comandaSel.id)
+    setPreContaMsg(error
+      ? '⚠️ Não consegui pedir a pré-conta. Tente de novo.'
+      : '🧾 Pedi a pré-conta na impressora da loja — pode ir buscar o papel.')
     setTimeout(() => setPreContaMsg(''), 6000)
   }
 
