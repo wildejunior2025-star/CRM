@@ -4196,6 +4196,10 @@ export default function PainelPedidos() {
   function agendarImpressaoMesa(item) {
     // Se o app FWC está ativo, ELE imprime a mesa sozinho (escuta comanda_itens).
     // O navegador só imprime mesa quando o app não está no comando (evita 2 vias).
+    // A tela do Salão já imprimiu estes itens na térmica deste aparelho, na hora
+    // do envio. Sem esta marca sairiam duas vias da mesma comanda.
+    const jaSaiu = window.__fwcMesaImpressa
+    if (jaSaiu?.has(item.id)) { jaSaiu.delete(item.id); return }
     if (!autoImprimirAtivo() || fwcImprimeRef.current || (item.status && item.status !== 'pendente')) return
     const cid = item.comanda_id
     const buf = mesaPrintRef.current

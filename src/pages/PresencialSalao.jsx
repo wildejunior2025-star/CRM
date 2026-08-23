@@ -659,6 +659,35 @@ export default function PresencialSalao() {
   }
   // Nome já existe no catálogo? (ignora acento/maiúsculas) — pra avisar sem bloquear.
   const invNomeExiste = invNome.trim() && produtos.some(p => semAcento(p.nome) === semAcento(invNome))
+  // A comanda da cozinha sai AQUI, na hora do envio, quando a térmica está NESTE
+  // aparelho. Antes ela dependia de duas coisas invisíveis pra quem opera só pelo
+  // celular: o Painel de Pedidos estar montado (é lá que mora o ouvinte de
+  // comanda_itens) E o interruptor "Auto-imprimir" estar ligado. Resultado: a
+  // conta e a pré-conta saíam (são ação direta) e a comanda do pedido não —
+  // exatamente o que o Wilde viu em 23/08/2026.
+  //
+  // Quem NÃO tem térmica aqui (garçom no celular dele, gestor no PC) continua
+  // como antes: o ouvinte do Painel de Pedidos imprime.
+  async function imprimirComandaAgora(itens) {
+    if (!itens.length || window.__fwcBtConectada !== true) return
+    // Marca os itens como já impressos ANTES de mandar o papel: o ouvinte do
+    // Painel de Pedidos (mesma aba) ia imprimir os mesmos itens 1,5s depois, e
+    // sairiam duas vias da mesma comanda.
+    const jaSaiu = (window.__fwcMesaImpressa ||= new Set())
+    for (const i of itens) jaSaiu.add(i.id)
+    await viaBluetooth('comanda', {
+      numeroMesa: mesaSel?.numero,
+      rotulo: mesaSel?.is_comanda
+        ? `${rotuloMesa(mesaSel)}${comandaSel?.nome_cliente ? ' · ' + comandaSel.nome_cliente : ''}`
+        : '',
+      nomeLoja: empresaNome,
+      atendente: (comandaSel?.garcom_id && garcons[comandaSel.garcom_id])
+        ? String(garcons[comandaSel.garcom_id]).split(' ')[0] : '',
+      pessoas: comandaSel?.num_pessoas || 0,
+      itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao })),
+    })
+  }
+
   // Envia o pedido montado pra cozinha: insere TODOS os itens de uma vez → sai numa
   // impressão só (o gestor e o app FWC juntam os inserts que chegam juntos).
   async function enviarCozinha() {
@@ -671,9 +700,10 @@ export default function PresencialSalao() {
       preco_unitario: Number(r.preco_venda), quantidade: r.quantidade,
       observacao: (r.observacao ?? '').trim() || null,
     }))
-    const { error } = await supabase.from('comanda_itens').insert(rows)
+    const { data: inseridos, error } = await supabase.from('comanda_itens').insert(rows).select()
     setEnviando(false)
     if (error) { window.alert('Erro ao enviar pra cozinha: ' + error.message); return }
+    imprimirComandaAgora(inseridos ?? [])
     setRascunho([])
     if (rascunhoKey) { try { localStorage.removeItem(rascunhoKey) } catch { /* ignora */ } }
     await loadAll()
