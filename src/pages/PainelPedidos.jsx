@@ -1932,7 +1932,7 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
             </span>
           )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="pp-card-header-right">
           {/* Badge tipo entrega */}
           <span className={`pp-tipo-badge ${isRetirada ? 'retirada' : 'entrega'}`}>
             {isRetirada ? 'Retirada' : 'Entrega'}

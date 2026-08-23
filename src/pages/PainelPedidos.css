@@ -338,18 +338,44 @@
 }
 
 /* ── Cabeçalho do card ── */
+/* O cabeçalho tinha uma linha só e ninguém podia encolher: no celular o número
+   do iFood, as tarjetas (ENTREGA, iFood, Preparando), a hora e os botões de
+   imprimir subiam UM POR CIMA DO OUTRO e não dava pra acertar o de imprimir.
+   Agora ele quebra em linhas quando não cabe. */
 .pp-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
+  row-gap: 6px;
 }
 
 .pp-card-header-left {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  row-gap: 6px;
   min-width: 0;
+}
+
+/* Hora e botões de imprimir: nunca encolhem e ficam colados à direita. Quando
+   a linha enche, descem inteiros pra linha de baixo em vez de se sobrepor. */
+.pp-card-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* Alvo de toque de dedo nos botões de imprimir (eram 16px de ícone: no celular
+   a pessoa errava e abria o pedido em vez de imprimir). */
+.pp-card-header-right button {
+  min-width: 32px;
+  min-height: 32px;
+  justify-content: center;
 }
 
 .pp-numero {
