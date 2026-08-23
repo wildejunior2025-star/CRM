@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 19
+const APP_VERSION = 20
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -107,6 +107,14 @@ const setConfig = o => fs.writeFileSync(CONFIG_FILE, JSON.stringify({ ...config(
 // nao muda nada pras lojas antigas). Uma origem so deixa de imprimir se estiver
 // explicitamente desligada (=== false).
 const ORIGENS_FILTRAVEIS = ['whatsapp', 'cardapio', 'app', 'balcao', 'ifood', 'mesa']
+// Papel DESTE PC: 'tudo' (padrao) | 'cozinha' | 'frente'. Mesma ideia do celular
+// com termica Bluetooth — um PC na cozinha, outro na frente, cada um com a sua
+// impressora. Quem tem UM PC com DUAS impressoras usa `printerBar` em vez disto.
+function papelDoPc() {
+  const v = config().setor
+  return (v === 'cozinha' || v === 'frente') ? v : 'tudo'
+}
+
 function origemLigada(origem) {
   const f = config().filtros
   if (!f) return true
@@ -408,7 +416,12 @@ async function imprimirComandaMesa(cid, itens) {
   const bar = config().printerBar
   // Categoria marcada como "nao imprime" nao vira papel em impressora nenhuma,
   // nem quando a loja so tem uma. A loja disse que ali nao precisa.
-  const paraPapel = itens.filter(it => !naoImprime(it.nome))
+  let paraPapel = itens.filter(it => !naoImprime(it.nome))
+  // Este PC so cuida de um setor? Entao o resto nao e problema dele.
+  const papel = papelDoPc()
+  if (papel !== 'tudo') {
+    paraPapel = paraPapel.filter(it => (setorDoItem(it.nome) === 'cozinha' ? 'cozinha' : 'frente') === papel)
+  }
   if (!paraPapel.length) return
   if (bar) {
     const cozinha = paraPapel.filter(it => setorDoItem(it.nome) === 'cozinha')
@@ -638,6 +651,7 @@ function statusObj() {
     impressoras: sessionAtiva ? listarImpressoras() : [],
     pausado: !!config().pausado,
     filtros: config().filtros || null,   // o que este PC imprime (null = tudo)
+    setor: papelDoPc(),                  // cozinha / frente / tudo (mig 0184)
   }
 }
 // CORS + Private Network Access — libera o gestor (https) a falar com o app (localhost).
@@ -745,6 +759,13 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, { ok: true, ...statusObj() })
       }
       // Gestor salva o que ESTE PC imprime (por origem). Body: { filtros: {mesa:true, ifood:false, ...} }
+      // Gestor troca o papel deste PC (cozinha / frente / tudo).
+      if (req.method === 'POST' && req.url === '/api/setor') {
+        const f = await jsonBody(req)
+        const v = (f.setor === 'cozinha' || f.setor === 'frente') ? f.setor : 'tudo'
+        setConfig({ setor: v }); log('Papel desta impressora: ' + v)
+        return sendJson(res, { ok: true, ...statusObj() })
+      }
       if (req.method === 'POST' && req.url === '/api/filtros') {
         const f = await jsonBody(req)
         const filtros = {}

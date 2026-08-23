@@ -1784,20 +1784,14 @@ function ImpressoraCelularPanel({ empresa }) {
       {msg && <div style={{ fontSize: 12, color: msg.ok ? '#16a34a' : '#dc2626', fontWeight: 600 }}>{msg.ok ? '✓ ' : '⚠️ '}{msg.txt}</div>}
       <div style={{ borderTop: '1px solid var(--border, #2a2a3a)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <span style={{ fontSize: 13, fontWeight: 800 }}>O que ESTA impressora imprime</span>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {[
-            { v: 'tudo', lbl: '📄 Tudo' },
-            { v: 'cozinha', lbl: '🍳 Só cozinha' },
-            { v: 'frente', lbl: '🧾 Só frente' },
-          ].map(o => (
-            <button key={o.v} type="button" onClick={() => escolherSetor(o.v)} style={{
-              flex: '1 1 100px', padding: '9px 8px', borderRadius: 9, cursor: 'pointer', fontWeight: 700, fontSize: 12.5,
-              border: `1.5px solid ${setor === o.v ? '#2563eb' : 'var(--border, #2a2a3a)'}`,
-              background: setor === o.v ? 'rgba(37,99,235,.14)' : 'transparent',
-              color: setor === o.v ? '#2563eb' : 'var(--text)',
-            }}>{o.lbl}</button>
-          ))}
-        </div>
+        <select value={setor} onChange={e => escolherSetor(e.target.value)} style={{
+          width: '100%', padding: '9px 10px', borderRadius: 8, fontSize: 13, fontWeight: 700,
+          border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
+        }}>
+          <option value="tudo">📄 Tudo</option>
+          <option value="cozinha">🍳 Só cozinha</option>
+          <option value="frente">🧾 Só frente (salão)</option>
+        </select>
         <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
           {setor === 'cozinha'
             ? 'Só os itens de categoria marcada como Cozinha. Conta, pré-conta e fechamento NÃO saem aqui.'
@@ -2825,6 +2819,23 @@ function ImpressoraFWCPanel({ empresaId }) {
               </>
             )}
           </div>
+
+          {/* Papel deste PC (v20+). Só aparece em quem já atualizou: nas versões
+              antigas o app ignora o comando e o botão mentiria. */}
+          {Number(st.versao) >= 20 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <label style={{ fontSize: 12.5, fontWeight: 800 }}>O que ESTA impressora imprime</label>
+              <select value={st.setor || 'tudo'} disabled={busy} style={inp}
+                onChange={e => acao('/setor', { setor: e.target.value })}>
+                <option value="tudo">📄 Tudo</option>
+                <option value="cozinha">🍳 Só cozinha</option>
+                <option value="frente">🧾 Só frente (salão)</option>
+              </select>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                Vale pelas categorias marcadas em <b>Produtos → Categorias</b>. Com uma impressora só, deixe em Tudo.
+              </div>
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" disabled={busy || !st.impressora} style={{ ...btnVerde, opacity: (busy || !st.impressora) ? .6 : 1 }} onClick={() => acao('/teste')}>Imprimir cupom de teste</button>
