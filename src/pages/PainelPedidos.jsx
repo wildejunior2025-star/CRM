@@ -3588,6 +3588,23 @@ export default function PainelPedidos() {
     imprimirCupom(pedido, empresa)
   }
 
+  // ── Religa a térmica Bluetooth assim que o gestor abre ────────────────────
+  // Recarregar a página apaga a conexão BLE (ela vive na memória da aba). O
+  // navegador ainda LEMBRA que este site pode falar com aquela impressora, então
+  // dá pra religar sem pedir nada — mas alguém precisa mandar religar.
+  //
+  // Antes só o painel da Impressora fazia isso, e só se o dono abrisse aquela
+  // aba. Quem dava F5 e ficava no Salão só descobria na hora de imprimir. Agora
+  // a religada começa junto com o gestor, e o vigia do módulo assume daí.
+  useEffect(() => {
+    let sobrou = false
+    try { sobrou = !!localStorage.getItem('bt_printer_id') } catch { /* ok */ }
+    if (!sobrou) return
+    import('../utils/imprimirBluetooth')
+      .then(m => m.reconectarSilencioso())
+      .catch(() => { /* sem Bluetooth neste aparelho */ })
+  }, [])
+
   // ── Painel lateral direito (Impressora / Pedidos) ─────────
   // Lembra a seção aberta (ex.: Mesas) ao sair e voltar do gestor.
   const [painelDireito, setPainelDireito] = useState(() => {
