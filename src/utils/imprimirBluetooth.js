@@ -9,8 +9,20 @@
 // ============================================================================
 import { separarItem } from '../lib/itensPedido'
 
-const LARGURA = 48 // 80mm = 48 colunas
 const ESC = 0x1b, GS = 0x1d
+
+// Largura e fonte saem da MESMA configuração do painel que o cupom do PC usa
+// ('painelConfig' no navegador). Antes a Bluetooth ignorava as duas — tinha 48
+// colunas cravadas no código. Numa térmica de 58 mm (32 colunas) a linha do
+// preço batia na borda e quebrava; e quem escolhia "fonte Grande" pra enxergar
+// melhor não via diferença nenhuma. Os dois botões pareciam enfeite, mas eram
+// só desligados deste caminho.
+function painelConfig() {
+  try { return JSON.parse(localStorage.getItem('painelConfig') || '{}') }
+  catch { return {} }
+}
+const colunas = () => (painelConfig().larguraCupom === '58mm' ? 32 : 48)
+const fonteGrande = () => (painelConfig().cupom || {}).fonte === 'grande'
 
 // UUIDs comuns de módulos Bluetooth de impressora térmica (precisam estar no
 // optionalServices pra o Web Bluetooth liberar o acesso ao serviço).
@@ -170,7 +182,10 @@ async function escrever(bytes) {
 
 // ── montagem do cupom em ESC/POS ────────────────────────────────────────
 class B {
-  constructor() { this.parts = [] }
+  constructor() {
+    this.parts = []
+    this.cols = colunas()
+  }
   raw(a) { this.parts.push(new Uint8Array(a)); return this }
   txt(s) { this.parts.push(enc(semAcento(s))); return this }
   nl(n = 1) { return this.raw(Array(n).fill(0x0a)) }
@@ -180,8 +195,20 @@ class B {
   bold(on) { return this.raw([ESC, 0x45, on ? 1 : 0]) }
   init() { return this.raw([ESC, 0x40]) }
   cut() { return this.raw([GS, 0x56, 0x00]) }
-  line() { return this.txt('-'.repeat(LARGURA)).nl() }
-  row(a, b) { a = semAcento(a); b = semAcento(b); const e = Math.max(1, LARGURA - a.length - b.length); return this.txt(a + ' '.repeat(e) + b).nl() }
+  line() { return this.txt('-'.repeat(this.cols)).nl() }
+  row(a, b) {
+    a = semAcento(a); b = semAcento(b)
+    // Não cabe na largura? Quebra em duas linhas com o valor à direita, em vez
+    // de deixar o papel embolar o nome com o preço.
+    if (a.length + b.length + 1 > this.cols) {
+      this.txt(a).nl()
+      return this.txt(' '.repeat(Math.max(0, this.cols - b.length)) + b).nl()
+    }
+    return this.txt(a + ' '.repeat(this.cols - a.length - b.length) + b).nl()
+  }
+  // "Fonte grande" do painel: dobra a altura da letra sem dobrar a largura, que
+  // em 32 colunas cortaria metade do nome do produto.
+  alto(on) { return this.raw([GS, 0x21, on ? (fonteGrande() ? 0x01 : 0x00) : 0x00]) }
   build() { const len = this.parts.reduce((s, p) => s + p.length, 0); const u = new Uint8Array(len); let o = 0; for (const p of this.parts) { u.set(p, o); o += p.length } return u }
 }
 
@@ -208,7 +235,7 @@ export function montarCupomBytes(pedido, empresa = {}) {
     const qtd = item.qtd ?? item.quantidade ?? 1
     const sub = item.subtotal != null ? Number(item.subtotal) : qtd * Number(item.preco ?? item.preco_unitario ?? 0)
     const { nome, complementos } = separarItem(item)
-    b.row(`${qtd}x ${nome}`, fmt(sub))
+    b.alto(true).row(`${qtd}x ${nome}`, fmt(sub)).alto(false)
     for (const c of complementos) {
       const cq = Number(c?.qtd ?? 1) * Number(qtd || 1)
       const cp = Number(c?.preco ?? 0)
@@ -303,7 +330,7 @@ export function montarContaMesaBytes({
     const sub = it.subtotal != null
       ? Number(it.subtotal)
       : q * Number(it.preco_unitario ?? it.preco ?? 0)
-    b.row(`${q}x ${it.nome}`, fmt(sub))
+    b.alto(true).row(`${q}x ${it.nome}`, fmt(sub)).alto(false)
   }
   if (!itens.length) b.txt('—').nl()
   b.line()
