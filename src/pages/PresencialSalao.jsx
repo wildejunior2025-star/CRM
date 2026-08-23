@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
@@ -170,17 +170,38 @@ export default function PresencialSalao() {
   const [pixRecebidos, setPixRecebidos] = useState([])
   const [pixVistos, setPixVistos] = useState(() => new Set())
 
-  async function loadAll() {
+  // ── Duas cargas, não uma ────────────────────────────────────────────────
+  // Antes era um `loadAll` só, com NOVE consultas — cardápio, complementos de
+  // todos os produtos, mil clientes, funcionários, categorias — e ele rodava
+  // inteiro a cada ação e a cada aviso do tempo real. Fechar e abrir a mesa
+  // recarregava o cardápio da loja de novo; no celular do garçom isso é uma
+  // eternidade de espera por nada (Wilde, 23/08/2026).
+  //
+  // O cardápio não muda enquanto o garçom atende: carrega uma vez. O que muda a
+  // toda hora é mesa e comanda — só isso volta ao banco.
+
+  // Muda o tempo todo: mesas, comandas e o caixa deste usuário.
+  const loadMesas = useCallback(async () => {
     if (!empresaId) return
-    const [emp, ms, cs, ps, gs, cat, cx, cg, cl] = await Promise.all([
-      supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios, comanda_balcao_ativa').eq('id', empresaId).single(),
+    const [ms, cs, cx] = await Promise.all([
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('comandas').select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
+      supabase.from('caixas').select('id').eq('empresa_id', empresaId).eq('aberto_por', user?.id).eq('status', 'aberto').limit(1),
+    ])
+    setMesas(ms.data ?? [])
+    setComandas(cs.data ?? [])
+    setCaixaAberto(!!(cx.data && cx.data.length))
+    setLoading(false)
+  }, [empresaId, user?.id])
+
+  // Quase nunca muda: cardápio, complementos, categorias, funcionários, clientes.
+  const loadCatalogo = useCallback(async () => {
+    if (!empresaId) return
+    const [emp, ps, gs, cat, cg, cl] = await Promise.all([
+      supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios, comanda_balcao_ativa').eq('id', empresaId).single(),
       supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria').eq('empresa_id', empresaId).order('nome').limit(500),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
       supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId),
-      // Caixa aberto por este usuário? (é o mesmo que recebe a venda — current_caixa_id)
-      supabase.from('caixas').select('id').eq('empresa_id', empresaId).eq('aberto_por', user?.id).eq('status', 'aberto').limit(1),
       // Complementos por produto. A tabela de vínculo não tem empresa_id e é lida por
       // todos (policy le_publico_pcg), então o "!inner" é o que garante a separação:
       // vira INNER JOIN com complemento_grupos, que a RLS já filtra por empresa — os
@@ -196,9 +217,6 @@ export default function PresencialSalao() {
       setSemObrigatorios(!!emp.data.presencial_sem_obrigatorios)
       setComandaBalcaoAtiva(!!emp.data.comanda_balcao_ativa)
     }
-    setCaixaAberto(!!(cx.data && cx.data.length))
-    setMesas(ms.data ?? [])
-    setComandas(cs.data ?? [])
     setProdutos(ps.data ?? [])
     setGarcons(Object.fromEntries((gs.data ?? []).map(p => [p.id, p.nome])))
     const om = {}
@@ -226,10 +244,25 @@ export default function PresencialSalao() {
     // "Consumidor (Mesa)" é o cliente genérico que a função usa nas mesas pagas —
     // não faz sentido oferecer como devedor no fiado.
     setClientes((cl.data ?? []).filter(c => c.nome !== 'Consumidor (Mesa)'))
-    setLoading(false)
-  }
+  }, [empresaId])
 
-  useEffect(() => { loadAll() }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
+  // Mantido pro punhado de lugares que precisam dos dois (ex.: acabou de inventar
+  // um produto e ele tem que aparecer na busca).
+  const loadAll = useCallback(async () => {
+    await Promise.all([loadMesas(), loadCatalogo()])
+  }, [loadMesas, loadCatalogo])
+
+  // O tempo real avisa UM POR UM: um envio de 6 itens vira 6 avisos, e antes
+  // eram 6 recargas completas em cima da outra. Junta os avisos que chegam
+  // colados e recarrega uma vez só.
+  const recargaTimer = useRef(null)
+  const loadMesasEmBreve = useCallback(() => {
+    clearTimeout(recargaTimer.current)
+    recargaTimer.current = setTimeout(loadMesas, 350)
+  }, [loadMesas])
+
+  useEffect(() => { loadCatalogo() }, [loadCatalogo])
+  useEffect(() => { loadMesas() }, [loadMesas])
 
   // Avisa quando cai um PIX de fiado pago pelo link do cliente (últimos 30 min).
   useEffect(() => {
@@ -252,9 +285,9 @@ export default function PresencialSalao() {
   useEffect(() => {
     if (!empresaId) return
     const ch = supabase.channel(`salao_${empresaId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas', filter: `empresa_id=eq.${empresaId}` }, loadAll)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `empresa_id=eq.${empresaId}` }, loadAll)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas', filter: `empresa_id=eq.${empresaId}` }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
@@ -470,14 +503,14 @@ export default function PresencialSalao() {
         empresa_id: empresaId, mesa_id: mesa.id, numero_mesa: mesa.numero, garcom_id: user?.id ?? null,
       })
       await supabase.from('mesas').update({ status: 'ocupada' }).eq('id', mesa.id)
-      await loadAll()
+      await loadMesas()
     }
     // Abrir a comanda JÁ conta como "vi" (mig 0182): para a sirene e o piscar.
     // Não tem botão separado de confirmar de propósito — botão de silenciar sem
     // atender seria exatamente o buraco que isto veio tapar.
     const alvo = existente ?? comandaPorMesa[mesa.id]
     if (alvo && alvo.visto_em == null) {
-      supabase.rpc('marcar_comanda_vista', { p_comanda_id: alvo.id }).then(loadAll)
+      supabase.rpc('marcar_comanda_vista', { p_comanda_id: alvo.id }).then(loadMesas)
     }
 
     setMesaSel(mesa)
@@ -504,7 +537,7 @@ export default function PresencialSalao() {
     // Recarrega e já abre o drawer da comanda nova (o atendente vai lançar agora).
     const { data: nova } = await supabase.from('comandas')
       .select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)').eq('id', data).single()
-    await loadAll()
+    await loadMesas()
     if (nova) {
       setMesaSel(mesaDaComanda(nova))
       setBusca(''); setCategoriaSel(null); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true)
@@ -528,7 +561,7 @@ export default function PresencialSalao() {
     setLigandoCliente(false)
     setPickerCliente(false)
     if (error) { window.alert('Erro ao ligar o cliente: ' + error.message); return }
-    await loadAll()
+    await loadMesas()
   }
 
   // Fecha o drawer da mesa. Se a mesa foi só ABERTA e não tem NADA (nenhum item
@@ -542,7 +575,7 @@ export default function PresencialSalao() {
       if (c.mesa_id) await supabase.from('mesas').update({ status: 'livre' }).eq('id', c.mesa_id)
       if (rascunhoKey) { try { localStorage.removeItem(rascunhoKey) } catch { /* ignora */ } }
       setMesaSel(null)
-      await loadAll()
+      await loadMesas()
       return
     }
     setMesaSel(null)
@@ -661,7 +694,7 @@ export default function PresencialSalao() {
       setInvSalvando(false)
       if (error) { window.alert('Erro ao salvar no catálogo: ' + error.message); return }
       produtoId = data.id
-      await loadAll()  // recarrega os produtos pra o novo aparecer na busca
+      await loadAll()  // aqui SIM o pesado: o produto novo tem que entrar na busca
     }
     setRascunho(prev => [...prev, { produto_id: produtoId, linha: String(produtoId), nome, preco_venda: preco, complementos: [], quantidade: 1, observacao: '' }])
     setInvNome(''); setInvPreco(''); setInvCatalogo(false); setInvCategoria(''); setInvAberto(false)
@@ -718,7 +751,7 @@ export default function PresencialSalao() {
     imprimirComandaAgora(inseridos ?? [])
     setRascunho([])
     if (rascunhoKey) { try { localStorage.removeItem(rascunhoKey) } catch { /* ignora */ } }
-    await loadAll()
+    await loadMesas()
   }
 
   async function mudarQtd(item, delta) {
@@ -729,7 +762,7 @@ export default function PresencialSalao() {
     const nova = item.quantidade + delta
     if (nova <= 0) await supabase.from('comanda_itens').delete().eq('id', item.id)
     else await supabase.from('comanda_itens').update({ quantidade: nova }).eq('id', item.id)
-    await loadAll()
+    await loadMesas()
   }
 
   // Dar o "pronto" sem depender do app da cozinha. Loja que não usa a tela da
@@ -737,7 +770,7 @@ export default function PresencialSalao() {
   async function marcarItemPronto(item) {
     const { error } = await supabase.from('comanda_itens').update({ status: 'pronto' }).eq('id', item.id)
     if (error) { window.alert('Erro ao marcar pronto: ' + error.message); return }
-    await loadAll()
+    await loadMesas()
   }
   async function marcarTudoPronto() {
     const ids = (comandaSel?.comanda_itens ?? [])
@@ -745,7 +778,7 @@ export default function PresencialSalao() {
     if (!ids.length) return
     const { error } = await supabase.from('comanda_itens').update({ status: 'pronto' }).in('id', ids)
     if (error) { window.alert('Erro ao marcar pronto: ' + error.message); return }
-    await loadAll()
+    await loadMesas()
   }
 
   async function entregarItem(item) {
@@ -753,7 +786,7 @@ export default function PresencialSalao() {
     await supabase.from('comanda_itens')
       .update({ status: 'entregue', entregue_por: user?.id ?? null, entregue_at: new Date().toISOString() })
       .eq('id', item.id)
-    await loadAll()
+    await loadMesas()
   }
 
   // Edita o preço unitário de um item já lançado (só admin) — ex.: prato por peso.
@@ -765,7 +798,7 @@ export default function PresencialSalao() {
     if (!Number.isFinite(preco) || preco === Number(item.preco_unitario)) return
     const { error } = await supabase.from('comanda_itens').update({ preco_unitario: preco }).eq('id', item.id)
     if (error) { window.alert('Erro ao salvar o preço: ' + error.message); return }
-    await loadAll()
+    await loadMesas()
   }
 
   async function salvarObs(item) {
@@ -778,7 +811,7 @@ export default function PresencialSalao() {
     }
     await supabase.from('comanda_itens').update({ observacao: novo }).eq('id', item.id)
     setObsEdit(prev => { const n = { ...prev }; delete n[item.id]; return n })
-    await loadAll()
+    await loadMesas()
   }
 
   async function cancelarMesa() {
@@ -787,7 +820,7 @@ export default function PresencialSalao() {
     await supabase.from('comandas').update({ status: 'cancelada' }).eq('id', comandaSel.id)
     if (comandaSel.mesa_id) await supabase.from('mesas').update({ status: 'livre' }).eq('id', comandaSel.mesa_id)
     setMesaSel(null)
-    await loadAll()
+    await loadMesas()
   }
 
   function abrirFechamento() {
@@ -1111,7 +1144,7 @@ export default function PresencialSalao() {
     }
     setFechando(false)
     setMesaSel(null)
-    await loadAll()
+    await loadMesas()
   }
 
   // ADM confere o pagamento e libera a mesa de vez (a partir do que o garçom fechou).
@@ -1124,7 +1157,7 @@ export default function PresencialSalao() {
       await supabase.from('mesas').update({ status: 'livre' }).eq('id', mesaSel.id)
       setSalvando(false)
       setMesaSel(null)
-      await loadAll()
+      await loadMesas()
       return
     }
     const pend = comandaSel.fechamento_pendente || {}
@@ -1146,7 +1179,7 @@ export default function PresencialSalao() {
     setSalvando(false)
     if (error) { window.alert('Erro ao liberar a mesa: ' + error.message); return }
     setMesaSel(null)
-    await loadAll()
+    await loadMesas()
   }
 
   // Só produtos que TÊM categoria entram no menu (os "sem categoria" somem).
