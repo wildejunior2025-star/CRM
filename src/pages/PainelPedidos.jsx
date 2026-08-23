@@ -4283,7 +4283,11 @@ export default function PainelPedidos() {
       itens: entry.itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao, setor: i.setor })),
     }
     if (await viaBluetooth('comanda', dados)) return
-    imprimirHtml(montarComandaCozinhaHtml(dados))
+    // "Não imprime" vale em qualquer impressora, não só na Bluetooth: a loja
+    // disse que ali não precisa de papel.
+    const paraPapel = dados.itens.filter(i => i.setor !== 'nenhum')
+    if (!paraPapel.length) return
+    imprimirHtml(montarComandaCozinhaHtml({ ...dados, itens: paraPapel }))
   }
 
   // A CONTA da mesa também respeita o filtro "Mesa" deste PC: se a Mesa está

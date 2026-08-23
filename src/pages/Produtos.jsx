@@ -1785,13 +1785,15 @@ export default function Produtos() {
               Ex.: Quentinhas <strong>10:00 às 14:00</strong>, Janta <strong>17:00 às 22:00</strong>.
             </p>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
-              🍳 <strong>Cozinha ou Salão</strong> — só vale pra quem tem <strong>duas impressoras</strong>. Marque como
-              <strong> Cozinha</strong> o que é preparado lá dentro (quentinhas, tapiocas, porções): esses itens saem na
-              térmica da cozinha. Todo o resto sai na da frente, junto com a conta. Com uma impressora só, tanto faz —
-              ela imprime tudo.
+              🖨️ <strong>Onde imprime</strong> — <strong>🍳 Cozinha</strong>: sai na térmica da cozinha (o que é preparado
+              lá dentro: quentinhas, espetinhos, porções). <strong>🧾 Salão</strong>: sai na impressora da frente, junto
+              com a conta. <strong>🚫 Não imprime</strong>: não sai papel nenhum — pro que o próprio garçom pega e dá baixa
+              no celular (bebida na geladeira, por exemplo). O item entra na conta do mesmo jeito.
+              Quem tem <strong>uma impressora só</strong> pode deixar tudo no Salão: ela imprime tudo, menos o que estiver
+              como Não imprime.
             </p>
 
-            <div className="data-table">
+            <div className="data-table tabela-categorias">
               {categorias.length === 0 ? (
                 <div className="empty-state">Nenhuma categoria cadastrada.</div>
               ) : (
@@ -1866,13 +1868,14 @@ export default function Produtos() {
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
                           <select
-                            value={c.setor === 'cozinha' ? 'cozinha' : 'salao'}
+                            value={['cozinha', 'nenhum'].includes(c.setor) ? c.setor : 'salao'}
                             onChange={(e) => salvarSetorCategoria(c.id, e.target.value)}
                             title="Em que impressora sai o pedido desta categoria"
-                            style={{ width: 130 }}
+                            className="cat-setor"
                           >
                             <option value="salao">🧾 Salão</option>
                             <option value="cozinha">🍳 Cozinha</option>
+                            <option value="nenhum">🚫 Não imprime</option>
                           </select>
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
@@ -1881,7 +1884,7 @@ export default function Produtos() {
                             value={(c.hora_inicio || '').slice(0, 5)}
                             onChange={(e) => salvarHorarioCategoria(c.id, 'hora_inicio', e.target.value)}
                             title="Disponível a partir de"
-                            style={{ width: 96 }}
+                            className="cat-hora"
                           />
                           <span style={{ margin: '0 5px', color: 'var(--text-muted)' }}>às</span>
                           <input
@@ -1889,7 +1892,7 @@ export default function Produtos() {
                             value={(c.hora_fim || '').slice(0, 5)}
                             onChange={(e) => salvarHorarioCategoria(c.id, 'hora_fim', e.target.value)}
                             title="Disponível até"
-                            style={{ width: 96 }}
+                            className="cat-hora"
                           />
                         </td>
                         <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>

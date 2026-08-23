@@ -379,12 +379,21 @@ export function definirSetorDaImpressora(v) {
 }
 
 // Dos itens que acabaram de ser pedidos, quais são DESTA impressora?
+//
+// 'nenhum' fica de fora SEMPRE, até quando a loja tem uma impressora só: é a
+// categoria que a loja marcou como "não precisa de papel" (o garçom pega a
+// bebida e dá baixa no celular dele). Imprimir mesmo assim seria ignorar a
+// escolha dela.
+//
 // Item sem setor (pedido antigo, produto sem categoria) conta como salão — a
 // regra é "salão sai tudo, menos o que é da cozinha", então nada some.
+const setorDoItem = (i) => (i.setor === 'cozinha' || i.setor === 'nenhum') ? i.setor : 'frente'
+
 export function itensDoSetor(itens = []) {
   const papel = setorDaImpressora()
-  if (papel === 'tudo') return itens
-  return itens.filter(i => (i.setor === 'cozinha' ? 'cozinha' : 'frente') === papel)
+  const imprimiveis = itens.filter(i => setorDoItem(i) !== 'nenhum')
+  if (papel === 'tudo') return imprimiveis
+  return imprimiveis.filter(i => setorDoItem(i) === papel)
 }
 
 // Conta, pré-conta e fechamento são papel da FRENTE: quem cobra é o caixa, não
