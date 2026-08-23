@@ -447,10 +447,19 @@ export default function PresencialSalao() {
     : pagamentos.some(p => p.forma === 'fiado' && Number(p.valor) > 0 && !p.cliente)
   const podeReceber = (modoPag === 'unico' || Math.abs(restante) < 0.05) && !fiadoSemDono
 
+  // A trava do caixa existe pra a venda não escapar do caixa — e quem CRIA a
+  // venda é quem libera a mesa no fim, sempre um ADM. O garçom só lança e manda
+  // pra conferência; nenhuma ação dele vira venda.
+  //
+  // Cobrar caixa dele travava a operação por um motivo que não é dele: garçom
+  // não abre caixa, e a RLS de `caixas` só deixa ele enxergar caixa que ELE
+  // abriu — então a condição era impossível de satisfazer. A tela mandava
+  // "abra o caixa" pra quem não tem esse botão (Wilde testou 23/08/2026).
+  const exigeCaixa = ehAdmin
+
   // ── Ações ────────────────────────────────────────────────────────────────
   async function abrirMesa(mesa) {
-    // Trava: só lança na mesa/balcão com o caixa aberto (senão a venda escaparia do caixa).
-    if (!caixaAberto) {
+    if (exigeCaixa && !caixaAberto) {
       window.alert('⚠️ Abra o caixa primeiro (aba 💵 Caixa) pra lançar na mesa.')
       return
     }
@@ -483,7 +492,7 @@ export default function PresencialSalao() {
   // dois atendentes clicando junto não podem receber o mesmo número. O nome do
   // cliente entra depois, lá dentro, pelo mesmo "Ligar cliente" das mesas.
   async function criarComandaBalcao() {
-    if (!caixaAberto) {
+    if (exigeCaixa && !caixaAberto) {
       window.alert('⚠️ Abra o caixa primeiro (aba 💵 Caixa) pra abrir comanda.')
       return
     }
@@ -1268,7 +1277,7 @@ export default function PresencialSalao() {
         )}
       </div>
 
-      {!caixaAberto && (
+      {exigeCaixa && !caixaAberto && (
         <div style={{
           margin: '0 0 12px', padding: '12px 14px', borderRadius: 10,
           border: '1px solid #f59e0b', background: 'rgba(245,158,11,.12)',
