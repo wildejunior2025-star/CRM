@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { iniciarTags, registrarCompra } from '../lib/tracking'
 import AvisoCookies from '../components/AvisoCookies'
+import 'leaflet/dist/leaflet.css'
 import './DeliveryPedido.css'
 
 const STATUS_STEPS = [
@@ -51,6 +52,204 @@ function IconRefresh() {
 
 function fmt(n) {
   return Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function enderecoTexto(p) {
+  return [
+    [p.endereco_rua, p.endereco_numero].filter(Boolean).join(', '),
+    p.endereco_bairro, p.endereco_cidade,
+  ].filter(Boolean).join(', ')
+}
+
+// ── Mapa da entrega: o cliente confere (e conserta) o ponto ──────────────────
+//
+// Quem descobria o pino errado era o motoboy, na rua, procurando uma casa que
+// não é a do pedido. O cliente é o único que sabe onde mora e era o único que
+// nunca via o ponto — a tela mostrava só o texto do endereço, e o caso comum é
+// justamente texto certo com pino errado (quem erra é o buscador de mapa).
+//
+// Aqui ele vê, arrasta se precisar, e o acerto vai direto pro link de navegação
+// do entregador. A taxa não muda: o preço já foi fechado.
+function MapaEntrega({ pedido, loja }) {
+  const mapRef = useRef(null)
+  const mapObj = useRef(null)
+  const pinRef = useRef(null)
+  // Ponto que está gravado no pedido agora (null = pedido antigo, sem coordenada)
+  const pinInicial = pedido.endereco_lat != null && pedido.endereco_lng != null
+    ? { lat: Number(pedido.endereco_lat), lng: Number(pedido.endereco_lng) }
+    : null
+
+  const [pontoSalvo, setPontoSalvo] = useState(pinInicial)
+  const [centro, setCentro] = useState(pinInicial)
+  const [coord, setCoord] = useState(pinInicial)
+  const [buscando, setBuscando] = useState(!pinInicial)
+  const [semPonto, setSemPonto] = useState(false)
+  const [locLoading, setLocLoading] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+  const [aviso, setAviso] = useState(null)     // { tipo: 'ok' | 'erro', texto }
+
+  const encerrado = pedido.status === 'entregue' || pedido.status === 'cancelado'
+  const mexeu = !!coord && (!pontoSalvo
+    || Math.abs(coord.lat - pontoSalvo.lat) > 1e-7
+    || Math.abs(coord.lng - pontoSalvo.lng) > 1e-7)
+
+  // Pedido antigo (ou feito antes do mapa) não tem coordenada: procura pelo
+  // texto do endereço só pra ter onde começar — e avisa que o ponto é um chute.
+  useEffect(() => {
+    if (pinInicial) return
+    let vivo = true
+    const texto = enderecoTexto(pedido)
+    if (!texto) { setBuscando(false); setSemPonto(true); return }
+    ;(async () => {
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(`${texto}, Brasil`)}&format=json&limit=1`,
+          { headers: { 'User-Agent': 'CRM-FWC/1.0' } })
+        const d = await res.json()
+        if (!vivo) return
+        if (d?.[0]) {
+          const c = { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
+          setCentro(c); setCoord(c); setSemPonto(true)
+        } else { setSemPonto(true) }
+      } catch { if (vivo) setSemPonto(true) }
+      finally { if (vivo) setBuscando(false) }
+    })()
+    return () => { vivo = false }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!centro || !mapRef.current || mapObj.current) return
+    let cancelado = false
+    ;(async () => {
+      const L = (await import('leaflet')).default
+      if (cancelado || !mapRef.current || mapObj.current) return
+      // Arrasto do mapa desligado no celular: senão o dedo que tenta rolar a
+      // página fica preso movendo o mapa. O pino continua arrastável.
+      const travarPan = L.Browser.mobile
+      const map = L.map(mapRef.current, {
+        zoomControl: true, dragging: !travarPan, touchZoom: !travarPan, scrollWheelZoom: false,
+      }).setView([centro.lat, centro.lng], 17)
+      mapObj.current = map
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map)
+
+      const pinIcon = L.divIcon({
+        html: '<div style="width:32px;height:32px;background:#ef4444;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 3px 10px rgba(0,0,0,.4);"></div>',
+        className: '', iconSize: [32, 32], iconAnchor: [16, 30],
+      })
+      pinRef.current = L.marker([centro.lat, centro.lng], { icon: pinIcon, draggable: !encerrado }).addTo(map)
+      if (!encerrado) {
+        pinRef.current.on('dragend', e => { const { lat, lng } = e.target.getLatLng(); setCoord({ lat, lng }); setAviso(null) })
+        map.on('click', e => { const { lat, lng } = e.latlng; pinRef.current.setLatLng([lat, lng]); setCoord({ lat, lng }); setAviso(null) })
+      }
+    })()
+    return () => { cancelado = true; if (mapObj.current) { mapObj.current.remove(); mapObj.current = null } }
+  }, [centro, encerrado])
+
+  // A loja chega numa consulta separada, depois do mapa. Entra como marcador à
+  // parte pra não refazer o mapa inteiro (e jogar fora um pino já arrastado).
+  const lojaMarcada = useRef(false)
+  useEffect(() => {
+    if (lojaMarcada.current || !mapObj.current || !loja?.latitude || !loja?.longitude) return
+    let cancelado = false
+    ;(async () => {
+      const L = (await import('leaflet')).default
+      if (cancelado || lojaMarcada.current || !mapObj.current) return
+      lojaMarcada.current = true
+      const lojaIcon = L.divIcon({
+        html: '<div style="width:30px;height:30px;background:#7c3aed;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:15px;">🏪</div>',
+        className: '', iconSize: [30, 30], iconAnchor: [15, 15],
+      })
+      L.marker([Number(loja.latitude), Number(loja.longitude)], { icon: lojaIcon, interactive: false }).addTo(mapObj.current)
+    })()
+    return () => { cancelado = true }
+  }, [loja?.latitude, loja?.longitude, centro])
+
+  function usarMinhaLocalizacao() {
+    if (!navigator.geolocation) return
+    setLocLoading(true)
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const c = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+        setLocLoading(false); setCoord(c); setAviso(null)
+        if (pinRef.current) pinRef.current.setLatLng([c.lat, c.lng])
+        if (mapObj.current) mapObj.current.setView([c.lat, c.lng], 18)
+        else setCentro(c)
+      },
+      () => { setLocLoading(false); setAviso({ tipo: 'erro', texto: 'Não consegui pegar sua localização. Você pode arrastar o pino à mão.' }) },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
+  async function salvar() {
+    if (!coord || salvando) return
+    setSalvando(true); setAviso(null)
+    const { data, error } = await supabase.rpc('corrigir_pin_pedido', {
+      p_pedido_id: pedido.id, p_lat: coord.lat, p_lng: coord.lng,
+    })
+    setSalvando(false)
+    if (error || !data?.ok) {
+      setAviso({ tipo: 'erro', texto: data?.erro || 'Não deu pra salvar agora. Tente de novo.' })
+      return
+    }
+    setPontoSalvo({ lat: coord.lat, lng: coord.lng })
+    setSemPonto(false)
+    setAviso({ tipo: 'ok', texto: 'Ponto atualizado! O entregador já vai pelo local novo.' })
+    // Avisa a loja pela conversa: o entregador pode já ter saído com o ponto
+    // velho, e quem consegue chamar ele no rádio é a loja.
+    if (pedido.empresa_id && pedido.cliente_telefone) {
+      supabase.rpc('enviar_msg_loja', {
+        p_empresa_id: pedido.empresa_id,
+        p_telefone: pedido.cliente_telefone,
+        p_nome: pedido.cliente_nome || '',
+        p_texto: '📍 Corrigi o ponto da entrega no mapa (pedido #' + shortId(pedido.id) + ').',
+      }).then(() => {}, () => {})
+    }
+  }
+
+  if (buscando) {
+    return (
+      <section className="dpd-card">
+        <h2 className="dpd-card-title">Onde vamos entregar</h2>
+        <p className="dpd-mapa-hint">Carregando o mapa…</p>
+      </section>
+    )
+  }
+  if (!centro) return null
+
+  return (
+    <section className="dpd-card">
+      <h2 className="dpd-card-title">Onde vamos entregar</h2>
+      <p className="dpd-mapa-hint">
+        {encerrado
+          ? 'Este foi o ponto usado na entrega.'
+          : semPonto
+            ? 'Esse ponto o mapa achou sozinho pelo seu endereço — confira se é mesmo a sua casa e arraste o pino se estiver errado.'
+            : 'Confira se o pino está na sua casa. Se estiver no lugar errado, arraste ele (ou toque no ponto certo) e salve.'}
+      </p>
+
+      <div ref={mapRef} className="dpd-mapa" />
+
+      {!encerrado && (
+        <div className="dpd-mapa-acoes">
+          <button type="button" className="dpd-mapa-btn" onClick={usarMinhaLocalizacao} disabled={locLoading}>
+            {locLoading ? 'Localizando…' : '🎯 Estou aqui agora'}
+          </button>
+          <button type="button" className="dpd-mapa-btn dpd-mapa-btn--salvar" onClick={salvar} disabled={!mexeu || salvando}>
+            {salvando ? 'Salvando…' : mexeu ? 'Salvar ponto corrigido' : 'Ponto conferido ✓'}
+          </button>
+        </div>
+      )}
+
+      {aviso && (
+        <p className={`dpd-mapa-aviso${aviso.tipo === 'erro' ? ' dpd-mapa-aviso--erro' : ''}`}>{aviso.texto}</p>
+      )}
+      {!encerrado && mexeu && !aviso && (
+        <p className="dpd-mapa-aviso dpd-mapa-aviso--neutro">
+          Você moveu o pino. Toque em <strong>Salvar ponto corrigido</strong> pra o entregador receber o local novo. A taxa combinada não muda.
+        </p>
+      )}
+    </section>
+  )
 }
 
 function shortId(uuid) {
@@ -261,7 +460,7 @@ export default function DeliveryPedido() {
     if (!pedido?.empresa_id) return
     supabase
       .from('empresas')
-      .select('id, nome, logo_url, slug, google_ads_id, google_ads_label, meta_pixel_id, chave_pix, pix_nome')
+      .select('id, nome, logo_url, slug, google_ads_id, google_ads_label, meta_pixel_id, chave_pix, pix_nome, latitude, longitude')
       .eq('id', pedido.empresa_id)
       .maybeSingle()
       .then(({ data }) => {
@@ -686,6 +885,11 @@ export default function DeliveryPedido() {
             <br />{pedido.endereco_cidade}
           </address>
         </section>
+
+        {/* O ponto no mapa, pro cliente conferir e consertar antes do motoboy sair */}
+        {(pedido.tipo_entrega || 'entrega') === 'entrega' && (
+          <MapaEntrega key={pedido.id} pedido={pedido} loja={loja} />
+        )}
 
         {pedido.observacoes && (
           <section className="dpd-card">

@@ -497,6 +497,94 @@
   font-style: normal;
 }
 
+/* ── Mapa da entrega (cliente confere e corrige o ponto) ── */
+.dpd-mapa-hint {
+  font-size: 12.5px;
+  color: #94a3b8;
+  line-height: 1.55;
+  margin: 0 0 10px;
+}
+
+.dpd-mapa {
+  width: 100%;
+  height: 230px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #334155;
+  background: #1e293b;
+}
+
+/* O Leaflet nasce com fundo branco e z-index alto; aqui ele se comporta */
+.dpd-mapa .leaflet-container {
+  background: #1e293b;
+  font-family: inherit;
+}
+
+.dpd-mapa-acoes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.dpd-mapa-btn {
+  flex: 1 1 150px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1.5px solid #334155;
+  background: transparent;
+  color: #cbd5e1;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 140ms, color 140ms, background 140ms;
+}
+
+.dpd-mapa-btn:hover:not(:disabled) {
+  border-color: #7c3aed;
+  color: #f1f5f9;
+}
+
+.dpd-mapa-btn--salvar {
+  border-color: #7c3aed;
+  background: #7c3aed;
+  color: #fff;
+  font-weight: 700;
+}
+
+.dpd-mapa-btn--salvar:hover:not(:disabled) {
+  background: #6d28d9;
+}
+
+.dpd-mapa-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dpd-mapa-aviso {
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.dpd-mapa-aviso--erro {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.dpd-mapa-aviso--neutro {
+  color: #c4b5fd;
+  background: rgba(124, 58, 237, 0.12);
+  border-color: rgba(124, 58, 237, 0.35);
+}
+
 /* ── Observações ── */
 .dpd-obs {
   font-size: 13px;

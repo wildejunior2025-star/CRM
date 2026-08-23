@@ -498,6 +498,15 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
                     rota e confirme com o cliente.</>}
             </div>
           )}
+          {/* Cliente arrastou o ponto no mapa depois de fazer o pedido (mig 0183).
+              O link de navegação já sai com o ponto novo — o aviso é pra quem já
+              olhou a rota antes e memorizou o lugar errado. */}
+          {pedido.endereco_pin_corrigido_em && (
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#047857', background: 'rgba(16,185,129,.12)',
+              border: '1px solid #10b981', borderRadius: 8, padding: '7px 10px', marginBottom: 6 }}>
+              📍 O cliente <strong>corrigiu o ponto no mapa</strong>. Abra a navegação de novo: o local mudou.
+            </div>
+          )}
           {checagemEndereco === undefined && pedido.endereco_lat == null && (
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
               ⏳ Conferindo o endereço no mapa...

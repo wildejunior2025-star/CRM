@@ -230,8 +230,15 @@ async function reverseGeocode(lat, lng) {
   } catch { return null }
 }
 
-// ── Modal do mapa: cliente arrasta o pino até a casa (ponto exato) ───────────
-function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco, exigeManual, onConfirm, onClose }) {
+// ── Mapa: cliente arrasta o pino até a casa (ponto exato) ────────────────────
+//
+// Dois modos, o MESMO componente:
+//   * embutido — vive dentro do formulário, sempre visível. Mapa escondido atrás
+//     de botão quase ninguém abre, e quem não abre manda o entregador pro ponto
+//     que o buscador chutou. Aberto na cara, o cliente vê o erro sozinho.
+//   * modal — tela cheia, pro ajuste fino (arrastar num mapa pequeno, dentro de
+//     uma página que rola, é briga de dedo).
+function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco, exigeManual, embutido, onChange, onAmpliar, onConfirm, onClose }) {
   const mapRef = useRef(null)
   const mapObj = useRef(null)
   const pinRef = useRef(null)
@@ -264,7 +271,17 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
       const L = (await import('leaflet')).default
       if (cancelado || !mapRef.current || mapObj.current) return
       const c = coord || { lat: Number(storeLat), lng: Number(storeLng) }
-      const map = L.map(mapRef.current, { zoomControl: true }).setView([c.lat, c.lng], 15)
+      // No mapa embutido do celular o arrasto do MAPA fica desligado: com ele
+      // ligado o dedo que tentava rolar a página ficava preso arrastando o mapa.
+      // O pino continua arrastável e o toque no mapa move o pino — pra
+      // reposicionar o mapa inteiro tem o botão de ampliar.
+      const travarPan = embutido && L.Browser.mobile
+      const map = L.map(mapRef.current, {
+        zoomControl: !embutido,
+        dragging: !travarPan,
+        scrollWheelZoom: !embutido,
+        touchZoom: !travarPan,
+      }).setView([c.lat, c.lng], 15)
       mapObj.current = map
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map)
       if (storeLat && storeLng) {
@@ -279,7 +296,9 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
 
       // Sem ponto ainda? Tenta achar pelo endereço digitado (CEP/rua) e já leva o
       // pino pra lá — assim ele nasce perto da casa, não parado na loja.
-      if (!initial && endereco && (endereco.rua || endereco.cep)) {
+      // No embutido quem procura é o formulário (ele já geocodifica conforme a
+      // pessoa digita); aqui só seguimos o ponto que ele achar.
+      if (!embutido && !initial && endereco && (endereco.rua || endereco.cep)) {
         setGeoLoading(true)
         geocodeEndereco(endereco).then(g => {
           setGeoLoading(false)
@@ -296,6 +315,25 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
     return () => { cancelado = true; if (mapObj.current) { mapObj.current.remove(); mapObj.current = null } }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ── Embutido: segue o ponto que o formulário achou pelo endereço digitado ──
+  // Enquanto o cliente não põe o dedo no pino, ele acompanha o que o buscador
+  // devolve a cada linha do endereço. Depois que a pessoa arrasta, o mapa é
+  // dela: nada de buscador reescrevendo o acerto feito à mão.
+  useEffect(() => {
+    if (!embutido || !initial || interagiu.current) return
+    if (coord && Math.abs(coord.lat - initial.lat) < 1e-7 && Math.abs(coord.lng - initial.lng) < 1e-7) return
+    setCoord({ lat: initial.lat, lng: initial.lng })
+    setDefinido(true)
+    if (pinRef.current) pinRef.current.setLatLng([initial.lat, initial.lng])
+    if (mapObj.current) mapObj.current.setView([initial.lat, initial.lng], 16)
+  }, [embutido, initial?.lat, initial?.lng]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Embutido não tem botão "confirmar": cada arrasto já vale como escolha.
+  useEffect(() => {
+    if (!embutido || !coord || !definido) return
+    onChange?.({ lat: coord.lat, lng: coord.lng, manual: interagiu.current })
+  }, [embutido, coord, definido]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function usarMinhaLocalizacao() {
     if (!navigator.geolocation) return
@@ -324,6 +362,50 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
   // o ponto tem que ter saído do dedo dele, não do buscador.
   const liberado = !!coord && definido && (!exigeManual || mexeu)
 
+  const linhaDistancia = geoLoading ? 'Procurando o endereço…'
+    : !definido ? '👆 Arraste o pino até sua casa'
+    : dist != null ? <>📏 {dist.toFixed(1)} km · <strong style={{ color: '#34d399' }}>Taxa {taxa != null ? `R$ ${fmt(taxa)}` : '—'}</strong>{foraRaio ? ' · ⚠️ fora do raio' : ''}</>
+    : 'Arraste o pino até sua casa'
+
+  const avisoBairro = pinLongeDoBairro && (
+    <div style={{ fontSize: 12.5, lineHeight: 1.5, color: '#fbbf24', background: 'rgba(251,191,36,.12)', border: '1px solid rgba(251,191,36,.4)', borderRadius: 8, padding: '9px 11px' }}>
+      ⚠️ Esse ponto está a <strong>{distBairro?.toFixed(1)} km</strong> do bairro <strong>{endereco?.bairro}</strong> que você informou. Confira se o pino está mesmo na sua casa — se estiver no lugar errado, a taxa de entrega sai errada.
+    </div>
+  )
+
+  if (embutido) {
+    return (
+      <div style={{ border: `1.5px solid ${mexeu ? '#16a34a' : 'var(--border,#2a2a3a)'}`, borderRadius: 12, overflow: 'hidden', background: 'var(--surface,#16161f)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px' }}>
+          <strong style={{ fontSize: 13.5, color: 'var(--text,#fff)' }}>📍 Onde o entregador vai chegar</strong>
+          <button type="button" onClick={onAmpliar}
+            style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #7c3aed', background: 'rgba(124,58,237,.12)', color: '#a78bfa', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            ⛶ Ampliar
+          </button>
+        </div>
+        <div ref={mapRef} style={{ width: '100%', height: 220 }} />
+        <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.45, color: 'var(--text-muted,#9aa)' }}>
+            Confira se o pino está na sua casa. Está no lugar errado? <strong style={{ color: 'var(--text,#fff)' }}>Arraste ele</strong> ou toque no ponto certo.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+            <button type="button" onClick={usarMinhaLocalizacao}
+              style={{ padding: '8px 12px', borderRadius: 9, border: '1.5px solid #7c3aed', background: 'rgba(124,58,237,.12)', color: '#a78bfa', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}>
+              {locLoading ? 'Localizando…' : '🎯 Usar minha localização'}
+            </button>
+            <div style={{ fontSize: 13, color: foraRaio ? '#f87171' : 'var(--text,#fff)', fontWeight: 600 }}>{linhaDistancia}</div>
+          </div>
+          {avisoBairro}
+          {exigeManual && !mexeu && (
+            <div style={{ fontSize: 12.5, lineHeight: 1.5, color: '#a78bfa', background: 'rgba(124,58,237,.12)', border: '1px solid rgba(124,58,237,.4)', borderRadius: 8, padding: '9px 11px' }}>
+              📍 <strong>Arraste o pino até a sua casa.</strong> O ponto que o mapa achou sozinho já errou o seu endereço antes — por isso precisamos que você aponte.
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }} onClick={onClose}>
       <div style={{ width: '100%', maxWidth: 560, background: 'var(--surface,#16161f)', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '92vh' }} onClick={e => e.stopPropagation()}>
@@ -337,17 +419,9 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
             <button type="button" onClick={usarMinhaLocalizacao} style={{ padding: '9px 14px', borderRadius: 10, border: '1.5px solid #7c3aed', background: 'rgba(124,58,237,.12)', color: '#a78bfa', fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}>
               {locLoading ? 'Localizando…' : '🎯 Usar minha localização'}
             </button>
-            <div style={{ fontSize: 14, color: foraRaio ? '#f87171' : 'var(--text,#fff)', fontWeight: 600 }}>
-              {geoLoading ? 'Procurando o endereço…'
-                : !definido ? '👆 Arraste o pino até sua casa'
-                : dist != null ? <>📏 {dist.toFixed(1)} km · <strong style={{ color: '#34d399' }}>Taxa {taxa != null ? `R$ ${fmt(taxa)}` : '—'}</strong>{foraRaio ? ' · ⚠️ fora do raio' : ''}</> : 'Arraste o pino até sua casa'}
-            </div>
+            <div style={{ fontSize: 14, color: foraRaio ? '#f87171' : 'var(--text,#fff)', fontWeight: 600 }}>{linhaDistancia}</div>
           </div>
-          {pinLongeDoBairro && (
-            <div style={{ fontSize: 12.5, lineHeight: 1.5, color: '#fbbf24', background: 'rgba(251,191,36,.12)', border: '1px solid rgba(251,191,36,.4)', borderRadius: 8, padding: '9px 11px' }}>
-              ⚠️ Esse ponto está a <strong>{distBairro.toFixed(1)} km</strong> do bairro <strong>{endereco?.bairro}</strong> que você informou. Confira se o pino está mesmo na sua casa — se estiver no lugar errado, a taxa de entrega sai errada.
-            </div>
-          )}
+          {avisoBairro}
           {/* Sem local definido = pino ainda parado na loja. Bloqueia pra não
               gravar o endereço da loja no lugar do endereço do cliente.
               `exigeManual` é o cliente marcado pra reconfirmar: pra ele o pino
@@ -705,6 +779,18 @@ export default function DeliveryCheckout() {
   // `manual` diz se o ponto saiu do DEDO do cliente ou se ele só confirmou o que
   // o buscador de mapa tinha chutado — só o primeiro é bom o bastante pra virar
   // o pino oficial do cadastro dele (mig 0160).
+  // Mapa embutido: cada arrasto já vale, sem botão de confirmar. Aqui NÃO se
+  // faz o caminho de volta (coordenada → endereço) de propósito: a pessoa está
+  // digitando rua e bairro nesse instante, e reescrever os campos a cada arrasto
+  // seria o formulário brigando com o dedo dela. Isso continua só no mapa grande.
+  function pontoDoMapa({ lat, lng, manual }) {
+    if (manual) pinManualRef.current = true
+    setCoordCliente(prev =>
+      prev && Math.abs(prev.lat - lat) < 1e-7 && Math.abs(prev.lng - lng) < 1e-7
+        ? prev
+        : { lat, lng })
+  }
+
   function confirmarMapa({ lat, lng, manual }) {
     pinManualRef.current = !!manual
     setCoordCliente({ lat, lng })
@@ -828,8 +914,8 @@ export default function DeliveryCheckout() {
     const precisaPino = !coordCliente || (reconfirmar && !pinManualRef.current)
     if (tipo === 'entrega' && lojaTemMapa && precisaPino) {
       setErroGlobal(reconfirmar
-        ? 'Pra confirmar seu endereço, toque em "Marcar meu local no mapa" e aponte onde você mora.'
-        : 'Toque em "Marcar meu local no mapa" pra o entregador achar seu endereço.')
+        ? 'Pra confirmar seu endereço, arraste o pino do mapa até onde você mora.'
+        : 'Arraste o pino do mapa até a sua casa pra o entregador achar o endereço.')
       setMapaAberto(true)
       return
     }
@@ -1226,16 +1312,24 @@ export default function DeliveryCheckout() {
                     </div>
                   )}
 
-                  {/* Localizador no mapa — ponto exato pra taxa certinha */}
+                  {/* Localizador no mapa — ponto exato pra taxa certinha.
+                      Fica ABERTO, não atrás de botão: mapa que precisa de clique
+                      pra aparecer ninguém abre, e o entregador acaba indo pro
+                      ponto que o buscador chutou. */}
                   {lojaEndereco?.latitude && lojaEndereco?.longitude && (
                     <div style={{ marginTop: 4 }}>
-                      <button type="button" onClick={() => setMapaAberto(true)}
-                        style={{ width: '100%', padding: '12px', borderRadius: 12, cursor: 'pointer', fontWeight: 700, fontSize: 14,
-                          border: `1.5px solid ${coordCliente ? '#16a34a' : '#7c3aed'}`,
-                          background: coordCliente ? 'rgba(16,185,129,.12)' : 'rgba(124,58,237,.12)',
-                          color: coordCliente ? '#34d399' : '#a78bfa' }}>
-                        {coordCliente ? '✓ Local marcado no mapa — toque para ajustar' : '📍 Marcar meu local no mapa (obrigatório)'}
-                      </button>
+                      <MapaLocalizador
+                        embutido
+                        storeLat={lojaEndereco.latitude}
+                        storeLng={lojaEndereco.longitude}
+                        raioKm={lojaEndereco.raio_entrega_km}
+                        taxas={lojaEndereco.taxas_entrega_km}
+                        initial={coordCliente}
+                        endereco={{ rua: form.rua, numero: form.numero, bairro: form.bairro, cidade: form.cidade, estado: form.estado, cep: form.cep }}
+                        exigeManual={reconfirmar}
+                        onChange={pontoDoMapa}
+                        onAmpliar={() => setMapaAberto(true)}
+                      />
                       {temFaixas && (
                         <div style={{ marginTop: 6, fontSize: 12.5, color: taxaPendente ? '#eab308' : 'var(--text-muted,#9aa)' }}>
                           {taxaPendente
