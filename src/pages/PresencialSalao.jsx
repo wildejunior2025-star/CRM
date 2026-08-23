@@ -34,6 +34,35 @@ const FORMAS = [
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
 
+// Sirene da comanda que chegou pelo link e ninguém viu (mig 0182).
+//
+// Toca em looping, de propósito: um bipe único no meio do movimento do balcão
+// não é ouvido, e o pedido fica parado com o cliente esperando na frente. Para
+// sozinha no instante em que alguém abre a comanda.
+//
+// O navegador só deixa tocar depois de um gesto do usuário — como o atendente
+// clica o tempo todo nessa tela, na prática já está destravado.
+let _ctxSalao = null
+function tocarSirene() {
+  try {
+    if (!_ctxSalao) _ctxSalao = new (window.AudioContext || window.webkitAudioContext)()
+    const ctx = _ctxSalao
+    if (ctx.state === 'suspended') ctx.resume()
+    // Dois tons alternados: chama mais atenção que um bipe só, e não se
+    // confunde com o som de "pedido pronto" da cozinha.
+    ;[[880, 0], [1174, 0.22]].forEach(([hz, atraso]) => {
+      const o = ctx.createOscillator(); const g = ctx.createGain()
+      o.connect(g); g.connect(ctx.destination)
+      o.type = 'square'
+      o.frequency.setValueAtTime(hz, ctx.currentTime + atraso)
+      g.gain.setValueAtTime(0.22, ctx.currentTime + atraso)
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + atraso + 0.18)
+      o.start(ctx.currentTime + atraso)
+      o.stop(ctx.currentTime + atraso + 0.18)
+    })
+  } catch { /* sem áudio: o piscar já avisa */ }
+}
+
 // Tira acento e deixa minúsculo: assim "agua" acha "Água", "cafe" acha "Café" etc.
 const semAcento = (s) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 
@@ -376,6 +405,21 @@ export default function PresencialSalao() {
   const taxaSel = aplicarTaxa ? Math.round(subtotalSel * (taxaPct / 100) * 100) / 100 : 0
   const totalSel = subtotalSel + taxaSel
 
+  // Comandas que chegaram pelo link e ninguém abriu ainda (mig 0182).
+  const naoVistas = useMemo(
+    () => comandas.filter(c => c.status === 'aberta' && c.visto_em == null),
+    [comandas])
+
+  // Sirene a cada 4s enquanto tiver pedido esperando alguém olhar. Para
+  // sozinha quando o atendente abre a comanda — não tem botão de silenciar de
+  // propósito: silenciar sem atender é o buraco que isto veio tapar.
+  useEffect(() => {
+    if (naoVistas.length === 0) return
+    tocarSirene()
+    const t = setInterval(tocarSirene, 4000)
+    return () => clearInterval(t)
+  }, [naoVistas.length])
+
   // Quanto do crédito cabe nesta conta. Nunca cobre tudo: a loja precisa
   // receber alguma coisa, e o servidor recusa — melhor a tela já oferecer só o
   // que vai passar. Um centavo é o bastante pra conta não fechar em zero.
@@ -419,6 +463,14 @@ export default function PresencialSalao() {
       await supabase.from('mesas').update({ status: 'ocupada' }).eq('id', mesa.id)
       await loadAll()
     }
+    // Abrir a comanda JÁ conta como "vi" (mig 0182): para a sirene e o piscar.
+    // Não tem botão separado de confirmar de propósito — botão de silenciar sem
+    // atender seria exatamente o buraco que isto veio tapar.
+    const alvo = existente ?? comandaPorMesa[mesa.id]
+    if (alvo && alvo.visto_em == null) {
+      supabase.rpc('marcar_comanda_vista', { p_comanda_id: alvo.id }).then(loadAll)
+    }
+
     setMesaSel(mesa)
     setBusca(''); setCategoriaSel(null); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true)
     // Zera o fechamento anterior: linha de fiado com o devedor da OUTRA mesa ainda
@@ -1169,10 +1221,12 @@ export default function PresencialSalao() {
             const sub = subtotalDe(c)
             const prontos = prontosDe(c)
             const aguardando = c.status === 'aguardando_conferencia'
+            const naoVisto = c.visto_em == null && c.status === 'aberta'
             const borda = prontos > 0 ? '#22c55e' : aguardando ? '#3b82f6' : '#d97706'
             return (
               <div key={c.id} role="button" tabIndex={0} onClick={() => abrirMesa(pseudo)}
                 onKeyDown={ev => { if (ev.key === 'Enter') abrirMesa(pseudo) }}
+                className={naoVisto ? 'sal-comanda-nova' : undefined}
                 style={{
                   borderRadius: 9, padding: '7px 8px', cursor: 'pointer', textAlign: 'left', position: 'relative',
                   border: `1.5px solid ${borda}`,
@@ -1186,7 +1240,8 @@ export default function PresencialSalao() {
                     background: '#22c55e', color: '#fff', borderRadius: 999, padding: '1px 5px',
                   }}>🔔{prontos}</span>
                 )}
-                <div style={{ fontSize: 14.5, fontWeight: 800, lineHeight: 1.1 }}>🧾 {rotuloMesa(pseudo)}</div>
+                {naoVisto && <span className="sal-selo-novo">NOVO</span>}
+                <div style={{ fontSize: 14.5, fontWeight: 800, lineHeight: 1.1, marginTop: naoVisto ? 10 : 0 }}>🧾 {rotuloMesa(pseudo)}</div>
                 <div style={{ fontSize: 9.5, marginTop: 2, color: borda, fontWeight: 700 }}>
                   {aguardando ? 'Aguard. ADM' : 'Aberta'}
                 </div>

@@ -240,3 +240,42 @@ html[data-teclado='aberto'] .sal-overlay {
   }
   .sal-acoes .sal-acao-txt { display: inline; }
 }
+
+/* Comanda que chegou pelo link do cliente e ninguém olhou ainda (mig 0182).
+ *
+ * Pedido pelo link cai como comanda nova e a loja não recebe aviso nenhum.
+ * Numa casa com dez mesas abertas isso passa batido — e o cliente está no
+ * balcão esperando. Então pisca roxo até alguém abrir a comanda.
+ *
+ * Pulsa a SOMBRA e não o `opacity`: piscar o card inteiro deixa o texto
+ * ilegível justo na hora em que o atendente precisa ler o nome.
+ */
+@keyframes sal-pisca-novo {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, .95), 0 0 14px 2px rgba(139, 92, 246, .55); }
+  50%      { box-shadow: 0 0 0 5px rgba(139, 92, 246, 0),  0 0 4px 0 rgba(139, 92, 246, .15); }
+}
+
+.sal-comanda-nova {
+  animation: sal-pisca-novo 1.1s ease-in-out infinite;
+  border-color: #8b5cf6 !important;
+  background: rgba(139, 92, 246, .22) !important;
+}
+
+/* Quem configurou o sistema pra não animar não fica com a tela tremendo — mas
+ * continua vendo que é diferente das outras, que é o que importa. */
+@media (prefers-reduced-motion: reduce) {
+  .sal-comanda-nova { animation: none; }
+}
+
+.sal-selo-novo {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  background: #8b5cf6;
+  color: #fff;
+  border-radius: 999px;
+  padding: 1px 6px;
+}
