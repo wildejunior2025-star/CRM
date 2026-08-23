@@ -2129,6 +2129,15 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
                 <span>{fmt(pedido.taxa_entrega)}</span>
               </div>
             )}
+            {/* Cashback (mig 0178): sem esta linha o card mostrava subtotal de
+                R$ 68 e total de R$ 28, e a loja não tinha como saber por quê —
+                parecia erro de conta ou pedido adulterado. */}
+            {Number(pedido.cashback_usado || 0) > 0 && (
+              <div className="pp-totais-row" style={{ color: '#16a34a' }}>
+                <span>🎟️ Cashback do cliente</span>
+                <span>− {fmt(pedido.cashback_usado)}</span>
+              </div>
+            )}
             <div className="pp-totais-total">
               <span>Total</span>
               <span>{fmt(pedido.total)}</span>

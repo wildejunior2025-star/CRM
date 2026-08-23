@@ -526,6 +526,13 @@ export default function DeliveryCheckout() {
 
   // Crédito da loja pelo telefone (mig 0178). Mesma deixa do reconhecimento
   // abaixo: assim que o telefone fica completo, pergunta quanto ele tem.
+  // Mesmo tema que o catálogo grava. Sem isto o cliente escolhia claro na
+  // vitrine, ia pagar e a tela virava preta — com o nome do produto escuro
+  // sobre escuro, ilegível.
+  const tema = (() => {
+    try { return localStorage.getItem('dloja-tema') || 'claro' } catch { return 'claro' }
+  })()
+
   const [saldoCashback, setSaldoCashback] = useState(0)
   const [usarCashback, setUsarCashback]   = useState(true)
   useEffect(() => {
@@ -1000,7 +1007,7 @@ export default function DeliveryCheckout() {
   }
 
   return (
-    <div className="dco-root">
+    <div className="dco-root" data-tema={tema}>
       <header className="dco-header">
         <div className="dco-header-inner">
           <button className="dco-back-btn" onClick={() => navigate(-1)} aria-label="Voltar">

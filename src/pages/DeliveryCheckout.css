@@ -1,9 +1,45 @@
-/* ── DeliveryCheckout — order form ── */
+/* ── DeliveryCheckout — order form ──
+ *
+ * A tela nascia sempre ESCURA, com as cores cravadas. O cliente escolhia o
+ * modo claro no catálogo, ia pagar e a tela virava preta na cara dele — e o
+ * nome do produto ficava escuro sobre escuro, ilegível.
+ *
+ * Agora as cores estruturais são token e o tema vem do mesmo `dloja-tema` que
+ * o catálogo grava. O roxo da marca e os vermelhos de erro não viraram token
+ * de propósito: funcionam nos dois fundos.
+ */
+
+.dco-root {
+  /* escuro — o padrão histórico desta tela */
+  --dco-bg:              #0f172a;
+  --dco-surface:         #1e293b;
+  --dco-border:          #334155;
+  --dco-border-forte:    #475569;
+  --dco-text:            #f1f5f9;
+  --dco-text-2:          #e2e8f0;
+  --dco-muted:           #94a3b8;
+  --dco-muted-2:         #64748b;
+  --dco-destaque:        #1e1b4b;
+  --dco-destaque-borda:  #312e81;
+}
+
+.dco-root[data-tema="claro"] {
+  --dco-bg:              #f6f7fb;
+  --dco-surface:         #ffffff;
+  --dco-border:          #e2e8f0;
+  --dco-border-forte:    #cbd5e1;
+  --dco-text:            #0f172a;
+  --dco-text-2:          #1e293b;
+  --dco-muted:           #64748b;
+  --dco-muted-2:         #94a3b8;
+  --dco-destaque:        #f5f3ff;
+  --dco-destaque-borda:  #ddd6fe;
+}
 
 .dco-root {
   min-height: 100vh;
-  background: #0f172a;
-  color: #f1f5f9;
+  background: var(--dco-bg);
+  color: var(--dco-text);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -13,8 +49,8 @@
 
 /* ── Header ── */
 .dco-header {
-  background: #0f172a;
-  border-bottom: 1px solid #1e293b;
+  background: var(--dco-bg);
+  border-bottom: 1px solid var(--dco-surface);
   position: sticky;
   top: 0;
   z-index: 100;
@@ -36,16 +72,16 @@
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  border: 1px solid #1e293b;
-  background: #1e293b;
-  color: #f1f5f9;
+  border: 1px solid var(--dco-surface);
+  background: var(--dco-surface);
+  color: var(--dco-text);
   cursor: pointer;
   flex-shrink: 0;
   transition: background 140ms;
 }
 
 .dco-back-btn:hover {
-  background: #334155;
+  background: var(--dco-border);
 }
 
 .dco-back-btn:focus-visible {
@@ -56,7 +92,7 @@
 .dco-logo {
   font-size: 20px;
   font-weight: 800;
-  color: #f1f5f9;
+  color: var(--dco-text);
   letter-spacing: -0.03em;
   line-height: 1;
   flex-shrink: 0;
@@ -69,7 +105,7 @@
 .dco-header-divider {
   width: 1px;
   height: 20px;
-  background: #1e293b;
+  background: var(--dco-surface);
   flex-shrink: 0;
 }
 
@@ -77,14 +113,14 @@
   display: block;
   font-size: 15px;
   font-weight: 700;
-  color: #f1f5f9;
+  color: var(--dco-text);
   line-height: 1.2;
 }
 
 .dco-header-sub {
   display: block;
   font-size: 12px;
-  color: #64748b;
+  color: var(--dco-muted-2);
   margin-top: 1px;
 }
 
@@ -128,8 +164,8 @@
 
 /* ── Seções ── */
 .dco-section {
-  background: #1e1b4b;
-  border: 1px solid #312e81;
+  background: var(--dco-destaque);
+  border: 1px solid var(--dco-destaque-borda);
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 16px;
@@ -138,7 +174,7 @@
 .dco-section-title {
   font-size: 14px;
   font-weight: 700;
-  color: #f1f5f9;
+  color: var(--dco-text);
   margin: 0 0 16px;
   letter-spacing: 0.01em;
   display: flex;
@@ -149,7 +185,7 @@
 .dco-optional {
   font-size: 12px;
   font-weight: 400;
-  color: #64748b;
+  color: var(--dco-muted-2);
 }
 
 /* ── Campo ── */
@@ -168,7 +204,7 @@
 .dco-label {
   font-size: 12px;
   font-weight: 600;
-  color: #94a3b8;
+  color: var(--dco-muted);
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
@@ -180,17 +216,17 @@
 
 .dco-input {
   padding: 10px 12px;
-  background: #0f172a;
-  border: 1.5px solid #334155;
+  background: var(--dco-bg);
+  border: 1.5px solid var(--dco-border);
   border-radius: 8px;
-  color: #f1f5f9;
+  color: var(--dco-text);
   font-size: 14px;
   width: 100%;
   transition: border-color 140ms, box-shadow 140ms;
 }
 
 .dco-input::placeholder {
-  color: #475569;
+  color: var(--dco-border-forte);
 }
 
 .dco-input:focus {
@@ -233,8 +269,8 @@
 }
 
 .dco-select option {
-  background: #0f172a;
-  color: #f1f5f9;
+  background: var(--dco-bg);
+  color: var(--dco-text);
 }
 
 .dco-row {
@@ -247,10 +283,10 @@
 .dco-textarea {
   width: 100%;
   padding: 10px 12px;
-  background: #0f172a;
-  border: 1.5px solid #334155;
+  background: var(--dco-bg);
+  border: 1.5px solid var(--dco-border);
   border-radius: 8px;
-  color: #f1f5f9;
+  color: var(--dco-text);
   font-size: 14px;
   font-family: inherit;
   resize: vertical;
@@ -259,7 +295,7 @@
 }
 
 .dco-textarea::placeholder {
-  color: #475569;
+  color: var(--dco-border-forte);
 }
 
 .dco-textarea:focus {
@@ -283,9 +319,9 @@
   gap: 8px;
   padding: 12px;
   border-radius: 10px;
-  border: 1.5px solid #334155;
-  background: #0f172a;
-  color: #94a3b8;
+  border: 1.5px solid var(--dco-border);
+  background: var(--dco-bg);
+  color: var(--dco-muted);
   cursor: pointer;
   font-family: inherit;
   font-size: 13px;
@@ -296,7 +332,7 @@
 
 .dco-pay-btn:hover {
   border-color: #7c3aed;
-  color: #f1f5f9;
+  color: var(--dco-text);
 }
 
 .dco-pay-btn--active {
@@ -319,8 +355,8 @@
 
 /* ── Resumo ── */
 .dco-resumo {
-  background: #1e1b4b;
-  border: 1px solid #312e81;
+  background: var(--dco-destaque);
+  border: 1px solid var(--dco-destaque-borda);
   border-radius: 12px;
   padding: 20px;
 }
@@ -347,7 +383,7 @@
 }
 
 .dco-resumo-item-nome {
-  color: #e2e8f0;
+  color: var(--dco-text-2);
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -356,7 +392,7 @@
 }
 
 .dco-resumo-item-sub {
-  color: #94a3b8;
+  color: var(--dco-muted);
   font-weight: 600;
   flex-shrink: 0;
 }
@@ -366,7 +402,7 @@
   flex-direction: column;
   gap: 8px;
   padding-top: 12px;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid var(--dco-surface);
   margin-bottom: 16px;
 }
 
@@ -374,15 +410,15 @@
   display: flex;
   justify-content: space-between;
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--dco-muted);
 }
 
 .dco-resumo-total {
   font-size: 15px;
   font-weight: 700;
-  color: #f1f5f9;
+  color: var(--dco-text);
   padding-top: 8px;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid var(--dco-surface);
   margin-top: 4px;
 }
 
@@ -420,8 +456,8 @@
 }
 
 .dco-btn-submit:disabled {
-  background: #334155;
-  color: #64748b;
+  background: var(--dco-border);
+  color: var(--dco-muted-2);
   cursor: not-allowed;
 }
 
@@ -484,8 +520,8 @@
     left: 0;
     right: 0;
     padding: 12px 16px 20px;
-    background: #0f172a;
-    border-top: 1px solid #1e293b;
+    background: var(--dco-bg);
+    border-top: 1px solid var(--dco-surface);
     z-index: 40;
   }
 }
