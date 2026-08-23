@@ -4204,25 +4204,42 @@ export default function PainelPedidos() {
     return info
   }
 
+  // Se a térmica Bluetooth do celular estiver ligada, é ELA quem imprime.
+  // Só o delivery passava por aqui: a loja que imprime pelo celular não recebia
+  // comanda de mesa nenhuma, porque o caminho de mesa ia direto pro app FWC /
+  // navegador — que no celular não existe. Devolve true se a Bluetooth deu conta.
+  async function viaBluetooth(fn) {
+    try {
+      const mod = await import('../utils/imprimirBluetooth')
+      if (mod.estaConectada() || await mod.reconectarSilencioso()) { await fn(mod); return true }
+    } catch { /* sem Bluetooth ou falhou — cai no caminho normal */ }
+    return false
+  }
+
   async function flushImpressaoMesa(cid) {
     const entry = mesaPrintRef.current[cid]
     delete mesaPrintRef.current[cid]
     if (!entry?.itens?.length) return
     const info = await infoComandaCozinha(cid)
-    imprimirHtml(montarComandaCozinhaHtml({
+    const dados = {
       numeroMesa: info.numero, rotulo: info.rotulo,
       nomeLoja: empresa?.nome,
       area: info.area, atendente: info.atendente, pessoas: info.pessoas, rodape: info.rodape,
       itens: entry.itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao })),
-    }))
+    }
+    if (await viaBluetooth(m => m.imprimirComandaMesaCelular(dados))) return
+    imprimirHtml(montarComandaCozinhaHtml(dados))
   }
 
   // A CONTA da mesa também respeita o filtro "Mesa" deste PC: se a Mesa está
   // DESLIGADA aqui, este PC não imprime nem a comanda da cozinha nem a conta.
   // (fwcFiltros null = sem filtro = imprime tudo, como antes.)
-  function imprimirContaSeMesa(html, titulo) {
+  // Recebe os DADOS da conta (não o HTML pronto): a Bluetooth monta em ESC/POS,
+  // o app FWC / navegador monta em HTML. Cada um no seu formato.
+  async function imprimirContaSeMesa(dados, titulo) {
     if (fwcFiltros?.mesa === false) return
-    imprimirHtml(html, titulo, { origem: 'mesa' }) // o app também filtra por origem
+    if (await viaBluetooth(m => m.imprimirContaMesaCelular(dados))) return
+    imprimirHtml(montarContaPresencialHtml(dados), titulo, { origem: 'mesa' }) // o app também filtra por origem
   }
 
   // Imprime a CONTA da mesa na loja (chamado quando o garçom fecha e a mesa entra em
@@ -4235,16 +4252,16 @@ export default function PainelPedidos() {
     const total = pagamentos.length ? pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0) : subtotal
     const taxa = Math.max(0, Math.round((total - subtotal) * 100) / 100)
     const forma = pagamentos.length > 1 ? 'Dividido' : (pagamentos[0]?.forma ?? '')
-    imprimirContaSeMesa(montarContaPresencialHtml({
+    imprimirContaSeMesa({
       numeroMesa: c.numero_mesa, rotulo: rotuloComanda(c), itens, subtotal, taxa, total, formaPagamento: forma, pagamentos, empresa,
-    }), empresa?.nome)
+    }, empresa?.nome)
   }
 
   // Impressão MANUAL da CONTA (botão no card, mesa aguardando conferência).
   // Aqui NÃO passa pelo filtro nem pela detecção do app: quem clicou quer o papel
   // agora. Vai por onde der — app FWC, QZ ou navegador. É a rede de segurança pra
   // quando a conta automática não sai e a loja fica sem saber.
-  function handleImprimirContaMesa(c) {
+  async function handleImprimirContaMesa(c) {
     const itens = Array.isArray(c.comanda_itens) ? c.comanda_itens : []
     const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
     const pend = c.fechamento_pendente || {}
@@ -4252,10 +4269,12 @@ export default function PainelPedidos() {
     const total = pagamentos.length ? pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0) : subtotal
     const taxa = Math.max(0, Math.round((total - subtotal) * 100) / 100)
     const forma = pagamentos.length > 1 ? 'Dividido' : (pagamentos[0]?.forma ?? '')
-    imprimirHtml(montarContaPresencialHtml({
+    const dados = {
       numeroMesa: c.numero_mesa, rotulo: rotuloComanda(c), itens, subtotal, taxa, total,
       formaPagamento: forma, pagamentos, empresa,
-    }), empresa?.nome, { origem: 'mesa' })
+    }
+    if (await viaBluetooth(m => m.imprimirContaMesaCelular(dados))) return
+    imprimirHtml(montarContaPresencialHtml(dados), empresa?.nome, { origem: 'mesa' })
   }
 
   // Impressão MANUAL da comanda da mesa (botão no card). Imprime todos os itens
@@ -4264,14 +4283,16 @@ export default function PainelPedidos() {
     const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
     if (!itens.length) return
     const info = await infoComandaCozinha(comanda.id)
-    imprimirComandaMesaApp({
+    const dados = {
       numeroMesa: comanda.numero_mesa ?? info.numero ?? '?',
       rotulo: rotuloComanda(comanda),
       comandaId: comanda.id,
       nomeLoja: empresa?.nome,
       area: info.area, atendente: info.atendente, pessoas: info.pessoas, rodape: info.rodape,
       itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, preco_unitario: i.preco_unitario, observacao: i.observacao })),
-    })
+    }
+    if (await viaBluetooth(m => m.imprimirComandaMesaCelular(dados))) return
+    imprimirComandaMesaApp(dados)
   }
 
   // Fecha a conta da mesa pelo gestor (cria a venda, baixa estoque, libera a mesa).
@@ -4287,11 +4308,11 @@ export default function PainelPedidos() {
     try {
       const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
       const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
-      imprimirContaSeMesa(montarContaPresencialHtml({
+      imprimirContaSeMesa({
         numeroMesa: comanda.numero_mesa, rotulo: rotuloComanda(comanda),
         itens, subtotal, taxa: Math.max(0, total - subtotal), total,
         formaPagamento: forma, empresa,
-      }))
+      })
     } catch { /* best-effort */ }
     setComandaFechando(null)
     setComandas(cs => cs.filter(c => c.id !== comanda.id))
@@ -4335,9 +4356,9 @@ export default function PainelPedidos() {
     setComandas(cs => cs.map(c => c.id === comanda.id ? { ...c, fechamento_pendente: novoPend } : c))
     // reimprime a conta com o novo valor
     const forma = novos.length > 1 ? 'Dividido' : (novos[0]?.forma ?? '')
-    imprimirContaSeMesa(montarContaPresencialHtml({
+    imprimirContaSeMesa({
       numeroMesa: comanda.numero_mesa, rotulo: rotuloComanda(comanda), itens, subtotal, taxa, total: novoTotal, formaPagamento: forma, pagamentos: novos, empresa,
-    }), empresa?.nome)
+    }, empresa?.nome)
   }
 
   // ADM confere e libera uma mesa que o garçom já fechou (aguardando_conferencia),

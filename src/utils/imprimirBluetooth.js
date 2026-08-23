@@ -44,6 +44,57 @@ function marcarEstado() {
   try { window.__fwcBtConectada = estaConectada() } catch { /* ok */ }
 }
 
+// ── Manter viva ─────────────────────────────────────────────────────────────
+// A térmica cai sozinha: o Android desliga o GATT quando a aba sai da frente, e
+// a própria impressora derruba o link depois de um tempo sem receber nada.
+//
+// Antes, quem religava era só o painel da Impressora — e ele só existe enquanto
+// aquela aba está aberta. Bastava o dono ir em Mesas e voltar pro Salão pra
+// impressora ficar "desligada" sem ninguém tentar religar (aconteceu com o
+// Wilde 23/08/2026). Agora quem cuida disso é o módulo, o tempo todo, esteja
+// qual aba estiver aberta.
+let _religarTimer = null
+let _vigiando = false
+
+const temImpressoraConhecida = () => {
+  if (_device) return true
+  try { return !!localStorage.getItem(LS_DEV) } catch { return false }
+}
+
+function ouvirQueda(dev) {
+  if (!dev || dev.__fwcOuvindo) return   // sem isto, cada religada empilhava um ouvinte novo
+  dev.__fwcOuvindo = true
+  dev.addEventListener('gattserverdisconnected', () => {
+    _car = null
+    marcarEstado()
+    agendarReligar(0)
+  })
+}
+
+function agendarReligar(tentativa = 0) {
+  if (_religarTimer || !temImpressoraConhecida()) return
+  const espera = Math.min(30_000, 1000 * 2 ** tentativa)  // 1s, 2s, 4s… até 30s
+  _religarTimer = setTimeout(async () => {
+    _religarTimer = null
+    if (estaConectada()) return
+    const ok = await reconectarSilencioso()
+    if (!ok && tentativa < 6) agendarReligar(tentativa + 1)
+  }, espera)
+}
+
+// Vigia global (uma vez só na vida da página).
+function vigiar() {
+  if (_vigiando || typeof window === 'undefined') return
+  _vigiando = true
+  const acordar = () => { if (temImpressoraConhecida() && !estaConectada()) agendarReligar(0) }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') acordar() })
+  window.addEventListener('focus', acordar)
+  window.addEventListener('online', acordar)
+  // Batida de 20s: o evento de queda nem sempre chega quando o Android mata o
+  // GATT em segundo plano — aí só olhando é que se descobre.
+  setInterval(acordar, 20_000)
+}
+
 async function acharCaracteristica(server) {
   const servicos = await server.getPrimaryServices()
   for (const s of servicos) {
@@ -59,10 +110,11 @@ export async function conectarImpressoraCelular() {
   if (!suporta()) throw new Error('Este navegador não tem Bluetooth. Abra pelo Chrome no Android (não pelo app).')
   _device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: SERVICOS })
   try { localStorage.setItem(LS_DEV, _device.id) } catch { /* ok */ }
-  _device.addEventListener('gattserverdisconnected', () => { _car = null; marcarEstado() })
+  ouvirQueda(_device)
   const server = await _device.gatt.connect()
   _car = await acharCaracteristica(server)
   marcarEstado()
+  vigiar()
   if (!_car) throw new Error('Conectei, mas não achei o canal de impressão — pode ser Bluetooth "Classic". Nesse caso use o RawBT.')
   return true
 }
@@ -77,10 +129,11 @@ export async function reconectarSilencioso() {
   if (estaConectada()) return true
   try {
     if (_device?.gatt) {
+      ouvirQueda(_device)
       const server = await _device.gatt.connect()
       _car = await acharCaracteristica(server)
       marcarEstado()
-      if (estaConectada()) return true
+      if (estaConectada()) { vigiar(); return true }
     }
     if (!navigator.bluetooth.getDevices) return false
     const salvos = await navigator.bluetooth.getDevices()
@@ -89,11 +142,12 @@ export async function reconectarSilencioso() {
     const dev = salvos.find(d => d.id === alvoId) || salvos[0]
     if (!dev) return false
     _device = dev
-    _device.addEventListener('gattserverdisconnected', () => { _car = null; marcarEstado() })
+    ouvirQueda(_device)
     const server = await _device.gatt.connect()
     _car = await acharCaracteristica(server)
     marcarEstado()
-    return estaConectada()
+    if (estaConectada()) { vigiar(); return true }
+    return false
   } catch { marcarEstado(); return false }
 }
 
@@ -188,4 +242,96 @@ export async function imprimirTesteCelular(empresa = {}) {
   const b = new B().init().center().big(true).txt(empresa.nome || 'TESTE').nl().big(false)
     .txt('Impressora celular OK!').nl().left().line().txt('Se voce leu isso, funcionou.').nl().nl(4).cut()
   await escrever(b.build())
+}
+
+// ── MESA / SALÃO ─────────────────────────────────────────────────────────────
+// Só o delivery passava pela Bluetooth: a loja que imprime pelo celular ficava
+// sem comanda de cozinha e sem conta de mesa, e ninguém entendia por quê (o
+// caminho de mesa ia direto pro app FWC / navegador, que no celular não existe).
+// Aqui vão as duas em ESC/POS, com o mesmo conteúdo das versões em HTML.
+
+const formaLabel = (f) => ({
+  dinheiro: 'Dinheiro', pix: 'PIX', credito: 'Credito', debito: 'Debito',
+  cartao: 'Cartao', dividido: 'Dividido', fiado: 'Fiado',
+}[String(f || '').toLowerCase()] || (f || ''))
+
+// Comanda da COZINHA: só o que preparar, SEM preço (o preço sai depois, na
+// conta). Item em letra grande — quem lê está de longe, no meio do movimento.
+export function montarComandaMesaBytes({
+  numeroMesa, rotulo = '', nomeLoja = '', area = '', atendente = '',
+  pessoas = 0, rodape = '', obsGeral = '', itens = [],
+}) {
+  const titulo = rotulo || `Mesa: ${numeroMesa}`
+  const hora = new Date().toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  })
+  const b = new B().init().center()
+  if (nomeLoja) b.bold(true).txt(nomeLoja).nl().bold(false)
+  b.big(true).txt(`~ ${titulo}${area ? ` (${area})` : ''} ~`).nl().big(false)
+  b.txt(hora).nl()
+  if (atendente) b.txt('Atendente: ' + atendente).nl()
+  if (Number(pessoas) > 0) b.txt('Pessoas: ' + pessoas).nl()
+  b.left().line()
+  for (const it of itens) {
+    const q = it.quantidade ?? it.qtd ?? 1
+    b.big(true).bold(true).txt(`${q} ${semAcento(it.nome)}`).nl().bold(false).big(false)
+    if (it.observacao) b.txt('   > ' + semAcento(it.observacao)).nl()
+    b.nl()
+  }
+  if (!itens.length) b.txt('—').nl()
+  if (obsGeral) b.line().txt(semAcento(obsGeral)).nl()
+  if (rodape) b.line().center().txt(semAcento(rodape)).nl().left()
+  b.nl(4).cut()
+  return b.build()
+}
+
+// CONTA da mesa: com preços, taxa, total e divisão.
+export function montarContaMesaBytes({
+  numeroMesa, rotulo = '', itens = [], subtotal = 0, taxa = 0, total = 0,
+  formaPagamento = '', pagamentos = [], empresa = {}, preConta = false,
+}) {
+  const titulo = (rotulo || `MESA ${numeroMesa}`).toUpperCase()
+  const hora = new Date().toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  })
+  const b = new B().init().center().big(true).txt(empresa.nome || 'Conta').nl().big(false)
+  if (preConta) b.bold(true).txt('** PRE-CONTA **').nl().bold(false)
+  b.left().bold(true).txt(`${titulo} - ${hora}`).nl().bold(false)
+  b.line()
+  for (const it of itens) {
+    const q = it.quantidade ?? it.qtd ?? 1
+    const sub = it.subtotal != null
+      ? Number(it.subtotal)
+      : q * Number(it.preco_unitario ?? it.preco ?? 0)
+    b.row(`${q}x ${it.nome}`, fmt(sub))
+  }
+  if (!itens.length) b.txt('—').nl()
+  b.line()
+  b.row('Subtotal', fmt(subtotal))
+  if (Number(taxa) > 0) b.row('Taxa de servico', fmt(taxa))
+  b.big(true).row('TOTAL', fmt(total)).big(false)
+  if (Array.isArray(pagamentos) && pagamentos.length > 1) {
+    b.line().bold(true).txt('DIVISAO DA CONTA').nl().bold(false)
+    pagamentos.forEach((p, i) => {
+      b.row(`${p.nome || 'Pessoa ' + (i + 1)} (${formaLabel(p.forma)})`, fmt(p.valor))
+    })
+    b.bold(true).row('Total pago', fmt(pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0))).bold(false)
+  } else if (formaPagamento && !preConta) {
+    b.line().txt('Pagamento: ' + formaLabel(formaPagamento)).nl()
+  }
+  b.line().center()
+  if (preConta) b.bold(true).txt('CONFERENCIA - NAO E COMPROVANTE').nl().bold(false).txt('Confira os itens antes de pagar').nl()
+  else b.txt('Obrigado pela preferencia!').nl()
+  b.left().nl(4).cut()
+  return b.build()
+}
+
+export async function imprimirComandaMesaCelular(dados) {
+  await garantirConectado()
+  await escrever(montarComandaMesaBytes(dados))
+}
+
+export async function imprimirContaMesaCelular(dados) {
+  await garantirConectado()
+  await escrever(montarContaMesaBytes(dados))
 }
