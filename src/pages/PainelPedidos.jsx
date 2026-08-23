@@ -1712,6 +1712,17 @@ function SeletorEntregador({ entregadores = [], onAtribuir, pedidoId }) {
 
 // Card de configuração da impressora do CELULAR (Bluetooth / Web Bluetooth).
 // Isolado do FWC — só conecta e testa a térmica Bluetooth pelo Chrome do Android.
+// Mesma lista do filtro do app FWC. Duplicada de propósito: a de lá vive dentro
+// do componente principal e é enviada pro app do PC; esta fica no navegador.
+const ORIGENS_IMPRESSORA = [
+  { k: 'mesa', lbl: 'Mesa (comandas)' },
+  { k: 'whatsapp', lbl: 'WhatsApp' },
+  { k: 'ifood', lbl: 'iFood' },
+  { k: 'balcao', lbl: 'Balcão' },
+  { k: 'cardapio', lbl: 'Cardápio (loja online)' },
+  { k: 'app', lbl: 'App' },
+]
+
 function ImpressoraCelularPanel({ empresa }) {
   const [conectada, setConectada] = useState(false)
   const [nome, setNome] = useState(null)
@@ -1762,6 +1773,18 @@ function ImpressoraCelularPanel({ empresa }) {
     try { const m = await import('../utils/imprimirBluetooth'); m.definirSetorDaImpressora(v) } catch { /* ok */ }
   }
 
+  // O que esta impressora imprime, por origem. Mesma lista do app do PC — mas
+  // guardada aqui no navegador, porque no celular não existe app pra guardar.
+  const [origens, setOrigens] = useState({})
+  useEffect(() => {
+    import('../utils/imprimirBluetooth').then(m => setOrigens(m.origensDaImpressora())).catch(() => {})
+  }, [])
+  async function alternarOrigem(k) {
+    const nova = origens[k] === false
+    setOrigens(prev => ({ ...prev, [k]: nova }))
+    try { const m = await import('../utils/imprimirBluetooth'); m.definirOrigemDaImpressora(k, nova) } catch { /* ok */ }
+  }
+
   const conectar = () => rodar(m => m.conectarImpressoraCelular(), 'Conectada! Agora use o botão 📱🖨️ nos pedidos.')
   const testar = () => rodar(m => m.imprimirTesteCelular(empresa || {}), 'Enviei um cupom de teste!')
 
@@ -1799,6 +1822,16 @@ function ImpressoraCelularPanel({ empresa }) {
               ? 'Tudo que NÃO é da cozinha, mais conta, pré-conta e fechamento.'
               : 'Uma impressora só: sai tudo, como sempre. Marque o setor de cada categoria em Produtos → Categorias antes de dividir.'}
         </div>
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--border, #2a2a3a)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <span style={{ fontSize: 13, fontWeight: 800 }}>De onde ela imprime</span>
+        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.45, marginBottom: 2 }}>
+          Desligue o que NÃO deve sair neste aparelho. Ex.: celular da cozinha = só <b>Mesa</b>.
+        </div>
+        {ORIGENS_IMPRESSORA.map(({ k, lbl }) => (
+          <ToggleRow key={k} label={lbl} ativo={origens[k] !== false} onToggle={() => alternarOrigem(k)} />
+        ))}
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Se a impressora não aparecer na lista do Chrome, ela é Bluetooth "Classic" — aí usamos o app RawBT.</div>
     </div>
@@ -3642,6 +3675,9 @@ export default function PainelPedidos() {
     try {
       const mod = await import('../utils/imprimirBluetooth')
       if (mod.estaConectada() || await mod.reconectarSilencioso()) {
+        // Origem desligada NESTA impressora: não imprime aqui — e também não
+        // cai no caminho de baixo, senão o "desligado" não desligaria nada.
+        if (!mod.imprimeOrigem(pedido.origem)) return
         await mod.imprimirPedidoCelular(pedido, empresa)
         return
       }
@@ -4310,6 +4346,7 @@ export default function PainelPedidos() {
   async function viaBluetooth(tipo, dados) {
     try {
       const mod = await import('../utils/imprimirBluetooth')
+      if (!mod.imprimeOrigem('mesa')) return mod.estaConectada()   // desligado aqui: assunto encerrado
       return await mod.imprimirMesaSeConectada(tipo, dados)
     } catch { return false }   // sem Bluetooth neste aparelho
   }

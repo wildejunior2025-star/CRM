@@ -426,3 +426,31 @@ export function itensDoSetor(itens = []) {
 // Conta, pré-conta e fechamento são papel da FRENTE: quem cobra é o caixa, não
 // a cozinha. Numa impressora só ('tudo'), sai aqui mesmo como sempre.
 export const imprimeConta = () => setorDaImpressora() !== 'cozinha'
+
+// ── O que ESTA impressora imprime, por origem ───────────────────────────────
+// O app FWC do PC já tinha isso (guardado no config do app). A Bluetooth não
+// respeitava — e nem tinha como: aqueles botões moram DENTRO do app, e no
+// celular o app não existe. Então a Bluetooth ganha a lista dela, no próprio
+// navegador, igual ao pareamento e ao setor.
+//
+// Serve pra loja com dois celulares: o da cozinha imprime só Mesa, o da frente
+// imprime o resto. Origem que não está na lista imprime — o padrão é imprimir
+// tudo, e ninguém precisa configurar nada.
+const LS_ORIGENS = 'impressora_origens'
+
+export function origensDaImpressora() {
+  try { return JSON.parse(localStorage.getItem(LS_ORIGENS) || '{}') }
+  catch { return {} }
+}
+
+export function definirOrigemDaImpressora(origem, ligada) {
+  try {
+    localStorage.setItem(LS_ORIGENS, JSON.stringify({ ...origensDaImpressora(), [origem]: !!ligada }))
+  } catch { /* ok */ }
+}
+
+// Só `false` desliga. Origem desconhecida ou nunca mexida = imprime.
+export function imprimeOrigem(origem) {
+  const k = String(origem || '').toLowerCase()
+  return origensDaImpressora()[k] !== false
+}
