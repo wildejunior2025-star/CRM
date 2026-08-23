@@ -2623,9 +2623,32 @@ function ImpressoraFWCPanel({ empresaId }) {
     } finally { setAtzBusy(false); setTimeout(carregar, 8000) }
   }
 
+  // Solução de problema fica FECHADA por padrão. Na esmagadora maioria das vezes
+  // é só baixar e abrir; o muro de texto (permissão de rede local, localhost,
+  // antivírus) assusta quem só queria clicar num botão.
+  const [ajuda, setAjuda] = useState(false)
+
+  // O app é um programa de Windows que só responde em localhost — de um celular
+  // ele NUNCA vai ser encontrado. Mostrar "App fechado" em vermelho, botão de
+  // baixar .exe e três parágrafos de diagnóstico num celular é puro barulho:
+  // ali a impressora certa é a Bluetooth, logo abaixo.
+  const ehCelular = typeof navigator !== 'undefined' && (
+    navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')
+  )
+
   const inp = { width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }
   const btnRoxo = { padding: '10px 14px', borderRadius: 8, border: 'none', cursor: busy ? 'wait' : 'pointer', background: '#7c3aed', color: '#fff', fontWeight: 800, fontSize: 13, opacity: busy ? .6 : 1 }
   const btnVerde = { ...btnRoxo, background: '#16a34a' }
+
+  // ── Celular: o app não é daqui ──
+  if (ehCelular && online !== true) {
+    return (
+      <div style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '11px 13px', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+        🖨️ <b style={{ color: 'var(--text)' }}>Impressora FWC</b> é o app do <b>computador</b> da loja (impressora no cabo).
+        No celular, use a <b>impressora Bluetooth</b> aqui embaixo.
+      </div>
+    )
+  }
 
   // ── App não encontrado (fechado ou não instalado) ──
   if (online === false) {
@@ -2636,52 +2659,61 @@ function ImpressoraFWCPanel({ empresaId }) {
           <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 800 }}>● App fechado</span>
         </div>
 
-        {/* Chrome 150+ pede permissão pra um site https falar com o localhost. Sem ela
-            a chamada fica pendurada e o card jura que o app está fechado — mesmo com o
-            app rodando. Como o navegador conta isso ANTES de tentar, avisa aqui em cima. */}
-        {(permLocal === 'prompt' || permLocal === 'denied') && (
-          <div style={{ border: '1.5px solid #f59e0b', background: 'rgba(245,158,11,.12)', borderRadius: 8, padding: '10px 12px', fontSize: 12.5, lineHeight: 1.5 }}>
-            <b>⚠️ Pode não ser o app.</b> Este Chrome ainda {permLocal === 'denied' ? 'está BLOQUEANDO' : 'não liberou'} o
-            acesso do site aos aparelhos da <b>rede local</b> — sem isso ele nem chega no app, e aparece "App fechado"
-            mesmo com tudo certo.
-            <div style={{ marginTop: 6 }}>
-              Clique no <b>ícone à esquerda do endereço</b> (cadeado) → <b>Configurações do site</b> →
-              <b> Rede local</b> → <b>Permitir</b>. Depois recarregue a página (F5).
-            </div>
-          </div>
-        )}
-
         <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-          Baixe e <b>abra o arquivo uma vez</b> — ele se <b>instala sozinho</b>: vai pra Área de Trabalho, liga junto com o Windows e começa a rodar escondido. Depois a configuração da impressora aparece aqui mesmo.
+          Baixe e <b>abra o arquivo uma vez</b> — ele se <b>instala sozinho</b> e passa a ligar junto com o Windows.
         </div>
         <a href={FWC_EXE_URL} download
           style={{ alignSelf: 'flex-start', background: '#7c3aed', color: '#fff', borderRadius: 8, padding: '10px 16px', fontWeight: 800, fontSize: 13, textDecoration: 'none', marginTop: 2 }}>
           ⬇️ Baixar Impressora FWC (Windows)
         </a>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Se o Windows avisar, clique em "Mais informações → Executar assim mesmo". Aparece um aviso "instalada!" e pronto.</div>
-        {/* O erro cru ("Failed to fetch") não ajuda ninguém no balcão — aqui sai traduzido. */}
-        {motivo && (
-          <div style={{ fontSize: 11.5, color: '#f59e0b', fontWeight: 700, lineHeight: 1.45 }}>
-            Motivo: {motivo}
+
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', marginTop: 2 }}>
+          <button type="button" onClick={carregar} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary, #a78bfa)', fontSize: 12, fontWeight: 700, padding: 0 }}>
+            ↻ Já instalei — procurar de novo
+          </button>
+          <button type="button" onClick={() => setAjuda(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12, fontWeight: 700, padding: 0 }}>
+            {ajuda ? '▴ Fechar ajuda' : '▾ Instalei e continua "App fechado"'}
+          </button>
+        </div>
+
+        {/* Tudo que só serve quando dá errado mora aqui dentro. Aberto o tempo
+            todo, virava um muro de texto na frente do único botão que importa. */}
+        {ajuda && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px dashed var(--border)', paddingTop: 10, marginTop: 2 }}>
+            {/* Chrome 150+ pede permissão pra um site https falar com o localhost. Sem ela
+                a chamada fica pendurada e o card jura que o app está fechado — mesmo com o
+                app rodando. Como o navegador conta isso ANTES de tentar, vem primeiro. */}
+            {(permLocal === 'prompt' || permLocal === 'denied') && (
+              <div style={{ border: '1.5px solid #f59e0b', background: 'rgba(245,158,11,.12)', borderRadius: 8, padding: '10px 12px', fontSize: 12.5, lineHeight: 1.5 }}>
+                <b>⚠️ Provavelmente é isto.</b> Este Chrome {permLocal === 'denied' ? 'está BLOQUEANDO' : 'não liberou'} o
+                acesso do site à <b>rede local</b> — sem isso ele nem chega no app.
+                <div style={{ marginTop: 6 }}>
+                  Cadeado ao lado do endereço → <b>Configurações do site</b> → <b>Rede local</b> → <b>Permitir</b>. Depois F5.
+                </div>
+              </div>
+            )}
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              Se o Windows avisar ao abrir o arquivo, clique em "Mais informações → Executar assim mesmo".
+            </div>
+            {/* O erro cru ("Failed to fetch") não ajuda ninguém no balcão — aqui sai traduzido. */}
+            {motivo && (
+              <div style={{ fontSize: 11.5, color: '#f59e0b', fontWeight: 700, lineHeight: 1.45 }}>Motivo: {motivo}</div>
+            )}
+            {/* Teste direto: separa "o app não está rodando" de "o app roda mas algo bloqueia
+                a conexão" (antivírus/firewall). Sem isso o suporte fica no escuro. */}
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              Abra este endereço numa aba nova <b>deste PC</b>:{' '}
+              <a href="http://localhost:9110/api/status" target="_blank" rel="noreferrer"
+                style={{ color: 'var(--primary, #a78bfa)', fontWeight: 800, wordBreak: 'break-all' }}>
+                localhost:9110/api/status
+              </a>
+              <br />
+              <b>Abriu um monte de texto</b> = o app roda, quem bloqueia é o antivírus/firewall.
+              {' '}<b>Deu erro</b> = o app não subiu: abra o ícone <b>Impressora FWC</b> na Área de Trabalho
+              (ou na setinha ▲ perto do relógio).
+            </div>
           </div>
         )}
-        {/* Teste direto: separa "o app não está rodando" de "o app roda mas algo bloqueia
-            a conexão" (antivírus/firewall). Sem isso o suporte fica no escuro. */}
-        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5, borderTop: '1px dashed var(--border)', paddingTop: 8, marginTop: 2 }}>
-          <b>Diz "App fechado" mas você já instalou?</b> Abre este endereço numa aba nova <b>deste PC</b>:
-          <br />
-          <a href="http://localhost:9110/api/status" target="_blank" rel="noreferrer"
-            style={{ color: 'var(--primary, #a78bfa)', fontWeight: 800, wordBreak: 'break-all' }}>
-            http://localhost:9110/api/status
-          </a>
-          <br />
-          <b>Abriu um monte de texto</b> = o app está rodando (o bloqueio é do antivírus/firewall).
-          {' '}<b>Deu erro</b> = o app não subiu: abre o ícone <b>Impressora FWC</b> na Área de Trabalho
-          (ou na setinha ▲ perto do relógio) e clica em "Já abri o app" aqui embaixo.
-        </div>
-        <button type="button" onClick={carregar} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary, #a78bfa)', fontSize: 12, fontWeight: 700, padding: 0, marginTop: 2 }}>
-          ↻ Já abri o app — detectar de novo
-        </button>
       </div>
     )
   }
