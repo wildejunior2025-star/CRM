@@ -811,6 +811,17 @@ export default function PresencialSalao() {
     setPagamentos(prev => prev.filter((_, idx) => idx !== i))
   }
 
+  // Térmica Bluetooth ligada neste aparelho? Então é ela quem imprime. É o que
+  // faz a MESMA tela servir no PC da loja (app FWC) e no celular do dono (BLE),
+  // sem dois códigos diferentes. Devolve false quando não tem — aí segue o
+  // caminho de sempre.
+  async function viaBluetooth(tipo, dados) {
+    try {
+      const mod = await import('../utils/imprimirBluetooth')
+      return await mod.imprimirMesaSeConectada(tipo, dados)
+    } catch { return false }   // sem Bluetooth neste aparelho
+  }
+
   // PRÉ-CONTA: sai antes de escolher a forma de pagamento, pra mesa conferir o
   // que consumiu e quanto deu. Sem isso o atendente era obrigado a entrar no
   // fechamento (que já pede a forma) só pra mostrar o valor ao cliente.
@@ -818,7 +829,7 @@ export default function PresencialSalao() {
   async function imprimirPreConta() {
     if (!comandaSel) return
     setPreContaMsg('')
-    const ok = await imprimirHtml(montarContaPresencialHtml({
+    const dados = {
       numeroMesa: mesaSel?.numero,
       rotulo: mesaSel?.is_comanda
         ? `${rotuloMesa(mesaSel)}${comandaSel?.nome_cliente ? ' · ' + comandaSel.nome_cliente : ''}`
@@ -829,9 +840,12 @@ export default function PresencialSalao() {
       preConta: true,
       // A pré-conta não fala em pagamento: ele ainda vai ser escolhido.
       formaPagamento: '', pagamentos: [],
-      // No celular não tem impressora: só sai se o app FWC da loja atender.
-    }), empresaNome, { soApp: ehCelular, origem: 'mesa' })
-    setPreContaMsg(ok ? '🧾 Pré-conta enviada pra impressora.' : '⚠️ Não achei a impressora. Abra o app FWC no PC da loja.')
+    }
+    // Térmica do celular primeiro (o caso da loja que só tem o celular); senão
+    // o app FWC da loja. No celular sem Bluetooth continua só o app (soApp).
+    const ok = await viaBluetooth('conta', dados)
+      || await imprimirHtml(montarContaPresencialHtml(dados), empresaNome, { soApp: ehCelular, origem: 'mesa' })
+    setPreContaMsg(ok ? '🧾 Pré-conta enviada pra impressora.' : '⚠️ Não achei a impressora. Ligue a térmica Bluetooth ou abra o app FWC no PC da loja.')
     setTimeout(() => setPreContaMsg(''), 6000)
   }
 
@@ -889,7 +903,7 @@ export default function PresencialSalao() {
     }
   }
 
-  function imprimirConta({ soApp = true } = {}) {
+  async function imprimirConta({ soApp = true } = {}) {
     const pags = modoPag === 'dividir'
       ? pagamentos
         // nome do devedor sai impresso na conta: o cliente confere de quem é a dívida
@@ -898,7 +912,7 @@ export default function PresencialSalao() {
       : []
     // soApp: a conta do salão só sai na térmica da loja (app FWC). Se quem fechou está
     // no CELULAR (sem app), NÃO imprime no navegador do aparelho — retorna sem imprimir.
-    return imprimirHtml(montarContaPresencialHtml({
+    const dados = {
       numeroMesa: mesaSel?.numero,
       // Comanda de balcão sai como "COMANDA 07 · MARIA" no lugar de "MESA 7".
       rotulo: mesaSel?.is_comanda
@@ -909,7 +923,9 @@ export default function PresencialSalao() {
       formaPagamento: modoPag === 'unico' ? forma : 'Dividido',
       pagamentos: pags,
       empresa: { nome: empresaNome },
-    }), empresaNome, { soApp, origem: 'mesa' }) // app filtra por origem (PC não-mesa não imprime)
+    }
+    if (await viaBluetooth('conta', dados)) return true
+    return imprimirHtml(montarContaPresencialHtml(dados), empresaNome, { soApp, origem: 'mesa' }) // app filtra por origem (PC não-mesa não imprime)
   }
 
   // Celular/tablet não tem impressora: nesses a conta só sai pelo app FWC (soApp).
@@ -984,7 +1000,7 @@ export default function PresencialSalao() {
       })
       setSalvando(false)
       if (error) { window.alert('Erro ao fechar a conta: ' + error.message); return }
-      try { imprimirConta() } catch { /* best-effort */ }
+      imprimirConta().catch(() => { /* best-effort */ })
     } else {
       // Garçom, OU ADM no celular (sem impressora): NÃO libera a mesa. Marca
       // "aguardando_conferencia" e guarda o pagamento; depois o ADM confere e libera.
@@ -994,7 +1010,10 @@ export default function PresencialSalao() {
       // loja fechava a conta pela tela do Salão com o painel fechado, o comando nunca
       // era criado: não dava erro, não ia pra fila, e ninguém entendia por que só a
       // conta não saía (Estação, 07/08/2026). No celular continua sem imprimir.
-      const vaiImprimirAqui = !ehCelular
+      // Celular COM térmica Bluetooth imprime aqui igual a um PC — era essa a
+      // premissa velha ("celular não tem impressora") que deixava a loja que só
+      // usa o celular sem a conta da mesa.
+      const vaiImprimirAqui = !ehCelular || window.__fwcBtConectada === true
       const { error } = await supabase.from('comandas').update({
         status: 'aguardando_conferencia',
         // cliente_id vai junto: quem libera a mesa depois é o ADM, e sem isso o
@@ -1014,7 +1033,7 @@ export default function PresencialSalao() {
       if (error) { window.alert('Erro ao enviar pro caixa: ' + error.message); return }
       // soApp: false num PC — se o app FWC não responder, sai pelo navegador em vez
       // de a conta simplesmente não existir.
-      if (vaiImprimirAqui) { try { imprimirConta({ soApp: false }) } catch { /* best-effort */ } }
+      if (vaiImprimirAqui) imprimirConta({ soApp: false }).catch(() => { /* best-effort */ })
     }
     setFechando(false)
     setMesaSel(null)

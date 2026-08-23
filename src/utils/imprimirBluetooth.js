@@ -335,3 +335,15 @@ export async function imprimirContaMesaCelular(dados) {
   await garantirConectado()
   await escrever(montarContaMesaBytes(dados))
 }
+
+// Atalho pra quem só quer saber "deu pra imprimir na térmica do celular?".
+// Devolve false sem estourar quando não tem impressora ligada — aí quem chamou
+// segue pro caminho normal (app FWC / navegador). É o que deixa a MESMA tela
+// funcionar no PC da loja e no celular do dono sem dois códigos diferentes.
+export async function imprimirMesaSeConectada(tipo, dados) {
+  try {
+    if (!estaConectada() && !(await reconectarSilencioso())) return false
+    await escrever(tipo === 'comanda' ? montarComandaMesaBytes(dados) : montarContaMesaBytes(dados))
+    return true
+  } catch { return false }
+}

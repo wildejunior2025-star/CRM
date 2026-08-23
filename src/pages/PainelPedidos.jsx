@@ -4225,12 +4225,11 @@ export default function PainelPedidos() {
   // Só o delivery passava por aqui: a loja que imprime pelo celular não recebia
   // comanda de mesa nenhuma, porque o caminho de mesa ia direto pro app FWC /
   // navegador — que no celular não existe. Devolve true se a Bluetooth deu conta.
-  async function viaBluetooth(fn) {
+  async function viaBluetooth(tipo, dados) {
     try {
       const mod = await import('../utils/imprimirBluetooth')
-      if (mod.estaConectada() || await mod.reconectarSilencioso()) { await fn(mod); return true }
-    } catch { /* sem Bluetooth ou falhou — cai no caminho normal */ }
-    return false
+      return await mod.imprimirMesaSeConectada(tipo, dados)
+    } catch { return false }   // sem Bluetooth neste aparelho
   }
 
   async function flushImpressaoMesa(cid) {
@@ -4244,7 +4243,7 @@ export default function PainelPedidos() {
       area: info.area, atendente: info.atendente, pessoas: info.pessoas, rodape: info.rodape,
       itens: entry.itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao })),
     }
-    if (await viaBluetooth(m => m.imprimirComandaMesaCelular(dados))) return
+    if (await viaBluetooth('comanda', dados)) return
     imprimirHtml(montarComandaCozinhaHtml(dados))
   }
 
@@ -4255,7 +4254,7 @@ export default function PainelPedidos() {
   // o app FWC / navegador monta em HTML. Cada um no seu formato.
   async function imprimirContaSeMesa(dados, titulo) {
     if (fwcFiltros?.mesa === false) return
-    if (await viaBluetooth(m => m.imprimirContaMesaCelular(dados))) return
+    if (await viaBluetooth('conta', dados)) return
     imprimirHtml(montarContaPresencialHtml(dados), titulo, { origem: 'mesa' }) // o app também filtra por origem
   }
 
@@ -4290,7 +4289,7 @@ export default function PainelPedidos() {
       numeroMesa: c.numero_mesa, rotulo: rotuloComanda(c), itens, subtotal, taxa, total,
       formaPagamento: forma, pagamentos, empresa,
     }
-    if (await viaBluetooth(m => m.imprimirContaMesaCelular(dados))) return
+    if (await viaBluetooth('conta', dados)) return
     imprimirHtml(montarContaPresencialHtml(dados), empresa?.nome, { origem: 'mesa' })
   }
 
@@ -4308,7 +4307,7 @@ export default function PainelPedidos() {
       area: info.area, atendente: info.atendente, pessoas: info.pessoas, rodape: info.rodape,
       itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, preco_unitario: i.preco_unitario, observacao: i.observacao })),
     }
-    if (await viaBluetooth(m => m.imprimirComandaMesaCelular(dados))) return
+    if (await viaBluetooth('comanda', dados)) return
     imprimirComandaMesaApp(dados)
   }
 
