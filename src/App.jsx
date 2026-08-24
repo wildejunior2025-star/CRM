@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useEffect, lazy, Suspense } from 'react'
 import { useAuth } from './hooks/useAuth'
+import ErroNaTela from './components/ErroNaTela'
+import { homeDoPerfil, usaPainelDePedidos } from './lib/homeDoPerfil'
 
 /* ── Telas que só carregam quando alguém entra nelas ────────────────────
  * O sistema inteiro era UM arquivo de 2 MB: quem abria o gestor baixava
@@ -109,11 +111,18 @@ function HostnameRedirect() {
       }
     } else if (h === 'gestor.fwcinter.com') {
       // Super admin sem loja fica no painel dele (pra escolher qual loja entrar);
-      // o guard lá em cima já cuida. Os demais vão pro gestor de pedidos.
+      // o guard lá em cima já cuida.
       if (perfil === 'super_admin' && !empresa) {
         if (!pathname.startsWith('/super-admin')) navigate('/super-admin', { replace: true })
-      } else if (!pathname.startsWith('/painel') && pathname !== '/login') {
-        navigate('/painel', { replace: true })
+        return
+      }
+      // Aqui morava o loop: mandava TODO MUNDO pro /painel, mas o /painel só
+      // aceita admin, super_admin e vendedor. Garçom chegava lá, o guard da rota
+      // devolvia ele pro salão, e daqui ele era empurrado pro /painel de novo —
+      // sem parar. Agora cada perfil vai pra casa dele.
+      const destino = usaPainelDePedidos(perfil) ? '/painel' : homeDoPerfil(perfil)
+      if (pathname !== '/login' && !pathname.startsWith(destino)) {
+        navigate(destino, { replace: true })
       }
     }
   }, [pathname, navigate, profile, empresa, loading])
@@ -231,6 +240,7 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <HostnameRedirect />
+        <ErroNaTela>
         <Suspense fallback={<TelaCarregando />}>
           <Routes>
           <Route path="/login" element={<Login />} />
@@ -434,6 +444,7 @@ export default function App() {
           </Route>
         </Routes>
           </Suspense>
+        </ErroNaTela>
       </BrowserRouter>
     </AuthProvider>
     </BrandingProvider>

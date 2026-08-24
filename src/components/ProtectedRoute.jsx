@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { moduloAtivo, moduloBloqueado } from '../lib/modulos'
+import { homeDoPerfil } from '../lib/homeDoPerfil'
 
 export default function ProtectedRoute({ children, roles, modulo }) {
   const { session, profile, empresa, loading, profileLoading } = useAuth()
@@ -23,14 +24,7 @@ export default function ProtectedRoute({ children, roles, modulo }) {
 
   // Rotas com papel exigido: usuário sem profile (Google não finalizado) não entra.
   if (roles && (!profile || !roles.includes(profile.perfil))) {
-    let home = '/portal'
-    if (profile?.perfil === 'super_admin') home = '/super-admin'
-    else if (profile?.perfil === 'admin') home = '/'
-    else if (profile?.perfil === 'vendedor') home = '/painel'
-    else if (profile?.perfil === 'garcom') home = '/presencial/salao'
-    else if (profile?.perfil === 'cozinheiro') home = '/presencial/cozinha'
-    else if (profile?.perfil === 'entregador') home = '/entregas'
-    return <Navigate to={home} replace />
+    return <Navigate to={homeDoPerfil(profile?.perfil)} replace />
   }
 
   // Bloqueado pelo plano → tela de upgrade (não é erro, é oferta).
