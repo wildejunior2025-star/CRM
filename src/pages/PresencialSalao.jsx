@@ -161,7 +161,8 @@ export default function PresencialSalao() {
   // Mesma fonte do cardápio do QR (MesaCardapio) — produto com grupo abre o modal de montagem.
   const [compMap, setCompMap] = useState({})
   const [montando, setMontando] = useState(null) // produto que está sendo montado no modal
-  const [pickerCliente, setPickerCliente] = useState(false) // modal "ligar cliente à mesa"
+  const [pickerCliente, setPickerCliente] = useState(false)
+  const [verMovimentos, setVerMovimentos] = useState(false)  // trilha da mesa aberta (ADM) // modal "ligar cliente à mesa"
   const [ligandoCliente, setLigandoCliente] = useState(false)
   const [showFiado, setShowFiado] = useState(false) // modal "quem está devendo fiado"
   const [showConsumoFunc, setShowConsumoFunc] = useState(false) // modal "consumo de funcionários"
@@ -372,6 +373,9 @@ export default function PresencialSalao() {
     if (mesa.is_comanda) return rotuloComanda({ tipo: 'balcao', numero_mesa: mesa.numero }, { comNome: false })
     return mesa.is_balcao ? 'Balcão' : `Mesa ${mesa.numero}`
   }
+
+  // Só hora:minuto — o dia inteiro é o mesmo, mostrar a data só ocuparia espaço.
+  const horaCurta = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 
   function subtotalDe(comanda) {
     return (comanda?.comanda_itens ?? []).reduce((s, i) => s + Number(i.preco_unitario) * i.quantidade, 0)
@@ -1497,6 +1501,19 @@ export default function PresencialSalao() {
                     📱 Pedido pelo QR (autoatendimento)
                   </div>
                 ) : null}
+                {/* Conferir a mesa ANTES de fechar. Depois de fechada nao adianta:
+                    se um item tem que sair da conta, tem que sair antes. A trilha
+                    ja existia no banco desde o primeiro item lancado — faltava
+                    poder olhar enquanto a mesa ainda esta aberta. */}
+                {ehAdmin && comandaSel && (comandaSel.comanda_itens ?? []).length > 0 && (
+                  <button type="button" onClick={() => setVerMovimentos(true)}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4, marginRight: 6,
+                      padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
+                      border: '1.5px solid var(--border)', background: 'transparent',
+                      color: 'var(--text-muted)', fontSize: 12.5, fontWeight: 700 }}>
+                    🕑 Quem fez o quê
+                  </button>
+                )}
                 {/* Cliente da mesa: liga um cliente a esta comanda (ou troca/tira). */}
                 {comandaSel && comandaSel.status !== 'fechada' && (
                   (comandaSel.cliente || comandaSel.nome_cliente) ? (
@@ -1859,6 +1876,68 @@ export default function PresencialSalao() {
                   )}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Trilha da mesa: item por item, quem lancou e quem entregou, com hora.
+          "Quem fechou" nao aparece de proposito — a conta ainda esta aberta. */}
+      {verMovimentos && comandaSel && (
+        <div onClick={() => setVerMovimentos(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 300,
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div onClick={ev => ev.stopPropagation()}
+            style={{ width: '100%', maxWidth: 520, maxHeight: '85vh', overflowY: 'auto',
+              background: 'var(--surface, var(--bg))', borderRadius: '16px 16px 0 0',
+              border: '1px solid var(--border)', padding: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+              <strong style={{ fontSize: 16 }}>🕑 Quem fez o quê</strong>
+              <button type="button" onClick={() => setVerMovimentos(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, lineHeight: 1, color: 'var(--text-muted)' }}>×</button>
+            </div>
+            <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+              {mesaSel?.is_comanda ? rotuloMesa(mesaSel) : `Mesa ${mesaSel?.numero}`} · confira antes de fechar.
+              Item errado tem que sair da conta agora.
+            </p>
+
+            {[...(comandaSel.comanda_itens ?? [])]
+              .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+              .map(it => (
+                <div key={it.id} style={{ padding: '10px 0', borderTop: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                    <strong style={{ fontSize: 13.5 }}>{it.quantidade}× {it.nome}</strong>
+                    <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                      {fmt(Number(it.preco_unitario) * it.quantidade)}
+                    </span>
+                  </div>
+                  {it.observacao && (
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>📝 {it.observacao}</div>
+                  )}
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.6 }}>
+                    <div>
+                      ✍️ <strong style={{ color: 'var(--text)' }}>
+                        {it.lancado_por ? (garcons[it.lancado_por] ?? 'alguém') : 'não registrado'}
+                      </strong> lançou{it.created_at ? ` · ${horaCurta(it.created_at)}` : ''}
+                    </div>
+                    {it.status === 'entregue' ? (
+                      <div>
+                        🍽️ <strong style={{ color: 'var(--text)' }}>
+                          {it.entregue_por ? (garcons[it.entregue_por] ?? 'alguém') : 'não registrado'}
+                        </strong> entregou{it.entregue_at ? ` · ${horaCurta(it.entregue_at)}` : ''}
+                      </div>
+                    ) : (
+                      <div style={{ color: it.status === 'pronto' ? '#16a34a' : 'var(--text-muted)' }}>
+                        {it.status === 'pronto' ? '🔔 pronto, ainda não entregue' : '⏳ ainda não saiu'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.45 }}>
+              Quem fechou a conta só aparece depois de fechada, em <strong>Vendas salão</strong>.
+              Item lançado antes de 23/08/2026 não tem o "lançou" gravado.
             </div>
           </div>
         </div>
