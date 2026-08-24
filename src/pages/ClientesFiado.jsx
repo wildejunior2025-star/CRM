@@ -39,6 +39,61 @@ const FORMAS = [
 // Marca o recebimento de fiado e separa do pagamento de mesa no histórico.
 const OBS_FIADO = 'Recebimento de fiado'
 
+// Quais pedidos ainda estão em aberto.
+//
+// O recebimento de fiado é do CLIENTE, não do pedido: a linha em `pagamentos`
+// entra sem venda_id e abate do saldo inteiro. Por isso a lista de compras
+// mostra "fiado" até nos pedidos que já foram quitados — não existe no banco a
+// informação de qual pedido cada pagamento cobriu.
+//
+// Aqui a gente reconstrói isso do jeito que qualquer caderninho faz: o que foi
+// pago cobre os pedidos MAIS ANTIGOS primeiro. O que sobra é o que ainda deve —
+// e é isso que vai na cobrança, senão o cliente recebe cobrança de pedido que
+// ele já pagou, que é o jeito mais rápido de perder o cliente.
+function pedidosEmAberto(vendasFiado, saldo) {
+  const antigas = [...vendasFiado].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+  const somaTudo = antigas.reduce((s, v) => s + Number(v.total || 0), 0)
+  let jaPago = Math.max(0, somaTudo - Number(saldo || 0))   // quanto os recebimentos cobriram
+  const abertos = []
+  for (const v of antigas) {
+    const total = Number(v.total || 0)
+    if (jaPago >= total - 0.005) { jaPago -= total; continue }   // esse já foi quitado
+    abertos.push({ ...v, falta: Math.round((total - jaPago) * 100) / 100 })
+    jaPago = 0
+  }
+  return abertos
+}
+
+const soDia = iso => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+
+function textoCobranca({ nomeCliente, nomeLoja, abertos, saldo, token }) {
+  const primeiro = String(nomeCliente ?? '').trim().split(' ')[0]
+  const nome = primeiro ? primeiro.charAt(0).toUpperCase() + primeiro.slice(1) : 'Oi'
+  const linhas = abertos.map(v => {
+    const itens = (v.venda_itens ?? [])
+      .map(i => `${Number(i.quantidade) % 1 === 0 ? Number(i.quantidade) : i.quantidade}x ${i.produtos?.nome ?? 'item'}`)
+      .join(', ')
+    const parcial = Math.abs(v.falta - Number(v.total)) > 0.005 ? ' (falta desse)' : ''
+    return `• ${soDia(v.created_at)}${itens ? ' — ' + itens : ''} — *${fmtBRL(v.falta)}*${parcial}`
+  }).join('\n')
+
+  return [
+    `Oi ${nome}, tudo bem? 😊`,
+    `Aqui é da *${nomeLoja}*.`,
+    '',
+    'Passando só pra lembrar do que ficou anotado aqui — acho que passou batido:',
+    '',
+    linhas,
+    '',
+    `Total: *${fmtBRL(saldo)}*`,
+    '',
+    'Se você já pagou alguma dessas, me avisa que eu acerto aqui — pode ter sido a gente que esqueceu de dar baixa. 🙏',
+    token ? `\nDá pra ver seus pedidos e o que está em aberto no seu link:\nhttps://lojaonline.fwcinter.com/c/${token}` : '',
+    '',
+    'Obrigado, viu! Qualquer coisa é só chamar 😊',
+  ].join('\n')
+}
+
 export default function ClientesFiado({ empresaId }) {
   // Esta tela abre no Financeiro (ADM) e também no Salão (garçom). Só o ADM apaga
   // dívida — a função no banco recusa de qualquer jeito, isto é só pra não mostrar
@@ -58,6 +113,10 @@ export default function ClientesFiado({ empresaId }) {
   // Telefone em edição: { cliente_id, valor }. Cliente cadastrado às pressas no
   // balcão costuma ficar sem telefone — e sem telefone não dá pra cobrar no zap.
   const [editTel, setEditTel] = useState(null)
+  // Cobrança montada e pronta pra mandar: { nome, telefone, texto }
+  const [cobranca, setCobranca] = useState(null)
+  const [montandoCob, setMontandoCob] = useState(null)
+  const [nomeLoja, setNomeLoja] = useState('')
   const [salvandoTel, setSalvandoTel] = useState(false)
   // Recebimento com a forma trocada na hora do aperto: id do pagamento em edição.
   const [formaEdit, setFormaEdit] = useState(null)
@@ -125,7 +184,7 @@ export default function ClientesFiado({ empresaId }) {
     // e junta por id (a view não tem FK, então não dá pra embutir no select).
     const [fi, cl, pg] = await Promise.all([
       supabase.from('alertas_fiado').select('cliente_id, cliente_nome, saldo_fiado'),
-      supabase.from('clientes').select('id, telefone, limite_credito').eq('empresa_id', empresaId),
+      supabase.from('clientes').select('id, telefone, limite_credito, token').eq('empresa_id', empresaId),
       // Só os recebimentos de fiado. `pagamentos` também guarda a mesa fechada em
       // dinheiro/PIX/cartão (vem da fechar_conta_presencial, com observação
       // "Presencial · Mesa N"), e misturar as duas coisas aqui daria a impressão
@@ -145,12 +204,19 @@ export default function ClientesFiado({ empresaId }) {
       saldo_fiado: Number(f.saldo_fiado || 0),
       telefone: extra[f.cliente_id]?.telefone ?? null,
       limite: Number(extra[f.cliente_id]?.limite_credito || 0),
+      token: extra[f.cliente_id]?.token ?? null,
     })))
     setHistorico(pg.data ?? [])
     setLoading(false)
   }
 
   useEffect(() => { if (empresaId) load() }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!empresaId) return
+    supabase.from('empresas').select('nome').eq('id', empresaId).maybeSingle()
+      .then(({ data }) => setNomeLoja(data?.nome ?? 'nossa loja'))
+  }, [empresaId])
 
   // Registra o recebimento. É a linha em `pagamentos` que abate o saldo: a view
   // clientes_saldo_fiado faz "vendas − pagamentos", então quem quita some da lista
@@ -176,6 +242,34 @@ export default function ClientesFiado({ empresaId }) {
     if (error) { window.alert('Erro ao registrar o pagamento: ' + error.message); return }
     setRecebendo(null)
     await load()
+  }
+
+  // Monta a cobrança de um cliente: busca os pedidos fiado, descobre quais
+  // ainda estão em aberto (ver pedidosEmAberto) e escreve o texto.
+  async function abrirCobranca(l) {
+    setMontandoCob(l.cliente_id)
+    const { data, error } = await supabase.from('vendas')
+      .select('id, total, created_at, forma_pagamento, venda_itens(quantidade, produtos(nome))')
+      .eq('empresa_id', empresaId)
+      .eq('cliente_id', l.cliente_id)
+      .neq('status', 'cancelado')
+      .neq('forma_pagamento', 'a_vista')
+      .order('created_at', { ascending: false })
+      .limit(60)
+    setMontandoCob(null)
+    if (error) { window.alert('Não deu pra montar a cobrança: ' + error.message); return }
+
+    const abertos = pedidosEmAberto(data ?? [], l.saldo_fiado)
+    if (!abertos.length) { window.alert('Não achei pedido em aberto pra esse cliente.'); return }
+
+    setCobranca({
+      cliente_id: l.cliente_id,
+      nome: l.cliente_nome,
+      telefone: l.telefone,
+      texto: textoCobranca({
+        nomeCliente: l.cliente_nome, nomeLoja, abertos, saldo: l.saldo_fiado, token: l.token,
+      }),
+    })
   }
 
   const filtradas = useMemo(() => {
@@ -295,6 +389,18 @@ export default function ClientesFiado({ empresaId }) {
                             background: 'transparent', color: aberto ? 'var(--text-muted)' : 'var(--success, #16a34a)',
                             fontSize: 12.5, fontWeight: 700 }}>
                           {aberto ? 'Cancelar' : '✓ Pago'}
+                        </button>
+                        {/* Cobrança pronta: o texto já sai com os pedidos que
+                            ainda estão em aberto, não com todos os fiados. */}
+                        <button type="button"
+                          onClick={() => abrirCobranca(l)}
+                          disabled={montandoCob === l.cliente_id}
+                          title={l.telefone ? 'Montar a mensagem de cobrança' : 'Põe o telefone primeiro'}
+                          style={{ marginLeft: 8, padding: '6px 12px', borderRadius: 8, whiteSpace: 'nowrap',
+                            cursor: montandoCob === l.cliente_id ? 'wait' : 'pointer',
+                            border: '1px solid var(--primary)', background: 'transparent',
+                            color: 'var(--primary)', fontSize: 12.5, fontWeight: 700 }}>
+                          {montandoCob === l.cliente_id ? '...' : '📣 Cobrar'}
                         </button>
                       </td>
                     </tr>
@@ -438,6 +544,62 @@ export default function ClientesFiado({ empresaId }) {
           </table>
         )}
       </div>
+
+      {/* ── Cobrança pronta ──
+          O texto sai montado e editável. Mandar pelo WhatsApp abre a conversa
+          com o cliente no aparelho da loja — assim a mensagem sai do número da
+          loja, que é o número que o cliente conhece. */}
+      {cobranca && (
+        <div onClick={() => setCobranca(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 60,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: 'var(--card, var(--bg))', border: '1px solid var(--border)', borderRadius: 14,
+              width: 'min(560px, 100%)', maxHeight: '90vh', overflow: 'auto', padding: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <h3 style={{ margin: 0, fontSize: 17 }}>Cobrar {cobranca.nome}</h3>
+              <button type="button" onClick={() => setCobranca(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 20 }}>×</button>
+            </div>
+            <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--text-muted)' }}>
+              Só entram os pedidos que ainda estão em aberto. Pode editar antes de mandar.
+            </p>
+
+            <textarea value={cobranca.texto}
+              onChange={e => setCobranca(c => ({ ...c, texto: e.target.value }))}
+              rows={14}
+              style={{ width: '100%', padding: 10, borderRadius: 10, border: '1px solid var(--border)',
+                background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13.5,
+                lineHeight: 1.5, fontFamily: 'inherit', resize: 'vertical' }} />
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+              {zap(cobranca.telefone) ? (
+                <a href={`${zap(cobranca.telefone)}?text=${encodeURIComponent(cobranca.texto)}`}
+                  target="_blank" rel="noreferrer"
+                  onClick={() => setCobranca(null)}
+                  style={{ flex: '1 1 200px', textAlign: 'center', padding: '11px 14px', borderRadius: 10,
+                    background: '#25D366', color: '#05230f', fontWeight: 800, fontSize: 14, textDecoration: 'none' }}>
+                  💬 Mandar no WhatsApp
+                </a>
+              ) : (
+                <span style={{ flex: '1 1 200px', textAlign: 'center', padding: '11px 14px', borderRadius: 10,
+                  border: '1px dashed var(--border)', color: 'var(--text-muted)', fontSize: 13 }}>
+                  Sem telefone cadastrado
+                </span>
+              )}
+              <button type="button"
+                onClick={async () => {
+                  try { await navigator.clipboard.writeText(cobranca.texto); window.alert('Texto copiado.') }
+                  catch { window.alert('Não deu pra copiar — selecione o texto e copie na mão.') }
+                }}
+                style={{ padding: '11px 14px', borderRadius: 10, border: '1px solid var(--border)',
+                  background: 'transparent', color: 'var(--text)', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+                Copiar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
