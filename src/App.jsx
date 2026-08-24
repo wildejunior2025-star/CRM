@@ -116,14 +116,21 @@ function HostnameRedirect() {
         if (!pathname.startsWith('/super-admin')) navigate('/super-admin', { replace: true })
         return
       }
-      // Aqui morava o loop: mandava TODO MUNDO pro /painel, mas o /painel só
+      // Aqui morava um loop: mandava TODO MUNDO pro /painel, mas o /painel só
       // aceita admin, super_admin e vendedor. Garçom chegava lá, o guard da rota
       // devolvia ele pro salão, e daqui ele era empurrado pro /painel de novo —
-      // sem parar. Agora cada perfil vai pra casa dele.
-      const destino = usaPainelDePedidos(perfil) ? '/painel' : homeDoPerfil(perfil)
-      if (pathname !== '/login' && !pathname.startsWith(destino)) {
-        navigate(destino, { replace: true })
+      // sem parar.
+      if (usaPainelDePedidos(perfil)) {
+        if (!pathname.startsWith('/painel') && pathname !== '/login') {
+          navigate('/painel', { replace: true })
+        }
+        return
       }
+      // Garçom e cozinheiro: só empurra quem chegou na RAIZ. Empurrar de
+      // qualquer outra rota prendia eles numa tela só — o botão "Minhas mesas"
+      // piscava e voltava pro Salão, porque este redirect desfazia o clique.
+      // O que eles não podem abrir já é barrado pelo guard de cada rota.
+      if (pathname === '/') navigate(homeDoPerfil(perfil), { replace: true })
     }
   }, [pathname, navigate, profile, empresa, loading])
   return null
