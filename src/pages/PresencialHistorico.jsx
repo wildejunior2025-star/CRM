@@ -31,7 +31,8 @@ export default function PresencialHistorico() {
   const [lancados, setLancados] = useState([])  // itens lançados hoje (mig 0187)
   const [fechadas, setFechadas] = useState([])  // contas fechadas hoje, por quem fechou
   const [pontosCfg, setPontosCfg] = useState({ lancar: 1, entregar: 1, fechar: 2 })
-  const [comissaoPct, setComissaoPct] = useState(0)
+  const [rateioPct, setRateioPct] = useState(0)   // % da taxa que vira o bolo (mig 0188)
+  const [taxaDoDia, setTaxaDoDia] = useState(0)   // taxa de serviço arrecadada hoje na LOJA
   const [loading, setLoading]   = useState(true)
   const [aberta, setAberta]     = useState(null) // id da comanda expandida
   const [pickerComanda, setPickerComanda] = useState(null) // comanda em que se está ligando o cliente
@@ -85,7 +86,7 @@ export default function PresencialHistorico() {
         .eq('status', 'entregue')
         .not('entregue_por', 'is', null)
         .gte('entregue_at', inicioHoje.toISOString()),
-      supabase.from('empresas').select('comissao_garcom_pct, pontos_garcom').eq('id', empresaId).single(),
+      supabase.from('empresas').select('rateio_taxa_pct, pontos_garcom').eq('id', empresaId).single(),
       // Quem LANÇOU cada item hoje (mig 0187)
       supabase.from('comanda_itens')
         .select('lancado_por, preco_unitario, quantidade')
@@ -98,7 +99,15 @@ export default function PresencialHistorico() {
         .eq('empresa_id', empresaId)
         .not('fechada_por', 'is', null)
         .gte('fechada_por_em', inicioHoje.toISOString()),
-    ]).then(([cs, gs, es, emp, ls, fs]) => {
+      // Taxa arrecadada hoje na LOJA INTEIRA — é ela que forma o bolo. Consulta
+      // à parte de propósito: a lista de contas é limitada a 100 e filtrada por
+      // garçom, então somar a taxa a partir dela daria um bolo menor que o real.
+      supabase.from('comandas')
+        .select('taxa_servico')
+        .eq('empresa_id', empresaId)
+        .eq('status', 'fechada')
+        .gte('fechada_at', inicioHoje.toISOString()),
+    ]).then(([cs, gs, es, emp, ls, fs, tx]) => {
       const todas = cs.data ?? []
       // Conta em que ELE encostou: abriu, lançou, entregou ou fechou.
       const participouDaConta = (c) => c.garcom_id === meuId
@@ -109,7 +118,8 @@ export default function PresencialHistorico() {
       setEntregas(es.data ?? [])
       setLancados(ls.data ?? [])
       setFechadas(fs.data ?? [])
-      setComissaoPct(Number(emp.data?.comissao_garcom_pct ?? 0))
+      setRateioPct(Number(emp.data?.rateio_taxa_pct ?? 0))
+      setTaxaDoDia((tx.data ?? []).reduce((acc, c) => acc + Number(c.taxa_servico || 0), 0))
       const pc = emp.data?.pontos_garcom
       if (pc) setPontosCfg({ lancar: Number(pc.lancar ?? 1), entregar: Number(pc.entregar ?? 1), fechar: Number(pc.fechar ?? 2) })
       setLoading(false)
@@ -123,10 +133,10 @@ export default function PresencialHistorico() {
     await supabase.from('empresas').update({ pontos_garcom: novo }).eq('id', empresaId)
   }
 
-  async function salvarComissao(v) {
+  async function salvarRateio(v) {
     const n = Math.max(0, Math.min(100, Number(v) || 0))
-    setComissaoPct(n)
-    await supabase.from('empresas').update({ comissao_garcom_pct: n }).eq('id', empresaId)
+    setRateioPct(n)
+    await supabase.from('empresas').update({ rateio_taxa_pct: n }).eq('id', empresaId)
   }
 
   // Ranking do dia por PONTOS (mig 0187).
@@ -135,7 +145,7 @@ export default function PresencialHistorico() {
   // descartado de propósito: ele obriga o garçom a carregar aquela mesa até o
   // fim pra levar o crédito, e cria o "não mexe na minha mesa" que trava o
   // salão. Contando gesto por gesto, qualquer um atende qualquer mesa.
-  const ranking = useMemo(() => {
+  const rankingTodos = useMemo(() => {
     const map = {}
     const linha = (k) => (map[k] ??= { id: k, lancou: 0, entregou: 0, fechou: 0, valor: 0 })
     for (const it of lancados) linha(it.lancado_por).lancou += it.quantidade
@@ -145,12 +155,23 @@ export default function PresencialHistorico() {
       l.valor += Number(it.preco_unitario) * it.quantidade   // base da comissão em R$
     }
     for (const c of fechadas) linha(c.fechada_por).fechou += 1
-    const lista = Object.values(map).map(r => ({
+    return Object.values(map).map(r => ({
       ...r,
       pontos: r.lancou * pontosCfg.lancar + r.entregou * pontosCfg.entregar + r.fechou * pontosCfg.fechar,
     })).sort((a, b) => b.pontos - a.pontos)
-    return ehAdmin ? lista : lista.filter(r => r.id === meuId)
-  }, [lancados, entregas, fechadas, pontosCfg, ehAdmin, meuId])
+  }, [lancados, entregas, fechadas, pontosCfg])
+
+  // O bolo do dia e quanto vale cada ponto. O total de pontos é o de TODOS os
+  // garçons, inclusive quando a tela mostra só um: o ponto do garçom vale menos
+  // no dia em que a equipe inteira trabalhou mais, e é isso que segura o bolo.
+  const bolo = taxaDoDia * (Number(rateioPct) || 0) / 100
+  const pontosDaLoja = rankingTodos.reduce((s, r) => s + r.pontos, 0)
+  const valorPorPonto = pontosDaLoja > 0 ? bolo / pontosDaLoja : 0
+  const ganhoDe = (r) => r.pontos * valorPorPonto
+
+  const ranking = useMemo(
+    () => (ehAdmin ? rankingTodos : rankingTodos.filter(r => r.id === meuId)),
+    [rankingTodos, ehAdmin, meuId])
 
   // Resumo de hoje
   const resumoHoje = useMemo(() => {
@@ -162,24 +183,26 @@ export default function PresencialHistorico() {
     }
   }, [comandas])
 
-  // Quanto sai de comissão nesta conta. Pro garçom, só o que ELE entregou —
-  // a comissão segue quem levou o item até a mesa, não quem abriu a mesa.
-  // Pro dono, tudo que foi entregue na conta (o que ele vai pagar por ela).
-  const comissaoDaConta = (c) => {
-    const pct = Number(comissaoPct) || 0
-    if (!pct) return 0
-    const meus = (c.comanda_itens ?? []).filter(i =>
-      i.entregue_por && (ehAdmin || i.entregue_por === meuId))
-    const valor = meus.reduce((s, i) => s + Number(i.preco_unitario) * i.quantidade, 0)
-    return valor * pct / 100
+  // Pontos que ELE fez nesta mesa. Não dá pra mostrar R$ por mesa: o bolo é
+  // do DIA e o valor do ponto só existe depois que o dia fecha — quanto mais a
+  // equipe trabalhar, menos vale o ponto. Mostrar um R$ por mesa seria um
+  // número que muda sozinho até o fim do expediente.
+  const pontosNaConta = (c) => {
+    const itens = c.comanda_itens ?? []
+    const meu = (id) => ehAdmin || id === meuId
+    let p = 0
+    for (const i of itens) {
+      if (i.lancado_por && meu(i.lancado_por)) p += i.quantidade * pontosCfg.lancar
+      if (i.entregue_por && meu(i.entregue_por)) p += i.quantidade * pontosCfg.entregar
+    }
+    if (c.fechada_por && meu(c.fechada_por)) p += pontosCfg.fechar
+    return p
   }
 
-  // Vem do MESMO cálculo do ranking do dia (itens entregues hoje), não da soma
-  // das contas fechadas: item entregue numa mesa que ainda não fechou também é
-  // dele. Dois números diferentes na mesma tela viram discussão no fim do mês.
-  const minhaComissaoHoje = ranking
+  // O que ele leva hoje: os pontos dele vezes o valor do ponto.
+  const meuGanhoHoje = rankingTodos
     .filter(r => r.id === meuId)
-    .reduce((s, r) => s + r.valor * (Number(comissaoPct) || 0) / 100, 0)
+    .reduce((s, r) => s + ganhoDe(r), 0)
 
   if (loading) return <div className="page"><p>Carregando...</p></div>
 
@@ -216,7 +239,7 @@ export default function PresencialHistorico() {
             {ehAdmin ? 'Recebido hoje' : 'Você ganhou hoje'}
           </div>
           <div style={{ fontSize: 21, fontWeight: 800, marginTop: 2, color: 'var(--success)', overflowWrap: 'anywhere' }}>
-            {fmt(ehAdmin ? resumoHoje.total : minhaComissaoHoje)}
+            {fmt(ehAdmin ? resumoHoje.total : meuGanhoHoje)}
           </div>
         </div>
       </div>
@@ -226,8 +249,7 @@ export default function PresencialHistorico() {
           espremidos. Agora o garçom vê um cartão com o número dele grande e três
           blocos, e o dono vê uma lista de linhas, sem tabela. */}
       {ranking.length > 0 && (() => {
-        const pctNum = Number(comissaoPct) || 0
-        const totalEntregue = ranking.reduce((s, r) => s + r.valor, 0)
+        const temBolo = bolo > 0 && pontosDaLoja > 0
 
         const bloco = (n, lbl, icone) => (
           <div key={lbl} style={{
@@ -251,21 +273,26 @@ export default function PresencialHistorico() {
                   {bloco(r.entregou, 'entregou', '🍽️')}
                   {bloco(r.fechou, 'fechou', '🧾')}
                 </div>
-                {pctNum > 0 && r.valor > 0 && (
+                {temBolo && (
                   <div style={{
                     marginTop: 12, padding: '10px 12px', borderRadius: 10, display: 'flex',
                     alignItems: 'center', justifyContent: 'space-between', gap: 8,
                     background: 'rgba(16,185,129,.10)', border: '1px solid rgba(16,185,129,.35)',
                   }}>
                     <span style={{ fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'left' }}>
-                      Comissão de {pctNum}% sobre {fmt(r.valor)}
+                      {r.pontos} pontos × {fmt(valorPorPonto)} por ponto
                     </span>
-                    <strong style={{ fontSize: 17, color: 'var(--success)', whiteSpace: 'nowrap' }}>{fmt(r.valor * pctNum / 100)}</strong>
+                    <strong style={{ fontSize: 19, color: 'var(--success)', whiteSpace: 'nowrap' }}>{fmt(ganhoDe(r))}</strong>
                   </div>
                 )}
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.45 }}>
-                  Cada item que você lança vale {pontosCfg.lancar}, cada item que entrega vale{' '}
-                  {pontosCfg.entregar} e cada conta fechada vale {pontosCfg.fechar}.
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.5 }}>
+                  Lançar item vale {pontosCfg.lancar}, entregar vale {pontosCfg.entregar} e fechar conta
+                  vale {pontosCfg.fechar}.
+                  {temBolo && (
+                    <> A loja separa {rateioPct}% da taxa de serviço do dia ({fmt(bolo)} até agora) e divide
+                    entre todos pelos pontos. Hoje a equipe fez {pontosDaLoja} pontos, então cada ponto
+                    está valendo {fmt(valorPorPonto)} — esse valor muda até o fim do expediente.</>
+                  )}
                 </div>
               </div>
             ))}
@@ -293,8 +320,8 @@ export default function PresencialHistorico() {
                       </div>
                       <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
                         ✍️ {r.lancou} · 🍽️ {r.entregou} · 🧾 {r.fechou}
-                        {pctNum > 0 && r.valor > 0 && (
-                          <> · <span style={{ color: 'var(--success)', fontWeight: 700 }}>{fmt(r.valor * pctNum / 100)}</span></>
+                        {temBolo && (
+                          <> · <span style={{ color: 'var(--success)', fontWeight: 700 }}>{fmt(ganhoDe(r))}</span></>
                         )}
                       </div>
                     </div>
@@ -305,10 +332,19 @@ export default function PresencialHistorico() {
                   </div>
                 ))}
 
-                {pctNum > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, paddingTop: 10, marginTop: 4, borderTop: '1px dashed var(--border)', fontWeight: 800, fontSize: 13.5 }}>
-                    <span>Comissão do dia ({fmt(totalEntregue)} entregue)</span>
-                    <span style={{ color: 'var(--success)', whiteSpace: 'nowrap' }}>{fmt(totalEntregue * pctNum / 100)}</span>
+                {temBolo ? (
+                  <div style={{ paddingTop: 10, marginTop: 4, borderTop: '1px dashed var(--border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontWeight: 800, fontSize: 13.5 }}>
+                      <span>Bolo do dia ({rateioPct}% de {fmt(taxaDoDia)} de taxa)</span>
+                      <span style={{ color: 'var(--success)', whiteSpace: 'nowrap' }}>{fmt(bolo)}</span>
+                    </div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
+                      {pontosDaLoja} pontos no total · cada ponto vale {fmt(valorPorPonto)}
+                    </div>
+                  </div>
+                ) : Number(rateioPct) > 0 && (
+                  <div style={{ paddingTop: 10, marginTop: 4, borderTop: '1px dashed var(--border)', fontSize: 12, color: 'var(--text-muted)' }}>
+                    Ainda não há taxa arrecadada hoje — o bolo aparece quando a primeira conta fechar.
                   </div>
                 )}
               </div>
@@ -335,13 +371,21 @@ export default function PresencialHistorico() {
                     </label>
                   ))}
                 </div>
-                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 10, fontSize: 12.5, color: 'var(--text-muted)' }}>
-                  Comissão em % sobre o que o garçom entrega (0 = não usa)
-                  <input type="number" min="0" max="100" step="0.5" value={comissaoPct}
-                    onChange={e => setComissaoPct(e.target.value)} onBlur={e => salvarComissao(e.target.value)}
+                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 12, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                  Quanto da <strong style={{ color: 'var(--text)' }}>taxa de serviço</strong> vai pros garçons (0 = não usa)
+                  <input type="number" min="0" max="100" step="1" value={rateioPct}
+                    onChange={e => setRateioPct(e.target.value)} onBlur={e => salvarRateio(e.target.value)}
                     style={{ width: 64, padding: '5px 8px', borderRadius: 8, textAlign: 'center', fontWeight: 800, flexShrink: 0,
                       border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
                 </label>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
+                  É uma fatia do que a loja JÁ arrecadou de taxa — o bolo nunca estoura. Se a equipe
+                  trabalhar mais, o ponto vale menos e a loja paga o mesmo; em dia fraco, paga menos.
+                  {Number(rateioPct) > 0 && (
+                    <> Hoje a loja arrecadou {fmt(taxaDoDia)} de taxa, então {rateioPct}% dá
+                    <strong style={{ color: 'var(--success)' }}> {fmt(bolo)}</strong> pra dividir.</>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -371,9 +415,9 @@ export default function PresencialHistorico() {
                     {/* Quanto ele ganhou nesta mesa. É a pergunta que o garçom
                         faz olhando o histórico — o total do dia não responde
                         "e nessa mesa aqui, quanto eu tirei?". */}
-                    {comissaoDaConta(c) > 0 && (
-                      <div style={{ fontSize: 12.5, color: 'var(--success)', fontWeight: 700, marginTop: 1 }}>
-                        💰 {ehAdmin ? 'comissão' : 'você ganhou'}: {fmt(comissaoDaConta(c))}
+                    {pontosNaConta(c) > 0 && (
+                      <div style={{ fontSize: 12.5, color: 'var(--primary)', fontWeight: 700, marginTop: 1 }}>
+                        ✨ {ehAdmin ? 'pontos nesta mesa' : 'seus pontos aqui'}: {pontosNaConta(c)}
                       </div>
                     )}
                     {(c.garcom_id || c.fechada_por) && (
