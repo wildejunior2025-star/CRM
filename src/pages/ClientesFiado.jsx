@@ -66,6 +66,14 @@ function pedidosEmAberto(vendasFiado, saldo) {
 
 const soDia = iso => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
 
+// Quanto falta em cada fiado, por id. Quem não aparece no mapa já foi pago.
+// Mesma reconstrução do pedidosEmAberto — é o que permite escrever "pago" na
+// linha, já que o banco não guarda qual pedido cada recebimento cobriu.
+function faltaPorVenda(vendas, saldo) {
+  const fiados = (vendas ?? []).filter(v => v.forma_pagamento !== 'a_vista')
+  return new Map(pedidosEmAberto(fiados, saldo).map(a => [a.id, a.falta]))
+}
+
 function textoCobranca({ nomeCliente, nomeLoja, abertos, saldo, token }) {
   const primeiro = String(nomeCliente ?? '').trim().split(' ')[0]
   const nome = primeiro ? primeiro.charAt(0).toUpperCase() + primeiro.slice(1) : 'Oi'
@@ -174,7 +182,9 @@ export default function ClientesFiado({ empresaId }) {
       .eq('cliente_id', clienteId)
       .neq('status', 'cancelado')
       .order('created_at', { ascending: false })
-      .limit(30)
+      // 30 cortava fiado antigo em cliente de todo dia, e sem TODOS os fiados a
+      // conta de quem já pagou sai errada (ver faltaPorVenda).
+      .limit(200)
     setCompras(p => ({ ...p, [clienteId]: error ? [] : (data ?? []) }))
   }
 
@@ -448,17 +458,27 @@ export default function ClientesFiado({ empresaId }) {
                             <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '4px 0' }}>Nenhuma compra registrada.</div>
                           ) : (
                             <div style={{ padding: '2px 0' }}>
-                              {compras[l.cliente_id].map(v => (
+                              {(() => { const falta = faltaPorVenda(compras[l.cliente_id], l.saldo_fiado); return compras[l.cliente_id].map(v => {
+                                const emAberto = falta.get(v.id)                       // undefined = quitado
+                                const ehFiado  = v.forma_pagamento !== 'a_vista'
+                                const parcial  = emAberto !== undefined && emAberto < Number(v.total) - 0.005
+                                return (
                                 <div key={v.id} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13 }}>
                                     <span style={{ color: 'var(--text-muted)' }}>
                                       {dataHora(v.created_at)}
-                                      {v.forma_pagamento === 'fiado' && <span style={{ color: '#d97706', fontWeight: 700 }}> · fiado</span>}
+                                      {ehFiado && (
+                                        emAberto === undefined
+                                          ? <span style={{ color: 'var(--success, #16a34a)', fontWeight: 700 }}> · fiado pago</span>
+                                          : parcial
+                                            ? <span style={{ color: '#d97706', fontWeight: 700 }}> · falta {fmtBRL(emAberto)}</span>
+                                            : <span style={{ color: '#d97706', fontWeight: 700 }}> · fiado</span>
+                                      )}
                                     </span>
                                     <span style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
                                       <span style={{ fontWeight: 700 }}>{fmtBRL(v.total)}</span>
                                       {/* Fiado lançado errado: o ADM apaga aqui (mig 0146). */}
-                                      {ehAdmin && v.forma_pagamento === 'fiado' && (
+                                      {ehAdmin && v.forma_pagamento === 'fiado' && emAberto !== undefined && (
                                         <button type="button" onClick={() => apagarFiado(v, l.cliente_id)}
                                           title="Apagar este fiado (lançamento errado)"
                                           style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
@@ -476,7 +496,7 @@ export default function ClientesFiado({ empresaId }) {
                                     </div>
                                   )}
                                 </div>
-                              ))}
+                              ) }) })()}
                             </div>
                           )}
                         </td>
