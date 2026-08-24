@@ -381,6 +381,19 @@ export default function PresencialSalao() {
     return (comanda?.comanda_itens ?? []).filter(i => i.status === 'pronto').length
   }
 
+  // Mesa já servida: tem item e nenhum falta levar. Ela some do radar de
+  // propósito (cor apagada) — o olho do garçom tem que cair no que falta fazer,
+  // não em mesa que já está resolvida esperando a hora de fechar.
+  function tudoEntregue(comanda) {
+    const itens = comanda?.comanda_itens ?? []
+    return itens.length > 0 && itens.every(i => i.status === 'entregue')
+  }
+
+  // O que ainda falta servir nesta mesa (pendente ou em preparo).
+  function faltamDe(comanda) {
+    return (comanda?.comanda_itens ?? []).filter(i => i.status !== 'entregue' && i.status !== 'pronto').length
+  }
+
   // Bip quando a cozinha marca um item como pronto (avisa o garçom)
   const prevProntos = useRef(0)
   function bip() {
@@ -1226,11 +1239,19 @@ export default function PresencialSalao() {
 
   if (loading) return <div className="page"><p>Carregando salão...</p></div>
 
+  // A cor é o mapa do salão: quanto mais forte, mais precisa de você agora.
+  //   verde forte + 🔔 → tem prato pronto esperando pra levar (feito no card)
+  //   vermelho         → tem item pra sair da cozinha / servir
+  //   cinza apagado    → tudo entregue, só falta fechar
+  //   azul             → fechada, esperando o ADM liberar
+  //   verde claro      → livre
   const corStatus = (mesa) => {
     const c = comandaPorMesa[mesa.id]
     if (!c) return { bg: 'rgba(34,197,94,.12)', border: '#22c55e', label: 'Livre' }
     if (c.status === 'aguardando_conferencia') return { bg: 'rgba(59,130,246,.16)', border: '#3b82f6', label: 'Aguard. ADM' }
-    return { bg: 'rgba(239,68,68,.12)', border: '#ef4444', label: 'Ocupada' }
+    if (tudoEntregue(c)) return { bg: 'rgba(100,116,139,.10)', border: '#64748b', label: 'Servida' }
+    const faltam = faltamDe(c)
+    return { bg: 'rgba(239,68,68,.12)', border: '#ef4444', label: faltam > 0 ? `Faltam ${faltam}` : 'Ocupada' }
   }
 
   return (
