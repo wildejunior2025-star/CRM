@@ -236,13 +236,42 @@ export default function PresencialHistorico() {
               das mesas pra ele daria a impressão errada de que aquele dinheiro
               é o ganho dele. */}
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.3 }}>
-            {ehAdmin ? 'Recebido hoje' : 'Você ganhou hoje'}
+            {ehAdmin ? 'Recebido hoje (com a taxa)' : 'Você ganhou hoje'}
           </div>
           <div style={{ fontSize: 21, fontWeight: 800, marginTop: 2, color: 'var(--success)', overflowWrap: 'anywhere' }}>
             {fmt(ehAdmin ? resumoHoje.total : meuGanhoHoje)}
           </div>
         </div>
       </div>
+
+      {/* A taxa de serviço tinha um lugar só: escondida dentro da frase do bolo,
+          e só quando o rateio estava ligado. É o número que o dono precisa pra
+          saber quanto entrou de taxa e quanto dela sai da mão dele. */}
+      {ehAdmin && taxaDoDia > 0 && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Taxa de serviço arrecadada hoje</span>
+            <strong style={{ fontSize: 22 }}>{fmt(taxaDoDia)}</strong>
+          </div>
+          {Number(rateioPct) > 0 ? (
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)', display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Vai pros garçons ({rateioPct}%)</span>
+                <strong style={{ color: 'var(--success)', whiteSpace: 'nowrap' }}>{fmt(bolo)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Fica com a loja</span>
+                <strong style={{ whiteSpace: 'nowrap' }}>{fmt(taxaDoDia - bolo)}</strong>
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+              Tudo fica com a loja. Pra repassar uma parte pros garçons, defina a fatia
+              logo abaixo, em <strong>Quanto vale cada gesto</strong>.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Pontos do dia (mig 0187).
           Era uma tabela de 5 colunas — no celular virava um amontoado de números
