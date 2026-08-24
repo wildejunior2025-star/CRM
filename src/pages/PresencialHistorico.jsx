@@ -308,9 +308,11 @@ export default function PresencialHistorico() {
                       {horaBR(c.fechada_at)} · {FORMA_LABEL[c.forma_pagamento] ?? c.forma_pagamento ?? '—'}
                       {' · '}{(c.comanda_itens ?? []).length} {(c.comanda_itens ?? []).length === 1 ? 'item' : 'itens'}
                     </div>
-                    {c.garcom_id && garcons[c.garcom_id] && (
+                    {(c.garcom_id || c.fechada_por) && (
                       <div style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}>
-                        👤 {garcons[c.garcom_id]}
+                        {c.garcom_id && garcons[c.garcom_id] && <>👤 abriu: {garcons[c.garcom_id]}</>}
+                        {c.garcom_id && garcons[c.garcom_id] && c.fechada_por && garcons[c.fechada_por] && ' · '}
+                        {c.fechada_por && garcons[c.fechada_por] && <>🧾 fechou: {garcons[c.fechada_por]}</>}
                       </div>
                     )}
                     {c.cliente && (
@@ -330,6 +332,17 @@ export default function PresencialHistorico() {
                         <div>
                           <div style={{ fontSize: 13.5 }}>{it.quantidade}× {it.nome}</div>
                           {it.observacao && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>📝 {it.observacao}</div>}
+                          {/* A trilha de quem fez o quê. Estava só no banco: quando o
+                              cliente contestava um item na hora de pagar, a resposta
+                              existia mas ninguém conseguia olhar. Agora está na linha
+                              do próprio item — que é onde a pergunta nasce. */}
+                          {(it.lancado_por || it.entregue_por) && (
+                            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                              {it.lancado_por && <>✍️ lançou: {garcons[it.lancado_por] ?? '—'}</>}
+                              {it.lancado_por && it.entregue_por && ' · '}
+                              {it.entregue_por && <>🍽️ entregou: {garcons[it.entregue_por] ?? '—'}</>}
+                            </div>
+                          )}
                         </div>
                         <span style={{ fontSize: 13, fontWeight: 600 }}>{fmt(it.preco_unitario * it.quantidade)}</span>
                       </div>
