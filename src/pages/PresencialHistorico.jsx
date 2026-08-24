@@ -173,116 +173,147 @@ export default function PresencialHistorico() {
         </div>
       </div>
 
-      {/* Resumo de hoje */}
-      <div className="card" style={{ marginBottom: 18, display: 'flex', gap: 28, flexWrap: 'wrap' }}>
-        <div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{ehAdmin ? 'Contas fechadas hoje' : 'Suas mesas fechadas hoje'}</div>
-          <div style={{ fontSize: 24, fontWeight: 800 }}>{resumoHoje.qtd}</div>
+      {/* Resumo de hoje — dois blocos de largura igual, pra caber lado a lado
+          na tela do celular em vez de um empurrar o outro pra baixo. */}
+      <div style={{ marginBottom: 12, display: 'flex', gap: 10 }}>
+        <div className="card" style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.3 }}>
+            {ehAdmin ? 'Contas fechadas hoje' : 'Mesas fechadas hoje'}
+          </div>
+          <div style={{ fontSize: 26, fontWeight: 800, marginTop: 2 }}>{resumoHoje.qtd}</div>
         </div>
-        <div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{ehAdmin ? 'Recebido hoje' : 'Total das suas mesas hoje'}</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--success)' }}>{fmt(resumoHoje.total)}</div>
+        <div className="card" style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.3 }}>
+            {ehAdmin ? 'Recebido hoje' : 'Total das suas mesas'}
+          </div>
+          <div style={{ fontSize: 21, fontWeight: 800, marginTop: 2, color: 'var(--success)', overflowWrap: 'anywhere' }}>
+            {fmt(resumoHoje.total)}
+          </div>
         </div>
       </div>
 
-      {/* Ranking do dia por pontos (mig 0187) */}
+      {/* Pontos do dia (mig 0187).
+          Era uma tabela de 5 colunas — no celular virava um amontoado de números
+          espremidos. Agora o garçom vê um cartão com o número dele grande e três
+          blocos, e o dono vê uma lista de linhas, sem tabela. */}
       {ranking.length > 0 && (() => {
         const pctNum = Number(comissaoPct) || 0
         const totalEntregue = ranking.reduce((s, r) => s + r.valor, 0)
-        const cel = { padding: '7px 6px', fontSize: 12.5, textAlign: 'center', whiteSpace: 'nowrap' }
+
+        const bloco = (n, lbl, icone) => (
+          <div key={lbl} style={{
+            flex: 1, minWidth: 0, textAlign: 'center', padding: '10px 4px',
+            borderRadius: 10, background: 'var(--surface-hover)', border: '1px solid var(--border)',
+          }}>
+            <div style={{ fontSize: 19, fontWeight: 800, lineHeight: 1.1 }}>{n}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2, whiteSpace: 'nowrap' }}>{icone} {lbl}</div>
+          </div>
+        )
+
         return (
-          <div className="card" style={{ marginBottom: 18 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
-              <div style={{ fontSize: 14, fontWeight: 800 }}>{ehAdmin ? '🏆 Pontos por garçom (hoje)' : '🏆 Seus pontos hoje'}</div>
-            </div>
-            <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.45 }}>
-              Conta gesto por gesto, não mesa por mesa — assim qualquer um atende qualquer mesa
-              sem perder o crédito do que fez.
-            </p>
-
-            {/* Pesos: só o dono mexe; o garçom vê quanto vale cada coisa. */}
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12,
-              padding: '9px 11px', borderRadius: 9, background: 'var(--surface-hover)', border: '1px solid var(--border)' }}>
-              {[['lancar', 'Lançar item'], ['entregar', 'Entregar item'], ['fechar', 'Fechar conta']].map(([k, lbl]) => (
-                <label key={k} style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                  {lbl}
-                  {ehAdmin ? (
-                    <input type="number" min="0" max="99" step="1" value={pontosCfg[k]}
-                      onChange={e => setPontosCfg(p => ({ ...p, [k]: e.target.value }))}
-                      onBlur={e => salvarPontos(k, e.target.value)}
-                      style={{ width: 52, padding: '4px 6px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
-                  ) : (
-                    <strong style={{ color: 'var(--text)' }}>{pontosCfg[k]}</strong>
-                  )}
-                  <span>pt</span>
-                </label>
-              ))}
-            </div>
-
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 380 }}>
-                <thead>
-                  <tr style={{ color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '.03em' }}>
-                    <th style={{ ...cel, textAlign: 'left' }}>Garçom</th>
-                    <th style={cel}>Lançou</th>
-                    <th style={cel}>Entregou</th>
-                    <th style={cel}>Fechou</th>
-                    <th style={{ ...cel, textAlign: 'right' }}>Pontos</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ranking.map((r, i) => (
-                    <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
-                      <td style={{ ...cel, textAlign: 'left', fontWeight: 600 }}>
-                        {ehAdmin && <span style={{ marginRight: 6 }}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`}</span>}
-                        {garcons[r.id] ?? 'Garçom'}
-                      </td>
-                      <td style={cel}>{r.lancou}</td>
-                      <td style={cel}>{r.entregou}</td>
-                      <td style={cel}>{r.fechou}</td>
-                      <td style={{ ...cel, textAlign: 'right', fontWeight: 800, fontSize: 14 }}>{r.pontos}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* A comissão em R$ continua pelo VALOR ENTREGUE: pontos medem esforço,
-                dinheiro segue o que a pessoa carregou até a mesa. */}
-            {pctNum > 0 && (
-              <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px dashed var(--border)' }}>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-                  Comissão de {pctNum}% sobre o que cada um entregou
+          <div style={{ marginBottom: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* ── Garçom: o número dele, grande ── */}
+            {!ehAdmin && ranking.map(r => (
+              <div key={r.id} className="card" style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Seus pontos hoje</div>
+                <div style={{ fontSize: 46, fontWeight: 900, lineHeight: 1.05, color: 'var(--primary)' }}>{r.pontos}</div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  {bloco(r.lancou, 'lançou', '✍️')}
+                  {bloco(r.entregou, 'entregou', '🍽️')}
+                  {bloco(r.fechou, 'fechou', '🧾')}
                 </div>
-                {ranking.filter(r => r.valor > 0).map(r => (
-                  <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '3px 0' }}>
-                    <span>{garcons[r.id] ?? 'Garçom'} · {fmt(r.valor)}</span>
-                    <strong style={{ color: 'var(--success)' }}>{fmt(r.valor * pctNum / 100)}</strong>
+                {pctNum > 0 && r.valor > 0 && (
+                  <div style={{
+                    marginTop: 12, padding: '10px 12px', borderRadius: 10, display: 'flex',
+                    alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                    background: 'rgba(16,185,129,.10)', border: '1px solid rgba(16,185,129,.35)',
+                  }}>
+                    <span style={{ fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'left' }}>
+                      Comissão de {pctNum}% sobre {fmt(r.valor)}
+                    </span>
+                    <strong style={{ fontSize: 17, color: 'var(--success)', whiteSpace: 'nowrap' }}>{fmt(r.valor * pctNum / 100)}</strong>
                   </div>
-                ))}
-                {ehAdmin && (
-                  <label style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
-                    Comissão do garçom
-                    <input type="number" min="0" max="100" step="0.5" value={comissaoPct}
-                      onChange={e => setComissaoPct(e.target.value)} onBlur={e => salvarComissao(e.target.value)}
-                      style={{ width: 64, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
-                    %
-                  </label>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 8, marginTop: 6, borderTop: '1px dashed var(--border)', fontWeight: 800 }}>
-                  <span>Total ({fmt(totalEntregue)} entregue)</span>
-                  <span style={{ color: 'var(--success)' }}>{fmt(totalEntregue * pctNum / 100)}</span>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.45 }}>
+                  Cada item que você lança vale {pontosCfg.lancar}, cada item que entrega vale{' '}
+                  {pontosCfg.entregar} e cada conta fechada vale {pontosCfg.fechar}.
                 </div>
               </div>
+            ))}
+
+            {/* ── Dono: lista, uma linha por garçom ── */}
+            {ehAdmin && (
+              <div className="card">
+                <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 2 }}>🏆 Pontos por garçom (hoje)</div>
+                <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '0 0 12px', lineHeight: 1.45 }}>
+                  Conta gesto por gesto, não mesa por mesa — assim qualquer um atende qualquer mesa
+                  sem perder o crédito do que fez.
+                </p>
+
+                {ranking.map((r, i) => (
+                  <div key={r.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0',
+                    borderTop: i === 0 ? 'none' : '1px solid var(--border)',
+                  }}>
+                    <span style={{ fontSize: 17, width: 26, textAlign: 'center', flexShrink: 0 }}>
+                      {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {garcons[r.id] ?? 'Garçom'}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                        ✍️ {r.lancou} · 🍽️ {r.entregou} · 🧾 {r.fechou}
+                        {pctNum > 0 && r.valor > 0 && (
+                          <> · <span style={{ color: 'var(--success)', fontWeight: 700 }}>{fmt(r.valor * pctNum / 100)}</span></>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1 }}>{r.pontos}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>pontos</div>
+                    </div>
+                  </div>
+                ))}
+
+                {pctNum > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, paddingTop: 10, marginTop: 4, borderTop: '1px dashed var(--border)', fontWeight: 800, fontSize: 13.5 }}>
+                    <span>Comissão do dia ({fmt(totalEntregue)} entregue)</span>
+                    <span style={{ color: 'var(--success)', whiteSpace: 'nowrap' }}>{fmt(totalEntregue * pctNum / 100)}</span>
+                  </div>
+                )}
+              </div>
             )}
-            {pctNum === 0 && ehAdmin && (
-              <label style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 12 }}>
-                Comissão em % sobre o que o garçom entrega (0 = não usa)
-                <input type="number" min="0" max="100" step="0.5" value={comissaoPct}
-                  onChange={e => setComissaoPct(e.target.value)} onBlur={e => salvarComissao(e.target.value)}
-                  style={{ width: 64, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
-                %
-              </label>
+
+            {/* ── Dono: quanto vale cada gesto ── */}
+            {ehAdmin && (
+              <div className="card">
+                <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Quanto vale cada gesto</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {[['lancar', '✍️ Lançar item'], ['entregar', '🍽️ Entregar item'], ['fechar', '🧾 Fechar conta']].map(([k, lbl]) => (
+                    <label key={k} style={{
+                      flex: '1 1 140px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      gap: 8, padding: '9px 11px', borderRadius: 10,
+                      background: 'var(--surface-hover)', border: '1px solid var(--border)',
+                      fontSize: 12.5, color: 'var(--text-muted)',
+                    }}>
+                      <span style={{ whiteSpace: 'nowrap' }}>{lbl}</span>
+                      <input type="number" min="0" max="99" step="1" value={pontosCfg[k]}
+                        onChange={e => setPontosCfg(p => ({ ...p, [k]: e.target.value }))}
+                        onBlur={e => salvarPontos(k, e.target.value)}
+                        style={{ width: 48, padding: '5px 6px', borderRadius: 7, textAlign: 'center', fontWeight: 800,
+                          border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
+                    </label>
+                  ))}
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 10, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                  Comissão em % sobre o que o garçom entrega (0 = não usa)
+                  <input type="number" min="0" max="100" step="0.5" value={comissaoPct}
+                    onChange={e => setComissaoPct(e.target.value)} onBlur={e => salvarComissao(e.target.value)}
+                    style={{ width: 64, padding: '5px 8px', borderRadius: 8, textAlign: 'center', fontWeight: 800, flexShrink: 0,
+                      border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
+                </label>
+              </div>
             )}
           </div>
         )
