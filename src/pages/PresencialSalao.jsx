@@ -1095,6 +1095,11 @@ export default function PresencialSalao() {
     // direto — senão a conta não sairia em lugar nenhum. Vai pro gestor, igual garçom.
     const temImpressoraLocal = ehAdmin ? await appFwcDisponivel() : false
     if (ehAdmin && temImpressoraLocal) {
+      // Quem fechou a conta, pro ranking (mig 0187). Carimba ANTES do RPC: ele
+      // mexe em status/total e não encosta nestes campos.
+      await supabase.from('comandas')
+        .update({ fechada_por: user?.id ?? null, fechada_por_em: new Date().toISOString() })
+        .eq('id', comandaSel.id)
       // ADM no PC da loja: fecha de vez (gera a venda e libera a mesa) e imprime aqui.
       const { error } = await supabase.rpc('fechar_conta_presencial', {
         p_comanda_id: comandaSel.id,
@@ -1123,6 +1128,10 @@ export default function PresencialSalao() {
         && papelImpressora() !== 'cozinha'   // a da cozinha não tira conta
       const { error } = await supabase.from('comandas').update({
         status: 'aguardando_conferencia',
+        // Quem fechou, pro ranking (mig 0187). É o garçom que mandou pra
+        // conferência — não o ADM que libera a mesa depois.
+        fechada_por: user?.id ?? null,
+        fechada_por_em: new Date().toISOString(),
         // cliente_id vai junto: quem libera a mesa depois é o ADM, e sem isso o
         // fiado perderia o dono no caminho.
         // `lista` já carrega o cliente_id de cada linha de fiado; o cliente_id de fora

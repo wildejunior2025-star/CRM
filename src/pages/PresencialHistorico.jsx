@@ -28,6 +28,9 @@ export default function PresencialHistorico() {
   const [comandas, setComandas] = useState([])
   const [garcons, setGarcons]   = useState({})  // { profile_id: nome }
   const [entregas, setEntregas] = useState([])  // itens entregues hoje
+  const [lancados, setLancados] = useState([])  // itens lançados hoje (mig 0187)
+  const [fechadas, setFechadas] = useState([])  // contas fechadas hoje, por quem fechou
+  const [pontosCfg, setPontosCfg] = useState({ lancar: 1, entregar: 1, fechar: 2 })
   const [comissaoPct, setComissaoPct] = useState(0)
   const [loading, setLoading]   = useState(true)
   const [aberta, setAberta]     = useState(null) // id da comanda expandida
@@ -80,15 +83,38 @@ export default function PresencialHistorico() {
         .eq('status', 'entregue')
         .not('entregue_por', 'is', null)
         .gte('entregue_at', inicioHoje.toISOString()),
-      supabase.from('empresas').select('comissao_garcom_pct').eq('id', empresaId).single(),
-    ]).then(([cs, gs, es, emp]) => {
+      supabase.from('empresas').select('comissao_garcom_pct, pontos_garcom').eq('id', empresaId).single(),
+      // Quem LANÇOU cada item hoje (mig 0187)
+      supabase.from('comanda_itens')
+        .select('lancado_por, preco_unitario, quantidade')
+        .eq('empresa_id', empresaId)
+        .not('lancado_por', 'is', null)
+        .gte('created_at', inicioHoje.toISOString()),
+      // Quem FECHOU cada conta hoje (mig 0187)
+      supabase.from('comandas')
+        .select('fechada_por')
+        .eq('empresa_id', empresaId)
+        .not('fechada_por', 'is', null)
+        .gte('fechada_por_em', inicioHoje.toISOString()),
+    ]).then(([cs, gs, es, emp, ls, fs]) => {
       setComandas(cs.data ?? [])
       setGarcons(Object.fromEntries((gs.data ?? []).map(p => [p.id, p.nome])))
       setEntregas(es.data ?? [])
+      setLancados(ls.data ?? [])
+      setFechadas(fs.data ?? [])
       setComissaoPct(Number(emp.data?.comissao_garcom_pct ?? 0))
+      const pc = emp.data?.pontos_garcom
+      if (pc) setPontosCfg({ lancar: Number(pc.lancar ?? 1), entregar: Number(pc.entregar ?? 1), fechar: Number(pc.fechar ?? 2) })
       setLoading(false)
     })
   }, [empresaId, ehAdmin, meuId])
+
+  async function salvarPontos(campo, valor) {
+    const n = Math.max(0, Math.min(99, Number(valor) || 0))
+    const novo = { ...pontosCfg, [campo]: n }
+    setPontosCfg(novo)
+    await supabase.from('empresas').update({ pontos_garcom: novo }).eq('id', empresaId)
+  }
 
   async function salvarComissao(v) {
     const n = Math.max(0, Math.min(100, Number(v) || 0))
@@ -96,18 +122,28 @@ export default function PresencialHistorico() {
     await supabase.from('empresas').update({ comissao_garcom_pct: n }).eq('id', empresaId)
   }
 
-  // Ranking de entregas de hoje por garçom
-  const rankingEntregas = useMemo(() => {
+  // Ranking do dia por PONTOS (mig 0187).
+  //
+  // Antes contava só entrega. O ranking por "dono da mesa" (quem abriu) foi
+  // descartado de propósito: ele obriga o garçom a carregar aquela mesa até o
+  // fim pra levar o crédito, e cria o "não mexe na minha mesa" que trava o
+  // salão. Contando gesto por gesto, qualquer um atende qualquer mesa.
+  const ranking = useMemo(() => {
     const map = {}
+    const linha = (k) => (map[k] ??= { id: k, lancou: 0, entregou: 0, fechou: 0, valor: 0 })
+    for (const it of lancados) linha(it.lancado_por).lancou += it.quantidade
     for (const it of entregas) {
-      const k = it.entregue_por
-      if (!map[k]) map[k] = { id: k, qtd: 0, valor: 0 }
-      map[k].qtd += it.quantidade
-      map[k].valor += Number(it.preco_unitario) * it.quantidade
+      const l = linha(it.entregue_por)
+      l.entregou += it.quantidade
+      l.valor += Number(it.preco_unitario) * it.quantidade   // base da comissão em R$
     }
-    const lista = Object.values(map).sort((a, b) => b.qtd - a.qtd)
+    for (const c of fechadas) linha(c.fechada_por).fechou += 1
+    const lista = Object.values(map).map(r => ({
+      ...r,
+      pontos: r.lancou * pontosCfg.lancar + r.entregou * pontosCfg.entregar + r.fechou * pontosCfg.fechar,
+    })).sort((a, b) => b.pontos - a.pontos)
     return ehAdmin ? lista : lista.filter(r => r.id === meuId)
-  }, [entregas, ehAdmin, meuId])
+  }, [lancados, entregas, fechadas, pontosCfg, ehAdmin, meuId])
 
   // Resumo de hoje
   const resumoHoje = useMemo(() => {
@@ -149,44 +185,104 @@ export default function PresencialHistorico() {
         </div>
       </div>
 
-      {/* Ranking de entregas por garçom (hoje) + comissão */}
-      {rankingEntregas.length > 0 && (() => {
+      {/* Ranking do dia por pontos (mig 0187) */}
+      {ranking.length > 0 && (() => {
         const pctNum = Number(comissaoPct) || 0
-        const totalEntregue = rankingEntregas.reduce((s, r) => s + r.valor, 0)
-        const totalComissao = totalEntregue * pctNum / 100
+        const totalEntregue = ranking.reduce((s, r) => s + r.valor, 0)
+        const cel = { padding: '7px 6px', fontSize: 12.5, textAlign: 'center', whiteSpace: 'nowrap' }
         return (
           <div className="card" style={{ marginBottom: 18 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-              <div style={{ fontSize: 14, fontWeight: 800 }}>{ehAdmin ? '🏆 Entregas por garçom (hoje)' : '🏆 O que você entregou hoje'}</div>
-              {ehAdmin ? (
-                <label style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  Comissão do garçom
-                  <input type="number" min="0" max="100" step="0.5" value={comissaoPct}
-                    onChange={e => setComissaoPct(e.target.value)} onBlur={e => salvarComissao(e.target.value)}
-                    style={{ width: 64, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
-                  %
-                </label>
-              ) : Number(comissaoPct) > 0 && (
-                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Comissão: {comissaoPct}%</span>
-              )}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 14, fontWeight: 800 }}>{ehAdmin ? '🏆 Pontos por garçom (hoje)' : '🏆 Seus pontos hoje'}</div>
             </div>
-            {rankingEntregas.map((r, i) => (
-              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < rankingEntregas.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                <span style={{ fontSize: 16, width: 24, textAlign: 'center' }}>
-                  {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`}
-                </span>
-                <span style={{ flex: 1, fontWeight: 600 }}>{garcons[r.id] ?? 'Garçom'}</span>
-                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{r.qtd} {r.qtd === 1 ? 'item' : 'itens'} · {fmt(r.valor)}</span>
-                {pctNum > 0 && (
-                  <strong style={{ minWidth: 84, textAlign: 'right', color: 'var(--success)' }}>{fmt(r.valor * pctNum / 100)}</strong>
-                )}
-              </div>
-            ))}
+            <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.45 }}>
+              Conta gesto por gesto, não mesa por mesa — assim qualquer um atende qualquer mesa
+              sem perder o crédito do que fez.
+            </p>
+
+            {/* Pesos: só o dono mexe; o garçom vê quanto vale cada coisa. */}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12,
+              padding: '9px 11px', borderRadius: 9, background: 'var(--surface-hover)', border: '1px solid var(--border)' }}>
+              {[['lancar', 'Lançar item'], ['entregar', 'Entregar item'], ['fechar', 'Fechar conta']].map(([k, lbl]) => (
+                <label key={k} style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  {lbl}
+                  {ehAdmin ? (
+                    <input type="number" min="0" max="99" step="1" value={pontosCfg[k]}
+                      onChange={e => setPontosCfg(p => ({ ...p, [k]: e.target.value }))}
+                      onBlur={e => salvarPontos(k, e.target.value)}
+                      style={{ width: 52, padding: '4px 6px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
+                  ) : (
+                    <strong style={{ color: 'var(--text)' }}>{pontosCfg[k]}</strong>
+                  )}
+                  <span>pt</span>
+                </label>
+              ))}
+            </div>
+
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 380 }}>
+                <thead>
+                  <tr style={{ color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '.03em' }}>
+                    <th style={{ ...cel, textAlign: 'left' }}>Garçom</th>
+                    <th style={cel}>Lançou</th>
+                    <th style={cel}>Entregou</th>
+                    <th style={cel}>Fechou</th>
+                    <th style={{ ...cel, textAlign: 'right' }}>Pontos</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ranking.map((r, i) => (
+                    <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ ...cel, textAlign: 'left', fontWeight: 600 }}>
+                        {ehAdmin && <span style={{ marginRight: 6 }}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`}</span>}
+                        {garcons[r.id] ?? 'Garçom'}
+                      </td>
+                      <td style={cel}>{r.lancou}</td>
+                      <td style={cel}>{r.entregou}</td>
+                      <td style={cel}>{r.fechou}</td>
+                      <td style={{ ...cel, textAlign: 'right', fontWeight: 800, fontSize: 14 }}>{r.pontos}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* A comissão em R$ continua pelo VALOR ENTREGUE: pontos medem esforço,
+                dinheiro segue o que a pessoa carregou até a mesa. */}
             {pctNum > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, marginTop: 4, borderTop: '1px dashed var(--border)', fontWeight: 800 }}>
-                <span>Total de comissão ({pctNum}% sobre {fmt(totalEntregue)})</span>
-                <span style={{ color: 'var(--success)' }}>{fmt(totalComissao)}</span>
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px dashed var(--border)' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+                  Comissão de {pctNum}% sobre o que cada um entregou
+                </div>
+                {ranking.filter(r => r.valor > 0).map(r => (
+                  <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '3px 0' }}>
+                    <span>{garcons[r.id] ?? 'Garçom'} · {fmt(r.valor)}</span>
+                    <strong style={{ color: 'var(--success)' }}>{fmt(r.valor * pctNum / 100)}</strong>
+                  </div>
+                ))}
+                {ehAdmin && (
+                  <label style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                    Comissão do garçom
+                    <input type="number" min="0" max="100" step="0.5" value={comissaoPct}
+                      onChange={e => setComissaoPct(e.target.value)} onBlur={e => salvarComissao(e.target.value)}
+                      style={{ width: 64, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
+                    %
+                  </label>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 8, marginTop: 6, borderTop: '1px dashed var(--border)', fontWeight: 800 }}>
+                  <span>Total ({fmt(totalEntregue)} entregue)</span>
+                  <span style={{ color: 'var(--success)' }}>{fmt(totalEntregue * pctNum / 100)}</span>
+                </div>
               </div>
+            )}
+            {pctNum === 0 && ehAdmin && (
+              <label style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 12 }}>
+                Comissão em % sobre o que o garçom entrega (0 = não usa)
+                <input type="number" min="0" max="100" step="0.5" value={comissaoPct}
+                  onChange={e => setComissaoPct(e.target.value)} onBlur={e => salvarComissao(e.target.value)}
+                  style={{ width: 64, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
+                %
+              </label>
             )}
           </div>
         )

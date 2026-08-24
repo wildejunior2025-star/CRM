@@ -4257,7 +4257,7 @@ export default function PainelPedidos() {
     async function carregarComandas() {
       const { data } = await supabase
         .from('comandas')
-        .select('id, numero_mesa, tipo, nome_cliente, created_at, status, fechamento_pendente, preconta_pedida_em, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao, setor)')
+        .select('id, numero_mesa, tipo, nome_cliente, created_at, status, fechamento_pendente, preconta_pedida_em, fechada_por, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao, setor)')
         .eq('empresa_id', empresa.id)
         .in('status', ['aberta', 'aguardando_conferencia'])
         .order('numero_mesa')
@@ -4486,6 +4486,16 @@ export default function PainelPedidos() {
 
   // Fecha a conta da mesa pelo gestor (cria a venda, baixa estoque, libera a mesa).
   async function handleFecharConta({ comanda, forma, aplicarTaxa, total }) {
+    // Quem fechou, pro ranking do salão (mig 0187). Antes do RPC: ele mexe em
+    // status/total e não encosta nestes campos.
+    if (!comanda.fechada_por) {
+      const { data: s } = await supabase.auth.getUser()
+      if (s?.user?.id) {
+        await supabase.from('comandas')
+          .update({ fechada_por: s.user.id, fechada_por_em: new Date().toISOString() })
+          .eq('id', comanda.id)
+      }
+    }
     const { error } = await supabase.rpc('fechar_conta_presencial', {
       p_comanda_id: comanda.id,
       // Sem valor: quem reconta a mesa e fecha o número é o servidor (mig 0144).
