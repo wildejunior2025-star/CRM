@@ -1249,9 +1249,13 @@ export default function PresencialSalao() {
 
       <div className="page-header">
         <div>
-          <p style={{ margin: 0, fontSize: 13 }}>
-            <Link to="/presencial" style={{ color: 'var(--primary)' }}>← Serviço Presencial</Link>
-          </p>
+          {/* O garçom não entra em /presencial (é tela de ADM): pra ele o voltar
+              não leva a lugar nenhum, então nem aparece. */}
+          {ehAdmin && (
+            <p style={{ margin: 0, fontSize: 13 }}>
+              <Link to="/presencial" style={{ color: 'var(--primary)' }}>← Serviço Presencial</Link>
+            </p>
+          )}
           <h1>Salão</h1>
           <p className="page-subtitle">Toque numa mesa para abrir/gerenciar a comanda.</p>
           {/* Atalhos rápidos sem sair do salão: fiado (quem deve) e consumo de funcionários. */}
@@ -1280,6 +1284,21 @@ export default function PresencialSalao() {
             >
               🍽️ Consumo de funcionários
             </button>
+            {/* O garçom praticamente não sai desta tela — o menu lateral ele nem
+                abre. O atalho pras mesas dele tem que estar aqui. */}
+            {!ehAdmin && (
+              <Link
+                to="/presencial/historico"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '7px 14px', borderRadius: 10, textDecoration: 'none',
+                  border: '1.5px solid var(--primary)', background: 'rgba(124,58,237,.1)',
+                  color: 'var(--primary)', fontSize: 13.5, fontWeight: 700,
+                }}
+              >
+                🧾 Minhas mesas fechadas
+              </Link>
+            )}
           </div>
         </div>
 

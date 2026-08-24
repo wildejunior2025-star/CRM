@@ -144,7 +144,7 @@ export default function PresencialHistorico() {
           <div style={{ fontSize: 24, fontWeight: 800 }}>{resumoHoje.qtd}</div>
         </div>
         <div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Recebido hoje</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{ehAdmin ? 'Recebido hoje' : 'Total das suas mesas hoje'}</div>
           <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--success)' }}>{fmt(resumoHoje.total)}</div>
         </div>
       </div>
