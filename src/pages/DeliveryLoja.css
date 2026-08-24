@@ -594,6 +594,79 @@
   justify-content: flex-end;
 }
 
+/* ── No celular o card vira LINHA ──
+   Com a foto ocupando a largura toda, dois produtos comiam a tela inteira e o
+   cliente rolava sem ver o cardápio. Aqui a mesma estrutura (foto/info/ação)
+   deita: miniatura quadrada na esquerda, texto no meio, botão na direita —
+   umas sete linhas por tela, do jeito que o catálogo do WhatsApp mostra.
+   Da tablet pra cima o card volta a ser vertical, que lá sobra largura. */
+@media (max-width: 599px) {
+  .dloja-produtos {
+    gap: 8px;
+  }
+
+  .dloja-prod-card {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .dloja-prod-foto {
+    width: 92px;
+    height: auto;
+    min-height: 92px;
+    align-self: stretch;
+  }
+
+  .dloja-prod-info {
+    padding: 10px 10px 10px 12px;
+    min-width: 0;              /* deixa o texto truncar em vez de empurrar a linha */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+  }
+
+  .dloja-prod-nome {
+    font-size: 14.5px;
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .dloja-prod-desc {
+    margin: 0;
+    -webkit-line-clamp: 1;
+  }
+
+  .dloja-prod-preco {
+    font-size: 14.5px;
+    margin: 0;
+  }
+
+  .dloja-prod-acao {
+    padding: 8px 10px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  /* O -/+ inteiro tem que caber na coluna da direita sem espremer o nome */
+  .dloja-prod-acao .dloja-btn-add {
+    width: 38px;
+    height: 38px;
+  }
+
+  .dloja-prod-acao .dloja-qty--card .dloja-qty-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  .dloja-prod-acao .dloja-qty--card .dloja-qty-val {
+    min-width: 20px;
+  }
+}
+
 /* ── Botão + ── */
 .dloja-btn-add {
   width: 44px;
