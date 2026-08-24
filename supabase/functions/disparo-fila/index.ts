@@ -23,6 +23,8 @@ const corsHeaders = {
 
 const EVOLUTION_API_URL = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$/, "")
 const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY") ?? ""
+const CLOUD_TOKEN       = Deno.env.get("WHATSAPP_CLOUD_TOKEN") ?? ""
+const GRAPH_VERSION     = Deno.env.get("WHATSAPP_GRAPH_VERSION") ?? "v21.0"
 
 const TETO_POR_HORA = 15
 const HORA_INICIO = 8
@@ -94,14 +96,67 @@ serve(async (req) => {
       return json({ ...(p.pendente ? { esperando: "aguardando o intervalo" } : { fim: "campanha concluida" }), ...p })
     }
 
-    if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) return json({ error: "Evolution nao configurada" }, 500)
+    // Dois canos. Com template_nome preenchido vai pela Cloud API da Meta, que
+    // é o único jeito legítimo de puxar conversa com quem não fala com a loja
+    // há mais de 24h (texto livre nesse caso volta 131047). Sem template,
+    // continua o caminho antigo: texto pela Evolution.
+    let res: Response
+    let resposta: any = {}
+    let wamid: string | null = null
 
-    const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${alvo.instancia}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
-      body: JSON.stringify({ number: alvo.telefone, text: alvo.mensagem }),
-    })
-    const resposta = await res.json().catch(() => ({}))
+    if (alvo.template_nome) {
+      const { data: cfg } = await sb.from("whatsapp_config")
+        .select("cloud_phone_number_id").eq("empresa_id", alvo.empresa_id).eq("ativo", true).maybeSingle()
+
+      if (!cfg?.cloud_phone_number_id || !CLOUD_TOKEN) {
+        return json({ error: "template pedido mas a loja nao esta na Cloud API" }, 500)
+      }
+
+      // O corpo leva as variáveis na ordem ({{1}}, {{2}}...). O botão de URL
+      // dinâmica leva só o pedaço que completa o link (o token do cliente).
+      const componentes: unknown[] = []
+      const params = Array.isArray(alvo.template_params) ? alvo.template_params : []
+      if (params.length) {
+        componentes.push({
+          type: "body",
+          parameters: params.map((p: unknown) => ({ type: "text", text: String(p) })),
+        })
+      }
+      if (alvo.botao_param) {
+        componentes.push({
+          type: "button", sub_type: "url", index: "0",
+          parameters: [{ type: "text", text: String(alvo.botao_param) }],
+        })
+      }
+
+      res = await fetch(
+        `https://graph.facebook.com/${GRAPH_VERSION}/${cfg.cloud_phone_number_id}/messages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${CLOUD_TOKEN}` },
+          body: JSON.stringify({
+            messaging_product: "whatsapp", recipient_type: "individual",
+            to: alvo.telefone, type: "template",
+            template: {
+              name: alvo.template_nome,
+              language: { code: alvo.template_lang || "pt_BR" },
+              ...(componentes.length ? { components: componentes } : {}),
+            },
+          }),
+        }
+      )
+      resposta = await res.json().catch(() => ({}))
+      wamid = resposta?.messages?.[0]?.id ?? null
+    } else {
+      if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) return json({ error: "Evolution nao configurada" }, 500)
+
+      res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${alvo.instancia}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+        body: JSON.stringify({ number: alvo.telefone, text: alvo.mensagem }),
+      })
+      resposta = await res.json().catch(() => ({}))
+    }
 
     if (!res.ok) {
       await sb.from("campanha_fila").update({
@@ -112,7 +167,7 @@ serve(async (req) => {
     }
 
     await sb.from("campanha_fila").update({
-      status: "enviado", enviado_em: new Date().toISOString(),
+      status: "enviado", enviado_em: new Date().toISOString(), message_id: wamid,
     }).eq("id", alvo.id)
 
     // Sorteia quando a próxima pode sair
