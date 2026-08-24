@@ -148,10 +148,6 @@ async function processar(body: any) {
     .eq("ativo", true)
     .maybeSingle()
   if (!cfg) { console.error("[cloud] nenhuma loja para phone_number_id", phoneNumberId); return }
-  // Vendedor IA desligado: não responde NADA. Sem esta linha, as respostas de
-  // "só entendo texto" (áudio e foto) saíam mesmo com o interruptor desligado,
-  // porque elas são enviadas aqui, antes de chamar o cérebro.
-  if (!cfg.ia_ativo) return
   const instanceName = cfg.instance_name ?? `cloud_${phoneNumberId}`
 
   // Token: o da loja (Cadastro Incorporado) quando existir; senão o do app.
@@ -166,6 +162,47 @@ async function processar(body: any) {
     if (tok?.token) token = tok.token
   }
   if (!token) { console.error("[cloud] sem token para phone_number_id", phoneNumberId); return }
+
+  // RESPOSTA DA CAMPANHA — vem antes de tudo, inclusive do interruptor da IA.
+  //
+  // Quem clica num botão de resposta rápida de TEMPLATE não chega aqui como
+  // "interactive": a Meta manda type "button", com o texto em message.button.
+  // Sem este trecho a resposta caía no "só consigo te atender por texto" — e o
+  // cliente que pediu pra não receber ficaria sem registro nenhum, recebendo
+  // tudo de novo na campanha seguinte. É assim que se ganha uma denúncia.
+  // O rodapé do template promete "responda SAIR" — então SAIR digitado tem que
+  // valer tanto quanto o botão, senão a promessa é mentira.
+  const textoBotao = message.type === "button"
+    ? String(message.button?.text ?? message.button?.payload ?? "").trim()
+    : message.type === "text" && /^\s*sair[.!]?\s*$/i.test(String(message.text?.body ?? ""))
+      ? "prefiro não receber"
+      : ""
+  if (textoBotao) {
+    const t = textoBotao.toLowerCase()
+    const querSim  = t.includes("pode mandar") || t.includes("quero receber")
+    const querNao  = t.includes("prefiro n")  || t.includes("não receber") || t.includes("nao receber")
+
+    if (querSim || querNao) {
+      await supabase.from("clientes")
+        .update({ aceita_campanha: querSim, campanha_respondida_em: new Date().toISOString() })
+        .eq("empresa_id", cfg.empresa_id)
+        .or(`telefone.eq.${from},telefone.eq.${from.replace(/^55/, "")}`)
+
+      await sendText(
+        phoneNumberId, from,
+        querSim
+          ? "Show! 🙌 Toda vez que sair o cardápio do dia eu te aviso por aqui. Se um dia enjoar, é só responder *SAIR*."
+          : "Beleza, não te mando mais o cardápio. 👍 Quando quiser pedir, é só chamar aqui que eu te atendo.",
+        token
+      )
+      return
+    }
+  }
+
+  // Vendedor IA desligado: não responde NADA. Sem esta linha, as respostas de
+  // "só entendo texto" (áudio e foto) saíam mesmo com o interruptor desligado,
+  // porque elas são enviadas aqui, antes de chamar o cérebro.
+  if (!cfg.ia_ativo) return
 
   // Extrai o texto (MVP: texto e botões/listas)
   let text = ""

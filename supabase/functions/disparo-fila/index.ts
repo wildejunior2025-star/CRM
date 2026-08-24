@@ -124,7 +124,7 @@ serve(async (req) => {
       }
       if (alvo.botao_param) {
         componentes.push({
-          type: "button", sub_type: "url", index: "0",
+          type: "button", sub_type: "url", index: String(alvo.botao_index ?? "0"),
           parameters: [{ type: "text", text: String(alvo.botao_param) }],
         })
       }
