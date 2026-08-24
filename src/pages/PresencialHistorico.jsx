@@ -66,13 +66,15 @@ export default function PresencialHistorico() {
   useEffect(() => {
     if (!empresaId) return
     const inicioHoje = new Date(); inicioHoje.setHours(0, 0, 0, 0)
-    // Garçom só puxa o que é dele — filtrado no BANCO, não na tela: menos dado
-    // viajando no celular dele e nada de conta dos outros passando por ali.
-    let qComandas = supabase.from('comandas')
+    // Antes eu filtrava no banco por `garcom_id` (quem ABRIU a mesa) e achei que
+    // estava economizando dados. Estava, e estava errado: o ranking conta gesto
+    // por gesto, então o garçom que entregou dez itens numa mesa que outro abriu
+    // não via essa mesa em lugar nenhum — e a comissão dela sumia da vista dele.
+    // Agora vem tudo e a tela separa o que é dele (participouDaConta).
+    const qComandas = supabase.from('comandas')
       .select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)')
       .eq('empresa_id', empresaId)
       .eq('status', 'fechada')
-    if (!ehAdmin && meuId) qComandas = qComandas.eq('garcom_id', meuId)
 
     Promise.all([
       qComandas.order('fechada_at', { ascending: false }).limit(100),
@@ -97,7 +99,12 @@ export default function PresencialHistorico() {
         .not('fechada_por', 'is', null)
         .gte('fechada_por_em', inicioHoje.toISOString()),
     ]).then(([cs, gs, es, emp, ls, fs]) => {
-      setComandas(cs.data ?? [])
+      const todas = cs.data ?? []
+      // Conta em que ELE encostou: abriu, lançou, entregou ou fechou.
+      const participouDaConta = (c) => c.garcom_id === meuId
+        || c.fechada_por === meuId
+        || (c.comanda_itens ?? []).some(i => i.entregue_por === meuId || i.lancado_por === meuId)
+      setComandas(ehAdmin ? todas : todas.filter(participouDaConta))
       setGarcons(Object.fromEntries((gs.data ?? []).map(p => [p.id, p.nome])))
       setEntregas(es.data ?? [])
       setLancados(ls.data ?? [])
@@ -155,6 +162,25 @@ export default function PresencialHistorico() {
     }
   }, [comandas])
 
+  // Quanto sai de comissão nesta conta. Pro garçom, só o que ELE entregou —
+  // a comissão segue quem levou o item até a mesa, não quem abriu a mesa.
+  // Pro dono, tudo que foi entregue na conta (o que ele vai pagar por ela).
+  const comissaoDaConta = (c) => {
+    const pct = Number(comissaoPct) || 0
+    if (!pct) return 0
+    const meus = (c.comanda_itens ?? []).filter(i =>
+      i.entregue_por && (ehAdmin || i.entregue_por === meuId))
+    const valor = meus.reduce((s, i) => s + Number(i.preco_unitario) * i.quantidade, 0)
+    return valor * pct / 100
+  }
+
+  // Vem do MESMO cálculo do ranking do dia (itens entregues hoje), não da soma
+  // das contas fechadas: item entregue numa mesa que ainda não fechou também é
+  // dele. Dois números diferentes na mesma tela viram discussão no fim do mês.
+  const minhaComissaoHoje = ranking
+    .filter(r => r.id === meuId)
+    .reduce((s, r) => s + r.valor * (Number(comissaoPct) || 0) / 100, 0)
+
   if (loading) return <div className="page"><p>Carregando...</p></div>
 
   return (
@@ -183,11 +209,14 @@ export default function PresencialHistorico() {
           <div style={{ fontSize: 26, fontWeight: 800, marginTop: 2 }}>{resumoHoje.qtd}</div>
         </div>
         <div className="card" style={{ flex: 1, minWidth: 0 }}>
+          {/* Pro dono, o que entrou. Pro garçom, o que É DELE — mostrar o total
+              das mesas pra ele daria a impressão errada de que aquele dinheiro
+              é o ganho dele. */}
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.3 }}>
-            {ehAdmin ? 'Recebido hoje' : 'Total das suas mesas'}
+            {ehAdmin ? 'Recebido hoje' : 'Você ganhou hoje'}
           </div>
           <div style={{ fontSize: 21, fontWeight: 800, marginTop: 2, color: 'var(--success)', overflowWrap: 'anywhere' }}>
-            {fmt(resumoHoje.total)}
+            {fmt(ehAdmin ? resumoHoje.total : minhaComissaoHoje)}
           </div>
         </div>
       </div>
@@ -339,6 +368,14 @@ export default function PresencialHistorico() {
                       {horaBR(c.fechada_at)} · {FORMA_LABEL[c.forma_pagamento] ?? c.forma_pagamento ?? '—'}
                       {' · '}{(c.comanda_itens ?? []).length} {(c.comanda_itens ?? []).length === 1 ? 'item' : 'itens'}
                     </div>
+                    {/* Quanto ele ganhou nesta mesa. É a pergunta que o garçom
+                        faz olhando o histórico — o total do dia não responde
+                        "e nessa mesa aqui, quanto eu tirei?". */}
+                    {comissaoDaConta(c) > 0 && (
+                      <div style={{ fontSize: 12.5, color: 'var(--success)', fontWeight: 700, marginTop: 1 }}>
+                        💰 {ehAdmin ? 'comissão' : 'você ganhou'}: {fmt(comissaoDaConta(c))}
+                      </div>
+                    )}
                     {(c.garcom_id || c.fechada_por) && (
                       <div style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}>
                         {c.garcom_id && garcons[c.garcom_id] && <>👤 abriu: {garcons[c.garcom_id]}</>}
