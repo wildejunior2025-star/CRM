@@ -85,6 +85,7 @@ export default function Caixa() {
 
   const [editandoMovId, setEditandoMovId] = useState(null) // movimento com seletor de forma aberto
   const [salvandoMovForma, setSalvandoMovForma] = useState(false)
+  const [excluindoMovId, setExcluindoMovId] = useState(null)
 
   // ── Taxa da maquineta ──
   // O cartão não cai inteiro na conta: a maquineta come uma % — e ela é
@@ -124,6 +125,25 @@ export default function Caixa() {
     setSalvandoMovForma(false)
     setEditandoMovId(null)
     if (rpcError) { window.alert('Não deu pra trocar a forma: ' + rpcError.message); return }
+    loadAll()
+  }
+
+  // Apaga uma sangria/suprimento lançado errado. Só aparece no caixa ABERTO —
+  // depois de fechado o banco recusa, porque o fechamento é a foto do dia.
+  // Antes disso o jeito de consertar era lançar um suprimento do mesmo valor:
+  // o total voltava ao certo, mas o extrato ficava com duas linhas inventadas.
+  async function excluirMovimento(m) {
+    const oque = m.tipo === 'sangria' ? 'sangria' : 'suprimento'
+    const ok = window.confirm(
+      `Apagar esta ${oque} de R$ ${Number(m.valor).toFixed(2)}?`
+      + (m.observacao ? `\n\n"${m.observacao}"` : '')
+      + '\n\nDepois que o caixa fechar não dá mais.'
+    )
+    if (!ok) return
+    setExcluindoMovId(m.id)
+    const { error: rpcError } = await supabase.rpc('excluir_movimento_caixa', { p_id: m.id })
+    setExcluindoMovId(null)
+    if (rpcError) { window.alert('Não deu pra apagar: ' + rpcError.message); return }
     loadAll()
   }
 
@@ -596,6 +616,7 @@ export default function Caixa() {
                     <th>Forma</th>
                     <th className="caixa-amount-col">Valor</th>
                     <th>Observação</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -635,6 +656,21 @@ export default function Caixa() {
                       </td>
                       <td className="caixa-amount-col">R$ {Number(m.valor).toFixed(2)}</td>
                       <td>{m.observacao ?? '-'}</td>
+                      <td style={{ textAlign: 'right', width: 1, whiteSpace: 'nowrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => excluirMovimento(m)}
+                          disabled={excluindoMovId === m.id}
+                          title="Apagar (só enquanto o caixa está aberto)"
+                          style={{
+                            background: 'none', border: '1px solid var(--border)', borderRadius: 7,
+                            padding: '3px 9px', cursor: excluindoMovId === m.id ? 'wait' : 'pointer',
+                            color: 'var(--danger, #ef4444)', fontSize: 13, lineHeight: 1.4,
+                          }}
+                        >
+                          {excluindoMovId === m.id ? '...' : '🗑'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
