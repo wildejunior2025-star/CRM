@@ -371,7 +371,7 @@ export default function App() {
             />
             <Route
               path="presencial/historico"
-              element={<ProtectedRoute roles={['admin']} modulo="presencial"><PresencialHistorico /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'garcom']} modulo="presencial"><PresencialHistorico /></ProtectedRoute>}
             />
             <Route
               path="presencial/reservas"

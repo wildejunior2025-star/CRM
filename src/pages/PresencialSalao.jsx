@@ -1409,6 +1409,14 @@ export default function PresencialSalao() {
                     🧑 {c.cliente.nome}
                   </div>
                 )}
+                {/* Quem está atendendo. Estava só dentro da mesa aberta — o dono
+                    tinha que abrir uma por uma pra saber de quem era cada uma.
+                    Só o primeiro nome: no card não cabe mais que isso. */}
+                {c?.garcom_id && garcons[c.garcom_id] && (
+                  <div style={{ fontSize: 10, marginTop: 1, color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    👤 {String(garcons[c.garcom_id]).split(' ')[0]}
+                  </div>
+                )}
                 {c && <div style={{ fontSize: 11.5, marginTop: 1, fontWeight: 800 }}>{fmt(sub)}</div>}
               </div>
             )

@@ -16,8 +16,14 @@ function horaBR(iso) {
 }
 
 export default function PresencialHistorico() {
-  const { profile } = useAuth()
+  const { profile, user } = useAuth()
   const empresaId = profile?.empresa_id
+  // A MESMA tela serve o dono e o garçom. Pro garçom ela vira "Minhas mesas":
+  // só as contas que ele atendeu, sem os controles de dono (corrigir forma de
+  // pagamento, ligar cliente, mexer na comissão) e sem o ranking dos colegas —
+  // quanto o outro vendeu não é assunto dele.
+  const ehAdmin = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
+  const meuId = user?.id
 
   const [comandas, setComandas] = useState([])
   const [garcons, setGarcons]   = useState({})  // { profile_id: nome }
@@ -57,13 +63,16 @@ export default function PresencialHistorico() {
   useEffect(() => {
     if (!empresaId) return
     const inicioHoje = new Date(); inicioHoje.setHours(0, 0, 0, 0)
+    // Garçom só puxa o que é dele — filtrado no BANCO, não na tela: menos dado
+    // viajando no celular dele e nada de conta dos outros passando por ali.
+    let qComandas = supabase.from('comandas')
+      .select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)')
+      .eq('empresa_id', empresaId)
+      .eq('status', 'fechada')
+    if (!ehAdmin && meuId) qComandas = qComandas.eq('garcom_id', meuId)
+
     Promise.all([
-      supabase.from('comandas')
-        .select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)')
-        .eq('empresa_id', empresaId)
-        .eq('status', 'fechada')
-        .order('fechada_at', { ascending: false })
-        .limit(100),
+      qComandas.order('fechada_at', { ascending: false }).limit(100),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
       supabase.from('comanda_itens')
         .select('entregue_por, preco_unitario, quantidade')
@@ -79,7 +88,7 @@ export default function PresencialHistorico() {
       setComissaoPct(Number(emp.data?.comissao_garcom_pct ?? 0))
       setLoading(false)
     })
-  }, [empresaId])
+  }, [empresaId, ehAdmin, meuId])
 
   async function salvarComissao(v) {
     const n = Math.max(0, Math.min(100, Number(v) || 0))
@@ -96,8 +105,9 @@ export default function PresencialHistorico() {
       map[k].qtd += it.quantidade
       map[k].valor += Number(it.preco_unitario) * it.quantidade
     }
-    return Object.values(map).sort((a, b) => b.qtd - a.qtd)
-  }, [entregas])
+    const lista = Object.values(map).sort((a, b) => b.qtd - a.qtd)
+    return ehAdmin ? lista : lista.filter(r => r.id === meuId)
+  }, [entregas, ehAdmin, meuId])
 
   // Resumo de hoje
   const resumoHoje = useMemo(() => {
@@ -116,17 +126,21 @@ export default function PresencialHistorico() {
       <div className="page-header">
         <div>
           <p style={{ margin: 0, fontSize: 13 }}>
-            <Link to="/pedidos-delivery" style={{ color: 'var(--primary)' }}>← Vendas</Link>
+            <Link to={ehAdmin ? '/pedidos-delivery' : '/presencial/salao'} style={{ color: 'var(--primary)' }}>
+              {ehAdmin ? '← Vendas' : '← Salão'}
+            </Link>
           </p>
-          <h1>Vendas salão</h1>
-          <p className="page-subtitle">Contas fechadas do salão.</p>
+          <h1>{ehAdmin ? 'Vendas salão' : 'Minhas mesas'}</h1>
+          <p className="page-subtitle">
+            {ehAdmin ? 'Contas fechadas do salão.' : 'As mesas que você atendeu e já foram fechadas.'}
+          </p>
         </div>
       </div>
 
       {/* Resumo de hoje */}
       <div className="card" style={{ marginBottom: 18, display: 'flex', gap: 28, flexWrap: 'wrap' }}>
         <div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Contas fechadas hoje</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{ehAdmin ? 'Contas fechadas hoje' : 'Suas mesas fechadas hoje'}</div>
           <div style={{ fontSize: 24, fontWeight: 800 }}>{resumoHoje.qtd}</div>
         </div>
         <div>
@@ -143,14 +157,18 @@ export default function PresencialHistorico() {
         return (
           <div className="card" style={{ marginBottom: 18 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-              <div style={{ fontSize: 14, fontWeight: 800 }}>🏆 Entregas por garçom (hoje)</div>
-              <label style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                Comissão do garçom
-                <input type="number" min="0" max="100" step="0.5" value={comissaoPct}
-                  onChange={e => setComissaoPct(e.target.value)} onBlur={e => salvarComissao(e.target.value)}
-                  style={{ width: 64, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
-                %
-              </label>
+              <div style={{ fontSize: 14, fontWeight: 800 }}>{ehAdmin ? '🏆 Entregas por garçom (hoje)' : '🏆 O que você entregou hoje'}</div>
+              {ehAdmin ? (
+                <label style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  Comissão do garçom
+                  <input type="number" min="0" max="100" step="0.5" value={comissaoPct}
+                    onChange={e => setComissaoPct(e.target.value)} onBlur={e => salvarComissao(e.target.value)}
+                    style={{ width: 64, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
+                  %
+                </label>
+              ) : Number(comissaoPct) > 0 && (
+                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Comissão: {comissaoPct}%</span>
+              )}
             </div>
             {rankingEntregas.map((r, i) => (
               <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < rankingEntregas.length - 1 ? '1px solid var(--border)' : 'none' }}>
@@ -176,7 +194,7 @@ export default function PresencialHistorico() {
 
       {comandas.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
-          Nenhuma conta fechada ainda. Feche uma conta no Salão que ela aparece aqui. 🧾
+          {ehAdmin ? 'Nenhuma conta fechada ainda. Feche uma conta no Salão que ela aparece aqui. 🧾' : 'Você ainda não teve mesa fechada. Assim que fechar, ela aparece aqui. 🧾'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -238,7 +256,7 @@ export default function PresencialHistorico() {
                         <span style={{ fontSize: 13.5 }}>
                           💳 Pagamento: <strong>{FORMA_LABEL[c.forma_pagamento] ?? c.forma_pagamento ?? '—'}</strong>
                         </span>
-                        {editandoForma !== c.id && (
+                        {ehAdmin && editandoForma !== c.id && (
                           <button type="button" onClick={() => setEditandoForma(c.id)}
                             style={{ padding: '5px 12px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)',
                               background: 'transparent', color: 'var(--primary)', fontSize: 12.5, fontWeight: 700 }}>
@@ -271,7 +289,9 @@ export default function PresencialHistorico() {
                       )}
                     </div>
 
-                    {/* Ligar/trocar o cliente deste pedido já fechado */}
+                    {/* Ligar/trocar o cliente deste pedido já fechado — mexe em fiado
+                        e no cadastro, então é coisa de dono. */}
+                    {ehAdmin && (
                     <button type="button" onClick={() => setPickerComanda(c)}
                       style={{ width: '100%', marginTop: 12, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
                         border: `1.5px ${c.cliente ? 'solid var(--border)' : 'dashed var(--primary)'}`,
@@ -279,6 +299,7 @@ export default function PresencialHistorico() {
                         color: c.cliente ? 'var(--text)' : 'var(--primary)', fontSize: 13.5, fontWeight: 700 }}>
                       {c.cliente ? `🧑 ${c.cliente.nome} · trocar cliente` : '➕ Ligar cliente a este pedido'}
                     </button>
+                    )}
                   </div>
                 )}
               </div>
