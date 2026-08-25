@@ -202,6 +202,22 @@ serve(async (req) => {
       }).eq("id", alvo.id)
       enviados.push({ nome: alvo.nome, telefone: alvo.telefone })
 
+      // Registra o envio pra colher o aviso de entrega. O webhook da Cloud
+      // (whatsapp-cloud) casa o status pelo message_id em whatsapp_envios; sem
+      // esta linha o aviso chega e é descartado, e a campanha fica dizendo
+      // "enviado" pra mensagem que a Meta recusou depois — foi o que escondeu,
+      // em 25/08/2026, 11 mensagens barradas por falta de verificação do
+      // negócio (erro 141010): todas voltaram "accepted" e nenhuma chegou.
+      if (wamid) {
+        await sb.from("whatsapp_envios").insert({
+          empresa_id: alvo.empresa_id,
+          message_id: wamid,
+          telefone:   alvo.telefone,
+          assunto:    `campanha: ${campanha}`,
+          status:     "aceito",
+        })
+      }
+
       // Sorteia quando a próxima pode sair. Dentro do mesmo lote a espera é
       // curta (só pra não sair tudo no mesmo segundo); na última do lote vale
       // o intervalo cheio, que é o que segura o ritmo entre as rodadas.
