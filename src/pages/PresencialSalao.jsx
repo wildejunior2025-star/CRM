@@ -127,7 +127,11 @@ export default function PresencialSalao() {
   // PIX online da mesa (mig 0193): a loja com Mercado Pago conectado cobra o QR
   // na tela e quem fecha a conta é o MP, quando o dinheiro cai.
   const [mpConectado, setMpConectado] = useState(false)
-  const [pixCob, setPixCob] = useState(null)     // { cobranca_id, valor, qr_code, qr_base64 }
+  // Os PIX esperando pagamento, de TODAS as mesas. É isto que deixa o garçom
+  // gerar o QR, mostrar e ir embora atender outra mesa: a cobrança não vive numa
+  // tela aberta, vive na mesa.
+  const [pixPendentes, setPixPendentes] = useState([])   // [{ id, comanda_id, valor, qr_code, qr_base64 }]
+  const [pixAmpliado, setPixAmpliado] = useState(null)   // QR em tela cheia pra mostrar pro cliente
   const [pixMsg, setPixMsg] = useState('')
   const [pixGerando, setPixGerando] = useState(false)
   // [{ forma, valor(string), cliente }] no modo dividir. `cliente` só vale nas linhas
@@ -191,14 +195,18 @@ export default function PresencialSalao() {
   // Muda o tempo todo: mesas, comandas e o caixa deste usuário.
   const loadMesas = useCallback(async () => {
     if (!empresaId) return
-    const [ms, cs, cx] = await Promise.all([
+    const [ms, cs, cx, px] = await Promise.all([
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('comandas').select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
       supabase.from('caixas').select('id').eq('empresa_id', empresaId).eq('aberto_por', user?.id).eq('status', 'aberto').limit(1),
+      supabase.from('comanda_pix_cobrancas')
+        .select('id, comanda_id, valor, qr_code, qr_base64, expira_em')
+        .eq('empresa_id', empresaId).eq('status', 'pendente'),
     ])
     setMesas(ms.data ?? [])
     setComandas(cs.data ?? [])
     setCaixaAberto(!!(cx.data && cx.data.length))
+    setPixPendentes(px.data ?? [])
     setLoading(false)
   }, [empresaId, user?.id])
 
@@ -301,6 +309,7 @@ export default function PresencialSalao() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_pix_cobrancas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
@@ -1189,9 +1198,14 @@ export default function PresencialSalao() {
   }
 
   // ── PIX online da mesa (mig 0193) ────────────────────────────────────────
-  // Gera a cobrança na conta do Mercado Pago DA LOJA e mostra o QR. Ninguém
-  // marca "recebido" aqui: quem fecha a conta é o webhook do MP, quando o
-  // dinheiro cai de verdade. É a diferença entre cobrar e acreditar no print.
+  // Gera a cobrança na conta do Mercado Pago DA LOJA. Ninguém marca "recebido"
+  // aqui: quem fecha a conta é o webhook do MP, quando o dinheiro cai.
+  //
+  // O QR NÃO prende a tela de propósito. O garçom gera, mostra pro cliente e vai
+  // atender outra mesa — a cobrança fica morando na mesa (card na comanda e selo
+  // no quadro). Quando o PIX cai, a mesa fecha e some do salão sozinha.
+  const pixDaMesa = pixPendentes.find(x => x.comanda_id === comandaSel?.id) ?? null
+
   async function cobrarPixOnline() {
     if (!comandaSel) return
     setPixMsg('')
@@ -1209,7 +1223,11 @@ export default function PresencialSalao() {
       const motivo = data?.error ?? (error ? (await error.context?.json?.().catch(() => null))?.error : null)
       if (motivo) { setPixMsg(`⚠️ ${motivo}`); return }
       if (error || !data?.cobranca_id) { setPixMsg('⚠️ Não consegui gerar o PIX. Tente de novo.'); return }
-      setPixCob(data)
+      // Sai do modal de fechamento e abre o QR grande: é o momento de virar a
+      // tela pro cliente. Fechar esse QR não cancela nada.
+      setFechando(false)
+      setPixAmpliado(data)
+      await loadMesas()
     } catch {
       setPixMsg('⚠️ Não consegui gerar o PIX. Tente de novo.')
     } finally {
@@ -1219,56 +1237,66 @@ export default function PresencialSalao() {
 
   // O cliente desistiu do PIX: cancela no MP também, senão o QR continua vivo e
   // alguém paga meia hora depois, sem conta aberta pra receber.
-  async function cancelarPixOnline() {
-    const cob = pixCob
-    setPixCob(null)
-    if (!cob?.cobranca_id) return
-    await supabase.functions.invoke('comanda-pix', { body: { acao: 'cancelar', cobranca_id: cob.cobranca_id } })
+  async function cancelarPixOnline(cobrancaId) {
+    if (!cobrancaId) return
+    if (!window.confirm('Cancelar a cobrança em PIX desta mesa?')) return
+    setPixAmpliado(null)
+    await supabase.functions.invoke('comanda-pix', { body: { acao: 'cancelar', cobranca_id: cobrancaId } })
       .catch(() => { /* expira sozinho em 30 min */ })
+    await loadMesas()
   }
 
-  // Enquanto o QR está na tela, fica de olho. O caminho normal é o webhook do
-  // MP; o `conferir` (de 15 em 15s) é o cinto de segurança pra quando ele
-  // atrasa — pergunta o status direto pro Mercado Pago.
-  useEffect(() => {
-    if (!pixCob?.cobranca_id) return
-    let vivo = true
-    let voltas = 0
-
-    async function fechou() {
-      setPixCob(null)
-      setPixMsg('')
-      setFechando(false)
-      // Imprime a conta ANTES de largar a mesa: depois de recarregar, comandaSel
-      // já é outra coisa e não teria mais os itens.
-      imprimirConta({ soApp: false, formaPagamento: 'pix' }).catch(() => { /* best-effort */ })
-      setMesaSel(null)
-      await loadMesas()
-      window.alert('✅ PIX recebido! A conta foi fechada e a mesa está livre.')
+  // A conta de uma mesa que fechou sozinha (o PIX caiu com o garçom longe daqui).
+  // Recebe a comanda de fora porque nesse momento ela já não é a mesa aberta.
+  async function imprimirContaDoPix(comanda) {
+    if (!comanda) return
+    if (papelImpressora() === 'cozinha') return          // a da cozinha não tira conta
+    if (ehCelular && window.__fwcBtConectada !== true) return  // celular sem térmica não tem onde sair
+    const mesa = mesas.find(m => m.id === comanda.mesa_id) ?? null
+    const itens = comanda.comanda_itens ?? []
+    const subtotal = subtotalDe(comanda)
+    const taxa = calcularTaxa(itens, taxaPct, true)
+    const dados = {
+      numeroMesa: mesa?.numero,
+      rotulo: mesa ? null : rotuloComanda(comanda),
+      itens, subtotal, taxa, total: subtotal + taxa,
+      formaPagamento: 'pix', pagamentos: [],
+      empresa: { nome: empresaNome },
     }
+    if (await viaBluetooth('conta', dados)) return
+    imprimirHtml(montarContaPresencialHtml(dados), empresaNome, { soApp: false, origem: 'mesa' })
+  }
+
+  // Vigia os PIX abertos enquanto o Salão estiver na tela. O caminho normal é o
+  // webhook do MP fechar a conta sozinho; isto aqui é o cinto de segurança pra
+  // quando ele atrasa — e é quem manda imprimir a conta da mesa que fechou
+  // enquanto o garçom estava noutro canto.
+  useEffect(() => {
+    if (pixPendentes.length === 0) return
+    let vivo = true
 
     const t = setInterval(async () => {
       if (!vivo) return
-      voltas += 1
-      const { data } = await supabase.from('comanda_pix_cobrancas')
-        .select('status').eq('id', pixCob.cobranca_id).maybeSingle()
-      if (!vivo) return
-      if (data?.status === 'pago') { await fechou(); return }
-      if (data?.status === 'expirado' || data?.status === 'cancelado') {
-        setPixCob(null)
-        setPixMsg('⚠️ O PIX expirou. Gere de novo ou receba de outro jeito.')
-        return
-      }
-      if (voltas % 5 === 0) {
-        const { data: res } = await supabase.functions.invoke('comanda-pix', {
-          body: { acao: 'conferir', cobranca_id: pixCob.cobranca_id },
+      // No máximo 3 por rodada: 10 mesas esperando não viram 10 chamadas de uma vez.
+      for (const pix of pixPendentes.slice(0, 3)) {
+        const { data } = await supabase.functions.invoke('comanda-pix', {
+          body: { acao: 'conferir', cobranca_id: pix.id },
         }).catch(() => ({ data: null }))
-        if (vivo && res?.status === 'pago') await fechou()
+        if (!vivo) return
+        if (data?.status === 'pago') {
+          const c = comandas.find(x => x.id === pix.comanda_id)
+          await imprimirContaDoPix(c).catch(() => { /* best-effort */ })
+          if (comandaSel?.id === pix.comanda_id) { setFechando(false); setMesaSel(null) }
+          setPixAmpliado(a => (a?.cobranca_id === pix.id ? null : a))
+          await loadMesas()
+          setPixMsg('')
+          window.alert(`✅ PIX de ${fmt(Number(pix.valor))} recebido! A conta fechou e a mesa está livre.`)
+        }
       }
-    }, 3000)
+    }, 15000)
 
     return () => { vivo = false; clearInterval(t) }
-  }, [pixCob?.cobranca_id])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pixPendentes, comandas, comandaSel?.id])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ADM confere o pagamento e libera a mesa de vez (a partir do que o garçom fechou).
   async function confirmarLiberarAdm() {
@@ -1551,6 +1579,13 @@ export default function PresencialSalao() {
                     background: '#22c55e', color: '#fff', borderRadius: 999, padding: '1px 5px',
                   }}>🔔{prontos}</span>
                 )}
+                {/* Mesa esperando PIX: quem passar pelo quadro já sabe, sem abrir. */}
+                {c && pixPendentes.some(x => x.comanda_id === c.id) && (
+                  <span style={{
+                    position: 'absolute', top: 4, left: 4, fontSize: 9, fontWeight: 800,
+                    background: '#16a34a', color: '#fff', borderRadius: 999, padding: '1px 5px',
+                  }}>⚡PIX</span>
+                )}
                 <div style={{ fontSize: 14.5, fontWeight: 800, lineHeight: 1.1 }}>{mesa.is_balcao ? '🛎️ Balcão' : `Mesa ${mesa.numero}`}</div>
                 <div style={{ fontSize: 9.5, marginTop: 2, color: cor.border, fontWeight: 700 }}>{cor.label}</div>
                 {/* Nome do cliente ligado à mesa (quando cadastrado) — ajuda a saber de quem é a mesa. */}
@@ -1650,6 +1685,44 @@ export default function PresencialSalao() {
                   </button>
                 )}
               </div>
+              {/* PIX esperando nesta mesa (mig 0193). Fica aqui, e não numa tela
+                  por cima de tudo, porque o garçom mostra o QR e SAI — vai
+                  atender outra mesa enquanto o cliente paga. Quando cair, a
+                  conta fecha sozinha e a mesa some do salão. */}
+              {pixDaMesa && (
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, padding: 10,
+                  borderRadius: 12, border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.10)' }}>
+                  {pixDaMesa.qr_base64 && (
+                    <button type="button" onClick={() => setPixAmpliado({ ...pixDaMesa, cobranca_id: pixDaMesa.id })}
+                      title="Mostrar grande pro cliente"
+                      style={{ border: 'none', padding: 0, borderRadius: 8, cursor: 'pointer', background: '#fff', flexShrink: 0 }}>
+                      <img src={`data:image/png;base64,${pixDaMesa.qr_base64}`} alt="QR do PIX"
+                        style={{ width: 76, height: 76, display: 'block', borderRadius: 8 }} />
+                    </button>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 800, fontSize: 14 }}>
+                      ⚡ PIX de {fmt(Number(pixDaMesa.valor))} esperando
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4, marginTop: 2 }}>
+                      Pode fechar a mesa e ir atender outra. Quando o pagamento cair,
+                      a conta fecha sozinha e a mesa fica livre.
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 7 }}>
+                      <button type="button" onClick={() => setPixAmpliado({ ...pixDaMesa, cobranca_id: pixDaMesa.id })}
+                        style={{ fontSize: 12, fontWeight: 800, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
+                          border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.15)', color: '#16a34a' }}>
+                        🔍 Mostrar pro cliente
+                      </button>
+                      <button type="button" onClick={() => cancelarPixOnline(pixDaMesa.id)}
+                        style={{ fontSize: 12, fontWeight: 700, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
+                          border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)' }}>
+                        Cancelar PIX
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
               {(comandaSel.comanda_itens ?? []).length === 0 ? (
                 <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum item ainda. Adicione abaixo.</p>
               ) : (
@@ -2215,7 +2288,14 @@ export default function PresencialSalao() {
                     Fica fora da fileira das outras formas de propósito: as de cima o
                     atendente MARCA (ele viu o dinheiro); esta COBRA de verdade e a
                     conta fecha sozinha quando o MP confirma. */}
-                {mpConectado && (
+                {mpConectado && pixDaMesa && (
+                  <div style={{ flex: '1 1 100%', padding: '9px 12px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.45,
+                    border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.10)', color: 'var(--text)' }}>
+                    ⚡ Esta mesa já tem um <strong>PIX de {fmt(Number(pixDaMesa.valor))}</strong> esperando.
+                    Feche esta janela e o QR está na comanda. Se receber por aqui, cancele o PIX antes.
+                  </div>
+                )}
+                {mpConectado && !pixDaMesa && (
                   <button type="button" onClick={cobrarPixOnline}
                     disabled={pixGerando || cashbackAplicado > 0 || totalSel <= 0}
                     style={{ flex: '1 1 100%', padding: '11px 0', borderRadius: 10, fontWeight: 800, fontSize: 13,
@@ -2225,7 +2305,7 @@ export default function PresencialSalao() {
                     {pixGerando ? 'Gerando o QR...' : `⚡ PIX online · cobrar ${fmt(totalSel)} no QR`}
                   </button>
                 )}
-                {mpConectado && cashbackAplicado > 0 && (
+                {mpConectado && !pixDaMesa && cashbackAplicado > 0 && (
                   <div style={{ flex: '1 1 100%', fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.4 }}>
                     Com crédito abatido o PIX online não vale — receba pelas formas de cima.
                   </div>
@@ -2390,54 +2470,53 @@ export default function PresencialSalao() {
           </div>
         </div>
       )}
-      {/* ── QR do PIX na mesa (mig 0193) ─────────────────────────────────────
-          Fica por cima do modal de fechamento porque é isto que o cliente vai
-          olhar: o garçom vira o celular/tablet pra ele. Ninguém aperta nada
-          aqui — some sozinho quando o Mercado Pago confirma. */}
-      {pixCob && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 220,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ width: '100%', maxWidth: 360, background: 'var(--bg)', borderRadius: 16,
-            border: '1px solid var(--border)', padding: 20, textAlign: 'center', maxHeight: '92dvh', overflowY: 'auto' }}>
+      {/* ── QR grande, só pra mostrar pro cliente (mig 0193) ────────────────
+          Sai com um toque em qualquer lugar e NÃO cancela nada: a cobrança
+          continua viva na mesa. Era isto que prendia o garçom antes — a única
+          saída da tela era cancelar o PIX. */}
+      {pixAmpliado && (
+        <div onClick={() => setPixAmpliado(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', zIndex: 220,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 340, background: 'var(--bg)', borderRadius: 16,
+              border: '1px solid var(--border)', padding: 20, textAlign: 'center', maxHeight: '92dvh', overflowY: 'auto' }}>
             <div style={{ fontWeight: 800, fontSize: 17 }}>Pague no PIX</div>
             <div style={{ fontSize: 26, fontWeight: 900, color: 'var(--primary)', margin: '6px 0 2px' }}>
-              {fmt(Number(pixCob.valor))}
+              {fmt(Number(pixAmpliado.valor))}
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 12 }}>
               Aponte a câmera do banco pro código
             </div>
 
-            {pixCob.qr_base64 && (
-              <img src={`data:image/png;base64,${pixCob.qr_base64}`} alt="QR do PIX"
+            {pixAmpliado.qr_base64 && (
+              <img src={`data:image/png;base64,${pixAmpliado.qr_base64}`} alt="QR do PIX"
                 style={{ width: '100%', maxWidth: 260, borderRadius: 10, background: '#fff', padding: 8, boxSizing: 'border-box' }} />
             )}
 
-            {pixCob.qr_code && (
+            {pixAmpliado.qr_code && (
               <button type="button"
                 onClick={() => {
-                  navigator.clipboard?.writeText(pixCob.qr_code)
+                  navigator.clipboard?.writeText(pixAmpliado.qr_code)
                     .then(() => setPixMsg('✅ Copia e cola copiado.'))
-                    .catch(() => setPixMsg('Copie o código na mão: ' + pixCob.qr_code.slice(0, 20) + '...'))
+                    .catch(() => setPixMsg('Não consegui copiar aqui.'))
                 }}
                 style={{ width: '100%', marginTop: 12, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
                   border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 700, fontSize: 13 }}>
                 📋 Copiar o copia e cola
               </button>
             )}
-
-            <div style={{ marginTop: 14, fontSize: 13, fontWeight: 700, color: '#22c55e' }}>
-              ⏳ Esperando o pagamento cair...
-            </div>
-            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.45 }}>
-              Assim que o Mercado Pago confirmar, a conta fecha sozinha e a mesa é liberada.
-              Não precisa marcar nada.
-            </div>
             {pixMsg && <div style={{ fontSize: 12.5, marginTop: 8 }}>{pixMsg}</div>}
 
-            <button type="button" onClick={cancelarPixOnline}
-              style={{ width: '100%', marginTop: 14, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
-                border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 700 }}>
-              Cancelar o PIX
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.45 }}>
+              Pode fechar esta tela e continuar trabalhando — a cobrança fica guardada
+              na mesa e a conta fecha sozinha quando o pagamento cair.
+            </div>
+
+            <button type="button" onClick={() => setPixAmpliado(null)}
+              style={{ width: '100%', marginTop: 12, padding: '11px 0', borderRadius: 10, cursor: 'pointer',
+                border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 800 }}>
+              Pronto, mostrei
             </button>
           </div>
         </div>
