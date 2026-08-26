@@ -198,7 +198,10 @@ function CardEntregaKDS({ pedido, meuId, onAceitar, onSoltar, onPronto, historic
   )
 }
 
-export default function PresencialCozinha() {
+// `embutido` = está dentro do gestor (aba Mesas → Cozinha), e não na página
+// própria. Só muda o cabeçalho: lá dentro já tem título e botão de voltar, e
+// dois cabeçalhos empilhados só comem tela de quem está no balcão.
+export default function PresencialCozinha({ embutido = false }) {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id
   const meuId = profile?.id
@@ -389,16 +392,18 @@ export default function PresencialCozinha() {
   ]
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <div>
-          <p style={{ margin: 0, fontSize: 13 }}>
-            <Link to="/presencial" style={{ color: 'var(--primary)' }}>← Serviço Presencial</Link>
-          </p>
-          <h1>Cozinha (KDS)</h1>
-          <p className="page-subtitle">Aceite o pedido, prepare e marque pronto — ao vivo.</p>
+    <div className="page" style={embutido ? { padding: 0 } : undefined}>
+      {!embutido && (
+        <div className="page-header">
+          <div>
+            <p style={{ margin: 0, fontSize: 13 }}>
+              <Link to="/presencial" style={{ color: 'var(--primary)' }}>← Serviço Presencial</Link>
+            </p>
+            <h1>Cozinha (KDS)</h1>
+            <p className="page-subtitle">Aceite o pedido, prepare e marque pronto — ao vivo.</p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Abas (igual ao app do motoqueiro) */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>

@@ -24,6 +24,7 @@ import PresencialSalao from './PresencialSalao'
 import PresencialReservas from './PresencialReservas'
 import PresencialMesas from './PresencialMesas'
 import PresencialHistorico from './PresencialHistorico'
+import PresencialCozinha from './PresencialCozinha'
 import './PainelPedidos.css'
 
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
@@ -4970,6 +4971,9 @@ export default function PainelPedidos() {
   // (Reversível: antes era (!filtroOrigem || isMesaFiltro) ? mesasFechadasHoje/comandas : [].)
   const mesasFechadasHojeView = []
   const comandasView          = []
+  // Quanto a cozinha tem na fila agora (item de mesa que ninguém marcou pronto).
+  const itensNaCozinha = comandas.reduce((n, c) => n + (c.comanda_itens ?? [])
+    .filter(i => i.status !== 'pronto' && i.status !== 'entregue' && i.setor !== 'nenhum').length, 0)
 
   return (
     <div className="pp-root">
@@ -6114,6 +6118,14 @@ export default function PainelPedidos() {
               // `curto` é o que aparece no celular: com o nome inteiro os botões
               // não cabiam na tela e "Histórico" ficava escondido fora da borda.
               { id: 'salao', label: 'Salão / Mesas', curto: '🍽️ Mesas' },
+              // A Cozinha estava só no portal (/presencial/cozinha). Quem fica no
+              // celular preso na impressora tinha que SAIR do gestor pra marcar
+              // pronto e voltar pra imprimir — e nesse vai-e-volta saía comanda
+              // sem imprimir. Agora é a mesma tela, aqui dentro.
+              // O número é o que falta preparar. Sem ele, quem está no Salão não
+              // vê a cozinha encher — e a ideia toda é não precisar ficar
+              // trocando de tela pra saber.
+              { id: 'cozinha', label: '👨‍🍳 Cozinha', curto: '👨‍🍳 Cozinha', count: itensNaCozinha },
               { id: 'caixa', label: '💵 Caixa', curto: '💵 Caixa' },
               { id: 'historico', label: 'Histórico', curto: 'Histórico' },
               { id: 'reservas', label: 'Reservas', curto: 'Reservas' },
@@ -6128,12 +6140,17 @@ export default function PainelPedidos() {
                 }}>
                 <span className="pp-rot-longo">{t.label}</span>
                 <span className="pp-rot-curto">{t.curto}</span>
+                {t.count > 0 && (
+                  <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 900, padding: '1px 7px',
+                    borderRadius: 999, background: '#f59e0b', color: '#1a1200' }}>{t.count}</span>
+                )}
               </button>
             ))}
           </div>
           {/* Conteúdo da sub-aba */}
           <div className="pp-salao-body" style={{ flex: 1, overflow: 'auto' }}>
             {subAbaSalao === 'salao' && <PresencialSalao />}
+            {subAbaSalao === 'cozinha' && <PresencialCozinha embutido />}
             {subAbaSalao === 'caixa' && <Caixa />}
             {subAbaSalao === 'historico' && <PresencialHistorico />}
             {subAbaSalao === 'reservas' && <PresencialReservas />}
