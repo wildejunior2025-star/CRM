@@ -5,6 +5,8 @@ import { useAuth } from '../hooks/useAuth'
 import { adicionalComplementos } from '../lib/complementos'
 import { rotuloComanda } from '../lib/comanda'
 import { calcularTaxa, itemIsento, MARCA_ISENTO } from '../lib/taxaServico'
+import AvisoPix from '../components/AvisoPix'
+import { useConfirmar } from '../hooks/useConfirmar'
 import { clienteComMesmoNome } from '../lib/clientes'
 import ClientePicker from '../components/ClientePicker'
 import ClientesFiado from './ClientesFiado'
@@ -134,6 +136,10 @@ export default function PresencialSalao() {
   const [pixAmpliado, setPixAmpliado] = useState(null)   // QR em tela cheia pra mostrar pro cliente
   const [pixMsg, setPixMsg] = useState('')
   const [pixGerando, setPixGerando] = useState(false)
+  // O aviso de "caiu o PIX". Era alert() do navegador — no celular, colado no
+  // topo e com o valor perdido no meio da frase.
+  const [avisoPix, setAvisoPix] = useState(null)  // { tipo, valor, texto }
+  const [confirmar, avisoConfirmar] = useConfirmar()
   // [{ forma, valor(string), cliente }] no modo dividir. `cliente` só vale nas linhas
   // de fiado: cada pedaço fiado tem o SEU devedor (mig 0141) — é o que separa a
   // dívida da Maria da do João quando os dois racham a mesma mesa.
@@ -1286,7 +1292,14 @@ export default function PresencialSalao() {
   // alguém paga meia hora depois, sem conta aberta pra receber.
   async function cancelarPixOnline(cobrancaId) {
     if (!cobrancaId) return
-    if (!window.confirm('Cancelar a cobrança em PIX desta mesa?')) return
+    const ok = await confirmar({
+      titulo: 'Cancelar o PIX desta mesa?',
+      texto: 'O QR para de valer na hora. Se o cliente já leu o código, avise antes de cancelar.',
+      textoOk: 'Sim, cancelar o PIX',
+      textoCancelar: 'Deixa o QR',
+      icone: '⚡',
+    })
+    if (!ok) return
     setPixAmpliado(null)
     setForma('dinheiro')
     await supabase.functions.invoke('comanda-pix', { body: { acao: 'cancelar', cobranca_id: cobrancaId } })
@@ -1355,7 +1368,10 @@ export default function PresencialSalao() {
           if (emMesaFechada) {
             // Dinheiro que caiu numa mesa que já tinha sido fechada por outro
             // caminho. Não dá pra "desfechar": quem resolve é a loja, olhando.
-            window.alert(`⚠️ Um PIX de ${fmt(Number(pix.valor))} caiu numa mesa que já estava fechada.\n\nO dinheiro ESTÁ na conta do Mercado Pago. Confira se a conta foi cobrada duas vezes — se foi, estorne pelo app do MP.`)
+            setAvisoPix({
+              tipo: 'alerta', valor: Number(pix.valor),
+              texto: 'Caiu numa mesa que já estava fechada. O dinheiro está na conta do Mercado Pago — confira se a conta foi cobrada duas vezes e, se foi, estorne pelo app.',
+            })
             await loadMesas()
             continue
           }
@@ -1364,11 +1380,18 @@ export default function PresencialSalao() {
             await imprimirContaDoPix(c).catch(() => { /* best-effort */ })
             if (comandaSel?.id === pix.comanda_id) { setFechando(false); setMesaSel(null) }
             await loadMesas()
-            window.alert(`✅ PIX de ${fmt(Number(pix.valor))} recebido! A conta fechou e a mesa está livre.`)
+            setAvisoPix({
+              tipo: 'pago', valor: Number(pix.valor),
+              texto: 'A conta fechou sozinha e a mesa já está livre.',
+            })
           } else {
             // Conta rachada: caiu uma parte. A mesa continua aberta esperando o resto.
             await loadMesas()
-            window.alert(`✅ PIX de ${fmt(Number(pix.valor))} recebido — falta o resto da conta pra fechar a mesa.`)
+            setAvisoPix({
+              tipo: 'parcial', valor: Number(pix.valor),
+              titulo: 'Uma parte caiu',
+              texto: 'Esta é a parte de quem já pagou. A mesa continua aberta até o resto da conta entrar.',
+            })
           }
         }
       }
@@ -2599,6 +2622,18 @@ export default function PresencialSalao() {
           </div>
         </div>
       )}
+      {avisoConfirmar}
+
+      {avisoPix && (
+        <AvisoPix
+          tipo={avisoPix.tipo}
+          valor={avisoPix.valor}
+          titulo={avisoPix.titulo}
+          texto={avisoPix.texto}
+          onFechar={() => setAvisoPix(null)}
+        />
+      )}
+
       {/* ── QR grande, só pra mostrar pro cliente (mig 0193) ────────────────
           Sai com um toque em qualquer lugar e NÃO cancela nada: a cobrança
           continua viva na mesa. Era isto que prendia o garçom antes — a única

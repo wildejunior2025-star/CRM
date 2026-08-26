@@ -1,0 +1,137 @@
+/* Aviso de PIX recebido (mig 0193) — ver AvisoPix.jsx.
+   Feito pro celular primeiro: folha subindo de baixo, onde o polegar alcança. */
+
+.avpix-fundo {
+  position: fixed;
+  inset: 0;
+  z-index: 300;                 /* acima do QR ampliado (220) e do fechamento */
+  background: rgba(0, 0, 0, .62);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: flex-end;        /* celular: folha embaixo */
+  justify-content: center;
+  padding: 0;
+  animation: avpix-fundo-entra .18s ease-out;
+}
+
+.avpix {
+  width: 100%;
+  max-width: 480px;
+  box-sizing: border-box;
+  background: var(--bg, #14121f);
+  color: var(--text, #fff);
+  border: 1px solid var(--border, #2a2a3a);
+  border-bottom: none;
+  border-radius: 22px 22px 0 0;
+  padding: 26px 22px calc(20px + env(safe-area-inset-bottom, 0px));
+  text-align: center;
+  animation: avpix-sobe .26s cubic-bezier(.2, .9, .3, 1);
+}
+
+/* Pegador da folha: diz "isto arrasta/fecha" sem precisar de texto. */
+.avpix::before {
+  content: '';
+  display: block;
+  width: 42px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border, #2a2a3a);
+  margin: -12px auto 16px;
+}
+
+/* O selo redondo. Verde quando é dinheiro na conta, âmbar quando é pra olhar. */
+.avpix-selo {
+  width: 66px;
+  height: 66px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+  font-weight: 900;
+  line-height: 1;
+  color: #04170c;
+  background: linear-gradient(160deg, #4ade80, #16a34a);
+  box-shadow: 0 0 0 8px rgba(34, 197, 94, .14);
+  animation: avpix-selo-pulsa .42s ease-out .06s both;
+}
+
+.avpix--alerta .avpix-selo {
+  color: #1c1300;
+  background: linear-gradient(160deg, #fbbf24, #d97706);
+  box-shadow: 0 0 0 8px rgba(245, 158, 11, .16);
+}
+
+.avpix-titulo {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -.2px;
+}
+
+.avpix-valor {
+  margin-top: 2px;
+  font-size: 38px;
+  font-weight: 900;
+  letter-spacing: -1px;
+  color: #22c55e;
+  font-variant-numeric: tabular-nums;
+}
+
+.avpix--alerta .avpix-valor { color: #f59e0b; }
+
+.avpix-texto {
+  margin: 8px auto 0;
+  max-width: 34ch;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-muted, #a89ec9);
+}
+
+.avpix-botao {
+  width: 100%;
+  margin-top: 20px;
+  height: 52px;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 800;
+  color: #04170c;
+  background: linear-gradient(160deg, #4ade80, #16a34a);
+}
+
+.avpix--alerta .avpix-botao {
+  color: #1c1300;
+  background: linear-gradient(160deg, #fbbf24, #d97706);
+}
+
+.avpix-botao:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+
+/* Tela grande: vira cartão no meio, sem cara de folha de celular. */
+@media (min-width: 640px) {
+  .avpix-fundo { align-items: center; padding: 20px; }
+  .avpix {
+    max-width: 380px;
+    border: 1px solid var(--border, #2a2a3a);
+    border-radius: 20px;
+    padding: 28px 26px 24px;
+    animation: avpix-cresce .2s ease-out;
+  }
+  .avpix::before { display: none; }
+}
+
+@keyframes avpix-fundo-entra { from { opacity: 0 } to { opacity: 1 } }
+@keyframes avpix-sobe { from { transform: translateY(100%) } to { transform: translateY(0) } }
+@keyframes avpix-cresce { from { transform: scale(.94); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+@keyframes avpix-selo-pulsa {
+  from { transform: scale(.5); opacity: 0 }
+  60%  { transform: scale(1.08) }
+  to   { transform: scale(1); opacity: 1 }
+}
+
+/* Quem pediu menos movimento no aparelho não leva animação nenhuma. */
+@media (prefers-reduced-motion: reduce) {
+  .avpix-fundo, .avpix, .avpix-selo { animation: none; }
+}
