@@ -716,7 +716,7 @@ export default function DeliveryLoja() {
               </button>
             </div>
 
-            <div className="dloja-drawer-body">
+            <div className="dloja-drawer-body" ref={corpoRef}>
               {itens.map(item => (
                 <div key={item.key} className="dloja-drawer-item">
                   <div className="dloja-drawer-item-info">
@@ -901,18 +901,49 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
     } catch { /* localStorage indisponível */ }
   }, [sel, draftKey, produto.id])
 
-  function toggle(grupo, opcao) {
-    setSel(prev => {
-      const atual = new Set(prev[grupo.id] ?? [])
-      if (atual.has(opcao.id)) {
-        atual.delete(opcao.id)
-      } else {
-        if (grupo.max === 1) atual.clear()        // rádio
-        if (atual.size >= grupo.max) return prev   // limite atingido (checkbox)
-        atual.add(opcao.id)
-      }
-      return { ...prev, [grupo.id]: atual }
+  // Refs pra rolar sozinho de um grupo pro outro (ver `avancar` abaixo).
+  const corpoRef = useRef(null)
+  const gruposRef = useRef({})
+  const [destaque, setDestaque] = useState(null)
+
+  // Fechou um grupo (escolheu o tanto que podia)? Leva o cliente pro próximo
+  // que ainda aceita escolha. Nasceu da pizzaria: o cliente marcava o sabor,
+  // não descia mais e a BORDA passava batida — vendia pouca borda porque
+  // ninguém via que existia.
+  function avancar(grupoFeito, selAtual) {
+    const i = grupos.findIndex(g => g.id === grupoFeito.id)
+    const proximo = grupos.slice(i + 1).find(g => (selAtual[g.id]?.size ?? 0) < (g.max ?? 1))
+    if (!proximo) return
+    setDestaque(proximo.id)
+    requestAnimationFrame(() => {
+      const corpo = corpoRef.current
+      const alvo = gruposRef.current[proximo.id]
+      if (!corpo || !alvo) return
+      const topo = corpo.scrollTop + (alvo.getBoundingClientRect().top - corpo.getBoundingClientRect().top) - 10
+      corpo.scrollTo({ top: topo, behavior: 'smooth' })
     })
+  }
+
+  // O destaque é só o piscar do grupo pro qual pulamos — apaga sozinho.
+  useEffect(() => {
+    if (!destaque) return
+    const t = setTimeout(() => setDestaque(null), 1600)
+    return () => clearTimeout(t)
+  }, [destaque])
+
+  function toggle(grupo, opcao) {
+    const atual = new Set(sel[grupo.id] ?? [])
+    const marcando = !atual.has(opcao.id)
+    if (!marcando) {
+      atual.delete(opcao.id)
+    } else {
+      if (grupo.max === 1) atual.clear()        // rádio
+      if (atual.size >= grupo.max) return       // limite atingido (checkbox)
+      atual.add(opcao.id)
+    }
+    const novo = { ...sel, [grupo.id]: atual }
+    setSel(novo)
+    if (marcando && atual.size >= (grupo.max ?? 1)) avancar(grupo, novo)
   }
 
   const selecoes = grupos.flatMap(g =>
@@ -942,8 +973,13 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
             const qtdSel = sel[grupo.id]?.size ?? 0
             const obrig = (grupo.min ?? 0) > 0
             const incompleto = qtdSel < (grupo.min ?? 0)
+            const pulouPraCa = destaque === grupo.id
             return (
-              <div key={grupo.id} style={{ marginBottom: 18 }}>
+              <div key={grupo.id} ref={el => { gruposRef.current[grupo.id] = el }} style={{
+                marginBottom: 18, borderRadius: 12, transition: 'box-shadow .3s, background .3s',
+                boxShadow: pulouPraCa ? '0 0 0 2px #22c55e' : 'none',
+                background: pulouPraCa ? 'rgba(34,197,94,.07)' : 'transparent',
+              }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <span style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--dl-text)' }}>{grupo.nome}</span>
                   <span style={{

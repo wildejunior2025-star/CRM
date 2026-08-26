@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { adicionalComplementos, blocosDeOpcoes } from '../lib/complementos'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
@@ -15,17 +15,45 @@ export default function ModalComplementos({ produto, grupos, semObrigatorios, on
   const [sel, setSel] = useState({}) // { grupoId: [opcaoId] }
   const base = Number(produto.preco_venda)
 
-  function toggle(g, o) {
-    setSel(prev => {
-      const atual = prev[g.id] ?? []
-      const tem = atual.includes(o.id)
-      let novo
-      if (g.max === 1) novo = tem ? [] : [o.id]
-      else if (tem) novo = atual.filter(x => x !== o.id)
-      else if (atual.length >= g.max) novo = atual // trava no máximo
-      else novo = [...atual, o.id]
-      return { ...prev, [g.id]: novo }
+  // Refs pra pular sozinho de um grupo pro outro (ver `avancar`).
+  const corpoRef = useRef(null)
+  const gruposRef = useRef({})
+  const [destaque, setDestaque] = useState(null)
+
+  // Fechou o grupo (escolheu tudo que podia)? Rola até o próximo que ainda
+  // aceita escolha. Veio da pizzaria: o cliente marcava o sabor e parava ali,
+  // sem nunca ver a BORDA logo abaixo.
+  function avancar(grupoFeito, selAtual) {
+    const i = grupos.findIndex(g => g.id === grupoFeito.id)
+    const proximo = grupos.slice(i + 1).find(g => (selAtual[g.id]?.length ?? 0) < (g.max ?? 1))
+    if (!proximo) return
+    setDestaque(proximo.id)
+    requestAnimationFrame(() => {
+      const corpo = corpoRef.current
+      const alvo = gruposRef.current[proximo.id]
+      if (!corpo || !alvo) return
+      const topo = corpo.scrollTop + (alvo.getBoundingClientRect().top - corpo.getBoundingClientRect().top) - 10
+      corpo.scrollTo({ top: topo, behavior: 'smooth' })
     })
+  }
+
+  useEffect(() => {
+    if (!destaque) return
+    const t = setTimeout(() => setDestaque(null), 1600)
+    return () => clearTimeout(t)
+  }, [destaque])
+
+  function toggle(g, o) {
+    const atual = sel[g.id] ?? []
+    const tem = atual.includes(o.id)
+    let novo
+    if (g.max === 1) novo = tem ? [] : [o.id]
+    else if (tem) novo = atual.filter(x => x !== o.id)
+    else if (atual.length >= g.max) novo = atual // trava no máximo
+    else novo = [...atual, o.id]
+    const proximaSel = { ...sel, [g.id]: novo }
+    setSel(proximaSel)
+    if (!tem && novo.length >= (g.max ?? 1)) avancar(g, proximaSel)
   }
 
   const selecionados = grupos.flatMap(g => (sel[g.id] ?? []).map(oid => {
@@ -56,12 +84,17 @@ export default function ModalComplementos({ produto, grupos, semObrigatorios, on
           <p style={{ fontSize: 12.5, opacity: .7, margin: 0 }}>Monte do seu jeito 👇</p>
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px 4px' }}>
+        <div ref={corpoRef} style={{ flex: 1, overflowY: 'auto', padding: '14px 18px 4px' }}>
         {grupos.map(g => {
           const conta = sel[g.id]?.length ?? 0
           const falta = !semObrigatorios && (g.min ?? 0) > 0 && conta < g.min
+          const pulouPraCa = destaque === g.id
           return (
-            <div key={g.id} style={{ marginBottom: 16 }}>
+            <div key={g.id} ref={el => { gruposRef.current[g.id] = el }} style={{
+              marginBottom: 16, borderRadius: 12, transition: 'box-shadow .3s, background .3s',
+              boxShadow: pulouPraCa ? '0 0 0 2px #7c3aed' : 'none',
+              background: pulouPraCa ? 'rgba(124,58,237,.10)' : 'transparent',
+            }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <strong style={{ fontSize: 14 }}>{g.nome}</strong>
                 <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: falta ? '#7f1d1d' : '#2c2350', color: falta ? '#fecaca' : '#a78bfa' }}>
