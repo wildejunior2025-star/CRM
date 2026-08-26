@@ -502,6 +502,9 @@ export default function PresencialSalao() {
     : 0
   const totalAPagar = Math.max(0, Math.round((totalSel - cashbackAplicado) * 100) / 100)
 
+  // O PIX aberto DESTA mesa (mig 0193) — a cobrança mora na mesa, não numa tela.
+  const pixDaMesa = pixPendentes.find(x => x.comanda_id === comandaSel?.id) ?? null
+
   // Divisão da conta
   const somaPag = pagamentos.reduce((s, p) => s + (Number(p.valor) || 0), 0)
   const restante = Math.round((totalSel - somaPag) * 100) / 100
@@ -519,7 +522,11 @@ export default function PresencialSalao() {
   const fiadoSemDono = modoPag === 'unico'
     ? (forma === 'fiado' && !clienteSel)
     : pagamentos.some(p => p.forma === 'fiado' && Number(p.valor) > 0 && !p.cliente)
-  const podeReceber = (modoPag === 'unico' || Math.abs(restante) < 0.05) && !fiadoSemDono
+  // Esperando PIX não é forma de recebimento: o dinheiro ainda não caiu, e quem
+  // fecha essa conta é o Mercado Pago. Sem esta trava dava pra gerar o QR e, dois
+  // toques depois, fechar a mesma mesa em dinheiro — conta fechada e PIX vivo.
+  const esperandoPix = forma === 'pix_online' || !!pixDaMesa
+  const podeReceber = (modoPag === 'unico' || Math.abs(restante) < 0.05) && !fiadoSemDono && !esperandoPix
 
   // A trava do caixa existe pra a venda não escapar do caixa — e quem CRIA a
   // venda é quem libera a mesa no fim, sempre um ADM. O garçom só lança e manda
@@ -1130,6 +1137,13 @@ export default function PresencialSalao() {
       window.alert('Escolha quem fica devendo em cada linha do fiado.')
       return
     }
+    // Cinto de segurança do PIX: o botão já fica travado, mas fechar a conta com
+    // um PIX vivo deixaria a mesa fechada e o QR pagável — dinheiro entrando sem
+    // conta pra receber.
+    if (esperandoPix) {
+      window.alert('Esta mesa está esperando um PIX. Quando o pagamento cair a conta fecha sozinha — ou cancele o PIX na comanda pra receber de outro jeito.')
+      return
+    }
     setSalvando(true)
     // Só fecha DIRETO (gera a venda + libera a mesa + imprime) quem é ADM e está no
     // PC da loja (com o app FWC/térmica). ADM no CELULAR (sem impressora) NÃO fecha
@@ -1204,11 +1218,13 @@ export default function PresencialSalao() {
   // O QR NÃO prende a tela de propósito. O garçom gera, mostra pro cliente e vai
   // atender outra mesa — a cobrança fica morando na mesa (card na comanda e selo
   // no quadro). Quando o PIX cai, a mesa fecha e some do salão sozinha.
-  const pixDaMesa = pixPendentes.find(x => x.comanda_id === comandaSel?.id) ?? null
-
   async function cobrarPixOnline() {
     if (!comandaSel) return
     setPixMsg('')
+    // Marca a escolha ANTES de sair chamando o Mercado Pago: enquanto o QR não
+    // chega, quem olha a tela tem que ver que o PIX foi o escolhido — senão fica
+    // "Dinheiro" aceso e ninguém sabe no que clicou.
+    setForma('pix_online')
     setPixGerando(true)
     try {
       const { data, error } = await supabase.functions.invoke('comanda-pix', {
@@ -1221,8 +1237,8 @@ export default function PresencialSalao() {
         },
       })
       const motivo = data?.error ?? (error ? (await error.context?.json?.().catch(() => null))?.error : null)
-      if (motivo) { setPixMsg(`⚠️ ${motivo}`); return }
-      if (error || !data?.cobranca_id) { setPixMsg('⚠️ Não consegui gerar o PIX. Tente de novo.'); return }
+      if (motivo) { setForma('dinheiro'); setPixMsg(`⚠️ ${motivo}`); return }
+      if (error || !data?.cobranca_id) { setForma('dinheiro'); setPixMsg('⚠️ Não consegui gerar o PIX. Tente de novo.'); return }
       // Sai do modal de fechamento e abre o QR grande: é o momento de virar a
       // tela pro cliente. Fechar esse QR não cancela nada.
       setFechando(false)
@@ -1241,6 +1257,7 @@ export default function PresencialSalao() {
     if (!cobrancaId) return
     if (!window.confirm('Cancelar a cobrança em PIX desta mesa?')) return
     setPixAmpliado(null)
+    setForma('dinheiro')
     await supabase.functions.invoke('comanda-pix', { body: { acao: 'cancelar', cobranca_id: cobrancaId } })
       .catch(() => { /* expira sozinho em 30 min */ })
     await loadMesas()
@@ -2300,9 +2317,16 @@ export default function PresencialSalao() {
                     disabled={pixGerando || cashbackAplicado > 0 || totalSel <= 0}
                     style={{ flex: '1 1 100%', padding: '11px 0', borderRadius: 10, fontWeight: 800, fontSize: 13,
                       cursor: (pixGerando || cashbackAplicado > 0) ? 'not-allowed' : 'pointer',
-                      border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.12)', color: 'var(--text)',
+                      // Escolhido = marcado, igual às outras formas. Antes ficava
+                      // "Dinheiro" aceso e ninguém sabia no que tinha clicado.
+                      border: `1.5px solid ${forma === 'pix_online' ? '#16a34a' : '#22c55e'}`,
+                      background: forma === 'pix_online' ? 'rgba(34,197,94,.30)' : 'rgba(34,197,94,.12)',
+                      boxShadow: forma === 'pix_online' ? '0 0 0 2px rgba(34,197,94,.35)' : 'none',
+                      color: 'var(--text)',
                       opacity: (pixGerando || cashbackAplicado > 0 || totalSel <= 0) ? .5 : 1 }}>
-                    {pixGerando ? 'Gerando o QR...' : `⚡ PIX online · cobrar ${fmt(totalSel)} no QR`}
+                    {pixGerando ? '⚡ Gerando o QR...'
+                      : forma === 'pix_online' ? `✓ PIX online · ${fmt(totalSel)}`
+                      : `⚡ PIX online · cobrar ${fmt(totalSel)} no QR`}
                   </button>
                 )}
                 {mpConectado && !pixDaMesa && cashbackAplicado > 0 && (
@@ -2460,6 +2484,7 @@ export default function PresencialSalao() {
               <button type="button" onClick={confirmarFechamento} disabled={salvando || !podeReceber}
                 className="btn btn-primary" style={{ width: '100%', marginTop: 0, opacity: (salvando || !podeReceber) ? 0.5 : 1 }}>
                 {salvando ? 'Fechando...'
+                  : esperandoPix ? '⚡ Esperando o PIX cair — a conta fecha sozinha'
                   : !ehAdmin ? `Fechar e enviar pro caixa · ${fmt(totalSel)}`
                   // No fiado não entra dinheiro agora: "Receber" mentiria no valor.
                   : valorFiado >= totalSel - 0.05 ? `Fechar no fiado · ${fmt(totalSel)}`
