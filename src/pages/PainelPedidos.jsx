@@ -4260,7 +4260,7 @@ export default function PainelPedidos() {
     async function carregarComandas() {
       const { data } = await supabase
         .from('comandas')
-        .select('id, numero_mesa, tipo, nome_cliente, created_at, status, fechamento_pendente, preconta_pedida_em, fechada_por, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao, setor)')
+        .select('id, numero_mesa, tipo, nome_cliente, created_at, status, fechamento_pendente, preconta_pedida_em, fechada_por, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao, setor, isento_taxa)')
         .eq('empresa_id', empresa.id)
         .in('status', ['aberta', 'aguardando_conferencia'])
         .order('numero_mesa')
