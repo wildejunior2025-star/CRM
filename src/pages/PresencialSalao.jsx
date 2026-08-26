@@ -207,7 +207,9 @@ export default function PresencialSalao() {
     if (!empresaId) return
     const [emp, mp, ps, gs, cat, cg, cl] = await Promise.all([
       supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios, comanda_balcao_ativa').eq('id', empresaId).single(),
-      supabase.from('mercadopago_contas').select('empresa_id').eq('empresa_id', empresaId).maybeSingle(),
+      // Pergunta "tem MP ligado?" pela funcao, e nao pela tabela: mercadopago_contas
+      // guarda o token da loja e nao e (nem deve ser) legivel pelo navegador (mig 0194).
+      supabase.rpc('mp_conectado_loja'),
       supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria').eq('empresa_id', empresaId).order('nome').limit(500),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
       supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId),
@@ -227,7 +229,7 @@ export default function PresencialSalao() {
       setComandaBalcaoAtiva(!!emp.data.comanda_balcao_ativa)
     }
     // Só quem conectou o Mercado Pago vê o botão de PIX online (mig 0193).
-    setMpConectado(!!mp.data?.empresa_id)
+    setMpConectado(mp.data === true)
     setProdutos(ps.data ?? [])
     setGarcons(Object.fromEntries((gs.data ?? []).map(p => [p.id, p.nome])))
     const om = {}
