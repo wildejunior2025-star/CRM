@@ -199,13 +199,18 @@ export default function PresencialSalao() {
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('comandas').select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
       supabase.from('caixas').select('id').eq('empresa_id', empresaId).eq('aberto_por', user?.id).eq('status', 'aberto').limit(1),
+      // Pagos entram junto: numa conta rachada, a parte que ja caiu tem que
+      // aparecer pro atendente ("PIX 1 pago, falta o outro") -- senao ele nao
+      // sabe o que ainda tem pra receber.
       supabase.from('comanda_pix_cobrancas')
-        .select('id, comanda_id, valor, qr_code, qr_base64, expira_em')
-        .eq('empresa_id', empresaId).eq('status', 'pendente'),
+        .select('id, comanda_id, valor, qr_code, qr_base64, expira_em, status')
+        .eq('empresa_id', empresaId).in('status', ['pendente', 'pago']),
     ])
     setMesas(ms.data ?? [])
     setComandas(cs.data ?? [])
     setCaixaAberto(!!(cx.data && cx.data.length))
+    // 'pago' aqui e sempre de comanda ABERTA (a query so traz mesa aberta): e a
+    // parte da conta rachada que ja caiu e ainda espera as outras.
     setPixPendentes(px.data ?? [])
     setLoading(false)
   }, [empresaId, user?.id])
@@ -502,8 +507,13 @@ export default function PresencialSalao() {
     : 0
   const totalAPagar = Math.max(0, Math.round((totalSel - cashbackAplicado) * 100) / 100)
 
-  // O PIX aberto DESTA mesa (mig 0193) — a cobrança mora na mesa, não numa tela.
-  const pixDaMesa = pixPendentes.find(x => x.comanda_id === comandaSel?.id) ?? null
+  // Os PIX DESTA mesa (mig 0193/0195) — a cobrança mora na mesa, não numa tela.
+  // Conta rachada tem um QR por pessoa, por isso é lista e não um só.
+  const pixDaMesaTodos = pixPendentes.filter(x => x.comanda_id === comandaSel?.id)
+  const pixAbertos = pixDaMesaTodos.filter(x => x.status !== 'pago')
+  const pixPagos   = pixDaMesaTodos.filter(x => x.status === 'pago')
+  const pixDaMesa  = pixAbertos[0] ?? null
+  const pixJaPago  = pixPagos.reduce((soma, x) => soma + Number(x.valor || 0), 0)
 
   // Divisão da conta
   const somaPag = pagamentos.reduce((s, p) => s + (Number(p.valor) || 0), 0)
@@ -525,7 +535,7 @@ export default function PresencialSalao() {
   // Esperando PIX não é forma de recebimento: o dinheiro ainda não caiu, e quem
   // fecha essa conta é o Mercado Pago. Sem esta trava dava pra gerar o QR e, dois
   // toques depois, fechar a mesma mesa em dinheiro — conta fechada e PIX vivo.
-  const esperandoPix = forma === 'pix_online' || !!pixDaMesa
+  const esperandoPix = forma === 'pix_online' || pixAbertos.length > 0
   const podeReceber = (modoPag === 'unico' || Math.abs(restante) < 0.05) && !fiadoSemDono && !esperandoPix
 
   // A trava do caixa existe pra a venda não escapar do caixa — e quem CRIA a
@@ -1123,9 +1133,14 @@ export default function PresencialSalao() {
     // Pagamento único: quem diz QUANTO é o servidor (ele reconta os itens da mesa na
     // hora). O valor calculado aqui vai só pro papel e pro gestor conferir — se os
     // dois divergirem, vale a conta do servidor e a mesa não trava mais (mig 0144).
-    const listaRpc = modoPag === 'unico'
+    // 'pix_online' e nome de TELA, nao forma de pagamento: no banco ele e PIX
+    // igual aos outros. Sem esta traducao o fechamento gravava a parte do QR
+    // como DINHEIRO e a gaveta fechava sobrando no fim do dia.
+    const formaReal = f => (f === 'pix_online' ? 'pix' : f)
+    const listaRpc = (modoPag === 'unico'
       ? [...linhaCashback, { forma, valor: null }]
       : lista
+    ).map(l => ({ ...l, forma: formaReal(l.forma) }))
     // Fiado sem cliente não fecha: a dívida cairia no "Consumidor (Mesa)" e ninguém
     // saberia de quem cobrar. A função no banco barra também, isto é só o aviso amigável.
     const temFiado = lista.some(p => p.forma === 'fiado' && (p.valor ?? 1) > 0)
@@ -1218,13 +1233,23 @@ export default function PresencialSalao() {
   // O QR NÃO prende a tela de propósito. O garçom gera, mostra pro cliente e vai
   // atender outra mesa — a cobrança fica morando na mesa (card na comanda e selo
   // no quadro). Quando o PIX cai, a mesa fecha e some do salão sozinha.
-  async function cobrarPixOnline() {
+  // Uma linha da conta dividida vira o SEU QR (mig 0195). O resto do fluxo é
+  // igual: o QR fica na mesa e a conta só fecha quando o pago cobre o total.
+  async function cobrarPixDaLinha(i) {
+    const linha = pagamentos[i]
+    const valor = Number(String(linha?.valor ?? '').replace(',', '.'))
+    if (!(valor > 0)) { window.alert('Digite o valor desta parte antes de gerar o QR.'); return }
+    await cobrarPixOnline(valor)
+  }
+
+  async function cobrarPixOnline(valorParcial = null) {
     if (!comandaSel) return
     setPixMsg('')
     // Marca a escolha ANTES de sair chamando o Mercado Pago: enquanto o QR não
     // chega, quem olha a tela tem que ver que o PIX foi o escolhido — senão fica
-    // "Dinheiro" aceso e ninguém sabe no que clicou.
-    setForma('pix_online')
+    // "Dinheiro" aceso e ninguém sabe no que clicou. (No rachado a marcação é
+    // por linha, então não mexe na forma da conta inteira.)
+    if (valorParcial == null) setForma('pix_online')
     setPixGerando(true)
     try {
       const { data, error } = await supabase.functions.invoke('comanda-pix', {
@@ -1232,16 +1257,17 @@ export default function PresencialSalao() {
           acao: 'criar',
           comanda_id: comandaSel.id,
           aplicar_taxa: aplicarTaxa,
+          valor: valorParcial ?? null,
           criada_por: user?.id ?? null,
           cliente_id: clienteSel?.id ?? comandaSel.cliente_id ?? null,
         },
       })
       const motivo = data?.error ?? (error ? (await error.context?.json?.().catch(() => null))?.error : null)
-      if (motivo) { setForma('dinheiro'); setPixMsg(`⚠️ ${motivo}`); return }
-      if (error || !data?.cobranca_id) { setForma('dinheiro'); setPixMsg('⚠️ Não consegui gerar o PIX. Tente de novo.'); return }
-      // Sai do modal de fechamento e abre o QR grande: é o momento de virar a
-      // tela pro cliente. Fechar esse QR não cancela nada.
-      setFechando(false)
+      if (motivo) { if (valorParcial == null) setForma('dinheiro'); setPixMsg(`⚠️ ${motivo}`); return }
+      if (error || !data?.cobranca_id) { if (valorParcial == null) setForma('dinheiro'); setPixMsg('⚠️ Não consegui gerar o PIX. Tente de novo.'); return }
+      // Conta inteira: sai do fechamento, o assunto acabou aqui. Rachada: o modal
+      // fica aberto, porque ainda tem as outras partes pra resolver.
+      if (valorParcial == null) setFechando(false)
       setPixAmpliado(data)
       await loadMesas()
     } catch {
@@ -1706,8 +1732,14 @@ export default function PresencialSalao() {
                   por cima de tudo, porque o garçom mostra o QR e SAI — vai
                   atender outra mesa enquanto o cliente paga. Quando cair, a
                   conta fecha sozinha e a mesa some do salão. */}
-              {pixDaMesa && (
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12, padding: 10,
+              {pixJaPago > 0 && pixAbertos.length > 0 && (
+                <div style={{ marginBottom: 8, padding: '8px 12px', borderRadius: 10, fontSize: 13, fontWeight: 700,
+                  border: '1px solid #22c55e', background: 'rgba(34,197,94,.12)', color: '#16a34a' }}>
+                  ✅ Já caiu {fmt(pixJaPago)} em PIX nesta mesa — falta o resto pra fechar.
+                </div>
+              )}
+              {pixAbertos.map(pixDaMesa => (
+                <div key={pixDaMesa.id} style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12, padding: 10,
                   borderRadius: 12, border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.10)' }}>
                   {pixDaMesa.qr_base64 && (
                     <button type="button" onClick={() => setPixAmpliado({ ...pixDaMesa, cobranca_id: pixDaMesa.id })}
@@ -1724,8 +1756,9 @@ export default function PresencialSalao() {
                       ⚡ PIX de {fmt(Number(pixDaMesa.valor))} esperando
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4, marginTop: 2 }}>
-                      Pode fechar a mesa e ir atender outra. Quando o pagamento cair,
-                      a conta fecha sozinha e a mesa fica livre.
+                      {pixDaMesaTodos.length > 1
+                        ? 'Parte da conta rachada. A mesa fecha sozinha quando todas as partes caírem.'
+                        : 'Pode fechar a mesa e ir atender outra. Quando o pagamento cair, a conta fecha sozinha e a mesa fica livre.'}
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 7 }}>
                       <button type="button" onClick={() => setPixAmpliado({ ...pixDaMesa, cobranca_id: pixDaMesa.id })}
@@ -1741,7 +1774,7 @@ export default function PresencialSalao() {
                     </div>
                   </div>
                 </div>
-              )}
+              ))}
               {(comandaSel.comanda_itens ?? []).length === 0 ? (
                 <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum item ainda. Adicione abaixo.</p>
               ) : (
@@ -2307,7 +2340,7 @@ export default function PresencialSalao() {
                     Fica fora da fileira das outras formas de propósito: as de cima o
                     atendente MARCA (ele viu o dinheiro); esta COBRA de verdade e a
                     conta fecha sozinha quando o MP confirma. */}
-                {mpConectado && pixDaMesa && (
+                {mpConectado && pixDaMesa && modoPag === 'unico' && (
                   <div style={{ flex: '1 1 100%', padding: '9px 12px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.45,
                     border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.10)', color: 'var(--text)' }}>
                     ⚡ Esta mesa já tem um <strong>PIX de {fmt(Number(pixDaMesa.valor))}</strong> esperando.
@@ -2361,6 +2394,10 @@ export default function PresencialSalao() {
                       <select value={p.forma} onChange={e => updatePagamento(i, 'forma', e.target.value)}
                         style={{ padding: '8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13 }}>
                         {FORMAS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+                        {/* Um QR só pra ESTA parte (mig 0195). Fica no mesmo lugar
+                            das outras formas porque, pro atendente, é a mesma
+                            pergunta: como esta pessoa vai pagar? */}
+                        {mpConectado && <option value="pix_online">⚡ PIX online (QR)</option>}
                       </select>
                       <input type="number" step="0.01" min="0" inputMode="decimal" value={p.valor}
                         onChange={e => updatePagamento(i, 'valor', e.target.value)} placeholder="0,00"
@@ -2368,6 +2405,35 @@ export default function PresencialSalao() {
                       <button type="button" onClick={() => removePagamento(i)}
                         style={{ width: 30, height: 34, borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--danger)', fontSize: 16 }}>×</button>
                     </div>
+
+                    {/* Linha de PIX online: gera (ou mostra) o QR daquela parte. */}
+                    {p.forma === 'pix_online' && (() => {
+                      const alvo = Number(String(p.valor ?? '').replace(',', '.'))
+                      const jaTem = pixDaMesaTodos.find(x => Math.abs(Number(x.valor) - alvo) < 0.005)
+                      if (jaTem?.status === 'pago') {
+                        return (
+                          <div style={{ marginTop: 4, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 700,
+                            border: '1px solid #22c55e', background: 'rgba(34,197,94,.12)', color: '#16a34a' }}>
+                            ✅ PIX de {fmt(Number(jaTem.valor))} já caiu
+                          </div>
+                        )
+                      }
+                      return (
+                        <button type="button"
+                          onClick={() => (jaTem ? setPixAmpliado({ ...jaTem, cobranca_id: jaTem.id }) : cobrarPixDaLinha(i))}
+                          disabled={pixGerando || !(alvo > 0)}
+                          style={{ width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 8, cursor: (pixGerando || !(alvo > 0)) ? 'not-allowed' : 'pointer',
+                            border: `1.5px solid ${jaTem ? '#16a34a' : '#22c55e'}`,
+                            background: jaTem ? 'rgba(34,197,94,.25)' : 'rgba(34,197,94,.10)',
+                            color: 'var(--text)', fontSize: 12.5, fontWeight: 800,
+                            opacity: (pixGerando || !(alvo > 0)) ? .5 : 1 }}>
+                          {pixGerando ? '⚡ Gerando...'
+                            : jaTem ? `🔍 Mostrar o QR de ${fmt(Number(jaTem.valor))}`
+                            : alvo > 0 ? `⚡ Gerar QR de ${fmt(alvo)}`
+                            : 'Digite o valor pra gerar o QR'}
+                        </button>
+                      )
+                    })()}
 
                     {/* Só a linha de fiado pede cliente — as outras já foram pagas. */}
                     {p.forma === 'fiado' && (

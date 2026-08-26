@@ -157,18 +157,6 @@ Deno.serve(async (req) => {
       return json({ error: 'Esta conta já foi fechada.' }, 400)
     }
 
-    // Já tem QR vivo pra esta mesa? Devolve o MESMO. Dois QR do mesmo valor é
-    // como a mesa paga duas vezes.
-    const { data: viva } = await sb.from('comanda_pix_cobrancas')
-      .select('id, valor, qr_code, qr_base64, expira_em').eq('comanda_id', comandaId)
-      .eq('status', 'pendente').maybeSingle()
-    if (viva) {
-      return json({
-        cobranca_id: viva.id, valor: Number(viva.valor),
-        qr_code: viva.qr_code, qr_base64: viva.qr_base64, expira_em: viva.expira_em, reaproveitada: true,
-      })
-    }
-
     const token = await tokenDaLoja(sb, com.empresa_id)
     if (!token) {
       return json({ error: 'Esta loja ainda não conectou o Mercado Pago. Conecte em Loja → Pagamento pra cobrar no PIX online.' }, 400)
@@ -176,6 +164,39 @@ Deno.serve(async (req) => {
 
     const { total, subtotal, taxa, empresaNome } = await valorDaComanda(sb, comandaId, com.empresa_id, aplicarTaxa)
     if (!(total > 0)) return json({ error: 'A conta está zerada.' }, 400)
+
+    // O que já está aberto ou pago nesta mesa. Na conta dividida cada pessoa tem
+    // o seu QR (mig 0195), então o que limita não é "um por mesa" — é a soma não
+    // passar do total. Cobrar a mais é a loja devolvendo dinheiro depois.
+    const { data: jaTem } = await sb.from('comanda_pix_cobrancas')
+      .select('id, valor, qr_code, qr_base64, expira_em, status')
+      .eq('comanda_id', comandaId).in('status', ['pendente', 'pago'])
+    const jaCobrado = (jaTem ?? []).reduce((soma: number, c: { valor: number }) => soma + Number(c.valor ?? 0), 0)
+
+    // Sem valor informado = cobrar o que falta (o caso normal, conta inteira).
+    const pedido = Number(body.valor ?? 0)
+    const valorCobrar = Math.round((pedido > 0 ? pedido : total - jaCobrado) * 100) / 100
+
+    if (valorCobrar <= 0) {
+      return json({ error: 'Esta mesa já tem PIX cobrindo a conta inteira.' }, 400)
+    }
+    if (jaCobrado + valorCobrar > total + 0.05) {
+      return json({
+        error: `Passa do total: a conta é ${total.toFixed(2)} e já tem ${jaCobrado.toFixed(2)} em PIX. Cabe no máximo ${(total - jaCobrado).toFixed(2)}.`,
+      }, 400)
+    }
+
+    // Mesma pessoa, mesmo valor, QR ainda vivo: devolve o que já existe em vez de
+    // criar outro. É o toque repetido no botão — e dois QR iguais é a mesa
+    // pagando duas vezes.
+    const igual = (jaTem ?? []).find((c: { status: string; valor: number }) =>
+      c.status === 'pendente' && Math.abs(Number(c.valor) - valorCobrar) < 0.005)
+    if (igual) {
+      return json({
+        cobranca_id: igual.id, valor: Number(igual.valor),
+        qr_code: igual.qr_code, qr_base64: igual.qr_base64, expira_em: igual.expira_em, reaproveitada: true,
+      })
+    }
 
     const expira = new Date(Date.now() + MINUTOS_VALIDADE * 60 * 1000)
 
@@ -187,7 +208,7 @@ Deno.serve(async (req) => {
         'X-Idempotency-Key': crypto.randomUUID(),
       },
       body: JSON.stringify({
-        transaction_amount: total,
+        transaction_amount: valorCobrar,
         description: `Mesa · ${empresaNome}`,
         payment_method_id: 'pix',
         date_of_expiration: expira.toISOString(),
@@ -205,7 +226,7 @@ Deno.serve(async (req) => {
     const { data: cob, error: dbErr } = await sb.from('comanda_pix_cobrancas').insert({
       empresa_id:    com.empresa_id,
       comanda_id:    comandaId,
-      valor:         total,
+      valor:         valorCobrar,
       aplicar_taxa:  aplicarTaxa,
       cliente_id:    body.cliente_id ?? com.cliente_id ?? null,
       mp_payment_id: String(mp.id),
@@ -221,7 +242,7 @@ Deno.serve(async (req) => {
     }
 
     return json({
-      cobranca_id: cob.id, valor: total, subtotal, taxa,
+      cobranca_id: cob.id, valor: valorCobrar, total, subtotal, taxa,
       qr_code: td.qr_code, qr_base64: td.qr_code_base64, expira_em: expira.toISOString(),
     })
   } catch (e) {
