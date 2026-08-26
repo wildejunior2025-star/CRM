@@ -125,6 +125,9 @@ export default function PresencialSalao() {
   // Preço em edição no rascunho, por linha. Existe pra comida no peso: o atendente
   // pesa o prato e digita o valor ANTES de mandar pra cozinha (antes só dava depois).
   const [precoRascEdit, setPrecoRascEdit] = useState({})
+  // Celular: a mesa mostra UMA coisa de cada vez — a comanda ou o cardápio.
+  // No PC (1100px+) as duas colunas convivem e isto não muda nada.
+  const [abaMesa, setAbaMesa] = useState('comanda')  // 'comanda' | 'add'
   const [modoPag, setModoPag] = useState('unico')   // 'unico' | 'dividir'
   // PIX online da mesa (mig 0193): a loja com Mercado Pago conectado cobra o QR
   // na tela e quem fecha a conta é o MP, quando o dinheiro cai.
@@ -584,6 +587,9 @@ export default function PresencialSalao() {
 
     setMesaSel(mesa)
     setBusca(''); setCategoriaSel(null); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true)
+    // Mesa sem nada lançado cai direto no cardápio: foi pra isso que o
+    // atendente abriu ela. Mesa com conta abre na conta.
+    setAbaMesa((alvo?.comanda_itens ?? []).length > 0 ? 'comanda' : 'add')
     // Zera o fechamento anterior: linha de fiado com o devedor da OUTRA mesa ainda
     // na tela é o tipo de sobra que joga dívida no nome errado.
     setModoPag('unico'); setPagamentos([]); setPickerFiadoIdx(null); setClienteSel(null); setBuscaCliente('')
@@ -609,7 +615,7 @@ export default function PresencialSalao() {
     await loadMesas()
     if (nova) {
       setMesaSel(mesaDaComanda(nova))
-      setBusca(''); setCategoriaSel(null); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true)
+      setBusca(''); setCategoriaSel(null); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true); setAbaMesa('add')
       setModoPag('unico'); setPagamentos([]); setPickerFiadoIdx(null); setClienteSel(null); setBuscaCliente('')
     }
   }
@@ -1774,8 +1780,8 @@ export default function PresencialSalao() {
             </div>
 
             {/* corpo — no PC vira 2 colunas (ver PresencialSalao.css) */}
-            <div className="sal-corpo">
-            <div className="sal-col">
+            <div className="sal-corpo" data-aba={abaMesa}>
+            <div className="sal-col sal-col--comanda">
               {/* itens lançados */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
                 <div style={{ fontSize: 15, fontWeight: 700 }}>Comanda</div>
@@ -1835,7 +1841,7 @@ export default function PresencialSalao() {
                 </div>
               ))}
               {(comandaSel.comanda_itens ?? []).length === 0 ? (
-                <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum item ainda. Adicione abaixo.</p>
+                <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum item ainda — lance o primeiro produto.</p>
               ) : (
                 (comandaSel.comanda_itens ?? [])
                   .slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
@@ -1971,9 +1977,20 @@ export default function PresencialSalao() {
                 </div>
               )}
 
+              {comandaSel.status !== 'aguardando_conferencia' && (
+                <button type="button" className="sal-btn-lancar sal-so-mobile" onClick={() => setAbaMesa('add')}>
+                  ➕ Lançar produtos
+                </button>
+              )}
+
             </div>
 
-            <div className="sal-col">
+            <div className="sal-col sal-col--add">
+              {/* No celular esta coluna É a tela: o caminho de volta pra comanda
+                  fica grudado no topo, com o que já está no rascunho à vista. */}
+              <button type="button" className="sal-btn-voltar sal-so-mobile" onClick={() => setAbaMesa('comanda')}>
+                ← Ver a comanda{rascunho.length > 0 ? ` · ${rascunho.reduce((n, r) => n + r.quantidade, 0)} a enviar` : ''}
+              </button>
               {/* adicionar item */}
               <div className="sal-titulo-add" style={{ fontSize: 15, fontWeight: 700, margin: '18px 0 8px' }}>Adicionar item</div>
 

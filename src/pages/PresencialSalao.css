@@ -279,3 +279,56 @@ html[data-teclado='aberto'] .sal-overlay {
   border-radius: 999px;
   padding: 1px 6px;
 }
+
+/* ── Celular: uma tarefa de cada vez dentro da mesa ────────────────────────
+ * Empilhado, o atendente via a comanda em cima e o cardápio inteiro embaixo:
+ * pra lançar mais uma cerveja tinha que rolar por toda a conta, e pra conferir
+ * a conta tinha que rolar de volta por todo o cardápio.
+ *
+ * Agora é uma coisa de cada vez, com um botão indo e voltando. No PC (1100px+)
+ * nada muda: lá as duas colunas cabem lado a lado e ver as duas juntas é bom. */
+@media (max-width: 1099px) {
+  .sal-corpo[data-aba="comanda"] .sal-col--add     { display: none; }
+  .sal-corpo[data-aba="add"]     .sal-col--comanda { display: none; }
+  /* Sem o respiro do topo: no celular "Adicionar item" é a tela inteira. */
+  .sal-corpo[data-aba="add"] .sal-titulo-add { margin-top: 0; }
+}
+
+@media (min-width: 1100px) {
+  .sal-so-mobile { display: none !important; }
+}
+
+/* Fica colado no rodapé da lista: com a comanda cheia, o botão de lançar não
+ * pode ficar lá em cima, fora do alcance do polegar. */
+.sal-btn-lancar {
+  position: sticky;
+  bottom: 0;
+  width: 100%;
+  margin-top: 14px;
+  padding: 13px 0;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+  background: var(--primary, #7c3aed);
+  box-shadow: 0 -10px 16px -12px rgba(0, 0, 0, .8);
+}
+
+/* E o caminho de volta fica colado no topo do cardápio, pelo mesmo motivo. */
+.sal-btn-voltar {
+  position: sticky;
+  top: -18px;
+  z-index: 5;
+  width: 100%;
+  margin: -18px 0 12px;
+  padding: 12px 0;
+  border: 1.5px solid var(--border);
+  border-radius: 0 0 12px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+  background: var(--bg);
+}
