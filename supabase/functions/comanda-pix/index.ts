@@ -103,7 +103,11 @@ Deno.serve(async (req) => {
       const { data: cob } = await sbUser.from('comanda_pix_cobrancas')
         .select('id, empresa_id, mp_payment_id, status, comanda_id').eq('id', body.cobranca_id).maybeSingle()
       if (!cob) return json({ error: 'Cobrança não encontrada.' }, 404)
-      if (cob.status === 'pago') return json({ status: 'pago' })
+      // 'liquidado' = já estava pago ANTES desta pergunta, e não acabou de cair.
+      // A diferença existe por causa de tela velha: aba aberta desde antes da
+      // atualização ficava anunciando "PIX recebido!" de 15 em 15 segundos por
+      // um pagamento de uma hora atrás. Ela só reage a 'pago', então some.
+      if (cob.status === 'pago') return json({ status: 'liquidado' })
 
       const token = await tokenDaLoja(sb, cob.empresa_id)
       if (!token) return json({ error: 'Mercado Pago não conectado.' }, 400)

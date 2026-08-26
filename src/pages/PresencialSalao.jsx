@@ -1356,7 +1356,10 @@ export default function PresencialSalao() {
           body: { acao: 'conferir', cobranca_id: pix.id },
         }).catch(() => ({ data: null }))
         if (!vivo) return
-        if (data?.status === 'pago') {
+        // 'liquidado' é o mesmo dinheiro: o webhook confirmou entre uma volta e
+        // outra. Aqui só chega cobrança que estava PENDENTE quando a tela
+        // carregou, então nos dois casos a notícia é nova.
+        if (data?.status === 'pago' || data?.status === 'liquidado') {
           pixJaAnunciados.current.add(pix.id)
           const c = comandas.find(x => x.id === pix.comanda_id)
           // O que aconteceu com a MESA quem responde é o banco, não a resposta
