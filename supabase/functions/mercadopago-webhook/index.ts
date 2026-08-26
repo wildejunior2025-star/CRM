@@ -25,6 +25,12 @@ async function tokenDoPagamento(sb: SB, paymentId: string): Promise<string> {
       .select('empresa_id').eq('mp_payment_id', String(paymentId)).maybeSingle()
     empresaId = cob?.empresa_id ?? null
   }
+  if (!empresaId) {
+    // PIX da MESA (mig 0193): a cobrança nasce na conta do MP da própria loja.
+    const { data: mesa } = await sb.from('comanda_pix_cobrancas')
+      .select('empresa_id').eq('mp_payment_id', String(paymentId)).maybeSingle()
+    empresaId = mesa?.empresa_id ?? null
+  }
   if (!empresaId) return MP_ACCESS_TOKEN
   const { data: conta } = await sb.from('mercadopago_contas')
     .select('access_token, refresh_token, expires_at').eq('empresa_id', empresaId).maybeSingle()
@@ -139,6 +145,35 @@ Deno.serve(async (req) => {
           }
         } else if (['cancelled', 'rejected', 'expired'].includes(payment.status)) {
           await supabase.from('cliente_pix_cobrancas')
+            .update({ status: 'expirado' })
+            .eq('mp_payment_id', String(paymentId))
+            .eq('status', 'pendente')
+        }
+        return new Response('ok', { status: 200 })
+      }
+    }
+
+    // ── PIX DA MESA (mig 0193) ──
+    // Também não cruza com os outros: o mp_payment_id de uma mesa só existe em
+    // comanda_pix_cobrancas. Quem fecha a conta é a RPC — atômica e idempotente,
+    // então aviso repetido do MP não vira duas vendas.
+    {
+      const { data: cob } = await supabase
+        .from('comanda_pix_cobrancas')
+        .select('id, status')
+        .eq('mp_payment_id', String(paymentId))
+        .maybeSingle()
+
+      if (cob) {
+        if (payment.status === 'approved') {
+          const { data: res, error } = await supabase.rpc('confirmar_pix_comanda', { p_mp_payment_id: String(paymentId) })
+          // Erro aqui é conta que NÃO fechou com dinheiro já recebido: tem que
+          // aparecer no log, senão vira mesa aberta com PIX pago e ninguém sabe.
+          if (error) console.error('confirmar_pix_comanda:', error.message)
+          else if (res && res.ok === false) console.error('confirmar_pix_comanda recusou:', JSON.stringify(res))
+        } else if (['cancelled', 'rejected', 'expired'].includes(payment.status)) {
+          await supabase
+            .from('comanda_pix_cobrancas')
             .update({ status: 'expirado' })
             .eq('mp_payment_id', String(paymentId))
             .eq('status', 'pendente')

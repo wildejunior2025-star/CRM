@@ -124,6 +124,12 @@ export default function PresencialSalao() {
   // pesa o prato e digita o valor ANTES de mandar pra cozinha (antes só dava depois).
   const [precoRascEdit, setPrecoRascEdit] = useState({})
   const [modoPag, setModoPag] = useState('unico')   // 'unico' | 'dividir'
+  // PIX online da mesa (mig 0193): a loja com Mercado Pago conectado cobra o QR
+  // na tela e quem fecha a conta é o MP, quando o dinheiro cai.
+  const [mpConectado, setMpConectado] = useState(false)
+  const [pixCob, setPixCob] = useState(null)     // { cobranca_id, valor, qr_code, qr_base64 }
+  const [pixMsg, setPixMsg] = useState('')
+  const [pixGerando, setPixGerando] = useState(false)
   // [{ forma, valor(string), cliente }] no modo dividir. `cliente` só vale nas linhas
   // de fiado: cada pedaço fiado tem o SEU devedor (mig 0141) — é o que separa a
   // dívida da Maria da do João quando os dois racham a mesma mesa.
@@ -199,8 +205,9 @@ export default function PresencialSalao() {
   // Quase nunca muda: cardápio, complementos, categorias, funcionários, clientes.
   const loadCatalogo = useCallback(async () => {
     if (!empresaId) return
-    const [emp, ps, gs, cat, cg, cl] = await Promise.all([
+    const [emp, mp, ps, gs, cat, cg, cl] = await Promise.all([
       supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios, comanda_balcao_ativa').eq('id', empresaId).single(),
+      supabase.from('mercadopago_contas').select('empresa_id').eq('empresa_id', empresaId).maybeSingle(),
       supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria').eq('empresa_id', empresaId).order('nome').limit(500),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
       supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId),
@@ -219,6 +226,8 @@ export default function PresencialSalao() {
       setSemObrigatorios(!!emp.data.presencial_sem_obrigatorios)
       setComandaBalcaoAtiva(!!emp.data.comanda_balcao_ativa)
     }
+    // Só quem conectou o Mercado Pago vê o botão de PIX online (mig 0193).
+    setMpConectado(!!mp.data?.empresa_id)
     setProdutos(ps.data ?? [])
     setGarcons(Object.fromEntries((gs.data ?? []).map(p => [p.id, p.nome])))
     const om = {}
@@ -1030,7 +1039,7 @@ export default function PresencialSalao() {
     }
   }
 
-  async function imprimirConta({ soApp = true } = {}) {
+  async function imprimirConta({ soApp = true, formaPagamento = null } = {}) {
     const pags = modoPag === 'dividir'
       ? pagamentos
         // nome do devedor sai impresso na conta: o cliente confere de quem é a dívida
@@ -1047,7 +1056,7 @@ export default function PresencialSalao() {
         : null,
       itens: comandaSel?.comanda_itens ?? [],
       subtotal: subtotalSel, taxa: taxaSel, total: totalSel,
-      formaPagamento: modoPag === 'unico' ? forma : 'Dividido',
+      formaPagamento: formaPagamento ?? (modoPag === 'unico' ? forma : 'Dividido'),
       pagamentos: pags,
       empresa: { nome: empresaNome },
     }
@@ -1176,6 +1185,88 @@ export default function PresencialSalao() {
     setMesaSel(null)
     await loadMesas()
   }
+
+  // ── PIX online da mesa (mig 0193) ────────────────────────────────────────
+  // Gera a cobrança na conta do Mercado Pago DA LOJA e mostra o QR. Ninguém
+  // marca "recebido" aqui: quem fecha a conta é o webhook do MP, quando o
+  // dinheiro cai de verdade. É a diferença entre cobrar e acreditar no print.
+  async function cobrarPixOnline() {
+    if (!comandaSel) return
+    setPixMsg('')
+    setPixGerando(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('comanda-pix', {
+        body: {
+          acao: 'criar',
+          comanda_id: comandaSel.id,
+          aplicar_taxa: aplicarTaxa,
+          criada_por: user?.id ?? null,
+          cliente_id: clienteSel?.id ?? comandaSel.cliente_id ?? null,
+        },
+      })
+      const motivo = data?.error ?? (error ? (await error.context?.json?.().catch(() => null))?.error : null)
+      if (motivo) { setPixMsg(`⚠️ ${motivo}`); return }
+      if (error || !data?.cobranca_id) { setPixMsg('⚠️ Não consegui gerar o PIX. Tente de novo.'); return }
+      setPixCob(data)
+    } catch {
+      setPixMsg('⚠️ Não consegui gerar o PIX. Tente de novo.')
+    } finally {
+      setPixGerando(false)
+    }
+  }
+
+  // O cliente desistiu do PIX: cancela no MP também, senão o QR continua vivo e
+  // alguém paga meia hora depois, sem conta aberta pra receber.
+  async function cancelarPixOnline() {
+    const cob = pixCob
+    setPixCob(null)
+    if (!cob?.cobranca_id) return
+    await supabase.functions.invoke('comanda-pix', { body: { acao: 'cancelar', cobranca_id: cob.cobranca_id } })
+      .catch(() => { /* expira sozinho em 30 min */ })
+  }
+
+  // Enquanto o QR está na tela, fica de olho. O caminho normal é o webhook do
+  // MP; o `conferir` (de 15 em 15s) é o cinto de segurança pra quando ele
+  // atrasa — pergunta o status direto pro Mercado Pago.
+  useEffect(() => {
+    if (!pixCob?.cobranca_id) return
+    let vivo = true
+    let voltas = 0
+
+    async function fechou() {
+      setPixCob(null)
+      setPixMsg('')
+      setFechando(false)
+      // Imprime a conta ANTES de largar a mesa: depois de recarregar, comandaSel
+      // já é outra coisa e não teria mais os itens.
+      imprimirConta({ soApp: false, formaPagamento: 'pix' }).catch(() => { /* best-effort */ })
+      setMesaSel(null)
+      await loadMesas()
+      window.alert('✅ PIX recebido! A conta foi fechada e a mesa está livre.')
+    }
+
+    const t = setInterval(async () => {
+      if (!vivo) return
+      voltas += 1
+      const { data } = await supabase.from('comanda_pix_cobrancas')
+        .select('status').eq('id', pixCob.cobranca_id).maybeSingle()
+      if (!vivo) return
+      if (data?.status === 'pago') { await fechou(); return }
+      if (data?.status === 'expirado' || data?.status === 'cancelado') {
+        setPixCob(null)
+        setPixMsg('⚠️ O PIX expirou. Gere de novo ou receba de outro jeito.')
+        return
+      }
+      if (voltas % 5 === 0) {
+        const { data: res } = await supabase.functions.invoke('comanda-pix', {
+          body: { acao: 'conferir', cobranca_id: pixCob.cobranca_id },
+        }).catch(() => ({ data: null }))
+        if (vivo && res?.status === 'pago') await fechou()
+      }
+    }, 3000)
+
+    return () => { vivo = false; clearInterval(t) }
+  }, [pixCob?.cobranca_id])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ADM confere o pagamento e libera a mesa de vez (a partir do que o garçom fechou).
   async function confirmarLiberarAdm() {
@@ -2118,6 +2209,28 @@ export default function PresencialSalao() {
                     {f.label}
                   </button>
                 ))}
+                {/* PIX ONLINE (mig 0193) — só pra loja que conectou o Mercado Pago.
+                    Fica fora da fileira das outras formas de propósito: as de cima o
+                    atendente MARCA (ele viu o dinheiro); esta COBRA de verdade e a
+                    conta fecha sozinha quando o MP confirma. */}
+                {mpConectado && (
+                  <button type="button" onClick={cobrarPixOnline}
+                    disabled={pixGerando || cashbackAplicado > 0 || totalSel <= 0}
+                    style={{ flex: '1 1 100%', padding: '11px 0', borderRadius: 10, fontWeight: 800, fontSize: 13,
+                      cursor: (pixGerando || cashbackAplicado > 0) ? 'not-allowed' : 'pointer',
+                      border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.12)', color: 'var(--text)',
+                      opacity: (pixGerando || cashbackAplicado > 0 || totalSel <= 0) ? .5 : 1 }}>
+                    {pixGerando ? 'Gerando o QR...' : `⚡ PIX online · cobrar ${fmt(totalSel)} no QR`}
+                  </button>
+                )}
+                {mpConectado && cashbackAplicado > 0 && (
+                  <div style={{ flex: '1 1 100%', fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                    Com crédito abatido o PIX online não vale — receba pelas formas de cima.
+                  </div>
+                )}
+                {pixMsg && (
+                  <div style={{ flex: '1 1 100%', fontSize: 12.5, color: 'var(--text)' }}>{pixMsg}</div>
+                )}
               </div>
             ) : (
               <div>
@@ -2272,6 +2385,58 @@ export default function PresencialSalao() {
                   : `Receber ${fmt(totalSel)}`}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* ── QR do PIX na mesa (mig 0193) ─────────────────────────────────────
+          Fica por cima do modal de fechamento porque é isto que o cliente vai
+          olhar: o garçom vira o celular/tablet pra ele. Ninguém aperta nada
+          aqui — some sozinho quando o Mercado Pago confirma. */}
+      {pixCob && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 220,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ width: '100%', maxWidth: 360, background: 'var(--bg)', borderRadius: 16,
+            border: '1px solid var(--border)', padding: 20, textAlign: 'center', maxHeight: '92dvh', overflowY: 'auto' }}>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>Pague no PIX</div>
+            <div style={{ fontSize: 26, fontWeight: 900, color: 'var(--primary)', margin: '6px 0 2px' }}>
+              {fmt(Number(pixCob.valor))}
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 12 }}>
+              Aponte a câmera do banco pro código
+            </div>
+
+            {pixCob.qr_base64 && (
+              <img src={`data:image/png;base64,${pixCob.qr_base64}`} alt="QR do PIX"
+                style={{ width: '100%', maxWidth: 260, borderRadius: 10, background: '#fff', padding: 8, boxSizing: 'border-box' }} />
+            )}
+
+            {pixCob.qr_code && (
+              <button type="button"
+                onClick={() => {
+                  navigator.clipboard?.writeText(pixCob.qr_code)
+                    .then(() => setPixMsg('✅ Copia e cola copiado.'))
+                    .catch(() => setPixMsg('Copie o código na mão: ' + pixCob.qr_code.slice(0, 20) + '...'))
+                }}
+                style={{ width: '100%', marginTop: 12, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
+                  border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 700, fontSize: 13 }}>
+                📋 Copiar o copia e cola
+              </button>
+            )}
+
+            <div style={{ marginTop: 14, fontSize: 13, fontWeight: 700, color: '#22c55e' }}>
+              ⏳ Esperando o pagamento cair...
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.45 }}>
+              Assim que o Mercado Pago confirmar, a conta fecha sozinha e a mesa é liberada.
+              Não precisa marcar nada.
+            </div>
+            {pixMsg && <div style={{ fontSize: 12.5, marginTop: 8 }}>{pixMsg}</div>}
+
+            <button type="button" onClick={cancelarPixOnline}
+              style={{ width: '100%', marginTop: 14, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
+                border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 700 }}>
+              Cancelar o PIX
+            </button>
           </div>
         </div>
       )}
