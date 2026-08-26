@@ -209,9 +209,11 @@ export default function PresencialSalao() {
     setMesas(ms.data ?? [])
     setComandas(cs.data ?? [])
     setCaixaAberto(!!(cx.data && cx.data.length))
-    // 'pago' aqui e sempre de comanda ABERTA (a query so traz mesa aberta): e a
-    // parte da conta rachada que ja caiu e ainda espera as outras.
-    setPixPendentes(px.data ?? [])
+    // Só o que é de mesa AINDA ABERTA. Sem este filtro, a cobrança paga de uma
+    // mesa já fechada ficava na lista pra sempre e o Salão anunciava "PIX
+    // recebido!" de 15 em 15 segundos, pra um pagamento de uma hora atrás.
+    const abertas = new Set((cs.data ?? []).map(c => c.id))
+    setPixPendentes((px.data ?? []).filter(x => abertas.has(x.comanda_id)))
     setLoading(false)
   }, [empresaId, user?.id])
 
@@ -535,7 +537,10 @@ export default function PresencialSalao() {
   // Esperando PIX não é forma de recebimento: o dinheiro ainda não caiu, e quem
   // fecha essa conta é o Mercado Pago. Sem esta trava dava pra gerar o QR e, dois
   // toques depois, fechar a mesma mesa em dinheiro — conta fechada e PIX vivo.
-  const esperandoPix = forma === 'pix_online' || pixAbertos.length > 0
+  // `forma` é a escolha do modo ÚNICO. No "Dividir conta" ela não vale mais —
+  // sem esta separação, quem clicava em PIX online e depois trocava pra dividir
+  // ficava com o botão de receber travado sem entender por quê.
+  const esperandoPix = (modoPag === 'unico' && forma === 'pix_online') || pixAbertos.length > 0
   const podeReceber = (modoPag === 'unico' || Math.abs(restante) < 0.05) && !fiadoSemDono && !esperandoPix
 
   // A trava do caixa existe pra a venda não escapar do caixa — e quem CRIA a
@@ -1314,26 +1319,57 @@ export default function PresencialSalao() {
   // webhook do MP fechar a conta sozinho; isto aqui é o cinto de segurança pra
   // quando ele atrasa — e é quem manda imprimir a conta da mesa que fechou
   // enquanto o garçom estava noutro canto.
+  // Quem já estava pago quando esta tela carregou não é novidade — anunciar
+  // pagamento velho como se tivesse acabado de cair é pior que não anunciar.
+  const pixJaAnunciados = useRef(new Set())
+
   useEffect(() => {
-    if (pixPendentes.length === 0) return
+    const aConferir = pixPendentes.filter(x => x.status !== 'pago')
+    if (aConferir.length === 0) return
     let vivo = true
 
     const t = setInterval(async () => {
       if (!vivo) return
       // No máximo 3 por rodada: 10 mesas esperando não viram 10 chamadas de uma vez.
-      for (const pix of pixPendentes.slice(0, 3)) {
+      for (const pix of aConferir.slice(0, 3)) {
+        if (pixJaAnunciados.current.has(pix.id)) continue
         const { data } = await supabase.functions.invoke('comanda-pix', {
           body: { acao: 'conferir', cobranca_id: pix.id },
         }).catch(() => ({ data: null }))
         if (!vivo) return
         if (data?.status === 'pago') {
+          pixJaAnunciados.current.add(pix.id)
           const c = comandas.find(x => x.id === pix.comanda_id)
-          await imprimirContaDoPix(c).catch(() => { /* best-effort */ })
-          if (comandaSel?.id === pix.comanda_id) { setFechando(false); setMesaSel(null) }
+          // O que aconteceu com a MESA quem responde é o banco, não a resposta
+          // da chamada: o webhook pode ter fechado a conta antes desta volta, e
+          // aí a resposta vem sem detalhe nenhum.
+          const [{ data: cm }, { data: cb }] = await Promise.all([
+            supabase.from('comandas').select('status').eq('id', pix.comanda_id).maybeSingle(),
+            supabase.from('comanda_pix_cobrancas').select('venda_id').eq('id', pix.id).maybeSingle(),
+          ])
+          const fechou = cm?.status === 'fechada' && !!cb?.venda_id
+          const emMesaFechada = cm?.status === 'fechada' && !cb?.venda_id
           setPixAmpliado(a => (a?.cobranca_id === pix.id ? null : a))
-          await loadMesas()
           setPixMsg('')
-          window.alert(`✅ PIX de ${fmt(Number(pix.valor))} recebido! A conta fechou e a mesa está livre.`)
+
+          if (emMesaFechada) {
+            // Dinheiro que caiu numa mesa que já tinha sido fechada por outro
+            // caminho. Não dá pra "desfechar": quem resolve é a loja, olhando.
+            window.alert(`⚠️ Um PIX de ${fmt(Number(pix.valor))} caiu numa mesa que já estava fechada.\n\nO dinheiro ESTÁ na conta do Mercado Pago. Confira se a conta foi cobrada duas vezes — se foi, estorne pelo app do MP.`)
+            await loadMesas()
+            continue
+          }
+
+          if (fechou) {
+            await imprimirContaDoPix(c).catch(() => { /* best-effort */ })
+            if (comandaSel?.id === pix.comanda_id) { setFechando(false); setMesaSel(null) }
+            await loadMesas()
+            window.alert(`✅ PIX de ${fmt(Number(pix.valor))} recebido! A conta fechou e a mesa está livre.`)
+          } else {
+            // Conta rachada: caiu uma parte. A mesa continua aberta esperando o resto.
+            await loadMesas()
+            window.alert(`✅ PIX de ${fmt(Number(pix.valor))} recebido — falta o resto da conta pra fechar a mesa.`)
+          }
         }
       }
     }, 15000)
