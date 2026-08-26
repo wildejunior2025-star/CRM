@@ -1707,18 +1707,20 @@ export default function PresencialSalao() {
                   atender outra mesa enquanto o cliente paga. Quando cair, a
                   conta fecha sozinha e a mesa some do salão. */}
               {pixDaMesa && (
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, padding: 10,
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12, padding: 10,
                   borderRadius: 12, border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.10)' }}>
                   {pixDaMesa.qr_base64 && (
                     <button type="button" onClick={() => setPixAmpliado({ ...pixDaMesa, cobranca_id: pixDaMesa.id })}
                       title="Mostrar grande pro cliente"
                       style={{ border: 'none', padding: 0, borderRadius: 8, cursor: 'pointer', background: '#fff', flexShrink: 0 }}>
+                      {/* Grande o bastante pra escanear AQUI. Miniatura de indicador
+                          não serve: o cliente aponta a câmera e não lê. */}
                       <img src={`data:image/png;base64,${pixDaMesa.qr_base64}`} alt="QR do PIX"
-                        style={{ width: 76, height: 76, display: 'block', borderRadius: 8 }} />
+                        style={{ width: 'clamp(150px, 42vw, 200px)', height: 'auto', display: 'block', borderRadius: 8, padding: 6 }} />
                     </button>
                   )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, fontSize: 14 }}>
+                  <div style={{ flex: '1 1 190px', minWidth: 0 }}>
+                    <div style={{ fontWeight: 800, fontSize: 15 }}>
                       ⚡ PIX de {fmt(Number(pixDaMesa.valor))} esperando
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4, marginTop: 2 }}>
@@ -2516,7 +2518,7 @@ export default function PresencialSalao() {
 
             {pixAmpliado.qr_base64 && (
               <img src={`data:image/png;base64,${pixAmpliado.qr_base64}`} alt="QR do PIX"
-                style={{ width: '100%', maxWidth: 260, borderRadius: 10, background: '#fff', padding: 8, boxSizing: 'border-box' }} />
+                style={{ width: '100%', maxWidth: 300, borderRadius: 10, background: '#fff', padding: 10, boxSizing: 'border-box' }} />
             )}
 
             {pixAmpliado.qr_code && (
