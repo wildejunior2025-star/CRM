@@ -290,7 +290,10 @@ export default function MesaCardapio() {
         const lista = comanda?.itens ?? []
         const sub = Number(comanda?.subtotal ?? 0)
         const taxaPct = Number(comanda?.taxa_pct ?? 0)
-        const taxa = Math.round(sub * taxaPct / 100 * 100) / 100
+        // A taxa não pega o que é isento (couvert): o banco manda a base pronta
+        // pra este total bater com a conta que a loja vai cobrar (mig 0192).
+        const base = Number(comanda?.base_taxa ?? sub)
+        const taxa = Math.round(base * taxaPct / 100 * 100) / 100
         const totalEst = sub + taxa
         const sLabel = s => s === 'pronto' ? '🔔 Pronto!' : s === 'entregue' ? '🍽️ Entregue' : '⏳ Preparando'
         const sCor = s => s === 'pronto' ? '#22c55e' : s === 'entregue' ? '#a78bfa' : '#f59e0b'
@@ -308,7 +311,10 @@ export default function MesaCardapio() {
                   {lista.map(it => (
                     <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderBottom: '1px solid #2c2350' }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 14 }}>{it.quantidade}× {it.nome}</div>
+                        <div style={{ fontSize: 14 }}>
+                          {it.quantidade}× {it.nome}
+                          {it.isento_taxa && <span style={{ fontSize: 11.5, opacity: .65 }}> (isento de taxa)</span>}
+                        </div>
                         {it.observacao && <div style={{ fontSize: 12, opacity: .7 }}>📝 {it.observacao}</div>}
                         <div style={{ fontSize: 12.5, fontWeight: 800, color: sCor(it.status), marginTop: 2 }}>{sLabel(it.status)}</div>
                       </div>

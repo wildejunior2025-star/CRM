@@ -406,7 +406,10 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
   const linhas = itens.map(it => {
     const q = it.quantidade ?? it.qtd ?? 1
     const sub = it.subtotal != null ? Number(it.subtotal) : q * Number(it.preco_unitario ?? it.preco ?? 0)
-    return `<li><div class="row"><span>${esc(q)}x ${esc(it.nome)}</span> <span>${fmt(sub)}</span></div></li>`
+    // Couvert e afins saem marcados: o cliente vê no papel POR QUE aquele valor
+    // não entrou na conta dos 10% (mig 0192).
+    const isento = it.isento_taxa === true ? ' (isento de taxa)' : ''
+    return `<li><div class="row"><span>${esc(q)}x ${esc(it.nome)}${esc(isento)}</span> <span>${fmt(sub)}</span></div></li>`
   }).join('')
   return `<!doctype html><html><head><meta charset="utf-8"><title>Conta ${esc(titulo)}</title>
 <style>

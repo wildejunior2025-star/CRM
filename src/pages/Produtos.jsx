@@ -343,7 +343,7 @@ export default function Produtos() {
   async function loadCategorias() {
     const { data } = await supabase
       .from('categorias')
-      .select('id, nome, ordem, hora_inicio, hora_fim, setor')
+      .select('id, nome, ordem, hora_inicio, hora_fim, setor, isento_taxa')
       .order('ordem', { ascending: true })
       .order('nome', { ascending: true })
     const lista = data ?? []
@@ -374,6 +374,14 @@ export default function Produtos() {
   async function salvarSetorCategoria(id, setor) {
     setCategorias(cs => cs.map(c => (c.id === id ? { ...c, setor } : c)))
     await supabase.from('categorias').update({ setor }).eq('id', id)
+  }
+
+  // Tira (ou devolve) a categoria da base da taxa de serviço (mig 0192). O item
+  // continua na conta e no faturamento; só não entra na conta dos 10%. Nasceu do
+  // couvert artístico: é o cachê do músico, não serviço de mesa.
+  async function salvarIsentoTaxa(id, isento) {
+    setCategorias(cs => cs.map(c => (c.id === id ? { ...c, isento_taxa: isento } : c)))
+    await supabase.from('categorias').update({ isento_taxa: isento }).eq('id', id)
   }
 
   // Persiste a ordem 1..n de uma nova lista de categorias (otimista)
@@ -1793,6 +1801,12 @@ export default function Produtos() {
               como Não imprime.
             </p>
 
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+              💸 <strong>Sem taxa</strong> — marque as categorias que <strong>não entram na taxa de serviço</strong> da mesa
+              (couvert artístico, ingresso, reserva). O item continua na conta e no faturamento normalmente; só fica de fora
+              do cálculo da taxa — e sai na comanda com <strong>(isento de taxa)</strong> do lado, pro cliente ver.
+            </p>
+
             <div className="data-table tabela-categorias">
               {categorias.length === 0 ? (
                 <div className="empty-state">Nenhuma categoria cadastrada.</div>
@@ -1877,6 +1891,22 @@ export default function Produtos() {
                             <option value="cozinha">🍳 Cozinha</option>
                             <option value="nenhum">🚫 Não imprime</option>
                           </select>
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
+                          <label
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 12.5 }}
+                            title="Marcado: os itens desta categoria NÃO entram na conta da taxa de serviço (couvert, ingresso)"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!!c.isento_taxa}
+                              onChange={(e) => salvarIsentoTaxa(c.id, e.target.checked)}
+                              draggable={false}
+                            />
+                            <span style={{ color: c.isento_taxa ? 'var(--text)' : 'var(--text-muted)' }}>
+                              Sem taxa
+                            </span>
+                          </label>
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
                           <input

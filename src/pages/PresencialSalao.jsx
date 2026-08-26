@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { adicionalComplementos } from '../lib/complementos'
 import { rotuloComanda } from '../lib/comanda'
+import { calcularTaxa, itemIsento, MARCA_ISENTO } from '../lib/taxaServico'
 import { clienteComMesmoNome } from '../lib/clientes'
 import ClientePicker from '../components/ClientePicker'
 import ClientesFiado from './ClientesFiado'
@@ -452,7 +453,10 @@ export default function PresencialSalao() {
       .then(({ data }) => { if (vivo) setCashbackSaldo(Number(data?.saldo ?? 0)) })
     return () => { vivo = false }
   }, [comandaSel?.cliente_id, clienteSel?.id, fechando])
-  const taxaSel = aplicarTaxa ? Math.round(subtotalSel * (taxaPct / 100) * 100) / 100 : 0
+  // A taxa não pega tudo: item de categoria isenta (couvert) fica de fora da
+  // base (mig 0192). Quem decide de verdade é o banco — aqui é só pra tela
+  // mostrar o mesmo número que vai ser cobrado.
+  const taxaSel = calcularTaxa(comandaSel?.comanda_itens ?? [], taxaPct, aplicarTaxa)
   const totalSel = subtotalSel + taxaSel
 
   // Comandas que chegaram pelo link e ninguém abriu ainda (mig 0182).
@@ -990,7 +994,7 @@ export default function PresencialSalao() {
       .map(i => {
         const qtd = Number(i.quantidade) || 1
         const total = Number(i.preco_unitario) * qtd
-        return `${qtd}x ${i.nome} — ${fmt(total)}`
+        return `${qtd}x ${i.nome}${itemIsento(i) ? ` ${MARCA_ISENTO}` : ''} — ${fmt(total)}`
       })
 
     const texto = [
@@ -1906,7 +1910,12 @@ export default function PresencialSalao() {
               .map(it => (
                 <div key={it.id} style={{ padding: '10px 0', borderTop: '1px solid var(--border)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <strong style={{ fontSize: 13.5 }}>{it.quantidade}× {it.nome}</strong>
+                    <strong style={{ fontSize: 13.5 }}>
+                      {it.quantidade}× {it.nome}
+                      {itemIsento(it) && (
+                        <span style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)' }}> {MARCA_ISENTO}</span>
+                      )}
+                    </strong>
                     <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap' }}>
                       {fmt(Number(it.preco_unitario) * it.quantidade)}
                     </span>

@@ -364,7 +364,9 @@ export function montarContaMesaBytes({
     const sub = it.subtotal != null
       ? Number(it.subtotal)
       : q * Number(it.preco_unitario ?? it.preco ?? 0)
-    b.alto(true).row(`${q}x ${it.nome}`, fmt(sub)).alto(false)
+    // Couvert e afins saem marcados, igual à conta impressa no PC (mig 0192).
+    const isento = it.isento_taxa === true ? ' (isento de taxa)' : ''
+    b.alto(true).row(`${q}x ${it.nome}${isento}`, fmt(sub)).alto(false)
   }
   if (!itens.length) b.txt('—').nl()
   b.line()

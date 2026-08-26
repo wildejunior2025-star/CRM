@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
 import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
 import { rotuloComanda } from '../lib/comanda'
+import { calcularTaxa } from '../lib/taxaServico'
 import { fwcFetch, explicaErroFwc } from '../lib/appFwc'
 import Caixa from './Caixa'
 
@@ -3348,7 +3349,8 @@ function ModalFecharConta({ comanda, taxaPct, onFechar, onConfirmar }) {
   const [salvando, setSalvando] = useState(false)
   const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
   const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
-  const taxa = aplicarTaxa ? Math.round(subtotal * taxaPct / 100 * 100) / 100 : 0
+  // Item de categoria isenta (couvert) fica fora da base da taxa (mig 0192).
+  const taxa = calcularTaxa(itens, taxaPct, aplicarTaxa)
   const total = subtotal + taxa
   // Crédito e débito separados: cada um tem a taxa da maquineta dele (ver Caixa).
   const FORMAS = [['dinheiro', '💵 Dinheiro'], ['pix', '⚡ Pix'], ['credito', '💳 Crédito'], ['debito', '💳 Débito']]
@@ -4412,7 +4414,7 @@ export default function PainelPedidos() {
     if (!itens.length) return
     const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
     const pct = Number(empresa?.taxa_servico_pct ?? 0)
-    const taxa = Math.round(subtotal * pct / 100 * 100) / 100
+    const taxa = calcularTaxa(itens, pct, true)
     const dados = {
       numeroMesa: c.numero_mesa, rotulo: rotuloComanda(c),
       itens, subtotal, taxa, total: subtotal + taxa,
@@ -4531,7 +4533,7 @@ export default function PainelPedidos() {
     // ?? 0 e não ?? 10: chutar 10% quando a config da loja não veio já inventou taxa
     // de serviço numa loja que cobra 0% e travou a mesa na hora de liberar (mig 0144).
     const pct = Number(empresa?.taxa_servico_pct ?? 0)
-    const taxa = aplicar ? Math.round(subtotal * pct / 100 * 100) / 100 : 0
+    const taxa = calcularTaxa(itens, pct, aplicar)
     const novoTotal = Math.round((subtotal + taxa) * 100) / 100
     const pend = comanda.fechamento_pendente || {}
     const pagsAntigos = Array.isArray(pend.pagamentos) ? pend.pagamentos : []
