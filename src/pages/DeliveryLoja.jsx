@@ -716,7 +716,7 @@ export default function DeliveryLoja() {
               </button>
             </div>
 
-            <div className="dloja-drawer-body" ref={corpoRef}>
+            <div className="dloja-drawer-body">
               {itens.map(item => (
                 <div key={item.key} className="dloja-drawer-item">
                   <div className="dloja-drawer-item-info">
