@@ -1778,9 +1778,9 @@ export default function PresencialSalao() {
       {/* ── Drawer da comanda ── */}
       {mesaSel && comandaSel && (
         <div onClick={sairDaMesa} className="sal-overlay">
-          <div onClick={e => e.stopPropagation()} className="sal-drawer">
+          <div onClick={e => e.stopPropagation()} className="sal-drawer" data-buscando={busca.trim() ? '1' : undefined}>
             {/* header */}
-            <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div className="sal-header" style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
                 <div style={{ fontWeight: 800, fontSize: 18 }}>
                   {mesaSel.is_comanda ? `🧾 ${rotuloMesa(mesaSel)}` : mesaSel.is_balcao ? '🛎️ Balcão' : `Mesa ${mesaSel.numero}`}

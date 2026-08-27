@@ -319,6 +319,13 @@ html[data-teclado='aberto'] .sal-overlay {
   .sal-rodape[data-buscando] .sal-rodape-envio,
   .sal-rodape[data-buscando] .sal-rodape-subtotal { display: none; }
 
+  /* O cabeçalho da mesa também sai da frente. Sozinho ele come 150px dos ~415
+   * que sobram com o teclado aberto — "4 lugares", "Atendido por", "Quem fez o
+   * quê" e o nome do cliente não ajudam em nada a escolher a cerveja. Fica só
+   * o "Mesa 1" e o × de fechar, pra pessoa não se perder de onde está. */
+  .sal-drawer[data-buscando] .sal-header > div > *:not(:first-child) { display: none; }
+  .sal-drawer[data-buscando] .sal-header { padding-top: 8px; padding-bottom: 8px; }
+
   /* O campo de busca acompanha a rolagem: sem isto, descer pro quinto
      resultado tirava da tela o que estava digitado (e o × de limpar). */
   .sal-col--add[data-buscando] .sal-busca {
