@@ -167,6 +167,11 @@ export default function PresencialSalao() {
   // quando ele clica "Enviar" — assim o pedido inteiro sai numa impressão só.
   const [rascunho, setRascunho] = useState([]) // [{ produto_id, nome, preco_venda, quantidade }]
   const [enviando, setEnviando] = useState(false)
+  // Recado desta remessa (ex.: "sem cebola em tudo"). Vai colado na observação de CADA
+  // item enviado: a observação do item é o único campo que a impressora da cozinha
+  // imprime grande dentro do bloco do pedido.
+  const [obsEnvio, setObsEnvio] = useState('')
+  const [salvandoViagem, setSalvandoViagem] = useState(false)
   const buscaRef = useRef(null) // pra focar de volta o campo de busca ao limpar (X)
   // "Inventar produto": criar item na hora (só nesta venda) ou salvar no catálogo.
   const [invAberto, setInvAberto] = useState(false)
@@ -462,13 +467,18 @@ export default function PresencialSalao() {
   // Rascunho é por comanda e fica salvo no navegador (sobrevive a fechar sem querer).
   const rascunhoKey = comandaSel ? 'rasc_mesa_' + comandaSel.id : null
   useEffect(() => {
-    if (!rascunhoKey) { setRascunho([]); return }
+    if (!rascunhoKey) { setRascunho([]); setObsEnvio(''); return }
     try { setRascunho(JSON.parse(localStorage.getItem(rascunhoKey) || '[]')) } catch { setRascunho([]) }
+    try { setObsEnvio(localStorage.getItem(rascunhoKey + '_obs') || '') } catch { setObsEnvio('') }
   }, [rascunhoKey])
   useEffect(() => {
     if (!rascunhoKey) return
     try { localStorage.setItem(rascunhoKey, JSON.stringify(rascunho)) } catch { /* ignora */ }
   }, [rascunho, rascunhoKey])
+  useEffect(() => {
+    if (!rascunhoKey) return
+    try { localStorage.setItem(rascunhoKey + '_obs', obsEnvio) } catch { /* ignora */ }
+  }, [obsEnvio, rascunhoKey])
   const subtotalRascunho = rascunho.reduce((s, r) => s + Number(r.preco_venda) * r.quantidade, 0)
 
   const subtotalSel = subtotalDe(comandaSel)
@@ -813,19 +823,43 @@ export default function PresencialSalao() {
   async function enviarCozinha() {
     if (!comandaSel || !rascunho.length || enviando) return
     setEnviando(true)
+    // "PARA VIAGEM" e o recado da remessa vão na observação de cada item: é o único
+    // campo que sai impresso na comanda da cozinha (grande e em negrito, dentro do
+    // bloco do item). Observação escrita DEPOIS do envio não imprime — por isso ela é
+    // montada aqui, na hora de gravar.
+    const recado = obsEnvio.trim()
     const rows = rascunho.map(r => ({
       empresa_id: empresaId, comanda_id: comandaSel.id,
       produto_id: (r.produto_id && !String(r.produto_id).startsWith('avulso:')) ? r.produto_id : null,
       nome: r.nome,
       preco_unitario: Number(r.preco_venda), quantidade: r.quantidade,
-      observacao: (r.observacao ?? '').trim() || null,
+      observacao: [
+        comandaSel.para_viagem ? 'PARA VIAGEM' : '',
+        recado,
+        (r.observacao ?? '').trim(),
+      ].filter(Boolean).join(' · ') || null,
     }))
     const { data: inseridos, error } = await supabase.from('comanda_itens').insert(rows).select()
     setEnviando(false)
     if (error) { window.alert('Erro ao enviar pra cozinha: ' + error.message); return }
     imprimirComandaAgora(inseridos ?? [])
     setRascunho([])
-    if (rascunhoKey) { try { localStorage.removeItem(rascunhoKey) } catch { /* ignora */ } }
+    setObsEnvio('')
+    if (rascunhoKey) {
+      try { localStorage.removeItem(rascunhoKey); localStorage.removeItem(rascunhoKey + '_obs') } catch { /* ignora */ }
+    }
+    await loadMesas()
+  }
+
+  // Liga/desliga "para viagem" na comanda inteira. Fica gravado no banco: os outros
+  // garçons veem o selo na mesa e todo item enviado dali pra frente sai avisando.
+  async function alternarViagem() {
+    if (!comandaSel || salvandoViagem) return
+    const novo = !comandaSel.para_viagem
+    setSalvandoViagem(true)
+    const { error } = await supabase.from('comandas').update({ para_viagem: novo }).eq('id', comandaSel.id)
+    setSalvandoViagem(false)
+    if (error) { window.alert('Não consegui salvar: ' + error.message); return }
     await loadMesas()
   }
 
@@ -1660,6 +1694,9 @@ export default function PresencialSalao() {
                 <div style={{ fontSize: 9.5, marginTop: 2, color: borda, fontWeight: 700 }}>
                   {aguardando ? 'Aguard. ADM' : 'Aberta'}
                 </div>
+                {c.para_viagem && (
+                  <div style={{ fontSize: 10, marginTop: 1, fontWeight: 800, color: '#d97706' }}>📦 VIAGEM</div>
+                )}
                 {(c.nome_cliente || c.cliente?.nome) && (
                   <div style={{ fontSize: 10.5, marginTop: 1, fontWeight: 700, color: 'var(--primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     🧑 {c.nome_cliente || c.cliente?.nome}
@@ -1699,6 +1736,9 @@ export default function PresencialSalao() {
                 )}
                 <div style={{ fontSize: 14.5, fontWeight: 800, lineHeight: 1.1 }}>{mesa.is_balcao ? '🛎️ Balcão' : `Mesa ${mesa.numero}`}</div>
                 <div style={{ fontSize: 9.5, marginTop: 2, color: cor.border, fontWeight: 700 }}>{cor.label}</div>
+                {c?.para_viagem && (
+                  <div style={{ fontSize: 10, marginTop: 1, fontWeight: 800, color: '#d97706' }}>📦 VIAGEM</div>
+                )}
                 {/* Nome do cliente ligado à mesa (quando cadastrado) — ajuda a saber de quem é a mesa. */}
                 {c?.cliente?.nome && (
                   <div style={{ fontSize: 10.5, marginTop: 1, fontWeight: 700, color: 'var(--primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -1917,6 +1957,14 @@ export default function PresencialSalao() {
                           background: 'var(--input-bg, var(--bg))', color: 'var(--text)',
                         }}
                       />
+                      {/* Este item já foi gravado: o papel da cozinha já saiu. Avisa o garçom
+                          em vez de deixar ele achar que a cozinha vai ficar sabendo. */}
+                      {obsEdit[item.id] !== undefined && (
+                        <div style={{ fontSize: 11.5, fontWeight: 700, color: '#d97706', marginTop: 4, lineHeight: 1.35 }}>
+                          ⚠️ Item já enviado — isto aparece na tela da cozinha, mas NÃO sai na impressão.
+                          Pra sair no papel, escreva o recado embaixo ANTES de enviar.
+                        </div>
+                      )}
                     </div>
                   ))
               )}
@@ -2096,6 +2144,42 @@ export default function PresencialSalao() {
 
             {/* rodapé — sempre à vista (ver .sal-rodape no PresencialSalao.css) */}
             <div className="sal-rodape">
+              {/* Recado da cozinha fica AQUI, coladinho no botão de enviar: a observação
+                  só sai impressa se for escrita ANTES do envio, então ela não pode estar
+                  perdida lá em cima, fora da vista de quem está lançando no celular. */}
+              {comandaSel.status !== 'aguardando_conferencia' && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+                  <button type="button" onClick={alternarViagem} disabled={salvandoViagem}
+                    title="Marca a comanda inteira como pedido para viagem — sai impresso na cozinha"
+                    style={{
+                      flexShrink: 0, padding: '10px 13px', borderRadius: 999, fontSize: 14.5, fontWeight: 800,
+                      cursor: salvandoViagem ? 'wait' : 'pointer',
+                      border: `1.5px solid ${comandaSel.para_viagem ? '#d97706' : 'var(--border)'}`,
+                      background: comandaSel.para_viagem ? '#d97706' : 'transparent',
+                      color: comandaSel.para_viagem ? '#fff' : 'var(--text)',
+                    }}>
+                    📦 {comandaSel.para_viagem ? 'Para viagem' : 'Viagem?'}
+                  </button>
+                  <input
+                    value={obsEnvio}
+                    onChange={e => setObsEnvio(e.target.value)}
+                    placeholder="📝 Recado pra cozinha (sai impresso)"
+                    style={{
+                      flex: 1, minWidth: 130, padding: '10px 10px', fontSize: 14.5, fontWeight: 600, boxSizing: 'border-box',
+                      borderRadius: 8, border: '1px solid var(--border)',
+                      background: 'var(--input-bg, var(--bg))', color: 'var(--text)',
+                    }}
+                  />
+                </div>
+              )}
+              {comandaSel.status !== 'aguardando_conferencia' && rascunho.length > 0 && (comandaSel.para_viagem || obsEnvio.trim()) && (
+                <div style={{
+                  marginBottom: 8, padding: '7px 10px', borderRadius: 8, fontSize: 13, fontWeight: 800,
+                  background: 'rgba(217,119,6,.14)', color: '#d97706',
+                }}>
+                  A cozinha vai ler: {[comandaSel.para_viagem ? 'PARA VIAGEM' : '', obsEnvio.trim()].filter(Boolean).join(' · ')}
+                </div>
+              )}
               {comandaSel.status !== 'aguardando_conferencia' && rascunho.length > 0 && (
                 <button type="button" onClick={enviarCozinha} disabled={enviando}
                   style={{ width: '100%', marginBottom: 12, padding: '12px 0', borderRadius: 10, border: 'none', cursor: enviando ? 'wait' : 'pointer',
