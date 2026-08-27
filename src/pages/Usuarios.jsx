@@ -15,6 +15,21 @@ const PERFIS = [
 
 const emptyVendorForm = { nome: '', email: '', senha: '', telefone: '', perfil: 'entregador' }
 
+const FN_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co/functions/v1'
+
+// Chama a função que mexe no login do funcionário (e-mail, senha, exclusão).
+// Isso não dá pra fazer daqui direto: exige a chave de serviço, que nunca sai
+// do servidor.
+async function chamarUpdateVendor(payload) {
+  const { data: { session } } = await supabase.auth.getSession()
+  const res = await fetch(`${FN_URL}/update-vendor`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+    body: JSON.stringify(payload),
+  })
+  return res.json()
+}
+
 export default function Usuarios() {
   const { user, profile, empresa, refreshProfile } = useAuth()
   const [perfis, setPerfis] = useState([])
@@ -34,6 +49,12 @@ export default function Usuarios() {
   const [vendorError, setVendorError] = useState(null)
   const [creatingVendor, setCreatingVendor] = useState(false)
   const [mostrarSenha, setMostrarSenha] = useState(false)
+
+  // Modal "Editar funcionário". `editForm.senha` em branco = mantém a atual.
+  const [editando, setEditando] = useState(null) // o profile em edição
+  const [editForm, setEditForm] = useState(emptyVendorForm)
+  const [editError, setEditError] = useState(null)
+  const [salvandoEdit, setSalvandoEdit] = useState(false)
 
   const linkCliente = profile?.empresa_id
     ? `${window.location.origin}/cadastro-cliente/${profile.empresa_id}`
@@ -126,16 +147,51 @@ export default function Usuarios() {
     if (error) setError(error.message)
   }
 
-  // Excluir funcionário = soft delete (ativo=false). Não apaga de verdade pra não
-  // quebrar o histórico de pedidos (entregador_id) nem o login; ele só sai da loja.
+  function abrirEdicao(p) {
+    setEditando(p)
+    setEditForm({ nome: p.nome ?? '', email: p.email ?? '', senha: '', telefone: p.telefone ?? '', perfil: p.perfil })
+    setEditError(null)
+    setMostrarSenha(false)
+  }
+
+  async function handleSalvarEdicao(e) {
+    e.preventDefault()
+    setEditError(null)
+    if (!editForm.nome.trim()) { setEditError('O nome é obrigatório.'); return }
+    if (!editForm.email.trim()) { setEditError('O e-mail é obrigatório.'); return }
+    if (editForm.senha && editForm.senha.length < 6) {
+      setEditError('A senha nova deve ter no mínimo 6 caracteres.')
+      return
+    }
+    setSalvandoEdit(true)
+    const r = await chamarUpdateVendor({
+      user_id: editando.id, acao: 'editar',
+      nome: editForm.nome.trim(), email: editForm.email.trim().toLowerCase(),
+      telefone: editForm.telefone.trim(), perfil: editForm.perfil,
+      senha: editForm.senha || undefined,
+    })
+    setSalvandoEdit(false)
+    if (!r?.ok) { setEditError(r?.error ?? 'Erro ao salvar.'); return }
+    setEditando(null)
+    await loadAll()
+    if (editando.id === user?.id) await refreshProfile()
+  }
+
+  // Excluir funcionário: o cadastro vira inativo (ativo=false) pra não quebrar o
+  // histórico de pedidos (entregador_id), MAS o e-mail é devolvido — trocado por
+  // uma lápide no login e o acesso trancado.
+  //
+  // Antes o e-mail ficava preso: quem excluía o "romario@..." e tentava criar de
+  // novo com o mesmo endereço levava "já existe", pra um funcionário que a tela
+  // jurava ter sumido.
   async function handleExcluir(p) {
     if (p.id === user?.id) { setError('Você não pode excluir a si mesmo.'); return }
-    if (!confirm(`Excluir o funcionário "${p.nome || p.email}"?\nEle perde o acesso à loja. O histórico de pedidos é mantido.`)) return
+    if (!confirm(`Excluir o funcionário "${p.nome || p.email}"?\nEle perde o acesso à loja e o e-mail volta a ficar livre pra ser usado de novo. O histórico de pedidos é mantido.`)) return
     setSavingId(p.id)
     setError(null)
-    const { error } = await supabase.from('profiles').update({ ativo: false }).eq('id', p.id)
+    const r = await chamarUpdateVendor({ user_id: p.id, acao: 'liberar' })
     setSavingId(null)
-    if (error) { setError(error.message); return }
+    if (!r?.ok) { setError(r?.error ?? 'Erro ao excluir.'); return }
     setPerfis(prev => prev.filter(x => x.id !== p.id))
   }
 
@@ -295,6 +351,19 @@ export default function Usuarios() {
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                     <button
                       type="button"
+                      onClick={() => abrirEdicao(p)}
+                      disabled={savingId === p.id}
+                      title="Editar nome, e-mail, telefone e senha"
+                      style={{
+                        background: 'none', border: '1px solid var(--border)', color: 'var(--text)',
+                        borderRadius: 8, cursor: 'pointer', padding: '4px 10px', marginRight: 6,
+                        fontSize: 12.5, fontWeight: 700,
+                      }}
+                    >
+                      Editar
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => handleExcluir(p)}
                       disabled={savingId === p.id || p.id === user?.id}
                       title={p.id === user?.id ? 'Você não pode se excluir' : 'Excluir funcionário'}
@@ -325,6 +394,74 @@ export default function Usuarios() {
           </>
         )}
       </div>
+      {/* ── Editar funcionário ──
+          Sem esta tela, corrigir um nome errado (ou trocar o e-mail) só dava
+          excluindo e criando de novo — que era justamente o caminho que
+          esbarrava no e-mail preso. */}
+      {editando && (
+        <div className="modal-overlay" onClick={() => setEditando(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <h2>Editar funcionário</h2>
+            <form onSubmit={handleSalvarEdicao}>
+              <div className="form-field">
+                <label>Nome</label>
+                <input required value={editForm.nome}
+                  onChange={(e) => setEditForm(p => ({ ...p, nome: e.target.value }))}
+                  placeholder="Nome completo" />
+              </div>
+              <div className="form-field">
+                <label>E-mail <span style={{ fontWeight: 400, color: 'var(--text-muted, #888)' }}>(é com ele que entra no sistema)</span></label>
+                <input required type="email" value={editForm.email}
+                  onChange={(e) => setEditForm(p => ({ ...p, email: e.target.value }))}
+                  placeholder="funcionario@exemplo.com" />
+              </div>
+              <div className="form-field">
+                <label>Perfil / Função</label>
+                <select value={editForm.perfil}
+                  onChange={(e) => setEditForm(p => ({ ...p, perfil: e.target.value }))}>
+                  {PERFIS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                </select>
+              </div>
+              <div className="form-field">
+                <label>Senha nova <span style={{ fontWeight: 400, color: 'var(--text-muted, #888)' }}>(em branco = mantém a atual)</span></label>
+                <div style={{ position: 'relative' }}>
+                  <input type={mostrarSenha ? 'text' : 'password'} value={editForm.senha}
+                    onChange={(e) => setEditForm(p => ({ ...p, senha: e.target.value }))}
+                    placeholder="Só preencha se for trocar"
+                    style={{ paddingRight: 44, width: '100%' }} />
+                  <button type="button" onClick={() => setMostrarSenha(v => !v)} tabIndex={-1}
+                    style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                      background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, display: 'flex' }}>
+                    {mostrarSenha ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
+                      </svg>
+                    ) : (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+              <div className="form-field">
+                <label>Telefone / WhatsApp <span style={{ fontWeight: 400, color: 'var(--text-muted, #888)' }}>(opcional)</span></label>
+                <input type="tel" value={editForm.telefone}
+                  onChange={(e) => setEditForm(p => ({ ...p, telefone: e.target.value }))}
+                  placeholder="(84) 99999-9999" />
+              </div>
+              {editError && <p className="error-text">{editError}</p>}
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setEditando(null)}>Cancelar</button>
+                <button type="submit" className="btn btn-primary" disabled={salvandoEdit}>
+                  {salvandoEdit ? 'Salvando…' : 'Salvar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showVendorModal && (
         <div className="modal-overlay" onClick={() => setShowVendorModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
