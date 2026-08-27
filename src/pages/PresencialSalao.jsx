@@ -641,9 +641,11 @@ export default function PresencialSalao() {
     const { error } = await supabase.rpc('vincular_cliente_comanda', {
       p_comanda_id: comandaSel.id, p_cliente_id: cliente?.id ?? null,
     })
-    // Na comanda de balcão o nome também é gravado na própria comanda: é ele que
-    // sai escrito na comanda da cozinha, no cupom e no histórico ("Comanda 03 · Maria").
-    if (!error && comandaSel.tipo === 'balcao') {
+    // O nome também é gravado na própria comanda: é ele que sai escrito na
+    // comanda da cozinha, no cupom e no histórico ("Mesa 4 · Maria").
+    // Vale pra MESA também, não só pro balcão — sem isto, o nome digitado sem
+    // cadastro não tinha onde morar e o atendente clicava e não acontecia nada.
+    if (!error) {
       await supabase.from('comandas')
         .update({ nome_cliente: cliente?.nome ?? null }).eq('id', comandaSel.id)
     }
@@ -1820,7 +1822,7 @@ export default function PresencialSalao() {
                       style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4, padding: '3px 10px',
                         borderRadius: 999, cursor: 'pointer', border: '1.5px dashed var(--border)',
                         background: 'transparent', color: 'var(--text-muted)', fontSize: 12.5, fontWeight: 700 }}>
-                      ➕ {mesaSel.is_comanda ? 'Pôr o nome do cliente' : 'Ligar cliente'}
+                      ➕ Pôr o nome do cliente
                     </button>
                   )
                 )}
@@ -2391,12 +2393,18 @@ export default function PresencialSalao() {
         </div>
       )}
 
-      {/* ── Ligar cliente à mesa ── */}
+      {/* ── Ligar cliente à mesa ──
+          `permitirSemCadastro` vale na MESA também, não só no balcão. Quem senta
+          na mesa raramente quer virar cadastro, e obrigar a escolher alguém da
+          lista (ou cadastrar na hora) só pra escrever "Mesa 4 · Marcos" fazia o
+          atendente desistir de pôr o nome. Ao ABRIR a comanda isso já dava;
+          faltava depois, com a conta já aberta — que é justamente quando o
+          atendente descobre o nome de quem sentou. */}
       {pickerCliente && comandaSel && (
         <ClientePicker
           empresaId={empresaId}
           titulo={mesaSel?.is_balcao ? 'Cliente do balcão' : `Cliente da ${rotuloMesa(mesaSel)}`}
-          permitirSemCadastro={mesaSel?.is_comanda}
+          permitirSemCadastro
           permitirTirar={!!(comandaSel.cliente || comandaSel.nome_cliente)}
           onPick={ligarClienteComanda}
           onFechar={() => setPickerCliente(false)}
