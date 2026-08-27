@@ -301,6 +301,34 @@ html[data-teclado='aberto'] .sal-overlay {
 @media (max-width: 1099px) {
   .sal-corpo[data-aba="comanda"] .sal-col--add     { display: none; }
   .sal-corpo[data-aba="add"]     .sal-col--comanda { display: none; }
+
+  /* ── Buscando produto: a lista fica com a tela ────────────────────────
+   * Com o teclado aberto sobra pouco mais de um terço da altura, e nesse
+   * pedaço ainda cabiam o "Viagem?/Recado", o Subtotal e o cabeçalho da
+   * seção — sobrava espaço pra UM resultado. O garçom baixava o teclado a
+   * cada busca só pra enxergar o que tinha achado.
+   *
+   * Enquanto há texto na busca, some tudo que não ajuda a escolher o
+   * produto. Os botões de ação FICAM: é por eles que o item vai pra
+   * cozinha, e escondê-los obrigaria a limpar a busca antes de enviar.
+   * A regra é o texto digitado, não o foco — se fosse o foco, tocar num
+   * resultado tiraria o foco, o rodapé voltaria e a lista pularia embaixo
+   * do dedo no meio do toque. */
+  .sal-col--add[data-buscando] .sal-titulo-add,
+  .sal-col--add[data-buscando] .sal-inv-abrir,
+  .sal-rodape[data-buscando] .sal-rodape-envio,
+  .sal-rodape[data-buscando] .sal-rodape-subtotal { display: none; }
+
+  /* O campo de busca acompanha a rolagem: sem isto, descer pro quinto
+     resultado tirava da tela o que estava digitado (e o × de limpar). */
+  .sal-col--add[data-buscando] .sal-busca {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding-top: 4px;
+    background: var(--bg);
+  }
+
   /* Sem o respiro do topo: no celular "Adicionar item" é a tela inteira. */
   .sal-corpo[data-aba="add"] .sal-titulo-add { margin-top: 0; }
 

@@ -2044,7 +2044,7 @@ export default function PresencialSalao() {
 
             </div>
 
-            <div className="sal-col sal-col--add">
+            <div className="sal-col sal-col--add" data-buscando={busca.trim() ? '1' : undefined}>
               {/* No celular esta coluna É a tela: o caminho de volta pra comanda
                   fica grudado no topo, com o que já está no rascunho à vista. */}
               <button type="button" className="sal-btn-voltar sal-so-mobile" onClick={() => setAbaMesa('comanda')}>
@@ -2055,7 +2055,7 @@ export default function PresencialSalao() {
 
               {/* ── Inventar produto (item fora do catálogo) ── */}
               {!invAberto ? (
-                <button type="button" onClick={() => setInvAberto(true)}
+                <button type="button" className="sal-inv-abrir" onClick={() => setInvAberto(true)}
                   style={{ width: '100%', padding: '9px 0', borderRadius: 8, marginBottom: 8, cursor: 'pointer',
                     border: '1.5px dashed var(--primary)', background: 'rgba(124,58,237,.06)', color: 'var(--primary)', fontSize: 14.5, fontWeight: 700 }}>
                   ➕ Inventar produto
@@ -2110,7 +2110,7 @@ export default function PresencialSalao() {
                 </div>
               )}
 
-              <div style={{ position: 'relative', marginBottom: 8 }}>
+              <div className="sal-busca" style={{ position: 'relative', marginBottom: 8 }}>
                 <input ref={buscaRef} value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar produto..."
                   style={{ width: '100%', padding: '10px 38px 10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box', fontSize: 14.5 }} />
                 {busca && (
@@ -2161,13 +2161,16 @@ export default function PresencialSalao() {
             </div>
             </div>
 
-            {/* rodapé — sempre à vista (ver .sal-rodape no PresencialSalao.css) */}
-            <div className="sal-rodape">
+            {/* rodapé — sempre à vista (ver .sal-rodape no PresencialSalao.css).
+                `data-buscando` some com o que não serve pra escolher produto:
+                digitando a busca no celular, o teclado come metade da tela e
+                sobrava espaço pra UM resultado só. */}
+            <div className="sal-rodape" data-buscando={busca.trim() ? '1' : undefined}>
               {/* Recado da cozinha fica AQUI, coladinho no botão de enviar: a observação
                   só sai impressa se for escrita ANTES do envio, então ela não pode estar
                   perdida lá em cima, fora da vista de quem está lançando no celular. */}
               {comandaSel.status !== 'aguardando_conferencia' && (
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+                <div className="sal-rodape-envio" style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
                   <button type="button" onClick={alternarViagem} disabled={salvandoViagem}
                     title="Marca a comanda inteira como pedido para viagem — sai impresso na cozinha"
                     style={{
@@ -2206,7 +2209,7 @@ export default function PresencialSalao() {
                   {enviando ? 'Enviando...' : `🍳 Enviar para a cozinha · ${rascunho.reduce((s, r) => s + r.quantidade, 0)} item(ns) · ${fmt(subtotalRascunho)}`}
                 </button>
               )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15.5, marginBottom: 4 }}>
+              <div className="sal-rodape-subtotal" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15.5, marginBottom: 4 }}>
                 <span>Subtotal</span><strong>{fmt(subtotalSel)}</strong>
               </div>
               {comandaSel.status === 'aguardando_conferencia' ? (
