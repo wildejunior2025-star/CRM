@@ -759,9 +759,11 @@ export default function PresencialSalao() {
     }))
   }
 
-  // "Inventar produto": adiciona um item que não está no catálogo. Se o admin marcar
+  // "Inventar produto": adiciona um item que não está no catálogo. Marcando
   // "adicionar ao catálogo", cria o produto de verdade (pra próximas vendas); senão o
   // item existe só nesta venda (produto_id "avulso:", que vira null no comanda_itens).
+  // Garçom também cria — a regra do banco ("Garcom cria produto pelo salao") deixa ele
+  // INSERIR produto da própria loja, mas não mexer nem apagar os que já existem.
   async function adicionarInventado() {
     if (!comandaSel) return
     if (comandaSel.status === 'aguardando_conferencia') { window.alert('Conta já fechada, aguardando o ADM liberar a mesa.'); return }
@@ -771,7 +773,7 @@ export default function PresencialSalao() {
     if (preco <= 0) { window.alert('Digite um preço válido.'); return }
 
     let produtoId = 'avulso:' + Date.now() + '-' + Math.floor(Math.random() * 1000)
-    if (invCatalogo && ehAdmin) {
+    if (invCatalogo) {
       setInvSalvando(true)
       const { data, error } = await supabase.from('produtos')
         .insert({ empresa_id: empresaId, nome, preco_venda: preco, categoria: (invCategoria.trim() || 'outros'), controla_estoque: false })
@@ -2069,13 +2071,11 @@ export default function PresencialSalao() {
                   <input value={invPreco} onChange={e => setInvPreco(maskMoeda(e.target.value))} type="text" inputMode="numeric" placeholder="Preço (ex: 12,00)"
                     style={{ width: '100%', marginTop: 8, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }} />
 
-                  {ehAdmin && (
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 12.5, color: 'var(--text)', cursor: 'pointer' }}>
-                      <input type="checkbox" checked={invCatalogo} onChange={e => setInvCatalogo(e.target.checked)} style={{ width: 16, height: 16 }} />
-                      Adicionar ao catálogo (fica salvo pras próximas vendas)
-                    </label>
-                  )}
-                  {invCatalogo && ehAdmin && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 12.5, color: 'var(--text)', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={invCatalogo} onChange={e => setInvCatalogo(e.target.checked)} style={{ width: 16, height: 16 }} />
+                    Adicionar ao catálogo (fica salvo pras próximas vendas)
+                  </label>
+                  {invCatalogo && (
                     <>
                       <input list="cats-inv" value={invCategoria} onChange={e => setInvCategoria(e.target.value)} placeholder="Categoria (escolha ou digite uma nova)"
                         style={{ width: '100%', marginTop: 8, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }} />
@@ -2086,7 +2086,7 @@ export default function PresencialSalao() {
                   <button type="button" onClick={adicionarInventado} disabled={invSalvando}
                     style={{ width: '100%', marginTop: 12, padding: '10px 0', borderRadius: 8, cursor: invSalvando ? 'wait' : 'pointer',
                       border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 800, opacity: invSalvando ? .6 : 1 }}>
-                    {invSalvando ? 'Salvando...' : (invCatalogo && ehAdmin ? 'Salvar no catálogo e adicionar' : 'Adicionar só nesta venda')}
+                    {invSalvando ? 'Salvando...' : (invCatalogo ? 'Salvar no catálogo e adicionar' : 'Adicionar só nesta venda')}
                   </button>
                 </div>
               )}
