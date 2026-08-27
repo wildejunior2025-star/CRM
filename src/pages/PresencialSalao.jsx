@@ -180,6 +180,10 @@ export default function PresencialSalao() {
   const [invCatalogo, setInvCatalogo] = useState(false)
   const [invCategoria, setInvCategoria] = useState('')
   const [invSalvando, setInvSalvando] = useState(false)
+  // Categoria vira lista de ESCOLHER: o <datalist> não abre no iPhone (o Safari
+  // mostra no máximo uma barrinha em cima do teclado) e no Android virava uma
+  // lista deslizando pro lado. O <select> abre a roda nativa nos dois.
+  const [invCatNova, setInvCatNova] = useState(false)
   const [ordemCat, setOrdemCat] = useState({}) // { nomeCategoria(minusculo): ordem } — mesma ordem do catálogo
   const [caixaAberto, setCaixaAberto] = useState(false) // só lança na mesa com o caixa aberto
   // Complementos: { produto_id: [{ id, nome, min, max, opcoes:[{id,nome,preco_adicional}] }] }
@@ -784,7 +788,7 @@ export default function PresencialSalao() {
       await loadAll()  // aqui SIM o pesado: o produto novo tem que entrar na busca
     }
     setRascunho(prev => [...prev, { produto_id: produtoId, linha: String(produtoId), nome, preco_venda: preco, complementos: [], quantidade: 1, observacao: '' }])
-    setInvNome(''); setInvPreco(''); setInvCatalogo(false); setInvCategoria(''); setInvAberto(false)
+    setInvNome(''); setInvPreco(''); setInvCatalogo(false); setInvCategoria(''); setInvCatNova(false); setInvAberto(false)
   }
   // Nome já existe no catálogo? (ignora acento/maiúsculas) — pra avisar sem bloquear.
   const invNomeExiste = invNome.trim() && produtos.some(p => semAcento(p.nome) === semAcento(invNome))
@@ -2055,21 +2059,21 @@ export default function PresencialSalao() {
                   ➕ Inventar produto
                 </button>
               ) : (
-                <div style={{ border: '1.5px solid var(--primary)', borderRadius: 10, padding: 12, marginBottom: 10, background: 'rgba(124,58,237,.05)' }}>
+                <div className="sal-inv">
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                     <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)' }}>➕ Inventar produto</span>
-                    <button type="button" onClick={() => { setInvAberto(false); setInvNome(''); setInvPreco(''); setInvCatalogo(false); setInvCategoria('') }}
+                    <button type="button" onClick={() => { setInvAberto(false); setInvNome(''); setInvPreco(''); setInvCatalogo(false); setInvCategoria(''); setInvCatNova(false) }}
                       style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)', lineHeight: 1 }}>×</button>
                   </div>
                   <input value={invNome} onChange={e => setInvNome(e.target.value)} placeholder="Nome do produto"
-                    style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }} />
+                    style={{ width: '100%', padding: '11px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 16, boxSizing: 'border-box' }} />
                   {invNomeExiste && (
                     <div style={{ fontSize: 12, color: '#d97706', fontWeight: 700, marginTop: 5 }}>
                       ⚠️ Já existe um produto com esse nome.
                     </div>
                   )}
-                  <input value={invPreco} onChange={e => setInvPreco(maskMoeda(e.target.value))} type="text" inputMode="numeric" placeholder="Preço (ex: 12,00)"
-                    style={{ width: '100%', marginTop: 8, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }} />
+                  <input value={invPreco} onChange={e => setInvPreco(maskMoeda(e.target.value))} type="text" inputMode="decimal" placeholder="Preço (ex: 12,00)"
+                    style={{ width: '100%', marginTop: 8, padding: '11px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 16, boxSizing: 'border-box' }} />
 
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 12.5, color: 'var(--text)', cursor: 'pointer' }}>
                     <input type="checkbox" checked={invCatalogo} onChange={e => setInvCatalogo(e.target.checked)} style={{ width: 16, height: 16 }} />
@@ -2077,9 +2081,22 @@ export default function PresencialSalao() {
                   </label>
                   {invCatalogo && (
                     <>
-                      <input list="cats-inv" value={invCategoria} onChange={e => setInvCategoria(e.target.value)} placeholder="Categoria (escolha ou digite uma nova)"
-                        style={{ width: '100%', marginTop: 8, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }} />
-                      <datalist id="cats-inv">{categorias.map(c => <option key={c} value={c} />)}</datalist>
+                      <select
+                        value={invCatNova ? '__nova__' : invCategoria}
+                        onChange={e => {
+                          const v = e.target.value
+                          if (v === '__nova__') { setInvCatNova(true); setInvCategoria('') }
+                          else { setInvCatNova(false); setInvCategoria(v) }
+                        }}
+                        style={{ width: '100%', marginTop: 8, padding: '11px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 16, boxSizing: 'border-box' }}>
+                        <option value="">Escolha a categoria</option>
+                        {categorias.map(c => <option key={c} value={c}>{c}</option>)}
+                        <option value="__nova__">➕ Criar categoria nova</option>
+                      </select>
+                      {invCatNova && (
+                        <input value={invCategoria} onChange={e => setInvCategoria(e.target.value)} placeholder="Nome da categoria nova"
+                          style={{ width: '100%', marginTop: 8, padding: '11px 10px', borderRadius: 8, border: '1px solid var(--primary)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 16, boxSizing: 'border-box' }} />
+                      )}
                     </>
                   )}
 

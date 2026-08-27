@@ -280,6 +280,17 @@ html[data-teclado='aberto'] .sal-overlay {
   padding: 1px 6px;
 }
 
+/* Caixa do "Inventar produto". Fica aqui e não no inline porque no celular ela
+ * vira tela cheia (mais abaixo) — e inline a folha de estilo não conseguiria
+ * trocar fundo e espaçamento. */
+.sal-inv {
+  border: 1.5px solid var(--primary);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: rgba(124, 58, 237, .05);
+}
+
 /* ── Celular: uma tarefa de cada vez dentro da mesa ────────────────────────
  * Empilhado, o atendente via a comanda em cima e o cardápio inteiro embaixo:
  * pra lançar mais uma cerveja tinha que rolar por toda a conta, e pra conferir
@@ -292,6 +303,26 @@ html[data-teclado='aberto'] .sal-overlay {
   .sal-corpo[data-aba="add"]     .sal-col--comanda { display: none; }
   /* Sem o respiro do topo: no celular "Adicionar item" é a tela inteira. */
   .sal-corpo[data-aba="add"] .sal-titulo-add { margin-top: 0; }
+
+  /* "Inventar produto" sai do meio da mesa e vira TELA CHEIA.
+   *
+   * Dentro do drawer ele ficava espremido entre o cabeçalho da mesa e o rodapé,
+   * que são fixos: com o teclado aberto sobrava uma tirinha, e o campo do nome
+   * saía cortado no meio (o que o Wilde viu em 26/08/2026). Sozinho na tela, o
+   * formulário fica com o espaço todo e rola por conta própria. */
+  .sal-inv {
+    position: fixed;
+    inset: 0;
+    z-index: 950;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    padding: 16px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--bg);
+  }
 }
 
 @media (min-width: 1100px) {
