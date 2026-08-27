@@ -183,10 +183,17 @@ async function processar(body: any) {
     const querNao  = t.includes("prefiro n")  || t.includes("não receber") || t.includes("nao receber")
 
     if (querSim || querNao) {
-      await supabase.from("clientes")
-        .update({ aceita_campanha: querSim, campanha_respondida_em: new Date().toISOString() })
-        .eq("empresa_id", cfg.empresa_id)
-        .or(`telefone.eq.${from},telefone.eq.${from.replace(/^55/, "")}`)
+      // O `from` da Meta vem SEM o 9º dígito no Nordeste (5584 8774-7166) e o
+      // cadastro guarda COM o 9. Comparar o texto cru não achava ninguém: o
+      // cliente recebia o "Show!" e o banco continuava sem resposta nenhuma.
+      // O RPC casa pelas duas formas e guarda a resposta mesmo se não casar.
+      const { data: marcados } = await supabase.rpc("campanha_registrar_resposta", {
+        p_empresa_id: cfg.empresa_id, p_telefone: from,
+        p_texto: textoBotao, p_aceita: querSim,
+      })
+      if (!marcados) {
+        console.error("[cloud] resposta de campanha sem cadastro casado", from, textoBotao)
+      }
 
       await sendText(
         phoneNumberId, from,
@@ -196,6 +203,18 @@ async function processar(body: any) {
         token
       )
       return
+    }
+
+    // Botão que o código não soube ler (rótulo mudou no template, campanha
+    // nova com outra pergunta). Guarda assim mesmo: se a gente reescrever o
+    // template amanhã e esquecer desta lista, a resposta do cliente fica no
+    // banco pra ser recuperada, em vez de sumir sem deixar rastro.
+    if (message.type === "button") {
+      await supabase.rpc("campanha_registrar_resposta", {
+        p_empresa_id: cfg.empresa_id, p_telefone: from,
+        p_texto: textoBotao, p_aceita: null,
+      })
+      console.error("[cloud] botão de campanha não reconhecido", from, textoBotao)
     }
   }
 
