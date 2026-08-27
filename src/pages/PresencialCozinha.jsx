@@ -215,13 +215,25 @@ export default function PresencialCozinha({ embutido = false }) {
   const [, setTick]             = useState(0)
   const [cozinheiros, setCozinheiros] = useState([]) // quem pode preparar (pro admin definir responsável)
   const loadGenRef              = useRef(0) // descarta reload atrasado que reverteria um "aceitar" recém-feito
+  // Setor (mig 0184): a impressora já separa o que é da cozinha do que é do salão,
+  // mas esta tela nasceu antes disso e mostrava TUDO — o cozinheiro do Saidera via
+  // cerveja na fila dele (26/08/2026). Agora ela segue a mesma marcação.
+  const [soCozinha, setSoCozinha] = useState(() => {
+    try { return localStorage.getItem('kds_so_cozinha') !== 'nao' } catch { return true }
+  })
+  // Só esconde se a loja REALMENTE marcou alguma categoria como cozinha. Loja que
+  // nunca configurou nada continua vendo tudo — senão a tela nasceria vazia.
+  const [lojaMarcouSetor, setLojaMarcouSetor] = useState(false)
+  useEffect(() => {
+    try { localStorage.setItem('kds_so_cozinha', soCozinha ? 'sim' : 'nao') } catch { /* ignora */ }
+  }, [soCozinha])
 
   async function load() {
     if (!empresaId) return
     const gen = ++loadGenRef.current
     const inicioHoje = new Date(); inicioHoje.setHours(0, 0, 0, 0)
     const hojeISO = inicioHoje.toISOString()
-    const [mesasRes, entregasRes] = await Promise.all([
+    const [mesasRes, entregasRes, catRes] = await Promise.all([
       supabase
         .from('comanda_itens')
         .select('*, comandas!inner(numero_mesa, status, tipo, nome_cliente)')
@@ -237,12 +249,14 @@ export default function PresencialCozinha({ embutido = false }) {
         .in('status', ['confirmado', 'em_preparo', 'pronto', 'saiu_entrega', 'entregue'])
         .gte('created_at', hojeISO)
         .order('created_at'),
+      supabase.from('categorias').select('id').eq('empresa_id', empresaId).eq('setor', 'cozinha').limit(1),
     ])
     // Descarta este reload se um mais novo já começou — evita que uma leitura
     // atrasada reverta um "aceitar" recém-feito (o pedido sumia do "Preparando").
     if (gen !== loadGenRef.current) return
     setItens(mesasRes.data ?? [])
     setEntregas(entregasRes.data ?? [])
+    setLojaMarcouSetor((catRes.data ?? []).length > 0)
     setLoading(false)
   }
 
@@ -331,11 +345,20 @@ export default function PresencialCozinha({ embutido = false }) {
     historico:  entregas.filter(p => (p.status === 'pronto' || p.status === 'saiu_entrega' || p.status === 'entregue') && (ehAdmin || p.preparando_por === meuId)),
     todos:      entregas.filter(p => emPreparoStatus(p.status)),
   }
+  // 'nenhum' some sempre: é a categoria que a loja marcou como "não precisa de
+  // preparo" (couvert, taxa). O resto só é escondido com o filtro ligado E a loja
+  // tendo marcado o que é da cozinha — mesma regra da impressora.
+  const itensDaTela = itens.filter(i => {
+    if (i.setor === 'nenhum') return false
+    if (!soCozinha || !lojaMarcouSetor) return true
+    return i.setor === 'cozinha'
+  })
+  const escondidos = itens.length - itensDaTela.length
   const mesa = {
-    afazer:     itens.filter(i => i.status === 'pendente' && !i.preparando_por),
-    preparando: itens.filter(i => i.status === 'pendente' && i.preparando_por === meuId),
-    historico:  itens.filter(i => i.status === 'pronto' && (ehAdmin || i.preparando_por === meuId)),
-    todos:      itens.filter(i => i.status === 'pendente'),
+    afazer:     itensDaTela.filter(i => i.status === 'pendente' && !i.preparando_por),
+    preparando: itensDaTela.filter(i => i.status === 'pendente' && i.preparando_por === meuId),
+    historico:  itensDaTela.filter(i => i.status === 'pronto' && (ehAdmin || i.preparando_por === meuId)),
+    todos:      itensDaTela.filter(i => i.status === 'pendente'),
   }
   const cont = {
     afazer:     ent.afazer.length + mesa.afazer.length,
@@ -379,7 +402,7 @@ export default function PresencialCozinha({ embutido = false }) {
       // A busca acha tanto por "mesa 4" quanto por "comanda 07" / nome escrito nela.
       return agruparPorMesa(base.filter(i => casaBusca([i.comandas?.numero_mesa, rotuloComanda(i.comandas), i.comandas?.nome_cliente, i.nome, i.preparando_nome])))
     },
-    [itens, aba, meuId, buscaLimpa] // eslint-disable-line react-hooks/exhaustive-deps
+    [itens, aba, meuId, buscaLimpa, soCozinha, lojaMarcouSetor] // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   if (loading) return <div className="page"><p>Carregando cozinha...</p></div>
@@ -418,6 +441,20 @@ export default function PresencialCozinha({ embutido = false }) {
             {label} {cont[id] > 0 && <span style={{ opacity: .8 }}>({cont[id]})</span>}
           </button>
         ))}
+        {/* A loja separou o que é da cozinha? Então o cozinheiro pode escolher ver
+            só o dele. Sem essa marcação o botão nem aparece (não teria o que filtrar). */}
+        {lojaMarcouSetor && (
+          <button type="button" onClick={() => setSoCozinha(v => !v)}
+            title={soCozinha ? 'Mostrando só o que a cozinha prepara. Clique pra ver tudo.' : 'Mostrando tudo, inclusive bebida. Clique pra ver só a cozinha.'}
+            style={{
+              marginLeft: 'auto', padding: '9px 16px', borderRadius: 10, cursor: 'pointer', fontWeight: 800, fontSize: 13.5,
+              border: `1.5px solid ${soCozinha ? '#d97706' : 'var(--border)'}`,
+              background: soCozinha ? 'rgba(217,119,6,.14)' : 'transparent',
+              color: soCozinha ? '#d97706' : 'var(--text)',
+            }}>
+            {soCozinha ? `🍳 Só cozinha${escondidos > 0 ? ` (${escondidos} escondido${escondidos > 1 ? 's' : ''})` : ''}` : '👁 Vendo tudo'}
+          </button>
+        )}
       </div>
 
       {/* Busca por nº/código/cliente/mesa — ajuda quando tem muito pedido */}
