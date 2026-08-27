@@ -1,7 +1,15 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
+
+// Cada aba tem seu endereço (/entregas?aba=minhas). O motoqueiro sai pro Waze,
+// pro iFood, atende o telefone — e quando volta o celular já descarregou a
+// página. Com a aba só na memória ele caía sempre em "Disponíveis" e achava
+// que os pedidos que tinha aceitado haviam sumido.
+const ABAS = ['disponiveis', 'minhas', 'historico']
+const ABA_LEMBRADA = 'entregador-aba'
 
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? ''
@@ -747,7 +755,30 @@ export default function PainelEntregador() {
   const { user, profile, empresa, logout } = useAuth()
   const [pedidos, setPedidos] = useState([])
   const [loading, setLoading] = useState(true)
-  const [aba, setAba] = useState('disponiveis') // 'disponiveis' | 'minhas' | 'historico'
+  // Aba atual = o que está no link. Trocar de aba empurra no histórico, então
+  // o "voltar" do celular anda entre as abas em vez de fechar a tela.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const abaLink = searchParams.get('aba')
+  const aba = ABAS.includes(abaLink) ? abaLink : 'disponiveis'
+  const setAba = useCallback(id => {
+    const p = new URLSearchParams(searchParams)
+    p.set('aba', id)
+    setSearchParams(p)
+    try { localStorage.setItem(ABA_LEMBRADA, id) } catch { /* ignora */ }
+  }, [searchParams, setSearchParams])
+
+  // Reabrir pelo atalho na tela de início (PWA) entra em /entregas puro, sem o
+  // ?aba=. Aí vale a última aba que ele estava usando.
+  useEffect(() => {
+    if (ABAS.includes(abaLink)) return
+    let lembrada = null
+    try { lembrada = localStorage.getItem(ABA_LEMBRADA) } catch { /* ignora */ }
+    if (!ABAS.includes(lembrada) || lembrada === 'disponiveis') return
+    const p = new URLSearchParams(searchParams)
+    p.set('aba', lembrada)
+    setSearchParams(p, { replace: true })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const [busca, setBusca] = useState('') // filtra por nº/código/cliente/endereço
   const [historico, setHistorico] = useState([])
   const [histLoading, setHistLoading] = useState(false)
