@@ -1778,7 +1778,7 @@ export default function PresencialSalao() {
       {/* ── Drawer da comanda ── */}
       {mesaSel && comandaSel && (
         <div onClick={sairDaMesa} className="sal-overlay">
-          <div onClick={e => e.stopPropagation()} className="sal-drawer" data-buscando={busca.trim() ? '1' : undefined}>
+          <div onClick={e => e.stopPropagation()} className="sal-drawer">
             {/* header */}
             <div className="sal-header" style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
@@ -2051,7 +2051,7 @@ export default function PresencialSalao() {
 
             </div>
 
-            <div className="sal-col sal-col--add" data-buscando={busca.trim() ? '1' : undefined}>
+            <div className="sal-col sal-col--add">
               {/* No celular esta coluna É a tela: o caminho de volta pra comanda
                   fica grudado no topo, com o que já está no rascunho à vista. */}
               <button type="button" className="sal-btn-voltar sal-so-mobile" onClick={() => setAbaMesa('comanda')}>
@@ -2117,6 +2117,21 @@ export default function PresencialSalao() {
                 </div>
               )}
 
+              {/* Busca + resultados moram juntos porque no celular os dois viram
+                  TELA CHEIA quando há texto digitado — mesma receita do
+                  "Inventar produto" (ver .sal-busca-painel no CSS). */}
+              <div className="sal-busca-painel" data-buscando={busca.trim() ? '1' : undefined}>
+              {/* Barra de volta: só existe no modo tela cheia. Sem ela o garçom
+                  fica sem saída — o "← Ver a comanda" está atrás do painel. E o
+                  contador é o único sinal de que o toque no produto pegou. */}
+              <div className="sal-busca-topo">
+                <button type="button" onClick={() => { setBusca(''); if (buscaRef.current) buscaRef.current.blur() }}>
+                  ← Voltar
+                </button>
+                {rascunho.length > 0 && (
+                  <span>{rascunho.reduce((n, r) => n + r.quantidade, 0)} a enviar · {fmt(subtotalRascunho)}</span>
+                )}
+              </div>
               <div className="sal-busca" style={{ position: 'relative', marginBottom: 8 }}>
                 <input ref={buscaRef} value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar produto..."
                   style={{ width: '100%', padding: '10px 38px 10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box', fontSize: 14.5 }} />
@@ -2165,14 +2180,12 @@ export default function PresencialSalao() {
                   {produtosFiltrados.length === 0 && <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum produto encontrado.</p>}
                 </div>
               )}
+              </div>
             </div>
             </div>
 
-            {/* rodapé — sempre à vista (ver .sal-rodape no PresencialSalao.css).
-                `data-buscando` some com o que não serve pra escolher produto:
-                digitando a busca no celular, o teclado come metade da tela e
-                sobrava espaço pra UM resultado só. */}
-            <div className="sal-rodape" data-buscando={busca.trim() ? '1' : undefined}>
+            {/* rodapé — sempre à vista (ver .sal-rodape no PresencialSalao.css) */}
+            <div className="sal-rodape">
               {/* Recado da cozinha fica AQUI, coladinho no botão de enviar: a observação
                   só sai impressa se for escrita ANTES do envio, então ela não pode estar
                   perdida lá em cima, fora da vista de quem está lançando no celular. */}
