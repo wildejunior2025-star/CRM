@@ -1677,9 +1677,16 @@ export default function PresencialSalao() {
             const pseudo = mesaDaComanda(c)
             const sub = subtotalDe(c)
             const prontos = prontosDe(c)
-            const aguardando = c.status === 'aguardando_conferencia'
             const naoVisto = c.visto_em == null && c.status === 'aberta'
-            const borda = prontos > 0 ? '#22c55e' : aguardando ? '#3b82f6' : '#d97706'
+            // Mesmo semáforo da mesa (corStatus). Antes a comanda tinha cor
+            // própria e só sabia três estados — nunca ficava CINZA quando tudo
+            // já tinha sido entregue, e a que faltava servir era laranja
+            // "Aberta" em vez de vermelha "Faltam N". Quem olhava o quadro
+            // precisava ler cor de dois jeitos: um pras mesas, outro pras
+            // comandas. `comandaPorMesa` já indexa a comanda de balcão pela
+            // chave da pseudo-mesa, então corStatus acha ela sozinho.
+            const cor = corStatus(pseudo)
+            const borda = prontos > 0 ? '#22c55e' : cor.border
             return (
               <div key={c.id} role="button" tabIndex={0} onClick={() => abrirMesa(pseudo)}
                 onKeyDown={ev => { if (ev.key === 'Enter') abrirMesa(pseudo) }}
@@ -1687,7 +1694,7 @@ export default function PresencialSalao() {
                 style={{
                   borderRadius: 9, padding: '7px 8px', cursor: 'pointer', textAlign: 'left', position: 'relative',
                   border: `1.5px solid ${borda}`,
-                  background: prontos > 0 ? 'rgba(34,197,94,.14)' : aguardando ? 'rgba(59,130,246,.16)' : 'rgba(217,119,6,.12)',
+                  background: prontos > 0 ? 'rgba(34,197,94,.14)' : cor.bg,
                   color: 'var(--text)',
                   boxShadow: prontos > 0 ? '0 0 0 2px rgba(34,197,94,.25)' : 'none',
                 }}>
@@ -1699,8 +1706,8 @@ export default function PresencialSalao() {
                 )}
                 {naoVisto && <span className="sal-selo-novo">NOVO</span>}
                 <div style={{ fontSize: 14.5, fontWeight: 800, lineHeight: 1.1, marginTop: naoVisto ? 10 : 0 }}>🧾 {rotuloMesa(pseudo)}</div>
-                <div style={{ fontSize: 9.5, marginTop: 2, color: borda, fontWeight: 700 }}>
-                  {aguardando ? 'Aguard. ADM' : 'Aberta'}
+                <div style={{ fontSize: 9.5, marginTop: 2, color: cor.border, fontWeight: 700 }}>
+                  {cor.label}
                 </div>
                 {c.para_viagem && (
                   <div style={{ fontSize: 10, marginTop: 1, fontWeight: 800, color: '#d97706' }}>📦 VIAGEM</div>
