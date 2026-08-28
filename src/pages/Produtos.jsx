@@ -58,6 +58,7 @@ const emptyForm = {
   custo_modo: 'fixo',      // 'fixo' = R$ por unidade | 'pct' = % do valor vendido
   custo_pct_venda: '',
   preco_venda: 0,
+  preco_promocional: '',
   preco_app: 0,
   faixas_preco: [],
   estoque_minimo: 0,
@@ -642,6 +643,7 @@ export default function Produtos() {
       custo_modo: produto.custo_pct_venda != null ? 'pct' : 'fixo',
       custo_pct_venda: produto.custo_pct_venda ?? '',
       preco_venda: produto.preco_venda ?? 0,
+      preco_promocional: produto.preco_promocional ?? '',
       preco_app: produto.preco_app ?? 0,
       faixas_preco: produto.faixas_preco ?? [],
       estoque_minimo: produto.estoque_minimo ?? 0,
@@ -747,6 +749,12 @@ export default function Produtos() {
         ? Math.max(0, Math.min(100, Number(form.custo_pct_venda) || 0))
         : null,
       preco_venda: Number(form.preco_venda) || 0,
+      // Vazio, zero ou maior/igual ao preço = SEM promoção. Guardar um valor que
+      // não é menor riscaria o preço e mostraria outro igual do lado (e o banco
+      // recusa, mig 0202).
+      preco_promocional: (Number(form.preco_promocional) > 0
+        && Number(form.preco_promocional) < (Number(form.preco_venda) || 0))
+        ? Number(form.preco_promocional) : null,
       preco_app: Number(form.preco_app) || 0,
       estoque_minimo: Number(form.estoque_minimo) || 0,
       faixas_preco: form.faixas_preco ?? [],
@@ -1182,7 +1190,18 @@ export default function Produtos() {
                       ? <span title="Custo estimado como % do valor vendido">{Number(p.custo_pct_venda)}% do vendido</span>
                       : `R$ ${Number(p.preco_custo).toFixed(2)}`}
                   </td>
-                  <td>R$ {Number(p.preco_venda).toFixed(2)}</td>
+                  <td>
+                    {p.preco_promocional > 0 && p.preco_promocional < p.preco_venda ? (
+                      <>
+                        <s style={{ color: 'var(--text-muted)', fontWeight: 400 }}>
+                          R$ {Number(p.preco_venda).toFixed(2)}
+                        </s>{' '}
+                        <strong style={{ color: '#22c55e' }}>
+                          R$ {Number(p.preco_promocional).toFixed(2)}
+                        </strong>
+                      </>
+                    ) : `R$ ${Number(p.preco_venda).toFixed(2)}`}
+                  </td>
                   {MOSTRAR_PRECO_APP && <td className="col-extra">R$ {Number(p.preco_app || 0).toFixed(2)}</td>}
                   {usaEstoque && <td className="col-extra">{p.estoque_minimo}</td>}
                   <td>
@@ -1566,6 +1585,37 @@ export default function Produtos() {
                     value={form.preco_venda}
                     onChange={handleChange}
                   />
+                </div>
+
+                <div className="form-field">
+                  <label style={{ color: '#22c55e' }}>
+                    Preço promocional (R$){' '}
+                    <span style={{ fontWeight: 400, fontSize: '0.8em', color: 'var(--text-muted)' }}>
+                      opcional — risca o de cima
+                    </span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="preco_promocional"
+                    value={form.preco_promocional}
+                    placeholder="sem promoção"
+                    onChange={handleChange}
+                  />
+                  {Number(form.preco_promocional) > 0
+                    && Number(form.preco_promocional) >= (Number(form.preco_venda) || 0) && (
+                    <span style={{ fontSize: 11.5, color: '#f87171' }}>
+                      Tem que ser MENOR que o preço público, senão não é promoção.
+                    </span>
+                  )}
+                  {Number(form.preco_promocional) > 0
+                    && Number(form.preco_promocional) < (Number(form.preco_venda) || 0) && (
+                    <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                      O cliente vê <s>R$ {Number(form.preco_venda).toFixed(2)}</s>{' '}
+                      <strong style={{ color: '#22c55e' }}>R$ {Number(form.preco_promocional).toFixed(2)}</strong>
+                    </span>
+                  )}
                 </div>
 
                 {MOSTRAR_PRECO_APP && (

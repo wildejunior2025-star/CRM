@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
 import AvisoCookies from '../components/AvisoCookies'
 import { adicionalComplementos, blocosDeOpcoes, cobraPeloMaior, rotuloPrecoOpcao } from '../lib/complementos'
-import { precoPorQuantidade, faixaAplicada, menorFaixa } from '../lib/precoQuantidade'
+import { precoPorQuantidade, faixaAplicada, menorFaixa, precoRiscado } from '../lib/precoQuantidade'
 import { criarBuscadorDescricao, comDescricaoNasOpcoes } from '../lib/descricaoSabor'
 import { abertaAgora, comoFicaNoDia, carregarExcecoes, hojeBR } from '../lib/feriados'
 import { capturarIndicacao } from '../lib/indicacao'
@@ -200,7 +200,7 @@ export default function DeliveryLoja() {
       if (!lojaData) { setLoja(null); setLoading(false); return }
 
       const { data: produtosData } = await supabase.from('produtos')
-        .select('id, nome, descricao, preco:preco_venda, faixas_preco, foto_url, categoria, ordem, disponivel_delivery, estoque_minimo')
+        .select('id, nome, descricao, preco:preco_venda, preco_promocional, faixas_preco, foto_url, categoria, ordem, disponivel_delivery, estoque_minimo')
         .eq('empresa_id', lojaData.id)
         .eq('ativo', true)
         .eq('disponivel_delivery', true)
@@ -311,7 +311,8 @@ export default function DeliveryLoja() {
           // de 9 pra 10 tem que trocar o preco sozinho, senão o "a partir de 10"
           // vira promessa que a loja não cumpre.
           precoBase: Number(prod.preco), faixas_preco: prod.faixas_preco ?? [],
-          preco: precoPorQuantidade(prod.preco, prod.faixas_preco, qtd),
+          preco_promocional: prod.preco_promocional ?? null,
+          preco: precoPorQuantidade(prod.preco, prod.faixas_preco, qtd, prod.preco_promocional),
         },
       }
     })
@@ -357,7 +358,10 @@ export default function DeliveryLoja() {
   // baixar o valor sozinho.
   function comPrecoDaFaixa(item, qtd) {
     if (item.precoBase == null) return { ...item, quantidade: qtd }
-    return { ...item, quantidade: qtd, preco: precoPorQuantidade(item.precoBase, item.faixas_preco, qtd) }
+    return {
+      ...item, quantidade: qtd,
+      preco: precoPorQuantidade(item.precoBase, item.faixas_preco, qtd, item.preco_promocional),
+    }
   }
 
   function incKey(key) {
@@ -852,6 +856,10 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
   }, 0)
   const precoBase = Number(produto.preco) + minExtra
   const faixa1 = menorFaixa(produto.faixas_preco)
+  // Promocao (mig 0202): o que vende nao e o "R$ 15,00", e o R$ 18,00 riscado
+  // do lado. Sem o de antes, o cliente nao sabe que esta levando mais barato.
+  const riscado = precoRiscado(produto.preco, produto.preco_promocional)
+  const precoMostrado = riscado ? Number(produto.preco_promocional) + minExtra : precoBase
   return (
     <div className="dloja-prod-card">
       <div className="dloja-prod-foto">
@@ -871,7 +879,15 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
         )}
         <p className="dloja-prod-preco">
           {temComplementos && <span style={{ fontSize: 11, color: 'var(--dl-text-muted)', fontWeight: 500 }}>a partir de </span>}
-          R$ {fmt(precoBase)}
+          {riscado && (
+            <span style={{
+              textDecoration: 'line-through', color: 'var(--dl-text-muted)',
+              fontWeight: 500, fontSize: '0.82em', marginRight: 6,
+            }}>
+              R$ {fmt(riscado + minExtra)}
+            </span>
+          )}
+          <span style={riscado ? { color: '#22c55e' } : undefined}>R$ {fmt(precoMostrado)}</span>
         </p>
         {/* Chamada do atacado no card: o desconto só vende se o cliente souber
             que ele existe antes de abrir o produto. */}
@@ -1059,8 +1075,9 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
   const qtdItem = grupoQtd ? somaQtd(sel, grupoQtd.id) : 1
 
   // Preco de atacado entra sozinho quando a quantidade alcanca a faixa.
-  const precoBase = precoPorQuantidade(produto.preco, produto.faixas_preco, qtdItem)
+  const precoBase = precoPorQuantidade(produto.preco, produto.faixas_preco, qtdItem, produto.preco_promocional)
   const faixa = faixaAplicada(produto.faixas_preco, qtdItem)
+  const riscado = precoRiscado(produto.preco, produto.preco_promocional)
   const adicional = adicionalComplementos(grupos, selecoes)
   // Opção que custa a mais entra rateada no total, pra o item ter UM preço
   // unitário e o subtotal (qtd × unitário) continuar batendo.
@@ -1086,6 +1103,16 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
               aviso viravam um paragrafo unico e ninguem lia. */}
           {produto.descricao && (
             <p style={{ fontSize: 13, color: 'var(--dl-text-muted)', margin: '0 0 12px', whiteSpace: 'pre-wrap' }}>{produto.descricao}</p>
+          )}
+          {riscado && (
+            <p style={{ fontSize: 13.5, margin: '0 0 12px', fontWeight: 700 }}>
+              <span style={{ textDecoration: 'line-through', color: 'var(--dl-text-muted)', fontWeight: 500 }}>
+                R$ {fmt(riscado)}
+              </span>
+              <span style={{ color: '#22c55e', marginLeft: 8 }}>
+                R$ {fmt(Number(produto.preco_promocional))} · promoção
+              </span>
+            </p>
           )}
           {grupos.map(grupo => {
             const qtdSel = nEscolhidas(sel, grupo.id)
