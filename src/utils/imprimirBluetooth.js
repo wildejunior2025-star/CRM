@@ -271,7 +271,7 @@ export function montarCupomBytes(pedido, empresa = {}) {
     const { nome, complementos } = separarItem(item)
     b.alto(true).row(`${qtd}x ${nome}`, fmt(sub)).alto(false)
     for (const c of complementos) {
-      const cq = Number(c?.qtd ?? 1) * Number(qtd || 1)
+      const cq = Number(c?.qtdTotal ?? 1)
       const cp = Number(c?.preco ?? 0)
       b.txt(`  > ${cq > 1 ? cq + 'x ' : ''}${semAcento(c?.nome ?? c)}${cp > 0 ? ' +' + fmt(cp * cq) : ''}`).nl()
     }

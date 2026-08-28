@@ -85,8 +85,9 @@ export function montarCupomHtml(pedido, empresa = {}) {
       : qtd * Number(item.preco ?? item.preco_unitario ?? 0)
     const { nome: nomeItem, complementos: comps } = separarItem(item)
     const compsHtml = comps.map(c => {
-      // Complemento multiplica pela qtd do prato (4 quentinhas → complemento ×4).
-      const cq = Number(c?.qtd ?? 1) * Number(qtd || 1)
+      // separarItem ja resolveu: complemento normal multiplica pela qtd do prato
+      // (4 quentinhas → complemento ×4) e o de grupo por quantidade vem absoluto.
+      const cq = Number(c?.qtdTotal ?? 1)
       const cn = esc(c?.nome ?? c)
       // Adicional pago (ex.: proteína/porção extra) sai com o valor cobrado.
       const cp = Number(c?.preco ?? 0)

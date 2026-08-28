@@ -979,9 +979,13 @@ export default function DeliveryCheckout() {
 
     const itensPedido = itens.map(i => ({
       produto_id:    i.id,
-      // Dobra as escolhas no nome (aparece no painel/cupom) + guarda estruturado
+      // Dobra as escolhas no nome (aparece no painel/cupom) + guarda estruturado.
+      // No atacado a quantidade de cada sabor entra junto: "Dadá (500× Leite
+      // condensado, 100× Uva)" — sem isso a comanda diria só quais sabores,
+      // e quem monta não saberia quanto separar de cada um.
       nome:          i.complementos?.length
-        ? `${i.nome} (${i.complementos.map(c => c.nome).join(', ')})`
+        ? `${i.nome} (${i.complementos.map(c =>
+            c?.absoluto ? `${Number(c.qtd) || 1}× ${c.nome}` : c.nome).join(', ')})`
         : i.nome,
       quantidade:    i.quantidade,
       preco_unitario: i.preco,

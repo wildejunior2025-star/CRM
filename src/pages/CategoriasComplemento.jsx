@@ -187,7 +187,7 @@ export default function CategoriasComplemento() {
     setLoading(true)
     const [gruposRes, prodRes, linkRes] = await Promise.all([
       supabase.from('complemento_grupos')
-        .select('id, nome, min, max, ordem, disponivel, regra_preco, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel)')
+        .select('id, nome, min, max, ordem, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel)')
         .eq('empresa_id', empresaId).order('nome'),
       supabase.from('produtos').select('id, nome, categoria, descricao, preco_venda, ativo').eq('empresa_id', empresaId).is('arquivado_em', null).order('nome'),
       supabase.from('produto_complemento_grupos')
@@ -200,6 +200,7 @@ export default function CategoriasComplemento() {
     const lista = (gruposRes.data ?? []).map(g => ({
       id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, disponivel: g.disponivel !== false,
       regra_preco: g.regra_preco ?? 'somar',
+      modo_quantidade: g.modo_quantidade === true,
       opcoes: (g.complemento_opcoes ?? []).sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0)),
       links: (linksPorGrupo[g.id] ?? []),
     }))
@@ -571,12 +572,31 @@ export default function CategoriasComplemento() {
                 <span className={`badge ${cat.disponivel ? 'badge-success' : 'badge-danger'}`}>
                   {cat.disponivel ? 'Ativa' : 'Pausada'}
                 </span>
-                <span className="cc-minmax">
-                  mín <input className="cc-input" type="number" min="0" defaultValue={cat.min}
+                {/* Com quantidade ligada o máximo perde o sentido (é justamente o
+                    "sem limite") e o mínimo passa a valer pro TOTAL do grupo:
+                    é o "a partir de 10 unidades" do atacado. */}
+                <span className="cc-minmax" title={cat.modo_quantidade
+                  ? 'Mínimo de unidades somando todas as opções (0 = sem mínimo)'
+                  : 'Quantas opções diferentes o cliente escolhe'}>
+                  {cat.modo_quantidade ? 'mín. unidades' : 'mín'}
+                  <input className="cc-input" type="number" min="0" defaultValue={cat.min}
                     onBlur={e => salvarCategoria(cat, { min: Number(e.target.value) || 0 })} />
-                  máx <input className="cc-input" type="number" min="1" defaultValue={cat.max}
-                    onBlur={e => salvarCategoria(cat, { max: Number(e.target.value) || 1 })} />
+                  {!cat.modo_quantidade && <>
+                    máx <input className="cc-input" type="number" min="1" defaultValue={cat.max}
+                      onBlur={e => salvarCategoria(cat, { max: Number(e.target.value) || 1 })} />
+                  </>}
                 </span>
+                {/* Atacado: o cliente diz QUANTO de cada sabor (500 de um, 100 de
+                    outro), em vez de só marcar qual. Vale na Loja Online. */}
+                <label className="cc-minmax" style={{ cursor: 'pointer', gap: 5 }}
+                  title="O cliente escolhe a quantidade de cada opção, sem limite, e a quantidade do item vira a soma. Vale na Loja Online — balcão e mesa seguem marcando opção.">
+                  <input
+                    type="checkbox"
+                    checked={!!cat.modo_quantidade}
+                    onChange={e => salvarCategoria(cat, { modo_quantidade: e.target.checked })}
+                  />
+                  quantidade por opção
+                </label>
                 {/* Como cobrar: somar (adicional comum) ou pelo mais caro (pizza meio a meio) */}
                 <span className="cc-minmax" title="Somar: cada opção soma no preço. Mais caro: vale só a opção mais cara (pizza meio a meio).">
                   cobrar
