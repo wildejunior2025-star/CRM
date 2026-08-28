@@ -1770,7 +1770,7 @@ export default function Produtos() {
 
       {showCategModal && (
         <div className="modal-overlay" onClick={() => setShowCategModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
             <h2>Categorias</h2>
 
             <form onSubmit={handleSaveCategoria} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
@@ -1788,11 +1788,12 @@ export default function Produtos() {
 
             {categError && <p className="error-text">{categError}</p>}
 
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+            <div className="cat-ajuda">
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
               🕒 Defina o horário que cada categoria fica disponível para venda. Deixe <strong>em branco</strong> = sempre disponível.
               Ex.: Quentinhas <strong>10:00 às 14:00</strong>, Janta <strong>17:00 às 22:00</strong>.
             </p>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
               🖨️ <strong>Onde imprime</strong> — <strong>🍳 Cozinha</strong>: sai na térmica da cozinha (o que é preparado
               lá dentro: quentinhas, espetinhos, porções). <strong>🧾 Salão</strong>: sai na impressora da frente, junto
               com a conta. <strong>🚫 Não imprime</strong>: não sai papel nenhum — pro que o próprio garçom pega e dá baixa
@@ -1801,11 +1802,12 @@ export default function Produtos() {
               como Não imprime.
             </p>
 
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
               💸 <strong>Sem taxa</strong> — marque as categorias que <strong>não entram na taxa de serviço</strong> da mesa
               (couvert artístico, ingresso, reserva). O item continua na conta e no faturamento normalmente; só fica de fora
               do cálculo da taxa — e sai na comanda com <strong>(isento de taxa)</strong> do lado, pro cliente ver.
             </p>
+            </div>
 
             <div className="data-table tabela-categorias">
               {categorias.length === 0 ? (

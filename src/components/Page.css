@@ -204,6 +204,13 @@
   box-shadow: var(--shadow-md);
 }
 
+/* Modal largo: pra quem tem tabela dentro (Categorias tem 7 colunas). No 640px
+   padrao a tabela rolava de lado e os botoes de Duplicar/Excluir ficavam fora
+   da tela, com o monitor inteiro sobrando vazio dos dois lados. */
+.modal.modal-wide {
+  max-width: min(1080px, 94vw);
+}
+
 .modal h2 {
   margin: 0 0 20px;
   font-size: 20px;
@@ -571,6 +578,19 @@ a.dashboard-card-link:hover {
 .cat-setor { width: 130px; }
 .cat-hora  { width: 96px; }
 
+/* As tres explicacoes (horario, onde imprime, sem taxa) empilhadas comiam meia
+   tela de altura e empurravam a lista pra fora. Lado a lado no desktop. */
+.cat-ajuda {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px 20px;
+  margin-bottom: 14px;
+}
+
+@media (max-width: 900px) {
+  .cat-ajuda { grid-template-columns: 1fr; gap: 10px; }
+}
+
 @media (max-width: 720px) {
   .tabela-categorias { overflow-x: visible; }
   .tabela-categorias table { min-width: 0; width: 100%; }
@@ -590,19 +610,20 @@ a.dashboard-card-link:hover {
     white-space: normal;
   }
 
-  /* 1 arrastar · 2 setas · 3 nome · 4 setor · 5 horário · 6 ações */
+  /* 1 arrastar · 2 setas · 3 nome · 4 setor · 5 sem taxa · 6 horário · 7 ações */
   .tabela-categorias tbody td:nth-child(1) { grid-area: 1 / 1; }
   .tabela-categorias tbody td:nth-child(3) { grid-area: 1 / 2; font-weight: 600; }
   .tabela-categorias tbody td:nth-child(2) { grid-area: 2 / 1; }
   .tabela-categorias tbody td:nth-child(4) { grid-area: 2 / 2; }
   .tabela-categorias tbody td:nth-child(5) { grid-area: 3 / 1 / 4 / 3; }
-  .tabela-categorias tbody td:nth-child(6) { grid-area: 4 / 1 / 5 / 3; text-align: left; }
+  .tabela-categorias tbody td:nth-child(6) { grid-area: 4 / 1 / 5 / 3; }
+  .tabela-categorias tbody td:nth-child(7) { grid-area: 5 / 1 / 6 / 3; text-align: left; }
 
   .tabela-categorias .cat-setor { width: 100%; }
   .tabela-categorias .cat-hora  { width: auto; flex: 1 1 90px; min-width: 84px; }
 
   /* O horário é "hh:mm às hh:mm": vira flex pra dividir a largura por igual. */
-  .tabela-categorias tbody td:nth-child(5) {
+  .tabela-categorias tbody td:nth-child(6) {
     display: flex;
     align-items: center;
     gap: 6px;
