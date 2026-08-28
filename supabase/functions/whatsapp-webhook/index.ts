@@ -1,4 +1,4 @@
-// Bot v183 — endereço: CEP OU escrito (salvar_rua agora guarda bairro/cidade, senão a taxa sai errada). v182: cadastro pede só o nome, sem e-mail.
+// Bot v184 — pedido de endereço vende o CEP como atalho (escrever é só a saída de quem não sabe). v183: escrito guarda bairro/cidade. v182: cadastro sem e-mail.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -14,14 +14,16 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 }
 
-// Pedido de endereço — o CEP é o caminho rápido, mas quem não sabe de cabeça pode
-// escrever o endereço. Nos dois casos precisamos de rua + bairro + cidade: é o
-// bairro que define a taxa fixa, e sem cidade o mapa procura a rua no Brasil inteiro.
+// Pedido de endereço. O CEP tem que parecer o ATALHO que é: 8 números e só falta o
+// número da casa. Por isso a mensagem já diz onde o caminho termina — senão o cliente
+// imagina que depois do CEP ainda vem um monte de pergunta. A alternativa de escrever
+// fica em uma linha discreta, sem listar os campos (listar faz o CEP parecer o trabalhoso).
+// Nos dois caminhos precisamos de rua + bairro + cidade: é o bairro que define a taxa
+// fixa, e sem cidade o mapa procura a rua no Brasil inteiro.
 const TEXTO_PEDIR_ENDERECO =
-  "📍 Agora o endereço!\n\n" +
-  "Me manda o seu *CEP* que eu já puxo a rua, o bairro e a cidade automaticamente. 😉\n\n" +
-  "Se não souber de cabeça, sem problema — é só escrever assim:\n" +
-  "_Rua, número, bairro e cidade_"
+  "📍 Falta só o endereço!\n\n" +
+  "Me manda o seu *CEP* que eu pego a rua, o bairro e a cidade sozinho — aí você só me diz o *número* da casa. 😉\n\n" +
+  "_Não sabe o CEP? Sem problema, é só escrever o endereço que eu anoto._"
 
 // ── handleAtualizar_carrinho ─────────────────────────────────────────────────
 // Usa PATCH (update) + POST (insert) separados — upsert via on_conflict tem falhas intermitentes
@@ -429,7 +431,7 @@ async function handleSalvarNumero(
       .single()
 
     if (!c?.endereco_rua) {
-      return { resposta: "Não encontrei o endereço salvo. Me manda o *CEP* de novo — ou escreva _rua, número, bairro e cidade_. 😊" }
+      return { resposta: "Não encontrei o endereço salvo. Me manda o *CEP* de novo — ou escreva o endereço. 😊" }
     }
 
     const { error: numErr } = await supabase.from("whatsapp_carrinho").update({
@@ -538,7 +540,8 @@ async function handleFecharPedido(
         mensagemExtra: "",
         acaoPromise: Promise.resolve(),
         bloqueioMensagem: "📍 Preciso do seu endereço para entrega!\n\n" +
-          "Me manda o seu *CEP* que eu puxo a rua, o bairro e a cidade — ou escreva _rua, número, bairro e cidade_. 😊",
+          "Me manda o seu *CEP* que eu pego a rua, o bairro e a cidade — aí falta só o *número* da casa. 😊\n\n" +
+          "_Não sabe o CEP? É só escrever o endereço._",
       }
     }
     const totalCarrinho  = itens.reduce((s: number, i: any) => s + Number(i.qtd) * Number(i.preco), 0)
@@ -1488,7 +1491,7 @@ O telefone já temos (${phoneLocal}) — NUNCA peça.
 
 ▶ PASSO 4 — ENTREGA OU RETIRADA
 ${aceitaDelivery
-  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE já temos o endereço (ver CLIENTE, ou acabou de coletar no cadastro) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → PASSO 5\n  - Quer trocar → peça o endereço novo: se vier CEP emita buscar_cep, se vier escrito emita salvar_rua (rua+bairro+cidade); depois o número (emita salvar_numero)\n• SE ainda não temos endereço → peça o *CEP*, avisando que ele também pode escrever _rua, número, bairro e cidade_ se preferir. CEP → buscar_cep; escrito → salvar_rua. Depois o número (emita salvar_numero), aí siga ao PASSO 5\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá ao PASSO 5`
+  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE já temos o endereço (ver CLIENTE, ou acabou de coletar no cadastro) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → PASSO 5\n  - Quer trocar → peça o endereço novo: se vier CEP emita buscar_cep, se vier escrito emita salvar_rua (rua+bairro+cidade); depois o número (emita salvar_numero)\n• SE ainda não temos endereço → peça o *CEP* (é o caminho mais rápido: com ele só falta o número da casa). Não fique enumerando rua/bairro/cidade — só se ele disser que não sabe o CEP é que você aceita o endereço escrito. CEP → buscar_cep; escrito → salvar_rua. Depois o número (emita salvar_numero), aí siga ao PASSO 5\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá ao PASSO 5`
   : `Somente retirada no local.\nInforme: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\nVá ao PASSO 5`}
 
 ▶ PASSO 5 — FORMA DE PAGAMENTO
