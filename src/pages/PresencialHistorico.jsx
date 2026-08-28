@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import ClientePicker from '../components/ClientePicker'
 import { rotuloComanda } from '../lib/comanda'
+import { imprimirHtml, montarContaPresencialHtml } from '../utils/imprimirCupom'
 import '../components/Page.css'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
@@ -16,7 +17,7 @@ function horaBR(iso) {
 }
 
 export default function PresencialHistorico() {
-  const { profile, user } = useAuth()
+  const { profile, user, empresa } = useAuth()
   const empresaId = profile?.empresa_id
   // A MESMA tela serve o dono e o garçom. Pro garçom ela vira "Minhas mesas":
   // só as contas que ele atendeu, sem os controles de dono (corrigir forma de
@@ -38,6 +39,50 @@ export default function PresencialHistorico() {
   const [pickerComanda, setPickerComanda] = useState(null) // comanda em que se está ligando o cliente
   const [editandoForma, setEditandoForma] = useState(null) // id da comanda com o seletor de forma aberto
   const [salvandoForma, setSalvandoForma] = useState(false)
+
+  // ── Segunda via de uma conta já fechada ──────────────────────────────────
+  //
+  // A conta sai UMA vez, no fechamento. Se a térmica tinha caído do Bluetooth
+  // naquele instante, o papel não saía — e a mesa já estava liberada, fora do
+  // Salão. Não havia segunda via em lugar nenhum: o jeito era refazer a conta
+  // na mão. Aconteceu na Saidera em 27/08/2026.
+  //
+  // Aqui vale pra qualquer conta de qualquer dia da lista, porque o histórico
+  // já traz os itens (comanda_itens) junto.
+  const [imprimindo, setImprimindo] = useState(null) // id da comanda saindo
+  const [impMsg, setImpMsg] = useState(null)         // { id, texto }
+
+  async function imprimirSegundaVia(c) {
+    setImprimindo(c.id)
+    setImpMsg(null)
+    const nomeLoja = empresa?.nome || ''
+    const dados = {
+      numeroMesa: c.numero_mesa,
+      // Comanda de balcão sai como "COMANDA 07 · MARIA" no lugar de "MESA 7".
+      rotulo: c.tipo === 'balcao' ? rotuloComanda(c) : null,
+      itens: c.comanda_itens ?? [],
+      subtotal: Number(c.subtotal || 0),
+      taxa: Number(c.taxa_servico || 0),
+      total: Number(c.total || 0),
+      // A forma vem da comanda: é a que foi realmente cobrada (e pode ter sido
+      // corrigida aqui mesmo, no "Trocar").
+      formaPagamento: FORMA_LABEL[c.forma_pagamento] ?? c.forma_pagamento ?? '',
+      pagamentos: [],
+      empresa: { nome: nomeLoja },
+    }
+    // Térmica pareada neste aparelho primeiro (é o caso do celular do balcão);
+    // senão cai no app FWC / navegador. `soApp: false` de propósito: se o app
+    // não responder, é melhor abrir a janela de impressão do que não sair nada.
+    let ok = false
+    try {
+      const mod = await import('../utils/imprimirBluetooth')
+      ok = await mod.imprimirMesaSeConectada('conta', dados)
+    } catch { /* sem Bluetooth neste aparelho */ }
+    if (!ok) ok = await imprimirHtml(montarContaPresencialHtml(dados), nomeLoja, { soApp: false, origem: 'mesa' })
+    setImprimindo(null)
+    setImpMsg({ id: c.id, texto: ok ? '🧾 Segunda via enviada pra impressora.' : '⚠️ Não achei impressora neste aparelho.' })
+    setTimeout(() => setImpMsg(null), 6000)
+  }
 
   // Corrige a forma de pagamento de uma conta já fechada (lançou errado e fechou).
   async function trocarForma(comanda, forma) {
@@ -538,6 +583,20 @@ export default function PresencialHistorico() {
                         </div>
                       )}
                     </div>
+
+                    {/* Segunda via: NÃO é só do dono. Quem fica sem o papel é
+                        quem fechou a conta — em geral o garçom, com a térmica
+                        dele caindo do Bluetooth na hora errada. */}
+                    <button type="button" onClick={() => imprimirSegundaVia(c)} disabled={imprimindo === c.id}
+                      style={{ width: '100%', marginTop: 12, padding: '10px 0', borderRadius: 10,
+                        cursor: imprimindo === c.id ? 'wait' : 'pointer',
+                        border: '1px solid var(--border)', background: 'transparent',
+                        color: 'var(--text)', fontSize: 13.5, fontWeight: 700 }}>
+                      {imprimindo === c.id ? 'Enviando…' : '🖨️ Imprimir segunda via'}
+                    </button>
+                    {impMsg?.id === c.id && (
+                      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'center', marginTop: 6 }}>{impMsg.texto}</div>
+                    )}
 
                     {/* Ligar/trocar o cliente deste pedido já fechado — mexe em fiado
                         e no cadastro, então é coisa de dono. */}
