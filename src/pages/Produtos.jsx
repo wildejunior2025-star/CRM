@@ -1373,10 +1373,11 @@ export default function Produtos() {
 
       {showModal && (
         <div className="modal-overlay">
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal-wide prod-form" onClick={(e) => e.stopPropagation()}>
             <h2>{editingId ? 'Editar produto' : 'Novo produto'}</h2>
             <form onSubmit={handleSubmit}>
               <div className="form-grid">
+                <div className="pf-secao"><span>Produto</span></div>
                 <div className="form-field full">
                   <label>Nome</label>
                   <input
@@ -1444,8 +1445,9 @@ export default function Produtos() {
                   {form.foto_url && (
                     <img
                       src={form.foto_url}
-                      alt="Preview"
-                      style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 8, marginTop: 8 }}
+                      alt="Foto do produto"
+                      className="prod-form-foto"
+                      style={{ marginTop: 8 }}
                     />
                   )}
                 </div>
@@ -1525,11 +1527,13 @@ export default function Produtos() {
                 {/* Custo em R$ ou em % do que for cobrado. O % existe pro prato sem
                     preço fixo (comida no peso): a atendente digita o valor na mesa,
                     então o custo só pode ser uma fatia desse valor. */}
+                <div className="pf-secao"><span>Preços</span></div>
                 <div className="form-field">
-                  <label style={{color:'#f97316'}}>Preço de custo</label>
-                  <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                  <label>Preço de custo</label>
+                  <div className="pf-toggle">
                     {[['fixo', 'R$ por unidade'], ['pct', '% do valor vendido']].map(([id, lbl]) => (
                       <button key={id} type="button"
+                        className={(form.custo_modo || 'fixo') === id ? 'ativo' : ''}
                         onClick={() => setForm(f => ({
                           ...f,
                           custo_modo: id,
@@ -1537,11 +1541,7 @@ export default function Produtos() {
                           // com custo em R$ E em %, e ninguém sabe qual vale.
                           preco_custo: id === 'pct' ? 0 : f.preco_custo,
                           custo_pct_venda: id === 'fixo' ? '' : (f.custo_pct_venda || ''),
-                        }))}
-                        style={{ flex: 1, padding: '8px 0', borderRadius: 9, cursor: 'pointer', fontWeight: 700, fontSize: 13,
-                          border: `1.5px solid ${(form.custo_modo || 'fixo') === id ? '#f97316' : 'var(--border)'}`,
-                          background: (form.custo_modo || 'fixo') === id ? 'rgba(249,115,22,.12)' : 'transparent',
-                          color: (form.custo_modo || 'fixo') === id ? '#f97316' : 'var(--text)' }}>
+                        }))}>
                         {lbl}
                       </button>
                     ))}
@@ -1576,7 +1576,7 @@ export default function Produtos() {
                 </div>
 
                 <div className="form-field">
-                  <label style={{color:'#22c55e'}}>Preço Público (R$) <span style={{fontWeight:400, fontSize:'0.8em', color:'var(--text-muted)'}}>WhatsApp / link</span></label>
+                  <label>Preço Público (R$) <span style={{fontWeight:400, fontSize:'0.8em', color:'var(--text-muted)'}}>WhatsApp / link</span></label>
                   <input
                     type="number"
                     step="0.01"
@@ -1620,7 +1620,7 @@ export default function Produtos() {
 
                 {MOSTRAR_PRECO_APP && (
                 <div className="form-field">
-                  <label style={{color:'#a855f7'}}>Preço App (R$) <span style={{fontWeight:400, fontSize:'0.8em', color:'var(--text-muted)'}}>FWC Inter app</span></label>
+                  <label>Preço App (R$) <span style={{fontWeight:400, fontSize:'0.8em', color:'var(--text-muted)'}}>FWC Inter app</span></label>
                   <input
                     type="number"
                     step="0.01"
@@ -1714,9 +1714,10 @@ export default function Produtos() {
 
                 {/* Quantidade em estoque direto aqui: cadastrou o item, já diz quantos
                     tem — sem precisar abrir a tela Estoque só pra isso. */}
+                {usaEstoque && form.controla_estoque && <div className="pf-secao"><span>Estoque</span></div>}
                 {usaEstoque && form.controla_estoque && (
                 <div className="form-field">
-                  <label style={{ color: '#0ea5e9' }}>
+                  <label>
                     {editingId ? 'Quantidade em estoque (contagem)' : 'Quantidade em estoque'}
                   </label>
                   <input
@@ -1759,6 +1760,7 @@ export default function Produtos() {
                 </div>
                 )}
 
+                <div className="pf-secao"><span>Venda</span></div>
                 <div className="form-field">
                   <label style={{ display: 'block', marginBottom: 6 }}>Disponibilidade</label>
                   <button
