@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy && node scripts/purge-cache.mjs"
+    "deploy": "npm run build && node scripts/deploy-worker.mjs && node scripts/purge-cache.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.0",
