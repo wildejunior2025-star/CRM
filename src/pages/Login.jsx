@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { useBranding } from '../context/BrandingContext'
 import { supabase } from '../lib/supabaseClient'
+import { pareceQuedaDeRede, mensagemDeQueda } from '../lib/diagnosticoConexao'
 import ThemeToggle from '../components/ThemeToggle'
 import { logoFwcIcone as logoFwc, isPortalDomain } from '../lib/logoFwc'
 import './Login.css'
@@ -97,7 +98,12 @@ export default function Login() {
         p_username: loginEmail.toLowerCase()
       })
       if (rpcErr || !foundEmail) {
-        setError('Apelido não encontrado. Verifique ou use seu e-mail.')
+        // Servidor fora do ar não é apelido errado. Acusar a pessoa de digitar
+        // errado quando o pedido nem chegou ao servidor faz ela repetir o login
+        // dez vezes procurando um erro que não existe.
+        setError(pareceQuedaDeRede(rpcErr)
+          ? await mensagemDeQueda()
+          : 'Apelido não encontrado. Verifique ou use seu e-mail.')
         setLoading(false)
         return
       }
@@ -106,7 +112,9 @@ export default function Login() {
 
     const { error } = await login(loginEmail, password)
 
-    if (error) setError(error.message)
+    // "Failed to fetch" não quer dizer nada pra quem está na loja: troca pela
+    // explicação de quem é a culpa (a internet daqui ou o servidor).
+    if (error) setError(pareceQuedaDeRede(error) ? await mensagemDeQueda() : error.message)
     setLoading(false)
   }
 

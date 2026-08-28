@@ -2,6 +2,7 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { moduloAtivo, moduloBloqueado } from '../lib/modulos'
 import { homeDoPerfil } from '../lib/homeDoPerfil'
+import CarregandoOuFalha from './CarregandoOuFalha'
 
 export default function ProtectedRoute({ children, roles, modulo }) {
   const { session, profile, empresa, loading, profileLoading } = useAuth()
@@ -9,13 +10,12 @@ export default function ProtectedRoute({ children, roles, modulo }) {
 
   // Espera a sessão e a 1ª busca do profile terminarem (sem travar para sempre
   // quando o usuário não tem profile — caso do login Google ainda não finalizado).
+  // Este "Carregando..." era eterno: quando o servidor não responde, a busca da
+  // sessão nunca volta e a tela roda pra sempre sem dizer nada (Supabase fora do
+  // ar em 28/08/2026). Agora, passados 20s, ele descobre se é a internet daqui
+  // ou o servidor, avisa, e volta sozinho quando der.
   if (loading || (session && profileLoading)) {
-    return (
-      <div className="auth-loading">
-        <span className="auth-loading-spinner" aria-hidden="true" />
-        <span>Carregando...</span>
-      </div>
-    )
+    return <CarregandoOuFalha />
   }
 
   if (!session) {

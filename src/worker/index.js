@@ -28,6 +28,21 @@ const CACHE_SEG = 300 // 5 min
 
 export default {
   async fetch(request, env, ctx) {
+    // ── /api/ping ────────────────────────────────────────────────────────────
+    // Responde "pong" sem encostar no banco. E o que permite a tela saber DE QUEM
+    // e a culpa quando ela trava: se este ping responde e o banco nao, o problema
+    // e o servidor do banco; se nem este responde, a internet daqui e que caiu.
+    // Precisa vir ANTES do ASSETS pra nao virar o index.html do app.
+    const p = new URL(request.url).pathname
+    if (p === '/api/ping') {
+      return new Response('pong', {
+        headers: {
+          'content-type': 'text/plain; charset=utf-8',
+          'cache-control': 'no-store, no-cache, must-revalidate',
+        },
+      })
+    }
+
     const resposta = await env.ASSETS.fetch(request)
 
     try {

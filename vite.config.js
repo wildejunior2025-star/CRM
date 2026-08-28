@@ -57,6 +57,10 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         navigateFallback: 'index.html',
+        // /api/ping tem que sair pela rede SEMPRE. Se virasse index.html servido
+        // do cache, ele responderia "ok" até com a internet caída — e a tela
+        // culparia o servidor quando o problema é a conexão de quem está usando.
+        navigateFallbackDenylist: [/^\/api\//],
         // Sem skipWaiting: é o main.jsx que manda o SKIP_WAITING na hora certa.
         clientsClaim: true,
         cleanupOutdatedCaches: true,
