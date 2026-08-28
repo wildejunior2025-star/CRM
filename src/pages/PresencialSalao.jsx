@@ -161,6 +161,8 @@ export default function PresencialSalao() {
   const [novoCliente, setNovoCliente] = useState(false)
   const [novoTelefone, setNovoTelefone] = useState('') // opcional no cadastro do fiado (o nome é que não repete)
   const [preContaMsg, setPreContaMsg] = useState('')   // aviso depois de mandar a pré-conta pra impressora
+  const [confirmarCancelar, setConfirmarCancelar] = useState(false)
+  const [cancelando, setCancelando] = useState(false)
   const [enviandoZap, setEnviandoZap] = useState(false) // pré-conta indo pro WhatsApp do cliente
   const [salvandoCliente, setSalvandoCliente] = useState(false)
   // Rascunho: itens que o garçom monta mas que só vão pra cozinha (e pra impressora)
@@ -931,11 +933,22 @@ export default function PresencialSalao() {
     await loadMesas()
   }
 
-  async function cancelarMesa() {
+  // Cancelar joga fora TUDO que já foi lançado — e não tem desfazer. O aviso
+  // do navegador dizia isso numa linha cinza que ninguém lê; agora é uma tela
+  // que mostra quantos itens e quanto dinheiro estão sendo descartados, com o
+  // botão perigoso separado do de voltar.
+  function cancelarMesa() {
     if (!comandaSel) return
-    if (!window.confirm(`Cancelar ${mesaSel?.is_comanda ? 'esta comanda' : 'esta mesa'}? Os itens lançados serão descartados.`)) return
+    setConfirmarCancelar(true)
+  }
+
+  async function cancelarMesaDeVerdade() {
+    if (!comandaSel) return
+    setCancelando(true)
     await supabase.from('comandas').update({ status: 'cancelada' }).eq('id', comandaSel.id)
     if (comandaSel.mesa_id) await supabase.from('mesas').update({ status: 'livre' }).eq('id', comandaSel.mesa_id)
+    setCancelando(false)
+    setConfirmarCancelar(false)
     setMesaSel(null)
     await loadMesas()
   }
@@ -1069,6 +1082,46 @@ export default function PresencialSalao() {
     setPreContaMsg(error
       ? '⚠️ Não consegui pedir a pré-conta. Tente de novo.'
       : '🧾 Pedi a pré-conta na impressora da loja — pode ir buscar o papel.')
+    setTimeout(() => setPreContaMsg(''), 6000)
+  }
+
+  // SEGUNDA VIA DA CONTA FECHADA.
+  //
+  // A conta sai UMA vez, no fechamento. Se a térmica tinha caído do Bluetooth
+  // naquele instante, o papel não saía e não havia mais como tirar: a mesa já
+  // estava azul, esperando o ADM, e nesse estado a tela só oferecia liberar ou
+  // cancelar. O jeito era cancelar a mesa e lançar tudo de novo. Aconteceu na
+  // Saidera em 27/08/2026.
+  //
+  // Agora dá pra pedir de novo quantas vezes precisar, enquanto a mesa está
+  // azul — e o caminho é o mesmo da pré-conta: tenta a impressora deste
+  // aparelho e, se não houver, manda a estação da loja tirar o papel.
+  async function reimprimirConta() {
+    if (!comandaSel) return
+    setPreContaMsg('')
+    if (papelImpressora() === 'cozinha') {
+      setPreContaMsg('🍳 Esta impressora é a da cozinha. A conta sai na impressora da frente.')
+      setTimeout(() => setPreContaMsg(''), 6000)
+      return
+    }
+    // A forma de pagamento vem da comanda, não do formulário: ele foi zerado
+    // quando a tela reabriu, e sairia "dinheiro" numa conta paga no cartão.
+    const ok = await imprimirConta({
+      soApp: ehCelular,
+      formaPagamento: comandaSel.forma_pagamento || null,
+    })
+    if (ok) {
+      setPreContaMsg('🧾 Segunda via enviada pra impressora.')
+      setTimeout(() => setPreContaMsg(''), 6000)
+      return
+    }
+    const { error } = await supabase
+      .from('comandas')
+      .update({ preconta_pedida_em: new Date().toISOString() })
+      .eq('id', comandaSel.id)
+    setPreContaMsg(error
+      ? '⚠️ Não consegui pedir a impressão. Tente de novo.'
+      : '🧾 Pedi na impressora da loja — pode ir buscar o papel.')
     setTimeout(() => setPreContaMsg(''), 6000)
   }
 
@@ -2237,6 +2290,19 @@ export default function PresencialSalao() {
                   <div style={{ padding: '8px 10px', borderRadius: 8, background: 'rgba(59,130,246,.16)', color: '#2563eb', fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
                     🔵 Conta fechada pelo garçom — aguardando o ADM conferir o pagamento e liberar a mesa.
                   </div>
+                  {/* Segunda via: fica FORA do bloco do ADM porque quem perde o
+                      papel é o garçom — a térmica dele caiu do Bluetooth na hora
+                      do fechamento e a conta não saiu. Antes o único jeito era
+                      cancelar a mesa e lançar tudo de novo. */}
+                  <button type="button" onClick={reimprimirConta}
+                    style={{ width: '100%', marginBottom: 8, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
+                      border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)',
+                      fontSize: 14.5, fontWeight: 700 }}>
+                    🖨️ Imprimir a conta de novo
+                  </button>
+                  {preContaMsg && (
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'center', marginBottom: 8 }}>{preContaMsg}</div>
+                  )}
                   {ehAdmin ? (
                     <div className="sal-acoes">
                       <button type="button" onClick={cancelarMesa}
@@ -2412,6 +2478,55 @@ export default function PresencialSalao() {
                 style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-muted)', lineHeight: 1 }}>×</button>
             </div>
             <ConsumoFuncionario empresaId={empresaId} />
+          </div>
+        </div>
+      )}
+
+      {/* ── Cancelar a mesa: a pergunta que precisa ser lida ──
+          Era um confirm() do navegador — uma linha cinza no topo da tela, igual
+          à de sair da página, que o dedo dispensa no automático. Cancelar joga
+          fora tudo que foi lançado e não tem desfazer, então aqui a conta
+          aparece por extenso e o botão perigoso fica separado do de voltar. */}
+      {confirmarCancelar && comandaSel && (
+        <div onClick={() => !cancelando && setConfirmarCancelar(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1100,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 380, background: 'var(--bg)', borderRadius: 16,
+              border: '1.5px solid var(--danger, #ef4444)', padding: 20, boxSizing: 'border-box' }}>
+            <div style={{ fontSize: 40, textAlign: 'center', lineHeight: 1 }}>⚠️</div>
+            <h2 style={{ margin: '10px 0 6px', fontSize: 19, textAlign: 'center', color: 'var(--text)' }}>
+              Cancelar {mesaSel?.is_comanda ? 'esta comanda' : `a Mesa ${mesaSel?.numero}`}?
+            </h2>
+            <p style={{ margin: '0 0 14px', fontSize: 14.5, lineHeight: 1.45, textAlign: 'center', color: 'var(--text-muted)' }}>
+              Tudo que já foi lançado será <strong style={{ color: 'var(--danger, #ef4444)' }}>perdido</strong>. Não dá pra desfazer.
+            </p>
+
+            {(comandaSel.comanda_itens ?? []).length > 0 && (
+              <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+                  <span>{(comandaSel.comanda_itens ?? []).reduce((n, i) => n + Number(i.quantidade || 0), 0)} item(ns) lançado(s)</span>
+                  <span>{fmt(subtotalSel)}</span>
+                </div>
+                {/* Só os primeiros: a lista inteira empurraria os botões pra
+                    fora da tela do celular, que é onde isso é usado. */}
+                <div style={{ marginTop: 6, fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-muted)' }}>
+                  {(comandaSel.comanda_itens ?? []).slice(0, 4).map(i => `${Number(i.quantidade || 0)}× ${i.nome}`).join(' · ')}
+                  {(comandaSel.comanda_itens ?? []).length > 4 && ` · +${(comandaSel.comanda_itens ?? []).length - 4} …`}
+                </div>
+              </div>
+            )}
+
+            <button type="button" onClick={cancelarMesaDeVerdade} disabled={cancelando}
+              style={{ width: '100%', padding: '13px 0', borderRadius: 12, border: 'none', cursor: cancelando ? 'wait' : 'pointer',
+                background: 'var(--danger, #ef4444)', color: '#fff', fontWeight: 800, fontSize: 15.5, opacity: cancelando ? .6 : 1 }}>
+              {cancelando ? 'Cancelando...' : 'Sim, cancelar e perder tudo'}
+            </button>
+            <button type="button" onClick={() => setConfirmarCancelar(false)} disabled={cancelando}
+              style={{ width: '100%', marginTop: 8, padding: '13px 0', borderRadius: 12, cursor: 'pointer',
+                border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 800, fontSize: 15.5 }}>
+              Não, voltar pra mesa
+            </button>
           </div>
         </div>
       )}
