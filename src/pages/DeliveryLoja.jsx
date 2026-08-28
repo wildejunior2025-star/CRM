@@ -200,11 +200,14 @@ export default function DeliveryLoja() {
       if (!lojaData) { setLoja(null); setLoading(false); return }
 
       const { data: produtosData } = await supabase.from('produtos')
-        .select('id, nome, descricao, preco:preco_venda, faixas_preco, foto_url, categoria, disponivel_delivery, estoque_minimo')
+        .select('id, nome, descricao, preco:preco_venda, faixas_preco, foto_url, categoria, ordem, disponivel_delivery, estoque_minimo')
         .eq('empresa_id', lojaData.id)
         .eq('ativo', true)
         .eq('disponivel_delivery', true)
         .order('categoria')
+        // Ordem manual do dono dentro da categoria (mig 0201). nullsFirst:false
+        // deixa quem nunca foi ordenado no fim, em ordem alfabetica.
+        .order('ordem', { nullsFirst: false })
         .order('nome')
 
       // Complementos (ex.: "monte sua quentinha") — grupos + opções por produto

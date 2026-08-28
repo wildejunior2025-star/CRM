@@ -940,6 +940,32 @@ export default function Produtos() {
     }
   }
 
+  // Sobe/desce o produto DENTRO da categoria dele. Grava a categoria inteira
+  // numerada 1..n em vez de so os dois que trocaram: se metade estivesse com
+  // ordem e metade com null, a lista pularia de lugar a cada mexida.
+  const [reordenando, setReordenando] = useState(null)
+  async function moverProduto(prod, dir) {
+    const daCategoria = [...produtos]
+      .filter(x => (x.categoria ?? '') === (prod.categoria ?? ''))
+      .sort((a, b) => {
+        const pa = a.ordem ?? Number.MAX_SAFE_INTEGER
+        const pb = b.ordem ?? Number.MAX_SAFE_INTEGER
+        if (pa !== pb) return pa - pb
+        return (a.nome ?? '').localeCompare(b.nome ?? '')
+      })
+    const i = daCategoria.findIndex(x => x.id === prod.id)
+    const j = i + dir
+    if (i < 0 || j < 0 || j >= daCategoria.length) return
+    ;[daCategoria[i], daCategoria[j]] = [daCategoria[j], daCategoria[i]]
+
+    const novaOrdem = new Map(daCategoria.map((x, k) => [x.id, k + 1]))
+    setProdutos(prev => prev.map(x => novaOrdem.has(x.id) ? { ...x, ordem: novaOrdem.get(x.id) } : x))
+    setReordenando(prod.id)
+    await Promise.all(daCategoria.map((x, k) =>
+      supabase.from('produtos').update({ ordem: k + 1 }).eq('id', x.id)))
+    setReordenando(null)
+  }
+
   // Ordena os produtos exibidos seguindo a ordem personalizada das categorias.
   // O desempate é SEMPRE pelo nome da categoria antes do nome do produto: duas
   // categorias com a mesma `ordem` iam se misturar item a item e a lista repetia
@@ -951,6 +977,12 @@ export default function Produtos() {
     if (oa !== ob) return oa - ob
     const porCategoria = (a.categoria ?? '').localeCompare(b.categoria ?? '')
     if (porCategoria !== 0) return porCategoria
+    // Ordem manual dentro da categoria (mig 0201). Quem nunca foi ordenado
+    // (null) cai no fim, em ordem alfabetica — ninguem precisa arrastar as 78
+    // linhas pra comecar a usar.
+    const pa = a.ordem ?? Number.MAX_SAFE_INTEGER
+    const pb = b.ordem ?? Number.MAX_SAFE_INTEGER
+    if (pa !== pb) return pa - pb
     return (a.nome ?? '').localeCompare(b.nome ?? '')
   })
   // Paginação client-side sobre a lista JÁ ordenada pelas categorias
@@ -1095,6 +1127,24 @@ export default function Produtos() {
                     <tr>
                   <td>
                     <div className="prod-nome">
+                      {/* Sobe/desce dentro da categoria. Fica escondido enquanto
+                          uma busca ou filtro esta ativo: a lista ali nao e a
+                          categoria inteira, e trocar posicao no que esta
+                          filtrado bagunçaria o que nao aparece. */}
+                      {!search && (
+                        <div className="prod-ordem">
+                          <button
+                            type="button" title="Subir na categoria"
+                            disabled={reordenando === p.id}
+                            onClick={() => moverProduto(p, -1)}
+                          >↑</button>
+                          <button
+                            type="button" title="Descer na categoria"
+                            disabled={reordenando === p.id}
+                            onClick={() => moverProduto(p, 1)}
+                          >↓</button>
+                        </div>
+                      )}
                       {p.foto_url ? (
                         <img className="prod-foto" src={p.foto_url} alt={p.nome} />
                       ) : (

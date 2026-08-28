@@ -629,3 +629,32 @@ a.dashboard-card-link:hover {
     gap: 6px;
   }
 }
+
+/* ── Ordem do produto dentro da categoria (mig 0201) ───────────────────────
+   Setinhas discretas antes da foto: a lista de produtos e longa e o botao nao
+   pode competir com o nome do item. Some quando ha busca ativa, porque ali a
+   lista nao e a categoria inteira.                                          */
+.prod-ordem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.prod-ordem button {
+  line-height: 1;
+  padding: 1px 5px;
+  font-size: 11px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.prod-ordem button:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.prod-ordem button:disabled { opacity: 0.35; cursor: default; }

@@ -13,9 +13,11 @@ const soSemOpcao = nome => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ''))
 export async function carregarCardapio(supabase, empresaId) {
   const { data: produtos } = await supabase
     .from('estoque_catalogo')
-    .select('produto_id, nome, preco_venda, categoria, foto_url')
+    .select('produto_id, nome, preco_venda, categoria, foto_url, ordem')
     .eq('empresa_id', empresaId)
-    .order('categoria').order('nome').limit(500)
+    // Mesma ordem que o dono montou na tela de Produtos (mig 0201): sem isso o
+    // cardapio da mesa sairia alfabetico e o do celular na ordem escolhida.
+    .order('categoria').order('ordem', { nullsFirst: false }).order('nome').limit(500)
 
   // Ordem personalizada das categorias (a mesma da loja online)
   const { data: cats } = await supabase
