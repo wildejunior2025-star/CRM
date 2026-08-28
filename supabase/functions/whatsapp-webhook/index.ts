@@ -1,4 +1,4 @@
-// Bot v181 — safety net: cliente cadastrado nunca é perguntado nome/email (troca pela próxima etapa) — corrige o Haiku pedindo nome de quem já é cliente
+// Bot v182 — cadastro pelo WhatsApp pede SÓ o nome; e-mail nunca é perguntado (o código já usa o login sintético telefone@wpp.vendamais.app)
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -1456,15 +1456,14 @@ Continue somando itens até o cliente dizer que é só isso / que quer fechar.
 
 ▶ PASSO 3 — CADASTRO (só DEPOIS da sacola fechada, e só se CLIENTE = "Não cadastrado nesta loja")
 Se o cliente JÁ tem nome em CLIENTE → PULE este passo inteiro, vá direto ao PASSO 4.
-⚠️ GATILHO: assim que o cliente indicar que fechou a sacola ("é só isso", "pode fechar", "só isso mesmo", "fechar"), sua PRÓXIMA mensagem JÁ deve pedir o *nome* (item 1 abaixo). NÃO pergunte "quer mais algum item?" de novo, NÃO mostre resumo ainda. Se o cliente mandar o nome ou o e-mail por conta própria, ACEITE e siga a ordem — nunca responda "quer mais alguma coisa?".
+⚠️ GATILHO: assim que o cliente indicar que fechou a sacola ("é só isso", "pode fechar", "só isso mesmo", "fechar"), sua PRÓXIMA mensagem JÁ deve pedir o *nome* (item 1 abaixo). NÃO pergunte "quer mais algum item?" de novo, NÃO mostre resumo ainda. Se o cliente mandar o nome por conta própria, ACEITE e siga a ordem — nunca responda "quer mais alguma coisa?".
 Colete UM POR VEZ, nesta ordem exata:
   1. "⚡ Estamos com um sistema novo por aqui! Seu cadastro é rapidinho e *uma vez só* — no próximo pedido já não precisa. 😊\n\nPra começar, qual o seu *nome*?"
-  2. Recebeu o nome → "E o seu *e-mail*? 📧"
-  3. Recebeu o e-mail → emita cadastrar_cliente IMEDIATAMENTE (sem texto antes). O sistema pede o CEP em seguida.
-  4. Recebeu o CEP → emita buscar_cep (sem texto antes). O sistema confirma o endereço e pede o número.
-  5. Recebeu o número → emita salvar_numero. O sistema pergunta entrega/retirada automaticamente.
+  2. Recebeu o nome → emita cadastrar_cliente IMEDIATAMENTE (sem texto antes). O sistema pede o CEP em seguida.
+  3. Recebeu o CEP → emita buscar_cep (sem texto antes). O sistema confirma o endereço e pede o número.
+  4. Recebeu o número → emita salvar_numero. O sistema pergunta entrega/retirada automaticamente.
 O telefone já temos (${phoneLocal}) — NUNCA peça.
-⚠️ CRÍTICO: nome + e-mail são obrigatórios. Nunca pule um dos dois.
+⚠️ CRÍTICO: só o *nome* é obrigatório. ⛔ NUNCA peça e-mail — o sistema não precisa dele.
 
 ▶ PASSO 4 — ENTREGA OU RETIRADA
 ${aceitaDelivery
@@ -1501,7 +1500,7 @@ REGRAS IMPORTANTES
 2. NUNCA peça o telefone — já temos: ${phoneLocal}
 3. NUNCA peça CEP se já temos o endereço do cliente (ver CLIENTE acima)
 4. O resumo (PASSO 6) é OBRIGATÓRIO antes de fechar. NUNCA emita fechar_pedido sem antes mostrar o resumo e receber confirmação. E NUNCA mostre resumo/total ANTES de ter entrega/retirada E pagamento definidos — ao fechar a sacola, se o cliente não é cadastrado, a próxima coisa é pedir o NOME (PASSO 3), sem resumo ainda.
-5. Colete nome e e-mail UM POR VEZ para clientes novos — e SÓ depois que a sacola estiver fechada (nunca durante a montagem)
+5. Para cliente novo colete SÓ o nome — e SÓ depois que a sacola estiver fechada (nunca durante a montagem). ⛔ NUNCA peça e-mail.
 6. CEP (8 dígitos): emita buscar_cep IMEDIATAMENTE, sem texto antes
 7. NUNCA assuma forma de pagamento ou tipo de entrega sem perguntar nesta conversa
 8. ⚠️ CRÍTICO — CARRINHO: toda vez que o cliente escolher um produto VOCÊ DEVE emitir ACAO: atualizar_carrinho com TODOS os itens. NUNCA diga "anotei" ou "adicionei" sem emitir esta ACAO. Sem ela o carrinho fica vazio e o pedido NÃO é criado.
@@ -1522,9 +1521,9 @@ ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome":
      - inclua SEMPRE "complementos": lista com o que ele escolheu, cada um {"nome": "opção", "qtd": 1}. Sem os complementos a cozinha não sabe o que fazer.
   ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Quentinha (M)", "qtd": 1, "preco": 17.00, "complementos": [{"nome": "Feijão Preto", "qtd": 1}, {"nome": "Arroz refogado", "qtd": 1}, {"nome": "Frango Assado", "qtd": 1}]}]}
 
-Cadastrar cliente novo (após coletar nome E e-mail — PASSO 3, só depois da sacola fechada):
-ACAO: {"tipo": "cadastrar_cliente", "nome": "[nome]", "email": "[email]"}
-⚠️ Emita IMEDIATAMENTE após receber o e-mail. SEM texto antes. O sistema pede CEP em seguida.
+Cadastrar cliente novo (após coletar o nome — PASSO 3, só depois da sacola fechada):
+ACAO: {"tipo": "cadastrar_cliente", "nome": "[nome]"}
+⚠️ Emita IMEDIATAMENTE após receber o nome. SEM texto antes. O sistema pede CEP em seguida.
 
 Buscar endereço pelo CEP (quando cliente enviar o CEP):
 ACAO: {"tipo": "buscar_cep", "cep": "59640000"}
@@ -1543,8 +1542,8 @@ ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "entrega", "forma_pagamento": "d
 ⚠️ SE for retirada, omita os campos cliente_rua/numero/bairro/cidade/estado
 
 Fechar pedido — CLIENTE SEM CADASTRO (raro: CLIENTE = "Não identificado" e cadastrar_cliente não foi emitido):
-ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "retirada", "forma_pagamento": "dinheiro", "cliente_nome": "[nome]", "cliente_email": "[email]", "cliente_telefone": "${phoneLocal}", "items": [{"produto_id": "ID_REAL", "nome": "Nome", "qtd": 1, "preco": 0.00}]}
-⚠️ CRÍTICO: sem cliente_nome e cliente_email o pedido NÃO é criado
+ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "retirada", "forma_pagamento": "dinheiro", "cliente_nome": "[nome]", "cliente_telefone": "${phoneLocal}", "items": [{"produto_id": "ID_REAL", "nome": "Nome", "qtd": 1, "preco": 0.00}]}
+⚠️ CRÍTICO: sem cliente_nome o pedido NÃO é criado
 
 Escalar para humano (problema que a IA não resolve):
 ACAO: {"tipo": "escalar_humano", "problema": "descrição"}
@@ -1731,7 +1730,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           if (resultado.resposta) {
             resposta = resultado.resposta
           } else {
-            resposta += "\n\nNão encontrei seu cadastro ainda! Vou te cadastrar agora. 😊\n\nQual é o seu *e-mail*?"
+            resposta += "\n\nNão encontrei seu cadastro ainda! Vou te cadastrar agora. 😊\n\nQual é o seu *nome*?"
           }
           if (resultado.cliente) cliente = resultado.cliente
 
@@ -1967,12 +1966,11 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
 
     // Rede de segurança INVERSA: cliente NOVO (sem cadastro) com a sacola já montada
     // NUNCA pode pular o CADASTRO. O Haiku às vezes vai direto pro "entrega/retirada"
-    // ou "CEP" sem pedir o nome/e-mail — aqui forçamos a coleta na ordem certa.
+    // ou "CEP" sem pedir o nome — aqui forçamos a coleta do nome. E-mail não é mais pedido.
     if (!cliente?.nome && carrinho.length > 0) {
       const histAssist = mensagens.filter((m: any) => m.role === "assistant").map((m: any) => (m.content ?? "").toLowerCase())
       const respAtual = (resposta ?? "").toLowerCase()
       const botJaPediuNome  = histAssist.some((c: string) => /seu\s*\*?nome/.test(c))    || /seu\s*\*?nome/.test(respAtual)
-      const botJaPediuEmail = histAssist.some((c: string) => /seu\s*\*?e-?mail/.test(c)) || /seu\s*\*?e-?mail/.test(respAtual)
       const cadastrouAgora = acaoMatch !== null && (() => { try { return JSON.parse(acaoMatch![1])?.tipo === "cadastrar_cliente" } catch { return false } })()
       // Bot está tentando avançar (entrega/retirada/pagamento/CEP/resumo) sem ter feito o cadastro
       const respostaAvancou = /(prefere\s*\*?entrega|vai\s*\*?retirar|\bretirada\b|como vai pagar|forma de pagamento|seu\s*\*?cep|resumo do pedido)/i.test(respAtual)
@@ -1980,9 +1978,6 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
         if (!botJaPediuNome) {
           resposta = "⚡ Estamos com um sistema novo por aqui! Seu cadastro é rapidinho e *uma vez só* — no próximo pedido já não precisa. 😊\n\nPra começar, qual o seu *nome*?"
           console.log("[SafeNet] cliente novo — forcei a pergunta do NOME (Haiku pulou o cadastro)")
-        } else if (!botJaPediuEmail) {
-          resposta = "E o seu *e-mail*? 📧"
-          console.log("[SafeNet] cliente novo — forcei a pergunta do E-MAIL")
         }
       }
     }
