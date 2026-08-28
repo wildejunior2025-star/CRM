@@ -190,7 +190,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 50;
+  /* Estava em 50 — ABAIXO da barra de cima do celular (150) e do botão flutuante
+     "← Admin" (500). No PC ninguém via, porque a barra do celular nem aparece;
+     no celular o título do modal sumia atrás da barra e o botão do Admin ficava
+     por cima dos campos. Modal tem que estar acima de tudo que é da página. */
+  z-index: 600;
 }
 
 .modal {
@@ -669,8 +673,12 @@ a.dashboard-card-link:hover {
 .prod-form h2 {
   font-size: 22px;
   letter-spacing: -0.01em;
-  margin-bottom: 6px;
+  margin: 0;
 }
+
+/* Respiro entre o título e o primeiro bloco: colados, o "PRODUTO" parecia
+   subtítulo do "Novo produto" em vez de nome de seção. */
+.prod-form .pf-topo { margin-bottom: 18px; }
 
 /* Cabeçalho de bloco: ocupa a linha inteira do grid de 2 colunas. A régua sai
    do texto e atravessa até a borda, pra separar sem pesar. */
@@ -682,7 +690,7 @@ a.dashboard-card-link:hover {
   margin: 14px 0 -2px;
 }
 
-.pf-secao:first-of-type { margin-top: 4px; }
+.pf-secao:first-of-type { margin-top: 0; }
 
 .pf-secao span {
   font-size: 11.5px;
@@ -839,6 +847,7 @@ a.dashboard-card-link:hover {
   }
 
   .prod-form .pf-topo {
+    margin-bottom: 0;
     position: sticky;
     top: 0;
     z-index: 2;
