@@ -1,4 +1,4 @@
-// Bot v182 — cadastro pelo WhatsApp pede SÓ o nome; e-mail nunca é perguntado (o código já usa o login sintético telefone@wpp.vendamais.app)
+// Bot v183 — endereço: CEP OU escrito (salvar_rua agora guarda bairro/cidade, senão a taxa sai errada). v182: cadastro pede só o nome, sem e-mail.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -13,6 +13,15 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-bot-test",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 }
+
+// Pedido de endereço — o CEP é o caminho rápido, mas quem não sabe de cabeça pode
+// escrever o endereço. Nos dois casos precisamos de rua + bairro + cidade: é o
+// bairro que define a taxa fixa, e sem cidade o mapa procura a rua no Brasil inteiro.
+const TEXTO_PEDIR_ENDERECO =
+  "📍 Agora o endereço!\n\n" +
+  "Me manda o seu *CEP* que eu já puxo a rua, o bairro e a cidade automaticamente. 😉\n\n" +
+  "Se não souber de cabeça, sem problema — é só escrever assim:\n" +
+  "_Rua, número, bairro e cidade_"
 
 // ── handleAtualizar_carrinho ─────────────────────────────────────────────────
 // Usa PATCH (update) + POST (insert) separados — upsert via on_conflict tem falhas intermitentes
@@ -376,16 +385,26 @@ async function handleSalvarRua(
   supabase: ReturnType<typeof createClient>,
   empresaId: string,
   phone: string,
-  rua: string
+  rua: string,
+  bairro?: string | null,
+  cidade?: string | null,
+  estado?: string | null
 ): Promise<{ resposta: string }> {
   try {
+    // Bairro e cidade também são salvos quando vêm junto (cliente que digitou o
+    // endereço sem CEP). Sem eles a taxa sai errada: o bairro define a taxa fixa e,
+    // no cálculo por km, o mapa procuraria a rua no Brasil inteiro.
     const { error: ruaErr } = await supabase.from("whatsapp_carrinho").update({
       endereco_rua: rua,
+      ...(bairro ? { endereco_bairro: bairro } : {}),
+      ...(cidade ? { endereco_cidade: cidade } : {}),
+      ...(estado ? { endereco_estado: estado } : {}),
       updated_at:   new Date().toISOString(),
     }).eq("empresa_id", empresaId).eq("phone", phone)
     if (ruaErr) console.error("[Rua] update erro:", ruaErr)
 
-    return { resposta: `✅ Rua salva!\n\n📍 *Rua:* ${rua}\n\nQual o *número* da sua casa? 😊` }
+    const detalhe = [rua, bairro, cidade].filter(Boolean).join(" — ")
+    return { resposta: `✅ Endereço salvo!\n\n📍 ${detalhe}\n\nQual o *número* da sua casa? 😊` }
   } catch (e: any) {
     console.error("[Rua] exceção:", e?.message ?? String(e))
     return { resposta: "Não consegui salvar a rua. Pode repetir?" }
@@ -410,7 +429,7 @@ async function handleSalvarNumero(
       .single()
 
     if (!c?.endereco_rua) {
-      return { resposta: "Não encontrei o endereço salvo. Me manda o CEP de novo." }
+      return { resposta: "Não encontrei o endereço salvo. Me manda o *CEP* de novo — ou escreva _rua, número, bairro e cidade_. 😊" }
     }
 
     const { error: numErr } = await supabase.from("whatsapp_carrinho").update({
@@ -518,7 +537,8 @@ async function handleFecharPedido(
       return {
         mensagemExtra: "",
         acaoPromise: Promise.resolve(),
-        bloqueioMensagem: "📍 Preciso do seu endereço para entrega!\n\nMe manda o seu *CEP* 👇",
+        bloqueioMensagem: "📍 Preciso do seu endereço para entrega!\n\n" +
+          "Me manda o seu *CEP* que eu puxo a rua, o bairro e a cidade — ou escreva _rua, número, bairro e cidade_. 😊",
       }
     }
     const totalCarrinho  = itens.reduce((s: number, i: any) => s + Number(i.qtd) * Number(i.preco), 0)
@@ -1459,15 +1479,16 @@ Se o cliente JÁ tem nome em CLIENTE → PULE este passo inteiro, vá direto ao 
 ⚠️ GATILHO: assim que o cliente indicar que fechou a sacola ("é só isso", "pode fechar", "só isso mesmo", "fechar"), sua PRÓXIMA mensagem JÁ deve pedir o *nome* (item 1 abaixo). NÃO pergunte "quer mais algum item?" de novo, NÃO mostre resumo ainda. Se o cliente mandar o nome por conta própria, ACEITE e siga a ordem — nunca responda "quer mais alguma coisa?".
 Colete UM POR VEZ, nesta ordem exata:
   1. "⚡ Estamos com um sistema novo por aqui! Seu cadastro é rapidinho e *uma vez só* — no próximo pedido já não precisa. 😊\n\nPra começar, qual o seu *nome*?"
-  2. Recebeu o nome → emita cadastrar_cliente IMEDIATAMENTE (sem texto antes). O sistema pede o CEP em seguida.
+  2. Recebeu o nome → emita cadastrar_cliente IMEDIATAMENTE (sem texto antes). O sistema pede o endereço em seguida (CEP ou escrito).
   3. Recebeu o CEP → emita buscar_cep (sem texto antes). O sistema confirma o endereço e pede o número.
+     Recebeu o endereço ESCRITO (sem CEP) → emita salvar_rua com rua + bairro + cidade (sem texto antes). O sistema pede o número.
   4. Recebeu o número → emita salvar_numero. O sistema pergunta entrega/retirada automaticamente.
 O telefone já temos (${phoneLocal}) — NUNCA peça.
 ⚠️ CRÍTICO: só o *nome* é obrigatório. ⛔ NUNCA peça e-mail — o sistema não precisa dele.
 
 ▶ PASSO 4 — ENTREGA OU RETIRADA
 ${aceitaDelivery
-  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE já temos o endereço (ver CLIENTE, ou acabou de coletar no cadastro) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → PASSO 5\n  - Quer trocar → peça o CEP (emita buscar_cep) e depois o número (emita salvar_numero)\n• SE ainda não temos endereço → peça o CEP (emita buscar_cep) e depois o número (emita salvar_numero), aí siga ao PASSO 5\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá ao PASSO 5`
+  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE já temos o endereço (ver CLIENTE, ou acabou de coletar no cadastro) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → PASSO 5\n  - Quer trocar → peça o endereço novo: se vier CEP emita buscar_cep, se vier escrito emita salvar_rua (rua+bairro+cidade); depois o número (emita salvar_numero)\n• SE ainda não temos endereço → peça o *CEP*, avisando que ele também pode escrever _rua, número, bairro e cidade_ se preferir. CEP → buscar_cep; escrito → salvar_rua. Depois o número (emita salvar_numero), aí siga ao PASSO 5\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá ao PASSO 5`
   : `Somente retirada no local.\nInforme: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\nVá ao PASSO 5`}
 
 ▶ PASSO 5 — FORMA DE PAGAMENTO
@@ -1498,10 +1519,10 @@ REGRAS IMPORTANTES
 ══════════════════════════════════════
 1. NUNCA invente produtos ou preços — use APENAS a lista acima
 2. NUNCA peça o telefone — já temos: ${phoneLocal}
-3. NUNCA peça CEP se já temos o endereço do cliente (ver CLIENTE acima)
+3. NUNCA peça CEP nem endereço se já temos o endereço do cliente (ver CLIENTE acima)
 4. O resumo (PASSO 6) é OBRIGATÓRIO antes de fechar. NUNCA emita fechar_pedido sem antes mostrar o resumo e receber confirmação. E NUNCA mostre resumo/total ANTES de ter entrega/retirada E pagamento definidos — ao fechar a sacola, se o cliente não é cadastrado, a próxima coisa é pedir o NOME (PASSO 3), sem resumo ainda.
 5. Para cliente novo colete SÓ o nome — e SÓ depois que a sacola estiver fechada (nunca durante a montagem). ⛔ NUNCA peça e-mail.
-6. CEP (8 dígitos): emita buscar_cep IMEDIATAMENTE, sem texto antes
+6. CEP (8 dígitos): emita buscar_cep IMEDIATAMENTE, sem texto antes. Endereço escrito (ex.: "Rua das Flores, 42, Centro, Assu"): emita salvar_rua IMEDIATAMENTE com rua+bairro+cidade, sem texto antes — e se ele mandar o número junto, emita salvar_numero na sequência
 7. NUNCA assuma forma de pagamento ou tipo de entrega sem perguntar nesta conversa
 8. ⚠️ CRÍTICO — CARRINHO: toda vez que o cliente escolher um produto VOCÊ DEVE emitir ACAO: atualizar_carrinho com TODOS os itens. NUNCA diga "anotei" ou "adicionei" sem emitir esta ACAO. Sem ela o carrinho fica vazio e o pedido NÃO é criado.
 9. NUNCA diga o que vai fazer antes de fazer. Proibido: "Deixa eu criar...", "Deixa eu fechar...", "Vou verificar...". Emita a ACAO diretamente — a confirmação vem automática. Se não há ACAO, termine sempre com uma pergunta.
@@ -1528,8 +1549,10 @@ ACAO: {"tipo": "cadastrar_cliente", "nome": "[nome]"}
 Buscar endereço pelo CEP (quando cliente enviar o CEP):
 ACAO: {"tipo": "buscar_cep", "cep": "59640000"}
 
-Salvar rua (quando CEP não tinha logradouro):
-ACAO: {"tipo": "salvar_rua", "rua": "Rua das Flores"}
+Salvar endereço escrito pelo cliente (ele mandou o endereço em vez do CEP, ou o CEP não tinha logradouro):
+ACAO: {"tipo": "salvar_rua", "rua": "Rua das Flores", "bairro": "Centro", "cidade": "Assu", "estado": "RN"}
+⚠️ Mande SEMPRE o *bairro* e a *cidade* quando o cliente disser — é o que define a taxa de entrega. Se ele mandou só a rua, pergunte o bairro e a cidade ANTES de emitir. "estado" só se ele disser.
+⚠️ NUNCA invente o bairro nem a cidade, e NUNCA complete com a cidade da loja: o cliente pode morar na cidade vizinha.
 
 Salvar número da casa:
 ACAO: {"tipo": "salvar_numero", "numero": "42"}
@@ -1741,7 +1764,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             SUPABASE_URL, SUPABASE_KEY, indicadorProfileId
           )
           // Após cadastro, coleta endereço antes de perguntar entrega/retirada
-          resposta = `Me manda o seu *CEP* 😊`
+          resposta = TEXTO_PEDIR_ENDERECO
 
         } else if (acao.tipo === "pedir_cep") {
           // sem ação — Claude já pediu o CEP na resposta
@@ -1751,7 +1774,12 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           resposta = resultado.resposta
 
         } else if (acao.tipo === "salvar_rua" && acao.rua) {
-          const resultado = await handleSalvarRua(supabase, empresaId, phone, String(acao.rua))
+          const resultado = await handleSalvarRua(
+            supabase, empresaId, phone, String(acao.rua),
+            acao.bairro ? String(acao.bairro) : null,
+            acao.cidade ? String(acao.cidade) : null,
+            acao.estado ? String(acao.estado) : null,
+          )
           resposta = resultado.resposta
 
         } else if (acao.tipo === "salvar_numero" && acao.numero) {
