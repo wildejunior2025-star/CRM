@@ -333,28 +333,39 @@ export default function PortalPedidos() {
                 )}
                 {p.status === 'saiu_entrega' && p.tipo_entrega !== 'retirada' && (
                   <div style={{ marginTop: 8, padding: '10px 12px', background: 'rgba(124,58,237,.12)', borderRadius: 8, border: '1px solid rgba(124,58,237,.3)' }}>
-                    <div style={{ fontSize: 13, color: '#7c3aed', fontWeight: 600, marginBottom: 6 }}>
+                    <div style={{ fontSize: 13, color: '#7c3aed', fontWeight: 600, marginBottom: p.codigo_entrega ? 6 : 0 }}>
                       🛵 Seu pedido saiu para entrega!
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                      Código de confirmação — passe ao entregador:
-                    </div>
-                    <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '0.4em', color: '#7c3aed', fontVariantNumeric: 'tabular-nums' }}>
-                      {p.codigo_entrega ?? '----'}
-                    </div>
+                    {/* Loja com o código de entrega desligado: a caixa mostrava "- - - -"
+                        e mandava o cliente passar ao entregador um código que não existe.
+                        Sem código, fica só o aviso de que o pedido saiu. */}
+                    {p.codigo_entrega && (
+                      <>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                          Código de confirmação — passe ao entregador:
+                        </div>
+                        <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '0.4em', color: '#7c3aed', fontVariantNumeric: 'tabular-nums' }}>
+                          {p.codigo_entrega}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
                 {p.status === 'saiu_entrega' && p.tipo_entrega === 'retirada' && (
                   <div style={{ marginTop: 8, padding: '10px 12px', background: 'rgba(124,58,237,.12)', borderRadius: 8, border: '1px solid rgba(124,58,237,.3)' }}>
-                    <div style={{ fontSize: 13, color: '#7c3aed', fontWeight: 600, marginBottom: 6 }}>
+                    <div style={{ fontSize: 13, color: '#7c3aed', fontWeight: 600, marginBottom: p.codigo_entrega ? 6 : 0 }}>
                       🏪 Seu pedido está pronto para retirada!
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                      Código de retirada — apresente na loja:
-                    </div>
-                    <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '0.4em', color: '#7c3aed', fontVariantNumeric: 'tabular-nums' }}>
-                      {p.codigo_entrega ?? '----'}
-                    </div>
+                    {p.codigo_entrega && (
+                      <>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                          Código de retirada — apresente na loja:
+                        </div>
+                        <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '0.4em', color: '#7c3aed', fontVariantNumeric: 'tabular-nums' }}>
+                          {p.codigo_entrega}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
                 {p.status === 'entregue' && (
