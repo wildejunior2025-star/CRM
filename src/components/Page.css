@@ -785,3 +785,121 @@ a.dashboard-card-link:hover {
   color: var(--text);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
 }
+
+/* Cabeçalho do formulário de produto (título + fechar). No PC o X é redundante
+   — dá pra clicar fora ou usar o Cancelar —, mas no celular a tela é cheia e
+   não existe "fora" pra tocar. */
+.pf-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pf-topo h2 { margin: 0; }
+
+.pf-fechar {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pf-fechar:hover { color: var(--text); border-color: var(--text-muted); }
+
+/* ══ Cadastro de produto no CELULAR ═══════════════════════════════════════
+   No PC o formulário é um modal centralizado e funciona bem. No celular o
+   mesmo modal vira uma caixinha espremida com 17 campos rolando por dentro
+   dela, dentro da página que também rola — e o Salvar mora lá no fim, fora
+   do alcance. Aqui ele deixa de ser modal e vira TELA: ocupa tudo, o miolo é
+   a única coisa que rola, e o Salvar fica fixo embaixo, sempre visível.
+
+   100dvh, não 100vh: com a barra do Chrome à vista, 100vh joga o rodapé pra
+   debaixo dela — a mesma armadilha que já pegou a gaveta do salão.           */
+@media (max-width: 720px) {
+  .modal-overlay:has(.prod-form) { padding: 0; }
+
+  .modal.prod-form {
+    width: 100%;
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;          /* quem rola é o miolo, não a tela toda */
+  }
+
+  .prod-form .pf-topo {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 14px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .prod-form .pf-topo h2 { font-size: 18px; }
+
+  /* O form é a área que rola; o rodapé sai de dentro dela e gruda embaixo. */
+  .prod-form form {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .prod-form .form-grid {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 14px 16px 20px;
+    gap: 14px;
+  }
+
+  /* 16px é o mínimo que o iOS aceita sem dar zoom sozinho no campo focado —
+     e o zoom desalinha a tela inteira e assusta quem está cadastrando. */
+  .prod-form .form-field input[type="text"],
+  .prod-form .form-field input[type="number"],
+  .prod-form .form-field select,
+  .prod-form .form-field textarea {
+    font-size: 16px;
+    padding: 11px 12px;
+  }
+
+  .prod-form .form-field input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+  }
+
+  /* Alvo de toque: botão de 8px de altura não se acerta com o dedo. */
+  .prod-form .pf-toggle button { padding: 11px 0; font-size: 13.5px; }
+
+  .prod-form .prod-form-foto { max-width: 140px; }
+
+  .prod-form .pf-acoes {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin: 0;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+  }
+
+  /* Salvar é o que a pessoa veio fazer; Cancelar fica do tamanho do texto. */
+  .prod-form .pf-acoes .btn-primary { flex: 1; padding: 13px; font-size: 15px; }
+  .prod-form .pf-acoes .btn-secondary { flex: 0 0 auto; padding: 13px 16px; }
+}

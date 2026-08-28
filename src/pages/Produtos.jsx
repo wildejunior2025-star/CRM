@@ -1374,7 +1374,15 @@ export default function Produtos() {
       {showModal && (
         <div className="modal-overlay">
           <div className="modal modal-wide prod-form" onClick={(e) => e.stopPropagation()}>
-            <h2>{editingId ? 'Editar produto' : 'Novo produto'}</h2>
+            <div className="pf-topo">
+              <h2>{editingId ? 'Editar produto' : 'Novo produto'}</h2>
+              <button
+                type="button"
+                className="pf-fechar"
+                onClick={fecharModal}
+                aria-label="Fechar"
+              >✕</button>
+            </div>
             <form onSubmit={handleSubmit}>
               <div className="form-grid">
                 <div className="pf-secao"><span>Produto</span></div>
@@ -1853,7 +1861,7 @@ export default function Produtos() {
 
               {error && <p className="error-text">{error}</p>}
 
-              <div className="modal-actions">
+              <div className="modal-actions pf-acoes">
                 <button
                   type="button"
                   className="btn btn-secondary"
