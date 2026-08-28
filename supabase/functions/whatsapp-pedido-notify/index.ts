@@ -38,11 +38,16 @@ function getMensagem(status: string, tipoEntrega: string, num: string, codigo: s
       return `✅ *Pedido #${num} confirmado pela loja!*\nSeu pedido está sendo preparado. Em breve você recebe uma atualização! 🎉`
     case "em_preparo":
       return `👨‍🍳 *Pedido #${num} em preparo!*\nFique de olho, logo logo fica pronto!`
+    // Sem código o pedido segue normal — a loja pode ter desligado o código de
+    // entrega no Super Admin. Sem esse cuidado o cliente receberia a frase pela
+    // metade: "Seu código de entrega: **".
     case "saiu_entrega":
       if (tipoEntrega === "retirada") {
-        return `🏪 *Pedido #${num} pronto para retirada!*\nPode vir buscar na loja! Seu código de confirmação: *${codigo}* 🎉`
+        return `🏪 *Pedido #${num} pronto para retirada!*\nPode vir buscar na loja! 🎉` +
+          (codigo ? `\nSeu código de confirmação: *${codigo}*` : "")
       }
-      return `🛵 *Pedido #${num} saiu para entrega!*\nEstá a caminho! Seu código de entrega: *${codigo}*`
+      return `🛵 *Pedido #${num} saiu para entrega!*\nEstá a caminho!` +
+        (codigo ? `\nSeu código de entrega: *${codigo}*` : "")
     case "entregue":
       return `📦 *Pedido #${num} entregue!*\nEsperamos que tenha gostado! Como foi sua experiência?\n\nAvalie de *1 a 5* ⭐`
     case "cancelado":
