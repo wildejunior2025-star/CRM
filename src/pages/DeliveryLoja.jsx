@@ -966,10 +966,10 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
         </div>
 
         <div className="dloja-drawer-body">
+          {/* pre-wrap: a descricao e o unico lugar onde a loja avisa coisa do
+              tipo "nao aceitamos balde de retorno sujo". Sem isso as linhas do
+              aviso viravam um paragrafo unico e ninguem lia. */}
           {produto.descricao && (
-            {/* pre-wrap: a descricao e o unico lugar onde a loja avisa coisa do
-                tipo "nao aceitamos balde de retorno sujo". Sem isso as linhas
-                do aviso viravam um paragrafo unico e ninguem lia. */}
             <p style={{ fontSize: 13, color: 'var(--dl-text-muted)', margin: '0 0 12px', whiteSpace: 'pre-wrap' }}>{produto.descricao}</p>
           )}
           {grupos.map(grupo => {
