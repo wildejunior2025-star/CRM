@@ -458,7 +458,7 @@ html[data-teclado='aberto'] .sal-overlay {
   .sal-drawer { width: min(1500px, 96vw); }
 
   .sal-titulo-col {
-    font-size: 15px !important;
+    font-size: 17px !important;
     font-weight: 800 !important;
     letter-spacing: 0.5px;
     text-transform: uppercase;
@@ -473,13 +473,21 @@ html[data-teclado='aberto'] .sal-overlay {
   .sal-item-sub { font-size: 13.5px !important; }
   .sal-item-qtd { font-size: 17px !important; min-width: 26px !important; }
 
-  /* Catálogo do "Adicionar item". */
-  .sal-prod-nome { font-size: 16.5px !important; }
-  .sal-prod-preco { font-size: 15.5px !important; }
-  .sal-produtos button { min-height: 56px !important; padding: 12px 14px !important; }
-  .sal-cat-nome { font-size: 16px !important; }
-  .sal-cat { padding: 14px 14px !important; }
-  .sal-vazio { font-size: 15px !important; }
+  /* Catálogo do "Adicionar item". A coluna toda cresce junto: campo de busca,
+     lista de categorias e lista de produtos. Numa gaveta de 1500px o texto de
+     celular vira um risco no meio da tela. */
+  .sal-prod-nome { font-size: 18px !important; }
+  .sal-prod-preco { font-size: 16.5px !important; }
+  .sal-produtos button { min-height: 60px !important; padding: 14px 16px !important; }
+
+  .sal-cat-nome { font-size: 18px !important; }
+  .sal-cat-qtd { font-size: 13px !important; min-width: 26px !important; padding: 2px 9px !important; }
+  .sal-cat-seta { font-size: 22px !important; }
+  .sal-cat { padding: 17px 16px !important; }
+
+  .sal-busca input { font-size: 17px !important; padding: 13px 40px 13px 14px !important; }
+  .sal-inv-abrir { font-size: 16px !important; padding: 13px 0 !important; }
+  .sal-vazio { font-size: 16px !important; }
 
   /* UMA por linha, igual à Nova venda. Em 3 colunas o nome longo ("AMENDOIM
      PETTIZ CEBOLA E SALSA 50G") quebrava em quatro linhas e o preço montava em
