@@ -273,7 +273,8 @@ export function montarCupomBytes(pedido, empresa = {}) {
     for (const c of complementos) {
       const cq = Number(c?.qtdTotal ?? 1)
       const cp = Number(c?.preco ?? 0)
-      b.txt(`  > ${cq > 1 ? cq + 'x ' : ''}${semAcento(c?.nome ?? c)}${cp > 0 ? ' +' + fmt(cp * cq) : ''}`).nl()
+      // Sem o "x", igual ao card do gestor: "5 Milho verde".
+      b.txt(`  > ${cq} ${semAcento(c?.nome ?? c)}${cp > 0 ? ' +' + fmt(cp * cq) : ''}`).nl()
     }
     if (item.observacao) b.txt('  obs: ' + semAcento(item.observacao)).nl()
   }

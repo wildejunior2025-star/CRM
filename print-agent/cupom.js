@@ -141,8 +141,11 @@ function montarCupom(pedido, empresa) {
       if (!cn) continue
       // Adicional pago (ex.: proteina/porcao extra) sai com o valor cobrado.
       const cp = Number(c?.preco ?? 0)
-      if (cp > 0) parts.push(kv('   ' + cq + 'x ' + cn, '+' + money(cp * cq)))
-      else parts.push(linha('   ' + cq + 'x ' + cn))
+      // Sem o "x" na linha do complemento: "5 Milho verde", igual ao card do
+      // gestor. O "x" fica só na linha do item ("20x Picole"), que e o que
+      // multiplica de verdade — no complemento ele confundia quem le o papel.
+      if (cp > 0) parts.push(kv('   ' + cq + ' ' + cn, '+' + money(cp * cq)))
+      else parts.push(linha('   ' + cq + ' ' + cn))
     }
     if (it.observacao) parts.push(linha('   obs: ' + it.observacao))
   }
