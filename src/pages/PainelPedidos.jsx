@@ -15,7 +15,7 @@ function aceitarAutoAtivo() {
   try { return JSON.parse(localStorage.getItem('painelConfig') || '{}').aceitarAuto === true }
   catch { return false }
 }
-import { CONDICOES_PAGAMENTO, FORMAS_PAGAMENTO, formasAtivas } from '../lib/constants'
+import { FORMAS_PAGAMENTO, formasAtivas } from '../lib/constants'
 import { separarItem } from '../lib/itensPedido'
 import { semAcento } from '../lib/texto'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
@@ -471,24 +471,24 @@ function QtdInput({ value, onChange }) {
   )
 }
 
-// ── Modal de cadastro completo de cliente (mesma ficha do CRM) ──
-const DIAS_VISITA = ['segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado']
-const TIPOS_CLIENTE_PADRAO = ['mercadinho', 'bar', 'restaurante', 'distribuidor', 'outro']
-
+// ── Cadastro rápido de cliente no balcão ──
 function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar, onSalvo }) {
-  const { profile } = useAuth()
-  // Desconto e limite de crédito só o dono (admin/super_admin) pode definir.
-  const podeFinanceiro = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
+  // Cadastro de balcão: nome, telefone e endereço, numa tela só.
+  //
+  // Antes eram duas etapas com a ficha comercial inteira — tipo de cliente,
+  // CNPJ, dia de visita, condição de pagamento, limite de crédito, desconto
+  // autorizado, pedido mínimo, observações. Isso serve pra carteira de
+  // atacado, não pra quem está com o cliente na frente e a fila andando.
+  //
+  // Os campos tirados NÃO sumiram do banco: todos têm valor padrão na coluna
+  // (tipo 'mercadinho', condição 'à vista', ativo true, zeros), então o
+  // cadastro sai exatamente igual ao que saía antes — só não é mais perguntado.
   const [form, setForm] = useState({
-    nome: initialNome, tipo: 'mercadinho', cnpj_cpf: '', telefone: initialTel,
-    cep: '', endereco: '', numero: '', complemento: '', bairro: '', cidade: '', estado: '', dia_visita: '',
-    condicao_pagamento: 'a_vista', limite_credito: 0,
-    desconto_percentual: 0, desconto_minimo_pedido: 0, observacoes: '', ativo: true,
+    nome: initialNome, telefone: initialTel,
+    cep: '', endereco: '', numero: '', complemento: '', bairro: '', cidade: '', estado: '',
   })
-  const [tipos, setTipos]   = useState(TIPOS_CLIENTE_PADRAO)
   const [saving, setSaving] = useState(false)
   const [erro, setErro]     = useState(null)
-  const [step, setStep]     = useState(1) // 1 = dados, 2 = endereço
   const [buscandoCep, setBuscandoCep] = useState(false)
 
   // Ao digitar o CEP completo, puxa endereço/bairro/cidade/UF (ViaCEP).
@@ -511,21 +511,6 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
     setBuscandoCep(false)
   }
 
-  function avancar(e) {
-    e.preventDefault()
-    if (!form.nome.trim()) { setErro('Informe o nome do cliente.'); return }
-    setErro(null); setStep(2)
-  }
-
-  useEffect(() => {
-    let ativo = true
-    ;(async () => {
-      const { data } = await supabase.from('tipos_cliente').select('nome').order('nome')
-      if (ativo && data && data.length) setTipos(data.map(t => t.nome))
-    })()
-    return () => { ativo = false }
-  }, [])
-
   useEffect(() => {
     function onKey(e) { if (e.key === 'Escape') onFechar() }
     window.addEventListener('keydown', onKey)
@@ -533,23 +518,17 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
   }, [onFechar])
 
   function ch(e) {
-    const { name, value, type, checked } = e.target
-    setForm(p => ({ ...p, [name]: type === 'checkbox' ? checked : value }))
+    const { name, value } = e.target
+    setForm(p => ({ ...p, [name]: value }))
   }
 
   async function salvar(e) {
     e.preventDefault()
     if (!form.nome.trim()) { setErro('Informe o nome do cliente.'); return }
     setSaving(true); setErro(null)
-    const payload = {
-      ...form, empresa_id: empresa.id,
-      limite_credito: Number(form.limite_credito) || 0,
-      desconto_percentual: Number(form.desconto_percentual) || 0,
-      desconto_minimo_pedido: Number(form.desconto_minimo_pedido) || 0,
-    }
     const { data, error } = await supabase
       .from('clientes')
-      .insert(payload)
+      .insert({ ...form, empresa_id: empresa.id })
       .select('id, nome, telefone, endereco, numero, complemento, bairro, cidade')
       .single()
     setSaving(false)
@@ -567,145 +546,67 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
 
   return (
     <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 200 }}>
-      <form className="pp-modal" onClick={e => e.stopPropagation()} onSubmit={step === 1 ? avancar : salvar}
+      <form className="pp-modal" onClick={e => e.stopPropagation()} onSubmit={salvar}
         style={{ maxWidth: 560, width: '94vw', maxHeight: '90vh', overflowY: 'auto', display: 'block' }}>
         <p className="pp-modal-titulo" style={{ marginBottom: 4 }}>Novo cliente</p>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 14px' }}>
-          Etapa {step} de 2 · {step === 1 ? 'Dados do cliente' : 'Endereço'}
+          Só o endereço é opcional — dá pra salvar sem.
         </p>
 
-        {step === 1 ? (
-          <>
-            <div style={{ marginBottom: 12 }}>
-              <label style={lbl}>Nome / Razão social *</label>
-              <input name="nome" value={form.nome} onChange={ch} style={inp} autoFocus />
-            </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={lbl}>Nome *</label>
+          <input name="nome" value={form.nome} onChange={ch} style={inp} autoFocus />
+        </div>
 
-            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-              <div style={col}>
-                <label style={lbl}>Tipo</label>
-                <select name="tipo" value={form.tipo} onChange={ch} style={inp}>
-                  {tipos.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-              <div style={col}>
-                <label style={lbl}>CNPJ / CPF</label>
-                <input name="cnpj_cpf" value={form.cnpj_cpf} onChange={ch} style={inp} />
-              </div>
-            </div>
+        <div style={{ marginBottom: 16 }}>
+          <label style={lbl}>Telefone</label>
+          <input name="telefone" value={form.telefone} onChange={ch} style={inp} inputMode="tel" />
+        </div>
 
-            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-              <div style={col}>
-                <label style={lbl}>Telefone</label>
-                <input name="telefone" value={form.telefone} onChange={ch} style={inp} />
-              </div>
-              <div style={col}>
-                <label style={lbl}>Dia de visita</label>
-                <select name="dia_visita" value={form.dia_visita} onChange={ch} style={inp}>
-                  <option value="">-</option>
-                  {DIAS_VISITA.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
-            </div>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+          <div style={{ ...col, flex: '0 0 45%' }}>
+            <label style={lbl}>CEP {buscandoCep && <span style={{ color: 'var(--primary)' }}>· buscando...</span>}</label>
+            <input name="cep" value={form.cep} onChange={e => { ch(e); buscarCep(e.target.value) }}
+              placeholder="00000-000" inputMode="numeric" style={inp} />
+          </div>
+          <div style={col}>
+            <label style={lbl}>Número</label>
+            <input name="numero" value={form.numero} onChange={ch} style={inp} />
+          </div>
+        </div>
 
-            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-              <div style={col}>
-                <label style={lbl}>Condição de pagamento</label>
-                <select name="condicao_pagamento" value={form.condicao_pagamento} onChange={ch} style={inp}>
-                  {CONDICOES_PAGAMENTO.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </div>
-              {podeFinanceiro && (
-                <div style={col}>
-                  <label style={lbl}>Limite de crédito (R$)</label>
-                  <input name="limite_credito" type="number" value={form.limite_credito} onChange={ch} style={inp} />
-                </div>
-              )}
-            </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={lbl}>Endereço</label>
+          <input name="endereco" value={form.endereco} onChange={ch} style={inp} />
+        </div>
 
-            {/* Desconto e limite: só o dono (admin) define — vendedor não vê */}
-            {podeFinanceiro && (
-              <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-                <div style={col}>
-                  <label style={lbl}>Desconto autorizado (%)</label>
-                  <input name="desconto_percentual" type="number" value={form.desconto_percentual} onChange={ch} style={inp} />
-                </div>
-                <div style={col}>
-                  <label style={lbl}>Pedido mínimo para desconto (R$)</label>
-                  <input name="desconto_minimo_pedido" type="number" value={form.desconto_minimo_pedido} onChange={ch} style={inp} />
-                </div>
-              </div>
-            )}
+        <div style={{ marginBottom: 12 }}>
+          <label style={lbl}>Complemento</label>
+          <input name="complemento" value={form.complemento} onChange={ch} style={inp} placeholder="Apto, bloco, referência..." />
+        </div>
 
-            <div style={{ marginBottom: 12 }}>
-              <label style={lbl}>Observações</label>
-              <textarea name="observacoes" value={form.observacoes} onChange={ch} rows={3} style={{ ...inp, resize: 'vertical' }} />
-            </div>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+          <div style={col}>
+            <label style={lbl}>Bairro</label>
+            <input name="bairro" value={form.bairro} onChange={ch} style={inp} />
+          </div>
+          <div style={col}>
+            <label style={lbl}>Cidade</label>
+            <input name="cidade" value={form.cidade} onChange={ch} style={inp} />
+          </div>
+        </div>
 
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--text)', marginBottom: 14, cursor: 'pointer' }}>
-              <input name="ativo" type="checkbox" checked={form.ativo} onChange={ch} />
-              Ativo
-            </label>
-          </>
-        ) : (
-          <>
-            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-              <div style={{ ...col, flex: '0 0 45%' }}>
-                <label style={lbl}>CEP {buscandoCep && <span style={{ color: 'var(--primary)' }}>· buscando...</span>}</label>
-                <input name="cep" value={form.cep} onChange={e => { ch(e); buscarCep(e.target.value) }}
-                  placeholder="00000-000" inputMode="numeric" style={inp} autoFocus />
-              </div>
-              <div style={col}>
-                <label style={lbl}>Número</label>
-                <input name="numero" value={form.numero} onChange={ch} style={inp} />
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 12 }}>
-              <label style={lbl}>Endereço</label>
-              <input name="endereco" value={form.endereco} onChange={ch} style={inp} />
-            </div>
-
-            <div style={{ marginBottom: 12 }}>
-              <label style={lbl}>Complemento</label>
-              <input name="complemento" value={form.complemento} onChange={ch} style={inp} placeholder="Apto, bloco, referência..." />
-            </div>
-
-            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-              <div style={col}>
-                <label style={lbl}>Bairro</label>
-                <input name="bairro" value={form.bairro} onChange={ch} style={inp} />
-              </div>
-              <div style={col}>
-                <label style={lbl}>Cidade</label>
-                <input name="cidade" value={form.cidade} onChange={ch} style={inp} />
-              </div>
-            </div>
-
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 14px' }}>
-              Digite o CEP que a gente puxa o endereço. É opcional — pode salvar sem.
-            </p>
-          </>
-        )}
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 14px' }}>
+          Digite o CEP que a gente puxa o endereço.
+        </p>
 
         {erro && <p style={{ color: 'var(--danger, #ef4444)', fontSize: 13, margin: '0 0 10px' }}>{erro}</p>}
 
         <div className="pp-modal-actions">
-          {step === 1 ? (
-            <>
-              <button type="button" className="pp-modal-btn-secondary" onClick={onFechar}>Cancelar</button>
-              <button type="submit" className="pp-modal-btn-danger" style={{ background: '#7c3aed', borderColor: '#7c3aed' }}>
-                Próximo →
-              </button>
-            </>
-          ) : (
-            <>
-              <button type="button" className="pp-modal-btn-secondary" onClick={() => setStep(1)}>← Voltar</button>
-              <button type="submit" className="pp-modal-btn-danger" style={{ background: '#7c3aed', borderColor: '#7c3aed' }} disabled={saving}>
-                {saving ? 'Salvando...' : 'Salvar cliente'}
-              </button>
-            </>
-          )}
+          <button type="button" className="pp-modal-btn-secondary" onClick={onFechar}>Cancelar</button>
+          <button type="submit" className="pp-modal-btn-danger" style={{ background: '#7c3aed', borderColor: '#7c3aed' }} disabled={saving}>
+            {saving ? 'Salvando...' : 'Salvar cliente'}
+          </button>
         </div>
       </form>
     </div>
