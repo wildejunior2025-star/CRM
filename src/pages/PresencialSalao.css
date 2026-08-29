@@ -481,9 +481,11 @@ html[data-teclado='aberto'] .sal-overlay {
   .sal-cat { padding: 14px 14px !important; }
   .sal-vazio { font-size: 15px !important; }
 
-  /* Três colunas de produto: na largura nova, duas deixavam metade da linha
-     vazia e obrigavam a rolar sem necessidade. */
-  .sal-produtos { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* UMA por linha, igual à Nova venda. Em 3 colunas o nome longo ("AMENDOIM
+     PETTIZ CEBOLA E SALSA 50G") quebrava em quatro linhas e o preço montava em
+     cima do texto — na largura nova cabe tudo numa linha só, e o olho desce a
+     lista em vez de varrer em ziguezague. */
+  .sal-produtos { display: flex; flex-direction: column; gap: 6px; }
 
   /* Subtotal com o mesmo destaque do total da Nova venda: é o número que o
      cliente pergunta e o garçom fala em voz alta. */
@@ -509,5 +511,4 @@ html[data-teclado='aberto'] .sal-overlay {
 
 @media (min-width: 1600px) {
   .sal-rodape-subtotal > strong { font-size: 46px; }
-  .sal-produtos { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }

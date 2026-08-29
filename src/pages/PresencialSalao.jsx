@@ -114,6 +114,9 @@ export default function PresencialSalao() {
   const [loading, setLoading] = useState(true)
 
   const [mesaSel, setMesaSel] = useState(null)   // mesa aberta no drawer
+  const [destaque, setDestaque] = useState(0)   // produto marcado pelas setas
+  const listaProdRef = useRef(null)
+  useEffect(() => { setDestaque(0) }, [busca, categoriaSel])
   const [movendo, setMovendo] = useState(false)  // drawer de trocar de mesa
   const [moverNome, setMoverNome] = useState('')
   const [moverErro, setMoverErro] = useState('')
@@ -1617,6 +1620,26 @@ export default function PresencialSalao() {
       ? produtosComCategoria.filter(p => p.categoria.trim() === categoriaSel)
       : []
 
+  // ── Teclado na busca de produto ─────────────────────────────────────────
+  // Digita, desce na seta e confirma no Enter, igual à Nova venda. Sem isso o
+  // garçom digita, tira a mão do teclado e vai mirar o produto com o mouse.
+  function teclaBusca(e) {
+    if (!produtosFiltrados.length) return
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      setDestaque(d => {
+        const i = Math.max(0, Math.min(produtosFiltrados.length - 1, e.key === 'ArrowDown' ? d + 1 : d - 1))
+        const el = listaProdRef.current?.children?.[i]
+        if (el?.scrollIntoView) el.scrollIntoView({ block: 'nearest' })
+        return i
+      })
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const p = produtosFiltrados[destaque]
+      if (p) addItem(p)
+    }
+  }
+
   if (loading) return <div className="page"><p>Carregando salão...</p></div>
 
   // A cor é o mapa do salão: quanto mais forte, mais precisa de você agora.
@@ -2251,7 +2274,7 @@ export default function PresencialSalao() {
                 )}
               </div>
               <div className="sal-busca" style={{ position: 'relative', marginBottom: 8 }}>
-                <input ref={buscaRef} value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar produto..."
+                <input ref={buscaRef} value={busca} onChange={e => setBusca(e.target.value)} onKeyDown={teclaBusca} placeholder="Buscar produto... (↑ ↓ e Enter)"
                   style={{ width: '100%', padding: '10px 38px 10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box', fontSize: 14.5 }} />
                 {busca && (
                   <button type="button" title="Limpar" aria-label="Limpar busca"
@@ -2287,15 +2310,21 @@ export default function PresencialSalao() {
 
               {/* Produtos: quando há busca OU quando uma categoria está aberta. */}
               {(busca.trim() || categoriaSel) && (
-                <div className="sal-produtos">
-                  {produtosFiltrados.map(p => (
+                <div className="sal-produtos" ref={listaProdRef}>
+                  {produtosFiltrados.map((p, idx) => {
+                    const marcado = !!busca && idx === destaque
+                    return (
                     <button key={p.produto_id} type="button" onClick={() => addItem(p)}
-                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, minHeight: 48, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', textAlign: 'left' }}>
+                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, minHeight: 48, padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                        border: `1px solid ${marcado ? 'var(--primary)' : 'var(--border)'}`,
+                        background: marcado ? 'rgba(124,58,237,.16)' : 'transparent',
+                        color: 'var(--text)', textAlign: 'left' }}>
                       <span className="sal-prod-nome" style={{ flex: 1, minWidth: 0, fontSize: 15.5, fontWeight: 600, lineHeight: 1.3 }}>{p.nome}</span>
                       <span className="sal-prod-preco" style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: 14.5, fontWeight: 700, color: 'var(--primary)' }}>+ {fmt(p.preco_venda)}</span>
                     </button>
-                  ))}
-                  {produtosFiltrados.length === 0 && <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum produto encontrado.</p>}
+                    )
+                  })}
+                  {produtosFiltrados.length === 0 && <p className="sal-vazio" style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum produto encontrado.</p>}
                 </div>
               )}
               </div>
