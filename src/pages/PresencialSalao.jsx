@@ -131,7 +131,6 @@ export default function PresencialSalao() {
   const [forma, setForma]     = useState('dinheiro')
   const [aplicarTaxa, setAplicarTaxa] = useState(true)
   const [salvando, setSalvando] = useState(false)
-  const [obsEdit, setObsEdit] = useState({})  // observação em edição por item
   const [precoEdit, setPrecoEdit] = useState({})  // preço em edição por item (só admin)
   // Preço em edição no rascunho, por linha. Existe pra comida no peso: o atendente
   // pesa o prato e digita o valor ANTES de mandar pra cozinha (antes só dava depois).
@@ -956,19 +955,6 @@ export default function PresencialSalao() {
     if (!Number.isFinite(preco) || preco === Number(item.preco_unitario)) return
     const { error } = await supabase.from('comanda_itens').update({ preco_unitario: preco }).eq('id', item.id)
     if (error) { window.alert('Erro ao salvar o preço: ' + error.message); return }
-    await loadMesas()
-  }
-
-  async function salvarObs(item) {
-    const texto = obsEdit[item.id]
-    if (texto === undefined) return                 // não estava editando
-    const novo = texto.trim() || null
-    if (novo === (item.observacao ?? null)) {        // não mudou
-      setObsEdit(prev => { const n = { ...prev }; delete n[item.id]; return n })
-      return
-    }
-    await supabase.from('comanda_itens').update({ observacao: novo }).eq('id', item.id)
-    setObsEdit(prev => { const n = { ...prev }; delete n[item.id]; return n })
     await loadMesas()
   }
 
@@ -2151,24 +2137,15 @@ export default function PresencialSalao() {
                           </span>
                         )}
                       </div>
-                      <input
-                        value={obsEdit[item.id] !== undefined ? obsEdit[item.id] : (item.observacao ?? '')}
-                        onChange={e => setObsEdit(prev => ({ ...prev, [item.id]: e.target.value }))}
-                        onBlur={() => salvarObs(item)}
-                        onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
-                        placeholder="📝 Observação (ex: sem cebola, sem gelo, ponto da carne...)"
-                        style={{
-                          width: '100%', marginTop: 6, padding: '8px 10px', fontSize: 14.5, fontWeight: 600,
-                          borderRadius: 8, border: '1px solid var(--border)',
-                          background: 'var(--input-bg, var(--bg))', color: 'var(--text)',
-                        }}
-                      />
-                      {/* Este item já foi gravado: o papel da cozinha já saiu. Avisa o garçom
-                          em vez de deixar ele achar que a cozinha vai ficar sabendo. */}
-                      {obsEdit[item.id] !== undefined && (
-                        <div style={{ fontSize: 11.5, fontWeight: 700, color: '#d97706', marginTop: 4, lineHeight: 1.35 }}>
-                          ⚠️ Item já enviado — isto aparece na tela da cozinha, mas NÃO sai na impressão.
-                          Pra sair no papel, escreva o recado embaixo ANTES de enviar.
+                      {/* Item já enviado NÃO tem campo de observação: o papel da
+                          cozinha já saiu e nada escrito aqui chega em quem está
+                          cozinhando. Era um campo que só dava a impressão de estar
+                          avisando alguém. O recado se escreve ANTES de enviar, na
+                          linha do rascunho.
+                          O que já foi escrito continua à vista, só que como texto. */}
+                      {item.observacao && (
+                        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-muted)', marginTop: 5 }}>
+                          📝 {item.observacao}
                         </div>
                       )}
                     </div>
