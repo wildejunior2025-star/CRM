@@ -102,6 +102,8 @@ export default function PresencialSalao() {
   // monta o prato junto com o cliente, então exigir os grupos só atrasa. Vale
   // aqui e no cardápio da mesa — a Loja Online e a Nova venda seguem exigindo.
   const [semObrigatorios, setSemObrigatorios] = useState(false)
+  const [semCozinha, setSemCozinha] = useState(false)
+  const [salvandoCoz, setSalvandoCoz] = useState(false)
   const [salvandoObrig, setSalvandoObrig] = useState(false)
   const [mesas, setMesas]     = useState([])
   const [comandas, setComandas] = useState([])
@@ -251,7 +253,7 @@ export default function PresencialSalao() {
   const loadCatalogo = useCallback(async () => {
     if (!empresaId) return
     const [emp, mp, ps, gs, cat, cg, cl] = await Promise.all([
-      supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios, comanda_balcao_ativa').eq('id', empresaId).single(),
+      supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios, presencial_sem_cozinha, comanda_balcao_ativa').eq('id', empresaId).single(),
       // Pergunta "tem MP ligado?" pela funcao, e nao pela tabela: mercadopago_contas
       // guarda o token da loja e nao e (nem deve ser) legivel pelo navegador (mig 0194).
       supabase.rpc('mp_conectado_loja'),
@@ -273,6 +275,7 @@ export default function PresencialSalao() {
       setTaxaPct(Number(emp.data.taxa_servico_pct ?? 0))
       setEmpresaNome(emp.data.nome || '')
       setSemObrigatorios(!!emp.data.presencial_sem_obrigatorios)
+      setSemCozinha(!!emp.data.presencial_sem_cozinha)
       setComandaBalcaoAtiva(!!emp.data.comanda_balcao_ativa)
     }
     // Só quem conectou o Mercado Pago vê o botão de PIX online (mig 0193).
@@ -500,6 +503,18 @@ export default function PresencialSalao() {
     if (!rascunhoKey) return
     try { localStorage.setItem(rascunhoKey + '_obs', obsEnvio) } catch { /* ignora */ }
   }, [obsEnvio, rascunhoKey])
+
+  // Loja sem cozinha: o que cair no rascunho vira item da comanda na hora.
+  //
+  // O envio mora aqui e não dentro do addItem porque o rascunho é alimentado
+  // por três caminhos (produto simples, produto com complemento e "inventar
+  // produto") — resolvendo no estado, os três ficam cobertos de uma vez, e o
+  // rascunho continua sendo o lugar onde a quantidade é somada antes de gravar.
+  useEffect(() => {
+    if (!semCozinha || !comandaSel || enviando || rascunho.length === 0) return
+    enviarCozinha({ imprimir: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [semCozinha, rascunho, comandaSel, enviando])
   const subtotalRascunho = rascunho.reduce((s, r) => s + Number(r.preco_venda) * r.quantidade, 0)
 
   const subtotalSel = subtotalDe(comandaSel)
@@ -716,6 +731,24 @@ export default function PresencialSalao() {
     })
   }
 
+  // Depósito de bebida, conveniência, adega: não existe preparo. Ligado isto, o
+  // item cai direto na comanda ao ser escolhido — sem rascunho, sem botão de
+  // enviar e sem papel de uma cozinha que não existe.
+  async function alternarCozinha() {
+    if (!empresaId || salvandoCoz) return
+    const novo = !semCozinha
+    setSemCozinha(novo)
+    setSalvandoCoz(true)
+    const { error } = await supabase.from('empresas')
+      .update({ presencial_sem_cozinha: novo })
+      .eq('id', empresaId)
+    setSalvandoCoz(false)
+    if (error) {
+      setSemCozinha(!novo)
+      alert(`Não consegui salvar: ${error.message}`)
+    }
+  }
+
   // Liga/desliga a exigência dos complementos no presencial. Atualiza a tela na
   // hora e só depois grava — se o banco recusar, volta como estava.
   async function alternarObrigatorios() {
@@ -847,7 +880,7 @@ export default function PresencialSalao() {
 
   // Envia o pedido montado pra cozinha: insere TODOS os itens de uma vez → sai numa
   // impressão só (o gestor e o app FWC juntam os inserts que chegam juntos).
-  async function enviarCozinha() {
+  async function enviarCozinha({ imprimir = true } = {}) {
     if (!comandaSel || !rascunho.length || enviando) return
     setEnviando(true)
     // "PARA VIAGEM" e o recado da remessa vão na observação de cada item: é o único
@@ -860,6 +893,10 @@ export default function PresencialSalao() {
       produto_id: (r.produto_id && !String(r.produto_id).startsWith('avulso:')) ? r.produto_id : null,
       nome: r.nome,
       preco_unitario: Number(r.preco_venda), quantidade: r.quantidade,
+      // Sem cozinha o produto sai da prateleira pra mão do cliente: nasce
+      // entregue, senão a comanda fica cheia de "preparando" esperando um
+      // "Marcar pronto" que ninguém vai apertar.
+      ...(semCozinha ? { status: 'entregue' } : {}),
       observacao: [
         comandaSel.para_viagem ? 'PARA VIAGEM' : '',
         recado,
@@ -868,8 +905,10 @@ export default function PresencialSalao() {
     }))
     const { data: inseridos, error } = await supabase.from('comanda_itens').insert(rows).select()
     setEnviando(false)
-    if (error) { window.alert('Erro ao enviar pra cozinha: ' + error.message); return }
-    imprimirComandaAgora(inseridos ?? [])
+    if (error) { window.alert('Erro ao lançar o item: ' + error.message); return }
+    // Loja sem cozinha não tem quem leia a comanda de preparo — o papel só
+    // gastaria bobina.
+    if (imprimir) imprimirComandaAgora(inseridos ?? [])
     setRascunho([])
     setObsEnvio('')
     if (rascunhoKey) {
@@ -1770,6 +1809,30 @@ export default function PresencialSalao() {
         {ehAdmin && (
           <button
             type="button"
+            onClick={alternarCozinha}
+            disabled={salvandoCoz}
+            title="Depósito, conveniência, adega: sem preparo, o item vai direto pra comanda."
+            style={{
+              alignSelf: 'flex-start', padding: '9px 14px', borderRadius: 10, cursor: salvandoCoz ? 'wait' : 'pointer',
+              border: `1.5px solid ${semCozinha ? '#0ea5e9' : 'var(--border)'}`,
+              background: semCozinha ? 'rgba(14,165,233,.12)' : 'transparent',
+              color: semCozinha ? '#0ea5e9' : 'var(--text-muted)',
+              fontSize: 13, fontWeight: 700, textAlign: 'left', lineHeight: 1.35,
+            }}
+          >
+            {semCozinha ? '🥤 Sem cozinha' : '🍳 Tem cozinha'}
+            <span style={{ display: 'block', fontSize: 11, fontWeight: 600, opacity: .85 }}>
+              {salvandoCoz
+                ? 'salvando...'
+                : semCozinha
+                  ? 'o item cai direto na comanda'
+                  : 'o item passa pelo "enviar pra cozinha"'}
+            </span>
+          </button>
+        )}
+        {ehAdmin && (
+          <button
+            type="button"
             onClick={alternarObrigatorios}
             disabled={salvandoObrig}
             title="Vale no Salão e no cardápio do QR da mesa. A Loja Online e a Nova venda continuam exigindo."
@@ -2015,7 +2078,7 @@ export default function PresencialSalao() {
               {/* itens lançados */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
                 <div className="sal-titulo-col" style={{ fontSize: 15, fontWeight: 700 }}>Comanda</div>
-                {(comandaSel.comanda_itens ?? []).some(i => i.status !== 'pronto' && i.status !== 'entregue') && (
+                {!semCozinha && (comandaSel.comanda_itens ?? []).some(i => i.status !== 'pronto' && i.status !== 'entregue') && (
                   <button type="button" onClick={marcarTudoPronto}
                     style={{ fontSize: 12, fontWeight: 800, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
                       border: '1.5px solid #3b82f6', background: 'rgba(59,130,246,.12)', color: '#2563eb' }}>
@@ -2385,7 +2448,7 @@ export default function PresencialSalao() {
                     }}>
                     📦 {comandaSel.para_viagem ? 'Para viagem' : 'Viagem?'}
                   </button>
-                  <input
+                  {!semCozinha && <input
                     value={obsEnvio}
                     onChange={e => setObsEnvio(e.target.value)}
                     placeholder="📝 Recado pra cozinha (sai impresso)"
@@ -2394,10 +2457,10 @@ export default function PresencialSalao() {
                       borderRadius: 8, border: '1px solid var(--border)',
                       background: 'var(--input-bg, var(--bg))', color: 'var(--text)',
                     }}
-                  />
+                  />}
                 </div>
               )}
-              {comandaSel.status !== 'aguardando_conferencia' && rascunho.length > 0 && (comandaSel.para_viagem || obsEnvio.trim()) && (
+              {!semCozinha && comandaSel.status !== 'aguardando_conferencia' && rascunho.length > 0 && (comandaSel.para_viagem || obsEnvio.trim()) && (
                 <div style={{
                   marginBottom: 8, padding: '7px 10px', borderRadius: 8, fontSize: 13, fontWeight: 800,
                   background: 'rgba(217,119,6,.14)', color: '#d97706',
@@ -2405,8 +2468,8 @@ export default function PresencialSalao() {
                   A cozinha vai ler: {[comandaSel.para_viagem ? 'PARA VIAGEM' : '', obsEnvio.trim()].filter(Boolean).join(' · ')}
                 </div>
               )}
-              {comandaSel.status !== 'aguardando_conferencia' && rascunho.length > 0 && (
-                <button type="button" onClick={enviarCozinha} disabled={enviando}
+              {!semCozinha && comandaSel.status !== 'aguardando_conferencia' && rascunho.length > 0 && (
+                <button type="button" onClick={() => enviarCozinha()} disabled={enviando}
                   style={{ width: '100%', marginBottom: 12, padding: '12px 0', borderRadius: 10, border: 'none', cursor: enviando ? 'wait' : 'pointer',
                     background: '#16a34a', color: '#fff', fontWeight: 800, fontSize: 15, opacity: enviando ? 0.6 : 1 }}>
                   {enviando ? 'Enviando...' : `🍳 Enviar para a cozinha · ${rascunho.reduce((s, r) => s + r.quantidade, 0)} item(ns) · ${fmt(subtotalRascunho)}`}
