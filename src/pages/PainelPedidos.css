@@ -1426,3 +1426,57 @@
   .pp-venda button { font-size: 17.5px !important; }
   .pp-venda .pp-modal-titulo { font-size: 30px; }
 }
+
+/* ── Novo cliente: cadastro rápido do balcão ──────────────────────────────
+   Sete campos numa coluna de 560px sobrando tela dos dois lados. Aqui o
+   ganho não é largura bruta (o formulário é curto) e sim separar o "quem é"
+   do "onde entregar": no PC as duas metades ficam lado a lado e o caixa vê o
+   cadastro inteiro sem rolar. */
+.pp-cliente {
+  max-width: 600px;
+  max-height: 92vh;
+  overflow-y: auto;
+  gap: 18px;
+}
+
+.pp-cliente-secao {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--pp-text-muted, #94a3b8);
+  margin: 0 0 10px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--pp-border);
+}
+
+.pp-cliente-dica {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--pp-text-muted, #94a3b8);
+  margin: 12px 0 0;
+}
+
+@media (min-width: 1024px) {
+  .pp-cliente { max-width: 960px; padding: 30px 34px; }
+
+  /* Mesma razão da tela de venda: os tamanhos estão no style inline e só dá
+     pra crescer daqui. Alvo restrito a este formulário. */
+  .pp-cliente input { font-size: 16px !important; padding: 12px 14px !important; }
+  .pp-cliente button { font-size: 16px !important; }
+  .pp-cliente label { font-size: 13px !important; }
+  .pp-cliente .pp-modal-titulo { font-size: 26px; }
+  .pp-cliente .pp-cliente-secao { font-size: 13px; }
+
+  .pp-cliente-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.25fr;
+    gap: 34px;
+    align-items: start;
+  }
+
+  .pp-cliente-grid > .pp-cliente-col + .pp-cliente-col {
+    border-left: 1px solid var(--pp-border);
+    padding-left: 34px;
+  }
+}

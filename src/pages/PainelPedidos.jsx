@@ -546,61 +546,74 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
 
   return (
     <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 200 }}>
-      <form className="pp-modal" onClick={e => e.stopPropagation()} onSubmit={salvar}
-        style={{ maxWidth: 560, width: '94vw', maxHeight: '90vh', overflowY: 'auto', display: 'block' }}>
-        <p className="pp-modal-titulo" style={{ marginBottom: 4 }}>Novo cliente</p>
-        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 14px' }}>
-          Só o endereço é opcional — dá pra salvar sem.
-        </p>
-
-        <div style={{ marginBottom: 12 }}>
-          <label style={lbl}>Nome *</label>
-          <input name="nome" value={form.nome} onChange={ch} style={inp} autoFocus />
+      <form className="pp-modal pp-cliente" onClick={e => e.stopPropagation()} onSubmit={salvar}>
+        <div>
+          <p className="pp-modal-titulo" style={{ marginBottom: 4 }}>Novo cliente</p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+            Só o nome é obrigatório — o endereço dá pra completar depois.
+          </p>
         </div>
 
-        <div style={{ marginBottom: 16 }}>
-          <label style={lbl}>Telefone</label>
-          <input name="telefone" value={form.telefone} onChange={ch} style={inp} inputMode="tel" />
-        </div>
+        {/* Duas colunas no PC (quem cadastra está no caixa, de tela larga) e uma
+            só no celular. Ver .pp-cliente em PainelPedidos.css. */}
+        <div className="pp-cliente-grid">
+          <div className="pp-cliente-col">
+            <p className="pp-cliente-secao">Quem é</p>
 
-        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-          <div style={{ ...col, flex: '0 0 45%' }}>
-            <label style={lbl}>CEP {buscandoCep && <span style={{ color: 'var(--primary)' }}>· buscando...</span>}</label>
-            <input name="cep" value={form.cep} onChange={e => { ch(e); buscarCep(e.target.value) }}
-              placeholder="00000-000" inputMode="numeric" style={inp} />
+            <div style={{ marginBottom: 14 }}>
+              <label style={lbl}>Nome *</label>
+              <input name="nome" value={form.nome} onChange={ch} style={inp} autoFocus
+                placeholder="Como chamar o cliente" />
+            </div>
+
+            <div>
+              <label style={lbl}>Telefone</label>
+              <input name="telefone" value={form.telefone} onChange={ch} style={inp}
+                inputMode="tel" placeholder="(84) 90000-0000" />
+            </div>
           </div>
-          <div style={col}>
-            <label style={lbl}>Número</label>
-            <input name="numero" value={form.numero} onChange={ch} style={inp} />
+
+          <div className="pp-cliente-col">
+            <p className="pp-cliente-secao">Onde entregar</p>
+
+            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+              <div style={{ ...col, flex: '0 0 46%' }}>
+                <label style={lbl}>CEP {buscandoCep && <span style={{ color: 'var(--primary)' }}>· buscando...</span>}</label>
+                <input name="cep" value={form.cep} onChange={e => { ch(e); buscarCep(e.target.value) }}
+                  placeholder="00000-000" inputMode="numeric" style={inp} />
+              </div>
+              <div style={col}>
+                <label style={lbl}>Número</label>
+                <input name="numero" value={form.numero} onChange={ch} style={inp} />
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={lbl}>Endereço</label>
+              <input name="endereco" value={form.endereco} onChange={ch} style={inp} placeholder="Rua, avenida..." />
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={lbl}>Complemento</label>
+              <input name="complemento" value={form.complemento} onChange={ch} style={inp} placeholder="Apto, bloco, referência..." />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={col}>
+                <label style={lbl}>Bairro</label>
+                <input name="bairro" value={form.bairro} onChange={ch} style={inp} />
+              </div>
+              <div style={col}>
+                <label style={lbl}>Cidade</label>
+                <input name="cidade" value={form.cidade} onChange={ch} style={inp} />
+              </div>
+            </div>
+
+            <p className="pp-cliente-dica">💡 Digite o CEP que a gente puxa rua, bairro e cidade.</p>
           </div>
         </div>
 
-        <div style={{ marginBottom: 12 }}>
-          <label style={lbl}>Endereço</label>
-          <input name="endereco" value={form.endereco} onChange={ch} style={inp} />
-        </div>
-
-        <div style={{ marginBottom: 12 }}>
-          <label style={lbl}>Complemento</label>
-          <input name="complemento" value={form.complemento} onChange={ch} style={inp} placeholder="Apto, bloco, referência..." />
-        </div>
-
-        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-          <div style={col}>
-            <label style={lbl}>Bairro</label>
-            <input name="bairro" value={form.bairro} onChange={ch} style={inp} />
-          </div>
-          <div style={col}>
-            <label style={lbl}>Cidade</label>
-            <input name="cidade" value={form.cidade} onChange={ch} style={inp} />
-          </div>
-        </div>
-
-        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 14px' }}>
-          Digite o CEP que a gente puxa o endereço.
-        </p>
-
-        {erro && <p style={{ color: 'var(--danger, #ef4444)', fontSize: 13, margin: '0 0 10px' }}>{erro}</p>}
+        {erro && <p style={{ color: 'var(--danger, #ef4444)', fontSize: 14, margin: 0 }}>{erro}</p>}
 
         <div className="pp-modal-actions">
           <button type="button" className="pp-modal-btn-secondary" onClick={onFechar}>Cancelar</button>
