@@ -257,7 +257,7 @@ export default function PresencialSalao() {
       // vira INNER JOIN com complemento_grupos, que a RLS já filtra por empresa — os
       // vínculos de outras lojas não chegam nem a sair do banco.
       supabase.from('produto_complemento_grupos')
-        .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))'),
+        .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))'),
       // Clientes: usados só no fiado (quem fica devendo).
       supabase.from('clientes').select('id, nome, telefone').eq('empresa_id', empresaId).order('nome').limit(1000),
     ])
@@ -289,6 +289,9 @@ export default function PresencialSalao() {
         min: v.min_override ?? g.min ?? 0,
         max: v.max_override ?? g.max ?? 1,
         regra_preco: g.regra_preco ?? 'somar',
+        // Atacado (mig 0200): o cliente diz QUANTO de cada sabor e o teto do
+        // grupo não vale — o sentido do modo é justamente não ter limite.
+        modo_quantidade: g.modo_quantidade === true,
         opcoes,
       })
     }
@@ -723,11 +726,13 @@ export default function PresencialSalao() {
   }
 
   // Fecha o modal de complementos criando a linha montada.
-  function addMontado(produto, escolhas) {
+  function addMontado(produto, escolhas, qtdItem = 1) {
     const adicional = adicionalComplementos(
       compMap[produto.produto_id] ?? [],
       escolhas.map(e => ({ grupoId: e.grupoId, preco: e.preco_adicional, qtd: e.qtd })),
     )
+    // No atacado a linha nasce com a soma dos sabores (45 picolés), não com 1.
+    const qtd = Math.max(1, Number(qtdItem) || 1)
     // "2× Marmitex Grande, Feijão" — o nome carrega a montagem, porque comanda_itens
     // não tem coluna de complemento (mesmo jeito do cardápio do QR).
     const resumo = escolhas.map(e => (e.qtd > 1 ? `${e.qtd}× ${e.nome}` : e.nome)).join(', ')
@@ -735,9 +740,9 @@ export default function PresencialSalao() {
       produto_id: produto.produto_id,
       linha: `${produto.produto_id}::${resumo}`,
       nome: resumo ? `${produto.nome} (${resumo})` : produto.nome,
-      preco_venda: Number(produto.preco_venda) + adicional,
+      preco_venda: Number(produto.preco_venda) + adicional / qtd,
       complementos: escolhas,
-      quantidade: 1, observacao: '',
+      quantidade: qtd, observacao: '',
     })
     setMontando(null)
   }
@@ -2519,7 +2524,7 @@ export default function PresencialSalao() {
           grupos={compMap[montando.produto_id] ?? []}
           semObrigatorios={semObrigatorios}
           onCancelar={() => setMontando(null)}
-          onConfirmar={escolhas => addMontado(montando, escolhas)}
+          onConfirmar={(escolhas, qtdItem) => addMontado(montando, escolhas, qtdItem)}
         />
       )}
 
@@ -3130,7 +3135,7 @@ function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onCon
       // trava no máximo do grupo (só barra quando está aumentando).
       // Conta a partir do `prev`, não do `sel` do render — senão dois cliques
       // rápidos passariam do limite.
-      if (delta > 0 && g.max > 0 && somaDe(atual) >= g.max) return prev
+      if (delta > 0 && !g.modo_quantidade && g.max > 0 && somaDe(atual) >= g.max) return prev
       const novo = { ...atual }
       if (q === 0) delete novo[o.id]
       else novo[o.id] = q
@@ -3138,17 +3143,45 @@ function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onCon
     })
   }
 
+  // Digitar o número direto. No + e - a conta vai de um em um; cliente que quer
+  // 100 picolés não vai clicar 100 vezes — desiste antes, e o garçom também.
+  function definir(g, o, valor) {
+    const n = Math.max(0, Math.floor(Number(valor) || 0))
+    setSel(prev => {
+      const atual = { ...(prev[g.id] ?? {}) }
+      // Fora do atacado o teto do grupo continua valendo: "escolha até 2
+      // sabores" não pode virar 40 pela digitação.
+      const limite = !g.modo_quantidade && g.max > 0
+        ? Math.max(0, g.max - (somaDe(atual) - (atual[o.id] ?? 0)))
+        : n
+      const q = Math.min(n, limite)
+      if (q <= 0) delete atual[o.id]
+      else atual[o.id] = q
+      return { ...prev, [g.id]: atual }
+    })
+  }
+
   const escolhas = grupos.flatMap(g =>
     Object.entries(sel[g.id] ?? {}).map(([oId, qtd]) => {
       const o = g.opcoes.find(x => String(x.id) === String(oId))
-      return { grupoId: g.id, nome: o?.nome ?? '', preco_adicional: Number(o?.preco_adicional || 0), qtd }
+      return {
+        grupoId: g.id, nome: o?.nome ?? '', preco_adicional: Number(o?.preco_adicional || 0), qtd,
+        // Pra comanda/cupom não multiplicarem de novo pela qtd do item.
+        absoluto: !!g.modo_quantidade,
+      }
     })
   )
   const adicional = adicionalComplementos(
     grupos,
     escolhas.map(e => ({ grupoId: e.grupoId, preco: e.preco_adicional, qtd: e.qtd })),
   )
-  const precoFinal = Number(produto.preco_venda) + adicional
+  // No atacado a linha leva a soma dos sabores (10 + 15 + 20 = 45 picolés) e o
+  // adicional entra rateado, pra a linha ter UM preço unitário e o subtotal
+  // (qtd × unitário) continuar batendo.
+  const grupoQtd = grupos.find(g => g.modo_quantidade)
+  const qtdItem = grupoQtd ? Math.max(1, somaGrupo(grupoQtd.id)) : 1
+  const precoFinal = Number(produto.preco_venda) + adicional / qtdItem
+  const totalItem = precoFinal * qtdItem
   // Com "complementos livres" ligado, o mínimo do grupo é ignorado: o garçom
   // lança direto e monta o prato com o cliente. O máximo continua valendo.
   const faltando = semObrigatorios
@@ -3180,13 +3213,15 @@ function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onCon
         {grupos.map(g => {
           const conta = somaGrupo(g.id)
           const falta = !semObrigatorios && (g.min ?? 0) > 0 && conta < g.min
-          const cheio = g.max > 0 && conta >= g.max
+          const cheio = !g.modo_quantidade && g.max > 0 && conta >= g.max
           return (
             <div key={g.id} style={{ marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                 <span style={{ fontWeight: 700, fontSize: 14.5 }}>{g.nome}</span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: falta ? '#d97706' : 'var(--text-muted)' }}>
-                  {conta}/{g.max}{g.min > 0 && !semObrigatorios ? ' · obrigatório' : ''}
+                  {g.modo_quantidade
+                    ? `${conta} un${g.min > 0 && !semObrigatorios ? ` · mín ${g.min}` : ''}`
+                    : `${conta}/${g.max}${g.min > 0 && !semObrigatorios ? ' · obrigatório' : ''}`}
                 </span>
               </div>
               {g.opcoes.map(o => {
@@ -3202,7 +3237,15 @@ function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onCon
                     </div>
                     <button type="button" onClick={() => mudar(g, o, -1)} disabled={q === 0}
                       style={{ ...qtdBtn, opacity: q === 0 ? .35 : 1, cursor: q === 0 ? 'default' : 'pointer' }}>−</button>
-                    <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{q}</span>
+                    <input
+                      type="number" min="0" inputMode="numeric"
+                      aria-label={`Quantidade de ${o.nome}`}
+                      value={q === 0 ? '' : q} placeholder="0"
+                      onChange={e => definir(g, o, e.target.value)}
+                      onFocus={e => e.target.select()}
+                      style={{ width: 52, textAlign: 'center', fontWeight: 700, fontSize: 14.5,
+                        padding: '5px 2px', borderRadius: 8, border: '1px solid var(--border)',
+                        background: 'var(--surface, transparent)', color: 'var(--text)' }} />
                     <button type="button" onClick={() => mudar(g, o, +1)} disabled={cheio}
                       style={{ ...qtdBtn, opacity: cheio ? .35 : 1, cursor: cheio ? 'default' : 'pointer' }}>+</button>
                   </div>
@@ -3224,11 +3267,11 @@ function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onCon
             </div>
           )}
 
-          <button type="button" onClick={() => onConfirmar(escolhas)} disabled={faltando.length > 0}
+          <button type="button" onClick={() => onConfirmar(escolhas, qtdItem)} disabled={faltando.length > 0}
             style={{ width: '100%', padding: '12px 0', borderRadius: 10,
               border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 15, fontWeight: 800,
               cursor: faltando.length > 0 ? 'default' : 'pointer', opacity: faltando.length > 0 ? .5 : 1 }}>
-            Adicionar · {fmt(precoFinal)}
+            {grupoQtd ? `Adicionar ${qtdItem} un · ${fmt(totalItem)}` : `Adicionar · ${fmt(precoFinal)}`}
           </button>
         </div>
       </div>
