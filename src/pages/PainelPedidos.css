@@ -1361,3 +1361,45 @@
 
 /* Rótulos curtos existem só pro celular (ver .pp-salao-tabs no bloco mobile) */
 .pp-rot-curto { display: none; }
+
+/* ── Nova venda (balcão): duas colunas na tela grande ─────────────────────
+   A mesma tela serve o celular do garçom e o PC do caixa. Em coluna única ela
+   fica boa no celular e desperdiça dois terços do monitor: a lista de produtos
+   aparecia com cinco linhas e o resto era fundo vazio, obrigando a rolar a
+   página inteira pra ver o total. No desktop vira duas colunas — à esquerda o
+   que se repete a cada item (buscar produto, conferir o carrinho), à direita o
+   que se preenche uma vez por venda (cliente, pagamento, total). */
+.pp-venda {
+  max-width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
+  gap: 16px;
+}
+
+.pp-venda-lista { max-height: 240px; }
+
+@media (min-width: 1024px) {
+  .pp-venda { max-width: 1040px; padding: 26px 30px; }
+
+  .pp-venda-grid {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 28px;
+    align-items: start;
+  }
+
+  /* Divisória discreta entre as duas metades, pro olho não misturar as colunas. */
+  .pp-venda-grid > .pp-venda-col + .pp-venda-col {
+    border-left: 1px solid var(--pp-border);
+    padding-left: 28px;
+  }
+
+  /* A lista de produtos é o que o caixa mais usa: na tela grande ela cresce
+     junto, em vez de continuar com a altura pensada pro celular. */
+  .pp-venda-lista { max-height: 42vh; }
+}
+
+@media (min-width: 1500px) {
+  .pp-venda { max-width: 1180px; }
+  .pp-venda-lista { max-height: 48vh; }
+}

@@ -716,44 +716,77 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
 // Seletor de complementos ("monte sua quentinha") na venda de balcão.
 function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
   const grupos = produto.grupos ?? []
+  // A escolha é { grupoId: { opcaoId: quantidade } }. No grupo comum a
+  // quantidade é sempre 1 e o que vale é estar ou não na lista; no grupo de
+  // atacado (modo_quantidade) é ela que diz quantos picolés de cada sabor.
   const [sel, setSel] = useState(() => {
-    // Ao EDITAR, começa já marcado com o que o cliente tinha escolhido (casando
-    // pelo nome da opção). Ao adicionar do zero, vem tudo vazio.
-    const nomesIniciais = new Set((iniciais ?? []).map(n => String(n?.nome ?? n).toLowerCase().trim()))
+    const chave = n => String(n ?? '').toLowerCase().trim()
     const init = {}
     for (const g of grupos) {
-      const s = new Set()
+      const m = {}
       for (const o of (g.opcoes ?? [])) {
-        if (nomesIniciais.has(String(o.nome).toLowerCase().trim())) s.add(o.id)
+        // Ao EDITAR, volta com o que já estava escolhido (casando pelo nome).
+        const antes = (iniciais ?? []).find(n => chave(n?.nome ?? n) === chave(o.nome))
+        if (antes) m[o.id] = Number(antes?.qtd ?? 1) || 1
       }
-      init[g.id] = s
+      init[g.id] = m
     }
     return init
   })
 
+  const escolhidas = g => Object.keys(sel[g.id] ?? {}).length
+  const somaQtd = g => Object.values(sel[g.id] ?? {}).reduce((s, q) => s + (Number(q) || 0), 0)
+
   function toggle(grupo, opcao) {
     setSel(prev => {
-      const atual = new Set(prev[grupo.id] ?? [])
-      if (atual.has(opcao.id)) atual.delete(opcao.id)
+      const atual = { ...(prev[grupo.id] ?? {}) }
+      if (atual[opcao.id]) delete atual[opcao.id]
       else {
-        if (grupo.max === 1) atual.clear()          // rádio
-        if (atual.size >= grupo.max) return prev     // limite atingido
-        atual.add(opcao.id)
+        if (grupo.max === 1) return { ...prev, [grupo.id]: { [opcao.id]: 1 } }   // rádio
+        if (Object.keys(atual).length >= grupo.max) return prev                   // limite atingido
+        atual[opcao.id] = 1
       }
       return { ...prev, [grupo.id]: atual }
     })
   }
 
+  function setQtd(grupo, opcao, valor) {
+    const n = Math.max(0, Math.floor(Number(valor) || 0))
+    setSel(prev => {
+      const atual = { ...(prev[grupo.id] ?? {}) }
+      if (n <= 0) delete atual[opcao.id]
+      else atual[opcao.id] = n
+      return { ...prev, [grupo.id]: atual }
+    })
+  }
+
   const selecoes = grupos.flatMap(g =>
-    [...(sel[g.id] ?? [])].map(oid => {
-      const o = g.opcoes.find(x => x.id === oid)
-      return { grupoId: g.id, opcaoId: oid, nome: o?.nome ?? '', preco: Number(o?.preco_adicional ?? 0) }
+    Object.entries(sel[g.id] ?? {}).map(([oid, q]) => {
+      const o = g.opcoes.find(x => String(x.id) === String(oid))
+      return {
+        grupoId: g.id, grupo: g.nome, opcaoId: oid, nome: o?.nome ?? '',
+        preco: Number(o?.preco_adicional ?? 0), qtd: Number(q) || 1,
+        // Marca pra comanda/cupom não multiplicar de novo pela quantidade do
+        // item: aqui os sabores DIVIDEM o total (itensPedido.js).
+        absoluto: !!g.modo_quantidade,
+      }
     })
   )
+
+  // Quantas unidades a linha leva. No atacado é a soma dos sabores (10 + 15 +
+  // 20 = 45) — é essa quantidade que dá baixa certa no estoque.
+  const grupoQtd = grupos.find(g => g.modo_quantidade)
+  const qtdItem = grupoQtd ? somaQtd(grupoQtd) : 1
   const adicional = adicionalComplementos(grupos, selecoes)
-  const precoUnit = Number(produto.preco_venda || 0) + adicional
-  const faltando = grupos.filter(g => (sel[g.id]?.size ?? 0) < (g.min ?? 0))
-  const podeAdd = faltando.length === 0
+  // Opção paga entra rateada, pra a linha ter UM preço unitário e o
+  // subtotal (qtd × unitário) continuar batendo.
+  const precoBase = Number(produto.preco_venda || 0)
+  const precoUnit = qtdItem > 0 ? precoBase + adicional / qtdItem : precoBase + adicional
+  const totalItem = precoUnit * (qtdItem || 1)
+  const faltando = grupos.filter(g => g.modo_quantidade
+    ? somaQtd(g) < (g.min ?? 0)
+    : escolhidas(g) < (g.min ?? 0))
+  const podeAdd = faltando.length === 0 && qtdItem > 0
 
   return (
     <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 200 }}>
@@ -768,7 +801,7 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
         </div>
 
         {grupos.map(grupo => {
-          const qtdSel = sel[grupo.id]?.size ?? 0
+          const qtdSel = grupo.modo_quantidade ? somaQtd(grupo) : escolhidas(grupo)
           const obrig = (grupo.min ?? 0) > 0
           const incompleto = qtdSel < (grupo.min ?? 0)
           return (
@@ -778,13 +811,52 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6,
                   background: incompleto ? 'rgba(239,68,68,.15)' : 'var(--border,#2a2a3a)',
                   color: incompleto ? '#f87171' : 'var(--text-muted)' }}>
-                  {obrig ? `Obrigatório${grupo.min > 1 ? ` · min ${grupo.min}` : ''}` : 'Opcional'}{grupo.max > 1 ? ` · até ${grupo.max}` : ''}
+                  {grupo.modo_quantidade
+                    ? `${qtdSel} un${obrig ? ` · min ${grupo.min}` : ''}`
+                    : `${obrig ? `Obrigatório${grupo.min > 1 ? ` · min ${grupo.min}` : ''}` : 'Opcional'}${grupo.max > 1 ? ` · até ${grupo.max}` : ''}`}
                 </span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {grupo.opcoes.map(opcao => {
-                  const marcado = sel[grupo.id]?.has(opcao.id)
-                  const bloqueado = !marcado && grupo.max > 1 && qtdSel >= grupo.max
+                  const qtdOpcao = Number(sel[grupo.id]?.[opcao.id] ?? 0)
+                  const marcado = qtdOpcao > 0
+                  const bloqueado = !grupo.modo_quantidade && !marcado && grupo.max > 1 && qtdSel >= grupo.max
+
+                  // Atacado: − / número / +. O número é campo de digitar porque
+                  // ninguém clica 500 vezes no + — desiste antes.
+                  if (grupo.modo_quantidade) return (
+                    <div key={opcao.id}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                        padding: '7px 11px', borderRadius: 9,
+                        border: `1.5px solid ${marcado ? '#22c55e' : 'var(--border,#2a2a3a)'}`,
+                        background: marcado ? 'rgba(34,197,94,.12)' : 'transparent', color: 'var(--text)' }}>
+                      <span style={{ flex: 1, fontSize: 14 }}>{opcao.nome}</span>
+                      {Number(opcao.preco_adicional) > 0 && (
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>+{fmt(opcao.preco_adicional)}</span>
+                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                        <button type="button" aria-label={`Menos ${opcao.nome}`} disabled={qtdOpcao <= 0}
+                          onClick={() => setQtd(grupo, opcao, qtdOpcao - 1)}
+                          style={{ width: 28, height: 28, borderRadius: 7, cursor: qtdOpcao <= 0 ? 'not-allowed' : 'pointer',
+                            border: '1px solid var(--border,#2a2a3a)', background: 'transparent',
+                            color: 'var(--text)', fontSize: 16, fontWeight: 800, opacity: qtdOpcao <= 0 ? .4 : 1 }}>−</button>
+                        <input type="number" min="0" inputMode="numeric"
+                          aria-label={`Quantidade de ${opcao.nome}`}
+                          value={qtdOpcao === 0 ? '' : qtdOpcao} placeholder="0"
+                          onChange={e => setQtd(grupo, opcao, e.target.value)}
+                          onFocus={e => e.target.select()}
+                          style={{ width: 58, textAlign: 'center', fontSize: 14, fontWeight: 700,
+                            padding: '5px 2px', borderRadius: 7, border: '1px solid var(--border,#2a2a3a)',
+                            background: 'var(--bg, transparent)', color: 'var(--text)' }} />
+                        <button type="button" aria-label={`Mais ${opcao.nome}`}
+                          onClick={() => setQtd(grupo, opcao, qtdOpcao + 1)}
+                          style={{ width: 28, height: 28, borderRadius: 7, cursor: 'pointer',
+                            border: '1px solid var(--border,#2a2a3a)', background: 'transparent',
+                            color: 'var(--text)', fontSize: 16, fontWeight: 800 }}>+</button>
+                      </div>
+                    </div>
+                  )
+
                   return (
                     <button key={opcao.id} type="button" onClick={() => toggle(grupo, opcao)} disabled={bloqueado}
                       style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
@@ -809,9 +881,11 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
           )
         })}
 
-        <button type="button" disabled={!podeAdd} onClick={() => onConfirmar(produto, selecoes, precoUnit)}
+        <button type="button" disabled={!podeAdd} onClick={() => onConfirmar(produto, selecoes, precoUnit, qtdItem)}
           className="btn btn-primary" style={{ width: '100%', opacity: podeAdd ? 1 : 0.5, marginTop: 4 }}>
-          {podeAdd ? `Adicionar · ${fmt(precoUnit)}` : (faltando[0] ? `Escolha: ${faltando[0].nome}` : 'Escolha os obrigatórios')}
+          {podeAdd
+            ? (grupoQtd ? `Adicionar ${qtdItem} un · ${fmt(totalItem)}` : `Adicionar · ${fmt(totalItem)}`)
+            : (faltando[0] ? `Escolha: ${faltando[0].nome}` : 'Escolha os obrigatórios')}
         </button>
       </div>
     </div>
@@ -844,7 +918,7 @@ async function carregarCatalogo(empresaId) {
     supabase.from('produtos').select('id, nome, preco_venda, categoria')
       .eq('empresa_id', empresaId).is('arquivado_em', null).order('nome', { ascending: true }),
     supabase.from('produto_complemento_grupos')
-      .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, regra_preco, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)), produtos!inner(empresa_id)')
+      .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, regra_preco, modo_quantidade, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)), produtos!inner(empresa_id)')
       .eq('produtos.empresa_id', empresaId).order('ordem'),
   ])
   if (prodRes.error) throw prodRes.error
@@ -859,6 +933,10 @@ async function carregarCatalogo(empresaId) {
     ;(compMap[v.produto_id] = compMap[v.produto_id] || []).push({
       id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1,
       regra_preco: g.regra_preco ?? 'somar', opcoes,
+      // Atacado (mig 0200): o cliente diz QUANTO de cada sabor. Sem isso o
+      // balcao mostrava radio e a Gaby nao conseguia vender 10 de leite
+      // condensado + 15 de limao numa linha so.
+      modo_quantidade: g.modo_quantidade === true,
     })
   }
   const catalogo = { produtos: prodRes.data || [], compMap }
@@ -1126,14 +1204,27 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     else addItem(p)
   }
   // Adiciona uma linha com os complementos escolhidos (mesma escolha soma qtd).
-  function adicionarComComplementos(produto, selecoes, precoUnit, qtdInicial) {
-    const sig = `${produto.id}::${selecoes.map(s => s.opcaoId).sort().join(',')}`
+  //
+  // A assinatura leva a QUANTIDADE de cada opção junto: sem isso "10 uva" e "15
+  // uva" cairiam na mesma linha do carrinho e uma apagaria a outra.
+  //
+  // `qtdItem` vem preenchido no atacado (é a soma dos sabores: 10 + 15 + 20 =
+  // 45 picolés) e manda na quantidade da linha — repetir o produto ali somaria
+  // 45 em cima de 45. Fora do atacado ele vem 1 e o comportamento é o de
+  // sempre: clicar de novo soma mais um.
+  function adicionarComComplementos(produto, selecoes, precoUnit, qtdInicial, qtdItem) {
+    const sig = `${produto.id}::${selecoes.map(s => `${s.opcaoId}x${s.qtd ?? 1}`).sort().join(',')}`
+    const atacado = selecoes.some(s => s.absoluto)
     setCart(prev => {
       // Ao editar, preserva a quantidade original; ao adicionar, soma 1.
-      const qtd = qtdInicial != null ? qtdInicial : (prev[sig]?.qtd ?? 0) + 1
+      const qtd = qtdInicial != null ? qtdInicial
+        : atacado ? Number(qtdItem || 1)
+        : (prev[sig]?.qtd ?? 0) + 1
       return { ...prev, [sig]: {
         id: sig, produto_id: produto.id, nome: produto.nome, preco: precoUnit, qtd,
-        complementos: selecoes.map(s => ({ nome: s.nome, qtd: 1 })),
+        complementos: selecoes.map(s => ({
+          nome: s.nome, qtd: s.qtd ?? 1, grupo: s.grupo, preco: s.preco, absoluto: !!s.absoluto,
+        })),
       } }
     })
     setProdutoComp(null)
@@ -1361,8 +1452,16 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   return (
     <>
     <div className="pp-modal-overlay" onClick={onFechar}>
-      <div className="pp-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 560, width: '94vw', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div className="pp-modal pp-venda" onClick={e => e.stopPropagation()}>
         <p className="pp-modal-titulo">{editando ? `Editar pedido #${pedidoEdicao.numero_pedido ?? ''}` : 'Nova venda (balcão)'}</p>
+
+        {/* Duas colunas na tela grande, uma só no celular (ver PainelPedidos.css).
+            À esquerda o que o vendedor fica repetindo — buscar produto e conferir
+            o carrinho; à direita o que ele preenche uma vez por venda. Numa tela
+            larga a coluna única deixava a lista de produtos com 5 linhas visíveis
+            e metade da tela vazia. */}
+        <div className="pp-venda-grid">
+        <div className="pp-venda-col">
 
         {/* Leitor de print — pra loja que recebe pedido por outro canal (iFood,
             WhatsApp...): tira o print de lá e a IA preenche a venda.
@@ -1431,7 +1530,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
           type="search" value={busca} onChange={e => setBusca(e.target.value)}
           placeholder="Buscar produto..." style={{ ...inputSt, marginBottom: 8 }}
         />
-        <div style={{ maxHeight: 240, overflowY: 'auto', flexShrink: 0, border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 6, marginBottom: 14 }}>
+        <div className="pp-venda-lista" style={{ overflowY: 'auto', flexShrink: 0, border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 6, marginBottom: 14 }}>
           {loading ? (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>Carregando produtos...</div>
           ) : filtrados.length === 0 ? (
@@ -1503,6 +1602,9 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
             })}
           </div>
         )}
+
+        </div>{/* fim da coluna da esquerda */}
+        <div className="pp-venda-col">
 
         {/* Cliente — busca os já cadastrados pelo nome */}
         <div style={{ marginBottom: 10 }}>
@@ -1651,6 +1753,9 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
             {salvando ? 'Salvando...' : `${editando ? 'Salvar alterações' : 'Concluir venda'} · ${fmt(total)}`}
           </button>
         </div>
+
+        </div>{/* fim da coluna da direita */}
+        </div>{/* fim do grid */}
       </div>
     </div>
 
@@ -1669,13 +1774,16 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         produto={produtoComp}
         iniciais={produtoComp._iniciais ?? []}
         onFechar={() => setProdutoComp(null)}
-        onConfirmar={(prod, selecoes, precoUnit) => {
-          // Edição: tira a linha antiga e recria com a escolha nova, mantendo a qtd.
+        onConfirmar={(prod, selecoes, precoUnit, qtdItem) => {
+          // Edição: tira a linha antiga e recria com a escolha nova, mantendo a
+          // qtd — menos no atacado, onde a quantidade É a soma dos sabores e
+          // acabou de ser recontada.
+          const atacado = selecoes.some(s => s.absoluto)
           if (produtoComp._editId) {
             removeItem(produtoComp._editId)
-            adicionarComComplementos(prod, selecoes, precoUnit, produtoComp._qtd)
+            adicionarComComplementos(prod, selecoes, precoUnit, atacado ? qtdItem : produtoComp._qtd, qtdItem)
           } else {
-            adicionarComComplementos(prod, selecoes, precoUnit)
+            adicionarComComplementos(prod, selecoes, precoUnit, undefined, qtdItem)
           }
         }}
       />
