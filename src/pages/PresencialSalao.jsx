@@ -103,6 +103,8 @@ export default function PresencialSalao() {
   // aqui e no cardápio da mesa — a Loja Online e a Nova venda seguem exigindo.
   const [semObrigatorios, setSemObrigatorios] = useState(false)
   const [semCozinha, setSemCozinha] = useState(false)
+  const [avisoImpressao, setAvisoImpressao] = useState(null) // remessa que nao saiu no papel
+  const [reimprimindo, setReimprimindo] = useState(false)
   const [salvandoCoz, setSalvandoCoz] = useState(false)
   const [salvandoObrig, setSalvandoObrig] = useState(false)
   const [mesas, setMesas]     = useState([])
@@ -855,14 +857,17 @@ export default function PresencialSalao() {
   //
   // Quem NÃO tem térmica aqui (garçom no celular dele, gestor no PC) continua
   // como antes: o ouvinte do Painel de Pedidos imprime.
+  // Devolve se o papel REALMENTE saiu. Antes não devolvia nada e ainda saía
+  // calada quando a Bluetooth estava fora do ar — o garçom apertava "enviar",
+  // via a tela limpar e ia embora achando que a cozinha tinha recebido.
   async function imprimirComandaAgora(itens) {
-    if (!itens.length || window.__fwcBtConectada !== true) return
-    // Marca os itens como já impressos ANTES de mandar o papel: o ouvinte do
-    // Painel de Pedidos (mesma aba) ia imprimir os mesmos itens 1,5s depois, e
-    // sairiam duas vias da mesma comanda.
+    if (!itens.length) return false
+    // Marca como impresso ANTES de mandar pra ganhar a corrida do ouvinte do
+    // Painel de Pedidos, que imprimiria os mesmos itens 1,5s depois (duas vias).
+    // Se a impressão falhar, a marca é desfeita logo abaixo.
     const jaSaiu = (window.__fwcMesaImpressa ||= new Set())
     for (const i of itens) jaSaiu.add(i.id)
-    await viaBluetooth('comanda', {
+    const ok = await viaBluetooth('comanda', {
       numeroMesa: mesaSel?.numero,
       rotulo: mesaSel?.is_comanda
         ? `${rotuloMesa(mesaSel)}${comandaSel?.nome_cliente ? ' · ' + comandaSel.nome_cliente : ''}`
@@ -876,6 +881,22 @@ export default function PresencialSalao() {
       // como separar.
       itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao, setor: i.setor })),
     })
+    // Não saiu: desfaz a marca, senão o item fica "já impresso" pra sempre e
+    // nem o caminho de reserva do Painel tentaria.
+    if (!ok) for (const i of itens) jaSaiu.delete(i.id)
+    return ok
+  }
+
+  // Reimprimir o que já foi enviado. A térmica Bluetooth cai sozinha de vez em
+  // quando (celular longe, tela apagada) e antes não havia saída nenhuma: o
+  // jeito era cancelar a comanda e refazer, ou gritar o pedido pra cozinha.
+  async function reimprimir(itens) {
+    if (!itens?.length || reimprimindo) return
+    setReimprimindo(true)
+    const ok = await imprimirComandaAgora(itens)
+    setReimprimindo(false)
+    setAvisoImpressao(ok ? null : { itens, quando: Date.now() })
+    if (ok) setPreContaMsg('🖨️ Comanda reimpressa.')
   }
 
   // Envia o pedido montado pra cozinha: insere TODOS os itens de uma vez → sai numa
@@ -908,7 +929,12 @@ export default function PresencialSalao() {
     if (error) { window.alert('Erro ao lançar o item: ' + error.message); return }
     // Loja sem cozinha não tem quem leia a comanda de preparo — o papel só
     // gastaria bobina.
-    if (imprimir) imprimirComandaAgora(inseridos ?? [])
+    if (imprimir) {
+      const saiu = await imprimirComandaAgora(inseridos ?? [])
+      // Falhou: guarda ESTES itens pra reimpressão e avisa na tela. Limpar o
+      // rascunho sem dizer nada era o que fazia o pedido sumir no caminho.
+      setAvisoImpressao(saiu ? null : { itens: inseridos ?? [], quando: Date.now() })
+    }
     setRascunho([])
     setObsEnvio('')
     if (rascunhoKey) {
@@ -2078,6 +2104,17 @@ export default function PresencialSalao() {
               {/* itens lançados */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
                 <div className="sal-titulo-col" style={{ fontSize: 15, fontWeight: 700 }}>Comanda</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {!semCozinha && (comandaSel.comanda_itens ?? []).length > 0 && (
+                  <button type="button" disabled={reimprimindo}
+                    onClick={() => reimprimir(comandaSel.comanda_itens ?? [])}
+                    title="Sai de novo o papel da cozinha com todos os itens desta comanda"
+                    style={{ fontSize: 12, fontWeight: 800, padding: '5px 12px', borderRadius: 999,
+                      cursor: reimprimindo ? 'wait' : 'pointer',
+                      border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)' }}>
+                    {reimprimindo ? '🖨️ ...' : '🖨️ Reimprimir'}
+                  </button>
+                )}
                 {!semCozinha && (comandaSel.comanda_itens ?? []).some(i => i.status !== 'pronto' && i.status !== 'entregue') && (
                   <button type="button" onClick={marcarTudoPronto}
                     style={{ fontSize: 12, fontWeight: 800, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
@@ -2085,7 +2122,38 @@ export default function PresencialSalao() {
                     🔔 Marcar tudo pronto
                   </button>
                 )}
+                </div>
               </div>
+
+              {/* A térmica Bluetooth cai sozinha (celular longe, tela apagada).
+                  Antes a tela limpava igual e o garçom ia embora achando que a
+                  cozinha tinha recebido — o pedido sumia no caminho. */}
+              {avisoImpressao && (
+                <div style={{
+                  marginBottom: 10, padding: '10px 12px', borderRadius: 10,
+                  border: '1.5px solid #ef4444', background: 'rgba(239,68,68,.12)',
+                }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 800, color: '#ef4444', lineHeight: 1.35 }}>
+                    ⚠️ O papel NÃO saiu na cozinha
+                  </div>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '3px 0 8px', lineHeight: 1.4 }}>
+                    Os {avisoImpressao.itens.length} item(ns) foram lançados na comanda, mas a impressora
+                    não respondeu. Confira se ela está ligada e pareada.
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button type="button" onClick={() => reimprimir(avisoImpressao.itens)} disabled={reimprimindo}
+                      style={{ padding: '7px 14px', borderRadius: 8, cursor: reimprimindo ? 'wait' : 'pointer',
+                        border: 'none', background: '#ef4444', color: '#fff', fontWeight: 800, fontSize: 13 }}>
+                      {reimprimindo ? 'Tentando...' : '🖨️ Tentar de novo'}
+                    </button>
+                    <button type="button" onClick={() => setAvisoImpressao(null)}
+                      style={{ padding: '7px 14px', borderRadius: 8, cursor: 'pointer',
+                        border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 700, fontSize: 13 }}>
+                      Já avisei a cozinha
+                    </button>
+                  </div>
+                </div>
+              )}
               {/* PIX esperando nesta mesa (mig 0193). Fica aqui, e não numa tela
                   por cima de tudo, porque o garçom mostra o QR e SAI — vai
                   atender outra mesa enquanto o cliente paga. Quando cair, a
