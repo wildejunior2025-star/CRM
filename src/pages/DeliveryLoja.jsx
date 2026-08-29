@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
 import AvisoCookies from '../components/AvisoCookies'
 import { adicionalComplementos, blocosDeOpcoes, cobraPeloMaior, rotuloPrecoOpcao } from '../lib/complementos'
+import { semAcento } from '../lib/texto'
 import { precoPorQuantidade, faixaAplicada, menorFaixa, precoRiscado } from '../lib/precoQuantidade'
 import { criarBuscadorDescricao, comDescricaoNasOpcoes } from '../lib/descricaoSabor'
 import { abertaAgora, comoFicaNoDia, carregarExcecoes, hojeBR } from '../lib/feriados'
@@ -470,13 +471,15 @@ export default function DeliveryLoja() {
   const semCategoria = produtosFiltrados.filter(p => !p.categoria)
   const todasCats = semCategoria.length > 0 ? [...categorias, '__sem__'] : categorias
 
-  // Busca por nome do produto (filtra tudo, ignorando a divisão por categoria)
-  const buscaTrim = busca.trim().toLowerCase()
+  // Busca por nome do produto (filtra tudo, ignorando a divisão por categoria).
+  // Sem acento dos dois lados: ninguém digita "Camarão" no celular, digita
+  // "camarao" — e antes disso não achava nada e o cliente ia embora.
+  const buscaTrim = semAcento(busca)
   const resultadosBusca = buscaTrim
     ? produtosFiltrados.filter(p =>
         (!p.categoria || catDisponivelAgora(p.categoria)) &&
-        ((p.nome ?? '').toLowerCase().includes(buscaTrim) ||
-         (p.descricao ?? '').toLowerCase().includes(buscaTrim)))
+        (semAcento(p.nome).includes(buscaTrim) ||
+         semAcento(p.descricao).includes(buscaTrim)))
     : null
 
   // Loja aberta = pausa manual ligada (delivery_ativo) E dentro da grade semanal de horário.

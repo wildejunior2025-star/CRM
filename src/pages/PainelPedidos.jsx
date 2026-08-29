@@ -17,6 +17,7 @@ function aceitarAutoAtivo() {
 }
 import { CONDICOES_PAGAMENTO, FORMAS_PAGAMENTO, formasAtivas } from '../lib/constants'
 import { separarItem } from '../lib/itensPedido'
+import { semAcento } from '../lib/texto'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { abertaAgora, comoFicaNoDia, carregarExcecoes, hojeBR } from '../lib/feriados'
 // Sistema de salão embutido no gestor (Mesas): salão, reservas e config de mesas.
@@ -982,6 +983,8 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const [produtos, setProdutos] = useState([])
   const [loading, setLoading]   = useState(true)
   const [busca, setBusca]       = useState('')
+  const [destaque, setDestaque] = useState(0)   // item marcado pelas setas do teclado
+  const listaRef = useRef(null)
   const [cart, setCart]         = useState(() => draft?.cart ?? cartFromPedido(pedidoEdicao))
   const [compMap, setCompMap]   = useState({}) // { [produto_id]: grupos[] }
   const [produtoComp, setProdutoComp] = useState(null) // produto sendo montado (complementos)
@@ -1265,7 +1268,35 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const total     = subtotal + taxaNum
   // Aplica o preço especial do cliente (se houver) antes de mostrar/adicionar — só afeta este cliente.
   const produtosComPreco = produtos.map(p => (precoEspMap[p.id] != null ? { ...p, preco_venda: precoEspMap[p.id] } : p))
-  const filtrados = produtosComPreco.filter(p => !busca.trim() || p.nome?.toLowerCase().includes(busca.trim().toLowerCase()))
+  // Busca ignorando acento: quem digita rápido escreve "camarao", e o produto
+  // está cadastrado como "Camarão".
+  const buscaNorm = semAcento(busca)
+  const filtrados = produtosComPreco.filter(p => !buscaNorm || semAcento(p.nome).includes(buscaNorm))
+
+  // ── Teclado na busca ────────────────────────────────────────────────────
+  // Digita, desce com a seta e confirma no Enter, sem tirar a mão do teclado
+  // nem mirar o mouse num botão pequeno. Produto com complemento abre a
+  // montagem no Enter, igual ao clique.
+  useEffect(() => { setDestaque(0) }, [busca])
+
+  function teclaBusca(e) {
+    if (!filtrados.length) return
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      setDestaque(d => {
+        const proximo = e.key === 'ArrowDown' ? d + 1 : d - 1
+        const i = Math.max(0, Math.min(filtrados.length - 1, proximo))
+        // Rola só o necessário pra linha marcada ficar visível.
+        const el = listaRef.current?.children?.[i]
+        if (el?.scrollIntoView) el.scrollIntoView({ block: 'nearest' })
+        return i
+      })
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const p = filtrados[destaque]
+      if (p) pedirProduto(p)
+    }
+  }
 
   async function concluir() {
     if (itens.length === 0) { setErro('Adicione pelo menos um item.'); return }
@@ -1528,19 +1559,24 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         {/* Produtos */}
         <input
           type="search" value={busca} onChange={e => setBusca(e.target.value)}
-          placeholder="Buscar produto..." style={{ ...inputSt, marginBottom: 8 }}
+          onKeyDown={teclaBusca}
+          placeholder="Buscar produto... (↑ ↓ e Enter)" style={{ ...inputSt, marginBottom: 8 }}
         />
-        <div className="pp-venda-lista" style={{ overflowY: 'auto', flexShrink: 0, border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 6, marginBottom: 14 }}>
+        <div ref={listaRef} className="pp-venda-lista" style={{ overflowY: 'auto', flexShrink: 0, border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 6, marginBottom: 14 }}>
           {loading ? (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>Carregando produtos...</div>
           ) : filtrados.length === 0 ? (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>
               {produtos.length === 0 ? 'Nenhum produto cadastrado.' : `Nenhum produto com “${busca}”. (${produtos.length} produtos no catálogo)`}
             </div>
-          ) : filtrados.map(p => {
+          ) : filtrados.map((p, idx) => {
             const qtd = cart[p.id]?.qtd ?? 0
+            const marcado = idx === destaque && !!buscaNorm
             return (
-              <div key={p.id} className="pp-venda-linha" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 6px', borderRadius: 8 }}>
+              <div key={p.id} className="pp-venda-linha"
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 6px', borderRadius: 8,
+                  background: marcado ? 'rgba(124,58,237,.18)' : 'transparent',
+                  boxShadow: marcado ? 'inset 0 0 0 1.5px #7c3aed' : 'none' }}>
                 <div style={{ minWidth: 0 }}>
                   <div className="pp-venda-nome" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nome}</div>
                   <div className="pp-venda-sub" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
