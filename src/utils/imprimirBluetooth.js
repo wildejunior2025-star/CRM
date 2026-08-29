@@ -269,7 +269,7 @@ export function montarCupomBytes(pedido, empresa = {}) {
     const qtd = item.qtd ?? item.quantidade ?? 1
     const sub = item.subtotal != null ? Number(item.subtotal) : qtd * Number(item.preco ?? item.preco_unitario ?? 0)
     const { nome, complementos } = separarItem(item)
-    b.alto(true).row(`${qtd}x ${nome}`, fmt(sub)).alto(false)
+    b.alto(true).row(`${qtd} ${nome}`, fmt(sub)).alto(false)
     for (const c of complementos) {
       const cq = Number(c?.qtdTotal ?? 1)
       const cp = Number(c?.preco ?? 0)

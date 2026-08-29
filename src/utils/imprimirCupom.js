@@ -96,7 +96,7 @@ export function montarCupomHtml(pedido, empresa = {}) {
       return `<div class="comp">▸ ${cq} ${cn}${precoTxt}</div>`
     }).join('')
     const obsHtml = item.observacao ? `<div class="comp">obs: ${esc(item.observacao)}</div>` : ''
-    return `<li><div class="row"><span>${esc(qtd)}x ${esc(nomeItem)}</span><span>${fmt(sub)}</span></div>${compsHtml}${obsHtml}</li>`
+    return `<li><div class="row"><span>${esc(qtd)} ${esc(nomeItem)}</span><span>${fmt(sub)}</span></div>${compsHtml}${obsHtml}</li>`
   }).join('')
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>Pedido ${esc(numero)}</title>

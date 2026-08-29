@@ -2129,7 +2129,7 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
             return (
               <li key={i} style={{ display: 'block' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
-                  <span><strong style={{ marginRight: 5 }}>{qtd}x</strong>{nomeItem}</span>
+                  <span><strong style={{ marginRight: 5 }}>{qtd}</strong>{nomeItem}</span>
                   <span style={{ whiteSpace: 'nowrap' }}>{fmt(sub)}</span>
                 </div>
                 {complementos.length > 0 && (

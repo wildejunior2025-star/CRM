@@ -134,7 +134,9 @@ function montarCupom(pedido, empresa) {
   for (const it of itens) {
     const qtd = it.quantidade ?? it.qtd ?? 1
     const { nome, complementos: comps } = separarItem(it)
-    parts.push(BOLD(1), linha(qtd + 'x ' + (nome || 'Item')), BOLD(0))
+    // Sem "x" tambem na linha do item: "20 Picole". Fica igual a comanda da
+    // cozinha (que sempre imprimiu assim) e igual ao card do gestor.
+    parts.push(BOLD(1), linha(qtd + ' ' + (nome || 'Item')), BOLD(0))
     for (const c of comps) {
       const cn = c.nome
       const cq = c.qtdTotal
