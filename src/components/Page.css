@@ -894,7 +894,9 @@ a.dashboard-card-link:hover {
   /* Alvo de toque: botão de 8px de altura não se acerta com o dedo. */
   .prod-form .pf-toggle button { padding: 11px 0; font-size: 13.5px; }
 
-  .prod-form .prod-form-foto { max-width: 140px; }
+  /* img.: precisa vencer o `max-width: 100%` que zera o piso dos itens do grid
+     (mesma contagem de classes, então o seletor de elemento desempata). */
+  .prod-form .form-field img.prod-form-foto { max-width: 140px; }
 
   .prod-form .pf-acoes {
     position: sticky;
@@ -911,4 +913,54 @@ a.dashboard-card-link:hover {
   /* Salvar é o que a pessoa veio fazer; Cancelar fica do tamanho do texto. */
   .prod-form .pf-acoes .btn-primary { flex: 1; padding: 13px; font-size: 15px; }
   .prod-form .pf-acoes .btn-secondary { flex: 0 0 auto; padding: 13px 16px; }
+}
+
+/* ── Nada de arrastar pro lado no celular ──────────────────────────────────
+   Item de grid nasce com `min-width: auto`, ou seja: a coluna NÃO encolhe
+   abaixo do conteúdo do maior filho. Aqui os "Preços por quantidade" (490px de
+   largura mínima), os dois botões de foto (425px) e os Complementos (351px)
+   esticavam a coluna pra 540px numa tela de 330 — e o formulário inteiro
+   passava a rolar de lado. Só aparecia ao EDITAR, porque produto novo não tem
+   faixa de preço nem complemento pra esticar nada.
+
+   minmax(0, 1fr) + min-width: 0 tiram esse piso e deixam o conteúdo se ajustar
+   à tela, que é o que ele já sabia fazer.                                    */
+.prod-form .form-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+
+.prod-form .form-field,
+.prod-form .form-field > *,
+.prod-form .form-field input,
+.prod-form .form-field select,
+.prod-form .form-field textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 720px) {
+  .prod-form .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-x: hidden;        /* cinto de segurança: nada escapa pro lado */
+  }
+
+  /* Os dois botões de foto não cabem lado a lado numa tela estreita: quebram. */
+  .prod-form .form-field .btn { flex: 1 1 auto; min-width: 0; }
+
+  /* Faixa de preço: "Qtd mínima | Preço | ✕" em 330px ficava ilegível.
+     Vira duas linhas, com o ✕ na ponta da segunda. */
+  .prod-form .pf-faixas { grid-template-columns: 1fr 1fr auto; gap: 6px 8px; }
+}
+
+@media (max-width: 720px) {
+  /* Linha do complemento: [nome] [máx.] [↑ ↓ Tirar] em três colunas não cabe
+     numa tela de 320px — o "Tirar" ficava CORTADO fora da área visível, e como
+     o formulário não rola de lado, o botão de remover virava inalcançável.
+     Nome em cima ocupando a linha toda, controles embaixo.                   */
+  .prod-form .pf-vinculo {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+
+  .prod-form .pf-vinculo > span:first-child {
+    grid-column: 1 / -1;
+    word-break: break-word;
+  }
 }

@@ -1651,7 +1651,7 @@ export default function Produtos() {
                   {form.faixas_preco.length > 0 && (
                     <div style={{
                       display: 'grid',
-                      gridTemplateColumns: '1fr 1fr auto',
+                      gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) auto',
                       gap: '6px 8px',
                       marginBottom: 8,
                       alignItems: 'center',
@@ -1811,7 +1811,7 @@ export default function Produtos() {
                   )}
 
                   {vinculos.map((v, i) => (
-                    <div key={v.grupo_id} style={{ display: 'grid', gridTemplateColumns: '1fr 120px auto', gap: 8, alignItems: 'center', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px', marginTop: 8, background: 'var(--surface-hover)' }}>
+                    <div key={v.grupo_id} className="pf-vinculo" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 120px auto', gap: 8, alignItems: 'center', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px', marginTop: 8, background: 'var(--surface-hover)' }}>
                       <span style={{ fontWeight: 600 }}>{v.nome}</span>
                       <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
                         máx.:
