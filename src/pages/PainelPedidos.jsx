@@ -1512,49 +1512,68 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
           })}
         </div>
 
-        {/* Carrinho */}
-        {itens.length > 0 && (
-          <div className="pp-venda-carrinho" style={{ marginBottom: 14, fontSize: 13 }}>
-            {itens.map(i => {
-              const temComp = Array.isArray(i.complementos) && i.complementos.length > 0
-              const btnQtd = { width: 24, height: 24, borderRadius: 6, border: '1px solid var(--border,#2a2a3a)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontWeight: 800, fontSize: 15, lineHeight: 1, flexShrink: 0 }
-              return (
-              <div key={i.id} style={{ padding: '3px 0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, color: 'var(--text)' }}>
-                  {/* Setinhas pra aumentar/diminuir a quantidade */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
-                    <button type="button" onClick={() => subItem(i.id)} title="Diminuir" style={btnQtd}>−</button>
-                    <span style={{ minWidth: 16, textAlign: 'center', fontWeight: 700 }}>{i.qtd}</span>
-                    <button type="button" onClick={() => maisItem(i.id)} title="Aumentar" style={btnQtd}>+</button>
-                  </div>
-                  <span style={{ flex: 1 }}>{i.nome}</span>
-                  <span>{fmt(i.preco * i.qtd)}</span>
-                  {/* Editar complementos (só quando tem) — reabre a escolha */}
-                  {temComp && (
-                    <button type="button" title="Editar complementos"
-                      onClick={() => {
-                        const p = produtosComPreco.find(x => x.id === i.produto_id)
-                        const grupos = compMap[i.produto_id]
-                        // Abre o modal JÁ preenchido com o que estava escolhido; só troca
-                        // ao confirmar (se fechar no X, o item original continua).
-                        if (p && grupos?.length) setProdutoComp({ ...p, grupos, _editId: i.id, _iniciais: i.complementos ?? [], _qtd: i.qtd })
-                      }}
-                      style={{ background: 'none', border: 'none', color: '#7c3aed', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>✏️</button>
-                  )}
-                  <button type="button" onClick={() => removeItem(i.id)} title="Remover"
-                    style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>×</button>
-                </div>
-                {temComp && i.complementos.map((c, j) => (
-                  <div key={j} style={{ fontSize: 12, color: 'var(--text-muted)', paddingLeft: 16 }}>{Number(c.qtd ?? 1)}× {c.nome}</div>
-                ))}
-              </div>
-              )
-            })}
-          </div>
-        )}
-
         </div>{/* fim da coluna da esquerda */}
         <div className="pp-venda-col">
+
+        {/* Itens da venda — é a lista que o caixa confere em voz alta com o
+            cliente. Ficava espremida embaixo da busca, em letra de 13px; agora
+            mora do lado do total, que é o outro número que os dois olham. */}
+        <div className="pp-venda-itens">
+          <div className="pp-venda-itens-cab">
+            <span>Itens da venda</span>
+            {itens.length > 0 && <span>{itens.reduce((n, i) => n + i.qtd, 0)} un</span>}
+          </div>
+
+          {itens.length === 0 ? (
+            <div className="pp-venda-itens-vazio">
+              Nenhum item ainda — busque o produto ao lado.
+            </div>
+          ) : (
+            <div className="pp-venda-itens-lista">
+              {itens.map(i => {
+                const temComp = Array.isArray(i.complementos) && i.complementos.length > 0
+                const btnQtd = { width: 28, height: 28, borderRadius: 7, border: '1px solid var(--border,#2a2a3a)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontWeight: 800, fontSize: 16, lineHeight: 1, flexShrink: 0 }
+                return (
+                  <div key={i.id} className="pp-venda-item">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                      <button type="button" onClick={() => subItem(i.id)} title="Diminuir" style={btnQtd}>−</button>
+                      <span className="pp-venda-item-qtd">{i.qtd}</span>
+                      <button type="button" onClick={() => maisItem(i.id)} title="Aumentar" style={btnQtd}>+</button>
+                    </div>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="pp-venda-item-nome">{i.nome}</div>
+                      {/* Unitário ao lado do total: sem ele o caixa não confere
+                          o preço de cabeça quando a quantidade é alta. */}
+                      <div className="pp-venda-item-unit">
+                        {fmt(i.preco)} cada
+                        {temComp && i.complementos.map((c, j) => (
+                          <span key={j}> · {Number(c.qtd ?? 1)}× {c.nome}</span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <span className="pp-venda-item-total">{fmt(i.preco * i.qtd)}</span>
+
+                    {temComp && (
+                      <button type="button" title="Editar complementos"
+                        onClick={() => {
+                          const pr = produtosComPreco.find(x => x.id === i.produto_id)
+                          const grupos = compMap[i.produto_id]
+                          // Abre o modal JÁ preenchido com o que estava escolhido; só troca
+                          // ao confirmar (se fechar no X, o item original continua).
+                          if (pr && grupos?.length) setProdutoComp({ ...pr, grupos, _editId: i.id, _iniciais: i.complementos ?? [], _qtd: i.qtd })
+                        }}
+                        style={{ background: 'none', border: 'none', color: '#7c3aed', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>✏️</button>
+                    )}
+                    <button type="button" onClick={() => removeItem(i.id)} title="Remover"
+                      style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>×</button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Cliente — busca os já cadastrados pelo nome */}
         <div style={{ marginBottom: 10 }}>
@@ -1683,10 +1702,21 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
 
         <input value={obs} onChange={e => setObs(e.target.value)} placeholder="Observações (opcional)" style={{ ...inputSt, marginBottom: 14 }} />
 
-        {/* Total */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 18, fontWeight: 800, color: 'var(--text)', marginBottom: 14 }}>
-          <span>Total</span>
-          <span style={{ color: '#7c3aed' }}>{fmt(total)}</span>
+        {/* Total em painel — é o número que o cliente pergunta e o caixa fala
+            em voz alta. Em linha de 18px no meio do formulário ele se perdia
+            entre os campos. Quando tem taxa, a conta aparece por cima, senão o
+            valor "não bate" com a soma dos itens e vira discussão no balcão. */}
+        <div className="pp-venda-total">
+          {taxaNum > 0 && (
+            <div className="pp-venda-total-conta">
+              <span>Itens {fmt(subtotal)}</span>
+              <span>+ entrega {fmt(taxaNum)}</span>
+            </div>
+          )}
+          <div className="pp-venda-total-linha">
+            <span className="pp-venda-total-rot">Total</span>
+            <span className="pp-venda-total-val">{fmt(total)}</span>
+          </div>
         </div>
 
         {erro && <p style={{ fontSize: 13, color: 'var(--danger, #ef4444)', margin: '0 0 10px' }}>{erro}</p>}

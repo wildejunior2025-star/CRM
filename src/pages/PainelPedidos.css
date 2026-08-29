@@ -1480,3 +1480,103 @@
     padding-left: 34px;
   }
 }
+
+/* ── Itens da venda + total (inspirado no PDV que a loja já usa) ──────────
+   Os itens escolhidos ficavam numa tira de 13px embaixo da busca, com o
+   caixa tendo que apertar os olhos justamente na parte que ele confere em voz
+   alta com o cliente. Agora ocupam o topo da coluna da direita, com o total
+   logo abaixo — os dois números que interessam, juntos. */
+.pp-venda-itens {
+  border: 1px solid var(--pp-border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+.pp-venda-itens-cab {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 14px;
+  background: rgba(124, 58, 237, 0.12);
+  border-bottom: 1px solid var(--pp-border);
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--pp-text-muted, #94a3b8);
+}
+
+.pp-venda-itens-vazio {
+  padding: 22px 14px;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--pp-text-muted, #94a3b8);
+}
+
+.pp-venda-itens-lista { max-height: 30vh; overflow-y: auto; }
+
+.pp-venda-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--pp-border);
+}
+.pp-venda-item:last-child { border-bottom: none; }
+
+.pp-venda-item-qtd { min-width: 26px; text-align: center; font-weight: 800; font-size: 15px; }
+.pp-venda-item-nome { font-size: 14.5px; font-weight: 600; color: var(--pp-text); line-height: 1.25; }
+.pp-venda-item-unit { font-size: 12px; color: var(--pp-text-muted, #94a3b8); margin-top: 2px; }
+.pp-venda-item-total { font-size: 15px; font-weight: 800; white-space: nowrap; }
+
+.pp-venda-total {
+  border: 1.5px solid #7c3aed;
+  background: rgba(124, 58, 237, 0.12);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+
+.pp-venda-total-conta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: var(--pp-text-muted, #94a3b8);
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--pp-border);
+}
+
+.pp-venda-total-linha {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.pp-venda-total-rot {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--pp-text-muted, #94a3b8);
+}
+
+.pp-venda-total-val { font-size: 30px; font-weight: 900; color: #a78bfa; line-height: 1; }
+
+@media (min-width: 1024px) {
+  .pp-venda-itens-lista { max-height: 34vh; }
+  .pp-venda .pp-venda-item-nome { font-size: 16px; }
+  .pp-venda .pp-venda-item-unit { font-size: 13px; }
+  .pp-venda .pp-venda-item-total { font-size: 17px; }
+  .pp-venda .pp-venda-item-qtd { font-size: 16.5px; }
+  .pp-venda .pp-venda-total-val { font-size: 44px; }
+  .pp-venda .pp-venda-total-rot { font-size: 14px; }
+  .pp-venda .pp-venda-total { padding: 16px 20px; }
+}
+
+@media (min-width: 1500px) {
+  .pp-venda .pp-venda-total-val { font-size: 54px; }
+  .pp-venda-itens-lista { max-height: 38vh; }
+}
