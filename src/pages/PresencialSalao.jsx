@@ -2515,9 +2515,12 @@ export default function PresencialSalao() {
 
       {/* Trilha da mesa: item por item, quem lancou e quem entregou, com hora.
           "Quem fechou" nao aparece de proposito — a conta ainda esta aberta. */}
+      {/* zIndex 1100 e não 300: a gaveta do salão é 900, então com camada menor
+          este painel abria ATRÁS dela — o garçom clicava no botão e não
+          acontecia nada. */}
       {verMovimentos && comandaSel && (
         <div onClick={() => setVerMovimentos(false)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 300,
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1100,
             display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
           <div onClick={ev => ev.stopPropagation()}
             style={{ width: '100%', maxWidth: 520, maxHeight: '85vh', overflowY: 'auto',
@@ -3124,9 +3127,11 @@ export default function PresencialSalao() {
           Sai com um toque em qualquer lugar e NÃO cancela nada: a cobrança
           continua viva na mesa. Era isto que prendia o garçom antes — a única
           saída da tela era cancelar o PIX. */}
+      {/* Mesmo caso da gaveta, e este ainda abre por cima da tela de fechamento
+          (1100): o QR que o cliente vai ler tem que estar na frente de tudo. */}
       {pixAmpliado && (
         <div onClick={() => setPixAmpliado(null)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', zIndex: 220,
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', zIndex: 1200,
             display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
           <div onClick={e => e.stopPropagation()}
             style={{ width: '100%', maxWidth: 340, background: 'var(--bg)', borderRadius: 16,
