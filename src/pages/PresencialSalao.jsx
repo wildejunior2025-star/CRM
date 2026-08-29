@@ -1798,17 +1798,31 @@ export default function PresencialSalao() {
                   }}>🔔{prontos}</span>
                 )}
                 {naoVisto && <span className="sal-selo-novo">NOVO</span>}
-                <div style={{ fontSize: 14.5, fontWeight: 800, lineHeight: 1.1, marginTop: naoVisto ? 10 : 0 }}>🧾 {rotuloMesa(pseudo)}</div>
+                {/* Na comanda de nome quem manda é o NOME, não o número: o
+                    "Comanda 01" não existe em lugar nenhum do salão, é só um
+                    contador interno. O garçom acha o pedido pelo nome do
+                    cliente, então é ele que fica grande. Sem nome (comanda
+                    aberta às pressas), o número volta a ser o título. */}
+                {(c.nome_cliente || c.cliente?.nome) ? (
+                  <>
+                    <div title={c.nome_cliente || c.cliente?.nome}
+                      style={{ fontSize: 14.5, fontWeight: 800, lineHeight: 1.15, marginTop: naoVisto ? 10 : 0,
+                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden', wordBreak: 'break-word' }}>
+                      🧑 {c.nome_cliente || c.cliente?.nome}
+                    </div>
+                    <div style={{ fontSize: 9.5, marginTop: 1, fontWeight: 700, color: 'var(--text-muted)' }}>
+                      🧾 {rotuloMesa(pseudo)}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 14.5, fontWeight: 800, lineHeight: 1.1, marginTop: naoVisto ? 10 : 0 }}>🧾 {rotuloMesa(pseudo)}</div>
+                )}
                 <div style={{ fontSize: 9.5, marginTop: 2, color: cor.border, fontWeight: 700 }}>
                   {cor.label}
                 </div>
                 {c.para_viagem && (
                   <div style={{ fontSize: 10, marginTop: 1, fontWeight: 800, color: '#d97706' }}>📦 VIAGEM</div>
-                )}
-                {(c.nome_cliente || c.cliente?.nome) && (
-                  <div style={{ fontSize: 10.5, marginTop: 1, fontWeight: 700, color: 'var(--primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    🧑 {c.nome_cliente || c.cliente?.nome}
-                  </div>
                 )}
                 <div style={{ fontSize: 11.5, marginTop: 1, fontWeight: 800 }}>{fmt(sub)}</div>
               </div>
@@ -1876,10 +1890,16 @@ export default function PresencialSalao() {
             <div className="sal-header" style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
                 <div style={{ fontWeight: 800, fontSize: 18 }}>
-                  {mesaSel.is_comanda ? `🧾 ${rotuloMesa(mesaSel)}` : mesaSel.is_balcao ? '🛎️ Balcão' : `Mesa ${mesaSel.numero}`}
+                  {mesaSel.is_comanda
+                    ? (comandaSel?.nome_cliente || comandaSel?.cliente?.nome
+                        ? `🧑 ${comandaSel.nome_cliente || comandaSel.cliente?.nome}`
+                        : `🧾 ${rotuloMesa(mesaSel)}`)
+                    : mesaSel.is_balcao ? '🛎️ Balcão' : `Mesa ${mesaSel.numero}`}
                 </div>
                 {mesaSel.is_comanda ? (
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Comanda de balcão</div>
+                  // O número vira legenda: é o nome que identifica o cliente no
+                  // salão, o "Comanda 01" só serve pra ordenar a fila.
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>🧾 {rotuloMesa(mesaSel)} · comanda de balcão</div>
                 ) : (
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{mesaSel.nome || `${mesaSel.capacidade} lugares`}</div>
                 )}
