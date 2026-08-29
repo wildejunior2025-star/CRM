@@ -2136,7 +2136,7 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
                   <div style={{ paddingLeft: 18, marginTop: 3, marginBottom: 4 }}>
                     {complementos.map((c, j) => (
                       <div key={j} style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                        {Number(c.qtd ?? 1)}× {c.nome ?? c}
+                        {Number(c.qtdTotal ?? 1)} {c.nome ?? c}
                       </div>
                     ))}
                   </div>
