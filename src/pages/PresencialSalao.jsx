@@ -1960,7 +1960,7 @@ export default function PresencialSalao() {
             <div className="sal-col sal-col--comanda">
               {/* itens lançados */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-                <div style={{ fontSize: 15, fontWeight: 700 }}>Comanda</div>
+                <div className="sal-titulo-col" style={{ fontSize: 15, fontWeight: 700 }}>Comanda</div>
                 {(comandaSel.comanda_itens ?? []).some(i => i.status !== 'pronto' && i.status !== 'entregue') && (
                   <button type="button" onClick={marcarTudoPronto}
                     style={{ fontSize: 12, fontWeight: 800, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
@@ -2017,16 +2017,16 @@ export default function PresencialSalao() {
                 </div>
               ))}
               {(comandaSel.comanda_itens ?? []).length === 0 ? (
-                <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum item ainda — lance o primeiro produto.</p>
+                <p className="sal-vazio" style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum item ainda — lance o primeiro produto.</p>
               ) : (
                 (comandaSel.comanda_itens ?? [])
                   .slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
                   .map(item => (
-                    <div key={item.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                    <div key={item.id} className="sal-item" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 15.5, fontWeight: 700 }}>{item.nome}</div>
-                          <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <div className="sal-item-nome" style={{ fontSize: 15.5, fontWeight: 700 }}>{item.nome}</div>
+                          <div className="sal-item-sub" style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                             <span>
                               {fmt(item.preco_unitario)} · {
                                 item.status === 'pronto' ? '🔔 pronto'
@@ -2052,7 +2052,7 @@ export default function PresencialSalao() {
                           </div>
                         </div>
                         <button type="button" onClick={() => mudarQtd(item, -1)} style={qtdBtn}>−</button>
-                        <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{item.quantidade}</span>
+                        <span className="sal-item-qtd" style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{item.quantidade}</span>
                         <button type="button" onClick={() => mudarQtd(item, +1)} style={qtdBtn}>+</button>
                         {precoEdit[item.id] !== undefined ? (
                           <input
@@ -2176,7 +2176,7 @@ export default function PresencialSalao() {
                 ← Ver a comanda{rascunho.length > 0 ? ` · ${rascunho.reduce((n, r) => n + r.quantidade, 0)} a enviar` : ''}
               </button>
               {/* adicionar item */}
-              <div className="sal-titulo-add" style={{ fontSize: 15, fontWeight: 700, margin: '18px 0 8px' }}>Adicionar item</div>
+              <div className="sal-titulo-add sal-titulo-col" style={{ fontSize: 15, fontWeight: 700, margin: '18px 0 8px' }}>Adicionar item</div>
 
               {/* ── Inventar produto (item fora do catálogo) ── */}
               {!invAberto ? (
@@ -2291,8 +2291,8 @@ export default function PresencialSalao() {
                   {produtosFiltrados.map(p => (
                     <button key={p.produto_id} type="button" onClick={() => addItem(p)}
                       style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, minHeight: 48, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', textAlign: 'left' }}>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: 15.5, fontWeight: 600, lineHeight: 1.3 }}>{p.nome}</span>
-                      <span style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: 14.5, fontWeight: 700, color: 'var(--primary)' }}>+ {fmt(p.preco_venda)}</span>
+                      <span className="sal-prod-nome" style={{ flex: 1, minWidth: 0, fontSize: 15.5, fontWeight: 600, lineHeight: 1.3 }}>{p.nome}</span>
+                      <span className="sal-prod-preco" style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: 14.5, fontWeight: 700, color: 'var(--primary)' }}>+ {fmt(p.preco_venda)}</span>
                     </button>
                   ))}
                   {produtosFiltrados.length === 0 && <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum produto encontrado.</p>}

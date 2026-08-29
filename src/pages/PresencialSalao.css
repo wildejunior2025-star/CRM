@@ -443,3 +443,71 @@ html[data-teclado='aberto'] .sal-overlay {
   color: var(--text);
   background: var(--bg);
 }
+
+/* ── Salão no PC: gaveta larga e letra de gente grande ────────────────────
+ * A gaveta nasceu pro celular do garçom e continuou com as mesmas medidas no
+ * PC: 1080px no meio de um monitor de 1920, com nome de item em 15px e o
+ * subtotal como uma linha comum no rodapé. Quem trabalha no caixa lê em pé e
+ * de longe.
+ *
+ * Tudo aqui vale só de 1100px pra cima — no celular a gaveta continua igual.
+ * Os tamanhos moram em style inline (que ganha da folha), então o aumento
+ * precisa de !important; o alvo é restrito à gaveta do salão.
+ */
+@media (min-width: 1100px) {
+  .sal-drawer { width: min(1500px, 96vw); }
+
+  .sal-titulo-col {
+    font-size: 15px !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Item da comanda: é o que o garçom confere com o cliente. */
+  .sal-item { padding: 12px 0 !important; }
+  .sal-item-nome { font-size: 17px !important; }
+  .sal-item-sub { font-size: 13.5px !important; }
+  .sal-item-qtd { font-size: 17px !important; min-width: 26px !important; }
+
+  /* Catálogo do "Adicionar item". */
+  .sal-prod-nome { font-size: 16.5px !important; }
+  .sal-prod-preco { font-size: 15.5px !important; }
+  .sal-produtos button { min-height: 56px !important; padding: 12px 14px !important; }
+  .sal-cat-nome { font-size: 16px !important; }
+  .sal-cat { padding: 14px 14px !important; }
+  .sal-vazio { font-size: 15px !important; }
+
+  /* Três colunas de produto: na largura nova, duas deixavam metade da linha
+     vazia e obrigavam a rolar sem necessidade. */
+  .sal-produtos { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+  /* Subtotal com o mesmo destaque do total da Nova venda: é o número que o
+     cliente pergunta e o garçom fala em voz alta. */
+  .sal-rodape-subtotal {
+    align-items: baseline;
+    border: 1.5px solid var(--primary);
+    background: rgba(124, 58, 237, .12);
+    border-radius: 12px;
+    padding: 12px 18px;
+    margin-bottom: 12px !important;
+    font-size: 14px !important;
+  }
+  .sal-rodape-subtotal > span {
+    font-weight: 800;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .sal-rodape-subtotal > strong { font-size: 38px; line-height: 1; font-weight: 900; }
+
+  .sal-acoes .sal-acao-principal { font-size: 17px !important; padding: 14px 0 !important; }
+}
+
+@media (min-width: 1600px) {
+  .sal-rodape-subtotal > strong { font-size: 46px; }
+  .sal-produtos { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
