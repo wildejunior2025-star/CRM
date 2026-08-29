@@ -512,3 +512,26 @@ html[data-teclado='aberto'] .sal-overlay {
 @media (min-width: 1600px) {
   .sal-rodape-subtotal > strong { font-size: 46px; }
 }
+
+/* Quantidade digitável na linha do item: some as setinhas do input number
+   (ocupam espaço e o garçom já tem o − e o + do lado) e mantém o campo com
+   cara de número, não de formulário. */
+.sal-item-qtd-inp {
+  width: 46px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 14.5px;
+  padding: 5px 2px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--input-bg, var(--bg));
+  color: var(--text);
+  flex-shrink: 0;
+  -moz-appearance: textfield;
+}
+.sal-item-qtd-inp::-webkit-outer-spin-button,
+.sal-item-qtd-inp::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+@media (min-width: 1100px) {
+  .sal-item-qtd-inp { width: 54px; font-size: 16.5px !important; padding: 7px 2px; }
+}

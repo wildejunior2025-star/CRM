@@ -115,6 +115,7 @@ export default function PresencialSalao() {
 
   const [mesaSel, setMesaSel] = useState(null)   // mesa aberta no drawer
   const [destaque, setDestaque] = useState(0)   // produto marcado pelas setas
+  const [qtdEdit, setQtdEdit] = useState({})    // quantidade sendo digitada, por item
   const listaProdRef = useRef(null)
   const [movendo, setMovendo] = useState(false)  // drawer de trocar de mesa
   const [moverNome, setMoverNome] = useState('')
@@ -888,6 +889,29 @@ export default function PresencialSalao() {
     await loadMesas()
   }
 
+  // Digitar a quantidade em vez de clicar no + vinte vezes. O campo fica vazio
+  // enquanto o garçom apaga pra redigitar; só grava quando ele sai do campo,
+  // senão apagar o "1" pra escrever "12" apagaria o item no meio do caminho.
+  async function definirQtd(item, valor) {
+    if (comandaSel?.status === 'aguardando_conferencia') {
+      window.alert('Conta já fechada, aguardando o ADM liberar a mesa. Não dá pra mexer nos itens.')
+      return
+    }
+    const n = Math.max(0, Math.floor(Number(valor) || 0))
+    if (n === Number(item.quantidade)) return
+    if (n <= 0) await supabase.from('comanda_itens').delete().eq('id', item.id)
+    else await supabase.from('comanda_itens').update({ quantidade: n }).eq('id', item.id)
+    await loadMesas()
+  }
+
+  function definirQtdRascunho(linha, valor) {
+    const n = Math.max(0, Math.floor(Number(valor) || 0))
+    setRascunho(prev => prev.flatMap(r => {
+      if ((r.linha ?? String(r.produto_id)) !== linha) return [r]
+      return n <= 0 ? [] : [{ ...r, quantidade: n }]
+    }))
+  }
+
   async function mudarQtd(item, delta) {
     if (comandaSel?.status === 'aguardando_conferencia') {
       window.alert('Conta já fechada, aguardando o ADM liberar a mesa. Não dá pra mexer nos itens.')
@@ -1626,7 +1650,19 @@ export default function PresencialSalao() {
   // ── Teclado na busca de produto ─────────────────────────────────────────
   // Digita, desce na seta e confirma no Enter, igual à Nova venda. Sem isso o
   // garçom digita, tira a mão do teclado e vai mirar o produto com o mouse.
+  // Volta o cursor pra busca com o texto JÁ marcado: a próxima letra que o
+  // garçom digitar substitui o que estava escrito, sem ele precisar apagar
+  // nem clicar de novo no campo. É o que faz lançar item atrás de item virar
+  // "digita, seta, enter, digita" sem tirar a mão do teclado.
+  function voltarPraBusca() {
+    const el = buscaRef.current
+    if (!el) return
+    el.focus()
+    el.select()
+  }
+
   function teclaBusca(e) {
+    if (e.key === 'ArrowUp' && destaque === 0) { voltarPraBusca(); return }
     if (!produtosFiltrados.length) return
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
@@ -1639,7 +1675,11 @@ export default function PresencialSalao() {
     } else if (e.key === 'Enter') {
       e.preventDefault()
       const p = produtosFiltrados[destaque]
-      if (p) addItem(p)
+      if (!p) return
+      addItem(p)
+      // Produto com complemento abre a montagem: o foco tem que ir pra lá, não
+      // voltar pra busca por baixo do modal.
+      if (!compMap[p.produto_id]?.length) voltarPraBusca()
     }
   }
 
@@ -2078,7 +2118,14 @@ export default function PresencialSalao() {
                           </div>
                         </div>
                         <button type="button" onClick={() => mudarQtd(item, -1)} style={qtdBtn}>−</button>
-                        <span className="sal-item-qtd" style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{item.quantidade}</span>
+                        <input type="number" min="0" inputMode="numeric"
+                          className="sal-item-qtd sal-item-qtd-inp"
+                          aria-label={`Quantidade de ${item.nome}`}
+                          value={qtdEdit[item.id] ?? item.quantidade}
+                          onFocus={e => e.target.select()}
+                          onChange={e => setQtdEdit(prev => ({ ...prev, [item.id]: e.target.value }))}
+                          onBlur={e => { definirQtd(item, e.target.value); setQtdEdit(prev => { const n = { ...prev }; delete n[item.id]; return n }) }}
+                          onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }} />
                         <button type="button" onClick={() => mudarQtd(item, +1)} style={qtdBtn}>+</button>
                         {precoEdit[item.id] !== undefined ? (
                           <input
@@ -2142,7 +2189,14 @@ export default function PresencialSalao() {
                           <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{fmt(r.preco_venda)}</div>
                         </div>
                         <button type="button" onClick={() => mudarQtdRascunho(r.linha ?? String(r.produto_id), -1)} style={qtdBtn}>−</button>
-                        <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{r.quantidade}</span>
+                        <input type="number" min="0" inputMode="numeric"
+                          className="sal-item-qtd-inp"
+                          aria-label={`Quantidade de ${r.nome}`}
+                          value={qtdEdit[r.linha ?? String(r.produto_id)] ?? r.quantidade}
+                          onFocus={e => e.target.select()}
+                          onChange={e => setQtdEdit(prev => ({ ...prev, [r.linha ?? String(r.produto_id)]: e.target.value }))}
+                          onBlur={e => { definirQtdRascunho(r.linha ?? String(r.produto_id), e.target.value); setQtdEdit(prev => { const n = { ...prev }; delete n[r.linha ?? String(r.produto_id)]; return n }) }}
+                          onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }} />
                         <button type="button" onClick={() => mudarQtdRascunho(r.linha ?? String(r.produto_id), +1)} style={qtdBtn}>+</button>
                         {precoRascEdit[r.linha ?? String(r.produto_id)] !== undefined ? (
                           <input
