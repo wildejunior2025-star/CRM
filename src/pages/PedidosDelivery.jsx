@@ -814,6 +814,10 @@ export default function PedidosDelivery() {
   const pedidosRef = useRef(pedidos)
   useEffect(() => { pedidosRef.current = pedidos }, [pedidos])
 
+  // O auto-aceitar roda dentro da inscricao do Realtime, que e montada uma vez
+  // so — pegar a funcao por ref evita remontar o canal a cada render.
+  const notificarClienteRef = useRef(null)
+
   // App Impressora FWC rodando + logado + com impressora? Se sim, ELE imprime os
   // pedidos sozinho (pela conexão realtime dele). O navegador NÃO deve mandar
   // imprimir também, senão sai 2 vias (o cupom vai pro app pelos dois caminhos).
@@ -947,6 +951,7 @@ export default function PedidosDelivery() {
                 .from('pedidos_delivery')
                 .update({ status: 'confirmado' })
                 .eq('id', novoPedido.id)
+              notificarClienteRef.current?.(novoPedido.id, 'confirmado')
             }
           }
         } else if (payload.eventType === 'UPDATE') {
@@ -972,6 +977,7 @@ export default function PedidosDelivery() {
                 .from('pedidos_delivery')
                 .update({ status: 'confirmado' })
                 .eq('id', novo.id)
+              notificarClienteRef.current?.(novo.id, 'confirmado')
             }
           }
         } else if (payload.eventType === 'DELETE') {
@@ -982,6 +988,28 @@ export default function PedidosDelivery() {
 
     return () => { channel.unsubscribe() }
   }, [empresa, carregarPedidos])
+
+  // Aviso no zap a cada passo do pedido. Esta tela mudava status direto no
+  // banco e nao chamava ninguem — quem pediu pelo site nao recebia nem o
+  // "pedido confirmado" nem o "saiu para entrega", e ninguem via que faltou.
+  // A funcao tem trava de duplicata (whatsapp_notify_dedup), entao chamar aqui
+  // e no Painel nao manda a mensagem duas vezes.
+  async function notificarCliente(pedidoId, novoStatus) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-pedido-notify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ pedido_id: pedidoId, novo_status: novoStatus }),
+      })
+    } catch {
+      // silencioso — o aviso e best-effort, nao pode travar a tela do lojista
+    }
+  }
+  useEffect(() => { notificarClienteRef.current = notificarCliente })
 
   async function handleAtualizarStatus(id, novoStatus) {
     const update = { status: novoStatus }
@@ -1006,6 +1034,8 @@ export default function PedidosDelivery() {
       const pedido = pedidos.find(p => p.id === id)
       if (pedido) imprimirAutoUmaVez(pedido)
     }
+
+    notificarCliente(id, novoStatus)
   }
 
   async function handleConfirmarCancelamento(id, motivo) {
@@ -1013,6 +1043,7 @@ export default function PedidosDelivery() {
       .from('pedidos_delivery')
       .update({ status: 'cancelado', motivo_cancelamento: motivo })
       .eq('id', id)
+    notificarCliente(id, 'cancelado')
     setPedidoCancelando(null)
   }
 
@@ -1030,11 +1061,16 @@ export default function PedidosDelivery() {
         body: JSON.stringify({ order_id: id, motivo: 'Tempo de aceite esgotado' }),
       })
     } else {
-      await supabase
+      const { data: cancelado } = await supabase
         .from('pedidos_delivery')
         .update({ status: 'cancelado', motivo_cancelamento: 'Tempo de aceite esgotado' })
         .eq('id', id)
         .eq('status', 'aguardando')
+        .select('id')
+      // So avisa se o cancelamento pegou — o filtro de status pode nao casar
+      // (alguem aceitou o pedido no mesmo segundo) e o cliente levaria um
+      // "pedido cancelado" de um pedido que a loja aceitou.
+      if (cancelado?.length) notificarCliente(id, 'cancelado')
     }
   }
 
