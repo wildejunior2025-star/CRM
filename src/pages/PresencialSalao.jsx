@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { adicionalComplementos } from '../lib/complementos'
 import { rotuloComanda } from '../lib/comanda'
@@ -255,7 +255,9 @@ export default function PresencialSalao() {
       // Pergunta "tem MP ligado?" pela funcao, e nao pela tabela: mercadopago_contas
       // guarda o token da loja e nao e (nem deve ser) legivel pelo navegador (mig 0194).
       supabase.rpc('mp_conectado_loja'),
-      supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria').eq('empresa_id', empresaId).order('nome').limit(500),
+      // Deposito tem milhares de itens: sem paginar o cardapio do salao parava nos
+      // primeiros 500 nomes em ordem alfabetica e o resto sumia da tela.
+      fetchAll(() => supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria').eq('empresa_id', empresaId).order('nome')),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
       supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId),
       // Complementos por produto. A tabela de vínculo não tem empresa_id e é lida por
@@ -2792,24 +2794,24 @@ export default function PresencialSalao() {
               e o botão de receber ficava fora da tela sem rolagem nenhuma pra
               alcançar. Mesmo remédio do ModalComplementos aqui embaixo: só o
               miolo rola, título e botão ficam sempre parados à vista. */}
-          <div onClick={e => e.stopPropagation()}
+          <div onClick={e => e.stopPropagation()} className="sal-fechar"
             style={{ width: '100%', maxWidth: 380, background: 'var(--bg)', borderRadius: 16, border: '1px solid var(--border)',
               maxHeight: '85dvh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ flexShrink: 0, padding: '20px 20px 0', fontWeight: 800, fontSize: 17 }}>Fechar conta — {rotuloMesa(mesaSel)}</div>
+            <div className="sal-fechar-titulo" style={{ flexShrink: 0, padding: '20px 20px 0', fontWeight: 800, fontSize: 17 }}>Fechar conta — {rotuloMesa(mesaSel)}</div>
 
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 20px 0' }}>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '4px 0' }}>
+            <div className="sal-fechar-linha" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '4px 0' }}>
               <span>Subtotal</span><span>{fmt(subtotalSel)}</span>
             </div>
-            <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14, padding: '4px 0', cursor: 'pointer' }}>
+            <label className="sal-fechar-linha" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14, padding: '4px 0', cursor: 'pointer' }}>
               <span>
                 <input type="checkbox" checked={aplicarTaxa} onChange={e => setAplicarTaxa(e.target.checked)} style={{ marginRight: 8 }} />
                 Taxa de serviço ({taxaPct}%)
               </span>
               <span>{fmt(taxaSel)}</span>
             </label>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, fontWeight: 800, padding: '10px 0', borderTop: '1px dashed var(--border)', marginTop: 6 }}>
+            <div className="sal-fechar-total" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, fontWeight: 800, padding: '10px 0', borderTop: '1px dashed var(--border)', marginTop: 6 }}>
               <span>Total</span><span style={{ color: 'var(--primary)' }}>{fmt(totalSel)}</span>
             </div>
             {cashbackAplicado > 0 && (

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import React from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useConfirmar } from '../hooks/useConfirmar'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
@@ -450,16 +450,21 @@ export default function Produtos() {
     }
     // Carrega os produtos (categoria filtra no banco) e o termo filtra no cliente
     // (nome sem acento OU casou por complemento).
-    let query = supabase
-      .from('produtos')
-      .select('*')
-      .order('nome', { ascending: true })
-      .limit(1000)
-    query = verArquivadosRef.current
-      ? query.not('arquivado_em', 'is', null)
-      : query.is('arquivado_em', null)
-    if (categ) query = query.eq('categoria', categ)
-    let { data, error } = await query
+    // fetchAll pagina: loja de deposito passa de 4 mil produtos e o corte em 1000
+    // fazia o dono achar que a planilha nao tinha subido inteira.
+    const montaQuery = () => {
+      let q = supabase
+        .from('produtos')
+        .select('*')
+        .order('nome', { ascending: true })
+        .order('id')
+      q = verArquivadosRef.current
+        ? q.not('arquivado_em', 'is', null)
+        : q.is('arquivado_em', null)
+      if (categ) q = q.eq('categoria', categ)
+      return q
+    }
+    let { data, error } = await fetchAll(montaQuery)
     if (!error && nt) {
       const idset = new Set(idsPorComp)
       data = (data ?? []).filter(p => norm(p.nome).includes(nt) || idset.has(p.id))

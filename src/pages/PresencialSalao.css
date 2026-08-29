@@ -543,3 +543,44 @@ html[data-teclado='aberto'] .sal-overlay {
 @media (min-width: 1100px) {
   .sal-item-qtd-inp { width: 54px; font-size: 16.5px !important; padding: 7px 2px; }
 }
+
+/* ── Fechar conta no PC ───────────────────────────────────────────────────
+ * A janela de 380px foi desenhada pro celular e no monitor virou um cartãozinho
+ * no meio da tela: total de 18px e sete botões de pagamento em letra de 13px,
+ * justamente na hora em que o garçom está com o cliente esperando e precisa
+ * acertar de primeira. */
+@media (min-width: 1100px) {
+  .sal-fechar { max-width: 620px !important; max-height: 90dvh !important; }
+
+  .sal-fechar-titulo { font-size: 22px !important; padding: 26px 28px 0 !important; }
+  .sal-fechar > div:nth-child(2) { padding: 18px 28px 0 !important; }
+
+  .sal-fechar-linha { font-size: 16px !important; padding: 7px 0 !important; }
+  .sal-fechar-linha input[type="checkbox"] { width: 17px; height: 17px; }
+
+  /* Total no mesmo painel destacado do resto do sistema. */
+  .sal-fechar-total {
+    align-items: baseline;
+    border: 1.5px solid var(--primary) !important;
+    background: rgba(124, 58, 237, .12);
+    border-radius: 12px;
+    padding: 14px 18px !important;
+    margin-top: 12px !important;
+    font-size: 14px !important;
+  }
+  .sal-fechar-total > span:first-child {
+    font-weight: 800;
+    letter-spacing: .6px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .sal-fechar-total > span:last-child { font-size: 36px; font-weight: 900; line-height: 1; }
+
+  /* Botão de pagamento: alvo grande, letra legível. Errar a forma de
+     pagamento é retrabalho no caixa. */
+  .sal-fechar button { font-size: 15.5px !important; }
+  .sal-fechar button:not(:disabled) { min-height: 46px; }
+  .sal-fechar input[type="text"],
+  .sal-fechar input[type="number"],
+  .sal-fechar select { font-size: 15.5px !important; padding: 10px 12px !important; }
+}

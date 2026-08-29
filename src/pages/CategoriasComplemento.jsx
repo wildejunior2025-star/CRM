@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import { blocosDeOpcoes } from '../lib/complementos'
 import { criarBuscadorDescricao } from '../lib/descricaoSabor'
 import { useConfirmar } from '../hooks/useConfirmar'
@@ -189,7 +189,7 @@ export default function CategoriasComplemento() {
       supabase.from('complemento_grupos')
         .select('id, nome, min, max, ordem, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel)')
         .eq('empresa_id', empresaId).order('nome'),
-      supabase.from('produtos').select('id, nome, categoria, descricao, preco_venda, ativo').eq('empresa_id', empresaId).is('arquivado_em', null).order('nome'),
+      fetchAll(() => supabase.from('produtos').select('id, nome, categoria, descricao, preco_venda, ativo').eq('empresa_id', empresaId).is('arquivado_em', null).order('nome').order('id')),
       supabase.from('produto_complemento_grupos')
         .select('id, produto_id, grupo_id, max_override, produtos!inner(empresa_id)')
         .eq('produtos.empresa_id', empresaId),

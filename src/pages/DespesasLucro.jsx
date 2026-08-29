@@ -176,7 +176,7 @@ export default function DespesasLucro({ empresaId }) {
         supabase.from('estoque_movimentos').select('produto_id, quantidade')
           .eq('empresa_id', empresaId).eq('tipo', 'saida').eq('motivo', 'venda')
           .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString()),
-        supabase.from('produtos').select('id, nome, preco_custo').eq('empresa_id', empresaId),
+        fetchAll(() => supabase.from('produtos').select('id, nome, preco_custo').eq('empresa_id', empresaId).order('id')),
         // Custo que a baixa de estoque NÃO enxerga: prato no peso (% do vendido) e
         // produto sem controle de estoque (qtd vendida × custo). Quem faz a conta é
         // o banco, que vê mesa e delivery juntos.

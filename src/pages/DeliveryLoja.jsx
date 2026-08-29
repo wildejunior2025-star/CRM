@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
 import AvisoCookies from '../components/AvisoCookies'
 import { adicionalComplementos, blocosDeOpcoes, cobraPeloMaior, rotuloPrecoOpcao } from '../lib/complementos'
@@ -226,7 +226,9 @@ export default function DeliveryLoja() {
 
       if (!lojaData) { setLoja(null); setLoading(false); return }
 
-      const produtosData = await lerOuFalhar(() => supabase.from('produtos')
+      // fetchAll pagina: loja de deposito passa de 4 mil itens e o PostgREST corta
+      // em 1000 por request — sem isso a vitrine perdia produto sem avisar ninguem.
+      const produtosData = await lerOuFalhar(() => fetchAll(() => supabase.from('produtos')
         .select('id, nome, descricao, preco:preco_venda, preco_promocional, faixas_preco, foto_url, categoria, ordem, disponivel_delivery, estoque_minimo')
         .eq('empresa_id', lojaData.id)
         .eq('ativo', true)
@@ -235,7 +237,8 @@ export default function DeliveryLoja() {
         // Ordem manual do dono dentro da categoria (mig 0201). nullsFirst:false
         // deixa quem nunca foi ordenado no fim, em ordem alfabetica.
         .order('ordem', { nullsFirst: false })
-        .order('nome'))
+        .order('nome')
+        .order('id')))
 
       // Complementos (ex.: "monte sua quentinha") — grupos + opções por produto
       let produtosFinal = produtosData ?? []
@@ -243,16 +246,24 @@ export default function DeliveryLoja() {
       if (ids.length) {
         // Sabor de pizza também é produto: puxa a descrição dele pra mostrar no que vai na pizza.
         // Pega TODOS os ativos (tem sabor que só existe dentro da pizza, sem aparecer no cardápio).
-        const { data: descData } = await supabase.from('produtos')
+        const { data: descData } = await fetchAll(() => supabase.from('produtos')
           .select('nome, categoria, descricao')
           .eq('empresa_id', lojaData.id)
           .eq('ativo', true)
+          .order('id'))
         const descricaoDaOpcao = criarBuscadorDescricao(descData)
         // Lê pela ponte produto↔grupo: uma mesma categoria pode estar em vários produtos.
-        const vinc = await lerOuFalhar(() => supabase
-          .from('produto_complemento_grupos')
-          .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
-          .in('produto_id', ids))
+        // O .in() vai na URL: com 4 mil ids de uma vez o request estoura o tamanho
+        // maximo e a leitura falha, entao pergunta de 300 em 300 e junta.
+        const vinc = []
+        for (let i = 0; i < ids.length; i += 300) {
+          const lote = await lerOuFalhar(() => fetchAll(() => supabase
+            .from('produto_complemento_grupos')
+            .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
+            .in('produto_id', ids.slice(i, i + 300))
+            .order('produto_id')))
+          vinc.push(...lote)
+        }
         // Opção "opt-out" (Sem X / Não Quero): serve pra recusar a categoria.
         const soSemOpcao = nome => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ''))
         const porProduto = {}

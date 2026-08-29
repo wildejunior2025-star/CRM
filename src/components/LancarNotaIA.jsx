@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import BuscaSelect from './BuscaSelect'
 
 // Botão "Lançar nota (IA)": tira foto/PDF da nota de compra, a IA lê e casa cada item
@@ -23,7 +23,7 @@ export default function LancarNotaIA({ empresaId, onDone }) {
   async function abrir() {
     setStep('upload'); setItens([]); setErro(null); setAviso(null); setAtualizarCusto(true); setShow(true)
     const [pr, mp] = await Promise.all([
-      supabase.from('produtos').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
+      fetchAll(() => supabase.from('produtos').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome').order('id')),
       supabase.from('materias_primas').select('id, nome, unidade').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
     ])
     setProdutos(pr.data || [])

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { CONDICOES_PAGAMENTO } from '../lib/constants'
 import ClienteHistorico from './ClienteHistorico'
@@ -107,7 +107,7 @@ export default function Clientes() {
   // Catálogo de produtos (pro seletor de preço especial)
   useEffect(() => {
     if (!empresaId) return
-    supabase.from('produtos').select('id, nome, preco_venda').eq('empresa_id', empresaId).eq('ativo', true).order('nome')
+    fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda').eq('empresa_id', empresaId).eq('ativo', true).order('nome').order('id'))
       .then(({ data }) => setProdutosLista(data ?? []))
   }, [empresaId])
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import './PortalLoja.css'
 
@@ -21,8 +21,9 @@ export default function PortalCatalogo() {
     setError(null)
 
     const queries = [
-      supabase.from('produtos').select('*').eq('ativo', true).order('categoria').order('nome'),
-      supabase.from('estoque_saldo').select('produto_id, quantidade_atual'),
+      // Paginado: catalogo de deposito passa de 4 mil linhas e o PostgREST corta em 1000.
+      fetchAll(() => supabase.from('produtos').select('*').eq('ativo', true).order('categoria').order('nome').order('id')),
+      fetchAll(() => supabase.from('estoque_saldo').select('produto_id, quantidade_atual').order('produto_id')),
     ]
     if (profile?.cliente_id) {
       queries.push(supabase.from('clientes').select('*').eq('id', profile.cliente_id).maybeSingle())

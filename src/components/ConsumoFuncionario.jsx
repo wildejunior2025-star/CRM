@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 
 // Consumo de funcionário (alimentação): lança o que o funcionário pega (item do
 // estoque ou refeição avulsa). Item do estoque dá baixa e usa o preço de venda.
@@ -26,7 +26,7 @@ export default function ConsumoFuncionario({ empresaId }) {
     const iniMes = new Date(); iniMes.setDate(1); iniMes.setHours(0, 0, 0, 0)
     const [co, prc, fn, us] = await Promise.all([
       supabase.from('consumo_funcionario').select('*').eq('empresa_id', empresaId).gte('created_at', iniMes.toISOString()).order('created_at', { ascending: false }),
-      supabase.from('produtos').select('id, nome, preco_venda, controla_estoque').eq('empresa_id', empresaId).eq('ativo', true).order('nome').limit(1000),
+      fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, controla_estoque').eq('empresa_id', empresaId).eq('ativo', true).order('nome').order('id')),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
       supabase.from('profiles').select('id, nome, perfil').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
     ])

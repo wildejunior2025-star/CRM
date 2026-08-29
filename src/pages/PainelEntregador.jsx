@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { separarItem } from '../lib/itensPedido'
 
@@ -810,7 +810,7 @@ export default function PainelEntregador() {
     if (!empresa?.id) return
     let vivo = true
     ;(async () => {
-      const { data } = await supabase.from('produtos').select('id, nome, categoria').eq('empresa_id', empresa.id)
+      const { data } = await fetchAll(() => supabase.from('produtos').select('id, nome, categoria').eq('empresa_id', empresa.id).order('id'))
       if (!vivo || !data) return
       const ehBebida = c => /refriger|cerveja|suco|agua|energetic|bebida|drink/.test(normTxt(c))
       const ids = new Set(), nomes = new Set()

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import BuscaSelect from '../components/BuscaSelect'
 import LancarNotaIA from '../components/LancarNotaIA'
 import { useAuth } from '../hooks/useAuth'
@@ -186,7 +186,7 @@ export default function FichaTecnica() {
         supabase.from('materias_primas').select('*').eq('empresa_id', empresaId).order('nome'),
         supabase.from('fichas_tecnicas').select('*, produtos(id, nome, preco_venda), complemento_opcoes(id, nome, preco_adicional)').eq('empresa_id', empresaId).order('nome'),
         supabase.from('ficha_itens').select('*').eq('empresa_id', empresaId),
-        supabase.from('produtos').select('id, nome, preco_venda, preco_custo, controla_estoque').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
+        fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, preco_custo, controla_estoque').eq('empresa_id', empresaId).eq('ativo', true).order('nome').order('id')),
         supabase.from('complemento_opcoes').select('id, nome, preco_adicional, complemento_grupos!inner(nome, empresa_id)').eq('complemento_grupos.empresa_id', empresaId).order('nome'),
         supabase.from('materia_prima_saldo').select('materia_prima_id, quantidade_atual'),
         // Saldo dos produtos de revenda: o carrinho de entrada aceita os dois.

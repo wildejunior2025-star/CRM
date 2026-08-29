@@ -1,4 +1,5 @@
 import { criarBuscadorDescricao, comDescricaoNasOpcoes } from './descricaoSabor'
+import { fetchAll } from './supabaseClient'
 
 // Cardápio que o cliente vê SEM login: usado no QR da mesa e no link do cliente.
 //
@@ -11,13 +12,15 @@ import { criarBuscadorDescricao, comDescricaoNasOpcoes } from './descricaoSabor'
 const soSemOpcao = nome => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ''))
 
 export async function carregarCardapio(supabase, empresaId) {
-  const { data: produtos } = await supabase
+  // fetchAll pagina de 1000 em 1000: loja de deposito passa de 4 mil itens e tanto
+  // o limite antigo de 500 quanto o corte do PostgREST sumiam com o resto do cardapio.
+  const { data: produtos } = await fetchAll(() => supabase
     .from('estoque_catalogo')
     .select('produto_id, nome, preco_venda, categoria, foto_url, ordem')
     .eq('empresa_id', empresaId)
     // Mesma ordem que o dono montou na tela de Produtos (mig 0201): sem isso o
     // cardapio da mesa sairia alfabetico e o do celular na ordem escolhida.
-    .order('categoria').order('ordem', { nullsFirst: false }).order('nome').limit(500)
+    .order('categoria').order('ordem', { nullsFirst: false }).order('nome').order('produto_id'))
 
   // Ordem personalizada das categorias (a mesma da loja online)
   const { data: cats } = await supabase
@@ -29,15 +32,21 @@ export async function carregarCardapio(supabase, empresaId) {
   const compMap = {}
   if (ids.length) {
     // Sabor de pizza também é produto: a descrição dele vira o "o que vem dentro".
-    const { data: descData } = await supabase.from('produtos')
-      .select('nome, categoria, descricao').eq('empresa_id', empresaId).eq('ativo', true)
+    const { data: descData } = await fetchAll(() => supabase.from('produtos')
+      .select('nome, categoria, descricao').eq('empresa_id', empresaId).eq('ativo', true).order('id'))
     const descricaoDaOpcao = criarBuscadorDescricao(descData)
 
-    const { data: vinc } = await supabase
-      .from('produto_complemento_grupos')
-      .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
-      .in('produto_id', ids)
-      .order('ordem')
+    // O .in() viaja na URL: com milhares de ids de uma vez o request estoura o
+    // tamanho maximo, entao pergunta de 300 em 300 e junta.
+    const vinc = []
+    for (let i = 0; i < ids.length; i += 300) {
+      const { data: lote } = await fetchAll(() => supabase
+        .from('produto_complemento_grupos')
+        .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
+        .in('produto_id', ids.slice(i, i + 300))
+        .order('ordem').order('produto_id'))
+      vinc.push(...(lote ?? []))
+    }
 
     for (const v of (vinc ?? [])) {
       const g = v.complemento_grupos
