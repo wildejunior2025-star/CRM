@@ -116,13 +116,16 @@ export default function PresencialSalao() {
   const [mesaSel, setMesaSel] = useState(null)   // mesa aberta no drawer
   const [destaque, setDestaque] = useState(0)   // produto marcado pelas setas
   const listaProdRef = useRef(null)
-  useEffect(() => { setDestaque(0) }, [busca, categoriaSel])
   const [movendo, setMovendo] = useState(false)  // drawer de trocar de mesa
   const [moverNome, setMoverNome] = useState('')
   const [moverErro, setMoverErro] = useState('')
   const [moverBusy, setMoverBusy] = useState(false)
   const [busca, setBusca]     = useState('')
   const [categoriaSel, setCategoriaSel] = useState(null) // categoria aberta no menu de adicionar item
+  // Mora AQUI, e não junto do useRef lá em cima: a lista de dependências é lida
+  // durante o render, então um efeito que cita `busca` antes do useState dela
+  // derruba a tela inteira com "Cannot access before initialization".
+  useEffect(() => { setDestaque(0) }, [busca, categoriaSel])
   const [fechando, setFechando] = useState(false) // modal de fechamento
   const [forma, setForma]     = useState('dinheiro')
   const [aplicarTaxa, setAplicarTaxa] = useState(true)
