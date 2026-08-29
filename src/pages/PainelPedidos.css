@@ -1379,40 +1379,50 @@
 .pp-venda-lista { max-height: 240px; }
 
 @media (min-width: 1024px) {
-  .pp-venda { max-width: 1240px; padding: 28px 32px; }
+  /* Ocupa a tela quase inteira: sobrava um vazio dos dois lados que nao servia
+     pra nada. O vh no max-height evita que a janela cresca alem do monitor. */
+  .pp-venda { max-width: min(1700px, 95vw); max-height: 94vh; padding: 30px 36px; }
 
   /* Fonte de celular num monitor de 24" fica ilegivel de longe, e o caixa
      trabalha em pe. Como os tamanhos estao no style inline (que ganha da folha),
      so da pra crescer aqui com !important — o alvo e restrito a esta tela. */
   .pp-venda input,
   .pp-venda textarea,
-  .pp-venda button { font-size: 15px !important; }
-  .pp-venda .pp-modal-titulo { font-size: 23px; }
-  .pp-venda .pp-venda-nome { font-size: 15.5px !important; }
-  .pp-venda .pp-venda-sub { font-size: 13.5px !important; }
-  .pp-venda .pp-venda-linha { padding: 10px 8px !important; }
-  .pp-venda .pp-venda-carrinho { font-size: 14.5px !important; }
+  .pp-venda button { font-size: 16.5px !important; }
+  .pp-venda input,
+  .pp-venda textarea { padding: 12px 14px !important; }
+  .pp-venda .pp-modal-titulo { font-size: 27px; }
+  .pp-venda .pp-venda-nome { font-size: 17px !important; }
+  .pp-venda .pp-venda-sub { font-size: 14.5px !important; }
+  .pp-venda .pp-venda-linha { padding: 12px 10px !important; }
+  .pp-venda .pp-venda-carrinho { font-size: 16px !important; }
+  .pp-venda .pp-modal-actions button { padding: 14px 20px !important; font-size: 17px !important; }
 
   .pp-venda-grid {
     display: grid;
-    grid-template-columns: 1.1fr 1fr;
-    gap: 28px;
+    grid-template-columns: 1.15fr 1fr;
+    gap: 34px;
     align-items: start;
   }
 
   /* Divisória discreta entre as duas metades, pro olho não misturar as colunas. */
   .pp-venda-grid > .pp-venda-col + .pp-venda-col {
     border-left: 1px solid var(--pp-border);
-    padding-left: 28px;
+    padding-left: 34px;
   }
 
   /* A lista de produtos é o que o caixa mais usa: na tela grande ela cresce
      junto, em vez de continuar com a altura pensada pro celular. */
-  .pp-venda-lista { max-height: 50vh; }
+  .pp-venda-lista { max-height: 58vh; }
 }
 
 @media (min-width: 1500px) {
-  .pp-venda { max-width: 1440px; }
-  .pp-venda-lista { max-height: 56vh; }
-  .pp-venda .pp-venda-nome { font-size: 16.5px !important; }
+  .pp-venda { padding: 34px 40px; }
+  .pp-venda-lista { max-height: 64vh; }
+  .pp-venda .pp-venda-nome { font-size: 18px !important; }
+  .pp-venda .pp-venda-sub { font-size: 15px !important; }
+  .pp-venda input,
+  .pp-venda textarea,
+  .pp-venda button { font-size: 17.5px !important; }
+  .pp-venda .pp-modal-titulo { font-size: 30px; }
 }
