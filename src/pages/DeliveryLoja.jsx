@@ -80,6 +80,23 @@ function fmt(n) {
   return Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// Leitura que NAO pode sair pela metade. O cardapio e montado com varias
+// consultas; se a dos complementos falhar e a tela seguir assim mesmo, TODO
+// produto vira "produto sem complemento": o cliente poe a quentinha na sacola
+// sem escolher feijao nem proteina, paga o preco base e a cozinha recebe um
+// pedido em branco. Entao aqui e tudo ou nada — tenta de novo e, se nao vier,
+// quem chama derruba a tela com aviso em vez de servir cardapio quebrado.
+async function lerOuFalhar(fn, tentativas = 3) {
+  let ultimoErro = null
+  for (let i = 0; i < tentativas; i++) {
+    const { data, error } = await fn()
+    if (!error) return data ?? []
+    ultimoErro = error
+    await new Promise(r => setTimeout(r, 400 * (i + 1)))
+  }
+  throw ultimoErro ?? new Error('falha ao carregar o cardapio')
+}
+
 export default function DeliveryLoja() {
   const { id, slug } = useParams()
   const navigate = useNavigate()
@@ -98,6 +115,9 @@ export default function DeliveryLoja() {
   const cartKey = loja?.id ? `sacola_${loja.id}` : null
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [optProduto, setOptProduto] = useState(null) // produto aberto no modal de complementos
+  // Cardapio que nao carregou inteiro NAO vira loja aberta pela metade (ver lerOuFalhar)
+  const [erroCardapio, setErroCardapio] = useState(false)
+  const [tentativa, setTentativa] = useState(0)
   const drawerRef = useRef(null)
   const [filtroEstoqueBaixo, setFiltroEstoqueBaixo] = useState(false)
   const [busca, setBusca] = useState('')
@@ -179,12 +199,17 @@ export default function DeliveryLoja() {
       const atualizado = {}
       for (const [key, item] of Object.entries(prev)) {
         const produtoAtual = produtos.find(p => String(p.id) === String(item.id ?? key))
-        if (produtoAtual) {
-          // Combos (com complementos) mantêm o preço já calculado (base + adicionais)
-          atualizado[key] = item.complementos?.length
-            ? { key, ...item }
-            : { key, ...item, id: produtoAtual.id, preco: Number(produtoAtual.preco) }
-        }
+        if (!produtoAtual) continue
+        // Item obrigatório que entrou na sacola SEM escolha nenhuma não existe
+        // de verdade — é sobra de um carregamento em que os complementos não
+        // vieram. Deixar passar manda pra cozinha uma quentinha sem feijão nem
+        // proteína, e ainda pelo preço base. Some da sacola.
+        const exigeEscolha = (produtoAtual.complementos ?? []).some(g => Number(g.min ?? 0) > 0)
+        if (exigeEscolha && !item.complementos?.length) continue
+        // Combos (com complementos) mantêm o preço já calculado (base + adicionais)
+        atualizado[key] = item.complementos?.length
+          ? { key, ...item }
+          : { key, ...item, id: produtoAtual.id, preco: Number(produtoAtual.preco) }
       }
       return atualizado
     })
@@ -192,6 +217,7 @@ export default function DeliveryLoja() {
 
   useEffect(() => {
     async function load() {
+      setErroCardapio(false)
       // Resolve a loja por slug (lojaonline.fwcinter.com/slug) ou por id (link antigo /loja/:id)
       let lojaQuery = supabase.from('empresas').select('*').eq('aceita_delivery', true)
       lojaQuery = slug ? lojaQuery.eq('slug', slug) : lojaQuery.eq('id', id)
@@ -199,7 +225,7 @@ export default function DeliveryLoja() {
 
       if (!lojaData) { setLoja(null); setLoading(false); return }
 
-      const { data: produtosData } = await supabase.from('produtos')
+      const produtosData = await lerOuFalhar(() => supabase.from('produtos')
         .select('id, nome, descricao, preco:preco_venda, preco_promocional, faixas_preco, foto_url, categoria, ordem, disponivel_delivery, estoque_minimo')
         .eq('empresa_id', lojaData.id)
         .eq('ativo', true)
@@ -208,7 +234,7 @@ export default function DeliveryLoja() {
         // Ordem manual do dono dentro da categoria (mig 0201). nullsFirst:false
         // deixa quem nunca foi ordenado no fim, em ordem alfabetica.
         .order('ordem', { nullsFirst: false })
-        .order('nome')
+        .order('nome'))
 
       // Complementos (ex.: "monte sua quentinha") — grupos + opções por produto
       let produtosFinal = produtosData ?? []
@@ -222,10 +248,10 @@ export default function DeliveryLoja() {
           .eq('ativo', true)
         const descricaoDaOpcao = criarBuscadorDescricao(descData)
         // Lê pela ponte produto↔grupo: uma mesma categoria pode estar em vários produtos.
-        const { data: vinc } = await supabase
+        const vinc = await lerOuFalhar(() => supabase
           .from('produto_complemento_grupos')
           .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
-          .in('produto_id', ids)
+          .in('produto_id', ids))
         // Opção "opt-out" (Sem X / Não Quero): serve pra recusar a categoria.
         const soSemOpcao = nome => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ''))
         const porProduto = {}
@@ -285,8 +311,13 @@ export default function DeliveryLoja() {
       setCarrinho(savedCart)
       setLoading(false)
     }
-    load()
-  }, [id, slug])
+    load().catch(() => {
+      // Cardapio incompleto e pior que cardapio nenhum: melhor pedir pra
+      // tentar de novo do que deixar montar uma sacola errada.
+      setErroCardapio(true)
+      setLoading(false)
+    })
+  }, [id, slug, tentativa])
 
   useEffect(() => {
     if (!drawerOpen) return
@@ -525,6 +556,19 @@ export default function DeliveryLoja() {
       <div className="dloja-loading">
         <div className="dloja-spinner" />
         <p>Carregando cardápio...</p>
+      </div>
+    )
+  }
+
+  if (erroCardapio) {
+    return (
+      <div className="dloja-loading">
+        <p style={{ color: '#94a3b8', textAlign: 'center', maxWidth: 320 }}>
+          Não deu pra carregar o cardápio inteiro. Confira a internet e tente de novo.
+        </p>
+        <button className="dloja-back-btn" onClick={() => { setLoading(true); setTentativa(t => t + 1) }}>
+          Tentar de novo
+        </button>
       </div>
     )
   }
