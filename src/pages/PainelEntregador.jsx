@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
+import { separarItem } from '../lib/itensPedido'
 
 // Cada aba tem seu endereço (/entregas?aba=minhas). O motoqueiro sai pro Waze,
 // pro iFood, atende o telefone — e quando volta o celular já descarregou a
@@ -550,11 +551,11 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
             // fica escondida — é coisa da cozinha, não do entregador. O que CUSTA
             // a mais é porção extra: isso o motoqueiro precisa ver, senão sai sem
             // levar. Ex: "1× Quentinha (M) + Churrasco extra".
-            const extras = (Array.isArray(it.complementos) ? it.complementos : [])
-              .filter(c => Number(c.preco ?? c.preco_adicional ?? 0) > 0)
+            const { nome, complementos } = separarItem(it)
+            const extras = complementos.filter(c => Number(c.preco ?? c.preco_adicional ?? 0) > 0)
             return (
               <li key={i} style={{ fontSize: 13.5, color: 'var(--text)', padding: '3px 0' }}>
-                <strong>{it.quantidade ?? it.qtd ?? 1}×</strong> {String(it.nome || '—').replace(/\s*\([^()]*\)\s*$/, '')}
+                <strong>{it.quantidade ?? it.qtd ?? 1}×</strong> {nome || '—'}
                 {extras.map((c, j) => (
                   <span key={j} style={{
                     display: 'inline-block', marginLeft: 6,
@@ -562,7 +563,7 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
                     color: '#f59e0b', borderRadius: 6, padding: '1px 7px',
                     fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap',
                   }}>
-                    + {Number(c.qtd ?? 1) > 1 ? `${c.qtd}× ` : ''}{c.nome}
+                    + {Number(c.qtdTotal ?? 1) > 1 ? `${c.qtdTotal}× ` : ''}{c.nome}
                   </span>
                 ))}
               </li>

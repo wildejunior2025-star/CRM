@@ -26,6 +26,57 @@ function kv(label, valor) {
   return linha(l + ' '.repeat(espacos) + v)
 }
 
+// ── Nome x complementos ─────────────────────────────────────────
+// Copia fiel de src/lib/itensPedido.js (esse .exe e um app a parte, nao da pra
+// importar o modulo do site). Se mexer la, mexe aqui. Duas regras:
+//
+// 1) `qtd` do complemento e POR UNIDADE: 4 quentinhas com 2 arroz = 8 arroz.
+//    Mas grupo em modo_quantidade (migration 0200) e o contrario: os sabores
+//    DIVIDEM o total. 45 picoles com 10 leite condensado tem quantidade 45 no
+//    item (pro estoque baixar certo) e 10 no complemento — multiplicar imprimia
+//    450 na comanda. Esses vem marcados com `absoluto: true`.
+//
+// 2) O checkout cola a lista de sabores no fim do nome e a comanda ja imprime
+//    cada um na linha de baixo. Tira o parentese, mas so quando TODO pedaco de
+//    dentro bate com um complemento — "Sorvete CDBOM (Balde 10 litros)" fica.
+const semAcento = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+const chave = s => semAcento(s).toLowerCase().replace(/\s+/g, ' ').trim()
+
+function tiraListaColada(nome, complementos) {
+  const m = nome.match(/^(.*?)\s*\(([^()]*)\)\s*$/)
+  if (!m || !m[1].trim()) return nome
+  const nomes = complementos.map(c => chave(c && c.nome ? c.nome : c)).filter(Boolean)
+  const partes = m[2].split(',')
+    .map(s => chave(s).replace(/^\d+\s*[x×]?\s*/, ''))
+    .filter(Boolean)
+  if (!partes.length) return nome
+  return partes.every(p => nomes.includes(p)) ? m[1].trim() : nome
+}
+
+function separarItem(item) {
+  let nome = String((item && item.nome) || '')
+  let complementos = Array.isArray(item && item.complementos) ? item.complementos : []
+
+  if (!complementos.length) {
+    const m = nome.match(/^(.*)\((.+)\)\s*$/)  // guloso: pega o ULTIMO parentese
+    if (m && m[2].includes(',')) {              // so separa se for lista (tem virgula)
+      nome = m[1].trim()
+      complementos = m[2].split(',').map(s => ({ nome: s.trim(), qtd: 1 })).filter(c => c.nome)
+    }
+  } else {
+    nome = tiraListaColada(nome, complementos)
+  }
+
+  const qtdItem = Number((item && (item.quantidade ?? item.qtd)) ?? 1) || 1
+  complementos = complementos.map(c => {
+    if (typeof c === 'string') c = { nome: c, qtd: 1 }
+    const q = Number((c && c.qtd) ?? 1) || 1
+    return { ...c, qtdTotal: c && c.absoluto ? q : q * qtdItem }
+  })
+
+  return { nome, complementos }
+}
+
 function formaPagamento(p) {
   const f = p.forma_pagamento
   const ifood = p.origem === 'ifood'
@@ -82,13 +133,11 @@ function montarCupom(pedido, empresa) {
   const itens = Array.isArray(p.itens) ? p.itens : []
   for (const it of itens) {
     const qtd = it.quantidade ?? it.qtd ?? 1
-    const nome = it.nome || 'Item'
-    parts.push(BOLD(1), linha(qtd + 'x ' + nome), BOLD(0))
-    const comps = Array.isArray(it.complementos) ? it.complementos : []
+    const { nome, complementos: comps } = separarItem(it)
+    parts.push(BOLD(1), linha(qtd + 'x ' + (nome || 'Item')), BOLD(0))
     for (const c of comps) {
-      const cn = typeof c === 'string' ? c : (c?.nome ?? '')
-      // Complemento multiplica pela qtd do prato (4 quentinhas → complemento x4).
-      const cq = Number(c?.qtd ?? 1) * Number(qtd || 1)
+      const cn = c.nome
+      const cq = c.qtdTotal
       if (!cn) continue
       // Adicional pago (ex.: proteina/porcao extra) sai com o valor cobrado.
       const cp = Number(c?.preco ?? 0)

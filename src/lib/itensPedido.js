@@ -20,6 +20,25 @@
 // Pra ninguém ter que lembrar dessa regra em cinco lugares, a conta é feita
 // UMA vez aqui e sai pronta em `qtdTotal`. Quem exibe só lê.
 
+const semAcento = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+const chave = s => semAcento(s).toLowerCase().replace(/\s+/g, ' ').trim()
+
+// O checkout cola a lista de complementos no fim do nome — "Picolé (10× Limão,
+// 20× Uva)" — e a comanda já imprime cada sabor na linha de baixo. Repetido, o
+// nome estoura a largura da bobina e o cozinheiro lê a mesma coisa duas vezes.
+// Só corta se TODO pedaço de dentro do parêntese bater com um complemento do
+// item; assim "Sorvete CDBOM (Balde 10 litros)" continua inteiro.
+function tiraListaColada(nome, complementos) {
+  const m = nome.match(/^(.*?)\s*\(([^()]*)\)\s*$/)
+  if (!m || !m[1].trim()) return nome
+  const nomes = complementos.map(c => chave(c?.nome ?? c)).filter(Boolean)
+  const partes = m[2].split(',')
+    .map(s => chave(s).replace(/^\d+\s*[x×]?\s*/, ''))
+    .filter(Boolean)
+  if (!partes.length) return nome
+  return partes.every(p => nomes.includes(p)) ? m[1].trim() : nome
+}
+
 export function separarItem(item) {
   let nome = String(item?.nome ?? '')
   let complementos = Array.isArray(item?.complementos) ? item.complementos : []
@@ -33,6 +52,8 @@ export function separarItem(item) {
         .map(s => ({ nome: s.trim(), qtd: 1 }))
         .filter(c => c.nome)
     }
+  } else {
+    nome = tiraListaColada(nome, complementos)
   }
 
   const qtdItem = Number(item?.quantidade ?? item?.qtd ?? 1) || 1
