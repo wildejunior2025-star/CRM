@@ -114,6 +114,10 @@ export default function PresencialSalao() {
   const [loading, setLoading] = useState(true)
 
   const [mesaSel, setMesaSel] = useState(null)   // mesa aberta no drawer
+  const [movendo, setMovendo] = useState(false)  // drawer de trocar de mesa
+  const [moverNome, setMoverNome] = useState('')
+  const [moverErro, setMoverErro] = useState('')
+  const [moverBusy, setMoverBusy] = useState(false)
   const [busca, setBusca]     = useState('')
   const [categoriaSel, setCategoriaSel] = useState(null) // categoria aberta no menu de adicionar item
   const [fechando, setFechando] = useState(false) // modal de fechamento
@@ -949,6 +953,42 @@ export default function PresencialSalao() {
     if (comandaSel.mesa_id) await supabase.from('mesas').update({ status: 'livre' }).eq('id', comandaSel.mesa_id)
     setCancelando(false)
     setConfirmarCancelar(false)
+    setMesaSel(null)
+    await loadMesas()
+  }
+
+  // ── Trocar de mesa ───────────────────────────────────────────────────────
+  // O cliente muda de lugar no meio do consumo (mesa perto do palco, mesa na
+  // sombra). A comanda vai junto com tudo dentro dela — a conta do que ele já
+  // consumiu não pode recomeçar do zero só porque ele levantou.
+  //
+  // Só mesa LIVRE recebe. Pra quem senta junto de um amigo, a comanda sai da
+  // mesa e passa a ser chamada pelo NOME dele: as duas contas dividem a mesa
+  // física mas fecham separadas, que é como o salão realmente trabalha.
+  const mesasLivres = useMemo(
+    () => mesas.filter(m => !m.is_balcao && m.id !== comandaSel?.mesa_id && !comandaPorMesa[m.id]),
+    [mesas, comandaSel, comandaPorMesa]
+  )
+
+  async function mover(mesaDestinoId) {
+    if (!comandaSel || moverBusy) return
+    setMoverErro('')
+    if (!mesaDestinoId && !moverNome.trim()) {
+      setMoverErro('Escreva o nome do cliente pra comanda não ficar sem dono.')
+      return
+    }
+    setMoverBusy(true)
+    const { error } = await supabase.rpc('mover_comanda', {
+      p_comanda_id: comandaSel.id,
+      p_mesa_destino: mesaDestinoId ?? null,
+      p_nome: mesaDestinoId ? null : moverNome.trim(),
+    })
+    setMoverBusy(false)
+    if (error) { setMoverErro(error.message); return }
+    setMovendo(false)
+    setMoverNome('')
+    // Fecha o drawer: a comanda mudou de chave (outra mesa, ou virou de nome),
+    // então o `mesaSel` que está na mão não aponta mais pra ela.
     setMesaSel(null)
     await loadMesas()
   }
@@ -2335,6 +2375,17 @@ export default function PresencialSalao() {
                       style={{ borderRadius: 10, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}>
                       ✕<span className="sal-acao-txt">Cancelar</span>
                     </button>
+                    {/* Cliente mudou de lugar: leva a comanda junto, com tudo
+                        que já consumiu. Só aparece em comanda de mesa — a de
+                        nome já não está presa a mesa nenhuma. */}
+                    {!mesaSel?.is_comanda && !mesaSel?.is_balcao && (
+                      <button type="button" onClick={() => { setMoverErro(''); setMoverNome(comandaSel?.cliente?.nome || ''); setMovendo(true) }}
+                        className="sal-acao-icone" title="Trocar de mesa" aria-label="Trocar de mesa"
+                        style={{ borderRadius: 10, border: '1px solid var(--border)',
+                          background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
+                        ↔<span className="sal-acao-txt">Trocar mesa</span>
+                      </button>
+                    )}
                     {/* Pré-conta: o cliente vê o que consumiu e quanto deu ANTES
                         de decidir como paga. Não fecha nada. */}
                     <button type="button" onClick={imprimirPreConta} disabled={subtotalSel <= 0}
@@ -2487,6 +2538,86 @@ export default function PresencialSalao() {
           à de sair da página, que o dedo dispensa no automático. Cancelar joga
           fora tudo que foi lançado e não tem desfazer, então aqui a conta
           aparece por extenso e o botão perigoso fica separado do de voltar. */}
+      {/* ── Trocar de mesa ──────────────────────────────────────────────────
+          Duas saídas, e a segunda existe porque juntar duas contas na mesma
+          mesa vira briga na hora de fechar: ou a comanda vai pra uma mesa
+          livre, ou ela sai da mesa e passa a ser chamada pelo nome do cliente
+          (aí ele senta onde quiser, inclusive junto dos amigos). */}
+      {movendo && comandaSel && (
+        <div onClick={() => !moverBusy && setMovendo(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1100,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 420, maxHeight: '86vh', overflowY: 'auto',
+              background: 'var(--bg)', borderRadius: 16, border: '1.5px solid var(--border)',
+              padding: 20, boxSizing: 'border-box' }}>
+            <h2 style={{ margin: '0 0 4px', fontSize: 19, color: 'var(--text)' }}>
+              Trocar a Mesa {mesaSel?.numero} de lugar
+            </h2>
+            <p style={{ margin: '0 0 16px', fontSize: 13.5, lineHeight: 1.45, color: 'var(--text-muted)' }}>
+              Os {(comandaSel.comanda_itens ?? []).reduce((n, i) => n + Number(i.quantidade || 0), 0)} item(ns)
+              e os {fmt(subtotalSel)} já consumidos vão junto.
+            </p>
+
+            <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: .4, textTransform: 'uppercase',
+              color: 'var(--text-muted)', marginBottom: 8 }}>
+              Mesas livres
+            </div>
+            {mesasLivres.length === 0 ? (
+              <div style={{ fontSize: 13.5, color: 'var(--text-muted)', padding: '6px 0 12px' }}>
+                Nenhuma mesa livre agora.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 18 }}>
+                {mesasLivres.map(m => (
+                  <button key={m.id} type="button" onClick={() => mover(m.id)} disabled={moverBusy}
+                    style={{ minWidth: 62, padding: '10px 12px', borderRadius: 10, cursor: moverBusy ? 'wait' : 'pointer',
+                      border: '1.5px solid var(--border)', background: 'transparent',
+                      color: 'var(--text)', fontWeight: 800, fontSize: 15 }}>
+                    {m.numero}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: .4, textTransform: 'uppercase',
+                color: 'var(--text-muted)', marginBottom: 6 }}>
+                Ou sentou junto de alguém
+              </div>
+              <p style={{ margin: '0 0 10px', fontSize: 13, lineHeight: 1.45, color: 'var(--text-muted)' }}>
+                A conta sai da mesa e passa a ser chamada pelo nome — as duas contas
+                ficam na mesma mesa, mas cada uma fecha sozinha.
+              </p>
+              <input value={moverNome} onChange={e => setMoverNome(e.target.value)}
+                placeholder="Nome do cliente" disabled={moverBusy}
+                style={{ width: '100%', padding: '11px 12px', borderRadius: 10, boxSizing: 'border-box',
+                  border: '1.5px solid var(--border)', background: 'var(--surface, transparent)',
+                  color: 'var(--text)', fontSize: 15 }} />
+              <button type="button" onClick={() => mover(null)} disabled={moverBusy}
+                style={{ width: '100%', marginTop: 8, padding: '12px 0', borderRadius: 12, cursor: moverBusy ? 'wait' : 'pointer',
+                  border: '1.5px solid #7c3aed', background: 'rgba(124,58,237,.12)',
+                  color: 'var(--text)', fontWeight: 800, fontSize: 15 }}>
+                {moverBusy ? 'Trocando…' : 'Tirar da mesa e usar o nome'}
+              </button>
+            </div>
+
+            {moverErro && (
+              <div style={{ marginTop: 12, fontSize: 13.5, lineHeight: 1.4, color: 'var(--danger, #ef4444)' }}>
+                {moverErro}
+              </div>
+            )}
+
+            <button type="button" onClick={() => setMovendo(false)} disabled={moverBusy}
+              style={{ width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 12, cursor: 'pointer',
+                border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)',
+                fontWeight: 800, fontSize: 15 }}>
+              Voltar
+            </button>
+          </div>
+        </div>
+      )}
+
       {confirmarCancelar && comandaSel && (
         <div onClick={() => !cancelando && setConfirmarCancelar(false)}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1100,
