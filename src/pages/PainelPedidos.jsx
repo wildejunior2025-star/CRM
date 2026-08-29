@@ -1540,10 +1540,10 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
           ) : filtrados.map(p => {
             const qtd = cart[p.id]?.qtd ?? 0
             return (
-              <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 6px', borderRadius: 8 }}>
+              <div key={p.id} className="pp-venda-linha" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 6px', borderRadius: 8 }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nome}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  <div className="pp-venda-nome" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nome}</div>
+                  <div className="pp-venda-sub" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                     {fmt(p.preco_venda)}
                     {compMap[p.id]?.length ? <span style={{ color: '#7c3aed', fontWeight: 700 }}> · monte</span> : null}
                   </div>
@@ -1564,7 +1564,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
 
         {/* Carrinho */}
         {itens.length > 0 && (
-          <div style={{ marginBottom: 14, fontSize: 13 }}>
+          <div className="pp-venda-carrinho" style={{ marginBottom: 14, fontSize: 13 }}>
             {itens.map(i => {
               const temComp = Array.isArray(i.complementos) && i.complementos.length > 0
               const btnQtd = { width: 24, height: 24, borderRadius: 6, border: '1px solid var(--border,#2a2a3a)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontWeight: 800, fontSize: 15, lineHeight: 1, flexShrink: 0 }
