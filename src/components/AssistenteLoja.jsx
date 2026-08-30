@@ -36,6 +36,7 @@ export default function AssistenteLoja() {
   const [erro, setErro] = useState(null)
   const [video, setVideo] = useState(null)   // vídeo aberto no lightbox
   const [carregou, setCarregou] = useState(false)
+  const [carteira, setCarteira] = useState(null)
   const fimRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -46,24 +47,42 @@ export default function AssistenteLoja() {
   // carregamento do sistema seria uma consulta a mais em toda tela, pra uma
   // caixa que na maioria dos dias nem é aberta.
   useEffect(() => {
-    if (!aberto || carregou || !user?.id) return
+    if (!aberto || carregou || !user?.id || !profile?.empresa_id) return
     setCarregou(true)
-    supabase.from('assistente_conversas')
-      .select('pergunta, resposta, videos, created_at')
-      .eq('user_id', user.id).is('oculto_em', null)
-      .order('created_at', { ascending: false }).limit(HISTORICO_NA_TELA)
-      .then(({ data }) => {
-        if (!data?.length) return
-        const antigas = []
-        for (const c of data.reverse()) {
-          antigas.push({ role: 'user', content: c.pergunta })
-          antigas.push({ role: 'assistant', content: c.resposta, videos: c.videos ?? [] })
-        }
-        // Concatena em vez de sobrescrever: se ele já perguntou algo enquanto
-        // isto carregava, a pergunta dele não pode sumir da tela.
-        setMsgs(m => [...antigas, ...m])
+    const mesIni = new Date()
+    mesIni.setDate(1); mesIni.setHours(0, 0, 0, 0)
+
+    Promise.all([
+      supabase.from('assistente_conversas')
+        .select('pergunta, resposta, videos, created_at')
+        .eq('user_id', user.id).is('oculto_em', null)
+        .order('created_at', { ascending: false }).limit(HISTORICO_NA_TELA),
+      // O gasto do mês é da LOJA inteira, não deste usuário: a franquia é uma
+      // só, e dois gerentes perguntando dividem o mesmo bolo.
+      supabase.from('assistente_conversas').select('custo_brl')
+        .gte('created_at', mesIni.toISOString()),
+      supabase.from('empresas').select('ia_saldo_centavos, ia_franquia_centavos')
+        .eq('id', profile.empresa_id).maybeSingle(),
+    ]).then(([hist, mes, emp]) => {
+      const antigas = []
+      for (const c of (hist.data ?? []).reverse()) {
+        antigas.push({ role: 'user', content: c.pergunta })
+        antigas.push({ role: 'assistant', content: c.resposta, videos: c.videos ?? [] })
+      }
+      // Concatena em vez de sobrescrever: se ele já perguntou algo enquanto
+      // isto carregava, a pergunta dele não pode sumir da tela.
+      if (antigas.length) setMsgs(m => [...antigas, ...m])
+
+      const franquia = Number(emp.data?.ia_franquia_centavos ?? 500) / 100
+      const saldo = Number(emp.data?.ia_saldo_centavos ?? 0) / 100
+      const usado = (mes.data ?? []).reduce((s, r) => s + Number(r.custo_brl || 0), 0)
+      const resta = Math.max(0, franquia - usado)
+      setCarteira({
+        franquia, saldo, usado_no_mes: usado,
+        franquia_restante: resta, disponivel: resta + saldo,
       })
-  }, [aberto, carregou, user?.id])
+    })
+  }, [aberto, carregou, user?.id, profile?.empresa_id])
 
   // Limpar esconde a conversa DELE. Do seu lado (Super Admin) as perguntas
   // continuam — é o que mostra onde o sistema está confundindo os lojistas.
@@ -100,10 +119,12 @@ export default function AssistenteLoja() {
       // esconde o corpo — sem ler o context, o dono só veria "falhou".
       if (error) {
         const detalhe = await error.context?.json?.().catch(() => null)
+        if (detalhe?.carteira) setCarteira(detalhe.carteira)
         if (detalhe?.erro) { setErro(detalhe.erro); return }
         throw error
       }
       if (data?.erro) { setErro(data.erro); return }
+      if (data?.carteira) setCarteira(data.carteira)
       setMsgs(m => [...m, { role: 'assistant', content: data?.resposta || '', videos: data?.videos ?? [] }])
     } catch {
       setErro('Não consegui responder agora. Tente de novo em instantes.')
@@ -174,6 +195,8 @@ export default function AssistenteLoja() {
           <div ref={fimRef} />
         </div>
 
+        {carteira && <Medidor c={carteira} />}
+
         <form onSubmit={e => { e.preventDefault(); perguntar() }} style={S.form}>
           <input ref={inputRef} type="text" value={texto} maxLength={500}
             onChange={e => setTexto(e.target.value)} placeholder="Pergunte alguma coisa…" style={S.input} />
@@ -200,6 +223,28 @@ export default function AssistenteLoja() {
         </div>
       )}
     </>
+  )
+}
+
+const real = (v) => 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',')
+
+// Quanto da franquia do mês já foi. Fica sempre visível, e não só quando acaba:
+// o lojista precisa perceber que aquilo tem um custo ANTES de bater na trava —
+// senão a primeira notícia que ele tem do limite é o assistente parando.
+function Medidor({ c }) {
+  const usou = Math.min(1, c.franquia > 0 ? c.usado_no_mes / c.franquia : 1)
+  const acabou = c.disponivel <= 0
+  const cor = acabou ? 'var(--danger)' : usou > 0.8 ? 'var(--warning)' : 'var(--primary)'
+  return (
+    <div style={{ padding: '8px 12px 0', flexShrink: 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>
+        <span>{real(c.usado_no_mes)} de {real(c.franquia)} usados este mês</span>
+        {c.saldo > 0 && <span>+ {real(c.saldo)} de saldo</span>}
+      </div>
+      <div style={{ height: 5, borderRadius: 999, background: 'var(--border)', overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${usou * 100}%`, background: cor, borderRadius: 999, transition: 'width 400ms' }} />
+      </div>
+    </div>
   )
 }
 

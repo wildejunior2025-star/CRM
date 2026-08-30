@@ -428,6 +428,48 @@ async function situacaoAgora(sb: any, empresaId: string) {
   }
 }
 
+// ── carteira: franquia do mes + saldo comprado ──────────────────────────────
+// A loja tem uma franquia mensal (R$ 5,00 por padrao) que renova todo dia 1.
+// Gastou tudo, comeca a sair do saldo que ela comprou. Sem saldo, o assistente
+// para — senao o custo da IA cresce sem teto e come a mensalidade.
+//
+// O preco de cada pergunta e o CUSTO REAL em dolar, convertido, mais a margem.
+// Pergunta com cache quente sai barata e desconta pouco; e o mais justo que da.
+async function verCarteira(admin: any, empresaId: string) {
+  const hoje = hojeBRT()
+  const mesIni = hoje.slice(0, 8) + "01"
+
+  const [cfg, emp, mes] = await Promise.all([
+    admin.from("config_global").select("chave, valor").in("chave", ["ia_cotacao_usd", "ia_margem"]),
+    admin.from("empresas").select("ia_saldo_centavos, ia_franquia_centavos").eq("id", empresaId).maybeSingle(),
+    admin.from("assistente_conversas").select("custo_brl")
+      .eq("empresa_id", empresaId).gte("created_at", iniISO(mesIni)),
+  ])
+
+  const conf: Record<string, string> = {}
+  for (const c of (cfg.data ?? [])) conf[c.chave] = c.valor
+  // Se alguem apagar a configuracao, o padrao tem que ser CARO, nao de graca:
+  // errar pra baixo aqui significa dar IA de presente sem ninguem perceber.
+  const cotacao = Number(conf.ia_cotacao_usd) > 0 ? Number(conf.ia_cotacao_usd) : 5.5
+  const margem  = Number(conf.ia_margem)      > 0 ? Number(conf.ia_margem)      : 1.2
+
+  const franquia = Number(emp.data?.ia_franquia_centavos ?? 500) / 100
+  const saldo    = Number(emp.data?.ia_saldo_centavos ?? 0) / 100
+  const gastoMes = (mes.data ?? []).reduce((s: number, r: any) => s + Number(r.custo_brl || 0), 0)
+  const franquiaRestante = Math.max(0, franquia - gastoMes)
+
+  return { cotacao, margem, franquia, saldo, gastoMes, franquiaRestante,
+           disponivel: franquiaRestante + saldo }
+}
+
+const resumoCarteira = (c: any) => ({
+  franquia: c.franquia,
+  usado_no_mes: Number(c.gastoMes.toFixed(2)),
+  franquia_restante: Number(c.franquiaRestante.toFixed(2)),
+  saldo: Number(c.saldo.toFixed(2)),
+  disponivel: Number(c.disponivel.toFixed(2)),
+})
+
 // ── handler ─────────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
@@ -460,6 +502,19 @@ Deno.serve(async (req) => {
     }
     if (passouDoLimite(user.id)) {
       return json({ erro: "Muitas perguntas seguidas. Aguarde alguns minutos." }, 429)
+    }
+
+    // Cliente com service role: le a configuracao de preco, o saldo da loja e
+    // grava a conversa. Nenhuma consulta de DADO da loja passa por ele.
+    const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
+    const carteira = await verCarteira(admin, perfil.empresa_id)
+    if (carteira.disponivel <= 0) {
+      return json({
+        erro: `Seu assistente usou os R$ ${carteira.franquia.toFixed(2).replace(".", ",")} deste mes e o saldo acabou. ` +
+              `Compre saldo pra continuar perguntando, ou volte dia 1 quando renova.`,
+        sem_saldo: true,
+        carteira: resumoCarteira(carteira),
+      }, 402)
     }
 
     const body = await req.json().catch(() => ({}))
@@ -622,8 +677,27 @@ para datas AAAA-MM-DD antes de consultar.`
        gasto.cacheGravar * PRECO.cacheGravar +
        gasto.cacheLer    * PRECO.cacheLer +
        gasto.saida       * PRECO.saida) / 1_000_000
+
+    // Quanto ESTA pergunta custa pra loja: o custo real em dolar, convertido,
+    // mais a margem. A franquia do mes paga primeiro; o que passar dela sai do
+    // saldo comprado.
+    const custoBrl = Math.round(custo * carteira.cotacao * carteira.margem * 10000) / 10000
+    const daFranquia = Math.min(custoBrl, carteira.franquiaRestante)
+    const doSaldo = Math.max(0, custoBrl - daFranquia)
+    if (doSaldo > 0) {
+      // Arredonda o debito PRA CIMA: centavo perdido em toda pergunta vira
+      // prejuizo silencioso no fim do mes.
+      const centavos = Math.ceil(doSaldo * 100)
+      const { error: debErro } = await admin.rpc("ia_mover_saldo", {
+        p_empresa_id: perfil.empresa_id,
+        p_centavos: -centavos,
+        p_tipo: "debito",
+        p_descricao: `Pergunta ao assistente: ${pergunta.slice(0, 60)}`,
+      })
+      if (debErro) console.error("[assistente-loja] debito", debErro.message)
+    }
+
     try {
-      const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
       const { error: insErro } = await admin.from("assistente_conversas").insert({
         empresa_id: perfil.empresa_id,
         user_id: user.id,
@@ -635,6 +709,8 @@ para datas AAAA-MM-DD antes de consultar.`
         tokens_cache: gasto.cacheLer,
         tokens_out: gasto.saida,
         custo_usd: Number(custo.toFixed(6)),
+        custo_brl: custoBrl,
+        pago_com_saldo: Number(doSaldo.toFixed(4)),
         modelo: MODELO,
       })
       if (insErro) console.error("[assistente-loja] historico", insErro.message)
@@ -642,7 +718,19 @@ para datas AAAA-MM-DD antes de consultar.`
       console.error("[assistente-loja] historico", e)
     }
 
-    return json({ resposta: texto, videos: sugeridos })
+    // Devolve a carteira JÁ com esta pergunta descontada, pro medidor da tela
+    // andar na hora — sem precisar de uma segunda consulta.
+    const depois = {
+      ...carteira,
+      gastoMes: carteira.gastoMes + custoBrl,
+      franquiaRestante: carteira.franquiaRestante - daFranquia,
+      saldo: Math.max(0, carteira.saldo - doSaldo),
+    }
+    return json({
+      resposta: texto,
+      videos: sugeridos,
+      carteira: resumoCarteira({ ...depois, disponivel: depois.franquiaRestante + depois.saldo }),
+    })
   } catch (e) {
     console.error("[assistente-loja]", e)
     return json({ erro: "Deu erro aqui. Tente de novo em instantes." }, 500)

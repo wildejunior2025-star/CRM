@@ -16,6 +16,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import '../components/Page.css'
 
 const usd = (v) => 'US$ ' + Number(v || 0).toFixed(2)
+const brl = (v) => 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',')
 const dataHora = (ts) => new Date(ts).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 
 const PERIODOS = [['7', '7 dias'], ['30', '30 dias'], ['90', '90 dias'], ['0', 'Tudo']]
@@ -28,6 +29,7 @@ export default function SuperAdminAssistente() {
   const [busca, setBusca] = useState('')
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState(null)
+  const [recarga, setRecarga] = useState(0)
 
   useEffect(() => {
     let cancelado = false
@@ -37,7 +39,7 @@ export default function SuperAdminAssistente() {
         // Sem paginar, uma base movimentada cortaria em 1000 e o custo do mês
         // apareceria MENOR do que é — o erro exato que já aconteceu no resumo.
         let base = supabase.from('assistente_conversas')
-          .select('id, empresa_id, pergunta, resposta, consultas, custo_usd, tokens_in, tokens_cache, tokens_out, modelo, oculto_em, created_at')
+          .select('id, empresa_id, pergunta, resposta, consultas, custo_usd, custo_brl, pago_com_saldo, tokens_in, tokens_cache, tokens_out, modelo, oculto_em, created_at')
           .order('created_at', { ascending: false })
         if (dias !== '0') {
           const desde = new Date(); desde.setDate(desde.getDate() - Number(dias))
@@ -47,17 +49,34 @@ export default function SuperAdminAssistente() {
       }
       const [{ data, error }, emp] = await Promise.all([
         fetchAll(q),
-        supabase.from('empresas').select('id, nome'),
+        supabase.from('empresas').select('id, nome, ia_saldo_centavos, ia_franquia_centavos'),
       ])
       if (cancelado) return
       if (error) setErro(error.message)
       setLinhas(data ?? [])
-      setEmpresas(Object.fromEntries((emp.data ?? []).map(e => [e.id, e.nome])))
+      setEmpresas(Object.fromEntries((emp.data ?? []).map(e => [e.id, e])))
       setLoading(false)
     }
     carregar()
     return () => { cancelado = true }
-  }, [dias])
+  }, [dias, recarga])
+
+  // Lança saldo na mão. Enquanto a compra por PIX não existe, é assim que a
+  // loja que estourou a franquia volta a perguntar.
+  async function darSaldo(empresaId, nome) {
+    const txt = window.prompt(`Quanto de saldo adicionar para ${nome}? (em reais, ex: 10)`)
+    if (!txt) return
+    const reais = Number(String(txt).replace(',', '.'))
+    if (!(reais > 0)) { setErro('Valor inválido.'); return }
+    const { error } = await supabase.rpc('ia_mover_saldo', {
+      p_empresa_id: empresaId,
+      p_centavos: Math.round(reais * 100),
+      p_tipo: 'credito',
+      p_descricao: 'Saldo lançado pelo Super Admin',
+    })
+    if (error) { setErro(error.message); return }
+    setRecarga(n => n + 1)
+  }
 
   const filtradas = useMemo(() => {
     const t = busca.trim().toLowerCase()
@@ -69,6 +88,7 @@ export default function SuperAdminAssistente() {
 
   const resumo = useMemo(() => {
     const custo = filtradas.reduce((s, l) => s + Number(l.custo_usd || 0), 0)
+    const cobrado = filtradas.reduce((s, l) => s + Number(l.custo_brl || 0), 0)
     const lojas = new Set(filtradas.map(l => l.empresa_id))
     // Quanto do que a IA leu veio do cache. Abaixo de uns 50% tem prompt novo
     // sendo montado a cada pergunta — é dinheiro indo embora sem motivo.
@@ -77,6 +97,7 @@ export default function SuperAdminAssistente() {
     return {
       perguntas: filtradas.length,
       custo,
+      cobrado,
       media: filtradas.length ? custo / filtradas.length : 0,
       lojas: lojas.size,
       cachePct: (lidos + entrada) ? Math.round((lidos / (lidos + entrada)) * 100) : 0,
@@ -98,8 +119,10 @@ export default function SuperAdminAssistente() {
     const agg = {}
     for (const l of filtradas) {
       const k = l.empresa_id
-      agg[k] ??= { nome: empresas[k] ?? 'Loja', n: 0, custo: 0 }
-      agg[k].n++; agg[k].custo += Number(l.custo_usd || 0)
+      agg[k] ??= { nome: empresas[k]?.nome ?? 'Loja', n: 0, custo: 0, cobrado: 0 }
+      agg[k].n++
+      agg[k].custo += Number(l.custo_usd || 0)      // o que EU paguei
+      agg[k].cobrado += Number(l.custo_brl || 0)     // o que a loja consumiu
     }
     return Object.entries(agg).sort((a, b) => b[1].n - a[1].n)
   }, [filtradas, empresas])
@@ -129,7 +152,8 @@ export default function SuperAdminAssistente() {
           <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', marginBottom: 20 }}>
             <Cartao rotulo="Perguntas" valor={resumo.perguntas} />
             <Cartao rotulo="Lojas usando" valor={resumo.lojas} />
-            <Cartao rotulo="Custo no período" valor={usd(resumo.custo)} />
+            <Cartao rotulo="Meu custo" valor={usd(resumo.custo)} />
+            <Cartao rotulo="Cobrado das lojas" valor={brl(resumo.cobrado)} dica="Custo real convertido + a margem. É o que sai da franquia ou do saldo." />
             <Cartao rotulo="Custo por pergunta" valor={usd(resumo.media)} />
             <Cartao rotulo="Lido do cache" valor={resumo.cachePct + '%'}
               dica="Quanto do prompt veio do cache (custa 10%). Quanto maior, melhor." />
@@ -152,13 +176,37 @@ export default function SuperAdminAssistente() {
 
           {lojasComUso.length > 0 && (
             <div style={caixa}>
-              <h2 style={titulo}>Por loja</h2>
-              {lojasComUso.map(([id, v], i) => (
-                <div key={id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '6px 0', fontSize: 13.5, borderTop: i ? '1px solid var(--border)' : 'none' }}>
-                  <span>{v.nome}</span>
-                  <span style={{ color: 'var(--text-muted)' }}>{v.n} perguntas · {usd(v.custo)}</span>
-                </div>
-              ))}
+              <h2 style={titulo}>Por loja · franquia e saldo</h2>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+                Cada loja usa a franquia do mês; passou dela, sai do saldo comprado.
+                Sem saldo, o assistente para de responder.
+              </p>
+              {lojasComUso.map(([id, v], i) => {
+                const e = empresas[id] ?? {}
+                const franquia = Number(e.ia_franquia_centavos ?? 500) / 100
+                const saldo = Number(e.ia_saldo_centavos ?? 0) / 100
+                // O consumo do mês só bate com a franquia quando o filtro é do
+                // mês; em "7 dias" é o consumo do recorte, não o do mês.
+                const estourou = v.cobrado >= franquia && saldo <= 0
+                return (
+                  <div key={id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: '9px 0', fontSize: 13.5, borderTop: i ? '1px solid var(--border)' : 'none' }}>
+                    <div style={{ minWidth: 150 }}>
+                      <div style={{ fontWeight: 700 }}>{v.nome}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                        {v.n} perguntas · consumiu {brl(v.cobrado)} · me custou {usd(v.custo)}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 12, color: estourou ? 'var(--danger)' : 'var(--text-muted)' }}>
+                        franquia {brl(franquia)} · saldo {brl(saldo)}
+                      </span>
+                      <button type="button" onClick={() => darSaldo(id, v.nome)} style={chip(false)}>
+                        + saldo
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
 
@@ -168,7 +216,7 @@ export default function SuperAdminAssistente() {
             {filtradas.map(l => (
               <div key={l.id} style={{ padding: '12px 0', borderTop: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 6 }}>
-                  <strong style={{ color: 'var(--text)' }}>{empresas[l.empresa_id] ?? 'Loja'}</strong>
+                  <strong style={{ color: 'var(--text)' }}>{empresas[l.empresa_id]?.nome ?? 'Loja'}</strong>
                   <span>{dataHora(l.created_at)}</span>
                   <span>{usd(l.custo_usd)}</span>
                   {(l.consultas ?? []).map(c => <span key={c} style={etiqueta}>{c}</span>)}
