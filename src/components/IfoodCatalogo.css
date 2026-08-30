@@ -46,7 +46,7 @@
 
   .ifc-item { padding: 14px 16px; }
 
-  .ifc-thumb { width: 46px; height: 46px; border-radius: 8px; margin-right: 12px; }
+  .ifc-thumb { width: 62px; height: 62px; border-radius: 10px; margin-right: 14px; }
 
   .ifc-nome { font-size: 16.5px; }
 
@@ -54,7 +54,7 @@
 
   .ifc-grupo-nome { font-size: 15px; }
 
-  .ifc-opcao { font-size: 14.5px; }
+  .ifc-opcao { font-size: 16px; }
 
   .ifc-acao { font-size: 14px; padding: 8px 16px; }
 

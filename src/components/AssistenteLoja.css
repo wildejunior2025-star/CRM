@@ -1,0 +1,36 @@
+/* Posição do assistente: canto INFERIOR ESQUERDO.
+ *
+ * O canto direito já é do botão "Admin" (.impersonate-fab). Dois botões
+ * redondos flutuando no mesmo canto viram um monte só, e o dono clica no
+ * errado — por isso a IA fica do outro lado.
+ *
+ * No desktop a lateral do menu tem 220px e é ELEMENTO EM FLUXO, não fixo:
+ * um `left: 18px` cairia em cima do "Sair" no pé do menu. Por isso o botão
+ * começa depois dela. No celular a lateral vira gaveta escondida e o canto
+ * esquerdo fica livre de verdade.
+ */
+.ia-fab,
+.ia-janela {
+  position: fixed;
+  left: 238px; /* 220 do menu + 18 de respiro */
+  bottom: 18px;
+  z-index: 9000;
+}
+
+.ia-janela {
+  width: min(400px, calc(100vw - 256px));
+  max-height: min(640px, calc(100vh - 36px));
+}
+
+@media (max-width: 768px) {
+  .ia-fab,
+  .ia-janela {
+    left: 14px;
+    bottom: 14px;
+  }
+
+  .ia-janela {
+    width: calc(100vw - 28px);
+    max-height: calc(100dvh - 90px); /* não passa por baixo da barra do topo */
+  }
+}

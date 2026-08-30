@@ -8,6 +8,7 @@ import ThemeToggle from './ThemeToggle'
 import SubscriptionGate from './SubscriptionGate'
 import InstallPWA from './InstallPWA'
 import NotificationBell from './NotificationBell'
+import AssistenteLoja from './AssistenteLoja'
 import './Layout.css'
 
 // `mod` liga o item a uma funcionalidade que o Super Admin pode desligar por loja
@@ -263,6 +264,10 @@ export default function Layout() {
       <main className="content">
         <SubscriptionGate />
       </main>
+
+      {/* Fica fora do <main> de propósito: é fixo na tela e acompanha o dono em
+          qualquer página do Portal, sem depender de qual tela está aberta. */}
+      <AssistenteLoja />
 
       <InstallPWA />
     </div>
