@@ -71,6 +71,7 @@ Deno.serve(async (req) => {
     if (acao === "catalogo_upload_imagem") return json(await runUploadImagem(sb, body?.empresa_id, body?.image))
     if (acao === "catalogo_salvar_item") return json(await runSalvarItem(sb, body?.empresa_id, body?.payload))
     if (acao === "catalogo_enviar_loja") return json(await runEnviarDaLoja(sb, body?.empresa_id, body))
+    if (acao === "catalogo_excluir_item") return json(await runExcluirItem(sb, body?.empresa_id, body?.categoria_id, body?.product_id))
     if (acao === "catalogo_itens") return json(await runCatalogoItensCompletos(sb, body?.empresa_id))
     if (acao === "catalogo_pausar_complemento") return json(await runPausarComplemento(sb, body?.empresa_id, body?.option_id, body?.pausar))
     if (acao === "detectar_merchant") return json(await runDetectarMerchant(sb, body?.empresa_id, body?.merchant_id))
@@ -823,6 +824,33 @@ async function baixarComoBase64(url: string): Promise<string> {
   }
   const tipo = r.headers.get("content-type") ?? "image/jpeg"
   return `data:${tipo};base64,${btoa(bin)}`
+}
+
+// Tira o item do cardápio do iFood de vez. NÃO tem desfazer lá — quem só quer
+// esconder por hoje usa o pausar.
+//
+// O endpoint é por (categoria, produto): remove o produto daquela categoria, que
+// é o que o cliente vê como "o item". O cadastro do produto continua existindo
+// no iFood, então nada some de pedidos antigos.
+async function runExcluirItem(sb: any, empresaId: string, categoriaId: string, productId: string) {
+  if (!categoriaId || !productId) return { ok: false, error: "categoria_id e product_id obrigatórios" }
+  const ctx = await catalogoCtx(sb, empresaId)
+  if ("error" in ctx) return { ok: false, error: ctx.error }
+
+  const r = await fetch(
+    `${IFOOD}/catalog/v2.0/merchants/${ctx.mid}/categories/${categoriaId}/products/${productId}`,
+    { method: "DELETE", headers: ctx.auth },
+  )
+  if (!r.ok && r.status !== 404) {
+    return { ok: false, error: `iFood ${r.status}: ${(await r.text()).slice(0, 300)}` }
+  }
+  // Se algum produto nosso apontava pra esse item, o vínculo morre junto —
+  // senão o espelho de pausa ficaria mandando pausar um item que não existe.
+  await sb.from("produtos")
+    .update({ ifood_item_id: null, ifood_product_id: null })
+    .eq("empresa_id", empresaId)
+    .eq("ifood_product_id", productId)
+  return { ok: true, jaNaoExistia: r.status === 404 }
 }
 
 async function runCatalogoItensCompletos(sb: any, empresaId: string) {
