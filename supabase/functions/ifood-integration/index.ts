@@ -501,7 +501,15 @@ async function runImportarCatalogo(sb: any, empresaId: string, categoriaIds?: st
       for (const it of (c.items ?? [])) {
         total++
         const preco = it.price?.value ?? it.price ?? 0
-        const foto = it.imagePath ? `https://static-images.ifood.com.br/image/upload/${it.imagePath}` : null
+        // O iFood às vezes devolve a URL completa da foto e às vezes só o
+        // caminho. Colar o prefixo sem olhar gerava
+        // ".../image/upload/https://static-images..." — endereço inválido, e o
+        // produto entrava aqui sem foto nenhuma.
+        const foto = it.imagePath
+          ? (String(it.imagePath).startsWith("http")
+              ? String(it.imagePath)
+              : `https://static-images.ifood.com.br/pratos/${it.imagePath}`)
+          : null
         const ok = await upsertProduto(sb, empresaId, {
           nome: it.name, preco, descricao: it.description, foto,
           categoria: nomeCat, publicar: true,
