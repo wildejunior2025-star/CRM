@@ -71,6 +71,7 @@ Deno.serve(async (req) => {
     if (acao === "catalogo_upload_imagem") return json(await runUploadImagem(sb, body?.empresa_id, body?.image))
     if (acao === "catalogo_salvar_item") return json(await runSalvarItem(sb, body?.empresa_id, body?.payload))
     if (acao === "catalogo_enviar_loja") return json(await runEnviarDaLoja(sb, body?.empresa_id, body))
+    if (acao === "catalogo_fotos_para_ca") return json(await runTrazerFotos(sb, body?.empresa_id))
     if (acao === "catalogo_excluir_item") return json(await runExcluirItem(sb, body?.empresa_id, body?.categoria_id, body?.product_id))
     if (acao === "catalogo_itens") return json(await runCatalogoItensCompletos(sb, body?.empresa_id))
     if (acao === "catalogo_pausar_complemento") return json(await runPausarComplemento(sb, body?.empresa_id, body?.option_id, body?.pausar))
@@ -425,6 +426,59 @@ async function ensureCategoria(sb: any, empresaId: string, nome: string) {
 
 // Cria um produto a partir de um item do iFood, se ainda não existir (por nome).
 // Retorna true se criou. `publicar` define se aparece na loja online.
+// Copia a foto do iFood pro nosso storage.
+//
+// A URL que o iFood devolve aponta pro servidor DELES: funciona hoje, mas o dia
+// em que trocarem o endereço (ou o item sair de lá) o produto fica sem imagem
+// no nosso cardápio, no app e na Loja Online. Guardar a cópia deixa o catálogo
+// daqui de pé sozinho.
+//
+// Se o download ou o upload falhar, devolve a URL do iFood mesmo: foto emprestada
+// é melhor que produto sem foto, e não vale derrubar a importação por causa disso.
+async function guardarFotoLocal(sb: any, empresaId: string, urlIfood: string): Promise<string> {
+  try {
+    const r = await fetch(urlIfood)
+    if (!r.ok) return urlIfood
+    const bytes = new Uint8Array(await r.arrayBuffer())
+    if (bytes.length === 0 || bytes.length > 8 * 1024 * 1024) return urlIfood
+
+    const tipo = r.headers.get("content-type") ?? "image/jpeg"
+    const ext = (urlIfood.split(".").pop() ?? "jpg").split(/[?#]/)[0].slice(0, 5) || "jpg"
+    const path = `${empresaId}/ifood_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
+
+    const { error } = await sb.storage.from("produto-fotos")
+      .upload(path, bytes, { contentType: tipo, upsert: true })
+    if (error) return urlIfood
+
+    const { data } = sb.storage.from("produto-fotos").getPublicUrl(path)
+    return data?.publicUrl || urlIfood
+  } catch {
+    return urlIfood
+  }
+}
+
+// Traz pro nosso storage as fotos que ficaram hospedadas no iFood — produtos
+// importados antes de a cópia existir. Roda quantas vezes precisar: quem já
+// está no nosso storage é ignorado.
+async function runTrazerFotos(sb: any, empresaId: string) {
+  if (!empresaId) return { ok: false, error: "empresa_id obrigatório" }
+  const { data: produtos } = await sb.from("produtos")
+    .select("id, nome, foto_url")
+    .eq("empresa_id", empresaId)
+    .like("foto_url", "%static-images.ifood.com.br%")
+  if (!produtos?.length) return { ok: true, copiadas: 0, total: 0, avisos: [] }
+
+  const avisos: string[] = []
+  let copiadas = 0
+  for (const p of produtos) {
+    const nova = await guardarFotoLocal(sb, empresaId, p.foto_url)
+    if (nova === p.foto_url) { avisos.push(`${p.nome}: não deu pra copiar a foto`); continue }
+    await sb.from("produtos").update({ foto_url: nova }).eq("id", p.id)
+    copiadas++
+  }
+  return { ok: true, copiadas, total: produtos.length, avisos }
+}
+
 async function upsertProduto(
   sb: any,
   empresaId: string,
@@ -510,8 +564,14 @@ async function runImportarCatalogo(sb: any, empresaId: string, categoriaIds?: st
               ? String(it.imagePath)
               : `https://static-images.ifood.com.br/pratos/${it.imagePath}`)
           : null
+        // Só baixa a foto de quem vai entrar mesmo: produto que já existe aqui
+        // mantém a foto dele e só ganha o vínculo.
+        const jaTem = await sb.from("produtos").select("id").eq("empresa_id", empresaId)
+          .ilike("nome", (it.name ?? "").trim()).maybeSingle()
+        const fotoFinal = (foto && !jaTem.data) ? await guardarFotoLocal(sb, empresaId, foto) : foto
+
         const ok = await upsertProduto(sb, empresaId, {
-          nome: it.name, preco, descricao: it.description, foto,
+          nome: it.name, preco, descricao: it.description, foto: fotoFinal,
           categoria: nomeCat, publicar: true,
           ifoodItemId: it.id ?? null, ifoodProductId: it.productId ?? null,
         })
