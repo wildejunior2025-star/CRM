@@ -2654,14 +2654,18 @@ export default function PresencialSalao() {
                       ✕<span className="sal-acao-txt">Cancelar</span>
                     </button>
                     {/* Cliente mudou de lugar: leva a comanda junto, com tudo
-                        que já consumiu. Só aparece em comanda de mesa — a de
-                        nome já não está presa a mesa nenhuma. */}
-                    {!mesaSel?.is_comanda && !mesaSel?.is_balcao && (
-                      <button type="button" onClick={() => { setMoverErro(''); setMoverNome(comandaSel?.cliente?.nome || ''); setMovendo(true) }}
-                        className="sal-acao-icone" title="Trocar de mesa" aria-label="Trocar de mesa"
+                        que já consumiu.
+                        Vale também na comanda de NOME — o cliente abre a conta no
+                        balcão e depois senta numa mesa. Só o card fixo "Balcão"
+                        fica de fora, porque ele não é uma conta que anda. */}
+                    {!mesaSel?.is_balcao && (
+                      <button type="button" onClick={() => { setMoverErro(''); setMoverNome(comandaSel?.cliente?.nome || comandaSel?.nome_cliente || ''); setMovendo(true) }}
+                        className="sal-acao-icone"
+                        title={mesaSel?.is_comanda ? 'Pôr esta conta numa mesa' : 'Trocar de mesa'}
+                        aria-label={mesaSel?.is_comanda ? 'Pôr numa mesa' : 'Trocar de mesa'}
                         style={{ borderRadius: 10, border: '1px solid var(--border)',
                           background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
-                        ↔<span className="sal-acao-txt">Trocar mesa</span>
+                        ↔<span className="sal-acao-txt">{mesaSel?.is_comanda ? 'Pôr numa mesa' : 'Trocar mesa'}</span>
                       </button>
                     )}
                     {/* Pré-conta: o cliente vê o que consumiu e quanto deu ANTES
@@ -2917,7 +2921,9 @@ export default function PresencialSalao() {
               background: 'var(--bg)', borderRadius: 16, border: '1.5px solid var(--border)',
               padding: 20, boxSizing: 'border-box' }}>
             <h2 style={{ margin: '0 0 4px', fontSize: 19, color: 'var(--text)' }}>
-              Trocar a Mesa {mesaSel?.numero} de lugar
+              {mesaSel?.is_comanda
+                ? `Pôr a ${rotuloMesa(mesaSel)} numa mesa`
+                : `Trocar a Mesa ${mesaSel?.numero} de lugar`}
             </h2>
             <p style={{ margin: '0 0 16px', fontSize: 13.5, lineHeight: 1.45, color: 'var(--text-muted)' }}>
               Os {(comandaSel.comanda_itens ?? []).reduce((n, i) => n + Number(i.quantidade || 0), 0)} item(ns)
@@ -2945,7 +2951,9 @@ export default function PresencialSalao() {
               </div>
             )}
 
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+            {/* A conta que JÁ é de nome não tem pra onde "sair da mesa" — ela
+                nunca esteve numa. Aqui só faz sentido escolher uma mesa livre. */}
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, display: mesaSel?.is_comanda ? 'none' : 'block' }}>
               <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: .4, textTransform: 'uppercase',
                 color: 'var(--text-muted)', marginBottom: 6 }}>
                 Ou sentou junto de alguém
