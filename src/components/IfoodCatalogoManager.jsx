@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import './IfoodCatalogo.css'
 
 // ============================================================================
 // Gerência de cardápio no iFood (módulo Catalog v2.0).
@@ -38,6 +39,9 @@ function fileToDataUri(file) {
 const inp = { width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box', fontSize: 13.5 }
 const btn = (bg) => ({ padding: '8px 14px', borderRadius: 8, cursor: 'pointer', border: 'none', background: bg, color: '#fff', fontWeight: 700, fontSize: 13 })
 const btnOut = { padding: '6px 12px', borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${RED}`, background: 'transparent', color: RED, fontWeight: 700, fontSize: 12.5 }
+// Mesmo botão, mas sem padding/fontSize: na lista quem manda no tamanho é a
+// classe .ifc-acao (que cresce no PC). Estilo inline venceria a media query.
+const btnLista = { borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${RED}`, background: 'transparent', color: RED, fontWeight: 700 }
 
 function grupoVazio() { return { grupoId: uuid(), nome: '', min: 0, max: 1, opcoes: [] } }
 function opcaoVazia() { return { opcaoId: uuid(), produtoId: uuid(), nome: '', preco: '', imagePath: null, imgPreview: null, status: 'AVAILABLE' } }
@@ -408,7 +412,7 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
         )}
         {porCategoria.map(cat => (
           <div key={cat.nome} style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: .4, margin: '0 0 6px' }}>
+            <div className="ifc-cat">
               {cat.nome} <span style={{ fontWeight: 400 }}>· {cat.itens.length}</span>
             </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -416,10 +420,10 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
               const pausado = it.status === 'UNAVAILABLE'
               const comp = complementosVisiveis(it)
               return (
-                <div key={it.itemId} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
+                <div key={it.itemId} className="ifc-item" style={{ border: '1px solid var(--border)', borderRadius: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13.5 }}>
-                      {it.imgPreview && <img src={it.imgPreview} alt='' style={{ width: 22, height: 22, borderRadius: 4, objectFit: 'cover', verticalAlign: 'middle', marginRight: 6 }} />}
+                    <div className="ifc-nome">
+                      {it.imgPreview && <img src={it.imgPreview} alt='' className="ifc-thumb" />}
                       {it.nome}{it.preco ? ` · R$ ${Number(it.preco).toFixed(2)}` : ''}{pausado ? ' · ⏸' : ''}
                       {comp.total > 0 && (
                         <button
@@ -431,10 +435,11 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
                             comp.aberto && !comp.porBusca ? s.delete(it.itemId) : s.add(it.itemId)
                             return s
                           })}
+                          className="ifc-toggle"
                           style={{
                             marginLeft: 8, padding: '2px 8px', borderRadius: 6, cursor: 'pointer',
                             border: '1px solid var(--border)', background: 'transparent',
-                            color: 'var(--text-muted)', fontSize: 11.5, fontWeight: 600,
+                            color: 'var(--text-muted)', fontWeight: 600,
                           }}
                           title={comp.aberto ? 'Esconder os complementos' : 'Ver os complementos'}
                         >
@@ -444,8 +449,8 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <button type="button" style={btnOut} onClick={() => editar(it)}>✏ Editar</button>
-                      <button type="button" style={{ ...btnOut, border: `1.5px solid ${pausado ? '#16a34a' : '#f59e0b'}`, color: pausado ? '#16a34a' : '#b45309' }}
+                      <button type="button" className="ifc-acao" style={btnLista} onClick={() => editar(it)}>✏ Editar</button>
+                      <button type="button" className="ifc-acao" style={{ ...btnLista, border: `1.5px solid ${pausado ? '#16a34a' : '#f59e0b'}`, color: pausado ? '#16a34a' : '#b45309' }}
                         disabled={busy === 'pausa-' + it.itemId} onClick={() => pausarItem(it, !pausado)}>
                         {busy === 'pausa-' + it.itemId ? '...' : (pausado ? '▶ Despausar' : '⏸ Pausar')}
                       </button>
@@ -465,7 +470,7 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
                       {comp.grupos.map(g => (
                         <div key={g.grupoId} style={{ marginBottom: 10 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                            <strong style={{ fontSize: 12.5 }}>{g.nome || 'Complementos'}</strong>
+                            <strong className="ifc-grupo-nome">{g.nome || 'Complementos'}</strong>
                             {Number(g.min) > 0 && (
                               <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: 'var(--text-muted)', color: 'var(--bg)' }}>
                                 OBRIGATÓRIO
@@ -479,11 +484,11 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
                             {g.opcoes.map(o => {
                               const op = o.status === 'UNAVAILABLE'
                               return (
-                                <div key={o.opcaoId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12.5 }}>
+                                <div key={o.opcaoId} className="ifc-opcao" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                                   <span style={{ color: op ? 'var(--text-muted)' : 'var(--text)' }}>
                                     {o.nome}{o.preco ? ` · R$ ${Number(o.preco).toFixed(2)}` : ''}{op ? ' · ⏸' : ''}
                                   </span>
-                                  <button type="button" style={{ ...btnOut, padding: '4px 10px', border: `1.5px solid ${op ? '#16a34a' : '#f59e0b'}`, color: op ? '#16a34a' : '#b45309' }}
+                                  <button type="button" className="ifc-acao-mini" style={{ ...btnLista, border: `1.5px solid ${op ? '#16a34a' : '#f59e0b'}`, color: op ? '#16a34a' : '#b45309' }}
                                     disabled={busy === 'pausaC-' + o.opcaoId} onClick={() => pausarComplemento(it, o.opcaoId, !op)}>
                                     {busy === 'pausaC-' + o.opcaoId ? '...' : (op ? '▶ Despausar' : '⏸ Pausar')}
                                   </button>
