@@ -584,3 +584,11 @@ html[data-teclado='aberto'] .sal-overlay {
   .sal-fechar input[type="number"],
   .sal-fechar select { font-size: 15.5px !important; padding: 10px 12px !important; }
 }
+
+/* Separar conta: no PC a lista de itens cresce junto com a tela, senão o garçom
+   rola uma janelinha de celular pra achar o que é de cada um. */
+@media (min-width: 1100px) {
+  .sal-separar { max-width: 620px !important; }
+  .sal-separar button { font-size: 15.5px !important; }
+  .sal-separar input { font-size: 16px !important; padding: 12px 14px !important; }
+}

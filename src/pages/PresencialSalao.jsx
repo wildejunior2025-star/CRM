@@ -121,6 +121,12 @@ export default function PresencialSalao() {
   const [destaque, setDestaque] = useState(0)   // produto marcado pelas setas
   const [qtdEdit, setQtdEdit] = useState({})    // quantidade sendo digitada, por item
   const listaProdRef = useRef(null)
+  const [separando, setSeparando] = useState(false)   // drawer de separar a conta
+  const [sepSel, setSepSel] = useState(() => new Set())
+  const [sepNome, setSepNome] = useState('')
+  const [sepErro, setSepErro] = useState('')
+  const [sepBusy, setSepBusy] = useState(false)
+  const [abrirComandaId, setAbrirComandaId] = useState(null) // comanda pra abrir assim que aparecer
   const [movendo, setMovendo] = useState(false)  // drawer de trocar de mesa
   const [moverNome, setMoverNome] = useState('')
   const [moverErro, setMoverErro] = useState('')
@@ -488,6 +494,17 @@ export default function PresencialSalao() {
     if (total > prevProntos.current) bip()
     prevProntos.current = total
   }, [comandas])
+
+  // A comanda separada só existe na tela depois do loadMesas(); quando ela
+  // aparece, abre sozinha — quem separou vai fechar a conta agora, não depois.
+  useEffect(() => {
+    if (!abrirComandaId) return
+    const c = comandas.find(x => x.id === abrirComandaId)
+    if (!c) return
+    setMesaSel(mesaDaComanda(c))
+    setAbrirComandaId(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abrirComandaId, comandas])
 
   const comandaSel = mesaSel ? comandaPorMesa[mesaSel.id] : null
   // Rascunho é por comanda e fica salvo no navegador (sobrevive a fechar sem querer).
@@ -1057,6 +1074,31 @@ export default function PresencialSalao() {
     () => mesas.filter(m => !m.is_balcao && m.id !== comandaSel?.mesa_id && !comandaPorMesa[m.id]),
     [mesas, comandaSel, comandaPorMesa]
   )
+
+  // ── Separar a conta de quem vai embora ───────────────────────────────────
+  // Os itens marcados saem da mesa e viram uma comanda no NOME da pessoa. Ela
+  // fecha essa conta e vai; a mesa continua com o resto. Ver mig 0205.
+  async function separar() {
+    if (!comandaSel || sepBusy) return
+    setSepErro('')
+    if (sepSel.size === 0) { setSepErro('Marque o que é dela.'); return }
+    if (!sepNome.trim()) { setSepErro('Escreva o nome de quem vai levar a conta.'); return }
+    setSepBusy(true)
+    const { data, error } = await supabase.rpc('separar_comanda', {
+      p_comanda_id: comandaSel.id,
+      p_itens: [...sepSel],
+      p_nome: sepNome.trim(),
+    })
+    setSepBusy(false)
+    if (error) { setSepErro(error.message); return }
+    setSeparando(false)
+    setSepSel(new Set())
+    setSepNome('')
+    // Já abre a conta separada: quem separou vai fechar ela agora, não depois.
+    setAbrirComandaId(data?.comanda_id ?? null)
+    setMesaSel(null)
+    await loadMesas()
+  }
 
   async function mover(mesaDestinoId) {
     if (!comandaSel || moverBusy) return
@@ -2599,6 +2641,18 @@ export default function PresencialSalao() {
                     {/* Cliente mudou de lugar: leva a comanda junto, com tudo
                         que já consumiu. Só aparece em comanda de mesa — a de
                         nome já não está presa a mesa nenhuma. */}
+                    {/* Alguém da mesa vai embora antes: leva só o que consumiu.
+                        Precisa de pelo menos 2 itens — com um só não há o que
+                        separar, é a conta inteira. */}
+                    {(comandaSel?.comanda_itens ?? []).length > 1 && (
+                      <button type="button"
+                        onClick={() => { setSepErro(''); setSepSel(new Set()); setSepNome(''); setSeparando(true) }}
+                        className="sal-acao-icone" title="Separar a conta de quem vai embora" aria-label="Separar conta"
+                        style={{ borderRadius: 10, border: '1px solid var(--border)',
+                          background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
+                        🧍<span className="sal-acao-txt">Separar conta</span>
+                      </button>
+                    )}
                     {!mesaSel?.is_comanda && !mesaSel?.is_balcao && (
                       <button type="button" onClick={() => { setMoverErro(''); setMoverNome(comandaSel?.cliente?.nome || ''); setMovendo(true) }}
                         className="sal-acao-icone" title="Trocar de mesa" aria-label="Trocar de mesa"
@@ -2648,6 +2702,90 @@ export default function PresencialSalao() {
 
       {/* Trilha da mesa: item por item, quem lancou e quem entregou, com hora.
           "Quem fechou" nao aparece de proposito — a conta ainda esta aberta. */}
+      {/* ── Separar a conta de quem vai embora (mig 0205) ──────────────────
+          Marca o que é dela, escreve o nome, e os itens viram uma comanda
+          própria. A mesa continua aberta com o resto. */}
+      {separando && comandaSel && (() => {
+        const itens = comandaSel.comanda_itens ?? []
+        const selecionado = itens.filter(i => sepSel.has(i.id))
+        const totalSep = selecionado.reduce((s, i) => s + Number(i.preco_unitario || 0) * Number(i.quantidade || 0), 0)
+        const alternar = id => setSepSel(prev => {
+          const n = new Set(prev)
+          if (n.has(id)) n.delete(id); else n.add(id)
+          return n
+        })
+        return (
+        <div onClick={() => !sepBusy && setSeparando(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1100,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} className="sal-separar"
+            style={{ width: '100%', maxWidth: 520, maxHeight: '88vh', display: 'flex', flexDirection: 'column',
+              background: 'var(--bg)', borderRadius: 16, border: '1px solid var(--border)' }}>
+
+            <div style={{ flexShrink: 0, padding: '20px 22px 12px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 19, fontWeight: 800 }}>Separar conta</div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.4 }}>
+                Marque o que é dela. Esses itens saem da {rotuloMesa(mesaSel)} e viram
+                uma comanda no nome dela — a mesa continua aberta com o resto.
+              </div>
+            </div>
+
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 22px' }}>
+              {itens.map(i => {
+                const marcado = sepSel.has(i.id)
+                return (
+                  <button key={i.id} type="button" onClick={() => alternar(i.id)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
+                      padding: '10px 12px', marginBottom: 6, borderRadius: 10, cursor: 'pointer',
+                      border: `1.5px solid ${marcado ? 'var(--primary)' : 'var(--border)'}`,
+                      background: marcado ? 'rgba(124,58,237,.12)' : 'transparent', color: 'var(--text)' }}>
+                    <span style={{ width: 20, height: 20, flexShrink: 0, borderRadius: 6,
+                      border: `2px solid ${marcado ? 'var(--primary)' : '#64748b'}`,
+                      background: marcado ? 'var(--primary)' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: '#fff', fontSize: 13, fontWeight: 900 }}>{marcado ? '✓' : ''}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'block', fontSize: 15, fontWeight: 700 }}>{i.quantidade}× {i.nome}</span>
+                      <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)' }}>{fmt(i.preco_unitario)} cada</span>
+                    </span>
+                    <span style={{ fontSize: 15, fontWeight: 800, whiteSpace: 'nowrap' }}>
+                      {fmt(Number(i.preco_unitario || 0) * Number(i.quantidade || 0))}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div style={{ flexShrink: 0, padding: '12px 22px 20px', borderTop: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                marginBottom: 10, fontSize: 13, fontWeight: 800, letterSpacing: .5, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                <span>Conta dela · {selecionado.length} item(ns)</span>
+                <span style={{ fontSize: 26, fontWeight: 900, color: 'var(--primary)' }}>{fmt(totalSep)}</span>
+              </div>
+              <input value={sepNome} onChange={e => setSepNome(e.target.value)}
+                placeholder="Nome de quem vai levar a conta" disabled={sepBusy}
+                style={{ width: '100%', padding: '11px 12px', borderRadius: 10, boxSizing: 'border-box', marginBottom: 8,
+                  border: '1.5px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 15 }} />
+              {sepErro && (
+                <div style={{ fontSize: 13.5, color: 'var(--danger, #ef4444)', marginBottom: 8, lineHeight: 1.4 }}>{sepErro}</div>
+              )}
+              <button type="button" onClick={separar} disabled={sepBusy}
+                style={{ width: '100%', padding: '13px 0', borderRadius: 12, border: 'none',
+                  cursor: sepBusy ? 'wait' : 'pointer', background: 'var(--primary)', color: '#fff',
+                  fontWeight: 800, fontSize: 15.5 }}>
+                {sepBusy ? 'Separando...' : 'Separar e abrir a conta dela'}
+              </button>
+              <button type="button" onClick={() => setSeparando(false)} disabled={sepBusy}
+                style={{ width: '100%', marginTop: 8, padding: '12px 0', borderRadius: 12, cursor: 'pointer',
+                  border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 800, fontSize: 15 }}>
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+        )
+      })()}
+
       {/* zIndex 1100 e não 300: a gaveta do salão é 900, então com camada menor
           este painel abria ATRÁS dela — o garçom clicava no botão e não
           acontecia nada. */}
