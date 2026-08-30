@@ -11,7 +11,10 @@ import './IfoodCatalogo.css'
 // de confirmar, porque depois de publicado o preço errado já está no ar.
 // ============================================================================
 const RED = '#ea1d2c'
-const LIMITE = 25   // igual ao teto da edge function (cada item é upload + PUT)
+// Tamanho da leva, não teto do que dá pra mandar: a edge function tem tempo
+// limitado (cada item é um upload de foto + um PUT), então o envio é picado
+// aqui e vai em levas seguidas. Quem escolhe 200 produtos manda os 200.
+const POR_LEVA = 25
 
 const inp = { padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box', fontSize: 13.5 }
 const reais = (v) => Number(v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -26,6 +29,7 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
   const [destino, setDestino] = useState('nova')     // 'nova' | id de categoria do iFood
   const [nomeNova, setNomeNova] = useState('')
   const [enviando, setEnviando] = useState(false)
+  const [progresso, setProgresso] = useState(null)   // { leva, levas }
   const [msg, setMsg] = useState(null)
 
   useEffect(() => {
@@ -68,26 +72,47 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
   const pctNum = Math.max(0, Number(String(pct).replace(',', '.')) || 0)
   const comAcrescimo = (v) => Math.round(Number(v ?? 0) * (1 + pctNum / 100) * 100) / 100
   const selecionados = daCategoria.filter(p => marcados.has(p.id))
-  const passouDoLimite = selecionados.length > LIMITE
 
   async function enviar() {
     setEnviando(true); setMsg(null)
-    const d = await chamar({
-      acao: 'catalogo_enviar_loja',
-      empresa_id: empresaId,
-      produto_ids: selecionados.map(p => p.id),
-      acrescimo_pct: pctNum,
-      ...(destino === 'nova' ? { categoria_nome: nomeNova.trim() || categoria } : { categoria_ifood_id: destino }),
-    })
-    if (d.ok) {
-      setMsg({
-        tipo: d.avisos?.length ? 'aviso' : 'ok',
-        texto: `${d.enviados} de ${d.total} item(ns) publicado(s) no iFood.`,
-        avisos: d.avisos ?? [],
+    const ids = selecionados.map(p => p.id)
+    const levas = []
+    for (let i = 0; i < ids.length; i += POR_LEVA) levas.push(ids.slice(i, i + POR_LEVA))
+
+    let enviados = 0
+    const avisos = []
+    // A categoria nova é criada na PRIMEIRA leva; as seguintes vão pro id que
+    // ela devolveu. Sem isso, cada leva criaria uma categoria repetida no iFood
+    // — "Bebidas", "Bebidas", "Bebidas"...
+    let destinoId = destino === 'nova' ? null : destino
+
+    for (let i = 0; i < levas.length; i++) {
+      setProgresso({ leva: i + 1, levas: levas.length })
+      const d = await chamar({
+        acao: 'catalogo_enviar_loja',
+        empresa_id: empresaId,
+        produto_ids: levas[i],
+        acrescimo_pct: pctNum,
+        ...(destinoId ? { categoria_ifood_id: destinoId } : { categoria_nome: nomeNova.trim() || categoria }),
       })
-      setMarcados(new Set())
-      onPronto?.()
-    } else setMsg({ tipo: 'erro', texto: d.error ?? 'Falha ao enviar' })
+      if (!d.ok) {
+        // Erro de credencial ou de categoria vai se repetir em todas as levas:
+        // para aqui e conta o que já subiu, em vez de martelar até o fim.
+        avisos.push(`Parou na leva ${i + 1} de ${levas.length}: ${d.error ?? 'falha'}`)
+        break
+      }
+      enviados += d.enviados
+      avisos.push(...(d.avisos ?? []))
+      destinoId = destinoId ?? d.categoriaId
+    }
+
+    setProgresso(null)
+    setMsg({
+      tipo: enviados === 0 ? 'erro' : avisos.length ? 'aviso' : 'ok',
+      texto: `${enviados} de ${ids.length} item(ns) publicado(s) no iFood.`,
+      avisos,
+    })
+    if (enviados > 0) { setMarcados(new Set()); onPronto?.() }
     setEnviando(false)
   }
 
@@ -192,9 +217,10 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
             </>
           )}
 
-          {passouDoLimite && (
-            <p style={{ fontSize: 12.5, color: '#b45309', marginTop: 10, marginBottom: 0 }}>
-              Máximo de {LIMITE} por vez (cada item sobe foto e publica). Desmarque alguns e mande o resto numa segunda leva.
+          {selecionados.length > POR_LEVA && (
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 10, marginBottom: 0 }}>
+              São {Math.ceil(selecionados.length / POR_LEVA)} levas de até {POR_LEVA} — o sistema manda uma atrás da outra.
+              Deixe a tela aberta até terminar.
             </p>
           )}
 
@@ -214,10 +240,12 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
           )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-            <button type="button" className="ifc-acao" style={{ ...botao, opacity: (selecionados.length && !passouDoLimite) ? 1 : .5 }}
-              disabled={enviando || selecionados.length === 0 || passouDoLimite}
+            <button type="button" className="ifc-acao" style={{ ...botao, opacity: selecionados.length ? 1 : .5 }}
+              disabled={enviando || selecionados.length === 0}
               onClick={enviar}>
-              {enviando ? 'Publicando no iFood…' : `Publicar ${selecionados.length || ''} item${selecionados.length === 1 ? '' : 'ns'} no iFood`}
+              {enviando
+                ? (progresso ? `Publicando… leva ${progresso.leva} de ${progresso.levas}` : 'Publicando no iFood…')
+                : `Publicar ${selecionados.length || ''} ${selecionados.length === 1 ? 'item' : 'itens'} no iFood`}
             </button>
           </div>
         </>
