@@ -904,6 +904,21 @@ export default function PresencialSalao() {
     return ok
   }
 
+  // Este aparelho imprime só um setor e a remessa não tinha nada dele. É o caso
+  // do espetinho na Saidera: a categoria está marcada como SALÃO, o celular está
+  // marcado como COZINHA, e o papel não sai em lugar nenhum — sem erro, sem
+  // aviso, porque tecnicamente "não era pra sair aqui".
+  function motivoFiltro(itens) {
+    const papel = papelImpressora()
+    if (papel === 'tudo') return null
+    const doPapel = (itens ?? []).filter(i => (i.setor === 'cozinha' ? 'cozinha' : 'frente') === papel)
+    if (doPapel.length) return null
+    const outro = papel === 'cozinha' ? 'salão' : 'cozinha'
+    return `Este aparelho está marcado como impressora da ${papel === 'cozinha' ? 'COZINHA' : 'FRENTE/SALÃO'}, `
+      + `e estes ${(itens ?? []).length} item(ns) são da ${outro}. `
+      + `Imprima na outra impressora — ou, se a loja tem uma só, mude o papel deste aparelho para "tudo" na tela da Impressora.`
+  }
+
   // Reimprimir o que já foi enviado. A térmica Bluetooth cai sozinha de vez em
   // quando (celular longe, tela apagada) e antes não havia saída nenhuma: o
   // jeito era cancelar a comanda e refazer, ou gritar o pedido pra cozinha.
@@ -950,7 +965,12 @@ export default function PresencialSalao() {
       const saiu = await imprimirComandaAgora(inseridos ?? [])
       // Falhou: guarda ESTES itens pra reimpressão e avisa na tela. Limpar o
       // rascunho sem dizer nada era o que fazia o pedido sumir no caminho.
-      setAvisoImpressao(saiu ? null : { itens: inseridos ?? [], quando: Date.now() })
+      const filtro = saiu === 'filtrado' ? motivoFiltro(inseridos ?? []) : null
+      setAvisoImpressao(
+        filtro ? { itens: inseridos ?? [], motivo: filtro, quando: Date.now() }
+        : saiu ? null
+        : { itens: inseridos ?? [], quando: Date.now() },
+      )
     }
     setRascunho([])
     setObsEnvio('')
@@ -2201,11 +2221,12 @@ export default function PresencialSalao() {
                   border: '1.5px solid #ef4444', background: 'rgba(239,68,68,.12)',
                 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 800, color: '#ef4444', lineHeight: 1.35 }}>
-                    ⚠️ O papel NÃO saiu na cozinha
+                    ⚠️ {avisoImpressao.motivo ? 'O papel não saiu NESTE aparelho' : 'O papel NÃO saiu na cozinha'}
                   </div>
                   <div style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '3px 0 8px', lineHeight: 1.4 }}>
-                    Os {avisoImpressao.itens.length} item(ns) foram lançados na comanda, mas a impressora
-                    não respondeu. Confira se ela está ligada e pareada.
+                    {avisoImpressao.motivo
+                      ? avisoImpressao.motivo
+                      : `Os ${avisoImpressao.itens.length} item(ns) foram lançados na comanda, mas a impressora não respondeu. Confira se ela está ligada e pareada.`}
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     <button type="button" onClick={() => reimprimir(avisoImpressao.itens)} disabled={reimprimindo}
