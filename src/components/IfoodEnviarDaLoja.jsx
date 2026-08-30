@@ -25,6 +25,7 @@ const reais = (v) => Number(v ?? 0).toLocaleString('pt-BR', { minimumFractionDig
 export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
   const [aberto, setAberto] = useState(false)
   const [produtos, setProdutos] = useState(null)     // todos os ativos da loja
+  const [catsLoja, setCatsLoja] = useState([])       // as categorias CADASTRADAS aqui
   const [categoria, setCategoria] = useState('')     // categoria DAQUI
   const [pct, setPct] = useState('20')
   const [marcados, setMarcados] = useState(() => new Set())
@@ -48,19 +49,36 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
         .order('nome')
     ).then(({ data }) => setProdutos(data ?? []))
 
+    supabase.from('categorias').select('nome').eq('empresa_id', empresaId).order('ordem')
+      .then(({ data }) => setCatsLoja((data ?? []).map(c => c.nome)))
+
     chamar({ acao: 'catalogo_categorias', empresa_id: empresaId })
       .then(d => { if (d.ok) setCatsIfood(d.categorias ?? []) })
   }, [aberto, empresaId, produtos])
 
+  // A lista vem do CADASTRO de categorias, não do texto gravado em cada produto.
+  // Categoria excluída pelo lojista continuava aparecendo aqui enquanto sobrasse
+  // um produto com aquele nome escrito — dava pra publicar no iFood uma categoria
+  // que já não existe na loja.
   const categorias = useMemo(() => {
-    const nomes = new Set((produtos ?? []).map(p => p.categoria).filter(Boolean))
-    return [...nomes].sort((a, b) => a.localeCompare(b, 'pt-BR'))
-  }, [produtos])
+    const comProduto = new Set((produtos ?? []).map(p => norm(p.categoria)))
+    return catsLoja.filter(nome => comProduto.has(norm(nome)))
+  }, [catsLoja, produtos])
 
+  // Casa por texto normalizado: o produto pode ter "Almoço" e o cadastro "almoço".
   const daCategoria = useMemo(
-    () => (produtos ?? []).filter(p => p.categoria === categoria),
+    () => (produtos ?? []).filter(p => norm(p.categoria) === norm(categoria)),
     [produtos, categoria],
   )
+
+  // Produtos cuja categoria não está no cadastro ficam fora de qualquer lista —
+  // some da tela sem avisar. Melhor dizer que existem.
+  const orfaos = useMemo(() => {
+    if (!produtos || catsLoja.length === 0) return []
+    const cadastradas = new Set(catsLoja.map(norm))
+    const fora = new Set((produtos).filter(p => !cadastradas.has(norm(p.categoria))).map(p => p.categoria))
+    return [...fora].filter(Boolean)
+  }, [produtos, catsLoja])
 
   // Trocar de categoria marca tudo dela — o caso comum é mandar a categoria
   // inteira; desmarcar exceção é mais raro que marcar um por um.
@@ -73,7 +91,7 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
     setCategoria(nome)
     setNomeNova(nome)
     setDestino(igual ? igual.id : 'nova')
-    setMarcados(new Set((produtos ?? []).filter(p => p.categoria === nome).map(p => p.id)))
+    setMarcados(new Set((produtos ?? []).filter(p => norm(p.categoria) === norm(nome)).map(p => p.id)))
     setMsg(null)
   }
 
@@ -190,6 +208,14 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
           <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
             No iFood saem ~12% de comissão + ~4% da transação. Sem acréscimo, essa diferença sai da sua margem.
           </p>
+
+          {orfaos.length > 0 && (
+            <p style={{ fontSize: 12, color: '#b45309', margin: '0 0 10px' }}>
+              Você tem produtos em categoria que não existe mais no seu cadastro
+              ({orfaos.join(', ')}) — eles não aparecem aqui nem no filtro de Produtos.
+              Recrie a categoria ou mova esses produtos em Catálogo → Produtos.
+            </p>
+          )}
 
           {categoria && daCategoria.length === 0 && (
             <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nenhum produto ativo nessa categoria.</p>
