@@ -45,7 +45,7 @@ const btnLista = { borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${RE
 
 function grupoVazio() { return { grupoId: uuid(), nome: '', min: 0, max: 1, opcoes: [] } }
 function opcaoVazia() { return { opcaoId: uuid(), produtoId: uuid(), nome: '', preco: '', imagePath: null, imgPreview: null, status: 'AVAILABLE' } }
-function itemVazio() { return { itemId: uuid(), productId: uuid(), categoriaId: '', nome: '', preco: '', imagePath: null, imgPreview: null, status: 'AVAILABLE', grupos: [] } }
+function itemVazio() { return { itemId: uuid(), productId: uuid(), categoriaId: '', nome: '', descricao: '', preco: '', imagePath: null, imgPreview: null, status: 'AVAILABLE', grupos: [] } }
 
 // ---------------------------------------------------------------------------
 // Rascunho: o que ainda NÃO foi salvo no iFood fica guardado no navegador, pra
@@ -60,7 +60,7 @@ const previewDe = (p) => (!p ? null : (p.startsWith('http') || p.startsWith('dat
 const mapOpcoes = (it, fn) => ({ ...it, grupos: (it.grupos ?? []).map(g => ({ ...g, opcoes: (g.opcoes ?? []).map(fn) })) })
 const semPreview = (it) => ({ ...mapOpcoes(it, o => ({ ...o, imgPreview: null })), imgPreview: null })
 const comPreview = (it) => ({ ...mapOpcoes(it, o => ({ ...o, imgPreview: previewDe(o.imagePath) })), imgPreview: previewDe(it.imagePath) })
-const itemEmBranco = (it) => !it || (!it.nome?.trim() && !it.imagePath && (it.grupos ?? []).length === 0 && !it.preco)
+const itemEmBranco = (it) => !it || (!it.nome?.trim() && !it.descricao?.trim() && !it.imagePath && (it.grupos ?? []).length === 0 && !it.preco)
 
 function lerJson(chave) {
   try { const raw = localStorage.getItem(chave); return raw ? JSON.parse(raw) : null } catch { return null }
@@ -150,7 +150,8 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
     setBusy('salvarItem'); setMsg(null)
     const payload = {
       itemId: item.itemId, productId: item.productId, categoriaId: item.categoriaId,
-      nome: item.nome.trim(), preco: Number(item.preco || 0), imagePath: item.imagePath, status: item.status,
+      nome: item.nome.trim(), descricao: (item.descricao ?? '').trim(),
+      preco: Number(item.preco || 0), imagePath: item.imagePath, status: item.status,
       grupos: item.grupos.map(g => ({
         grupoId: g.grupoId, nome: g.nome.trim() || 'Complementos', min: Number(g.min || 0), max: Number(g.max || 1),
         opcoes: g.opcoes.map(o => ({ opcaoId: o.opcaoId, produtoId: o.produtoId, nome: o.nome.trim() || 'Opção', preco: Number(o.preco || 0), imagePath: o.imagePath, status: o.status })),
@@ -343,6 +344,12 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
           <option value=''>Selecione a categoria…</option>
           {(categorias ?? []).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
         </select>
+        <textarea
+          style={{ ...inp, marginBottom: 8, minHeight: 62, resize: 'vertical', fontFamily: 'inherit' }}
+          placeholder='Descrição (o que vem no prato, tamanho, acompanha…) — aparece embaixo do nome no iFood'
+          value={item.descricao ?? ''}
+          onChange={e => setItem(it => ({ ...it, descricao: e.target.value }))}
+        />
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>
           {item.imgPreview && <img src={item.imgPreview} alt='' style={{ width: 44, height: 44, borderRadius: 8, objectFit: 'cover' }} />}
           <label style={{ ...btnOut, display: 'inline-block' }}>
@@ -447,8 +454,15 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
                           {comp.totalGrupos > 1 ? ` em ${comp.totalGrupos} grupos` : ''}
                         </button>
                       )}
+                      {/* A descrição do que acabou de ser salvo, pra conferir sem
+                          precisar abrir o portal do iFood. */}
+                      {it.descricao && (
+                        <div style={{ fontWeight: 400, fontSize: '.82em', color: 'var(--text-muted)', marginTop: 3 }}>
+                          {it.descricao}
+                        </div>
+                      )}
                     </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                       <button type="button" className="ifc-acao" style={btnLista} onClick={() => editar(it)}>✏ Editar</button>
                       <button type="button" className="ifc-acao" style={{ ...btnLista, border: `1.5px solid ${pausado ? '#16a34a' : '#f59e0b'}`, color: pausado ? '#16a34a' : '#b45309' }}
                         disabled={busy === 'pausa-' + it.itemId} onClick={() => pausarItem(it, !pausado)}>
