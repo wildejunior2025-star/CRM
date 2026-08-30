@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { useConfirmar } from '../hooks/useConfirmar'
 import IfoodCatalogoManager from '../components/IfoodCatalogoManager'
+import IfoodEnviarDaLoja from '../components/IfoodEnviarDaLoja'
 import '../components/Page.css'
 
 // ============================================================================
@@ -28,6 +29,8 @@ export default function CardapioIfood() {
   const [cfg, setCfg] = useState(undefined)      // undefined = carregando, null = sem config
   const [importando, setImportando] = useState(false)
   const [msg, setMsg] = useState(null)           // { tipo, texto }
+  // Muda depois de publicar: remonta a lista pra já mostrar o que subiu.
+  const [recarregar, setRecarregar] = useState(0)
 
   useEffect(() => {
     if (!empresa?.id) return
@@ -136,7 +139,8 @@ export default function CardapioIfood() {
       )}
 
       <div className="card" style={{ padding: 18 }}>
-        <IfoodCatalogoManager empresaId={empresa?.id} merchantOk={!!cfg.merchant_id} autoCarregar />
+        <IfoodEnviarDaLoja empresaId={empresa?.id} onPronto={() => setRecarregar(n => n + 1)} />
+        <IfoodCatalogoManager key={recarregar} empresaId={empresa?.id} merchantOk={!!cfg.merchant_id} autoCarregar />
       </div>
     </div>
   )

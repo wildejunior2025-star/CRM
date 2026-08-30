@@ -26,6 +26,9 @@ const cors = {
 // Host único da Merchant API (loja de teste e produção usam o mesmo host;
 // o que muda é o conjunto de credenciais / merchant).
 const IFOOD = "https://merchant-api.ifood.com.br"
+// Teto por envio: cada produto é um upload de foto + um PUT no iFood, e a
+// edge function tem tempo limitado. Acima disso o lojista manda em duas levas.
+const LIMITE_ENVIO = 25
 
 type Config = {
   empresa_id: string
@@ -67,6 +70,7 @@ Deno.serve(async (req) => {
     if (acao === "catalogo_criar_categoria") return json(await runCriarCategoria(sb, body?.empresa_id, body?.nome))
     if (acao === "catalogo_upload_imagem") return json(await runUploadImagem(sb, body?.empresa_id, body?.image))
     if (acao === "catalogo_salvar_item") return json(await runSalvarItem(sb, body?.empresa_id, body?.payload))
+    if (acao === "catalogo_enviar_loja") return json(await runEnviarDaLoja(sb, body?.empresa_id, body))
     if (acao === "catalogo_itens") return json(await runCatalogoItensCompletos(sb, body?.empresa_id))
     if (acao === "catalogo_pausar_complemento") return json(await runPausarComplemento(sb, body?.empresa_id, body?.option_id, body?.pausar))
     if (acao === "detectar_merchant") return json(await runDetectarMerchant(sb, body?.empresa_id, body?.merchant_id))
@@ -693,6 +697,88 @@ function stripImg(u: any): string | null {
   if (!u) return null
   return String(u).replace(/^https?:\/\/static-images\.ifood\.com\.br\/(pratos|image\/upload)\//, "")
 }
+// ---------------------------------------------------------------------------
+// Manda produtos do catálogo DAQUI pro iFood (o contrário do "Importar").
+//
+// Serve pra loja que já tem o cardápio montado aqui e vai entrar no iFood, ou
+// que criou uma categoria nova e quer publicar dos dois lados sem digitar tudo
+// de novo.
+//
+// O preço vai com um acréscimo em % escolhido pelo lojista: no iFood saem ~12%
+// de comissão + ~4% da transação, então mandar o preço do balcão significaria
+// entregar essa diferença da própria margem. Quem decide o número é ele — a
+// tela mostra o antes/depois de cada item antes de confirmar.
+//
+// A imagem é buscada aqui no servidor (a URL é do nosso storage) e reenviada
+// pro iFood, que só aceita base64. Foto que falhar não derruba o item: ele vai
+// sem imagem e o nome aparece na lista de avisos.
+async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
+  const ids: string[] = Array.isArray(body?.produto_ids) ? body.produto_ids : []
+  if (ids.length === 0) return { ok: false, error: "nenhum produto escolhido" }
+  if (ids.length > LIMITE_ENVIO) return { ok: false, error: `manda no máximo ${LIMITE_ENVIO} produtos por vez` }
+
+  const ctx = await catalogoCtx(sb, empresaId)
+  if ("error" in ctx) return { ok: false, error: ctx.error }
+
+  const pct = Number(body?.acrescimo_pct ?? 0) || 0
+  const { data: produtos } = await sb
+    .from("produtos")
+    .select("id, nome, descricao, preco_venda, foto_url")
+    .eq("empresa_id", empresaId)
+    .in("id", ids)
+  if (!produtos?.length) return { ok: false, error: "produtos não encontrados" }
+
+  // Categoria de destino: uma que já existe no iFood, ou cria com o nome dado.
+  let categoriaId = body?.categoria_ifood_id ?? null
+  if (!categoriaId) {
+    const nome = String(body?.categoria_nome ?? "").trim()
+    if (!nome) return { ok: false, error: "escolha ou nomeie a categoria de destino" }
+    const nova = await runCriarCategoria(sb, empresaId, nome)
+    if (!nova.ok) return { ok: false, error: `não deu pra criar a categoria: ${nova.error}` }
+    categoriaId = nova.id
+  }
+
+  const avisos: string[] = []
+  let enviados = 0
+  for (const p of produtos) {
+    let imagePath: string | null = null
+    if (p.foto_url) {
+      try {
+        const b64 = await baixarComoBase64(p.foto_url)
+        const up = await runUploadImagem(sb, empresaId, b64)
+        if (up.ok) imagePath = up.imagePath
+        else avisos.push(`${p.nome}: foto não subiu (${String(up.error).slice(0, 80)})`)
+      } catch (e) {
+        avisos.push(`${p.nome}: foto não subiu (${String(e).slice(0, 80)})`)
+      }
+    }
+    const preco = Math.round(Number(p.preco_venda ?? 0) * (1 + pct / 100) * 100) / 100
+    const r = await runSalvarItem(sb, empresaId, {
+      categoriaId, nome: p.nome, descricao: p.descricao ?? "", preco, imagePath,
+      externalCode: `FWC-${String(p.id).slice(0, 8)}`,
+    })
+    if (r.ok) enviados++
+    else avisos.push(`${p.nome}: ${String(r.error).slice(0, 120)}`)
+  }
+  return { ok: true, enviados, total: produtos.length, categoriaId, avisos }
+}
+
+// O iFood só aceita imagem em base64; a nossa fica no storage do Supabase.
+// Converte em pedaços — passar o array inteiro pro fromCharCode estoura a pilha
+// numa foto grande.
+async function baixarComoBase64(url: string): Promise<string> {
+  const r = await fetch(url)
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  const bytes = new Uint8Array(await r.arrayBuffer())
+  if (bytes.length > 8 * 1024 * 1024) throw new Error("foto acima de 8MB")
+  let bin = ""
+  for (let i = 0; i < bytes.length; i += 8192) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 8192))
+  }
+  const tipo = r.headers.get("content-type") ?? "image/jpeg"
+  return `data:${tipo};base64,${btoa(bin)}`
+}
+
 async function runCatalogoItensCompletos(sb: any, empresaId: string) {
   const ctx = await catalogoCtx(sb, empresaId)
   if ("error" in ctx) return { ok: false, error: ctx.error }
