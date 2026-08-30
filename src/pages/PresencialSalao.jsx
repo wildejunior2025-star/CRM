@@ -2136,6 +2136,21 @@ export default function PresencialSalao() {
                     </button>
                   )
                 )}
+                {/* Fica aqui em cima, com os outros chips de gerenciar a mesa, e
+                    não na barra de baixo: lá são cinco botões numa linha só e no
+                    celular ele empurrava o "Fechar conta" pra fora da tela.
+                    Precisa de 2+ itens — com um só não há o que separar. */}
+                {(comandaSel?.comanda_itens ?? []).length > 1 && (
+                  <button type="button"
+                    onClick={() => { setSepErro(''); setSepSel(new Set()); setSepNome(''); setSeparando(true) }}
+                    title="Alguém vai embora antes e paga só o que consumiu"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4, marginLeft: 6,
+                      padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
+                      border: '1.5px solid var(--border)', background: 'transparent',
+                      color: 'var(--text-muted)', fontSize: 12.5, fontWeight: 700 }}>
+                    🧍 Separar conta
+                  </button>
+                )}
               </div>
               <button type="button" onClick={sairDaMesa} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-muted)' }}>×</button>
             </div>
@@ -2641,18 +2656,6 @@ export default function PresencialSalao() {
                     {/* Cliente mudou de lugar: leva a comanda junto, com tudo
                         que já consumiu. Só aparece em comanda de mesa — a de
                         nome já não está presa a mesa nenhuma. */}
-                    {/* Alguém da mesa vai embora antes: leva só o que consumiu.
-                        Precisa de pelo menos 2 itens — com um só não há o que
-                        separar, é a conta inteira. */}
-                    {(comandaSel?.comanda_itens ?? []).length > 1 && (
-                      <button type="button"
-                        onClick={() => { setSepErro(''); setSepSel(new Set()); setSepNome(''); setSeparando(true) }}
-                        className="sal-acao-icone" title="Separar a conta de quem vai embora" aria-label="Separar conta"
-                        style={{ borderRadius: 10, border: '1px solid var(--border)',
-                          background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
-                        🧍<span className="sal-acao-txt">Separar conta</span>
-                      </button>
-                    )}
                     {!mesaSel?.is_comanda && !mesaSel?.is_balcao && (
                       <button type="button" onClick={() => { setMoverErro(''); setMoverNome(comandaSel?.cliente?.nome || ''); setMovendo(true) }}
                         className="sal-acao-icone" title="Trocar de mesa" aria-label="Trocar de mesa"
