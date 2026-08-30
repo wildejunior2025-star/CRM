@@ -323,6 +323,9 @@ export default function Produtos() {
   }
 
   const [showCategModal, setShowCategModal] = useState(false)
+  // Exclusão de categoria que ainda tem produtos: { id, nome, qtd, destino }
+  const [catExcluir, setCatExcluir] = useState(null)
+  const [excluindoCat, setExcluindoCat] = useState(false)
   const [dragIdx, setDragIdx] = useState(null)
   const [novaCategoria, setNovaCategoria] = useState('')
   const [savingCateg, setSavingCateg] = useState(false)
@@ -578,16 +581,56 @@ export default function Produtos() {
   }
 
   async function handleDeleteCategoria(id, nome) {
+    // Categoria com produtos dentro precisa de destino. Sem perguntar, os
+    // produtos ficavam com o nome de uma categoria que não existe mais: somem do
+    // filtro e da lista de envio pro iFood, e o lojista não tem como saber.
+    const { count } = await supabase.from('produtos')
+      .select('id', { count: 'exact', head: true })
+      .eq('empresa_id', profile.empresa_id).eq('categoria', nome)
+
+    if (count > 0) { setCatExcluir({ id, nome, qtd: count, destino: '' }); return }
+
     const ok = await confirmar({
       titulo: `Excluir a categoria “${nome}”?`,
       texto: 'A categoria some da lista — não dá pra desfazer.',
-      aviso: 'Os produtos que estão nela não são apagados: eles ficam sem categoria até você escolher outra.',
+      aviso: 'Ela está vazia, então nenhum produto é afetado.',
       textoOk: 'Sim, excluir',
     })
     if (!ok) return
     const { error } = await supabase.from('categorias').delete().eq('id', id)
     if (error) { setCategError(error.message); return }
     loadCategorias()
+  }
+
+  // Move os produtos pra outra categoria (ou apaga junto) e só então tira a
+  // categoria da lista.
+  async function confirmarExclusaoCategoria(apagarProdutos) {
+    const { id, nome, destino, qtd } = catExcluir
+    if (!apagarProdutos && !destino) { setCategError('Escolha pra onde vão os produtos.'); return }
+
+    if (apagarProdutos) {
+      const ok = await confirmar({
+        titulo: `Excluir “${nome}” e os ${qtd} produtos dela?`,
+        texto: 'Os produtos somem do cardápio de vez, aqui e no iFood se estiverem publicados lá. Não dá pra desfazer.',
+        aviso: 'As vendas antigas continuam certinhas — cada venda guarda o nome e o preço do que foi vendido.',
+        textoOk: `Sim, excluir a categoria e ${qtd} produto(s)`,
+      })
+      if (!ok) return
+    }
+
+    setExcluindoCat(true); setCategError(null)
+    const r = apagarProdutos
+      ? await supabase.from('produtos').delete().eq('empresa_id', profile.empresa_id).eq('categoria', nome)
+      : await supabase.from('produtos').update({ categoria: destino }).eq('empresa_id', profile.empresa_id).eq('categoria', nome)
+
+    if (r.error) { setExcluindoCat(false); setCategError(r.error.message); return }
+
+    const { error } = await supabase.from('categorias').delete().eq('id', id)
+    setExcluindoCat(false)
+    if (error) { setCategError(error.message); return }
+    setCatExcluir(null)
+    await loadCategorias()
+    await loadProdutos(search, categoriaFiltro)
   }
 
   async function handleAddEmbalagem(e) {
@@ -1798,6 +1841,49 @@ export default function Produtos() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Categoria com produtos dentro: escolher o destino antes de excluir */}
+      {catExcluir && (
+        <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget && !excluindoCat) setCatExcluir(null) }}>
+          <div className="modal" style={{ maxWidth: 460 }}>
+            <h2 style={{ marginTop: 0, fontSize: 18 }}>Excluir a categoria “{catExcluir.nome}”</h2>
+            <p style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              Ela tem <strong>{catExcluir.qtd} produto(s)</strong> dentro. Pra onde eles vão?
+            </p>
+
+            <label style={{ display: 'block', fontSize: 13, marginBottom: 6 }}>Mover os produtos para</label>
+            <select
+              value={catExcluir.destino}
+              onChange={e => setCatExcluir(c => ({ ...c, destino: e.target.value }))}
+              style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px solid var(--border)',
+                       background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 14 }}
+            >
+              <option value=''>Escolha uma categoria…</option>
+              {categorias.filter(c => c.nome !== catExcluir.nome).map(c => (
+                <option key={c.id} value={c.nome}>{c.nome}</option>
+              ))}
+            </select>
+
+            {categError && (
+              <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 10, marginBottom: 0 }}>{categError}</p>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary" disabled={excluindoCat} onClick={() => { setCategError(null); setCatExcluir(null) }}>
+                Cancelar
+              </button>
+              <button className="btn btn-danger" disabled={excluindoCat} onClick={() => confirmarExclusaoCategoria(true)}
+                title="Apaga a categoria e os produtos dela">
+                🗑 Excluir tudo
+              </button>
+              <button className="btn btn-primary" style={{ marginLeft: 'auto' }} disabled={excluindoCat}
+                onClick={() => confirmarExclusaoCategoria(false)}>
+                {excluindoCat ? 'Movendo…' : 'Mover e excluir a categoria'}
+              </button>
+            </div>
           </div>
         </div>
       )}
