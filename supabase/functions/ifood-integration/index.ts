@@ -72,6 +72,7 @@ Deno.serve(async (req) => {
     if (acao === "catalogo_salvar_item") return json(await runSalvarItem(sb, body?.empresa_id, body?.payload))
     if (acao === "catalogo_enviar_loja") return json(await runEnviarDaLoja(sb, body?.empresa_id, body))
     if (acao === "catalogo_fotos_para_ca") return json(await runTrazerFotos(sb, body?.empresa_id))
+    if (acao === "catalogo_excluir_por_produto") return json(await runExcluirPorProduto(sb, body?.empresa_id, body?.item_id, body?.product_id))
     if (acao === "catalogo_excluir_item") return json(await runExcluirItem(sb, body?.empresa_id, body?.categoria_id, body?.product_id))
     if (acao === "catalogo_itens") return json(await runCatalogoItensCompletos(sb, body?.empresa_id))
     if (acao === "catalogo_pausar_complemento") return json(await runPausarComplemento(sb, body?.empresa_id, body?.option_id, body?.pausar))
@@ -902,6 +903,27 @@ async function baixarComoBase64(url: string): Promise<string> {
   }
   const tipo = r.headers.get("content-type") ?? "image/jpeg"
   return `data:${tipo};base64,${btoa(bin)}`
+}
+
+// Exclui pelo par (item, produto) sem saber a categoria — é o que o gatilho de
+// exclusão do produto (0209) tem em mãos. A categoria vem de uma varredura do
+// catálogo: custa uma chamada, e é o que evita guardar mais um id no produto
+// só pra este caso.
+async function runExcluirPorProduto(sb: any, empresaId: string, itemId: string, productId: string) {
+  if (!itemId || !productId) return { ok: false, error: "item_id e product_id obrigatórios" }
+  const ctx = await catalogoCtx(sb, empresaId)
+  if ("error" in ctx) return { ok: false, error: ctx.error }
+
+  const r = await fetch(`${IFOOD}/catalog/v2.0/merchants/${ctx.mid}/catalogs/${ctx.catalogId}/categories?includeItems=true`, { headers: ctx.auth })
+  if (!r.ok) return { ok: false, error: `iFood ${r.status} ao procurar o item` }
+  const cats: any[] = await r.json()
+  for (const c of (Array.isArray(cats) ? cats : [])) {
+    if ((c.items ?? []).some((it: any) => it.id === itemId)) {
+      return await runExcluirItem(sb, empresaId, c.id, productId)
+    }
+  }
+  // Não achou: o item já não está no cardápio, que era o objetivo.
+  return { ok: true, jaNaoExistia: true }
 }
 
 // Tira o item do cardápio do iFood de vez. NÃO tem desfazer lá — quem só quer

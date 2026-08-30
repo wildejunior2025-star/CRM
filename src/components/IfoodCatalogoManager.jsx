@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { useConfirmar } from '../hooks/useConfirmar'
 import './IfoodCatalogo.css'
 
 // ============================================================================
@@ -82,6 +83,7 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
   const [busca, setBusca] = useState('')
   const [criando, setCriando] = useState(false)        // formulário de item aberto?
   const [abertos, setAbertos] = useState(() => new Set())  // itens com os complementos à mostra
+  const [confirmar, avisoConfirmar] = useConfirmar()
 
   const notify = (tipo, texto) => setMsg({ tipo, texto })
 
@@ -218,6 +220,59 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
     if (autoCarregar) setCriando(false)   // na página do cardápio, fecha o formulário e volta pra lista
   }
 
+  // Excluir é o único caminho sem volta desta tela: o iFood não desfaz. Por isso
+  // a confirmação diz o nome e o preço do que vai sumir, e lembra que existe o
+  // pausar pra quem só quer esconder por hoje.
+  async function excluirItem(it) {
+    const ok = await confirmar({
+      titulo: `Excluir "${it.nome}" do iFood?`,
+      texto: 'Some do cardápio do iFood de vez. No iFood não tem desfazer — pra colocar de volta, tem que cadastrar de novo.',
+      itens: [`${it.nome}${it.preco ? ` · R$ ${Number(it.preco).toFixed(2)}` : ''}`],
+      aviso: 'Se é só porque acabou hoje, use o Pausar — o item volta com um clique.',
+      textoOk: 'Sim, excluir do iFood',
+      perigo: true,
+    })
+    if (!ok) return
+
+    setBusy('excluir-' + it.itemId)
+    const d = await chamar({
+      acao: 'catalogo_excluir_item', empresa_id: empresaId,
+      categoria_id: it.categoriaId, product_id: it.productId,
+    })
+    if (!d.ok) { notify('erro', d.error ?? 'Falha ao excluir o item'); setBusy(''); return }
+
+    setSalvos(prev => prev.filter(x => x.itemId !== it.itemId))
+    setBusy('')
+
+    // O produto daqui NÃO some junto por padrão: ele pode continuar sendo vendido
+    // no balcão e na Loja Online, que não têm nada a ver com o iFood. Mas quem
+    // está tirando o item do ar geralmente quer tirar dos dois — então a gente
+    // pergunta, em vez de escolher pelo lojista.
+    const { data: prod } = await supabase
+      .from('produtos').select('id, nome')
+      .eq('empresa_id', empresaId).eq('ifood_product_id', it.productId).maybeSingle()
+
+    if (!prod) { notify('ok', `"${it.nome}" saiu do cardápio do iFood.`); return }
+
+    const tirarDaqui = await confirmar({
+      titulo: `Tirar "${prod.nome}" do seu catálogo também?`,
+      texto: 'Saiu do iFood. Aqui ele continua à venda no balcão, no app e na Loja Online.',
+      aviso: 'Se você vende esse item fora do iFood, deixe como está.',
+      textoOk: 'Excluir daqui também',
+      perigo: true,
+    })
+    if (!tirarDaqui) { notify('ok', `"${it.nome}" saiu do iFood e continua no seu catálogo.`); return }
+
+    const { error } = await supabase.from('produtos').delete().eq('id', prod.id)
+    if (!error) return notify('ok', `"${prod.nome}" saiu dos dois cardápios.`)
+
+    // 23503 = já foi vendido: apagar levaria junto a linha dele em vendas antigas.
+    const jaVendido = error.code === '23503' || /venda_itens|foreign key/i.test(error.message ?? '')
+    notify('erro', jaVendido
+      ? `Saiu do iFood, mas aqui não dá pra apagar: "${prod.nome}" já foi vendido e o histórico depende dele. Use Catálogo → Produtos → Excluir, que oferece arquivar.`
+      : `Saiu do iFood, mas falhou aqui: ${error.message}`)
+  }
+
   async function pausarItem(it, pausar) {
     setBusy('pausa-' + it.itemId)
     const d = await chamar({ acao: 'catalogo_pausar', empresa_id: empresaId, item_id: it.itemId, pausar })
@@ -295,6 +350,7 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
 
   return (
     <div>
+      {avisoConfirmar}
       {!autoCarregar && (
         <div style={{ borderTop: '1px solid var(--border)', marginTop: 12, paddingTop: 12 }}>
           <strong style={{ fontSize: 14 }}>Gerenciar cardápio no iFood</strong>
@@ -467,6 +523,12 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
                       <button type="button" className="ifc-acao" style={{ ...btnLista, border: `1.5px solid ${pausado ? '#16a34a' : '#f59e0b'}`, color: pausado ? '#16a34a' : '#b45309' }}
                         disabled={busy === 'pausa-' + it.itemId} onClick={() => pausarItem(it, !pausado)}>
                         {busy === 'pausa-' + it.itemId ? '...' : (pausado ? '▶ Despausar' : '⏸ Pausar')}
+                      </button>
+                      <button type="button" className="ifc-acao"
+                        style={{ ...btnLista, border: '1.5px solid var(--border)', color: '#dc2626' }}
+                        disabled={busy === 'excluir-' + it.itemId} onClick={() => excluirItem(it)}
+                        title="Tira o item do cardápio do iFood de vez">
+                        {busy === 'excluir-' + it.itemId ? '...' : '🗑'}
                       </button>
                     </div>
                   </div>
