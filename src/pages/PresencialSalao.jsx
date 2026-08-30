@@ -2133,7 +2133,11 @@ export default function PresencialSalao() {
                       aria-label="Pôr o nome do cliente"
                       style={{ border: '1.5px dashed var(--border)',
                         background: 'transparent', color: 'var(--text-muted)' }}>
-                      ➕<span className="sal-chip-txt">Pôr o nome do cliente</span>
+                      {/* 🧑 e não ➕: no celular o chip é só o ícone, e um "+"
+                          sozinho não diz de quê. Como este e o de cliente já
+                          ligado nunca aparecem juntos, o rosto serve pros dois —
+                          o que muda é a borda (tracejada = ainda sem nome). */}
+                      🧑<span className="sal-chip-txt">Pôr o nome do cliente</span>
                     </button>
                   )
                 )}
