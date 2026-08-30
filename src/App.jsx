@@ -198,6 +198,7 @@ const LojaOnlineHome = lazy(() => import('./pages/LojaOnlineHome'))
 const RaioEntrega = lazy(() => import('./pages/RaioEntrega'))
 const HorariosLoja = lazy(() => import('./pages/HorariosLoja'))
 const WhatsAppCreditos = lazy(() => import('./pages/WhatsAppCreditos'))
+const AssistenteIA = lazy(() => import('./pages/AssistenteIA'))
 const Termos = lazy(() => import('./pages/Termos'))
 const Privacidade = lazy(() => import('./pages/Privacidade'))
 const ExcluirConta = lazy(() => import('./pages/ExcluirConta'))
@@ -412,6 +413,10 @@ export default function App() {
             <Route
               path="whatsapp-creditos"
               element={<ProtectedRoute roles={['admin']} modulo="whatsapp"><WhatsAppCreditos /></ProtectedRoute>}
+            />
+            <Route
+              path="assistente-ia"
+              element={<ProtectedRoute roles={['admin']}><AssistenteIA /></ProtectedRoute>}
             />
             <Route
               path="bot-teste"

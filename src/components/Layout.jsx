@@ -9,6 +9,7 @@ import SubscriptionGate from './SubscriptionGate'
 import InstallPWA from './InstallPWA'
 import NotificationBell from './NotificationBell'
 import AssistenteLoja from './AssistenteLoja'
+import IaConsumoMini from './IaConsumoMini'
 import './Layout.css'
 
 // `mod` liga o item a uma funcionalidade que o Super Admin pode desligar por loja
@@ -78,6 +79,10 @@ const links = [
       { to: '/bot-teste', label: 'Teste Bot', roles: ['admin', 'super_admin'] },
     ],
   },
+
+  // Sem `mod`: o assistente vem em todo plano. Se dependesse do módulo do
+  // WhatsApp, a loja sem bot perderia o robô do Portal junto, que é outro bicho.
+  { to: '/assistente-ia', label: 'Assistente IA', roles: ['admin'] },
 
   { group: 'Financeiro' },
   { to: '/fidelidade', label: 'Indicação e Cashback', roles: ['admin'], mod: 'fidelidade' },
@@ -244,6 +249,9 @@ export default function Layout() {
           )}
         </nav>
         <div className="sidebar-footer">
+          {/* Consumo da IA logo acima do botão dela — os dois no mesmo canto,
+              e sempre à vista mesmo pra quem nunca abriu o robô. */}
+          <IaConsumoMini />
           <div className="sidebar-notif-row">
             <NotificationBell />
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
