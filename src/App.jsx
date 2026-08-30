@@ -149,6 +149,7 @@ const Upgrade = lazy(() => import('./pages/Upgrade'))
 const SuperAdminVideos = lazy(() => import('./pages/SuperAdminVideos'))
 const Clientes = lazy(() => import('./pages/Clientes'))
 const Produtos = lazy(() => import('./pages/Produtos'))
+const CardapioIfood = lazy(() => import('./pages/CardapioIfood'))
 const CategoriasComplemento = lazy(() => import('./pages/CategoriasComplemento'))
 const FichaTecnica = lazy(() => import('./pages/FichaTecnica'))
 const Estoque = lazy(() => import('./pages/Estoque'))
@@ -311,6 +312,12 @@ export default function App() {
             <Route
               path="produtos"
               element={<ProtectedRoute roles={['admin']} modulo="produtos"><Produtos /></ProtectedRoute>}
+            />
+            {/* Cardápio do iFood: lista separada da de Produtos de propósito — preço e
+                nome costumam ser diferentes nos dois, e casar item por item erraria preço. */}
+            <Route
+              path="cardapio-ifood"
+              element={<ProtectedRoute roles={['admin']} modulo="produtos"><CardapioIfood /></ProtectedRoute>}
             />
             <Route
               path="complementos"

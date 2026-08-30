@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import { FORMAS_PAGAMENTO, FORMAS_CARTAO, ICONE_PAGAMENTO, formasAtivas } from '../lib/constants'
 
 // "2,5" → 2.5, e nunca fora de 0–100 (taxa de maquineta não passa disso).
 const pctNum = (s) => Math.min(100, Math.max(0, Number(String(s ?? '').replace(',', '.')) || 0))
-import IfoodCatalogoManager from '../components/IfoodCatalogoManager'
 import '../components/Page.css'
 
 export default function MinhaLoja({ secao = 'loja' }) {
@@ -68,12 +68,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
   const [ifoodTestando, setIfoodTestando] = useState(false)
   const [ifoodDetectando, setIfoodDetectando] = useState(false)
   const [ifoodOpcoes, setIfoodOpcoes] = useState(null) // lojas autorizadas quando há mais de uma
-  const [ifoodImportando, setIfoodImportando] = useState(false)
   const [ifoodMsg, setIfoodMsg] = useState(null) // { tipo: 'ok'|'erro', texto }
-  // F3 — gerenciar itens do iFood (pausar/despausar)
-  const [ifoodItens, setIfoodItens] = useState(null) // null = não carregado
-  const [ifoodItensLoading, setIfoodItensLoading] = useState(false)
-  const [ifoodPausandoId, setIfoodPausandoId] = useState(null)
   const [ifoodAjuda, setIfoodAjuda] = useState(false) // popup "onde encontro o Merchant ID"
 
   // Nota Fiscal (NFC-e) — cadastro fiscal da loja (opt-in, desligado por padrão)
@@ -306,70 +301,6 @@ export default function MinhaLoja({ secao = 'loja' }) {
       setIfoodMsg({ tipo: 'erro', texto: String(err.message ?? err) })
     }
     setIfoodTestando(false)
-  }
-
-  async function handleImportarCardapio() {
-    if (!empresa) return
-    setIfoodImportando(true)
-    setIfoodMsg(null)
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const url = `${import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'}/functions/v1/ifood-integration`
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token ?? ''}`,
-        },
-        body: JSON.stringify({ acao: 'catalogo', empresa_id: empresa.id }),
-      })
-      const data = await res.json()
-      if (data.ok) {
-        setIfoodMsg({
-          tipo: 'ok',
-          texto: data.criados > 0
-            ? `Cardápio importado! ${data.criados} produto(s) novo(s) adicionado(s) (de ${data.total} encontrados). Veja em Produtos.`
-            : `Nenhum produto novo pra importar (${data.total} já estavam no sistema).`,
-        })
-      } else {
-        setIfoodMsg({ tipo: 'erro', texto: data.error ?? 'Falha ao importar o cardápio' })
-      }
-    } catch (err) {
-      setIfoodMsg({ tipo: 'erro', texto: String(err.message ?? err) })
-    }
-    setIfoodImportando(false)
-  }
-
-  // F3 — chamadas de catálogo (listar / pausar item no iFood)
-  async function chamarIfood(payload) {
-    const { data: { session } } = await supabase.auth.getSession()
-    const url = `${import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'}/functions/v1/ifood-integration`
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token ?? ''}` },
-      body: JSON.stringify(payload),
-    })
-    return res.json()
-  }
-
-  async function carregarItensIfood() {
-    setIfoodItensLoading(true)
-    setIfoodMsg(null)
-    const data = await chamarIfood({ acao: 'catalogo_listar', empresa_id: empresa.id })
-    if (data.ok) setIfoodItens(data.itens ?? [])
-    else { setIfoodItens(null); setIfoodMsg({ tipo: 'erro', texto: data.error ?? 'Falha ao listar itens do iFood' }) }
-    setIfoodItensLoading(false)
-  }
-
-  async function pausarItemIfood(item, pausar) {
-    setIfoodPausandoId(item.id)
-    const data = await chamarIfood({ acao: 'catalogo_pausar', empresa_id: empresa.id, item_id: item.id, pausar })
-    if (data.ok) {
-      setIfoodItens(prev => (prev ?? []).map(x => x.id === item.id ? { ...x, status: pausar ? 'UNAVAILABLE' : 'AVAILABLE' } : x))
-    } else {
-      setIfoodMsg({ tipo: 'erro', texto: data.error ?? 'Falha ao pausar o item no iFood' })
-    }
-    setIfoodPausandoId(null)
   }
 
   async function handleAlterarSenha(e) {
@@ -1355,68 +1286,24 @@ export default function MinhaLoja({ secao = 'loja' }) {
             >
               {ifoodTestando ? 'Testando...' : 'Testar conexão'}
             </button>
-            <button
-              type="button"
-              onClick={handleImportarCardapio}
-              disabled={ifoodImportando || !ifoodCfg.merchant_id}
-              title={!ifoodCfg.merchant_id ? 'Informe o Merchant ID primeiro' : ''}
-              style={{
-                padding: '8px 18px', borderRadius: 8, cursor: ifoodCfg.merchant_id ? 'pointer' : 'not-allowed',
-                border: 'none', background: '#ea1d2c', color: '#fff',
-                fontWeight: 700, fontSize: 14, opacity: ifoodCfg.merchant_id ? 1 : 0.5,
-              }}
-            >
-              {ifoodImportando ? 'Importando...' : '📥 Importar cardápio do iFood'}
-            </button>
+            {ifoodCfg.merchant_id && (
+              <Link
+                to="/cardapio-ifood"
+                style={{
+                  padding: '8px 18px', borderRadius: 8, textDecoration: 'none',
+                  border: 'none', background: '#ea1d2c', color: '#fff',
+                  fontWeight: 700, fontSize: 14, display: 'inline-block',
+                }}
+              >
+                🍽 Abrir cardápio do iFood
+              </Link>
+            )}
           </div>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 10 }}>
-            “Importar cardápio” copia os produtos da sua loja do iFood pra cá, de uma vez.
+            Esta tela é só a conexão. Editar o cardápio (criar item, mudar preço, pausar o que esgotou)
+            e trazer os produtos do iFood pra cá ficam em <strong>Catálogo → Cardápio iFood</strong>.
           </p>
 
-          {/* F3 — Pausar/esgotar itens no iFood (precisa do módulo Catálogo homologado) */}
-          <div style={{ borderTop: '1px solid var(--border)', marginTop: 12, paddingTop: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-              <strong style={{ fontSize: 14 }}>Pausar itens no iFood (esgotar)</strong>
-              <button type="button" onClick={carregarItensIfood} disabled={ifoodItensLoading || !ifoodCfg.merchant_id}
-                style={{ padding: '6px 14px', borderRadius: 8, cursor: ifoodCfg.merchant_id ? 'pointer' : 'not-allowed',
-                  border: '1.5px solid #ea1d2c', background: 'transparent', color: '#ea1d2c', fontWeight: 700, fontSize: 13, opacity: ifoodCfg.merchant_id ? 1 : 0.5 }}>
-                {ifoodItensLoading ? 'Carregando...' : (ifoodItens ? '🔄 Atualizar lista' : 'Ver itens do iFood')}
-              </button>
-            </div>
-            {ifoodItens && (
-              ifoodItens.length === 0 ? (
-                <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8 }}>Nenhum item no catálogo do iFood.</p>
-              ) : (
-                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto' }}>
-                  {ifoodItens.map(item => {
-                    const pausado = item.status === 'UNAVAILABLE'
-                    return (
-                      <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-                        padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8 }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.nome}</div>
-                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                            {item.categoria}{item.preco ? ` · R$ ${Number(item.preco).toFixed(2)}` : ''}{pausado ? ' · ⏸ pausado' : ''}
-                          </div>
-                        </div>
-                        <button type="button" onClick={() => pausarItemIfood(item, !pausado)} disabled={ifoodPausandoId === item.id}
-                          style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12.5,
-                            border: `1.5px solid ${pausado ? '#16a34a' : '#f59e0b'}`, background: `${pausado ? '#16a34a' : '#f59e0b'}1e`, color: pausado ? '#16a34a' : '#b45309' }}>
-                          {ifoodPausandoId === item.id ? '...' : (pausado ? '▶ Despausar' : '⏸ Pausar')}
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            )}
-            <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
-              Pausar deixa o item indisponível no iFood na hora. (Precisa do módulo Catálogo homologado — em análise.)
-            </p>
-          </div>
-
-          {/* Gerência completa de cardápio no iFood (criar/editar categoria, item, foto, complemento) */}
-          <IfoodCatalogoManager empresaId={empresa?.id} merchantOk={!!ifoodCfg.merchant_id} />
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', fontSize: 13 }}>
             <input
               type="checkbox"

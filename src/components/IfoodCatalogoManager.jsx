@@ -65,13 +65,18 @@ function gravarJson(chave, valor) {
   try { valor == null ? localStorage.removeItem(chave) : localStorage.setItem(chave, JSON.stringify(valor)) } catch { /* cota cheia: rascunho é só conforto */ }
 }
 
-export default function IfoodCatalogoManager({ empresaId, merchantOk }) {
+// Busca sem acento e sem caixa: "camarao" acha "Camarão".
+const norm = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
+
+export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarregar = false }) {
   const [categorias, setCategorias] = useState(() => lerJson(CHAVE_CATS(empresaId)))
   const [novaCat, setNovaCat] = useState('')
   const [item, setItem] = useState(() => { const r = lerJson(CHAVE_RASCUNHO(empresaId)); return r ? comPreview(r) : itemVazio() })
   const [salvos, setSalvos] = useState([])             // itens já mandados (pra pausar/editar)
   const [busy, setBusy] = useState('')                 // rótulo da ação em curso
   const [msg, setMsg] = useState(null)                 // { tipo, texto }
+  const [busca, setBusca] = useState('')
+  const [criando, setCriando] = useState(false)        // formulário de item aberto?
 
   const notify = (tipo, texto) => setMsg({ tipo, texto })
 
@@ -170,7 +175,26 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk }) {
     setBusy('')
   }
 
+  // Abre a tela já com tudo na mão: as categorias (pra caixinha do formulário)
+  // e os itens que estão no ar.
+  // Em sequência, não em paralelo: as duas mexem no mesmo `busy`/`msg`, e juntas
+  // uma apagaria o recado da outra.
+  async function carregarTudo() {
+    await carregarCategorias()
+    await verItensIfood()
+  }
+
+  // Na página própria o cardápio é o assunto: ele se carrega sozinho, em vez de
+  // exigir um clique em "Ver itens" pra tela sair do vazio. Dentro de Minha Loja
+  // (autoCarregar=false) segue sob demanda, que lá é um bloco secundário.
+  useEffect(() => {
+    if (!autoCarregar || !merchantOk || !empresaId) return
+    carregarTudo()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoCarregar, merchantOk, empresaId])
+
   function editar(it) {
+    setCriando(true)
     setItem({ ...it })
     // Garante que a categoria do item apareça selecionada na caixinha (mesmo sem
     // ter clicado em "Carregar categorias" antes).
@@ -183,7 +207,10 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk }) {
     setMsg({ tipo: 'ok', texto: `Item "${it.nome}" carregado no formulário — altere e clique em "Salvar no iFood".` })
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
-  function novo() { setItem(itemVazio()); gravarJson(CHAVE_RASCUNHO(empresaId), null); setMsg(null) }
+  function novo() {
+    setItem(itemVazio()); gravarJson(CHAVE_RASCUNHO(empresaId), null); setMsg(null)
+    if (autoCarregar) setCriando(false)   // na página do cardápio, fecha o formulário e volta pra lista
+  }
 
   async function pausarItem(it, pausar) {
     setBusy('pausa-' + it.itemId)
@@ -206,12 +233,33 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk }) {
 
   if (!merchantOk) return null
 
+  // Na página própria o formulário fica recolhido até alguém querer criar/editar
+  // — senão a primeira coisa que aparece é um formulário vazio, e não o cardápio.
+  const formAberto = !autoCarregar || criando || item.salvo || !itemEmBranco(item)
+
+  // Agrupa por categoria na mesma ordem em que o iFood devolveu, pra tela ficar
+  // parecida com o cardápio que o lojista vê no portal.
+  const filtrados = busca.trim()
+    ? salvos.filter(it => norm(it.nome).includes(norm(busca)) || norm(it.categoriaNome).includes(norm(busca)))
+    : salvos
+  const porCategoria = []
+  for (const it of filtrados) {
+    const nome = it.categoriaNome || 'Sem categoria'
+    const grupo = porCategoria.find(g => g.nome === nome)
+    if (grupo) grupo.itens.push(it)
+    else porCategoria.push({ nome, itens: [it] })
+  }
+
   return (
-    <div style={{ borderTop: '1px solid var(--border)', marginTop: 12, paddingTop: 12 }}>
-      <strong style={{ fontSize: 14 }}>Gerenciar cardápio no iFood</strong>
-      <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '2px 0 10px' }}>
-        Cria e edita categoria, item, foto e complemento direto no iFood. (Módulo Catalog — em homologação.)
-      </p>
+    <div>
+      {!autoCarregar && (
+        <div style={{ borderTop: '1px solid var(--border)', marginTop: 12, paddingTop: 12 }}>
+          <strong style={{ fontSize: 14 }}>Gerenciar cardápio no iFood</strong>
+          <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '2px 0 10px' }}>
+            Cria e edita categoria, item, foto e complemento direto no iFood.
+          </p>
+        </div>
+      )}
 
       {msg && (
         <div style={{ margin: '0 0 10px', padding: '8px 10px', borderRadius: 8, fontSize: 12.5,
@@ -231,8 +279,13 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk }) {
         </button>
       </div>
 
-      {/* 2) Item */}
-      <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+      {/* 2) Item — recolhido até querer criar/editar, quando é a tela do cardápio */}
+      {!formAberto && (
+        <button type="button" style={{ ...btn(RED), marginBottom: 12 }} onClick={() => setCriando(true)}>
+          + Novo item no iFood
+        </button>
+      )}
+      <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12, marginBottom: 12, display: formAberto ? 'block' : 'none' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <strong style={{ fontSize: 13 }}>Item</strong>
           <button type="button" style={{ ...btnOut, border: '1.5px solid var(--border)', color: 'var(--text-muted)' }} onClick={novo}>Limpar / novo item</button>
@@ -292,20 +345,36 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk }) {
 
       {/* 3) Itens que já estão no iFood — editar / pausar item e complemento */}
       <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <strong style={{ fontSize: 13 }}>Itens no iFood</strong>
-          <button type="button" style={btnOut} disabled={busy === 'verItens'} onClick={verItensIfood}>
-            {busy === 'verItens' ? 'Carregando…' : '🔄 Ver itens do iFood'}
-          </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+          <strong style={{ fontSize: 13 }}>
+            Itens no iFood{salvos.length > 0 && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}> · {salvos.length}</span>}
+          </strong>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {salvos.length > 0 && (
+              <input style={{ ...inp, width: 190 }} placeholder='Buscar item…' value={busca} onChange={e => setBusca(e.target.value)} />
+            )}
+            <button type="button" style={btnOut} disabled={busy === 'verItens'} onClick={verItensIfood}>
+              {busy === 'verItens' ? 'Carregando…' : '🔄 Atualizar'}
+            </button>
+          </div>
         </div>
         {salvos.length === 0 && (
           <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>
-            Clique em <strong>“Ver itens do iFood”</strong> pra carregar os itens já cadastrados — aí é só clicar em <strong>Editar</strong> pra alterar.
+            {busy === 'verItens'
+              ? 'Buscando o cardápio no iFood…'
+              : <>Nenhum item carregado. Clique em <strong>“Atualizar”</strong> pra trazer o cardápio do iFood.</>}
           </p>
         )}
-        {salvos.length > 0 && (
+        {salvos.length > 0 && filtrados.length === 0 && (
+          <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Nenhum item com “{busca}”.</p>
+        )}
+        {porCategoria.map(cat => (
+          <div key={cat.nome} style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: .4, margin: '0 0 6px' }}>
+              {cat.nome} <span style={{ fontWeight: 400 }}>· {cat.itens.length}</span>
+            </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {salvos.map(it => {
+            {cat.itens.map(it => {
               const pausado = it.status === 'UNAVAILABLE'
               return (
                 <div key={it.itemId} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
@@ -342,7 +411,8 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk }) {
               )
             })}
           </div>
-        )}
+          </div>
+        ))}
       </div>
     </div>
   )

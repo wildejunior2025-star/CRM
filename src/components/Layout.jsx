@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate, useMatch } from 'react-router-dom'
 import { useTheme } from '../hooks/useTheme'
 import { useAuth } from '../hooks/useAuth'
 import { moduloVisivel, moduloBloqueado } from '../lib/modulos'
+import { useIfoodAtivo } from '../hooks/useIfoodAtivo'
 import ThemeToggle from './ThemeToggle'
 import SubscriptionGate from './SubscriptionGate'
 import InstallPWA from './InstallPWA'
@@ -46,6 +47,8 @@ const links = [
     to: '/produtos', label: 'Catálogo', roles: ['admin'], mod: 'produtos',
     children: [
       { to: '/produtos', label: 'Produtos', roles: ['admin'], mod: 'produtos' },
+      // `ifood: true` — só aparece pra quem tem loja conectada no iFood (ver useIfoodAtivo).
+      { to: '/cardapio-ifood', label: 'Cardápio iFood', roles: ['admin'], mod: 'produtos', ifood: true },
       { to: '/complementos', label: 'Complementos', roles: ['admin'], mod: 'produtos' },
       { to: '/ficha-tecnica', label: 'Ficha Técnica', roles: ['admin'], mod: 'produtos' },
       { to: '/estoque', label: 'Estoque', roles: ['admin'], mod: 'estoque' },
@@ -102,6 +105,7 @@ function HamburgerIcon() {
 export default function Layout() {
   const { theme, toggleTheme } = useTheme()
   const { user, profile, empresa, logout, voltarSuperAdmin } = useAuth()
+  const ifoodAtivo = useIfoodAtivo(empresa?.id)
   const location = useLocation()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -127,7 +131,7 @@ export default function Layout() {
   // Módulo BLOQUEADO continua aparecendo (com cadeado) — é o que faz o dono
   // descobrir que existe e querer o upgrade. Só o OCULTO some daqui.
   const porPerfilEModulo = links.filter(
-    (link) => link.group || (link.roles?.includes(profile?.perfil) && moduloVisivel(empresa, link.mod))
+    (link) => link.group || (link.roles?.includes(profile?.perfil) && moduloVisivel(empresa, link.mod) && (!link.ifood || ifoodAtivo))
   )
   // Remove cabeçalhos de grupo que ficaram sem nenhum item visível abaixo.
   const visibleLinks = porPerfilEModulo.filter((link, i) => {
@@ -205,7 +209,7 @@ export default function Layout() {
                 {expandidos.has(link.to) && (
                   <div style={{ paddingLeft: 12 }}>
                     {link.children
-                      .filter(c => c.roles?.includes(profile?.perfil) && moduloVisivel(empresa, c.mod))
+                      .filter(c => c.roles?.includes(profile?.perfil) && moduloVisivel(empresa, c.mod) && (!c.ifood || ifoodAtivo))
                       .map(child => (
                         <NavLink
                           key={child.to}
