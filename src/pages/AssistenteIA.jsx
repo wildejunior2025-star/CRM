@@ -16,6 +16,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useIaConsumo } from '../hooks/useIaConsumo'
+import { dataBR } from '../lib/cicloIa'
 import '../components/Page.css'
 
 const brl = (v) => 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',')
@@ -78,19 +79,18 @@ export default function AssistenteIA() {
   }
 
   useEffect(() => {
-    const mesIni = new Date()
-    mesIni.setDate(1); mesIni.setHours(0, 0, 0, 0)
+    if (!c.cicloIni) return
     carregarExtrato()
     supabase.from('assistente_conversas')
       .select('pergunta, custo_brl, created_at')
-      .gte('created_at', mesIni.toISOString())
+      .gte('created_at', c.cicloIni.toISOString())
       .order('created_at', { ascending: false }).limit(50)
       .then(({ data }) => setPerguntas(data ?? []))
     // Uma consulta ao servidor confere os PIX pendentes desta loja e credita o
     // que já foi pago — rede de segurança pra quando o webhook se perde.
     supabase.functions.invoke('ia-saldo', { body: { acao: 'saldo' } })
       .then(() => c.recarregar?.())
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [c.cicloIni?.getTime()]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function copiarPix() {
     navigator.clipboard?.writeText(pix.qr_code)
@@ -102,9 +102,6 @@ export default function AssistenteIA() {
 
   const acabou = c.disponivel <= 0
   const cor = acabou ? 'var(--danger)' : c.pct >= 80 ? 'var(--warning)' : 'var(--primary)'
-  const proximoMes = new Date()
-  proximoMes.setMonth(proximoMes.getMonth() + 1, 1)
-
   return (
     <div>
       <div className="page-header"><h1>Assistente IA</h1></div>
@@ -139,11 +136,11 @@ export default function AssistenteIA() {
           <div style={{ height: '100%', width: `${c.pct}%`, background: cor, borderRadius: 999, transition: 'width 400ms' }} />
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: 'var(--text-muted)', flexWrap: 'wrap', gap: 8 }}>
-          <span>{brl(c.usado)} de {brl(c.franquia)} usados · {c.perguntas} perguntas</span>
+          <span>{brl(c.usado)} de {brl(c.franquia)} usados neste ciclo · {c.perguntas} perguntas</span>
           {c.saldo > 0 && <span>+ {brl(c.saldo)} de saldo comprado</span>}
         </div>
         <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '12px 0 0' }}>
-          Renova em {proximoMes.toLocaleDateString('pt-BR')}.
+          Renova em {c.renovaEm ? dataBR(c.renovaEm) : '—'}, junto com a sua mensalidade.
         </p>
 
         {comoFunciona && (
@@ -161,8 +158,11 @@ export default function AssistenteIA() {
                 artificial</strong> que responde, que cobra por uso. Não é uma mensalidade do
                 sistema: você só paga quando pergunta.
               </li>
-              <li>Sua mensalidade já inclui <strong style={{ color: 'var(--text)' }}>{brl(c.franquia)} por mês</strong> de assistente.</li>
-              <li>Acabou a franquia, sai do saldo comprado. Sem saldo, o robô descansa até o dia 1.</li>
+                <li>Sua mensalidade já inclui <strong style={{ color: 'var(--text)' }}>{brl(c.franquia)} por mês</strong> de assistente, contados do seu vencimento até o próximo.</li>
+              <li>
+                Acabou a franquia, sai do saldo comprado. Sem saldo, o robô descansa até
+                a sua mensalidade renovar{c.renovaEm ? ` (${dataBR(c.renovaEm)})` : ''}.
+              </li>
               <li>Ver seus números pelas telas do sistema <strong style={{ color: 'var(--text)' }}>não consome nada</strong> — o Dashboard e os Relatórios continuam liberados sempre.</li>
             </ul>
           </div>
@@ -238,7 +238,7 @@ export default function AssistenteIA() {
       )}
 
       <div style={caixa}>
-        <h2 style={titulo}>O que você perguntou neste mês</h2>
+        <h2 style={titulo}>O que você perguntou neste ciclo</h2>
         {perguntas.length === 0
           ? <p style={{ fontSize: 13.5, color: 'var(--text-muted)', margin: 0 }}>Nenhuma pergunta ainda. O robô fica no canto de baixo da tela.</p>
           : perguntas.map((p, i) => (

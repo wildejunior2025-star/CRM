@@ -436,15 +436,18 @@ async function situacaoAgora(sb: any, empresaId: string) {
 // O preco de cada pergunta e o CUSTO REAL em dolar, convertido, mais a margem.
 // Pergunta com cache quente sai barata e desconta pouco; e o mais justo que da.
 async function verCarteira(admin: any, empresaId: string) {
-  const hoje = hojeBRT()
-  const mesIni = hoje.slice(0, 8) + "01"
-
-  const [cfg, emp, mes] = await Promise.all([
+  const [cfg, emp] = await Promise.all([
     admin.from("config_global").select("chave, valor").in("chave", ["ia_cotacao_usd", "ia_margem"]),
-    admin.from("empresas").select("ia_saldo_centavos, ia_franquia_centavos").eq("id", empresaId).maybeSingle(),
-    admin.from("assistente_conversas").select("custo_brl")
-      .eq("empresa_id", empresaId).gte("created_at", iniISO(mesIni)),
+    admin.from("empresas").select("ia_saldo_centavos, ia_franquia_centavos, vencimento")
+      .eq("id", empresaId).maybeSingle(),
   ])
+
+  // O ciclo segue o VENCIMENTO da loja, não o dia 1. A CDBom vence dia 20 e a
+  // Marajó dia 1: contar pelo mês civil daria franquia nova no meio do ciclo de
+  // quem vence dia 20, e a loja usaria quase dois meses de IA pagando um.
+  const cicloIni = inicioDoCiclo(emp.data?.vencimento)
+  const mes = await admin.from("assistente_conversas").select("custo_brl")
+    .eq("empresa_id", empresaId).gte("created_at", iniISO(cicloIni))
 
   const conf: Record<string, string> = {}
   for (const c of (cfg.data ?? [])) conf[c.chave] = c.valor
@@ -458,12 +461,45 @@ async function verCarteira(admin: any, empresaId: string) {
   const gastoMes = (mes.data ?? []).reduce((s: number, r: any) => s + Number(r.custo_brl || 0), 0)
   const franquiaRestante = Math.max(0, franquia - gastoMes)
 
-  return { cotacao, margem, franquia, saldo, gastoMes, franquiaRestante,
+  return { cotacao, margem, franquia, saldo, gastoMes, franquiaRestante, cicloIni,
+           renovaEm: proximaRenovacao(emp.data?.vencimento),
            disponivel: franquiaRestante + saldo }
+}
+
+// Espelho de src/lib/cicloIa.js — o servidor precisa da mesma conta pra decidir
+// se bloqueia. Mexeu lá, mexa aqui.
+const diaDeRenovacao = (vencimento: string | null | undefined) => {
+  const d = Number(String(vencimento ?? "").slice(8, 10))
+  return d >= 1 && d <= 31 ? d : 1     // loja em trial ainda não tem vencimento
+}
+// Dia preso ao mês: quem vence dia 31 renova dia 30 em novembro.
+const ultimoDiaDoMes = (ano: number, mes: number) =>
+  new Date(Date.UTC(ano, mes, 0)).getUTCDate()
+const diaNoMes = (ano: number, mes: number, dia: number) =>
+  Math.min(dia, ultimoDiaDoMes(ano, mes))
+const ymd = (ano: number, mes: number, dia: number) =>
+  `${ano}-${String(mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}`
+
+function inicioDoCiclo(vencimento: string | null | undefined): string {
+  const dia = diaDeRenovacao(vencimento)
+  const [ano, mes, hojeDia] = hojeBRT().split("-").map(Number)
+  if (hojeDia >= diaNoMes(ano, mes, dia)) return ymd(ano, mes, diaNoMes(ano, mes, dia))
+  const mesAnt = mes === 1 ? 12 : mes - 1
+  const anoAnt = mes === 1 ? ano - 1 : ano
+  return ymd(anoAnt, mesAnt, diaNoMes(anoAnt, mesAnt, dia))
+}
+
+function proximaRenovacao(vencimento: string | null | undefined): string {
+  const dia = diaDeRenovacao(vencimento)
+  const [ano, mes] = inicioDoCiclo(vencimento).split("-").map(Number)
+  const mesFim = mes === 12 ? 1 : mes + 1
+  const anoFim = mes === 12 ? ano + 1 : ano
+  return ymd(anoFim, mesFim, diaNoMes(anoFim, mesFim, dia))
 }
 
 const resumoCarteira = (c: any) => ({
   franquia: c.franquia,
+  renova_em: c.renovaEm,
   usado_no_mes: Number(c.gastoMes.toFixed(2)),
   franquia_restante: Number(c.franquiaRestante.toFixed(2)),
   saldo: Number(c.saldo.toFixed(2)),
@@ -510,8 +546,8 @@ Deno.serve(async (req) => {
     const carteira = await verCarteira(admin, perfil.empresa_id)
     if (carteira.disponivel <= 0) {
       return json({
-        erro: `Seu assistente usou os R$ ${carteira.franquia.toFixed(2).replace(".", ",")} deste mes e o saldo acabou. ` +
-              `Compre saldo pra continuar perguntando, ou volte dia 1 quando renova.`,
+        erro: `Seu assistente usou os R$ ${carteira.franquia.toFixed(2).replace(".", ",")} deste ciclo e o saldo acabou. ` +
+              `Compre saldo em Automacao > Assistente IA pra continuar hoje, ou espere renovar com a sua mensalidade.`,
         sem_saldo: true,
         carteira: resumoCarteira(carteira),
       }, 402)
