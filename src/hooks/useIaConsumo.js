@@ -33,19 +33,15 @@ export function useIaConsumo() {
     const usado = (mes.data ?? []).reduce((s, r) => s + Number(r.custo_brl || 0), 0)
     const restaFranquia = Math.max(0, franquia - usado)
     const perguntas = (mes.data ?? []).length
-    // Média das perguntas DELE, não uma média inventada: loja que pergunta em
-    // rajada tem cache quente e gasta menos por pergunta que outra.
-    const medioPorPergunta = perguntas ? usado / perguntas : 0.30
 
     setDados({
       franquia, saldo, usado, perguntas,
       restaFranquia,
       disponivel: restaFranquia + saldo,
       pct: franquia > 0 ? Math.min(100, Math.round((usado / franquia) * 100)) : 100,
-      // Quantas perguntas ainda cabem, pelo ritmo dela. É o número que o dono
-      // realmente quer saber — "R$ 3,40 restantes" não diz nada pra ele.
-      perguntasRestantes: medioPorPergunta > 0
-        ? Math.floor((restaFranquia + saldo) / medioPorPergunta) : 0,
+      // Não existe "quantas perguntas faltam": o custo depende do tamanho de
+      // cada pergunta, e qualquer contagem seria um chute que o dono cobraria
+      // da gente depois. O que a tela mostra é quanto ainda dá pra usar.
     })
     setCarregando(false)
   }, [empresaId])

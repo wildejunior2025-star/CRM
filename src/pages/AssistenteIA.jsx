@@ -105,11 +105,18 @@ export default function AssistenteIA() {
       </p>
 
       <div style={{ ...caixa, borderColor: acabou ? 'var(--danger)' : 'var(--border)' }}>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Ainda dá pra fazer</div>
+        {/* Número em REAIS, não em "quantas perguntas": o custo depende do
+            tamanho de cada pergunta, então qualquer contagem de perguntas seria
+            um chute que o dono cobraria da gente depois. */}
+        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Ainda dá pra usar</div>
         <div style={{ fontSize: 40, fontWeight: 800, lineHeight: 1.1, color: cor }}>
-          {acabou ? 'Acabou' : `~${c.perguntasRestantes}`}
+          {acabou ? 'Acabou' : brl(c.disponivel)}
         </div>
-        {!acabou && <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>perguntas neste mês</div>}
+        {!acabou && (
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>
+            em perguntas ao assistente
+          </div>
+        )}
 
         <div style={{ height: 8, borderRadius: 999, background: 'var(--border)', overflow: 'hidden', margin: '10px 0 8px' }}>
           <div style={{ height: '100%', width: `${c.pct}%`, background: cor, borderRadius: 999, transition: 'width 400ms' }} />
@@ -179,8 +186,18 @@ export default function AssistenteIA() {
       <div style={caixa}>
         <h2 style={titulo}>Como funciona</h2>
         <ul style={{ fontSize: 13.5, lineHeight: 1.7, margin: 0, paddingLeft: 18, color: 'var(--text-muted)' }}>
+          <li>
+            Cada pergunta é cobrada pelo tanto de informação que a inteligência artificial
+            precisa ler e escrever pra te responder. <strong style={{ color: 'var(--text)' }}>Quanto
+            mais dado ela tiver que levantar, mais aquela pergunta custa</strong> — perguntar
+            o faturamento de hoje sai bem mais barato que comparar o ano inteiro.
+          </li>
+          <li>
+            Esse valor vem da <strong style={{ color: 'var(--text)' }}>plataforma de inteligência
+            artificial</strong> que responde, que cobra por uso. Não é uma mensalidade do
+            sistema: você só paga quando pergunta.
+          </li>
           <li>Sua mensalidade já inclui <strong style={{ color: 'var(--text)' }}>{brl(c.franquia)} por mês</strong> de assistente.</li>
-          <li>Pergunta simples consome menos, pergunta que puxa muito dado consome mais.</li>
           <li>Acabou a franquia, sai do saldo comprado. Sem saldo, o robô descansa até o dia 1.</li>
           <li>Ver seus números pelas telas do sistema <strong style={{ color: 'var(--text)' }}>não consome nada</strong> — o Dashboard e os Relatórios continuam liberados sempre.</li>
         </ul>
