@@ -142,6 +142,13 @@ export default function SuperAdminLayout() {
             Vídeos tutoriais
           </NavLink>
           <NavLink
+            to="/super-admin/assistente"
+            className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
+            onClick={closeMenu}
+          >
+            Assistente IA
+          </NavLink>
+          <NavLink
             to="/super-admin/config"
             className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
             onClick={closeMenu}

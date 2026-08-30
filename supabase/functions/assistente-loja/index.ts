@@ -24,6 +24,17 @@ import { MANUAL } from "./manual.ts"
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? ""
 const SUPABASE_URL      = Deno.env.get("SUPABASE_URL") ?? ""
 const ANON_KEY          = Deno.env.get("SUPABASE_ANON_KEY") ?? ""
+// Usada SÓ pra gravar a conversa no histórico. A loja não tem permissão de
+// inserir lá (de propósito: senão ela poderia forjar o próprio histórico).
+// Nenhuma consulta de dado da loja passa por aqui — essas usam o token do
+// usuário, com a RLS ligada.
+const SERVICE_KEY       = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+
+const MODELO = "claude-opus-5"
+// Preço por 1 milhão de tokens (USD). Serve pra gravar quanto custou cada
+// pergunta — com um mês disso dá pra decidir trocar de modelo com número na
+// mão, em vez de no chute. Mudou o modelo? Mude aqui junto.
+const PRECO = { entrada: 5, cacheGravar: 6.25, cacheLer: 0.5, saida: 25 }
 
 const MAX_PERGUNTA  = 500
 const MAX_HISTORICO = 10
@@ -470,16 +481,19 @@ Deno.serve(async (req) => {
     const diaSemana = new Date(`${hoje}T12:00:00-03:00`)
       .toLocaleDateString("pt-BR", { weekday: "long", timeZone: "America/Sao_Paulo" })
 
-    const system = `Voce e o assistente do FWC Inter dentro do sistema da loja. Fala com o \
+    // O prompt vai em DOIS pedaços de propósito. O primeiro (manual, regras,
+    // catálogo de vídeos — uns 3.500 tokens) é IDÊNTICO em toda pergunta de
+    // toda loja, então vai marcado pra cache: paga-se 10% dele em vez de 100%.
+    // A data fica no segundo pedaço porque muda todo dia — se ela estivesse
+    // junto do manual, invalidaria o cache inteiro toda madrugada.
+    // Detalhe que faz a conta fechar: as DUAS chamadas de uma mesma pergunta
+    // acontecem com segundos de diferença, então a segunda sempre lê do cache.
+    const systemEstavel = `Voce e o assistente do FWC Inter dentro do sistema da loja. Fala com o \
 DONO da loja: alguem que entende do negocio e nada de tecnologia.
 
 VOCE FAZ DUAS COISAS
 1. Responde perguntas sobre os NUMEROS da loja usando as ferramentas de consulta.
 2. Ensina onde fica cada coisa no sistema, passo a passo, usando o manual abaixo.
-
-HOJE E ${hoje} (${diaSemana}), horario de Brasilia. "Ontem" e ${somaDias(hoje, -1)}. \
-Este mes comecou em ${hoje.slice(0, 8)}01. Converta o que o dono falar ("hoje", \
-"essa semana", "mes passado", "sabado") para datas AAAA-MM-DD antes de consultar.
 
 REGRAS DOS NUMEROS
 - NUNCA invente ou estime um numero. Todo valor que voce disser tem que ter vindo \
@@ -508,8 +522,20 @@ ${MANUAL}
 VIDEOS DISPONIVEIS (so estes existem)
 ${catalogo}`
 
+    const systemDoDia = `HOJE E ${hoje} (${diaSemana}), horario de Brasilia. \
+"Ontem" e ${somaDias(hoje, -1)}. Este mes comecou em ${hoje.slice(0, 8)}01. \
+Converta o que o dono falar ("hoje", "essa semana", "mes passado", "sabado") \
+para datas AAAA-MM-DD antes de consultar.`
+
+    const system = [
+      { type: "text", text: systemEstavel, cache_control: { type: "ephemeral" } },
+      { type: "text", text: systemDoDia },
+    ]
+
     const mensagens: any[] = [...historico, { role: "user", content: pergunta }]
     let resposta: any = null
+    const gasto = { entrada: 0, cacheGravar: 0, cacheLer: 0, saida: 0 }
+    const consultasFeitas: string[] = []
 
     for (let volta = 0; volta < MAX_VOLTAS; volta++) {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -520,7 +546,7 @@ ${catalogo}`
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          model: "claude-opus-5",
+          model: MODELO,
           // Teto alto de proposito: o raciocinio do modelo conta aqui dentro, e
           // um teto curto corta a resposta no meio da frase. Quem manda no
           // tamanho da resposta e a instrucao "ate 5 frases" la em cima — isto
@@ -539,12 +565,19 @@ ${catalogo}`
         return json({ erro: "A IA esta indisponivel agora. Tente de novo em instantes." }, 502)
       }
       resposta = await r.json()
+      const u = resposta?.usage ?? {}
+      gasto.entrada     += Number(u.input_tokens || 0)
+      gasto.cacheGravar += Number(u.cache_creation_input_tokens || 0)
+      gasto.cacheLer    += Number(u.cache_read_input_tokens || 0)
+      gasto.saida       += Number(u.output_tokens || 0)
+
       if (resposta?.stop_reason === "refusal") {
         return json({ resposta: "Nao consigo ajudar com isso. Me pergunte algo sobre a sua loja ou sobre o sistema.", videos: [] })
       }
       if (resposta?.stop_reason !== "tool_use") break
 
       const chamadas = (resposta.content ?? []).filter((b: any) => b?.type === "tool_use")
+      for (const c of chamadas) if (!consultasFeitas.includes(c.name)) consultasFeitas.push(c.name)
       const resultados = await Promise.all(chamadas.map(async (c: any) => {
         try {
           const dados = await rodarTool(sb, perfil.empresa_id, c.name, c.input ?? {})
@@ -579,6 +612,36 @@ ${catalogo}`
       .map(k => (videos ?? []).find((v: any) => v.chave === k)).filter(Boolean)
 
     if (!texto) texto = "Nao consegui montar a resposta agora. Tente perguntar de outro jeito."
+
+    // Grava a conversa. As perguntas dos lojistas sao o melhor mapa de onde o
+    // sistema confunde — e o custo por pergunta so vira decisao com historico.
+    // Se a gravacao falhar, o dono NAO pode perder a resposta por causa disso:
+    // por isso o erro so vai pro log.
+    const custo =
+      (gasto.entrada     * PRECO.entrada +
+       gasto.cacheGravar * PRECO.cacheGravar +
+       gasto.cacheLer    * PRECO.cacheLer +
+       gasto.saida       * PRECO.saida) / 1_000_000
+    try {
+      const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
+      const { error: insErro } = await admin.from("assistente_conversas").insert({
+        empresa_id: perfil.empresa_id,
+        user_id: user.id,
+        pergunta,
+        resposta: texto,
+        consultas: consultasFeitas,
+        videos: sugeridos.map((v: any) => ({ chave: v.chave, titulo: v.titulo, youtube_id: v.youtube_id })),
+        tokens_in: gasto.entrada + gasto.cacheGravar,
+        tokens_cache: gasto.cacheLer,
+        tokens_out: gasto.saida,
+        custo_usd: Number(custo.toFixed(6)),
+        modelo: MODELO,
+      })
+      if (insErro) console.error("[assistente-loja] historico", insErro.message)
+    } catch (e) {
+      console.error("[assistente-loja] historico", e)
+    }
+
     return json({ resposta: texto, videos: sugeridos })
   } catch (e) {
     console.error("[assistente-loja]", e)

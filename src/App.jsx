@@ -147,6 +147,7 @@ const CadastroCliente = lazy(() => import('./pages/CadastroCliente'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Upgrade = lazy(() => import('./pages/Upgrade'))
 const SuperAdminVideos = lazy(() => import('./pages/SuperAdminVideos'))
+const SuperAdminAssistente = lazy(() => import('./pages/SuperAdminAssistente'))
 const Clientes = lazy(() => import('./pages/Clientes'))
 const Produtos = lazy(() => import('./pages/Produtos'))
 const CardapioIfood = lazy(() => import('./pages/CardapioIfood'))
@@ -296,6 +297,7 @@ export default function App() {
             <Route path="/super-admin/financeiro" element={<SuperAdminFinanceiro />} />
             <Route path="/super-admin/despesas" element={<SuperAdminDespesas />} />
             <Route path="/super-admin/videos" element={<SuperAdminVideos />} />
+            <Route path="/super-admin/assistente" element={<SuperAdminAssistente />} />
           </Route>
 
           <Route element={<LayoutOrLanding />}>

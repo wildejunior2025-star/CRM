@@ -23,19 +23,57 @@ const SUGESTOES = [
   'O que mais vendeu essa semana?',
 ]
 
+// Quantas idas e voltas antigas reabrem junto com o balão. Mais que isso vira
+// uma rolagem longa que ninguém lê — quem quer o histórico inteiro tem a tela.
+const HISTORICO_NA_TELA = 15
+
 export default function AssistenteLoja() {
-  const { profile } = useAuth()
+  const { user, profile } = useAuth()
   const [aberto, setAberto] = useState(false)
   const [msgs, setMsgs] = useState([])       // { role, content, videos? }
   const [texto, setTexto] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState(null)
   const [video, setVideo] = useState(null)   // vídeo aberto no lightbox
+  const [carregou, setCarregou] = useState(false)
   const fimRef = useRef(null)
   const inputRef = useRef(null)
 
   useEffect(() => { fimRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs, enviando])
   useEffect(() => { if (aberto) inputRef.current?.focus() }, [aberto])
+
+  // Busca o histórico só na primeira vez que ele abre o balão. Buscar no
+  // carregamento do sistema seria uma consulta a mais em toda tela, pra uma
+  // caixa que na maioria dos dias nem é aberta.
+  useEffect(() => {
+    if (!aberto || carregou || !user?.id) return
+    setCarregou(true)
+    supabase.from('assistente_conversas')
+      .select('pergunta, resposta, videos, created_at')
+      .eq('user_id', user.id).is('oculto_em', null)
+      .order('created_at', { ascending: false }).limit(HISTORICO_NA_TELA)
+      .then(({ data }) => {
+        if (!data?.length) return
+        const antigas = []
+        for (const c of data.reverse()) {
+          antigas.push({ role: 'user', content: c.pergunta })
+          antigas.push({ role: 'assistant', content: c.resposta, videos: c.videos ?? [] })
+        }
+        // Concatena em vez de sobrescrever: se ele já perguntou algo enquanto
+        // isto carregava, a pergunta dele não pode sumir da tela.
+        setMsgs(m => [...antigas, ...m])
+      })
+  }, [aberto, carregou, user?.id])
+
+  // Limpar esconde a conversa DELE. Do seu lado (Super Admin) as perguntas
+  // continuam — é o que mostra onde o sistema está confundindo os lojistas.
+  async function limpar() {
+    setMsgs([]); setErro(null)
+    if (!user?.id) return
+    await supabase.from('assistente_conversas')
+      .update({ oculto_em: new Date().toISOString() })
+      .eq('user_id', user.id).is('oculto_em', null)
+  }
 
   useEffect(() => {
     if (!aberto) return
@@ -97,7 +135,7 @@ export default function AssistenteLoja() {
             <span style={{ fontSize: 11.5, opacity: .85 }}>Pergunte sobre seus números ou sobre o sistema</span>
           </div>
           {msgs.length > 0 && (
-            <button type="button" onClick={() => { setMsgs([]); setErro(null) }} title="Limpar conversa" style={S.btnTopo}>⟲</button>
+            <button type="button" onClick={limpar} title="Limpar conversa" style={S.btnTopo}>⟲</button>
           )}
           <button type="button" onClick={() => setAberto(false)} aria-label="Fechar" style={S.btnTopo}>×</button>
         </div>
