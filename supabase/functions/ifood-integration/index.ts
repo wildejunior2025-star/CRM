@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
     if (acao === "catalogo_upload_imagem") return json(await runUploadImagem(sb, body?.empresa_id, body?.image))
     if (acao === "catalogo_salvar_item") return json(await runSalvarItem(sb, body?.empresa_id, body?.payload))
     if (acao === "catalogo_enviar_loja") return json(await runEnviarDaLoja(sb, body?.empresa_id, body))
-    if (acao === "produto_foto_da_url") return json(await runFotoDaUrl(sb, body?.empresa_id, body?.produto_id, body?.url))
+    if (acao === "produto_foto_da_url") return json(await runFotoDaUrl(sb, body?.empresa_id, body?.produto_id, body?.url, body?.image))
     if (acao === "catalogo_fotos_para_ca") return json(await runTrazerFotos(sb, body?.empresa_id))
     if (acao === "catalogo_excluir_por_produto") return json(await runExcluirPorProduto(sb, body?.empresa_id, body?.item_id, body?.product_id))
     if (acao === "catalogo_excluir_categoria") return json(await runExcluirCategoria(sb, body?.empresa_id, body?.categoria_id))
@@ -445,6 +445,7 @@ async function ensureCategoria(sb: any, empresaId: string, nome: string): Promis
 // é melhor que produto sem foto, e não vale derrubar a importação por causa disso.
 async function guardarFotoLocal(sb: any, empresaId: string, urlIfood: string): Promise<string> {
   try {
+    // fetch resolve data-uri também, então imagem em base64 entra pelo mesmo caminho.
     const r = await fetch(urlIfood)
     if (!r.ok) return urlIfood
     const bytes = new Uint8Array(await r.arrayBuffer())
@@ -475,14 +476,17 @@ async function guardarFotoLocal(sb: any, empresaId: string, urlIfood: string): P
 // guardando no NOSSO storage. Nunca aponta pro endereço de fora: o dia em que o
 // site mudar a URL, o cardápio fica sem imagem — foi o que quase aconteceu com as
 // fotos que vinham penduradas no iFood.
-async function runFotoDaUrl(sb: any, empresaId: string, produtoId: string, url: string) {
-  if (!empresaId || !produtoId || !url) return { ok: false, error: "empresa_id, produto_id e url obrigatórios" }
+async function runFotoDaUrl(sb: any, empresaId: string, produtoId: string, url: string, image?: string) {
+  // `image` (data-uri) entra quando a foto foi tratada antes de subir — recorte
+  // de tarja de supermercado, por exemplo. `url` é o caminho normal.
+  if (!empresaId || !produtoId || (!url && !image)) return { ok: false, error: "empresa_id, produto_id e url (ou image) obrigatórios" }
   const { data: prod } = await sb.from("produtos").select("id, nome")
     .eq("empresa_id", empresaId).eq("id", produtoId).maybeSingle()
   if (!prod) return { ok: false, error: "produto não encontrado nesta loja" }
 
-  const nova = await guardarFotoLocal(sb, empresaId, url)
-  if (nova === url) return { ok: false, error: "não deu pra baixar/guardar essa imagem" }
+  const origem = image ?? url
+  const nova = await guardarFotoLocal(sb, empresaId, origem)
+  if (nova === origem) return { ok: false, error: "não deu pra baixar/guardar essa imagem" }
 
   const { error } = await sb.from("produtos").update({ foto_url: nova }).eq("id", produtoId)
   if (error) return { ok: false, error: error.message }
