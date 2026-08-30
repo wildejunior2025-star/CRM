@@ -77,6 +77,7 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
   const [msg, setMsg] = useState(null)                 // { tipo, texto }
   const [busca, setBusca] = useState('')
   const [criando, setCriando] = useState(false)        // formulário de item aberto?
+  const [abertos, setAbertos] = useState(() => new Set())  // itens com os complementos à mostra
 
   const notify = (tipo, texto) => setMsg({ tipo, texto })
 
@@ -237,17 +238,42 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
   // — senão a primeira coisa que aparece é um formulário vazio, e não o cardápio.
   const formAberto = !autoCarregar || criando || item.salvo || !itemEmBranco(item)
 
+  // Busca também dentro dos complementos: uma quentinha sozinha traz 20+ opções
+  // (feijão, arroz, macarrão...), e quem quer pausar "Feijoada" precisa achar a
+  // Feijoada, não decorar em qual item ela mora.
+  const q = norm(busca)
+  const opcoesDe = (it) => (it.grupos ?? []).flatMap(g => g.opcoes ?? [])
+  const casaItem = (it) => norm(it.nome).includes(q) || norm(it.categoriaNome).includes(q)
+  const casaComplemento = (it) => opcoesDe(it).some(o => norm(o.nome).includes(q))
+
   // Agrupa por categoria na mesma ordem em que o iFood devolveu, pra tela ficar
   // parecida com o cardápio que o lojista vê no portal.
-  const filtrados = busca.trim()
-    ? salvos.filter(it => norm(it.nome).includes(norm(busca)) || norm(it.categoriaNome).includes(norm(busca)))
-    : salvos
+  const filtrados = q ? salvos.filter(it => casaItem(it) || casaComplemento(it)) : salvos
   const porCategoria = []
   for (const it of filtrados) {
     const nome = it.categoriaNome || 'Sem categoria'
     const grupo = porCategoria.find(g => g.nome === nome)
     if (grupo) grupo.itens.push(it)
     else porCategoria.push({ nome, itens: [it] })
+  }
+
+  // O que mostrar dos complementos de um item:
+  // - recolhido por padrão (a lista aberta empurrava o cardápio pra fora da tela);
+  // - aberto quando o lojista clica na seta → mostra TODOS;
+  // - aberto sozinho quando a busca casou um complemento → mostra SÓ os que
+  //   casaram, que é o caminho curto pra pausar aquele.
+  function complementosVisiveis(it) {
+    const todas = opcoesDe(it)
+    if (todas.length === 0) return { aberto: false, opcoes: [], total: 0, porBusca: false }
+    const clicado = abertos.has(it.itemId)
+    const casadas = q ? todas.filter(o => norm(o.nome).includes(q)) : []
+    const porBusca = !clicado && casadas.length > 0
+    return {
+      aberto: clicado || porBusca,
+      opcoes: porBusca ? casadas : todas,
+      total: todas.length,
+      porBusca,
+    }
   }
 
   return (
@@ -376,12 +402,33 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {cat.itens.map(it => {
               const pausado = it.status === 'UNAVAILABLE'
+              const comp = complementosVisiveis(it)
               return (
                 <div key={it.itemId} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <div style={{ fontWeight: 600, fontSize: 13.5 }}>
                       {it.imgPreview && <img src={it.imgPreview} alt='' style={{ width: 22, height: 22, borderRadius: 4, objectFit: 'cover', verticalAlign: 'middle', marginRight: 6 }} />}
                       {it.nome}{it.preco ? ` · R$ ${Number(it.preco).toFixed(2)}` : ''}{pausado ? ' · ⏸' : ''}
+                      {comp.total > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setAbertos(prev => {
+                            const s = new Set(prev)
+                            // Se está aberto SÓ por causa da busca, o primeiro clique
+                            // deve abrir de vez (mostrar todos), não fechar.
+                            comp.aberto && !comp.porBusca ? s.delete(it.itemId) : s.add(it.itemId)
+                            return s
+                          })}
+                          style={{
+                            marginLeft: 8, padding: '2px 8px', borderRadius: 6, cursor: 'pointer',
+                            border: '1px solid var(--border)', background: 'transparent',
+                            color: 'var(--text-muted)', fontSize: 11.5, fontWeight: 600,
+                          }}
+                          title={comp.aberto ? 'Esconder os complementos' : 'Ver os complementos'}
+                        >
+                          {comp.aberto ? '▾' : '▸'} {comp.total} complemento{comp.total > 1 ? 's' : ''}
+                        </button>
+                      )}
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button type="button" style={btnOut} onClick={() => editar(it)}>✏ Editar</button>
@@ -391,9 +438,18 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
                       </button>
                     </div>
                   </div>
-                  {it.grupos.flatMap(g => g.opcoes).length > 0 && (
+                  {comp.aberto && (
                     <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                      {it.grupos.flatMap(g => g.opcoes).map(o => {
+                      {comp.porBusca && (
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 2 }}>
+                          {comp.opcoes.length} de {comp.total} complemento{comp.total > 1 ? 's' : ''} com “{busca.trim()}” —{' '}
+                          <button type="button" onClick={() => setAbertos(prev => new Set(prev).add(it.itemId))}
+                            style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', color: RED, fontWeight: 700, fontSize: 11.5 }}>
+                            ver todos
+                          </button>
+                        </div>
+                      )}
+                      {comp.opcoes.map(o => {
                         const op = o.status === 'UNAVAILABLE'
                         return (
                           <div key={o.opcaoId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12.5 }}>
