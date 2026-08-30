@@ -41,7 +41,7 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
     // categoria apareceria pela metade sem ninguém notar.
     fetchAll(() =>
       supabase.from('produtos')
-        .select('id, nome, categoria, preco_venda, foto_url')
+        .select('id, nome, categoria, preco_venda, foto_url, ifood_item_id')
         .eq('empresa_id', empresaId)
         .eq('ativo', true)
         .order('categoria')
@@ -88,6 +88,7 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
     for (let i = 0; i < ids.length; i += POR_LEVA) levas.push(ids.slice(i, i + POR_LEVA))
 
     let enviados = 0
+    let atualizados = 0
     const avisos = []
     // A categoria nova é criada na PRIMEIRA leva; as seguintes vão pro id que
     // ela devolveu. Sem isso, cada leva criaria uma categoria repetida no iFood
@@ -110,18 +111,23 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
         break
       }
       enviados += d.enviados
+      atualizados += d.atualizados ?? 0
       avisos.push(...(d.avisos ?? []))
       if (d.reusouCategoria) avisos.push(`Já existia a categoria "${d.reusouCategoria}" no iFood — os itens foram pra ela.`)
       destinoId = destinoId ?? d.categoriaId
     }
 
     setProgresso(null)
+    const feitos = enviados + atualizados
     setMsg({
-      tipo: enviados === 0 ? 'erro' : avisos.length ? 'aviso' : 'ok',
-      texto: `${enviados} de ${ids.length} item(ns) publicado(s) no iFood.`,
+      tipo: feitos === 0 ? 'erro' : avisos.length ? 'aviso' : 'ok',
+      texto: [
+        enviados > 0 ? `${enviados} item(ns) novo(s) no iFood` : null,
+        atualizados > 0 ? `${atualizados} atualizado(s)` : null,
+      ].filter(Boolean).join(' · ') + ` (de ${ids.length} escolhido(s)).`,
       avisos,
     })
-    if (enviados > 0) { setMarcados(new Set()); onPronto?.() }
+    if (feitos > 0) { setMarcados(new Set()); onPronto?.(); setProdutos(null) }
     setEnviando(false)
   }
 
@@ -216,6 +222,8 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
                       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {p.nome}
                         {!p.foto_url && <span style={{ color: 'var(--text-muted)', fontSize: 11 }}> · sem foto</span>}
+                        {/* Já publicado: reenviar atualiza o item de lá, não cria outro. */}
+                        {p.ifood_item_id && <span style={{ color: '#16a34a', fontSize: 11 }}> · 🔗 já no iFood, vai atualizar</span>}
                       </span>
                       <span style={{ flexShrink: 0, color: 'var(--text-muted)' }}>R$ {reais(p.preco_venda)}</span>
                       <span style={{ flexShrink: 0, color: RED, fontWeight: 700 }}>→ R$ {reais(comAcrescimo(p.preco_venda))}</span>

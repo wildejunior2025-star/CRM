@@ -749,7 +749,7 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
   const pct = Number(body?.acrescimo_pct ?? 0) || 0
   const { data: produtos } = await sb
     .from("produtos")
-    .select("id, nome, descricao, preco_venda, foto_url")
+    .select("id, nome, descricao, preco_venda, foto_url, ifood_item_id, ifood_product_id")
     .eq("empresa_id", empresaId)
     .in("id", ids)
   if (!produtos?.length) return { ok: false, error: "produtos não encontrados" }
@@ -771,7 +771,8 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
   }
 
   const avisos: string[] = []
-  let enviados = 0
+  let enviados = 0      // itens novos no iFood
+  let atualizados = 0   // já estavam lá e foram atualizados
   for (const p of produtos) {
     let imagePath: string | null = null
     if (p.foto_url) {
@@ -785,12 +786,19 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
       }
     }
     const preco = Math.round(Number(p.preco_venda ?? 0) * (1 + pct / 100) * 100) / 100
+    // Produto que JÁ foi publicado reusa o id do item lá: o PUT do iFood é por
+    // id, então mandar o mesmo id atualiza (preço, foto, descrição) em vez de
+    // criar um segundo. Sem isso, reenviar a categoria duplicava o cardápio —
+    // e o vínculo passava a apontar pro item novo, deixando o antigo órfão.
     const r = await runSalvarItem(sb, empresaId, {
       categoriaId, nome: p.nome, descricao: p.descricao ?? "", preco, imagePath,
+      itemId: p.ifood_item_id ?? undefined,
+      productId: p.ifood_product_id ?? undefined,
       externalCode: `FWC-${String(p.id).slice(0, 8)}`,
     })
     if (r.ok) {
-      enviados++
+      if (p.ifood_item_id) atualizados++
+      else enviados++
       // Guarda o par produto↔item: é o que permite pausar aqui e pausar lá
       // (gatilho trg_ifood_espelha_pausa, migração 0207).
       await sb.from("produtos")
@@ -798,7 +806,7 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
         .eq("id", p.id)
     } else avisos.push(`${p.nome}: ${String(r.error).slice(0, 120)}`)
   }
-  return { ok: true, enviados, total: produtos.length, categoriaId, avisos, reusouCategoria }
+  return { ok: true, enviados, atualizados, total: produtos.length, categoriaId, avisos, reusouCategoria }
 }
 
 // O iFood só aceita imagem em base64; a nossa fica no storage do Supabase.
