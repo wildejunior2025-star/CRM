@@ -521,7 +521,11 @@ ${catalogo}`
         },
         body: JSON.stringify({
           model: "claude-opus-5",
-          max_tokens: 2000,
+          // Teto alto de proposito: o raciocinio do modelo conta aqui dentro, e
+          // um teto curto corta a resposta no meio da frase. Quem manda no
+          // tamanho da resposta e a instrucao "ate 5 frases" la em cima — isto
+          // aqui e so a trava de seguranca.
+          max_tokens: 8000,
           // Esforco baixo: a tarefa e escolher a consulta certa e ler o resultado.
           // Alto so deixaria o dono esperando na frente do cliente e sairia caro.
           output_config: { effort: "low" },
