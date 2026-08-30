@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
     if (acao === "test") return json(await runTest(sb, body?.empresa_id))
     if (acao === "status") return json(await runStatus(sb, body?.pedido_id, body?.novo_status))
     if (acao === "verify_delivery_code") return json(await runVerifyDeliveryCode(sb, body?.pedido_id, body?.codigo))
-    if (acao === "catalogo") return json(await runImportarCatalogo(sb, body?.empresa_id))
+    if (acao === "catalogo") return json(await runImportarCatalogo(sb, body?.empresa_id, body?.categoria_ids))
     if (acao === "catalogo_listar") return json(await runCatalogoListar(sb, body?.empresa_id))
     if (acao === "catalogo_pausar") return json(await runCatalogoPausar(sb, body?.empresa_id, body?.item_id, body?.pausar))
     // ── Gerência de cardápio no iFood (homologação módulo Catalog) ──
@@ -465,7 +465,10 @@ async function upsertProduto(
 }
 
 // Importa o cardápio inteiro do iFood (Opção A — botão "Importar cardápio").
-async function runImportarCatalogo(sb: any, empresaId: string) {
+// `categoriaIds` vazio = cardápio inteiro (como sempre foi). Com a lista, traz
+// só as categorias escolhidas — quem já tem as bebidas cadastradas aqui e quer
+// só o Prato Executivo não precisa trazer o resto junto.
+async function runImportarCatalogo(sb: any, empresaId: string, categoriaIds?: string[]) {
   if (!empresaId) return { ok: false, error: "empresa_id obrigatório" }
   const { data: cfg } = await sb.from("ifood_config").select("*").eq("empresa_id", empresaId).maybeSingle()
   if (!cfg) return { ok: false, error: "iFood não configurado" }
@@ -491,7 +494,9 @@ async function runImportarCatalogo(sb: any, empresaId: string) {
     const cRes = await fetch(`${IFOOD}/catalog/v2.0/merchants/${mid}/catalogs/${catalogId}/categories?includeItems=true`, { headers: auth })
     if (!cRes.ok) continue
     const categorias: any[] = await cRes.json()
+    const filtro = Array.isArray(categoriaIds) && categoriaIds.length > 0 ? new Set(categoriaIds) : null
     for (const c of (Array.isArray(categorias) ? categorias : [])) {
+      if (filtro && !filtro.has(c.id)) continue
       const nomeCat = c.name ?? "iFood"
       for (const it of (c.items ?? [])) {
         total++
