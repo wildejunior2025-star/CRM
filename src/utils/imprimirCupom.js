@@ -270,18 +270,23 @@ async function imprimirViaAppFwc(rota, corpo) {
 // opts.auto=true → impressão AUTOMÁTICA (pedido novo): o app respeita o dedupe por
 // pedido, pra não bater 2 vias quando ele já imprimiu o mesmo pedido pelo tempo
 // real. Sem opts.auto (reimpressão manual pelos botões) o app força a impressão.
+// Devolve POR ONDE saiu: 'app' | 'qz' | 'navegador'. Quem chama pode avisar o
+// usuário — cair no navegador sem dizer nada é o que faz o lojista apertar
+// "reimprimir" e levar um susto com a janela do Chrome, achando que o sistema
+// ignorou a térmica.
 export async function imprimirCupom(pedido, empresa = {}, opts = {}) {
-  if (await imprimirViaAppFwc('imprimir', { pedido, auto: opts.auto === true })) return
+  if (await imprimirViaAppFwc('imprimir', { pedido, auto: opts.auto === true })) return 'app'
   const printer = impressoraEscolhida()
   if (printer) {
     try {
       await imprimirViaQz(pedido, empresa, printer)
-      return
+      return 'qz'
     } catch {
       // QZ indisponível / falhou → usa o fallback do navegador
     }
   }
   imprimirCupomNavegador(pedido, empresa)
+  return 'navegador'
 }
 
 // ──────────────── Impressão genérica de HTML (qualquer cupom) ────────────────

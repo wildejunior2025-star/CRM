@@ -3759,8 +3759,19 @@ export default function PainelPedidos() {
     patchConfigLocal({ aceitarAuto: novo })
   }
 
-  function handleImprimir(pedido) {
-    imprimirCupom(pedido, empresa)
+  async function handleImprimir(pedido) {
+    // Sem app FWC e sem QZ, a única saída é o navegador — mas aí o lojista
+    // precisa SABER, senão ele aperta reimprimir, aparece a janela do Chrome
+    // perguntando a impressora e ele conclui que o sistema está quebrado.
+    const via = await imprimirCupom(pedido, empresa)
+    if (via === 'navegador') {
+      alert([
+        'Não achei o app Impressora FWC neste computador (nem o QZ Tray).',
+        '',
+        'Abri a impressão pelo navegador. Se a térmica é a da loja, confira se o app',
+        'Impressora FWC está aberto E LOGADO — sem login ele também não imprime sozinho.',
+      ].join('\n'))
+    }
   }
 
   // Impressão pela térmica Bluetooth do CELULAR (Web Bluetooth) — caminho
@@ -3807,7 +3818,17 @@ export default function PainelPedidos() {
       alert('Impressora celular (Bluetooth): ' + (e?.message || e))
       return
     }
-    imprimirCupom(pedido, empresa)
+    // Mesmo aviso do handleImprimir: cair no navegador em silêncio faz o
+    // lojista achar que o botão ignorou a térmica da loja.
+    const via = await imprimirCupom(pedido, empresa)
+    if (via === 'navegador') {
+      alert([
+        'Não achei o app Impressora FWC neste computador (nem o QZ Tray).',
+        '',
+        'Abri a impressão pelo navegador. Se a térmica é a da loja, confira se o app',
+        'Impressora FWC está aberto E LOGADO — sem login ele também não imprime sozinho.',
+      ].join('\n'))
+    }
   }
 
   // ── Religa a térmica Bluetooth assim que o gestor abre ────────────────────
