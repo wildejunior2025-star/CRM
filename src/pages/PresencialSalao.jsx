@@ -105,6 +105,8 @@ export default function PresencialSalao() {
   const [semCozinha, setSemCozinha] = useState(false)
   const [avisoImpressao, setAvisoImpressao] = useState(null) // remessa que nao saiu no papel
   const [reimprimindo, setReimprimindo] = useState(false)
+  const [reimpAberto, setReimpAberto] = useState(false)   // escolher o que reimprimir
+  const [reimpSel, setReimpSel] = useState(() => new Set())
   const [salvandoCoz, setSalvandoCoz] = useState(false)
   const [salvandoObrig, setSalvandoObrig] = useState(false)
   const [mesas, setMesas]     = useState([])
@@ -2247,8 +2249,13 @@ export default function PresencialSalao() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 {!semCozinha && (comandaSel.comanda_itens ?? []).length > 0 && (
                   <button type="button" disabled={reimprimindo}
-                    onClick={() => reimprimir(comandaSel.comanda_itens ?? [])}
-                    title="Sai de novo o papel da cozinha com todos os itens desta comanda"
+                    onClick={() => {
+                      // Já vem tudo marcado: reimprimir a comanda inteira é o
+                      // caso comum. Quem quer só um item desmarca o resto.
+                      setReimpSel(new Set((comandaSel.comanda_itens ?? []).map(i => i.id)))
+                      setReimpAberto(true)
+                    }}
+                    title="Escolher o que sai de novo no papel da cozinha"
                     style={{ fontSize: 12, fontWeight: 800, padding: '5px 12px', borderRadius: 999,
                       cursor: reimprimindo ? 'wait' : 'pointer',
                       border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)' }}>
@@ -2793,6 +2800,83 @@ export default function PresencialSalao() {
 
       {/* Trilha da mesa: item por item, quem lancou e quem entregou, com hora.
           "Quem fechou" nao aparece de proposito — a conta ainda esta aberta. */}
+      {/* ── Escolher o que reimprimir ───────────────────────────────────────
+          Antes o botão mandava a comanda inteira de uma vez. Quando falta UM
+          item (o cozinheiro perdeu a folha, saiu borrado), reimprimir tudo faz
+          a cozinha refazer o que já está pronto. */}
+      {reimpAberto && comandaSel && (() => {
+        const itens = comandaSel.comanda_itens ?? []
+        // Categoria marcada como "não imprime" (as bebidas da Saidera, por
+        // exemplo) não vira papel em impressora nenhuma — mostrar como
+        // escolhível seria prometer um papel que não sai.
+        const semPapel = i => i.setor === 'nenhum'
+        const alternar = id => setReimpSel(prev => {
+          const n = new Set(prev)
+          if (n.has(id)) n.delete(id); else n.add(id)
+          return n
+        })
+        const marcados = itens.filter(i => reimpSel.has(i.id) && !semPapel(i))
+        return (
+        <div onClick={() => !reimprimindo && setReimpAberto(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1100,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} className="sal-separar"
+            style={{ width: '100%', maxWidth: 520, maxHeight: '88vh', display: 'flex', flexDirection: 'column',
+              background: 'var(--bg)', borderRadius: 16, border: '1px solid var(--border)' }}>
+
+            <div style={{ flexShrink: 0, padding: '20px 22px 12px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 19, fontWeight: 800 }}>Reimprimir</div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.4 }}>
+                Marque o que precisa sair de novo no papel.
+              </div>
+            </div>
+
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 22px' }}>
+              {itens.map(i => {
+                const nada = semPapel(i)
+                const marcado = !nada && reimpSel.has(i.id)
+                return (
+                  <button key={i.id} type="button" disabled={nada} onClick={() => alternar(i.id)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
+                      padding: '10px 12px', marginBottom: 6, borderRadius: 10,
+                      cursor: nada ? 'default' : 'pointer', opacity: nada ? .45 : 1,
+                      border: `1.5px solid ${marcado ? 'var(--primary)' : 'var(--border)'}`,
+                      background: marcado ? 'rgba(124,58,237,.12)' : 'transparent', color: 'var(--text)' }}>
+                    <span style={{ width: 20, height: 20, flexShrink: 0, borderRadius: 6,
+                      border: `2px solid ${marcado ? 'var(--primary)' : '#64748b'}`,
+                      background: marcado ? 'var(--primary)' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: '#fff', fontSize: 13, fontWeight: 900 }}>{marcado ? '✓' : ''}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'block', fontSize: 15, fontWeight: 700 }}>{i.quantidade}× {i.nome}</span>
+                      <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                        {nada ? 'categoria marcada como "não imprime"' : (i.setor === 'cozinha' ? 'cozinha' : 'salão')}
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div style={{ flexShrink: 0, padding: '12px 22px 20px', borderTop: '1px solid var(--border)' }}>
+              <button type="button" disabled={reimprimindo || marcados.length === 0}
+                onClick={() => { setReimpAberto(false); reimprimir(marcados) }}
+                style={{ width: '100%', padding: '13px 0', borderRadius: 12, border: 'none',
+                  cursor: reimprimindo ? 'wait' : 'pointer', background: 'var(--primary)', color: '#fff',
+                  fontWeight: 800, fontSize: 15.5, opacity: marcados.length === 0 ? .5 : 1 }}>
+                {reimprimindo ? 'Imprimindo...' : `🖨️ Reimprimir ${marcados.length} item(ns)`}
+              </button>
+              <button type="button" onClick={() => setReimpAberto(false)} disabled={reimprimindo}
+                style={{ width: '100%', marginTop: 8, padding: '12px 0', borderRadius: 12, cursor: 'pointer',
+                  border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 800, fontSize: 15 }}>
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+        )
+      })()}
+
       {/* ── Separar a conta de quem vai embora (mig 0205) ──────────────────
           Marca o que é dela, escreve o nome, e os itens viram uma comanda
           própria. A mesa continua aberta com o resto. */}
