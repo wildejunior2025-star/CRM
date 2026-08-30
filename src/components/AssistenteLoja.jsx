@@ -169,13 +169,13 @@ export default function AssistenteLoja() {
 // que é onde dá pra tratar o desktop e o celular de forma diferente.
 const S = {
   fab: {
-    display: 'inline-flex', alignItems: 'center', gap: 8,
-    padding: '13px 20px', borderRadius: 999, border: 'none', cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 7,
+    padding: '12px 17px', borderRadius: 999, border: 'none', cursor: 'pointer',
     background: 'var(--primary)', color: 'var(--primary-contrast)',
-    fontSize: 14.5, fontWeight: 800, fontFamily: 'inherit',
+    fontSize: 14, fontWeight: 800, fontFamily: 'inherit', whiteSpace: 'nowrap',
     boxShadow: '0 8px 26px var(--primary-ring)',
   },
-  fabTexto: { fontSize: 14.5, fontWeight: 800 },
+  fabTexto: { fontSize: 14, fontWeight: 800 },
   janela: {
     display: 'flex', flexDirection: 'column',
     background: 'var(--surface)', color: 'var(--text)',

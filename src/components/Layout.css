@@ -41,6 +41,9 @@
   background: var(--surface);
   border-right: 1px solid var(--border);
   padding: 20px 12px;
+  /* Vão no pé pro botão flutuante da IA (.ia-fab, AssistenteLoja.css), que
+     pousa em cima da lateral. Sem isso ele senta no "Sair". */
+  padding-bottom: 76px;
   transition: background-color 160ms ease, border-color 160ms ease;
   z-index: 200;
 }
