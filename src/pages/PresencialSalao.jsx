@@ -2106,6 +2106,12 @@ export default function PresencialSalao() {
                     se um item tem que sair da conta, tem que sair antes. A trilha
                     ja existia no banco desde o primeiro item lancado — faltava
                     poder olhar enquanto a mesa ainda esta aberta. */}
+              </div>
+
+              {/* Os chips ficam NA LINHA do título, não embaixo dele: no celular
+                  eles eram uma quarta linha de cabeçalho, e cabeçalho alto come
+                  a altura da comanda, que é o que o garçom precisa ver. */}
+              <div className="sal-chips">
                 {ehAdmin && comandaSel && (comandaSel.comanda_itens ?? []).length > 0 && (
                   <button type="button" onClick={() => setVerMovimentos(true)}
                     className="sal-chip" title="Quem lançou e quem entregou cada item"

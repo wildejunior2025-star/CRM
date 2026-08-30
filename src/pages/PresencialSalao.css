@@ -624,3 +624,16 @@ html[data-teclado='aberto'] .sal-overlay {
   .sal-chip { width: auto; height: auto; padding: 4px 12px; font-size: 12.5px; }
   .sal-chip-txt { display: inline; font-size: 12.5px; }
 }
+
+/* Fileira de chips na mesma linha do título da mesa. No celular economiza uma
+   linha inteira do cabeçalho; no PC fica ao lado do nome, com o texto. */
+.sal-chips {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
