@@ -122,10 +122,16 @@ export default function CardapioIfood() {
         </div>
       </div>
 
-      <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px', maxWidth: 720 }}>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 8px', maxWidth: 720 }}>
         Este é o cardápio que está <strong>no ar no iFood</strong> — separado do seu cardápio da loja,
         porque os preços e os nomes costumam ser diferentes nos dois. O que você mudar aqui muda lá na hora.
         {cfg.ambiente === 'teste' && <strong style={{ color: RED }}> (Ambiente de teste.)</strong>}
+      </p>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px', maxWidth: 720 }}>
+        🔗 <strong>Produto publicado daqui fica ligado ao item de lá:</strong> quando você pausar no
+        seu catálogo (acabou o frango), ele pausa no iFood na mesma hora — não precisa lembrar de
+        pausar nos dois lugares. Vale pro que você enviou por aqui e pro que importou do iFood.
+        Pausar direto no Portal do Parceiro não volta pra cá: aparece quando esta tela for aberta.
       </p>
 
       {msg && (

@@ -427,13 +427,23 @@ async function ensureCategoria(sb: any, empresaId: string, nome: string) {
 async function upsertProduto(
   sb: any,
   empresaId: string,
-  item: { nome: string; preco: number; descricao?: string | null; foto?: string | null; categoria?: string | null; publicar?: boolean },
+  item: { nome: string; preco: number; descricao?: string | null; foto?: string | null; categoria?: string | null; publicar?: boolean; ifoodItemId?: string | null; ifoodProductId?: string | null },
 ): Promise<boolean> {
   const nome = (item.nome ?? "").trim()
   if (!nome) return false
-  const { data: existe } = await sb.from("produtos").select("id")
+  const { data: existe } = await sb.from("produtos").select("id, ifood_item_id")
     .eq("empresa_id", empresaId).ilike("nome", nome).maybeSingle()
-  if (existe) return false
+  if (existe) {
+    // Produto que já existe aqui não é recriado, mas ganha o vínculo com o item
+    // do iFood — assim importar numa loja que já tem o cardápio montado serve
+    // pra casar os dois lados sem duplicar nada.
+    if (item.ifoodItemId && !existe.ifood_item_id) {
+      await sb.from("produtos")
+        .update({ ifood_item_id: item.ifoodItemId, ifood_product_id: item.ifoodProductId ?? null })
+        .eq("id", existe.id)
+    }
+    return false
+  }
   const cat = (item.categoria ?? "iFood").trim() || "iFood"
   await ensureCategoria(sb, empresaId, cat)
   const preco = Number(item.preco) || 0
@@ -447,6 +457,8 @@ async function upsertProduto(
     preco_app: preco,
     ativo: true,
     disponivel_delivery: item.publicar !== false,
+    ifood_item_id: item.ifoodItemId ?? null,
+    ifood_product_id: item.ifoodProductId ?? null,
   })
   return !error
 }
@@ -487,6 +499,7 @@ async function runImportarCatalogo(sb: any, empresaId: string) {
         const ok = await upsertProduto(sb, empresaId, {
           nome: it.name, preco, descricao: it.description, foto,
           categoria: nomeCat, publicar: true,
+          ifoodItemId: it.id ?? null, ifoodProductId: it.productId ?? null,
         })
         if (ok) criados++
       }
@@ -776,8 +789,14 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
       categoriaId, nome: p.nome, descricao: p.descricao ?? "", preco, imagePath,
       externalCode: `FWC-${String(p.id).slice(0, 8)}`,
     })
-    if (r.ok) enviados++
-    else avisos.push(`${p.nome}: ${String(r.error).slice(0, 120)}`)
+    if (r.ok) {
+      enviados++
+      // Guarda o par produto↔item: é o que permite pausar aqui e pausar lá
+      // (gatilho trg_ifood_espelha_pausa, migração 0207).
+      await sb.from("produtos")
+        .update({ ifood_item_id: r.itemId, ifood_product_id: r.productId })
+        .eq("id", p.id)
+    } else avisos.push(`${p.nome}: ${String(r.error).slice(0, 120)}`)
   }
   return { ok: true, enviados, total: produtos.length, categoriaId, avisos, reusouCategoria }
 }
