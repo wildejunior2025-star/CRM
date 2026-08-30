@@ -185,9 +185,6 @@ export default function Produtos() {
   // Arquivados: item que já foi vendido não pode ser apagado (o histórico da venda
   // depende dele), então ele sai da lista por aqui. O ref evita recriar o
   // loadProdutos e disparar o useEffect de carga inicial a cada clique.
-  const [verArquivados, setVerArquivados] = useState(false)
-  const verArquivadosRef = useRef(false)
-  const [arquivandoId, setArquivandoId] = useState(null)
   const [page, setPage] = useState(0)
   const [total, setTotal] = useState(0)
   const debounceRef = useRef(null)
@@ -458,9 +455,6 @@ export default function Produtos() {
         .select('*')
         .order('nome', { ascending: true })
         .order('id')
-      q = verArquivadosRef.current
-        ? q.not('arquivado_em', 'is', null)
-        : q.is('arquivado_em', null)
       if (categ) q = q.eq('categoria', categ)
       return q
     }
@@ -828,34 +822,11 @@ export default function Produtos() {
     setError(error.message)
   }
 
-  // Não existe mais "arquivar" a partir daqui: excluir apaga de vez, e as vendas
-  // antigas continuam legíveis porque cada venda guarda o nome e o preço do que
-  // vendeu (migração 0210). A tela "Ver arquivados" e o "Trazer de volta" seguem
-  // aqui para os produtos arquivados no tempo em que a exclusão era barrada.
-  async function desarquivarProduto(p) {
-    const ok = await confirmar({
-      titulo: `Trazer “${p.nome}” de volta?`,
-      texto: 'Ele volta pra lista de produtos já disponível pra vender.',
-      textoOk: 'Sim, trazer de volta',
-    })
-    if (!ok) return
-    setArquivandoId(p.id)
-    const { error } = await supabase
-      .from('produtos')
-      .update({ arquivado_em: null, ativo: true })
-      .eq('id', p.id)
-    setArquivandoId(null)
-    if (error) { setError(error.message); return }
-    loadProdutos(search, categoriaFiltro)
-  }
-
-  function toggleArquivados() {
-    const novo = !verArquivados
-    verArquivadosRef.current = novo
-    setVerArquivados(novo)
-    setPage(0)
-    loadProdutos(search, categoriaFiltro)
-  }
+  // Arquivar saiu de cena: excluir apaga de vez e as vendas antigas continuam
+  // legíveis sozinhas, porque cada venda guarda o nome e o preço do que vendeu
+  // (migração 0210). Sem nada que arquive, a tela "Ver arquivados" só ocupava
+  // espaço — e ela estava vazia em todas as lojas. A coluna arquivado_em segue
+  // no banco por compatibilidade, sem ninguém escrevendo nela.
 
   // Cria uma cópia de um produto (com todos os campos + os vínculos de complementos).
   // Se `novaCategoria` vier, a cópia vai pra essa categoria mantendo o nome (usado ao
@@ -991,13 +962,6 @@ export default function Produtos() {
       <div className="page-header">
         <h1>Produtos</h1>
         <div className="prod-header-acoes">
-          <button
-            className="btn btn-secondary"
-            onClick={toggleArquivados}
-            title="Itens que saíram do cardápio mas já tinham sido vendidos"
-          >
-            {verArquivados ? '← Voltar pros produtos' : '📦 Ver arquivados'}
-          </button>
           <button className="btn btn-secondary" onClick={() => { setCategError(null); setShowCategModal(true) }}>
             ☰ Categorias
           </button>
@@ -1010,19 +974,8 @@ export default function Produtos() {
         </div>
       </div>
 
-      {verArquivados && (
-        <div style={{
-          background: 'rgba(234,179,8,.12)', border: '1px solid #eab308', borderRadius: 10,
-          padding: '12px 16px', marginBottom: '1rem', fontSize: 13.5, lineHeight: 1.5,
-        }}>
-          📦 <strong>Itens arquivados.</strong> São produtos que já tinham sido vendidos, então não dá
-          pra apagar sem bagunçar o faturamento e os relatórios das vendas antigas. Eles não aparecem
-          pra vender em lugar nenhum — e você pode trazer qualquer um de volta quando quiser.
-        </div>
-      )}
-
       {/* Banner link do cardápio */}
-      {!verArquivados && linkCardapio && (
+      {linkCardapio && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: '0.75rem',
           background: 'var(--surface-hover)',
@@ -1207,17 +1160,6 @@ export default function Produtos() {
                   </td>
                   <td className="prod-acoes-cell">
                     <div className="prod-acoes">
-                      {verArquivados ? (
-                        <button
-                          className="btn btn-primary btn-sm"
-                          onClick={() => desarquivarProduto(p)}
-                          disabled={arquivandoId === p.id}
-                          title="Voltar pro cardápio"
-                        >
-                          {arquivandoId === p.id ? '...' : <>↩<span className="btn-label"> Trazer de volta</span></>}
-                        </button>
-                      ) : (
-                        <>
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => openEdit(p)}
@@ -1236,13 +1178,10 @@ export default function Produtos() {
                           <button
                             className="btn btn-danger btn-sm"
                             onClick={() => handleDelete(p)}
-                            disabled={arquivandoId === p.id}
                             title="Excluir"
                           >
-                            {arquivandoId === p.id ? '...' : <>🗑<span className="btn-label"> Excluir</span></>}
+                            🗑<span className="btn-label"> Excluir</span>
                           </button>
-                        </>
-                      )}
                     </div>
                   </td>
                 </tr>
