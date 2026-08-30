@@ -2,8 +2,16 @@
 //
 // Onde ele vê quanto ainda pode perguntar, o que já perguntou e quanto isso
 // consumiu. A pergunta que essa tela responde é sempre a mesma: "posso continuar
-// usando?" — por isso o número grande é PERGUNTAS, não reais. "R$ 3,40
-// restantes" não diz nada pro dono de pizzaria; "dá pra mais 11 perguntas" diz.
+// usando?"
+//
+// O número grande é em REAIS, e não em "quantas perguntas ainda dá". Chegamos a
+// mostrar a contagem e ela saiu: o custo depende do tanto de dado que a IA
+// precisa levantar, então qualquer contagem é chute — e é o tipo de chute que o
+// dono cobra da gente depois, quando não bate.
+//
+// O "como funciona" fica escondido atrás do "?" de propósito. É coisa que se lê
+// uma vez; aberto na tela toda hora vira parede de texto que ele pula — e aí
+// some junto o aviso que importa (usar o sistema não consome nada).
 
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
@@ -24,6 +32,7 @@ export default function AssistenteIA() {
   const [pago, setPago] = useState(false)
   const [erroPix, setErroPix] = useState(null)
   const [copiado, setCopiado] = useState(false)
+  const [comoFunciona, setComoFunciona] = useState(false)
   const timerRef = useRef(null)
 
   async function comprar(valor) {
@@ -104,7 +113,15 @@ export default function AssistenteIA() {
         responde consome um pouquinho — aqui você acompanha quanto ainda dá pra usar.
       </p>
 
-      <div style={{ ...caixa, borderColor: acabou ? 'var(--danger)' : 'var(--border)' }}>
+      <div style={{ ...caixa, borderColor: acabou ? 'var(--danger)' : 'var(--border)', position: 'relative' }}>
+        {/* O "como funciona" é coisa que o dono lê UMA vez. Aberto na tela toda
+            hora, vira parede de texto que ele pula — e aí some junto o aviso
+            que importa (que usar o sistema não consome nada). */}
+        <button type="button" onClick={() => setComoFunciona(v => !v)}
+          aria-label="Como funciona a cobrança" title="Como funciona"
+          style={{ ...S.ajuda, ...(comoFunciona ? S.ajudaAtiva : null) }}>
+          ?
+        </button>
         {/* Número em REAIS, não em "quantas perguntas": o custo depende do
             tamanho de cada pergunta, então qualquer contagem de perguntas seria
             um chute que o dono cobraria da gente depois. */}
@@ -128,6 +145,28 @@ export default function AssistenteIA() {
         <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '12px 0 0' }}>
           Renova em {proximoMes.toLocaleDateString('pt-BR')}.
         </p>
+
+        {comoFunciona && (
+          <div style={S.explicacao}>
+            <strong style={{ fontSize: 13.5, display: 'block', marginBottom: 8 }}>Como funciona a cobrança</strong>
+            <ul style={{ fontSize: 13, lineHeight: 1.65, margin: 0, paddingLeft: 18, color: 'var(--text-muted)' }}>
+              <li>
+                Cada pergunta é cobrada pelo tanto de informação que a inteligência artificial
+                precisa ler e escrever pra te responder. <strong style={{ color: 'var(--text)' }}>Quanto
+                mais dado ela tiver que levantar, mais aquela pergunta custa</strong> — perguntar
+                o faturamento de hoje sai bem mais barato que comparar o ano inteiro.
+              </li>
+              <li>
+                Esse valor vem da <strong style={{ color: 'var(--text)' }}>plataforma de inteligência
+                artificial</strong> que responde, que cobra por uso. Não é uma mensalidade do
+                sistema: você só paga quando pergunta.
+              </li>
+              <li>Sua mensalidade já inclui <strong style={{ color: 'var(--text)' }}>{brl(c.franquia)} por mês</strong> de assistente.</li>
+              <li>Acabou a franquia, sai do saldo comprado. Sem saldo, o robô descansa até o dia 1.</li>
+              <li>Ver seus números pelas telas do sistema <strong style={{ color: 'var(--text)' }}>não consome nada</strong> — o Dashboard e os Relatórios continuam liberados sempre.</li>
+            </ul>
+          </div>
+        )}
       </div>
 
       <div style={{ ...caixa, ...(acabou ? { background: 'var(--primary-bg)', borderColor: 'var(--primary-ring)' } : null) }}>
@@ -183,26 +222,6 @@ export default function AssistenteIA() {
         {erroPix && <p style={{ fontSize: 13, color: 'var(--danger)', margin: '12px 0 0' }}>{erroPix}</p>}
       </div>
 
-      <div style={caixa}>
-        <h2 style={titulo}>Como funciona</h2>
-        <ul style={{ fontSize: 13.5, lineHeight: 1.7, margin: 0, paddingLeft: 18, color: 'var(--text-muted)' }}>
-          <li>
-            Cada pergunta é cobrada pelo tanto de informação que a inteligência artificial
-            precisa ler e escrever pra te responder. <strong style={{ color: 'var(--text)' }}>Quanto
-            mais dado ela tiver que levantar, mais aquela pergunta custa</strong> — perguntar
-            o faturamento de hoje sai bem mais barato que comparar o ano inteiro.
-          </li>
-          <li>
-            Esse valor vem da <strong style={{ color: 'var(--text)' }}>plataforma de inteligência
-            artificial</strong> que responde, que cobra por uso. Não é uma mensalidade do
-            sistema: você só paga quando pergunta.
-          </li>
-          <li>Sua mensalidade já inclui <strong style={{ color: 'var(--text)' }}>{brl(c.franquia)} por mês</strong> de assistente.</li>
-          <li>Acabou a franquia, sai do saldo comprado. Sem saldo, o robô descansa até o dia 1.</li>
-          <li>Ver seus números pelas telas do sistema <strong style={{ color: 'var(--text)' }}>não consome nada</strong> — o Dashboard e os Relatórios continuam liberados sempre.</li>
-        </ul>
-      </div>
-
       {extrato.length > 0 && (
         <div style={caixa}>
           <h2 style={titulo}>Extrato do saldo</h2>
@@ -233,6 +252,23 @@ export default function AssistenteIA() {
       </div>
     </div>
   )
+}
+
+const S = {
+  ajuda: {
+    position: 'absolute', top: 14, right: 14,
+    width: 26, height: 26, borderRadius: '50%', cursor: 'pointer',
+    border: '1px solid var(--border)', background: 'transparent',
+    color: 'var(--text-muted)', fontSize: 14, fontWeight: 800,
+    lineHeight: 1, fontFamily: 'inherit',
+  },
+  ajudaAtiva: {
+    background: 'var(--primary)', color: 'var(--primary-contrast)',
+    borderColor: 'var(--primary)',
+  },
+  explicacao: {
+    marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)',
+  },
 }
 
 const caixa = {
