@@ -26,15 +26,12 @@ export default function IaConsumoMini() {
       title={`R$ ${c.usado.toFixed(2)} de R$ ${c.franquia.toFixed(2)} usados este mês`}>
       <div style={S.linha}>
         <span>Assistente IA</span>
-        <strong style={{ color: cor }}>{c.pct}%</strong>
+        {/* Só a porcentagem — a estimativa de perguntas poluía o canto. Quando
+            acaba, "Acabou" no lugar do número: 100% sozinho não diz o que fazer. */}
+        <strong style={{ color: cor }}>{acabou ? 'Acabou' : `${c.pct}%`}</strong>
       </div>
       <div style={S.trilho}>
         <div style={{ ...S.barra, width: `${c.pct}%`, background: cor }} />
-      </div>
-      <div style={S.rodape}>
-        {acabou
-          ? 'Acabou — toque para comprar saldo'
-          : `dá pra mais ~${c.perguntasRestantes} perguntas`}
       </div>
     </NavLink>
   )
@@ -52,5 +49,4 @@ const S = {
   },
   trilho: { height: 5, borderRadius: 999, background: 'var(--border)', overflow: 'hidden' },
   barra: { height: '100%', borderRadius: 999, transition: 'width 400ms' },
-  rodape: { fontSize: 10.5, color: 'var(--text-muted)', marginTop: 5 },
 }
