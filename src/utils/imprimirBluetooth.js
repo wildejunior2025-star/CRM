@@ -204,12 +204,30 @@ async function garantirConectado() {
 }
 
 // BLE tem MTU pequeno — manda em pedaços.
+// A térmica BLE engasga quando o pacote chega rápido demais: o navegador
+// devolve NetworkError / InvalidStateError num pacote do meio e a impressão
+// INTEIRA era dada como perdida — mesmo com o papel já saindo, porque a
+// impressora imprime o que recebeu. Era isso que fazia o Salão gritar
+// "o papel não saiu" com a comanda na mão do cozinheiro.
+//
+// Tenta o MESMO pacote de novo, com pausa crescente, antes de desistir.
+async function escreverChunk(chunk, tentativas = 3) {
+  for (let t = 1; t <= tentativas; t++) {
+    try {
+      if (_car.writeValueWithoutResponse) await _car.writeValueWithoutResponse(chunk)
+      else await _car.writeValue(chunk)
+      return
+    } catch (e) {
+      if (t === tentativas) throw e
+      await new Promise(r => setTimeout(r, 60 * t))
+    }
+  }
+}
+
 async function escrever(bytes) {
   const TAM = 180
   for (let i = 0; i < bytes.length; i += TAM) {
-    const chunk = bytes.slice(i, i + TAM)
-    if (_car.writeValueWithoutResponse) await _car.writeValueWithoutResponse(chunk)
-    else await _car.writeValue(chunk)
+    await escreverChunk(bytes.slice(i, i + TAM))
     await new Promise(r => setTimeout(r, 18)) // respiro entre pacotes
   }
 }
@@ -416,8 +434,10 @@ export async function imprimirContaMesaCelular(dados) {
 // importa pra TELA: dizer "enviada pra impressora" quando o aparelho estava
 // marcado como cozinha é mentira, e foi o que fez a segunda via "sumir" no bar.
 export async function imprimirMesaSeConectada(tipo, dados) {
+  // Sem conexão NADA foi enviado — este é o único caso em que dá pra afirmar
+  // que não saiu papel.
+  if (!estaConectada() && !(await reconectarSilencioso())) return false
   try {
-    if (!estaConectada() && !(await reconectarSilencioso())) return false
     if (tipo === 'comanda') {
       const meus = itensDoSetor(dados.itens ?? [])
       if (!meus.length) return 'filtrado'
@@ -427,7 +447,14 @@ export async function imprimirMesaSeConectada(tipo, dados) {
       await escrever(montarContaMesaBytes(dados))
     }
     return 'ok'
-  } catch { return false }
+  } catch {
+    // Erro DEPOIS de começar a enviar pra uma impressora conectada. A térmica
+    // imprime o que recebe, então na prática o papel saiu (inteiro ou quase) —
+    // era este caso que fazia o Salão gritar "não saiu" com a comanda já na mão
+    // do cozinheiro. Não é sucesso, mas também não é motivo de alarme: quem
+    // chamar decide, e o botão Reimprimir continua ali.
+    return 'parcial'
+  }
 }
 
 // ── Papel deste aparelho (mig 0184) ─────────────────────────────────────────

@@ -884,7 +884,7 @@ export default function PresencialSalao() {
     // Se a impressão falhar, a marca é desfeita logo abaixo.
     const jaSaiu = (window.__fwcMesaImpressa ||= new Set())
     for (const i of itens) jaSaiu.add(i.id)
-    const ok = await viaBluetooth('comanda', {
+    const dadosComanda = {
       numeroMesa: mesaSel?.numero,
       rotulo: mesaSel?.is_comanda
         ? `${rotuloMesa(mesaSel)}${comandaSel?.nome_cliente ? ' · ' + comandaSel.nome_cliente : ''}`
@@ -897,11 +897,31 @@ export default function PresencialSalao() {
       // é da cozinha ou do salão. Sem ele aqui, o filtro por impressora não teria
       // como separar.
       itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao, setor: i.setor })),
-    })
-    // Não saiu: desfaz a marca, senão o item fica "já impresso" pra sempre e
-    // nem o caminho de reserva do Painel tentaria.
-    if (!ok) for (const i of itens) jaSaiu.delete(i.id)
-    return ok
+    }
+    let ok = await viaBluetooth('comanda', dadosComanda)
+    if (ok) return ok
+
+    // Uma segunda chance antes de gritar. A térmica BLE cai sozinha quando a
+    // tela apaga, e a religação nem sempre pega de primeira — na prática o
+    // papel saía na segunda tentativa (a do Painel, 1,5s depois) e o garçom já
+    // tinha levado o susto do aviso vermelho.
+    await new Promise(r => setTimeout(r, 1200))
+    ok = await viaBluetooth('comanda', dadosComanda)
+    if (ok) return ok
+
+    // Sem Bluetooth NESTE aparelho não quer dizer que não saiu papel: no PC da
+    // loja quem imprime é o app Impressora FWC, que recebe o item pelo tempo
+    // real e nem passa por aqui. Avisar nesse caso é alarme falso a cada
+    // pedido — foi o que aconteceu na Saidera assim que o papel voltou a sair.
+    try {
+      const mod = await import('../utils/imprimirCupom')
+      if (await mod.appFwcDisponivel()) return 'app'
+    } catch { /* sem app neste aparelho */ }
+
+    // Aí sim não saiu em lugar nenhum: desfaz a marca, senão o item fica "já
+    // impresso" pra sempre e nem o caminho de reserva do Painel tentaria.
+    for (const i of itens) jaSaiu.delete(i.id)
+    return false
   }
 
   // Este aparelho imprime só um setor e a remessa não tinha nada dele. É o caso
@@ -925,10 +945,39 @@ export default function PresencialSalao() {
   async function reimprimir(itens) {
     if (!itens?.length || reimprimindo) return
     setReimprimindo(true)
-    const ok = await imprimirComandaAgora(itens)
+    let ok = await viaBluetooth('comanda', {
+      numeroMesa: mesaSel?.numero,
+      rotulo: mesaSel?.is_comanda
+        ? `${rotuloMesa(mesaSel)}${comandaSel?.nome_cliente ? ' · ' + comandaSel.nome_cliente : ''}`
+        : '',
+      nomeLoja: empresaNome,
+      atendente: (comandaSel?.garcom_id && garcons[comandaSel.garcom_id])
+        ? String(garcons[comandaSel.garcom_id]).split(' ')[0] : '',
+      pessoas: comandaSel?.num_pessoas || 0,
+      itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao, setor: i.setor })),
+    })
+    // Sem Bluetooth: manda pelo app FWC do PC. Aqui a chamada é DIRETA (rota
+    // manual do app) porque reimpressão é pedido explícito — o tempo real, que
+    // é quem imprime sozinho, já passou faz tempo.
+    if (!ok) {
+      try {
+        const mod = await import('../utils/imprimirCupom')
+        if (await mod.appFwcDisponivel()) {
+          await mod.imprimirComandaMesaApp({
+            numeroMesa: mesaSel?.numero,
+            rotulo: mesaSel?.is_comanda ? rotuloMesa(mesaSel) : '',
+            comandaId: comandaSel?.id,
+            nomeLoja: empresaNome,
+            itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, preco_unitario: i.preco_unitario, observacao: i.observacao })),
+          })
+          ok = 'app'
+        }
+      } catch { /* sem app neste aparelho */ }
+    }
     setReimprimindo(false)
-    setAvisoImpressao(ok ? null : { itens, quando: Date.now() })
-    if (ok) setPreContaMsg('🖨️ Comanda reimpressa.')
+    const filtro = ok === 'filtrado' ? motivoFiltro(itens) : null
+    setAvisoImpressao(filtro ? { itens, motivo: filtro, quando: Date.now() } : ok ? null : { itens, quando: Date.now() })
+    if (ok && !filtro) setPreContaMsg('🖨️ Comanda reimpressa.')
   }
 
   // Envia o pedido montado pra cozinha: insere TODOS os itens de uma vez → sai numa
@@ -965,6 +1014,10 @@ export default function PresencialSalao() {
       const saiu = await imprimirComandaAgora(inseridos ?? [])
       // Falhou: guarda ESTES itens pra reimpressão e avisa na tela. Limpar o
       // rascunho sem dizer nada era o que fazia o pedido sumir no caminho.
+      // O aviso vermelho é só pra quando dá pra AFIRMAR que não saiu papel
+      // (`false` = impressora não conectada, nada foi enviado). 'parcial' — erro
+      // no meio do envio, com a impressora conectada — não entra aqui: a térmica
+      // imprime o que recebe, e gritar em toda comanda tira o valor do aviso.
       const filtro = saiu === 'filtrado' ? motivoFiltro(inseridos ?? []) : null
       setAvisoImpressao(
         filtro ? { itens: inseridos ?? [], motivo: filtro, quando: Date.now() }
