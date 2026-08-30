@@ -220,6 +220,36 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
     if (autoCarregar) setCriando(false)   // na página do cardápio, fecha o formulário e volta pra lista
   }
 
+  // Apagar a categoria leva os itens dela junto — por isso a confirmação lista o
+  // que vai sumir (até 8 nomes) e diz o total, em vez de um "tem certeza?" seco.
+  async function excluirCategoria(cat) {
+    const nomes = cat.itens.map(i => i.nome)
+    const mostra = nomes.slice(0, 8)
+    if (nomes.length > mostra.length) mostra.push(`…e mais ${nomes.length - mostra.length}`)
+
+    const ok = await confirmar({
+      titulo: `Excluir a categoria "${cat.nome}" do iFood?`,
+      texto: `Some do cardápio do iFood a categoria e os ${nomes.length} item(ns) dentro dela. Isso é IRREVERSÍVEL: o iFood não desfaz, e pra voltar atrás tem que cadastrar tudo de novo.`,
+      itens: mostra,
+      aviso: 'Seus produtos aqui no catálogo NÃO são apagados — eles continuam à venda no balcão, no app e na Loja Online. Se é só porque acabou hoje, use o Pausar de cada item.',
+      textoOk: `Sim, excluir a categoria e ${nomes.length} item(ns)`,
+      perigo: true,
+    })
+    if (!ok) return
+
+    const catId = cat.itens[0]?.categoriaId
+    if (!catId) return notify('erro', 'Não achei o código dessa categoria no iFood.')
+
+    setBusy('excluirCat-' + catId)
+    const d = await chamar({ acao: 'catalogo_excluir_categoria', empresa_id: empresaId, categoria_id: catId })
+    if (d.ok) {
+      setSalvos(prev => prev.filter(x => x.categoriaId !== catId))
+      setCategorias(prev => (prev ?? []).filter(c => c.id !== catId))
+      notify('ok', `Categoria "${cat.nome}" saiu do iFood (${d.itens ?? 0} item(ns)).`)
+    } else notify('erro', d.error ?? 'Falha ao excluir a categoria')
+    setBusy('')
+  }
+
   // Excluir é o único caminho sem volta desta tela: o iFood não desfaz. Por isso
   // a confirmação diz o nome e o preço do que vai sumir, e lembra que existe o
   // pausar pra quem só quer esconder por hoje.
@@ -475,8 +505,21 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
         )}
         {porCategoria.map(cat => (
           <div key={cat.nome} style={{ marginBottom: 14 }}>
-            <div className="ifc-cat">
-              {cat.nome} <span style={{ fontWeight: 400 }}>· {cat.itens.length}</span>
+            <div className="ifc-cat" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>{cat.nome} <span style={{ fontWeight: 400 }}>· {cat.itens.length}</span></span>
+              {/* Só sem busca ativa: com filtro, a categoria aparece com parte dos
+                  itens e o botão sugeriria apagar só aqueles. */}
+              {!busca.trim() && (
+                <button type="button" onClick={() => excluirCategoria(cat)}
+                  disabled={busy.startsWith('excluirCat-')}
+                  title="Apaga a categoria e os itens dela no iFood"
+                  style={{
+                    border: '1px solid var(--border)', background: 'transparent', color: '#dc2626',
+                    borderRadius: 6, cursor: 'pointer', fontSize: 11, padding: '1px 7px', fontWeight: 700,
+                  }}>
+                  🗑 categoria
+                </button>
+              )}
             </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {cat.itens.map(it => {

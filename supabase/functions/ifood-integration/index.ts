@@ -73,6 +73,7 @@ Deno.serve(async (req) => {
     if (acao === "catalogo_enviar_loja") return json(await runEnviarDaLoja(sb, body?.empresa_id, body))
     if (acao === "catalogo_fotos_para_ca") return json(await runTrazerFotos(sb, body?.empresa_id))
     if (acao === "catalogo_excluir_por_produto") return json(await runExcluirPorProduto(sb, body?.empresa_id, body?.item_id, body?.product_id))
+    if (acao === "catalogo_excluir_categoria") return json(await runExcluirCategoria(sb, body?.empresa_id, body?.categoria_id))
     if (acao === "catalogo_excluir_item") return json(await runExcluirItem(sb, body?.empresa_id, body?.categoria_id, body?.product_id))
     if (acao === "catalogo_itens") return json(await runCatalogoItensCompletos(sb, body?.empresa_id))
     if (acao === "catalogo_pausar_complemento") return json(await runPausarComplemento(sb, body?.empresa_id, body?.option_id, body?.pausar))
@@ -903,6 +904,44 @@ async function baixarComoBase64(url: string): Promise<string> {
   }
   const tipo = r.headers.get("content-type") ?? "image/jpeg"
   return `data:${tipo};base64,${btoa(bin)}`
+}
+
+// Apaga a categoria inteira do iFood, com os itens que estão dentro dela.
+//
+// Antes de apagar, lê o que tem lá pra soltar o vínculo dos nossos produtos: sem
+// isso o espelho de pausa continuaria mandando pausar itens que não existem mais,
+// e o reenvio acharia que já estavam publicados.
+//
+// Os PRODUTOS daqui não são tocados — some do iFood, continua no seu catálogo.
+async function runExcluirCategoria(sb: any, empresaId: string, categoriaId: string) {
+  if (!categoriaId) return { ok: false, error: "categoria_id obrigatório" }
+  const ctx = await catalogoCtx(sb, empresaId)
+  if ("error" in ctx) return { ok: false, error: ctx.error }
+
+  const produtosIds: string[] = []
+  try {
+    const lista = await fetch(`${IFOOD}/catalog/v2.0/merchants/${ctx.mid}/catalogs/${ctx.catalogId}/categories?includeItems=true`, { headers: ctx.auth })
+    if (lista.ok) {
+      const cats: any[] = await lista.json()
+      const alvo = (Array.isArray(cats) ? cats : []).find((c: any) => c.id === categoriaId)
+      for (const it of (alvo?.items ?? [])) if (it.productId) produtosIds.push(it.productId)
+    }
+  } catch { /* sem a lista, apaga do mesmo jeito e os vínculos ficam pra limpeza seguinte */ }
+
+  const r = await fetch(`${IFOOD}/catalog/v2.0/merchants/${ctx.mid}/categories/${categoriaId}`, {
+    method: "DELETE", headers: ctx.auth,
+  })
+  if (!r.ok && r.status !== 404) {
+    return { ok: false, error: `iFood ${r.status}: ${(await r.text()).slice(0, 300)}` }
+  }
+
+  if (produtosIds.length > 0) {
+    await sb.from("produtos")
+      .update({ ifood_item_id: null, ifood_product_id: null })
+      .eq("empresa_id", empresaId)
+      .in("ifood_product_id", produtosIds)
+  }
+  return { ok: true, itens: produtosIds.length }
 }
 
 // Exclui pelo par (item, produto) sem saber a categoria — é o que o gatilho de
