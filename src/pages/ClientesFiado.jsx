@@ -79,7 +79,7 @@ function textoCobranca({ nomeCliente, nomeLoja, abertos, saldo, token }) {
   const nome = primeiro ? primeiro.charAt(0).toUpperCase() + primeiro.slice(1) : 'Oi'
   const linhas = abertos.map(v => {
     const itens = (v.venda_itens ?? [])
-      .map(i => `${Number(i.quantidade) % 1 === 0 ? Number(i.quantidade) : i.quantidade}x ${i.produtos?.nome ?? 'item'}`)
+      .map(i => `${Number(i.quantidade) % 1 === 0 ? Number(i.quantidade) : i.quantidade}x ${i.produtos?.nome ?? i.nome_produto ?? 'item'}`)
       .join(', ')
     const parcial = Math.abs(v.falta - Number(v.total)) > 0.005 ? ' (falta desse)' : ''
     return `• ${soDia(v.created_at)}${itens ? ' — ' + itens : ''} — *${fmtBRL(v.falta)}*${parcial}`
@@ -177,7 +177,7 @@ export default function ClientesFiado({ empresaId }) {
     if (compras[clienteId]) { setCompras(p => { const n = { ...p }; delete n[clienteId]; return n }); return }
     setCompras(p => ({ ...p, [clienteId]: 'carregando' }))
     const { data, error } = await supabase.from('vendas')
-      .select('id, total, forma_pagamento, created_at, venda_itens(quantidade, preco_unitario, produtos(nome))')
+      .select('id, total, forma_pagamento, created_at, venda_itens(quantidade, preco_unitario, nome_produto, produtos(nome))')
       .eq('empresa_id', empresaId)
       .eq('cliente_id', clienteId)
       .neq('status', 'cancelado')
@@ -259,7 +259,7 @@ export default function ClientesFiado({ empresaId }) {
   async function abrirCobranca(l) {
     setMontandoCob(l.cliente_id)
     const { data, error } = await supabase.from('vendas')
-      .select('id, total, created_at, forma_pagamento, venda_itens(quantidade, produtos(nome))')
+      .select('id, total, created_at, forma_pagamento, venda_itens(quantidade, nome_produto, produtos(nome))')
       .eq('empresa_id', empresaId)
       .eq('cliente_id', l.cliente_id)
       .neq('status', 'cancelado')
@@ -491,7 +491,7 @@ export default function ClientesFiado({ empresaId }) {
                                   {(v.venda_itens ?? []).length > 0 && (
                                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
                                       {v.venda_itens.map((it, i) => (
-                                        <span key={i}>{i > 0 ? ' · ' : ''}{it.quantidade}× {it.produtos?.nome ?? 'item'}</span>
+                                        <span key={i}>{i > 0 ? ' · ' : ''}{it.quantidade}× {it.produtos?.nome ?? it.nome_produto ?? 'item'}</span>
                                       ))}
                                     </div>
                                   )}

@@ -25,6 +25,11 @@ function formaPagamentoLabel(value) {
     || value
 }
 
+// O nome do item sai do produto quando ele ainda existe; se foi excluído, sai do
+// que a venda guardou na hora (venda_itens.nome_produto). É o que mantém o
+// histórico legível depois de o produto sumir do cardápio.
+const nomeDoItem = (item) => item.produtos?.nome ?? item.nome_produto ?? '-'
+
 export default function Relatorios() {
   const [dataInicio, setDataInicio] = useState(primeiroDiaDoMes())
   const [dataFim, setDataFim] = useState(toInputDate(new Date()))
@@ -153,12 +158,14 @@ export default function Relatorios() {
 
   const rankingProdutos = Object.values(
     itens.reduce((acc, item) => {
-      const key = item.produto_id
+      // Produto excluído deixa produto_id nulo (a venda guarda o nome). Agrupa
+      // pelo nome nesse caso, senão todos os excluídos virariam uma linha só.
+      const key = item.produto_id ?? `n:${nomeDoItem(item)}`
       if (!acc[key]) {
         acc[key] = {
           produto_id: key,
-          nome: item.produtos?.nome ?? '-',
-          categoria: item.produtos?.categoria ?? '-',
+          nome: nomeDoItem(item),
+          categoria: item.produtos?.categoria ?? item.categoria_produto ?? '-',
           quantidade: 0,
           subtotal: 0,
         }
@@ -175,8 +182,8 @@ export default function Relatorios() {
   const curvaABC = (() => {
     const acc = {}
     for (const item of itens) {
-      const key = item.produto_id
-      if (!acc[key]) acc[key] = { nome: item.produtos?.nome ?? '-', subtotal: 0, quantidade: 0 }
+      const key = item.produto_id ?? `n:${nomeDoItem(item)}`
+      if (!acc[key]) acc[key] = { nome: nomeDoItem(item), subtotal: 0, quantidade: 0 }
       acc[key].subtotal += Number(item.subtotal)
       acc[key].quantidade += Number(item.quantidade)
     }

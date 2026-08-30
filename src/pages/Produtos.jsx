@@ -813,45 +813,25 @@ export default function Produtos() {
   async function handleDelete(p) {
     const ok = await confirmar({
       titulo: `Excluir “${p.nome}”?`,
-      texto: 'Apaga o item do cardápio de vez — não dá pra desfazer.',
-      aviso: 'Se é só uma pausa (acabou o ingrediente, por exemplo), use o botão Pausar — o cliente para de ver e você reativa quando quiser.',
+      texto: 'Apaga o item do cardápio de vez, aqui e no iFood se ele estiver publicado lá. Não dá pra desfazer — pra ter de volta, tem que cadastrar de novo.',
+      itens: [`${p.nome}${p.preco_venda ? ` · R$ ${Number(p.preco_venda).toFixed(2)}` : ''}`],
+      aviso: 'As vendas antigas continuam certinhas: cada venda guarda o nome e o preço do que foi vendido. Se é só uma pausa (acabou o ingrediente), use o botão Pausar.',
       textoOk: 'Sim, excluir',
     })
     if (!ok) return
     const { error } = await supabase.from('produtos').delete().eq('id', p.id)
     if (!error) { loadProdutos(search, categoriaFiltro); return }
 
-    // 23503 = o item já foi vendido. Apagar levaria junto a linha dele dentro de
-    // vendas antigas (faturamento, relatório de produto vendido, conta do cliente).
-    // Em vez do erro cru do Postgres, oferecemos o que a loja realmente quer:
-    // tirar do cardápio guardando o histórico.
-    const jaVendido = error.code === '23503' || /venda_itens|foreign key/i.test(error.message ?? '')
-    if (!jaVendido) { setError(error.message); return }
-
-    const arquivar = await confirmar({
-      titulo: `“${p.nome}” já foi vendido`,
-      texto: 'Não dá pra apagar de vez: as vendas antigas guardam este item, e apagar bagunçaria o faturamento e os relatórios.',
-      aviso: 'Dá pra ARQUIVAR: ele some do cardápio, do delivery e de tudo que vende — mas o histórico continua certinho. Se precisar, você desarquiva depois em “Ver arquivados”.',
-      textoOk: 'Arquivar item',
-    })
-    if (!arquivar) return
-    await arquivarProduto(p)
+    // Antes da migração 0210 o item já vendido não podia ser apagado, porque a
+    // venda dependia do produto pro nome. Hoje a venda guarda o nome, então isso
+    // não deveria mais acontecer — se acontecer, é outra coisa, e o erro é dito.
+    setError(error.message)
   }
 
-  // Arquivar = sai da lista + fica pausado. O `ativo: false` é de propósito: toda
-  // tela de venda já filtra por ele, então o item some de tudo sem precisar mexer
-  // em cada uma delas.
-  async function arquivarProduto(p) {
-    setArquivandoId(p.id)
-    const { error } = await supabase
-      .from('produtos')
-      .update({ arquivado_em: new Date().toISOString(), ativo: false })
-      .eq('id', p.id)
-    setArquivandoId(null)
-    if (error) { setError(error.message); return }
-    loadProdutos(search, categoriaFiltro)
-  }
-
+  // Não existe mais "arquivar" a partir daqui: excluir apaga de vez, e as vendas
+  // antigas continuam legíveis porque cada venda guarda o nome e o preço do que
+  // vendeu (migração 0210). A tela "Ver arquivados" e o "Trazer de volta" seguem
+  // aqui para os produtos arquivados no tempo em que a exclusão era barrada.
   async function desarquivarProduto(p) {
     const ok = await confirmar({
       titulo: `Trazer “${p.nome}” de volta?`,

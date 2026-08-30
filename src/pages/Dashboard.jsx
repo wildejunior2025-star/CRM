@@ -190,7 +190,7 @@ export default function Dashboard() {
       const [vData, pData, iData, cnData, nRes, caRes, saRes, csRes, fiRes, empRes] = await Promise.all([
         fetchAll(() => supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes, cliente_id, clientes(nome)').neq('status', 'cancelado').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens, subtotal, taxa_entrega, ifood_valores, forma_pagamento, cliente_id, cliente_nome, cliente_telefone').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
-        fetchAll(() => supabase.from('venda_itens').select('produto_id, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desdeISO).order('id', { ascending: false })).then(r => r.data),
+        fetchAll(() => supabase.from('venda_itens').select('produto_id, nome_produto, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desdeISO).order('id', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('clientes').select('created_at').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         supabase.from('produtos').select('id, nome, controla_casco'),
         supabase.from('clientes').select('id', { count: 'exact', head: true }).eq('ativo', true),
@@ -283,7 +283,8 @@ export default function Dashboard() {
     const agg = {}
     for (const it of itens) {
       if (new Date(it.vendas.created_at) < start) continue
-      const nm = nomes[it.produto_id] ?? 'Produto'
+      // Produto excluído sai do mapa de nomes, mas a venda guardou o nome dele.
+      const nm = nomes[it.produto_id] ?? it.nome_produto ?? 'Produto'
       agg[nm] = (agg[nm] || 0) + Number(it.subtotal)
     }
     for (const p of pedidos) {
