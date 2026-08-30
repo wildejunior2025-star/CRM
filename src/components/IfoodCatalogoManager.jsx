@@ -262,16 +262,28 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
   // - aberto quando o lojista clica na seta → mostra TODOS;
   // - aberto sozinho quando a busca casou um complemento → mostra SÓ os que
   //   casaram, que é o caminho curto pra pausar aquele.
+  //
+  // Sempre POR GRUPO (Feijões, Arroz, Macarrões...), como o iFood mostra. Numa
+  // lista achatada, 22 complementos de uma quentinha viram um paredão em que
+  // ninguém acha nada.
   function complementosVisiveis(it) {
-    const todas = opcoesDe(it)
-    if (todas.length === 0) return { aberto: false, opcoes: [], total: 0, porBusca: false }
+    const grupos = (it.grupos ?? []).filter(g => (g.opcoes ?? []).length > 0)
+    const total = grupos.reduce((n, g) => n + g.opcoes.length, 0)
+    if (total === 0) return { aberto: false, grupos: [], total: 0, totalGrupos: 0, casadas: 0, porBusca: false }
+
     const clicado = abertos.has(it.itemId)
-    const casadas = q ? todas.filter(o => norm(o.nome).includes(q)) : []
-    const porBusca = !clicado && casadas.length > 0
+    const casados = q
+      ? grupos
+          .map(g => ({ ...g, opcoes: g.opcoes.filter(o => norm(o.nome).includes(q)) }))
+          .filter(g => g.opcoes.length > 0)
+      : []
+    const porBusca = !clicado && casados.length > 0
     return {
       aberto: clicado || porBusca,
-      opcoes: porBusca ? casadas : todas,
-      total: todas.length,
+      grupos: porBusca ? casados : grupos,
+      total,
+      totalGrupos: grupos.length,
+      casadas: casados.reduce((n, g) => n + g.opcoes.length, 0),
       porBusca,
     }
   }
@@ -427,6 +439,7 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
                           title={comp.aberto ? 'Esconder os complementos' : 'Ver os complementos'}
                         >
                           {comp.aberto ? '▾' : '▸'} {comp.total} complemento{comp.total > 1 ? 's' : ''}
+                          {comp.totalGrupos > 1 ? ` em ${comp.totalGrupos} grupos` : ''}
                         </button>
                       )}
                     </div>
@@ -439,28 +452,47 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
                     </div>
                   </div>
                   {comp.aberto && (
-                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
                       {comp.porBusca && (
-                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 2 }}>
-                          {comp.opcoes.length} de {comp.total} complemento{comp.total > 1 ? 's' : ''} com “{busca.trim()}” —{' '}
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+                          {comp.casadas} de {comp.total} complemento{comp.total > 1 ? 's' : ''} com “{busca.trim()}” —{' '}
                           <button type="button" onClick={() => setAbertos(prev => new Set(prev).add(it.itemId))}
                             style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', color: RED, fontWeight: 700, fontSize: 11.5 }}>
                             ver todos
                           </button>
                         </div>
                       )}
-                      {comp.opcoes.map(o => {
-                        const op = o.status === 'UNAVAILABLE'
-                        return (
-                          <div key={o.opcaoId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12.5 }}>
-                            <span style={{ color: 'var(--text-muted)' }}>↳ {o.nome}{o.preco ? ` · R$ ${Number(o.preco).toFixed(2)}` : ''}{op ? ' · ⏸' : ''}</span>
-                            <button type="button" style={{ ...btnOut, padding: '4px 10px', border: `1.5px solid ${op ? '#16a34a' : '#f59e0b'}`, color: op ? '#16a34a' : '#b45309' }}
-                              disabled={busy === 'pausaC-' + o.opcaoId} onClick={() => pausarComplemento(it, o.opcaoId, !op)}>
-                              {busy === 'pausaC-' + o.opcaoId ? '...' : (op ? '▶ Despausar' : '⏸ Pausar')}
-                            </button>
+                      {comp.grupos.map(g => (
+                        <div key={g.grupoId} style={{ marginBottom: 10 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                            <strong style={{ fontSize: 12.5 }}>{g.nome || 'Complementos'}</strong>
+                            {Number(g.min) > 0 && (
+                              <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: 'var(--text-muted)', color: 'var(--bg)' }}>
+                                OBRIGATÓRIO
+                              </span>
+                            )}
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                              escolhe até {g.max || 1}
+                            </span>
                           </div>
-                        )
-                      })}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingLeft: 8, borderLeft: '2px solid var(--border)' }}>
+                            {g.opcoes.map(o => {
+                              const op = o.status === 'UNAVAILABLE'
+                              return (
+                                <div key={o.opcaoId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12.5 }}>
+                                  <span style={{ color: op ? 'var(--text-muted)' : 'var(--text)' }}>
+                                    {o.nome}{o.preco ? ` · R$ ${Number(o.preco).toFixed(2)}` : ''}{op ? ' · ⏸' : ''}
+                                  </span>
+                                  <button type="button" style={{ ...btnOut, padding: '4px 10px', border: `1.5px solid ${op ? '#16a34a' : '#f59e0b'}`, color: op ? '#16a34a' : '#b45309' }}
+                                    disabled={busy === 'pausaC-' + o.opcaoId} onClick={() => pausarComplemento(it, o.opcaoId, !op)}>
+                                    {busy === 'pausaC-' + o.opcaoId ? '...' : (op ? '▶ Despausar' : '⏸ Pausar')}
+                                  </button>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
