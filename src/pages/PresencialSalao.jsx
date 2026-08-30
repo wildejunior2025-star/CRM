@@ -2108,31 +2108,32 @@ export default function PresencialSalao() {
                     poder olhar enquanto a mesa ainda esta aberta. */}
                 {ehAdmin && comandaSel && (comandaSel.comanda_itens ?? []).length > 0 && (
                   <button type="button" onClick={() => setVerMovimentos(true)}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4, marginRight: 6,
-                      padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
-                      border: '1.5px solid var(--border)', background: 'transparent',
-                      color: 'var(--text-muted)', fontSize: 12.5, fontWeight: 700 }}>
-                    🕑 Quem fez o quê
+                    className="sal-chip" title="Quem lançou e quem entregou cada item"
+                    aria-label="Quem fez o quê"
+                    style={{ border: '1.5px solid var(--border)', background: 'transparent',
+                      color: 'var(--text-muted)' }}>
+                    🕑<span className="sal-chip-txt">Quem fez o quê</span>
                   </button>
                 )}
                 {/* Cliente da mesa: liga um cliente a esta comanda (ou troca/tira). */}
                 {comandaSel && comandaSel.status !== 'fechada' && (
                   (comandaSel.cliente || comandaSel.nome_cliente) ? (
                     <button type="button" onClick={() => setPickerCliente(true)} disabled={ligandoCliente}
-                      title="Trocar ou tirar o cliente"
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4, padding: '3px 10px',
-                        borderRadius: 999, cursor: 'pointer', border: '1.5px solid var(--primary)',
-                        background: 'rgba(124,58,237,.1)', color: 'var(--primary)', fontSize: 12.5, fontWeight: 700 }}>
-                      🧑 {comandaSel.cliente?.nome || comandaSel.nome_cliente}
-                      {comandaSel.cliente?.telefone ? ` · ${comandaSel.cliente.telefone}` : ''}
-                      <span style={{ fontWeight: 500, opacity: .8 }}>✎</span>
+                      className="sal-chip" title="Trocar ou tirar o cliente"
+                      style={{ border: '1.5px solid var(--primary)',
+                        background: 'rgba(124,58,237,.1)', color: 'var(--primary)' }}>
+                      🧑<span className="sal-chip-txt">
+                        {comandaSel.cliente?.nome || comandaSel.nome_cliente}
+                        {comandaSel.cliente?.telefone ? ` · ${comandaSel.cliente.telefone}` : ''} ✎
+                      </span>
                     </button>
                   ) : (
                     <button type="button" onClick={() => setPickerCliente(true)} disabled={ligandoCliente}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4, padding: '3px 10px',
-                        borderRadius: 999, cursor: 'pointer', border: '1.5px dashed var(--border)',
-                        background: 'transparent', color: 'var(--text-muted)', fontSize: 12.5, fontWeight: 700 }}>
-                      ➕ Pôr o nome do cliente
+                      className="sal-chip" title="Pôr o nome do cliente nesta conta"
+                      aria-label="Pôr o nome do cliente"
+                      style={{ border: '1.5px dashed var(--border)',
+                        background: 'transparent', color: 'var(--text-muted)' }}>
+                      ➕<span className="sal-chip-txt">Pôr o nome do cliente</span>
                     </button>
                   )
                 )}
@@ -2143,12 +2144,11 @@ export default function PresencialSalao() {
                 {(comandaSel?.comanda_itens ?? []).length > 1 && (
                   <button type="button"
                     onClick={() => { setSepErro(''); setSepSel(new Set()); setSepNome(''); setSeparando(true) }}
-                    title="Alguém vai embora antes e paga só o que consumiu"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4, marginLeft: 6,
-                      padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
-                      border: '1.5px solid var(--border)', background: 'transparent',
-                      color: 'var(--text-muted)', fontSize: 12.5, fontWeight: 700 }}>
-                    🧍 Separar conta
+                    className="sal-chip" title="Alguém vai embora antes e paga só o que consumiu"
+                    aria-label="Separar conta"
+                    style={{ border: '1.5px solid var(--border)', background: 'transparent',
+                      color: 'var(--text-muted)' }}>
+                    🧍<span className="sal-chip-txt">Separar conta</span>
                   </button>
                 )}
               </div>

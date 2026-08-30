@@ -592,3 +592,35 @@ html[data-teclado='aberto'] .sal-overlay {
   .sal-separar button { font-size: 15.5px !important; }
   .sal-separar input { font-size: 16px !important; padding: 12px 14px !important; }
 }
+
+/* ── Chips do cabeçalho da mesa ───────────────────────────────────────────
+ * "Quem fez o quê", o cliente e "Separar conta". Com o texto escrito eles
+ * quebravam em duas linhas no celular e comiam a altura da comanda — a mesma
+ * doença que a barra de ações de baixo já tinha curado.
+ *
+ * Mesmo remédio: no celular vira só o ícone (o title/aria-label diz o que é),
+ * no PC o texto volta, que lá cabe e é mais claro. */
+.sal-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 4px;
+  margin-right: 6px;
+  width: 38px;
+  height: 30px;
+  padding: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.sal-chip:disabled { opacity: .45; cursor: not-allowed; }
+.sal-chip-txt { display: none; }
+
+@media (min-width: 1100px) {
+  .sal-chip { width: auto; height: auto; padding: 4px 12px; font-size: 12.5px; }
+  .sal-chip-txt { display: inline; font-size: 12.5px; }
+}
