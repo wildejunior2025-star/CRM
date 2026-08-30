@@ -71,6 +71,7 @@ Deno.serve(async (req) => {
     if (acao === "catalogo_upload_imagem") return json(await runUploadImagem(sb, body?.empresa_id, body?.image))
     if (acao === "catalogo_salvar_item") return json(await runSalvarItem(sb, body?.empresa_id, body?.payload))
     if (acao === "catalogo_enviar_loja") return json(await runEnviarDaLoja(sb, body?.empresa_id, body))
+    if (acao === "produto_foto_da_url") return json(await runFotoDaUrl(sb, body?.empresa_id, body?.produto_id, body?.url))
     if (acao === "catalogo_fotos_para_ca") return json(await runTrazerFotos(sb, body?.empresa_id))
     if (acao === "catalogo_excluir_por_produto") return json(await runExcluirPorProduto(sb, body?.empresa_id, body?.item_id, body?.product_id))
     if (acao === "catalogo_excluir_categoria") return json(await runExcluirCategoria(sb, body?.empresa_id, body?.categoria_id))
@@ -449,8 +450,14 @@ async function guardarFotoLocal(sb: any, empresaId: string, urlIfood: string): P
     const bytes = new Uint8Array(await r.arrayBuffer())
     if (bytes.length === 0 || bytes.length > 8 * 1024 * 1024) return urlIfood
 
-    const tipo = r.headers.get("content-type") ?? "image/jpeg"
-    const ext = (urlIfood.split(".").pop() ?? "jpg").split(/[?#]/)[0].slice(0, 5) || "jpg"
+    // A extensão sai do content-type, não da URL: endereço sem ".jpg" no fim
+    // (link com query, CDN que serve por id) fazia a "extensão" virar um pedaço
+    // do domínio — e com barra dentro, criando subpasta no bucket.
+    const tipo = (r.headers.get("content-type") ?? "image/jpeg").split(";")[0].trim()
+    const ext = ({
+      "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png",
+      "image/webp": "webp", "image/gif": "gif", "image/avif": "avif",
+    } as Record<string, string>)[tipo] ?? "jpg"
     const path = `${empresaId}/ifood_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
 
     const { error } = await sb.storage.from("produto-fotos")
@@ -462,6 +469,24 @@ async function guardarFotoLocal(sb: any, empresaId: string, urlIfood: string): P
   } catch {
     return urlIfood
   }
+}
+
+// Põe no produto uma foto que está em algum lugar da internet, baixando e
+// guardando no NOSSO storage. Nunca aponta pro endereço de fora: o dia em que o
+// site mudar a URL, o cardápio fica sem imagem — foi o que quase aconteceu com as
+// fotos que vinham penduradas no iFood.
+async function runFotoDaUrl(sb: any, empresaId: string, produtoId: string, url: string) {
+  if (!empresaId || !produtoId || !url) return { ok: false, error: "empresa_id, produto_id e url obrigatórios" }
+  const { data: prod } = await sb.from("produtos").select("id, nome")
+    .eq("empresa_id", empresaId).eq("id", produtoId).maybeSingle()
+  if (!prod) return { ok: false, error: "produto não encontrado nesta loja" }
+
+  const nova = await guardarFotoLocal(sb, empresaId, url)
+  if (nova === url) return { ok: false, error: "não deu pra baixar/guardar essa imagem" }
+
+  const { error } = await sb.from("produtos").update({ foto_url: nova }).eq("id", produtoId)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, nome: prod.nome, foto_url: nova }
 }
 
 // Traz pro nosso storage as fotos que ficaram hospedadas no iFood — produtos
