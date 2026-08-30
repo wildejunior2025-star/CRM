@@ -415,13 +415,18 @@ function mapearPagamento(payments: any): { forma: string; troco: number | null; 
 // Catálogo: cria produtos no CRM a partir dos itens do iFood
 // ─────────────────────────────────────────────────────────────────────
 // Garante que a categoria exista na lista de categorias da empresa.
-async function ensureCategoria(sb: any, empresaId: string, nome: string) {
-  if (!nome) return
-  const { data } = await sb.from("categorias").select("id")
+// Devolve o nome da categoria COMO ELA JÁ ESTÁ CADASTRADA aqui, criando se não
+// existir. O nome importa: o produto guarda a categoria por texto, e o iFood
+// escreve "Almoço" enquanto a loja cadastrou "almoço". Gravar o nome do iFood
+// criava um grupo paralelo que não aparecia em lugar nenhum — produto importado
+// "sumia" mesmo tendo entrado.
+async function ensureCategoria(sb: any, empresaId: string, nome: string): Promise<string> {
+  if (!nome) return nome
+  const { data } = await sb.from("categorias").select("nome")
     .eq("empresa_id", empresaId).ilike("nome", nome).maybeSingle()
-  if (!data) {
-    try { await sb.from("categorias").insert({ empresa_id: empresaId, nome }) } catch { /* corrida/duplicado ok */ }
-  }
+  if (data?.nome) return data.nome
+  try { await sb.from("categorias").insert({ empresa_id: empresaId, nome }) } catch { /* corrida/duplicado ok */ }
+  return nome
 }
 
 // Cria um produto a partir de um item do iFood, se ainda não existir (por nome).
@@ -499,8 +504,8 @@ async function upsertProduto(
     }
     return false
   }
-  const cat = (item.categoria ?? "iFood").trim() || "iFood"
-  await ensureCategoria(sb, empresaId, cat)
+  const catPedida = (item.categoria ?? "iFood").trim() || "iFood"
+  const cat = await ensureCategoria(sb, empresaId, catPedida)
   const preco = Number(item.preco) || 0
   const { error } = await sb.from("produtos").insert({
     empresa_id: empresaId,
