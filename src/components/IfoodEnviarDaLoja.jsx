@@ -17,6 +17,9 @@ const RED = '#ea1d2c'
 const POR_LEVA = 25
 
 const inp = { padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box', fontSize: 13.5 }
+// Compara nome de categoria sem acento e sem caixa: "bebidas" e "Bebidas" são
+// a mesma coisa pro iFood, que recusa o nome repetido.
+const norm = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
 const reais = (v) => Number(v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
@@ -61,10 +64,15 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
 
   // Trocar de categoria marca tudo dela — o caso comum é mandar a categoria
   // inteira; desmarcar exceção é mais raro que marcar um por um.
+  //
+  // Se já existe uma categoria com o mesmo nome no iFood, o destino aponta pra
+  // ela: o iFood recusa nome repetido (409) e o lojista levaria um erro cru só
+  // pra voltar e escolher na mão a categoria óbvia.
   function escolherCategoria(nome) {
+    const igual = catsIfood.find(c => norm(c.nome) === norm(nome))
     setCategoria(nome)
     setNomeNova(nome)
-    setDestino('nova')
+    setDestino(igual ? igual.id : 'nova')
     setMarcados(new Set((produtos ?? []).filter(p => p.categoria === nome).map(p => p.id)))
     setMsg(null)
   }
@@ -103,6 +111,7 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
       }
       enviados += d.enviados
       avisos.push(...(d.avisos ?? []))
+      if (d.reusouCategoria) avisos.push(`Já existia a categoria "${d.reusouCategoria}" no iFood — os itens foram pra ela.`)
       destinoId = destinoId ?? d.categoriaId
     }
 

@@ -605,7 +605,20 @@ async function runCriarCategoria(sb: any, empresaId: string, nome: string) {
     body: JSON.stringify({ name: nome.trim(), status: "AVAILABLE", template: "DEFAULT" }),
   })
   const txt = await r.text()
-  if (!r.ok) return { ok: false, error: `iFood ${r.status}: ${txt.slice(0, 300)}` }
+  if (!r.ok) {
+    // 409 = já existe categoria com esse nome. O iFood devolve o id dela em
+    // `conflictingResources`, então dá pra dizer QUAL é — quem está publicando
+    // uma leva de produtos aproveita essa em vez de parar tudo.
+    let jaExisteId: string | null = null
+    if (r.status === 409) {
+      // O id vem aninhado: {"error":{"code":"Conflict","conflictingResources":["<id>"]}}
+      try {
+        const j = JSON.parse(txt)
+        jaExisteId = j?.error?.conflictingResources?.[0] ?? j?.conflictingResources?.[0] ?? null
+      } catch { /* corpo fora do formato: segue sem o id */ }
+    }
+    return { ok: false, error: `iFood ${r.status}: ${txt.slice(0, 300)}`, jaExisteId }
+  }
   const cat = txt ? JSON.parse(txt) : {}
   return { ok: true, id: cat.id, nome: cat.name }
 }
@@ -730,12 +743,18 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
 
   // Categoria de destino: uma que já existe no iFood, ou cria com o nome dado.
   let categoriaId = body?.categoria_ifood_id ?? null
+  let reusouCategoria: string | null = null
   if (!categoriaId) {
     const nome = String(body?.categoria_nome ?? "").trim()
     if (!nome) return { ok: false, error: "escolha ou nomeie a categoria de destino" }
     const nova = await runCriarCategoria(sb, empresaId, nome)
-    if (!nova.ok) return { ok: false, error: `não deu pra criar a categoria: ${nova.error}` }
-    categoriaId = nova.id
+    if (nova.ok) categoriaId = nova.id
+    else if (nova.jaExisteId) {
+      // Já tinha uma categoria com esse nome lá: publica nela. Parar aqui só
+      // obrigaria o lojista a voltar e escolher a mesma categoria na mão.
+      categoriaId = nova.jaExisteId
+      reusouCategoria = nome
+    } else return { ok: false, error: `não deu pra criar a categoria: ${nova.error}` }
   }
 
   const avisos: string[] = []
@@ -760,7 +779,7 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
     if (r.ok) enviados++
     else avisos.push(`${p.nome}: ${String(r.error).slice(0, 120)}`)
   }
-  return { ok: true, enviados, total: produtos.length, categoriaId, avisos }
+  return { ok: true, enviados, total: produtos.length, categoriaId, avisos, reusouCategoria }
 }
 
 // O iFood só aceita imagem em base64; a nossa fica no storage do Supabase.
