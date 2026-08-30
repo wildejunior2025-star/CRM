@@ -73,14 +73,26 @@ export default function PresencialHistorico() {
     // Térmica pareada neste aparelho primeiro (é o caso do celular do balcão);
     // senão cai no app FWC / navegador. `soApp: false` de propósito: se o app
     // não responder, é melhor abrir a janela de impressão do que não sair nada.
-    let ok = false
+    let via = false
     try {
       const mod = await import('../utils/imprimirBluetooth')
-      ok = await mod.imprimirMesaSeConectada('conta', dados)
+      via = await mod.imprimirMesaSeConectada('conta', dados)
     } catch { /* sem Bluetooth neste aparelho */ }
-    if (!ok) ok = await imprimirHtml(montarContaPresencialHtml(dados), nomeLoja, { soApp: false, origem: 'mesa' })
+    // 'filtrado' = a Bluetooth existe e está conectada, mas ESTE aparelho está
+    // marcado como impressora da cozinha. Não adianta tentar por outro caminho
+    // (sairia via dupla) — o que faltava era DIZER isso. Antes a tela avisava
+    // "enviada pra impressora" e não saía papel nenhum.
+    if (!via) via = await imprimirHtml(montarContaPresencialHtml(dados), nomeLoja, { soApp: false, origem: 'mesa' })
+
+    const texto = via === 'filtrado'
+      ? '⚠️ Este aparelho está marcado como impressora da COZINHA — conta sai na da frente.'
+      : via === 'navegador'
+        ? '🖨️ Sem térmica neste aparelho — abri a impressão pelo navegador.'
+        : via
+          ? '🧾 Segunda via enviada pra impressora.'
+          : '⚠️ Não achei impressora neste aparelho.'
     setImprimindo(null)
-    setImpMsg({ id: c.id, texto: ok ? '🧾 Segunda via enviada pra impressora.' : '⚠️ Não achei impressora neste aparelho.' })
+    setImpMsg({ id: c.id, texto })
     setTimeout(() => setImpMsg(null), 6000)
   }
 

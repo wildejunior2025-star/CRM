@@ -404,21 +404,29 @@ export async function imprimirContaMesaCelular(dados) {
 // Devolve false sem estourar quando não tem impressora ligada — aí quem chamou
 // segue pro caminho normal (app FWC / navegador). É o que deixa a MESMA tela
 // funcionar no PC da loja e no celular do dono sem dois códigos diferentes.
+// Devolve O QUE ACONTECEU, não um sim/não:
+//
+//   'ok'        saiu o papel
+//   'filtrado'  esta impressora não é a deste documento (aparelho marcado como
+//               cozinha recebendo uma conta, ou comanda sem item do setor dele)
+//   false       não deu: sem conexão ou erro no envio
+//
+// 'filtrado' continua sendo VERDADEIRO pra quem só testa `if (ok)` — quem chama
+// não deve tentar de novo por outro caminho, senão sai via dupla. A diferença
+// importa pra TELA: dizer "enviada pra impressora" quando o aparelho estava
+// marcado como cozinha é mentira, e foi o que fez a segunda via "sumir" no bar.
 export async function imprimirMesaSeConectada(tipo, dados) {
   try {
     if (!estaConectada() && !(await reconectarSilencioso())) return false
     if (tipo === 'comanda') {
-      // Só o que é desta impressora. Se não sobrou nada (a cozinha não tem o
-      // que preparar neste pedido), não gasta papel — mas responde "sim, tratei
-      // isto", senão quem chamou tentaria imprimir tudo pelo caminho antigo.
       const meus = itensDoSetor(dados.itens ?? [])
-      if (!meus.length) return true
+      if (!meus.length) return 'filtrado'
       await escrever(montarComandaMesaBytes({ ...dados, itens: meus }))
     } else {
-      if (!imprimeConta()) return true   // conta é papel da frente
+      if (!imprimeConta()) return 'filtrado'   // conta é papel da frente
       await escrever(montarContaMesaBytes(dados))
     }
-    return true
+    return 'ok'
   } catch { return false }
 }
 

@@ -326,14 +326,16 @@ export async function imprimirHtml(html, titulo, opts = {}) {
   // nome da loja (titulo-loja), tira dele pra não sair duas vezes na térmica.
   if (titulo) htmlParaApp = htmlParaApp.replace(/<div[^>]*class="[^"]*titulo-loja[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '')
   // opts.origem (ex.: 'mesa') → o app respeita o filtro por origem deste PC.
-  if (await imprimirViaAppFwc('imprimir-html', { html: htmlParaApp, titulo, origem: opts.origem })) return true
+  if (await imprimirViaAppFwc('imprimir-html', { html: htmlParaApp, titulo, origem: opts.origem })) return 'app'
   if (opts.soApp) return false // sem app FWC local (celular): não imprime no navegador do aparelho
   const printer = impressoraEscolhida()
   if (printer) {
-    try { await imprimirHtmlViaQz(html, printer); return true } catch { /* fallback */ }
+    try { await imprimirHtmlViaQz(html, printer); return 'qz' } catch { /* fallback */ }
   }
   imprimirHtmlNavegador(html)
-  return true
+  // 'navegador' e não true: abrir a janela do Chrome não é "saiu na térmica", e
+  // quem chama precisa poder dizer isso pro lojista.
+  return 'navegador'
 }
 
 // Comanda de MESA: pede pro app FWC montar nativamente (nome da loja + MESA grandes,
