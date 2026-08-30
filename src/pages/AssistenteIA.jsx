@@ -5,37 +5,89 @@
 // usando?" — por isso o número grande é PERGUNTAS, não reais. "R$ 3,40
 // restantes" não diz nada pro dono de pizzaria; "dá pra mais 11 perguntas" diz.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { useAuth } from '../hooks/useAuth'
 import { useIaConsumo } from '../hooks/useIaConsumo'
 import '../components/Page.css'
 
 const brl = (v) => 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',')
 const dataHora = (ts) => new Date(ts).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 
-// Enquanto a compra por PIX não existe, comprar saldo é falar com a gente.
-const WHATSAPP_FWC = '5584998180774'
+const VALORES = [10, 20, 50, 100]
 
 export default function AssistenteIA() {
-  const { empresa } = useAuth()
   const c = useIaConsumo()
   const [extrato, setExtrato] = useState([])
   const [perguntas, setPerguntas] = useState([])
+  const [pix, setPix] = useState(null)        // { qr_code, qr_code_base64, valor, mp_payment_id }
+  const [gerando, setGerando] = useState(false)
+  const [pago, setPago] = useState(false)
+  const [erroPix, setErroPix] = useState(null)
+  const [copiado, setCopiado] = useState(false)
+  const timerRef = useRef(null)
 
+  async function comprar(valor) {
+    setGerando(true); setErroPix(null); setPago(false)
+    const { data, error } = await supabase.functions.invoke('ia-saldo', {
+      body: { acao: 'comprar', valor },
+    })
+    setGerando(false)
+    if (error) {
+      const d = await error.context?.json?.().catch(() => null)
+      setErroPix(d?.error || 'Não consegui gerar o PIX agora. Tente de novo.')
+      return
+    }
+    if (data?.error) { setErroPix(data.error); return }
+    setPix(data)
+  }
+
+  // Pergunta ao servidor de tempos em tempos se o PIX já caiu. O webhook do
+  // Mercado Pago às vezes demora, e o lojista está parado olhando a tela.
   useEffect(() => {
-    const mesIni = new Date()
-    mesIni.setDate(1); mesIni.setHours(0, 0, 0, 0)
+    if (!pix?.mp_payment_id || pago) return
+    timerRef.current = setInterval(async () => {
+      const { data } = await supabase.functions.invoke('ia-saldo', {
+        body: { acao: 'conferir', mp_payment_id: pix.mp_payment_id },
+      })
+      if (data?.status === 'pago') {
+        setPago(true)
+        c.recarregar?.()
+        carregarExtrato()
+      } else if (data?.status === 'cancelado') {
+        setErroPix('O PIX expirou. Gere um novo.')
+        setPix(null)
+      }
+    }, 5000)
+    return () => clearInterval(timerRef.current)
+  }, [pix?.mp_payment_id, pago]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function carregarExtrato() {
     supabase.from('ia_saldo_log')
       .select('tipo, valor_centavos, saldo_depois, descricao, created_at')
       .order('created_at', { ascending: false }).limit(30)
       .then(({ data }) => setExtrato(data ?? []))
+  }
+
+  useEffect(() => {
+    const mesIni = new Date()
+    mesIni.setDate(1); mesIni.setHours(0, 0, 0, 0)
+    carregarExtrato()
     supabase.from('assistente_conversas')
       .select('pergunta, custo_brl, created_at')
       .gte('created_at', mesIni.toISOString())
       .order('created_at', { ascending: false }).limit(50)
       .then(({ data }) => setPerguntas(data ?? []))
-  }, [])
+    // Uma consulta ao servidor confere os PIX pendentes desta loja e credita o
+    // que já foi pago — rede de segurança pra quando o webhook se perde.
+    supabase.functions.invoke('ia-saldo', { body: { acao: 'saldo' } })
+      .then(() => c.recarregar?.())
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function copiarPix() {
+    navigator.clipboard?.writeText(pix.qr_code)
+    setCopiado(true)
+    setTimeout(() => setCopiado(false), 2000)
+  }
 
   if (c.carregando) return <p style={{ color: 'var(--text-muted)' }}>Carregando…</p>
 
@@ -43,9 +95,6 @@ export default function AssistenteIA() {
   const cor = acabou ? 'var(--danger)' : c.pct >= 80 ? 'var(--warning)' : 'var(--primary)'
   const proximoMes = new Date()
   proximoMes.setMonth(proximoMes.getMonth() + 1, 1)
-
-  const texto = encodeURIComponent(
-    `Olá! Sou da ${empresa?.nome ?? 'minha loja'} e quero comprar saldo para o Assistente IA.`)
 
   return (
     <div>
@@ -74,19 +123,58 @@ export default function AssistenteIA() {
         </p>
       </div>
 
-      {(acabou || c.pct >= 80) && (
-        <div style={{ ...caixa, background: 'var(--primary-bg)', borderColor: 'var(--primary-ring)' }}>
-          <h2 style={titulo}>{acabou ? 'Seu assistente parou' : 'Está acabando'}</h2>
-          <p style={{ fontSize: 13.5, lineHeight: 1.6, margin: '0 0 12px' }}>
-            {acabou
-              ? 'Ele volta sozinho quando o mês virar. Se não quiser esperar, compre saldo e continue perguntando hoje mesmo.'
-              : 'Quando acabar, o robô para até virar o mês. Dá pra comprar saldo e não ficar sem.'}
-          </p>
-          <a href={`https://wa.me/${WHATSAPP_FWC}?text=${texto}`} target="_blank" rel="noreferrer" style={botao}>
-            Comprar saldo pelo WhatsApp
-          </a>
-        </div>
-      )}
+      <div style={{ ...caixa, ...(acabou ? { background: 'var(--primary-bg)', borderColor: 'var(--primary-ring)' } : null) }}>
+        <h2 style={titulo}>
+          {acabou ? 'Seu assistente parou' : c.pct >= 80 ? 'Está acabando' : 'Comprar saldo'}
+        </h2>
+        <p style={{ fontSize: 13.5, lineHeight: 1.6, margin: '0 0 14px', color: 'var(--text-muted)' }}>
+          {acabou
+            ? 'Ele volta sozinho quando o mês virar. Se não quiser esperar, compre saldo e continue perguntando agora.'
+            : 'O saldo comprado não expira no fim do mês — ele só é usado depois que a franquia acaba.'}
+        </p>
+
+        {pago ? (
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--success)' }}>
+            Pagamento confirmado! Seu saldo já está disponível. 🎉
+          </div>
+        ) : pix ? (
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            {pix.qr_code_base64 && (
+              <img src={`data:image/png;base64,${pix.qr_code_base64}`} alt="QR Code do PIX"
+                width={190} height={190}
+                style={{ borderRadius: 10, background: '#fff', padding: 8, flexShrink: 0 }} />
+            )}
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>{brl(pix.valor)}</div>
+              <p style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+                Abra o aplicativo do banco, escolha PIX e leia o código.
+                Assim que cair, o saldo entra sozinho — pode deixar esta tela aberta.
+              </p>
+              <button type="button" onClick={copiarPix} style={botao}>
+                {copiado ? 'Copiado!' : 'Copiar código PIX'}
+              </button>
+              <button type="button" onClick={() => { setPix(null); setErroPix(null) }}
+                style={{ ...botao, background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border)', marginLeft: 8 }}>
+                Cancelar
+              </button>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>
+                Aguardando o pagamento… O código vale por 30 minutos.
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {VALORES.map(v => (
+              <button key={v} type="button" disabled={gerando} onClick={() => comprar(v)}
+                style={{ ...botao, opacity: gerando ? .5 : 1 }}>
+                {gerando ? 'Gerando…' : brl(v)}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {erroPix && <p style={{ fontSize: 13, color: 'var(--danger)', margin: '12px 0 0' }}>{erroPix}</p>}
+      </div>
 
       <div style={caixa}>
         <h2 style={titulo}>Como funciona</h2>

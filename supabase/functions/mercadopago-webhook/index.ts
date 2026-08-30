@@ -102,6 +102,31 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── COMPRA DE SALDO DO ASSISTENTE DE IA (conta central, como os créditos) ──
+    // Mesmo raciocínio do bloco acima: o mp_payment_id de uma compra de saldo
+    // nunca existe em pedidos_delivery, então os fluxos não se cruzam. Quem
+    // credita é a RPC — atômica e idempotente, porque o MP repete o aviso.
+    {
+      const { data: compraIa } = await supabase
+        .from('ia_saldo_pagamentos')
+        .select('empresa_id, valor_reais, status')
+        .eq('mp_payment_id', String(paymentId))
+        .maybeSingle()
+
+      if (compraIa) {
+        if (payment.status === 'approved') {
+          await supabase.rpc('confirmar_pagamento_ia', { p_mp_payment_id: String(paymentId) })
+        } else if (['cancelled', 'rejected', 'expired'].includes(payment.status)) {
+          await supabase
+            .from('ia_saldo_pagamentos')
+            .update({ status: 'cancelado' })
+            .eq('mp_payment_id', String(paymentId))
+            .eq('status', 'pendente')
+        }
+        return new Response('ok', { status: 200 })
+      }
+    }
+
     // ── PIX DO FIADO PELO LINK DO CLIENTE (mig 0149) ──
     // Também não cruza com os pedidos: o mp_payment_id de uma cobrança de fiado
     // nunca existe em pedidos_delivery. Quem lança o recebimento é a RPC, que é
