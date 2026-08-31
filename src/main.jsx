@@ -67,6 +67,17 @@ for (const evt of ['input', 'keydown', 'paste', 'pointerdown', 'click']) {
 }
 const ESFRIAR_MS = 3 * 60 * 1000   // 3 min sem mexer = pode recarregar
 
+// Aparece de verdade na tela? O fundo escuro do menu do celular
+// (.sidebar-overlay) fica SEMPRE no HTML, só apagado por opacity/pointer-events —
+// contar com ele travaria a atualização pra sempre em todo celular.
+function estaVisivel(el) {
+  if (!el.getClientRects().length) return false
+  const st = getComputedStyle(el)
+  if (st.visibility === 'hidden' || st.display === 'none') return false
+  if (Number(st.opacity) === 0 || st.pointerEvents === 'none') return false
+  return true
+}
+
 // Está no meio de alguma coisa? (cursor num campo, mexeu faz pouco, tem um
 // modal/gaveta aberto na frente, ou a tela avisou que está ocupada)
 function ocupadoPreenchendo() {
@@ -77,10 +88,21 @@ function ocupadoPreenchendo() {
   const tag = el?.tagName?.toLowerCase()
   if (tag === 'input' || tag === 'textarea' || tag === 'select' || el?.isContentEditable) return true
   if (Date.now() - ultimoMexeu < ESFRIAR_MS) return true
-  // Lista genérica: modal é modal em qualquer tela. A lista antiga só citava
-  // .modal-overlay/.confirmar-fundo e deixava de fora a gaveta da Loja Online
-  // (.dloja-overlay), que é exatamente onde o cliente monta o pedido.
-  if (document.querySelector('[aria-modal="true"], [role="dialog"], dialog[open], .modal-overlay, .confirmar-fundo, .dloja-overlay')) return true
+  // Modal é modal em qualquer tela — e citar as classes UMA A UMA nunca deu
+  // certo: cada tela batizou a sua (.modal-overlay no cadastro de clientes,
+  // .pp-modal-overlay no painel, .sal-modal-overlay no salão, .dloja-overlay e
+  // .loja-drawer-overlay na Loja Online). A que ficava de fora era sempre a
+  // que dava problema: em 31/08/2026 o Wilde estava cadastrando um cliente
+  // pelo Vender+ (.pp-modal-overlay, fora da lista) quando a versão nova
+  // entrou, recarregou a página e fechou a venda inteira no meio.
+  //
+  // Agora vale qualquer coisa com "overlay" no nome — mas só se estiver
+  // VISÍVEL na tela: overlay que existe no HTML e está escondido seguraria a
+  // atualização pra sempre.
+  const modais = document.querySelectorAll(
+    '[aria-modal="true"], [role="dialog"], dialog[open], [class*="overlay" i], .confirmar-fundo'
+  )
+  for (const el of modais) if (estaVisivel(el)) return true
   return false
 }
 
