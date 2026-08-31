@@ -774,54 +774,74 @@ async function runSalvarItem(sb: any, empresaId: string, p: any) {
   const ctx = await catalogoCtx(sb, empresaId)
   if ("error" in ctx) return { ok: false, error: ctx.error }
 
-  const itemId = p.itemId || uuid()
-  const productId = p.productId || uuid()
   const status = p.status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE"
   const grupos = Array.isArray(p.grupos) ? p.grupos : []
 
-  // produtos: o principal + um por opção de complemento
-  const products: any[] = [{
-    id: productId, name: p.nome, description: p.descricao ?? "",
-    ...(p.imagePath ? { imagePath: p.imagePath } : {}),
-    optionGroups: grupos.map((g: any) => ({ id: g.grupoId, min: Number(g.min ?? 0), max: Number(g.max ?? 1) })),
-  }]
-  const optionGroups: any[] = []
-  const options: any[] = []
-  for (const g of grupos) {
-    const opcoes = Array.isArray(g.opcoes) ? g.opcoes : []
-    optionGroups.push({
-      id: g.grupoId, name: g.nome, status: "AVAILABLE",
-      min: Number(g.min ?? 0), max: Number(g.max ?? 1),
-      optionIds: opcoes.map((o: any) => o.opcaoId),
-    })
-    for (const o of opcoes) {
-      products.push({ id: o.produtoId, name: o.nome, ...(o.imagePath ? { imagePath: o.imagePath } : {}) })
-      options.push({
-        id: o.opcaoId, productId: o.produtoId,
-        status: o.status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE",
-        price: { value: Number(o.preco ?? 0) },
+  const montaBody = (itemId: string, productId: string) => {
+    // produtos: o principal + um por opção de complemento
+    const products: any[] = [{
+      id: productId, name: p.nome, description: p.descricao ?? "",
+      ...(p.imagePath ? { imagePath: p.imagePath } : {}),
+      optionGroups: grupos.map((g: any) => ({ id: g.grupoId, min: Number(g.min ?? 0), max: Number(g.max ?? 1) })),
+    }]
+    const optionGroups: any[] = []
+    const options: any[] = []
+    for (const g of grupos) {
+      const opcoes = Array.isArray(g.opcoes) ? g.opcoes : []
+      optionGroups.push({
+        id: g.grupoId, name: g.nome, status: "AVAILABLE",
+        min: Number(g.min ?? 0), max: Number(g.max ?? 1),
+        optionIds: opcoes.map((o: any) => o.opcaoId),
       })
+      for (const o of opcoes) {
+        products.push({ id: o.produtoId, name: o.nome, ...(o.imagePath ? { imagePath: o.imagePath } : {}) })
+        options.push({
+          id: o.opcaoId, productId: o.produtoId,
+          status: o.status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE",
+          price: { value: Number(o.preco ?? 0) },
+        })
+      }
+    }
+    return {
+      item: {
+        id: itemId, type: "DEFAULT", categoryId: p.categoriaId, status,
+        price: { value: Number(p.preco ?? 0) },
+        externalCode: p.externalCode || `FWC-${itemId.slice(0, 8)}`,
+        index: Number(p.index ?? 1), productId,
+      },
+      products, optionGroups, options,
     }
   }
 
-  const bodyItem = {
-    item: {
-      id: itemId, type: "DEFAULT", categoryId: p.categoriaId, status,
-      price: { value: Number(p.preco ?? 0) },
-      externalCode: p.externalCode || `FWC-${itemId.slice(0, 8)}`,
-      index: Number(p.index ?? 1), productId,
-    },
-    products, optionGroups, options,
+  const manda = async (itemId: string, productId: string) => {
+    const r = await fetch(`${IFOOD}/catalog/v2.0/merchants/${ctx.mid}/items`, {
+      method: "PUT",
+      headers: { ...ctx.auth, "Content-Type": "application/json" },
+      body: JSON.stringify(montaBody(itemId, productId)),
+    })
+    return { status: r.status, ok: r.ok, txt: await r.text() }
   }
-  const r = await fetch(`${IFOOD}/catalog/v2.0/merchants/${ctx.mid}/items`, {
-    method: "PUT",
-    headers: { ...ctx.auth, "Content-Type": "application/json" },
-    body: JSON.stringify(bodyItem),
-  })
-  const txt = await r.text()
-  if (!r.ok) return { ok: false, error: `iFood ${r.status}: ${txt.slice(0, 400)}` }
+
+  let itemId = p.itemId || uuid()
+  let productId = p.productId || uuid()
+  let recriado = false
+  let r = await manda(itemId, productId)
+
+  // 409 "There is a deleted Item with this Id": o item foi APAGADO lá no iFood e
+  // o id dele fica queimado — não dá pra reusar nem ressuscitar. Como aqui ainda
+  // guardamos esse id, todo reenvio batia nesse erro pra sempre. Nesse caso a
+  // saída é publicar como item novo, com ids novos; quem chamou grava os ids que
+  // voltam e o vínculo volta a funcionar.
+  if (!r.ok && r.status === 409 && /deleted item/i.test(r.txt) && (p.itemId || p.productId)) {
+    itemId = uuid()
+    productId = uuid()
+    recriado = true
+    r = await manda(itemId, productId)
+  }
+
+  if (!r.ok) return { ok: false, error: `iFood ${r.status}: ${r.txt.slice(0, 400)}` }
   // devolve os ids gerados pra UI guardar (necessário pra depois editar/pausar)
-  return { ok: true, itemId, productId,
+  return { ok: true, itemId, productId, recriado,
     grupos: grupos.map((g: any) => ({ grupoId: g.grupoId, opcoes: (g.opcoes ?? []).map((o: any) => ({ opcaoId: o.opcaoId, produtoId: o.produtoId })) })) }
 }
 
@@ -907,7 +927,8 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
       externalCode: `FWC-${String(p.id).slice(0, 8)}`,
     })
     if (r.ok) {
-      if (p.ifood_item_id) atualizados++
+      // recriado = o item tinha sido apagado no iFood e subiu de novo com id novo
+      if (p.ifood_item_id && !r.recriado) atualizados++
       else enviados++
       // Guarda o par produto↔item: é o que permite pausar aqui e pausar lá
       // (gatilho trg_ifood_espelha_pausa, migração 0207).
