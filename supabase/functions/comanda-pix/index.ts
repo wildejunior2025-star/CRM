@@ -158,6 +158,7 @@ Deno.serve(async (req) => {
       .select('id, empresa_id, status, cliente_id').eq('id', comandaId).maybeSingle()
     if (!com) return json({ error: 'Comanda não encontrada.' }, 404)
     if (!['aberta', 'aguardando_conferencia'].includes(com.status)) {
+      console.error('[pix] recusado: comanda', comandaId, 'status', com.status)
       return json({ error: 'Esta conta já foi fechada.' }, 400)
     }
 
@@ -167,7 +168,10 @@ Deno.serve(async (req) => {
     }
 
     const { total, subtotal, taxa, empresaNome } = await valorDaComanda(sb, comandaId, com.empresa_id, aplicarTaxa)
-    if (!(total > 0)) return json({ error: 'A conta está zerada.' }, 400)
+    if (!(total > 0)) {
+      console.error('[pix] recusado: conta zerada', comandaId)
+      return json({ error: 'A conta está zerada.' }, 400)
+    }
 
     // O que já está aberto ou pago nesta mesa. Na conta dividida cada pessoa tem
     // o seu QR (mig 0195), então o que limita não é "um por mesa" — é a soma não
@@ -182,9 +186,11 @@ Deno.serve(async (req) => {
     const valorCobrar = Math.round((pedido > 0 ? pedido : total - jaCobrado) * 100) / 100
 
     if (valorCobrar <= 0) {
+      console.error('[pix] recusado: nada a cobrar', comandaId, 'total', total, 'jaCobrado', jaCobrado)
       return json({ error: 'Esta mesa já tem PIX cobrindo a conta inteira.' }, 400)
     }
     if (jaCobrado + valorCobrar > total + 0.05) {
+      console.error('[pix] recusado: passa do total', comandaId, 'total', total, 'jaCobrado', jaCobrado, 'pedido', valorCobrar, 'parte', body?.parte)
       return json({
         error: `Passa do total: a conta é ${total.toFixed(2)} e já tem ${jaCobrado.toFixed(2)} em PIX. Cabe no máximo ${(total - jaCobrado).toFixed(2)}.`,
       }, 400)
