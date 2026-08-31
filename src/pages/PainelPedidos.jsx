@@ -1009,7 +1009,13 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const [produtoComp, setProdutoComp] = useState(null) // produto sendo montado (complementos)
   const [nome, setNome]         = useState(draft?.nome ?? (pedidoEdicao && pedidoEdicao.cliente_nome !== 'Balcão' ? (pedidoEdicao.cliente_nome ?? '') : ''))
   const [telefone, setTelefone] = useState(draft?.telefone ?? (pedidoEdicao && pedidoEdicao.cliente_telefone !== '—' ? (pedidoEdicao.cliente_telefone ?? '') : ''))
-  const [tipo, setTipo]         = useState(draft?.tipo ?? pedidoEdicao?.tipo_entrega ?? 'retirada') // 'retirada' (balcão) | 'entrega'
+  // Abre em ENTREGA. O padrão era Retirada e isso custava venda: a venda saía
+  // como balcão, sem endereço e sem taxa, e o pedido nunca aparecia no app do
+  // motoqueiro — o pedido 1001 da CD Bom (31/08/2026) ficou parado assim, com o
+  // endereço do cliente já preenchido por trás e escondido pela aba errada.
+  // Esquecer de marcar Entrega some com o pedido; esquecer de marcar Retirada
+  // só faz o sistema pedir o endereço, e aí dá pra corrigir na hora.
+  const [tipo, setTipo]         = useState(draft?.tipo ?? pedidoEdicao?.tipo_entrega ?? 'entrega') // 'retirada' (balcão) | 'entrega'
   const [cep, setCep]           = useState(draft?.cep ?? pedidoEdicao?.endereco_cep ?? '')
   const [buscandoCepVenda, setBuscandoCepVenda] = useState(false)
   const [rua, setRua]           = useState(draft?.rua ?? (pedidoEdicao && pedidoEdicao.endereco_rua !== 'Retirada na loja' ? (pedidoEdicao.endereco_rua ?? '') : ''))
@@ -1330,7 +1336,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
 
   async function concluir() {
     if (itens.length === 0) { setErro('Adicione pelo menos um item.'); return }
-    if (tipo === 'entrega' && !rua.trim()) { setErro('Informe o endereço da entrega.'); return }
+    if (tipo === 'entrega' && !rua.trim()) { setErro('Informe o endereço da entrega — ou marque Balcão / Retirada se o cliente leva daqui.'); return }
     setSalvando(true); setErro(null)
 
     // Vincula o cliente: usa o selecionado ou cadastra/atualiza pelo telefone.
