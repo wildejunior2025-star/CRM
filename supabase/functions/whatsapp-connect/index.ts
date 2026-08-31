@@ -413,7 +413,7 @@ serve(async (req) => {
       // dizia que enviou e não chegava nada — era o caso da Estação do Sabor.
       const { data: cfgEnvio } = await supabaseAdmin
         .from("whatsapp_config")
-        .select("cloud_phone_number_id")
+        .select("cloud_phone_number_id, cloud_waba_id")
         .eq("empresa_id", empresaId)
         .maybeSingle()
 
@@ -424,7 +424,13 @@ serve(async (req) => {
       // a mensagem ENTREGOU mesmo.
       let messageId: string | null = null
 
-      if (cfgEnvio?.cloud_phone_number_id) {
+  // Cloud SÓ com a conta completa (WABA). Um phone_number_id sozinho é setup
+  // pela metade — número de teste da Meta, que só fala com uma lista de
+  // permitidos. A CD Bom tinha um desses parado no cadastro: as mensagens dela
+  // saíam pelo Cloud e voltavam "131030 Recipient phone number not in allowed
+  // list", enquanto o WhatsApp de verdade dela (o do servidor) estava ali do
+  // lado, funcionando. 22 avisos perdidos em 30 dias, calados.
+      if (cfgEnvio?.cloud_phone_number_id && cfgEnvio?.cloud_waba_id) {
         // Token da própria loja (Cadastro Incorporado) quando existir; senão o do app.
         let cloudToken = Deno.env.get("WHATSAPP_CLOUD_TOKEN") ?? ""
         const { data: tok } = await supabaseAdmin

@@ -83,7 +83,7 @@ serve(async (req) => {
     // Interruptor por loja: quem não ligou não manda nada.
     const { data: cfg } = await supabase
       .from("whatsapp_config")
-      .select("instance_name, cloud_phone_number_id, ativo, notif_fiado_compra")
+      .select("instance_name, cloud_phone_number_id, cloud_waba_id, ativo, notif_fiado_compra")
       .eq("empresa_id", venda.empresa_id)
       .maybeSingle()
     if (!cfg?.ativo || !cfg?.notif_fiado_compra) {
@@ -172,7 +172,13 @@ serve(async (req) => {
     // por webhook, se ENTREGOU — sem guardar o id esse aviso não tem onde
     // encaixar, e o histórico fica dizendo "enviado" pra mensagem que morreu.
     let messageId: string | null = null
-    if (cfg.cloud_phone_number_id) {
+    // Cloud SÓ com a conta completa (WABA). Um phone_number_id sozinho é setup
+    // pela metade — número de teste da Meta, que só fala com uma lista de
+    // permitidos. A CD Bom tinha um desses parado no cadastro: as mensagens dela
+    // saíam pelo Cloud e voltavam "131030 Recipient phone number not in allowed
+    // list", enquanto o WhatsApp de verdade dela (o do servidor) estava ali do
+    // lado, funcionando. 22 avisos perdidos em 30 dias, calados.
+    if (cfg.cloud_phone_number_id && cfg.cloud_waba_id) {
       let token = CLOUD_TOKEN
       const { data: tok } = await supabase
         .from("whatsapp_cloud_tokens").select("token").eq("empresa_id", venda.empresa_id).maybeSingle()
