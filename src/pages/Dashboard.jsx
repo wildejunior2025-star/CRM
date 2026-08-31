@@ -586,12 +586,20 @@ export default function Dashboard() {
           </div>
 
           {/* Funil da Loja Online — onde o cliente desiste */}
-          {fn.temDados && (
+          {/* Aparece SEMPRE, mesmo zerado. Escondido quando vazio, o dono não
+              descobre que existe: procurou no Dashboard e não achou nada. */}
+          {(
             <div style={{ ...cardBox, marginBottom: 16 }}>
               <strong style={{ fontSize: 15, display: 'block', marginBottom: 4 }}>🛒 Loja Online — onde o cliente parou</strong>
               <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 14px' }}>
                 Cada pessoa que abriu o cardápio {ehLabel(periodo)} e até onde ela foi.
               </p>
+              {!fn.temDados && (
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px', padding: '10px 12px', background: 'var(--bg)', borderRadius: 8 }}>
+                  Ninguém abriu o cardápio {ehLabel(periodo)} ainda. A contagem começou hoje —
+                  os números aparecem sozinhos na primeira visita.
+                </p>
+              )}
               <FunilLinha rotulo="Abriu o cardápio" valor={fn.abriu} base={fn.abriu} perdeu={fn.perdeuNaVitrine} legenda="saíram sem botar nada na sacola" />
               <FunilLinha rotulo="Botou na sacola" valor={fn.sacola} base={fn.abriu} pct={fn.pctSacola} perdeu={fn.perdeuNaSacola} legenda="montaram a sacola e não foram pro endereço" />
               <FunilLinha rotulo="Foi pro endereço" valor={fn.endereco} base={fn.abriu} pct={fn.pctEndereco} perdeu={fn.perdeuNoCadastro} legenda="chegaram no cadastro e desistiram" />
