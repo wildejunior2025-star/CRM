@@ -50,6 +50,29 @@ async function espelharNoChat(
   }
 }
 
+// O número recebe WhatsApp?
+//
+// O iFood NÃO entrega o telefone do cliente: ele manda o 0800 da central dele
+// ("0800 200 5011"). A loja recebia esse número como se fosse do cliente e o
+// sistema mandava aviso de pedido pra ele a cada troca de status. Só no Zebu
+// foram 4.094 mensagens em 30 dias — 70% de tudo que saiu — para 12 números
+// que não existem no WhatsApp. Ninguém recebeu nada, e do lado da loja parecia
+// que o cliente tinha sido avisado.
+//
+// Regra: depois de tirar o 55, o que sobra tem que ser um telefone brasileiro
+// de 10 ou 11 dígitos com DDD de verdade. Os 10 dígitos ficam valendo de
+// propósito — o WhatsApp entrega muito celular sem o 9 migratório, e barrar
+// isso calaria cliente de verdade pra resolver problema de 0800.
+function recebeWhatsapp(phoneRaw: string): boolean {
+  const d = String(phoneRaw ?? "").replace(/\D/g, "")
+  const local = d.startsWith("55") ? d.slice(2) : d
+  if (local.length !== 10 && local.length !== 11) return false
+  if (local.startsWith("0")) return false           // 0800, 0300, 0500: central, não celular
+  const ddd = Number(local.slice(0, 2))
+  if (!(ddd >= 11 && ddd <= 99)) return false
+  return true
+}
+
 function toInstanceName(empresaId: string) {
   return "crm" + empresaId.replace(/-/g, "")
 }
@@ -374,6 +397,16 @@ serve(async (req) => {
       }
       const numero = String(phone).replace(/\D/g, "")
       const numeroFull = numero.startsWith("55") ? numero : `55${numero}`
+
+      // Pedido do iFood vem com o 0800 da central no lugar do telefone. Sem
+      // este aviso, quem clica em "mandar mensagem" no card acha que falou com
+      // o cliente — e o cliente nunca soube de nada.
+      if (!recebeWhatsapp(numeroFull)) {
+        return new Response(JSON.stringify({
+          ok: false,
+          erro: "Este número não recebe WhatsApp. Pedido do iFood não traz o telefone do cliente, e sim o 0800 da central — fale com ele pelo chat do próprio iFood.",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+      }
 
       // Loja no WhatsApp Cloud (o oficial da Meta) não fala com o Evolution: o
       // envio tem que sair pela Graph API. Sem isto o botão de mensagem do painel

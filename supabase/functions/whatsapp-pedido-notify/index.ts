@@ -13,6 +13,29 @@ const GRAPH_VERSION     = Deno.env.get("WHATSAPP_GRAPH_VERSION") ?? "v21.0"
 // Atenção: texto livre só é entregue dentro da janela de 24h desde a última
 // mensagem do cliente. Fora dela a Meta recusa (erro 131047) e só um template
 // aprovado passa — quem pediu pelo site e nunca escreveu no zap não recebe.
+// O número recebe WhatsApp?
+//
+// O iFood NÃO entrega o telefone do cliente: ele manda o 0800 da central dele
+// ("0800 200 5011"). A loja recebia esse número como se fosse do cliente e o
+// sistema mandava aviso de pedido pra ele a cada troca de status. Só no Zebu
+// foram 4.094 mensagens em 30 dias — 70% de tudo que saiu — para 12 números
+// que não existem no WhatsApp. Ninguém recebeu nada, e do lado da loja parecia
+// que o cliente tinha sido avisado.
+//
+// Regra: depois de tirar o 55, o que sobra tem que ser um telefone brasileiro
+// de 10 ou 11 dígitos com DDD de verdade. Os 10 dígitos ficam valendo de
+// propósito — o WhatsApp entrega muito celular sem o 9 migratório, e barrar
+// isso calaria cliente de verdade pra resolver problema de 0800.
+function recebeWhatsapp(phoneRaw: string): boolean {
+  const d = String(phoneRaw ?? "").replace(/\D/g, "")
+  const local = d.startsWith("55") ? d.slice(2) : d
+  if (local.length !== 10 && local.length !== 11) return false
+  if (local.startsWith("0")) return false           // 0800, 0300, 0500: central, não celular
+  const ddd = Number(local.slice(0, 2))
+  if (!(ddd >= 11 && ddd <= 99)) return false
+  return true
+}
+
 async function sendViaCloud(phoneNumberId: string, to: string, text: string): Promise<string | null> {
   try {
     const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/messages`, {
@@ -158,6 +181,16 @@ serve(async (req) => {
 
     const phone = pedido.cliente_telefone.replace(/\D/g, "")
     const phoneWpp = phone.startsWith("55") ? phone : `55${phone}`
+
+    // Número que não recebe WhatsApp (o 0800 do iFood, por exemplo): sai daqui
+    // sem mandar e sem gravar. Gravar criaria uma "conversa" com a central do
+    // iFood na caixa de entrada da loja, cheia de mensagem que ninguém leu.
+    if (!recebeWhatsapp(phoneWpp)) {
+      console.log("[notify] numero nao recebe whatsapp, aviso nao enviado:", phoneWpp)
+      return new Response(JSON.stringify({ ok: true, ignorado: "numero nao recebe whatsapp" }), {
+        headers: { "Content-Type": "application/json" },
+      })
+    }
     // Evolution entrega BR sem o 9 migratório (13→12 chars): normaliza para bater com whatsapp_conversas
     const phoneHistory = phoneWpp.startsWith("55") && phoneWpp.length === 13
       ? phoneWpp.slice(0, 4) + phoneWpp.slice(5)
