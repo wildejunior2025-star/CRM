@@ -36,7 +36,10 @@ function recebeWhatsapp(phoneRaw: string): boolean {
   return true
 }
 
-async function sendViaCloud(phoneNumberId: string, to: string, text: string): Promise<string | null> {
+// Devolve { erro, id }: o id é o wamid da Meta, que o webhook de status usa
+// depois pra dizer se ENTREGOU (mig 0215). A Meta responde 200 na hora mesmo
+// quando vai recusar a mensagem um minuto depois.
+async function sendViaCloud(phoneNumberId: string, to: string, text: string): Promise<{ erro: string | null, id: string | null }> {
   try {
     const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/messages`, {
       method: "POST",
@@ -46,12 +49,12 @@ async function sendViaCloud(phoneNumberId: string, to: string, text: string): Pr
         to, type: "text", text: { body: text, preview_url: false },
       }),
     })
-    if (res.ok) return null
-    const corpo = (await res.text()).slice(0, 250)
-    console.error("[notify cloud] erro", res.status, corpo)
-    return `cloud ${res.status}: ${corpo}`
+    const corpo = await res.json().catch(() => ({} as any))
+    if (res.ok) return { erro: null, id: corpo?.messages?.[0]?.id ?? null }
+    console.error("[notify cloud] erro", res.status, JSON.stringify(corpo).slice(0, 250))
+    return { erro: `cloud ${res.status}: ${JSON.stringify(corpo).slice(0, 250)}`, id: null }
   } catch (e) {
-    return `cloud inacessivel: ${String(e).slice(0, 200)}`
+    return { erro: `cloud inacessivel: ${String(e).slice(0, 200)}`, id: null }
   }
 }
 
@@ -201,13 +204,16 @@ serve(async (req) => {
     // erro, e sem olhar isso a gente gravava o aviso como enviado e o cliente
     // ficava sem receber, ninguém sabendo.
     let erro: string | null = null
+    let messageId: string | null = null
     if (!avisosAtivos) {
       // Fica registrado no histórico pra loja entender por que o cliente não
       // recebeu — e pro dono ver que é módulo desligado, não falha técnica.
       erro = "modulo de avisos desligado para esta loja"
       console.error("[notify] modulo avisos off", pedido.empresa_id, phoneWpp)
     } else if (waCfg.cloud_phone_number_id) {
-      erro = await sendViaCloud(String(waCfg.cloud_phone_number_id), phoneWpp, mensagem)
+      const envio = await sendViaCloud(String(waCfg.cloud_phone_number_id), phoneWpp, mensagem)
+      erro = envio.erro
+      messageId = envio.id
     } else {
       try {
         const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${waCfg.instance_name}`, {
@@ -232,6 +238,7 @@ serve(async (req) => {
       content:    mensagem,
       falhou:     !!erro,
       erro,
+      message_id: messageId,
     })
 
     return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } })

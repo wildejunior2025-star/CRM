@@ -191,7 +191,14 @@ async function processar(body: any) {
         erro_msg:  err ? (err.error_data?.details ?? err.title ?? err.message ?? null) : null,
         updated_at: new Date().toISOString(),
       }).eq("message_id", st.id)
+      // A mesma correção na conversa normal (mig 0215): sem isto, a comanda do
+      // fiado que a Meta recusou continuava gravada como enviada, e a loja ia
+      // cobrar achando que tinha avisado o cliente.
       if (st.status === "failed") {
+        await supabase.from("whatsapp_conversas").update({
+          falhou: true,
+          erro: err ? `${err.code ?? ""} ${err.error_data?.details ?? err.title ?? err.message ?? ""}`.trim() : "falhou na Meta",
+        }).eq("message_id", st.id)
         console.error("[cloud] mensagem falhou", st.id, JSON.stringify(err))
       }
     }

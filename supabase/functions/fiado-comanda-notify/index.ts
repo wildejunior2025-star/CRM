@@ -168,6 +168,10 @@ serve(async (req) => {
     // Mesmo caminho do aviso de pedido: Cloud quando a loja é oficial da Meta,
     // Evolution nas outras.
     let erro: string | null = null
+    // Id da mensagem na Meta. A Meta responde 200 na hora e só depois avisa,
+    // por webhook, se ENTREGOU — sem guardar o id esse aviso não tem onde
+    // encaixar, e o histórico fica dizendo "enviado" pra mensagem que morreu.
+    let messageId: string | null = null
     if (cfg.cloud_phone_number_id) {
       let token = CLOUD_TOKEN
       const { data: tok } = await supabase
@@ -181,7 +185,9 @@ serve(async (req) => {
           to: phoneFull, type: "text", text: { body: mensagem, preview_url: false },
         }),
       })
-      if (!res.ok) erro = `cloud ${res.status}: ${(await res.text()).slice(0, 250)}`
+      const corpo = await res.json().catch(() => ({} as any))
+      if (!res.ok) erro = `cloud ${res.status}: ${JSON.stringify(corpo).slice(0, 250)}`
+      else messageId = corpo?.messages?.[0]?.id ?? null
     } else {
       try {
         const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${cfg.instance_name}`, {
@@ -202,6 +208,7 @@ serve(async (req) => {
     await supabase.from("whatsapp_conversas").insert({
       empresa_id: venda.empresa_id, phone: phoneFull,
       role: "assistant", content: mensagem, falhou: !!erro, erro,
+      message_id: messageId,
     })
 
     return new Response(JSON.stringify({ ok: !erro, erro }), {

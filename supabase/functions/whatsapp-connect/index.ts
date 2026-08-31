@@ -420,6 +420,9 @@ serve(async (req) => {
       let ok = false
       let erro: string | null = null
       let data: any = {}
+      // Ver mig 0215: guarda o id pra o webhook de status poder dizer depois se
+      // a mensagem ENTREGOU mesmo.
+      let messageId: string | null = null
 
       if (cfgEnvio?.cloud_phone_number_id) {
         // Token da própria loja (Cadastro Incorporado) quando existir; senão o do app.
@@ -438,6 +441,7 @@ serve(async (req) => {
         })
         data = await res.json().catch(() => ({}))
         ok = res.ok
+        if (ok) messageId = data?.messages?.[0]?.id ?? null
         if (!ok) {
           // A Meta só deixa escrever livremente até 24h depois da última mensagem
           // do cliente (erro 131047). Quem está no balcão precisa saber POR QUE
@@ -464,7 +468,7 @@ serve(async (req) => {
       if (ok) {
         await supabaseAdmin.from("whatsapp_conversas").insert({
           empresa_id: empresaId, phone: numeroFull, role: "assistant",
-          content: text, origem: "loja",
+          content: text, origem: "loja", message_id: messageId,
         })
         // Também no chat do painel/link, pra quem pediu pelo site ver a mesma
         // resposta ali. Quem chama passando espelhar_no_chat:false já gravou
