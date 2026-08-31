@@ -206,22 +206,49 @@ async function rodarTool(sb: any, empresaId: string, nome: string, arg: any) {
   return { erro: "Consulta desconhecida." }
 }
 
+// Por que os pagamentos entram aqui
+// -------------------------------
+// `vendas.forma_pagamento` não guarda COMO o cliente pagou: no salão ele grava
+// "a_vista" pra tudo que não é fiado. PIX, dinheiro, débito e crédito viram a
+// mesma palavra. Por isso o assistente respondia "não sei" quando perguntavam
+// quanto entrou no PIX — e não era falta de dado, era o lugar errado.
+//
+// A forma de verdade mora em `pagamentos`, uma linha por forma. Conta dividida
+// (metade PIX, metade dinheiro) vira duas linhas ali, o que a coluna da venda
+// nunca conseguiria representar.
 async function carregarVendasEPedidos(sb: any, de: string, ate: string) {
-  const [vendas, pedidos] = await Promise.all([
+  const [vendas, pedidos, pagamentos] = await Promise.all([
     todos((a, b) => sb.from("vendas")
-      .select("total, created_at, forma_pagamento, observacoes")
+      .select("id, total, created_at, forma_pagamento, observacoes")
       .neq("status", "cancelado").gte("created_at", de).lt("created_at", ate)
       .order("created_at").range(a, b)),
     todos((a, b) => sb.from("pedidos_delivery")
       .select("total, created_at, forma_pagamento, origem, status")
       .gte("created_at", de).lt("created_at", ate)
       .order("created_at").range(a, b)),
+    todos((a, b) => sb.from("pagamentos")
+      .select("venda_id, valor, forma_pagamento, created_at")
+      .gte("created_at", de).lt("created_at", ate)
+      .order("created_at").range(a, b)),
   ])
-  return { vendas, pedidos: pedidos.filter((p: any) => pedidoVale(p.status)) }
+  return { vendas, pedidos: pedidos.filter((p: any) => pedidoVale(p.status)), pagamentos }
 }
 
 async function consultarVendas(sb: any, ini: string, fim: string, de: string, ate: string) {
-  const { vendas, pedidos } = await carregarVendasEPedidos(sb, de, ate)
+  const { vendas, pedidos, pagamentos } = await carregarVendasEPedidos(sb, de, ate)
+
+  // Pagamento com venda_id: é o "como pagou" daquela venda.
+  // Pagamento SEM venda_id: é cliente quitando fiado antigo — dinheiro que
+  // entrou no caixa hoje, mas de uma venda de outro dia. Somar junto inflaria
+  // o faturamento do período com venda que já foi contada lá atrás.
+  const pagPorVenda: Record<string, { forma: string; valor: number }[]> = {}
+  const fiadoRecebido: Record<string, number> = {}
+  for (const p of (pagamentos ?? [])) {
+    const forma = String(p.forma_pagamento || "nao informado")
+    const valor = Number(p.valor) || 0
+    if (p.venda_id) (pagPorVenda[p.venda_id] ??= []).push({ forma, valor })
+    else fiadoRecebido[forma] = (fiadoRecebido[forma] ?? 0) + valor
+  }
 
   let faturamento = 0, qtd = 0
   const canal: Record<string, number> = {}
@@ -229,11 +256,18 @@ async function consultarVendas(sb: any, ini: string, fim: string, de: string, at
   const porDia: Record<string, { total: number; pedidos: number }> = {}
   for (const d of dias(ini, fim)) porDia[d] = { total: 0, pedidos: 0 }
 
-  const somar = (ts: string, valor: number, ch: string, fp: string) => {
+  // `linhas` é como o valor se reparte entre as formas. Uma só na maioria dos
+  // casos; duas ou mais quando a conta foi dividida.
+  const somar = (ts: string, valor: number, ch: string, fp: string,
+                 linhas?: { forma: string; valor: number }[]) => {
     faturamento += valor; qtd++
     canal[ch] = (canal[ch] ?? 0) + valor
-    const k = fp || "nao informado"
-    forma[k] = (forma[k] ?? 0) + valor
+    if (linhas?.length) {
+      for (const l of linhas) forma[l.forma] = (forma[l.forma] ?? 0) + l.valor
+    } else {
+      const k = fp || "nao informado"
+      forma[k] = (forma[k] ?? 0) + valor
+    }
     const d = porDia[diaBRT(ts)]
     if (d) { d.total += valor; d.pedidos++ }
   }
@@ -241,7 +275,10 @@ async function consultarVendas(sb: any, ini: string, fim: string, de: string, at
     // Venda de mesa/comanda nasce com observacoes comecando em "Presencial" —
     // e o unico jeito de separar salao de balcao (as duas viram linha em `vendas`).
     const ch = String(v.observacoes || "").startsWith("Presencial") ? "Salao (mesa)" : "Balcao"
-    somar(v.created_at, Number(v.total), ch, v.forma_pagamento)
+    // Fiado fica como fiado: ainda não entrou dinheiro nenhum. Quando o cliente
+    // pagar, aparece em recebido_de_fiado, na forma em que ele pagou.
+    const linhas = v.forma_pagamento === "fiado" ? undefined : pagPorVenda[v.id]
+    somar(v.created_at, Number(v.total), ch, v.forma_pagamento, linhas)
   }
   for (const p of pedidos) somar(p.created_at, Number(p.total), canalDoPedido(p.origem), p.forma_pagamento)
 
@@ -256,6 +293,11 @@ async function consultarVendas(sb: any, ini: string, fim: string, de: string, at
     ticket_medio: brl(qtd ? faturamento / qtd : 0),
     por_canal: ordena(canal),
     por_forma_pagamento: ordena(forma),
+    // Dinheiro que entrou no caixa no período mas NÃO é venda do período: é
+    // cliente quitando fiado antigo. Fica separado de propósito — somar junto
+    // contaria a mesma venda duas vezes.
+    recebido_de_fiado: ordena(fiadoRecebido),
+    nota_formas: "por_forma_pagamento e o que foi VENDIDO no periodo, ja separado por PIX, dinheiro, debito e credito. Venda no fiado aparece como fiado ate o cliente pagar. recebido_de_fiado e divida antiga quitada agora: e dinheiro que entrou, mas nao e venda deste periodo.",
     // Periodo longo demais viraria uma lista gigantesca dentro do prompt sem
     // ajudar a responder — acima de 62 dias so o total interessa.
     por_dia: lista.length <= 62
