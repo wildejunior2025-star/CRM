@@ -12,6 +12,20 @@ function normBairro(s) {
     .replace(/^bairro\s+/, '').replace(/\s+/g, ' ')
 }
 
+// Tabela inicial de faixas: de 500 em 500 m até o raio, todas com a mesma taxa.
+// É o que a loja vê quando ainda não montou a tabela dela — quem cobra um valor
+// só para toda a área simplesmente deixa o mesmo número em todas as linhas.
+function faixasPadrao(raio, taxa) {
+  const passo = 0.5
+  const r = Number(raio) || 10
+  const t = Number(taxa) || 0
+  const n = Math.max(1, Math.round(r / passo))
+  return Array.from({ length: n }, (_, i) => {
+    const km = +((i + 1) * passo).toFixed(1)
+    return { km, taxa: t, tempo: Math.round(km * 5) }
+  })
+}
+
 
 export default function RaioEntrega() {
   const { profile, refreshProfile } = useAuth()
@@ -46,7 +60,6 @@ export default function RaioEntrega() {
   const [aceitaEntrega,   setAceitaEntrega]   = useState(true)
   const [taxaEntrega,     setTaxaEntrega]     = useState(0)
   const [pedidoMinimo,    setPedidoMinimo]    = useState(0)
-  const [usarTaxasPorKm,  setUsarTaxasPorKm]  = useState(false)
   const [taxasKm,         setTaxasKm]         = useState([])  // [{km, taxa}]
   const [tempoMin,        setTempoMin]        = useState(30)
   const [tempoMax,        setTempoMax]        = useState(60)
@@ -95,7 +108,6 @@ export default function RaioEntrega() {
   function mudarRaio(novo) {
     const r = Number(novo) || 0
     setRaio(r)
-    if (!usarTaxasPorKm) return
     clearTimeout(raioSyncTimer.current)
     raioSyncTimer.current = setTimeout(() => {
       setTaxasKm(prev => {
@@ -169,7 +181,6 @@ export default function RaioEntrega() {
       aceitaEntrega:  o.aceitaEntrega  !== false,
       taxaEntrega: String(o.taxaEntrega ?? ''),
       pedidoMinimo: String(o.pedidoMinimo ?? ''),
-      usarTaxasPorKm: !!o.usarTaxasPorKm,
       taxasKm: (o.taxasKm ?? []).map(f => ({ km: Number(f.km) || 0, taxa: Number(f.taxa) || 0, tempo: (f.tempo == null || f.tempo === '') ? null : Number(f.tempo) })),
       tempoMin: String(o.tempoMin ?? ''),
       tempoMax: String(o.tempoMax ?? ''),
@@ -180,7 +191,7 @@ export default function RaioEntrega() {
     })
   }
   function snapshotAtual() {
-    return normSnap({ aceitaDelivery, aceitaRetirada, aceitaEntrega, taxaEntrega, pedidoMinimo, usarTaxasPorKm, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado })
+    return normSnap({ aceitaDelivery, aceitaRetirada, aceitaEntrega, taxaEntrega, pedidoMinimo, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado })
   }
   function descartarAlteracoes() {
     if (!baselineRef.current) return
@@ -189,7 +200,7 @@ export default function RaioEntrega() {
     setAceitaDelivery(!!b.aceitaDelivery); setAceitaRetirada(b.aceitaRetirada !== false)
     setAceitaEntrega(b.aceitaEntrega !== false)
     setTaxaEntrega(b.taxaEntrega); setPedidoMinimo(b.pedidoMinimo)
-    setUsarTaxasPorKm(!!b.usarTaxasPorKm); setTaxasKm(Array.isArray(b.taxasKm) ? b.taxasKm : [])
+    setTaxasKm(Array.isArray(b.taxasKm) ? b.taxasKm : [])
     setTempoMin(b.tempoMin); setTempoMax(b.tempoMax); setCategoria(b.categoria); setRaio(b.raio)
     setCep(b.cep); setRua(b.rua); setNumero(b.numero); setBairro(b.bairro); setCidade(b.cidade); setEstado(b.estado)
     if (draftKey) { try { localStorage.removeItem(draftKey) } catch { /* ignore */ } }
@@ -224,7 +235,13 @@ export default function RaioEntrega() {
         setEstado(data.estado ?? '')
         setCategoria(data.categoria_delivery ?? '')
         setRaio(data.raio_entrega_km ?? 10)
-        const faixas = Array.isArray(data.taxas_entrega_km) ? data.taxas_entrega_km : []
+        // A cobrança é sempre por faixa de distância. Loja que ainda estava na
+        // taxa fixa antiga chega aqui com a tabela vazia: monta as faixas de 500
+        // em 500 m até o raio, todas com a taxa que ela já cobrava. A conta sai
+        // igual à de antes, e agora dá pra mexer km a km.
+        const faixas = Array.isArray(data.taxas_entrega_km) && data.taxas_entrega_km.length
+          ? data.taxas_entrega_km
+          : faixasPadrao(data.raio_entrega_km ?? 10, data.taxa_entrega ?? 0)
         setTaxasKm(faixas)
         setUsarTaxasPorKm(faixas.length > 0)
         setLatitude(data.latitude ? Number(data.latitude) : null)
@@ -237,7 +254,6 @@ export default function RaioEntrega() {
           aceitaEntrega:  data.aceita_entrega  !== false,
           taxaEntrega: data.taxa_entrega ?? 0,
           pedidoMinimo: data.pedido_minimo ?? 0,
-          usarTaxasPorKm: faixas.length > 0,
           taxasKm: faixas,
           tempoMin: data.tempo_entrega_min ?? 30,
           tempoMax: data.tempo_entrega_max ?? 60,
@@ -254,7 +270,7 @@ export default function RaioEntrega() {
             setAceitaDelivery(!!d.aceitaDelivery); setAceitaRetirada(d.aceitaRetirada !== false)
             setAceitaEntrega(d.aceitaEntrega !== false)
             setTaxaEntrega(d.taxaEntrega ?? 0); setPedidoMinimo(d.pedidoMinimo ?? 0)
-            setUsarTaxasPorKm(!!d.usarTaxasPorKm); setTaxasKm(Array.isArray(d.taxasKm) ? d.taxasKm : [])
+            setTaxasKm(Array.isArray(d.taxasKm) ? d.taxasKm : [])
             setTempoMin(d.tempoMin ?? 30); setTempoMax(d.tempoMax ?? 60); setCategoria(d.categoria ?? ''); setRaio(d.raio ?? 10)
             setCep(d.cep ?? cepFmt); setRua(d.rua ?? ''); setNumero(d.numero ?? '')
             setBairro(d.bairro ?? ''); setCidade(d.cidade ?? ''); setEstado(d.estado ?? '')
@@ -274,7 +290,7 @@ export default function RaioEntrega() {
       try { mudou ? localStorage.setItem(draftKey, snap) : localStorage.removeItem(draftKey) } catch { /* ignore */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aceitaDelivery, aceitaRetirada, aceitaEntrega, taxaEntrega, pedidoMinimo, usarTaxasPorKm, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado])
+  }, [aceitaDelivery, aceitaRetirada, aceitaEntrega, taxaEntrega, pedidoMinimo, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado])
 
   // ── Carrega bairros: config salva + sugestões dos pedidos passados ──
   useEffect(() => {
@@ -449,15 +465,21 @@ export default function RaioEntrega() {
     if (!empresaId) return
     setSalvando(true); setMsg(null)
 
+    const faixasOrdenadas = [...taxasKm].sort((a, b) => a.km - b.km)
+    // taxa_entrega não é mais "a taxa da loja": vira o piso ("a partir de"), pra
+    // quem ainda lê esse campo (robô do WhatsApp, telas antigas) não concluir que
+    // a entrega é de graça quando a distância não pôde ser calculada.
+    const taxaPiso = faixasOrdenadas.length
+      ? Math.min(...faixasOrdenadas.map(f => Number(f.taxa) || 0))
+      : (parseFloat(taxaEntrega) || 0)
+
     const { error } = await supabase.from('empresas').update({
       aceita_delivery:      aceitaDelivery,
       aceita_retirada:      aceitaRetirada,
       aceita_entrega:       aceitaEntrega,
-      taxa_entrega:         usarTaxasPorKm ? 0 : (parseFloat(taxaEntrega) || 0),
+      taxa_entrega:         taxaPiso,
       pedido_minimo:        parseFloat(pedidoMinimo) || 0,
-      taxas_entrega_km:     usarTaxasPorKm
-        ? [...taxasKm].sort((a, b) => a.km - b.km)
-        : [],
+      taxas_entrega_km:     faixasOrdenadas,
       tempo_entrega_min:    parseInt(tempoMin) || 30,
       tempo_entrega_max:    parseInt(tempoMax) || 60,
       cep:                  cep.replace(/\D/g, '') || null,
@@ -713,53 +735,8 @@ export default function RaioEntrega() {
             <div className="re-delivery-body">
               <div className="form-grid">
 
-                {/* Modo de taxa */}
+                {/* Faixas de entrega por distância (única forma de cobrar) */}
                 <div className="form-field full">
-                  <div className="re-taxa-mode">
-                    <button
-                      type="button"
-                      className={`re-taxa-btn${!usarTaxasPorKm ? ' selected' : ''}`}
-                      onClick={() => setUsarTaxasPorKm(false)}
-                    >
-                      Taxa fixa
-                    </button>
-                    <button
-                      type="button"
-                      className={`re-taxa-btn${usarTaxasPorKm ? ' selected' : ''}`}
-                      onClick={() => {
-                        setUsarTaxasPorKm(true)
-                        // Gera uma faixa a cada 500 m (0,5 km) até o raio.
-                        if (taxasKm.length === 0) {
-                          const passo = 0.5
-                          const n = Math.max(1, Math.round((parseFloat(raio) || 10) / passo))
-                          const faixasAuto = Array.from({ length: n }, (_, i) => {
-                            const km = +((i + 1) * passo).toFixed(1)
-                            return { km, taxa: 0, tempo: Math.round(km * 5) }
-                          })
-                          setTaxasKm(faixasAuto)
-                        }
-                      }}
-                    >
-                      Por km (faixas)
-                    </button>
-                  </div>
-                </div>
-
-                {/* Taxa fixa */}
-                {!usarTaxasPorKm && (
-                  <div className="form-field">
-                    <label>Taxa de entrega (R$)</label>
-                    <input
-                      type="number" step="0.01" min="0"
-                      value={taxaEntrega}
-                      onChange={e => setTaxaEntrega(e.target.value)}
-                    />
-                  </div>
-                )}
-
-                {/* Faixas por km */}
-                {usarTaxasPorKm && (
-                  <div className="form-field full">
                     <span className="re-faixas-label">Faixas de entrega por distância</span>
                     <div className="re-faixas-table">
 
@@ -833,11 +810,10 @@ export default function RaioEntrega() {
                       </button>
 
                       <p className="re-faixas-hint">
-                        Cada faixa define a taxa e o tempo estimado para aquela distância. A faixa mais próxima é aplicada automaticamente no pedido. Pode usar de <b>500 em 500 m</b> (0,5 · 1 · 1,5 · 2 km…).
+                        Cada faixa define a taxa e o tempo estimado para aquela distância. A faixa mais próxima é aplicada automaticamente no pedido. Pode usar de <b>500 em 500 m</b> (0,5 · 1 · 1,5 · 2 km…). Cobra o mesmo valor para toda a área? Basta repetir a mesma taxa em todas as linhas.
                       </p>
                     </div>
-                  </div>
-                )}
+                </div>
 
                 {/* Pedido mínimo (só entrega) */}
                 <div className="form-field">

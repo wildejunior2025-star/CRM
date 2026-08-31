@@ -332,44 +332,6 @@
 .re-switch.on  .re-switch-thumb { left: 23px; }
 .re-switch.off .re-switch-thumb { left: 3px; }
 
-/* ── Modo de taxa (Taxa fixa / Por km) ── */
-.re-taxa-mode {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.re-taxa-btn {
-  flex: 1;
-  padding: 9px 12px;
-  border-radius: 8px;
-  border: 1.5px solid var(--border);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 140ms, border-color 140ms, color 140ms;
-  background: var(--surface);
-  color: var(--text);
-  line-height: 1.25;
-}
-
-.re-taxa-btn:hover:not(.selected) {
-  border-color: var(--primary);
-  background: var(--primary-bg);
-  color: var(--primary);
-}
-
-.re-taxa-btn.selected {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: var(--primary-contrast);
-}
-
-.re-taxa-btn:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
-
 /* ── Tabela de faixas por km ── */
 .re-faixas-label {
   font-size: 13px;
