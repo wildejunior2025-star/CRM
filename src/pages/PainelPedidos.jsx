@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
+import { precoPorQuantidade, faixaAplicada, menorFaixa } from '../lib/precoQuantidade'
 import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
 import { rotuloComanda } from '../lib/comanda'
 import { calcularTaxa } from '../lib/taxaServico'
@@ -695,8 +696,13 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
   const adicional = adicionalComplementos(grupos, selecoes)
   // Opção paga entra rateada, pra a linha ter UM preço unitário e o
   // subtotal (qtd × unitário) continuar batendo.
-  const precoBase = Number(produto.preco_venda || 0)
-  const precoUnit = qtdItem > 0 ? precoBase + adicional / qtdItem : precoBase + adicional
+  // No atacado a quantidade da linha é a soma dos sabores (10 uva + 15 limão),
+  // e é ela que decide a faixa: 25 picolés entram no "a partir de 10".
+  const precoBase = precoDoProduto(produto, qtdItem)
+  const faixa = faixaAplicada(produto.faixas_preco, qtdItem)
+  const faixa1 = menorFaixa(produto.faixas_preco)
+  const adicionalUnit = qtdItem > 0 ? adicional / qtdItem : adicional
+  const precoUnit = precoBase + adicionalUnit
   const totalItem = precoUnit * (qtdItem || 1)
   const faltando = grupos.filter(g => g.modo_quantidade
     ? somaQtd(g) < (g.min ?? 0)
@@ -796,7 +802,17 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
           )
         })}
 
-        <button type="button" disabled={!podeAdd} onClick={() => onConfirmar(produto, selecoes, precoUnit, qtdItem)}
+        {faixa ? (
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#22c55e', marginBottom: 8 }}>
+            Atacado: {faixa.qtd_min}+ un sai a {fmt(faixa.preco)} cada
+          </div>
+        ) : faixa1 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+            A partir de {faixa1.qtd_min} un sai a {fmt(faixa1.preco)} cada
+          </div>
+        ) : null}
+
+        <button type="button" disabled={!podeAdd} onClick={() => onConfirmar(produto, selecoes, precoUnit, qtdItem, adicionalUnit)}
           className="btn btn-primary" style={{ width: '100%', opacity: podeAdd ? 1 : 0.5, marginTop: 4 }}>
           {podeAdd
             ? (grupoQtd ? `Adicionar ${qtdItem} un · ${fmt(totalItem)}` : `Adicionar · ${fmt(totalItem)}`)
@@ -805,6 +821,45 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
       </div>
     </div>
   )
+}
+
+// Preço do produto pela QUANTIDADE que o cliente leva (atacado/promoção).
+//
+// A Loja Online já cobrava a faixa ("a partir de 10 sai a R$ 0,65"), o balcão
+// não: na CD Bom, 10 picolés de R$ 1,50 fechavam R$ 15,00 em vez de R$ 6,50.
+// As duas telas leem as mesmas faixas de `produtos.faixas_preco`.
+function precoDoProduto(produto, qtd) {
+  const base = Number(produto?.preco_venda || 0)
+  const preco = precoPorQuantidade(base, produto?.faixas_preco, qtd, produto?.preco_promocional)
+  // O preço especial do cliente já entrou no lugar do preço cheio: a faixa só
+  // vale se for MENOR, senão o combinado com ele subiria por causa do atacado.
+  return Math.min(preco, base)
+}
+
+// Preço da linha do carrinho quando a quantidade muda no +/−: passar de 9 pra
+// 10 tem que baixar o valor sozinho, senão o "a partir de 10" vira promessa
+// que a loja não cumpre.
+//
+// Linha sem `precoBase` é de pedido em edição (o preço veio salvo do banco):
+// aí vale o que foi cobrado na hora, ninguém remarca venda antiga.
+function precoDaLinha(item, qtd) {
+  if (item?.precoBase == null) return Number(item?.preco || 0)
+  const p = {
+    preco_venda: item.precoBase,
+    faixas_preco: item.faixas_preco,
+    preco_promocional: item.preco_promocional,
+  }
+  return precoDoProduto(p, qtd) + Number(item.adicionalUnit || 0)
+}
+
+// Os campos que a linha do carrinho guarda pra saber recalcular sozinha.
+function dadosDePreco(produto, adicionalUnit = 0) {
+  return {
+    precoBase: Number(produto?.preco_venda || 0),
+    faixas_preco: produto?.faixas_preco ?? [],
+    preco_promocional: produto?.preco_promocional ?? null,
+    adicionalUnit: Number(adicionalUnit) || 0,
+  }
 }
 
 // Reconstrói o carrinho a partir dos itens de um pedido (ao editar).
@@ -831,7 +886,7 @@ const catalogoCache = {} // { [empresaId]: { produtos, compMap } }
 async function carregarCatalogo(empresaId) {
   const [prodRes, vincRes] = await Promise.all([
     // Paginado: sem isso a Nova venda de um deposito so achava os 1000 primeiros nomes.
-    fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, categoria')
+    fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, preco_promocional, faixas_preco, categoria')
       .eq('empresa_id', empresaId).is('arquivado_em', null).order('nome', { ascending: true }).order('id')),
     supabase.from('produto_complemento_grupos')
       .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, regra_preco, modo_quantidade, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)), produtos!inner(empresa_id)')
@@ -1112,7 +1167,10 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   function addItem(p) {
     setCart(prev => {
       const qtd = (prev[p.id]?.qtd ?? 0) + 1
-      return { ...prev, [p.id]: { id: p.id, produto_id: p.id, nome: p.nome, preco: Number(p.preco_venda || 0), qtd } }
+      return { ...prev, [p.id]: {
+        id: p.id, produto_id: p.id, nome: p.nome, qtd,
+        ...dadosDePreco(p), preco: precoDoProduto(p, qtd),
+      } }
     })
   }
   // Se o produto tem complementos, abre o seletor; senão adiciona direto.
@@ -1130,7 +1188,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   // 45 picolés) e manda na quantidade da linha — repetir o produto ali somaria
   // 45 em cima de 45. Fora do atacado ele vem 1 e o comportamento é o de
   // sempre: clicar de novo soma mais um.
-  function adicionarComComplementos(produto, selecoes, precoUnit, qtdInicial, qtdItem) {
+  function adicionarComComplementos(produto, selecoes, precoUnit, qtdInicial, qtdItem, adicionalUnit = 0) {
     const sig = `${produto.id}::${selecoes.map(s => `${s.opcaoId}x${s.qtd ?? 1}`).sort().join(',')}`
     const atacado = selecoes.some(s => s.absoluto)
     setCart(prev => {
@@ -1138,8 +1196,12 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       const qtd = qtdInicial != null ? qtdInicial
         : atacado ? Number(qtdItem || 1)
         : (prev[sig]?.qtd ?? 0) + 1
+      const dados = dadosDePreco(produto, adicionalUnit)
       return { ...prev, [sig]: {
-        id: sig, produto_id: produto.id, nome: produto.nome, preco: precoUnit, qtd,
+        id: sig, produto_id: produto.id, nome: produto.nome, qtd, ...dados,
+        // Fora do atacado a linha pode nascer com qtd maior que a da montagem
+        // (clicou de novo no mesmo combo): o preço é o da quantidade final.
+        preco: precoDaLinha({ ...dados, preco: precoUnit }, qtd),
         complementos: selecoes.map(s => ({
           nome: s.nome, qtd: s.qtd ?? 1, grupo: s.grupo, preco: s.preco, absoluto: !!s.absoluto,
         })),
@@ -1153,7 +1215,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       if (!cur) return prev
       const novo = { ...prev }
       if (cur.qtd <= 1) delete novo[id]
-      else novo[id] = { ...cur, qtd: cur.qtd - 1 }
+      else novo[id] = { ...cur, qtd: cur.qtd - 1, preco: precoDaLinha(cur, cur.qtd - 1) }
       return novo
     })
   }
@@ -1161,7 +1223,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     setCart(prev => {
       const cur = prev[id]
       if (!cur) return prev
-      return { ...prev, [id]: { ...cur, qtd: cur.qtd + 1 } }
+      return { ...prev, [id]: { ...cur, qtd: cur.qtd + 1, preco: precoDaLinha(cur, cur.qtd + 1) } }
     })
   }
   function removeItem(id) {
@@ -1172,7 +1234,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     setCart(prev => {
       const novo = { ...prev }
       if (qtd <= 0) delete novo[p.id]
-      else novo[p.id] = { id: p.id, nome: p.nome, preco: Number(p.preco_venda || 0), qtd }
+      else novo[p.id] = { id: p.id, nome: p.nome, qtd, ...dadosDePreco(p), preco: precoDoProduto(p, qtd) }
       return novo
     })
   }
@@ -1322,11 +1384,13 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
             const p = produtos.find(x => x.id === it.produto_id)
             if (!p) continue
             const comps = Array.isArray(it.complementos) ? it.complementos : []
-            const precoUnit = Number(p.preco_venda || 0) + comps.reduce((s, c) => s + Number(c.preco || 0), 0)
+            const adicUnit = comps.reduce((s, c) => s + Number(c.preco || 0), 0)
             const sig = comps.length ? `${p.id}::${comps.map(c => c.nome).sort().join(',')}` : p.id
             const q = (novo[sig]?.qtd ?? 0) + Math.max(1, Number(it.quantidade) || 1)
+            const dados = dadosDePreco(p, adicUnit)
             novo[sig] = {
-              id: sig, produto_id: p.id, nome: p.nome, preco: precoUnit, qtd: q,
+              id: sig, produto_id: p.id, nome: p.nome, qtd: q, ...dados,
+              preco: precoDaLinha(dados, q),
               complementos: comps.map(c => ({ nome: c.nome, qtd: 1 })),
             }
             addidos++
@@ -1486,6 +1550,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
             </div>
           ) : filtrados.map((p, idx) => {
             const qtd = cart[p.id]?.qtd ?? 0
+            const faixa1 = menorFaixa(p.faixas_preco)
             const marcado = idx === destaque && !!buscaNorm
             return (
               <div key={p.id} className="pp-venda-linha"
@@ -1496,6 +1561,9 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
                   <div className="pp-venda-nome" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nome}</div>
                   <div className="pp-venda-sub" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                     {fmt(p.preco_venda)}
+                    {/* O degrau do atacado na própria lista: o caixa vê que
+                        existe preço melhor antes de bater a quantidade. */}
+                    {faixa1 ? <span style={{ color: '#22c55e', fontWeight: 700 }}> · {faixa1.qtd_min}+ {fmt(faixa1.preco)}</span> : null}
                     {compMap[p.id]?.length ? <span style={{ color: '#7c3aed', fontWeight: 700 }}> · monte</span> : null}
                   </div>
                 </div>
@@ -1755,16 +1823,16 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         produto={produtoComp}
         iniciais={produtoComp._iniciais ?? []}
         onFechar={() => setProdutoComp(null)}
-        onConfirmar={(prod, selecoes, precoUnit, qtdItem) => {
+        onConfirmar={(prod, selecoes, precoUnit, qtdItem, adicionalUnit) => {
           // Edição: tira a linha antiga e recria com a escolha nova, mantendo a
           // qtd — menos no atacado, onde a quantidade É a soma dos sabores e
           // acabou de ser recontada.
           const atacado = selecoes.some(s => s.absoluto)
           if (produtoComp._editId) {
             removeItem(produtoComp._editId)
-            adicionarComComplementos(prod, selecoes, precoUnit, atacado ? qtdItem : produtoComp._qtd, qtdItem)
+            adicionarComComplementos(prod, selecoes, precoUnit, atacado ? qtdItem : produtoComp._qtd, qtdItem, adicionalUnit)
           } else {
-            adicionarComComplementos(prod, selecoes, precoUnit, undefined, qtdItem)
+            adicionarComComplementos(prod, selecoes, precoUnit, undefined, qtdItem, adicionalUnit)
           }
         }}
       />
