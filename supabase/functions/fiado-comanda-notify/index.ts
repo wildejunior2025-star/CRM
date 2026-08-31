@@ -128,9 +128,13 @@ serve(async (req) => {
     const { data: saldoRow } = await supabase
       .from("clientes_saldo_fiado").select("saldo_fiado").eq("cliente_id", venda.cliente_id).maybeSingle()
 
-    const quando = new Date(venda.created_at).toLocaleString("pt-BR", {
-      timeZone: "America/Fortaleza", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+    const dia = new Date(venda.created_at).toLocaleString("pt-BR", {
+      timeZone: "America/Fortaleza", day: "2-digit", month: "2-digit",
     })
+    const hora = new Date(venda.created_at).toLocaleString("pt-BR", {
+      timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit",
+    })
+    const quando = `${dia} às ${hora}`
     const local = ondeFoi(venda.observacoes)
     const primeiroNome = String(cliente?.nome ?? "").trim().split(" ")[0]
     const saudacao = primeiroNome
@@ -153,13 +157,13 @@ serve(async (req) => {
       `Forma de pagamento: *FIADO*`,
       // O saldo só entra se for maior que esta conta — repetir o mesmo número
       // duas vezes seguidas confunde mais do que informa.
-      saldo > Number(venda.total) + 0.005 ? `\nSeu total em aberto: *${brl(saldo)}*` : "",
+      saldo > Number(venda.total) + 0.005 ? `\nSeu total em aberto: *${brl(saldo)}*` : null,
       "",
       // É esta linha que faz o aviso valer a pena: confere hoje, enquanto todo
       // mundo lembra. Depois de duas semanas ninguém resolve mais.
       "Se tiver algo errado aqui, me avisa *hoje mesmo* que a gente confere. 🙏",
-      cliente?.token ? `\nVer tudo o que está em aberto:\nhttps://lojaonline.fwcinter.com/c/${cliente.token}` : "",
-    ].filter(l => l !== "").join("\n")
+      cliente?.token ? `\nVer tudo o que está em aberto:\nhttps://lojaonline.fwcinter.com/c/${cliente.token}` : null,
+    ].filter(l => l !== null).join("\n")
 
     // Mesmo caminho do aviso de pedido: Cloud quando a loja é oficial da Meta,
     // Evolution nas outras.
