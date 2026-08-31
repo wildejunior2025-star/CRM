@@ -245,7 +245,7 @@ export default function PresencialSalao() {
       // aparecer pro atendente ("PIX 1 pago, falta o outro") -- senao ele nao
       // sabe o que ainda tem pra receber.
       supabase.from('comanda_pix_cobrancas')
-        .select('id, comanda_id, valor, qr_code, qr_base64, expira_em, status')
+        .select('id, comanda_id, valor, qr_code, qr_base64, expira_em, status, parte')
         .eq('empresa_id', empresaId).in('status', ['pendente', 'pago']),
     ])
     setMesas(ms.data ?? [])
@@ -1596,10 +1596,16 @@ export default function PresencialSalao() {
     const linha = pagamentos[i]
     const valor = Number(String(linha?.valor ?? '').replace(',', '.'))
     if (!(valor > 0)) { window.alert('Digite o valor desta parte antes de gerar o QR.'); return }
-    await cobrarPixOnline(valor)
+    // Manda QUAL parte é: duas pessoas dividindo meio a meio têm o mesmo valor,
+    // e sem o número a segunda recebia o QR da primeira.
+    await cobrarPixOnline(valor, i)
   }
 
-  async function cobrarPixOnline(valorParcial = null) {
+  async function cobrarPixOnline(valorParcial = null, parte = null) {
+    // Se vier qualquer coisa que não seja número (um evento de clique, por
+    // exemplo), trata como conta inteira. Sem isso, o valor ia pro corpo da
+    // requisição e a cobrança morria antes de sair do navegador.
+    if (typeof valorParcial !== 'number') valorParcial = null
     if (!comandaSel) return
     setPixMsg('')
     // Marca a escolha ANTES de sair chamando o Mercado Pago: enquanto o QR não
@@ -1615,6 +1621,7 @@ export default function PresencialSalao() {
           comanda_id: comandaSel.id,
           aplicar_taxa: aplicarTaxa,
           valor: valorParcial ?? null,
+          parte: Number.isInteger(parte) ? parte : null,
           criada_por: user?.id ?? null,
           cliente_id: clienteSel?.id ?? comandaSel.cliente_id ?? null,
         },
@@ -3345,8 +3352,12 @@ export default function PresencialSalao() {
                     Feche esta janela e o QR está na comanda. Se receber por aqui, cancele o PIX antes.
                   </div>
                 )}
+                {/* Chamado com () de propósito: `onClick={cobrarPixOnline}` passaria o
+                    evento do clique como `valorParcial`, e a cobrança da conta inteira
+                    quebrava antes de sair do navegador (o evento não vira JSON). O
+                    rachado funcionava porque ali o valor vai explícito. */}
                 {mpConectado && !pixDaMesa && (
-                  <button type="button" onClick={cobrarPixOnline}
+                  <button type="button" onClick={() => cobrarPixOnline()}
                     disabled={pixGerando || cashbackAplicado > 0 || totalSel <= 0}
                     style={{ flex: '1 1 100%', padding: '11px 0', borderRadius: 10, fontWeight: 800, fontSize: 13,
                       cursor: (pixGerando || cashbackAplicado > 0) ? 'not-allowed' : 'pointer',
@@ -3407,7 +3418,11 @@ export default function PresencialSalao() {
                     {/* Linha de PIX online: gera (ou mostra) o QR daquela parte. */}
                     {p.forma === 'pix_online' && (() => {
                       const alvo = Number(String(p.valor ?? '').replace(',', '.'))
-                      const jaTem = pixDaMesaTodos.find(x => Math.abs(Number(x.valor) - alvo) < 0.005)
+                      // Casa pelo número da parte; o valor só serve pras cobranças
+                      // antigas (sem parte gravada), senão duas partes iguais
+                      // apontariam pro mesmo QR.
+                      const jaTem = pixDaMesaTodos.find(x => x.parte === i)
+                        ?? pixDaMesaTodos.find(x => x.parte == null && Math.abs(Number(x.valor) - alvo) < 0.005)
                       if (jaTem?.status === 'pago') {
                         return (
                           <div style={{ marginTop: 4, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 700,

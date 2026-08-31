@@ -173,7 +173,7 @@ Deno.serve(async (req) => {
     // o seu QR (mig 0195), então o que limita não é "um por mesa" — é a soma não
     // passar do total. Cobrar a mais é a loja devolvendo dinheiro depois.
     const { data: jaTem } = await sb.from('comanda_pix_cobrancas')
-      .select('id, valor, qr_code, qr_base64, expira_em, status')
+      .select('id, valor, qr_code, qr_base64, expira_em, status, parte')
       .eq('comanda_id', comandaId).in('status', ['pendente', 'pago'])
     const jaCobrado = (jaTem ?? []).reduce((soma: number, c: { valor: number }) => soma + Number(c.valor ?? 0), 0)
 
@@ -193,8 +193,15 @@ Deno.serve(async (req) => {
     // Mesma pessoa, mesmo valor, QR ainda vivo: devolve o que já existe em vez de
     // criar outro. É o toque repetido no botão — e dois QR iguais é a mesa
     // pagando duas vezes.
-    const igual = (jaTem ?? []).find((c: { status: string; valor: number }) =>
-      c.status === 'pendente' && Math.abs(Number(c.valor) - valorCobrar) < 0.005)
+    //
+    // Quando a conta é rachada, cada parte tem número próprio: "16,50 + 16,50"
+    // são DUAS cobranças legítimas de mesmo valor, e só se reaproveita o QR da
+    // MESMA parte. Sem isso a segunda metade recebia o QR da primeira.
+    const parte = Number.isInteger(body?.parte) ? body.parte as number : null
+    const igual = (jaTem ?? []).find((c: { status: string; valor: number; parte: number | null }) =>
+      c.status === 'pendente'
+      && Math.abs(Number(c.valor) - valorCobrar) < 0.005
+      && (parte === null ? (c.parte ?? null) === null : c.parte === parte))
     if (igual) {
       return json({
         cobranca_id: igual.id, valor: Number(igual.valor),
@@ -237,6 +244,7 @@ Deno.serve(async (req) => {
       qr_code:       td.qr_code ?? null,
       qr_base64:     td.qr_code_base64 ?? null,
       criada_por:    body.criada_por ?? null,
+      parte,
       expira_em:     expira.toISOString(),
     }).select('id').single()
 
