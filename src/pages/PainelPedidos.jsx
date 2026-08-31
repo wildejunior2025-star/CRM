@@ -1082,16 +1082,36 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     return () => { ativo = false }
   }, [empresa])
 
-  // Busca clientes da loja pelo nome (debounce) enquanto digita
+  // Busca os clientes da loja enquanto digita (debounce).
+  //
+  // Acha pelo NOME ou pelo TELEFONE. Quem está no balcão quase
+  // sempre tem o número antes do nome — o cliente dita o telefone, não como
+  // ficou cadastrado — e digitar o número não achava nada.
+  //
+  // A busca do número usa `telefone_digitos` (mig 0212), que é o telefone só
+  // com dígitos: os cadastros vieram de todo jeito ((84) 99818-0774, 84 8620-
+  // 4148, 84987749958) e procurar na coluna crua acharia um e perderia os
+  // outros dois.
   function buscarClientes(q) {
     clearTimeout(buscaCliTimer.current)
-    if (!q || q.trim().length < 2) { setSugestoes([]); return }
+    const termo = (q || '').trim()
+    if (termo.length < 2) { setSugestoes([]); return }
+    const digitos = termo.replace(/\D/g, '')
+    // Vírgula, parênteses e aspas separam os filtros na consulta do Supabase:
+    // digitar "(84) 99818" quebraria a busca inteira. Somem do pedaço do nome
+    // (o do telefone já é só número).
+    const nomeBusca = termo.replace(/[(),."\\]/g, ' ').trim()
+    // Menos de 3 dígitos não filtra nada de útil — traria meia loja.
+    const filtros = []
+    if (nomeBusca) filtros.push(`nome.ilike.%${nomeBusca}%`)
+    if (digitos.length >= 3) filtros.push(`telefone_digitos.ilike.%${digitos}%`)
+    if (!filtros.length) { setSugestoes([]); return }
     buscaCliTimer.current = setTimeout(async () => {
       const { data } = await supabase
         .from('clientes')
         .select('id, nome, telefone, endereco, numero, complemento, bairro, cidade, estado, cep')
         .eq('empresa_id', empresa.id)
-        .ilike('nome', `%${q.trim()}%`)
+        .or(filtros.join(','))
         .order('nome', { ascending: true })
         .limit(8)
       setSugestoes(data || [])
@@ -1710,7 +1730,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
               <input
                 value={nome}
                 onChange={e => { setNome(e.target.value); setClienteSelId(null); setMsgCli(null); buscarClientes(e.target.value) }}
-                placeholder="Nome do cliente (busca os cadastrados)"
+                placeholder="Nome ou telefone do cliente (busca os cadastrados)"
                 style={inputSt}
                 autoComplete="off"
               />
