@@ -139,6 +139,7 @@ export default function Dashboard() {
   const [itens, setItens] = useState([])
   const [nomes, setNomes] = useState({})
   const [clientesNovos, setClientesNovos] = useState([])
+  const [funil, setFunil] = useState([])   // etapas da Loja Online (mig 0216)
   const [op, setOp] = useState({ clientesAtivos: 0, estoqueBaixo: 0, cascosPendentes: 0, fiado: 0 })
   const [meta, setMeta] = useState(0)
   const [ifoodRates, setIfoodRates] = useState({})
@@ -187,7 +188,7 @@ export default function Dashboard() {
         if (pf?.ref_token) setRefToken(pf.ref_token)
       }
       const desdeISO = desde.toISOString()
-      const [vData, pData, iData, cnData, nRes, caRes, saRes, csRes, fiRes, empRes] = await Promise.all([
+      const [vData, pData, iData, cnData, nRes, caRes, saRes, csRes, fiRes, empRes, fnData] = await Promise.all([
         fetchAll(() => supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes, cliente_id, clientes(nome)').neq('status', 'cancelado').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens, subtotal, taxa_entrega, ifood_valores, forma_pagamento, cliente_id, cliente_nome, cliente_telefone').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('venda_itens').select('produto_id, nome_produto, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desdeISO).order('id', { ascending: false })).then(r => r.data),
@@ -198,12 +199,14 @@ export default function Dashboard() {
         supabase.from('casco_saldo').select('*'),
         supabase.from('clientes_saldo_fiado').select('saldo_fiado'),
         empresaId ? supabase.from('empresas').select('meta_faturamento_mensal, ifood_comissao_pct, ifood_transacao_pct, estoque_ativo, ifood_entrega_propria').eq('id', empresaId).single() : Promise.resolve({ data: null }),
+        fetchAll(() => supabase.from('loja_funil').select('etapa, sessao, created_at').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
       ])
       setVendas(vData ?? [])
       setPedidos(pData ?? [])
       setItens(iData ?? [])
       setNomes(Object.fromEntries((nRes.data ?? []).map(p => [p.id, p.nome])))
       setClientesNovos(cnData ?? [])
+      setFunil(fnData ?? [])
       setOp({
         clientesAtivos: caRes.count ?? 0,
         // Sem mínimo definido não é "baixo" — senão a loja que nunca mexeu no
@@ -220,6 +223,36 @@ export default function Dashboard() {
     }
     if (empresaId !== undefined) load()
   }, [empresaId, custIni])
+
+  // Funil da Loja Online: quantas VISITAS chegaram em cada degrau no período.
+  // Conta sessão distinta, não linha — quem voltou pra sacola três vezes é um
+  // cliente só, e o relatório existe justamente pra contar gente.
+  const fn = useMemo(() => {
+    const { start, now } = rangeFor(periodo, custIni, custFim)
+    const porEtapa = { abriu: new Set(), sacola: new Set(), endereco: new Set(), pedido: new Set() }
+    for (const e of funil) {
+      const t = new Date(e.created_at)
+      if (t < start || t >= now) continue
+      porEtapa[e.etapa]?.add(e.sessao)
+    }
+    const abriu = porEtapa.abriu.size
+    const sacola = porEtapa.sacola.size
+    const endereco = porEtapa.endereco.size
+    const pedido = porEtapa.pedido.size
+    const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0)
+    return {
+      abriu, sacola, endereco, pedido,
+      temDados: abriu + sacola + endereco + pedido > 0,
+      // Onde cada um perdeu gente. É esta coluna que diz o que consertar.
+      perdeuNaVitrine: abriu - sacola,
+      perdeuNaSacola: sacola - endereco,
+      perdeuNoCadastro: endereco - pedido,
+      pctSacola: pct(sacola, abriu),
+      pctEndereco: pct(endereco, sacola),
+      pctPedido: pct(pedido, endereco),
+      pctGeral: pct(pedido, abriu),
+    }
+  }, [funil, periodo, custIni, custFim])
 
   const m = useMemo(() => {
     const { start, now, prevStart, prevEnd } = rangeFor(periodo, custIni, custFim)
@@ -552,6 +585,23 @@ export default function Dashboard() {
             </div>
           </div>
 
+          {/* Funil da Loja Online — onde o cliente desiste */}
+          {fn.temDados && (
+            <div style={{ ...cardBox, marginBottom: 16 }}>
+              <strong style={{ fontSize: 15, display: 'block', marginBottom: 4 }}>🛒 Loja Online — onde o cliente parou</strong>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 14px' }}>
+                Cada pessoa que abriu o cardápio {ehLabel(periodo)} e até onde ela foi.
+              </p>
+              <FunilLinha rotulo="Abriu o cardápio" valor={fn.abriu} base={fn.abriu} perdeu={fn.perdeuNaVitrine} legenda="saíram sem botar nada na sacola" />
+              <FunilLinha rotulo="Botou na sacola" valor={fn.sacola} base={fn.abriu} pct={fn.pctSacola} perdeu={fn.perdeuNaSacola} legenda="montaram a sacola e não foram pro endereço" />
+              <FunilLinha rotulo="Foi pro endereço" valor={fn.endereco} base={fn.abriu} pct={fn.pctEndereco} perdeu={fn.perdeuNoCadastro} legenda="chegaram no cadastro e desistiram" />
+              <FunilLinha rotulo="Fechou o pedido" valor={fn.pedido} base={fn.abriu} pct={fn.pctPedido} ultimo />
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', fontSize: 13 }}>
+                De cada 100 que abriram o cardápio, <b>{fn.pctGeral}</b> fecharam pedido.
+              </div>
+            </div>
+          )}
+
           {/* Operacional + Ranking de clientes */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
             <div style={cardBox}>
@@ -641,6 +691,31 @@ export default function Dashboard() {
 }
 
 function ehLabel(p) { return p === 'hoje' ? '(hoje, por hora)' : p === '7d' ? '(últimos 7 dias)' : p === '30d' ? '(últimos 30 dias)' : p === 'custom' ? '(período escolhido)' : '(mês)' }
+// Uma linha do funil: quantos chegaram, que fatia é isso, e — o que importa —
+// quantos ficaram pelo caminho dali pra frente.
+function FunilLinha({ rotulo, valor, base, pct, perdeu, legenda, ultimo }) {
+  const largura = base > 0 ? Math.max(4, Math.round((valor / base) * 100)) : 0
+  return (
+    <div style={{ marginBottom: ultimo ? 0 : 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 600 }}>{rotulo}</span>
+        <span style={{ fontSize: 13.5, fontWeight: 800 }}>
+          {valor}
+          {pct != null && <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)' }}> · {pct}% de quem chegou antes</span>}
+        </span>
+      </div>
+      <div style={{ height: 8, borderRadius: 6, background: 'var(--border)', overflow: 'hidden' }}>
+        <div style={{ width: largura + '%', height: '100%', background: 'var(--primary)' }} />
+      </div>
+      {perdeu > 0 && (
+        <div style={{ fontSize: 11.5, color: '#b45309', marginTop: 4 }}>
+          ↓ {perdeu} {legenda}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Op({ label, value, to, alerta, ultimo }) {
   return (
     <Link to={to} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: ultimo ? 'none' : '1px solid var(--border)', textDecoration: 'none', color: 'var(--text)' }}>

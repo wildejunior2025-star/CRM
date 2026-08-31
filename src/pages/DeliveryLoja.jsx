@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
+import { marcarEtapa } from '../lib/funil'
 import AvisoCookies from '../components/AvisoCookies'
 import { adicionalComplementos, blocosDeOpcoes, cobraPeloMaior, rotuloPrecoOpcao } from '../lib/complementos'
 import { semAcento } from '../lib/texto'
@@ -311,6 +312,8 @@ export default function DeliveryLoja() {
       // Tags de anúncio da loja (Google Ads / Pixel da Meta). Loja sem ID
       // configurado não carrega script de terceiro nenhum.
       iniciarTags(lojaData)
+      // Degrau 1 do funil: abriu o cardápio. Uma vez por visita.
+      marcarEtapa(lojaData.id, 'abriu')
 
       // Feriados/folgas da loja (mig 0142): sem isso a loja aparece aberta num
       // feriado em que ninguém vai atender e o cliente monta a sacola à toa.
@@ -344,6 +347,10 @@ export default function DeliveryLoja() {
   function addOne(prod) {
     const key = String(prod.id)
     adicionarAoCarrinho(prod, prod.preco)
+    // Degrau 2: botou na sacola. É o degrau que separa "não gostou do
+    // cardápio" de "desistiu no frete" — e o único que não existia em
+    // lugar nenhum, porque a sacola vive dentro do celular do cliente.
+    marcarEtapa(loja?.id, 'sacola', prod.preco)
     setCarrinho(prev => {
       const qtd = (prev[key]?.quantidade ?? 0) + 1
       return {
@@ -375,6 +382,7 @@ export default function DeliveryLoja() {
       ? `${prod.id}::${selecoes.map(s => `${s.opcaoId}x${s.qtd ?? 1}`).sort().join('-')}`
       : String(prod.id)
     adicionarAoCarrinho(prod, precoUnit)
+    marcarEtapa(loja?.id, 'sacola', precoUnit)
     setCarrinho(prev => ({
       ...prev,
       [key]: {

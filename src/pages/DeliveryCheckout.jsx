@@ -5,6 +5,7 @@ import { registrarIndicacao } from '../lib/indicacao'
 import { getEnderecoAtivo } from '../utils/enderecoPortal'
 import { registrarPedido } from '../lib/meusPedidos'
 import { iniciarCheckout } from '../lib/tracking'
+import { marcarEtapa } from '../lib/funil'
 import { formasAtivas } from '../lib/constants'
 import 'leaflet/dist/leaflet.css'
 import './DeliveryCheckout.css'
@@ -538,6 +539,17 @@ export default function DeliveryCheckout() {
     }
     loadPerfil()
   }, [])
+
+  // Degrau 3 do funil: chegou na tela de endereço/pagamento. Quem para aqui
+  // montou a sacola e desistiu na hora de se identificar ou de ver o frete —
+  // é outro problema, e outra conversa com o lojista.
+  //
+  // Efeito próprio, e não junto com o de baixo, pra marcar UMA vez ao entrar:
+  // o valor da sacola não pode fazer isso disparar de novo.
+  useEffect(() => {
+    if (state?.empresaId) marcarEtapa(state.empresaId, 'endereco', state?.subtotal ?? null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.empresaId])
 
   // Endereço da loja — mostrado quando o cliente escolhe Retirada
   useEffect(() => {
@@ -1092,6 +1104,8 @@ export default function DeliveryCheckout() {
     if (error) { setErroGlobal(error.message); return }
 
     lembrarCliente()
+    // Degrau 4: fechou. Quem chega aqui saiu do funil pela porta certa.
+    marcarEtapa(empresaId, 'pedido', state?.subtotal ?? null)
     registrarPedido(data.id, empresaId)
     navigate(`/pedido/${data.id}`, { replace: true })
   }
