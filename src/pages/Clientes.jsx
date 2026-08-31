@@ -28,6 +28,31 @@ const emptyForm = {
   ativo: true,
 }
 
+// Rascunho do cadastro de cliente (só do NOVO, nunca da edição).
+//
+// A ficha daqui é longa — nome, documento, telefone, endereço inteiro,
+// condição de pagamento, preços especiais. Trocar de menu no meio, ou o app
+// recarregar no celular, apagava tudo e obrigava a digitar de novo.
+//
+// Some quando o cliente é salvo ou quando se clica em Cancelar. Fechar sem
+// querer (clique fora do quadro) preserva.
+const draftKeyCliente = (empresaId) => (empresaId ? `clientes-novo-draft-${empresaId}` : null)
+function lerDraftCliente(empresaId) {
+  const k = draftKeyCliente(empresaId)
+  if (!k) return null
+  try { return JSON.parse(localStorage.getItem(k) || 'null') } catch { return null }
+}
+function apagarDraftCliente(empresaId) {
+  const k = draftKeyCliente(empresaId)
+  if (k) { try { localStorage.removeItem(k) } catch { /* ignore */ } }
+}
+// Campo com valor padrão (tipo, condição, ativo) não conta: senão a ficha em
+// branco viraria rascunho e o modal abriria sozinho toda vez.
+function temAlgoDigitado(form) {
+  return ['nome', 'cnpj_cpf', 'telefone', 'cep', 'endereco', 'numero', 'bairro', 'cidade', 'observacoes']
+    .some(c => String(form?.[c] ?? '').trim())
+}
+
 export default function Clientes() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id ?? null
@@ -116,6 +141,32 @@ export default function Clientes() {
     setForm(emptyForm)
     setPrecosEspeciais([])
     setShowModal(true)
+  }
+
+  // Cadastro pela metade volta pra tela do jeito que estava.
+  useEffect(() => {
+    if (!empresaId) return
+    const d = lerDraftCliente(empresaId)
+    if (!d?.form || !temAlgoDigitado(d.form)) return
+    setEditingId(null)
+    setForm({ ...emptyForm, ...d.form })
+    setPrecosEspeciais(Array.isArray(d.precosEspeciais) ? d.precosEspeciais : [])
+    setShowModal(true)
+  }, [empresaId])
+
+  // Guarda o que já foi digitado a cada tecla.
+  useEffect(() => {
+    if (!empresaId || editingId || !showModal) return
+    if (!temAlgoDigitado(form)) { apagarDraftCliente(empresaId); return }
+    try {
+      localStorage.setItem(draftKeyCliente(empresaId), JSON.stringify({ form, precosEspeciais }))
+    } catch { /* ignore */ }
+  }, [empresaId, editingId, showModal, form, precosEspeciais])
+
+  // Cancelar é decisão consciente: aí sim o rascunho vai embora.
+  function cancelarModal() {
+    if (!editingId) apagarDraftCliente(empresaId)
+    setShowModal(false)
   }
 
   function openEdit(cliente) {
@@ -228,6 +279,7 @@ export default function Clientes() {
     }
 
     setSaving(false)
+    if (!editingId) apagarDraftCliente(empresaId)
     setShowModal(false)
     loadClientes()
   }
@@ -397,6 +449,11 @@ export default function Clientes() {
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>{editingId ? 'Editar cliente' : 'Novo cliente'}</h2>
+            {!editingId && temAlgoDigitado(form) && (
+              <p style={{ margin: '-6px 0 12px', fontSize: 12.5, fontWeight: 700, color: '#16a34a' }}>
+                💾 Rascunho guardado — pode sair da tela e voltar que continua daqui.
+              </p>
+            )}
             <form onSubmit={handleSubmit}>
               <div className="form-grid">
                 <div className="form-field full">
@@ -618,7 +675,7 @@ export default function Clientes() {
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => setShowModal(false)}
+                  onClick={cancelarModal}
                 >
                   Cancelar
                 </button>

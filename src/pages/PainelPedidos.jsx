@@ -472,6 +472,33 @@ function QtdInput({ value, onChange }) {
   )
 }
 
+// Rascunho do cadastro de cliente: sair da tela no meio não pode apagar o que
+// já foi digitado. No celular isso acontece à toa — basta abrir o WhatsApp pra
+// conferir o telefone do cliente que o app recarrega e a ficha volta em branco.
+//
+// O rascunho só some quando o cliente é salvo ou quando o vendedor clica em
+// Cancelar. Fechar sem querer (clique fora, Esc) preserva.
+const draftKeyCliente = (empresaId) => (empresaId ? `pp-cliente-draft-${empresaId}` : null)
+function lerDraftCliente(empresaId) {
+  const k = draftKeyCliente(empresaId)
+  if (!k) return null
+  try { return JSON.parse(localStorage.getItem(k) || 'null') } catch { return null }
+}
+function apagarDraftCliente(empresaId) {
+  const k = draftKeyCliente(empresaId)
+  if (k) { try { localStorage.removeItem(k) } catch { /* ignore */ } }
+}
+function clienteTemAlgoDigitado(form) {
+  return Object.values(form || {}).some(v => String(v ?? '').trim())
+}
+// Nome e telefone o vendedor já enxerga na tela da venda: reabrir a ficha por
+// causa deles só atrapalharia. O que dói perder é o endereço — é ele que manda
+// o cadastro voltar sozinho.
+function draftClienteTemEndereco(form) {
+  return ['cep', 'endereco', 'numero', 'complemento', 'bairro', 'cidade', 'estado']
+    .some(c => String(form?.[c] ?? '').trim())
+}
+
 // ── Cadastro rápido de cliente no balcão ──
 function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar, onSalvo }) {
   // Cadastro de balcão: nome, telefone e endereço, numa tela só.
@@ -484,9 +511,17 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
   // Os campos tirados NÃO sumiram do banco: todos têm valor padrão na coluna
   // (tipo 'mercadinho', condição 'à vista', ativo true, zeros), então o
   // cadastro sai exatamente igual ao que saía antes — só não é mais perguntado.
-  const [form, setForm] = useState({
-    nome: initialNome, telefone: initialTel,
-    cep: '', endereco: '', numero: '', complemento: '', bairro: '', cidade: '', estado: '',
+  const [form, setForm] = useState(() => {
+    const vazio = {
+      nome: initialNome, telefone: initialTel,
+      cep: '', endereco: '', numero: '', complemento: '', bairro: '', cidade: '', estado: '',
+    }
+    // O rascunho só volta se for do MESMO cliente. Se o vendedor digitou outro
+    // nome na venda, reabrir a ficha de antes é pior que começar do zero.
+    const d = lerDraftCliente(empresa?.id)
+    const inicial = String(initialNome || '').trim().toLowerCase()
+    const mesmo = d && (!inicial || String(d.nome ?? '').toLowerCase().startsWith(inicial))
+    return mesmo ? { ...vazio, ...d } : vazio
   })
   const [saving, setSaving] = useState(false)
   const [erro, setErro]     = useState(null)
@@ -518,6 +553,13 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
     return () => window.removeEventListener('keydown', onKey)
   }, [onFechar])
 
+  // Guarda o que já foi digitado a cada tecla.
+  useEffect(() => {
+    if (!empresa?.id) return
+    if (!clienteTemAlgoDigitado(form)) { apagarDraftCliente(empresa.id); return }
+    try { localStorage.setItem(draftKeyCliente(empresa.id), JSON.stringify(form)) } catch { /* ignore */ }
+  }, [empresa?.id, form])
+
   function ch(e) {
     const { name, value } = e.target
     setForm(p => ({ ...p, [name]: value }))
@@ -534,6 +576,7 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
       .single()
     setSaving(false)
     if (error) { setErro(error.message); return }
+    apagarDraftCliente(empresa.id)
     onSalvo(data)
   }
 
@@ -553,6 +596,11 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
             Só o nome é obrigatório — o endereço dá pra completar depois.
           </p>
+          {clienteTemAlgoDigitado(form) && (
+            <p style={{ fontSize: 12, color: '#16a34a', fontWeight: 700, margin: '6px 0 0' }}>
+              💾 Rascunho guardado — pode sair e voltar que continua daqui.
+            </p>
+          )}
         </div>
 
         {/* Duas colunas no PC (quem cadastra está no caixa, de tela larga) e uma
@@ -617,7 +665,8 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
         {erro && <p style={{ color: 'var(--danger, #ef4444)', fontSize: 14, margin: 0 }}>{erro}</p>}
 
         <div className="pp-modal-actions">
-          <button type="button" className="pp-modal-btn-secondary" onClick={onFechar}>Cancelar</button>
+          <button type="button" className="pp-modal-btn-secondary"
+            onClick={() => { apagarDraftCliente(empresa?.id); onFechar() }}>Cancelar</button>
           <button type="submit" className="pp-modal-btn-danger" style={{ background: '#7c3aed', borderColor: '#7c3aed' }} disabled={saving}>
             {saving ? 'Salvando...' : 'Salvar cliente'}
           </button>
@@ -986,7 +1035,11 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const [msgCli, setMsgCli]             = useState(null)
   const buscaCliTimer = useRef(null)
   // Abre a ficha completa de cadastro de cliente
-  const [cadastroAberto, setCadastroAberto] = useState(false)
+  // Ficha de cliente pela metade reabre junto com a venda: sem isso o rascunho
+  // ficava guardado e ninguém via, o que dá no mesmo que ter perdido.
+  const [cadastroAberto, setCadastroAberto] = useState(
+    () => draftClienteTemEndereco(lerDraftCliente(empresa?.id) ?? {})
+  )
   // Leitor de print: lê a captura de tela de um pedido de outro canal (iFood,
   // WhatsApp, planilha...) e preenche a venda automaticamente.
   const [lendoPrint, setLendoPrint] = useState(false)
