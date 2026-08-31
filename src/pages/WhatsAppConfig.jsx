@@ -40,6 +40,7 @@ const DEFAULT_MSG_FIADO  = 'Olá {nome}! Você tem um saldo em aberto de R$ {val
 const NOTIF_DEFAULTS = {
   notif_pedido:  true,
   notif_fiado:   false,
+  notif_fiado_compra: false,
   notif_estoque: false,
   admin_phone:   '',
   msg_pedido:    DEFAULT_MSG_PEDIDO,
@@ -104,6 +105,7 @@ export default function WhatsAppConfig() {
       setForm({
         notif_pedido:  data.notif_pedido  ?? true,
         notif_fiado:   data.notif_fiado   ?? false,
+        notif_fiado_compra: data.notif_fiado_compra ?? false,
         notif_estoque: data.notif_estoque ?? false,
         admin_phone:   data.admin_phone   ?? '',
         msg_pedido:    data.msg_pedido    ?? DEFAULT_MSG_PEDIDO,
@@ -783,6 +785,23 @@ export default function WhatsAppConfig() {
                 <div className="wa-checkbox-text">
                   <span>Habilitar cobranças de fiado via WhatsApp</span>
                   <small>Ativa o botão de cobrança na página Financeiro.</small>
+                </div>
+              </label>
+
+              <label className="wa-checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={form.notif_fiado_compra}
+                  onChange={(e) => setField('notif_fiado_compra', e.target.checked)}
+                />
+                <div className="wa-checkbox-text">
+                  <span>Mandar a comanda quando fechar no fiado</span>
+                  <small>
+                    Assim que a conta é fechada no fiado, o cliente recebe no WhatsApp o que foi
+                    anotado, com item, valor e hora. Serve pra ele conferir no dia — depois de duas
+                    semanas ninguém lembra se comprou ou se foi anotado errado. Só no fiado:
+                    dinheiro, PIX e cartão não mandam nada.
+                  </small>
                 </div>
               </label>
 
