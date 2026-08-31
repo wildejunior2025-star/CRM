@@ -331,13 +331,67 @@ serve(async (req) => {
       const numero = String(phone).replace(/\D/g, "")
       const numeroFull = numero.startsWith("55") ? numero : `55${numero}`
 
-      const res = await fetch(`${apiBase}/message/sendText/${instanceName}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", apikey: apiKey },
-        body: JSON.stringify({ number: numeroFull, text }),
-      })
-      const data = await res.json().catch(() => ({}))
-      return new Response(JSON.stringify({ ok: res.ok, data }), {
+      // Loja no WhatsApp Cloud (o oficial da Meta) não fala com o Evolution: o
+      // envio tem que sair pela Graph API. Sem isto o botão de mensagem do painel
+      // dizia que enviou e não chegava nada — era o caso da Estação do Sabor.
+      const { data: cfgEnvio } = await supabaseAdmin
+        .from("whatsapp_config")
+        .select("cloud_phone_number_id")
+        .eq("empresa_id", empresaId)
+        .maybeSingle()
+
+      let ok = false
+      let erro: string | null = null
+      let data: any = {}
+
+      if (cfgEnvio?.cloud_phone_number_id) {
+        // Token da própria loja (Cadastro Incorporado) quando existir; senão o do app.
+        let cloudToken = Deno.env.get("WHATSAPP_CLOUD_TOKEN") ?? ""
+        const { data: tok } = await supabaseAdmin
+          .from("whatsapp_cloud_tokens").select("token").eq("empresa_id", empresaId).maybeSingle()
+        if (tok?.token) cloudToken = tok.token
+        const graph = Deno.env.get("WHATSAPP_GRAPH_VERSION") ?? "v21.0"
+        const res = await fetch(`https://graph.facebook.com/${graph}/${cfgEnvio.cloud_phone_number_id}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${cloudToken}` },
+          body: JSON.stringify({
+            messaging_product: "whatsapp", recipient_type: "individual",
+            to: numeroFull, type: "text", text: { body: text, preview_url: false },
+          }),
+        })
+        data = await res.json().catch(() => ({}))
+        ok = res.ok
+        if (!ok) {
+          // A Meta só deixa escrever livremente até 24h depois da última mensagem
+          // do cliente (erro 131047). Quem está no balcão precisa saber POR QUE
+          // não foi — um "erro" seco faz a pessoa tentar de novo pra sempre.
+          const msgMeta = String(data?.error?.message ?? "")
+          erro = (data?.error?.code === 131047 || /24 ?h|re-?engagement/i.test(msgMeta))
+            ? "Passou de 24h desde a última mensagem do cliente. O WhatsApp oficial não deixa a loja escrever primeiro fora dessa janela — peça pra ele mandar um oi."
+            : (msgMeta || `erro ${res.status}`)
+        }
+      } else {
+        const res = await fetch(`${apiBase}/message/sendText/${instanceName}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: apiKey },
+          body: JSON.stringify({ number: numeroFull, text }),
+        })
+        data = await res.json().catch(() => ({}))
+        ok = res.ok
+        if (!ok) erro = String(data?.message ?? data?.error ?? `erro ${res.status}`)
+      }
+
+      // Enviou? Entra na conversa daquele número, marcada como escrita pela LOJA
+      // (mig 0213). Sem isso o atendente respondia e a própria resposta dele não
+      // aparecia na tela — dava a impressão de que não tinha saído.
+      if (ok) {
+        await supabaseAdmin.from("whatsapp_conversas").insert({
+          empresa_id: empresaId, phone: numeroFull, role: "assistant",
+          content: text, origem: "loja",
+        })
+      }
+
+      return new Response(JSON.stringify({ ok, erro, data }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" }
       })
     }

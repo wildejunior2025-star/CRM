@@ -951,6 +951,26 @@ async function transcribeAudio(base64: string, mimetype: string): Promise<string
 }
 
 // ── serve ────────────────────────────────────────────────────────────────────
+// O que guardar da mensagem quando o robô está desligado: o texto, quando é
+// texto; uma marca curta quando é áudio, foto ou figurinha. O suficiente pra
+// loja ver na tela que o cliente chamou e do que se trata.
+function textoParaRegistro(msg: any): string {
+  const t = msg?.messageType
+  if (t === "conversation" || t === "extendedTextMessage") {
+    return String(msg.message?.conversation ?? msg.message?.extendedTextMessage?.text ?? "").trim()
+  }
+  if (t === "pttMessage" || t === "audioMessage") return "🎤 Áudio"
+  if (t === "imageMessage") {
+    const cap = String(msg.message?.imageMessage?.caption ?? "").trim()
+    return cap ? `📷 Foto — ${cap}` : "📷 Foto"
+  }
+  if (t === "documentMessage") return "📄 Documento"
+  if (t === "locationMessage") return "📍 Localização"
+  if (t === "stickerMessage") return "🙂 Figurinha"
+  if (t === "videoMessage") return "🎬 Vídeo"
+  return ""
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
 
@@ -998,11 +1018,27 @@ serve(async (req) => {
     {
       const { data: liga } = await supabase
         .from("whatsapp_config")
-        .select("ia_ativo")
+        .select("empresa_id, ia_ativo")
         .eq("instance_name", instanceName)
         .eq("ativo", true)
         .maybeSingle()
-      if (!liga?.ia_ativo) return new Response("ok", { headers: corsHeaders })
+      if (!liga?.ia_ativo) {
+        // Robô desligado não é caixa postal fechada. A mensagem do cliente era
+        // jogada fora aqui, e a loja nunca ficava sabendo que alguém chamou —
+        // nem depois, olhando a tela. Guardar é tudo o que fazemos: responder
+        // continua sendo só do robô, e o atendente responde pelo gestor.
+        //
+        // Áudio e foto entram como marca ("🎤 Áudio"), sem transcrever: gastar
+        // Whisper com o robô desligado é cobrar da loja um trabalho que ninguém
+        // pediu. Quem for atender abre o WhatsApp e ouve.
+        const conteudo = textoParaRegistro(msg)
+        if (liga?.empresa_id && conteudo && !isTest) {
+          await supabase.from("whatsapp_conversas").insert({
+            empresa_id: liga.empresa_id, phone: phoneEarly, role: "user", content: conteudo,
+          })
+        }
+        return new Response("ok", { headers: corsHeaders })
+      }
     }
 
     let text = ""

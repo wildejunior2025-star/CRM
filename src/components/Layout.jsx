@@ -74,7 +74,7 @@ const links = [
     to: '/whatsapp', label: 'WhatsApp', roles: ['admin', 'super_admin'], mod: 'whatsapp',
     children: [
       { to: '/whatsapp', label: 'Conexão / Config', roles: ['admin', 'super_admin'] },
-      { to: '/whatsapp-conversas', label: 'Conversas do bot', roles: ['admin'] },
+      { to: '/whatsapp-conversas', label: 'Conversas', roles: ['admin'] },
       { to: '/whatsapp-creditos', label: 'Créditos Bot', roles: ['admin'] },
       { to: '/bot-teste', label: 'Teste Bot', roles: ['admin', 'super_admin'] },
     ],

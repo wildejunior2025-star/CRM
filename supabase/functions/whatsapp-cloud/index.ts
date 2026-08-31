@@ -85,6 +85,26 @@ function normalizeBrNumber(n: string): string {
   return d
 }
 
+// O que guardar da mensagem quando o robô está desligado (ver whatsapp-webhook).
+function textoParaRegistroCloud(message: any): string {
+  const t = message?.type
+  if (t === "text") return String(message.text?.body ?? "").trim()
+  if (t === "interactive") {
+    return String(message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? "").trim()
+  }
+  if (t === "button") return String(message.button?.text ?? "").trim()
+  if (t === "audio") return "🎤 Áudio"
+  if (t === "image") {
+    const cap = String(message.image?.caption ?? "").trim()
+    return cap ? `📷 Foto — ${cap}` : "📷 Foto"
+  }
+  if (t === "document") return "📄 Documento"
+  if (t === "location") return "📍 Localização"
+  if (t === "sticker") return "🙂 Figurinha"
+  if (t === "video") return "🎬 Vídeo"
+  return ""
+}
+
 // ── Envio de texto pela Graph API ────────────────────────────────────────────
 async function sendText(phoneNumberId: string, to: string, text: string, token: string) {
   try {
@@ -221,7 +241,18 @@ async function processar(body: any) {
   // Vendedor IA desligado: não responde NADA. Sem esta linha, as respostas de
   // "só entendo texto" (áudio e foto) saíam mesmo com o interruptor desligado,
   // porque elas são enviadas aqui, antes de chamar o cérebro.
-  if (!cfg.ia_ativo) return
+  if (!cfg.ia_ativo) {
+    // Mesma razão do whatsapp-webhook: robô desligado não pode significar
+    // mensagem perdida. A loja atende pelo gestor, e pra isso precisa ter o
+    // que o cliente escreveu.
+    const conteudo = textoParaRegistroCloud(message)
+    if (cfg.empresa_id && conteudo) {
+      await supabase.from("whatsapp_conversas").insert({
+        empresa_id: cfg.empresa_id, phone: from, role: "user", content: conteudo,
+      })
+    }
+    return
+  }
 
   // Extrai o texto (MVP: texto e botões/listas)
   let text = ""
