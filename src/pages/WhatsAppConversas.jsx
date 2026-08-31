@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 
-// Formata "558498180774" → "+55 (84) 9818-0774" (best-effort)
+// Formata "558498180774" → "(84) 9818-0774" (best-effort)
 function formatarTelefone(p) {
   const d = String(p || '').replace(/\D/g, '')
   const semPais = d.startsWith('55') ? d.slice(2) : d
@@ -15,6 +15,22 @@ function formatarTelefone(p) {
     return `(${ddd}) ${meio}-${fim}`
   }
   return p
+}
+
+// Chave da conversa: os 8 últimos dígitos do número.
+//
+// O MESMO cliente chega escrito de dois jeitos. O WhatsApp entrega a mensagem
+// dele como 5584 8180774 (sem o 9 do celular) e a loja responde para
+// 5584 99818 0774 (com o 9). Guardados como vieram, viram duas conversas
+// separadas: a loja escreve numa e a resposta do cliente cai na outra.
+//
+// Foi exatamente o que aconteceu no primeiro teste (31/08/2026) — a resposta
+// tinha chegado e ficado guardada, mas numa linha que a tela não juntava, e
+// parecia perdida. Os 8 últimos dígitos são iguais nas duas formas, então é
+// por eles que a conversa se junta. É a mesma regra que a tela já usava pra
+// casar o nome do cliente com o número.
+function chaveConversa(phone) {
+  return String(phone || '').replace(/\D/g, '').slice(-8)
 }
 
 function tempoRelativo(iso) {
@@ -47,29 +63,32 @@ function Conversa({ empresaId, item, iaAtiva, onFechar, onPausou, onEnviou }) {
   const carregar = useCallback(async () => {
     const { data } = await supabase
       .from('whatsapp_conversas')
-      .select('id, role, content, created_at, origem')
+      .select('id, phone, role, content, created_at, origem')
       .eq('empresa_id', empresaId)
-      .eq('phone', item.phone)
+      .in('phone', item.phones)
       .order('created_at', { ascending: true })
       .limit(300)
     setMsgs(data ?? [])
     setCarregando(false)
-  }, [empresaId, item.phone])
+  }, [empresaId, item.phones])
 
   useEffect(() => { carregar() }, [carregar])
 
-  // Mensagem nova do cliente entra na tela sem precisar recarregar — quem está
-  // atendendo não fica com a conversa parada na frente enquanto o cliente digita.
+  // Mensagem nova do cliente entra na tela sem recarregar — quem está atendendo
+  // não pode ficar com a conversa parada na frente enquanto o cliente digita.
   useEffect(() => {
     if (!empresaId) return
     const canal = supabase
-      .channel(`conversa-${item.phone}`)
+      .channel(`conversa-${item.chave}`)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'whatsapp_conversas', filter: `empresa_id=eq.${empresaId}` },
-        payload => { if (payload.new?.phone === item.phone) setMsgs(prev => [...prev, payload.new]) })
+        payload => {
+          if (chaveConversa(payload.new?.phone) !== item.chave) return
+          setMsgs(prev => (prev.some(m => m.id === payload.new.id) ? prev : [...prev, payload.new]))
+        })
       .subscribe()
     return () => { canal.unsubscribe() }
-  }, [empresaId, item.phone])
+  }, [empresaId, item.chave])
 
   useEffect(() => { fimRef.current?.scrollIntoView({ block: 'end' }) }, [msgs.length])
 
@@ -80,9 +99,12 @@ function Conversa({ empresaId, item, iaAtiva, onFechar, onPausou, onEnviou }) {
   }, [onFechar])
 
   async function pausarRobo() {
-    await supabase.from('whatsapp_bot_pausado').insert({ empresa_id: empresaId, phone: item.phone })
+    // Pausa TODAS as formas do número: o robô compara com o número exato que
+    // chegou, e pausar só uma delas deixaria a outra respondendo.
+    const linhas = item.phones.map(p => ({ empresa_id: empresaId, phone: p }))
+    await supabase.from('whatsapp_bot_pausado').upsert(linhas, { onConflict: 'empresa_id,phone', ignoreDuplicates: true })
     setPausado(true)
-    onPausou?.(item.phone)
+    onPausou?.(item.chave)
   }
 
   async function enviar() {
@@ -98,11 +120,11 @@ function Conversa({ empresaId, item, iaAtiva, onFechar, onPausou, onEnviou }) {
       return
     }
     setTexto('')
-    // A própria função grava a mensagem na conversa; o realtime traz de volta.
-    // Recarrega mesmo assim: se o tempo real estiver atrasado, quem enviou tem
-    // que ver a mensagem na tela na hora, senão manda de novo achando que falhou.
+    // A função grava a mensagem na conversa e o tempo real traz de volta.
+    // Recarrega mesmo assim: se o tempo real atrasar, quem enviou tem que ver a
+    // mensagem na tela na hora — senão manda de novo achando que falhou.
     carregar()
-    onEnviou?.(item.phone, msg)
+    onEnviou?.(item.chave, msg)
     // Assumiu a conversa: o robô sai de cena naquele número, senão os dois
     // respondem juntos e o cliente recebe duas versões da mesma coisa.
     if (iaAtiva && !pausado) pausarRobo()
@@ -190,7 +212,7 @@ export default function WhatsAppConversas() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id ?? null
 
-  const [conversas, setConversas] = useState([]) // [{phone, ultima, quando, total, nome, pausado}]
+  const [conversas, setConversas] = useState([]) // [{chave, phone, phones, ultima, quando, total, nome, pausado}]
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState('')
   const [soPausados, setSoPausados] = useState(false)
@@ -212,24 +234,36 @@ export default function WhatsAppConversas() {
     // nome por telefone (casa pelos últimos 8 dígitos)
     const nomePorTel = {}
     for (const c of (cliRes.data ?? [])) {
-      const k = String(c.telefone || '').replace(/\D/g, '').slice(-8)
+      const k = chaveConversa(c.telefone)
       if (k && c.nome) nomePorTel[k] = c.nome
     }
-    const pausadosSet = new Set((pausaRes.data ?? []).map(p => p.phone))
-    // agrupa por número (a lista já vem do mais novo pro mais antigo)
+    const pausadas = new Set((pausaRes.data ?? []).map(p => chaveConversa(p.phone)))
+    // Agrupa por número (a lista já vem do mais novo pro mais antigo), juntando
+    // as formas do mesmo número — ver chaveConversa().
     const map = new Map()
     for (const m of (convRes.data ?? [])) {
-      if (!map.has(m.phone)) {
-        map.set(m.phone, {
-          phone: m.phone,
+      const chave = chaveConversa(m.phone)
+      if (!chave) continue
+      if (!map.has(chave)) {
+        map.set(chave, {
+          chave,
+          phone: m.phone,          // pra onde responder — ajustado logo abaixo
+          phones: [],              // todas as formas, pra carregar a conversa inteira
           ultima: m.content ?? '',
           quando: m.created_at,
           total: 0,
-          nome: nomePorTel[String(m.phone).slice(-8)] ?? null,
-          pausado: pausadosSet.has(m.phone),
+          nome: nomePorTel[chave] ?? null,
+          pausado: pausadas.has(chave),
+          _achouCliente: false,
         })
       }
-      map.get(m.phone).total++
+      const c = map.get(chave)
+      if (!c.phones.includes(m.phone)) c.phones.push(m.phone)
+      // Responder no número que o WhatsApp do cliente usa DE VERDADE: é a forma
+      // que chegou numa mensagem dele. A que a loja usou pra escrever pode ser
+      // uma variação que o aparelho dele nem tem.
+      if (!c._achouCliente && m.role === 'user') { c.phone = m.phone; c._achouCliente = true }
+      c.total++
     }
     setConversas([...map.values()])
     setLoading(false)
@@ -252,12 +286,13 @@ export default function WhatsAppConversas() {
 
   async function togglePausa(item) {
     const pausar = !item.pausado
-    setBusy(item.phone)
-    setConversas(prev => prev.map(c => c.phone === item.phone ? { ...c, pausado: pausar } : c))
+    setBusy(item.chave)
+    setConversas(prev => prev.map(c => c.chave === item.chave ? { ...c, pausado: pausar } : c))
     if (pausar) {
-      await supabase.from('whatsapp_bot_pausado').insert({ empresa_id: empresaId, phone: item.phone })
+      const linhas = item.phones.map(p => ({ empresa_id: empresaId, phone: p }))
+      await supabase.from('whatsapp_bot_pausado').upsert(linhas, { onConflict: 'empresa_id,phone', ignoreDuplicates: true })
     } else {
-      await supabase.from('whatsapp_bot_pausado').delete().eq('empresa_id', empresaId).eq('phone', item.phone)
+      await supabase.from('whatsapp_bot_pausado').delete().eq('empresa_id', empresaId).in('phone', item.phones)
     }
     setBusy(null)
   }
@@ -316,7 +351,7 @@ export default function WhatsAppConversas() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {filtradas.map(item => (
-            <div key={item.phone} className="card" style={{
+            <div key={item.chave} className="card" style={{
               padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
               borderLeft: `4px solid ${item.pausado ? 'var(--danger)' : 'var(--success)'}`,
             }}>
@@ -343,10 +378,10 @@ export default function WhatsAppConversas() {
                 <button className="btn btn-primary btn-sm" onClick={() => setAberta(item)}>💬 Responder</button>
                 <button
                   className={`btn btn-sm ${item.pausado ? 'btn-secondary' : 'btn-danger'}`}
-                  disabled={busy === item.phone}
+                  disabled={busy === item.chave}
                   onClick={() => togglePausa(item)}
                 >
-                  {busy === item.phone ? '...' : item.pausado ? '▶ Reativar' : '⏸ Pausar'}
+                  {busy === item.chave ? '...' : item.pausado ? '▶ Reativar' : '⏸ Pausar'}
                 </button>
               </div>
             </div>
@@ -360,8 +395,8 @@ export default function WhatsAppConversas() {
           item={aberta}
           iaAtiva={iaAtiva}
           onFechar={() => { setAberta(null); load() }}
-          onPausou={phone => setConversas(prev => prev.map(c => c.phone === phone ? { ...c, pausado: true } : c))}
-          onEnviou={(phone, msg) => setConversas(prev => prev.map(c => c.phone === phone ? { ...c, ultima: msg, quando: new Date().toISOString() } : c))}
+          onPausou={chave => setConversas(prev => prev.map(c => c.chave === chave ? { ...c, pausado: true } : c))}
+          onEnviou={(chave, msg) => setConversas(prev => prev.map(c => c.chave === chave ? { ...c, ultima: msg, quando: new Date().toISOString() } : c))}
         />
       )}
     </div>
