@@ -1138,6 +1138,14 @@ serve(async (req) => {
       }
     }
 
+    // Horário do dia (em texto) e o relógio de agora — o prompt da IA usa os dois
+    // lá embaixo. Antes o prompt levava só horario_abertura/fechamento (o campo
+    // legado, que ninguém mais edita): o lojista mexia na grade da semana e a IA
+    // seguia recitando o horário velho, e às vezes dizia "estamos fechados" com a
+    // loja aberta, porque não sabia nem que horas eram.
+    let horarioLojaTexto = ""
+    let agoraTexto = ""
+
     // Verifica horário de funcionamento — responde "fechado" e retorna sem chamar Claude.
     // Fonte: grade semanal nova (horarios_funcionamento). Sem grade, cai no horário único legado.
     {
@@ -1175,6 +1183,9 @@ serve(async (req) => {
         lojaFechada = minutoAtual < (aH * 60 + aM) || minutoAtual >= (fH * 60 + fM)
         horarioTexto = `Horário de atendimento: *${empresa.horario_abertura.slice(0, 5)}* às *${empresa.horario_fechamento.slice(0, 5)}*`
       }
+
+      horarioLojaTexto = horarioTexto
+      agoraTexto = `${DIAS_SEM[dow]}, ${String(horaBR.getHours()).padStart(2, "0")}:${String(horaBR.getMinutes()).padStart(2, "0")}`
 
       if (lojaFechada) {
         // Só avisa uma vez — se a última mensagem do bot já foi "fechado", ignora
@@ -1423,6 +1434,20 @@ serve(async (req) => {
       }
     }
 
+    // Faixa de taxa (menor→maior) das tabelas por km e por bairro. Loja que cobra
+    // por distância deixa a taxa fixa em R$ 0 — sem o endereço do cliente, o
+    // taxaEntregaCalc cai nesse zero e o robô prometia FRETE GRÁTIS pra quem só
+    // perguntou "quanto é a entrega?". Com a faixa em mãos ele responde a
+    // realidade ("de R$ 5 a R$ 15, depende de onde você está") e pede o endereço.
+    const taxasCadastradas: number[] = [
+      ...(Array.isArray(empresa.taxas_entrega_km) ? empresa.taxas_entrega_km : [])
+        .map((f: any) => Number(f?.taxa)),
+      ...(Array.isArray(empresa.taxas_entrega_bairro) ? empresa.taxas_entrega_bairro : [])
+        .filter((b: any) => b?.entrega !== false).map((b: any) => Number(b?.taxa)),
+    ].filter((v) => Number.isFinite(v) && v > 0)
+    const taxaMin = taxasCadastradas.length ? Math.min(...taxasCadastradas) : null
+    const taxaMax = taxasCadastradas.length ? Math.max(...taxasCadastradas) : null
+
     // ── System prompt ────────────────────────────────────────────────────────
     const systemPrompt = `Você é o assistente virtual de vendas da ${empresaNome}. Responda sempre em português.
 Seja inteligente e conversacional — entenda o que o cliente quer e responda naturalmente.
@@ -1431,10 +1456,15 @@ DADOS DA LOJA:
 - Nome: ${empresaNome}
 ${empresaDescricao ? `- Descrição: ${empresaDescricao}` : ""}
 ${empresaEndereco   ? `- Endereço: ${empresaEndereco}` : ""}
-${empresaHorario    ? `- Horário: ${empresaHorario}` : ""}
+${agoraTexto        ? `- Agora são ${agoraTexto} (horário de Brasília)` : ""}
+${horarioLojaTexto  ? `- ${horarioLojaTexto.replace(/\*/g, "")}` : (empresaHorario ? `- Horário: ${empresaHorario}` : "")}
+🟢 A LOJA ESTÁ ABERTA NESTE MOMENTO — o sistema já conferiu a grade de horários antes de te chamar. NUNCA diga que a loja está fechada, nem repita um aviso de "estamos fechados" que apareça no histórico da conversa: aquilo era de antes. Se o cliente perguntar o horário, informe o da linha acima e nenhum outro.
 ${empresa.chave_pix ? `- PIX: ${empresa.chave_pix} (${empresa.pix_nome ?? ""})` : ""}
 CATÁLOGO: ${catalogoUrl}
-${aceitaDelivery ? (bairroBloqueado ? `⛔ ENTREGA BLOQUEADA NESTE BAIRRO: a loja NÃO entrega no bairro do cliente (${bairroCliente}). Avise educadamente que ainda não entregam nesse bairro e ofereça RETIRADA no local. NUNCA feche um pedido de ENTREGA para este cliente — só retirada.` : `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)}${enderecoCliente ? " (já calculada pela distância do endereço do cliente)" : " (taxa base — pode mudar conforme a distância do endereço)"}`) : "ENTREGA: somente retirada no local"}
+${aceitaDelivery ? (bairroBloqueado ? `⛔ ENTREGA BLOQUEADA NESTE BAIRRO: a loja NÃO entrega no bairro do cliente (${bairroCliente}). Avise educadamente que ainda não entregam nesse bairro e ofereça RETIRADA no local. NUNCA feche um pedido de ENTREGA para este cliente — só retirada.`
+  : enderecoCliente ? `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (já calculada pela distância do endereço do cliente)`
+  : taxaMin != null ? `ENTREGA: a taxa depende do endereço — vai de R$ ${taxaMin.toFixed(2)} a R$ ${taxaMax!.toFixed(2)}. ⛔ NUNCA diga um valor exato, e MUITO MENOS "R$ 0,00" ou frete grátis, enquanto não souber o endereço: diga a faixa e peça a rua, o número e o bairro — o sistema calcula a taxa certa na hora de fechar.`
+  : `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (taxa base — pode mudar conforme a distância do endereço)`) : "ENTREGA: somente retirada no local"}
 FORMAS DE PAGAMENTO: ${mpConectado ? "Dinheiro, Cartão ou PIX. Se o cliente escolher PIX, o sistema gera o QR Code e o código copia-e-cola automaticamente ao fechar o pedido — o pedido só vai para a loja depois que o pagamento for confirmado. Você NÃO envia chave PIX manualmente." : "Dinheiro ou Cartão (PIX não disponível nesta loja pelo WhatsApp)"}
 
 PRODUTOS DISPONÍVEIS:
