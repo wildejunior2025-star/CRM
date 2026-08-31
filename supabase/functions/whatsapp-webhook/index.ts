@@ -951,6 +951,50 @@ async function transcribeAudio(base64: string, mimetype: string): Promise<string
 }
 
 // ── serve ────────────────────────────────────────────────────────────────────
+// Espelha a mensagem no chat do painel (a aba Mensagens), pra loja atender tudo
+// num lugar só — WhatsApp e link da Loja Online na mesma conversa.
+//
+// Se o cliente já tinha falado pelo link, a mensagem entra NAQUELA conversa,
+// não numa nova: duas linhas do mesmo cliente fariam o atendente responder na
+// errada e o cliente receber pela metade. O casamento é pelos 8 últimos
+// dígitos, porque o WhatsApp entrega o número com e sem o 9 do celular.
+async function espelharNoChat(
+  supabase: any, empresaId: string, phone: string, texto: string, remetente: "cliente" | "loja",
+) {
+  try {
+    const digitos = String(phone ?? "").replace(/\D/g, "")
+    const chave = digitos.slice(-8)
+    if (!empresaId || !chave || !texto) return
+    const { data: existente } = await supabase
+      .from("mensagens_chat")
+      .select("canal, cliente_ref, cliente_nome")
+      .eq("empresa_id", empresaId)
+      .like("cliente_ref", `%${chave}`)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    let nome = existente?.cliente_nome ?? null
+    if (!nome) {
+      const { data: cli } = await supabase
+        .from("clientes").select("nome")
+        .eq("empresa_id", empresaId)
+        .like("telefone_digitos", `%${chave}`)
+        .limit(1).maybeSingle()
+      nome = cli?.nome ?? null
+    }
+    await supabase.from("mensagens_chat").insert({
+      empresa_id: empresaId,
+      canal: existente?.canal ?? "whatsapp",
+      cliente_ref: existente?.cliente_ref ?? digitos,
+      cliente_nome: nome,
+      remetente,
+      texto,
+    })
+  } catch (_e) {
+    // O espelho é bônus: se falhar, o atendimento pelo WhatsApp segue igual.
+  }
+}
+
 // O que guardar da mensagem quando o robô está desligado: o texto, quando é
 // texto; uma marca curta quando é áudio, foto ou figurinha. O suficiente pra
 // loja ver na tela que o cliente chamou e do que se trata.
@@ -1036,6 +1080,7 @@ serve(async (req) => {
           await supabase.from("whatsapp_conversas").insert({
             empresa_id: liga.empresa_id, phone: phoneEarly, role: "user", content: conteudo,
           })
+          await espelharNoChat(supabase, liga.empresa_id, phoneEarly, conteudo, "cliente")
         }
         return new Response("ok", { headers: corsHeaders })
       }
@@ -1124,9 +1169,22 @@ serve(async (req) => {
 
     // Conversa pausada pelo admin para este número? → o robô não responde.
     {
+      // Casa pelos 8 últimos dígitos: o mesmo número chega com e sem o 9, e
+      // pausar uma forma tem que calar o robô nas duas.
+      const chavePausa = phone.slice(-8)
       const { data: pausado } = await supabase.from("whatsapp_bot_pausado")
-        .select("phone").eq("empresa_id", empresaId).eq("phone", phone).maybeSingle()
-      if (pausado) return new Response("ok", { headers: corsHeaders })
+        .select("phone").eq("empresa_id", empresaId).like("phone", `%${chavePausa}`).limit(1).maybeSingle()
+      if (pausado) {
+        // Pausado = tem gente atendendo à mão. Antes a mensagem era descartada
+        // aqui — justamente na conversa em que alguém está esperando por ela.
+        if (text && !isTest) {
+          await supabase.from("whatsapp_conversas").insert({
+            empresa_id: empresaId, phone, role: "user", content: text,
+          })
+        }
+        if (text) await espelharNoChat(supabase, empresaId, phone, text, "cliente")
+        return new Response("ok", { headers: corsHeaders })
+      }
     }
 
     const phoneLocal = phone.replace(/^55/, "")

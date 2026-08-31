@@ -3651,7 +3651,7 @@ function Coluna({ titulo, cor, count, vazio, children }) {
 }
 
 // ── Conversa aberta (loja respondendo cliente) ──────────────
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso }) {
   const fimRef = useRef(null)
   useEffect(() => {
     fimRef.current?.scrollIntoView({ block: 'end' })
@@ -3701,6 +3701,16 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
         })}
         <div ref={fimRef} />
       </div>
+
+      {/* Saiu no WhatsApp ou não? Quem está atendendo precisa saber ANTES de
+          achar que avisou o cliente e tocar o pedido pra frente. */}
+      {aviso && (
+        <div style={{
+          fontSize: 11.5, fontWeight: 600, padding: '6px 9px', borderRadius: 8, marginTop: 6,
+          background: aviso.ok ? 'rgba(34,197,94,.12)' : 'rgba(234,179,8,.14)',
+          color: aviso.ok ? '#16a34a' : '#b45309',
+        }}>{aviso.txt}</div>
+      )}
 
       {/* Caixa de resposta */}
       <div style={{ display: 'flex', gap: 6, paddingTop: 8, borderTop: '1px solid var(--border, #2a2a3a)' }}>
@@ -4050,6 +4060,7 @@ export default function PainelPedidos() {
   // Caixa de entrada (chat com clientes) — a loja responde aqui
   const [chatMsgs, setChatMsgs]       = useState([])
   const [chatAberto, setChatAberto]   = useState(null)   // "canal|cliente_ref"
+  const [chatAviso, setChatAviso]     = useState(null)   // saiu no WhatsApp? (ver enviarChat)
   const [chatTexto, setChatTexto]     = useState('')
   const [enviandoChat, setEnviandoChat] = useState(false)
   // Catálogo (pausar/ativar itens da loja online)
@@ -4260,12 +4271,33 @@ export default function PainelPedidos() {
     const cliente_ref = chatAberto.slice(sep + 1)
     const thread = chatMsgs.find(m => `${m.canal}|${m.cliente_ref}` === chatAberto)
     setEnviandoChat(true)
+    setChatAviso(null)
     const { error } = await supabase.from('mensagens_chat').insert({
       empresa_id: empresa.id, canal, cliente_ref,
       cliente_nome: thread?.cliente_nome ?? null, remetente: 'loja', texto: txt,
     })
+    if (error) { setEnviandoChat(false); return }
+    setChatTexto('')
+
+    // A mesma resposta vai também pro WhatsApp dele. O chat do link só aparece
+    // pra quem está com a página aberta: quem pediu e fechou o navegador nunca
+    // ficava sabendo, e do lado da loja parecia respondido.
+    //
+    // O `cliente_ref` do chat É o telefone. Sem telefone (conversa antiga, ou
+    // canal app sem cadastro) não dá pra mandar — aí fica só no link mesmo, e a
+    // tela diz isso em vez de deixar a loja achando que o cliente foi avisado.
+    const tel = String(cliente_ref || '').replace(/\D/g, '')
+    if (tel.length >= 10) {
+      const { data, error: errZap } = await supabase.functions.invoke('whatsapp-connect', {
+        body: { action: 'send_message', phone: tel, text: txt, espelhar_no_chat: false },
+      })
+      setChatAviso(data?.ok
+        ? { ok: true, txt: '✓ Enviado aqui e no WhatsApp do cliente.' }
+        : { ok: false, txt: '⚠️ Ficou só aqui no link — no WhatsApp não foi: ' + (data?.erro || errZap?.message || 'WhatsApp da loja desconectado.') })
+    } else {
+      setChatAviso({ ok: false, txt: 'ℹ️ Esta conversa não tem telefone — a resposta fica só no link da loja.' })
+    }
     setEnviandoChat(false)
-    if (!error) setChatTexto('')
   }
 
   // ── Catálogo: carrega os produtos da loja ───────────────────
@@ -5723,8 +5755,9 @@ export default function PainelPedidos() {
                 onTexto={setChatTexto}
                 enviando={enviandoChat}
                 onEnviar={enviarChat}
-                onVoltar={() => setChatAberto(null)}
+                onVoltar={() => { setChatAberto(null); setChatAviso(null) }}
                 canalLabel={CANAL_LABEL[threadAberta.canal] ?? threadAberta.canal}
+                aviso={chatAviso}
               />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
