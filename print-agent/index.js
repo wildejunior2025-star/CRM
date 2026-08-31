@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 24
+const APP_VERSION = 25
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -69,6 +69,23 @@ let lojaMarcouSetor = false
 let catBebida = new Set()  // reserva: categorias que "parecem" bebida
 const KW_BEBIDA = ['refriger', 'suco', 'bebid', 'cerveja', 'agua', 'drink', 'tonic', 'energetic', 'chopp', 'vinho', 'destilad', 'whisky', 'cachaca', 'caipir', 'gin', 'vodka', 'licor']
 function norm(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim() }
+// Dados da loja que saem no papel: nome, endereço, telefone, PIX, rodapé.
+//
+// Eram lidos UMA vez, no login, e ficavam parados na memória pra sempre. Loja
+// que trocava de nome continuava saindo com o nome velho no cupom até alguém
+// fechar e abrir o app — e ninguém liga o cupom errado a "reiniciar o
+// programa". Aconteceu com a CDBom em 31/08/2026: já era Sorveteria CDBom no
+// sistema e ainda saía CDBom na impressora.
+async function carregarEmpresa() {
+  if (!empresaId) return
+  try {
+    const { data: emp } = await supabase.from('empresas')
+      .select('nome, slug, endereco, numero, bairro, cidade, telefone_contato, rodape_cozinha, chave_pix, pix_nome')
+      .eq('id', empresaId).single()
+    if (emp) empresa = emp
+  } catch (e) { /* silencioso — a proxima rodada tenta de novo */ }
+}
+
 async function carregarCategorias() {
   mapaCategoria = {}; catBebida = new Set(); catSetor = {}; lojaMarcouSetor = false
   try {
@@ -490,8 +507,8 @@ async function iniciarEscuta() {
   }
   // Guarda a loja resolvida pra sobreviver ao refresh / reabrir o app.
   if (empresaId) setConfig({ empresa_id: empresaId })
-  const { data: emp } = await supabase.from('empresas').select('nome, slug, endereco, numero, bairro, cidade, telefone_contato, rodape_cozinha, chave_pix, pix_nome').eq('id', empresaId).single()
-  empresa = emp || { nome: prof?.nome || 'Loja' }
+  await carregarEmpresa()
+  if (!empresa) empresa = { nome: prof?.nome || 'Loja' }
   await carregarCategorias()   // pra saber o que é bebida (roteamento cozinha/bar)
   supabase.realtime.setAuth(sess.session.access_token)
   if (canal) { try { supabase.removeChannel(canal) } catch (e) {} }
@@ -838,6 +855,13 @@ server.listen(PORT, '127.0.0.1', () => {
   criarAtalhoStartup(process.execPath)  // mantém o "ligar com o Windows" no lugar certo
   iniciarEscuta()                       // conecta e escuta os pedidos
   setInterval(verificarPendentes, 12000)            // backup: pega pedidos que o tempo real atrasar
+  // Releitura do cadastro: nome/endereço/PIX da loja e o setor das categorias
+  // (cozinha/salão) mudam no sistema e precisam valer no papel sem reiniciar.
+  setInterval(() => {
+    if (!empresaId || !sessionAtiva) return
+    carregarEmpresa().catch(() => {})
+    carregarCategorias().catch(() => {})
+  }, 5 * 60 * 1000)
   setTimeout(checarAtualizacao, 20000)              // checa atualização 20s após ligar
   setInterval(checarAtualizacao, 3 * 60 * 60 * 1000) // e a cada 3 horas
 })
