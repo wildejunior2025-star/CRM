@@ -45,6 +45,57 @@ async function graph(path: string, token: string, method = "GET", body?: unknown
   return { ok: res.ok, status: res.status, data }
 }
 
+// Templates que a loja precisa ter na conta dela, criados na conexão.
+//
+// Por que na conexão e não na hora de usar: template não é instantâneo — a
+// Meta leva de minutos a horas pra aprovar. Se a gente só criasse quando
+// precisasse mandar, a PRIMEIRA comanda de fiado de cada loja nova ia falhar
+// esperando aprovação, e ninguém entenderia por quê. Criando agora, quando a
+// loja conecta, a aprovação sai muito antes da primeira venda fiada.
+//
+// Cada loja que conecta o número próprio tem a conta Meta dela, e template
+// mora na conta — não dá pra reaproveitar o de outra loja. O que dá pra
+// reaproveitar é este código: o lojista não abre o Facebook, não preenche
+// formulário, não espera ninguém.
+const TEMPLATES_PADRAO = [
+  {
+    name: "comanda_fiado",
+    language: "pt_BR",
+    category: "UTILITY",
+    components: [{
+      type: "BODY",
+      text: "Oi {{1}}! Aqui é da {{2}}.\n\nFicou anotado no seu FIADO em {{3}}: {{4}}\n\nTotal desta conta: {{5}}\nSeu total em aberto: {{6}}\n\nSe tiver algo errado, me avisa hoje mesmo que a gente confere.",
+      example: {
+        body_text: [[
+          "Antonio", "Estação do Sabor", "20/08 às 12:52",
+          "1x Almoço no Peso R$ 11,50; 1x suco de caju R$ 6,00",
+          "R$ 34,00", "R$ 192,50",
+        ]],
+      },
+    }],
+  },
+]
+
+async function criarTemplatesDaLoja(wabaId: string, token: string) {
+  for (const tpl of TEMPLATES_PADRAO) {
+    try {
+      const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${wabaId}/message_templates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(tpl),
+      })
+      const corpo = await res.json().catch(() => ({}))
+      // Template repetido devolve erro (já existe) — e isso é sucesso, não
+      // falha: quer dizer que a loja reconectou e o template continua lá.
+      console.log("[signup] template", tpl.name, res.status, JSON.stringify(corpo).slice(0, 200))
+    } catch (e) {
+      // Nunca derruba a conexão: a loja fica conectada e conversando por texto
+      // livre do mesmo jeito. Só o envio fora das 24h que espera o template.
+      console.error("[signup] template", tpl.name, "falhou:", String(e).slice(0, 200))
+    }
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
   if (req.method !== "POST")    return json({ error: "Método não suportado" }, 405)
@@ -214,6 +265,12 @@ serve(async (req) => {
 
     // Não é fatal: o token global do app ainda atende as WABAs compartilhadas.
     if (tokErr) console.error("[signup] salvar token falhou", tokErr.message)
+
+    // Templates da loja, criados agora pra estarem aprovados quando precisar.
+    // Não espera: a conexão termina na hora e a criação segue por trás.
+    if (waba_id && bizToken) {
+      criarTemplatesDaLoja(String(waba_id), String(bizToken)).catch(() => {})
+    }
 
     return json({
       ok: true,

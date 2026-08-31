@@ -40,6 +40,11 @@ function recebeWhatsapp(phoneRaw: string): boolean {
   return ddd >= 11 && ddd <= 99
 }
 
+// Template aprovado na conta da loja. É o único jeito de falar com quem não
+// escreveu nas últimas 24h — ver a nota da janela mais abaixo.
+const TEMPLATE_FIADO = "comanda_fiado"
+const TEMPLATE_IDIOMA = "pt_BR"
+
 function brl(v: unknown): string {
   return "R$ " + Number(v ?? 0).toFixed(2).replace(".", ",")
 }
@@ -165,6 +170,32 @@ serve(async (req) => {
       cliente?.token ? `\nVer tudo o que está em aberto:\nhttps://lojaonline.fwcinter.com/c/${cliente.token}` : null,
     ].filter(l => l !== null).join("\n")
 
+    // A JANELA DE 24 HORAS
+    //
+    // A Meta só aceita texto livre até 24h depois da última mensagem DO CLIENTE.
+    // Fora disso ela responde 200 na hora e joga a mensagem fora depois, com o
+    // erro 131047 — o pior tipo de falha, a que se disfarça de sucesso. Foi
+    // exatamente o que aconteceu no primeiro teste da Estação (31/08/2026).
+    //
+    // Por isso a escolha é feita ANTES, não por tentativa e erro: se o cliente
+    // falou com a loja há pouco, vai texto livre (a Meta não cobra). Se não
+    // falou, vai o template, que entra a qualquer hora — esse a Meta cobra.
+    //
+    // 20h em vez de 24h de propósito: a margem cobre o tempo entre decidir aqui
+    // e a Meta entregar. Errar pra menos custa centavos; errar pra mais faz a
+    // comanda sumir, que é o problema que este aviso existe pra resolver.
+    const chave = phoneFull.slice(-8)
+    const { data: ultimaDele } = await supabase
+      .from("whatsapp_conversas")
+      .select("created_at")
+      .eq("empresa_id", venda.empresa_id)
+      .eq("role", "user")
+      .like("phone", `%${chave}`)
+      .gte("created_at", new Date(Date.now() - 20 * 60 * 60 * 1000).toISOString())
+      .limit(1)
+      .maybeSingle()
+    const janelaAberta = !!ultimaDele
+
     // Mesmo caminho do aviso de pedido: Cloud quando a loja é oficial da Meta,
     // Evolution nas outras.
     let erro: string | null = null
@@ -183,13 +214,41 @@ serve(async (req) => {
       const { data: tok } = await supabase
         .from("whatsapp_cloud_tokens").select("token").eq("empresa_id", venda.empresa_id).maybeSingle()
       if (tok?.token) token = tok.token
+      // Parâmetro de template não aceita quebra de linha (a Meta recusa), então
+      // a lista de itens vira uma linha só, separada por ponto e vírgula.
+      const itensUmaLinha = itens.map(i =>
+        `${qtd(i.quantidade)}x ${String(i.nome_produto ?? "item").trim()} ${brl(i.subtotal ?? Number(i.preco_unitario) * Number(i.quantidade))}`
+      ).join("; ")
+
+      const corpoEnvio = janelaAberta
+        ? {
+            messaging_product: "whatsapp", recipient_type: "individual",
+            to: phoneFull, type: "text", text: { body: mensagem, preview_url: false },
+          }
+        : {
+            messaging_product: "whatsapp", recipient_type: "individual",
+            to: phoneFull, type: "template",
+            template: {
+              name: TEMPLATE_FIADO,
+              language: { code: TEMPLATE_IDIOMA },
+              components: [{
+                type: "body",
+                parameters: [
+                  { type: "text", text: primeiroNome || "tudo bem" },
+                  { type: "text", text: empresa?.nome ?? "loja" },
+                  { type: "text", text: quando },
+                  { type: "text", text: itensUmaLinha },
+                  { type: "text", text: brl(venda.total) },
+                  { type: "text", text: brl(saldo) },
+                ],
+              }],
+            },
+          }
+
       const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${cfg.cloud_phone_number_id}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          messaging_product: "whatsapp", recipient_type: "individual",
-          to: phoneFull, type: "text", text: { body: mensagem, preview_url: false },
-        }),
+        body: JSON.stringify(corpoEnvio),
       })
       const corpo = await res.json().catch(() => ({} as any))
       if (!res.ok) erro = `cloud ${res.status}: ${JSON.stringify(corpo).slice(0, 250)}`
@@ -216,6 +275,8 @@ serve(async (req) => {
       role: "assistant", content: mensagem, falhou: !!erro, erro,
       message_id: messageId,
     })
+
+    console.log("[fiado] comanda", venda.id, janelaAberta ? "texto livre" : "template", erro ? "FALHOU" : "ok")
 
     return new Response(JSON.stringify({ ok: !erro, erro }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
