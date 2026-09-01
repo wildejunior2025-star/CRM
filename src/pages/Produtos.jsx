@@ -23,23 +23,51 @@ const EH_CELULAR = typeof navigator !== 'undefined' &&
 // Foto de câmera de celular vem com 4-8 MB. Encolhe pra no máximo 1200px e
 // JPEG 82% antes de subir: a vitrine mostra a foto pequena mesmo, e o upload
 // no 4G da loja deixa de demorar/estourar.
-async function comprimirImagem(file, maxLado = 1200, qualidade = 0.82) {
-  if (!file.type?.startsWith('image/') || file.type === 'image/gif') return file
+// Decodifica o arquivo. `createImageBitmap` é o caminho rápido, mas recusa
+// alguns formatos que o celular gera (HEIC do iPhone, por exemplo) — aí a tag
+// <img> resolve, porque o próprio aparelho que tirou a foto sabe abrir.
+async function decodificarImagem(file) {
   try {
     const bitmap = await createImageBitmap(file)
-    const escala = Math.min(1, maxLado / Math.max(bitmap.width, bitmap.height))
-    // Já é pequena e leve: sobe do jeito que veio.
-    if (escala === 1 && file.size < 900 * 1024) { bitmap.close?.(); return file }
+    return { fonte: bitmap, largura: bitmap.width, altura: bitmap.height, fechar: () => bitmap.close?.() }
+  } catch { /* tenta pela tag <img> */ }
+  const url = URL.createObjectURL(file)
+  try {
+    const img = await new Promise((ok, falha) => {
+      const el = new Image()
+      el.onload = () => ok(el)
+      el.onerror = falha
+      el.src = url
+    })
+    return { fonte: img, largura: img.naturalWidth, altura: img.naturalHeight, fechar: () => URL.revokeObjectURL(url) }
+  } catch {
+    URL.revokeObjectURL(url)
+    return null
+  }
+}
+
+async function comprimirImagem(file, maxLado = 1200, qualidade = 0.82) {
+  if (!file.type?.startsWith('image/') && !/\.(hei[cf]|jpe?g|png|webp)$/i.test(file.name || '')) return file
+  if (file.type === 'image/gif') return file
+  const img = await decodificarImagem(file)
+  if (!img || !img.largura) return file   // não deu pra abrir: sobe original, melhor do que travar o cadastro
+  try {
+    const ehWeb = /^image\/(jpeg|png|webp)$/.test(file.type || '')
+    const escala = Math.min(1, maxLado / Math.max(img.largura, img.altura))
+    // Já é pequena, leve e o navegador exibe: sobe do jeito que veio.
+    if (escala === 1 && file.size < 900 * 1024 && ehWeb) { img.fechar(); return file }
     const canvas = document.createElement('canvas')
-    canvas.width = Math.round(bitmap.width * escala)
-    canvas.height = Math.round(bitmap.height * escala)
-    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-    bitmap.close?.()
+    canvas.width = Math.round(img.largura * escala)
+    canvas.height = Math.round(img.altura * escala)
+    canvas.getContext('2d').drawImage(img.fonte, 0, 0, canvas.width, canvas.height)
+    img.fechar()
     const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', qualidade))
-    if (!blob || blob.size >= file.size) return file
+    // HEIC sempre vira JPEG, mesmo se ficar maior: senão a vitrine mostra foto quebrada.
+    if (!blob || (blob.size >= file.size && ehWeb)) return file
     return new File([blob], 'foto.jpg', { type: 'image/jpeg' })
   } catch {
-    return file   // navegador antigo: sobe original, melhor do que travar o cadastro
+    img.fechar()
+    return file
   }
 }
 
@@ -193,6 +221,9 @@ export default function Produtos() {
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [uploadingFoto, setUploadingFoto] = useState(false)
+  // Prévia local (blob do próprio aparelho): a foto aparece no formulário na hora
+  // em que a câmera fecha, sem esperar o 4G subir o arquivo.
+  const [fotoPreview, setFotoPreview] = useState('')
   const [duplicandoId, setDuplicandoId] = useState(null)        // produto sendo duplicado (spinner no botão)
 
   // Quantidade em estoque direto no cadastro do produto. Antes só dava pra
@@ -217,7 +248,9 @@ export default function Produtos() {
   // o trabalho). Limpa ao salvar ou cancelar.
   const draftKey = empresa?.id ? `produtos-draft-${empresa.id}` : null
   const limparRascunho = () => { try { if (draftKey) localStorage.removeItem(draftKey) } catch { /* ok */ } }
-  const fecharModal = () => { limparRascunho(); setShowModal(false) }
+  const fecharModal = () => { limparRascunho(); trocarPreview(''); setShowModal(false) }
+  // Troca a prévia soltando a anterior da memória (blob não some sozinho).
+  const trocarPreview = (nova) => setFotoPreview(prev => { if (prev) URL.revokeObjectURL(prev); return nova })
   useEffect(() => {
     if (!showModal || !draftKey) return
     try { localStorage.setItem(draftKey, JSON.stringify({ editingId, form, vinculos })) } catch { /* quota */ }
@@ -693,6 +726,7 @@ export default function Produtos() {
       foto_url: produto.foto_url ?? '',
       descricao: produto.descricao ?? '',
     })
+    trocarPreview('')
     setShowModal(true)
   }
 
@@ -749,36 +783,53 @@ export default function Produtos() {
 
   async function handleFotoChange(e) {
     const file = e.target.files?.[0]
+    // Zera o input logo: sem isso, tirar/escolher a MESMA foto de novo não
+    // dispara o onChange e parece que o sistema ignorou.
+    e.target.value = ''
     if (!file) return
     if (!profile?.empresa_id) { setError('Empresa não identificada para upload.'); return }
 
+    trocarPreview(URL.createObjectURL(file))
     setUploadingFoto(true)
     setError(null)
 
-    const arquivo = await comprimirImagem(file)
-    // Nome vindo da câmera/galeria pode ter acento e espaço — o storage recusa.
-    const nomeSeguro = (arquivo.name || 'foto.jpg')
-      .normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^\w.-]+/g, '_')
-    const path = `${profile.empresa_id}/${Date.now()}_${nomeSeguro}`
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('produto-fotos')
-      .upload(path, arquivo, { upsert: true })
+    try {
+      const arquivo = await comprimirImagem(file)
+      // Nome vindo da câmera/galeria pode ter acento e espaço — o storage recusa.
+      const nomeSeguro = (arquivo.name || 'foto.jpg')
+        .normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^\w.-]+/g, '_')
 
-    setUploadingFoto(false)
+      // Internet da loja oscila: tenta duas vezes antes de desistir. Caminho novo
+      // a cada tentativa, pra nunca esbarrar em arquivo pela metade.
+      let uploadData = null
+      let uploadError = null
+      for (let tentativa = 0; tentativa < 2; tentativa++) {
+        const path = `${profile.empresa_id}/${Date.now()}_${nomeSeguro}`
+        const r = await supabase.storage.from('produto-fotos').upload(path, arquivo, { upsert: true })
+        uploadData = r.data
+        uploadError = r.error
+        if (!uploadError) break
+      }
+      if (uploadError) throw new Error(uploadError.message)
 
-    if (uploadError) { setError(`Erro no upload: ${uploadError.message}`); return }
+      const { data: urlData } = supabase.storage
+        .from('produto-fotos')
+        .getPublicUrl(uploadData.path)
 
-    const { data: urlData } = supabase.storage
-      .from('produto-fotos')
-      .getPublicUrl(uploadData.path)
-
-    setForm(prev => ({ ...prev, foto_url: urlData.publicUrl }))
-    // Zera o input: sem isso, escolher/tirar a mesma foto de novo não dispara o onChange.
-    e.target.value = ''
+      setForm(prev => ({ ...prev, foto_url: urlData.publicUrl }))
+    } catch (err) {
+      trocarPreview('')
+      setError(`A foto não subiu: ${err?.message ?? err}. Toque de novo em tirar/escolher a foto.`)
+    } finally {
+      setUploadingFoto(false)
+    }
   }
 
   async function handleSubmit(e) {
     e.preventDefault()
+    // Salvar com a foto ainda subindo gravava o produto sem foto: o upload
+    // terminava depois, com o modal já fechado, e a foto se perdia.
+    if (uploadingFoto) { setError('A foto ainda está subindo. Espere aparecer no quadro e salve.'); return }
     setSaving(true)
     setError(null)
 
@@ -1417,13 +1468,23 @@ export default function Produtos() {
                       </button>
                     )}
                   </div>
-                  {form.foto_url && (
-                    <img
-                      src={form.foto_url}
-                      alt="Foto do produto"
-                      className="prod-form-foto"
-                      style={{ marginTop: 8 }}
-                    />
+                  {(fotoPreview || form.foto_url) && (
+                    <div style={{ position: 'relative', display: 'inline-block', marginTop: 8 }}>
+                      <img
+                        src={fotoPreview || form.foto_url}
+                        alt="Foto do produto"
+                        className="prod-form-foto"
+                        style={{ display: 'block', opacity: uploadingFoto ? 0.5 : 1 }}
+                      />
+                      {uploadingFoto && (
+                        <span style={{
+                          position: 'absolute', inset: 0, display: 'flex',
+                          alignItems: 'center', justifyContent: 'center',
+                          background: 'rgba(0,0,0,.45)', color: '#fff',
+                          fontSize: 13, fontWeight: 600, borderRadius: 8,
+                        }}>Enviando foto...</span>
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -1836,8 +1897,8 @@ export default function Produtos() {
                 >
                   Cancelar
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>
-                  {saving ? 'Salvando...' : 'Salvar'}
+                <button type="submit" className="btn btn-primary" disabled={saving || uploadingFoto}>
+                  {saving ? 'Salvando...' : (uploadingFoto ? 'Enviando foto...' : 'Salvar')}
                 </button>
               </div>
             </form>
