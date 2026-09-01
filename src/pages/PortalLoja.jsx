@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { capturarIndicacao, registrarIndicacao } from '../lib/indicacao'
@@ -368,22 +368,32 @@ export default function PortalLoja() {
   const categorias = ['Todos', ...new Set(produtos.map(p => p.categoria).filter(Boolean))]
 
   /* ── Filtro ── */
-  const produtosFiltrados = produtos.filter(p => {
+  const produtosFiltrados = useMemo(() => produtos.filter(p => {
     const matchCategoria = categoriaAtiva === 'Todos' || p.categoria === categoriaAtiva
     const termo = busca.trim().toLowerCase()
     const matchBusca = !termo || p.nome?.toLowerCase().includes(termo) || p.descricao?.toLowerCase().includes(termo)
     return matchCategoria && matchBusca
-  })
+  }), [produtos, categoriaAtiva, busca])
 
-  /* ── Agrupamento por categoria ── */
-  const categoriasDeProdutos = categorias.filter(c => c !== 'Todos')
-  const secoes = categoriaAtiva === 'Todos'
-    ? categoriasDeProdutos
-        .map(cat => ({ nome: cat, produtos: produtosFiltrados.filter(p => p.categoria === cat) }))
-        .filter(s => s.produtos.length > 0)
-    : [{ nome: categoriaAtiva, produtos: produtosFiltrados }].filter(s => s.produtos.length > 0)
+  /* ── Agrupamento por categoria ──
+     Uma passada só. Antes cada categoria varria a lista inteira (`filter` dentro
+     do `map`), e isso rodava de novo a cada toque no + de um produto — no
+     depósito, com centenas de itens na tela, a mão travava no carrinho. */
+  const secoes = useMemo(() => {
+    if (categoriaAtiva !== 'Todos') {
+      return produtosFiltrados.length ? [{ nome: categoriaAtiva, produtos: produtosFiltrados }] : []
+    }
+    const porCat = new Map()
+    for (const p of produtosFiltrados) {
+      if (!p.categoria) continue
+      const lista = porCat.get(p.categoria)
+      if (lista) lista.push(p)
+      else porCat.set(p.categoria, [p])
+    }
+    return [...porCat.entries()].map(([nome, produtos]) => ({ nome, produtos }))
+  }, [produtosFiltrados, categoriaAtiva])
 
-  const semCategoria = produtosFiltrados.filter(p => !p.categoria)
+  const semCategoria = useMemo(() => produtosFiltrados.filter(p => !p.categoria), [produtosFiltrados])
 
   /* ── CEP ── */
   function handleCepChange(e) {

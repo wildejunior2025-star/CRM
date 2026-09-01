@@ -85,9 +85,12 @@ async function buscarLoja(env, slug, ctx) {
     return j && j.nome ? j : null
   }
 
+  // `or` pra pegar tambem o link que a loja ja teve e trocou (slugs_antigos):
+  // link velho compartilhado no WhatsApp continua com a previa certa.
+  const s = encodeURIComponent(slug)
   const alvo =
     `${base}/rest/v1/empresas` +
-    `?slug=eq.${encodeURIComponent(slug)}` +
+    `?or=(slug.eq.${s},slugs_antigos.cs.{${s}})` +
     `&select=nome,descricao,logo_url,banner_url` +
     `&limit=1`
 

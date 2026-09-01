@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
@@ -223,7 +223,17 @@ export default function DeliveryLoja() {
       // Resolve a loja por slug (lojaonline.fwcinter.com/slug) ou por id (link antigo /loja/:id)
       let lojaQuery = supabase.from('empresas').select('*').eq('aceita_delivery', true)
       lojaQuery = slug ? lojaQuery.eq('slug', slug) : lojaQuery.eq('id', id)
-      const { data: lojaData } = await lojaQuery.maybeSingle()
+      let { data: lojaData } = await lojaQuery.maybeSingle()
+
+      // Link que a loja já teve e trocou. Ele continua no WhatsApp de mil
+      // clientes, impresso, anunciado — não pode virar "loja não encontrada".
+      if (!lojaData && slug) {
+        const { data: antiga } = await supabase.from('empresas').select('*')
+          .eq('aceita_delivery', true)
+          .contains('slugs_antigos', [slug])
+          .maybeSingle()
+        lojaData = antiga ?? null
+      }
 
       if (!lojaData) { setLoja(null); setLoading(false); return }
 
@@ -243,28 +253,30 @@ export default function DeliveryLoja() {
 
       // Complementos (ex.: "monte sua quentinha") — grupos + opções por produto
       let produtosFinal = produtosData ?? []
-      const ids = produtosFinal.map(p => p.id)
-      if (ids.length) {
+      if (produtosFinal.length) {
+        // Complementos numa consulta só, filtrando pela EMPRESA através do grupo.
+        // Antes era `.in(produto_id, ...)` de 300 em 300 ids: no depósito, com 4
+        // mil itens, davam 15 idas ao servidor em fila — e todas voltavam vazias,
+        // porque a loja não usa complemento nenhum.
+        const vinc = await lerOuFalhar(() => fetchAll(() => supabase
+          .from('produto_complemento_grupos')
+          .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
+          .eq('complemento_grupos.empresa_id', lojaData.id)
+          .order('produto_id')))
+
         // Sabor de pizza também é produto: puxa a descrição dele pra mostrar no que vai na pizza.
         // Pega TODOS os ativos (tem sabor que só existe dentro da pizza, sem aparecer no cardápio).
-        const { data: descData } = await fetchAll(() => supabase.from('produtos')
-          .select('nome, categoria, descricao')
-          .eq('empresa_id', lojaData.id)
-          .eq('ativo', true)
-          .order('id'))
-        const descricaoDaOpcao = criarBuscadorDescricao(descData)
-        // Lê pela ponte produto↔grupo: uma mesma categoria pode estar em vários produtos.
-        // O .in() vai na URL: com 4 mil ids de uma vez o request estoura o tamanho
-        // maximo e a leitura falha, entao pergunta de 300 em 300 e junta.
-        const vinc = []
-        for (let i = 0; i < ids.length; i += 300) {
-          const lote = await lerOuFalhar(() => fetchAll(() => supabase
-            .from('produto_complemento_grupos')
-            .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
-            .in('produto_id', ids.slice(i, i + 300))
-            .order('produto_id')))
-          vinc.push(...lote)
+        // Só faz sentido se a loja TEM complemento — senão é varrer o catálogo inteiro à toa.
+        let descData = null
+        if (vinc.length) {
+          const r = await fetchAll(() => supabase.from('produtos')
+            .select('nome, categoria, descricao')
+            .eq('empresa_id', lojaData.id)
+            .eq('ativo', true)
+            .order('id'))
+          descData = r.data
         }
+        const descricaoDaOpcao = criarBuscadorDescricao(descData)
         // Opção "opt-out" (Sem X / Não Quero): serve pra recusar a categoria.
         const soSemOpcao = nome => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ''))
         const porProduto = {}
@@ -463,9 +475,23 @@ export default function DeliveryLoja() {
   const taxaIndefinida = taxaPorEndereco && taxaEntrega === 0
   const total = subtotal + taxaEntrega
 
-  const produtosFiltrados = filtroEstoqueBaixo
+  const produtosFiltrados = useMemo(() => (filtroEstoqueBaixo
     ? produtos.filter(p => p.estoque != null && p.estoque_minimo != null && p.estoque <= p.estoque_minimo)
-    : produtos
+    : produtos), [produtos, filtroEstoqueBaixo])
+
+  // Agrupa por categoria UMA vez. Antes cada categoria varria a lista inteira
+  // (`filter` dentro do `map`): no depósito eram 19 categorias × 4 mil itens =
+  // 80 mil voltas a cada toque no + de um produto.
+  const porCategoria = useMemo(() => {
+    const m = new Map()
+    for (const p of produtosFiltrados) {
+      const k = p.categoria || '__sem__'
+      const lista = m.get(k)
+      if (lista) lista.push(p)
+      else m.set(k, [p])
+    }
+    return m
+  }, [produtosFiltrados])
 
   // Categoria dentro do horário de venda? (sem horário = sempre). Usa horário de Brasília
   // (America/Fortaleza) pra não depender do fuso do aparelho do cliente. Trata janela
@@ -479,7 +505,7 @@ export default function DeliveryLoja() {
     return a <= b ? (n >= a && n < b) : (n >= a || n < b)
   }
 
-  const categorias = [...new Set(produtosFiltrados.map(p => p.categoria).filter(Boolean))]
+  const categorias = [...porCategoria.keys()].filter(c => c !== '__sem__')
     .filter(cat => catDisponivelAgora(cat))
     .sort((a, b) => {
       const oa = catOrdem[a] ?? 999
@@ -487,8 +513,27 @@ export default function DeliveryLoja() {
       if (oa !== ob) return oa - ob
       return a.localeCompare(b)
     })
-  const semCategoria = produtosFiltrados.filter(p => !p.categoria)
+  const semCategoria = porCategoria.get('__sem__') ?? []
   const todasCats = semCategoria.length > 0 ? [...categorias, '__sem__'] : categorias
+
+  // Cardápio grande não pode nascer inteiro no DOM. Monta as primeiras seções e
+  // acrescenta conforme o cliente rola. Cardápio pequeno cabe todo no primeiro
+  // lote e ninguém vê diferença.
+  const SECOES_POR_VEZ = 4
+  const [secoesMontadas, setSecoesMontadas] = useState(SECOES_POR_VEZ)
+  useEffect(() => { setSecoesMontadas(SECOES_POR_VEZ) }, [produtosFiltrados])
+  const fimDasSecoesRef = useRef(null)
+  useEffect(() => {
+    if (secoesMontadas >= todasCats.length) return
+    const el = fimDasSecoesRef.current
+    if (!el) return
+    const io = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) setSecoesMontadas(n => Math.min(n + SECOES_POR_VEZ, todasCats.length))
+    }, { rootMargin: '800px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [secoesMontadas, todasCats.length])
+  const catsVisiveis = todasCats.slice(0, secoesMontadas)
 
   // Busca por nome do produto (filtra tudo, ignorando a divisão por categoria).
   // Sem acento dos dois lados: ninguém digita "Camarão" no celular, digita
@@ -536,21 +581,34 @@ export default function DeliveryLoja() {
       if (el) observer.observe(el)
     })
     return () => observer.disconnect()
-  }, [todasCats.join(',')])
+    // secoesMontadas entra aqui pra observar também as seções que acabaram de nascer.
+  }, [todasCats.join(','), secoesMontadas])
 
-  function scrollToCategoria(cat) {
+  function irAteCategoria(cat) {
     const el = catRefs.current[cat]
     if (el) {
       const offset = 130
       const top = el.getBoundingClientRect().top + window.scrollY - offset
       window.scrollTo({ top, behavior: 'smooth' })
     }
-    setCatAtiva(cat)
     // Scroll do nav para manter botão ativo visível
     if (navRef.current) {
       const btn = navRef.current.querySelector(`[data-nav="${cat}"]`)
       btn?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
     }
+  }
+
+  function scrollToCategoria(cat) {
+    setCatAtiva(cat)
+    // Categoria lá de baixo que ainda não nasceu: monta até ela e só então rola,
+    // senão o botão do menu não levava a lugar nenhum.
+    const i = todasCats.indexOf(cat)
+    if (i >= 0 && i >= secoesMontadas) {
+      setSecoesMontadas(i + 1)
+      requestAnimationFrame(() => requestAnimationFrame(() => irAteCategoria(cat)))
+      return
+    }
+    irAteCategoria(cat)
   }
 
   function handleFinalizar() {
@@ -733,21 +791,15 @@ export default function DeliveryLoja() {
               <p>Nenhum produto encontrado para “{busca.trim()}”.</p>
             </div>
           ) : (
-            <section className="dloja-section">
-              <h2 className="dloja-cat-title">Resultados ({resultadosBusca.length})</h2>
-              <div className="dloja-produtos">
-                {resultadosBusca.map(p => (
-                  <ProdutoCard
-                    key={p.id}
-                    produto={p}
-                    quantidade={qtdProduto(p.id)}
-                    lojaAberta={lojaAberta}
-                    onAdd={() => (p.complementos?.length ? abrirProduto(p) : addOne(p))}
-                    onRemove={() => removeOne(String(p.id))}
-                  />
-                ))}
-              </div>
-            </section>
+            <SecaoProdutos
+              titulo={`Resultados (${resultadosBusca.length})`}
+              produtos={resultadosBusca}
+              qtdProduto={qtdProduto}
+              lojaAberta={lojaAberta}
+              abrirProduto={abrirProduto}
+              addOne={addOne}
+              removeOne={removeOne}
+            />
           )
         ) : categorias.length === 0 && semCategoria.length === 0 ? (
           <div className="dloja-empty">
@@ -761,40 +813,23 @@ export default function DeliveryLoja() {
           </div>
         ) : (
           <>
-            {categorias.map(cat => (
-              <section key={cat} className="dloja-section" ref={el => { catRefs.current[cat] = el }} data-cat={cat}>
-                <h2 className="dloja-cat-title">{cat}</h2>
-                <div className="dloja-produtos">
-                  {produtosFiltrados.filter(p => p.categoria === cat).map(p => (
-                    <ProdutoCard
-                      key={p.id}
-                      produto={p}
-                      quantidade={qtdProduto(p.id)}
-                      lojaAberta={lojaAberta}
-                      onAdd={() => (p.complementos?.length ? abrirProduto(p) : addOne(p))}
-                      onRemove={() => removeOne(String(p.id))}
-                    />
-                  ))}
-                </div>
-              </section>
+            {catsVisiveis.map(cat => (
+              <SecaoProdutos
+                key={cat}
+                cat={cat}
+                titulo={cat === '__sem__' ? 'Outros' : cat}
+                produtos={cat === '__sem__' ? semCategoria : (porCategoria.get(cat) ?? [])}
+                refCallback={el => { catRefs.current[cat] = el }}
+                qtdProduto={qtdProduto}
+                lojaAberta={lojaAberta}
+                abrirProduto={abrirProduto}
+                addOne={addOne}
+                removeOne={removeOne}
+              />
             ))}
-
-            {semCategoria.length > 0 && (
-              <section className="dloja-section" ref={el => { catRefs.current['__sem__'] = el }} data-cat="__sem__">
-                <h2 className="dloja-cat-title">Outros</h2>
-                <div className="dloja-produtos">
-                  {semCategoria.map(p => (
-                    <ProdutoCard
-                      key={p.id}
-                      produto={p}
-                      quantidade={qtdProduto(p.id)}
-                      lojaAberta={lojaAberta}
-                      onAdd={() => (p.complementos?.length ? abrirProduto(p) : addOne(p))}
-                      onRemove={() => removeOne(String(p.id))}
-                    />
-                  ))}
-                </div>
-              </section>
+            {/* Chegou perto do fim: nasce o próximo lote de categorias. */}
+            {secoesMontadas < todasCats.length && (
+              <div ref={fimDasSecoesRef} style={{ height: 1 }} aria-hidden="true" />
             )}
           </>
         )}
@@ -904,6 +939,48 @@ export default function DeliveryLoja() {
 
       <AvisoCookies loja={loja} />
     </div>
+  )
+}
+
+// Uma categoria do cardápio. Ela mesma decide quantos itens ficam no DOM:
+// começa com um punhado e cresce sozinha quando o cliente chega no fim dela.
+// Sem isto, "Higiene Pessoal" do depósito nascia com 882 cartões de uma vez —
+// o celular travava antes de desenhar qualquer coisa na tela.
+const ITENS_POR_VEZ = 30
+
+function SecaoProdutos({ titulo, cat, produtos, refCallback, qtdProduto, lojaAberta, abrirProduto, addOne, removeOne }) {
+  const [visiveis, setVisiveis] = useState(ITENS_POR_VEZ)
+  const fimRef = useRef(null)
+
+  useEffect(() => { setVisiveis(ITENS_POR_VEZ) }, [produtos])
+  useEffect(() => {
+    if (visiveis >= produtos.length) return
+    const el = fimRef.current
+    if (!el) return
+    const io = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) setVisiveis(n => Math.min(n + ITENS_POR_VEZ, produtos.length))
+    }, { rootMargin: '600px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [visiveis, produtos.length])
+
+  return (
+    <section className="dloja-section" ref={refCallback} data-cat={cat}>
+      <h2 className="dloja-cat-title">{titulo}</h2>
+      <div className="dloja-produtos">
+        {produtos.slice(0, visiveis).map(p => (
+          <ProdutoCard
+            key={p.id}
+            produto={p}
+            quantidade={qtdProduto(p.id)}
+            lojaAberta={lojaAberta}
+            onAdd={() => (p.complementos?.length ? abrirProduto(p) : addOne(p))}
+            onRemove={() => removeOne(String(p.id))}
+          />
+        ))}
+      </div>
+      {visiveis < produtos.length && <div ref={fimRef} style={{ height: 1 }} aria-hidden="true" />}
+    </section>
   )
 }
 

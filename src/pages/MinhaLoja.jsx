@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import { FORMAS_PAGAMENTO, FORMAS_CARTAO, ICONE_PAGAMENTO, formasAtivas } from '../lib/constants'
+import { gerarSlug, erroDoSlug } from '../lib/slugLoja'
 
 // "2,5" → 2.5, e nunca fora de 0–100 (taxa de maquineta não passa disso).
 const pctNum = (s) => Math.min(100, Math.max(0, Number(String(s ?? '').replace(',', '.')) || 0))
@@ -45,6 +46,11 @@ export default function MinhaLoja({ secao = 'loja' }) {
   const [sucesso, setSucesso] = useState(false)
   const [copiado, setCopiado] = useState(false)
   const timerCopia = useRef(null)
+  // Edição do final do link (o "apelido" da loja na vitrine pública).
+  const [editandoLink, setEditandoLink] = useState(false)
+  const [slugNovo, setSlugNovo] = useState('')
+  const [erroLink, setErroLink] = useState(null)
+  const [salvandoLink, setSalvandoLink] = useState(false)
 
   const [senhaNova, setSenhaNova] = useState('')
   const [senhaConfirm, setSenhaConfirm] = useState('')
@@ -541,6 +547,46 @@ export default function MinhaLoja({ secao = 'loja' }) {
 
   const linkCatalogo = `https://lojaonline.fwcinter.com/${empresa.slug ?? empresa.id}`
 
+  function abrirEdicaoLink() {
+    // Sugere o link a partir do nome ATUAL da loja — que é justamente o caso de
+    // quem renomeou a loja e estranhou o link continuar o antigo.
+    setSlugNovo(empresa.slug ?? gerarSlug(empresa.nome))
+    setErroLink(null)
+    setEditandoLink(true)
+  }
+
+  async function salvarLink() {
+    const novo = gerarSlug(slugNovo)
+    const problema = erroDoSlug(novo)
+    if (problema) { setErroLink(problema); return }
+    if (novo === empresa.slug) { setEditandoLink(false); return }
+
+    setSalvandoLink(true)
+    setErroLink(null)
+
+    // Já é de outra loja? O banco recusaria com erro técnico; melhor dizer antes.
+    const { data: ocupado } = await supabase.from('empresas')
+      .select('id').eq('slug', novo).neq('id', empresa.id).maybeSingle()
+    if (ocupado) {
+      setSalvandoLink(false)
+      setErroLink('Esse link já é de outra loja. Escolha outro final.')
+      return
+    }
+
+    // O link antigo entra na lista dos que continuam funcionando: ele já foi
+    // mandado no WhatsApp, impresso e anunciado — não pode virar página de erro.
+    const antigos = Array.from(new Set([...(empresa.slugs_antigos ?? []), empresa.slug].filter(Boolean)))
+      .filter(s => s !== novo)
+    const { error } = await supabase.from('empresas')
+      .update({ slug: novo, slugs_antigos: antigos })
+      .eq('id', empresa.id)
+
+    setSalvandoLink(false)
+    if (error) { setErroLink(`Não deu pra salvar: ${error.message}`); return }
+    await refreshProfile()
+    setEditandoLink(false)
+  }
+
   function copiarLink() {
     navigator.clipboard.writeText(linkCatalogo)
     setCopiado(true)
@@ -611,7 +657,63 @@ export default function MinhaLoja({ secao = 'loja' }) {
           >
             Abrir
           </a>
+          <button
+            type="button"
+            onClick={editandoLink ? () => setEditandoLink(false) : abrirEdicaoLink}
+            style={{
+              padding: '8px 14px', borderRadius: 8,
+              border: '1.5px solid var(--border)',
+              fontSize: 13, fontWeight: 600, color: 'var(--text)',
+              cursor: 'pointer', whiteSpace: 'nowrap', background: 'var(--surface)',
+            }}
+          >
+            {editandoLink ? 'Cancelar' : 'Editar link'}
+          </button>
         </div>
+
+        {editandoLink && (
+          <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>
+              Final do link
+            </label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>lojaonline.fwcinter.com/</span>
+              <input
+                value={slugNovo}
+                onChange={e => { setSlugNovo(e.target.value); setErroLink(null) }}
+                placeholder="minha-loja"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                style={{ flex: 1, minWidth: 160, padding: '8px 12px', borderRadius: 8, border: '1.5px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }}
+              />
+              <button
+                type="button"
+                onClick={salvarLink}
+                disabled={salvandoLink}
+                style={{
+                  padding: '8px 18px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                  fontWeight: 700, fontSize: 13, background: 'var(--primary)', color: '#fff',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {salvandoLink ? 'Salvando...' : 'Salvar link'}
+              </button>
+            </div>
+            {gerarSlug(slugNovo) !== slugNovo && slugNovo && (
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 0' }}>
+                Vai ficar assim: <b>lojaonline.fwcinter.com/{gerarSlug(slugNovo)}</b>
+              </p>
+            )}
+            {erroLink && (
+              <p style={{ fontSize: 12.5, color: 'var(--danger)', margin: '8px 0 0' }}>{erroLink}</p>
+            )}
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 0', lineHeight: 1.5 }}>
+              Pode trocar sem medo: <b>o link antigo continua funcionando</b> e leva pra mesma loja.
+              Quem já tem o de antes salvo no WhatsApp não fica na mão.
+            </p>
+          </div>
+        )}
       </div>
 
       <form onSubmit={handleSalvar}>
