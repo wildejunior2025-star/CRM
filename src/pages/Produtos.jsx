@@ -251,6 +251,17 @@ export default function Produtos() {
   const fecharModal = () => { limparRascunho(); trocarPreview(''); setShowModal(false) }
   // Troca a prévia soltando a anterior da memória (blob não some sozinho).
   const trocarPreview = (nova) => setFotoPreview(prev => { if (prev) URL.revokeObjectURL(prev); return nova })
+  // Cinto de segurança da foto: escreve a URL direto no rascunho. Se o Android
+  // descarregar a página enquanto a câmera estava aberta, esta tela morre no
+  // meio do upload — e é o rascunho que reabre o cadastro. Sem isto, ele voltava
+  // sem a foto e o dono salvava o produto pelado.
+  const gravarFotoNoRascunho = (url) => {
+    if (!draftKey) return
+    try {
+      const d = JSON.parse(localStorage.getItem(draftKey) || 'null')
+      if (d?.form) localStorage.setItem(draftKey, JSON.stringify({ ...d, form: { ...d.form, foto_url: url } }))
+    } catch { /* quota */ }
+  }
   useEffect(() => {
     if (!showModal || !draftKey) return
     try { localStorage.setItem(draftKey, JSON.stringify({ editingId, form, vinculos })) } catch { /* quota */ }
@@ -817,6 +828,7 @@ export default function Produtos() {
         .getPublicUrl(uploadData.path)
 
       setForm(prev => ({ ...prev, foto_url: urlData.publicUrl }))
+      gravarFotoNoRascunho(urlData.publicUrl)
     } catch (err) {
       trocarPreview('')
       setError(`A foto não subiu: ${err?.message ?? err}. Toque de novo em tirar/escolher a foto.`)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { AuthContext } from './authContextValue'
 
@@ -11,6 +11,9 @@ export function AuthProvider({ children }) {
   // "ainda carregando" de "não tem profile" (caso do login social Google,
   // que só ganha profile ao finalizar o cadastro).
   const [profileLoading, setProfileLoading] = useState(true)
+  // De quem é o profile que já está na mão. Serve pra saber se um evento de
+  // auth é login de verdade ou só o token se renovando do mesmo usuário.
+  const profileIdRef = useRef(null)
 
   useEffect(() => {
     let active = true
@@ -24,12 +27,18 @@ export function AuthProvider({ children }) {
       if (active) setEmpresa(data ?? null)
     }
 
-    async function loadProfile(userId) {
-      if (active) setProfileLoading(true)
+    // `silencioso` = recarrega os dados sem levantar o profileLoading. É o que
+    // salva a tela: o ProtectedRoute troca a página inteira por "Carregando..."
+    // enquanto profileLoading estiver ligado, e isso DESMONTA o que estava
+    // aberto. No celular o token se renova toda vez que o app volta de outro
+    // aplicativo (a câmera, por exemplo) — sem isso, tirar uma foto derrubava
+    // o cadastro que estava preenchido e a foto se perdia no caminho.
+    async function loadProfile(userId, { silencioso = false } = {}) {
+      if (active && !silencioso) setProfileLoading(true)
       const { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
-      if (active) setProfile(data ?? null)
+      if (active) { setProfile(data ?? null); profileIdRef.current = data?.id ?? null }
       await loadEmpresa(data?.empresa_id ?? null)
-      if (active) setProfileLoading(false)
+      if (active && !silencioso) setProfileLoading(false)
     }
 
     supabase.auth.getSession().then(async ({ data }) => {
@@ -42,9 +51,14 @@ export function AuthProvider({ children }) {
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)
-      if (newSession) loadProfile(newSession.user.id)
-      else {
+      if (newSession) {
+        // Mesmo usuário de antes? Então é renovação de token / volta de outro
+        // app: atualiza por baixo, sem piscar o "Carregando..." e sem desmontar
+        // a tela que o dono está usando.
+        loadProfile(newSession.user.id, { silencioso: profileIdRef.current === newSession.user.id })
+      } else {
         setProfile(null)
+        profileIdRef.current = null
         setEmpresa(null)
         setProfileLoading(false)
       }
@@ -99,6 +113,7 @@ export function AuthProvider({ children }) {
       .eq('id', session.user.id)
       .maybeSingle()
     setProfile(data ?? null)
+    profileIdRef.current = data?.id ?? null
 
     if (data?.empresa_id) {
       const { data: empresaData } = await supabase
