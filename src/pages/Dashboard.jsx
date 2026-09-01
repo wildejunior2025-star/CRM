@@ -139,7 +139,10 @@ export default function Dashboard() {
   const [itens, setItens] = useState([])
   const [nomes, setNomes] = useState({})
   const [clientesNovos, setClientesNovos] = useState([])
-  const [funil, setFunil] = useState([])   // etapas da Loja Online (mig 0216)
+  const [funil, setFunil] = useState([])
+  // sessao -> { nome, telefone, cep } de quem chegou no cadastro
+  const [funilContato, setFunilContato] = useState({})
+  const [verParados, setVerParados] = useState(false)   // etapas da Loja Online (mig 0216)
   const [op, setOp] = useState({ clientesAtivos: 0, estoqueBaixo: 0, cascosPendentes: 0, fiado: 0 })
   const [meta, setMeta] = useState(0)
   const [ifoodRates, setIfoodRates] = useState({})
@@ -188,7 +191,7 @@ export default function Dashboard() {
         if (pf?.ref_token) setRefToken(pf.ref_token)
       }
       const desdeISO = desde.toISOString()
-      const [vData, pData, iData, cnData, nRes, caRes, saRes, csRes, fiRes, empRes, fnData] = await Promise.all([
+      const [vData, pData, iData, cnData, nRes, caRes, saRes, csRes, fiRes, empRes, fnData, fcData] = await Promise.all([
         fetchAll(() => supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes, cliente_id, clientes(nome)').neq('status', 'cancelado').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens, subtotal, taxa_entrega, ifood_valores, forma_pagamento, cliente_id, cliente_nome, cliente_telefone').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('venda_itens').select('produto_id, nome_produto, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desdeISO).order('id', { ascending: false })).then(r => r.data),
@@ -199,7 +202,10 @@ export default function Dashboard() {
         supabase.from('casco_saldo').select('*'),
         supabase.from('clientes_saldo_fiado').select('saldo_fiado'),
         empresaId ? supabase.from('empresas').select('meta_faturamento_mensal, ifood_comissao_pct, ifood_transacao_pct, estoque_ativo, ifood_entrega_propria').eq('id', empresaId).single() : Promise.resolve({ data: null }),
-        fetchAll(() => supabase.from('loja_funil').select('etapa, sessao, created_at').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
+        fetchAll(() => supabase.from('loja_funil').select('etapa, sessao, created_at, valor').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
+        // Nome/telefone/CEP de quem chegou no cadastro (mig 0218) — é o que
+        // permite ligar de volta pra quem travou na hora do endereço.
+        fetchAll(() => supabase.from('loja_funil_contato').select('sessao, nome, telefone, cep').gte('created_at', desdeISO)).then(r => r.data),
       ])
       setVendas(vData ?? [])
       setPedidos(pData ?? [])
@@ -207,6 +213,7 @@ export default function Dashboard() {
       setNomes(Object.fromEntries((nRes.data ?? []).map(p => [p.id, p.nome])))
       setClientesNovos(cnData ?? [])
       setFunil(fnData ?? [])
+      setFunilContato(Object.fromEntries((fcData ?? []).map(c => [c.sessao, c])))
       setOp({
         clientesAtivos: caRes.count ?? 0,
         // Sem mínimo definido não é "baixo" — senão a loja que nunca mexeu no
@@ -235,6 +242,22 @@ export default function Dashboard() {
       if (t < start || t >= now) continue
       porEtapa[e.etapa]?.add(e.sessao)
     }
+    // Quem chegou no endereço e NÃO fechou — com o que ele já tinha digitado.
+    // É a lista que responde "são cinco pessoas ou uma tentando cinco vezes?".
+    const parados = []
+    for (const e of funil) {
+      if (e.etapa !== 'endereco') continue
+      const t = new Date(e.created_at)
+      if (t < start || t >= now) continue
+      if (porEtapa.pedido.has(e.sessao)) continue   // esse fechou, não parou
+      const c = funilContato[e.sessao] ?? {}
+      parados.push({
+        sessao: e.sessao, quando: t, valor: e.valor,
+        nome: c.nome ?? null, telefone: c.telefone ?? null, cep: c.cep ?? null,
+      })
+    }
+    parados.sort((a, b) => b.quando - a.quando)
+
     const abriu = porEtapa.abriu.size
     const sacola = porEtapa.sacola.size
     const endereco = porEtapa.endereco.size
@@ -251,8 +274,9 @@ export default function Dashboard() {
       pctEndereco: pct(endereco, sacola),
       pctPedido: pct(pedido, endereco),
       pctGeral: pct(pedido, abriu),
+      parados,
     }
-  }, [funil, periodo, custIni, custFim])
+  }, [funil, funilContato, periodo, custIni, custFim])
 
   const m = useMemo(() => {
     const { start, now, prevStart, prevEnd } = rangeFor(periodo, custIni, custFim)
@@ -602,7 +626,44 @@ export default function Dashboard() {
               )}
               <FunilLinha rotulo="Abriu o cardápio" valor={fn.abriu} base={fn.abriu} perdeu={fn.perdeuNaVitrine} legenda="saíram sem botar nada na sacola" />
               <FunilLinha rotulo="Botou na sacola" valor={fn.sacola} base={fn.abriu} pct={fn.pctSacola} perdeu={fn.perdeuNaSacola} legenda="montaram a sacola e não foram pro endereço" />
-              <FunilLinha rotulo="Foi pro endereço" valor={fn.endereco} base={fn.abriu} pct={fn.pctEndereco} perdeu={fn.perdeuNoCadastro} legenda="chegaram no cadastro e desistiram" />
+              <FunilLinha
+                rotulo="Foi pro endereço" valor={fn.endereco} base={fn.abriu} pct={fn.pctEndereco}
+                perdeu={fn.perdeuNoCadastro} legenda="chegaram no cadastro e desistiram"
+                aberto={verParados}
+                onAbrir={fn.parados.length > 0 ? () => setVerParados(v => !v) : null}
+              />
+              {verParados && fn.parados.length > 0 && (
+                <div style={{ margin: '2px 0 12px', padding: '10px 12px', background: 'var(--bg)', borderRadius: 8 }}>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.5 }}>
+                    O que cada um já tinha digitado quando parou — aparece conforme ele foi
+                    preenchendo, então quem saiu no começo fica em branco.
+                    <b> Mesmo valor e mesmo telefone repetidos? É a mesma pessoa tentando de novo.</b>
+                  </div>
+                  {fn.parados.map(p => (
+                    <div key={p.sessao} style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap', padding: '7px 0', borderTop: '1px solid var(--border)' }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 42 }}>
+                        {p.quando.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 110 }}>
+                        {p.nome ?? <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>sem nome ainda</span>}
+                      </span>
+                      {p.telefone ? (
+                        <a
+                          href={`https://wa.me/55${p.telefone}`}
+                          target="_blank" rel="noreferrer"
+                          style={{ fontSize: 12.5, fontWeight: 600, color: '#16a34a', textDecoration: 'none', whiteSpace: 'nowrap' }}
+                        >
+                          💬 {telBonito(p.telefone)}
+                        </a>
+                      ) : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>sem telefone</span>}
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                        {p.cep ? `CEP ${p.cep.slice(0, 5)}-${p.cep.slice(5)}` : 'sem CEP'}
+                      </span>
+                      {p.valor != null && <strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{fmt(p.valor)}</strong>}
+                    </div>
+                  ))}
+                </div>
+              )}
               <FunilLinha rotulo="Fechou o pedido" valor={fn.pedido} base={fn.abriu} pct={fn.pctPedido} ultimo />
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', fontSize: 13 }}>
                 De cada 100 que abriram o cardápio, <b>{fn.pctGeral}</b> fecharam pedido.
@@ -701,12 +762,36 @@ export default function Dashboard() {
 function ehLabel(p) { return p === 'hoje' ? '(hoje, por hora)' : p === '7d' ? '(últimos 7 dias)' : p === '30d' ? '(últimos 30 dias)' : p === 'custom' ? '(período escolhido)' : '(mês)' }
 // Uma linha do funil: quantos chegaram, que fatia é isso, e — o que importa —
 // quantos ficaram pelo caminho dali pra frente.
-function FunilLinha({ rotulo, valor, base, pct, perdeu, legenda, ultimo }) {
+// Telefone só de dígitos vira (84) 99999-8888 — o dono lê pelo formato, não
+// por uma tira de onze números seguidos.
+function telBonito(t) {
+  const d = String(t ?? '').replace(/\D/g, '')
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`
+  return t
+}
+
+function FunilLinha({ rotulo, valor, base, pct, perdeu, legenda, ultimo, aberto, onAbrir }) {
   const largura = base > 0 ? Math.max(4, Math.round((valor / base) * 100)) : 0
   return (
     <div style={{ marginBottom: ultimo ? 0 : 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-        <span style={{ fontSize: 13.5, fontWeight: 600 }}>{rotulo}</span>
+        <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+          {onAbrir && (
+            <button
+              type="button"
+              onClick={onAbrir}
+              title={aberto ? 'Esconder quem parou aqui' : 'Ver quem parou aqui'}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '0 6px 0 0',
+                color: 'var(--primary)', fontSize: 12, fontWeight: 800,
+                display: 'inline-block', transform: aberto ? 'rotate(90deg)' : 'none',
+                transition: 'transform 150ms',
+              }}
+            >▶</button>
+          )}
+          {rotulo}
+        </span>
         <span style={{ fontSize: 13.5, fontWeight: 800 }}>
           {valor}
           {pct != null && <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)' }}> · {pct}% de quem chegou antes</span>}

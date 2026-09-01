@@ -16,7 +16,7 @@ import { supabase } from './supabaseClient'
 // aparelho. Serve só pra ligar "abriu" e "desistiu" da mesma visita.
 const CHAVE = 'fwc_funil_sessao'
 
-function sessaoDaVisita() {
+export function sessaoDaVisita() {
   try {
     let s = sessionStorage.getItem(CHAVE)
     if (!s) {
@@ -59,6 +59,36 @@ export function marcarEtapa(empresaId, etapa, valor = null) {
       sessao,
       etapa,
       valor: valor != null ? Number(valor) : null,
+    }).then(() => {}, () => {})
+  } catch { /* ignora */ }
+}
+
+/**
+ * Guarda o que a pessoa já digitou no cadastro do checkout: nome, telefone e
+ * CEP. Serve pra responder o que o funil sozinho não responde — "essas cinco
+ * que travaram no endereço são cinco pessoas ou uma tentando cinco vezes?" e
+ * "elas moram fora do raio de entrega?".
+ *
+ * Grava por uma função no banco (mig 0218), não direto na tabela: assim o
+ * visitante anônimo não ganha permissão de mexer em nada. Cada chamada só
+ * ACRESCENTA o que veio preenchido — quem digita o nome agora e o CEP daqui a
+ * um minuto não perde o nome.
+ *
+ * Falha calada, igual ao resto do funil: contador quebrado não pode derrubar
+ * um checkout.
+ */
+export function anotarContato(empresaId, { nome, telefone, cep } = {}) {
+  if (!empresaId) return
+  if (!nome && !telefone && !cep) return
+  const sessao = sessaoDaVisita()
+  if (!sessao) return
+  try {
+    supabase.rpc('funil_contato', {
+      p_empresa: empresaId,
+      p_sessao: sessao,
+      p_nome: nome || null,
+      p_telefone: telefone || null,
+      p_cep: cep || null,
     }).then(() => {}, () => {})
   } catch { /* ignora */ }
 }

@@ -5,7 +5,7 @@ import { registrarIndicacao } from '../lib/indicacao'
 import { getEnderecoAtivo } from '../utils/enderecoPortal'
 import { registrarPedido } from '../lib/meusPedidos'
 import { iniciarCheckout } from '../lib/tracking'
-import { marcarEtapa } from '../lib/funil'
+import { marcarEtapa, anotarContato } from '../lib/funil'
 import { formasAtivas } from '../lib/constants'
 import 'leaflet/dist/leaflet.css'
 import './DeliveryCheckout.css'
@@ -550,6 +550,25 @@ export default function DeliveryCheckout() {
     if (state?.empresaId) marcarEtapa(state.empresaId, 'endereco', state?.subtotal ?? null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.empresaId])
+
+  // Nome, telefone e CEP de quem CHEGOU no cadastro — inclusive de quem não
+  // termina. É o que diz se as cinco visitas que travaram no endereço são cinco
+  // pessoas ou uma tentando cinco vezes, e se elas moram fora do raio.
+  //
+  // Espera 2s parado pra não mandar uma letra por vez enquanto ele digita.
+  useEffect(() => {
+    if (!state?.empresaId) return
+    const nome = form.nome?.trim()
+    const telefone = form.telefone?.replace(/\D/g, '')
+    const cep = form.cep?.replace(/\D/g, '')
+    // Telefone e CEP só valem inteiros: meio telefone não serve pra ninguém.
+    const t = setTimeout(() => anotarContato(state.empresaId, {
+      nome: nome && nome.length >= 2 ? nome : null,
+      telefone: telefone && telefone.length >= 10 ? telefone : null,
+      cep: cep && cep.length === 8 ? cep : null,
+    }), 2000)
+    return () => clearTimeout(t)
+  }, [state?.empresaId, form.nome, form.telefone, form.cep])
 
   // Endereço da loja — mostrado quando o cliente escolhe Retirada
   useEffect(() => {
