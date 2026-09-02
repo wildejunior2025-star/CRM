@@ -7,6 +7,10 @@ import '../components/Page.css'
 
 const PAGE_SIZE = 50
 
+// Dias da semana no padrão do JavaScript e do Postgres: 0=domingo ... 6=sábado.
+const DIAS_SEMANA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
+const DIAS_NOME = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
+
 // Normaliza pra busca: tira acento, deixa minúsculo e sem espaços nas pontas.
 // Assim "feijao" acha "Feijão" e "macarrao" acha "Macarrão".
 const norm = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
@@ -442,7 +446,7 @@ export default function Produtos() {
   async function loadCategorias() {
     const { data } = await supabase
       .from('categorias')
-      .select('id, nome, ordem, hora_inicio, hora_fim, setor, isento_taxa')
+      .select('id, nome, ordem, hora_inicio, hora_fim, setor, isento_taxa, dias_semana')
       .order('ordem', { ascending: true })
       .order('nome', { ascending: true })
     const lista = data ?? []
@@ -464,6 +468,18 @@ export default function Produtos() {
     const v = valor ? valor : null
     setCategorias(cs => cs.map(c => (c.id === id ? { ...c, [campo]: v } : c)))
     await supabase.from('categorias').update({ [campo]: v }).eq('id', id)
+  }
+
+  // Dias em que a categoria aparece (mig 0220). Nasceu da "Quarta do Picolé" da
+  // CD Bom: promoção que vale só na quarta, e nos outros dias alguém tinha que
+  // lembrar de pausar item por item — e de despausar na quarta seguinte.
+  // Nenhum dia marcado = todo dia, que é como as categorias sempre foram.
+  async function alternarDiaCategoria(id, dia) {
+    const atual = categorias.find(c => c.id === id)?.dias_semana ?? []
+    const novo = atual.includes(dia) ? atual.filter(d => d !== dia) : [...atual, dia].sort((a, b) => a - b)
+    const valor = novo.length === 0 || novo.length === 7 ? null : novo
+    setCategorias(cs => cs.map(c => (c.id === id ? { ...c, dias_semana: valor } : c)))
+    await supabase.from('categorias').update({ dias_semana: valor }).eq('id', id)
   }
 
   // Marca a categoria como COZINHA ou SALÃO (mig 0184). Quem lê isso é a
@@ -2204,6 +2220,12 @@ export default function Produtos() {
             </p>
 
             <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+              📅 <strong>Dias</strong> — deixe <strong>tudo desmarcado</strong> pra a categoria aparecer todo dia (é o normal).
+              Marque só um dia pra promoção de dia fixo: a <strong>Quarta do Picolé</strong> some sozinha nos outros dias
+              e volta sozinha na quarta, sem ninguém ter que pausar item por item.
+            </p>
+
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
               💸 <strong>Sem taxa</strong> — marque as categorias que <strong>não entram na taxa de serviço</strong> da mesa
               (couvert artístico, ingresso, reserva). O item continua na conta e no faturamento normalmente; só fica de fora
               do cálculo da taxa — e sai na comanda com <strong>(isento de taxa)</strong> do lado, pro cliente ver.
@@ -2310,6 +2332,30 @@ export default function Produtos() {
                               Sem taxa
                             </span>
                           </label>
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
+                          <div style={{ display: 'flex', gap: 3 }} title="Em que dias esta categoria aparece. Nada marcado = todo dia.">
+                            {DIAS_SEMANA.map((d, idx) => {
+                              const marcados = c.dias_semana ?? []
+                              const on = marcados.includes(idx)
+                              return (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  draggable={false}
+                                  onClick={() => alternarDiaCategoria(c.id, idx)}
+                                  title={`${DIAS_NOME[idx]}${on ? '' : ' (desligado)'}`}
+                                  style={{
+                                    width: 26, height: 26, borderRadius: 6, cursor: 'pointer', fontSize: 11,
+                                    fontWeight: 700, lineHeight: 1, padding: 0,
+                                    border: `1.5px solid ${on ? 'var(--primary)' : 'var(--border)'}`,
+                                    background: on ? 'var(--primary)' : 'transparent',
+                                    color: on ? '#fff' : 'var(--text-muted)',
+                                  }}
+                                >{d}</button>
+                              )
+                            })}
+                          </div>
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
                           <input

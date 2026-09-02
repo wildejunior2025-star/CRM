@@ -109,6 +109,7 @@ export default function DeliveryLoja() {
   const [excecoes, setExcecoes] = useState({})  // feriados/folgas da loja (mig 0142)
   const [catOrdem, setCatOrdem] = useState({}) // { nomeCategoria: ordem }
   const [catHorario, setCatHorario] = useState({}) // { nomeCategoria: { inicio, fim } }
+  const [catDias, setCatDias] = useState({})       // { nomeCategoria: [0..6] } — vazio = todo dia
   const [loading, setLoading] = useState(true)
   const [catAtiva, setCatAtiva] = useState(null)
   const catRefs = useRef({})
@@ -320,13 +321,15 @@ export default function DeliveryLoja() {
       // Ordem personalizada + horário de disponibilidade das categorias
       const { data: catData } = await supabase
         .from('categorias')
-        .select('nome, ordem, hora_inicio, hora_fim')
+        .select('nome, ordem, hora_inicio, hora_fim, dias_semana')
         .eq('empresa_id', lojaData.id)
       const ordemMap = {}
       const horarioMap = {}
+      const diasMap = {}
       for (const c of (catData ?? [])) {
         ordemMap[c.nome] = c.ordem ?? 999
         if (c.hora_inicio && c.hora_fim) horarioMap[c.nome] = { inicio: c.hora_inicio, fim: c.hora_fim }
+        if (Array.isArray(c.dias_semana) && c.dias_semana.length > 0) diasMap[c.nome] = c.dias_semana
       }
 
       // Restaura carrinho salvo desta loja (chave = id real)
@@ -347,6 +350,7 @@ export default function DeliveryLoja() {
       setProdutos(produtosFinal)
       setCatOrdem(ordemMap)
       setCatHorario(horarioMap)
+      setCatDias(diasMap)
       setCarrinho(savedCart)
       setLoading(false)
     }
@@ -509,6 +513,15 @@ export default function DeliveryLoja() {
   // (America/Fortaleza) pra não depender do fuso do aparelho do cliente. Trata janela
   // que vira a noite (fim < inicio, ex.: 22:00-02:00).
   const catDisponivelAgora = (nome) => {
+    // Dia da semana (mig 0220): "Quarta do Picolé" não pode aparecer na terça.
+    // Usa o dia em Fortaleza, não o do aparelho do cliente — quem está viajando
+    // continua vendo a promoção no dia certo da loja.
+    const dias = catDias[nome]
+    if (dias && dias.length > 0) {
+      const hojeBrasilia = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' })
+      const diaSemana = new Date(`${hojeBrasilia}T12:00:00`).getDay()
+      if (!dias.includes(diaSemana)) return false
+    }
     const h = catHorario[nome]
     if (!h) return true
     const agora = new Date().toLocaleTimeString('en-GB', { hour12: false, timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit' })
