@@ -1042,26 +1042,6 @@ function palavrasDeBusca(texto: string): string[] {
 }
 
 
-// O cliente está PEDINDO ou só perguntando? "tem bauru?" é pergunta; "quero 2
-// bauru" é pedido. A diferença decide se a resposta leva link montado ou só o
-// preço — mandar link em toda mensagem cansa e faz ele parar de ler.
-const VERBOS_PEDIDO = /\b(quero|queria|vou querer|vou levar|manda|mande|me v[êe]|me manda|pode mandar|anota|bota|p[õo]e|separa|fecha|vou de)\b/
-
-function ehPedido(texto: string): boolean {
-  const t = semAcentoTxt(texto)
-  if (VERBOS_PEDIDO.test(t)) return true
-  // "2 bauru", "3x coca" — número na frente do produto também é pedido.
-  return /\b\d{1,2}\s*x?\s+[a-z]{3,}/.test(t)
-}
-
-// Quantos ele pediu daquilo: o número que aparece antes do nome ("2 bauru").
-function quantidadePedida(texto: string, termo: string): number {
-  const t = semAcentoTxt(texto)
-  const m = t.match(new RegExp(`(\\d{1,2})\\s*x?\\s+[^]{0,12}?${termo}`))
-  const n = m ? Number(m[1]) : 1
-  return n >= 1 && n <= 99 ? n : 1
-}
-
 // "Tem X?" respondido pelo CARDÁPIO, sem IA: procura o nome no banco e responde
 // com preço e link. É a segunda pergunta mais comum depois do "oi", e a que
 // mais fazia o cliente desistir quando ninguém respondia.
@@ -1069,12 +1049,11 @@ async function responderProduto(
   supabase: ReturnType<typeof createClient>,
   empresaId: string,
   texto: string,
-  link: string,
+  link: string | null,
 ): Promise<string | null> {
   try {
     const termos = palavrasDeBusca(texto)
     if (!termos.length) return null
-    const pedindo = ehPedido(texto)
     for (const termo of termos) {
       const { data, error } = await supabase.rpc("buscar_produto_nome", {
         p_empresa: empresaId, p_termo: termo, p_limite: 3,
@@ -1093,25 +1072,14 @@ async function responderProduto(
           : String(p.nome)
       }
 
-      // PEDIDO com um produto só: monta a sacola e manda o link pronto. É o
-      // único momento em que o link vale a pena — ele já disse o que quer.
-      if (pedindo && achados.length === 1) {
-        const p = achados[0] as Record<string, unknown>
-        const qtd = quantidadePedida(texto, termo)
-        const preco = Number(p.preco ?? 0)
-        const total = preco > 0
-          ? ` — R$ ${(preco * qtd).toFixed(2).replace(".", ",")}`
-          : ""
-        const linkCarrinho = `${link}${link.includes("?") ? "&" : "?"}c=${p.id}:${qtd}`
-        return `Anotei! 🛒${NL2}${qtd}x ${p.nome}${total}${NL2}${NL2}Confirma e escolhe o pagamento aqui:${NL2}${linkCarrinho}`
-      }
-
-      // PERGUNTA (ou pedido com mais de uma opção): responde o que ele
-      // perguntou e para por aí. Link em toda mensagem vira paisagem.
-      if (pedindo && achados.length > 1) {
-        return `Temos essas opções:${NL2}${achados.map(linha).join(NL2)}${NL2}${NL2}Qual você quer?`
-      }
-      return `Tem sim! 🙌${NL2}${achados.map(linha).join(NL2)}`
+      // O link entra SÓ na primeira fala da conversa (link == null depois
+      // disso). Montar a sacola pelo robô ficou de fora: produto com sabor ou
+      // tamanho ele não tem como escolher sozinho, e montar pra uns e pra
+      // outros não é pior que não montar pra ninguém — é mais confuso.
+      const lista = achados.map(linha).join(NL2)
+      return link
+        ? `Tem sim! 🙌${NL2}${lista}${NL2}${NL2}Peça aqui que já cai direto pra gente separar:${NL2}${link}`
+        : `Tem sim! 🙌${NL2}${lista}`
     }
     return null
   } catch (e) {
@@ -1150,9 +1118,24 @@ async function responderComLink(
     const telPre = (soDigitosPre.startsWith("55") && soDigitosPre.length >= 12) ? soDigitosPre.slice(2) : soDigitosPre
     const linkPre = `https://lojaonline.fwcinter.com/${slug}?t=${telPre}`
 
-    // Perguntou por um produto? Isso é resposta, não recado automático: vale
-    // sempre, sem o limite de 6 horas — quem pergunta espera resposta.
-    const respProduto = await responderProduto(supabase, cfg.empresa_id as string, mensagemDoCliente, linkPre)
+    // O limite é do LINK, não da resposta. Quem pergunta é sempre respondido; o
+    // link vai na PRIMEIRA fala da conversa e não se repete a cada mensagem —
+    // link em toda linha vira paisagem e o cliente para de ver.
+    const limiteLink = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    const { data: linkRecente } = await supabase
+      .from("whatsapp_conversas")
+      .select("id")
+      .eq("empresa_id", cfg.empresa_id as string)
+      .eq("phone", phone)
+      .eq("role", "assistant")
+      .ilike("content", "%lojaonline.fwcinter.com%")
+      .gte("created_at", limiteLink)
+      .limit(1)
+      .maybeSingle()
+
+    const respProduto = await responderProduto(
+      supabase, cfg.empresa_id as string, mensagemDoCliente, linkRecente ? null : linkPre,
+    )
     if (respProduto) {
       await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
         method: "POST",
@@ -1165,20 +1148,9 @@ async function responderComLink(
       return true
     }
 
-    // Uma hora, não seis: o limite existe pra quem manda cinco mensagens
-    // seguidas não levar cinco links. Seis horas calava o robô pro cliente que
-    // deu "oi" de manhã e voltou à tarde — que é justamente quem ia pedir.
-    const limite = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-    const { data: jaFalou } = await supabase
-      .from("whatsapp_conversas")
-      .select("id")
-      .eq("empresa_id", cfg.empresa_id as string)
-      .eq("phone", phone)
-      .eq("role", "assistant")
-      .gte("created_at", limite)
-      .limit(1)
-      .maybeSingle()
-    if (jaFalou) return false
+    // Não achou produto nenhum: vai o recado curto com o link — e só se ele
+    // ainda não tiver recebido link na última hora.
+    if (linkRecente) return false
 
     // Sem o 55 do país: o checkout lê isso como telefone brasileiro e o 55
     // viraria DDD — "(55) 84981-80774". Com 12 ou 13 dígitos começando em 55,
