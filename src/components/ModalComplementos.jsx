@@ -81,7 +81,11 @@ export default function ModalComplementos({ produto, grupos, semObrigatorios, on
             <strong style={{ fontSize: 17 }}>{produto.nome}</strong>
             <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer' }}>×</button>
           </div>
-          <p style={{ fontSize: 12.5, opacity: .7, margin: 0 }}>Monte do seu jeito 👇</p>
+          {/* A descrição vem junto quando existe: é onde a loja diz o que vai
+              no prato. Some daqui e o cliente escolhe adicional no escuro. */}
+          {produto.descricao
+            ? <p style={{ fontSize: 12.5, opacity: .75, margin: 0, lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>{produto.descricao}</p>
+            : <p style={{ fontSize: 12.5, opacity: .7, margin: 0 }}>Monte do seu jeito 👇</p>}
         </div>
 
         <div ref={corpoRef} style={{ flex: 1, overflowY: 'auto', padding: '14px 18px 4px' }}>

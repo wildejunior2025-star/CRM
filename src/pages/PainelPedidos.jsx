@@ -783,8 +783,15 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
         borderRadius: 14, padding: 20,
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>{produto.nome}</h3>
-          <button type="button" onClick={onFechar} style={{ background: 'none', border: 'none', fontSize: 22, color: 'var(--text-muted)', cursor: 'pointer', lineHeight: 1 }}>×</button>
+          <div style={{ minWidth: 0 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>{produto.nome}</h3>
+            {/* A descrição vem junto quando existe — quem atende lê o que vai no
+                prato sem ter que abrir o cadastro do produto em outra aba. */}
+            {produto.descricao && (
+              <p style={{ margin: '3px 0 0', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>{produto.descricao}</p>
+            )}
+          </div>
+          <button type="button" onClick={onFechar} style={{ background: 'none', border: 'none', fontSize: 22, color: 'var(--text-muted)', cursor: 'pointer', lineHeight: 1, flexShrink: 0 }}>×</button>
         </div>
 
         {grupos.map(grupo => {
@@ -817,7 +824,12 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
                         padding: '7px 11px', borderRadius: 9,
                         border: `1.5px solid ${marcado ? '#22c55e' : 'var(--border,#2a2a3a)'}`,
                         background: marcado ? 'rgba(34,197,94,.12)' : 'transparent', color: 'var(--text)' }}>
-                      <span style={{ flex: 1, fontSize: 14 }}>{opcao.nome}</span>
+                      <span style={{ flex: 1, fontSize: 14, minWidth: 0 }}>
+                        {opcao.nome}
+                        {opcao.descricao && (
+                          <span style={{ display: 'block', fontSize: 12, lineHeight: 1.35, color: 'var(--text-muted)', marginTop: 2 }}>{opcao.descricao}</span>
+                        )}
+                      </span>
                       {Number(opcao.preco_adicional) > 0 && (
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>+{fmt(opcao.preco_adicional)}</span>
                       )}
@@ -856,7 +868,12 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
                         display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#04120a', fontSize: 12, fontWeight: 900 }}>
                         {marcado ? '✓' : ''}
                       </span>
-                      <span style={{ flex: 1, fontSize: 14 }}>{opcao.nome}</span>
+                      <span style={{ flex: 1, fontSize: 14, minWidth: 0, textAlign: 'left' }}>
+                        {opcao.nome}
+                        {opcao.descricao && (
+                          <span style={{ display: 'block', fontSize: 12, lineHeight: 1.35, color: 'var(--text-muted)', marginTop: 2 }}>{opcao.descricao}</span>
+                        )}
+                      </span>
                       {Number(opcao.preco_adicional) > 0 && (
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>+{fmt(opcao.preco_adicional)}</span>
                       )}
