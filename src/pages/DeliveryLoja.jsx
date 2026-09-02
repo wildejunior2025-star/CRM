@@ -123,6 +123,16 @@ export default function DeliveryLoja() {
   // com a prévia de cada uma. Fica aqui em cima porque a busca (mais abaixo)
   // precisa fechá-la.
   const [catAberta, setCatAberta] = useState(null)
+  // Telefone que veio no link do WhatsApp (?t=). É ele que faz o checkout abrir
+  // com nome, endereço e pino já preenchidos — sem isso o cliente que chegou
+  // pela resposta automática ainda teria que digitar tudo.
+  const telefoneDoLink = (() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get('t')
+      const d = String(t ?? '').replace(/\D/g, '')
+      return d.length >= 10 ? d : null
+    } catch { return null }
+  })()
   // Cardapio que nao carregou inteiro NAO vira loja aberta pela metade (ver lerOuFalhar)
   const [erroCardapio, setErroCardapio] = useState(false)
   const [tentativa, setTentativa] = useState(0)
@@ -679,6 +689,7 @@ export default function DeliveryLoja() {
         taxaEntrega,
         // Fechada = o checkout já abre no modo agendar (não tem "pra agora").
         lojaAberta,
+        telefone: telefoneDoLink,
       },
     })
   }

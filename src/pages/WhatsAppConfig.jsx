@@ -74,6 +74,11 @@ export default function WhatsAppConfig() {
 
   // ── Vendedor IA ──
   const [iaAtivo,         setIaAtivo]         = useState(false)
+  // Resposta automática com o link do cardápio (mig 0226). Vive fora do robô de
+  // IA de propósito: não gasta crédito e não precisa aprender nada.
+  const [linkAtivo,       setLinkAtivo]       = useState(false)
+  const [salvandoLink,    setSalvandoLink]    = useState(false)
+  const [linkMsg,         setLinkMsg]         = useState(null)
   const [iaNome,          setIaNome]          = useState('Assistente')
   const [iaInstrucoes,    setIaInstrucoes]    = useState('')
   const [savingIa,        setSavingIa]        = useState(false)
@@ -112,6 +117,7 @@ export default function WhatsAppConfig() {
         msg_fiado:     data.msg_fiado     ?? DEFAULT_MSG_FIADO,
       })
       setIaAtivo(data.ia_ativo ?? false)
+      setLinkAtivo(data.resposta_link_ativo ?? false)
       setIaNome(data.ia_nome ?? 'Assistente')
       setIaInstrucoes(data.ia_instrucoes ?? '')
       // Carrega phone salvo no banco como fallback
@@ -397,6 +403,23 @@ export default function WhatsAppConfig() {
     }
   }
 
+  async function handleToggleLink(novoValor) {
+    setLinkAtivo(novoValor)
+    setSalvandoLink(true)
+    setLinkMsg(null)
+    const { error } = await supabase
+      .from('whatsapp_config')
+      .upsert({ empresa_id: profile.empresa_id, resposta_link_ativo: novoValor }, { onConflict: 'empresa_id' })
+    setSalvandoLink(false)
+    if (error) {
+      setLinkMsg({ type: 'error', text: error.message })
+      setLinkAtivo(!novoValor)
+      return
+    }
+    setLinkMsg({ type: 'success', text: novoValor ? 'Resposta automática ligada.' : 'Resposta automática desligada.' })
+    setTimeout(() => setLinkMsg(null), 2500)
+  }
+
   async function handleSaveInstrucoes(e) {
     e.preventDefault()
     setSavingIa(true)
@@ -633,6 +656,39 @@ export default function WhatsAppConfig() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* ── Resposta automática com o link (sem IA, sem crédito) ── */}
+      <div className="wa-section">
+        <h2 className="wa-section-title">🔗 Resposta automática com o cardápio</h2>
+
+        <div className="wa-fields">
+          <label className="wa-checkbox-row">
+            <input
+              type="checkbox"
+              checked={linkAtivo}
+              disabled={salvandoLink}
+              onChange={(e) => handleToggleLink(e.target.checked)}
+            />
+            <div className="wa-checkbox-text">
+              <span>Responder com o link do cardápio</span>
+              <small>
+                Cliente mandou mensagem e não tem ninguém no atendimento? O sistema responde
+                na hora com o link do seu cardápio — <strong>já com o telefone dele</strong>, então
+                o pedido abre com nome e endereço preenchidos. <strong>Não gasta crédito</strong>:
+                é texto pronto, sem inteligência artificial. Responde no máximo
+                uma vez a cada 6 horas por cliente, pra não virar spam.
+              </small>
+            </div>
+          </label>
+
+          {linkMsg && (
+            <div className={`wa-test-result ${linkMsg.type}`} style={{ marginTop: 8 }}>
+              {linkMsg.type === 'success' ? <CheckIcon /> : <AlertIcon />}
+              {linkMsg.text}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Seção Vendedor IA ── */}

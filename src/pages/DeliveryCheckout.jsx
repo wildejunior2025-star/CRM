@@ -563,6 +563,24 @@ export default function DeliveryCheckout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.empresaId])
 
+  // Telefone que veio no link do WhatsApp: preenche o campo e deixa o
+  // reconhecimento (buscar_cliente_loja) fazer o resto — nome, endereço e o
+  // pino que ele já apontou. É o que faz o link da resposta automática valer a
+  // pena: ele abre com tudo pronto em vez de um formulário em branco.
+  const telefoneDoLinkRef = useRef(false)
+  useEffect(() => {
+    if (telefoneDoLinkRef.current) return
+    const tel = String(state?.telefone ?? '').replace(/\D/g, '')
+    if (tel.length < 10) return
+    // O telefone do link MANDA sobre o cliente lembrado no aparelho: quem clicou
+    // veio do WhatsApp dele, e o celular pode ter o cadastro de outra pessoa da
+    // casa salvo de um pedido anterior.
+    if (form.telefone.replace(/\D/g, '') === tel) { telefoneDoLinkRef.current = true; return }
+    telefoneDoLinkRef.current = true
+    setForm(prev => ({ ...prev, telefone: fmtTelefone(tel) }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.telefone, form.telefone])
+
   // Nome, telefone, CEP e TAXA de quem CHEGOU no cadastro — inclusive de quem
   // não termina. É o que diz se as cinco visitas que travaram no endereço são
   // cinco pessoas ou uma tentando cinco vezes, se elas moram fora do raio e —

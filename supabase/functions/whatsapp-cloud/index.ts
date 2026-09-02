@@ -149,6 +149,62 @@ function textoParaRegistroCloud(message: any): string {
   return ""
 }
 
+// Resposta automática com o link do cardápio (robô de IA desligado, mig 0226).
+// Uma vez a cada 6 horas por cliente: cinco mensagens seguidas não podem virar
+// cinco links na cara dele.
+async function responderComLink(
+  supabase: ReturnType<typeof createClient>,
+  cfg: Record<string, unknown>,
+  phoneNumberId: string,
+  token: string,
+  phone: string,
+): Promise<boolean> {
+  try {
+    if (cfg.resposta_link_ativo !== true) return false
+    const empresa = (cfg.empresas ?? {}) as Record<string, unknown>
+    const slug = String(empresa.slug ?? "").trim()
+    if (!slug || !cfg.empresa_id) return false
+
+    const seisHoras = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
+    const { data: jaFalou } = await supabase
+      .from("whatsapp_conversas")
+      .select("id")
+      .eq("empresa_id", cfg.empresa_id as string)
+      .eq("phone", phone)
+      .eq("role", "assistant")
+      .gte("created_at", seisHoras)
+      .limit(1)
+      .maybeSingle()
+    if (jaFalou) return false
+
+    const link = `https://lojaonline.fwcinter.com/${slug}?t=${String(phone).replace(/\D/g, "")}`
+    const NL = String.fromCharCode(10)
+    const proprio = String(cfg.resposta_link_texto ?? "").trim()
+    const texto = proprio
+      ? `${proprio}${NL}${NL}${link}`
+      : [
+          `Oi! 👋 Aqui é da *${empresa.nome ?? "loja"}*.`,
+          "",
+          "Faça seu pedido pelo nosso cardápio — leva um minuto e já vai com seu nome e endereço salvos:",
+          link,
+          empresa.agendamento_ativo === true
+            ? `${NL}🗓️ Se estivermos fechados, dá pra agendar por lá também.`
+            : null,
+          "",
+          "Qualquer dúvida é só mandar aqui que a gente responde. 😊",
+        ].filter(l => l !== null).join(NL)
+
+    await sendText(phoneNumberId, phone, texto, token)
+    await supabase.from("whatsapp_conversas").insert({
+      empresa_id: cfg.empresa_id as string, phone, role: "assistant", content: texto,
+    })
+    return true
+  } catch (e) {
+    console.error("[link] falhou:", e)
+    return false
+  }
+}
+
 // ── Envio de texto pela Graph API ────────────────────────────────────────────
 async function sendText(phoneNumberId: string, to: string, text: string, token: string) {
   try {
@@ -214,7 +270,7 @@ async function processar(body: any) {
   // Acha a loja dona desse número
   const { data: cfg } = await supabase
     .from("whatsapp_config")
-    .select("empresa_id, instance_name, cloud_phone_number_id, ativo, ia_ativo")
+    .select("empresa_id, instance_name, cloud_phone_number_id, ativo, ia_ativo, resposta_link_ativo, resposta_link_texto, empresas(nome, slug, agendamento_ativo)")
     .eq("cloud_phone_number_id", phoneNumberId)
     .eq("ativo", true)
     .maybeSingle()
@@ -302,6 +358,11 @@ async function processar(body: any) {
         empresa_id: cfg.empresa_id, phone: from, role: "user", content: conteudo,
       })
       await espelharNoChat(supabase, cfg.empresa_id, from, conteudo, "cliente")
+
+      // Resposta automática com o link do cardápio (mig 0226). Aqui a janela de
+      // 24h da Meta não atrapalha: o cliente ACABOU de escrever, então texto
+      // livre é permitido e não é cobrado.
+      await responderComLink(supabase, cfg as Record<string, unknown>, phoneNumberId, token, from)
     }
     return
   }
