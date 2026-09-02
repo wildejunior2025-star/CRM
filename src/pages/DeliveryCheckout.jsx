@@ -857,8 +857,27 @@ export default function DeliveryCheckout() {
     setRuaBuscando(true)
     const t = setTimeout(async () => {
       try {
-        const r = await fetch(`https://viacep.com.br/ws/${uf}/${encodeURIComponent(cid)}/${encodeURIComponent(termo)}/json/`)
-        const d = await r.json()
+        const buscar = async (q) => {
+          if (!q || q.length < 3) return []
+          const r = await fetch(`https://viacep.com.br/ws/${uf}/${encodeURIComponent(cid)}/${encodeURIComponent(q)}/json/`)
+          const j = await r.json()
+          return Array.isArray(j) ? j : []
+        }
+        // A busca do ViaCEP é literal: ela procura o texto INTEIRO dentro do
+        // nome oficial. "Rua Eliane Barros" não acha "Rua Doutora Eliane
+        // Barros" — o "Doutora" no meio quebra. Então:
+        //   1) tira o tipo do logradouro (Rua, Av., Travessa...), que o cliente
+        //      escreve e o cadastro guarda de outro jeito;
+        //   2) não achando, tenta a maior palavra do que ele digitou, que é a
+        //      que identifica a rua ("barros", "eliane").
+        const semTipo = termo
+          .replace(/^(r|rua|av|avn|avenida|trav|travessa|al|alameda|pc|praca|praça|rod|rodovia|estr|estrada|beco|conj|conjunto|lot|loteamento|vl|vila)\.?\s+/i, '')
+          .trim()
+        let d = await buscar(semTipo || termo)
+        if (!d.length) {
+          const maior = semTipo.split(/\s+/).filter(w => w.length >= 4).sort((x, y) => y.length - x.length)[0]
+          if (maior) d = await buscar(maior)
+        }
         if (!vivo) return
         // Sem repetir a mesma rua em CEPs diferentes: numa avenida longa o
         // ViaCEP devolve dezenas de linhas iguais e a lista vira ruído.
@@ -1593,6 +1612,15 @@ export default function DeliveryCheckout() {
                         </>
                       )}
                     </div>
+                    {/* Rua que o cadastro dos Correios não tem (loteamento novo,
+                        nome popular) existe muito no interior. Sem este aviso o
+                        cliente acha que o sistema recusou o endereço dele. */}
+                    {tipo === 'entrega' && !ruaBuscando && form.rua.trim().length >= 4 && ruaSugestoes.length === 0 && (
+                      <span style={{ fontSize: 12, color: 'var(--dco-muted)', marginTop: 4, display: 'block', lineHeight: 1.45 }}>
+                        Não achou na lista? Escreva o nome do jeito que você conhece e siga —
+                        o que vale pra entrega é o <strong>pino no mapa</strong>, ali embaixo.
+                      </span>
+                    )}
                   </Field>
 
                   {/* Número + Complemento */}
