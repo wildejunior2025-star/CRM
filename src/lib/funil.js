@@ -77,9 +77,11 @@ export function marcarEtapa(empresaId, etapa, valor = null) {
  * Falha calada, igual ao resto do funil: contador quebrado não pode derrubar
  * um checkout.
  */
-export function anotarContato(empresaId, { nome, telefone, cep } = {}) {
+export function anotarContato(empresaId, { nome, telefone, cep, taxa } = {}) {
   if (!empresaId) return
-  if (!nome && !telefone && !cep) return
+  // Taxa 0 é informação (retirada / entrega grátis), então entra no teste por
+  // != null — com `!taxa` a entrega grátis nunca seria gravada.
+  if (!nome && !telefone && !cep && taxa == null) return
   const sessao = sessaoDaVisita()
   if (!sessao) return
   try {
@@ -89,6 +91,7 @@ export function anotarContato(empresaId, { nome, telefone, cep } = {}) {
       p_nome: nome || null,
       p_telefone: telefone || null,
       p_cep: cep || null,
+      p_taxa: taxa == null ? null : Number(taxa),
     }).then(() => {}, () => {})
   } catch { /* ignora */ }
 }

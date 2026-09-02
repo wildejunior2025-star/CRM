@@ -205,7 +205,7 @@ export default function Dashboard() {
         fetchAll(() => supabase.from('loja_funil').select('etapa, sessao, created_at, valor').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         // Nome/telefone/CEP de quem chegou no cadastro (mig 0218) — é o que
         // permite ligar de volta pra quem travou na hora do endereço.
-        fetchAll(() => supabase.from('loja_funil_contato').select('sessao, nome, telefone, cep').gte('created_at', desdeISO)).then(r => r.data),
+        fetchAll(() => supabase.from('loja_funil_contato').select('sessao, nome, telefone, cep, taxa').gte('created_at', desdeISO)).then(r => r.data),
       ])
       setVendas(vData ?? [])
       setPedidos(pData ?? [])
@@ -254,6 +254,7 @@ export default function Dashboard() {
       parados.push({
         sessao: e.sessao, quando: t, valor: e.valor,
         nome: c.nome ?? null, telefone: c.telefone ?? null, cep: c.cep ?? null,
+        taxa: c.taxa == null ? null : Number(c.taxa),
       })
     }
     parados.sort((a, b) => b.quando - a.quando)
@@ -635,7 +636,8 @@ export default function Dashboard() {
               {verParados && fn.parados.length > 0 && (
                 <div style={{ margin: '2px 0 12px', padding: '10px 12px', background: 'var(--bg)', borderRadius: 8 }}>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.5 }}>
-                    O que cada um já tinha digitado quando parou — aparece conforme ele foi
+                    O que cada um já tinha digitado quando parou, a taxa de entrega que estava
+                    aparecendo pra ele e o valor da sacola — aparece conforme ele foi
                     preenchendo, então quem saiu no começo fica em branco.
                     <b> Mesmo valor e mesmo telefone repetidos? É a mesma pessoa tentando de novo.</b>
                   </div>
@@ -659,6 +661,14 @@ export default function Dashboard() {
                       <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                         {p.cep ? `CEP ${p.cep.slice(0, 5)}-${p.cep.slice(5)}` : 'sem CEP'}
                       </span>
+                      {/* Sacola + taxa: é a dupla que responde "desistiu por causa
+                          do frete?". R$ 14 de sacola com R$ 10 de entrega conta uma
+                          história que a sacola sozinha não conta. */}
+                      {p.taxa != null && (
+                        <span style={{ fontSize: 12, color: p.taxa > 0 ? 'var(--text-muted)' : '#16a34a', whiteSpace: 'nowrap' }}>
+                          {p.taxa > 0 ? `taxa ${fmt(p.taxa)}` : 'sem taxa'}
+                        </span>
+                      )}
                       {p.valor != null && <strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{fmt(p.valor)}</strong>}
                     </div>
                   ))}

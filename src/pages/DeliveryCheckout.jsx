@@ -497,6 +497,10 @@ export default function DeliveryCheckout() {
   const [coordCliente, setCoordCliente] = useState(null) // {lat,lng} do ponto de entrega
   const [mapaAberto, setMapaAberto]     = useState(false)
   const pinManualRef = useRef(false) // true quando o cliente marcou no mapa (não sobrescreve com geocode)
+  // Taxa que está na tela do cliente, pro registro do funil. É ref porque o
+  // efeito que anota o contato roda aqui em cima e a taxa só é calculada lá
+  // embaixo (depois do `return` de sacola vazia, onde não cabe outro hook).
+  const taxaFunilRef = useRef(null)
   // Pino que o cliente já apontou em pedido anterior, vindo do cadastro dele.
   // {lat, lng, ref} — `ref` é o endereço a que ele pertence (mig 0160).
   const [pinSalvo, setPinSalvo] = useState(null)
@@ -551,9 +555,11 @@ export default function DeliveryCheckout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.empresaId])
 
-  // Nome, telefone e CEP de quem CHEGOU no cadastro — inclusive de quem não
-  // termina. É o que diz se as cinco visitas que travaram no endereço são cinco
-  // pessoas ou uma tentando cinco vezes, e se elas moram fora do raio.
+  // Nome, telefone, CEP e TAXA de quem CHEGOU no cadastro — inclusive de quem
+  // não termina. É o que diz se as cinco visitas que travaram no endereço são
+  // cinco pessoas ou uma tentando cinco vezes, se elas moram fora do raio e —
+  // com a taxa — se o que assustou foi o frete: sacola de R$ 14 com R$ 10 de
+  // entrega é outra conversa.
   //
   // Espera 2s parado pra não mandar uma letra por vez enquanto ele digita.
   useEffect(() => {
@@ -566,9 +572,11 @@ export default function DeliveryCheckout() {
       nome: nome && nome.length >= 2 ? nome : null,
       telefone: telefone && telefone.length >= 10 ? telefone : null,
       cep: cep && cep.length === 8 ? cep : null,
+      taxa: taxaFunilRef.current,
     }), 2000)
     return () => clearTimeout(t)
-  }, [state?.empresaId, form.nome, form.telefone, form.cep])
+    // bairro/pino/tipo entram nas dependências porque são eles que mudam a taxa.
+  }, [state?.empresaId, form.nome, form.telefone, form.cep, form.bairro, tipo, coordCliente, lojaEndereco])
 
   // Endereço da loja — mostrado quando o cliente escolhe Retirada
   useEffect(() => {
@@ -773,6 +781,10 @@ export default function DeliveryCheckout() {
   })()
   const taxaAplicada = taxaCalculada
   const totalBruto = subtotal + taxaAplicada
+  // O que vai pro funil: só a taxa que o cliente realmente viu. Enquanto ela
+  // está indefinida (ou o bairro nem é atendido) o número seria chute, e chute
+  // no relatório é pior que campo vazio.
+  taxaFunilRef.current = (taxaIndefinida || bairroBloqueado) ? null : taxaAplicada
 
   // Crédito da loja (mig 0178). O saldo aparece pelo telefone porque no
   // checkout da loja online nao existe login: o cliente so e criado no momento
