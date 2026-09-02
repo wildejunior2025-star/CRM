@@ -584,7 +584,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct')
+      .select('endereco, numero, telefone_contato, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -1324,7 +1324,13 @@ export default function DeliveryCheckout() {
                     <strong>Você vai retirar na loja</strong> — sem taxa de entrega.
                     {lojaEndereco && (lojaEndereco.endereco || lojaEndereco.cidade) && (
                       <div style={{ marginTop: 4, opacity: .85 }}>
-                        📍 {[lojaEndereco.endereco, lojaEndereco.bairro, lojaEndereco.cidade].filter(Boolean).join(', ')}
+                        {/* Com o NÚMERO: "Rua Santo Antônio, Golandim" manda o
+                            cliente pra rua toda e ele liga pra loja perguntar. */}
+                        📍 {[
+                          [lojaEndereco.endereco, lojaEndereco.numero].filter(Boolean).join(', '),
+                          lojaEndereco.bairro,
+                          lojaEndereco.cidade,
+                        ].filter(Boolean).join(' — ')}
                       </div>
                     )}
                   </div>

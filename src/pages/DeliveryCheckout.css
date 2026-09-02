@@ -305,19 +305,24 @@
 }
 
 /* ── Pagamento ── */
+/* Grade em vez de linha: com quatro formas de pagamento (Pix, dinheiro,
+   crédito, débito) a linha única estourava a tela do celular e o último botão
+   ficava cortado pela metade. Agora eles quebram sozinhos e cada um ocupa no
+   mínimo 130px — em duas colunas no celular, tudo numa linha no computador. */
 .dco-payment-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 10px;
   margin-bottom: 12px;
 }
 
 .dco-pay-btn {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 12px;
+  padding: 12px 10px;
+  min-height: 52px;
   border-radius: 10px;
   border: 1.5px solid var(--dco-border);
   background: var(--dco-bg);
@@ -326,6 +331,8 @@
   font-family: inherit;
   font-size: 13px;
   font-weight: 600;
+  text-align: center;
+  line-height: 1.25;
   transition: border-color 140ms, color 140ms, background 140ms;
   position: relative;
 }
@@ -351,6 +358,8 @@
   align-items: center;
   justify-content: center;
   margin-left: 4px;
+  /* Não encolhe: espremido, o ✓ virava um risco no meio do texto. */
+  flex-shrink: 0;
 }
 
 /* ── Resumo ── */
