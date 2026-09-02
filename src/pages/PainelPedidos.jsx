@@ -6121,22 +6121,34 @@ export default function PainelPedidos() {
                   {catalogoPorCategoria(catalogoFiltrado).map(({ categoria, itens }) => (
                   <div key={categoria} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {/* Cabeçalho da categoria: gruda no topo enquanto rola, senão
-                        numa lista longa some e o lojista perde onde está. */}
-                    <div style={{
-                      position: 'sticky', top: 0, zIndex: 2,
-                      background: 'var(--surface, #16161f)',
-                      padding: '6px 2px', margin: '0 -2px',
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      fontSize: 11.5, fontWeight: 800, letterSpacing: '.04em',
-                      textTransform: 'uppercase', color: 'var(--primary, #7c3aed)',
-                    }}>
+                        numa lista longa some e o lojista perde onde está.
+                        Clicar abre/fecha — durante uma busca fica tudo aberto,
+                        senão o resultado ficaria escondido atrás da categoria. */}
+                    <button
+                      type="button"
+                      onClick={() => toggleCategoriaCat(categoria)}
+                      aria-expanded={!!buscaCat || catCatsAbertas.has(categoria)}
+                      style={{
+                        position: 'sticky', top: 0, zIndex: 2,
+                        background: 'var(--surface, #16161f)',
+                        border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer',
+                        padding: '8px 2px', margin: '0 -2px',
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        fontSize: 11.5, fontWeight: 800, letterSpacing: '.04em',
+                        textTransform: 'uppercase', color: 'var(--primary, #7c3aed)',
+                      }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                        style={{ flexShrink: 0, transform: (!!buscaCat || catCatsAbertas.has(categoria)) ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} aria-hidden="true">
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
                       {categoria}
                       <span style={{ color: 'var(--text-muted)', fontWeight: 700, letterSpacing: 0, textTransform: 'none' }}>
                         {itens.length}
                       </span>
                       <span style={{ flex: 1, height: 1, background: 'var(--border, #2a2a3a)' }} />
-                    </div>
-                  {itens.map(prod => {
+                    </button>
+                  {(!!buscaCat || catCatsAbertas.has(categoria)) && itens.map(prod => {
                     const pausado = prod.disponivel_delivery === false
                     const prodBate = bateProduto(prod)
                     const grupos = gruposDaBusca(prod.id, prodBate)
