@@ -490,6 +490,12 @@ export default function DeliveryCheckout() {
   const [loadingCidades, setLoadingCidades] = useState(false)
   const [buscandoCep, setBuscandoCep] = useState(false)
   const [erroCep, setErroCep]     = useState(null)
+  // Busca de RUA pelo nome (ViaCEP ao contrário: UF + cidade + rua devolve os
+  // endereços com CEP). É a porta de entrada agora — cliente que não sabe o CEP
+  // travava logo na primeira linha do formulário e ia embora.
+  const [ruaSugestoes, setRuaSugestoes] = useState([])
+  const [ruaBuscando, setRuaBuscando] = useState(false)
+  const [ruaAberta, setRuaAberta] = useState(false)
   // O que o ViaCEP devolveu pro último CEP válido — pra avisar se a rua/bairro
   // digitados não baterem (caso do endereço trocado na mão).
   const [cepInfo, setCepInfo] = useState(null) // { cep, rua, bairro }
@@ -825,12 +831,50 @@ export default function DeliveryCheckout() {
     if (tipo !== 'entrega' || pinManualRef.current || !state?.empresaId) return
     const rua = form.rua.trim(), cidade = form.cidade
     if (!rua || !cidade) return
+    // SÓ depois do número. Sem ele o buscador devolve um ponto no meio da rua —
+    // e o cliente, vendo um pino já posto no mapa, confirma sem mexer. Era daí
+    // que saía a taxa errada. Mapa vazio pedindo o número é melhor que pino
+    // errado que parece certo.
+    if (!form.numero.trim()) return
     const t = setTimeout(async () => {
       const c = await geocodeEndereco({ rua, numero: form.numero, bairro: form.bairro, cidade, estado: form.estado, cep: form.cep })
       if (c && !pinManualRef.current) setCoordCliente(c)
     }, 900)
     return () => clearTimeout(t)
   }, [form.rua, form.numero, form.bairro, form.cidade, form.estado, form.cep, tipo, state])
+
+  // Busca as ruas da cidade pelo nome (ViaCEP ao contrário). A cidade/UF vem do
+  // que o cliente escolheu ou, se ainda não escolheu, da PRÓPRIA LOJA — que é
+  // onde mora a maioria de quem pede. Assim ele digita a rua já na primeira
+  // linha, sem precisar preencher estado e cidade antes.
+  useEffect(() => {
+    if (tipo !== 'entrega') return
+    const termo = form.rua.trim()
+    const uf = (form.estado || lojaEndereco?.estado || '').trim()
+    const cid = (form.cidade || lojaEndereco?.cidade || '').trim()
+    if (termo.length < 3 || !uf || cid.length < 3) { setRuaSugestoes([]); return }
+    let vivo = true
+    setRuaBuscando(true)
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`https://viacep.com.br/ws/${uf}/${encodeURIComponent(cid)}/${encodeURIComponent(termo)}/json/`)
+        const d = await r.json()
+        if (!vivo) return
+        // Sem repetir a mesma rua em CEPs diferentes: numa avenida longa o
+        // ViaCEP devolve dezenas de linhas iguais e a lista vira ruído.
+        const vistas = new Set()
+        const lista = (Array.isArray(d) ? d : []).filter(x => {
+          const k = `${x.logradouro}|${x.bairro}`
+          if (vistas.has(k)) return false
+          vistas.add(k)
+          return !!x.logradouro
+        })
+        setRuaSugestoes(lista.slice(0, 8))
+      } catch { if (vivo) setRuaSugestoes([]) }
+      finally { if (vivo) setRuaBuscando(false) }
+    }, 500)
+    return () => { vivo = false; clearTimeout(t); setRuaBuscando(false) }
+  }, [form.rua, form.estado, form.cidade, lojaEndereco, tipo])
 
   // Chegar no checkout já é sinal de intenção de compra (funil da Meta).
   // As tags já foram carregadas na vitrine — aqui só dispara o evento.
@@ -997,6 +1041,31 @@ export default function DeliveryCheckout() {
     } finally {
       setLoadingCidades(false)
     }
+  }
+
+
+  // Escolheu a rua na lista: preenche bairro, CEP, cidade e estado de uma vez.
+  function escolherRua(r) {
+    const cepNum = String(r.cep ?? '').replace(/\D/g, '')
+    setForm(prev => ({
+      ...prev,
+      rua: r.logradouro || prev.rua,
+      bairro: r.bairro || prev.bairro,
+      cep: cepNum.length === 8 ? `${cepNum.slice(0, 5)}-${cepNum.slice(5)}` : prev.cep,
+      cidade: prev.cidade || r.localidade || '',
+      estado: prev.estado || r.uf || '',
+    }))
+    setRuaSugestoes([])
+    setRuaAberta(false)
+    // A lista de cidades é carregada pelo IBGE quando o cliente troca o estado
+    // no seletor. Aqui o estado foi preenchido por baixo, então é preciso pedir
+    // a lista na mão — senão a cidade fica escolhida no formulário e o seletor
+    // aparece vazio, como se ele tivesse esquecido de preencher.
+    const uf = r.uf || form.estado || lojaEndereco?.estado
+    const cid = r.localidade || form.cidade || lojaEndereco?.cidade
+    if (uf) carregarCidades(uf, cid)
+    // Foi o cliente que escolheu: o pino pode ser recalculado por este endereço.
+    pinManualRef.current = false
   }
 
   function handleCepChange(e) {
@@ -1487,35 +1556,43 @@ export default function DeliveryCheckout() {
                 <h2 className="dco-section-title">Endereço de entrega</h2>
                 <div className="dco-field-group">
 
-                  {/* CEP — opcional, preenche automático */}
-                  <Field label="CEP" hint="Opcional — preenche o endereço automaticamente">
+                  {/* Rua — agora é a PORTA DE ENTRADA do endereço, com busca
+                      pelo nome. O CEP desceu pro fim: quem não sabia travava
+                      logo na primeira linha e ia embora. */}
+                  <Field label="Rua / Av." required error={errors.rua}
+                    hint="digite o nome e escolha na lista">
                     <div style={{ position: 'relative' }}>
                       <input
-                        className="dco-input"
-                        placeholder="00000-000"
-                        value={form.cep}
-                        onChange={handleCepChange}
-                        inputMode="numeric"
-                        maxLength={9}
+                        className={`dco-input${errors.rua ? ' dco-input--error' : ''}`}
+                        placeholder="Ex: Santo Antônio"
+                        value={form.rua}
+                        onChange={e => { set('rua', e.target.value); setRuaAberta(true) }}
+                        onFocus={() => setRuaAberta(true)}
+                        autoComplete="off"
+                        data-field-error={errors.rua ? true : undefined}
                       />
-                      {buscandoCep && (
+                      {ruaBuscando && (
                         <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: 'var(--text-muted, #888)' }}>
                           Buscando...
                         </span>
                       )}
+                      {ruaAberta && ruaSugestoes.length > 0 && (
+                        <>
+                          {/* Toque fora fecha a lista. */}
+                          <div onClick={() => setRuaAberta(false)}
+                            style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+                          <div className="dco-rua-lista">
+                            {ruaSugestoes.map(r => (
+                              <button key={`${r.cep}-${r.logradouro}`} type="button"
+                                onClick={() => escolherRua(r)}>
+                                <strong>{r.logradouro}</strong>
+                                <span>{[r.bairro, r.localidade].filter(Boolean).join(' · ')}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
                     </div>
-                    {erroCep && <span className="dco-field-error">{erroCep}</span>}
-                  </Field>
-
-                  {/* Rua */}
-                  <Field label="Rua / Av." required error={errors.rua}>
-                    <input
-                      className={`dco-input${errors.rua ? ' dco-input--error' : ''}`}
-                      placeholder="Rua das Flores"
-                      value={form.rua}
-                      onChange={e => set('rua', e.target.value)}
-                      data-field-error={errors.rua ? true : undefined}
-                    />
                   </Field>
 
                   {/* Número + Complemento */}
@@ -1581,6 +1658,26 @@ export default function DeliveryCheckout() {
                     />
                   </Field>
 
+                  {/* CEP — atalho pra quem sabe, não porta de entrada. */}
+                  <Field label="CEP" hint="opcional — se souber, preenche tudo de uma vez">
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        className="dco-input"
+                        placeholder="00000-000"
+                        value={form.cep}
+                        onChange={handleCepChange}
+                        inputMode="numeric"
+                        maxLength={9}
+                      />
+                      {buscandoCep && (
+                        <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: 'var(--text-muted, #888)' }}>
+                          Buscando...
+                        </span>
+                      )}
+                    </div>
+                    {erroCep && <span className="dco-field-error">{erroCep}</span>}
+                  </Field>
+
                   {/* Aviso quando a rua/bairro não batem com o CEP digitado */}
                   {cepDivergente && (
                     <div style={{ marginTop: -4, marginBottom: 4, padding: '9px 11px', borderRadius: 10,
@@ -1608,10 +1705,15 @@ export default function DeliveryCheckout() {
                         onChange={pontoDoMapa}
                         onAmpliar={() => setMapaAberto(true)}
                       />
-                      {temFaixas && (
+                      {!form.numero.trim() && (
+                        <div style={{ marginTop: 6, fontSize: 12.5, color: '#eab308' }}>
+                          ✏️ Digite o <strong>número da casa</strong> — é com ele que o mapa acha o ponto certo.
+                        </div>
+                      )}
+                      {temFaixas && form.numero.trim() && (
                         <div style={{ marginTop: 6, fontSize: 12.5, color: taxaPendente ? '#eab308' : 'var(--text-muted,#9aa)' }}>
                           {taxaPendente
-                            ? '⚠️ Marque seu local no mapa pra calcular a taxa de entrega certinha.'
+                            ? '⚠️ Confira o pino no mapa — é ele que define a taxa de entrega.'
                             : `📏 Entrega calculada pela distância: R$ ${fmt(taxaAplicada)}`}
                         </div>
                       )}

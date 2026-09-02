@@ -564,3 +564,47 @@
   background: rgba(124, 58, 237, 0.14);
   color: var(--dco-text);
 }
+
+/* Lista de ruas encontradas pelo nome (ViaCEP ao contrário). */
+.dco-rua-lista {
+  position: absolute;
+  z-index: 41;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--dco-border);
+  background: var(--dco-card, var(--dco-bg));
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .28);
+}
+
+.dco-rua-lista button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--dco-text);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.dco-rua-lista button:hover { background: rgba(124, 58, 237, 0.12); }
+
+.dco-rua-lista strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.dco-rua-lista span {
+  display: block;
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--dco-muted);
+}
