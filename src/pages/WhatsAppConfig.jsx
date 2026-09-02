@@ -674,10 +674,11 @@ export default function WhatsAppConfig() {
               <span>Responder com o link do cardápio</span>
               <small>
                 Cliente mandou mensagem e não tem ninguém no atendimento? O sistema responde
-                na hora com o link do seu cardápio — <strong>já com o telefone dele</strong>, então
-                o pedido abre com nome e endereço preenchidos. <strong>Não gasta crédito</strong>:
-                é texto pronto, sem inteligência artificial. Responde no máximo
-                uma vez a cada 6 horas por cliente, pra não virar spam.
+                na hora, em duas linhas: <em>"Oi! 👋 Peça aqui, é rapidinho:"</em> e o link do seu
+                cardápio — <strong>já com o telefone dele</strong>, então o pedido abre com nome e
+                endereço preenchidos. <strong>Não gasta crédito</strong>: é texto pronto, sem
+                inteligência artificial. Responde no máximo uma vez a cada 6 horas por cliente,
+                pra não virar spam.
               </small>
             </div>
           </label>

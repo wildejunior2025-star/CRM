@@ -1046,19 +1046,11 @@ async function responderComLink(
     const link = `https://lojaonline.fwcinter.com/${slug}?t=${String(phone).replace(/\D/g, "")}`
     const NL = String.fromCharCode(10)
     const proprio = String(cfg.resposta_link_texto ?? "").trim()
+    // CURTA de propósito: ninguém lê parágrafo de robô. Duas linhas e o link —
+    // e o preview do WhatsApp já mostra o nome e a foto da loja de graça.
     const texto = proprio
-      ? `${proprio}${NL}${NL}${link}`
-      : [
-          `Oi! 👋 Aqui é da *${empresa.nome ?? "loja"}*.`,
-          "",
-          "Faça seu pedido pelo nosso cardápio — leva um minuto e já vai com seu nome e endereço salvos:",
-          link,
-          empresa.agendamento_ativo === true
-            ? `${NL}🗓️ Se estivermos fechados, dá pra agendar por lá também.`
-            : null,
-          "",
-          "Qualquer dúvida é só mandar aqui que a gente responde. 😊",
-        ].filter(l => l !== null).join(NL)
+      ? `${proprio}${NL}${link}`
+      : `Oi! 👋 Peça aqui, é rapidinho:${NL}${link}`
 
     await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
       method: "POST",
