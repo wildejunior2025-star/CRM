@@ -135,6 +135,37 @@
   background: var(--bg-hover); color: var(--text-muted); font-size: 20px;
 }
 
+/* A foto da lista é clicável: troca (ou põe) a imagem sem abrir o cadastro.
+   O selo no canto é o que avisa que ali se clica — sem ele a foto parece
+   enfeite e o lojista continua indo pelo lápis. */
+.prod-foto-btn {
+  position: relative; display: block; padding: 0; border: none;
+  background: none; cursor: pointer; line-height: 0; border-radius: 8px;
+}
+.prod-foto-btn:disabled { cursor: progress; opacity: .75; }
+.prod-foto-btn:hover .prod-foto { border-color: var(--primary); }
+.prod-foto-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.prod-foto-selo {
+  position: absolute; right: -4px; bottom: -4px;
+  width: 19px; height: 19px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10.5px; line-height: 1;
+  background: var(--primary, #2563eb); color: #fff;
+  border: 2px solid var(--card-bg, var(--bg));
+}
+.prod-foto-menu {
+  position: absolute; z-index: 41; top: calc(100% + 6px); left: 0;
+  min-width: 190px; padding: 4px;
+  background: var(--card-bg, var(--bg)); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .25);
+}
+.prod-foto-menu button {
+  display: block; width: 100%; text-align: left;
+  padding: 10px; border: none; background: none; cursor: pointer;
+  border-radius: 7px; font-size: 14px; font-weight: 600; color: var(--text);
+}
+.prod-foto-menu button:hover { background: var(--bg-hover); }
+
 /* Lista de complementos que abre embaixo do item: recuada pra ficar claro que
    pertence ao produto de cima (no celular o recuo encolhe). */
 .prod-comp-lista { padding: 8px 12px 12px 74px; }

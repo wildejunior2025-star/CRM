@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
@@ -984,7 +985,35 @@ function SecaoProdutos({ titulo, cat, produtos, refCallback, qtdProduto, lojaAbe
   )
 }
 
+// Foto do produto em tela cheia, por cima de tudo. Vai por portal no body
+// porque o card vive dentro de containers que rolam — de dentro deles, um
+// `position: fixed` fica preso ao pedaço visível e a foto sairia cortada.
+function FotoAmpliada({ src, alt, onFechar }) {
+  useEffect(() => {
+    const aoTeclar = e => { if (e.key === 'Escape') onFechar() }
+    document.addEventListener('keydown', aoTeclar)
+    // Trava a rolagem do fundo: no celular, arrastar a foto rolava o cardápio
+    // atrás e o cliente perdia o lugar onde estava.
+    const antes = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', aoTeclar)
+      document.body.style.overflow = antes
+    }
+  }, [onFechar])
+
+  return createPortal(
+    <div className="dloja-foto-zoom" onClick={onFechar} role="dialog" aria-modal="true" aria-label={alt}>
+      <button type="button" className="dloja-foto-zoom-fechar" onClick={onFechar} aria-label="Fechar">✕</button>
+      <img src={src} alt={alt} onClick={e => e.stopPropagation()} />
+      <span className="dloja-foto-zoom-nome">{alt}</span>
+    </div>,
+    document.body,
+  )
+}
+
 function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
+  const [zoom, setZoom] = useState(false)
   const temComplementos = produto.complementos?.length > 0
   // Preço "a partir de" = base + as opções obrigatórias mais baratas (o `min` de
   // cada grupo). Sem isso, um produto "monte" com base 0 (ex: pizza 2 sabores)
@@ -1007,7 +1036,19 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
     <div className="dloja-prod-card">
       <div className="dloja-prod-foto">
         {produto.foto_url
-          ? <img src={produto.foto_url} alt={produto.nome} className="dloja-prod-img" />
+          ? (
+            // No card a foto é pequena e cortada (object-fit: cover). Clicar
+            // abre ela inteira: é a foto que vende o prato, e no celular o
+            // pedaço que aparece muitas vezes não é o que o cliente quer ver.
+            <button
+              type="button"
+              className="dloja-prod-foto-btn"
+              onClick={() => setZoom(true)}
+              aria-label={`Ver a foto de ${produto.nome}`}
+            >
+              <img src={produto.foto_url} alt={produto.nome} className="dloja-prod-img" />
+            </button>
+          )
           : (
             <div className="dloja-prod-placeholder">
               <IconImage />
@@ -1015,6 +1056,9 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
           )
         }
       </div>
+      {zoom && produto.foto_url && (
+        <FotoAmpliada src={produto.foto_url} alt={produto.nome} onFechar={() => setZoom(false)} />
+      )}
       <div className="dloja-prod-info">
         <p className="dloja-prod-nome">{produto.nome}</p>
         {produto.descricao && (

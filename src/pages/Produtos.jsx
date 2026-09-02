@@ -244,11 +244,21 @@ export default function Produtos() {
   }
   const fileInputRef = useRef(null)
   const camInputRef = useRef(null)     // input separado com `capture` — abre a câmera direto no celular
+  // Trocar/pôr foto clicando na própria foto da lista, sem abrir o cadastro.
+  // Foto é o que faz o item vender na vitrine, e passar pelo lápis + rolar o
+  // formulário inteiro pra isso fazia o lojista deixar pra depois (e nunca).
+  const listaFileRef = useRef(null)
+  const listaCamRef = useRef(null)
+  const alvoFotoRef = useRef(null)     // id do produto que vai receber a foto
   // Renumeração da ordem das categorias só pode acontecer uma vez por sessão
   // (se o update falhar, não pode ficar tentando em loop).
   const renumerouRef = useRef(false)
 
   const [produtos, setProdutos] = useState([])
+  // Produto com o menuzinho de foto aberto (só no celular, onde galeria e
+  // câmera precisam de inputs diferentes) e o que está com upload em andamento.
+  const [fotoMenu, setFotoMenu] = useState(null)
+  const [subindoFoto, setSubindoFoto] = useState(null)
   const [categorias, setCategorias] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -893,6 +903,77 @@ export default function Produtos() {
     }
   }
 
+  // ── Foto trocada direto na lista ────────────────────────────
+  // No computador, clicar na foto já abre o seletor de arquivo. No celular abre
+  // um menuzinho: o mesmo input não consegue ser câmera e galeria ao mesmo
+  // tempo (é o motivo do input com `capture` separado no cadastro).
+  function clicarNaFoto(p) {
+    if (subindoFoto) return
+    if (EH_CELULAR) { setFotoMenu(f => (f?.id === p.id ? null : p)); return }
+    alvoFotoRef.current = p.id
+    listaFileRef.current?.click()
+  }
+
+  function escolherFotoLista(p, origem) {
+    alvoFotoRef.current = p.id
+    setFotoMenu(null)
+    ;(origem === 'camera' ? listaCamRef : listaFileRef).current?.click()
+  }
+
+  async function handleFotoLista(e) {
+    const file = e.target.files?.[0]
+    // Zera o input logo: sem isso, escolher a MESMA foto de novo não dispara o
+    // onChange e parece que o sistema ignorou.
+    e.target.value = ''
+    const alvo = alvoFotoRef.current
+    if (!file || !alvo) return
+    if (!profile?.empresa_id) { setError('Empresa não identificada para upload.'); return }
+
+    setSubindoFoto(alvo)
+    setError(null)
+    try {
+      const arquivo = await comprimirImagem(file)
+      const nomeSeguro = (arquivo.name || 'foto.jpg')
+        .normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^\w.-]+/g, '_')
+
+      // Mesma teimosia do cadastro: internet de loja oscila, tenta duas vezes.
+      let uploadData = null
+      let uploadError = null
+      for (let tentativa = 0; tentativa < 2; tentativa++) {
+        const path = `${profile.empresa_id}/${Date.now()}_${nomeSeguro}`
+        const r = await supabase.storage.from('produto-fotos').upload(path, arquivo, { upsert: true })
+        uploadData = r.data
+        uploadError = r.error
+        if (!uploadError) break
+      }
+      if (uploadError) throw new Error(uploadError.message)
+
+      const { data: urlData } = supabase.storage.from('produto-fotos').getPublicUrl(uploadData.path)
+      const url = urlData.publicUrl
+      const { error: errUpd } = await supabase.from('produtos').update({ foto_url: url }).eq('id', alvo)
+      if (errUpd) throw new Error(errUpd.message)
+      setProdutos(prev => prev.map(x => (x.id === alvo ? { ...x, foto_url: url } : x)))
+    } catch (err) {
+      setError(`A foto não subiu: ${err?.message ?? err}. Toque na foto e tente de novo.`)
+    } finally {
+      setSubindoFoto(null)
+      alvoFotoRef.current = null
+    }
+  }
+
+  async function removerFotoLista(p) {
+    setFotoMenu(null)
+    const ok = await confirmar({
+      titulo: `Tirar a foto de “${p.nome}”?`,
+      texto: 'O item continua no cardápio, só fica sem foto.',
+      textoOk: 'Tirar a foto',
+    })
+    if (!ok) return
+    const { error } = await supabase.from('produtos').update({ foto_url: null }).eq('id', p.id)
+    if (error) { setError('Não deu pra tirar a foto: ' + error.message); return }
+    setProdutos(prev => prev.map(x => (x.id === p.id ? { ...x, foto_url: null } : x)))
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     // Salvar com a foto ainda subindo gravava o produto sem foto: o upload
@@ -1135,6 +1216,24 @@ export default function Produtos() {
   return (
     <div>
       {avisoConfirmar}
+      {/* Inputs da troca de foto pela lista. Ficam fora da tabela: se vivessem
+          dentro da linha, o React os recriaria a cada render e o arquivo
+          escolhido se perderia no meio do caminho. */}
+      <input
+        ref={listaFileRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handleFotoLista}
+      />
+      <input
+        ref={listaCamRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: 'none' }}
+        onChange={handleFotoLista}
+      />
       <div className="page-header">
         <h1>Produtos</h1>
         <div className="prod-header-acoes">
@@ -1267,11 +1366,45 @@ export default function Produtos() {
                           >↓</button>
                         </div>
                       )}
-                      {p.foto_url ? (
-                        <img className="prod-foto" src={p.foto_url} alt={p.nome} />
-                      ) : (
-                        <div className="prod-foto prod-foto-vazia">📷</div>
-                      )}
+                      {/* A foto é o botão: clicou, troca (ou põe, se não tem).
+                          Sem passar pelo lápis e sem rolar o cadastro inteiro. */}
+                      <div style={{ position: 'relative', flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          className="prod-foto-btn"
+                          onClick={() => clicarNaFoto(p)}
+                          disabled={subindoFoto === p.id}
+                          title={p.foto_url ? 'Trocar a foto' : 'Adicionar foto'}
+                          aria-label={p.foto_url ? `Trocar a foto de ${p.nome}` : `Adicionar foto em ${p.nome}`}
+                        >
+                          {p.foto_url ? (
+                            <img className="prod-foto" src={p.foto_url} alt={p.nome} />
+                          ) : (
+                            <div className="prod-foto prod-foto-vazia">📷</div>
+                          )}
+                          <span className="prod-foto-selo">
+                            {subindoFoto === p.id ? '⏳' : (p.foto_url ? '📷' : '+')}
+                          </span>
+                        </button>
+                        {fotoMenu?.id === p.id && (
+                          <>
+                            {/* Fundo invisível: toque fora fecha o menu. */}
+                            <div
+                              onClick={() => setFotoMenu(null)}
+                              style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+                            />
+                            <div className="prod-foto-menu">
+                              <button type="button" onClick={() => escolherFotoLista(p, 'camera')}>📷 Tirar foto</button>
+                              <button type="button" onClick={() => escolherFotoLista(p, 'galeria')}>🖼 Escolher da galeria</button>
+                              {p.foto_url && (
+                                <button type="button" onClick={() => removerFotoLista(p)} style={{ color: 'var(--danger, #dc2626)' }}>
+                                  🗑 Tirar a foto
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, minWidth: 0 }}>
                         <span>{p.nome}</span>
                         {(compProd[p.id]?.length > 0) && (
