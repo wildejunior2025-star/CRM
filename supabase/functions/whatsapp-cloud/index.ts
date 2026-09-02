@@ -188,10 +188,12 @@ async function responderProduto(
     const termos = palavrasDeBusca(texto)
     if (!termos.length) return null
     for (const termo of termos) {
-      const { data } = await supabase.rpc("buscar_produto_nome", {
+      const { data, error } = await supabase.rpc("buscar_produto_nome", {
         p_empresa: empresaId, p_termo: termo, p_limite: 3,
       })
+      if (error) console.error("[produto] rpc erro:", termo, JSON.stringify(error).slice(0, 200))
       const achados = Array.isArray(data) ? data : []
+      console.log("[produto] termo", termo, "achou", achados.length)
       if (!achados.length) continue
       const NL2 = String.fromCharCode(10)
       const linhas = achados.map((p: Record<string, unknown>) => {
