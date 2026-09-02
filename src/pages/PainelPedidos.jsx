@@ -73,6 +73,22 @@ const BADGE_STATUS_COR = {
 }
 
 // ── Utilidades ─────────────────────────────────────────────
+// A hora combinada ainda não chegou? Enquanto isso o pedido agendado NÃO tem
+// relógio de aceite: com a loja fechada não tem ninguém pra clicar, e o timer
+// cancelava sozinho ("Tempo de aceite esgotado") o pedido que o cliente deixou
+// marcado pra mais tarde.
+function agendadoAindaVai(pedido) {
+  if (!pedido?.agendado_para) return false
+  const t = new Date(pedido.agendado_para).getTime()
+  return !Number.isNaN(t) && t > Date.now()
+}
+
+// De quando começa a contar o tempo de aceite. No agendado é da HORA COMBINADA:
+// contar da criação faria o pedido feito de manhã nascer expirado à tarde.
+function inicioDoAceite(pedido) {
+  return pedido?.agendado_para || pedido?.aguardando_desde || pedido?.created_at
+}
+
 function getTempoRestante(createdAt, aguardandoDesde) {
   const ref = aguardandoDesde ?? createdAt
   const elapsed = Date.now() - new Date(ref).getTime()
@@ -2300,11 +2316,11 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         </div>
       </div>
 
-      {/* Timer — só para pedidos aguardando */}
-      {pedido.status === 'aguardando' && (
+      {/* Timer — só para pedidos aguardando, e só depois da hora combinada */}
+      {pedido.status === 'aguardando' && !agendadoAindaVai(pedido) && (
         <TimerRegressivo
-          createdAt={pedido.created_at}
-          aguardandoDesde={pedido.aguardando_desde}
+          createdAt={inicioDoAceite(pedido)}
+          aguardandoDesde={null}
           onExpirado={() => onExpirado(pedido.id)}
         />
       )}
@@ -3416,8 +3432,8 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
             : `#${pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()}`
           } · {fmt(pedido.total)}
         </span>
-        {pedido.status === 'aguardando' && onExpirado && (
-          <MiniTimer createdAt={pedido.created_at} aguardandoDesde={pedido.aguardando_desde} onExpirado={() => onExpirado(pedido.id)} />
+        {pedido.status === 'aguardando' && onExpirado && !agendadoAindaVai(pedido) && (
+          <MiniTimer createdAt={inicioDoAceite(pedido)} aguardandoDesde={null} onExpirado={() => onExpirado(pedido.id)} />
         )}
       </div>
       <div className="pp-mini-sub">{hora} · {pedido.cliente_nome || '—'}</div>
