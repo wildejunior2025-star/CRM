@@ -1402,6 +1402,18 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
         </div>
 
         <div className="dloja-drawer-body">
+          {/* A foto acompanha o cliente enquanto ele monta o pedido. Antes ela
+              ficava só no card e sumia ao abrir os complementos — quem estava
+              escolhendo borda de catupiry não via mais a pizza. É a foto que
+              vende, e é ela que faz a pessoa aceitar o adicional. */}
+          {produto.foto_url && (
+            <img
+              src={produto.foto_url}
+              alt={produto.nome}
+              className="dloja-drawer-foto"
+              loading="lazy"
+            />
+          )}
           {/* pre-wrap: a descricao e o unico lugar onde a loja avisa coisa do
               tipo "nao aceitamos balde de retorno sujo". Sem isso as linhas do
               aviso viravam um paragrafo unico e ninguem lia. */}

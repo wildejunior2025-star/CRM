@@ -969,6 +969,18 @@
   scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
+/* Foto do produto dentro do modal de complementos. Larga o padding lateral do
+   corpo pra encostar nas bordas, igual à capa de um card — assim ela aparece
+   inteira sem empurrar as opções pra fora da primeira tela. */
+.dloja-drawer-foto {
+  display: block;
+  width: calc(100% + 40px);
+  margin: -12px -20px 0;
+  max-height: 210px;
+  object-fit: cover;
+  background: var(--dl-surface-2);
+}
+
 .dloja-drawer-body::-webkit-scrollbar { width: 8px; }
 .dloja-drawer-body::-webkit-scrollbar-track { background: transparent; }
 .dloja-drawer-body::-webkit-scrollbar-thumb {
