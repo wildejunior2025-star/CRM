@@ -1350,9 +1350,51 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   // pedido entraria duas vezes.
   const telZap = String(telefone ?? '').replace(/\D/g, '')
   const podeMandarZap = itens.length > 0 && telZap.length >= 10
+  const [zapStatus, setZapStatus] = useState(null)   // null | 'enviando' | 'ok' | 'manual'
+  const [zapErro, setZapErro] = useState(null)
 
-  function mandarNoZap() {
-    if (!podeMandarZap) return
+  // Busca de rua pelo nome (mesma do checkout do cliente). Aqui vale ainda mais:
+  // quem digita é a atendente, com o cliente falando no ouvido — e endereço
+  // digitado de ouvido é o que faz o motoboy rodar à toa.
+  const [ruaSug, setRuaSug] = useState([])
+  const [ruaSugAberta, setRuaSugAberta] = useState(false)
+  useEffect(() => {
+    if (tipo !== 'entrega') { setRuaSug([]); return }
+    const termo = String(rua ?? '').trim()
+    const uf = String(empresa?.estado ?? '').trim()
+    const cid = String(cidade || empresa?.cidade || '').trim()
+    if (termo.length < 3 || !uf || cid.length < 3) { setRuaSug([]); return }
+    let vivo = true
+    const t = setTimeout(async () => {
+      try {
+        const buscar = async (q) => {
+          if (!q || q.length < 3) return []
+          const r = await fetch(`https://viacep.com.br/ws/${uf}/${encodeURIComponent(cid)}/${encodeURIComponent(q)}/json/`)
+          const j = await r.json()
+          return Array.isArray(j) ? j : []
+        }
+        // Mesma regra do checkout: a busca do ViaCEP é literal, então tira o
+        // "Rua/Av." e, não achando, tenta a maior palavra digitada.
+        const semTipo = termo.replace(/^(r|rua|av|avn|avenida|trav|travessa|al|alameda|pc|praca|praça|rod|rodovia|estr|estrada|beco|conj|conjunto|vl|vila)\.?\s+/i, '').trim()
+        let d = await buscar(semTipo || termo)
+        if (!d.length) {
+          const maior = semTipo.split(/\s+/).filter(w => w.length >= 4).sort((x, y) => y.length - x.length)[0]
+          if (maior) d = await buscar(maior)
+        }
+        if (!vivo) return
+        const vistas = new Set()
+        setRuaSug(d.filter(x => {
+          const k = `${x.logradouro}|${x.bairro}`
+          if (!x.logradouro || vistas.has(k)) return false
+          vistas.add(k); return true
+        }).slice(0, 6))
+      } catch { if (vivo) setRuaSug([]) }
+    }, 500)
+    return () => { vivo = false; clearTimeout(t) }
+  }, [rua, cidade, empresa, tipo])
+
+  async function mandarNoZap() {
+    if (!podeMandarZap || zapStatus === 'enviando') return
     const primeiro = String(nome ?? '').trim().split(' ')[0]
     const NL = '\n'
     const linhas = itens.map(i => {
@@ -1380,6 +1422,31 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     ].filter(l => l !== null).join(NL)
 
     const numero55 = telZap.startsWith('55') ? telZap : `55${telZap}`
+
+    // Sai pelo WhatsApp DA LOJA (Cloud ou Evolution, o mesmo caminho do botão de
+    // mensagem do pedido): a atendente não sai da tela e o cliente recebe do
+    // número que ele conhece. Abrir o wa.me troca de app, pede "abrir aplicação"
+    // e às vezes manda pelo WhatsApp pessoal de quem está no caixa.
+    setZapStatus('enviando')
+    setZapErro(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-connect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ action: 'send_message', phone: numero55, text: msg }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (d?.ok) { setZapStatus('ok'); return }
+      setZapErro(d?.erro || null)
+    } catch { /* rede caiu — cai no plano B */ }
+
+    // Loja sem WhatsApp conectado (ou envio recusado): abre o app com a
+    // mensagem escrita, que é melhor do que deixar a atendente sem saída.
+    setZapStatus('manual')
     window.open(`https://wa.me/${numero55}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener')
   }
 
@@ -1861,7 +1928,44 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
               )}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <input value={rua} onChange={e => setRua(e.target.value)} placeholder="Rua" style={inputSt} />
+              <div style={{ position: 'relative', flex: 1 }}>
+                <input value={rua} style={inputSt} autoComplete="off"
+                  placeholder="Rua (digite o nome e escolha)"
+                  onChange={e => { setRua(e.target.value); setRuaSugAberta(true) }}
+                  onFocus={() => setRuaSugAberta(true)} />
+                {ruaSugAberta && ruaSug.length > 0 && (
+                  <>
+                    <div onClick={() => setRuaSugAberta(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+                    <div style={{
+                      position: 'absolute', zIndex: 61, top: 'calc(100% + 4px)', left: 0, right: 0,
+                      maxHeight: 220, overflowY: 'auto', padding: 4, borderRadius: 10,
+                      border: '1px solid var(--border, #2a2a3a)', background: 'var(--surface, #16161f)',
+                      boxShadow: '0 12px 28px rgba(0,0,0,.35)',
+                    }}>
+                      {ruaSug.map(r => (
+                        <button key={`${r.cep}-${r.logradouro}`} type="button"
+                          onClick={() => {
+                            const c = String(r.cep ?? '').replace(/\D/g, '')
+                            setRua(r.logradouro || rua)
+                            if (r.bairro) setBairro(r.bairro)
+                            if (r.localidade) setCidade(r.localidade)
+                            if (c.length === 8) setCep(`${c.slice(0, 5)}-${c.slice(5)}`)
+                            setRuaSug([]); setRuaSugAberta(false)
+                          }}
+                          style={{
+                            display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
+                            border: 'none', borderRadius: 7, background: 'none', color: 'var(--text)', cursor: 'pointer',
+                          }}>
+                          <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700 }}>{r.logradouro}</span>
+                          <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)' }}>
+                            {[r.bairro, r.localidade].filter(Boolean).join(' · ')}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
               <input value={numero} onChange={e => setNumero(e.target.value)} placeholder="Nº" style={{ ...inputSt, maxWidth: 90 }} />
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -1929,6 +2033,11 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         </div>
 
         {erro && <p style={{ fontSize: 13, color: 'var(--danger, #ef4444)', margin: '0 0 10px' }}>{erro}</p>}
+        {zapErro && (
+          <p style={{ fontSize: 12.5, color: '#eab308', margin: '0 0 10px', lineHeight: 1.45 }}>
+            Não deu pra enviar pelo WhatsApp da loja: {zapErro} — abri o app com a mensagem pronta.
+          </p>
+        )}
 
         <div className="pp-modal-actions">
           <button type="button" className="pp-modal-btn-secondary" onClick={editando ? onFechar : cancelar}>Cancelar</button>
@@ -1944,7 +2053,10 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
               : 'Preencha o telefone do cliente e adicione ao menos um item'}
             onClick={mandarNoZap}
           >
-            💬 Mandar pro cliente
+            {zapStatus === 'enviando' ? 'Enviando...'
+              : zapStatus === 'ok' ? '✅ Enviado'
+              : zapStatus === 'manual' ? '💬 Mandar de novo'
+              : '💬 Mandar pro cliente'}
           </button>
           <button
             type="button"
