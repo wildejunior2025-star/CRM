@@ -1096,6 +1096,15 @@ async function responderComLink(
     const slug = String(empresa.slug ?? "").trim()
     if (!slug || !cfg.empresa_id) return false
 
+    // Conversa que a loja assumiu (pausou o robô nesse número) não recebe
+    // resposta automática: quem está atendendo é gente, e o robô falando por
+    // cima é o jeito mais rápido de a loja desligar isso pra sempre.
+    const chavePausa = String(phone).replace(/\D/g, "").slice(-8)
+    const { data: pausado } = await supabase.from("whatsapp_bot_pausado")
+      .select("phone").eq("empresa_id", cfg.empresa_id as string)
+      .like("phone", `%${chavePausa}`).limit(1).maybeSingle()
+    if (pausado) return false
+
     const soDigitosPre = String(phone).replace(/\D/g, "")
     const telPre = (soDigitosPre.startsWith("55") && soDigitosPre.length >= 12) ? soDigitosPre.slice(2) : soDigitosPre
     const linkPre = `https://lojaonline.fwcinter.com/${slug}?t=${telPre}`
@@ -1115,14 +1124,17 @@ async function responderComLink(
       return true
     }
 
-    const seisHoras = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
+    // Uma hora, não seis: o limite existe pra quem manda cinco mensagens
+    // seguidas não levar cinco links. Seis horas calava o robô pro cliente que
+    // deu "oi" de manhã e voltou à tarde — que é justamente quem ia pedir.
+    const limite = new Date(Date.now() - 60 * 60 * 1000).toISOString()
     const { data: jaFalou } = await supabase
       .from("whatsapp_conversas")
       .select("id")
       .eq("empresa_id", cfg.empresa_id as string)
       .eq("phone", phone)
       .eq("role", "assistant")
-      .gte("created_at", seisHoras)
+      .gte("created_at", limite)
       .limit(1)
       .maybeSingle()
     if (jaFalou) return false
