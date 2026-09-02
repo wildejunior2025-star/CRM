@@ -2437,6 +2437,14 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
                 <span>{fmt(pedido.taxa_entrega)}</span>
               </div>
             )}
+            {/* Taxa do cartão repassada (mig 0223). Sem a linha, o total não
+                fecha com subtotal + entrega e parece erro de conta. */}
+            {Number(pedido.acrescimo || 0) > 0 && (
+              <div className="pp-totais-row">
+                <span>💳 Taxa do cartão</span>
+                <span>{fmt(pedido.acrescimo)}</span>
+              </div>
+            )}
             {/* Cashback (mig 0178): sem esta linha o card mostrava subtotal de
                 R$ 68 e total de R$ 28, e a loja não tinha como saber por quê —
                 parecia erro de conta ou pedido adulterado. */}

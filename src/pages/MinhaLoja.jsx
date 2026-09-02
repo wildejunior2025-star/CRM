@@ -33,6 +33,10 @@ export default function MinhaLoja({ secao = 'loja' }) {
   // Taxa da maquineta por forma de cartão: o que a máquina desconta antes de
   // cair na conta. É o que o Caixa usa pra mostrar o valor real do dia.
   const [taxasCartao, setTaxasCartao] = useState({ taxa_credito_pct: '', taxa_debito_pct: '', taxa_cartao_pct: '' })
+  // Repasse ao cliente (mig 0223) — separado da taxa da maquineta de propósito:
+  // tem loja que só quer o controle do caixa e não cobra nada a mais.
+  const [repasses, setRepasses] = useState({ repasse_credito_pct: '', repasse_debito_pct: '', repasse_cartao_pct: '' })
+  const [cobrarDoCliente, setCobrarDoCliente] = useState(false)
   const [pixNome, setPixNome] = useState('')
   const [pixCidade, setPixCidade] = useState('')
 
@@ -340,6 +344,16 @@ export default function MinhaLoja({ secao = 'loja' }) {
       taxa_debito_pct: String(empresa.taxa_debito_pct ?? 0).replace('.', ','),
       taxa_cartao_pct: String(empresa.taxa_cartao_pct ?? 0).replace('.', ','),
     })
+    setRepasses({
+      repasse_credito_pct: String(empresa.repasse_credito_pct ?? 0).replace('.', ','),
+      repasse_debito_pct: String(empresa.repasse_debito_pct ?? 0).replace('.', ','),
+      repasse_cartao_pct: String(empresa.repasse_cartao_pct ?? 0).replace('.', ','),
+    })
+    setCobrarDoCliente(
+      Number(empresa.repasse_credito_pct ?? 0) > 0 ||
+      Number(empresa.repasse_debito_pct ?? 0) > 0 ||
+      Number(empresa.repasse_cartao_pct ?? 0) > 0
+    )
     setChavePix(empresa.chave_pix ?? '')
     setPixNome(empresa.pix_nome ?? '')
     setPixCidade(empresa.pix_cidade ?? '')
@@ -505,6 +519,9 @@ export default function MinhaLoja({ secao = 'loja' }) {
         taxa_credito_pct: pctNum(taxasCartao.taxa_credito_pct),
         taxa_debito_pct: pctNum(taxasCartao.taxa_debito_pct),
         taxa_cartao_pct: pctNum(taxasCartao.taxa_cartao_pct),
+        repasse_credito_pct: cobrarDoCliente ? pctNum(repasses.repasse_credito_pct) : 0,
+        repasse_debito_pct: cobrarDoCliente ? pctNum(repasses.repasse_debito_pct) : 0,
+        repasse_cartao_pct: cobrarDoCliente ? pctNum(repasses.repasse_cartao_pct) : 0,
         chave_pix: chavePix || null,
         pix_nome: pixNome || null,
         pix_cidade: pixCidade || null,
@@ -925,6 +942,48 @@ export default function MinhaLoja({ secao = 'loja' }) {
                     <span style={{ color: 'var(--text-muted)' }}>%</span>
                   </label>
                 ))}
+              </div>
+
+              {/* Repasse ao cliente — OPCIONAL e separado da taxa acima.
+                  Tem loja que só quer o controle do caixa (a taxa fica lá em
+                  cima e ela absorve); tem loja que cobra a diferença de quem
+                  paga no crédito, como já faz no balcão. */}
+              <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px dashed var(--border)' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 9, cursor: 'pointer', fontWeight: 700, fontSize: 14 }}>
+                  <input type="checkbox" checked={cobrarDoCliente}
+                    onChange={e => setCobrarDoCliente(e.target.checked)}
+                    style={{ width: 16, height: 16, cursor: 'pointer' }} />
+                  Cobrar essa taxa do cliente no cardápio online
+                </label>
+                <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '6px 0 0', lineHeight: 1.5 }}>
+                  Desligado, a taxa acima serve <strong>só pro controle do caixa</strong> — o cliente paga o
+                  preço do cardápio e a loja absorve. Ligado, quem escolher a forma no link paga o
+                  acréscimo, que aparece na conta dele antes de fechar o pedido.
+                </p>
+
+                {cobrarDoCliente && (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10, marginTop: 12 }}>
+                      {FORMAS_CARTAO.filter(f => f.value !== 'cartao' || formasPagamento.includes('cartao')).map(f => (
+                        <label key={f.value} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+                          <span style={{ flex: 1 }}>{f.label}</span>
+                          <input value={repasses[f.campoRepasse]} inputMode="decimal" placeholder="0"
+                            onChange={e => setRepasses(t => ({ ...t, [f.campoRepasse]: e.target.value }))}
+                            style={{ width: 70, padding: '7px 9px', borderRadius: 8, border: '1px solid var(--border)',
+                              background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 14, textAlign: 'right' }} />
+                          <span style={{ color: 'var(--text-muted)' }}>%</span>
+                        </label>
+                      ))}
+                    </div>
+                    <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '10px 0 0', lineHeight: 1.5 }}>
+                      Deixe <strong>0</strong> na forma que você não quer cobrar. Ex.: crédito <strong>5%</strong> e
+                      débito <strong>0</strong> — quem paga no débito não paga nada a mais.
+                      {!formasPagamento.includes('credito') && !formasPagamento.includes('debito') && (
+                        <> <br />⚠️ Pra o cliente escolher crédito ou débito no link, marque essas formas ali em cima.</>
+                      )}
+                    </p>
+                  </>
+                )}
               </div>
             </div>
           )}

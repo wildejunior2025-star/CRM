@@ -6,7 +6,7 @@ import { getEnderecoAtivo } from '../utils/enderecoPortal'
 import { registrarPedido } from '../lib/meusPedidos'
 import { iniciarCheckout } from '../lib/tracking'
 import { marcarEtapa, anotarContato } from '../lib/funil'
-import { formasAtivas } from '../lib/constants'
+import { formasAtivas, repassePct } from '../lib/constants'
 import { carregarExcecoes } from '../lib/feriados'
 import { diasParaAgendar, paraISO, rotuloAgendado } from '../lib/agendamento'
 import 'leaflet/dist/leaflet.css'
@@ -584,7 +584,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min')
+      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -846,7 +846,16 @@ export default function DeliveryCheckout() {
   // oferecer o que vai ser negado.
   const cashbackMax = Math.max(0, Math.round((totalBruto - 0.01) * 100) / 100)
   const cashbackUsado = usarCashback ? Math.min(saldoCashback, cashbackMax) : 0
-  const total = Math.max(0, Math.round((totalBruto - cashbackUsado) * 100) / 100)
+  // Acréscimo da forma de pagamento (mig 0223). Incide sobre o que vai passar na
+  // maquineta de verdade — ou seja, depois do cashback abatido. Loja que não
+  // cobra tem 0 e nada muda.
+  // Enquanto a entrega está "a calcular", o acréscimo sai só sobre o que já é
+  // certo: mostrar 5% de um total que a tela nem exibe ainda parecia conta
+  // errada. Marcado o endereço, os dois números sobem juntos.
+  const baseCartao = Math.max(0, Math.round(
+    ((subtotal + (taxaIndefinida ? 0 : taxaAplicada)) - cashbackUsado) * 100) / 100)
+  const acrescimoPagamento = Math.round(baseCartao * repassePct(lojaEndereco, form.pagamento)) / 100
+  const total = Math.round((baseCartao + acrescimoPagamento) * 100) / 100
 
   // Pedido mínimo (só entrega, conta o subtotal dos produtos — sem a taxa)
   const pedidoMinimo = Number(lojaEndereco?.pedido_minimo ?? 0)
@@ -1146,6 +1155,7 @@ export default function DeliveryCheckout() {
         // Hora combinada. No PIX o cliente paga AGORA e a comida sai na hora
         // marcada — quem agenda já garantiu o lugar dele.
         agendado_para: agendadoPara,
+        acrescimo: acrescimoPagamento,
       }
       let pixData = null, pixErr = null
       try {
@@ -1195,6 +1205,7 @@ export default function DeliveryCheckout() {
           : null,
         observacoes: form.observacoes.trim() || null,
         agendado_para: agendadoPara,
+        acrescimo: acrescimoPagamento,
       })
       .select('id')
       .single()
@@ -1560,16 +1571,40 @@ export default function DeliveryCheckout() {
                       {form.pagamento === 'dinheiro' && <span className="dco-pay-check"><IconCheck /></span>}
                     </button>
                   )}
-                  {formasLoja.includes('cartao') && (
-                    <button type="button"
-                      className={`dco-pay-btn${form.pagamento === 'cartao' ? ' dco-pay-btn--active' : ''}`}
-                      onClick={() => set('pagamento', 'cartao')}>
-                      <IconCard />
-                      <span>Cartão</span>
-                      {form.pagamento === 'cartao' && <span className="dco-pay-check"><IconCheck /></span>}
-                    </button>
-                  )}
+                  {/* Crédito e débito separados (mig 0223): cada um pode ter um
+                      acréscimo próprio, que é o que a loja já cobra no balcão.
+                      A loja que não separa continua com o "Cartão" de sempre. */}
+                  {['credito', 'debito', 'cartao'].filter(f => formasLoja.includes(f)).map(f => {
+                    const rotulo = f === 'credito' ? 'Crédito' : f === 'debito' ? 'Débito' : 'Cartão'
+                    const pct = repassePct(lojaEndereco, f)
+                    return (
+                      <button key={f} type="button"
+                        className={`dco-pay-btn${form.pagamento === f ? ' dco-pay-btn--active' : ''}`}
+                        onClick={() => set('pagamento', f)}>
+                        <IconCard />
+                        <span>
+                          {rotulo}
+                          {pct > 0 && (
+                            <span style={{ display: 'block', fontSize: 11, fontWeight: 600, opacity: .8 }}>
+                              +{String(pct).replace('.', ',')}%
+                            </span>
+                          )}
+                        </span>
+                        {form.pagamento === f && <span className="dco-pay-check"><IconCheck /></span>}
+                      </button>
+                    )
+                  })}
                 </div>
+                {acrescimoPagamento > 0 && (
+                  <div style={{
+                    marginTop: 10, padding: '10px 12px', borderRadius: 10,
+                    background: 'rgba(234,179,8,.10)', border: '1px solid rgba(234,179,8,.35)',
+                    fontSize: 13, lineHeight: 1.5,
+                  }}>
+                    Nesta forma a loja cobra <strong>+{String(repassePct(lojaEndereco, form.pagamento)).replace('.', ',')}%</strong>
+                    {' '}(<strong>R$ {fmt(acrescimoPagamento)}</strong>), que é a taxa da maquineta. Já está no total.
+                  </div>
+                )}
                 {/* PIX na entrega: nada é cobrado agora — o cliente paga na chave
                     da loja quando o pedido chegar. Mostra a chave já aqui pra ele
                     saber pra quem vai pagar. */}
@@ -1677,6 +1712,12 @@ export default function DeliveryCheckout() {
                     <div className="dco-resumo-linha" style={{ color: '#16a34a' }}>
                       <span>Seu crédito</span>
                       <span>− R$ {fmt(cashbackUsado)}</span>
+                    </div>
+                  )}
+                  {acrescimoPagamento > 0 && (
+                    <div className="dco-resumo-linha">
+                      <span>Taxa do cartão ({String(repassePct(lojaEndereco, form.pagamento)).replace('.', ',')}%)</span>
+                      <span>R$ {fmt(acrescimoPagamento)}</span>
                     </div>
                   )}
                   <div className="dco-resumo-linha dco-resumo-total">

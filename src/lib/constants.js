@@ -20,11 +20,23 @@ export const FORMAS_PAGAMENTO = [
 ]
 
 // Formas de cartão e em qual coluna de empresas mora a taxa de cada uma.
+// `campoTaxa` é o que a MAQUINETA desconta da loja (alimenta o "cai na conta" do
+// Caixa). `campoRepasse` é o acréscimo que a loja cobra DO CLIENTE no cardápio
+// online (mig 0223) — os dois são independentes de propósito: a Estação usa só
+// a taxa, pro controle do caixa; a CD Bom cobra 5% no crédito do cliente.
 export const FORMAS_CARTAO = [
-  { value: 'credito', label: 'Cartão de crédito', campoTaxa: 'taxa_credito_pct' },
-  { value: 'debito',  label: 'Cartão de débito',  campoTaxa: 'taxa_debito_pct' },
-  { value: 'cartao',  label: 'Cartão (sem separar)', campoTaxa: 'taxa_cartao_pct' },
+  { value: 'credito', label: 'Cartão de crédito', campoTaxa: 'taxa_credito_pct', campoRepasse: 'repasse_credito_pct' },
+  { value: 'debito',  label: 'Cartão de débito',  campoTaxa: 'taxa_debito_pct',  campoRepasse: 'repasse_debito_pct' },
+  { value: 'cartao',  label: 'Cartão (sem separar)', campoTaxa: 'taxa_cartao_pct', campoRepasse: 'repasse_cartao_pct' },
 ]
+
+/** Quanto a loja cobra a mais do cliente nesta forma (%). 0 = sem acréscimo. */
+export function repassePct(empresa, forma) {
+  const f = FORMAS_CARTAO.find(x => x.value === forma)
+  if (!f) return 0
+  const v = Number(empresa?.[f.campoRepasse] ?? 0)
+  return Number.isFinite(v) && v > 0 ? v : 0
+}
 export const ehCartao = (forma) => ['credito', 'debito', 'cartao'].includes(forma)
 export const FORMAS_PAGAMENTO_PADRAO = FORMAS_PAGAMENTO.map(f => f.value)
 
