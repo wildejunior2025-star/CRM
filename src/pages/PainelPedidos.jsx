@@ -4276,14 +4276,54 @@ export default function PainelPedidos() {
     ;(async () => {
       // Só as conversas de HOJE — as de dias anteriores não aparecem no gestor.
       const inicioHoje = new Date(); inicioHoje.setHours(0, 0, 0, 0)
-      const { data } = await supabase
+
+      // App e Loja Online: tudo. Ali o cliente não tem outro caminho pra falar
+      // com a loja — se não aparecer aqui, não aparece em lugar nenhum.
+      const { data: internas } = await supabase
         .from('mensagens_chat')
         .select('*')
         .eq('empresa_id', empresa.id)
+        .neq('canal', 'whatsapp')
         .gte('created_at', inicioHoje.toISOString())
         .order('created_at', { ascending: true })
         .limit(500)
-      if (ativo) setChatMsgs(data || [])
+
+      // WhatsApp: só a conversa em que a LOJA falou.
+      //
+      // O WhatsApp da loja é atendido no celular dela (coexistência), e o CRM
+      // só espelha o que ENTRA — a resposta que ela dá no aparelho não volta
+      // pra cá. Espelhando tudo, a caixa virava mão única: na CDBom deu 476 não
+      // lidas num dia, de gente que já tinha sido atendida. Pior: enchia o teto
+      // da consulta e empurrava pra fora as mensagens do App e da Loja Online,
+      // que são as que ninguém mais responde.
+      //
+      // Quando a loja escreve pelo gestor (o "Enviar mensagem" do pedido), a
+      // conversa passa a aparecer — e as respostas do cliente vêm junto.
+      const { data: daLoja } = await supabase
+        .from('mensagens_chat')
+        .select('cliente_ref')
+        .eq('empresa_id', empresa.id)
+        .eq('canal', 'whatsapp')
+        .eq('remetente', 'loja')
+        .gte('created_at', inicioHoje.toISOString())
+        .limit(300)
+      const refsAbertas = [...new Set((daLoja ?? []).map(r => r.cliente_ref).filter(Boolean))]
+      let doZap = []
+      if (refsAbertas.length) {
+        const { data } = await supabase
+          .from('mensagens_chat')
+          .select('*')
+          .eq('empresa_id', empresa.id)
+          .eq('canal', 'whatsapp')
+          .in('cliente_ref', refsAbertas)
+          .gte('created_at', inicioHoje.toISOString())
+          .order('created_at', { ascending: true })
+          .limit(500)
+        doZap = data ?? []
+      }
+      const todas = [...(internas ?? []), ...doZap]
+        .sort((x, y) => new Date(x.created_at) - new Date(y.created_at))
+      if (ativo) setChatMsgs(todas)
     })()
     const canal = supabase
       .channel(`chat_${empresa.id}`)
@@ -5274,9 +5314,14 @@ export default function PainelPedidos() {
     if (m.cliente_nome) acc[k].cliente_nome = m.cliente_nome
     if (m.remetente === 'cliente' && !m.lida) acc[k].unread++
     return acc
-  }, {})).sort((a, b) =>
-    new Date(b.msgs[b.msgs.length - 1].created_at) - new Date(a.msgs[a.msgs.length - 1].created_at)
-  )
+  }, {}))
+    // Conversa de WhatsApp só entra na caixa se a LOJA tiver falado nela (ver a
+    // carga acima). Vale também pro que chega em tempo real: sem isto, cada
+    // "bom dia" de cliente reabria a enxurrada na tela.
+    .filter(t => t.canal !== 'whatsapp' || t.msgs.some(m => m.remetente === 'loja'))
+    .sort((a, b) =>
+      new Date(b.msgs[b.msgs.length - 1].created_at) - new Date(a.msgs[a.msgs.length - 1].created_at)
+    )
   const chatNaoLidas = chatThreads.reduce((s, t) => s + t.unread, 0)
   const threadAberta = chatThreads.find(t => t.key === chatAberto)
   const CANAL_LABEL = { app: 'App', lojaonline: 'Loja online', whatsapp: 'WhatsApp' }
