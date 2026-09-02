@@ -4142,6 +4142,7 @@ export default function PainelPedidos() {
   const [catExpandido, setCatExpandido] = useState(() => new Set())        // produtos com complementos abertos
   const [loadingCatalogo, setLoadingCatalogo] = useState(false)
   const [buscaCatalogo, setBuscaCatalogo] = useState('')
+  const [ordemCategorias, setOrdemCategorias] = useState({})
   const [pausandoId, setPausandoId] = useState(null)
   function patchPainelConfig(patch) {
     try {
@@ -4416,6 +4417,12 @@ export default function PainelPedidos() {
       .is('arquivado_em', null)
       .order('nome', { ascending: true })
     setCatalogo(data || [])
+    // A ordem das categorias é a MESMA do cardápio (tabela categorias). Ordenar
+    // por nome aqui deixaria a lista do painel numa ordem e a da loja em outra —
+    // e quem pausa item procura pela ordem que conhece.
+    const { data: cats } = await supabase
+      .from('categorias').select('nome, ordem').eq('empresa_id', empresa.id)
+    setOrdemCategorias(Object.fromEntries((cats ?? []).map(c => [c.nome, Number(c.ordem ?? 0)])))
     // Complementos aninhados por produto (estilo iFood): cada produto abre seus
     // grupos ("subcategorias") e opções, cada um pausável individualmente.
     const { data: vinc } = await supabase
@@ -5291,6 +5298,25 @@ export default function PainelPedidos() {
     return out
   }
 
+  // Catálogo agrupado por categoria — a lista corrida misturava açaí com
+  // acompanhamento e cobertura, e achar o item pra pausar virava caça ao tesouro
+  // numa loja com 200 produtos.
+  const catalogoPorCategoria = (lista) => {
+    const grupos = new Map()
+    for (const p of lista) {
+      const cat = (p.categoria || '').trim() || 'Sem categoria'
+      if (!grupos.has(cat)) grupos.set(cat, [])
+      grupos.get(cat).push(p)
+    }
+    const posicao = (cat) => (
+      cat === 'Sem categoria' ? Number.MAX_SAFE_INTEGER
+        : (ordemCategorias[cat] ?? Number.MAX_SAFE_INTEGER - 1)
+    )
+    return [...grupos.entries()]
+      .map(([categoria, itens]) => ({ categoria, itens }))
+      .sort((a, b) => (posicao(a.categoria) - posicao(b.categoria)) || a.categoria.localeCompare(b.categoria, 'pt-BR'))
+  }
+
   const catalogoFiltrado = catalogo.filter(p => {
     if (!buscaCat) return true
     if (bateProduto(p)) return true
@@ -6073,8 +6099,26 @@ export default function PainelPedidos() {
                   {buscaCatalogo ? 'Nada encontrado.' : 'Nenhum item cadastrado.'}
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {catalogoFiltrado.map(prod => {
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {catalogoPorCategoria(catalogoFiltrado).map(({ categoria, itens }) => (
+                  <div key={categoria} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {/* Cabeçalho da categoria: gruda no topo enquanto rola, senão
+                        numa lista longa some e o lojista perde onde está. */}
+                    <div style={{
+                      position: 'sticky', top: 0, zIndex: 2,
+                      background: 'var(--surface, #16161f)',
+                      padding: '6px 2px', margin: '0 -2px',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      fontSize: 11.5, fontWeight: 800, letterSpacing: '.04em',
+                      textTransform: 'uppercase', color: 'var(--primary, #7c3aed)',
+                    }}>
+                      {categoria}
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 700, letterSpacing: 0, textTransform: 'none' }}>
+                        {itens.length}
+                      </span>
+                      <span style={{ flex: 1, height: 1, background: 'var(--border, #2a2a3a)' }} />
+                    </div>
+                  {itens.map(prod => {
                     const pausado = prod.disponivel_delivery === false
                     const prodBate = bateProduto(prod)
                     const grupos = gruposDaBusca(prod.id, prodBate)
@@ -6211,6 +6255,8 @@ export default function PainelPedidos() {
                       </div>
                     )
                   })}
+                  </div>
+                  ))}
                 </div>
               )}
             </div>
