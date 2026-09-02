@@ -901,7 +901,7 @@
   border-top: 1px solid var(--dl-border);
   width: 100%;
   max-width: 420px;
-  max-height: 90vh;
+  max-height: 92dvh;
   border-radius: 20px 20px 0 0;
   display: flex;
   flex-direction: column;
@@ -923,12 +923,49 @@
   to   { transform: translateY(0);    opacity: 1; }
 }
 
+/* Topo do modal. Com foto, ela ocupa o bloco inteiro e o nome fica POR CIMA
+   dela, num degradê escuro que garante a leitura em qualquer imagem. Sem foto,
+   é só a faixa de título de sempre. */
+.dloja-drawer-topo {
+  flex-shrink: 0;
+  position: relative;
+}
+.dloja-drawer-foto {
+  display: block;
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+  background: var(--dl-surface-2);
+}
 .dloja-drawer-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 20px 20px 16px;
   border-bottom: 1px solid var(--dl-border);
+}
+/* Com foto o cabeçalho deixa de ser uma faixa e passa a flutuar sobre ela. */
+.dloja-drawer-topo.com-foto .dloja-drawer-header {
+  position: absolute;
+  inset: auto 0 0 0;
+  border-bottom: none;
+  align-items: flex-end;
+  padding: 40px 18px 14px;
+  background: linear-gradient(to top, rgba(0, 0, 0, .82) 30%, rgba(0, 0, 0, 0));
+}
+.dloja-drawer-topo.com-foto .dloja-drawer-title {
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .6);
+}
+/* O X vai pro alto da foto, redondo e escuro, pra não sumir em foto clara. */
+.dloja-drawer-topo.com-foto .dloja-drawer-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  border: none;
+  backdrop-filter: blur(2px);
 }
 
 .dloja-drawer-title {
@@ -972,27 +1009,6 @@
 /* Foto do produto dentro do modal de complementos. Larga o padding lateral do
    corpo pra encostar nas bordas, igual à capa de um card — assim ela aparece
    inteira sem empurrar as opções pra fora da primeira tela. */
-.dloja-drawer-foto {
-  display: block;
-  width: calc(100% + 40px);
-  margin: -12px -20px 0;
-  height: 200px;
-  object-fit: cover;
-  background: var(--dl-surface-2);
-  /* Grudada no topo: o cliente rola a lista de sabores e continua vendo o que
-     está montando. */
-  position: sticky;
-  top: 0;
-  /* Acima do título de bloco (z-index 3): a foto é o topo de tudo aqui. */
-  z-index: 4;
-  transition: height 180ms ease;
-}
-/* Assim que ele começa a rolar ela encolhe pra faixa — continua na tela, mas
-   devolve o espaço pros sabores e pra BORDA, que é o que a loja quer vender. */
-.dloja-drawer-foto.compacta {
-  height: 72px;
-}
-
 .dloja-drawer-body::-webkit-scrollbar { width: 8px; }
 .dloja-drawer-body::-webkit-scrollbar-track { background: transparent; }
 .dloja-drawer-body::-webkit-scrollbar-thumb {
@@ -1007,10 +1023,9 @@
    apareceriam por baixo nas laterais. */
 .dloja-opt-bloco-titulo {
   position: sticky;
-  /* Encosta logo ABAIXO da foto grudada (72px de faixa menos os 12px de padding
-     da lista). Sem foto, volta pro topo: -12px é o padding de cima, e sem ele o
-     sabor aparecia numa fresta acima do título. */
-  top: var(--topo-blocos, -12px);
+  /* -12px = o padding de cima da lista: sem isso o sabor aparecia numa fresta
+     acima do título quando ele estava colado. */
+  top: -12px;
   z-index: 3;
   margin: 0 -20px;
   padding: 10px 20px 8px;
@@ -1214,4 +1229,17 @@
   font-size: 13.5px;
   font-weight: 700;
   cursor: pointer;
+}
+
+/* No celular o modal toma a tela inteira: com 90vh sobrava um vão escuro em
+   cima que não servia pra nada e ainda achatava a foto. */
+@media (max-width: 640px) {
+  .dloja-drawer {
+    max-height: 100dvh;
+    height: 100dvh;
+    border-radius: 0;
+    border-left: none;
+    border-top: none;
+  }
+  .dloja-drawer-foto { height: 34dvh; }
 }

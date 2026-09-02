@@ -1308,7 +1308,6 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
   const corpoRef = useRef(null)
   const gruposRef = useRef({})
   const [destaque, setDestaque] = useState(null)
-  const [fotoCompacta, setFotoCompacta] = useState(false)
 
   // Fechou um grupo (escolheu o tanto que podia)? Leva o cliente pro próximo
   // que ainda aceita escolha. Nasceu da pizzaria: o cliente marcava o sabor,
@@ -1400,32 +1399,21 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
   return (
     <div className="dloja-overlay" onClick={onClose}>
       <aside className="dloja-drawer" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={`Montar ${produto.nome}`}>
-        <div className="dloja-drawer-header">
-          <h2 className="dloja-drawer-title">{produto.nome}</h2>
-          <button className="dloja-drawer-close" onClick={onClose} aria-label="Fechar"><IconX /></button>
+        {/* A foto É o topo do modal: encostada na borda de cima da tela, com o
+            nome por cima dela. Antes ela ficava dentro da lista e grudava no
+            meio do caminho — aparecia cortada numa faixa feia e sobrava um vão
+            vazio acima. */}
+        <div className={`dloja-drawer-topo${produto.foto_url ? ' com-foto' : ''}`}>
+          {produto.foto_url && (
+            <img src={produto.foto_url} alt={produto.nome} className="dloja-drawer-foto" />
+          )}
+          <div className="dloja-drawer-header">
+            <h2 className="dloja-drawer-title">{produto.nome}</h2>
+            <button className="dloja-drawer-close" onClick={onClose} aria-label="Fechar"><IconX /></button>
+          </div>
         </div>
 
-        <div
-          className="dloja-drawer-body"
-          ref={corpoRef}
-          onScroll={e => setFotoCompacta(e.currentTarget.scrollTop > 40)}
-          style={{ '--topo-blocos': produto.foto_url ? '60px' : '-12px' }}
-        >
-          {/* A foto acompanha o cliente enquanto ele monta o pedido. Antes ela
-              ficava só no card e sumia ao abrir os complementos — quem estava
-              escolhendo borda de catupiry não via mais a pizza. É a foto que
-              vende, e é ela que faz a pessoa aceitar o adicional.
-              Ela fica GRUDADA no topo: some da vista e o cliente esquece o que
-              está montando. Encolhe assim que ele começa a rolar, senão comeria
-              metade da tela do celular justo na hora de escolher. */}
-          {produto.foto_url && (
-            <img
-              src={produto.foto_url}
-              alt={produto.nome}
-              className={`dloja-drawer-foto${fotoCompacta ? ' compacta' : ''}`}
-              loading="lazy"
-            />
-          )}
+        <div className="dloja-drawer-body" ref={corpoRef}>
           {/* pre-wrap: a descricao e o unico lugar onde a loja avisa coisa do
               tipo "nao aceitamos balde de retorno sujo". Sem isso as linhas do
               aviso viravam um paragrafo unico e ninguem lia. */}
