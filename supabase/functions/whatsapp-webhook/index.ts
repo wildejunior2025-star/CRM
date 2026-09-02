@@ -1015,6 +1015,68 @@ function textoParaRegistro(msg: any): string {
   return ""
 }
 
+
+// Palavras que não ajudam a achar produto nenhum — o que sobra depois delas é o
+// que o cliente realmente quer ("tem coca gelada?" vira "coca gelada").
+const PALAVRAS_VAZIAS = new Set([
+  "tem", "tens", "teria", "temos", "quanto", "quanta", "quantos", "custa", "custam",
+  "valor", "preco", "vale", "sai", "por", "favor", "boa", "bom", "dia", "tarde",
+  "noite", "oi", "ola", "vc", "voce", "vcs", "voces", "ai", "ta", "esta", "ainda",
+  "quero", "queria", "gostaria", "pra", "para", "com", "sem", "que", "qual", "quais",
+  "uma", "uns", "umas", "dos", "das", "nao", "sim", "voltou", "chegou", "hoje",
+  "ver", "saber", "sobre", "mim", "me", "eu", "de", "do", "da", "os", "as", "um",
+])
+
+const semAcentoTxt = (s: string) =>
+  String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+
+// As palavras que valem a pena procurar, da mais longa pra mais curta: a maior
+// costuma ser a que identifica o produto ("quentinha", "picole", "cerveja").
+function palavrasDeBusca(texto: string): string[] {
+  return semAcentoTxt(texto)
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(p => p.length >= 3 && !PALAVRAS_VAZIAS.has(p) && !/^\d+$/.test(p))
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 3)
+}
+
+// "Tem X?" respondido pelo CARDÁPIO, sem IA: procura o nome no banco e responde
+// com preço e link. É a segunda pergunta mais comum depois do "oi", e a que
+// mais fazia o cliente desistir quando ninguém respondia.
+async function responderProduto(
+  supabase: ReturnType<typeof createClient>,
+  empresaId: string,
+  texto: string,
+  link: string,
+): Promise<string | null> {
+  try {
+    const termos = palavrasDeBusca(texto)
+    if (!termos.length) return null
+    for (const termo of termos) {
+      const { data } = await supabase.rpc("buscar_produto_nome", {
+        p_empresa: empresaId, p_termo: termo, p_limite: 3,
+      })
+      const achados = Array.isArray(data) ? data : []
+      if (!achados.length) continue
+      const NL2 = String.fromCharCode(10)
+      const linhas = achados.map((p: Record<string, unknown>) => {
+        const preco = Number(p.preco ?? 0)
+        // Produto no peso/sob consulta entra sem preço: "R$ 0,00" faz o cliente
+        // achar que é de graça.
+        return preco > 0
+          ? `${p.nome} — R$ ${preco.toFixed(2).replace(".", ",")}`
+          : String(p.nome)
+      }).join(NL2)
+      return `Tem sim! 🙌${NL2}${linhas}${NL2}${NL2}Peça aqui: ${link}`
+    }
+    return null
+  } catch (e) {
+    console.error("[produto] busca falhou:", e)
+    return null
+  }
+}
+
 // Resposta automática com o link do cardápio (robô de IA desligado).
 //
 // Uma vez a cada 6 horas por cliente: quem manda cinco mensagens seguidas não
@@ -1024,12 +1086,32 @@ async function responderComLink(
   cfg: Record<string, unknown>,
   instanceName: string,
   phone: string,
+  mensagemDoCliente = "",
 ): Promise<boolean> {
   try {
     if (cfg.resposta_link_ativo !== true) return false
     const empresa = (cfg.empresas ?? {}) as Record<string, unknown>
     const slug = String(empresa.slug ?? "").trim()
     if (!slug || !cfg.empresa_id) return false
+
+    const soDigitosPre = String(phone).replace(/\D/g, "")
+    const telPre = (soDigitosPre.startsWith("55") && soDigitosPre.length >= 12) ? soDigitosPre.slice(2) : soDigitosPre
+    const linkPre = `https://lojaonline.fwcinter.com/${slug}?t=${telPre}`
+
+    // Perguntou por um produto? Isso é resposta, não recado automático: vale
+    // sempre, sem o limite de 6 horas — quem pergunta espera resposta.
+    const respProduto = await responderProduto(supabase, cfg.empresa_id as string, mensagemDoCliente, linkPre)
+    if (respProduto) {
+      await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+        body: JSON.stringify({ number: phone, text: respProduto }),
+      })
+      await supabase.from("whatsapp_conversas").insert({
+        empresa_id: cfg.empresa_id as string, phone, role: "assistant", content: respProduto,
+      })
+      return true
+    }
 
     const seisHoras = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
     const { data: jaFalou } = await supabase
@@ -1145,7 +1227,7 @@ serve(async (req) => {
           // crédito: o cardápio é que sabe preço, taxa, cashback e agendamento —
           // e ele está sempre atualizado, coisa que nenhum prompt fica.
           const respondeu = await responderComLink(
-            supabase, liga as Record<string, unknown>, instanceName, phoneEarly,
+            supabase, liga as Record<string, unknown>, instanceName, phoneEarly, conteudo,
           )
           if (respondeu) console.log("[link] resposta automatica enviada", phoneEarly)
         }
