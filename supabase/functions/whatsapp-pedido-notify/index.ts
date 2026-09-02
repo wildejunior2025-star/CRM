@@ -110,7 +110,7 @@ serve(async (req) => {
 
     const { data: pedido } = await supabase
       .from("pedidos_delivery")
-      .select("numero_pedido, cliente_telefone, empresa_id, codigo_entrega, tipo_entrega, motivo_cancelamento, agendado_para")
+      .select("numero_pedido, cliente_telefone, empresa_id, codigo_entrega, tipo_entrega, motivo_cancelamento, agendado_para, agendado_ate")
       .eq("id", pedido_id)
       .single()
 
@@ -156,10 +156,13 @@ serve(async (req) => {
       const d = new Date(pedido.agendado_para)
       const dia = d.toLocaleDateString("pt-BR", { timeZone: "America/Fortaleza", day: "2-digit", month: "2-digit" })
       const hora = d.toLocaleTimeString("pt-BR", { timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit" })
+      const horaFim = pedido.agendado_ate
+        ? new Date(pedido.agendado_ate).toLocaleTimeString("pt-BR", { timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit" })
+        : null
       const hojeBR = new Date().toLocaleDateString("pt-BR", { timeZone: "America/Fortaleza", day: "2-digit", month: "2-digit" })
       mensagem += `
 
-🗓️ *Agendado para ${dia === hojeBR ? "hoje" : dia} às ${hora}* — é nesse horário que a gente prepara.`
+🗓️ *Agendado para ${dia === hojeBR ? "hoje" : dia}${horaFim ? `, das ${hora} às ${horaFim}` : ` às ${hora}`}*.`
     }
 
     // Cashback e indicacao (mig 0177): so no "entregue", e so quando a loja

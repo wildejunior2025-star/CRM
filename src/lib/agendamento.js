@@ -1,9 +1,10 @@
-// Pedido agendado: quais dias e horas o cliente pode escolher.
+// Pedido agendado: quais dias e faixas o cliente pode escolher.
 //
-// A regra de quando a loja abre já existe (lib/feriados: grade da semana,
-// feriado e exceção marcada na mão). Aqui isso vira lista de horários clicáveis:
-// só dentro dos períodos que a loja abre, respeitando a antecedência mínima e
-// sem oferecer horário que já passou.
+// A loja cadastra as JANELAS dela ("08:00 às 18:00, até 10 pedidos" — mig 0225)
+// e a regra de quando ela abre já existe (lib/feriados: grade da semana,
+// feriado e exceção marcada na mão). Aqui as duas coisas viram a lista de
+// opções clicáveis: só nos dias em que abre, respeitando a antecedência mínima
+// e sem oferecer janela que já passou ou que bateu o limite.
 //
 // Tudo no fuso da loja (America/Fortaleza, o mesmo do resto do sistema). O
 // celular do cliente pode estar em qualquer fuso — por isso a hora escolhida
@@ -13,13 +14,10 @@ import { comoFicaNoDia, hojeBR } from './feriados'
 const FUSO = 'America/Fortaleza'
 const p2 = (n) => String(n).padStart(2, '0')
 
-export const PASSO_MIN = 30   // de meia em meia hora
-
 const paraMin = (hm) => {
   const [h, m] = String(hm ?? '').slice(0, 5).split(':').map(Number)
   return (h || 0) * 60 + (m || 0)
 }
-const paraHM = (min) => `${p2(Math.floor(min / 60) % 24)}:${p2(min % 60)}`
 
 // Agora na loja, em minutos do dia (e a data de hoje na loja).
 function agoraNaLoja() {
@@ -47,48 +45,53 @@ export function rotuloDoDia(ymd, hoje = hojeBR()) {
 }
 
 /**
- * Dias com horários livres pra agendar.
+ * Dias com FAIXAS livres pra agendar (mig 0225).
  *
- * @param dias        até quantos dias à frente (0 = só hoje)
- * @param antecedencia minutos mínimos entre agora e o horário escolhido
- * @returns [{ ymd, rotulo, horarios: ['11:00', '11:30', ...] }] — dias sem
- *          horário sobrando não entram na lista.
+ * A loja cadastra as janelas dela ("08:00 às 18:00, até 10 pedidos"); aqui elas
+ * viram opção clicável nos próximos dias em que a loja abre. Faixa que já
+ * acabou, que não cabe na antecedência mínima ou que bateu o limite não entra.
+ *
+ * @param faixas  [{ i, f, limite }] — empresas.agendamento_faixas
+ * @param vagas   { 'YYYY-MM-DD': { 'HH:MM': { usados, limite } } } — o que a
+ *                RPC agendamento_vagas devolveu. Dia sem resposta ainda conta
+ *                como livre: melhor oferecer e o servidor recusar do que
+ *                esconder tudo enquanto a consulta não volta.
+ * @returns [{ ymd, rotulo, faixas: [{ i, f, rotulo, cheia }] }]
  */
 export function diasParaAgendar({
   grade, excecoes = {}, fechaFeriado = false,
-  dias = 2, antecedencia = 60, passo = PASSO_MIN,
+  dias = 2, antecedencia = 60, faixas = [], vagas = {},
 } = {}) {
   const { ymd: hoje, min: agora } = agoraNaLoja()
-  const saida = []
+  const limpas = (Array.isArray(faixas) ? faixas : [])
+    .filter(f => f?.i && f?.f)
+    .sort((a, b) => paraMin(a.i) - paraMin(b.i))
+  if (!limpas.length) return []
 
+  const saida = []
   for (let i = 0; i <= Math.max(0, dias); i++) {
     const ymd = somaDias(hoje, i)
-    const dia = comoFicaNoDia(ymd, { grade, excecoes, fechaFeriado })
-    if (!dia.aberto) continue
+    if (!comoFicaNoDia(ymd, { grade, excecoes, fechaFeriado }).aberto) continue
 
-    // Loja sem grade cadastrada não tem período nenhum: oferece o comercial
-    // (8h às 22h) em vez de não oferecer nada — é melhor um palpite razoável
-    // que o cliente pode conferir do que a tela dizer "não dá pra agendar".
-    const periodos = dia.periodos.length ? dia.periodos : [{ i: '08:00', f: '22:00' }]
-
-    const horarios = []
-    for (const p of periodos) {
-      if (!p?.i || !p?.f) continue
-      const ini = paraMin(p.i)
-      // Período que vira a madrugada (18:00–02:00) fecha no fim do dia: o resto
-      // pertence ao dia seguinte, e é lá que ele vai aparecer.
-      const fim = paraMin(p.f) > ini ? paraMin(p.f) : 24 * 60
-      // Primeiro múltiplo do passo dentro do período.
-      let t = Math.ceil(ini / passo) * passo
-      for (; t < fim; t += passo) {
-        // Só hoje tem "já passou": nos outros dias o dia inteiro serve.
-        if (i === 0 && t < agora + antecedencia) continue
-        horarios.push(paraHM(t))
-      }
+    const doDia = []
+    for (const f of limpas) {
+      const ini = paraMin(f.i)
+      const fim = paraMin(f.f) > ini ? paraMin(f.f) : 24 * 60
+      // Hoje: a janela precisa ter sobra depois da antecedência mínima. Faixa
+      // que termina antes disso não serve mais.
+      if (i === 0 && fim <= agora + antecedencia) continue
+      const v = vagas?.[ymd]?.[f.i]
+      const limite = Number(v?.limite ?? f.limite ?? 0)
+      const usados = Number(v?.usados ?? 0)
+      doDia.push({
+        i: f.i, f: f.f,
+        rotulo: `${f.i} às ${f.f}`,
+        cheia: limite > 0 && usados >= limite,
+      })
     }
-    if (horarios.length) {
-      saida.push({ ymd, rotulo: rotuloDoDia(ymd, hoje), horarios: [...new Set(horarios)].sort() })
-    }
+    // Dia inteiro esgotado ainda aparece: o cliente precisa entender que tem
+    // horário, e que ele acabou — some da lista parece que a loja não agenda.
+    if (doDia.length) saida.push({ ymd, rotulo: rotuloDoDia(ymd, hoje), faixas: doDia })
   }
   return saida
 }
@@ -96,8 +99,9 @@ export function diasParaAgendar({
 // 'YYYY-MM-DD' + 'HH:MM' → ISO com o fuso da loja escrito na mão.
 export const paraISO = (ymd, hm) => `${ymd}T${String(hm).slice(0, 5)}:00-03:00`
 
-// Como a hora agendada aparece pro cliente e pra loja: "hoje às 11:30".
-export function rotuloAgendado(iso, { comData = false } = {}) {
+// Como a janela agendada aparece pro cliente e pra loja: "hoje das 14:00 às
+// 14:30". Sem o fim (pedido antigo, de antes das faixas) volta ao "às 14:30".
+export function rotuloAgendado(iso, { comData = false, ate = null } = {}) {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
@@ -107,9 +111,14 @@ export function rotuloAgendado(iso, { comData = false } = {}) {
   const hm = d.toLocaleTimeString('pt-BR', {
     timeZone: FUSO, hour: '2-digit', minute: '2-digit',
   })
+  const fim = ate ? new Date(ate) : null
+  const hmFim = fim && !Number.isNaN(fim.getTime())
+    ? fim.toLocaleTimeString('pt-BR', { timeZone: FUSO, hour: '2-digit', minute: '2-digit' })
+    : null
+  const quando = hmFim ? `das ${hm} às ${hmFim}` : `às ${hm}`
   const dia = rotuloDoDia(ymd)
-  if (!comData && (dia === 'Hoje' || dia === 'Amanhã')) return `${dia.toLowerCase()} às ${hm}`
-  return `${dia} às ${hm}`
+  if (!comData && (dia === 'Hoje' || dia === 'Amanhã')) return `${dia.toLowerCase()} ${quando}`
+  return `${dia} ${quando}`
 }
 
 // Ainda falta tempo pra hora combinada? É o que segura o pedido na aba

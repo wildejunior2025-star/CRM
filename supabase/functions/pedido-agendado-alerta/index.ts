@@ -32,7 +32,7 @@ const qtd = (v: unknown) => {
 }
 
 // "hoje às 14:30" / "amanhã às 09:00" / "qui 04/09 às 11:00", no fuso da loja.
-function quandoTexto(iso: string): string {
+function quandoTexto(iso: string, ate?: string | null): string {
   const d = new Date(iso)
   const fmt = (o: Intl.DateTimeFormatOptions) =>
     new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Fortaleza", ...o }).format(d)
@@ -46,9 +46,13 @@ function quandoTexto(iso: string): string {
     timeZone: "America/Fortaleza", year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date(Date.now() + 86400000))
   const hora = fmt({ hour: "2-digit", minute: "2-digit" })
-  if (dia === hoje) return `hoje às ${hora}`
-  if (dia === amanha) return `amanhã às ${hora}`
-  return `${fmt({ day: "2-digit", month: "2-digit" })} às ${hora}`
+  const horaFim = ate
+    ? new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit" }).format(new Date(ate))
+    : null
+  const janela = horaFim ? `das ${hora} às ${horaFim}` : `às ${hora}`
+  if (dia === hoje) return `hoje ${janela}`
+  if (dia === amanha) return `amanhã ${janela}`
+  return `${fmt({ day: "2-digit", month: "2-digit" })} ${janela}`
 }
 
 // ── A loja está aberta AGORA? ────────────────────────────────
@@ -148,7 +152,7 @@ serve(async (req) => {
 
     const { data: p } = await sb
       .from("pedidos_delivery")
-      .select("id, empresa_id, numero_pedido, cliente_nome, cliente_telefone, itens, total, tipo_entrega, forma_pagamento, agendado_para, status, observacoes")
+      .select("id, empresa_id, numero_pedido, cliente_nome, cliente_telefone, itens, total, tipo_entrega, forma_pagamento, agendado_para, agendado_ate, status, observacoes")
       .eq("id", pedido_id)
       .maybeSingle()
 
@@ -190,7 +194,7 @@ serve(async (req) => {
     const msg = [
       `🗓️ *${emp?.nome ?? "Sua loja"}* — pedido AGENDADO`,
       "",
-      `*Para ${quandoTexto(p.agendado_para)}*`,
+      `*Para ${quandoTexto(p.agendado_para, p.agendado_ate)}*`,
       `Pedido #${p.numero_pedido ?? ""} · ${p.tipo_entrega === "retirada" ? "RETIRADA" : "ENTREGA"}`,
       `Cliente: ${p.cliente_nome ?? "—"}${p.cliente_telefone ? ` (${p.cliente_telefone})` : ""}`,
       "",

@@ -584,7 +584,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, numero, telefone_contato, bairro, cidade, estado, latitude, longitude, delivery_ativo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct')
+      .select('endereco, numero, telefone_contato, bairro, cidade, estado, latitude, longitude, delivery_ativo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, agendamento_faixas, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -597,7 +597,18 @@ export default function DeliveryCheckout() {
   const [excecoes, setExcecoes] = useState({})
   const [quando, setQuando] = useState('agora')   // 'agora' | 'agendado'
   const [agDia, setAgDia] = useState('')
-  const [agHora, setAgHora] = useState('')
+  const [agHora, setAgHora] = useState('')       // começo da janela ('HH:MM')
+  // Relógio de meio em meio minuto. Fica aqui em cima porque tudo que é de
+  // horário depende dele — e dependência de efeito é lida no render: declarado
+  // depois, o checkout abria em branco com "Cannot access before initialization".
+  const [tiqueRelogio, setTiqueRelogio] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTiqueRelogio(t => t + 1), 30000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Vagas por dia/janela, vindas da RPC agendamento_vagas (mig 0225).
+  const [vagas, setVagas] = useState({})
 
   useEffect(() => {
     if (!state?.empresaId) return
@@ -605,6 +616,29 @@ export default function DeliveryCheckout() {
     carregarExcecoes(supabase, state.empresaId).then(e => { if (vivo) setExcecoes(e) })
     return () => { vivo = false }
   }, [state?.empresaId])
+
+  // Quantas vagas sobraram em cada janela dos próximos dias. Vem por RPC: o
+  // visitante anônimo não pode ler a tabela de pedidos, e aqui ele recebe só a
+  // contagem. Recarrega ao abrir e a cada tique do relógio (alguém pode ter
+  // fechado um pedido enquanto ele preenchia o endereço).
+  useEffect(() => {
+    if (!state?.empresaId || !lojaEndereco?.agendamento_ativo) return
+    const nDias = Math.max(0, Number(lojaEndereco?.agendamento_dias ?? 2))
+    const hoje = new Date()
+    let vivo = true
+    ;(async () => {
+      const acc = {}
+      for (let i = 0; i <= nDias; i++) {
+        const d = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() + i)
+        const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        const { data } = await supabase.rpc('agendamento_vagas', { p_empresa: state.empresaId, p_data: ymd })
+        acc[ymd] = Object.fromEntries((data ?? []).map(r => [r.inicio, { usados: r.usados, limite: r.limite }]))
+      }
+      if (vivo) setVagas(acc)
+    })()
+    return () => { vivo = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.empresaId, lojaEndereco?.agendamento_ativo, lojaEndereco?.agendamento_dias, tiqueRelogio])
 
   const agendaLigada = !!lojaEndereco?.agendamento_ativo
 
@@ -614,11 +648,6 @@ export default function DeliveryCheckout() {
   // finalizar. Quem abriu o cardápio 11h50 e demorou pra fechar o pedido
   // passava reto: o pedido #1003 da CD Bom entrou 12h02 com a loja fechada
   // desde meio-dia (02/09/2026).
-  const [tiqueRelogio, setTiqueRelogio] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setTiqueRelogio(t => t + 1), 30000)
-    return () => clearInterval(id)
-  }, [])
   const lojaAbertaAgora = useMemo(() => {
     // Config ainda não chegou: vale o que a vitrine disse (não dá pra travar
     // ninguém por causa de uma consulta lenta).
@@ -640,9 +669,12 @@ export default function DeliveryCheckout() {
           fechaFeriado: !!lojaEndereco?.feriados_fecha,
           dias: Number(lojaEndereco?.agendamento_dias ?? 2),
           antecedencia: Number(lojaEndereco?.agendamento_antecedencia_min ?? 60),
+          faixas: lojaEndereco?.agendamento_faixas,
+          vagas,
         })
       : []
-  ), [agendaLigada, lojaEndereco, excecoes])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [agendaLigada, lojaEndereco, excecoes, vagas, tiqueRelogio])
 
   // Loja fechada só tem um caminho: agendar. Já deixa o primeiro horário livre
   // escolhido — a maioria quer o mais cedo possível.
@@ -651,15 +683,21 @@ export default function DeliveryCheckout() {
     if (!lojaEstavaAberta) setQuando('agendado')
   }, [agendaLigada, lojaEstavaAberta])
 
+  // Já deixa escolhida a primeira janela LIVRE — a maioria quer o quanto antes,
+  // e cair numa esgotada só pra descobrir no fim seria armadilha.
   useEffect(() => {
     if (quando !== 'agendado' || !diasAgenda.length) return
     const dia = diasAgenda.find(d => d.ymd === agDia) ?? diasAgenda[0]
-    if (dia.ymd !== agDia) { setAgDia(dia.ymd); setAgHora(dia.horarios[0]); return }
-    if (!dia.horarios.includes(agHora)) setAgHora(dia.horarios[0])
+    const livre = dia.faixas.find(f => !f.cheia) ?? dia.faixas[0]
+    if (dia.ymd !== agDia) { setAgDia(dia.ymd); setAgHora(livre?.i ?? ''); return }
+    const atual = dia.faixas.find(f => f.i === agHora)
+    if (!atual || atual.cheia) setAgHora(livre?.i ?? '')
   }, [quando, diasAgenda, agDia, agHora])
 
-  const horariosDoDia = diasAgenda.find(d => d.ymd === agDia)?.horarios ?? []
-  const agendadoPara = (quando === 'agendado' && agDia && agHora) ? paraISO(agDia, agHora) : null
+  const faixasDoDia = diasAgenda.find(d => d.ymd === agDia)?.faixas ?? []
+  const faixaEscolhida = faixasDoDia.find(f => f.i === agHora && !f.cheia) ?? null
+  const agendadoPara = (quando === 'agendado' && agDia && faixaEscolhida) ? paraISO(agDia, faixaEscolhida.i) : null
+  const agendadoAte = (quando === 'agendado' && agDia && faixaEscolhida) ? paraISO(agDia, faixaEscolhida.f) : null
 
   // A loja pode desligar "Retirar na loja" nas configurações (Raio de entrega).
   // Enquanto os dados não chegaram, deixa aparecer — assim o botão não pisca
@@ -1184,6 +1222,7 @@ export default function DeliveryCheckout() {
         // Hora combinada. No PIX o cliente paga AGORA e a comida sai na hora
         // marcada — quem agenda já garantiu o lugar dele.
         agendado_para: agendadoPara,
+        agendado_ate: agendadoAte,
         acrescimo: acrescimoPagamento,
       }
       let pixData = null, pixErr = null
@@ -1234,6 +1273,7 @@ export default function DeliveryCheckout() {
           : null,
         observacoes: form.observacoes.trim() || null,
         agendado_para: agendadoPara,
+        agendado_ate: agendadoAte,
         acrescimo: acrescimoPagamento,
       })
       .select('id')
@@ -1407,13 +1447,16 @@ export default function DeliveryCheckout() {
                           </button>
                         ))}
                       </div>
-                      <label className="dco-label" style={{ marginTop: 12 }}>Horário</label>
+                      <label className="dco-label" style={{ marginTop: 12 }}>Horário da entrega</label>
                       <div className="dco-ag-chips">
-                        {horariosDoDia.map(h => (
-                          <button key={h} type="button"
-                            className={`dco-ag-chip${agHora === h ? ' dco-ag-chip--active' : ''}`}
-                            onClick={() => setAgHora(h)}>
-                            {h}
+                        {faixasDoDia.map(f => (
+                          <button key={f.i} type="button"
+                            className={`dco-ag-chip${agHora === f.i && !f.cheia ? ' dco-ag-chip--active' : ''}`}
+                            onClick={() => !f.cheia && setAgHora(f.i)}
+                            disabled={f.cheia}
+                            title={f.cheia ? 'Esgotado pra esse dia' : undefined}
+                            style={f.cheia ? { opacity: .45, cursor: 'not-allowed', textDecoration: 'line-through' } : undefined}>
+                            {f.rotulo}{f.cheia ? ' · esgotado' : ''}
                           </button>
                         ))}
                       </div>
@@ -1423,9 +1466,14 @@ export default function DeliveryCheckout() {
                           background: 'rgba(124,58,237,.1)', border: '1px solid rgba(124,58,237,.3)',
                           fontSize: 13.5, lineHeight: 1.5,
                         }}>
-                          🗓️ Seu pedido fica agendado para <strong>{rotuloAgendado(agendadoPara, { comData: true })}</strong>
-                          {tipo === 'entrega' ? ' — é o horário em que a loja começa a preparar.' : ' — é o horário pra retirar.'}
+                          🗓️ Seu pedido fica agendado para <strong>{rotuloAgendado(agendadoPara, { comData: true, ate: agendadoAte })}</strong>
+                          {tipo === 'entrega' ? ' — é a janela em que a loja entrega.' : ' — é a janela pra retirar.'}
                         </div>
+                      )}
+                      {faixasDoDia.length > 0 && faixasDoDia.every(f => f.cheia) && (
+                        <p style={{ fontSize: 13, color: '#eab308', margin: '10px 0 0' }}>
+                          Todos os horários desse dia já encheram. Escolha outro dia.
+                        </p>
                       )}
                     </div>
                   )

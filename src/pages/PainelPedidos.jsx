@@ -86,7 +86,7 @@ function agendadoAindaVai(pedido) {
 // De quando começa a contar o tempo de aceite. No agendado é da HORA COMBINADA:
 // contar da criação faria o pedido feito de manhã nascer expirado à tarde.
 function inicioDoAceite(pedido) {
-  return pedido?.agendado_para || pedido?.aguardando_desde || pedido?.created_at
+  return relogioDoPedido(pedido) || pedido?.aguardando_desde || pedido?.created_at
 }
 
 function getTempoRestante(createdAt, aguardandoDesde) {
@@ -3310,7 +3310,14 @@ function tempoDecorridoTxt(iso) {
 const ATRASO_PADRAO_MIN = 40
 // Pedido agendado conta o tempo da HORA COMBINADA, não de quando foi feito:
 // senão o almoço pedido às 8h já nasce "em atraso" ao entrar na cozinha.
-const relogioDoPedido = (p) => p?.agendado_para || p?.created_at
+const relogioDoPedido = (p) => {
+  // Janela que já começou quando o pedido entrou (a loja que entrega "das 08h
+  // às 18h" recebe pedido ao meio-dia) não pode contar desde as 08h: nasceria
+  // atrasado. Vale o que for MAIS RECENTE entre a hora combinada e a criação.
+  const a = p?.agendado_para
+  if (a && new Date(a).getTime() > new Date(p?.created_at).getTime()) return a
+  return p?.created_at
+}
 
 function pedidoAtrasado(pedido) {
   if (!['confirmado', 'em_preparo', 'pronto'].includes(pedido.status)) return false
@@ -3440,7 +3447,7 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
       <div className="pp-mini-tags">
         {pedido.agendado_para && (
           <span className="pp-mini-badge" style={{ background: 'rgba(14,165,233,.18)', color: '#0284c7' }}>
-            🗓️ {rotuloAgendado(pedido.agendado_para, { comData: true })}
+            🗓️ {rotuloAgendado(pedido.agendado_para, { comData: true, ate: pedido.agendado_ate })}
           </span>
         )}
         <span className="pp-mini-badge" style={{ background: oc.bg, color: oc.color }}>{oc.label}</span>
@@ -4140,6 +4147,7 @@ export default function PainelPedidos() {
   const [catalogo, setCatalogo] = useState([])
   const [complementosPorProduto, setComplementosPorProduto] = useState({}) // produtoId -> [grupos] (pausáveis)
   const [catExpandido, setCatExpandido] = useState(() => new Set())        // produtos com complementos abertos
+  const [catCatsAbertas, setCatCatsAbertas] = useState(() => new Set())    // categorias abertas (nascem fechadas)
   const [loadingCatalogo, setLoadingCatalogo] = useState(false)
   const [buscaCatalogo, setBuscaCatalogo] = useState('')
   const [ordemCategorias, setOrdemCategorias] = useState({})
@@ -4450,6 +4458,16 @@ export default function PainelPedidos() {
     setCatExpandido(prev => {
       const n = new Set(prev)
       n.has(produtoId) ? n.delete(produtoId) : n.add(produtoId)
+      return n
+    })
+  }
+
+  // Categorias nascem fechadas: numa loja com 200 produtos o lojista rolava a
+  // lista inteira pra achar o item. Abre só a que ele clicar.
+  function toggleCategoriaCat(categoria) {
+    setCatCatsAbertas(prev => {
+      const n = new Set(prev)
+      n.has(categoria) ? n.delete(categoria) : n.add(categoria)
       return n
     })
   }

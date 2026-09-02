@@ -35,12 +35,15 @@ export default function HorariosLoja() {
   // Pedido agendado (mig 0222): mora aqui porque quem decide isso está mexendo
   // justamente na grade de horário da loja.
   const [ag, setAg] = useState({ ativo: false, dias: 2, antecedencia: 60, libera: 45 })
+  // Janelas de entrega do agendamento (mig 0225): [{ i, f, limite }]. Valem em
+  // todo dia que a loja abre — a grade acima é que decide quais dias.
+  const [faixas, setFaixas] = useState([])
 
   useEffect(() => {
     if (!profile?.empresa_id) return
     supabase
       .from('empresas')
-      .select('id, horario_abertura, horario_fechamento, horarios_funcionamento, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, agendamento_libera_min')
+      .select('id, horario_abertura, horario_fechamento, horarios_funcionamento, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, agendamento_libera_min, agendamento_faixas')
       .eq('id', profile.empresa_id)
       .single()
       .then(({ data }) => {
@@ -53,6 +56,7 @@ export default function HorariosLoja() {
           antecedencia: Number(data.agendamento_antecedencia_min ?? 60),
           libera: Number(data.agendamento_libera_min ?? 45),
         })
+        setFaixas(Array.isArray(data.agendamento_faixas) ? data.agendamento_faixas : [])
       })
   }, [profile?.empresa_id])
 
@@ -99,6 +103,11 @@ export default function HorariosLoja() {
         agendamento_dias: Math.max(0, Math.min(30, Number(ag.dias) || 0)),
         agendamento_antecedencia_min: Math.max(0, Math.min(1440, Number(ag.antecedencia) || 0)),
         agendamento_libera_min: Math.max(0, Math.min(1440, Number(ag.libera) || 0)),
+        // Faixa sem começo ou sem fim não vale nada: sai na hora de salvar em
+        // vez de virar horário fantasma no cardápio.
+        agendamento_faixas: faixas
+          .filter(f => f.i && f.f)
+          .map(f => ({ i: f.i, f: f.f, limite: Math.max(0, Number(f.limite) || 0) })),
       })
       .eq('id', empresaId)
     setSalvando(false)
@@ -192,6 +201,50 @@ export default function HorariosLoja() {
         </label>
 
         {ag.ativo && (
+          <>
+          {/* Janelas de entrega. É aqui que a loja diz o que consegue cumprir:
+              "08:00 às 18:00, até 10 pedidos" (sem prometer hora cravada) ou
+              faixas curtas de meia em meia hora, se ela trabalha assim. */}
+          <div style={{ marginTop: 16 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px' }}>Janelas de entrega</h3>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.5 }}>
+              O cliente escolhe uma <strong>janela</strong>, não uma hora exata — assim ninguém cobra
+              entrega "às 14:30 em ponto". Ponha o <strong>limite de pedidos</strong> de cada janela
+              pensando no seu <strong>dia mais forte</strong>: no dia fraco ele nem chega perto.
+              Limite <strong>0</strong> = sem limite. As janelas valem em todo dia que a loja abre.
+            </p>
+
+            {faixas.length === 0 && (
+              <p style={{ fontSize: 12.5, color: '#eab308', margin: '0 0 10px' }}>
+                ⚠️ Sem janela cadastrada o cliente não consegue agendar. Adicione pelo menos uma.
+              </p>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {faixas.map((f, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>de</span>
+                  <input type="time" value={f.i ?? ''}
+                    onChange={e => setFaixas(fs => fs.map((x, j) => (j === i ? { ...x, i: e.target.value } : x)))} />
+                  <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>às</span>
+                  <input type="time" value={f.f ?? ''}
+                    onChange={e => setFaixas(fs => fs.map((x, j) => (j === i ? { ...x, f: e.target.value } : x)))} />
+                  <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>· até</span>
+                  <input type="number" min="0" style={{ width: 72, textAlign: 'right' }} value={f.limite ?? 0}
+                    onChange={e => setFaixas(fs => fs.map((x, j) => (j === i ? { ...x, limite: e.target.value } : x)))} />
+                  <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>pedidos</span>
+                  <button type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px 10px' }}
+                    onClick={() => setFaixas(fs => fs.filter((_, j) => j !== i))}>✕</button>
+                </div>
+              ))}
+            </div>
+
+            <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 10 }}
+              onClick={() => setFaixas(fs => [...fs, { i: '08:00', f: '18:00', limite: 10 }])}>
+              + Adicionar janela
+            </button>
+          </div>
+
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 14 }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, minWidth: 150 }}>
               <span style={{ fontWeight: 600 }}>Até quantos dias à frente</span>
@@ -209,9 +262,10 @@ export default function HorariosLoja() {
               <span style={{ fontWeight: 600 }}>Cai na cozinha (min antes)</span>
               <input type="number" min="0" max="1440" step="5" value={ag.libera}
                 onChange={e => setAg(a => ({ ...a, libera: e.target.value }))} />
-              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>quanto tempo antes da hora ele entra na fila e imprime</span>
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>quanto tempo antes do começo da janela ele entra na fila e imprime</span>
             </label>
           </div>
+          </>
         )}
       </div>
 
