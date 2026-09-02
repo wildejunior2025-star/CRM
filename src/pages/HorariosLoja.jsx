@@ -204,65 +204,72 @@ export default function HorariosLoja() {
           <>
           {/* Janelas de entrega. É aqui que a loja diz o que consegue cumprir:
               "08:00 às 18:00, até 10 pedidos" (sem prometer hora cravada) ou
-              faixas curtas de meia em meia hora, se ela trabalha assim. */}
-          <div style={{ marginTop: 16 }}>
+              faixas curtas de meia em meia hora, se ela trabalha assim.
+              Usa a mesma grade das faixas por km (RaioEntrega.css) — é a
+              mesma ideia de tabela, e o lojista já conhece o desenho. */}
+          <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px' }}>Janelas de entrega</h3>
-            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.5 }}>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 14px', lineHeight: 1.55, maxWidth: 620 }}>
               O cliente escolhe uma <strong>janela</strong>, não uma hora exata — assim ninguém cobra
-              entrega "às 14:30 em ponto". Ponha o <strong>limite de pedidos</strong> de cada janela
-              pensando no seu <strong>dia mais forte</strong>: no dia fraco ele nem chega perto.
-              Limite <strong>0</strong> = sem limite. As janelas valem em todo dia que a loja abre.
+              entrega “às 14:30 em ponto”. O <strong>limite</strong> de cada janela deve ser pensado no seu
+              <strong> dia mais forte</strong>: no dia fraco ele nem chega perto. Limite <strong>0</strong> = sem limite.
             </p>
 
-            {faixas.length === 0 && (
-              <p style={{ fontSize: 12.5, color: '#eab308', margin: '0 0 10px' }}>
-                ⚠️ Sem janela cadastrada o cliente não consegue agendar. Adicione pelo menos uma.
-              </p>
+            {faixas.length === 0 ? (
+              <div style={{
+                padding: '12px 14px', borderRadius: 10, marginBottom: 12,
+                background: 'rgba(234,179,8,.10)', border: '1px solid rgba(234,179,8,.35)',
+                fontSize: 12.5, color: '#eab308', lineHeight: 1.5,
+              }}>
+                Sem janela cadastrada o cliente <strong>não consegue agendar</strong>. Adicione pelo menos uma.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 620 }}>
+                <div className="re-faixas-header">
+                  <span className="re-faixas-col-label">De</span>
+                  <span className="re-faixas-col-label">Até</span>
+                  <span className="re-faixas-col-label">Máx. de pedidos</span>
+                  <span />
+                </div>
+                {faixas.map((f, i) => (
+                  <div className="re-faixas-row" key={i}>
+                    <input type="time" value={f.i ?? ''} aria-label="Começo da janela"
+                      onChange={e => setFaixas(fs => fs.map((x, j) => (j === i ? { ...x, i: e.target.value } : x)))} />
+                    <input type="time" value={f.f ?? ''} aria-label="Fim da janela"
+                      onChange={e => setFaixas(fs => fs.map((x, j) => (j === i ? { ...x, f: e.target.value } : x)))} />
+                    <input type="number" min="0" inputMode="numeric" value={f.limite ?? 0} aria-label="Máximo de pedidos"
+                      onChange={e => setFaixas(fs => fs.map((x, j) => (j === i ? { ...x, limite: e.target.value } : x)))} />
+                    <button type="button" className="re-faixas-remove" title="Remover janela"
+                      onClick={() => setFaixas(fs => fs.filter((_, j) => j !== i))}>×</button>
+                  </div>
+                ))}
+              </div>
             )}
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {faixas.map((f, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>de</span>
-                  <input type="time" value={f.i ?? ''}
-                    onChange={e => setFaixas(fs => fs.map((x, j) => (j === i ? { ...x, i: e.target.value } : x)))} />
-                  <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>às</span>
-                  <input type="time" value={f.f ?? ''}
-                    onChange={e => setFaixas(fs => fs.map((x, j) => (j === i ? { ...x, f: e.target.value } : x)))} />
-                  <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>· até</span>
-                  <input type="number" min="0" style={{ width: 72, textAlign: 'right' }} value={f.limite ?? 0}
-                    onChange={e => setFaixas(fs => fs.map((x, j) => (j === i ? { ...x, limite: e.target.value } : x)))} />
-                  <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>pedidos</span>
-                  <button type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px 10px' }}
-                    onClick={() => setFaixas(fs => fs.filter((_, j) => j !== i))}>✕</button>
-                </div>
-              ))}
-            </div>
-
-            <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 10 }}
+            <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 12 }}
               onClick={() => setFaixas(fs => [...fs, { i: '08:00', f: '18:00', limite: 10 }])}>
               + Adicionar janela
             </button>
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 14 }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, minWidth: 150 }}>
-              <span style={{ fontWeight: 600 }}>Até quantos dias à frente</span>
+          <div className="re-ag-opcoes">
+            <label>
+              <span className="re-faixas-col-label">Até quantos dias à frente</span>
               <input type="number" min="0" max="30" value={ag.dias}
                 onChange={e => setAg(a => ({ ...a, dias: e.target.value }))} />
-              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>0 = só hoje · 2 = hoje, amanhã e depois</span>
+              <small>0 = só hoje · 2 = hoje, amanhã e depois</small>
             </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, minWidth: 150 }}>
-              <span style={{ fontWeight: 600 }}>Antecedência mínima (min)</span>
+            <label>
+              <span className="re-faixas-col-label">Antecedência mínima</span>
               <input type="number" min="0" max="1440" step="15" value={ag.antecedencia}
                 onChange={e => setAg(a => ({ ...a, antecedencia: e.target.value }))} />
-              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>ninguém agenda pra daqui a 5 minutos</span>
+              <small>em minutos — ninguém agenda pra daqui a 5 min</small>
             </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, minWidth: 150 }}>
-              <span style={{ fontWeight: 600 }}>Cai na cozinha (min antes)</span>
+            <label>
+              <span className="re-faixas-col-label">Cai na cozinha</span>
               <input type="number" min="0" max="1440" step="5" value={ag.libera}
                 onChange={e => setAg(a => ({ ...a, libera: e.target.value }))} />
-              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>quanto tempo antes do começo da janela ele entra na fila e imprime</span>
+              <small>minutos antes da janela começar — aí ele imprime</small>
             </label>
           </div>
           </>

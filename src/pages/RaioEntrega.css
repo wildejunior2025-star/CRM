@@ -378,6 +378,19 @@
   min-width: 0;   /* deixa o input encolher junto com a coluna */
   width: 100%;
   box-sizing: border-box;
+  /* Sem isto o campo de número sai BRANCO no tema escuro (é o padrão do
+     navegador): a linha ficava com dois campos escuros e um branco no meio. */
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.re-faixas-row input:focus,
+.re-ag-opcoes input:focus {
+  outline: none;
+  border-color: var(--primary);
 }
 
 .re-faixas-remove {
@@ -576,4 +589,41 @@
     flex-wrap: wrap;
     gap: 6px;
   }
+}
+
+/* ── Pedido agendado (tela de Horários) ── */
+/* Os três ajustes finos do agendamento. Cada um é um rótulo em cima, campo
+   curto embaixo e a explicação em letra miúda — antes eram três campos largos
+   em linha, com o texto de ajuda vazando pra fora do card. */
+.re-ag-opcoes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  max-width: 620px;
+}
+
+.re-ag-opcoes label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.re-ag-opcoes input {
+  width: 90px;
+  text-align: center;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.re-ag-opcoes small {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.4;
 }
