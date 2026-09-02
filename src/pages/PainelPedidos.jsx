@@ -3958,10 +3958,13 @@ export default function PainelPedidos() {
       // painel no meio da tarde imprimiria de novo todo agendado do dia.
       if (!pendentes.has(p.id)) continue
       pendentes.delete(p.id)
-      if (p.status !== 'aguardando') continue
+      // O agendado já entra ACEITO (mig 0224), então aqui ele costuma estar em
+      // 'confirmado' — e é assim mesmo que precisa imprimir. Só quem ainda está
+      // 'aguardando' passa pelo aceite (manual ou automático).
+      if (!['aguardando', 'confirmado'].includes(p.status)) continue
       if (deveAutoImprimir() && !fwcImprimeRef.current) autoImprimirPedido(p)
       iniciarLoopSom()
-      if (aceitarAutoAtivo()) handleConfirmar(p.id, tempoPrevistoMin(p, empresa))
+      if (p.status === 'aguardando' && aceitarAutoAtivo()) handleConfirmar(p.id, tempoPrevistoMin(p, empresa))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pedidos, ticAgenda])
