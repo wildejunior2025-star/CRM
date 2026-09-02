@@ -118,6 +118,10 @@ export default function DeliveryLoja() {
   const cartKey = loja?.id ? `sacola_${loja.id}` : null
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [optProduto, setOptProduto] = useState(null) // produto aberto no modal de complementos
+  // Categoria aberta por inteiro (só no catálogo grande). null = tela inicial
+  // com a prévia de cada uma. Fica aqui em cima porque a busca (mais abaixo)
+  // precisa fechá-la.
+  const [catAberta, setCatAberta] = useState(null)
   // Cardapio que nao carregou inteiro NAO vira loja aberta pela metade (ver lerOuFalhar)
   const [erroCardapio, setErroCardapio] = useState(false)
   const [tentativa, setTentativa] = useState(0)
@@ -523,6 +527,10 @@ export default function DeliveryLoja() {
     })
   const semCategoria = porCategoria.get('__sem__') ?? []
   const todasCats = semCategoria.length > 0 ? [...categorias, '__sem__'] : categorias
+  // Mercado/depósito (4.278 itens no maior) abre em prévia; restaurante (o mais
+  // gordo tem 218) segue mostrando tudo. O corte é automático — a loja não
+  // precisa configurar nada.
+  const catalogoGrande = produtos.length > CATALOGO_GRANDE
 
   // Cardápio grande não pode nascer inteiro no DOM. Monta as primeiras seções e
   // acrescenta conforme o cliente rola. Cardápio pequeno cabe todo no primeiro
@@ -547,6 +555,10 @@ export default function DeliveryLoja() {
   // Sem acento dos dois lados: ninguém digita "Camarão" no celular, digita
   // "camarao" — e antes disso não achava nada e o cliente ia embora.
   const buscaTrim = semAcento(busca)
+  // Buscar sai da categoria aberta: o resultado varre o cardápio inteiro, e
+  // deixar a categoria aberta por baixo esconderia o que ele achou.
+  useEffect(() => { if (buscaTrim) setCatAberta(null) }, [buscaTrim])
+
   const resultadosBusca = buscaTrim
     ? produtosFiltrados.filter(p =>
         (!p.categoria || catDisponivelAgora(p.categoria)) &&
@@ -842,6 +854,27 @@ export default function DeliveryLoja() {
             )}
           </div>
         ) : (
+          catAberta ? (
+            /* Categoria inteira, aberta pelo "Ver mais". Começa com 50 e vai
+               puxando mais 30 conforme o cliente desce — é o que deixa a lista
+               de 800 itens do depósito rolar sem travar. */
+            <>
+              <button type="button" className="dloja-voltar-cat" onClick={() => setCatAberta(null)}>
+                ← Voltar pro cardápio
+              </button>
+              <SecaoProdutos
+                cat={catAberta}
+                titulo={catAberta === '__sem__' ? 'Outros' : catAberta}
+                produtos={catAberta === '__sem__' ? semCategoria : (porCategoria.get(catAberta) ?? [])}
+                qtdProduto={qtdProduto}
+                lojaAberta={podePedir}
+                abrirProduto={abrirProduto}
+                addOne={addOne}
+                removeOne={removeOne}
+                inicial={PRIMEIRO_LOTE}
+              />
+            </>
+          ) : (
           <>
             {catsVisiveis.map(cat => (
               <SecaoProdutos
@@ -855,6 +888,8 @@ export default function DeliveryLoja() {
                 abrirProduto={abrirProduto}
                 addOne={addOne}
                 removeOne={removeOne}
+                previa={catalogoGrande ? PREVIA_POR_CATEGORIA : null}
+                onVerMais={() => { setCatAberta(cat); window.scrollTo({ top: 0 }) }}
               />
             ))}
             {/* Chegou perto do fim: nasce o próximo lote de categorias. */}
@@ -862,6 +897,7 @@ export default function DeliveryLoja() {
               <div ref={fimDasSecoesRef} style={{ height: 1 }} aria-hidden="true" />
             )}
           </>
+          )
         )}
       </main>
 
@@ -978,13 +1014,29 @@ export default function DeliveryLoja() {
 // o celular travava antes de desenhar qualquer coisa na tela.
 const ITENS_POR_VEZ = 30
 
-function SecaoProdutos({ titulo, cat, produtos, refCallback, qtdProduto, lojaAberta, abrirProduto, addOne, removeOne }) {
-  const [visiveis, setVisiveis] = useState(ITENS_POR_VEZ)
-  const fimRef = useRef(null)
+// Catálogo de mercado/depósito abre em PRÉVIA (mig visual 02/09/2026): mostra
+// alguns itens de cada categoria e um "Ver mais", igual ao mercado do iFood.
+// O depósito tem 4.278 produtos em 19 categorias — desenhar 19 seções cheias
+// fazia o celular engasgar antes de mostrar qualquer coisa. Restaurante (o mais
+// gordo tem 218) continua abrindo com tudo à mostra, como sempre foi.
+const CATALOGO_GRANDE = 300
+const PREVIA_POR_CATEGORIA = 4
+const PRIMEIRO_LOTE = 50   // ao abrir a categoria inteira
 
-  useEffect(() => { setVisiveis(ITENS_POR_VEZ) }, [produtos])
+function SecaoProdutos({
+  titulo, cat, produtos, refCallback, qtdProduto, lojaAberta, abrirProduto, addOne, removeOne,
+  previa = null, onVerMais = null, inicial = ITENS_POR_VEZ,
+}) {
+  const [visiveis, setVisiveis] = useState(inicial)
+  const fimRef = useRef(null)
+  // Na prévia o rodapé de "carregar mais" não existe: quem quer o resto clica
+  // em Ver mais e vai pra categoria inteira.
+  const lista = previa ? produtos.slice(0, previa) : produtos.slice(0, visiveis)
+  const faltam = produtos.length - lista.length
+
+  useEffect(() => { setVisiveis(inicial) }, [produtos, inicial])
   useEffect(() => {
-    if (visiveis >= produtos.length) return
+    if (previa || visiveis >= produtos.length) return
     const el = fimRef.current
     if (!el) return
     const io = new IntersectionObserver(([e]) => {
@@ -992,13 +1044,20 @@ function SecaoProdutos({ titulo, cat, produtos, refCallback, qtdProduto, lojaAbe
     }, { rootMargin: '600px' })
     io.observe(el)
     return () => io.disconnect()
-  }, [visiveis, produtos.length])
+  }, [visiveis, produtos.length, previa])
 
   return (
     <section className="dloja-section" ref={refCallback} data-cat={cat}>
-      <h2 className="dloja-cat-title">{titulo}</h2>
+      <div className="dloja-cat-head">
+        <h2 className="dloja-cat-title">{titulo}</h2>
+        {previa && faltam > 0 && (
+          <button type="button" className="dloja-ver-mais" onClick={onVerMais}>
+            Ver mais <span>{faltam}</span>
+          </button>
+        )}
+      </div>
       <div className="dloja-produtos">
-        {produtos.slice(0, visiveis).map(p => (
+        {lista.map(p => (
           <ProdutoCard
             key={p.id}
             produto={p}
@@ -1009,7 +1068,12 @@ function SecaoProdutos({ titulo, cat, produtos, refCallback, qtdProduto, lojaAbe
           />
         ))}
       </div>
-      {visiveis < produtos.length && <div ref={fimRef} style={{ height: 1 }} aria-hidden="true" />}
+      {previa && faltam > 0 && (
+        <button type="button" className="dloja-ver-mais-larga" onClick={onVerMais}>
+          Ver todos os {produtos.length} itens de {titulo}
+        </button>
+      )}
+      {!previa && visiveis < produtos.length && <div ref={fimRef} style={{ height: 1 }} aria-hidden="true" />}
     </section>
   )
 }

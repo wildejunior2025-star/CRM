@@ -1120,3 +1120,73 @@
   color: var(--dl-text-dim);
   cursor: not-allowed;
 }
+
+/* ── Prévia por categoria (catálogo de mercado/depósito) ── */
+/* O título e o "Ver mais" na mesma linha, como no mercado do iFood: o cliente
+   entende na hora que ali tem mais coisa do que está vendo. */
+.dloja-cat-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dloja-ver-mais {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 20px;
+  background: transparent;
+  color: var(--dl-primary, #7c3aed);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.dloja-ver-mais span {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--dl-primary, #7c3aed), transparent 82%);
+}
+
+.dloja-ver-mais:hover { text-decoration: underline; }
+
+/* Repetido embaixo da prévia: quem rolou os quatro itens está justamente com o
+   dedo ali, e voltar lá em cima pro link do título é atrito à toa. */
+.dloja-ver-mais-larga {
+  width: 100%;
+  margin-top: 10px;
+  padding: 11px;
+  border: 1px solid var(--dl-border);
+  border-radius: 10px;
+  background: var(--dl-surface);
+  color: var(--dl-text);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dloja-ver-mais-larga:hover { border-color: var(--dl-primary, #7c3aed); }
+
+.dloja-voltar-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 8px 14px;
+  border: 1px solid var(--dl-border);
+  border-radius: 20px;
+  background: var(--dl-surface);
+  color: var(--dl-text);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
