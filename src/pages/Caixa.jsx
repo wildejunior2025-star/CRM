@@ -93,6 +93,15 @@ export default function Caixa() {
   // Pagamento; aqui o Caixa só mostra quanto sobra de cada uma.
   const [taxas, setTaxas] = useState({ credito: 0, debito: 0, cartao: 0 })
   const liquido = (bruto, pct) => Number(bruto || 0) * (1 - Number(pct || 0) / 100)
+  // O que de fato CAI NA CONTA da maquineta, somando cada forma com a taxa
+  // dela. É esse número que o esperado em cartão persegue: o extrato da conta
+  // nunca mostra o valor cheio da venda, e é com o extrato que a loja confere.
+  // Loja sem taxa cadastrada: líquido = bruto, nada muda.
+  const cartaoLiquidoDe = (r) => (
+    liquido(r?.recebimentos_credito, taxas.credito) +
+    liquido(r?.recebimentos_debito, taxas.debito) +
+    liquido(r?.recebimentos_cartao_generico, taxas.cartao)
+  )
 
   // Histórico expandível: mostra o detalhamento por forma de pagamento de um caixa fechado.
   const [histVersao, setHistVersao] = useState(0)         // sobe quando abre/fecha caixa → recarrega a semana
@@ -391,10 +400,16 @@ export default function Caixa() {
   // da maquineta, fica lá de um dia pro outro e a loja tira dali pra pagar
   // compra. Então tem saldo de abertura, desconta sangria e tem esperado.
   // Não entra no esperado da GAVETA — cartão nenhum fica em dinheiro vivo.
+  //
+  // O esperado vai LÍQUIDO (já com a taxa da maquineta descontada): a conta
+  // recebe o valor da venda menos a taxa, e é o saldo da conta que a loja
+  // confere no fechamento. Com o bruto, faltava a taxa todo dia — e como o
+  // saldo passa de um dia pro outro e a sangria em cartão sai do dinheiro de
+  // verdade, a diferença ia se acumulando.
   const totalCartaoSistema = resumo ? Number(resumo.recebimentos_cartao || 0) : 0
   const valorEsperadoCartao = resumo
     ? Number(caixaAtual.valor_abertura_cartao || 0) +
-      totalCartaoSistema +
+      cartaoLiquidoDe(resumo) +
       Number(resumo.total_suprimentos_cartao || 0) -
       Number(resumo.total_sangrias_cartao || 0)
     : 0
@@ -404,11 +419,7 @@ export default function Caixa() {
       : null
 
   // O que sobra de TODO o cartão depois das taxas (cada forma com a taxa dela).
-  const totalCartaoLiquido = resumo
-    ? liquido(resumo.recebimentos_credito, taxas.credito) +
-      liquido(resumo.recebimentos_debito, taxas.debito) +
-      liquido(resumo.recebimentos_cartao_generico, taxas.cartao)
-    : 0
+  const totalCartaoLiquido = resumo ? cartaoLiquidoDe(resumo) : 0
 
   // Faturamento total do caixa: soma de TODAS as formas (dinheiro + pix + cartão + transferência + fiado).
   const faturamentoTotal = resumo
@@ -739,13 +750,11 @@ export default function Caixa() {
                   : 0
                 const dif = (r && r !== 'loading' && c.valor_fechamento_informado != null) ? Number(c.valor_fechamento_informado) - espDin : null
                 const difPix = (r && r !== 'loading' && c.valor_fechamento_pix != null) ? Number(c.valor_fechamento_pix) - espPix : null
-                // Cartão: maquineta × sistema. Não tem abertura nem sangria — o
-                // dinheiro do cartão não passa pela gaveta.
-                const cartaoSist = (r && r !== 'loading') ? Number(r.recebimentos_cartao || 0) : 0
-                // Esperado em cartão = o que abriu + recebido + suprimentos − sangrias
-                // (mesma conta do PIX; o caixa aberto usa valorEsperadoCartao).
+                // Esperado em cartão = o que abriu + o que CAIU NA CONTA (já sem
+                // a taxa da maquineta) + suprimentos − sangrias. Mesma conta do
+                // caixa aberto (valorEsperadoCartao).
                 const espCartao = (r && r !== 'loading')
-                  ? Number(c.valor_abertura_cartao || 0) + cartaoSist +
+                  ? Number(c.valor_abertura_cartao || 0) + cartaoLiquidoDe(r) +
                     Number(r.total_suprimentos_cartao || 0) - Number(r.total_sangrias_cartao || 0)
                   : 0
                 const difCartao = (r && r !== 'loading' && c.valor_fechamento_cartao != null) ? Number(c.valor_fechamento_cartao) - espCartao : null
@@ -828,7 +837,7 @@ export default function Caixa() {
                             )}
                             {difCartao !== null && (
                               <div style={{ marginTop: 4, fontSize: 13.5, fontWeight: 700 }}>
-                                💳 Maquineta: R$ {Number(c.valor_fechamento_cartao).toFixed(2)} · esperado R$ {espCartao.toFixed(2)} ·{' '}
+                                💳 Conta da maquineta: R$ {Number(c.valor_fechamento_cartao).toFixed(2)} · esperado R$ {espCartao.toFixed(2)} ·{' '}
                                 <span style={{ color: Math.abs(difCartao) < 0.005 ? 'var(--success, #16a34a)' : (difCartao > 0 ? 'var(--primary)' : 'var(--danger, #ef4444)') }}>
                                   Diferença: R$ {difCartao.toFixed(2)}{Math.abs(difCartao) < 0.005 ? ' (confere)' : difCartao > 0 ? ' (venda não lançada)' : ' (lançada a mais)'}
                                 </span>
@@ -1173,8 +1182,13 @@ export default function Caixa() {
                     onChange={(e) => setValorFechamentoCartao(e.target.value)}
                     placeholder={`Esperado: ${valorEsperadoCartao.toFixed(2)}`}
                   />
+                  {/* A conta mostra o que CAIU (líquido). Deixar aqui o valor
+                      cheio da venda fazia o esperado não fechar com a conta de
+                      cima — a taxa sumia no meio sem explicação. */}
                   <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                    Abriu com R$ {Number(caixaAtual.valor_abertura_cartao || 0).toFixed(2)} · recebeu R$ {totalCartaoSistema.toFixed(2)}
+                    Abriu com R$ {Number(caixaAtual.valor_abertura_cartao || 0).toFixed(2)} · caiu na conta R$ {totalCartaoLiquido.toFixed(2)}
+                    {totalCartaoSistema - totalCartaoLiquido > 0.005
+                      && ` (venda R$ ${totalCartaoSistema.toFixed(2)} − maquineta R$ ${(totalCartaoSistema - totalCartaoLiquido).toFixed(2)})`}
                     {Number(resumo?.total_sangrias_cartao || 0) > 0 && ` · sangrou R$ ${Number(resumo.total_sangrias_cartao).toFixed(2)}`}
                   </span>
                 </div>
