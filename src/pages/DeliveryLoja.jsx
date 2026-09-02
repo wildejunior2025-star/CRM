@@ -1305,6 +1305,7 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
   const corpoRef = useRef(null)
   const gruposRef = useRef({})
   const [destaque, setDestaque] = useState(null)
+  const [fotoCompacta, setFotoCompacta] = useState(false)
 
   // Fechou um grupo (escolheu o tanto que podia)? Leva o cliente pro próximo
   // que ainda aceita escolha. Nasceu da pizzaria: o cliente marcava o sabor,
@@ -1401,16 +1402,24 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
           <button className="dloja-drawer-close" onClick={onClose} aria-label="Fechar"><IconX /></button>
         </div>
 
-        <div className="dloja-drawer-body">
+        <div
+          className="dloja-drawer-body"
+          ref={corpoRef}
+          onScroll={e => setFotoCompacta(e.currentTarget.scrollTop > 40)}
+          style={{ '--topo-blocos': produto.foto_url ? '60px' : '-12px' }}
+        >
           {/* A foto acompanha o cliente enquanto ele monta o pedido. Antes ela
               ficava só no card e sumia ao abrir os complementos — quem estava
               escolhendo borda de catupiry não via mais a pizza. É a foto que
-              vende, e é ela que faz a pessoa aceitar o adicional. */}
+              vende, e é ela que faz a pessoa aceitar o adicional.
+              Ela fica GRUDADA no topo: some da vista e o cliente esquece o que
+              está montando. Encolhe assim que ele começa a rolar, senão comeria
+              metade da tela do celular justo na hora de escolher. */}
           {produto.foto_url && (
             <img
               src={produto.foto_url}
               alt={produto.nome}
-              className="dloja-drawer-foto"
+              className={`dloja-drawer-foto${fotoCompacta ? ' compacta' : ''}`}
               loading="lazy"
             />
           )}

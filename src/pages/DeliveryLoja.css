@@ -976,9 +976,21 @@
   display: block;
   width: calc(100% + 40px);
   margin: -12px -20px 0;
-  max-height: 210px;
+  height: 200px;
   object-fit: cover;
   background: var(--dl-surface-2);
+  /* Grudada no topo: o cliente rola a lista de sabores e continua vendo o que
+     está montando. */
+  position: sticky;
+  top: 0;
+  /* Acima do título de bloco (z-index 3): a foto é o topo de tudo aqui. */
+  z-index: 4;
+  transition: height 180ms ease;
+}
+/* Assim que ele começa a rolar ela encolhe pra faixa — continua na tela, mas
+   devolve o espaço pros sabores e pra BORDA, que é o que a loja quer vender. */
+.dloja-drawer-foto.compacta {
+  height: 72px;
 }
 
 .dloja-drawer-body::-webkit-scrollbar { width: 8px; }
@@ -995,9 +1007,10 @@
    apareceriam por baixo nas laterais. */
 .dloja-opt-bloco-titulo {
   position: sticky;
-  /* -12px = o padding de cima da lista: sem isso o sabor aparecia numa fresta
-     acima do título quando ele estava colado. */
-  top: -12px;
+  /* Encosta logo ABAIXO da foto grudada (72px de faixa menos os 12px de padding
+     da lista). Sem foto, volta pro topo: -12px é o padding de cima, e sem ele o
+     sabor aparecia numa fresta acima do título. */
+  top: var(--topo-blocos, -12px);
   z-index: 3;
   margin: 0 -20px;
   padding: 10px 20px 8px;
