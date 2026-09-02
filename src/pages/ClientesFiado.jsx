@@ -65,6 +65,9 @@ function pedidosEmAberto(vendasFiado, saldo) {
 }
 
 const soDia = iso => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+// Chave do dia com ano: fiado de todo dia acumula meses, e "18/08" sozinho
+// juntaria a compra do ano passado com a de agora.
+const chaveDia = iso => new Date(iso).toLocaleDateString('pt-BR')
 
 // Quanto falta em cada fiado, por id. Quem não aparece no mapa já foi pago.
 // Mesma reconstrução do pedidosEmAberto — é o que permite escrever "pago" na
@@ -74,32 +77,52 @@ function faltaPorVenda(vendas, saldo) {
   return new Map(pedidosEmAberto(fiados, saldo).map(a => [a.id, a.falta]))
 }
 
+// A cobrança detalha SÓ O ÚLTIMO DIA.
+//
+// A comanda do fiado já sai no WhatsApp na hora em que a conta fecha (edge
+// function fiado-comanda-notify): o cliente confere no dia, com a memória
+// fresca, e a partir dali aquele dia está conferido. Repetir aqui item por item
+// de duas semanas vira parede de texto — ninguém lê, e o que interessa (quanto
+// ele deve) fica escondido lá no fim. O que ainda não foi conferido é a compra
+// do dia; o resto ele vê no link, com tudo, inclusive as contas já pagas.
 function textoCobranca({ nomeCliente, nomeLoja, abertos, saldo, token }) {
   const primeiro = String(nomeCliente ?? '').trim().split(' ')[0]
   const nome = primeiro ? primeiro.charAt(0).toUpperCase() + primeiro.slice(1) : 'Oi'
-  const linhas = abertos.map(v => {
+
+  const ordenados = [...abertos].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+  const diaChave = chaveDia(ordenados[0].created_at)
+  const doDia = ordenados.filter(v => chaveDia(v.created_at) === diaChave)
+  const anteriores = ordenados.filter(v => chaveDia(v.created_at) !== diaChave)
+  const somaAnteriores = anteriores.reduce((s, v) => s + Number(v.falta || 0), 0)
+  const ehHoje = diaChave === chaveDia(new Date().toISOString())
+  const quando = ehHoje ? '*hoje*' : `em *${soDia(ordenados[0].created_at)}*`
+
+  const linhas = doDia.map(v => {
     const itens = (v.venda_itens ?? [])
       .map(i => `${Number(i.quantidade) % 1 === 0 ? Number(i.quantidade) : i.quantidade}x ${i.produtos?.nome ?? i.nome_produto ?? 'item'}`)
       .join(', ')
     const parcial = Math.abs(v.falta - Number(v.total)) > 0.005 ? ' (falta desse)' : ''
-    return `• ${soDia(v.created_at)}${itens ? ' — ' + itens : ''} — *${fmtBRL(v.falta)}*${parcial}`
+    return `• ${itens || 'conta'} — *${fmtBRL(v.falta)}*${parcial}`
   }).join('\n')
 
   return [
     `Oi ${nome}, tudo bem? 😊`,
     `Aqui é da *${nomeLoja}*.`,
     '',
-    'Passando só pra lembrar do que ficou anotado aqui — acho que passou batido:',
+    `Sua última compra no fiado foi ${quando}:`,
     '',
     linhas,
+    // Os dias anteriores entram como uma linha só de valor: já foram conferidos
+    // na hora, não precisam ser relidos item por item.
+    anteriores.length ? `\nDos dias anteriores (já conferidos): *${fmtBRL(somaAnteriores)}*` : null,
     '',
-    `Total: *${fmtBRL(saldo)}*`,
+    `*Total em aberto: ${fmtBRL(saldo)}*`,
+    token ? `\nAs contas anteriores e o histórico completo estão no seu link:\nhttps://lojaonline.fwcinter.com/c/${token}` : null,
     '',
-    'Se você já pagou alguma dessas, me avisa que eu acerto aqui — pode ter sido a gente que esqueceu de dar baixa. 🙏',
-    token ? `\nDá pra ver seus pedidos e o que está em aberto no seu link:\nhttps://lojaonline.fwcinter.com/c/${token}` : '',
+    'Se já pagou alguma coisa e a gente não deu baixa, me avisa que eu acerto aqui. 🙏',
     '',
     'Obrigado, viu! Qualquer coisa é só chamar 😊',
-  ].join('\n')
+  ].filter(l => l !== null).join('\n')
 }
 
 export default function ClientesFiado({ empresaId }) {

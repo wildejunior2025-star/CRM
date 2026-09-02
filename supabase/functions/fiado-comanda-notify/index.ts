@@ -167,7 +167,10 @@ serve(async (req) => {
       // É esta linha que faz o aviso valer a pena: confere hoje, enquanto todo
       // mundo lembra. Depois de duas semanas ninguém resolve mais.
       "Se tiver algo errado aqui, me avisa *hoje mesmo* que a gente confere. 🙏",
-      cliente?.token ? `\nVer tudo o que está em aberto:\nhttps://lojaonline.fwcinter.com/c/${cliente.token}` : null,
+      // O link é pras contas ANTERIORES (e as já pagas). O que ele precisa
+      // conferir é a conta de hoje, que está aí em cima — mandar ele "ver o que
+      // está em aberto" no link só empurra pra depois a conferência do dia.
+      cliente?.token ? `\nAs contas anteriores e o histórico completo estão no seu link:\nhttps://lojaonline.fwcinter.com/c/${cliente.token}` : null,
     ].filter(l => l !== null).join("\n")
 
     // A JANELA DE 24 HORAS
