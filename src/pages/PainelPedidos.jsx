@@ -1339,6 +1339,50 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const subtotal  = itens.reduce((s, i) => s + i.preco * i.qtd, 0)
   const taxaNum   = tipo === 'entrega' ? (parseFloat(String(taxa).replace(',', '.')) || 0) : 0
   const total     = subtotal + taxaNum
+
+  // ── Mandar o pedido pro cliente no WhatsApp ──────────────────
+  // O atendimento acontece no WhatsApp e a venda é montada aqui: sem este
+  // botão, a pessoa digitava o pedido inteiro DE NOVO na mão pra confirmar com
+  // o cliente — e é digitando de novo que troca item e valor.
+  //
+  // Manda só o resumo pra ele conferir, sem link de pedido: quem fecha a venda
+  // é a atendente, aqui. Link levaria o cliente a montar tudo outra vez e o
+  // pedido entraria duas vezes.
+  const telZap = String(telefone ?? '').replace(/\D/g, '')
+  const podeMandarZap = itens.length > 0 && telZap.length >= 10
+
+  function mandarNoZap() {
+    if (!podeMandarZap) return
+    const primeiro = String(nome ?? '').trim().split(' ')[0]
+    const NL = '\n'
+    const linhas = itens.map(i => {
+      const comps = (i.complementos ?? [])
+        .map(c => `${Number(c.qtd ?? 1)} ${String(c.nome ?? '').trim()}`)
+        .filter(Boolean).join(', ')
+      return `• ${i.qtd}x ${i.nome} — ${fmt(i.preco * i.qtd)}` + (comps ? `${NL}   ${comps}` : '')
+    }).join(NL)
+
+    const endereco = tipo === 'entrega' && String(rua ?? '').trim()
+      ? [`${rua}${numero ? `, ${numero}` : ''}`, bairro, cidade].filter(Boolean).join(' — ')
+      : null
+
+    const msg = [
+      `${primeiro ? `Oi ${primeiro}!` : 'Oi!'} 👋 Seu pedido${empresa?.nome ? ` na *${empresa.nome}*` : ''}:`,
+      '',
+      linhas,
+      '',
+      taxaNum > 0 ? `Itens: ${fmt(subtotal)}` : null,
+      taxaNum > 0 ? `Entrega: ${fmt(taxaNum)}` : null,
+      `*Total: ${fmt(total)}*`,
+      endereco ? `${NL}📍 Entrega em: ${endereco}` : (tipo === 'retirada' ? `${NL}🏬 Retirada na loja` : null),
+      '',
+      'Confere pra mim que eu já mando preparar? 😊',
+    ].filter(l => l !== null).join(NL)
+
+    const numero55 = telZap.startsWith('55') ? telZap : `55${telZap}`
+    window.open(`https://wa.me/${numero55}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener')
+  }
+
   // Aplica o preço especial do cliente (se houver) antes de mostrar/adicionar — só afeta este cliente.
   const produtosComPreco = produtos.map(p => (precoEspMap[p.id] != null ? { ...p, preco_venda: precoEspMap[p.id] } : p))
   // Busca ignorando acento: quem digita rápido escreve "camarao", e o produto
@@ -1888,6 +1932,20 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
 
         <div className="pp-modal-actions">
           <button type="button" className="pp-modal-btn-secondary" onClick={editando ? onFechar : cancelar}>Cancelar</button>
+          <button
+            type="button"
+            className="pp-modal-btn-secondary"
+            style={podeMandarZap
+              ? { borderColor: '#16a34a', color: '#16a34a' }
+              : { opacity: .45, cursor: 'not-allowed' }}
+            disabled={!podeMandarZap}
+            title={podeMandarZap
+              ? 'Abre o WhatsApp com o pedido escrito pra você só enviar'
+              : 'Preencha o telefone do cliente e adicione ao menos um item'}
+            onClick={mandarNoZap}
+          >
+            💬 Mandar pro cliente
+          </button>
           <button
             type="button"
             className="pp-modal-btn-danger"
