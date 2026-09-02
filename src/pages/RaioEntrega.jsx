@@ -243,7 +243,13 @@ export default function RaioEntrega() {
           ? data.taxas_entrega_km
           : faixasPadrao(data.raio_entrega_km ?? 10, data.taxa_entrega ?? 0)
         setTaxasKm(faixas)
-        setUsarTaxasPorKm(faixas.length > 0)
+        // AQUI ESTAVA O BUG DO MAPA (02/09/2026): sobrou um `setUsarTaxasPorKm`
+        // do tempo da taxa fixa (removido no commit c8eee86). O estado não
+        // existe mais, então a linha estourava ReferenceError no meio do
+        // `.then()` — e como ninguém pega o erro, as DUAS linhas de baixo nunca
+        // rodavam. Resultado: endereço aparecia (setado antes) e a coordenada
+        // não, então toda visita começava em "Localização não configurada" e o
+        // salvar apagava o pino do banco.
         setLatitude(data.latitude ? Number(data.latitude) : null)
         setLongitude(data.longitude ? Number(data.longitude) : null)
 
@@ -277,6 +283,12 @@ export default function RaioEntrega() {
             setMsg({ type: 'success', text: '↩️ Restauramos as alterações que você não tinha salvo. Revise e clique em Salvar.' })
           }
         } catch { /* ignore */ }
+      })
+      // Sem isto, qualquer erro no meio da carga morre calado e a tela abre pela
+      // metade — foi assim que o mapa sumiu por semanas sem ninguém ver erro.
+      .catch(err => {
+        console.error('[raio-entrega] falhou ao carregar a loja:', err)
+        setMsg({ type: 'error', text: 'Não deu pra carregar tudo desta tela. Recarregue antes de salvar.' })
       })
   }, [profile?.empresa_id])
 
@@ -429,9 +441,15 @@ export default function RaioEntrega() {
   }
 
   // ── Geocodifica e move pino no mapa ───────────────────────────
-  async function geocodificarEndereco() {
-    if (!cidade) { setMsg({ type: 'error', text: 'Preencha pelo menos a cidade.' }); return }
-    setGeocodando(true); setMsg(null)
+  // `silencioso` é a busca automática da abertura: não fala nada quando dá
+  // certo (a loja não pediu) e não reclama quando dá errado.
+  async function geocodificarEndereco(silencioso = false) {
+    if (!cidade) {
+      if (!silencioso) setMsg({ type: 'error', text: 'Preencha pelo menos a cidade.' })
+      return
+    }
+    setGeocodando(true)
+    if (!silencioso) setMsg(null)
     try {
       const partes = [rua, numero, bairro, cidade, estado, 'Brasil'].filter(Boolean)
       const q = encodeURIComponent(partes.join(', '))
@@ -439,7 +457,10 @@ export default function RaioEntrega() {
         headers: { 'User-Agent': 'CRM-FWC/1.0' }
       })
       const data = await res.json()
-      if (!data?.[0]) { setMsg({ type: 'error', text: 'Endereço não encontrado. Tente ser mais específico.' }); return }
+      if (!data?.[0]) {
+        if (!silencioso) setMsg({ type: 'error', text: 'Endereço não encontrado. Tente ser mais específico.' })
+        return
+      }
 
       const lat = parseFloat(data[0].lat)
       const lng = parseFloat(data[0].lon)
@@ -454,10 +475,29 @@ export default function RaioEntrega() {
 
       // Atualiza estado DEPOIS de mover no mapa (não vai recriar pois guard `if mapObjRef.current return`)
       setLatitude(lat); setLongitude(lng)
-      setMsg({ type: 'success', text: 'Localização atualizada. Arraste o pino para ajuste fino.' })
-    } catch { setMsg({ type: 'error', text: 'Erro ao buscar localização.' }) }
+      if (!silencioso) setMsg({ type: 'success', text: 'Localização atualizada. Arraste o pino para ajuste fino.' })
+    } catch {
+      if (!silencioso) setMsg({ type: 'error', text: 'Erro ao buscar localização.' })
+    }
     finally { setGeocodando(false) }
   }
+
+  // Abriu a tela com endereço preenchido e sem pino? Localiza sozinho.
+  //
+  // Antes, toda visita começava em "Localização não configurada" e obrigava o
+  // lojista a clicar em Localizar no mapa de novo — e quem mexia em outra coisa
+  // e salvava sem clicar deixava a loja SEM coordenada (ver o update acima).
+  // Roda uma vez por visita e em silêncio: se a busca falhar, a tela fica como
+  // estava e o botão continua ali.
+  const autoLocalizouRef = useRef(false)
+  useEffect(() => {
+    if (autoLocalizouRef.current || !empresaId) return
+    if (latitude && longitude) { autoLocalizouRef.current = true; return }
+    if (!cidade || !(rua || bairro)) return
+    autoLocalizouRef.current = true
+    geocodificarEndereco(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empresaId, latitude, longitude, cidade, rua, bairro])
 
   // ── Salva tudo ────────────────────────────────────────────────
   async function handleSalvar(e) {
@@ -490,8 +530,11 @@ export default function RaioEntrega() {
       estado:               estado || null,
       categoria_delivery:   categoria || null,
       raio_entrega_km:      parseFloat(raio) || 10,
-      latitude:             latitude || null,
-      longitude:            longitude || null,
+      // Coordenada só entra no update quando existe. Com `latitude || null` o
+      // salvamento APAGAVA o pino sempre que a tela abria sem ele — e loja sem
+      // coordenada não calcula taxa por km: todo pedido saía com a taxa errada
+      // (ou de graça) sem ninguém entender por quê.
+      ...(latitude && longitude ? { latitude, longitude } : {}),
       taxas_entrega_bairro: paraTaxasSalvas(taxasBairro),
     }).eq('id', empresaId)
 
@@ -606,7 +649,7 @@ export default function RaioEntrega() {
             type="button"
             className="btn btn-secondary"
             style={{ marginTop: 16 }}
-            onClick={geocodificarEndereco}
+            onClick={() => geocodificarEndereco(false)}
             disabled={geocodando || !cidade}
           >
             {geocodando ? 'Buscando...' : 'Localizar no mapa'}
