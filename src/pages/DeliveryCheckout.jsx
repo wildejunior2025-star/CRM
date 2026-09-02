@@ -7,7 +7,7 @@ import { registrarPedido } from '../lib/meusPedidos'
 import { iniciarCheckout } from '../lib/tracking'
 import { marcarEtapa, anotarContato } from '../lib/funil'
 import { formasAtivas, repassePct } from '../lib/constants'
-import { carregarExcecoes } from '../lib/feriados'
+import { carregarExcecoes, abertaAgora } from '../lib/feriados'
 import { diasParaAgendar, paraISO, rotuloAgendado } from '../lib/agendamento'
 import 'leaflet/dist/leaflet.css'
 import './DeliveryCheckout.css'
@@ -584,7 +584,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, numero, telefone_contato, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct')
+      .select('endereco, numero, telefone_contato, bairro, cidade, estado, latitude, longitude, delivery_ativo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -607,9 +607,31 @@ export default function DeliveryCheckout() {
   }, [state?.empresaId])
 
   const agendaLigada = !!lojaEndereco?.agendamento_ativo
-  // A vitrine avisa se estava fechada quando o cliente montou a sacola. Fechada
-  // + agendamento ligado = não existe "pra agora", só agendar.
-  const lojaEstavaAberta = state?.lojaAberta !== false
+
+  // A loja está aberta AGORA — recalculado de meio em meio minuto, aqui dentro.
+  //
+  // Antes valia só o que a vitrine tinha dito quando o cliente clicou em
+  // finalizar. Quem abriu o cardápio 11h50 e demorou pra fechar o pedido
+  // passava reto: o pedido #1003 da CD Bom entrou 12h02 com a loja fechada
+  // desde meio-dia (02/09/2026).
+  const [tiqueRelogio, setTiqueRelogio] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTiqueRelogio(t => t + 1), 30000)
+    return () => clearInterval(id)
+  }, [])
+  const lojaAbertaAgora = useMemo(() => {
+    // Config ainda não chegou: vale o que a vitrine disse (não dá pra travar
+    // ninguém por causa de uma consulta lenta).
+    if (!lojaEndereco) return state?.lojaAberta !== false
+    if (lojaEndereco.delivery_ativo === false) return false
+    return abertaAgora({
+      grade: lojaEndereco.horarios_funcionamento,
+      excecoes,
+      fechaFeriado: !!lojaEndereco.feriados_fecha,
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lojaEndereco, excecoes, tiqueRelogio, state?.lojaAberta])
+  const lojaEstavaAberta = lojaAbertaAgora
   const diasAgenda = useMemo(() => (
     agendaLigada
       ? diasParaAgendar({
@@ -1031,8 +1053,15 @@ export default function DeliveryCheckout() {
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
-    if (agendaLigada && !lojaEstavaAberta && !agendadoPara) {
+    if (agendaLigada && !lojaAbertaAgora && !agendadoPara) {
       setErroGlobal('A loja está fechada agora — escolha um horário pra agendar seu pedido.')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    // Loja fechada e sem agendamento: o pedido não entra. É a última trava —
+    // o cliente pode ter aberto o cardápio ainda no horário e fechado depois.
+    if (!agendaLigada && !lojaAbertaAgora && !agendadoPara) {
+      setErroGlobal('A loja fechou agora e não está mais recebendo pedidos. Volte no próximo horário de funcionamento.')
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }

@@ -554,10 +554,22 @@ export default function DeliveryLoja() {
          semAcento(p.descricao).includes(buscaTrim)))
     : null
 
+  // Relógio de meio em meio minuto. Sem ele a tela só descobria que a loja
+  // fechou quando alguém recarregava a página: quem estava com o cardápio
+  // aberto às 11h50 continuava com os botões liberados e fechava pedido às
+  // 12h02, com a cozinha já fechada (aconteceu na CD Bom em 02/09/2026).
+  const [tiqueRelogio, setTiqueRelogio] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTiqueRelogio(t => t + 1), 30000)
+    return () => clearInterval(id)
+  }, [])
+
   // Loja aberta = pausa manual ligada (delivery_ativo) E dentro da grade semanal de horário.
-  const lojaAberta = !!loja?.delivery_ativo && abertaAgora({
+  const lojaAberta = useMemo(() => !!loja?.delivery_ativo && abertaAgora({
     grade: loja?.horarios_funcionamento, excecoes, fechaFeriado: !!loja?.feriados_fecha,
-  })
+  // tiqueRelogio entra de propósito: é ele que faz a conta ser refeita sozinha.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [loja, excecoes, tiqueRelogio])
   // Por que fechou (feriado, folga) — vira o texto do aviso pro cliente.
   const motivoFechada = comoFicaNoDia(hojeBR(), {
     grade: loja?.horarios_funcionamento, excecoes, fechaFeriado: !!loja?.feriados_fecha,
