@@ -177,7 +177,14 @@ async function responderComLink(
       .maybeSingle()
     if (jaFalou) return false
 
-    const link = `https://lojaonline.fwcinter.com/${slug}?t=${String(phone).replace(/\D/g, "")}`
+    // Sem o 55 do país: o checkout lê isso como telefone brasileiro e o 55
+    // viraria DDD — "(55) 84981-80774". Com 12 ou 13 dígitos começando em 55,
+    // o país sai e sobra DDD + número, que é o que o cadastro guarda.
+    const soDigitos = String(phone).replace(/\D/g, "")
+    const telLink = (soDigitos.startsWith("55") && soDigitos.length >= 12)
+      ? soDigitos.slice(2)
+      : soDigitos
+    const link = `https://lojaonline.fwcinter.com/${slug}?t=${telLink}`
     const NL = String.fromCharCode(10)
     const proprio = String(cfg.resposta_link_texto ?? "").trim()
     // CURTA de propósito: ninguém lê parágrafo de robô. Duas linhas e o link —
