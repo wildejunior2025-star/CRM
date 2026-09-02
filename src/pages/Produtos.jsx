@@ -98,9 +98,14 @@ const emptyForm = {
 const CATALOGO_BASE = 'https://lojaonline.fwcinter.com'
 
 // Campo de categoria com busca (dropdown próprio, estilizado — no lugar do <datalist> feio do navegador).
-function CategoriaCombobox({ categorias, value, onChange }) {
+// `onCriar` cria a categoria na hora, sem sair do cadastro do produto: antes o
+// lojista tinha que fechar o produto (perdendo o que já tinha digitado), ir em
+// Categorias, criar, e começar tudo de novo.
+function CategoriaCombobox({ categorias, value, onChange, onCriar }) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState(value || '')
+  const [criando, setCriando] = useState(false)
+  const [erro, setErro] = useState(null)
   const wrapRef = useRef(null)
 
   // Sincroniza o texto quando o valor muda de fora (abrir modal, editar produto, resetar form).
@@ -118,6 +123,7 @@ function CategoriaCombobox({ categorias, value, onChange }) {
   const exata = categorias.some((c) => norm(c.nome) === q)
   // Filtra enquanto digita; se o texto bate exatamente numa categoria, mostra todas (pra poder trocar).
   const filtradas = (q && !exata) ? categorias.filter((c) => norm(c.nome).includes(q)) : categorias
+  const podeCriar = Boolean(onCriar) && text.trim().length > 0 && !exata
 
   function escolher(nome) {
     setText(nome)
@@ -128,8 +134,27 @@ function CategoriaCombobox({ categorias, value, onChange }) {
   function digitar(e) {
     setText(e.target.value)
     onChange(e)              // mantém form.categoria em sincronia (texto livre, igual antes)
+    setErro(null)
     setOpen(true)
   }
+
+  async function criar() {
+    const nome = text.trim()
+    if (!nome || criando) return
+    setCriando(true)
+    setErro(null)
+    const r = await onCriar(nome)
+    setCriando(false)
+    if (r?.error) { setErro(r.error); return }
+    escolher(r?.nome ?? nome)
+  }
+
+  // Enter no campo com nome novo cria a categoria (e não envia o formulário do produto).
+  function teclar(e) {
+    if (e.key !== 'Enter') return
+    if (podeCriar) { e.preventDefault(); criar() }
+  }
+
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
@@ -139,8 +164,9 @@ function CategoriaCombobox({ categorias, value, onChange }) {
         value={text}
         required
         autoComplete="off"
-        placeholder="Digite pra buscar ou escolha..."
+        placeholder={onCriar ? 'Digite pra buscar ou criar...' : 'Digite pra buscar ou escolha...'}
         onChange={digitar}
+        onKeyDown={teclar}
         onFocus={(e) => { e.target.select(); setOpen(true) }}
         style={{ paddingRight: 30 }}
       />
@@ -152,8 +178,26 @@ function CategoriaCombobox({ categorias, value, onChange }) {
           background: 'var(--card-bg, var(--bg))', border: '1px solid var(--border)',
           borderRadius: 8, boxShadow: '0 10px 28px rgba(0,0,0,.22)', padding: 4,
         }}>
+          {podeCriar && (
+            <button
+              type="button"
+              onClick={criar}
+              disabled={criando}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '10px', border: 'none', borderRadius: 6, cursor: 'pointer',
+                background: 'var(--primary-ring, transparent)', color: 'var(--text)',
+                fontSize: 14.5, fontWeight: 700, marginBottom: filtradas.length ? 4 : 0,
+              }}
+            >
+              {criando ? 'Criando...' : <>➕ Criar categoria “{text.trim()}”</>}
+            </button>
+          )}
+          {erro && (
+            <div style={{ padding: '6px 10px', color: 'var(--danger, #d33)', fontSize: 13 }}>{erro}</div>
+          )}
           {filtradas.length === 0 ? (
-            <div style={{ padding: '9px 10px', color: 'var(--text-muted)', fontSize: 14 }}>Nenhuma categoria encontrada.</div>
+            !podeCriar && <div style={{ padding: '9px 10px', color: 'var(--text-muted)', fontSize: 14 }}>Nenhuma categoria encontrada.</div>
           ) : filtradas.map((c) => {
             const sel = c.nome === value
             return (
@@ -581,22 +625,34 @@ export default function Produtos() {
     loadEmbalagens()
   }, [loadProdutos])
 
-  async function handleSaveCategoria(e) {
-    e.preventDefault()
-    const nome = novaCategoria.trim()
-    if (!nome) return
-    if (!profile?.empresa_id) { setCategError('Empresa não identificada.'); return }
-    setSavingCateg(true)
-    setCategError(null)
+  // Cria a categoria e devolve o nome pra quem chamou. Serve tanto pro modal de
+  // Categorias quanto pro campo dentro do cadastro do produto.
+  async function criarCategoria(nomeBruto) {
+    const nome = (nomeBruto ?? '').trim()
+    if (!nome) return { error: 'Digite o nome da categoria.' }
+    if (!profile?.empresa_id) return { error: 'Empresa não identificada.' }
+    // Já existe com outro acento/caixa? Aproveita a que está lá em vez de duplicar.
+    const jaTem = categorias.find(c => norm(c.nome) === norm(nome))
+    if (jaTem) return { nome: jaTem.nome }
     const { error } = await supabase.rpc('add_categoria', { p_nome: nome })
-    setSavingCateg(false)
-    if (error) { setCategError(error.message); return }
-    setNovaCategoria('')
+    if (error) return { error: error.message }
     // A RPC cria a categoria com ordem 0: sem isso ela pularia pro topo do
     // cardápio e empataria com as outras recém-criadas. Entra no fim da fila.
     const lista = await loadCategorias()
     const nova = lista.find(c => c.nome === nome)
     if (nova) await persistOrdem([...lista.filter(c => c.id !== nova.id), nova])
+    return { nome }
+  }
+
+  async function handleSaveCategoria(e) {
+    e.preventDefault()
+    if (!novaCategoria.trim()) return
+    setSavingCateg(true)
+    setCategError(null)
+    const r = await criarCategoria(novaCategoria)
+    setSavingCateg(false)
+    if (r.error) { setCategError(r.error); return }
+    setNovaCategoria('')
   }
 
   function iniciarRenomear(c) {
@@ -866,6 +922,20 @@ export default function Produtos() {
     }
     // `custo_modo` é só da tela (escolhe R$ ou %) — não existe coluna pra ele.
     delete payload.custo_modo
+
+    // Rede de segurança: se o lojista digitou uma categoria nova e salvou direto
+    // (sem tocar no "criar categoria"), cria ela aqui. Sem isso o produto ficava
+    // com um nome que não existe na lista — sumia do cardápio e da ordenação.
+    const catNome = (form.categoria ?? '').trim()
+    if (catNome && !categorias.some(c => norm(c.nome) === norm(catNome))) {
+      const r = await criarCategoria(catNome)
+      if (r.error) {
+        setSaving(false)
+        setError('Não deu pra criar a categoria “' + catNome + '”: ' + r.error)
+        return
+      }
+      payload.categoria = r.nome
+    }
 
     const { data: saved, error } = editingId
       ? await supabase.from('produtos').update(payload).eq('id', editingId).select('id').single()
@@ -1502,7 +1572,12 @@ export default function Produtos() {
 
                 <div className="form-field">
                   <label>Categoria</label>
-                  <CategoriaCombobox categorias={categorias} value={form.categoria} onChange={handleChange} />
+                  <CategoriaCombobox
+                    categorias={categorias}
+                    value={form.categoria}
+                    onChange={handleChange}
+                    onCriar={criarCategoria}
+                  />
                 </div>
 
                 {/* Embalagem escondida por enquanto (sem utilidade ainda) */}
