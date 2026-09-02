@@ -94,8 +94,16 @@ function textoCobranca({ nomeCliente, nomeLoja, abertos, saldo, token }) {
   const doDia = ordenados.filter(v => chaveDia(v.created_at) === diaChave)
   const anteriores = ordenados.filter(v => chaveDia(v.created_at) !== diaChave)
   const somaAnteriores = anteriores.reduce((s, v) => s + Number(v.falta || 0), 0)
-  const ehHoje = diaChave === chaveDia(new Date().toISOString())
-  const quando = ehHoje ? '*hoje*' : `em *${soDia(ordenados[0].created_at)}*`
+  // Na maioria das vezes a cobrança sai logo depois de fechar a conta: pro
+  // cliente, aquilo é "a compra de agora", não "a última compra" — falar da
+  // data de um pedido que ele acabou de fazer soa como cobrança de coisa velha.
+  // Até 3h depois é agora; no mesmo dia é hoje; passou disso, entra a data.
+  const minutos = (Date.now() - new Date(ordenados[0].created_at).getTime()) / 60000
+  const cabecalho = minutos <= 180
+    ? 'Sua compra de agora:'
+    : (diaChave === chaveDia(new Date().toISOString())
+        ? 'Sua compra de hoje:'
+        : `Sua última compra no fiado foi em *${soDia(ordenados[0].created_at)}*:`)
 
   const linhas = doDia.map(v => {
     const itens = (v.venda_itens ?? [])
@@ -109,7 +117,7 @@ function textoCobranca({ nomeCliente, nomeLoja, abertos, saldo, token }) {
     `Oi ${nome}, tudo bem? 😊`,
     `Aqui é da *${nomeLoja}*.`,
     '',
-    `Sua última compra no fiado foi ${quando}:`,
+    cabecalho,
     '',
     linhas,
     // Os dias anteriores entram como uma linha só de valor: já foram conferidos

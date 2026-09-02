@@ -154,7 +154,7 @@ serve(async (req) => {
     const mensagem = [
       `${saudacao} Aqui é da *${empresa?.nome ?? "loja"}*.`,
       "",
-      `Ficou anotado no seu *fiado* agora${local ? ` (${local})` : ""}, ${quando}:`,
+      `Sua compra de agora${local ? ` (${local})` : ""} ficou anotada no *fiado*, ${quando}:`,
       "",
       linhas,
       "",
