@@ -157,6 +157,12 @@ function montarCupom(pedido, empresa) {
   if (p.subtotal != null) parts.push(kv('Subtotal', money(p.subtotal)))
   if ((p.tipo_entrega || 'entrega') !== 'retirada' && p.taxa_entrega != null)
     parts.push(kv('Taxa de entrega', money(p.taxa_entrega)))
+  // Taxa do cartao repassada e cashback abatido. Sem estas duas linhas o papel
+  // mostrava subtotal + entrega e um TOTAL que nao fechava com a soma — quem
+  // recebe o pedido na porta acha que o sistema errou a conta.
+  if (Number(p.acrescimo || 0) > 0) parts.push(kv('Taxa do cartao', money(p.acrescimo)))
+  if (Number(p.cashback_usado || 0) > 0) parts.push(kv('Cashback do cliente', '-' + money(p.cashback_usado)))
+  if (Number(p.desconto || 0) > 0) parts.push(kv('Desconto', '-' + money(p.desconto)))
   parts.push(SIZE(0x01), BOLD(1), kv('TOTAL', money(p.total)), BOLD(0), SIZE(0))
 
   // Pagamento — deixa MUITO claro se cobra ou ja pagou

@@ -134,6 +134,8 @@ export function montarCupomHtml(pedido, empresa = {}) {
   ${pedido.subtotal != null ? `<div class="row"><span>Subtotal</span><span>${fmt(pedido.subtotal)}</span></div>` : ''}
   ${!isRetirada && pedido.taxa_entrega != null && showTaxa ? `<div class="row"><span>Taxa entrega</span><span>${fmt(pedido.taxa_entrega)}</span></div>` : ''}
   ${Number(pedido.acrescimo || 0) > 0 ? `<div class="row"><span>Taxa cartao</span><span>${fmt(pedido.acrescimo)}</span></div>` : ''}
+  ${Number(pedido.cashback_usado || 0) > 0 ? `<div class="row"><span>Cashback do cliente</span><span>-${fmt(pedido.cashback_usado)}</span></div>` : ''}
+  ${Number(pedido.desconto || 0) > 0 ? `<div class="row"><span>Desconto</span><span>-${fmt(pedido.desconto)}</span></div>` : ''}
   <div class="row b lg"><span>TOTAL</span><span>${fmt(pedido.total)}</span></div>
   <hr>
   <div><span class="b">Pagamento:</span> ${esc(labelPagamento(pedido))}</div>
