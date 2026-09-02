@@ -133,6 +133,21 @@ export default function DeliveryLoja() {
       return d.length >= 10 ? d : null
     } catch { return null }
   })()
+  // Carrinho que veio pronto no link (?c=id:qtd,id:qtd). É o que o WhatsApp usa
+  // quando o cliente já disse o que quer: ele abre com tudo dentro e só
+  // confirma, em vez de procurar os itens de novo no cardápio.
+  const carrinhoDoLink = (() => {
+    try {
+      const c = new URLSearchParams(window.location.search).get('c')
+      if (!c) return null
+      const itens = String(c).split(',').map(par => {
+        const [id, qtd] = par.split(':')
+        return { id: String(id ?? '').trim(), qtd: Math.max(1, Math.min(99, Number(qtd) || 1)) }
+      }).filter(x => x.id.length > 8)
+      return itens.length ? itens : null
+    } catch { return null }
+  })()
+  const carrinhoDoLinkRef = useRef(false)
   // Cardapio que nao carregou inteiro NAO vira loja aberta pela metade (ver lerOuFalhar)
   const [erroCardapio, setErroCardapio] = useState(false)
   const [tentativa, setTentativa] = useState(0)
@@ -215,6 +230,30 @@ export default function DeliveryLoja() {
     window.__fwcOcupado = optProduto != null || drawerOpen
     return () => { window.__fwcOcupado = false }
   }, [optProduto, drawerOpen])
+
+  // Itens que vieram no link: entram na sacola assim que o cardápio carrega.
+  // Produto que exige escolha (sabor, tamanho) fica de fora de propósito — o
+  // sistema não pode escolher sabor pelo cliente, e item pela metade some na
+  // conferência logo abaixo.
+  useEffect(() => {
+    if (carrinhoDoLinkRef.current || !carrinhoDoLink || produtos.length === 0) return
+    carrinhoDoLinkRef.current = true
+    setCarrinho(prev => {
+      const novo = { ...prev }
+      for (const item of carrinhoDoLink) {
+        const p = produtos.find(x => String(x.id) === item.id)
+        if (!p) continue
+        if ((p.complementos ?? []).some(g => Number(g.min ?? 0) > 0)) continue
+        const key = String(p.id)
+        novo[key] = {
+          key, id: p.id, nome: p.nome, preco: Number(p.preco), foto_url: p.foto_url,
+          quantidade: (novo[key]?.quantidade ?? 0) + item.qtd,
+        }
+      }
+      return novo
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [produtos, carrinhoDoLink])
 
   // Após produtos carregarem, filtra itens do carrinho restaurado:
   // remove produtos que não existem mais e atualiza preços
@@ -1163,7 +1202,10 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
               onClick={() => setZoom(true)}
               aria-label={`Ver a foto de ${produto.nome}`}
             >
-              <img src={produto.foto_url} alt={produto.nome} className="dloja-prod-img" />
+              {/* lazy: sem isso o celular baixa a foto de TODOS os itens montados
+                  de uma vez. Na pizzaria, com foto de 2,5 MB, isso é dezenas de
+                  MB do 4G do cliente antes de ele rolar a primeira tela. */}
+              <img src={produto.foto_url} alt={produto.nome} className="dloja-prod-img" loading="lazy" decoding="async" />
             </button>
           )
           : (

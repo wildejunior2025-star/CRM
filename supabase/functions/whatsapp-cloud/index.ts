@@ -175,6 +175,27 @@ function palavrasDeBusca(texto: string): string[] {
     .slice(0, 3)
 }
 
+
+// O cliente está PEDINDO ou só perguntando? "tem bauru?" é pergunta; "quero 2
+// bauru" é pedido. A diferença decide se a resposta leva link montado ou só o
+// preço — mandar link em toda mensagem cansa e faz ele parar de ler.
+const VERBOS_PEDIDO = /\b(quero|queria|vou querer|vou levar|manda|mande|me v[êe]|me manda|pode mandar|anota|bota|p[õo]e|separa|fecha|vou de)\b/
+
+function ehPedido(texto: string): boolean {
+  const t = semAcentoTxt(texto)
+  if (VERBOS_PEDIDO.test(t)) return true
+  // "2 bauru", "3x coca" — número na frente do produto também é pedido.
+  return /\b\d{1,2}\s*x?\s+[a-z]{3,}/.test(t)
+}
+
+// Quantos ele pediu daquilo: o número que aparece antes do nome ("2 bauru").
+function quantidadePedida(texto: string, termo: string): number {
+  const t = semAcentoTxt(texto)
+  const m = t.match(new RegExp(`(\\d{1,2})\\s*x?\\s+[^]{0,12}?${termo}`))
+  const n = m ? Number(m[1]) : 1
+  return n >= 1 && n <= 99 ? n : 1
+}
+
 // "Tem X?" respondido pelo CARDÁPIO, sem IA: procura o nome no banco e responde
 // com preço e link. É a segunda pergunta mais comum depois do "oi", e a que
 // mais fazia o cliente desistir quando ninguém respondia.
@@ -187,6 +208,7 @@ async function responderProduto(
   try {
     const termos = palavrasDeBusca(texto)
     if (!termos.length) return null
+    const pedindo = ehPedido(texto)
     for (const termo of termos) {
       const { data, error } = await supabase.rpc("buscar_produto_nome", {
         p_empresa: empresaId, p_termo: termo, p_limite: 3,
@@ -196,15 +218,34 @@ async function responderProduto(
       console.log("[produto] termo", termo, "achou", achados.length)
       if (!achados.length) continue
       const NL2 = String.fromCharCode(10)
-      const linhas = achados.map((p: Record<string, unknown>) => {
+      const linha = (p: Record<string, unknown>) => {
         const preco = Number(p.preco ?? 0)
         // Produto no peso/sob consulta entra sem preço: "R$ 0,00" faz o cliente
         // achar que é de graça.
         return preco > 0
           ? `${p.nome} — R$ ${preco.toFixed(2).replace(".", ",")}`
           : String(p.nome)
-      }).join(NL2)
-      return `Tem sim! 🙌${NL2}${linhas}${NL2}${NL2}Peça aqui: ${link}`
+      }
+
+      // PEDIDO com um produto só: monta a sacola e manda o link pronto. É o
+      // único momento em que o link vale a pena — ele já disse o que quer.
+      if (pedindo && achados.length === 1) {
+        const p = achados[0] as Record<string, unknown>
+        const qtd = quantidadePedida(texto, termo)
+        const preco = Number(p.preco ?? 0)
+        const total = preco > 0
+          ? ` — R$ ${(preco * qtd).toFixed(2).replace(".", ",")}`
+          : ""
+        const linkCarrinho = `${link}${link.includes("?") ? "&" : "?"}c=${p.id}:${qtd}`
+        return `Anotei! 🛒${NL2}${qtd}x ${p.nome}${total}${NL2}${NL2}Confirma e escolhe o pagamento aqui:${NL2}${linkCarrinho}`
+      }
+
+      // PERGUNTA (ou pedido com mais de uma opção): responde o que ele
+      // perguntou e para por aí. Link em toda mensagem vira paisagem.
+      if (pedindo && achados.length > 1) {
+        return `Temos essas opções:${NL2}${achados.map(linha).join(NL2)}${NL2}${NL2}Qual você quer?`
+      }
+      return `Tem sim! 🙌${NL2}${achados.map(linha).join(NL2)}`
     }
     return null
   } catch (e) {
