@@ -1,15 +1,14 @@
 // Impressão de cupom térmico.
 //
-// Dois modos:
-//  1) QZ Tray (recomendado): app grátis instalado no PC. Permite listar as
-//     impressoras, escolher qual usar e imprimir SILENCIOSO (sem janela).
-//  2) Fallback do navegador (window.print num iframe oculto): usado quando
-//     nenhuma impressora foi escolhida ou o QZ Tray não está rodando.
+// Dois caminhos, nesta ordem:
+//  1) App Impressora FWC: instalado no PC da loja, imprime SILENCIOSO (sem
+//     janela) direto na térmica. É por onde sai a impressão de verdade.
+//  2) Janela do navegador (window.print num iframe oculto): quando o app não
+//     está rodando naquele computador.
 
 import { fwcFetch } from '../lib/appFwc'
 import { separarItem } from '../lib/itensPedido'
 
-const QZ_CDN = 'https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js'
 
 function fmt(v) {
   return Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -26,10 +25,6 @@ function painelConfig() {
 
 function larguraCupom() {
   return painelConfig().larguraCupom === '58mm' ? '58mm' : '80mm'
-}
-
-function impressoraEscolhida() {
-  return painelConfig().impressora || null
 }
 
 export function autoImprimirAtivo() {
@@ -149,73 +144,14 @@ export function montarCupomHtml(pedido, empresa = {}) {
 </body></html>`
 }
 
-// ───────────────────────────── QZ Tray ─────────────────────────────
-let _qzLoading = null
+// A impressão da loja sai pelo app Impressora FWC. Quando ele não está rodando,
+// a última saída é a janela do navegador.
+//
+// Existia aqui um terceiro caminho, o QZ Tray — programa de outra empresa
+// (qz.io) que o lojista instalava no PC. Nasceu antes do app FWC e nunca foi
+// usado por loja nenhuma: saiu em 02/09/2026, junto com a biblioteca que ele
+// carregava de um CDN de fora.
 
-function carregarQzLib() {
-  if (typeof window !== 'undefined' && window.qz) return Promise.resolve(window.qz)
-  if (_qzLoading) return _qzLoading
-  _qzLoading = new Promise((resolve, reject) => {
-    const s = document.createElement('script')
-    s.src = QZ_CDN
-    s.async = true
-    s.onload = () => resolve(window.qz)
-    s.onerror = () => { _qzLoading = null; reject(new Error('Falha ao carregar a biblioteca do QZ Tray')) }
-    document.head.appendChild(s)
-  })
-  return _qzLoading
-}
-
-async function qzConectar() {
-  const qz = await carregarQzLib()
-  if (!qz) throw new Error('QZ Tray indisponível')
-
-  // Promise nativa
-  if (qz.api?.setPromiseType) qz.api.setPromiseType(resolver => new Promise(resolver))
-  // Modo não assinado: resolve certificado/assinatura vazios (QZ pede "Permitir" uma vez)
-  if (qz.security?.setCertificatePromise) qz.security.setCertificatePromise(resolve => resolve())
-  if (qz.security?.setSignaturePromise) qz.security.setSignaturePromise(() => resolve => resolve())
-
-  if (!qz.websocket.isActive()) {
-    await qz.websocket.connect({ retries: 1, delay: 1 })
-  }
-  return qz
-}
-
-// Lista as impressoras instaladas no PC (precisa do QZ Tray rodando).
-// Retorna { printers: string[], padrao: string|null }
-export async function qzListarImpressoras() {
-  const qz = await qzConectar()
-  let printers = []
-  let padrao = null
-  try { printers = await qz.printers.find() } catch { printers = [] }
-  try { padrao = await qz.printers.getDefault() } catch { padrao = null }
-  if (!Array.isArray(printers)) printers = [printers].filter(Boolean)
-  return { printers, padrao }
-}
-
-// Indica se o QZ Tray está acessível (app rodando no PC).
-export async function qzDisponivel() {
-  try { await qzConectar(); return true }
-  catch { return false }
-}
-
-async function imprimirViaQz(pedido, empresa, printerName) {
-  const qz = await qzConectar()
-  const larguraMm = larguraCupom() === '58mm' ? 58 : 80
-  const config = qz.configs.create(printerName, {
-    size: { width: larguraMm, height: null },
-    units: 'mm',
-    margins: 0,
-    rasterize: true,
-    colorType: 'blackwhite',
-    scaleContent: true,
-  })
-  const data = [{ type: 'pixel', format: 'html', flavor: 'plain', data: montarCupomHtml(pedido, empresa) }]
-  await qz.print(config, data)
-}
-
-// ──────────────────── Fallback do navegador (iframe) ────────────────────
 function imprimirCupomNavegador(pedido, empresa = {}) {
   const html = montarCupomHtml(pedido, empresa)
 
@@ -247,7 +183,7 @@ function imprimirCupomNavegador(pedido, empresa = {}) {
 
 // Tenta imprimir pelo app Impressora FWC (localhost:9110) — a térmica configurada.
 // Retorna true se o app imprimiu. Falha rápido se o app não estiver rodando
-// (aí cai no QZ/navegador). É por aqui que TODA impressão vai pra térmica do FWC.
+// (aí cai no navegador). É por aqui que TODA impressão vai pra térmica do FWC.
 // Diz se o app Impressora FWC está rodando NESTE aparelho (localhost:9110).
 // true = é o PC da loja (com térmica). false = celular/tablet sem impressora.
 export async function appFwcDisponivel() {
@@ -269,39 +205,21 @@ async function imprimirViaAppFwc(rota, corpo) {
   } catch { return false }
 }
 
-// Imprime o cupom. Ordem: app Impressora FWC (térmica) → QZ Tray → navegador.
+// Imprime o cupom. Ordem: app Impressora FWC (térmica) → navegador.
 // opts.auto=true → impressão AUTOMÁTICA (pedido novo): o app respeita o dedupe por
 // pedido, pra não bater 2 vias quando ele já imprimiu o mesmo pedido pelo tempo
 // real. Sem opts.auto (reimpressão manual pelos botões) o app força a impressão.
-// Devolve POR ONDE saiu: 'app' | 'qz' | 'navegador'. Quem chama pode avisar o
+// Devolve POR ONDE saiu: 'app' | 'navegador'. Quem chama pode avisar o
 // usuário — cair no navegador sem dizer nada é o que faz o lojista apertar
 // "reimprimir" e levar um susto com a janela do Chrome, achando que o sistema
 // ignorou a térmica.
 export async function imprimirCupom(pedido, empresa = {}, opts = {}) {
   if (await imprimirViaAppFwc('imprimir', { pedido, auto: opts.auto === true })) return 'app'
-  const printer = impressoraEscolhida()
-  if (printer) {
-    try {
-      await imprimirViaQz(pedido, empresa, printer)
-      return 'qz'
-    } catch {
-      // QZ indisponível / falhou → usa o fallback do navegador
-    }
-  }
   imprimirCupomNavegador(pedido, empresa)
   return 'navegador'
 }
 
 // ──────────────── Impressão genérica de HTML (qualquer cupom) ────────────────
-async function imprimirHtmlViaQz(html, printerName) {
-  const qz = await qzConectar()
-  const larguraMm = larguraCupom() === '58mm' ? 58 : 80
-  const config = qz.configs.create(printerName, {
-    size: { width: larguraMm, height: null }, units: 'mm', margins: 0,
-    rasterize: true, colorType: 'blackwhite', scaleContent: true,
-  })
-  await qz.print(config, [{ type: 'pixel', format: 'html', flavor: 'plain', data: html }])
-}
 function imprimirHtmlNavegador(html) {
   const iframe = document.createElement('iframe')
   iframe.setAttribute('aria-hidden', 'true')
@@ -320,7 +238,7 @@ function imprimirHtmlNavegador(html) {
 export async function imprimirHtml(html, titulo, opts = {}) {
   // O app FWC imprime o HTML como TEXTO. Se mandar o <style>/<script>, o CSS sai
   // impresso como código. Então, SÓ pro app, tira esses blocos antes de enviar.
-  // (O QZ e o navegador precisam do <style> pra renderizar — esses recebem o html cheio.)
+  // (O navegador precisa do <style> pra renderizar — ele recebe o html cheio.)
   let htmlParaApp = String(html || '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -331,10 +249,6 @@ export async function imprimirHtml(html, titulo, opts = {}) {
   // opts.origem (ex.: 'mesa') → o app respeita o filtro por origem deste PC.
   if (await imprimirViaAppFwc('imprimir-html', { html: htmlParaApp, titulo, origem: opts.origem })) return 'app'
   if (opts.soApp) return false // sem app FWC local (celular): não imprime no navegador do aparelho
-  const printer = impressoraEscolhida()
-  if (printer) {
-    try { await imprimirHtmlViaQz(html, printer); return 'qz' } catch { /* fallback */ }
-  }
   imprimirHtmlNavegador(html)
   // 'navegador' e não true: abrir a janela do Chrome não é "saiu na térmica", e
   // quem chama precisa poder dizer isso pro lojista.
@@ -343,7 +257,7 @@ export async function imprimirHtml(html, titulo, opts = {}) {
 
 // Comanda de MESA: pede pro app FWC montar nativamente (nome da loja + MESA grandes,
 // data, itens com valor). Se o app não responder (ou for versão antiga), cai no HTML
-// pelo navegador/QZ. Assim o botão manual do gestor sai igual ao automático.
+// pelo navegador. Assim o botão manual do gestor sai igual ao automático.
 export async function imprimirComandaMesaApp({ numeroMesa, itens = [], nomeLoja = '', comandaId, area = '', atendente = '', pessoas = 0, rodape = '', rotulo = '' }) {
   if (await imprimirViaAppFwc('imprimir-mesa', { numeroMesa, itens, nomeLoja, comandaId })) return
   // Comanda de mesa NUNCA cai no navegador (Chrome). Quem imprime é o app FWC — que já

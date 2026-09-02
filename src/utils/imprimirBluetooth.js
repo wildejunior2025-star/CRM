@@ -1,7 +1,7 @@
 // ============================================================================
 // Impressão via Web Bluetooth (BLE) — ISOLADO do sistema principal.
 // Para a loja que imprime SÓ pelo celular numa térmica Bluetooth, usando o
-// Chrome do Android. NÃO mexe em imprimirCupom.js (FWC/QZ/navegador) — é um
+// Chrome do Android. NÃO mexe em imprimirCupom.js (FWC/navegador) — é um
 // caminho separado, ligado só pelo botão "Impressora celular" do gestor.
 //
 // ⚠️ Web Bluetooth só conversa com impressoras Bluetooth "BLE". Impressoras

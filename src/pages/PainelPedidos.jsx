@@ -5,7 +5,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
 import { precoPorQuantidade, faixaAplicada, menorFaixa } from '../lib/precoQuantidade'
 import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
-import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
+import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
 import { rotuloComanda } from '../lib/comanda'
 import { calcularTaxa } from '../lib/taxaServico'
 import { fwcFetch, explicaErroFwc } from '../lib/appFwc'
@@ -3568,7 +3568,7 @@ function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarL
           )}
           {/* Reimprimir a conta na mão. A impressão automática da conta depende do
               gestor ENXERGAR o app FWC; quando ele não enxerga, ela não sai e ninguém
-              percebe. Este botão não depende disso: tenta app → QZ → navegador. */}
+              percebe. Este botão não depende disso: tenta app → navegador. */}
           {onImprimirConta && (
             <button type="button" onClick={() => onImprimirConta(comanda)}
               style={{ marginTop: 6, width: '100%', padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12.5,
@@ -3971,13 +3971,13 @@ export default function PainelPedidos() {
   }
 
   async function handleImprimir(pedido) {
-    // Sem app FWC e sem QZ, a única saída é o navegador — mas aí o lojista
+    // Sem o app FWC, a única saída é o navegador — mas aí o lojista
     // precisa SABER, senão ele aperta reimprimir, aparece a janela do Chrome
     // perguntando a impressora e ele conclui que o sistema está quebrado.
     const via = await imprimirCupom(pedido, empresa)
     if (via === 'navegador') {
       alert([
-        'Não achei o app Impressora FWC neste computador (nem o QZ Tray).',
+        'Não achei o app Impressora FWC neste computador.',
         '',
         'Abri a impressão pelo navegador. Se a térmica é a da loja, confira se o app',
         'Impressora FWC está aberto E LOGADO — sem login ele também não imprime sozinho.',
@@ -3986,7 +3986,7 @@ export default function PainelPedidos() {
   }
 
   // Impressão pela térmica Bluetooth do CELULAR (Web Bluetooth) — caminho
-  // separado e isolado do sistema FWC/QZ. Carregado sob demanda (só quem usa).
+  // separado e isolado do sistema FWC. Carregado sob demanda (só quem usa).
   async function handleImprimirCelular(pedido) {
     try {
       const mod = await import('../utils/imprimirBluetooth')
@@ -3999,7 +3999,7 @@ export default function PainelPedidos() {
   // Auto-imprime um pedido novo. Se a térmica Bluetooth do CELULAR está conectada
   // (ou reconecta sozinha), imprime por ela e para aqui — assim o papel sai sozinho
   // sem precisar do botão 📱🖨️, e sem abrir o diálogo do navegador. Se não houver
-  // Bluetooth (ex.: no PC), cai no caminho normal (app FWC → QZ → navegador).
+  // Bluetooth (ex.: no PC), cai no caminho normal (app FWC → navegador).
   // Silencioso: no automático não mostra alerta se falhar (não atrapalha o painel).
   async function autoImprimirPedido(pedido) {
     try {
@@ -4017,7 +4017,7 @@ export default function PainelPedidos() {
 
   // Reimpressão MANUAL (botão 🖨️ dos pedidos finalizados). Igual ao auto, mas
   // mostra alerta se a Bluetooth falhar — é uma ação do usuário, ele quer saber.
-  // No PC (sem Bluetooth) cai no caminho normal (app FWC → QZ → navegador).
+  // No PC (sem Bluetooth) cai no caminho normal (app FWC → navegador).
   async function reimprimirPedido(pedido) {
     try {
       const mod = await import('../utils/imprimirBluetooth')
@@ -4034,7 +4034,7 @@ export default function PainelPedidos() {
     const via = await imprimirCupom(pedido, empresa)
     if (via === 'navegador') {
       alert([
-        'Não achei o app Impressora FWC neste computador (nem o QZ Tray).',
+        'Não achei o app Impressora FWC neste computador.',
         '',
         'Abri a impressão pelo navegador. Se a térmica é a da loja, confira se o app',
         'Impressora FWC está aberto E LOGADO — sem login ele também não imprime sozinho.',
@@ -4124,14 +4124,6 @@ export default function PainelPedidos() {
   const [loadingCatalogo, setLoadingCatalogo] = useState(false)
   const [buscaCatalogo, setBuscaCatalogo] = useState('')
   const [pausandoId, setPausandoId] = useState(null)
-  const [qzStatus, setQzStatus] = useState('idle') // idle | verificando | ok | sem-qz
-  const [impressoras, setImpressoras] = useState([])
-  const [impressoraPadrao, setImpressoraPadrao] = useState(null)
-  const [impressoraSel, setImpressoraSel] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('painelConfig') || '{}').impressora || '' }
-    catch { return '' }
-  })
-
   function patchPainelConfig(patch) {
     try {
       const cfg = JSON.parse(localStorage.getItem('painelConfig') || '{}')
@@ -4486,33 +4478,6 @@ export default function PainelPedidos() {
     }
   }
 
-  async function detectarImpressoras() {
-    setQzStatus('verificando')
-    try {
-      const { printers, padrao } = await qzListarImpressoras()
-      setImpressoras(printers)
-      setImpressoraPadrao(padrao)
-      setQzStatus('ok')
-      // Sem impressora escolhida ainda? sugere a padrão do PC
-      setImpressoraSel(prev => {
-        if (prev) return prev
-        if (padrao) { patchPainelConfig({ impressora: padrao }); return padrao }
-        return prev
-      })
-    } catch {
-      setQzStatus('sem-qz')
-    }
-  }
-
-  function escolherImpressora(name) {
-    setImpressoraSel(name)
-    patchPainelConfig({ impressora: name })
-  }
-
-  useEffect(() => {
-    if (painelDireito === 'impressora') detectarImpressoras()
-  }, [painelDireito]) // eslint-disable-line react-hooks/exhaustive-deps
-
   // ── Ref para o intervalo do loop de som ───────────────────
   const somLoopRef = useRef(null)
 
@@ -4834,7 +4799,7 @@ export default function PainelPedidos() {
 
   // Impressão MANUAL da CONTA (botão no card, mesa aguardando conferência).
   // Aqui NÃO passa pelo filtro nem pela detecção do app: quem clicou quer o papel
-  // agora. Vai por onde der — app FWC, QZ ou navegador. É a rede de segurança pra
+  // agora. Vai por onde der — app FWC ou navegador. É a rede de segurança pra
   // quando a conta automática não sai e a loja fica sem saber.
   async function handleImprimirContaMesa(c) {
     const itens = Array.isArray(c.comanda_itens) ? c.comanda_itens : []
