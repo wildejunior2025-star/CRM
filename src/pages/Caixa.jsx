@@ -331,10 +331,16 @@ export default function Caixa() {
     loadAll()
   }
 
+  // Abre o fechamento com os três campos JÁ PREENCHIDOS com o esperado. Na
+  // maioria dos dias bate, e o vendedor só confirma em vez de digitar três
+  // valores no fim do expediente. Quando não bate, ele apaga e põe o certo — os
+  // campos abrem selecionados (onFocus), então é um toque e digitar por cima.
   function openFechamento() {
-    setValorFechamento('')
-    setValorFechamentoPix('')
-    setValorFechamentoCartao('')
+    // Sem o resumo carregado o esperado é zero — melhor abrir vazio do que
+    // sugerir R$ 0,00 e alguém confirmar sem olhar.
+    setValorFechamento(resumo ? valorEsperadoDinheiro.toFixed(2) : '')
+    setValorFechamentoPix(resumo ? valorEsperadoPix.toFixed(2) : '')
+    setValorFechamentoCartao(resumo ? valorEsperadoCartao.toFixed(2) : '')
     setObsFechamento('')
     setFormError(null)
     setShowFechamento(true)
@@ -1110,9 +1116,13 @@ export default function Caixa() {
                     step="0.01"
                     value={valorFechamento}
                     onChange={(e) => setValorFechamento(e.target.value)}
+                    onFocus={(e) => e.target.select()}
                     required
                     autoFocus
                   />
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                    Já veio com o esperado. <strong>Conte a gaveta</strong> — se der outro valor, apague e ponha o que contou.
+                  </span>
                 </div>
                 {diferencaFechamento !== null && !Number.isNaN(diferencaFechamento) && (
                   <div className="form-field full">
@@ -1144,6 +1154,7 @@ export default function Caixa() {
                     step="0.01"
                     value={valorFechamentoPix}
                     onChange={(e) => setValorFechamentoPix(e.target.value)}
+                    onFocus={(e) => e.target.select()}
                     placeholder={`Esperado: ${valorEsperadoPix.toFixed(2)}`}
                   />
                 </div>
@@ -1180,6 +1191,7 @@ export default function Caixa() {
                     step="0.01"
                     value={valorFechamentoCartao}
                     onChange={(e) => setValorFechamentoCartao(e.target.value)}
+                    onFocus={(e) => e.target.select()}
                     placeholder={`Esperado: ${valorEsperadoCartao.toFixed(2)}`}
                   />
                   {/* A conta mostra o que CAIU (líquido). Deixar aqui o valor
