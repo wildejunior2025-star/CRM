@@ -4,6 +4,7 @@ import { useTheme } from '../hooks/useTheme'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
 import { precoPorQuantidade, faixaAplicada, menorFaixa } from '../lib/precoQuantidade'
+import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
 import { imprimirCupom, autoImprimirAtivo, qzListarImpressoras, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
 import { rotuloComanda } from '../lib/comanda'
 import { calcularTaxa } from '../lib/taxaServico'
@@ -3283,10 +3284,14 @@ function tempoDecorridoTxt(iso) {
 }
 // Pedido em preparo/pronto atrasado? usa a previsão do preparo; senão 40 min de teto.
 const ATRASO_PADRAO_MIN = 40
+// Pedido agendado conta o tempo da HORA COMBINADA, não de quando foi feito:
+// senão o almoço pedido às 8h já nasce "em atraso" ao entrar na cozinha.
+const relogioDoPedido = (p) => p?.agendado_para || p?.created_at
+
 function pedidoAtrasado(pedido) {
   if (!['confirmado', 'em_preparo', 'pronto'].includes(pedido.status)) return false
   if (pedido.pronto_previsto_at) return Date.now() > new Date(pedido.pronto_previsto_at).getTime()
-  const m = minutosDesde(pedido.created_at)
+  const m = minutosDesde(relogioDoPedido(pedido))
   return m != null && m > ATRASO_PADRAO_MIN
 }
 
@@ -3409,6 +3414,11 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
       </div>
       <div className="pp-mini-sub">{hora} · {pedido.cliente_nome || '—'}</div>
       <div className="pp-mini-tags">
+        {pedido.agendado_para && (
+          <span className="pp-mini-badge" style={{ background: 'rgba(14,165,233,.18)', color: '#0284c7' }}>
+            🗓️ {rotuloAgendado(pedido.agendado_para, { comData: true })}
+          </span>
+        )}
         <span className="pp-mini-badge" style={{ background: oc.bg, color: oc.color }}>{oc.label}</span>
         <span className="pp-mini-itens">{qtdItens} {qtdItens === 1 ? 'item' : 'itens'}</span>
         {isRetirada && <span className="pp-mini-itens">{pedido.origem === 'balcao' ? 'Balcão' : 'Retirada'}</span>}
@@ -3416,8 +3426,8 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
         {aguardandoEntregador && <span className="pp-mini-itens" style={{ color: '#a16207' }}>aguardando entregador</span>}
         {['confirmado', 'em_preparo', 'pronto'].includes(pedido.status) && (
           pedidoAtrasado(pedido)
-            ? <span className="pp-mini-badge" style={{ background: '#dc2626', color: '#fff' }}>⚠️ Em atraso · {tempoDecorridoTxt(pedido.created_at)}</span>
-            : <span className="pp-mini-itens">⏱ {tempoDecorridoTxt(pedido.created_at)}</span>
+            ? <span className="pp-mini-badge" style={{ background: '#dc2626', color: '#fff' }}>⚠️ Em atraso · {tempoDecorridoTxt(relogioDoPedido(pedido))}</span>
+            : <span className="pp-mini-itens">⏱ {tempoDecorridoTxt(relogioDoPedido(pedido))}</span>
         )}
         {pedido.status === 'saiu_entrega' && !isRetirada && (
           <span className="pp-mini-itens" style={{ color: '#7c3aed', fontWeight: 700 }}>🛵 Despachado {tempoDecorridoTxt(pedido.saiu_entrega_at || pedido.updated_at)}</span>
@@ -3895,6 +3905,42 @@ export default function PainelPedidos() {
   // impressão abre janela e atrapalha).
   const ehEstacaoDeImpressao = () => window.__fwcBtConectada === true
   const deveAutoImprimir = () => autoImprimirAtivo() || ehEstacaoDeImpressao()
+
+  // ── Pedido agendado (mig 0222) ───────────────────────────────
+  // Ele entra no painel na hora que o cliente faz — mas guardado: não toca e
+  // não imprime, senão a cozinha recebe às 8h da manhã o almoço das 11h.
+  // Faltando `agendamento_libera_min` pra hora combinada, vira pedido normal e
+  // aí sim toca, imprime e (se estiver ligado) é aceito sozinho.
+  const liberaAgendaMin = Number(empresa?.agendamento_libera_min ?? 45)
+  const [ticAgenda, setTicAgenda] = useState(0)
+  const agendadosPendentesRef = useRef(new Set())
+  const ehAgendadoPendente = (p) => !!p?.agendado_para
+    && !STATUS_FINALIZADOS.has(p.status)
+    && aguardandoHora(p.agendado_para, liberaAgendaMin)
+
+  // Relógio só enquanto existe agendado na tela.
+  useEffect(() => {
+    if (!pedidos.some(p => p.agendado_para)) return
+    const id = setInterval(() => setTicAgenda(t => t + 1), 30000)
+    return () => clearInterval(id)
+  }, [pedidos])
+
+  useEffect(() => {
+    const pendentes = agendadosPendentesRef.current
+    for (const p of pedidos) {
+      if (!p.agendado_para) continue
+      if (ehAgendadoPendente(p)) { pendentes.add(p.id); continue }
+      // Só solta o que ESTAVA guardado nesta tela. Sem esse `has`, abrir o
+      // painel no meio da tarde imprimiria de novo todo agendado do dia.
+      if (!pendentes.has(p.id)) continue
+      pendentes.delete(p.id)
+      if (p.status !== 'aguardando') continue
+      if (deveAutoImprimir() && !fwcImprimeRef.current) autoImprimirPedido(p)
+      iniciarLoopSom()
+      if (aceitarAutoAtivo()) handleConfirmar(p.id, tempoPrevistoMin(p, empresa))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedidos, ticAgenda])
 
   function patchConfigLocal(patch) {
     try {
@@ -4900,12 +4946,16 @@ export default function PainelPedidos() {
             // Só adiciona ao painel se não for finalizado E não for aguardando pagamento PIX
             if (!STATUS_FINALIZADOS.has(novo.status) && novo.status !== 'aguardando_pagamento') {
               setPedidos(prev => [...prev, novo])
+              // Agendado pra depois entra calado: vai pra aba Agendados e só
+              // toca/imprime perto da hora (ver o efeito de liberação).
+              const guardado = ehAgendadoPendente(novo)
+              if (guardado) agendadosPendentesRef.current.add(novo.id)
               // Imprime pedido novo (aguardando) OU venda de balcão (já confirmada).
               // Se o app Impressora FWC está imprimindo, o navegador não imprime (evita 2 vias).
-              if (deveAutoImprimir() && !fwcImprimeRef.current && (novo.status === 'aguardando' || novo.origem === 'balcao')) {
+              if (!guardado && deveAutoImprimir() && !fwcImprimeRef.current && (novo.status === 'aguardando' || novo.origem === 'balcao')) {
                 autoImprimirPedido(novo)
               }
-              if (novo.status === 'aguardando') {
+              if (!guardado && novo.status === 'aguardando') {
                 iniciarLoopSom()
                 if (aceitarAutoAtivo()) handleConfirmar(novo.id, tempoPrevistoMin(novo, empresa))
               }
@@ -4920,7 +4970,9 @@ export default function PainelPedidos() {
                 const jaEstaNopainel = prev.some(p => p.id === novo.id)
                 if (!jaEstaNopainel) {
                   // Pedido chegou ao painel agora (ex: PIX confirmado)
-                  if (novo.status === 'aguardando') {
+                  const guardado = ehAgendadoPendente(novo)
+                  if (guardado) agendadosPendentesRef.current.add(novo.id)
+                  if (!guardado && novo.status === 'aguardando') {
                     iniciarLoopSom()
                     if (deveAutoImprimir() && !fwcImprimeRef.current) autoImprimirPedido(novo)
                     if (aceitarAutoAtivo()) handleConfirmar(novo.id, tempoPrevistoMin(novo, empresa))
@@ -5251,8 +5303,15 @@ export default function PainelPedidos() {
   // Filtro "Mesa": mostra só as comandas/mesas e esconde o delivery.
   // Filtro de origem de delivery: esconde as mesas. Sem filtro: mostra tudo.
   // Novo no topo: as colunas mostram o pedido mais recente em cima (ordem de chegada, de cima pra baixo).
-  const pedidosView         = [...(isMesaFiltro ? [] : (filtroOrigem ? pedidos.filter(passaOrigem) : pedidos))]
+  const pedidosTodosView    = [...(isMesaFiltro ? [] : (filtroOrigem ? pedidos.filter(passaOrigem) : pedidos))]
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+  // Agendado que ainda não chegou a hora fica FORA da fila: não conta em "A
+  // aceitar", não entra na cozinha e não some no meio dos pedidos de agora.
+  // Ordem aqui é a da hora combinada — o próximo a sair fica em cima.
+  const agendadosView = pedidosTodosView
+    .filter(ehAgendadoPendente)
+    .sort((a, b) => new Date(a.agendado_para) - new Date(b.agendado_para))
+  const pedidosView = pedidosTodosView.filter(p => !ehAgendadoPendente(p))
   const concluidosHojeView  = isMesaFiltro ? [] : (filtroOrigem ? concluidosHoje.filter(passaOrigem)  : concluidosHoje)
   const canceladosHojeView  = isMesaFiltro ? [] : (filtroOrigem ? canceladosHoje.filter(passaOrigem)  : canceladosHoje)
   // Mesas saíram do "total de pedidos" — ficam SÓ na seção Mesas (evita duplicidade).
@@ -5439,7 +5498,11 @@ export default function PainelPedidos() {
             {!buscaQ && (
             <div className="pp-chips" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
               {[
-                { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidosView.length + concluidosHojeView.length + mesasFechadasHojeView.length + canceladosHojeView.length },
+                { id: null,         label: 'Todos',     cor: '#7c3aed', count: pedidosView.length + agendadosView.length + concluidosHojeView.length + mesasFechadasHojeView.length + canceladosHojeView.length },
+                // "Agendados" só existe quando há pedido marcado pra depois.
+                ...(agendadosView.length > 0
+                  ? [{ id: 'agendados', label: 'Agendados', cor: '#0284c7', count: agendadosView.length }]
+                  : []),
                 // "Mesas" só aparece quando há mesa aberta (autoatendimento por QR)
                 ...(comandasView.length > 0
                   ? [{ id: 'mesas', label: 'Mesas', cor: '#db2777', count: comandasView.length }]
@@ -5531,6 +5594,18 @@ export default function PainelPedidos() {
                 <Coluna titulo="Mesas" cor="#db2777" count={comandasView.length} vazio="Nenhuma mesa aberta">
                   {comandasView.map(c => (
                     <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} onConfirmarLiberar={handleConfirmarLiberarMesa} onImprimir={handleImprimirMesa} onImprimirConta={handleImprimirContaMesa} onEditarPreco={handleEditarPrecoMesaItem} podeEditarPreco={podeFinanceiro} onAjustarTaxa={podeFinanceiro ? handleAjustarTaxaMesa : null} />
+                  ))}
+                </Coluna>
+              )}
+
+              {/* Agendados: o que o cliente marcou pra mais tarde. Fica aqui,
+                  quieto, até faltar pouco pra hora — só então entra na fila. */}
+              {(!filtroColuna || filtroColuna === 'agendados') && agendadosView.length > 0 && (
+                <Coluna titulo="Agendados" cor="#0284c7"
+                  count={agendadosView.length}
+                  vazio="Nada agendado">
+                  {agendadosView.map(p => (
+                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}

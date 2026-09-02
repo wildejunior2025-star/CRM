@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { rotuloAgendado } from '../lib/agendamento'
 import { iniciarTags, registrarCompra } from '../lib/tracking'
 import AvisoCookies from '../components/AvisoCookies'
 import 'leaflet/dist/leaflet.css'
@@ -579,6 +580,19 @@ export default function DeliveryPedido() {
       </header>
 
       <main className="dpd-main">
+        {/* Pedido agendado: a hora combinada é a primeira coisa que o cliente
+            precisa ver aqui — senão ele acha que o pedido travou. */}
+        {pedido.agendado_para && (
+          <section className="dpd-card" style={{ borderLeft: '3px solid #0284c7' }}>
+            <h2 className="dpd-card-title">🗓️ Pedido agendado</h2>
+            <p style={{ margin: 0, fontSize: 15, lineHeight: 1.5 }}>
+              Está tudo certo — seu pedido fica guardado para{' '}
+              <strong>{rotuloAgendado(pedido.agendado_para, { comData: true })}</strong>.
+              {' '}A loja começa a preparar perto do horário.
+            </p>
+          </section>
+        )}
+
         {/* Timeline de status */}
         {!isCancelado ? (
           <section className="dpd-card dpd-card--timeline">

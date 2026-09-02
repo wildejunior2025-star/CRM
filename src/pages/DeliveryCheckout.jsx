@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { registrarIndicacao } from '../lib/indicacao'
@@ -7,6 +7,8 @@ import { registrarPedido } from '../lib/meusPedidos'
 import { iniciarCheckout } from '../lib/tracking'
 import { marcarEtapa, anotarContato } from '../lib/funil'
 import { formasAtivas } from '../lib/constants'
+import { carregarExcecoes } from '../lib/feriados'
+import { diasParaAgendar, paraISO, rotuloAgendado } from '../lib/agendamento'
 import 'leaflet/dist/leaflet.css'
 import './DeliveryCheckout.css'
 
@@ -582,11 +584,60 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome')
+      .select('endereco, bairro, cidade, estado, latitude, longitude, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
   }, [state?.empresaId])
+
+  // ── Pedido agendado (mig 0222) ───────────────────────────────
+  // Dia e hora saem da MESMA regra que diz se a loja está aberta: grade da
+  // semana + feriado + dia marcado na mão. Sem isso o cliente agendaria pra uma
+  // segunda-feira que a loja não abre.
+  const [excecoes, setExcecoes] = useState({})
+  const [quando, setQuando] = useState('agora')   // 'agora' | 'agendado'
+  const [agDia, setAgDia] = useState('')
+  const [agHora, setAgHora] = useState('')
+
+  useEffect(() => {
+    if (!state?.empresaId) return
+    let vivo = true
+    carregarExcecoes(supabase, state.empresaId).then(e => { if (vivo) setExcecoes(e) })
+    return () => { vivo = false }
+  }, [state?.empresaId])
+
+  const agendaLigada = !!lojaEndereco?.agendamento_ativo
+  // A vitrine avisa se estava fechada quando o cliente montou a sacola. Fechada
+  // + agendamento ligado = não existe "pra agora", só agendar.
+  const lojaEstavaAberta = state?.lojaAberta !== false
+  const diasAgenda = useMemo(() => (
+    agendaLigada
+      ? diasParaAgendar({
+          grade: lojaEndereco?.horarios_funcionamento,
+          excecoes,
+          fechaFeriado: !!lojaEndereco?.feriados_fecha,
+          dias: Number(lojaEndereco?.agendamento_dias ?? 2),
+          antecedencia: Number(lojaEndereco?.agendamento_antecedencia_min ?? 60),
+        })
+      : []
+  ), [agendaLigada, lojaEndereco, excecoes])
+
+  // Loja fechada só tem um caminho: agendar. Já deixa o primeiro horário livre
+  // escolhido — a maioria quer o mais cedo possível.
+  useEffect(() => {
+    if (!agendaLigada) { setQuando('agora'); return }
+    if (!lojaEstavaAberta) setQuando('agendado')
+  }, [agendaLigada, lojaEstavaAberta])
+
+  useEffect(() => {
+    if (quando !== 'agendado' || !diasAgenda.length) return
+    const dia = diasAgenda.find(d => d.ymd === agDia) ?? diasAgenda[0]
+    if (dia.ymd !== agDia) { setAgDia(dia.ymd); setAgHora(dia.horarios[0]); return }
+    if (!dia.horarios.includes(agHora)) setAgHora(dia.horarios[0])
+  }, [quando, diasAgenda, agDia, agHora])
+
+  const horariosDoDia = diasAgenda.find(d => d.ymd === agDia)?.horarios ?? []
+  const agendadoPara = (quando === 'agendado' && agDia && agHora) ? paraISO(agDia, agHora) : null
 
   // A loja pode desligar "Retirar na loja" nas configurações (Raio de entrega).
   // Enquanto os dados não chegaram, deixa aparecer — assim o botão não pisca
@@ -963,6 +1014,20 @@ export default function DeliveryCheckout() {
       return
     }
 
+    // Agendamento: sem dia e hora escolhidos o pedido não sai. Loja fechada é o
+    // caso que mais importa — ali não existe "pra agora", e deixar passar criaria
+    // um pedido pra uma cozinha que só abre daqui a quatro horas.
+    if (agendaLigada && quando === 'agendado' && !agendadoPara) {
+      setErroGlobal('Escolha o dia e o horário do seu pedido.')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    if (agendaLigada && !lojaEstavaAberta && !agendadoPara) {
+      setErroGlobal('A loja está fechada agora — escolha um horário pra agendar seu pedido.')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+
     // Pedido mínimo para entrega
     if (faltaMinimo) {
       setErroGlobal(`Pedido mínimo para entrega é R$ ${fmt(pedidoMinimo)}. Faltam R$ ${fmt(faltamParaMinimo)} em produtos${permiteRetirada ? ' (ou escolha Retirada)' : ''}.`)
@@ -1078,6 +1143,9 @@ export default function DeliveryCheckout() {
         endereco_lat:         tipo === 'entrega' ? (coordCliente?.lat ?? null) : null,
         endereco_lng:         tipo === 'entrega' ? (coordCliente?.lng ?? null) : null,
         observacoes:  form.observacoes.trim() || null,
+        // Hora combinada. No PIX o cliente paga AGORA e a comida sai na hora
+        // marcada — quem agenda já garantiu o lugar dele.
+        agendado_para: agendadoPara,
       }
       let pixData = null, pixErr = null
       try {
@@ -1126,6 +1194,7 @@ export default function DeliveryCheckout() {
           ? Math.round(parseFloat(form.troco.replace(',', '.')) * 100) / 100
           : null,
         observacoes: form.observacoes.trim() || null,
+        agendado_para: agendadoPara,
       })
       .select('id')
       .single()
@@ -1248,6 +1317,72 @@ export default function DeliveryCheckout() {
                       </div>
                     )}
                   </div>
+                )}
+              </section>
+              )}
+
+              {/* Quando o cliente quer — só aparece na loja que ligou o
+                  agendamento. Fechada, "pra agora" nem existe: o único caminho
+                  é escolher dia e hora dentro da grade da loja. */}
+              {agendaLigada && (
+              <section className="dco-section">
+                <h2 className="dco-section-title">Quando você quer?</h2>
+                {lojaEstavaAberta && (
+                  <div className="dco-payment-row">
+                    <button type="button"
+                      className={`dco-pay-btn${quando === 'agora' ? ' dco-pay-btn--active' : ''}`}
+                      onClick={() => setQuando('agora')}>
+                      <span>⚡ Assim que possível</span>
+                      {quando === 'agora' && <span className="dco-pay-check"><IconCheck /></span>}
+                    </button>
+                    <button type="button"
+                      className={`dco-pay-btn${quando === 'agendado' ? ' dco-pay-btn--active' : ''}`}
+                      onClick={() => setQuando('agendado')}
+                      disabled={!diasAgenda.length}>
+                      <span>🗓️ Agendar</span>
+                      {quando === 'agendado' && <span className="dco-pay-check"><IconCheck /></span>}
+                    </button>
+                  </div>
+                )}
+                {quando === 'agendado' && (
+                  diasAgenda.length === 0 ? (
+                    <p style={{ fontSize: 13.5, color: 'var(--dl-text-muted, #9aa0b5)', margin: '10px 0 0' }}>
+                      Não tem horário livre pra agendar agora. Tente mais tarde.
+                    </p>
+                  ) : (
+                    <div style={{ marginTop: 12 }}>
+                      <label className="dco-label">Dia</label>
+                      <div className="dco-ag-chips">
+                        {diasAgenda.map(d => (
+                          <button key={d.ymd} type="button"
+                            className={`dco-ag-chip${agDia === d.ymd ? ' dco-ag-chip--active' : ''}`}
+                            onClick={() => { setAgDia(d.ymd); setAgHora(d.horarios[0]) }}>
+                            {d.rotulo}
+                          </button>
+                        ))}
+                      </div>
+                      <label className="dco-label" style={{ marginTop: 12 }}>Horário</label>
+                      <div className="dco-ag-chips">
+                        {horariosDoDia.map(h => (
+                          <button key={h} type="button"
+                            className={`dco-ag-chip${agHora === h ? ' dco-ag-chip--active' : ''}`}
+                            onClick={() => setAgHora(h)}>
+                            {h}
+                          </button>
+                        ))}
+                      </div>
+                      {agendadoPara && (
+                        <div style={{
+                          marginTop: 12, padding: '12px 14px', borderRadius: 10,
+                          background: 'rgba(124,58,237,.1)', border: '1px solid rgba(124,58,237,.3)',
+                          fontSize: 13.5, lineHeight: 1.5,
+                        }}>
+                          🗓️ Seu pedido fica agendado para <strong>{rotuloAgendado(agendadoPara, { comData: true })}</strong>
+                          {tipo === 'entrega' ? ' — é o horário em que a loja começa a preparar.' : ' — é o horário pra retirar.'}
+                        </div>
+                      )}
+                    </div>
+                  )
                 )}
               </section>
               )}

@@ -555,6 +555,11 @@ export default function DeliveryLoja() {
   const motivoFechada = comoFicaNoDia(hojeBR(), {
     grade: loja?.horarios_funcionamento, excecoes, fechaFeriado: !!loja?.feriados_fecha,
   }).motivo
+  // Loja com agendamento ligado (mig 0222) monta sacola mesmo fechada: quem
+  // quer almoçar 11h decide isso às 8h, e às 8h a loja está fechada. A escolha
+  // do dia e da hora acontece no checkout, onde a grade da loja é consultada.
+  const agendamentoLigado = !!loja?.agendamento_ativo
+  const podePedir = lojaAberta || agendamentoLigado
 
   // Define categoria ativa inicial
   useEffect(() => {
@@ -628,6 +633,8 @@ export default function DeliveryLoja() {
         })),
         subtotal,
         taxaEntrega,
+        // Fechada = o checkout já abre no modo agendar (não tem "pra agora").
+        lojaAberta,
       },
     })
   }
@@ -780,7 +787,10 @@ export default function DeliveryLoja() {
 
       {!lojaAberta && (
         <div className="dloja-closed-banner">
-          <strong>Loja fechada{motivoFechada ? ` · ${motivoFechada}` : ' no momento'}</strong> — você pode ver o cardápio, mas não é possível fazer pedidos.
+          <strong>Loja fechada{motivoFechada ? ` · ${motivoFechada}` : ' no momento'}</strong>
+          {agendamentoLigado
+            ? ' — mas dá pra montar seu pedido e agendar pra quando a loja abrir. 🗓️'
+            : ' — você pode ver o cardápio, mas não é possível fazer pedidos.'}
         </div>
       )}
 
@@ -796,7 +806,7 @@ export default function DeliveryLoja() {
               titulo={`Resultados (${resultadosBusca.length})`}
               produtos={resultadosBusca}
               qtdProduto={qtdProduto}
-              lojaAberta={lojaAberta}
+              lojaAberta={podePedir}
               abrirProduto={abrirProduto}
               addOne={addOne}
               removeOne={removeOne}
@@ -822,7 +832,7 @@ export default function DeliveryLoja() {
                 produtos={cat === '__sem__' ? semCategoria : (porCategoria.get(cat) ?? [])}
                 refCallback={el => { catRefs.current[cat] = el }}
                 qtdProduto={qtdProduto}
-                lojaAberta={lojaAberta}
+                lojaAberta={podePedir}
                 abrirProduto={abrirProduto}
                 addOne={addOne}
                 removeOne={removeOne}
@@ -918,9 +928,9 @@ export default function DeliveryLoja() {
               <button
                 className="dloja-btn-finalizar"
                 onClick={handleFinalizar}
-                disabled={!lojaAberta}
+                disabled={!podePedir}
               >
-                {lojaAberta ? 'Finalizar pedido' : 'Loja fechada'}
+                {lojaAberta ? 'Finalizar pedido' : (agendamentoLigado ? '🗓️ Agendar pedido' : 'Loja fechada')}
               </button>
             </div>
           </aside>

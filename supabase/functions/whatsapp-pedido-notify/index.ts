@@ -110,7 +110,7 @@ serve(async (req) => {
 
     const { data: pedido } = await supabase
       .from("pedidos_delivery")
-      .select("numero_pedido, cliente_telefone, empresa_id, codigo_entrega, tipo_entrega, motivo_cancelamento")
+      .select("numero_pedido, cliente_telefone, empresa_id, codigo_entrega, tipo_entrega, motivo_cancelamento, agendado_para")
       .eq("id", pedido_id)
       .single()
 
@@ -149,6 +149,18 @@ serve(async (req) => {
       String(pedido.motivo_cancelamento ?? "")
     )
     if (!mensagem) return new Response("ok")
+
+    // Pedido agendado (mig 0222): sem essa linha, o "seu pedido foi aceito,
+    // chega em 40 min" contradiz a hora que o proprio cliente escolheu.
+    if (pedido.agendado_para && !["entregue", "cancelado"].includes(novo_status)) {
+      const d = new Date(pedido.agendado_para)
+      const dia = d.toLocaleDateString("pt-BR", { timeZone: "America/Fortaleza", day: "2-digit", month: "2-digit" })
+      const hora = d.toLocaleTimeString("pt-BR", { timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit" })
+      const hojeBR = new Date().toLocaleDateString("pt-BR", { timeZone: "America/Fortaleza", day: "2-digit", month: "2-digit" })
+      mensagem += `
+
+🗓️ *Agendado para ${dia === hojeBR ? "hoje" : dia} às ${hora}* — é nesse horário que a gente prepara.`
+    }
 
     // Cashback e indicacao (mig 0177): so no "entregue", e so quando a loja
     // ligou o programa. Vai anexado ao aviso que ele ja ia receber - mandar uma

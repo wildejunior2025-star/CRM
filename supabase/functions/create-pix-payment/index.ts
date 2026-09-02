@@ -196,6 +196,9 @@ Deno.serve(async (req) => {
         endereco_lat:          pedido.endereco_lat ?? null,
         endereco_lng:          pedido.endereco_lng ?? null,
         observacoes:           pedido.observacoes ?? null,
+        // Pedido agendado (mig 0222): o PIX é pago agora, a comida sai na hora
+        // combinada. Sem isso o agendamento se perdia justamente em quem já pagou.
+        agendado_para:         pedido.agendado_para ?? null,
         troco_para:            pedido.troco_para ?? null,
         codigo_entrega:        pedido.codigo_entrega,
         status:                'aguardando_pagamento',
