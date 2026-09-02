@@ -189,10 +189,17 @@ export default function DeliveryLoja() {
   // Enquanto tem item na sacola ou o "monte seu produto" está aberto, a tela se
   // declara ocupada e a versão nova espera (entra sozinha depois, quando a
   // pessoa fechar tudo ou sair).
+  //
+  // A SACOLA não conta como ocupado. Ela vive no localStorage e sobrevive ao
+  // recarregamento — e, como fica salva de uma visita pra outra, quem deixou um
+  // item lá se declarava ocupado JÁ NO CARREGAMENTO, pra sempre: o celular
+  // nunca mais pegava versão nova do cardápio. Foi o que fez uma cliente da CD
+  // Bom ver o carrinho sem os sabores que tinha escolhido — a tela dela era de
+  // meses atrás. O que segura de verdade é ter algo ABERTO na frente dela.
   useEffect(() => {
-    window.__fwcOcupado = Object.keys(carrinho).length > 0 || optProduto != null || drawerOpen
+    window.__fwcOcupado = optProduto != null || drawerOpen
     return () => { window.__fwcOcupado = false }
-  }, [carrinho, optProduto, drawerOpen])
+  }, [optProduto, drawerOpen])
 
   // Após produtos carregarem, filtra itens do carrinho restaurado:
   // remove produtos que não existem mais e atualiza preços

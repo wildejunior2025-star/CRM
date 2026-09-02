@@ -99,6 +99,12 @@ function ocupadoPreenchendo() {
   // Agora vale qualquer coisa com "overlay" no nome — mas só se estiver
   // VISÍVEL na tela: overlay que existe no HTML e está escondido seguraria a
   // atualização pra sempre.
+  return modalAberto()
+}
+
+// Tem modal/gaveta VISÍVEL na frente da pessoa? Overlay escondido no HTML não
+// vale — senão ele seguraria a atualização pra sempre.
+function modalAberto() {
   const modais = document.querySelectorAll(
     '[aria-modal="true"], [role="dialog"], dialog[open], [class*="overlay" i], .confirmar-fundo'
   )
@@ -180,8 +186,16 @@ updateSW = registerSW({
     // susto no meio do pedido — então a atualização espera calada.
     if (window.__fwcOcupado !== true) mostrarAvisoAtualizacao('preenchendo')
     if (esperandoTelaLivre) return
+    // Teto de espera. "Ocupado" que nunca acaba deixava a tela presa numa versão
+    // velha pra sempre — e o pior é que ninguém percebe: a pessoa acha que o
+    // sistema é assim mesmo. Passados 20 minutos com a atualização parada, ela
+    // entra assim que não houver NADA aberto na frente (modal, gaveta) e nenhuma
+    // impressora pareada, mesmo com a tela se dizendo ocupada.
+    const pedidoEm = Date.now()
     esperandoTelaLivre = setInterval(() => {
-      if (impressoraBtConectada() || ocupadoPreenchendo()) return
+      const esperandoDemais = Date.now() - pedidoEm > 20 * 60 * 1000
+      if (impressoraBtConectada()) return
+      if (ocupadoPreenchendo() && !(esperandoDemais && !modalAberto())) return
       clearInterval(esperandoTelaLivre)
       esperandoTelaLivre = null
       aplicarAtualizacao()
