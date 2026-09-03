@@ -2457,7 +2457,10 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     // chamado e toca o sino no gestor, sempre.
     const prometeuVerificar = new RegExp([
       // "vou verificar", "deixa eu conferir", "te retorno"
-      "(vou|deixa eu|deixe-me|posso) (verificar|conferir|checar|perguntar|confirmar)",
+      // "confirmar" ficou de FORA: "deixa eu confirmar tudo antes de fechar" é
+      // o robô lendo o resumo do pedido, e essa frase chegou a abrir chamado
+      // no meio do fechamento — calando o robô justamente no "sim" do cliente.
+      "(vou|deixa eu|deixe-me|posso) (verificar|conferir|checar|perguntar)",
       "com o respons[\u00e1a]vel", "com a loja", "retorno (em breve|pra voc[\u00eae])",
       "te retorno", "assim que (eu )?souber", "vou falar com",
       // "já chamei alguém" — a frase que o próprio roteiro manda dizer ANTES
@@ -2470,7 +2473,9 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     const chamouAtendente = acaoMatch !== null && (() => {
       try { return JSON.parse(acaoMatch![1])?.tipo === "chamar_atendente" } catch { return false }
     })()
-    if (prometeuVerificar && !chamouAtendente) {
+    // Resumo e fechamento nunca são pedido de socorro — é o robô trabalhando.
+    const ehResumoOuFechamento = /resumo do pedido|confirma\?|pedido #|total:/i.test(resposta)
+    if (prometeuVerificar && !chamouAtendente && !ehResumoOuFechamento) {
       await abrirChamado(supabase, empresaId, phone, text)
       console.log("[chamado] SafeNet: o robô prometeu retorno, chamado aberto")
     }

@@ -3987,7 +3987,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
       )}
 
       {/* Buscar produto sem sair da conversa (ver BuscaProdutoNoChat) */}
-      {empresaId && <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} />}
+      {empresaId && <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} onAvulso={onAvulsoSacola} />}
 
       {/* A sacola só aparece quando tem item — conversa de dúvida não precisa
           ver carrinho vazio ocupando a tela. */}
@@ -3996,7 +3996,6 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
           itens={sacola}
           onQtd={onQtdSacola}
           onRemover={idx => onQtdSacola(idx, -999)}
-          onAvulso={onAvulsoSacola}
           onEnviar={onEnviarSacola}
           enviando={enviandoSacola}
         />
@@ -4035,11 +4034,24 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
 // Galioto"), o atendente precisa do nome e do preço certos sem sair da tela — e
 // o nome que ele mandar é o que o robô vai ler pra reconhecer o produto quando
 // voltar. Escrito de cabeça, sai errado; daqui, sai do cadastro.
-function BuscaProdutoNoChat({ empresaId, onEscolher }) {
+function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso }) {
   const [termo, setTermo] = useState('')
   const [itens, setItens] = useState([])
   const [buscando, setBuscando] = useState(false)
   const [aberto, setAberto] = useState(false)
+  const [avulsoPreco, setAvulsoPreco] = useState('')
+
+  // Vender o que não está cadastrado: o nome é o que ele acabou de digitar na
+  // busca, e o preço ele informa. Vai pra sacola como qualquer outro item.
+  function addAvulso() {
+    const nome = termo.trim()
+    const v = Number(String(avulsoPreco).replace(',', '.'))
+    if (!nome || !(v > 0)) return
+    onAvulso({ produto_id: null, nome, preco: v, qtd: 1 })
+    setAvulsoPreco('')
+    setTermo('')
+    setItens([])
+  }
 
   async function buscar(q) {
     const t = q.trim()
@@ -4090,6 +4102,21 @@ function BuscaProdutoNoChat({ empresaId, onEscolher }) {
               Se a loja tem o produto e ele não está cadastrado, cadastre no <strong>Catálogo</strong> — depois é só buscar aqui de novo.
             </div>
           )}
+          {/* Não achou porque a loja não cadastrou? A venda não pode morrer
+              por isso: nome (o que ele digitou) + preço, e o item entra na
+              sacola igual aos outros. */}
+          <div style={{ display: 'flex', gap: 5, marginTop: 2, marginBottom: 2 }}>
+            <input value={avulsoPreco} onChange={e => setAvulsoPreco(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') addAvulso() }}
+              placeholder="R$"
+              style={{ width: 66, padding: '6px 8px', borderRadius: 7, fontSize: 12, border: '1px solid #f59e0b', background: 'var(--bg, #0f0f1a)', color: 'var(--text)' }} />
+            <button type="button" onClick={addAvulso}
+              style={{ flex: 1, padding: '6px 8px', borderRadius: 7, cursor: 'pointer', fontSize: 11.5, fontWeight: 700,
+                       border: '1px solid #f59e0b', background: 'rgba(245,158,11,.12)', color: '#f59e0b' }}>
+              + Vender &quot;{termo.trim()}&quot; mesmo sem cadastro
+            </button>
+          </div>
+
           {itens.map(p => (
             <button key={p.id} type="button" onClick={() => onEscolher(p)}
               style={{
@@ -4117,18 +4144,8 @@ function BuscaProdutoNoChat({ empresaId, onEscolher }) {
 // atendente acha o produto (ou digita um que não está cadastrado), monta, e um
 // botão só manda a lista pro cliente E entrega o carrinho pro robô terminar
 // endereço e pagamento. A parte chata fica com a gente; a fácil, com o robô.
-function SacolaNoChat({ itens, onQtd, onRemover, onAvulso, onEnviar, enviando }) {
-  const [nome, setNome] = useState('')
-  const [preco, setPreco] = useState('')
+function SacolaNoChat({ itens, onQtd, onRemover, onEnviar, enviando }) {
   const total = itens.reduce((s, i) => s + Number(i.preco) * Number(i.qtd), 0)
-
-  function addAvulso() {
-    const n = nome.trim()
-    const v = Number(String(preco).replace(',', '.'))
-    if (!n || !(v > 0)) return
-    onAvulso({ produto_id: null, nome: n, preco: v, qtd: 1 })
-    setNome(''); setPreco('')
-  }
 
   return (
     <div style={{
@@ -4155,20 +4172,6 @@ function SacolaNoChat({ itens, onQtd, onRemover, onAvulso, onEnviar, enviando })
           <button type="button" onClick={() => onRemover(idx)} style={{ ...btnQtd, color: '#ef4444' }}>×</button>
         </div>
       ))}
-
-      {/* Item que a loja tem mas não cadastrou. É o motivo de o robô ter
-          chamado — não pode ser o motivo de a venda não sair. */}
-      <div style={{ display: 'flex', gap: 5, marginTop: 6 }}>
-        <input value={nome} onChange={e => setNome(e.target.value)}
-          placeholder="Item fora do cardápio"
-          style={{ flex: 1, minWidth: 0, padding: '6px 8px', borderRadius: 7, fontSize: 12, border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)' }} />
-        <input value={preco} onChange={e => setPreco(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') addAvulso() }}
-          placeholder="R$"
-          style={{ width: 62, padding: '6px 8px', borderRadius: 7, fontSize: 12, border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)' }} />
-        <button type="button" onClick={addAvulso}
-          style={{ padding: '0 10px', borderRadius: 7, border: '1px solid var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontWeight: 800 }}>+</button>
-      </div>
 
       {itens.length > 0 && (
         <>
@@ -4563,6 +4566,9 @@ export default function PainelPedidos() {
   // "Devolver pro robô" dentro da conversa — depois de responder, o chamado
   // fecha e o card com os botões some, mas a conversa continua na tela.
   const [botPausado, setBotPausado] = useState(false)
+  // Sacola que o ATENDENTE monta dentro da conversa (ver SacolaNoChat).
+  const [sacolaChat, setSacolaChat] = useState([])
+  const [enviandoSacola, setEnviandoSacola] = useState(false)
   // Cliente que pediu atendente no WhatsApp: o robô não inventa resposta, chama
   // gente. Toca AQUI, no gestor — é a tela que fica aberta no balcão.
   const { chamados, atender: atenderChamado } = useChamados(empresa?.id)
