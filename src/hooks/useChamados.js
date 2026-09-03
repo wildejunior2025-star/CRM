@@ -13,7 +13,9 @@ import { tocarChamado } from '../lib/somChamado'
 // só é o mesmo que não tocar: o balcão está de costas pro computador.
 const REPETE_MS = 30000
 
-export function useChamados(empresaId, ativo = true) {
+// `comSom`: quem só quer o selo no menu passa false. O alarme sonoro é do
+// gestor de pedidos — é a tela que fica aberta o dia todo no balcão.
+export function useChamados(empresaId, ativo = true, comSom = true) {
   const [chamados, setChamados] = useState([])
   const vistosRef = useRef(new Set())
   // O menu lateral e a tela de Conversas usam este hook AO MESMO TEMPO. Se os
@@ -55,16 +57,16 @@ export function useChamados(empresaId, ativo = true) {
     const novos = chamados.filter(c => !vistosRef.current.has(c.id))
     if (novos.length) {
       novos.forEach(c => vistosRef.current.add(c.id))
-      tocarChamado()
+      if (comSom) tocarChamado()
     }
-  }, [chamados])
+  }, [chamados, comSom])
 
   // E continua tocando enquanto ninguém atender.
   useEffect(() => {
-    if (!chamados.length) return
+    if (!comSom || !chamados.length) return
     const id = setInterval(tocarChamado, REPETE_MS)
     return () => clearInterval(id)
-  }, [chamados.length])
+  }, [chamados.length, comSom])
 
   const atender = useCallback(async (chamadoId) => {
     await supabase.from('whatsapp_chamados')

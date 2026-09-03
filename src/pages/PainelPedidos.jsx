@@ -7,9 +7,18 @@ import { precoPorQuantidade, faixaAplicada, menorFaixa } from '../lib/precoQuant
 import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
 import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
 import { rotuloComanda } from '../lib/comanda'
+import { useChamados } from '../hooks/useChamados'
 import { calcularTaxa } from '../lib/taxaServico'
 import { fwcFetch, explicaErroFwc } from '../lib/appFwc'
 import Caixa from './Caixa'
+
+// "558498180774" -> "(84) 9818-0774"
+function foneBonito(p) {
+  const d = String(p || '').replace(/\D/g, '')
+  const n = d.startsWith('55') ? d.slice(2) : d
+  if (n.length < 10) return p || ''
+  return `(${n.slice(0, 2)}) ${n.slice(2, -4)}-${n.slice(-4)}`
+}
 
 // Aceitar pedidos automaticamente (lido do localStorage pra não pegar estado
 // velho dentro do handler de realtime).
@@ -4342,6 +4351,9 @@ export default function PainelPedidos() {
   const [chatAviso, setChatAviso]     = useState(null)   // saiu no WhatsApp? (ver enviarChat)
   const [chatTexto, setChatTexto]     = useState('')
   const [enviandoChat, setEnviandoChat] = useState(false)
+  // Cliente que pediu atendente no WhatsApp: o robô não inventa resposta, chama
+  // gente. Toca AQUI, no gestor — é a tela que fica aberta no balcão.
+  const { chamados, atender: atenderChamado } = useChamados(empresa?.id)
   // Catálogo (pausar/ativar itens da loja online)
   const [catalogo, setCatalogo] = useState([])
   const [complementosPorProduto, setComplementosPorProduto] = useState({}) // produtoId -> [grupos] (pausáveis)
@@ -6125,6 +6137,42 @@ export default function PainelPedidos() {
           </div>
 
           {/* Painel: Mensagens (chat App + Loja online) */}
+          {painelDireito === 'chat' && chamados.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: '#f87171', letterSpacing: '.04em' }}>
+                🔔 ESPERANDO ATENDENTE NO WHATSAPP
+              </div>
+              {chamados.map(c => (
+                <div key={c.id} style={{
+                  border: '1px solid rgba(220,38,38,.5)', borderRadius: 10, padding: '10px 12px',
+                  background: 'rgba(220,38,38,.10)',
+                }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)' }}>
+                    {c.nome || foneBonito(c.phone)}
+                  </div>
+                  {c.nome && (
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{foneBonito(c.phone)}</div>
+                  )}
+                  {c.motivo && (
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>"{c.motivo}"</div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <a href={`https://wa.me/${String(c.phone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer"
+                      style={{
+                        flex: 1, textAlign: 'center', textDecoration: 'none', padding: '7px 10px', borderRadius: 8,
+                        background: '#22c55e', color: '#fff', fontSize: 12, fontWeight: 800,
+                      }}>Responder no WhatsApp</a>
+                    <button type="button" onClick={() => atenderChamado(c.id)}
+                      style={{
+                        padding: '7px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 800,
+                        border: '1px solid var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text-muted)',
+                      }}>Já atendi</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {painelDireito === 'chat' && (
             threadAberta ? (
               <ChatConversa
@@ -6780,12 +6828,12 @@ export default function PainelPedidos() {
               }}>
               {b.icon}
               <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '.02em' }}>{b.label}</span>
-              {b.id === 'chat' && chatNaoLidas > 0 && (
+              {b.id === 'chat' && (chatNaoLidas + chamados.length) > 0 && (
                 <span style={{
                   position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8,
                   background: '#dc2626', color: '#fff', fontSize: 10, fontWeight: 800,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px',
-                }}>{chatNaoLidas}</span>
+                }}>{chatNaoLidas + chamados.length}</span>
               )}
             </button>
           )

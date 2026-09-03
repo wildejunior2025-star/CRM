@@ -124,9 +124,13 @@ export default function Layout() {
   const { user, profile, empresa, logout, voltarSuperAdmin } = useAuth()
   const ifoodAtivo = useIfoodAtivo(empresa?.id)
   // Só o dono é chamado: vendedor e garçom não respondem WhatsApp.
+  // Aqui é só o selo, MUDO: quem toca é o gestor de pedidos (/painel), a tela
+  // que fica aberta no balcão. No portal o alarme pegava quem estava mexendo em
+  // relatório e não tinha como atender.
   const { chamados } = useChamados(
     profile?.perfil === 'admin' ? empresa?.id : null,
     moduloVisivel(empresa, 'whatsapp'),
+    false,
   )
   const location = useLocation()
   const navigate = useNavigate()
