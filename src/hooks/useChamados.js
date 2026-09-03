@@ -68,12 +68,24 @@ export function useChamados(empresaId, ativo = true, comSom = true) {
     return () => clearInterval(id)
   }, [chamados.length, comSom])
 
+  // "Já atendi" = a loja assumiu essa conversa. Além de calar o alarme, o robô
+  // sai de cena naquele número por 12h: se ele voltar a responder por cima de
+  // quem está atendendo, o cliente recebe duas vozes na mesma conversa.
   const atender = useCallback(async (chamadoId) => {
+    const chamado = chamados.find(c => c.id === chamadoId)
     await supabase.from('whatsapp_chamados')
       .update({ atendido_em: new Date().toISOString() })
       .eq('id', chamadoId)
+    if (empresaId && chamado?.phone) {
+      const expira = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString()
+      await supabase.from('whatsapp_bot_pausado').upsert({
+        empresa_id: empresaId, phone: chamado.phone,
+        pausado_em: new Date().toISOString(), expira_em: expira,
+        motivo: 'loja assumiu a conversa',
+      }, { onConflict: 'empresa_id,phone' })
+    }
     setChamados(prev => prev.filter(c => c.id !== chamadoId))
-  }, [])
+  }, [chamados, empresaId])
 
   return { chamados, atender, recarregar: carregar }
 }

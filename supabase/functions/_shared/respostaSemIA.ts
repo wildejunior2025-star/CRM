@@ -59,6 +59,8 @@ const PALAVRAS_VAZIAS = new Set([
   // antes — foi o que fez ele repetir a lista de sucos igualzinha.
   "isso", "isto", "esse", "esses", "essa", "essas", "outro", "outra", "outros",
   "outras", "mais", "somente", "apenas", "tudo", "opcao", "opcoes",
+  "cardapio", "menu", "catalogo", "manda", "mandar", "envia", "enviar", "manda ai",
+  "lista", "preco", "precos", "tabela",
 ])
 
 function palavrasDeBusca(texto: string): string[] {
@@ -225,6 +227,11 @@ function respostaDeInfo(
   const t = semAcento(texto)
   const tem = (...ps: string[]) => ps.some(p => t.includes(p))
 
+  // "Manda o cardápio" é o pedido mais fácil da lista e o robô não tinha
+  // resposta pra ele. O link É o cardápio — com preço certo e sempre atualizado.
+  if (tem("cardapio", "cardapo", "menu", "catalogo", "lista de preco", "tabela de preco", "o que voces tem", "o que vcs tem"))
+    return `Nosso cardápio tá aqui, com tudo e o preço certinho:${NL}${link}`
+
   if (tem("horari", "que horas", "quantas horas", "abre", "aberto", "fecha", "fechad", "funciona", "atende hoje", "ta ai", "tao ai"))
     return respostaDeHorario(empresa)
 
@@ -363,17 +370,12 @@ export async function responderSemIA({
 
     const t = semAcento(mensagem).trim()
 
-    // 1) O cliente está respondendo "quer que eu chame um atendente?".
-    if (perguntouDoAtendente) {
-      const disseNao = /^(nao|nn|deixa|obrigad|valeu|blz|beleza|tudo bem)/.test(t)
-      if (disseNao) {
-        return await responder(`Beleza! 👍 Qualquer coisa é só chamar.${linkRecente ? "" : `${NL}${link}`}`)
-      }
-      // Qualquer outra coisa — "sim", "quero", ou a pergunta repetida — vira
-      // gente. Insistir com robô em quem já não foi entendido é o que faz o
-      // cliente desistir.
-      await abrirChamado(supabase, empresaId, phone, mensagem)
-      return await responder("Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!")
+    // 1) "Não precisa" fecha o assunto na hora. O "sim" fica pro fim: se a
+    //    mensagem seguinte for uma pergunta que o robô SABE responder, ele
+    //    responde — "manda o cardapio" virava "já chamei alguém", que é o robô
+    //    ignorando o cliente com educação.
+    if (perguntouDoAtendente && /^(nao|nn|deixa|obrigad|valeu|blz|beleza|tudo bem)/.test(t)) {
+      return await responder(`Beleza! 👍 Qualquer coisa é só chamar.${linkRecente ? "" : `${NL}${link}`}`)
     }
 
     // 2) "Só tem isso?" / "tem mais?" — é a MESMA pergunta de novo, e responder
@@ -417,11 +419,20 @@ export async function responderSemIA({
     }
     if (doProduto) return await responder(doProduto)
 
-    // 4) Horário, taxa de entrega, endereço.
+    // 4) Cardápio, horário, taxa de entrega, endereço.
     const daInfo = respostaDeInfo(mensagem, empresa, link)
     if (daInfo) return await responder(daInfo)
 
-    // 5) Primeira fala da conversa: o link vai SEMPRE, seja um "oi" ou uma
+    // 5) Ele tinha perguntado "quer que eu chame um atendente?" e o que veio
+    //    não é pergunta que ele saiba responder ("sim", "quero", ou a mesma
+    //    dúvida de novo). Aí vira gente: insistir com robô em quem já não foi
+    //    entendido é o que faz o cliente desistir.
+    if (perguntouDoAtendente) {
+      await abrirChamado(supabase, empresaId, phone, mensagem)
+      return await responder("Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!")
+    }
+
+    // 6) Primeira fala da conversa: o link vai SEMPRE, seja um "oi" ou uma
     //    pergunta que a gente não entendeu. É a mensagem que faz o pedido sair
     //    do WhatsApp e cair no sistema.
     if (!linkRecente) {
@@ -431,7 +442,7 @@ export async function responderSemIA({
       return await responder(proprio ? `${proprio}${NL}${link}` : `Oi! 👋 Peça aqui, é rapidinho:${NL}${link}`)
     }
 
-    // 6) Já mandou o link e não soube responder. Não inventa: oferece gente.
+    // 7) Já mandou o link e não soube responder. Não inventa: oferece gente.
     return await responder(`Essa eu não sei te responder. 😅 Quer que eu ${MARCA_ATENDENTE} pra te ajudar?`)
   } catch (e) {
     console.error("[link] falhou:", e)
