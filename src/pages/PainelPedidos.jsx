@@ -3900,7 +3900,7 @@ function Coluna({ titulo, cor, count, vazio, children }) {
 }
 
 // ── Conversa aberta (loja respondendo cliente) ──────────────
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, onEscolherProduto, botPausado, onDevolverAoRobo }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola }) {
   const fimRef = useRef(null)
   useEffect(() => {
     fimRef.current?.scrollIntoView({ block: 'end' })
@@ -3988,6 +3988,19 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
 
       {/* Buscar produto sem sair da conversa (ver BuscaProdutoNoChat) */}
       {empresaId && <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} />}
+
+      {/* A sacola só aparece quando tem item — conversa de dúvida não precisa
+          ver carrinho vazio ocupando a tela. */}
+      {sacola?.length > 0 && (
+        <SacolaNoChat
+          itens={sacola}
+          onQtd={onQtdSacola}
+          onRemover={idx => onQtdSacola(idx, -999)}
+          onAvulso={onAvulsoSacola}
+          onEnviar={onEnviarSacola}
+          enviando={enviandoSacola}
+        />
+      )}
 
       {/* Caixa de resposta */}
       <div style={{ display: 'flex', gap: 6, paddingTop: 8, borderTop: '1px solid var(--border, #2a2a3a)' }}>
@@ -4094,6 +4107,95 @@ function BuscaProdutoNoChat({ empresaId, onEscolher }) {
       )}
     </div>
   )
+}
+
+// Sacola montada pelo ATENDENTE, dentro da conversa.
+//
+// Nasce do caso que o robô não resolve: o cliente pediu algo que não está no
+// cardápio. A tela de balcão não serve aqui — ela cobre a conversa, e não tem
+// como jogar o que está nela pra dentro do chat. Então a sacola mora aqui: o
+// atendente acha o produto (ou digita um que não está cadastrado), monta, e um
+// botão só manda a lista pro cliente E entrega o carrinho pro robô terminar
+// endereço e pagamento. A parte chata fica com a gente; a fácil, com o robô.
+function SacolaNoChat({ itens, onQtd, onRemover, onAvulso, onEnviar, enviando }) {
+  const [nome, setNome] = useState('')
+  const [preco, setPreco] = useState('')
+  const total = itens.reduce((s, i) => s + Number(i.preco) * Number(i.qtd), 0)
+
+  function addAvulso() {
+    const n = nome.trim()
+    const v = Number(String(preco).replace(',', '.'))
+    if (!n || !(v > 0)) return
+    onAvulso({ produto_id: null, nome: n, preco: v, qtd: 1 })
+    setNome(''); setPreco('')
+  }
+
+  return (
+    <div style={{
+      marginTop: 6, border: '1px solid rgba(34,197,94,.4)', borderRadius: 10,
+      background: 'rgba(34,197,94,.06)', padding: 8,
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 800, color: '#22c55e', marginBottom: 6 }}>
+        🛒 SACOLA DO CLIENTE ({itens.length} {itens.length === 1 ? 'item' : 'itens'})
+      </div>
+
+      {itens.map((i, idx) => (
+        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {i.nome}{!i.produto_id && <span style={{ fontSize: 10, color: '#f59e0b' }}> · fora do cardápio</span>}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              R$ {Number(i.preco).toFixed(2).replace('.', ',')} · subtotal R$ {(Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')}
+            </div>
+          </div>
+          <button type="button" onClick={() => onQtd(idx, -1)} style={btnQtd}>−</button>
+          <span style={{ fontSize: 12.5, fontWeight: 800, minWidth: 16, textAlign: 'center', color: 'var(--text)' }}>{i.qtd}</span>
+          <button type="button" onClick={() => onQtd(idx, 1)} style={btnQtd}>+</button>
+          <button type="button" onClick={() => onRemover(idx)} style={{ ...btnQtd, color: '#ef4444' }}>×</button>
+        </div>
+      ))}
+
+      {/* Item que a loja tem mas não cadastrou. É o motivo de o robô ter
+          chamado — não pode ser o motivo de a venda não sair. */}
+      <div style={{ display: 'flex', gap: 5, marginTop: 6 }}>
+        <input value={nome} onChange={e => setNome(e.target.value)}
+          placeholder="Item fora do cardápio"
+          style={{ flex: 1, minWidth: 0, padding: '6px 8px', borderRadius: 7, fontSize: 12, border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)' }} />
+        <input value={preco} onChange={e => setPreco(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') addAvulso() }}
+          placeholder="R$"
+          style={{ width: 62, padding: '6px 8px', borderRadius: 7, fontSize: 12, border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)' }} />
+        <button type="button" onClick={addAvulso}
+          style={{ padding: '0 10px', borderRadius: 7, border: '1px solid var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontWeight: 800 }}>+</button>
+      </div>
+
+      {itens.length > 0 && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>
+            <span>Total dos itens</span>
+            <span>R$ {total.toFixed(2).replace('.', ',')}</span>
+          </div>
+          <button type="button" onClick={onEnviar} disabled={enviando}
+            style={{
+              width: '100%', marginTop: 8, padding: '9px 10px', borderRadius: 8, border: 'none',
+              background: '#22c55e', color: '#fff', fontSize: 12.5, fontWeight: 800,
+              cursor: enviando ? 'default' : 'pointer', opacity: enviando ? .6 : 1,
+            }}>
+            {enviando ? 'Enviando...' : '📤 Mandar pro cliente e devolver pro robô'}
+          </button>
+          <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.4 }}>
+            O cliente recebe a lista com os preços, e o robô continua pedindo endereço e forma de pagamento.
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+const btnQtd = {
+  width: 24, height: 24, borderRadius: 6, cursor: 'pointer', flexShrink: 0,
+  border: '1px solid var(--border, #2a2a3a)', background: 'transparent',
+  color: 'var(--text)', fontSize: 14, fontWeight: 800, lineHeight: 1,
 }
 
 // Tempo previsto (min) pra ficar pronto — usa o tempo do Raio de Entrega por KM,
@@ -4705,10 +4807,85 @@ export default function PainelPedidos() {
   // que o robô lê depois pra reconhecer o produto certo (ele passou a olhar
   // também o que a pessoa da loja escreveu).
   function escolherProdutoNoChat(p) {
-    const preco = Number(p.preco) > 0
-      ? ` — R$ ${Number(p.preco).toFixed(2).replace('.', ',')}`
-      : ''
-    setChatTexto(prev => `${prev ? prev.trimEnd() + '\n' : ''}${p.nome}${preco}`)
+    setSacolaChat(prev => {
+      const i = prev.findIndex(x => x.produto_id === p.id)
+      if (i >= 0) {
+        const copia = [...prev]
+        copia[i] = { ...copia[i], qtd: copia[i].qtd + 1 }
+        return copia
+      }
+      return [...prev, { produto_id: p.id, nome: p.nome, preco: Number(p.preco) || 0, qtd: 1 }]
+    })
+  }
+
+  function mudarQtdSacola(idx, delta) {
+    setSacolaChat(prev => prev
+      .map((it, i) => (i === idx ? { ...it, qtd: it.qtd + delta } : it))
+      .filter(it => it.qtd > 0))
+  }
+
+  /**
+   * Manda a sacola pro cliente e devolve a conversa pro robô.
+   *
+   * Três coisas de uma vez, e a ordem importa: o cliente vê a lista com preços,
+   * o carrinho do robô passa a ter esses itens (senão ele fecharia um pedido
+   * vazio) e a pausa sai, pra ele continuar em endereço e pagamento.
+   */
+  async function enviarSacolaDoChat() {
+    if (!sacolaChat.length || !chatAberto || !empresa?.id) return
+    const sep = chatAberto.indexOf('|')
+    const canal = chatAberto.slice(0, sep)
+    const cliente_ref = chatAberto.slice(sep + 1)
+    const tel = String(cliente_ref).replace(/\D/g, '')
+    setEnviandoSacola(true)
+    setChatAviso(null)
+
+    const total = sacolaChat.reduce((s, i) => s + Number(i.preco) * Number(i.qtd), 0)
+    const linhas = sacolaChat
+      .map(i => `• ${i.nome} x${i.qtd} — R$ ${(Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')}`)
+      .join('\n')
+    const texto = `Montei sua sacola aqui 🛒\n\n${linhas}\n\n*Total dos itens: R$ ${total.toFixed(2).replace('.', ',')}*\n\nÉ só me confirmar o endereço e a forma de pagamento que eu fecho pra você. 😉`
+
+    // 1) O carrinho do robô. Sem isso ele fecharia o pedido sem os itens.
+    const { error: errCarrinho } = await supabase.from('whatsapp_carrinho')
+      .upsert({
+        empresa_id: empresa.id, phone: tel,
+        items: sacolaChat.map(i => ({ produto_id: i.produto_id, nome: i.nome, qtd: i.qtd, preco: Number(i.preco) })),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'empresa_id,phone' })
+
+    // 2) A mensagem pro cliente (chat do gestor + WhatsApp).
+    const thread = chatMsgs.find(m => `${m.canal}|${m.cliente_ref}` === chatAberto)
+    await supabase.from('mensagens_chat').insert({
+      empresa_id: empresa.id, canal, cliente_ref,
+      cliente_nome: thread?.cliente_nome ?? null, remetente: 'loja', texto,
+    })
+    let okZap = false
+    if (tel.length >= 10) {
+      // assumir_conversa FALSE: aqui a gente está DEVOLVENDO a conversa, não
+      // tomando ela. Pausar de novo seria o contrário do botão.
+      const { data } = await supabase.functions.invoke('whatsapp-connect', {
+        body: { action: 'send_message', phone: tel, text: texto, espelhar_no_chat: false, assumir_conversa: false },
+      })
+      okZap = !!data?.ok
+    }
+
+    // 3) Tira a pausa: o robô volta e continua de onde a gente parou.
+    await supabase.from('whatsapp_bot_pausado')
+      .delete().eq('empresa_id', empresa.id)
+      .like('phone', `%${tel.slice(-8)}`)
+      .not('expira_em', 'is', null)
+    const chamado = chamados.find(c => String(c.phone).replace(/\D/g, '').endsWith(tel.slice(-8)))
+    if (chamado) await atenderChamado(chamado.id, { devolverAoRobo: true })
+
+    setBotPausado(false)
+    setSacolaChat([])
+    setEnviandoSacola(false)
+    setChatAviso(errCarrinho
+      ? { ok: false, txt: '⚠️ A lista foi enviada, mas não consegui gravar o carrinho: ' + errCarrinho.message }
+      : { ok: true, txt: okZap
+          ? '✓ Sacola enviada. O robô assume daqui e pede endereço e pagamento.'
+          : '⚠️ Sacola gravada aqui, mas não saiu no WhatsApp do cliente.' })
   }
 
   // Devolve a conversa pro robô sem sair dela: tira a pausa automática e ele
@@ -4728,6 +4905,7 @@ export default function PainelPedidos() {
   // Marca como lidas as mensagens do cliente ao abrir a conversa, e envia resposta
   async function abrirThread(t) {
     setChatAberto(t.key)
+    setSacolaChat([])   // sacola é daquela conversa, não segue pra próxima
     const tel = String(t.cliente_ref || '').replace(/\D/g, '')
     setBotPausado(false)
     if (tel.length >= 8 && empresa?.id) {
@@ -6368,6 +6546,11 @@ export default function PainelPedidos() {
                 onEscolherProduto={escolherProdutoNoChat}
                 botPausado={botPausado}
                 onDevolverAoRobo={devolverConversaAoRobo}
+                sacola={sacolaChat}
+                onQtdSacola={mudarQtdSacola}
+                onAvulsoSacola={item => setSacolaChat(prev => [...prev, item])}
+                onEnviarSacola={enviarSacolaDoChat}
+                enviandoSacola={enviandoSacola}
               />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
