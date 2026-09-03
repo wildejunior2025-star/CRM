@@ -2020,6 +2020,7 @@ Chamar uma pessoa da loja (VOCÊ NÃO SABE responder, ou o cliente está insisti
 Mande antes: "Já chamei alguém aqui da loja pra te ajudar. 🙌 Só um instante!" e emita:
 ACAO: {"tipo": "chamar_atendente", "motivo": "o que o cliente quer, em poucas palavras"}
 ⚠️ É a saída CERTA pra garantia, troca, nota fiscal, reclamação, negociação de preço, pedido antigo, ou qualquer coisa que não esteja nos dados acima. Chamar gente é sempre melhor do que inventar uma resposta.
+⚠️ NUNCA diga "vou verificar", "vou conferir com o responsável", "te retorno" ou "já aviso a loja" SEM emitir esta ação na mesma mensagem. Sem a ação, ninguém fica sabendo e o cliente espera um retorno que não vem. Ou você responde agora, ou emite chamar_atendente.
 ⚠️ Depois disso você para de responder esse cliente — quem fala é a pessoa da loja.
 
 Escalar para humano (problema que a IA não resolve):
@@ -2439,6 +2440,20 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       console.log("[CEP] safety net para:", text)
       const resultado = await handleBuscarCep(supabase, empresaId, phone, text)
       resposta = resultado.resposta
+    }
+
+    // Safety net: o robô PROMETEU perguntar pra alguém e não emitiu a ação.
+    // Aconteceu em "Galioto tem?" — ele respondeu "vou verificar com o
+    // responsável e retorno em breve" e não avisou ninguém: o cliente ficou
+    // esperando um retorno que não existia. Promessa de retorno agora abre o
+    // chamado e toca o sino no gestor, sempre.
+    const prometeuVerificar = /(vou|deixa eu|deixe-me|posso) (verificar|conferir|checar|perguntar|confirmar)|com o respons[\u00e1a]vel|com a loja|retorno (em breve|pra voc[\u00eae])|te retorno|j[\u00e1a] (aviso|avisei) a loja|assim que (eu )?souber|vou falar com/i.test(resposta)
+    const chamouAtendente = acaoMatch !== null && (() => {
+      try { return JSON.parse(acaoMatch![1])?.tipo === "chamar_atendente" } catch { return false }
+    })()
+    if (prometeuVerificar && !chamouAtendente) {
+      await abrirChamado(supabase, empresaId, phone, text)
+      console.log("[chamado] SafeNet: o robô prometeu retorno, chamado aberto")
     }
 
     // Safety net: cliente ESCREVEU o endereço e o Claude não emitiu salvar_rua.
