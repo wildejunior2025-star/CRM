@@ -28,6 +28,8 @@ export default function PresencialHistorico() {
 
   const [comandas, setComandas] = useState([])
   const [garcons, setGarcons]   = useState({})  // { profile_id: nome }
+  // { profile_id: perfil } — quem é ADM não divide o bolo (ver ehDaEquipe).
+  const [perfis, setPerfis]     = useState({})
   const [entregas, setEntregas] = useState([])  // itens entregues hoje
   const [lancados, setLancados] = useState([])  // itens lançados hoje (mig 0187)
   const [fechadas, setFechadas] = useState([])  // contas fechadas hoje, por quem fechou
@@ -136,7 +138,7 @@ export default function PresencialHistorico() {
 
     Promise.all([
       qComandas.order('fechada_at', { ascending: false }).limit(100),
-      supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
+      supabase.from('profiles').select('id, nome, perfil').eq('empresa_id', empresaId),
       supabase.from('comanda_itens')
         .select('entregue_por, preco_unitario, quantidade')
         .eq('empresa_id', empresaId)
@@ -172,6 +174,7 @@ export default function PresencialHistorico() {
         || (c.comanda_itens ?? []).some(i => i.entregue_por === meuId || i.lancado_por === meuId)
       setComandas(ehAdmin ? todas : todas.filter(participouDaConta))
       setGarcons(Object.fromEntries((gs.data ?? []).map(p => [p.id, p.nome])))
+      setPerfis(Object.fromEntries((gs.data ?? []).map(p => [p.id, p.perfil])))
       setEntregas(es.data ?? [])
       setLancados(ls.data ?? [])
       setFechadas(fs.data ?? [])
@@ -222,9 +225,18 @@ export default function PresencialHistorico() {
   // garçons, inclusive quando a tela mostra só um: o ponto do garçom vale menos
   // no dia em que a equipe inteira trabalhou mais, e é isso que segura o bolo.
   const bolo = taxaDoDia * (Number(rateioPct) || 0) / 100
-  const pontosDaLoja = rankingTodos.reduce((s, r) => s + r.pontos, 0)
+  // O ADM não divide o bolo (decisão do Wilde, 02/09/2026). Na Saidera é a conta
+  // da loja que fecha quase toda conta — o garçom faz a pré-conta e ela recebe —
+  // então ela levava os 2 pontos do "fechar" em cima de cada mesa e ficava com a
+  // maior pontuação do dia: 44% do bolo dos garçons ia pra ela. Ela continua no
+  // ranking (é bom ver o movimento), só não entra na divisão.
+  const ehDaEquipe = (id) => {
+    const p = perfis[id]
+    return p !== 'admin' && p !== 'super_admin'
+  }
+  const pontosDaLoja = rankingTodos.reduce((s, r) => s + (ehDaEquipe(r.id) ? r.pontos : 0), 0)
   const valorPorPonto = pontosDaLoja > 0 ? bolo / pontosDaLoja : 0
-  const ganhoDe = (r) => r.pontos * valorPorPonto
+  const ganhoDe = (r) => (ehDaEquipe(r.id) ? r.pontos * valorPorPonto : 0)
 
   const ranking = useMemo(
     () => (ehAdmin ? rankingTodos : rankingTodos.filter(r => r.id === meuId)),
@@ -406,8 +418,9 @@ export default function PresencialHistorico() {
                       </div>
                       <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
                         ✍️ {r.lancou} · 🍽️ {r.entregou} · 🧾 {r.fechou}
-                        {temBolo && (
-                          <> · <span style={{ color: 'var(--success)', fontWeight: 700 }}>{fmt(ganhoDe(r))}</span></>
+                        {temBolo && (ehDaEquipe(r.id)
+                          ? <> · <span style={{ color: 'var(--success)', fontWeight: 700 }}>{fmt(ganhoDe(r))}</span></>
+                          : <> · <span style={{ fontWeight: 700 }}>não divide (loja)</span></>
                         )}
                       </div>
                     </div>
@@ -425,7 +438,8 @@ export default function PresencialHistorico() {
                       <span style={{ color: 'var(--success)', whiteSpace: 'nowrap' }}>{fmt(bolo)}</span>
                     </div>
                     <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
-                      {pontosDaLoja} pontos no total · cada ponto vale {fmt(valorPorPonto)}
+                      {pontosDaLoja} pontos da equipe · cada ponto vale {fmt(valorPorPonto)}
+                      {' '}(ponto de ADM não conta aqui)
                     </div>
                   </div>
                 ) : Number(rateioPct) > 0 && (
