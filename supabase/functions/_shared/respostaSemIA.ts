@@ -561,12 +561,16 @@ export async function responderSemIA({
         // endereço, horário) — a dúvida dele não fecha junto com a loja.
         return daInfoFechada ? await responder(daInfoFechada) : false
       }
+      // O link vai de qualquer jeito: com a loja fechada ele não deixa comprar
+      // (os botões ficam travados e o topo diz "Fechado"), então não gera pedido
+      // que ninguém vai fazer. Mas deixa o cliente ver cardápio e preço agora,
+      // que é o que ele veio saber — e voltar quando abrir.
       const agendavel = empresa.agendamento_ativo === true
       const extra = daInfoFechada
         ? `${NL}${NL}${daInfoFechada}`
         : agendavel
           ? `${NL}${NL}Se quiser, já deixa seu pedido agendado por aqui que a gente separa:${NL}${link}`
-          : ""
+          : `${NL}${NL}Se quiser dar uma olhada no cardápio e nos preços, é aqui:${NL}${link}`
       return await responder(`${avisoDeFechada(empresa)}${extra}`)
     }
 
