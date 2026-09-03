@@ -124,7 +124,9 @@ export default function PresencialSalao() {
   const [qtdEdit, setQtdEdit] = useState({})    // quantidade sendo digitada, por item
   const listaProdRef = useRef(null)
   const [separando, setSeparando] = useState(false)   // drawer de separar a conta
-  const [sepSel, setSepSel] = useState(() => new Set())
+  // Map id do item -> QUANTAS unidades daquela linha vão com ela. Era um Set
+  // (item inteiro ou nada), mas "6 devassas, ele leva 3" não tinha como marcar.
+  const [sepSel, setSepSel] = useState(() => new Map())
   const [sepNome, setSepNome] = useState('')
   const [sepErro, setSepErro] = useState('')
   const [sepBusy, setSepBusy] = useState(false)
@@ -1153,6 +1155,10 @@ export default function PresencialSalao() {
   // ── Separar a conta de quem vai embora ───────────────────────────────────
   // Os itens marcados saem da mesa e viram uma comanda no NOME da pessoa. Ela
   // fecha essa conta e vai; a mesa continua com o resto. Ver mig 0205.
+  //
+  // Agora vai a QUANTIDADE de cada linha (mig 0229): a mesa pediu 6 litrinhos
+  // numa linha só e um dos dois vai embora levando 3 — a linha se parte em duas,
+  // 3 na conta dele e 3 continuam na mesa.
   async function separar() {
     if (!comandaSel || sepBusy) return
     setSepErro('')
@@ -1161,13 +1167,13 @@ export default function PresencialSalao() {
     setSepBusy(true)
     const { data, error } = await supabase.rpc('separar_comanda', {
       p_comanda_id: comandaSel.id,
-      p_itens: [...sepSel],
+      p_partes: [...sepSel].map(([id, qtd]) => ({ id, qtd })),
       p_nome: sepNome.trim(),
     })
     setSepBusy(false)
     if (error) { setSepErro(error.message); return }
     setSeparando(false)
-    setSepSel(new Set())
+    setSepSel(new Map())
     setSepNome('')
     // Já abre a conta separada: quem separou vai fechar ela agora, não depois.
     setAbrirComandaId(data?.comanda_id ?? null)
@@ -2232,10 +2238,11 @@ export default function PresencialSalao() {
                 {/* Fica aqui em cima, com os outros chips de gerenciar a mesa, e
                     não na barra de baixo: lá são cinco botões numa linha só e no
                     celular ele empurrava o "Fechar conta" pra fora da tela.
-                    Precisa de 2+ itens — com um só não há o que separar. */}
-                {(comandaSel?.comanda_itens ?? []).length > 1 && (
+                    Precisa de 2+ UNIDADES, não de 2+ linhas: uma linha só de "6
+                    litrinhos" também se divide, e antes o botão nem aparecia. */}
+                {(comandaSel?.comanda_itens ?? []).reduce((s, i) => s + Number(i.quantidade || 0), 0) > 1 && (
                   <button type="button"
-                    onClick={() => { setSepErro(''); setSepSel(new Set()); setSepNome(''); setSeparando(true) }}
+                    onClick={() => { setSepErro(''); setSepSel(new Map()); setSepNome(''); setSeparando(true) }}
                     className="sal-chip" title="Alguém vai embora antes e paga só o que consumiu"
                     aria-label="Separar conta"
                     style={{ border: '1.5px solid var(--border)', background: 'transparent',
@@ -2889,11 +2896,20 @@ export default function PresencialSalao() {
           própria. A mesa continua aberta com o resto. */}
       {separando && comandaSel && (() => {
         const itens = comandaSel.comanda_itens ?? []
-        const selecionado = itens.filter(i => sepSel.has(i.id))
-        const totalSep = selecionado.reduce((s, i) => s + Number(i.preco_unitario || 0) * Number(i.quantidade || 0), 0)
-        const alternar = id => setSepSel(prev => {
-          const n = new Set(prev)
-          if (n.has(id)) n.delete(id); else n.add(id)
+        // Só conta o que ela vai levar: 3 de 6 litrinhos cobra 3, não 6.
+        const totalSep = itens.reduce((s, i) => s + Number(i.preco_unitario || 0) * (sepSel.get(i.id) ?? 0), 0)
+        const unidSep = [...sepSel.values()].reduce((s, q) => s + q, 0)
+        // Clicar na linha marca a linha INTEIRA (é o caso comum, e é como era
+        // antes); quem leva só uma parte desce no "−".
+        const alternar = (id, max) => setSepSel(prev => {
+          const n = new Map(prev)
+          if (n.has(id)) n.delete(id); else n.set(id, max)
+          return n
+        })
+        const mudarQtd = (id, delta, max) => setSepSel(prev => {
+          const n = new Map(prev)
+          const novo = Math.min(max, Math.max(0, (n.get(id) ?? 0) + delta))
+          if (novo === 0) n.delete(id); else n.set(id, novo)
           return n
         })
         return (
@@ -2909,16 +2925,23 @@ export default function PresencialSalao() {
               <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.4 }}>
                 Marque o que é dela. Esses itens saem da {rotuloMesa(mesaSel)} e viram
                 uma comanda no nome dela — a mesa continua aberta com o resto.
+                Se ela leva só parte (3 das 6), use o − depois de marcar.
               </div>
             </div>
 
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 22px' }}>
               {itens.map(i => {
-                const marcado = sepSel.has(i.id)
+                const max = Math.max(1, Number(i.quantidade || 1))
+                const sel = sepSel.get(i.id) ?? 0
+                const marcado = sel > 0
+                // Div e não button: dentro dela moram os botões de − e +, e
+                // botão dentro de botão o navegador ignora.
                 return (
-                  <button key={i.id} type="button" onClick={() => alternar(i.id)}
+                  <div key={i.id} role="button" tabIndex={0}
+                    onClick={() => alternar(i.id, max)}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); alternar(i.id, max) } }}
                     style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
-                      padding: '10px 12px', marginBottom: 6, borderRadius: 10, cursor: 'pointer',
+                      padding: '10px 12px', marginBottom: 6, borderRadius: 10, cursor: 'pointer', boxSizing: 'border-box',
                       border: `1.5px solid ${marcado ? 'var(--primary)' : 'var(--border)'}`,
                       background: marcado ? 'rgba(124,58,237,.12)' : 'transparent', color: 'var(--text)' }}>
                     <span style={{ width: 20, height: 20, flexShrink: 0, borderRadius: 6,
@@ -2927,13 +2950,30 @@ export default function PresencialSalao() {
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       color: '#fff', fontSize: 13, fontWeight: 900 }}>{marcado ? '✓' : ''}</span>
                     <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ display: 'block', fontSize: 15, fontWeight: 700 }}>{i.quantidade}× {i.nome}</span>
+                      <span style={{ display: 'block', fontSize: 15, fontWeight: 700 }}>
+                        {marcado && max > 1 ? `${sel} de ${max}` : `${max}×`} {i.nome}
+                      </span>
                       <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)' }}>{fmt(i.preco_unitario)} cada</span>
                     </span>
+                    {/* Só na linha com mais de uma unidade: "ele leva 3 das 6". */}
+                    {max > 1 && marcado && (
+                      <span onClick={e => e.stopPropagation()}
+                        style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+                        <button type="button" onClick={() => mudarQtd(i.id, -1, max)} disabled={sel <= 1}
+                          aria-label="Menos um" style={{ width: 30, height: 30, borderRadius: 8, fontSize: 17, fontWeight: 900,
+                            lineHeight: 1, padding: 0, cursor: sel <= 1 ? 'default' : 'pointer', opacity: sel <= 1 ? .35 : 1,
+                            border: '1.5px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }}>−</button>
+                        <span style={{ minWidth: 22, textAlign: 'center', fontSize: 15, fontWeight: 800 }}>{sel}</span>
+                        <button type="button" onClick={() => mudarQtd(i.id, +1, max)} disabled={sel >= max}
+                          aria-label="Mais um" style={{ width: 30, height: 30, borderRadius: 8, fontSize: 17, fontWeight: 900,
+                            lineHeight: 1, padding: 0, cursor: sel >= max ? 'default' : 'pointer', opacity: sel >= max ? .35 : 1,
+                            border: '1.5px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }}>+</button>
+                      </span>
+                    )}
                     <span style={{ fontSize: 15, fontWeight: 800, whiteSpace: 'nowrap' }}>
-                      {fmt(Number(i.preco_unitario || 0) * Number(i.quantidade || 0))}
+                      {fmt(Number(i.preco_unitario || 0) * (marcado ? sel : max))}
                     </span>
-                  </button>
+                  </div>
                 )
               })}
             </div>
@@ -2941,7 +2981,7 @@ export default function PresencialSalao() {
             <div style={{ flexShrink: 0, padding: '12px 22px 20px', borderTop: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
                 marginBottom: 10, fontSize: 13, fontWeight: 800, letterSpacing: .5, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                <span>Conta dela · {selecionado.length} item(ns)</span>
+                <span>Conta dela · {unidSep} item(ns)</span>
                 <span style={{ fontSize: 26, fontWeight: 900, color: 'var(--primary)' }}>{fmt(totalSep)}</span>
               </div>
               <input value={sepNome} onChange={e => setSepNome(e.target.value)}
