@@ -33,6 +33,11 @@ const MARCA_ATENDENTE = "chame um atendente"
 // última coisa que o robô disse foi uma LISTA de produtos.
 const RESPOSTA_TEM = "Tem sim! 🙌"
 
+// Frase-marca do "peça pelo link". É por ela que o robô sabe que já ensinou o
+// caminho — e que a segunda tentativa do cliente de pedir pelo WhatsApp não é
+// desatenção: é ele dizendo que não quer o link. Aí vira gente.
+const MARCA_PEDIDO = "adiciona na sacola"
+
 const semAcento = (s: string) =>
   String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
 
@@ -486,7 +491,29 @@ export async function responderSemIA({
     const daInfo = respostaDeInfo(mensagem, empresa, link)
     if (daInfo) return await responder(daInfo)
 
-    // 5) Ele tinha perguntado "quer que eu chame um atendente?" e o que veio
+    // 5) "Quero uma M", "me vê 2 marmitas": o cliente está PEDINDO. Isso não é
+    //    pergunta sem resposta — é o pedido nascendo, e o caminho da casa é o
+    //    link: escolhe, joga na sacola, paga. Montar sacola no WhatsApp é o que
+    //    faz o pedido sair errado e o atendente parar tudo pra digitar.
+    const querPedir = /\b(quero|queria|vou querer|vou pedir|me ve|me ver|me manda|manda um|manda uma|anota|separa|pedir|pedido|fazer o pedido|fazer um pedido)\b/.test(t)
+      && !/cade|ja saiu|nao chegou|onde ta|status/.test(t)
+    if (querPedir) {
+      // Insistiu depois de já ter ouvido o caminho: não é que ele não entendeu,
+      // é que ele não quer o link. Aí a loja assume — brigar com o cliente pra
+      // ele usar o site é perder a venda.
+      const jaEnsinou = recentes.some((m: Record<string, unknown>) =>
+        String(m.content ?? "").includes(MARCA_PEDIDO))
+      if (jaEnsinou) {
+        await abrirChamado(supabase, empresaId, phone, mensagem)
+        return await responder("Já chamei alguém aqui da loja pra anotar com você. 🙌 Só um instante!")
+      }
+      return await responder(
+        `Boa! 🙌 Por aqui o pedido é pelo link, é rapidinho:${NL}` +
+        `é só escolher, ${MARCA_PEDIDO} e avançar pra forma de pagamento.${NL}${link}`,
+      )
+    }
+
+    // 6) Ele tinha perguntado "quer que eu chame um atendente?" e o que veio
     //    não é pergunta que ele saiba responder ("sim", "quero", ou a mesma
     //    dúvida de novo). Aí vira gente: insistir com robô em quem já não foi
     //    entendido é o que faz o cliente desistir.
@@ -495,7 +522,7 @@ export async function responderSemIA({
       return await responder("Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!")
     }
 
-    // 6) Primeira fala da conversa: o link vai SEMPRE, seja um "oi" ou uma
+    // 7) Primeira fala da conversa: o link vai SEMPRE, seja um "oi" ou uma
     //    pergunta que a gente não entendeu. É a mensagem que faz o pedido sair
     //    do WhatsApp e cair no sistema.
     if (!linkRecente) {
@@ -505,7 +532,7 @@ export async function responderSemIA({
       return await responder(proprio ? `${proprio}${NL}${link}` : `Oi! 👋 Peça aqui, é rapidinho:${NL}${link}`)
     }
 
-    // 7) Já mandou o link e não soube responder. Não inventa: oferece gente.
+    // 8) Já mandou o link e não soube responder. Não inventa: oferece gente.
     return await responder(`Essa eu não sei te responder. 😅 Quer que eu ${MARCA_ATENDENTE} pra te ajudar?`)
   } catch (e) {
     console.error("[link] falhou:", e)
