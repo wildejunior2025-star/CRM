@@ -3900,7 +3900,7 @@ function Coluna({ titulo, cor, count, vazio, children }) {
 }
 
 // ── Conversa aberta (loja respondendo cliente) ──────────────
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, onEscolherProduto }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, onEscolherProduto, botPausado, onDevolverAoRobo }) {
   const fimRef = useRef(null)
   useEffect(() => {
     fimRef.current?.scrollIntoView({ block: 'end' })
@@ -3965,6 +3965,25 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
           background: aviso.ok ? 'rgba(34,197,94,.12)' : 'rgba(234,179,8,.14)',
           color: aviso.ok ? '#16a34a' : '#b45309',
         }}>{aviso.txt}</div>
+      )}
+
+      {/* O robô está fora desta conversa porque alguém assumiu. O caminho de
+          volta fica AQUI, onde a pessoa está — o card do chamado já sumiu
+          quando ela respondeu. */}
+      {botPausado && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '7px 10px',
+          borderRadius: 8, background: 'rgba(124,58,237,.10)', border: '1px solid rgba(124,58,237,.35)',
+        }}>
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted)', flex: 1, lineHeight: 1.4 }}>
+            🤖 O robô está calado nesta conversa — quem responde é você.
+          </span>
+          <button type="button" onClick={onDevolverAoRobo}
+            style={{
+              flexShrink: 0, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 800,
+              border: '1px solid rgba(124,58,237,.6)', background: 'rgba(124,58,237,.18)', color: '#a78bfa',
+            }}>Devolver pro robô</button>
+        </div>
       )}
 
       {/* Buscar produto sem sair da conversa (ver BuscaProdutoNoChat) */}
@@ -4438,6 +4457,10 @@ export default function PainelPedidos() {
   const [chatAviso, setChatAviso]     = useState(null)   // saiu no WhatsApp? (ver enviarChat)
   const [chatTexto, setChatTexto]     = useState('')
   const [enviandoChat, setEnviandoChat] = useState(false)
+  // Robô pausado no número da conversa aberta? É o que decide mostrar o
+  // "Devolver pro robô" dentro da conversa — depois de responder, o chamado
+  // fecha e o card com os botões some, mas a conversa continua na tela.
+  const [botPausado, setBotPausado] = useState(false)
   // Cliente que pediu atendente no WhatsApp: o robô não inventa resposta, chama
   // gente. Toca AQUI, no gestor — é a tela que fica aberta no balcão.
   const { chamados, atender: atenderChamado } = useChamados(empresa?.id)
@@ -4688,9 +4711,33 @@ export default function PainelPedidos() {
     setChatTexto(prev => `${prev ? prev.trimEnd() + '\n' : ''}${p.nome}${preco}`)
   }
 
+  // Devolve a conversa pro robô sem sair dela: tira a pausa automática e ele
+  // volta a responder aquele número, já tendo lido o que a pessoa escreveu.
+  async function devolverConversaAoRobo() {
+    const sep = chatAberto?.indexOf('|') ?? -1
+    const tel = sep >= 0 ? String(chatAberto.slice(sep + 1)).replace(/\D/g, '') : ''
+    if (!tel || !empresa?.id) return
+    await supabase.from('whatsapp_bot_pausado')
+      .delete().eq('empresa_id', empresa.id)
+      .like('phone', `%${tel.slice(-8)}`)
+      .not('expira_em', 'is', null)
+    setBotPausado(false)
+    setChatAviso({ ok: true, txt: '🤖 Robô de volta nesta conversa — ele continua de onde você parou.' })
+  }
+
   // Marca como lidas as mensagens do cliente ao abrir a conversa, e envia resposta
   async function abrirThread(t) {
     setChatAberto(t.key)
+    const tel = String(t.cliente_ref || '').replace(/\D/g, '')
+    setBotPausado(false)
+    if (tel.length >= 8 && empresa?.id) {
+      // Casa pelos 8 últimos dígitos: o mesmo número aparece com e sem o 9.
+      const { data } = await supabase.from('whatsapp_bot_pausado')
+        .select('phone, expira_em').eq('empresa_id', empresa.id)
+        .like('phone', `%${tel.slice(-8)}`).limit(5)
+      const agora = Date.now()
+      setBotPausado((data ?? []).some(l => !l.expira_em || new Date(l.expira_em).getTime() > agora))
+    }
     const naoLidas = t.msgs.filter(m => m.remetente === 'cliente' && !m.lida).map(m => m.id)
     if (naoLidas.length) {
       setChatMsgs(prev => prev.map(m => naoLidas.includes(m.id) ? { ...m, lida: true } : m))
@@ -4729,6 +4776,14 @@ export default function PainelPedidos() {
       setChatAviso(data?.ok
         ? { ok: true, txt: '✓ Enviado aqui e no WhatsApp do cliente.' }
         : { ok: false, txt: '⚠️ Ficou só aqui no link — no WhatsApp não foi: ' + (data?.erro || errZap?.message || 'WhatsApp da loja desconectado.') })
+      // Respondeu = assumiu. O alarme para aqui, sem precisar de mais nenhum
+      // clique: ficar tocando enquanto a pessoa digita é o jeito mais rápido de
+      // ela desligar o som e parar de ver os chamados de verdade.
+      if (data?.ok) {
+        const chamado = chamados.find(c => String(c.phone).replace(/\D/g, '').endsWith(tel.slice(-8)))
+        if (chamado) await atenderChamado(chamado.id)
+        setBotPausado(true)   // whatsapp-connect pausa o robô 12h ao assumir
+      }
     } else {
       setChatAviso({ ok: false, txt: 'ℹ️ Esta conversa não tem telefone — a resposta fica só no link da loja.' })
     }
@@ -6286,8 +6341,8 @@ export default function PainelPedidos() {
                         flex: 1, padding: '7px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 800,
                         border: '1px solid rgba(124,58,237,.6)', background: 'rgba(124,58,237,.15)', color: '#a78bfa',
                       }}>🤖 Devolver pro robô</button>
-                    <button type="button" onClick={() => atenderChamado(c.id)}
-                      title="Você segue a conversa; o robô fica quieto por 12h neste número"
+                    <button type="button" onClick={() => { atenderChamado(c.id); setBotPausado(true) }}
+                      title="Você segue a conversa; o robô fica quieto por 12h neste número. Pra devolver depois, abra a conversa: o botão fica lá dentro"
                       style={{
                         flex: 1, padding: '7px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 800,
                         border: '1px solid var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text-muted)',
@@ -6311,6 +6366,8 @@ export default function PainelPedidos() {
                 aviso={chatAviso}
                 empresaId={empresa?.id}
                 onEscolherProduto={escolherProdutoNoChat}
+                botPausado={botPausado}
+                onDevolverAoRobo={devolverConversaAoRobo}
               />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
