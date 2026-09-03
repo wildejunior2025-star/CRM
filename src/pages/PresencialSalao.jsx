@@ -459,6 +459,19 @@ export default function PresencialSalao() {
     return (comanda?.comanda_itens ?? []).reduce((s, i) => s + Number(i.preco_unitario) * i.quantidade, 0)
   }
 
+  // O que a mesa deve DE VERDADE, com o serviço por cima. O card do quadro
+  // mostrava só a soma dos itens: a mesa dizia R$ 78,00 e a conta era R$ 85,80.
+  // Quem passa pelo salão lê esse número pra saber quanto a mesa tem — e na
+  // mesa azul é o valor que o ADM vai receber. Na azul vale a taxa que o garçom
+  // gravou no fechamento, não o padrão.
+  function totalDe(comanda) {
+    if (!comanda) return 0
+    const aplicar = comanda.status === 'aguardando_conferencia'
+      ? comanda.fechamento_pendente?.aplicar_taxa !== false
+      : true
+    return subtotalDe(comanda) + calcularTaxa(comanda.comanda_itens ?? [], taxaPct, aplicar)
+  }
+
   function prontosDe(comanda) {
     return (comanda?.comanda_itens ?? []).filter(i => i.status === 'pronto').length
   }
@@ -2141,7 +2154,10 @@ export default function PresencialSalao() {
                 {c.para_viagem && (
                   <div style={{ fontSize: 10, marginTop: 1, fontWeight: 800, color: '#d97706' }}>📦 VIAGEM</div>
                 )}
-                <div style={{ fontSize: 11.5, marginTop: 1, fontWeight: 800 }}>{fmt(sub)}</div>
+                <div style={{ fontSize: 11.5, marginTop: 1, fontWeight: 800 }}>
+                  {fmt(totalDe(c))}
+                  {totalDe(c) > sub && <span style={{ fontWeight: 600, opacity: .75 }}> c/ serv.</span>}
+                </div>
               </div>
             )
           })}
@@ -2192,7 +2208,12 @@ export default function PresencialSalao() {
                     👤 {String(garcons[c.garcom_id]).split(' ')[0]}
                   </div>
                 )}
-                {c && <div style={{ fontSize: 11.5, marginTop: 1, fontWeight: 800 }}>{fmt(sub)}</div>}
+                {c && (
+                  <div style={{ fontSize: 11.5, marginTop: 1, fontWeight: 800 }}>
+                    {fmt(totalDe(c))}
+                    {totalDe(c) > sub && <span style={{ fontWeight: 600, opacity: .75 }}> c/ serv.</span>}
+                  </div>
+                )}
               </div>
             )
           })}
