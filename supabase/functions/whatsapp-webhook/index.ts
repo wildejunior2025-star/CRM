@@ -960,7 +960,8 @@ async function transcribeAudio(base64: string, mimetype: string): Promise<string
 // errada e o cliente receber pela metade. O casamento é pelos 8 últimos
 // dígitos, porque o WhatsApp entrega o número com e sem o 9 do celular.
 async function espelharNoChat(
-  supabase: any, empresaId: string, phone: string, texto: string, remetente: "cliente" | "loja",
+  supabase: any, empresaId: string, phone: string, texto: string,
+  remetente: "cliente" | "loja", bot = false,
 ) {
   try {
     const digitos = String(phone ?? "").replace(/\D/g, "")
@@ -990,6 +991,9 @@ async function espelharNoChat(
       cliente_nome: nome,
       remetente,
       texto,
+      // Fala do robô entra como da loja (é o lado direito da conversa), mas
+      // marcada: quem atende precisa saber o que já foi respondido por ele.
+      bot,
     })
   } catch (_e) {
     // O espelho é bônus: se falhar, o atendimento pelo WhatsApp segue igual.
@@ -1138,6 +1142,8 @@ serve(async (req) => {
               headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
               body: JSON.stringify({ number: phoneEarly, text: texto }),
             }),
+            espelhar: (texto: string) =>
+              espelharNoChat(supabase, liga.empresa_id, phoneEarly, texto, "loja", true),
           })
           if (respondeu) console.log("[link] resposta automatica enviada", phoneEarly)
         }

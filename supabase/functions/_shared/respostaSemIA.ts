@@ -17,6 +17,9 @@
 // deno-lint-ignore-file no-explicit-any
 type Sb = any
 type Enviar = (texto: string) => Promise<unknown>
+// Espelho da fala do robô na aba Mensagens do gestor. Cada cano tem o seu (a
+// função é a mesma dos dois lados, mas mora dentro de cada webhook).
+type Espelhar = (texto: string) => Promise<unknown>
 
 const NL = String.fromCharCode(10)
 const FUSO = "America/Fortaleza"
@@ -70,8 +73,13 @@ function palavrasDeBusca(texto: string): string[] {
 // ── "Tem X?" respondido pelo cardápio ────────────────────────────────────────
 type Produto = Record<string, unknown>
 
+// Sem podar a lista: quem pergunta "tem suco?" quer ver TODOS os sucos. Cortar
+// em três é o atendente que fala três sabores de polpa — o cliente vai embora
+// achando que a loja só tem aqueles três.
+const LIMITE_LISTA = 40
+
 async function buscarProdutos(
-  supabase: Sb, empresaId: string, texto: string, limite = 3,
+  supabase: Sb, empresaId: string, texto: string, limite = LIMITE_LISTA,
 ): Promise<Produto[]> {
   try {
     const termos = palavrasDeBusca(texto)
@@ -104,7 +112,7 @@ function listaDeProdutos(achados: Produto[]): string {
 async function respostaDeProduto(
   supabase: Sb, empresaId: string, texto: string, link: string | null,
 ): Promise<string | null> {
-  const achados = await buscarProdutos(supabase, empresaId, texto, 3)
+  const achados = await buscarProdutos(supabase, empresaId, texto)
   if (!achados.length) return null
   const lista = listaDeProdutos(achados)
   return link
@@ -296,13 +304,14 @@ async function abrirChamado(supabase: Sb, empresaId: string, phone: string, moti
  * @returns true se respondeu alguma coisa.
  */
 export async function responderSemIA({
-  supabase, cfg, phone, mensagem, enviar,
+  supabase, cfg, phone, mensagem, enviar, espelhar,
 }: {
   supabase: Sb
   cfg: Record<string, unknown>
   phone: string
   mensagem: string
   enviar: Enviar
+  espelhar?: Espelhar
 }): Promise<boolean> {
   try {
     if (cfg.resposta_link_ativo !== true) return false
@@ -332,6 +341,10 @@ export async function responderSemIA({
       await supabase.from("whatsapp_conversas").insert({
         empresa_id: empresaId, phone, role: "assistant", content: texto,
       })
+      // A loja abre a conversa no gestor e vê as perguntas E as respostas. Sem
+      // isto, ela via só o cliente falando sozinho e achava que ninguém tinha
+      // respondido — e respondia tudo de novo.
+      try { await espelhar?.(texto) } catch { /* espelho é bônus */ }
       return true
     }
 
@@ -382,7 +395,7 @@ export async function responderSemIA({
         ultimaLista.split(NL).slice(1)
           .map(l => semAcento(l.split("—")[0]).trim()).filter(Boolean),
       )
-      const achados = anterior ? await buscarProdutos(supabase, empresaId, anterior, 12) : []
+      const achados = anterior ? await buscarProdutos(supabase, empresaId, anterior) : []
       const novos = achados.filter(p => !jaMostrados.has(semAcento(String(p.nome ?? "")).trim()))
       if (novos.length) {
         return await responder(`Tem mais sim! 🙌${NL}${listaDeProdutos(novos)}`)

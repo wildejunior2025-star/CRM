@@ -3929,17 +3929,23 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 2px' }}>
         {thread.msgs.map(m => {
           const daLoja = m.remetente === 'loja'
+          const doRobo = daLoja && m.bot
           return (
             <div key={m.id} style={{ display: 'flex', justifyContent: daLoja ? 'flex-end' : 'flex-start' }}>
               <div style={{
                 maxWidth: '82%', padding: '7px 11px', borderRadius: 12, fontSize: 13.5, lineHeight: 1.35,
-                background: daLoja ? '#7c3aed' : 'var(--bg, #0f0f1a)',
-                color: daLoja ? '#fff' : 'var(--text)',
-                border: daLoja ? 'none' : '1px solid var(--border, #2a2a3a)',
+                // Fala do robô fica num roxo mais apagado: quem atende precisa
+                // ver de relance o que já foi respondido sem ler tudo de novo.
+                background: doRobo ? 'rgba(124,58,237,.28)' : daLoja ? '#7c3aed' : 'var(--bg, #0f0f1a)',
+                color: doRobo ? 'var(--text)' : daLoja ? '#fff' : 'var(--text)',
+                border: doRobo ? '1px solid rgba(124,58,237,.55)' : daLoja ? 'none' : '1px solid var(--border, #2a2a3a)',
                 borderBottomRightRadius: daLoja ? 3 : 12,
                 borderBottomLeftRadius: daLoja ? 12 : 3,
                 whiteSpace: 'pre-wrap', wordBreak: 'break-word',
               }}>
+                {doRobo && (
+                  <div style={{ fontSize: 9.5, fontWeight: 800, opacity: .8, marginBottom: 2 }}>🤖 Robô</div>
+                )}
                 {m.texto}
                 <div style={{ fontSize: 9.5, opacity: .65, marginTop: 3, textAlign: 'right' }}>
                   {new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
@@ -6215,7 +6221,7 @@ export default function PainelPedidos() {
                           background: t.canal === 'app' ? '#f97316' : '#3b82f6', color: '#fff',
                         }}>{canalLbl}</span>
                         <span style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                          {ultima.remetente === 'loja' ? 'Você: ' : ''}{ultima.texto}
+                          {ultima.remetente === 'loja' ? (ultima.bot ? '🤖 ' : 'Você: ') : ''}{ultima.texto}
                         </span>
                         {t.unread > 0 && (
                           <span style={{ flexShrink: 0, minWidth: 18, height: 18, borderRadius: 9, background: '#7c3aed', color: '#fff', fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>
@@ -6828,12 +6834,17 @@ export default function PainelPedidos() {
               }}>
               {b.icon}
               <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '.02em' }}>{b.label}</span>
+              {/* Chamado de atendente é ALARME, não recado: ganha sino e pisca.
+                  Mensagem comum é só o número. */}
               {b.id === 'chat' && (chatNaoLidas + chamados.length) > 0 && (
-                <span style={{
-                  position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8,
+                <span className={chamados.length ? 'pp-sino-alerta' : undefined} style={{
+                  position: 'absolute', top: 2, right: 2, minWidth: 16, height: 16, borderRadius: 8,
                   background: '#dc2626', color: '#fff', fontSize: 10, fontWeight: 800,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px',
-                }}>{chatNaoLidas + chamados.length}</span>
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, padding: '0 4px',
+                }}>
+                  {chamados.length > 0 && <span style={{ fontSize: 9 }}>🔔</span>}
+                  {chatNaoLidas + chamados.length}
+                </span>
               )}
             </button>
           )
