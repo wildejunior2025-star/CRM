@@ -1,4 +1,4 @@
-// Bot v184 — pedido de endereço vende o CEP como atalho (escrever é só a saída de quem não sabe). v183: escrito guarda bairro/cidade. v182: cadastro sem e-mail.
+// Bot v185 — pedido de endereço pergunta rua e bairro (CEP vira a saída alternativa). v184: vendia o CEP como atalho (escrever é só a saída de quem não sabe). v183: escrito guarda bairro/cidade. v182: cadastro sem e-mail.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { responderSemIA, roboPausado, pausarPorAtendimentoHumano } from "../_shared/respostaSemIA.ts"
@@ -15,16 +15,18 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 }
 
-// Pedido de endereço. O CEP tem que parecer o ATALHO que é: 8 números e só falta o
-// número da casa. Por isso a mensagem já diz onde o caminho termina — senão o cliente
-// imagina que depois do CEP ainda vem um monte de pergunta. A alternativa de escrever
-// fica em uma linha discreta, sem listar os campos (listar faz o CEP parecer o trabalhoso).
-// Nos dois caminhos precisamos de rua + bairro + cidade: é o bairro que define a taxa
-// fixa, e sem cidade o mapa procura a rua no Brasil inteiro.
+// Pedido de endereço. Pergunta a RUA e o BAIRRO, do jeito que o atendente
+// pergunta — e do jeito que o robô do link faz. O CEP era o atalho na teoria:
+// na prática quase ninguém sabe o próprio CEP de cabeça, e quem sabe tem que
+// ir procurar. Rua e bairro o cliente responde sem levantar da cadeira, e é o
+// bairro que define a taxa fixa.
+//
+// O CEP fica como saída pra quem preferir — o caminho dele continua inteiro,
+// não mudou nada no resto do fluxo.
 const TEXTO_PEDIR_ENDERECO =
   "📍 Falta só o endereço!\n\n" +
-  "Me manda o seu *CEP* que eu pego a rua, o bairro e a cidade sozinho — aí você só me diz o *número* da casa. 😉\n\n" +
-  "_Não sabe o CEP? Sem problema, é só escrever o endereço que eu anoto._"
+  "Me diz o *nome da rua*, o *número* e o *bairro* que eu já anoto. 😉\n\n" +
+  "_Se preferir, me manda o CEP que eu pego a rua e o bairro sozinho._"
 
 // ── handleAtualizar_carrinho ─────────────────────────────────────────────────
 // Usa PATCH (update) + POST (insert) separados — upsert via on_conflict tem falhas intermitentes
@@ -616,8 +618,8 @@ async function handleFecharPedido(
         mensagemExtra: "",
         acaoPromise: Promise.resolve(),
         bloqueioMensagem: "📍 Preciso do seu endereço para entrega!\n\n" +
-          "Me manda o seu *CEP* que eu pego a rua, o bairro e a cidade — aí falta só o *número* da casa. 😊\n\n" +
-          "_Não sabe o CEP? É só escrever o endereço._",
+          "Me diz o *nome da rua*, o *número* e o *bairro* que eu já anoto. 😊\n\n" +
+          "_Se preferir, me manda o CEP._",
       }
     }
     const totalCarrinho  = itens.reduce((s: number, i: any) => s + Number(i.qtd) * Number(i.preco), 0)
@@ -1760,7 +1762,7 @@ Se o cliente JÁ tem nome em CLIENTE → PULE este passo inteiro, vá direto ao 
 ⚠️ GATILHO: assim que o cliente indicar que fechou a sacola ("é só isso", "pode fechar", "só isso mesmo", "fechar"), sua PRÓXIMA mensagem JÁ deve pedir o *nome* (item 1 abaixo). NÃO pergunte "quer mais algum item?" de novo, NÃO mostre resumo ainda. Se o cliente mandar o nome por conta própria, ACEITE e siga a ordem — nunca responda "quer mais alguma coisa?".
 Colete UM POR VEZ, nesta ordem exata:
   1. "⚡ Estamos com um sistema novo por aqui! Seu cadastro é rapidinho e *uma vez só* — no próximo pedido já não precisa. 😊\n\nPra começar, qual o seu *nome*?"
-  2. Recebeu o nome → emita cadastrar_cliente IMEDIATAMENTE (sem texto antes). O sistema pede o endereço em seguida (CEP ou escrito).
+  2. Recebeu o nome → emita cadastrar_cliente IMEDIATAMENTE (sem texto antes). O sistema pede o endereço em seguida (rua, número e bairro — ou CEP, se ele preferir).
   3. Recebeu o CEP → emita buscar_cep (sem texto antes). O sistema confirma o endereço e pede o número.
      Recebeu o endereço ESCRITO (sem CEP) → emita salvar_rua com rua + bairro + cidade (sem texto antes). O sistema pede o número.
   4. Recebeu o número → emita salvar_numero. O sistema pergunta entrega/retirada automaticamente.
@@ -1769,7 +1771,7 @@ O telefone já temos (${phoneLocal}) — NUNCA peça.
 
 ▶ PASSO 4 — ENTREGA OU RETIRADA
 ${aceitaDelivery
-  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE já temos o endereço (ver CLIENTE, ou acabou de coletar no cadastro) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → PASSO 5\n  - Quer trocar → peça o endereço novo: se vier CEP emita buscar_cep, se vier escrito emita salvar_rua (rua+bairro+cidade); depois o número (emita salvar_numero)\n• SE ainda não temos endereço → peça o *CEP* (é o caminho mais rápido: com ele só falta o número da casa). Não fique enumerando rua/bairro/cidade — só se ele disser que não sabe o CEP é que você aceita o endereço escrito. CEP → buscar_cep; escrito → salvar_rua. Depois o número (emita salvar_numero), aí siga ao PASSO 5\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá ao PASSO 5`
+  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE já temos o endereço (ver CLIENTE, ou acabou de coletar no cadastro) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → PASSO 5\n  - Quer trocar → peça o endereço novo: se vier CEP emita buscar_cep, se vier escrito emita salvar_rua (rua+bairro+cidade); depois o número (emita salvar_numero)\n• SE ainda não temos endereço → peça o *nome da rua*, o *número* e o *bairro* (é o que o cliente responde na hora; CEP quase ninguém sabe de cabeça). Se ele mandar o CEP por conta própria, aceite numa boa. Escrito → salvar_rua; CEP → buscar_cep. Depois o número (emita salvar_numero), aí siga ao PASSO 5\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá ao PASSO 5`
   : `Somente retirada no local.\nInforme: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\nVá ao PASSO 5`}
 
 ▶ PASSO 5 — FORMA DE PAGAMENTO
@@ -1825,7 +1827,7 @@ ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome":
 
 Cadastrar cliente novo (após coletar o nome — PASSO 3, só depois da sacola fechada):
 ACAO: {"tipo": "cadastrar_cliente", "nome": "[nome]"}
-⚠️ Emita IMEDIATAMENTE após receber o nome. SEM texto antes. O sistema pede CEP em seguida.
+⚠️ Emita IMEDIATAMENTE após receber o nome. SEM texto antes. O sistema pede o endereço (rua, número e bairro) em seguida.
 
 Buscar endereço pelo CEP (quando cliente enviar o CEP):
 ACAO: {"tipo": "buscar_cep", "cep": "59640000"}
