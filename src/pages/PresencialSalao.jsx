@@ -564,6 +564,15 @@ export default function PresencialSalao() {
   const taxaSel = calcularTaxa(comandaSel?.comanda_itens ?? [], taxaPct, aplicarTaxa)
   const totalSel = subtotalSel + taxaSel
 
+  // Mesa que o garçom já fechou: o interruptor da taxa começa como ELE deixou,
+  // não no padrão ligado. Senão o ADM confere uma conta com serviço que não foi
+  // cobrado — e é o valor gravado que o "Confirmar e liberar" usa de verdade.
+  useEffect(() => {
+    if (comandaSel?.status === 'aguardando_conferencia') {
+      setAplicarTaxa(comandaSel?.fechamento_pendente?.aplicar_taxa !== false)
+    }
+  }, [comandaSel?.id, comandaSel?.status]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Comandas que chegaram pelo link e ninguém abriu ainda (mig 0182).
   const naoVistas = useMemo(
     () => comandas.filter(c => c.status === 'aberta' && c.visto_em == null),
@@ -2708,6 +2717,20 @@ export default function PresencialSalao() {
               <div className="sal-rodape-subtotal" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15.5, marginBottom: 4 }}>
                 <span>Subtotal</span><strong>{fmt(subtotalSel)}</strong>
               </div>
+              {/* Loja que cobra serviço: o rodapé mostrava só o subtotal, e o ADM
+                  conferia a mesa azul por um valor MENOR do que o cliente pagou.
+                  A conta certa só aparecia dentro do fechamento. */}
+              {taxaSel > 0 && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5, color: 'var(--text-muted)', marginBottom: 4 }}>
+                    <span>Serviço ({taxaPct}%)</span><span>{fmt(taxaSel)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 16.5, marginBottom: 6 }}>
+                    <span style={{ fontWeight: 800 }}>Total</span>
+                    <strong style={{ color: 'var(--primary)' }}>{fmt(totalSel)}</strong>
+                  </div>
+                </>
+              )}
               {comandaSel.status === 'aguardando_conferencia' ? (
                 <div>
                   <div style={{ padding: '8px 10px', borderRadius: 8, background: 'rgba(59,130,246,.16)', color: '#2563eb', fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>

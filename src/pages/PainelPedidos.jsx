@@ -3728,17 +3728,29 @@ function LinhaItemMesa({ comanda, it, onItemPronto, onEditarPreco, podeEditarPre
   )
 }
 
-function CardMesa({ comanda, onPronto, onItemPronto, onFecharConta, onConfirmarLiberar, onImprimir, onImprimirConta, onEditarPreco, podeEditarPreco, onAjustarTaxa }) {
+function CardMesa({ comanda, taxaPct = 0, onPronto, onItemPronto, onFecharConta, onConfirmarLiberar, onImprimir, onImprimirConta, onEditarPreco, podeEditarPreco, onAjustarTaxa }) {
   const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
-  const total = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
+  const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
   const hora = new Date(comanda.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   const pendentes = itens.filter(it => it.status !== 'pronto' && it.status !== 'entregue')
   const aguardando = comanda.status === 'aguardando_conferencia'
   const taxaAplicada = (comanda.fechamento_pendente || {}).aplicar_taxa !== false // garçom fecha com 10% por padrão
+  // O card mostrava só a soma dos itens: o ADM conferia a mesa azul por um valor
+  // MENOR do que o cliente pagou, na loja que cobra serviço. Aqui o topo já sai
+  // com a taxa que vai ser cobrada de verdade (a do fechamento do garçom).
+  const taxa = calcularTaxa(itens, taxaPct, aguardando ? taxaAplicada : true)
+  const total = subtotal + taxa
   return (
     <div className="pp-mini" style={{ borderLeft: `3px solid ${aguardando ? '#3b82f6' : '#db2777'}`, cursor: 'default' }}>
       <div className="pp-mini-top" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span className="pp-mini-num" style={{ flex: 1, minWidth: 0 }}>🍽️ {rotuloComanda(comanda)} · {fmt(total)}</span>
+        <span className="pp-mini-num" style={{ flex: 1, minWidth: 0 }}>
+          🍽️ {rotuloComanda(comanda)} · {fmt(total)}
+          {taxa > 0 && (
+            <span style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)' }}>
+              {' '}({fmt(subtotal)} + {fmt(taxa)} de serviço)
+            </span>
+          )}
+        </span>
         {onImprimir && itens.length > 0 && (
           <button type="button" title="Imprimir comanda na cozinha" aria-label="Imprimir comanda"
             onClick={() => onImprimir(comanda)}
@@ -5862,7 +5874,7 @@ export default function PainelPedidos() {
               {(!filtroColuna || filtroColuna === 'mesas') && comandasView.length > 0 && (
                 <Coluna titulo="Mesas" cor="#db2777" count={comandasView.length} vazio="Nenhuma mesa aberta">
                   {comandasView.map(c => (
-                    <CardMesa key={c.id} comanda={c} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} onConfirmarLiberar={handleConfirmarLiberarMesa} onImprimir={handleImprimirMesa} onImprimirConta={handleImprimirContaMesa} onEditarPreco={handleEditarPrecoMesaItem} podeEditarPreco={podeFinanceiro} onAjustarTaxa={podeFinanceiro ? handleAjustarTaxaMesa : null} />
+                    <CardMesa key={c.id} comanda={c} taxaPct={Number(empresa?.taxa_servico_pct ?? 0)} onPronto={handleMesaPronto} onItemPronto={handleMesaItemPronto} onFecharConta={setComandaFechando} onConfirmarLiberar={handleConfirmarLiberarMesa} onImprimir={handleImprimirMesa} onImprimirConta={handleImprimirContaMesa} onEditarPreco={handleEditarPrecoMesaItem} podeEditarPreco={podeFinanceiro} onAjustarTaxa={podeFinanceiro ? handleAjustarTaxaMesa : null} />
                   ))}
                 </Coluna>
               )}
