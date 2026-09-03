@@ -860,7 +860,9 @@ export default function RaioEntrega() {
                           const nextKm = taxasKm.length === 0
                             ? 0.5
                             : +Math.min((Number(taxasKm.at(-1)?.km) || 0) + 0.5, raioMax).toFixed(1)
-                          setTaxasKm([...taxasKm, { km: nextKm, taxa: 0, tempo: Math.round(nextKm * 5) }])
+                          // Taxa nasce VAZIA: o zero que ninguém digitou só
+                          // atrapalha na hora de escrever o valor por cima.
+                          setTaxasKm([...taxasKm, { km: nextKm, taxa: '', tempo: Math.round(nextKm * 5) }])
                         }}
                       >
                         + Adicionar faixa
