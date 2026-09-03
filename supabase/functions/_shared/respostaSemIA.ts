@@ -363,6 +363,20 @@ async function chamadoAberto(supabase: Sb, empresaId: string, phone: string) {
   return data ?? null
 }
 
+// Primeiro nome de quem está falando, se a loja já tiver esse cliente. Só o
+// primeiro: "Oi, Wilde Junior da Silva! 👋" não é jeito de gente falar.
+async function primeiroNomeDoCliente(supabase: Sb, empresaId: string, phone: string): Promise<string> {
+  try {
+    const { data } = await supabase.from("clientes")
+      .select("nome").eq("empresa_id", empresaId)
+      .ilike("telefone", `%${chave8(phone)}`).limit(1).maybeSingle()
+    const nome = String(data?.nome ?? "").trim()
+    return nome ? nome.split(/\s+/)[0] : ""
+  } catch {
+    return ""
+  }
+}
+
 async function abrirChamado(supabase: Sb, empresaId: string, phone: string, motivo: string) {
   if (await chamadoAberto(supabase, empresaId, phone)) return
   const { data: cli } = await supabase.from("clientes")
@@ -373,6 +387,39 @@ async function abrirChamado(supabase: Sb, empresaId: string, phone: string, moti
   })
   if (error) console.error("[chamado] não abriu:", JSON.stringify(error).slice(0, 200))
   else console.log("[chamado] aberto para", phone)
+}
+
+// ── Primeira fala: o texto é da loja ─────────────────────────────────────────
+// Cada loja fala do seu jeito. O padrão da casa é este; quem quiser muda no
+// Portal (WhatsApp → Conexão / Config) sem mexer em código.
+//
+// {nome} = primeiro nome do cliente, quando ele já tem cadastro na loja. Sem
+// cadastro o token some junto com a vírgula solta — "Oi , ! 👋" é pior que não
+// chamar pelo nome.
+// {link} = o link da loja com o telefone dele. Se o texto não tiver o token, o
+// link entra no fim: loja nenhuma pode mandar uma saudação SEM o link.
+export const TEXTO_PRIMEIRA_FALA_PADRAO = [
+  "Oi {nome}! 👋",
+  "Para entrega ou retirada, é só acessar nossa loja online 👇",
+  "{link}",
+  "",
+  "Estamos à disposição!",
+].join(String.fromCharCode(10))
+
+export function montarPrimeiraFala(modelo: string, nome: string, link: string): string {
+  const texto = (modelo?.trim() || TEXTO_PRIMEIRA_FALA_PADRAO)
+  const comLink = texto.includes("{link}") ? texto : `${texto}${NL}{link}`
+  return comLink
+    .replace(/\{nome\}/g, nome)
+    .replace(/\{link\}/g, link)
+    // Faxina de quando o nome não veio: ", ," vira ",", "Oi !" vira "Oi!",
+    // e vírgula sozinha no começo da linha some.
+    .replace(/,[ ]*,/g, ",")
+    .replace(/[ ]{2,}/g, " ")
+    .replace(/[ ]+([!?.,:])/g, "$1")
+    .replace(/,[ ]*([!?.])/g, "$1")
+    .replace(new RegExp("(^|" + NL + ")[ ,]+", "g"), "$1")
+    .trim()
 }
 
 // ── O robô ───────────────────────────────────────────────────────────────────
@@ -526,10 +573,12 @@ export async function responderSemIA({
     //    pergunta que a gente não entendeu. É a mensagem que faz o pedido sair
     //    do WhatsApp e cair no sistema.
     if (!linkRecente) {
-      const proprio = String(cfg.resposta_link_texto ?? "").trim()
-      // CURTA de propósito: ninguém lê parágrafo de robô. Duas linhas e o link —
-      // o preview do WhatsApp já mostra o nome e a foto da loja de graça.
-      return await responder(proprio ? `${proprio}${NL}${link}` : `Oi! 👋 Peça aqui, é rapidinho:${NL}${link}`)
+      const modelo = String(cfg.resposta_link_texto ?? "")
+      // Só vai no banco atrás do nome se o texto pedir — loja que tirou o
+      // {nome} não paga por uma consulta que não vai usar.
+      const querNome = (modelo.trim() || TEXTO_PRIMEIRA_FALA_PADRAO).includes("{nome}")
+      const nome = querNome ? await primeiroNomeDoCliente(supabase, empresaId, phone) : ""
+      return await responder(montarPrimeiraFala(modelo, nome, link))
     }
 
     // 8) Já mandou o link e não soube responder. Não inventa: oferece gente.

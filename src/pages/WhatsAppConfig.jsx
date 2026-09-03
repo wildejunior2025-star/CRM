@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { conectarWhatsAppCloud } from '../lib/waEmbeddedSignup'
 import { useAuth } from '../hooks/useAuth'
+import { TEXTO_PRIMEIRA_FALA_PADRAO, montarPrimeiraFala } from '../lib/primeiraFala'
 import '../components/Page.css'
 import './WhatsAppConfig.css'
 
@@ -79,6 +80,10 @@ export default function WhatsAppConfig() {
   const [linkAtivo,       setLinkAtivo]       = useState(false)
   const [salvandoLink,    setSalvandoLink]    = useState(false)
   const [linkMsg,         setLinkMsg]         = useState(null)
+  // Texto da primeira fala. Vazio = o padrão da casa; cada loja fala do seu jeito.
+  const [linkTexto,       setLinkTexto]       = useState('')
+  const [salvandoTexto,   setSalvandoTexto]   = useState(false)
+  const [textoMsg,        setTextoMsg]        = useState(null)
   const [iaNome,          setIaNome]          = useState('Assistente')
   const [iaInstrucoes,    setIaInstrucoes]    = useState('')
   const [savingIa,        setSavingIa]        = useState(false)
@@ -118,6 +123,7 @@ export default function WhatsAppConfig() {
       })
       setIaAtivo(data.ia_ativo ?? false)
       setLinkAtivo(data.resposta_link_ativo ?? false)
+      setLinkTexto(data.resposta_link_texto ?? '')
       setIaNome(data.ia_nome ?? 'Assistente')
       setIaInstrucoes(data.ia_instrucoes ?? '')
       // Carrega phone salvo no banco como fallback
@@ -420,6 +426,20 @@ export default function WhatsAppConfig() {
     setTimeout(() => setLinkMsg(null), 2500)
   }
 
+  async function handleSalvarTexto(novo) {
+    setSalvandoTexto(true)
+    setTextoMsg(null)
+    const { error } = await supabase
+      .from('whatsapp_config')
+      // Texto vazio volta pro padrão da casa — é o mesmo que "não personalizei".
+      .upsert({ empresa_id: profile.empresa_id, resposta_link_texto: novo.trim() || null }, { onConflict: 'empresa_id' })
+    setSalvandoTexto(false)
+    setTextoMsg(error
+      ? { type: 'error', text: error.message }
+      : { type: 'success', text: 'Mensagem salva. É ela que o cliente vai receber.' })
+    if (!error) setTimeout(() => setTextoMsg(null), 3000)
+  }
+
   async function handleSaveInstrucoes(e) {
     e.preventDefault()
     setSavingIa(true)
@@ -687,6 +707,79 @@ export default function WhatsAppConfig() {
             <div className={`wa-test-result ${linkMsg.type}`} style={{ marginTop: 8 }}>
               {linkMsg.type === 'success' ? <CheckIcon /> : <AlertIcon />}
               {linkMsg.text}
+            </div>
+          )}
+
+          {/* A primeira fala é a cara da loja. Cada uma fala do seu jeito — o
+              padrão da casa fica de exemplo, e quem quiser escreve o dele. */}
+          {linkAtivo && (
+            <div className="wa-primeira-fala">
+              <label htmlFor="wa-msg-boas-vindas" className="wa-primeira-fala-label">
+                Mensagem de boas-vindas
+              </label>
+              <p className="wa-hint" style={{ margin: '2px 0 8px' }}>
+                É o que o cliente recebe quando manda a primeira mensagem. Deixe em branco
+                pra usar a nossa. Você pode usar:{' '}
+                <code>{'{nome}'}</code> — o primeiro nome dele, quando já tem cadastro na loja
+                (sem cadastro a mensagem sai sem o nome, sem ficar estranha) — e{' '}
+                <code>{'{link}'}</code> — o link do seu cardápio já com o telefone dele. Se você
+                não escrever <code>{'{link}'}</code>, ele entra no fim sozinho.
+              </p>
+              <textarea
+                id="wa-msg-boas-vindas"
+                className="wa-textarea"
+                rows={6}
+                value={linkTexto}
+                onChange={e => setLinkTexto(e.target.value)}
+                placeholder={TEXTO_PRIMEIRA_FALA_PADRAO}
+              />
+
+              <div className="wa-primeira-fala-acoes">
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={salvandoTexto}
+                  onClick={() => handleSalvarTexto(linkTexto)}
+                >
+                  {salvandoTexto ? 'Salvando...' : 'Salvar mensagem'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={salvandoTexto || !linkTexto.trim()}
+                  onClick={() => { setLinkTexto(''); handleSalvarTexto('') }}
+                >
+                  Usar a mensagem padrão
+                </button>
+              </div>
+
+              {textoMsg && (
+                <div className={`wa-test-result ${textoMsg.type}`} style={{ marginTop: 8 }}>
+                  {textoMsg.type === 'success' ? <CheckIcon /> : <AlertIcon />}
+                  {textoMsg.text}
+                </div>
+              )}
+
+              {/* Prévia dos dois casos, porque é onde o {nome} engana: a loja
+                  escreve pensando em quem ela conhece e esquece de quem chega
+                  pela primeira vez. */}
+              <div className="wa-previa-grid">
+                {[
+                  { titulo: 'Cliente já cadastrado', nome: 'Ana' },
+                  { titulo: 'Cliente novo (sem cadastro)', nome: '' },
+                ].map(caso => (
+                  <div key={caso.titulo} className="wa-previa">
+                    <div className="wa-previa-titulo">{caso.titulo}</div>
+                    <div className="wa-previa-balao">
+                      {montarPrimeiraFala(
+                        linkTexto,
+                        caso.nome,
+                        `https://lojaonline.fwcinter.com/${empresaData?.slug ?? 'sua-loja'}?t=84998180774`,
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
