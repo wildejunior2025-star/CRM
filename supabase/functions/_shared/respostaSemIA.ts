@@ -297,6 +297,24 @@ const soDigitos = (p: string) => String(p ?? "").replace(/\D/g, "")
 const chave8 = (p: string) => soDigitos(p).slice(-8)
 
 /**
+ * Telefone do jeito que o checkout entende: sem o 55 do país e COM o 9 do
+ * celular.
+ *
+ * Sem o 55 porque o checkout leria "55" como DDD. Com o 9 porque a Meta entrega
+ * o número do Nordeste sem ele (5584 8180-774) e o cadastro guarda com — o link
+ * abria com um telefone que não existe em lugar nenhum, o cliente não era
+ * reconhecido e digitava nome e endereço tudo de novo.
+ */
+function telefoneParaLink(phone: string): string {
+  const d = soDigitos(phone)
+  const n = (d.startsWith("55") && d.length >= 12) ? d.slice(2) : d
+  // DDD + 8 dígitos começando em 6-9 = celular que perdeu o 9 no caminho.
+  // Fixo (começa em 2-5) não leva 9 nenhum.
+  if (n.length === 10 && /^[6-9]/.test(n.slice(2))) return `${n.slice(0, 2)}9${n.slice(2)}`
+  return n
+}
+
+/**
  * Robô está pausado nesse número? Pausa manual (expira_em NULL) vale pra
  * sempre; a automática (a loja assumiu a conversa) vale por algumas horas.
  */
@@ -386,10 +404,7 @@ export async function responderSemIA({
       return false
     }
 
-    // Sem o 55 do país: o checkout leria isso como DDD ("(55) 84981-80774").
-    const d = soDigitos(phone)
-    const tel = (d.startsWith("55") && d.length >= 12) ? d.slice(2) : d
-    const link = `https://lojaonline.fwcinter.com/${slug}?t=${tel}`
+    const link = `https://lojaonline.fwcinter.com/${slug}?t=${telefoneParaLink(phone)}`
 
     const responder = async (texto: string) => {
       await enviar(texto)
