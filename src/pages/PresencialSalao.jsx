@@ -638,7 +638,19 @@ export default function PresencialSalao() {
   // não abre caixa, e a RLS de `caixas` só deixa ele enxergar caixa que ELE
   // abriu — então a condição era impossível de satisfazer. A tela mandava
   // "abra o caixa" pra quem não tem esse botão (Wilde testou 23/08/2026).
-  const exigeCaixa = ehAdmin
+  //
+  // 02/09/2026: o ADM também deixou de precisar de caixa PRA LANÇAR. Na Saidera
+  // quem abre a mesa é ele, e exigir caixa às 18h pra anotar uma cerveja que só
+  // vira dinheiro às 23h só atrasava o salão. Sobra o vendedor, que tem caixa
+  // próprio — a venda dele é imediata, no balcão.
+  const exigeCaixa = profile?.perfil === 'vendedor'
+
+  // FECHAR a conta é outra história: aí nasce a venda, e `vendas.caixa_id` vem
+  // do caixa de quem está fechando. Sem caixa aberto a venda entra com caixa
+  // NULO — o faturamento conta, mas o dinheiro não aparece em caixa nenhum e a
+  // gaveta não fecha no fim da noite. Por isso a trava mudou de lugar, do
+  // lançamento pro fechamento, em vez de simplesmente sumir.
+  const exigeCaixaPraFechar = !caixaAberto
 
   // ── Ações ────────────────────────────────────────────────────────────────
   async function abrirMesa(mesa) {
@@ -1531,6 +1543,12 @@ export default function PresencialSalao() {
       window.alert('Esta mesa está esperando um PIX. Quando o pagamento cair a conta fecha sozinha — ou cancele o PIX na comanda pra receber de outro jeito.')
       return
     }
+    // Aqui a venda nasce de verdade. Sem caixa aberto ela entraria com caixa
+    // NULO: o faturamento contaria e o dinheiro não apareceria em caixa nenhum.
+    if (ehAdmin && exigeCaixaPraFechar) {
+      window.alert('⚠️ Abra o caixa (aba 💵 Caixa) pra receber esta conta.\n\nLançar na mesa não precisa de caixa — receber precisa, senão o dinheiro não entra em caixa nenhum e a gaveta não fecha no fim da noite.')
+      return
+    }
     setSalvando(true)
     // Só fecha DIRETO (gera a venda + libera a mesa + imprime) quem é ADM e está no
     // PC da loja (com o app FWC/térmica). ADM no CELULAR (sem impressora) NÃO fecha
@@ -1774,6 +1792,13 @@ export default function PresencialSalao() {
   // ADM confere o pagamento e libera a mesa de vez (a partir do que o garçom fechou).
   async function confirmarLiberarAdm() {
     if (!comandaSel) return
+    // Liberar a mesa é o que CRIA a venda do que o garçom fechou — mesma regra do
+    // receber: sem caixa aberto o dinheiro não cai em caixa nenhum. Conta zerada
+    // passa: ali não nasce venda, a comanda é só cancelada.
+    if (subtotalSel > 0 && exigeCaixaPraFechar) {
+      window.alert('⚠️ Abra o caixa (aba 💵 Caixa) pra liberar esta mesa.\n\nÉ agora que a venda é criada — sem caixa aberto ela entra sem caixa e a gaveta não fecha no fim da noite.')
+      return
+    }
     // Conta sem itens (ex.: todos removidos): não gera venda R$ 0 — cancela e libera a mesa.
     if (subtotalSel <= 0) {
       setSalvando(true)
@@ -2021,14 +2046,19 @@ export default function PresencialSalao() {
         )}
       </div>
 
-      {exigeCaixa && !caixaAberto && (
+      {/* O ADM lança sem caixa, mas não RECEBE sem caixa. O aviso continua na
+          tela pra ele não descobrir isso só às 23h, com o cliente na frente
+          esperando pra pagar — só que agora avisa a coisa certa. */}
+      {(exigeCaixa || ehAdmin) && !caixaAberto && (
         <div style={{
           margin: '0 0 12px', padding: '12px 14px', borderRadius: 10,
           border: '1px solid #f59e0b', background: 'rgba(245,158,11,.12)',
           display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
           fontSize: 13.5, fontWeight: 600, color: 'var(--text)',
         }}>
-          <span>⚠️ <b>Caixa fechado.</b> Abra o caixa (aba <b>💵 Caixa</b>) pra poder lançar nas mesas/balcão.</span>
+          <span>⚠️ <b>Caixa fechado.</b> {exigeCaixa
+            ? <>Abra o caixa (aba <b>💵 Caixa</b>) pra poder lançar nas mesas/balcão.</>
+            : <>Pode lançar nas mesas normalmente — mas pra <b>receber</b> uma conta precisa abrir o caixa (aba <b>💵 Caixa</b>).</>}</span>
         </div>
       )}
 

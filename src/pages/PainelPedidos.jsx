@@ -5080,7 +5080,24 @@ export default function PainelPedidos() {
   }
 
   // Fecha a conta da mesa pelo gestor (cria a venda, baixa estoque, libera a mesa).
+  // A venda da mesa nasce com o caixa de quem fecha (`vendas.caixa_id` =
+  // current_caixa_id()). Sem caixa aberto ela entra com caixa NULO: o
+  // faturamento conta e o dinheiro não aparece em caixa nenhum, então a gaveta
+  // não fecha à noite. Desde 02/09/2026 o ADM lança na mesa sem caixa — o que
+  // torna fácil chegar até aqui sem ter aberto o dia.
+  async function caixaAbertoAgora() {
+    const { data: s } = await supabase.auth.getUser()
+    if (!s?.user?.id) return true   // sem sessão, deixa o servidor decidir
+    const { data } = await supabase.from('caixas').select('id')
+      .eq('empresa_id', empresa?.id).eq('aberto_por', s.user.id).eq('status', 'aberto').limit(1)
+    return !!(data && data.length)
+  }
+
   async function handleFecharConta({ comanda, forma, aplicarTaxa, total }) {
+    if (!(await caixaAbertoAgora())) {
+      alert('⚠️ Abra o caixa (menu 💵 Caixa) pra receber esta conta.\n\nSem caixa aberto a venda entra sem caixa e a gaveta não fecha no fim da noite.')
+      return
+    }
     // Quem fechou, pro ranking do salão (mig 0187). Antes do RPC: ele mexe em
     // status/total e não encosta nestes campos.
     if (!comanda.fechada_por) {
@@ -5161,6 +5178,11 @@ export default function PainelPedidos() {
     const pend = comanda.fechamento_pendente || {}
     if (!Array.isArray(pend.pagamentos) || !pend.pagamentos.length) {
       setComandaFechando(comanda); return
+    }
+    // Liberar a mesa azul é o que cria a venda do que o garçom já recebeu.
+    if (!(await caixaAbertoAgora())) {
+      alert('⚠️ Abra o caixa (menu 💵 Caixa) pra liberar esta mesa.\n\nÉ agora que a venda é criada — sem caixa aberto ela entra sem caixa e a gaveta não fecha no fim da noite.')
+      return
     }
     const total = (comanda.comanda_itens ?? []).reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
     // Pagamento único: manda SEM valor pro servidor recontar a mesa na hora. Era aqui
