@@ -505,7 +505,14 @@ export default function RaioEntrega() {
     if (!empresaId) return
     setSalvando(true); setMsg(null)
 
-    const faixasOrdenadas = [...taxasKm].sort((a, b) => a.km - b.km)
+    // O que está na tela é texto (ver os inputs das faixas); vira número aqui.
+    const faixasOrdenadas = taxasKm
+      .map(f => ({
+        km: Number(f.km) || 0,
+        taxa: Number(f.taxa) || 0,
+        tempo: (f.tempo === '' || f.tempo == null) ? null : (Number(f.tempo) || 0),
+      }))
+      .sort((a, b) => a.km - b.km)
     // taxa_entrega não é mais "a taxa da loja": vira o piso ("a partir de"), pra
     // quem ainda lê esse campo (robô do WhatsApp, telas antigas) não concluir que
     // a entrega é de graça quando a distância não pôde ser calculada.
@@ -794,25 +801,31 @@ export default function RaioEntrega() {
                       {/* Linhas */}
                       {taxasKm.map((faixa, i) => (
                         <div key={i} className="re-faixas-row">
+                          {/* Os três campos guardam o TEXTO digitado, não o número.
+                              Guardando número, digitar 23 em cima do 0 deixava "023"
+                              preso na tela: pro React "023" == 23, então ele não
+                              repintava o campo. Vira número só na hora de salvar. */}
                           <input
                             type="number" min="0.5" step="0.5"
-                            value={faixa.km}
+                            value={faixa.km ?? ''}
                             onChange={e => {
                               const next = [...taxasKm]
-                              next[i] = { ...next[i], km: Number(e.target.value) }
+                              next[i] = { ...next[i], km: e.target.value }
                               setTaxasKm(next)
                             }}
+                            onFocus={e => e.target.select()}
                             className="form-input"
                             placeholder="0.5"
                           />
                           <input
                             type="number" min="0" step="0.50"
-                            value={faixa.taxa}
+                            value={faixa.taxa ?? ''}
                             onChange={e => {
                               const next = [...taxasKm]
-                              next[i] = { ...next[i], taxa: Number(e.target.value) }
+                              next[i] = { ...next[i], taxa: e.target.value }
                               setTaxasKm(next)
                             }}
+                            onFocus={e => e.target.select()}
                             className="form-input"
                             placeholder="5.00"
                           />
@@ -821,9 +834,10 @@ export default function RaioEntrega() {
                             value={faixa.tempo ?? ''}
                             onChange={e => {
                               const next = [...taxasKm]
-                              next[i] = { ...next[i], tempo: Number(e.target.value) }
+                              next[i] = { ...next[i], tempo: e.target.value }
                               setTaxasKm(next)
                             }}
+                            onFocus={e => e.target.select()}
                             className="form-input"
                             placeholder="30"
                           />
@@ -845,7 +859,7 @@ export default function RaioEntrega() {
                           const raioMax = parseFloat(raio) || 10
                           const nextKm = taxasKm.length === 0
                             ? 0.5
-                            : +Math.min((taxasKm.at(-1)?.km ?? 0) + 0.5, raioMax).toFixed(1)
+                            : +Math.min((Number(taxasKm.at(-1)?.km) || 0) + 0.5, raioMax).toFixed(1)
                           setTaxasKm([...taxasKm, { km: nextKm, taxa: 0, tempo: Math.round(nextKm * 5) }])
                         }}
                       >
