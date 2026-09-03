@@ -1,4 +1,4 @@
-// Bot v185 — pedido de endereço pergunta rua e bairro (CEP vira a saída alternativa). v184: vendia o CEP como atalho (escrever é só a saída de quem não sabe). v183: escrito guarda bairro/cidade. v182: cadastro sem e-mail.
+// Bot v187 — promessa de retorno vira chamado de verdade; busca perdoa erro de digitação. v186: endereço+taxa no fechamento. v185: pedido de endereço pergunta rua e bairro (CEP vira a saída alternativa). v184: vendia o CEP como atalho (escrever é só a saída de quem não sabe). v183: escrito guarda bairro/cidade. v182: cadastro sem e-mail.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { responderSemIA, roboPausado, pausarPorAtendimentoHumano, chamadoAberto, abrirChamado } from "../_shared/respostaSemIA.ts"
@@ -2455,7 +2455,18 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     // responsável e retorno em breve" e não avisou ninguém: o cliente ficou
     // esperando um retorno que não existia. Promessa de retorno agora abre o
     // chamado e toca o sino no gestor, sempre.
-    const prometeuVerificar = /(vou|deixa eu|deixe-me|posso) (verificar|conferir|checar|perguntar|confirmar)|com o respons[\u00e1a]vel|com a loja|retorno (em breve|pra voc[\u00eae])|te retorno|j[\u00e1a] (aviso|avisei) a loja|assim que (eu )?souber|vou falar com/i.test(resposta)
+    const prometeuVerificar = new RegExp([
+      // "vou verificar", "deixa eu conferir", "te retorno"
+      "(vou|deixa eu|deixe-me|posso) (verificar|conferir|checar|perguntar|confirmar)",
+      "com o respons[\u00e1a]vel", "com a loja", "retorno (em breve|pra voc[\u00eae])",
+      "te retorno", "assim que (eu )?souber", "vou falar com",
+      // "já chamei alguém" — a frase que o próprio roteiro manda dizer ANTES
+      // da ação. Ele escrevia isso e não emitia a ação: o cliente ouvia que
+      // tinha sido chamado alguém que nunca soube de nada.
+      "j[\u00e1a] (chamei|estou chamando|vou chamar)", "chamei (algu[\u00e9e]m|uma pessoa|um atendente)",
+      "vou (chamar|pedir pra) algu[\u00e9e]m", "algu[\u00e9e]m (da loja )?(j[\u00e1a] )?(vai|est[\u00e1a]) (te )?(falar|falando|responder|respondendo|ajudar|ajudando|atender|atendendo)",
+      "j[\u00e1a] (aviso|avisei) a loja",
+    ].join("|"), "i").test(resposta)
     const chamouAtendente = acaoMatch !== null && (() => {
       try { return JSON.parse(acaoMatch![1])?.tipo === "chamar_atendente" } catch { return false }
     })()
