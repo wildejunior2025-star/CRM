@@ -1956,6 +1956,16 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     }
 
     const claudeData = await claudeRes.json()
+    // Quanto custou ESTA resposta. A loja paga R$ 0,07 por crédito (1 crédito =
+    // 1 resposta); sem ver o custo real não dá pra saber se a conta fecha —
+    // catálogo grande no prompt já custou mais que o crédito no passado.
+    {
+      const u = claudeData.usage ?? {}
+      const entrada = Number(u.input_tokens ?? 0)
+      const saida = Number(u.output_tokens ?? 0)
+      const usd = (entrada / 1e6) * 1 + (saida / 1e6) * 5   // Haiku 4.5: $1/$5 por M
+      console.log(`[custo] in=${entrada} out=${saida} ≈ US$ ${usd.toFixed(5)} (~R$ ${(usd * 5.4).toFixed(3)}) | crédito da loja: R$ 0,07`)
+    }
     let resposta: string = claudeData.content?.[0]?.text ?? ""
 
     const acaoStart = resposta.indexOf("ACAO:")
