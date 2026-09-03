@@ -481,6 +481,81 @@ function tipoEntregaDaConversa(mensagens: any[]): "entrega" | "retirada" | null 
   return null
 }
 
+// ── Catálogo que cabe no prompt ──────────────────────────────────────────────
+// Loja pequena manda o cardápio inteiro pro modelo e ele escolhe. Depósito com
+// 4 mil itens não: colar tudo dá ~107 mil tokens POR MENSAGEM (uns R$ 0,50 e
+// vários segundos), e o limite de 300 que existia aqui era pior ainda — o
+// modelo enxergava de "29 CACHAÇA" até a letra B e jurava, educadíssimo, que a
+// loja não tinha cerveja.
+//
+// Acima do teto o sistema PROCURA: pega as palavras do que o cliente vem
+// falando e manda só o que casou, mais o que já está no carrinho (senão o
+// modelo perde de vista o item que ele mesmo adicionou três mensagens atrás).
+const MENU_INTEIRO_ATE = 300      // itens: abaixo disso, vai tudo
+const MENU_BUSCA_MAX   = 80       // itens que a busca pode mandar
+
+const PALAVRAS_SEM_PRODUTO = new Set([
+  "quero", "queria", "gostaria", "tem", "temos", "tens", "voces", "vcs", "voce",
+  "quanto", "quantos", "custa", "preco", "valor", "para", "pra", "com", "sem",
+  "uma", "uns", "umas", "dos", "das", "que", "qual", "quais", "por", "favor",
+  "bom", "boa", "dia", "tarde", "noite", "oi", "ola", "sim", "nao", "obrigado",
+  "entrega", "entregar", "taxa", "frete", "endereco", "horario", "pedido",
+  "fechar", "isso", "mais", "menos", "tudo", "aqui", "ali", "unidade", "caixa",
+  "fardo", "duzia", "litro", "litros",
+])
+
+function termosDoCliente(textos: string[]): string[] {
+  const vistos = new Set<string>()
+  const termos: string[] = []
+  for (const t of textos) {
+    const limpo = String(t ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+      .replace(/[^a-z0-9 ]/g, " ")
+    for (const palavra of limpo.split(/ +/)) {
+      if (palavra.length < 3) continue
+      if (PALAVRAS_SEM_PRODUTO.has(palavra)) continue
+      if (/^[0-9]+$/.test(palavra)) continue
+      if (vistos.has(palavra)) continue
+      vistos.add(palavra)
+      termos.push(palavra)
+    }
+  }
+  // As falas mais novas vêm primeiro: é o que ele está pedindo AGORA.
+  return termos.slice(0, 6)
+}
+
+async function catalogoRelevante(
+  supabase: any,
+  empresaId: string,
+  falasDoCliente: string[],
+  idsNoCarrinho: string[],
+): Promise<any[]> {
+  const termos = termosDoCliente(falasDoCliente)
+  const ids = new Set<string>(idsNoCarrinho)
+
+  // buscar_produto_nome casa nome E categoria, sem acento (migs 0227/0232) —
+  // "acai" acha "Açaí", "refrigerante" acha a Coca pela categoria.
+  const buscas = await Promise.all(termos.map(termo =>
+    supabase.rpc("buscar_produto_nome", { p_empresa: empresaId, p_termo: termo, p_limite: 20 })
+  ))
+  for (const r of buscas as any[]) {
+    for (const p of (r?.data ?? [])) {
+      if (ids.size >= MENU_BUSCA_MAX) break
+      ids.add(p.id)
+    }
+  }
+  if (!ids.size) return []
+
+  // A busca devolve id/nome/preço; o prompt precisa da embalagem também, e o
+  // preço tem que sair da tabela (a RPC não conhece preço especial de cliente).
+  const { data } = await supabase.from("produtos")
+    .select("id, nome, preco_venda, embalagem, categoria")
+    .eq("empresa_id", empresaId)
+    .eq("ativo", true)
+    .in("id", [...ids])
+    .order("nome")
+  return (data ?? []) as any[]
+}
+
 // ── handleFecharPedido ───────────────────────────────────────────────────────
 async function handleFecharPedido(
   supabase: ReturnType<typeof createClient>,
@@ -1375,12 +1450,14 @@ serve(async (req) => {
         .eq("phone", phone)
         .order("created_at", { ascending: false })
         .limit(30),
+      // Até MENU_INTEIRO_ATE itens vem o cardápio todo; passou disso, esta
+      // consulta volta vazia (head) e quem monta o menu é catalogoRelevante.
       supabase.from("produtos")
-        .select("id, nome, preco_venda, embalagem, categoria")
+        .select("id, nome, preco_venda, embalagem, categoria", { count: "exact" })
         .eq("empresa_id", empresaId)
         .eq("ativo", true)
         .order("nome")
-        .limit(300),
+        .limit(MENU_INTEIRO_ATE),
       supabase.from("whatsapp_carrinho")
         .select("items, cliente_id, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, endereco_estado")
         .eq("empresa_id", empresaId)
@@ -1423,7 +1500,18 @@ serve(async (req) => {
       const disp = a <= b ? (nowMinBRT >= a && nowMinBRT < b) : (nowMinBRT >= a || nowMinBRT < b)
       if (!disp) catForaHorario.add(c.nome)
     }
-    const produtos = ((produtosRes.data ?? []) as any[]).filter((p: any) => !p.categoria || !catForaHorario.has(p.categoria))
+    // Catálogo grande: em vez do começo do alfabeto, o que tem a ver com a
+    // conversa. Usa as últimas falas do CLIENTE (não as do robô) e o carrinho.
+    const totalProdutos = produtosRes.count ?? (produtosRes.data ?? []).length
+    let produtosBase = (produtosRes.data ?? []) as any[]
+    if (totalProdutos > MENU_INTEIRO_ATE) {
+      const falas = [text, ...mensagens.filter((m: any) => m.role === "user").slice(-4).reverse().map((m: any) => m.content)]
+      const idsCarrinho = (carrinhoRes.data?.items ?? [])
+        .map((i: any) => i.produto_id ?? i.id).filter(Boolean)
+      produtosBase = await catalogoRelevante(supabase, empresaId, falas, idsCarrinho)
+      console.log(`[menu] catálogo com ${totalProdutos} itens → ${produtosBase.length} relevantes`)
+    }
+    const produtos = produtosBase.filter((p: any) => !p.categoria || !catForaHorario.has(p.categoria))
 
     // ── Preço especial de parceria (cliente + produto) ──
     // Se ESTE cliente tem preço combinado num produto, sobrescreve o preço base só pra ele.
@@ -1623,8 +1711,12 @@ ${aceitaDelivery ? (bairroBloqueado ? `⛔ ENTREGA BLOQUEADA NESTE BAIRRO: a loj
   : `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (taxa base — pode mudar conforme a distância do endereço)`) : "ENTREGA: somente retirada no local"}
 FORMAS DE PAGAMENTO: ${mpConectado ? "Dinheiro, Cartão ou PIX. Se o cliente escolher PIX, o sistema gera o QR Code e o código copia-e-cola automaticamente ao fechar o pedido — o pedido só vai para a loja depois que o pagamento for confirmado. Você NÃO envia chave PIX manualmente." : "Dinheiro ou Cartão (PIX não disponível nesta loja pelo WhatsApp)"}
 
-PRODUTOS DISPONÍVEIS:
-${produtos.map((p: any) => `• ${p.nome} [id:${p.id}] — R$ ${Number(p.preco_venda).toFixed(2)} (${p.embalagem || "un"})`).join("\n") || "Nenhum produto cadastrado"}
+${totalProdutos > MENU_INTEIRO_ATE ? `⚠️ CATÁLOGO GRANDE: esta loja tem ${totalProdutos} produtos e eles NÃO cabem aqui. A lista abaixo é só o que casou com o que o cliente falou até agora — NÃO é o catálogo inteiro.
+• Venda só o que está na lista (com [id:]), como sempre.
+• Se ele pedir algo que não está aí, NUNCA diga que a loja não tem. Diga que vai conferir e peça a MARCA e o TAMANHO ("Skol lata 350?"): o sistema procura com essas palavras e o item aparece aqui na próxima mensagem.
+• Categorias da loja: ${(catsHorario ?? []).map((c: any) => c.nome).join(", ") || "—"}
+` : ""}PRODUTOS DISPONÍVEIS${totalProdutos > MENU_INTEIRO_ATE ? " (o que casou com o que ele pediu)" : ""}:
+${produtos.map((p: any) => `• ${p.nome} [id:${p.id}] — R$ ${Number(p.preco_venda).toFixed(2)} (${p.embalagem || "un"})`).join("\n") || (totalProdutos > MENU_INTEIRO_ATE ? "Nada casou com o que ele falou — peça a marca e o tamanho, ou ofereça o link do catálogo." : "Nenhum produto cadastrado")}
 ${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n` : ""}
 CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) => {
   const comps = Array.isArray(i.complementos) && i.complementos.length ? ` (${i.complementos.map((c: any) => c.nome).join(", ")})` : ""
