@@ -311,7 +311,14 @@ export function montarCupomBytes(pedido, empresa = {}) {
   b.big(true).row('TOTAL', fmt(pedido.total)).big(false)
   b.line()
   b.txt('Pagamento: ' + (pedido.forma_pagamento || '-')).nl()
-  if (pedido.forma_pagamento === 'dinheiro' && Number(pedido.troco_para) > 0) b.txt('Troco para ' + fmt(pedido.troco_para)).nl()
+  if (pedido.forma_pagamento === 'dinheiro') {
+    const trocoPara = Number(pedido.troco_para || 0)
+    if (trocoPara > 0) {
+      // big() dobra a LARGURA e, em 32 colunas, cortaria a frase no meio.
+      b.bold(true).alto(true).txt('LEVAR TROCO DE ' + fmt(Math.max(0, trocoPara - Number(pedido.total || 0)))).nl().alto(false).bold(false)
+      b.txt('(cliente paga com ' + fmt(trocoPara) + ')').nl()
+    } else b.txt('(troco nao informado - confirmar)').nl()
+  }
   if (pedido.observacoes) b.txt('Obs: ' + semAcento(pedido.observacoes)).nl()
   if (pedido.codigo_entrega) b.line().center().txt('Codigo: ' + pedido.codigo_entrega).nl().left()
   b.line().center().txt('Obrigado pela preferencia!').nl().left()

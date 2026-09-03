@@ -134,7 +134,10 @@ export function montarCupomHtml(pedido, empresa = {}) {
   <div class="row b lg"><span>TOTAL</span><span>${fmt(pedido.total)}</span></div>
   <hr>
   <div><span class="b">Pagamento:</span> ${esc(labelPagamento(pedido))}</div>
-  ${pedido.forma_pagamento === 'dinheiro' && Number(pedido.troco_para) > 0 ? `<div>Troco para ${fmt(pedido.troco_para)}</div>` : ''}
+  ${pedido.forma_pagamento === 'dinheiro' ? (Number(pedido.troco_para) > 0
+    ? `<div class="b lg">Levar troco de ${fmt(Math.max(0, Number(pedido.troco_para) - Number(pedido.total || 0)))}</div>
+       <div>(cliente paga com ${fmt(pedido.troco_para)})</div>`
+    : '<div>(troco não informado — confirmar)</div>') : ''}
   ${pedido.forma_pagamento === 'pix_entrega' && empresa?.chave_pix ? `<div><span class="b">Chave PIX:</span> ${esc(empresa.chave_pix)}${empresa.pix_nome ? ` — ${esc(empresa.pix_nome)}` : ''}</div>` : ''}
   ${pedido.observacoes && showObs ? `<div style="margin-top:4px"><span class="b">Obs:</span> ${esc(pedido.observacoes)}</div>` : ''}
   ${pedido.codigo_entrega && showCodigo ? `<hr><div class="center b">Código de entrega: ${esc(pedido.codigo_entrega)}</div>` : ''}

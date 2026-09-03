@@ -191,6 +191,19 @@ function montarCupom(pedido, empresa) {
   if (pg.cobrar) {
     parts.push(linha('*** COBRAR NA ENTREGA ***'))
     parts.push(SIZE(0), linha(pg.label + ' - ' + money(p.total)))
+    // Troco: o gestor e o app do motoqueiro ja mostravam quanto levar, so o
+    // PAPEL nao — e quem separa o pedido na loja le o papel. O motoqueiro saia
+    // sem o troco na mao (pedido 1014 da CDBom, 03/09/2026). O valor A LEVAR
+    // vem em destaque; "paga com" fica embaixo, so pra conferir.
+    if (p.forma_pagamento === 'dinheiro') {
+      const trocoPara = Number(p.troco_para || 0)
+      if (trocoPara > 0) {
+        parts.push(SIZE(0x01), linha('LEVAR TROCO DE ' + money(Math.max(0, trocoPara - Number(p.total || 0)))), SIZE(0))
+        parts.push(linha('(cliente paga com ' + money(trocoPara) + ')'))
+      } else {
+        parts.push(linha('(troco nao informado - confirmar)'))
+      }
+    }
   } else {
     parts.push(linha('*** JA PAGO ***'))
     parts.push(SIZE(0), linha(pg.label))
