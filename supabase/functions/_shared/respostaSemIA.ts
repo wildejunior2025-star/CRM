@@ -418,7 +418,7 @@ export async function pausarPorAtendimentoHumano(supabase: Sb, empresaId: string
 }
 
 // ── Chamado de atendente ─────────────────────────────────────────────────────
-async function chamadoAberto(supabase: Sb, empresaId: string, phone: string) {
+export async function chamadoAberto(supabase: Sb, empresaId: string, phone: string) {
   const { data } = await supabase.from("whatsapp_chamados")
     .select("id").eq("empresa_id", empresaId).is("atendido_em", null)
     .like("phone", `%${chave8(phone)}`).limit(1).maybeSingle()
@@ -439,7 +439,7 @@ async function primeiroNomeDoCliente(supabase: Sb, empresaId: string, phone: str
   }
 }
 
-async function abrirChamado(supabase: Sb, empresaId: string, phone: string, motivo: string) {
+export async function abrirChamado(supabase: Sb, empresaId: string, phone: string, motivo: string) {
   if (await chamadoAberto(supabase, empresaId, phone)) return
   const { data: cli } = await supabase.from("clientes")
     .select("nome").eq("empresa_id", empresaId)

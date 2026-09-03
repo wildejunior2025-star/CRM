@@ -4585,6 +4585,17 @@ export default function PainelPedidos() {
     return () => { ativo = false; canal.unsubscribe() }
   }, [empresa])
 
+  // Abre no gestor a conversa do número que pediu atendente. O casamento é
+  // pelos 8 últimos dígitos porque o WhatsApp entrega o mesmo número com e sem
+  // o 9 do celular — comparar inteiro não acha a conversa que existe.
+  function abrirConversaDoChamado(phone) {
+    const chave = String(phone || '').replace(/\D/g, '').slice(-8)
+    const t = chatThreads.find(x => String(x.cliente_ref || '').replace(/\D/g, '').endsWith(chave))
+    if (t) { abrirThread(t); return }
+    // Sem conversa espelhada ainda: abre uma nova pra este número.
+    setChatAberto(`whatsapp|${String(phone || '').replace(/\D/g, '')}`)
+  }
+
   // Marca como lidas as mensagens do cliente ao abrir a conversa, e envia resposta
   async function abrirThread(t) {
     setChatAberto(t.key)
@@ -6163,16 +6174,32 @@ export default function PainelPedidos() {
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>"{c.motivo}"</div>
                   )}
                   <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                    <a href={`https://wa.me/${String(c.phone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer"
+                    {/* Responde AQUI, não no app da loja. A resposta digitada
+                        aqui fica gravada na conversa — é ela que o robô lê pra
+                        continuar de onde a pessoa parou. Respondendo pelo
+                        celular, ele volta sem saber o que foi dito. */}
+                    <button type="button" onClick={() => abrirConversaDoChamado(c.phone)}
                       style={{
-                        flex: 1, textAlign: 'center', textDecoration: 'none', padding: '7px 10px', borderRadius: 8,
+                        flex: 1, padding: '8px 10px', borderRadius: 8, cursor: 'pointer', border: 'none',
                         background: '#22c55e', color: '#fff', fontSize: 12, fontWeight: 800,
-                      }}>Responder no WhatsApp</a>
-                    <button type="button" onClick={() => atenderChamado(c.id)}
+                      }}>💬 Responder aqui</button>
+                  </div>
+                  {/* Duas saídas, e a diferença é quem continua falando com o
+                      cliente. Devolver é o caso comum: o robô travou numa
+                      pergunta, a pessoa respondeu, e o pedido segue sozinho. */}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                    <button type="button" onClick={() => atenderChamado(c.id, { devolverAoRobo: true })}
+                      title="O robô volta a responder este cliente e continua de onde parou"
                       style={{
-                        padding: '7px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 800,
+                        flex: 1, padding: '7px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 800,
+                        border: '1px solid rgba(124,58,237,.6)', background: 'rgba(124,58,237,.15)', color: '#a78bfa',
+                      }}>🤖 Devolver pro robô</button>
+                    <button type="button" onClick={() => atenderChamado(c.id)}
+                      title="Você segue a conversa; o robô fica quieto por 12h neste número"
+                      style={{
+                        flex: 1, padding: '7px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 800,
                         border: '1px solid var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text-muted)',
-                      }}>Já atendi</button>
+                      }}>Assumi a conversa</button>
                   </div>
                 </div>
               ))}

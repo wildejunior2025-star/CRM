@@ -1,7 +1,7 @@
 // Bot v185 — pedido de endereço pergunta rua e bairro (CEP vira a saída alternativa). v184: vendia o CEP como atalho (escrever é só a saída de quem não sabe). v183: escrito guarda bairro/cidade. v182: cadastro sem e-mail.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-import { responderSemIA, roboPausado, pausarPorAtendimentoHumano } from "../_shared/respostaSemIA.ts"
+import { responderSemIA, roboPausado, pausarPorAtendimentoHumano, chamadoAberto, abrirChamado } from "../_shared/respostaSemIA.ts"
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? ""
 const EVOLUTION_API_URL = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$/, "")
@@ -27,6 +27,15 @@ const TEXTO_PEDIR_ENDERECO =
   "📍 Falta só o endereço!\n\n" +
   "Me diz o *nome da rua*, o *número* e o *bairro* que eu já anoto. 😉\n\n" +
   "_Se preferir, me manda o CEP que eu pego a rua e o bairro sozinho._"
+
+// ── "Quero falar com uma pessoa" ─────────────────────────────────────────────
+// O robô de IA não tinha como pedir socorro: se ele não dava conta, continuava
+// tentando até o cliente desistir. Isto abre o chamado que toca no gestor (o
+// mesmo sino do robô do link) e cala o robô até alguém atender.
+//
+// Duas portas: o cliente pede ("quero falar com atendente"), ou o próprio
+// modelo emite a ação chamar_atendente quando se vê perdido.
+const PEDE_HUMANO = /\b(atendente|atendimento humano|falar com (uma )?pessoa|falar com (o |a )?(dono|gerente|vendedor|humano)|pessoa de verdade|alguem de verdade|algu[eé]m da loja|me transfere|transferir)\b/i
 
 // ── handleAtualizar_carrinho ─────────────────────────────────────────────────
 // Usa PATCH (update) + POST (insert) separados — upsert via on_conflict tem falhas intermitentes
@@ -444,6 +453,34 @@ function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; 
   // Sem prefixo de rua e sem número, é conversa, não endereço.
   if (!PREFIXO_RUA.test(rua) && !numero) return null
   return { rua, numero, bairro: bairro && bairro.length >= 3 ? bairro : null }
+}
+
+/**
+ * Cidade REAL da rua que o cliente escreveu.
+ *
+ * Quando ele diz só "Rua Eliane Barros, 600, Novo Amarante", o sistema
+ * completava com a cidade da LOJA — e o pedido #1063 saiu com "Natal" numa rua
+ * que fica em São Gonçalo do Amarante. O entregador lê isso. Aqui o mapa
+ * responde: acha o ponto pela rua + bairro e pergunta de volta em que cidade
+ * ele caiu.
+ */
+async function descobrirCidade(rua: string, bairro: string | null, estado: string | null, cidadeLoja: string | null): Promise<string | null> {
+  try {
+    const ponto = await geocodificarEndereco([rua, bairro, estado].filter(Boolean).join(", "))
+    if (!ponto) return cidadeLoja
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${ponto.lat}&lon=${ponto.lng}&format=json&addressdetails=1`,
+      { headers: { "User-Agent": "CRM-FWC/1.0" } },
+    )
+    const d = await res.json()
+    const a = d?.address ?? {}
+    const cidade = a.city ?? a.town ?? a.municipality ?? a.village ?? a.county ?? null
+    if (cidade) console.log(`[Geo] cidade do endereço: ${cidade}`)
+    return cidade ?? cidadeLoja
+  } catch (e: any) {
+    console.error("[Geo] reverse erro:", e?.message)
+    return cidadeLoja
+  }
 }
 
 // ── handleSalvarNumero ───────────────────────────────────────────────────────
@@ -1420,9 +1457,51 @@ serve(async (req) => {
       ? `${phoneLocal.slice(0, 2)}${phoneLocal.slice(3)}`
       : phoneLocal
 
+    // ── CHAMADO ABERTO: tem gente da loja indo responder ────────────────────
+    // O robô cala e guarda a mensagem. Falar por cima de quem foi chamado é
+    // exatamente o que o cliente não quer quando pede uma pessoa.
+    if (await chamadoAberto(supabase, empresaId, phone)) {
+      console.log("[chamado] aberto, robô calado:", phone)
+      await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text })
+      await espelharNoChat(supabase, empresaId, phone, text, "cliente")
+      if (isTest) {
+        return new Response(JSON.stringify({ ok: true, resposta: "(robô calado — chamado aberto)" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+      }
+      return new Response("ok", { headers: corsHeaders })
+    }
+
+    // ── O CLIENTE PEDIU UMA PESSOA ──────────────────────────────────────────
+    // Vem antes da IA de propósito: não gasta crédito pra dizer "vou chamar", e
+    // não corre o risco de o modelo tentar resolver sozinho o que já foi pedido
+    // a uma pessoa.
+    if (PEDE_HUMANO.test(text)) {
+      await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text })
+      await espelharNoChat(supabase, empresaId, phone, text, "cliente")
+      await abrirChamado(supabase, empresaId, phone, text)
+      const avisa = "Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!"
+      await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: avisa })
+      await espelharNoChat(supabase, empresaId, phone, avisa, "loja", true)
+      console.log("[chamado] cliente pediu atendente:", phone)
+      if (isTest) {
+        return new Response(JSON.stringify({ ok: true, resposta: avisa }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+      }
+      await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+        body: JSON.stringify({ number: phone, text: avisa }),
+      }).catch(e => console.error("[sendText] erro:", e))
+      return new Response("ok", { headers: corsHeaders })
+    }
+
     const [creditRes] = await Promise.all([
       supabase.from("empresas").select("whatsapp_creditos, credito_alerta_minimo, credito_alerta_enviado, credito_alerta_numeros").eq("id", empresaId).single(),
       supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text }),
+      // Espelho na aba Mensagens do gestor: é lá que a loja responde quando o
+      // robô chama, e a conversa precisa estar inteira na tela pra pessoa saber
+      // o que já foi dito.
+      espelharNoChat(supabase, empresaId, phone, text, "cliente"),
     ])
     if (!creditRes.data || creditRes.data.whatsapp_creditos <= 0) return new Response("ok", { headers: corsHeaders })
 
@@ -1841,6 +1920,8 @@ Produto com complementos (Quentinha): mostre TODAS as categorias DE UMA VEZ, num
 Continue somando itens até o cliente dizer que é só isso / que quer fechar.
 ⚠️ Enquanto monta a sacola, NUNCA peça nome, e-mail, CEP, endereço, entrega ou pagamento. Isso é SÓ depois que a sacola fechar.
 
+RETOMANDO DEPOIS DE UMA PESSOA: se nas últimas mensagens quem respondeu foi alguém da loja (uma pessoa assumiu porque você chamou), ela já resolveu aquele ponto. NÃO repita o que ela disse, NÃO peça de novo o que ela já perguntou e NÃO se apresente de novo. Leia a resposta dela como sua, agradeça em uma linha se fizer sentido e siga o pedido do ponto onde parou (sacola → cadastro → endereço → entrega/retirada → pagamento → resumo).
+
 ▶ PASSO 3 — CADASTRO (só DEPOIS da sacola fechada, e só se CLIENTE = "Não cadastrado nesta loja")
 Se o cliente JÁ tem nome em CLIENTE → PULE este passo inteiro, vá direto ao PASSO 4.
 ⚠️ GATILHO: assim que o cliente indicar que fechou a sacola ("é só isso", "pode fechar", "só isso mesmo", "fechar"), sua PRÓXIMA mensagem JÁ deve pedir o *nome* (item 1 abaixo). NÃO pergunte "quer mais algum item?" de novo, NÃO mostre resumo ainda. Se o cliente mandar o nome por conta própria, ACEITE e siga a ordem — nunca responda "quer mais alguma coisa?".
@@ -1934,6 +2015,12 @@ ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "entrega", "forma_pagamento": "d
 Fechar pedido — CLIENTE SEM CADASTRO (raro: CLIENTE = "Não identificado" e cadastrar_cliente não foi emitido):
 ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "retirada", "forma_pagamento": "dinheiro", "cliente_nome": "[nome]", "cliente_telefone": "${phoneLocal}", "items": [{"produto_id": "ID_REAL", "nome": "Nome", "qtd": 1, "preco": 0.00}]}
 ⚠️ CRÍTICO: sem cliente_nome o pedido NÃO é criado
+
+Chamar uma pessoa da loja (VOCÊ NÃO SABE responder, ou o cliente está insistindo/incomodado):
+Mande antes: "Já chamei alguém aqui da loja pra te ajudar. 🙌 Só um instante!" e emita:
+ACAO: {"tipo": "chamar_atendente", "motivo": "o que o cliente quer, em poucas palavras"}
+⚠️ É a saída CERTA pra garantia, troca, nota fiscal, reclamação, negociação de preço, pedido antigo, ou qualquer coisa que não esteja nos dados acima. Chamar gente é sempre melhor do que inventar uma resposta.
+⚠️ Depois disso você para de responder esse cliente — quem fala é a pessoa da loja.
 
 Escalar para humano (problema que a IA não resolve):
 ACAO: {"tipo": "escalar_humano", "problema": "descrição"}
@@ -2210,6 +2297,14 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             if (resultado.pixCode) extraMsgs.push(resultado.pixCode)
           }
 
+        } else if (acao.tipo === "chamar_atendente") {
+          // O sino do gestor (mig 0228), o mesmo do robô do link. Diferente do
+          // pausar_bot: aqui a pausa acaba quando alguém atende, e a loja pode
+          // devolver a conversa pro robô continuar de onde parou.
+          await abrirChamado(supabase, empresaId, phone, String(acao.motivo ?? text).slice(0, 300))
+          resposta = "Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!"
+          console.log("[chamado] a IA pediu ajuda:", acao.motivo ?? "")
+
         } else if (acao.tipo === "escalar_humano" && adminPhone) {
           const resumoConversa = mensagens.slice(-10).map((m: any) =>
             `${m.role === "user" ? "Cliente" : "Bot"}: ${m.content}`
@@ -2354,15 +2449,20 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     })()
     const ultimaDoBot = (mensagens.filter((m: any) => m.role === "assistant").pop()?.content ?? "").toLowerCase()
     const botPediuEndereco = /nome da rua|seu endere|preciso do seu endere|falta s[oó] o endere/.test(ultimaDoBot)
-    if (!salvarRuaJaExecutado && !carrinhoEndereco.rua && botPediuEndereco) {
+    // Não depende só de o bot ter pedido: se o cliente mandou algo que É um
+    // endereço ("Rua tal, 600, bairro"), grava do mesmo jeito. O modelo às
+    // vezes desvia do assunto no meio e a mensagem boa do cliente se perdia.
+    const pareceEndereco = PREFIXO_RUA.test(text.trim()) && /\d/.test(text)
+    if (!salvarRuaJaExecutado && !carrinhoEndereco.rua && (botPediuEndereco || pareceEndereco)) {
       const end = lerEnderecoEscrito(text)
       if (end) {
         console.log(`[Endereco] safety net: rua="${end.rua}" num=${end.numero ?? "-"} bairro="${end.bairro ?? "-"}"`)
         // Cidade da LOJA quando ele não disse: sem cidade o mapa procura a rua
         // no Brasil inteiro e a taxa sai de qualquer lugar.
+        const cidadeReal = await descobrirCidade(end.rua, end.bairro, empresa.estado ?? null, empresa.cidade ?? null)
         const r = await handleSalvarRua(
           supabase, empresaId, phone, end.rua, end.bairro,
-          empresa.cidade ?? null, empresa.estado ?? null,
+          cidadeReal, empresa.estado ?? null,
         )
         resposta = r.resposta
         if (end.numero) {
@@ -2441,6 +2541,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     // Salva resposta no histórico e desconta crédito sempre; em teste pula envio ao WhatsApp
     await Promise.all([
       supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: resposta }),
+      espelharNoChat(supabase, empresaId, phone, resposta, "loja", true),
       supabase.rpc("descontar_credito_whatsapp", { p_empresa_id: empresaId }),
       acaoPromise,
     ])
