@@ -26,6 +26,10 @@ const HORAS_PAUSA_HUMANA = 12
 // cliente é lida como "sim, chama" ou "não precisa" — sem guardar estado.
 const MARCA_ATENDENTE = "chame um atendente"
 
+// Começo da resposta de cardápio. Serve pra reconhecer, no histórico, que a
+// última coisa que o robô disse foi uma LISTA de produtos.
+const RESPOSTA_TEM = "Tem sim! 🙌"
+
 const semAcento = (s: string) =>
   String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
 
@@ -47,6 +51,11 @@ const PALAVRAS_VAZIAS = new Set([
   "fecha", "fechar", "fechado", "fechados", "funciona", "funcionando", "atende",
   "endereco", "onde", "fica", "ficam", "local", "localizacao", "retirada",
   "retirar", "buscar", "atendente", "demora", "tempo",
+  // Palavras do "só tem isso?" / "tem mais?". Sem elas o robô ia procurar um
+  // produto chamado "isso" e, não achando, cairia de novo na MESMA busca de
+  // antes — foi o que fez ele repetir a lista de sucos igualzinha.
+  "isso", "isto", "esse", "esses", "essa", "essas", "outro", "outra", "outros",
+  "outras", "mais", "somente", "apenas", "tudo", "opcao", "opcoes",
 ])
 
 function palavrasDeBusca(texto: string): string[] {
@@ -59,36 +68,48 @@ function palavrasDeBusca(texto: string): string[] {
 }
 
 // ── "Tem X?" respondido pelo cardápio ────────────────────────────────────────
-async function respostaDeProduto(
-  supabase: Sb, empresaId: string, texto: string, link: string | null,
-): Promise<string | null> {
+type Produto = Record<string, unknown>
+
+async function buscarProdutos(
+  supabase: Sb, empresaId: string, texto: string, limite = 3,
+): Promise<Produto[]> {
   try {
     const termos = palavrasDeBusca(texto)
-    if (!termos.length) return null
+    if (!termos.length) return []
     for (const termo of termos) {
       const { data, error } = await supabase.rpc("buscar_produto_nome", {
-        p_empresa: empresaId, p_termo: termo, p_limite: 3,
+        p_empresa: empresaId, p_termo: termo, p_limite: limite,
       })
       if (error) console.error("[produto] rpc erro:", termo, JSON.stringify(error).slice(0, 200))
       const achados = Array.isArray(data) ? data : []
       console.log("[produto] termo", termo, "achou", achados.length)
-      if (!achados.length) continue
-      const linha = (p: Record<string, unknown>) => {
-        const preco = Number(p.preco ?? 0)
-        // Produto no peso/sob consulta entra sem preço: "R$ 0,00" faz o cliente
-        // achar que é de graça.
-        return preco > 0 ? `${p.nome} — ${dinheiro(preco)}` : String(p.nome)
-      }
-      const lista = achados.map(linha).join(NL)
-      return link
-        ? `Tem sim! 🙌${NL}${lista}${NL}${NL}Peça aqui que já cai direto pra gente separar:${NL}${link}`
-        : `Tem sim! 🙌${NL}${lista}`
+      if (achados.length) return achados
     }
-    return null
+    return []
   } catch (e) {
     console.error("[produto] busca falhou:", e)
-    return null
+    return []
   }
+}
+
+function listaDeProdutos(achados: Produto[]): string {
+  return achados.map(p => {
+    const preco = Number(p.preco ?? 0)
+    // Produto no peso/sob consulta entra sem preço: "R$ 0,00" faz o cliente
+    // achar que é de graça.
+    return preco > 0 ? `${p.nome} — ${dinheiro(preco)}` : String(p.nome)
+  }).join(NL)
+}
+
+async function respostaDeProduto(
+  supabase: Sb, empresaId: string, texto: string, link: string | null,
+): Promise<string | null> {
+  const achados = await buscarProdutos(supabase, empresaId, texto, 3)
+  if (!achados.length) return null
+  const lista = listaDeProdutos(achados)
+  return link
+    ? `Tem sim! 🙌${NL}${lista}${NL}${NL}Peça aqui que já cai direto pra gente separar:${NL}${link}`
+    : `Tem sim! 🙌${NL}${lista}`
 }
 
 // ── Horário, endereço e taxa: as três perguntas que sobram ───────────────────
@@ -342,15 +363,52 @@ export async function responderSemIA({
       return await responder("Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!")
     }
 
-    // 2) "Tem X?" — o cardápio responde.
+    // 2) "Só tem isso?" / "tem mais?" — é a MESMA pergunta de novo, e responder
+    //    a mesma lista é o robô parecendo quebrado. Aqui ele volta na pergunta
+    //    anterior do cliente, procura fundo e mostra só o que ainda não mostrou.
+    const ultimaLista = recentes.find((m: Record<string, unknown>) =>
+      String(m.content ?? "").startsWith(RESPOSTA_TEM))?.content as string | undefined
+    const pedeMais = /\b(so|somente|apenas)\b.*\b(isso|isto|esse|esses|essa|essas)\b|tem mais|tem outr|mais algum|mais opc|nada mais|so tem esse/.test(t)
+    if (ultimaLista && pedeMais) {
+      const { data: falas } = await supabase.from("whatsapp_conversas")
+        .select("content, created_at").eq("empresa_id", empresaId)
+        .like("phone", `%${chave8(phone)}`).eq("role", "user")
+        .gte("created_at", umaHora).order("created_at", { ascending: false }).limit(4)
+      // [0] é a mensagem de agora (o webhook grava antes de chamar o robô).
+      const anterior = (Array.isArray(falas) ? falas : [])
+        .map((f: Record<string, unknown>) => String(f.content ?? ""))
+        .find(c => semAcento(c).trim() !== t)
+      const jaMostrados = new Set(
+        ultimaLista.split(NL).slice(1)
+          .map(l => semAcento(l.split("—")[0]).trim()).filter(Boolean),
+      )
+      const achados = anterior ? await buscarProdutos(supabase, empresaId, anterior, 12) : []
+      const novos = achados.filter(p => !jaMostrados.has(semAcento(String(p.nome ?? "")).trim()))
+      if (novos.length) {
+        return await responder(`Tem mais sim! 🙌${NL}${listaDeProdutos(novos)}`)
+      }
+      // Nada além do que já foi dito. Não inventa sabor: assume e oferece gente.
+      return await responder(
+        `Do que tá no cardápio hoje é isso mesmo. 😉 Quer que eu ${MARCA_ATENDENTE} pra confirmar?`,
+      )
+    }
+
+    // 3) "Tem X?" — o cardápio responde.
     const doProduto = await respostaDeProduto(supabase, empresaId, mensagem, linkRecente ? null : link)
+    // Mesma resposta duas vezes seguidas soa a robô travado. Se a lista é a que
+    // ele já mandou, ele para de repetir e chama gente.
+    if (doProduto && recentes.some((m: Record<string, unknown>) => m.content === doProduto)) {
+      return await responder(
+        `Do que tá no cardápio hoje é isso mesmo. 😉 Quer que eu ${MARCA_ATENDENTE} pra te ajudar?`,
+      )
+    }
     if (doProduto) return await responder(doProduto)
 
-    // 3) Horário, taxa de entrega, endereço.
+    // 4) Horário, taxa de entrega, endereço.
     const daInfo = respostaDeInfo(mensagem, empresa, link)
     if (daInfo) return await responder(daInfo)
 
-    // 4) Primeira fala da conversa: o link vai SEMPRE, seja um "oi" ou uma
+    // 5) Primeira fala da conversa: o link vai SEMPRE, seja um "oi" ou uma
     //    pergunta que a gente não entendeu. É a mensagem que faz o pedido sair
     //    do WhatsApp e cair no sistema.
     if (!linkRecente) {
@@ -360,7 +418,7 @@ export async function responderSemIA({
       return await responder(proprio ? `${proprio}${NL}${link}` : `Oi! 👋 Peça aqui, é rapidinho:${NL}${link}`)
     }
 
-    // 5) Já mandou o link e não soube responder. Não inventa: oferece gente.
+    // 6) Já mandou o link e não soube responder. Não inventa: oferece gente.
     return await responder(`Essa eu não sei te responder. 😅 Quer que eu ${MARCA_ATENDENTE} pra te ajudar?`)
   } catch (e) {
     console.error("[link] falhou:", e)
