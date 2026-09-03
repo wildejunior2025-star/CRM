@@ -8,6 +8,12 @@ import { imprimirHtml, montarContaPresencialHtml } from '../utils/imprimirCupom'
 import '../components/Page.css'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+// "2026-09-02" vira "02/09". Sem new Date() no meio: a data do banco não tem
+// hora, e o fuso do navegador jogaria ela um dia pra trás.
+const dataCurta = (d) => {
+  const [, m, dia] = String(d ?? '').split('-')
+  return dia && m ? `${dia}/${m}` : String(d ?? '')
+}
 const FORMA_LABEL = { dinheiro: 'Dinheiro', pix: 'PIX', credito: 'Crédito', debito: 'Débito', cartao: 'Cartão', fiado: 'Fiado', dividido: 'Dividido', transferencia: 'Transferência' }
 // Formas que dá pra escolher ao corrigir uma conta (o "dividido" não entra aqui).
 const FORMAS_EDIT = [['dinheiro', 'Dinheiro'], ['pix', 'PIX'], ['credito', 'Crédito'], ['debito', 'Débito'], ['cartao', 'Cartão'], ['fiado', 'Fiado']]
@@ -36,6 +42,9 @@ export default function PresencialHistorico() {
   const [pontosCfg, setPontosCfg] = useState({ lancar: 1, entregar: 1, fechar: 2 })
   const [rateioPct, setRateioPct] = useState(0)   // % da taxa que vira o bolo (mig 0188)
   const [taxaDoDia, setTaxaDoDia] = useState(0)   // taxa de serviço arrecadada hoje na LOJA
+  // O que cada um tem a receber somando os dias, até o dono pagar (mig 0230).
+  const [acumulado, setAcumulado] = useState([])
+  const [pagando, setPagando]     = useState(null)
   const [loading, setLoading]   = useState(true)
   const [aberta, setAberta]     = useState(null) // id da comanda expandida
   const [pickerComanda, setPickerComanda] = useState(null) // comanda em que se está ligando o cliente
@@ -184,7 +193,41 @@ export default function PresencialHistorico() {
       if (pc) setPontosCfg({ lancar: Number(pc.lancar ?? 1), entregar: Number(pc.entregar ?? 1), fechar: Number(pc.fechar ?? 2) })
       setLoading(false)
     })
-  }, [empresaId, ehAdmin, meuId])
+    carregarAcumulado()
+  }, [empresaId, ehAdmin, meuId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // O acumulado é conta de vários dias, cada um com o bolo dele — quem faz é o
+  // banco (mig 0230), não a tela. O garçom só enxerga a linha dele: a RLS de
+  // profiles não é o assunto aqui, mas o ranking de dinheiro do colega é dele.
+  async function carregarAcumulado() {
+    const { data, error } = await supabase.rpc('acumulado_garcons')
+    if (error) return
+    const lista = (data ?? []).filter(a => ehAdmin || a.garcom_id === meuId)
+    setAcumulado(lista)
+  }
+
+  // Marca que o dono acertou com o garçom: daqui pra frente a conta dele
+  // recomeça no dia seguinte. Não mexe no caixa — quem paga é o dono, no
+  // dinheiro dele, e lançar isso como despesa é outra decisão.
+  async function pagarGarcom(a) {
+    const ok = window.confirm(
+      `Confirmar que você pagou ${fmt(a.valor)} pra ${a.nome}?\n\n`
+      + `São ${a.pontos} pontos, de ${dataCurta(a.desde)} até hoje.\n\n`
+      + 'A conta dele volta pro zero a partir de amanhã. Isto não mexe no caixa.')
+    if (!ok) return
+    setPagando(a.garcom_id)
+    const { error } = await supabase.from('garcom_acertos').insert({
+      empresa_id: empresaId,
+      garcom_id: a.garcom_id,
+      ate_dia: new Date().toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' }),
+      valor: Number(a.valor) || 0,
+      pontos: Number(a.pontos) || 0,
+      pago_por: meuId,
+    })
+    setPagando(null)
+    if (error) { window.alert('Não consegui registrar o pagamento: ' + error.message); return }
+    await carregarAcumulado()
+  }
 
   async function salvarPontos(campo, valor) {
     const n = Math.max(0, Math.min(99, Number(valor) || 0))
@@ -445,6 +488,54 @@ export default function PresencialHistorico() {
                 ) : Number(rateioPct) > 0 && (
                   <div style={{ paddingTop: 10, marginTop: 4, borderTop: '1px dashed var(--border)', fontSize: 12, color: 'var(--text-muted)' }}>
                     Ainda não há taxa arrecadada hoje — o bolo aparece quando a primeira conta fechar.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── A receber: acumula até o dono pagar (mig 0230) ──
+                O ranking de cima é do DIA e zera de madrugada. Este não zera:
+                soma dia a dia desde o último acerto de cada um, porque o dono
+                não paga toda noite. */}
+            {acumulado.length > 0 && (
+              <div className="card">
+                <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 2 }}>💰 A receber (acumulado)</div>
+                <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '0 0 12px', lineHeight: 1.45 }}>
+                  Vai somando todo dia e só zera quando você paga. Cada dia entra com o bolo daquele
+                  dia — dia parado rende pouco, dia cheio rende mais.
+                </p>
+                {acumulado.map(a => (
+                  <div key={a.garcom_id} style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0',
+                    borderTop: '1px solid var(--border)',
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{a.nome}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                        {a.pontos} pontos · {a.dias} dia(s) · desde {dataCurta(a.desde)}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 18, fontWeight: 900, color: 'var(--success)', whiteSpace: 'nowrap' }}>
+                      {fmt(a.valor)}
+                    </div>
+                    {ehAdmin && (
+                      <button type="button" disabled={pagando === a.garcom_id || Number(a.valor) <= 0}
+                        onClick={() => pagarGarcom(a)}
+                        style={{
+                          flexShrink: 0, padding: '8px 12px', borderRadius: 9, fontWeight: 800, fontSize: 12.5,
+                          cursor: Number(a.valor) > 0 ? 'pointer' : 'default',
+                          opacity: Number(a.valor) > 0 ? 1 : .4,
+                          border: '1.5px solid var(--success)', background: 'transparent', color: 'var(--success)',
+                        }}>
+                        {pagando === a.garcom_id ? '...' : '✅ Paguei'}
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {ehAdmin && (
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.45 }}>
+                    O "Paguei" só marca aqui que você acertou com ele — não mexe no caixa. A partir do
+                    dia seguinte a conta dele recomeça do zero.
                   </div>
                 )}
               </div>
