@@ -80,6 +80,44 @@ type Produto = Record<string, unknown>
 // achando que a loja só tem aqueles três.
 const LIMITE_LISTA = 40
 
+// O cliente pergunta pela prateleira que ele conhece; a loja cadastrou com
+// outro nome. "Tem refrigerante?" numa loja cuja categoria é "bebidas" não
+// achava nada — e o robô dizia que não sabia, com a Coca na geladeira.
+//
+// Só entra apelido ÓBVIO. Chute vira mentira, e mentira do robô a loja paga.
+const SINONIMOS: Record<string, string[]> = {
+  // Sem "bebida" aqui de propósito: a categoria "bebidas" tem água, café e
+  // nescau, e quem pediu refrigerante ia receber a lista inteira da geladeira.
+  refrigerante: ["refrigerante", "coca", "guarana", "fanta", "pepsi", "sprite"],
+  refri: ["refrigerante", "coca", "guarana", "fanta", "pepsi", "sprite"],
+  bebida: ["bebida", "suco", "refrigerante", "coca", "agua"],
+  bebidas: ["bebida", "suco", "refrigerante", "coca", "agua"],
+  sorvete: ["sorvete", "picole", "sundae", "creme", "acai"],
+  sobremesa: ["sobremesa", "doce", "pudim", "sorvete", "picole"],
+  lanche: ["lanche", "sanduiche", "hamburguer", "misto", "bauru", "pao"],
+  sanduiche: ["sanduiche", "lanche", "hamburguer", "misto", "bauru"],
+  salgado: ["salgado", "coxinha", "pastel", "empada", "esfiha"],
+  salgados: ["salgado", "coxinha", "pastel", "empada", "esfiha"],
+  marmita: ["marmita", "quentinha", "almoco", "prato"],
+  quentinha: ["quentinha", "marmita", "almoco", "prato"],
+  almoco: ["almoco", "marmita", "quentinha", "prato"],
+  janta: ["janta", "jantar", "lanche", "prato"],
+  cafe: ["cafe", "tapioca", "cuscuz", "pao", "misto"],
+  polpa: ["polpa", "fruta"],
+}
+
+async function umTermo(
+  supabase: Sb, empresaId: string, termo: string, limite: number,
+): Promise<Produto[]> {
+  const { data, error } = await supabase.rpc("buscar_produto_nome", {
+    p_empresa: empresaId, p_termo: termo, p_limite: limite,
+  })
+  if (error) console.error("[produto] rpc erro:", termo, JSON.stringify(error).slice(0, 200))
+  const achados = Array.isArray(data) ? data : []
+  console.log("[produto] termo", termo, "achou", achados.length)
+  return achados
+}
+
 async function buscarProdutos(
   supabase: Sb, empresaId: string, texto: string, limite = LIMITE_LISTA,
 ): Promise<Produto[]> {
@@ -87,13 +125,23 @@ async function buscarProdutos(
     const termos = palavrasDeBusca(texto)
     if (!termos.length) return []
     for (const termo of termos) {
-      const { data, error } = await supabase.rpc("buscar_produto_nome", {
-        p_empresa: empresaId, p_termo: termo, p_limite: limite,
-      })
-      if (error) console.error("[produto] rpc erro:", termo, JSON.stringify(error).slice(0, 200))
-      const achados = Array.isArray(data) ? data : []
-      console.log("[produto] termo", termo, "achou", achados.length)
+      const achados = await umTermo(supabase, empresaId, termo, limite)
       if (achados.length) return achados
+    }
+    // Nada pelo que ele escreveu: tenta os apelidos. Aqui os resultados SOMAM —
+    // "refrigerante" é a Coca mais o Guaraná mais a Fanta, não um deles só.
+    for (const termo of termos) {
+      const apelidos = SINONIMOS[termo]
+      if (!apelidos) continue
+      const juntos = new Map<string, Produto>()
+      for (const apelido of apelidos) {
+        for (const p of await umTermo(supabase, empresaId, apelido, limite)) {
+          juntos.set(String(p.id ?? p.nome), p)
+          if (juntos.size >= limite) break
+        }
+        if (juntos.size >= limite) break
+      }
+      if (juntos.size) return [...juntos.values()]
     }
     return []
   } catch (e) {
