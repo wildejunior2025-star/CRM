@@ -133,11 +133,11 @@ function respostaDeTaxa(empresa: Record<string, unknown>, link: string): string 
   const max = Number(empresa.tempo_entrega_max ?? 0)
   const tempo = min && max ? ` Leva de ${min} a ${max} min.` : ""
 
-  // Taxa que muda conforme o endereço: falar um valor aqui seria chute. O link
-  // calcula certinho quando ele põe a rua — aqui o link É a resposta, então ele
-  // vai mesmo que já tenha ido antes.
+  // Taxa que muda conforme o endereço: o robô PERGUNTA. "Depende do seu
+  // endereço" é a resposta que não responde, e quem pergunta o frete está
+  // decidindo se pede — mandar abrir link pra descobrir é onde a venda morre.
   if (porBairro.length || porKm.length) {
-    return `A taxa depende do seu endereço.${tempo}${NL}Põe o endereço aqui que ele já mostra o valor certinho:${NL}${link}`
+    return `Depende de onde você tá — me diz ${MARCA_ENDERECO} que eu já vejo o valor certinho. 🙌${tempo}`
   }
   const taxa = Number(empresa.taxa_entrega ?? 0)
   if (taxa > 0) return `A entrega é ${dinheiro(taxa)}.${tempo}`
@@ -165,6 +165,124 @@ function respostaDeInfo(
     return respostaDeEndereco(empresa)
 
   return null
+}
+
+// ── Taxa de entrega pelo endereço do cliente ─────────────────────────────────
+// "A taxa depende do seu endereço" é a resposta que não responde. Quem pergunta
+// o frete está decidindo se pede — e mandar o cliente abrir um link pra
+// descobrir é onde a venda morre. Então o robô faz o que o atendente faz:
+// pergunta a rua e o bairro, e dá o valor.
+//
+// Mesma conta do checkout (DeliveryCheckout.jsx): bairro configurado manda; se
+// não tiver, geocodifica o endereço e mede a distância até a loja.
+const MARCA_ENDERECO = "sua rua e o bairro"
+
+const ABREV_BAIRRO: Record<string, string> = {
+  sra: "senhora", sr: "senhor", sto: "santo", sta: "santa",
+  n: "nossa", na: "nossa", jd: "jardim", pq: "parque",
+  vl: "vila", cj: "conjunto", res: "residencial", pres: "presidente",
+}
+
+function normBairro(v: string): string {
+  return semAcento(v)
+    .replace(/^bairro[ ]+/, "")
+    .replace(/[.]/g, " ")
+    .replace(/[ ]+/g, " ")
+    .trim()
+    .split(" ")
+    .map(p => ABREV_BAIRRO[p] ?? p)
+    .join(" ")
+    .trim()
+}
+
+function acharBairroCfg(lista: unknown, bairroCliente: string): Record<string, unknown> | null {
+  if (!Array.isArray(lista) || !bairroCliente) return null
+  const n = normBairro(bairroCliente)
+  if (!n) return null
+  // O cliente escreve a frase inteira ("rua tal, no Potengi"), então o casamento
+  // é por CONTER o nome do bairro — não por igualdade.
+  return lista.find((b: Record<string, unknown>) => {
+    const alvo = normBairro(String(b?.bairro ?? ""))
+    return alvo.length >= 3 && n.includes(alvo)
+  }) ?? null
+}
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+// Devolve a faixa inteira: cada uma tem o tempo dela (a de 1 km leva 5 min, a
+// de 10 km leva 50). Responder "de 30 a 60 min" pra quem mora na esquina é
+// jogar fora uma informação que a loja já cadastrou.
+function faixaDaDistancia(faixas: unknown, distKm: number): Record<string, unknown> | null {
+  const arr = Array.isArray(faixas)
+    ? [...faixas].sort((a, b) => Number(a.km) - Number(b.km))
+    : []
+  if (!arr.length) return null
+  return arr.find(f => distKm <= Number(f.km)) ?? arr[arr.length - 1]
+}
+
+// Nominatim: de graça, 1 consulta por segundo, e some quando está apertado.
+// Sem tempo limite a promessa fica pendurada e o cliente não recebe resposta
+// nenhuma — pior que uma taxa que não saiu.
+async function geocodar(consulta: string): Promise<{ lat: number; lng: number } | null> {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), 6000)
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(consulta)}&format=json&limit=1`
+    const res = await fetch(url, { headers: { "User-Agent": "CRM-FWC/1.0" }, signal: ctrl.signal })
+    if (!res.ok) return null
+    const d = await res.json()
+    if (!Array.isArray(d) || !d[0]) return null
+    return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
+  } catch {
+    return null
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+/**
+ * Taxa pro endereço que o cliente acabou de escrever.
+ *
+ * `null` = não deu pra calcular. Nesse caso quem responde é o link, que tem
+ * mapa e pino — chutar um valor aqui é a loja pagando a diferença ou o cliente
+ * levando um susto na porta.
+ */
+export async function taxaDoEndereco(
+  empresa: Record<string, unknown>, endereco: string,
+): Promise<{ taxa: number; km: number | null; minutos: number | null; foraRaio: boolean } | null> {
+  const cfgBairro = acharBairroCfg(empresa.taxas_entrega_bairro, endereco)
+  if (cfgBairro) {
+    if (cfgBairro.entrega === false) return null   // bairro que a loja não atende
+    return { taxa: Number(cfgBairro.taxa) || 0, km: null, minutos: null, foraRaio: false }
+  }
+
+  const lat = Number(empresa.latitude)
+  const lng = Number(empresa.longitude)
+  const faixas = empresa.taxas_entrega_km
+  if (!lat || !lng || !Array.isArray(faixas) || !faixas.length) return null
+
+  const cidade = String(empresa.cidade ?? "").trim()
+  const uf = String(empresa.estado ?? "").trim()
+  const ponto = await geocodar([endereco, cidade, uf, "Brasil"].filter(Boolean).join(", "))
+  if (!ponto) return null
+
+  const km = haversineKm(ponto.lat, ponto.lng, lat, lng)
+  const faixa = faixaDaDistancia(faixas, km)
+  if (!faixa) return null
+  const raio = Number(empresa.raio_entrega_km ?? 0)
+  return {
+    taxa: Number(faixa.taxa) || 0,
+    km,
+    minutos: Number(faixa.tempo) || null,
+    foraRaio: !!raio && km > raio,
+  }
 }
 
 // ── Pausa do robô ────────────────────────────────────────────────────────────
@@ -349,8 +467,9 @@ export async function responderSemIA({
       .like("phone", `%${chave8(phone)}`).eq("role", "assistant")
       .gte("created_at", umaHora).order("created_at", { ascending: false }).limit(5)
     const recentes = Array.isArray(ultimas) ? ultimas : []
-    const linkRecente = recentes.some((m: Record<string, unknown>) =>
-      String(m.content ?? "").includes("lojaonline.fwcinter.com"))
+    const vezesQueMandouOLink = recentes.filter((m: Record<string, unknown>) =>
+      String(m.content ?? "").includes("lojaonline.fwcinter.com")).length
+    const linkRecente = vezesQueMandouOLink > 0
     const perguntouDoAtendente = String(recentes[0]?.content ?? "").includes(MARCA_ATENDENTE)
 
     const t = semAcento(mensagem).trim()
@@ -363,11 +482,54 @@ export async function responderSemIA({
       return await responder(`Beleza! 👍 Qualquer coisa é só chamar.${linkRecente ? "" : `${NL}${link}`}`)
     }
 
-    // 2) Cardápio, horário, taxa de entrega, endereço — o que ele SABE.
+    // 2) Ele acabou de pedir a rua e o bairro: o que veio agora é o endereço.
+    //    Aqui é o único lugar onde o robô calcula alguma coisa — e só entrega
+    //    número quando a conta fecha.
+    const perguntouEndereco = String(recentes[0]?.content ?? "").includes(MARCA_ENDERECO)
+    if (perguntouEndereco && t.length >= 4) {
+      const conta = await taxaDoEndereco(empresa, mensagem)
+      if (conta?.foraRaio) {
+        await abrirChamado(supabase, empresaId, phone, `fora do raio: ${mensagem}`)
+        return await responder(
+          `Esse endereço fica a ${conta.km?.toFixed(1)} km daqui, um pouco fora da nossa área. 😕${NL}` +
+          "Já chamei alguém da loja pra ver se dá pra dar um jeito.",
+        )
+      }
+      if (conta) {
+        // O tempo da FAIXA, quando a loja cadastrou: quem mora na esquina não
+        // merece ouvir "de 30 a 60 min".
+        const min = Number(empresa.tempo_entrega_min ?? 0)
+        const max = Number(empresa.tempo_entrega_max ?? 0)
+        const tempo = conta.minutos
+          ? ` Leva uns ${conta.minutos} min.`
+          : (min && max ? ` Leva de ${min} a ${max} min.` : "")
+        const dist = conta.km != null ? ` (${conta.km.toFixed(1)} km daqui)` : ""
+        return await responder(
+          `A entrega pra você fica ${dinheiro(conta.taxa)}${dist}.${tempo}${NL}${NL}` +
+          `É só pedir aqui que a taxa já entra certinha:${NL}${link}`,
+        )
+      }
+      // Não fechou a conta: quem responde é o link, que tem mapa e pino. Chutar
+      // valor aqui é a loja pagando a diferença ou o cliente levando susto na
+      // porta.
+      return await responder(
+        `Não consegui achar esse endereço aqui. 😕${NL}` +
+        `Nesse link você marca no mapa e ele mostra a taxa exata:${NL}${link}`,
+      )
+    }
+
+    // 3) Cardápio, horário, taxa de entrega, endereço — o que ele SABE.
     const daInfo = respostaDeInfo(mensagem, empresa, link)
     if (daInfo) return await responder(daInfo)
 
-    // 3) "Quero uma M", "me vê 2 marmitas": o cliente está PEDINDO. Isso não é
+    // O cliente falando que não quer o link. Não é dúvida, é recado: ele quer
+    // gente. Aqui não se pergunta "quer que eu chame?" — chama.
+    if (/nao quero (o |esse )?link|nao vou (entrar|abrir)|so quero saber (por )?aqui|quero (saber|falar|pedir) (por )?aqui|aqui mesmo|nao consigo (abrir|entrar)|prefiro (por )?aqui/.test(t)) {
+      await abrirChamado(supabase, empresaId, phone, mensagem)
+      return await responder("Beleza! 🙌 Já chamei alguém da loja pra falar com você por aqui mesmo. Só um instante!")
+    }
+
+    // 4) "Quero uma M", "me vê 2 marmitas": o cliente está PEDINDO. Isso não é
     //    pergunta sem resposta — é o pedido nascendo, e o caminho da casa é o
     //    link: escolhe, joga na sacola, paga. Montar sacola no WhatsApp é o que
     //    faz o pedido sair errado e o atendente parar tudo pra digitar.
@@ -389,7 +551,7 @@ export async function responderSemIA({
       )
     }
 
-    // 4) Ele tinha perguntado "quer que eu chame um atendente?" e o que veio
+    // 5) Ele tinha perguntado "quer que eu chame um atendente?" e o que veio
     //    não é pergunta que ele saiba responder ("sim", "quero", ou a mesma
     //    dúvida de novo). Aí vira gente: insistir com robô em quem já não foi
     //    entendido é o que faz o cliente desistir.
@@ -398,7 +560,7 @@ export async function responderSemIA({
       return await responder("Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!")
     }
 
-    // 5) Primeira fala da conversa: o link vai SEMPRE, seja um "oi" ou uma
+    // 6) Primeira fala da conversa: o link vai SEMPRE, seja um "oi" ou uma
     //    pergunta que a gente não entendeu. É a mensagem que faz o pedido sair
     //    do WhatsApp e cair no sistema.
     if (!linkRecente) {
@@ -410,8 +572,18 @@ export async function responderSemIA({
       return await responder(montarPrimeiraFala(modelo, nome, link))
     }
 
-    // 6) Já mandou o link e não soube responder. Não inventa: oferece gente.
-    return await responder(`Essa eu não sei te responder. 😅 Quer que eu ${MARCA_ATENDENTE} pra te ajudar?`)
+    // 7) Segunda vez que ele não entende: manda o link de novo, agora dizendo o
+    //    que tem lá dentro. Pode ser que o cliente nem tenha aberto na primeira.
+    if (vezesQueMandouOLink === 1) {
+      return await responder(
+        `Nossos produtos e as promoções tão todos aqui, dá uma conferida: 👇${NL}${link}`,
+      )
+    }
+
+    // 8) Terceira. Já mandou o link duas vezes e ele continua perguntando por
+    //    aqui — o cliente não quer o link, e insistir vira teimosia de robô.
+    //    Oferece gente, que é o que ele está pedindo desde a segunda pergunta.
+    return await responder(`Essa eu não sei te responder por aqui. 😅 Quer que eu ${MARCA_ATENDENTE} pra te ajudar?`)
   } catch (e) {
     console.error("[link] falhou:", e)
     return false
