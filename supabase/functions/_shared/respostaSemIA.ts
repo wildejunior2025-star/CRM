@@ -90,7 +90,7 @@ function respostaDeHorario(empresa: Record<string, unknown>): string | null {
       const quando = textoDosPeriodos(periodos)
       return abertoAgora
         ? `Tô aqui sim! 🙌 Hoje a gente atende ${quando}.`
-        : `Hoje a gente atende ${quando}.`
+        : `Hoje a gente atende ${quando}.`   // fora da faixa: quem avisa é avisoDeFechada
     }
     // Fechado hoje: dizer só "não abre" deixa o cliente sem saber quando volta.
     for (let i = 1; i <= 7; i++) {
@@ -110,6 +110,80 @@ function respostaDeHorario(empresa: Record<string, unknown>): string | null {
   const fecha = String(empresa.horario_fechamento ?? "").slice(0, 5)
   if (abre && fecha) return `A gente atende das ${abre} às ${fecha}.`
   return null
+}
+
+// ── A loja está aberta agora? ────────────────────────────────────────────────
+// Mesma regra da Loja Online: aberta = o interruptor "Loja fechada" desligado E
+// dentro da grade da semana. Sem isso o robô convidava pra pedir às 3 da manhã
+// e o pedido caía num painel que ninguém estava olhando.
+//
+// Feriado marcado na mão (dias_excecao) ainda não entra aqui — quando a loja
+// fecha num feriado ela costuma usar o botão "Loja fechada", que este código
+// respeita.
+const MARCA_FECHADA = "a gente tá fechado"
+
+export function lojaAbertaAgora(empresa: Record<string, unknown>): boolean {
+  // O botão vermelho do gestor. Fechou na mão, está fechado — grade nenhuma
+  // discute com isso.
+  if (empresa.delivery_ativo === false) return false
+
+  const grade = Array.isArray(empresa.horarios_funcionamento)
+    ? empresa.horarios_funcionamento as Array<Record<string, unknown>>
+    : null
+  if (!grade || grade.length !== 7) return true    // sem grade: não sabe, não atrapalha
+
+  const { min: agora, diaSemana } = agoraNaLoja()
+  const hoje = grade[diaSemana] ?? {}
+  if (!hoje.aberto) return false
+  const periodos = (hoje.periodos ?? []) as Array<Record<string, string>>
+  if (!periodos.length) return true                // dia aberto sem faixa = sem restrição
+  return periodos.some(p => {
+    const i = paraMin(p.i), f = paraMin(p.f)
+    // Faixa que vira a madrugada (22:00 → 02:00) conta os dois pedaços.
+    return i <= f ? (agora >= i && agora < f) : (agora >= i || agora < f)
+  })
+}
+
+/**
+ * "Agora a gente tá fechado. Abre hoje às 18:00." / "...Amanhã a gente atende
+ * das 07:00 às 14:00."
+ *
+ * Dizer só "tá fechado" faz o cliente ir pedir em outro lugar. Ele precisa
+ * saber QUANDO volta — e às 17h de um dia que fechou às 14h, "hoje a gente
+ * atende das 07:00 às 14:00" é uma informação que não serve pra nada.
+ */
+export function avisoDeFechada(empresa: Record<string, unknown>): string {
+  const fechado = `Agora ${MARCA_FECHADA}. 😴`
+  const grade = Array.isArray(empresa.horarios_funcionamento)
+    ? empresa.horarios_funcionamento as Array<Record<string, unknown>>
+    : null
+  if (!grade || grade.length !== 7) return fechado
+
+  const { min: agora, diaSemana } = agoraNaLoja()
+  const hoje = grade[diaSemana] ?? {}
+  const periodosHoje = (hoje.aberto ? (hoje.periodos ?? []) : []) as Array<Record<string, string>>
+
+  // Ainda abre hoje? (fechado no intervalo do almoço, ou antes de abrir)
+  const proximo = periodosHoje
+    .map(p => paraMin(p.i))
+    .filter(i => i > agora)
+    .sort((a, b) => a - b)[0]
+  if (proximo != null) {
+    const hm = `${String(Math.floor(proximo / 60)).padStart(2, "0")}:${String(proximo % 60).padStart(2, "0")}`
+    return `${fechado} A gente abre hoje às ${hm}.`
+  }
+
+  // Já passou o horário de hoje (ou hoje nem abre): o próximo dia que abre.
+  for (let i = 1; i <= 7; i++) {
+    const idx = (diaSemana + i) % 7
+    const dia = grade[idx] ?? {}
+    const periodos = (dia.periodos ?? []) as Array<Record<string, string>>
+    if (dia.aberto && periodos.length) {
+      const nome = i === 1 ? "Amanhã" : `${DIAS[idx].charAt(0).toUpperCase()}${DIAS[idx].slice(1)}`
+      return `${fechado} ${nome} a gente atende ${textoDosPeriodos(periodos)}.`
+    }
+  }
+  return fechado
 }
 
 function respostaDeEndereco(empresa: Record<string, unknown>): string | null {
@@ -473,6 +547,28 @@ export async function responderSemIA({
     const perguntouDoAtendente = String(recentes[0]?.content ?? "").includes(MARCA_ATENDENTE)
 
     const t = semAcento(mensagem).trim()
+
+    // 0) LOJA FECHADA. Nada de convidar pra pedir com a porta fechada: o pedido
+    //    cairia num painel que ninguém está olhando, e o cliente ficaria
+    //    esperando. Ele avisa UMA vez e cala — repetir "tamos fechados" a cada
+    //    mensagem é pior que não responder.
+    if (!lojaAbertaAgora(empresa)) {
+      const jaAvisou = recentes.some((m: Record<string, unknown>) =>
+        String(m.content ?? "").includes(MARCA_FECHADA))
+      const daInfoFechada = respostaDeInfo(mensagem, empresa, link)
+      if (jaAvisou) {
+        // Já sabe que está fechado. Ainda assim responde o que sabe (taxa,
+        // endereço, horário) — a dúvida dele não fecha junto com a loja.
+        return daInfoFechada ? await responder(daInfoFechada) : false
+      }
+      const agendavel = empresa.agendamento_ativo === true
+      const extra = daInfoFechada
+        ? `${NL}${NL}${daInfoFechada}`
+        : agendavel
+          ? `${NL}${NL}Se quiser, já deixa seu pedido agendado por aqui que a gente separa:${NL}${link}`
+          : ""
+      return await responder(`${avisoDeFechada(empresa)}${extra}`)
+    }
 
     // 1) "Não precisa" fecha o assunto na hora. O "sim" fica pro fim: se a
     //    mensagem seguinte for uma pergunta que o robô SABE responder, ele

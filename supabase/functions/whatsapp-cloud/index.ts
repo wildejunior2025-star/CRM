@@ -270,7 +270,7 @@ async function processar(body: any) {
   // Acha a loja dona desse número
   const { data: cfg } = await supabase
     .from("whatsapp_config")
-    .select("empresa_id, instance_name, cloud_phone_number_id, ativo, ia_ativo, resposta_link_ativo, resposta_link_texto, empresas(nome, slug, agendamento_ativo, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
+    .select("empresa_id, instance_name, cloud_phone_number_id, ativo, ia_ativo, resposta_link_ativo, resposta_link_texto, empresas(nome, slug, agendamento_ativo, delivery_ativo, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
     .eq("cloud_phone_number_id", phoneNumberId)
     .eq("ativo", true)
     .maybeSingle()
