@@ -4954,14 +4954,25 @@ export default function PainelPedidos() {
       setChatAviso(data?.ok
         ? { ok: true, txt: '✓ Enviado aqui e no WhatsApp do cliente.' }
         : { ok: false, txt: '⚠️ Ficou só aqui no link — no WhatsApp não foi: ' + (data?.erro || errZap?.message || 'WhatsApp da loja desconectado.') })
-      // Respondeu = assumiu. O alarme para aqui, sem precisar de mais nenhum
-      // clique: ficar tocando enquanto a pessoa digita é o jeito mais rápido de
-      // ela desligar o som e parar de ver os chamados de verdade.
-      if (data?.ok) {
-        const chamado = chamados.find(c => String(c.phone).replace(/\D/g, '').endsWith(tel.slice(-8)))
-        if (chamado) await atenderChamado(chamado.id)
-        setBotPausado(true)   // whatsapp-connect pausa o robô 12h ao assumir
+      // Respondeu = assumiu, e isso NÃO depende de o WhatsApp ter aceitado a
+      // mensagem. O alarme tocando enquanto a pessoa digita a resposta é o
+      // jeito mais rápido de ela desligar o som — e aí ela perde os chamados de
+      // verdade. Se o envio falhou, o aviso acima já diz; o sino não tem nada a
+      // ver com isso.
+      const chamado = chamados.find(c => String(c.phone).replace(/\D/g, '').endsWith(tel.slice(-8)))
+      if (chamado) await atenderChamado(chamado.id)
+      // E o robô sai de cena enquanto a pessoa atende. Quem faz isso de dentro
+      // do whatsapp-connect é o envio bem-sucedido; aqui a gente garante o
+      // mesmo mesmo quando o WhatsApp da loja está fora do ar.
+      if (empresa?.id) {
+        await supabase.from('whatsapp_bot_pausado').upsert({
+          empresa_id: empresa.id, phone: tel,
+          pausado_em: new Date().toISOString(),
+          expira_em: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
+          motivo: 'loja assumiu a conversa',
+        }, { onConflict: 'empresa_id,phone' })
       }
+      setBotPausado(true)
     } else {
       setChatAviso({ ok: false, txt: 'ℹ️ Esta conversa não tem telefone — a resposta fica só no link da loja.' })
     }
