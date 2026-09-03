@@ -3900,7 +3900,7 @@ function Coluna({ titulo, cor, count, vazio, children }) {
 }
 
 // ── Conversa aberta (loja respondendo cliente) ──────────────
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, onEscolherProduto }) {
   const fimRef = useRef(null)
   useEffect(() => {
     fimRef.current?.scrollIntoView({ block: 'end' })
@@ -3967,6 +3967,9 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
         }}>{aviso.txt}</div>
       )}
 
+      {/* Buscar produto sem sair da conversa (ver BuscaProdutoNoChat) */}
+      {empresaId && <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} />}
+
       {/* Caixa de resposta */}
       <div style={{ display: 'flex', gap: 6, paddingTop: 8, borderTop: '1px solid var(--border, #2a2a3a)' }}>
         <textarea
@@ -3992,6 +3995,84 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
           </svg>
         </button>
       </div>
+    </div>
+  )
+}
+
+// Busca de produto DENTRO da conversa. Quando o robô transfere ("não achei
+// Galioto"), o atendente precisa do nome e do preço certos sem sair da tela — e
+// o nome que ele mandar é o que o robô vai ler pra reconhecer o produto quando
+// voltar. Escrito de cabeça, sai errado; daqui, sai do cadastro.
+function BuscaProdutoNoChat({ empresaId, onEscolher }) {
+  const [termo, setTermo] = useState('')
+  const [itens, setItens] = useState([])
+  const [buscando, setBuscando] = useState(false)
+  const [aberto, setAberto] = useState(false)
+
+  async function buscar(q) {
+    const t = q.trim()
+    if (t.length < 3) { setItens([]); return }
+    setBuscando(true)
+    // Mesma busca do robô (migs 0227/0232/0233): sem acento, casa categoria e
+    // perdoa erro de digitação — "heinekem" acha "HEINEKEN".
+    const { data } = await supabase.rpc('buscar_produto_nome', {
+      p_empresa: empresaId, p_termo: t, p_limite: 12,
+    })
+    setItens(Array.isArray(data) ? data : [])
+    setBuscando(false)
+  }
+
+  if (!aberto) {
+    return (
+      <button type="button" onClick={() => setAberto(true)}
+        style={{
+          marginTop: 6, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+          border: '1px dashed var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text-muted)',
+        }}>🔍 Buscar produto no cardápio</button>
+    )
+  }
+
+  return (
+    <div style={{ marginTop: 6, border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 8 }}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          autoFocus
+          value={termo}
+          onChange={e => { setTermo(e.target.value); buscar(e.target.value) }}
+          placeholder="Nome do produto (ex.: galioto, coca 2l)"
+          style={{
+            flex: 1, padding: '7px 10px', borderRadius: 8, fontSize: 13,
+            border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
+          }}
+        />
+        <button type="button" onClick={() => { setAberto(false); setTermo(''); setItens([]) }}
+          style={{ padding: '0 10px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>×</button>
+      </div>
+
+      {termo.trim().length >= 3 && (
+        <div style={{ marginTop: 6, maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {buscando && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Procurando…</div>}
+          {!buscando && itens.length === 0 && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              Nada com esse nome no cardápio.<br />
+              Se a loja tem o produto e ele não está cadastrado, cadastre no <strong>Catálogo</strong> — depois é só buscar aqui de novo.
+            </div>
+          )}
+          {itens.map(p => (
+            <button key={p.id} type="button" onClick={() => onEscolher(p)}
+              style={{
+                textAlign: 'left', cursor: 'pointer', padding: '7px 9px', borderRadius: 8,
+                border: '1px solid var(--border, #2a2a3a)', background: 'transparent',
+              }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{p.nome}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                {Number(p.preco) > 0 ? `R$ ${Number(p.preco).toFixed(2).replace('.', ',')}` : 'sob consulta'}
+                {p.categoria ? ` · ${p.categoria}` : ''}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -4594,6 +4675,17 @@ export default function PainelPedidos() {
     if (t) { abrirThread(t); return }
     // Sem conversa espelhada ainda: abre uma nova pra este número.
     setChatAberto(`whatsapp|${String(phone || '').replace(/\D/g, '')}`)
+  }
+
+  // Produto escolhido na busca: vira texto pronto na caixa de resposta, com
+  // nome e preço EXATOS do cadastro. O atendente revisa e manda — e é esse nome
+  // que o robô lê depois pra reconhecer o produto certo (ele passou a olhar
+  // também o que a pessoa da loja escreveu).
+  function escolherProdutoNoChat(p) {
+    const preco = Number(p.preco) > 0
+      ? ` — R$ ${Number(p.preco).toFixed(2).replace('.', ',')}`
+      : ''
+    setChatTexto(prev => `${prev ? prev.trimEnd() + '\n' : ''}${p.nome}${preco}`)
   }
 
   // Marca como lidas as mensagens do cliente ao abrir a conversa, e envia resposta
@@ -6217,6 +6309,8 @@ export default function PainelPedidos() {
                 onVoltar={() => { setChatAberto(null); setChatAviso(null) }}
                 canalLabel={CANAL_LABEL[threadAberta.canal] ?? threadAberta.canal}
                 aviso={chatAviso}
+                empresaId={empresa?.id}
+                onEscolherProduto={escolherProdutoNoChat}
               />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

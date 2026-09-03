@@ -1610,7 +1610,10 @@ serve(async (req) => {
 
     const [historicoRes, produtosRes, carrinhoRes, clienteRes] = await Promise.all([
       supabase.from("whatsapp_conversas")
-        .select("role, content")
+        // `origem` diz quem escreveu do lado da loja: 'loja' é gente, o resto é
+        // o robô. Serve pra busca de produto enxergar o nome CERTO que o
+        // atendente digitou quando assumiu a conversa.
+        .select("role, content, origem")
         .eq("empresa_id", empresaId)
         .eq("phone", phone)
         .order("created_at", { ascending: false })
@@ -1670,7 +1673,12 @@ serve(async (req) => {
     const totalProdutos = produtosRes.count ?? (produtosRes.data ?? []).length
     let produtosBase = (produtosRes.data ?? []) as any[]
     if (totalProdutos > MENU_INTEIRO_ATE) {
-      const falas = [text, ...mensagens.filter((m: any) => m.role === "user").slice(-4).reverse().map((m: any) => m.content)]
+      // O que o CLIENTE falou + o que a PESSOA da loja escreveu. O atendente é
+      // quem sabe o nome certo do produto ("é a CACHAÇA GALIOTO 1L"), e sem
+      // isto o robô voltava da transferência ainda sem enxergar o item.
+      const falasCliente = mensagens.filter((m: any) => m.role === "user").slice(-4).reverse().map((m: any) => m.content)
+      const falasDaLoja = mensagens.filter((m: any) => m.origem === "loja").slice(-2).reverse().map((m: any) => m.content)
+      const falas = [text, ...falasDaLoja, ...falasCliente]
       const idsCarrinho = (carrinhoRes.data?.items ?? [])
         .map((i: any) => i.produto_id ?? i.id).filter(Boolean)
       produtosBase = await catalogoRelevante(supabase, empresaId, falas, idsCarrinho)
