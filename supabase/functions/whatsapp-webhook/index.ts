@@ -416,6 +416,36 @@ async function handleSalvarRua(
   }
 }
 
+// ── Endereço escrito à mão ───────────────────────────────────────────────────
+// "Rua Eliane Barros, 600, Novo Amarante" → rua, número e bairro.
+//
+// Existe porque o modelo às vezes CONVERSA sobre o endereço e não emite
+// salvar_rua: ele responde "confirmei: Rua tal, 600, Novo Amarante" e segue
+// adiante com o cadastro vazio. Aí, na hora de fechar, não tem endereço, a taxa
+// não é calculada e o pedido não sai. Aqui o sistema grava sem depender dele.
+const PREFIXO_RUA = /^(rua|r[.]|av|av[.]|avenida|travessa|trav|estrada|rod|rodovia|praca|praça|alameda|al[.]|beco|conj|conjunto|quadra|qd|loteamento|sitio|sítio|vila)[ .]/i
+
+function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; bairro: string | null } | null {
+  const bruto = String(txt ?? "").trim()
+  if (bruto.length < 8 || bruto.length > 160) return null
+  const partes = bruto.split(",").map(p => p.trim()).filter(Boolean)
+  let rua = partes[0] ?? ""
+  let numero: string | null = null
+  let bairro: string | null = partes[1] ?? null
+
+  // Número colado na rua ("Rua Eliane Barros 600") ou na própria vírgula.
+  const comNumero = rua.match(/^(.+?)[ ,]+(\d{1,5}[a-zA-Z]?)$/)
+  if (comNumero) { rua = comNumero[1].trim(); numero = comNumero[2] }
+  if (!numero && bairro && /^\d{1,5}[a-zA-Z]?$/.test(bairro)) {
+    numero = bairro
+    bairro = partes[2] ?? null
+  }
+  if (!rua || rua.length < 5) return null
+  // Sem prefixo de rua e sem número, é conversa, não endereço.
+  if (!PREFIXO_RUA.test(rua) && !numero) return null
+  return { rua, numero, bairro: bairro && bairro.length >= 3 ? bairro : null }
+}
+
 // ── handleSalvarNumero ───────────────────────────────────────────────────────
 async function handleSalvarNumero(
   supabase: ReturnType<typeof createClient>,
@@ -638,7 +668,24 @@ async function handleFecharPedido(
     }
 
     // Taxa: usa a calculada pela distância (quando veio); senão cai na fixa da loja.
-    const taxaFinal      = tipoEntrega === "entrega" ? (taxaEntregaCalc != null ? taxaEntregaCalc : taxaEntrega) : 0
+    // A taxa é recalculada AQUI, com o endereço que vai no pedido. O valor que
+    // vinha de cima foi calculado no começo da mensagem, quando o endereço
+    // muitas vezes ainda não existia — e aí a loja entregava de graça: o pedido
+    // #1061 saiu com endereço completo e taxa R$ 0,00 por causa disso.
+    let taxaFinal = tipoEntrega === "entrega" ? (taxaEntregaCalc != null ? taxaEntregaCalc : taxaEntrega) : 0
+    if (tipoEntrega === "entrega" && endRua) {
+      const cfgB = acharBairroCfg(empresa.taxas_entrega_bairro, endBairro)
+      if (cfgB && cfgB.entrega !== false) {
+        taxaFinal = Number(cfgB.taxa) || 0
+        console.log(`[Taxa] bairro "${endBairro}" → R$${taxaFinal}`)
+      } else {
+        const enderecoFinal = [endRua, endNumero, endBairro, endCidade ?? empresa.cidade].filter(Boolean).join(", ")
+        const t = await calcularTaxaEntregaKm(empresa, enderecoFinal)
+        // Só troca quando a conta fecha: geocode que falhou não pode virar
+        // frete grátis.
+        if (t != null) taxaFinal = t
+      }
+    }
     const totalFinal     = totalCarrinho + taxaFinal
 
     let clienteId         = cliente?.id ?? null
@@ -869,7 +916,13 @@ async function handleFecharPedido(
 
     // Cliente só da loja — sem conta no app, sem credenciais/senha (sem mensagem de senha).
 
-    mensagemExtra = `🧾 *Pedido #${numPedido} recebido!*\n\n💳 Pagamento em *${labelPgto}* ${labelEntrega}.\n\n⏳ Aguardando a loja confirmar — assim que confirmarem você recebe uma mensagem aqui! 🎉` + mensagemExtra
+    // A taxa e o total saem daqui, do cálculo do sistema — não do resumo que o
+    // modelo escreveu. Ele já chutou "R$ 15,00" de taxa numa conversa em que
+    // endereço nenhum tinha sido calculado; o cliente tem que ver o valor real.
+    const linhaValores = tipoEntrega === "entrega"
+      ? `\n🚚 Taxa de entrega: *R$ ${taxaFinal.toFixed(2)}*\n💰 Total: *R$ ${totalFinal.toFixed(2)}*`
+      : `\n💰 Total: *R$ ${totalFinal.toFixed(2)}*`
+    mensagemExtra = `🧾 *Pedido #${numPedido} recebido!*${linhaValores}\n\n💳 Pagamento em *${labelPgto}* ${labelEntrega}.\n\n⏳ Aguardando a loja confirmar — assim que confirmarem você recebe uma mensagem aqui! 🎉` + mensagemExtra
     return { mensagemExtra, acaoPromise }
   } catch (e) {
     console.error("[Pedido] erro:", e)
@@ -966,15 +1019,46 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
-async function geocodificarEndereco(endereco: string): Promise<{ lat: number; lng: number } | null> {
+async function umGeocode(consulta: string): Promise<{ lat: number; lng: number } | null> {
   try {
-    const q = encodeURIComponent(`${endereco}, Brasil`)
+    const q = encodeURIComponent(`${consulta}, Brasil`)
     const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, {
       headers: { "User-Agent": "CRM-FWC/1.0" },
     })
     const data = await res.json()
     if (data?.[0]) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
   } catch (e: any) { console.error("[Geo] erro:", e?.message) }
+  return null
+}
+
+/**
+ * Coordenada do endereço, tentando do mais específico ao menos.
+ *
+ * A cidade é o campo que mais atrapalha: quando o cliente não diz, o sistema
+ * preenche com a da LOJA — e loja que entrega na cidade vizinha manda o mapa
+ * procurar uma rua de São Gonçalo dentro de Natal. Não acha nada, a taxa volta
+ * null e o pedido sai de graça. Então, se a busca completa falhar, tenta sem a
+ * cidade e depois só pelo bairro.
+ */
+async function geocodificarEndereco(endereco: string): Promise<{ lat: number; lng: number } | null> {
+  const partes = endereco.split(",").map(p => p.trim()).filter(Boolean)
+  const tentativas = [endereco]
+  if (partes.length >= 3) {
+    // Sem a cidade (penúltima parte costuma ser ela quando veio do sistema)
+    tentativas.push([...partes.slice(0, -1)].join(", "))
+    // Só rua + bairro
+    tentativas.push([partes[0], partes[partes.length - 2]].join(", "))
+  }
+  for (const t of tentativas) {
+    const ponto = await umGeocode(t)
+    if (ponto) {
+      if (t !== endereco) console.log(`[Geo] achou na tentativa reduzida: "${t}"`)
+      return ponto
+    }
+    // Nominatim limita 1 consulta por segundo — sem respiro ele devolve vazio.
+    await new Promise(r => setTimeout(r, 1100))
+  }
+  console.log(`[Geo] não achei: "${endereco}"`)
   return null
 }
 // Normaliza bairro pra casar cliente <-> config (mesma regra da tela Raio de Entrega e do site).
@@ -2236,7 +2320,14 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           SUPABASE_URL, SUPABASE_KEY, instanceName, carrinhoEndereco,
           indicadorProfileId, taxaEntregaCalc, mensagens, produtos
         )
-        if (!resultado.bloqueioMensagem) {
+        if (resultado.bloqueioMensagem) {
+          // O bloqueio VAI pro cliente. Antes ele era descartado aqui e ficava
+          // valendo o texto do modelo — que já tinha dito "pedido confirmado".
+          // O cliente sentava pra esperar comida que a loja nem sabia que
+          // existia: nenhum pedido tinha sido criado.
+          resposta = resultado.bloqueioMensagem
+          console.log("[SafeNet] fechamento bloqueado:", resultado.bloqueioMensagem.slice(0, 60))
+        } else {
           acaoPromise = resultado.acaoPromise
           if (resultado.mensagemExtra) resposta = resultado.mensagemExtra
           if (resultado.pixCode) extraMsgs.push(resultado.pixCode)
@@ -2253,6 +2344,32 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       console.log("[CEP] safety net para:", text)
       const resultado = await handleBuscarCep(supabase, empresaId, phone, text)
       resposta = resultado.resposta
+    }
+
+    // Safety net: cliente ESCREVEU o endereço e o Claude não emitiu salvar_rua.
+    // Sem isto o endereço só existia no texto da conversa — o cadastro ficava
+    // vazio e a taxa era calculada sobre o nada.
+    const salvarRuaJaExecutado = acaoMatch !== null && (() => {
+      try { return JSON.parse(acaoMatch![1])?.tipo === "salvar_rua" } catch { return false }
+    })()
+    const ultimaDoBot = (mensagens.filter((m: any) => m.role === "assistant").pop()?.content ?? "").toLowerCase()
+    const botPediuEndereco = /nome da rua|seu endere|preciso do seu endere|falta s[oó] o endere/.test(ultimaDoBot)
+    if (!salvarRuaJaExecutado && !carrinhoEndereco.rua && botPediuEndereco) {
+      const end = lerEnderecoEscrito(text)
+      if (end) {
+        console.log(`[Endereco] safety net: rua="${end.rua}" num=${end.numero ?? "-"} bairro="${end.bairro ?? "-"}"`)
+        // Cidade da LOJA quando ele não disse: sem cidade o mapa procura a rua
+        // no Brasil inteiro e a taxa sai de qualquer lugar.
+        const r = await handleSalvarRua(
+          supabase, empresaId, phone, end.rua, end.bairro,
+          empresa.cidade ?? null, empresa.estado ?? null,
+        )
+        resposta = r.resposta
+        if (end.numero) {
+          const n = await handleSalvarNumero(supabase, empresaId, phone, phoneLocal, end.numero, aceitaDelivery)
+          resposta = n.resposta
+        }
+      }
     }
 
     // Safety net: usuário mandou número mas Claude não emitiu salvar_numero
