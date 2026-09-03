@@ -4590,7 +4590,8 @@ export default function PainelPedidos() {
     const tel = String(cliente_ref || '').replace(/\D/g, '')
     if (tel.length >= 10) {
       const { data, error: errZap } = await supabase.functions.invoke('whatsapp-connect', {
-        body: { action: 'send_message', phone: tel, text: txt, espelhar_no_chat: false },
+        // Gente digitou: o robô cala nesse número por umas horas (mig 0228).
+        body: { action: 'send_message', phone: tel, text: txt, espelhar_no_chat: false, assumir_conversa: true },
       })
       setChatAviso(data?.ok
         ? { ok: true, txt: '✓ Enviado aqui e no WhatsApp do cliente.' }

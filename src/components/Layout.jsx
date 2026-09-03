@@ -4,6 +4,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useAuth } from '../hooks/useAuth'
 import { moduloVisivel, moduloBloqueado } from '../lib/modulos'
 import { useIfoodAtivo } from '../hooks/useIfoodAtivo'
+import { useChamados } from '../hooks/useChamados'
 import ThemeToggle from './ThemeToggle'
 import SubscriptionGate from './SubscriptionGate'
 import InstallPWA from './InstallPWA'
@@ -90,6 +91,16 @@ const links = [
   { to: '/relatorios', label: 'Relatórios', roles: ['admin'], mod: 'relatorios' },
 ]
 
+// Cliente pedindo atendente no WhatsApp. Some assim que alguém abre a conversa.
+function SeloChamado({ n }) {
+  if (!n) return null
+  return (
+    <span className="sidebar-chamado" title={`${n} cliente${n === 1 ? '' : 's'} esperando atendente no WhatsApp`}>
+      🔔 {n}
+    </span>
+  )
+}
+
 function ChevronDown({ size = 12 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -112,6 +123,11 @@ export default function Layout() {
   const { theme, toggleTheme } = useTheme()
   const { user, profile, empresa, logout, voltarSuperAdmin } = useAuth()
   const ifoodAtivo = useIfoodAtivo(empresa?.id)
+  // Só o dono é chamado: vendedor e garçom não respondem WhatsApp.
+  const { chamados } = useChamados(
+    profile?.perfil === 'admin' ? empresa?.id : null,
+    moduloVisivel(empresa, 'whatsapp'),
+  )
   const location = useLocation()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -195,6 +211,7 @@ export default function Layout() {
                     style={{ flex: 1, ...(moduloBloqueado(empresa, link.mod) ? { opacity: .6 } : null) }}
                   >
                     {link.label}
+                    {link.to === '/whatsapp' && <SeloChamado n={chamados.length} />}
                     {moduloBloqueado(empresa, link.mod) && <span style={{ marginLeft: 6 }} title="Não incluído no seu plano">🔒</span>}
                   </NavLink>
                   <button
@@ -226,6 +243,7 @@ export default function Layout() {
                         >
                           <span style={{ marginRight: 6, opacity: 0.5, fontSize: 10 }}>└</span>
                           {child.label}
+                          {child.to === '/whatsapp-conversas' && <SeloChamado n={chamados.length} />}
                           {moduloBloqueado(empresa, child.mod) && <span style={{ marginLeft: 6 }} title="Não incluído no seu plano">🔒</span>}
                         </NavLink>
                       ))

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { pausarPorAtendimentoHumano } from "../_shared/respostaSemIA.ts"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -481,6 +482,14 @@ serve(async (req) => {
         // lá (é o caso da própria aba Mensagens) e não pode duplicar.
         if (body.espelhar_no_chat !== false) {
           await espelharNoChat(supabaseAdmin, empresaId, numeroFull, text, "loja")
+        }
+        // Gente digitou essa resposta (caixa de conversa do gestor). O robô sai
+        // de cena nesse número por umas horas: os dois respondendo junto é o
+        // jeito mais rápido de o lojista desligar a resposta automática.
+        // Aviso de pedido e disparo NÃO mandam esta bandeira — são automáticos,
+        // e calariam o robô pra quem acabou de pedir.
+        if (body.assumir_conversa === true) {
+          await pausarPorAtendimentoHumano(supabaseAdmin, empresaId, numeroFull)
         }
       }
 

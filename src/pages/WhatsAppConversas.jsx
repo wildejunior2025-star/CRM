@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
+import { useChamados } from '../hooks/useChamados'
 import '../components/Page.css'
 
 // Formata "558498180774" → "(84) 9818-0774" (best-effort)
@@ -51,7 +52,7 @@ function hora(iso) {
 // automático de pedido. Do lado do cliente é uma conversa só: ele não sabe (nem
 // precisa saber) se quem escreveu foi o robô ou a pessoa do balcão.
 // ─────────────────────────────────────────────────────────────────────────────
-function Conversa({ empresaId, item, iaAtiva, onFechar, onPausou, onEnviou }) {
+function Conversa({ empresaId, item, onFechar, onPausou, onEnviou }) {
   const [msgs, setMsgs] = useState([])
   const [carregando, setCarregando] = useState(true)
   const [texto, setTexto] = useState('')
@@ -98,21 +99,14 @@ function Conversa({ empresaId, item, iaAtiva, onFechar, onPausou, onEnviou }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onFechar])
 
-  async function pausarRobo() {
-    // Pausa TODAS as formas do número: o robô compara com o número exato que
-    // chegou, e pausar só uma delas deixaria a outra respondendo.
-    const linhas = item.phones.map(p => ({ empresa_id: empresaId, phone: p }))
-    await supabase.from('whatsapp_bot_pausado').upsert(linhas, { onConflict: 'empresa_id,phone', ignoreDuplicates: true })
-    setPausado(true)
-    onPausou?.(item.chave)
-  }
-
   async function enviar() {
     const msg = texto.trim()
     if (!msg || enviando) return
     setEnviando(true); setErro(null)
     const { data, error } = await supabase.functions.invoke('whatsapp-connect', {
-      body: { action: 'send_message', phone: item.phone, text: msg },
+      // `assumir_conversa`: quem digitou foi gente, então o robô cala nesse
+      // número por umas horas. Aviso de pedido e disparo não mandam isso.
+      body: { action: 'send_message', phone: item.phone, text: msg, assumir_conversa: true },
     })
     setEnviando(false)
     if (error || !data?.ok) {
@@ -125,9 +119,12 @@ function Conversa({ empresaId, item, iaAtiva, onFechar, onPausou, onEnviou }) {
     // mensagem na tela na hora — senão manda de novo achando que falhou.
     carregar()
     onEnviou?.(item.chave, msg)
-    // Assumiu a conversa: o robô sai de cena naquele número, senão os dois
-    // respondem juntos e o cliente recebe duas versões da mesma coisa.
-    if (iaAtiva && !pausado) pausarRobo()
+    // Assumiu a conversa: o robô sai de cena naquele número — quem faz isso é o
+    // servidor (pausa de 12h), aqui é só a tela acompanhar. Vale com o robô de
+    // IA e com a resposta automática do cardápio: os dois falando junto fazem o
+    // cliente receber duas versões da mesma coisa.
+    setPausado(true)
+    onPausou?.(item.chave)
   }
 
   const bolha = (m) => {
@@ -161,13 +158,11 @@ function Conversa({ empresaId, item, iaAtiva, onFechar, onPausou, onEnviou }) {
           <button className="btn btn-secondary btn-sm" onClick={onFechar}>Fechar</button>
         </div>
 
-        {iaAtiva && (
-          <p style={{ fontSize: 12.5, margin: '8px 0 0', color: pausado ? 'var(--text-muted)' : '#b45309' }}>
-            {pausado
-              ? '⏸ Robô pausado nesta conversa — quem responde é você. Pra devolver pro robô, use o botão Reativar na lista.'
-              : '⚠️ O robô está atendendo este número. Assim que você responder, ele é pausado aqui pra vocês dois não falarem junto.'}
-          </p>
-        )}
+        <p style={{ fontSize: 12.5, margin: '8px 0 0', color: pausado ? 'var(--text-muted)' : '#b45309' }}>
+          {pausado
+            ? '⏸ Robô pausado nesta conversa — quem responde é você.'
+            : '⚠️ Assim que você responder, o robô cala nesta conversa por 12 horas, pra vocês dois não falarem junto.'}
+        </p>
 
         <div style={{
           marginTop: 12, padding: 12, borderRadius: 10, background: 'var(--bg)',
@@ -218,26 +213,31 @@ export default function WhatsAppConversas() {
   const [soPausados, setSoPausados] = useState(false)
   const [busy, setBusy] = useState(null)
   const [aberta, setAberta] = useState(null)   // conversa aberta na tela
-  const [iaAtiva, setIaAtiva] = useState(false)
+  // Clientes que pediram pra falar com gente (mig 0228). O alarme toca no menu;
+  // aqui é onde ele é resolvido.
+  const { chamados, atender } = useChamados(empresaId)
 
   const load = useCallback(async () => {
     if (!empresaId) return
     setLoading(true)
-    const [convRes, cliRes, pausaRes, cfgRes] = await Promise.all([
+    const [convRes, cliRes, pausaRes] = await Promise.all([
       supabase.from('whatsapp_conversas').select('phone, role, content, created_at')
         .eq('empresa_id', empresaId).order('created_at', { ascending: false }).limit(4000),
       supabase.from('clientes').select('nome, telefone').eq('empresa_id', empresaId),
-      supabase.from('whatsapp_bot_pausado').select('phone').eq('empresa_id', empresaId),
-      supabase.from('whatsapp_config').select('ia_ativo').eq('empresa_id', empresaId).maybeSingle(),
+      // A pausa que já venceu não é pausa: mostrar "Robô pausado" nela faria a
+      // loja apertar Reativar num número que o robô já voltou a atender.
+      supabase.from('whatsapp_bot_pausado').select('phone, expira_em').eq('empresa_id', empresaId),
     ])
-    setIaAtiva(cfgRes.data?.ia_ativo === true)
     // nome por telefone (casa pelos últimos 8 dígitos)
     const nomePorTel = {}
     for (const c of (cliRes.data ?? [])) {
       const k = chaveConversa(c.telefone)
       if (k && c.nome) nomePorTel[k] = c.nome
     }
-    const pausadas = new Set((pausaRes.data ?? []).map(p => chaveConversa(p.phone)))
+    const agora = Date.now()
+    const pausadas = new Set((pausaRes.data ?? [])
+      .filter(p => !p.expira_em || new Date(p.expira_em).getTime() > agora)
+      .map(p => chaveConversa(p.phone)))
     // Agrupa por número (a lista já vem do mais novo pro mais antigo), juntando
     // as formas do mesmo número — ver chaveConversa().
     const map = new Map()
@@ -309,7 +309,27 @@ export default function WhatsAppConversas() {
     })
   }, [conversas, busca, soPausados])
 
+  // Quem pediu atendente sobe pro topo: é o único que tem gente esperando.
+  const ordenadas = useMemo(() => {
+    const chaves = new Set(chamados.map(c => chaveConversa(c.phone)))
+    return [...filtradas].sort((a, b) => (chaves.has(b.chave) ? 1 : 0) - (chaves.has(a.chave) ? 1 : 0))
+  }, [filtradas, chamados])
+
   const totalPausados = conversas.filter(c => c.pausado).length
+
+  const chamadoPorChave = useMemo(() => {
+    const m = new Map()
+    for (const c of chamados) m.set(chaveConversa(c.phone), c)
+    return m
+  }, [chamados])
+
+  // Abrir a conversa É atender: o alarme para quando alguém olha, não quando
+  // alguém lembra de apertar um botão a mais.
+  function abrirConversa(item) {
+    setAberta(item)
+    const ch = chamadoPorChave.get(item.chave)
+    if (ch) atender(ch.id)
+  }
 
   return (
     <div>
@@ -342,7 +362,7 @@ export default function WhatsAppConversas() {
 
       {loading ? (
         <div className="card"><div className="skeleton-row" /><div className="skeleton-row" style={{ width: '70%' }} /></div>
-      ) : filtradas.length === 0 ? (
+      ) : ordenadas.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon" style={{ fontSize: 22 }}>💬</div>
           <strong>{conversas.length === 0 ? 'Nenhuma conversa ainda' : 'Nada encontrado'}</strong>
@@ -350,19 +370,20 @@ export default function WhatsAppConversas() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {filtradas.map(item => (
+          {ordenadas.map(item => (
             <div key={item.chave} className="card" style={{
               padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
               borderLeft: `4px solid ${item.pausado ? 'var(--danger)' : 'var(--success)'}`,
             }}>
               <button
                 type="button"
-                onClick={() => setAberta(item)}
+                onClick={() => abrirConversa(item)}
                 style={{ minWidth: 0, flex: 1, textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text)' }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <span style={{ fontWeight: 700 }}>{formatarTelefone(item.phone)}</span>
                   {item.nome && <span className="badge badge-primary">{item.nome}</span>}
+                  {chamadoPorChave.has(item.chave) && <span className="badge badge-danger">🔔 Quer atendente</span>}
                   {item.pausado
                     ? <span className="badge badge-danger">Robô pausado</span>
                     : <span className="badge badge-success">Robô ativo</span>}
@@ -375,7 +396,7 @@ export default function WhatsAppConversas() {
                 </div>
               </button>
               <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                <button className="btn btn-primary btn-sm" onClick={() => setAberta(item)}>💬 Responder</button>
+                <button className="btn btn-primary btn-sm" onClick={() => abrirConversa(item)}>💬 Responder</button>
                 <button
                   className={`btn btn-sm ${item.pausado ? 'btn-secondary' : 'btn-danger'}`}
                   disabled={busy === item.chave}
@@ -393,7 +414,6 @@ export default function WhatsAppConversas() {
         <Conversa
           empresaId={empresaId}
           item={aberta}
-          iaAtiva={iaAtiva}
           onFechar={() => { setAberta(null); load() }}
           onPausou={chave => setConversas(prev => prev.map(c => c.chave === chave ? { ...c, pausado: true } : c))}
           onEnviou={(chave, msg) => setConversas(prev => prev.map(c => c.chave === chave ? { ...c, ultima: msg, quando: new Date().toISOString() } : c))}

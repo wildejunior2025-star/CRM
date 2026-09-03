@@ -16,6 +16,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { responderSemIA, pausarPorAtendimentoHumano } from "../_shared/respostaSemIA.ts"
 
 const SUPABASE_URL  = Deno.env.get("SUPABASE_URL") ?? ""
 const SUPABASE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
@@ -150,165 +151,6 @@ function textoParaRegistroCloud(message: any): string {
 }
 
 
-// Palavras que não ajudam a achar produto nenhum — o que sobra depois delas é o
-// que o cliente realmente quer ("tem coca gelada?" vira "coca gelada").
-const PALAVRAS_VAZIAS = new Set([
-  "tem", "tens", "teria", "temos", "quanto", "quanta", "quantos", "custa", "custam",
-  "valor", "preco", "vale", "sai", "por", "favor", "boa", "bom", "dia", "tarde",
-  "noite", "oi", "ola", "vc", "voce", "vcs", "voces", "ai", "ta", "esta", "ainda",
-  "quero", "queria", "gostaria", "pra", "para", "com", "sem", "que", "qual", "quais",
-  "uma", "uns", "umas", "dos", "das", "nao", "sim", "voltou", "chegou", "hoje",
-  "ver", "saber", "sobre", "mim", "me", "eu", "de", "do", "da", "os", "as", "um",
-])
-
-const semAcentoTxt = (s: string) =>
-  String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
-
-// As palavras que valem a pena procurar, da mais longa pra mais curta: a maior
-// costuma ser a que identifica o produto ("quentinha", "picole", "cerveja").
-function palavrasDeBusca(texto: string): string[] {
-  return semAcentoTxt(texto)
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter(p => p.length >= 3 && !PALAVRAS_VAZIAS.has(p) && !/^\d+$/.test(p))
-    .sort((a, b) => b.length - a.length)
-    .slice(0, 3)
-}
-
-
-// "Tem X?" respondido pelo CARDÁPIO, sem IA: procura o nome no banco e responde
-// com preço e link. É a segunda pergunta mais comum depois do "oi", e a que
-// mais fazia o cliente desistir quando ninguém respondia.
-async function responderProduto(
-  supabase: ReturnType<typeof createClient>,
-  empresaId: string,
-  texto: string,
-  link: string | null,
-): Promise<string | null> {
-  try {
-    const termos = palavrasDeBusca(texto)
-    if (!termos.length) return null
-    for (const termo of termos) {
-      const { data, error } = await supabase.rpc("buscar_produto_nome", {
-        p_empresa: empresaId, p_termo: termo, p_limite: 3,
-      })
-      if (error) console.error("[produto] rpc erro:", termo, JSON.stringify(error).slice(0, 200))
-      const achados = Array.isArray(data) ? data : []
-      console.log("[produto] termo", termo, "achou", achados.length)
-      if (!achados.length) continue
-      const NL2 = String.fromCharCode(10)
-      const linha = (p: Record<string, unknown>) => {
-        const preco = Number(p.preco ?? 0)
-        // Produto no peso/sob consulta entra sem preço: "R$ 0,00" faz o cliente
-        // achar que é de graça.
-        return preco > 0
-          ? `${p.nome} — R$ ${preco.toFixed(2).replace(".", ",")}`
-          : String(p.nome)
-      }
-
-      // O link entra SÓ na primeira fala da conversa (link == null depois
-      // disso). Montar a sacola pelo robô ficou de fora: produto com sabor ou
-      // tamanho ele não tem como escolher sozinho, e montar pra uns e pra
-      // outros não é pior que não montar pra ninguém — é mais confuso.
-      const lista = achados.map(linha).join(NL2)
-      return link
-        ? `Tem sim! 🙌${NL2}${lista}${NL2}${NL2}Peça aqui que já cai direto pra gente separar:${NL2}${link}`
-        : `Tem sim! 🙌${NL2}${lista}`
-    }
-    return null
-  } catch (e) {
-    console.error("[produto] busca falhou:", e)
-    return null
-  }
-}
-
-// Resposta automática com o link do cardápio (robô de IA desligado, mig 0226).
-// Uma vez a cada 6 horas por cliente: cinco mensagens seguidas não podem virar
-// cinco links na cara dele.
-async function responderComLink(
-  supabase: ReturnType<typeof createClient>,
-  cfg: Record<string, unknown>,
-  phoneNumberId: string,
-  token: string,
-  phone: string,
-  mensagemDoCliente = "",
-): Promise<boolean> {
-  try {
-    if (cfg.resposta_link_ativo !== true) return false
-    const empresa = (cfg.empresas ?? {}) as Record<string, unknown>
-    const slug = String(empresa.slug ?? "").trim()
-    if (!slug || !cfg.empresa_id) return false
-
-    // Conversa que a loja assumiu (pausou o robô nesse número) não recebe
-    // resposta automática: quem está atendendo é gente, e o robô falando por
-    // cima é o jeito mais rápido de a loja desligar isso pra sempre.
-    const chavePausa = String(phone).replace(/\D/g, "").slice(-8)
-    const { data: pausado } = await supabase.from("whatsapp_bot_pausado")
-      .select("phone").eq("empresa_id", cfg.empresa_id as string)
-      .like("phone", `%${chavePausa}`).limit(1).maybeSingle()
-    if (pausado) return false
-
-    const soDigitosPre = String(phone).replace(/\D/g, "")
-    const telPre = (soDigitosPre.startsWith("55") && soDigitosPre.length >= 12) ? soDigitosPre.slice(2) : soDigitosPre
-    const linkPre = `https://lojaonline.fwcinter.com/${slug}?t=${telPre}`
-
-    // O limite é do LINK, não da resposta. Quem pergunta é sempre respondido; o
-    // link vai na PRIMEIRA fala da conversa e não se repete a cada mensagem —
-    // link em toda linha vira paisagem e o cliente para de ver.
-    const limiteLink = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-    const { data: linkRecente } = await supabase
-      .from("whatsapp_conversas")
-      .select("id")
-      .eq("empresa_id", cfg.empresa_id as string)
-      .eq("phone", phone)
-      .eq("role", "assistant")
-      .ilike("content", "%lojaonline.fwcinter.com%")
-      .gte("created_at", limiteLink)
-      .limit(1)
-      .maybeSingle()
-
-    const respProduto = await responderProduto(
-      supabase, cfg.empresa_id as string, mensagemDoCliente, linkRecente ? null : linkPre,
-    )
-    if (respProduto) {
-      await sendText(phoneNumberId, phone, respProduto, token)
-      await supabase.from("whatsapp_conversas").insert({
-        empresa_id: cfg.empresa_id as string, phone, role: "assistant", content: respProduto,
-      })
-      return true
-    }
-
-    // Não achou produto nenhum: vai o recado curto com o link — e só se ele
-    // ainda não tiver recebido link na última hora.
-    if (linkRecente) return false
-
-    // Sem o 55 do país: o checkout lê isso como telefone brasileiro e o 55
-    // viraria DDD — "(55) 84981-80774". Com 12 ou 13 dígitos começando em 55,
-    // o país sai e sobra DDD + número, que é o que o cadastro guarda.
-    const soDigitos = String(phone).replace(/\D/g, "")
-    const telLink = (soDigitos.startsWith("55") && soDigitos.length >= 12)
-      ? soDigitos.slice(2)
-      : soDigitos
-    const link = `https://lojaonline.fwcinter.com/${slug}?t=${telLink}`
-    const NL = String.fromCharCode(10)
-    const proprio = String(cfg.resposta_link_texto ?? "").trim()
-    // CURTA de propósito: ninguém lê parágrafo de robô. Duas linhas e o link —
-    // e o preview do WhatsApp já mostra o nome e a foto da loja de graça.
-    const texto = proprio
-      ? `${proprio}${NL}${link}`
-      : `Oi! 👋 Peça aqui, é rapidinho:${NL}${link}`
-
-    await sendText(phoneNumberId, phone, texto, token)
-    await supabase.from("whatsapp_conversas").insert({
-      empresa_id: cfg.empresa_id as string, phone, role: "assistant", content: texto,
-    })
-    return true
-  } catch (e) {
-    console.error("[link] falhou:", e)
-    return false
-  }
-}
-
 // ── Envio de texto pela Graph API ────────────────────────────────────────────
 async function sendText(phoneNumberId: string, to: string, text: string, token: string) {
   try {
@@ -327,6 +169,41 @@ async function sendText(phoneNumberId: string, to: string, text: string, token: 
     if (!res.ok) console.error("[cloud send] erro", res.status, (await res.text()).slice(0, 400))
   } catch (e) {
     console.error("[cloud send] exceção", String(e))
+  }
+}
+
+// Eco de mensagem que a própria loja mandou pelo celular dela. Pausa o robô e
+// joga a resposta na conversa do gestor — quem abrir a tela depois precisa ver
+// o que o dono já respondeu.
+// deno-lint-ignore-next-line no-explicit-any
+async function lojaAssumiuCloud(supabase: any, phoneNumberId: string, eco: any) {
+  try {
+    // No eco, `to` é o cliente (o `from` é o número da própria loja).
+    const phone = String(eco?.to ?? "").replace(/\D/g, "")
+    const texto = textoParaRegistroCloud(eco).trim()
+    if (!phone || !texto) return
+
+    const { data: cfg } = await supabase.from("whatsapp_config")
+      .select("empresa_id").eq("cloud_phone_number_id", phoneNumberId).eq("ativo", true).maybeSingle()
+    if (!cfg?.empresa_id) return
+
+    // O eco também volta pras mensagens que SAÍRAM daqui. Tudo que o sistema
+    // manda fica guardado como assistant: se o texto bate, o eco é nosso.
+    const dezMin = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+    const { data: nossas } = await supabase.from("whatsapp_conversas")
+      .select("content").eq("empresa_id", cfg.empresa_id)
+      .like("phone", `%${phone.slice(-8)}`).eq("role", "assistant")
+      .gte("created_at", dezMin).limit(20)
+    const daMaquina = (Array.isArray(nossas) ? nossas : [])
+      .some((m: Record<string, unknown>) => String(m.content ?? "").trim() === texto)
+    if (daMaquina) return
+
+    await pausarPorAtendimentoHumano(supabase, cfg.empresa_id, phone)
+    await supabase.from("whatsapp_conversas").insert({
+      empresa_id: cfg.empresa_id, phone, role: "assistant", content: texto, origem: "loja",
+    })
+  } catch (e) {
+    console.error("[eco] falhou:", e)
   }
 }
 
@@ -365,6 +242,21 @@ async function processar(body: any) {
     return
   }
 
+  // ── A LOJA ASSUMIU A CONVERSA (coexistência) ──────────────────────────────
+  // Na coexistência o dono continua usando o WhatsApp Business no celular. Toda
+  // mensagem que ele manda de lá volta pra cá como eco — e é por ela que o robô
+  // sabe que tem gente atendendo e cala a boca naquele número por 12 horas.
+  //
+  // Só chega se o app estiver inscrito no campo `message_echoes` na Meta. Sem a
+  // inscrição isto nunca roda: não quebra nada, só não pausa sozinho.
+  const ecos = value?.message_echoes
+  if (Array.isArray(ecos) && ecos.length) {
+    for (const eco of ecos) {
+      await lojaAssumiuCloud(supabase, phoneNumberId, eco)
+    }
+    return
+  }
+
   const message = value?.messages?.[0]
   if (!phoneNumberId || !message) return          // outros eventos: ignora
 
@@ -374,7 +266,7 @@ async function processar(body: any) {
   // Acha a loja dona desse número
   const { data: cfg } = await supabase
     .from("whatsapp_config")
-    .select("empresa_id, instance_name, cloud_phone_number_id, ativo, ia_ativo, resposta_link_ativo, resposta_link_texto, empresas(nome, slug, agendamento_ativo)")
+    .select("empresa_id, instance_name, cloud_phone_number_id, ativo, ia_ativo, resposta_link_ativo, resposta_link_texto, empresas(nome, slug, agendamento_ativo, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
     .eq("cloud_phone_number_id", phoneNumberId)
     .eq("ativo", true)
     .maybeSingle()
@@ -466,7 +358,10 @@ async function processar(body: any) {
       // Resposta automática com o link do cardápio (mig 0226). Aqui a janela de
       // 24h da Meta não atrapalha: o cliente ACABOU de escrever, então texto
       // livre é permitido e não é cobrado.
-      await responderComLink(supabase, cfg as Record<string, unknown>, phoneNumberId, token, from, conteudo)
+      await responderSemIA({
+        supabase, cfg: cfg as Record<string, unknown>, phone: from, mensagem: conteudo,
+        enviar: (texto: string) => sendText(phoneNumberId, from, texto, token),
+      })
     }
     return
   }
