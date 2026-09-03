@@ -333,7 +333,29 @@ function pagamentoInfo(p) {
 // Normaliza texto (tira acento, minúsculo) pra comparar nome de produto/categoria.
 function normTxt(s) { return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase() }
 // Palavras que denunciam bebida — fallback caso a lista de produtos não carregue.
-const BEBIDA_KEYWORDS = /refrigerante|guaran|\bcerveja|heineken|\bskol|\bbrahma|energetic|red bull|monster|\bsuco|\bagua\b|itaipava/
+// Marca conta tanto quanto o tipo: o iFood manda "Pepsi 200ml", que não tem
+// nem "refrigerante" nem "guaraná" no nome.
+const BEBIDA_KEYWORDS = /refrigerante|\brefri\b|guaran|antarc|\bcerveja|heineken|\bskol|\bbrahma|itaipava|energetic|red bull|monster|\bbaly|\bsuco|refresco|\bagua\b|\bcoca\b|coca.?cola|\bpepsi|\bfanta|\bsprite|\bsukita|grapette|schweppes|\bkuat|\bdolly|itubaina|\btonica|\bh2o\b|del valle|milk.?shake|\bcha\b|\bvinho|whisky|vodka|\bgin\b|caipirin/
+
+// Palavras que aparecem em bebida E em comida — tamanho, embalagem, sabor. Não
+// servem de pista: "laranja" está no suco e no frango ao molho de laranja.
+const BEBIDA_PALAVRAS_VAGAS = new Set([
+  'lata', 'latas', 'litro', 'litros', 'garrafa', 'garrafas', 'pack', 'fardo', 'unidade',
+  'pequena', 'pequeno', 'grande', 'media', 'medio', 'mini', 'copo', 'caixa',
+  'gelada', 'gelado', 'gelo', 'zero', 'light', 'diet', 'original', 'tradicional',
+  'sabor', 'sabores', 'diversas', 'diversos', 'outros', 'outras', 'natural', 'polpa',
+  'fresh', 'black', 'para', 'mais', 'misto', 'verde', 'preto', 'frutas',
+  'laranja', 'limao', 'morango', 'maracuja', 'abacaxi', 'manga', 'caju', 'acerola',
+  'goiaba', 'graviola', 'cupuacu', 'melancia', 'pessego', 'coco',
+])
+
+// Palavras "de marca" de um nome de produto: as que sobram depois de tirar
+// tamanho (350ml, 1l), embalagem e sabor. De "Pepsi Cola 1l" sobra pepsi, cola.
+function palavrasDeMarca(nome) {
+  return normTxt(nome)
+    .split(/[^a-z0-9]+/)
+    .filter(p => p.length >= 4 && !/^\d/.test(p) && !BEBIDA_PALAVRAS_VAGAS.has(p))
+}
 
 // Horário previsto de entrega: no iFood vem do próprio iFood; na loja calcula pelo tempo de entrega.
 function previstaEntregaTxt(p, tempoMax) {
@@ -346,11 +368,14 @@ function previstaEntregaTxt(p, tempoMax) {
   return dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
-function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, temBebida = false, exigeCodigo = true, tempoEntregaMax, empresa, ordemRota, totalRota = 0, checagemEndereco, foraDaRota = false, onAlternarRota }) {
+function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, bebidas = null, exigeCodigo = true, tempoEntregaMax, empresa, ordemRota, totalRota = 0, checagemEndereco, foraDaRota = false, onAlternarRota }) {
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
   const [verItens, setVerItens] = useState(false)
+  const bebidasNomes = bebidas?.nomes ?? []
+  const bebidasIdx = bebidas?.idx ?? new Set()
+  const temBebida = bebidasNomes.length > 0
   const endereco = enderecoTexto(pedido)
   const itensPedido = Array.isArray(pedido.itens) ? pedido.itens : []
   const totalItens = itensPedido.reduce((s, it) => s + Number(it.quantidade ?? it.qtd ?? 1), 0)
@@ -555,6 +580,7 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
             const extras = complementos.filter(c => Number(c.preco ?? c.preco_adicional ?? 0) > 0)
             return (
               <li key={i} style={{ fontSize: 13.5, color: 'var(--text)', padding: '3px 0' }}>
+                {bebidasIdx.has(i) && <span style={{ marginRight: 3 }}>🥤</span>}
                 <strong>{it.quantidade ?? it.qtd ?? 1}×</strong> {nome || '—'}
                 {extras.map((c, j) => (
                   <span key={j} style={{
@@ -608,7 +634,7 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
           borderRadius: 8, padding: '6px 10px', marginBottom: 10,
           fontSize: 12.5, fontWeight: 800, color: '#b45309',
         }}>
-          🥤 Tem bebida neste pedido — não esqueça!
+          🥤 Não esqueça: {bebidasNomes.join(', ')}
         </div>
       )}
       {/* O que o motoqueiro RECEBE nesta corrida (iFood já com o desconto abatido) */}
@@ -806,6 +832,7 @@ export default function PainelEntregador() {
   // categorias de bebida. Se não carregar (RLS), o fallback por palavra-chave cobre.
   const [bebidaIds, setBebidaIds] = useState(() => new Set())
   const [bebidaNomes, setBebidaNomes] = useState(() => new Set())
+  const [bebidaPalavras, setBebidaPalavras] = useState(() => new Set())
   useEffect(() => {
     if (!empresa?.id) return
     let vivo = true
@@ -813,19 +840,48 @@ export default function PainelEntregador() {
       const { data } = await fetchAll(() => supabase.from('produtos').select('id, nome, categoria').eq('empresa_id', empresa.id).order('id'))
       if (!vivo || !data) return
       const ehBebida = c => /refriger|cerveja|suco|agua|energetic|bebida|drink/.test(normTxt(c))
-      const ids = new Set(), nomes = new Set()
-      for (const p of data) if (ehBebida(p.categoria)) { ids.add(p.id); nomes.add(normTxt(p.nome)) }
-      setBebidaIds(ids); setBebidaNomes(nomes)
+      const ids = new Set(), nomes = new Set(), palavras = new Set()
+      for (const p of data) if (ehBebida(p.categoria)) {
+        ids.add(p.id); nomes.add(normTxt(p.nome))
+        for (const w of palavrasDeMarca(p.nome)) palavras.add(w)
+      }
+      setBebidaIds(ids); setBebidaNomes(nomes); setBebidaPalavras(palavras)
     })()
     return () => { vivo = false }
   }, [empresa?.id])
-  function pedidoTemBebida(pedido) {
+
+  // Quais itens do pedido são bebida — devolve o índice (pra marcar na lista) e
+  // o nome (pra escrever no alerta).
+  //
+  // O iFood manda o item SEM produto_id e com o nome do cardápio DELE. No
+  // pedido 43 do Zebu (03/09/2026) veio "Pepsi 200ml": não bateu no id, não
+  // bateu no nome exato (na loja é "Pepsi Cola 1l", "Refrigerante Pepsi 350ml")
+  // e "pepsi" não estava na lista fixa — o motoqueiro saiu sem a bebida. Agora
+  // basta UMA palavra de marca da loja aparecer no nome do item.
+  function bebidasDoPedido(pedido) {
     const itens = Array.isArray(pedido.itens) ? pedido.itens : []
-    return itens.some(it => {
-      if (it.produto_id && bebidaIds.has(it.produto_id)) return true
-      const n = normTxt(it.nome)
-      return bebidaNomes.has(n) || BEBIDA_KEYWORDS.test(n)
+    const ehBebidaTxt = txt => {
+      const n = normTxt(txt)
+      if (!n) return false
+      return bebidaNomes.has(n) || BEBIDA_KEYWORDS.test(n) || palavrasDeMarca(txt).some(p => bebidaPalavras.has(p))
+    }
+    const idx = new Set(), nomes = []
+    itens.forEach((it, i) => {
+      const qtd = Number(it?.quantidade ?? it?.qtd ?? 1) || 1
+      const { nome, complementos } = separarItem(it)
+      if ((it?.produto_id && bebidaIds.has(it.produto_id)) || ehBebidaTxt(it?.nome)) {
+        idx.add(i)
+        nomes.push(qtd + '× ' + (nome || it?.nome || 'bebida'))
+        return
+      }
+      // Bebida que vem dentro do combo ("Prato + Refrigerante lata").
+      const dentro = complementos.filter(c => ehBebidaTxt(c?.nome))
+      if (dentro.length) {
+        idx.add(i)
+        for (const c of dentro) nomes.push((Number(c.qtdTotal ?? qtd) || qtd) + '× ' + c.nome)
+      }
     })
+    return { idx, nomes }
   }
 
   // Config global: exigir código de entrega da loja? (iFood sempre exige o dele.)
@@ -1275,7 +1331,7 @@ export default function PainelEntregador() {
                   </button>
                 )}
                 {minhasF.map(p => (
-                  <CardEntrega key={p.id} pedido={p} mine temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} empresa={empresa}
+                  <CardEntrega key={p.id} pedido={p} mine bebidas={bebidasDoPedido(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} empresa={empresa}
                     ordemRota={ordemRota.get(p.id)} totalRota={ordemRota.size}
                     checagemEndereco={checagem.get(p.id)}
                     foraDaRota={foraDaRota.has(p.id)} onAlternarRota={alternarForaDaRota}
@@ -1301,7 +1357,7 @@ export default function PainelEntregador() {
                 Nenhum pedido encontrado pra <strong>“{busca}”</strong>.
               </div>
             ) : disponiveisF.map(p => (
-              <CardEntrega key={p.id} pedido={p} mine={false} temBebida={pedidoTemBebida(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} empresa={empresa} onAceitar={podeAceitar ? aceitar : undefined} />
+              <CardEntrega key={p.id} pedido={p} mine={false} bebidas={bebidasDoPedido(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} empresa={empresa} onAceitar={podeAceitar ? aceitar : undefined} />
             ))
           )
         ) : (
