@@ -279,7 +279,12 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
   // Cada item tem um tracejado embaixo (espaço bom entre um e outro).
   const linhas = itens.map(it => {
     const q = it.quantidade ?? it.qtd ?? 1
-    return `<li><div class="it">${esc(q)} ${esc(it.nome)}</div>${it.observacao ? `<div class="obs">▸ ${esc(it.observacao)}</div>` : ''}<div class="sep"></div></li>`
+    // Sabor por linha, como no cupom de delivery: colado no nome do produto o
+    // pastel virava um parágrafo que quebrava no meio da palavra.
+    const { nome, complementos } = separarItem(it)
+    const comps = complementos.map(c => c?.nome
+      ? `<div class="comp">${esc(Number(c.qtdTotal ?? 1))} ${esc(c.nome)}</div>` : '').join('')
+    return `<li><div class="it">${esc(q)} ${esc(nome)}</div>${comps}${it.observacao ? `<div class="obs">▸ ${esc(it.observacao)}</div>` : ''}<div class="sep"></div></li>`
   }).join('')
   return `<!doctype html><html><head><meta charset="utf-8"><title>Cozinha ${esc(titulo)}</title>
 <style>
@@ -293,6 +298,7 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
   ul { list-style: none; margin: 0; padding: 0; }
   li { margin-bottom: 4px; }
   .it { font-size: 24px; font-weight: 800; line-height: 1.25; }
+  .comp { font-size: 21px; font-weight: 700; padding-left: 14px; line-height: 1.3; }
   .obs { font-size: 22px; font-weight: 700; padding-left: 12px; margin-top: 2px; }
   .sep { border-top: 1px dashed #000; margin: 20px 0 34px; }
   .rodape { text-align: center; font-size: 14px; margin-top: 8px; }

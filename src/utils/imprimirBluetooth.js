@@ -42,7 +42,16 @@ const LS_DEV = 'bt_printer_id' // id do aparelho autorizado — pra religar sozi
 
 const suporta = () => typeof navigator !== 'undefined' && !!navigator.bluetooth
 const enc = (s) => new TextEncoder().encode(s)
-const semAcento = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+// A térmica lê a tabela dela (CP437), não UTF-8: todo caractere fora do ASCII
+// vira lixo no papel — foi o "2Ã-" no lugar de "2×" na comanda dos pastéis.
+// Tirar acento não bastava, porque × e – não são acento. Aqui os símbolos
+// comuns viram o parente ASCII e o resto cai fora, em vez de sujar a linha.
+const trocaSimbolos = (s) => String(s ?? '')
+  .replace(/[×✕✖]/g, 'x').replace(/[–—−]/g, '-')
+  .replace(/[“”„]/g, '"').replace(/[‘’‚]/g, "'")
+  .replace(/…/g, '...').replace(/[ºᵒ°]/g, 'o').replace(/ª/g, 'a')
+  .replace(/€/g, 'EUR').replace(/[   ]/g, ' ')
+const semAcento = (s) => trocaSimbolos(s).normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^\x00-\x7F]/g, '')
 const fmt = (v) => 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',')
 
 export const estaConectada = () => !!(_car && _device?.gatt?.connected)
@@ -354,7 +363,18 @@ export function montarComandaMesaBytes({
   b.left().line()
   for (const it of itens) {
     const q = it.quantidade ?? it.qtd ?? 1
-    b.big(true).bold(true).txt(`${q} ${semAcento(it.nome)}`).nl().bold(false).big(false)
+    // Os sabores saem em LINHA PRÓPRIA, como no cupom de delivery. Colados no
+    // nome viravam um bloco só — "6 Porcao de Pastel (escolha os sabores)
+    // (Carne Moida, 2x Queijo, 2x Frango...)" quebrando no meio da palavra, e
+    // o cozinheiro não achava quantos de cada sabor eram.
+    const { nome, complementos } = separarItem(it)
+    b.big(true).bold(true).txt(`${q} ${semAcento(nome)}`).nl().bold(false).big(false)
+    for (const c of complementos) {
+      const cn = semAcento(c?.nome ?? c)
+      if (!cn) continue
+      // Alto (não largo) pra caber o sabor inteiro na linha e ainda ler de longe.
+      b.alto(true).bold(true).txt(`  ${Number(c?.qtdTotal ?? 1)} ${cn}`).nl().bold(false).alto(false)
+    }
     if (it.observacao) b.txt('   > ' + semAcento(it.observacao)).nl()
     b.nl()
   }

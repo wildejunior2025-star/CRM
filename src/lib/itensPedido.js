@@ -43,20 +43,36 @@ export function separarItem(item) {
   let nome = String(item?.nome ?? '')
   let complementos = Array.isArray(item?.complementos) ? item.complementos : []
 
+  const qtdItem = Number(item?.quantidade ?? item?.qtd ?? 1) || 1
+
   if (!complementos.length) {
     const m = nome.match(/^(.*)\((.+)\)\s*$/) // guloso: pega o ÚLTIMO parêntese
     if (m && m[2].includes(',')) {            // só separa se for lista (tem vírgula)
       nome = m[1].trim()
+      // A mesa não tem coluna de complemento: o salão escreve a montagem dentro
+      // do parêntese, e o número vem junto — "2× Queijo". Sem ler esse número o
+      // papel saía "6 2× Queijo".
       complementos = m[2]
         .split(',')
-        .map(s => ({ nome: s.trim(), qtd: 1 }))
+        .map(s => {
+          const t = s.trim()
+          const mm = t.match(/^(\d+)\s*[x×]\s*(.+)$/)
+          return mm ? { nome: mm[2].trim(), qtd: Number(mm[1]) || 1 } : { nome: t, qtd: 1 }
+        })
         .filter(c => c.nome)
+      // Absoluto ou por unidade? O nome não diz qual grupo era. Mas quando os
+      // números somam a quantidade da linha (6 pastéis = 1+2+2+1 sabores), eles
+      // JÁ são o total — é o grupo em modo_quantidade. Fora disso vale a regra
+      // de sempre: 4 quentinhas com "2× Arroz" são 8 arroz.
+      const soma = complementos.reduce((s, c) => s + c.qtd, 0)
+      if (qtdItem > 1 && soma === qtdItem) {
+        complementos = complementos.map(c => ({ ...c, absoluto: true }))
+      }
     }
   } else {
     nome = tiraListaColada(nome, complementos)
   }
 
-  const qtdItem = Number(item?.quantidade ?? item?.qtd ?? 1) || 1
   complementos = complementos.map(c => {
     const q = Number(c?.qtd ?? 1) || 1
     return { ...c, qtdTotal: c?.absoluto ? q : q * qtdItem }

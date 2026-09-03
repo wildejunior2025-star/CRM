@@ -12,8 +12,15 @@ const NL     = Buffer.from('\n', 'latin1')
 // se passar disso, o valor "R$ x,xx" quebra pra linha de baixo. 42 = fica certo.
 const LARGURA = 42
 
+// Simbolo fora do ASCII sumia calado ("2x Queijo" virava "2 Queijo"). Agora
+// vira o parente ASCII antes do corte.
+const trocaSimbolos = (s) => String(s ?? '')
+  .replace(/[×✕✖]/g, 'x').replace(/[–—−]/g, '-')
+  .replace(/[“”„]/g, '"').replace(/[‘’‚]/g, "'")
+  .replace(/…/g, '...').replace(/[º°]/g, 'o').replace(/ª/g, 'a')
+
 function txt(s) {
-  const clean = String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\x00-\x7F]/g, '')
+  const clean = trocaSimbolos(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\x00-\x7F]/g, '')
   return Buffer.from(clean, 'latin1')
 }
 function linha(s = '') { return Buffer.concat([txt(s), NL]) }
@@ -57,17 +64,29 @@ function separarItem(item) {
   let nome = String((item && item.nome) || '')
   let complementos = Array.isArray(item && item.complementos) ? item.complementos : []
 
+  const qtdItem = Number((item && (item.quantidade ?? item.qtd)) ?? 1) || 1
+
   if (!complementos.length) {
     const m = nome.match(/^(.*)\((.+)\)\s*$/)  // guloso: pega o ULTIMO parentese
     if (m && m[2].includes(',')) {              // so separa se for lista (tem virgula)
       nome = m[1].trim()
-      complementos = m[2].split(',').map(s => ({ nome: s.trim(), qtd: 1 })).filter(c => c.nome)
+      // A mesa nao tem coluna de complemento: o salao escreve a montagem dentro
+      // do parentese com o numero junto ("2x Queijo"). Sem ler esse numero o
+      // papel saia "6 2x Queijo".
+      complementos = m[2].split(',').map(s => {
+        const t = s.trim()
+        const mm = t.match(/^(\d+)\s*[x×]\s*(.+)$/)
+        return mm ? { nome: mm[2].trim(), qtd: Number(mm[1]) || 1 } : { nome: t, qtd: 1 }
+      }).filter(c => c.nome)
+      // Quando os numeros somam a quantidade da linha (6 pasteis = 1+2+2+1),
+      // eles JA sao o total — grupo em modo_quantidade.
+      const soma = complementos.reduce((s, c) => s + c.qtd, 0)
+      if (qtdItem > 1 && soma === qtdItem) complementos = complementos.map(c => ({ ...c, absoluto: true }))
     }
   } else {
     nome = tiraListaColada(nome, complementos)
   }
 
-  const qtdItem = Number((item && (item.quantidade ?? item.qtd)) ?? 1) || 1
   complementos = complementos.map(c => {
     if (typeof c === 'string') c = { nome: c, qtd: 1 }
     const q = Number((c && c.qtd) ?? 1) || 1
@@ -234,7 +253,15 @@ function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente =
   lista.forEach((it) => {
     const q = it.quantidade ?? it.qtd ?? 1
     parts.push(FEED(1)) // espaço ANTES do item — cada pedido vira um bloco maior
-    parts.push(SIZE(0x11), BOLD(1), linha(q + ' ' + (it.nome || 'Item')), BOLD(0), SIZE(0))
+    // Sabor em linha propria, igual ao cupom de delivery aqui em cima: colado no
+    // nome ("6 Pastel (Carne, 2x Queijo, 2x Frango)") a cozinha nao le quantos
+    // de cada sao, e a frase ainda quebra no meio da palavra.
+    const { nome: nomeIt, complementos: compsIt } = separarItem(it)
+    parts.push(SIZE(0x11), BOLD(1), linha(q + ' ' + (nomeIt || 'Item')), BOLD(0), SIZE(0))
+    for (const c of compsIt) {
+      if (!c || !c.nome) continue
+      parts.push(SIZE(0x01), BOLD(1), linha('  ' + (c.qtdTotal ?? 1) + ' ' + c.nome), BOLD(0), SIZE(0))
+    }
     // Observação também GRANDE (fonte alta + negrito), pra cozinha ler fácil.
     if (it.observacao) parts.push(SIZE(0x01), BOLD(1), linha('obs: ' + it.observacao), BOLD(0), SIZE(0))
     // Espaço + tracejado + espaço: separa BEM cada pedido (comanda maior por item).
