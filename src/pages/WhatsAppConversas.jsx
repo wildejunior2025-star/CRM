@@ -80,7 +80,7 @@ function Conversa({ empresaId, item, onFechar, onPausou, onEnviou }) {
   useEffect(() => {
     if (!empresaId) return
     const canal = supabase
-      .channel(`conversa-${item.chave}`)
+      .channel(`conversa-${item.chave}-${Date.now()}`)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'whatsapp_conversas', filter: `empresa_id=eq.${empresaId}` },
         payload => {
@@ -88,7 +88,9 @@ function Conversa({ empresaId, item, onFechar, onPausou, onEnviou }) {
           setMsgs(prev => (prev.some(m => m.id === payload.new.id) ? prev : [...prev, payload.new]))
         })
       .subscribe()
-    return () => { canal.unsubscribe() }
+    // removeChannel: unsubscribe deixaria o canal registrado no cliente e, ao
+    // reabrir a mesma conversa, o `.on()` cairia num canal já assinado (erro).
+    return () => { supabase.removeChannel(canal) }
   }, [empresaId, item.chave])
 
   useEffect(() => { fimRef.current?.scrollIntoView({ block: 'end' }) }, [msgs.length])
@@ -276,12 +278,12 @@ export default function WhatsAppConversas() {
   useEffect(() => {
     if (!empresaId) return
     const canal = supabase
-      .channel(`conversas-lista-${empresaId}`)
+      .channel(`conversas-lista-${empresaId}-${Date.now()}`)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'whatsapp_conversas', filter: `empresa_id=eq.${empresaId}` },
         () => load())
       .subscribe()
-    return () => { canal.unsubscribe() }
+    return () => { supabase.removeChannel(canal) }
   }, [empresaId, load])
 
   async function togglePausa(item) {

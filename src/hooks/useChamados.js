@@ -16,6 +16,11 @@ const REPETE_MS = 30000
 export function useChamados(empresaId, ativo = true) {
   const [chamados, setChamados] = useState([])
   const vistosRef = useRef(new Set())
+  // O menu lateral e a tela de Conversas usam este hook AO MESMO TEMPO. Se os
+  // dois pedirem o canal pelo mesmo nome, o cliente devolve o canal que já foi
+  // assinado e o segundo `.on()` estoura ("cannot add postgres_changes callbacks
+  // after subscribe"), derrubando a tela inteira. Cada instância tem o seu.
+  const canalIdRef = useRef(Math.random().toString(36).slice(2))
 
   const carregar = useCallback(async () => {
     if (!empresaId || !ativo) return
@@ -35,12 +40,14 @@ export function useChamados(empresaId, ativo = true) {
   useEffect(() => {
     if (!empresaId || !ativo) return
     const canal = supabase
-      .channel(`chamados-${empresaId}`)
+      .channel(`chamados-${empresaId}-${canalIdRef.current}`)
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'whatsapp_chamados', filter: `empresa_id=eq.${empresaId}` },
         () => carregar())
       .subscribe()
-    return () => { canal.unsubscribe() }
+    // removeChannel, não unsubscribe: unsubscribe deixa o canal registrado no
+    // cliente, e o próximo `supabase.channel(mesmo nome)` devolve esse zumbi.
+    return () => { supabase.removeChannel(canal) }
   }, [empresaId, ativo, carregar])
 
   // Toca no chamado que ainda não tinha aparecido nesta tela.
