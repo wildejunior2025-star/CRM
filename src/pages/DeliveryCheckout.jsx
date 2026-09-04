@@ -1837,15 +1837,16 @@ export default function DeliveryCheckout() {
                   </div>
                 )}
                 {/* PIX na entrega: nada é cobrado agora — o cliente paga na chave
-                    da loja quando o pedido chegar. Mostra a chave já aqui pra ele
-                    saber pra quem vai pagar. */}
+                    da loja. Mostra a chave já aqui pra ele saber pra quem vai
+                    pagar, e pede o comprovante no WhatsApp: é assim que a loja
+                    sabe que o pagamento saiu antes de separar o pedido. */}
                 {form.pagamento === 'pix_entrega' && (
                   <div style={{
                     marginTop: 10, padding: '10px 12px', borderRadius: 10,
                     background: 'rgba(0,180,216,.10)', border: '1px solid rgba(0,180,216,.35)',
                     fontSize: 13, lineHeight: 1.5, color: 'var(--text,#e6e6f0)',
                   }}>
-                    Você paga o PIX <strong>na hora que o pedido chegar</strong>, direto pra loja.
+                    Mande o comprovante no <strong>WhatsApp</strong> para concluir o pedido.
                     {lojaEndereco?.chave_pix && (
                       <div style={{ marginTop: 6 }}>
                         Chave PIX: <strong style={{ wordBreak: 'break-all' }}>{lojaEndereco.chave_pix}</strong>
