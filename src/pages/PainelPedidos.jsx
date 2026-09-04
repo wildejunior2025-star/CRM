@@ -3934,8 +3934,8 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
           return (
             <div key={m.id} style={{ display: 'flex', justifyContent: daLoja ? 'flex-end' : 'flex-start' }}>
               <div style={{
-                maxWidth: g ? '74%' : '82%', padding: g ? '10px 14px' : '7px 11px', borderRadius: 12,
-                fontSize: g ? 15 : 13.5, lineHeight: g ? 1.45 : 1.35,
+                maxWidth: g ? '76%' : '82%', padding: g ? '12px 16px' : '7px 11px', borderRadius: 13,
+                fontSize: g ? 17 : 13.5, lineHeight: g ? 1.5 : 1.35,
                 // Fala do robô fica num roxo mais apagado: quem atende precisa
                 // ver de relance o que já foi respondido sem ler tudo de novo.
                 background: doRobo ? 'rgba(124,58,237,.28)' : daLoja ? '#7c3aed' : 'var(--bg, #0f0f1a)',
@@ -4014,7 +4014,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
           style={{
             flex: 1, resize: 'none', maxHeight: g ? 140 : 90, padding: g ? '12px 14px' : '9px 11px', borderRadius: 10,
             border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)',
-            color: 'var(--text)', fontSize: g ? 15 : 13.5, fontFamily: 'inherit',
+            color: 'var(--text)', fontSize: g ? 16.5 : 13.5, fontFamily: 'inherit',
           }}
         />
         <button type="button" onClick={onEnviar} disabled={!texto.trim() || enviando}
@@ -4090,7 +4090,7 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso }) {
       <button type="button" onClick={() => setAberto(true)}
         style={{
           marginTop: 8, width: '100%', padding: g ? '12px 14px' : '8px 10px', borderRadius: 10,
-          cursor: 'pointer', fontSize: g ? 14 : 12.5, fontWeight: 700,
+          cursor: 'pointer', fontSize: g ? 15.5 : 12.5, fontWeight: 700,
           border: '1px dashed var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text-muted)',
         }}>🔍 Buscar produto no cardápio</button>
     )
@@ -4105,7 +4105,7 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso }) {
           onChange={e => { setTermo(e.target.value); buscar(e.target.value) }}
           placeholder="Nome do produto (ex.: galioto, coca 2l)"
           style={{
-            flex: 1, padding: g ? '11px 13px' : '7px 10px', borderRadius: 9, fontSize: g ? 15 : 13,
+            flex: 1, padding: g ? '13px 15px' : '7px 10px', borderRadius: 9, fontSize: g ? 16 : 13,
             border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
           }}
         />
@@ -4143,8 +4143,8 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso }) {
                 textAlign: 'left', cursor: 'pointer', padding: g ? '11px 13px' : '7px 9px', borderRadius: 9,
                 border: '1px solid var(--border, #2a2a3a)', background: 'transparent',
               }}>
-              <div style={{ fontSize: g ? 15 : 13, fontWeight: 700, color: 'var(--text)' }}>{p.nome}</div>
-              <div style={{ fontSize: g ? 13 : 11.5, color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: g ? 16.5 : 13, fontWeight: 700, color: 'var(--text)' }}>{p.nome}</div>
+              <div style={{ fontSize: g ? 14 : 11.5, color: 'var(--text-muted)' }}>
                 {Number(p.preco) > 0 ? `R$ ${Number(p.preco).toFixed(2).replace('.', ',')}` : 'sob consulta'}
                 {p.categoria ? ` · ${p.categoria}` : ''}
               </div>
@@ -4173,17 +4173,17 @@ function SacolaNoChat({ itens, onQtd, onRemover, onEnviar, enviando }) {
       marginTop: 8, border: '1px solid rgba(34,197,94,.4)', borderRadius: 10,
       background: 'rgba(34,197,94,.06)', padding: g ? 14 : 8,
     }}>
-      <div style={{ fontSize: g ? 12.5 : 11, fontWeight: 800, color: '#22c55e', marginBottom: g ? 10 : 6 }}>
+      <div style={{ fontSize: g ? 13.5 : 11, fontWeight: 800, color: '#22c55e', marginBottom: g ? 10 : 6 }}>
         🛒 SACOLA DO CLIENTE ({itens.length} {itens.length === 1 ? 'item' : 'itens'})
       </div>
 
       {itens.map((i, idx) => (
         <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: g ? 10 : 6, marginBottom: g ? 8 : 4 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: g ? 14.5 : 12.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ fontSize: g ? 16 : 12.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {i.nome}{!i.produto_id && <span style={{ fontSize: 10, color: '#f59e0b' }}> · fora do cardápio</span>}
             </div>
-            <div style={{ fontSize: g ? 13 : 11, color: 'var(--text-muted)' }}>
+            <div style={{ fontSize: g ? 14 : 11, color: 'var(--text-muted)' }}>
               R$ {Number(i.preco).toFixed(2).replace('.', ',')} · subtotal R$ {(Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')}
             </div>
           </div>
@@ -4196,19 +4196,19 @@ function SacolaNoChat({ itens, onQtd, onRemover, onEnviar, enviando }) {
 
       {itens.length > 0 && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: g ? 12 : 8, fontSize: g ? 16 : 13, fontWeight: 800, color: 'var(--text)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: g ? 12 : 8, fontSize: g ? 17.5 : 13, fontWeight: 800, color: 'var(--text)' }}>
             <span>Total dos itens</span>
             <span>R$ {total.toFixed(2).replace('.', ',')}</span>
           </div>
           <button type="button" onClick={onEnviar} disabled={enviando}
             style={{
               width: '100%', marginTop: g ? 12 : 8, padding: g ? '14px 12px' : '9px 10px', borderRadius: 9, border: 'none',
-              background: '#22c55e', color: '#fff', fontSize: g ? 14.5 : 12.5, fontWeight: 800,
+              background: '#22c55e', color: '#fff', fontSize: g ? 16 : 12.5, fontWeight: 800,
               cursor: enviando ? 'default' : 'pointer', opacity: enviando ? .6 : 1,
             }}>
             {enviando ? 'Enviando...' : '📤 Mandar pro cliente e devolver pro robô'}
           </button>
-          <div style={{ fontSize: g ? 12 : 10.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.45 }}>
+          <div style={{ fontSize: g ? 13 : 10.5, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
             O cliente recebe a lista com os preços, e o robô continua pedindo endereço e forma de pagamento.
           </div>
         </>
@@ -6499,11 +6499,12 @@ export default function PainelPedidos() {
           // right:56 reserva o menu de ícones; a largura precisa descontar isso
           // (senão no celular 94vw + 56px estoura a tela e corta o lado esquerdo).
           //
-          // No PC ela é quase o dobro: atender pelo gestor é ler conversa e
+          // No PC ela pega METADE da tela: atender pelo gestor é ler conversa e
           // montar sacola ao mesmo tempo, e 480px espremia as duas coisas num
-          // monitor que tem espaço sobrando.
+          // monitor que tem espaço sobrando. A outra metade continua mostrando
+          // os pedidos, que é o que a loja não pode perder de vista.
           position: 'fixed', top: 60, right: 56, bottom: 0, zIndex: 39,
-          width: telaGrande ? 'min(820px, calc(100vw - 80px))' : 'min(480px, calc(100vw - 64px))',
+          width: telaGrande ? 'min(50vw, calc(100vw - 80px))' : 'min(480px, calc(100vw - 64px))',
           background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
           boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowY: 'auto', overflowX: 'hidden',
           padding: telaGrande ? 22 : 16,
@@ -6535,7 +6536,7 @@ export default function PainelPedidos() {
                   padding: telaGrande ? '14px 16px' : '10px 12px',
                   background: 'rgba(220,38,38,.10)',
                 }}>
-                  <div style={{ fontSize: telaGrande ? 15.5 : 13.5, fontWeight: 700, color: 'var(--text)' }}>
+                  <div style={{ fontSize: telaGrande ? 17 : 13.5, fontWeight: 700, color: 'var(--text)' }}>
                     {c.nome || foneBonito(c.phone)}
                   </div>
                   {c.nome && (
@@ -6553,7 +6554,7 @@ export default function PainelPedidos() {
                       style={{
                         flex: 1, padding: telaGrande ? '12px 14px' : '8px 10px', borderRadius: 8,
                         cursor: 'pointer', border: 'none',
-                        background: '#22c55e', color: '#fff', fontSize: telaGrande ? 14 : 12, fontWeight: 800,
+                        background: '#22c55e', color: '#fff', fontSize: telaGrande ? 15.5 : 12, fontWeight: 800,
                       }}>💬 Responder aqui</button>
                   </div>
                   {/* Duas saídas, e a diferença é quem continua falando com o
@@ -6619,7 +6620,7 @@ export default function PainelPedidos() {
                         background: t.unread ? 'rgba(124,58,237,.08)' : 'transparent',
                       }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                        <span style={{ fontSize: telaGrande ? 15 : 13.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontSize: telaGrande ? 16.5 : 13.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {t.cliente_nome || t.cliente_ref || 'Cliente'}
                         </span>
                         <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{hora}</span>
@@ -6629,7 +6630,7 @@ export default function PainelPedidos() {
                           fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 20, flexShrink: 0,
                           background: t.canal === 'app' ? '#f97316' : '#3b82f6', color: '#fff',
                         }}>{canalLbl}</span>
-                        <span style={{ fontSize: telaGrande ? 13.5 : 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                        <span style={{ fontSize: telaGrande ? 15 : 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                           {ultima.remetente === 'loja' ? (ultima.bot ? '🤖 ' : 'Você: ') : ''}{ultima.texto}
                         </span>
                         {t.unread > 0 && (
