@@ -3900,7 +3900,7 @@ function Coluna({ titulo, cor, count, vazio, children }) {
 }
 
 // ── Conversa aberta (loja respondendo cliente) ──────────────
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   useEffect(() => {
@@ -4012,6 +4012,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
         <SacolaNoChat
           itens={sacola}
           onQtd={onQtdSacola}
+          onQtdDireta={onQtdDiretaSacola}
           onRemover={idx => onQtdSacola(idx, -999)}
           onEnviar={onEnviarSacola}
           enviando={enviandoSacola}
@@ -4161,6 +4162,12 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso, semBotao = false 
               <div style={{ fontSize: g ? 16.5 : 13, fontWeight: 700, color: 'var(--text)' }}>{p.nome}</div>
               <div style={{ fontSize: g ? 14 : 11.5, color: 'var(--text-muted)' }}>
                 {Number(p.preco) > 0 ? `R$ ${Number(p.preco).toFixed(2).replace('.', ',')}` : 'sob consulta'}
+                {/* O degrau do atacado já na lista, igual à tela de Vender: o
+                    atendente vê que existe preço melhor antes de bater a
+                    quantidade. */}
+                {menorFaixa(p.faixas_preco)
+                  ? <span style={{ color: '#22c55e', fontWeight: 700 }}> · {menorFaixa(p.faixas_preco).qtd_min}+ R$ {Number(menorFaixa(p.faixas_preco).preco).toFixed(2).replace('.', ',')}</span>
+                  : null}
                 {p.categoria ? ` · ${p.categoria}` : ''}
               </div>
             </button>
@@ -4171,6 +4178,26 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso, semBotao = false 
   )
 }
 
+/**
+ * Preço da linha da sacola pra essa quantidade — a mesma conta da tela de
+ * Vender e da Loja Online.
+ *
+ * Sem isto, 10 picolés de R$ 1,50 fechavam R$ 15,00 na conversa mesmo com a
+ * faixa "a partir de 10 sai a R$ 0,65" cadastrada: o atendente mandava pro
+ * cliente um preço que a loja não cobra em lugar nenhum.
+ *
+ * Item fora do cardápio não tem faixa nenhuma: vale o preço que o atendente
+ * digitou, e ninguém mexe nele.
+ */
+function precoSacola(item, qtd) {
+  if (item?.precoBase == null) return Number(item?.preco || 0)
+  const base = Number(item.precoBase) || 0
+  const p = precoPorQuantidade(base, item.faixas_preco, qtd, item.preco_promocional)
+  // A faixa só vale se for MENOR: preço combinado à parte não sobe por causa
+  // do atacado.
+  return Math.min(p, base)
+}
+
 // Sacola montada pelo ATENDENTE, dentro da conversa.
 //
 // Nasce do caso que o robô não resolve: o cliente pediu algo que não está no
@@ -4179,7 +4206,7 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso, semBotao = false 
 // atendente acha o produto (ou digita um que não está cadastrado), monta, e um
 // botão só manda a lista pro cliente E entrega o carrinho pro robô terminar
 // endereço e pagamento. A parte chata fica com a gente; a fácil, com o robô.
-function SacolaNoChat({ itens, onQtd, onRemover, onEnviar, enviando }) {
+function SacolaNoChat({ itens, onQtd, onQtdDireta, onRemover, onEnviar, enviando }) {
   const g = useTelaGrande()
   const total = itens.reduce((s, i) => s + Number(i.preco) * Number(i.qtd), 0)
 
@@ -4200,10 +4227,19 @@ function SacolaNoChat({ itens, onQtd, onRemover, onEnviar, enviando }) {
             </div>
             <div style={{ fontSize: g ? 14 : 11, color: 'var(--text-muted)' }}>
               R$ {Number(i.preco).toFixed(2).replace('.', ',')} · subtotal R$ {(Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')}
+              {/* Por que este preço e não o da vitrine: o atendente confere
+                  isso em voz alta com o cliente. */}
+              {faixaAplicada(i.faixas_preco, i.qtd)
+                ? <span style={{ color: '#22c55e', fontWeight: 700 }}> · atacado {faixaAplicada(i.faixas_preco, i.qtd).qtd_min}+</span>
+                : menorFaixa(i.faixas_preco)
+                  ? <span style={{ color: '#22c55e', fontWeight: 700 }}> · {menorFaixa(i.faixas_preco).qtd_min}+ sai a R$ {Number(menorFaixa(i.faixas_preco).preco).toFixed(2).replace('.', ',')}</span>
+                  : null}
             </div>
           </div>
           <button type="button" onClick={() => onQtd(idx, -1)} style={btnQtd(g)}>−</button>
-          <span style={{ fontSize: g ? 15 : 12.5, fontWeight: 800, minWidth: g ? 22 : 16, textAlign: 'center', color: 'var(--text)' }}>{i.qtd}</span>
+          {/* Digitar a quantidade, igual à tela de Vender: no atacado ninguém
+              clica 30 vezes no "+" pra vender 30 picolés. */}
+          <QtdInput value={i.qtd} onChange={n => onQtdDireta(idx, n)} />
           <button type="button" onClick={() => onQtd(idx, 1)} style={btnQtd(g)}>+</button>
           <button type="button" onClick={() => onRemover(idx)} style={{ ...btnQtd(g), color: '#ef4444' }}>×</button>
         </div>
@@ -4857,18 +4893,35 @@ export default function PainelPedidos() {
       const i = prev.findIndex(x => x.produto_id === p.id)
       if (i >= 0) {
         const copia = [...prev]
-        copia[i] = { ...copia[i], qtd: copia[i].qtd + 1 }
+        const qtd = copia[i].qtd + 1
+        copia[i] = { ...copia[i], qtd, preco: precoSacola(copia[i], qtd) }
         return copia
       }
-      return [...prev, { produto_id: p.id, nome: p.nome, preco: Number(p.preco) || 0, qtd: 1 }]
+      // Guarda o preço cheio e as faixas junto: é o que deixa a linha
+      // recalcular sozinha quando a quantidade muda.
+      const item = {
+        produto_id: p.id, nome: p.nome, qtd: 1,
+        precoBase: Number(p.preco) || 0,
+        faixas_preco: p.faixas_preco ?? [],
+        preco_promocional: p.preco_promocional ?? null,
+      }
+      return [...prev, { ...item, preco: precoSacola(item, 1) }]
     })
   }
 
-  function mudarQtdSacola(idx, delta) {
+  // Uma função só pros dois jeitos de mudar a quantidade: os botões +/− e o
+  // campo onde se digita. Quem some é a linha que chegou a zero.
+  function ajustarQtdSacola(idx, calcular) {
     setSacolaChat(prev => prev
-      .map((it, i) => (i === idx ? { ...it, qtd: it.qtd + delta } : it))
+      .map((it, i) => {
+        if (i !== idx) return it
+        const qtd = Math.max(0, Math.floor(Number(calcular(Number(it.qtd) || 0)) || 0))
+        return { ...it, qtd, preco: precoSacola(it, qtd) }
+      })
       .filter(it => it.qtd > 0))
   }
+  const mudarQtdSacola   = (idx, delta) => ajustarQtdSacola(idx, q => q + delta)
+  const definirQtdSacola = (idx, n)     => ajustarQtdSacola(idx, () => n)
 
   /**
    * Manda a sacola pro cliente e devolve a conversa pro robô.
@@ -6615,6 +6668,7 @@ export default function PainelPedidos() {
                 onDevolverAoRobo={devolverConversaAoRobo}
                 sacola={sacolaChat}
                 onQtdSacola={mudarQtdSacola}
+                onQtdDiretaSacola={definirQtdSacola}
                 onAvulsoSacola={item => setSacolaChat(prev => [...prev, item])}
                 onEnviarSacola={enviarSacolaDoChat}
                 enviandoSacola={enviandoSacola}
@@ -7278,6 +7332,7 @@ export default function PainelPedidos() {
             <SacolaNoChat
               itens={sacolaChat}
               onQtd={mudarQtdSacola}
+              onQtdDireta={definirQtdSacola}
               onRemover={idx => mudarQtdSacola(idx, -999)}
               onEnviar={enviarSacolaDoChat}
               enviando={enviandoSacola}
