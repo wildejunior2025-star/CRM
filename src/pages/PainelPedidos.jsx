@@ -1028,6 +1028,60 @@ async function geocodificarEndereco(endereco) {
   return null
 }
 
+// ── Taxa de entrega de um endereço ───────────────────────────────────────────
+// A mesma conta da Loja Online e do robô, pra que o pedido montado na conversa
+// cobre o mesmo frete que o cliente pagaria pelo link: BAIRRO cadastrado manda
+// (é o que a loja combinou na mão); sem bairro, mede a distância até a loja.
+const ABREV_BAIRRO = {
+  sra: 'senhora', sr: 'senhor', sto: 'santo', sta: 'santa',
+  n: 'nossa', na: 'nossa', jd: 'jardim', pq: 'parque',
+  vl: 'vila', cj: 'conjunto', res: 'residencial', pres: 'presidente',
+}
+function normBairro(s) {
+  return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean)
+    .map(p => ABREV_BAIRRO[p] ?? p).join(' ')
+}
+function acharBairroCfg(lista, bairroCliente) {
+  const n = normBairro(bairroCliente)
+  if (!n) return null
+  return (Array.isArray(lista) ? lista : []).find(b => normBairro(b.bairro) === n) || null
+}
+
+/**
+ * Devolve { taxa, texto, bloqueado } pro endereço. `texto` é o que aparece na
+ * tela explicando de onde saiu o valor — sem isso o atendente não tem como
+ * saber se a taxa é a do bairro, a da distância ou a fixa da loja.
+ */
+async function taxaDoEndereco(empresa, end) {
+  const cfg = acharBairroCfg(empresa?.taxas_entrega_bairro, end.bairro)
+  if (cfg && cfg.entrega === false) {
+    return { taxa: 0, bloqueado: true, texto: `A loja não entrega no bairro ${cfg.bairro}.` }
+  }
+  if (cfg) {
+    return { taxa: Number(cfg.taxa) || 0, texto: `bairro ${cfg.bairro} · taxa cadastrada` }
+  }
+
+  const faixas = Array.isArray(empresa?.taxas_entrega_km) ? empresa.taxas_entrega_km : []
+  const linha = [end.rua, end.numero, end.bairro, end.cidade || empresa?.cidade, end.cep].filter(s => s && String(s).trim()).join(', ')
+  if (empresa?.latitude && empresa?.longitude && faixas.length && linha) {
+    const coords = await geocodificarEndereco(linha)
+    if (coords) {
+      const km = haversineKm(coords.lat, coords.lng, Number(empresa.latitude), Number(empresa.longitude))
+      const ordenadas = [...faixas].sort((a, b) => Number(a.km) - Number(b.km))
+      const faixa = ordenadas.find(f => km <= Number(f.km)) ?? ordenadas[ordenadas.length - 1]
+      const fora = empresa.raio_entrega_km && km > Number(empresa.raio_entrega_km)
+      return {
+        taxa: Number(faixa.taxa) || 0,
+        texto: `${km.toFixed(1)} km da loja${fora ? ` · ⚠️ fora do raio de ${empresa.raio_entrega_km} km` : ''}`,
+      }
+    }
+  }
+  // Sem bairro cadastrado e sem como medir: a taxa fixa da loja, dizendo que é
+  // ela. Chutar zero seria entregar de graça sem ninguém perceber.
+  return { taxa: Number(empresa?.taxa_entrega ?? 0) || 0, texto: 'taxa fixa da loja (não deu pra medir a distância)' }
+}
+
 // Rascunho da venda de balcão: se o vendedor sai da tela no meio do pedido,
 // a gente guarda o que ele já digitou e reabre igualzinho quando ele volta.
 const draftKeyFor = (empresaId) => (empresaId ? `pp-venda-draft-${empresaId}` : null)
@@ -3900,7 +3954,7 @@ function Coluna({ titulo, cor, count, vazio, children }) {
 }
 
 // ── Conversa aberta (loja respondendo cliente) ──────────────
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   useEffect(() => {
@@ -4011,14 +4065,25 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
 
       {empresaId && !g && <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} onAvulso={onAvulsoSacola} />}
       {!g && sacola?.length > 0 && (
-        <SacolaNoChat
-          itens={sacola}
-          onQtd={onQtdSacola}
-          onQtdDireta={onQtdDiretaSacola}
-          onRemover={idx => onQtdSacola(idx, -999)}
-          onEnviar={onEnviarSacola}
-          enviando={enviandoSacola}
-        />
+        <>
+          <SacolaNoChat
+            itens={sacola}
+            onQtd={onQtdSacola}
+            onQtdDireta={onQtdDiretaSacola}
+            onRemover={idx => onQtdSacola(idx, -999)}
+            onEnviar={onEnviarSacola}
+            enviando={enviandoSacola}
+          />
+          <FecharPedidoNoChat
+            key={thread.cliente_ref}
+            empresa={empresa}
+            telefone={thread.cliente_ref}
+            nomeThread={thread.cliente_nome}
+            itens={sacola}
+            onFinalizar={onFinalizarPedido}
+            salvando={salvandoPedido}
+          />
+        </>
       )}
 
       {/* Caixa de resposta */}
@@ -4274,6 +4339,220 @@ const btnQtd = (g) => ({
   border: '1px solid var(--border, #2a2a3a)', background: 'transparent',
   color: 'var(--text)', fontSize: g ? 17 : 14, fontWeight: 800, lineHeight: 1,
 })
+
+// ── Fechar o pedido pela conversa ────────────────────────────────────────────
+//
+// A sacola já monta os itens. O que faltava era o resto do pedido: endereço,
+// forma de pagamento e o botão que joga no sistema. Sem isso o atendente
+// conversava aqui e digitava tudo DE NOVO na tela de Vender — dois trabalhos
+// pro mesmo pedido, e é na segunda digitação que troca item e valor.
+//
+// O endereço vem preenchido quando o cliente já pediu antes: é o caso comum, e
+// aí o atendente só confere e aperta o botão.
+const FORMAS_PGTO = [
+  ['dinheiro',    '💵 Dinheiro'],
+  ['pix_entrega', '📱 PIX'],
+  ['credito',     '💳 Crédito'],
+  ['debito',      '💳 Débito'],
+  ['cartao',      '💳 Cartão'],
+]
+
+function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar, salvando }) {
+  const g = useTelaGrande()
+  const [tipo, setTipo] = useState('entrega')
+  const [nome, setNome] = useState(nomeThread || '')
+  const [cep, setCep] = useState('')
+  const [rua, setRua] = useState('')
+  const [numero, setNumero] = useState('')
+  const [bairro, setBairro] = useState('')
+  const [cidade, setCidade] = useState('')
+  const [taxa, setTaxa] = useState('')
+  const [pagamento, setPagamento] = useState('dinheiro')
+  const [troco, setTroco] = useState('')
+  const [obs, setObs] = useState('')
+  const [msgTaxa, setMsgTaxa] = useState(null)
+  const [calculando, setCalculando] = useState(false)
+  const [achouCliente, setAchouCliente] = useState(false)
+
+  // O cadastro do cliente, pelos 8 últimos dígitos (o WhatsApp entrega o mesmo
+  // número com e sem o 9). Quem já pediu antes não digita endereço de novo.
+  useEffect(() => {
+    let vivo = true
+    const chave = String(telefone ?? '').replace(/\D/g, '').slice(-8)
+    if (!empresa?.id || chave.length < 8) return
+    ;(async () => {
+      const { data } = await supabase.from('clientes')
+        .select('nome, endereco, numero, bairro, cidade, cep')
+        .eq('empresa_id', empresa.id).ilike('telefone', `%${chave}`)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      if (!vivo || !data) return
+      setAchouCliente(true)
+      if (data.nome) setNome(n => n || data.nome)
+      if (data.endereco) setRua(data.endereco)
+      if (data.numero) setNumero(data.numero)
+      if (data.bairro) setBairro(data.bairro)
+      if (data.cidade) setCidade(data.cidade)
+      if (data.cep) setCep(data.cep)
+    })()
+    return () => { vivo = false }
+  }, [empresa?.id, telefone])
+
+  // CEP preenche rua/bairro/cidade (ViaCEP), igual à tela de Vender.
+  async function buscarCep(v) {
+    const num = String(v || '').replace(/\D/g, '')
+    if (num.length !== 8) return
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${num}/json/`)
+      const d = await res.json()
+      if (d.erro) return
+      if (d.logradouro) setRua(d.logradouro)
+      if (d.bairro) setBairro(d.bairro)
+      if (d.localidade) setCidade(d.localidade)
+    } catch { /* CEP fora do ar: segue na mão */ }
+  }
+
+  async function calcularTaxa() {
+    if (!rua.trim() && !bairro.trim()) { setMsgTaxa({ ok: false, txt: 'Preencha o bairro (ou a rua) primeiro.' }); return }
+    setCalculando(true)
+    const r = await taxaDoEndereco(empresa, { rua, numero, bairro, cidade, cep })
+    setCalculando(false)
+    setTaxa(String(r.taxa.toFixed(2)))
+    setMsgTaxa({ ok: !r.bloqueado, txt: r.bloqueado ? r.texto : `Taxa R$ ${r.taxa.toFixed(2).replace('.', ',')} — ${r.texto}` })
+  }
+
+  // Só as formas que a loja aceita. PIX aqui é sempre o PIX direto pra loja
+  // (o cliente manda o comprovante): gerar cobrança de gateway é outro caminho,
+  // e prometer isso aqui daria um pedido esperando um pagamento que não existe.
+  const aceitas = Array.isArray(empresa?.formas_pagamento) ? empresa.formas_pagamento : []
+  const formas = FORMAS_PGTO.filter(([id]) => (
+    aceitas.length === 0
+      ? id === 'dinheiro' || id === 'pix_entrega'
+      : id === 'pix_entrega' ? (aceitas.includes('pix_entrega') || aceitas.includes('pix')) : aceitas.includes(id)
+  ))
+  const formasFinais = formas.length ? formas : FORMAS_PGTO.slice(0, 2)
+
+  const subtotal = itens.reduce((s, i) => s + Number(i.preco) * Number(i.qtd), 0)
+  const taxaNum = tipo === 'entrega' ? (parseFloat(String(taxa).replace(',', '.')) || 0) : 0
+  const total = subtotal + taxaNum
+  const faltaEndereco = tipo === 'entrega' && !rua.trim()
+
+  const inp = {
+    width: '100%', padding: g ? '10px 12px' : '7px 9px', borderRadius: 8,
+    border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)',
+    color: 'var(--text)', fontSize: g ? 14.5 : 13, fontFamily: 'inherit',
+  }
+  const btnEscolha = (ativo) => ({
+    flex: 1, minWidth: 84, padding: g ? '9px 10px' : '7px 8px', borderRadius: 9, cursor: 'pointer',
+    fontSize: g ? 13.5 : 12, fontWeight: 700, whiteSpace: 'nowrap',
+    border: `1px solid ${ativo ? '#22c55e' : 'var(--border, #2a2a3a)'}`,
+    background: ativo ? 'rgba(34,197,94,.16)' : 'transparent',
+    color: ativo ? '#22c55e' : 'var(--text-muted)',
+  })
+  const rotulo = { fontSize: 11, fontWeight: 800, letterSpacing: .4, color: 'var(--text-muted)', textTransform: 'uppercase', margin: '0 0 5px' }
+
+  return (
+    <div style={{
+      marginTop: 8, border: '1px solid var(--border, #2a2a3a)', borderRadius: 10,
+      padding: g ? 14 : 10, display: 'flex', flexDirection: 'column', gap: 12,
+    }}>
+      <div style={{ fontSize: g ? 13.5 : 11, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: .5, textTransform: 'uppercase' }}>
+        Fechar o pedido
+      </div>
+
+      <div>
+        <p style={rotulo}>Entrega ou retirada</p>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button type="button" onClick={() => setTipo('entrega')} style={btnEscolha(tipo === 'entrega')}>🛵 Entrega</button>
+          <button type="button" onClick={() => setTipo('retirada')} style={btnEscolha(tipo === 'retirada')}>🏪 Retirada</button>
+        </div>
+      </div>
+
+      <div>
+        <p style={rotulo}>Nome do cliente</p>
+        <input value={nome} onChange={e => setNome(e.target.value)} placeholder="Como chamar" style={inp} />
+        {achouCliente && (
+          <div style={{ fontSize: 11.5, color: '#22c55e', marginTop: 4 }}>
+            ✓ Cliente já cadastrado — dados vieram do último pedido.
+          </div>
+        )}
+      </div>
+
+      {tipo === 'entrega' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <p style={{ ...rotulo, margin: 0 }}>Endereço da entrega</p>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input value={cep} onChange={e => { setCep(e.target.value); buscarCep(e.target.value) }}
+              placeholder="CEP (preenche sozinho)" inputMode="numeric" style={{ ...inp, flex: 1 }} />
+            <input value={numero} onChange={e => setNumero(e.target.value)}
+              placeholder="Nº" style={{ ...inp, width: 80, flexShrink: 0 }} />
+          </div>
+          <input value={rua} onChange={e => setRua(e.target.value)} placeholder="Rua" style={inp} />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input value={bairro} onChange={e => setBairro(e.target.value)} placeholder="Bairro" style={{ ...inp, flex: 1 }} />
+            <input value={cidade} onChange={e => setCidade(e.target.value)} placeholder="Cidade" style={{ ...inp, flex: 1 }} />
+          </div>
+
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input value={taxa} onChange={e => setTaxa(e.target.value)} placeholder="Taxa R$"
+              inputMode="decimal" style={{ ...inp, width: 110, flexShrink: 0 }} />
+            <button type="button" onClick={calcularTaxa} disabled={calculando}
+              style={{ ...btnEscolha(false), flex: 1, cursor: calculando ? 'wait' : 'pointer' }}>
+              {calculando ? 'Calculando…' : '📍 Calcular pelo endereço'}
+            </button>
+          </div>
+          {msgTaxa && (
+            <div style={{ fontSize: 11.5, lineHeight: 1.4, color: msgTaxa.ok ? '#22c55e' : '#f59e0b' }}>{msgTaxa.txt}</div>
+          )}
+        </div>
+      )}
+
+      <div>
+        <p style={rotulo}>Forma de pagamento</p>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {formasFinais.map(([id, lab]) => (
+            <button key={id} type="button" onClick={() => setPagamento(id)} style={btnEscolha(pagamento === id)}>{lab}</button>
+          ))}
+        </div>
+        {pagamento === 'dinheiro' && (
+          <input value={troco} onChange={e => setTroco(e.target.value)} inputMode="decimal"
+            placeholder={`Troco para R$ (total ${total.toFixed(2).replace('.', ',')})`}
+            style={{ ...inp, marginTop: 6 }} />
+        )}
+      </div>
+
+      <div>
+        <p style={rotulo}>Observação (opcional)</p>
+        <input value={obs} onChange={e => setObs(e.target.value)}
+          placeholder="Ex.: portão azul, sem cebola" style={inp} />
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: g ? 17 : 14, fontWeight: 800, color: 'var(--text)' }}>
+        <span>Total do pedido</span>
+        <span>R$ {total.toFixed(2).replace('.', ',')}</span>
+      </div>
+      {tipo === 'entrega' && (
+        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: -8 }}>
+          itens R$ {subtotal.toFixed(2).replace('.', ',')} + taxa R$ {taxaNum.toFixed(2).replace('.', ',')}
+        </div>
+      )}
+
+      <button type="button" disabled={salvando || faltaEndereco || !itens.length}
+        onClick={() => onFinalizar({ tipo, nome, cep, rua, numero, bairro, cidade, taxa: taxaNum, pagamento, troco, obs, subtotal, total })}
+        style={{
+          width: '100%', padding: g ? '14px 12px' : '10px', borderRadius: 9, border: 'none',
+          background: (salvando || faltaEndereco || !itens.length) ? 'var(--border, #2a2a3a)' : '#7c3aed',
+          color: '#fff', fontSize: g ? 16 : 13, fontWeight: 800,
+          cursor: (salvando || faltaEndereco || !itens.length) ? 'default' : 'pointer',
+        }}>
+        {salvando ? 'Lançando...' : faltaEndereco ? 'Falta o endereço da entrega' : '✅ Finalizar e jogar no sistema'}
+      </button>
+      <div style={{ fontSize: g ? 12.5 : 10.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: -6 }}>
+        O pedido entra já confirmado, igual ao da tela de Vender — imprime, vai pro
+        entregador e conta no caixa. O cliente recebe o número do pedido no WhatsApp.
+      </div>
+    </div>
+  )
+}
 
 // Tempo previsto (min) pra ficar pronto — usa o tempo do Raio de Entrega por KM,
 // sem perguntar ao lojista. Ordem: distância→faixa; senão faixa pela taxa; senão
@@ -4646,6 +4925,7 @@ export default function PainelPedidos() {
   // Painel da sacola colado na conversa (só no PC).
   const [sacolaLateral, setSacolaLateral] = useState(false)
   const [enviandoSacola, setEnviandoSacola] = useState(false)
+  const [salvandoPedidoChat, setSalvandoPedidoChat] = useState(false)
   // Cliente que pediu atendente no WhatsApp: o robô não inventa resposta, chama
   // gente. Toca AQUI, no gestor — é a tela que fica aberta no balcão.
   const { chamados, atender: atenderChamado } = useChamados(empresa?.id)
@@ -4924,6 +5204,119 @@ export default function PainelPedidos() {
   }
   const mudarQtdSacola   = (idx, delta) => ajustarQtdSacola(idx, q => q + delta)
   const definirQtdSacola = (idx, n)     => ajustarQtdSacola(idx, () => n)
+
+  /**
+   * Fecha o pedido pela própria conversa — sem passar pela tela de Vender.
+   *
+   * É o outro fim da sacola: em vez de devolver pro robô pedir endereço e
+   * pagamento, quem está atendendo já tem essas duas coisas na conversa e
+   * lança o pedido. Ele entra igual ao da tela de Vender (origem balcão, já
+   * confirmado), então imprime, aparece pro entregador e conta no caixa do
+   * mesmo jeito — o que muda é que ninguém digitou o pedido duas vezes.
+   */
+  async function finalizarPedidoDoChat(d) {
+    if (!sacolaChat.length || !chatAberto || !empresa?.id) return
+    const sep = chatAberto.indexOf('|')
+    const canal = chatAberto.slice(0, sep)
+    const cliente_ref = chatAberto.slice(sep + 1)
+    const tel = String(cliente_ref).replace(/\D/g, '')
+    setSalvandoPedidoChat(true)
+    setChatAviso(null)
+
+    const thread = chatMsgs.find(m => `${m.canal}|${m.cliente_ref}` === chatAberto)
+    const nomeCliente = (d.nome || thread?.cliente_nome || '').trim() || 'Cliente do WhatsApp'
+
+    // Cadastra/atualiza o cliente com o endereço — é o que faz o PRÓXIMO pedido
+    // dele vir preenchido, aqui e na Loja Online.
+    let clienteId = null
+    if (tel.length >= 10) {
+      try {
+        const { data: cid } = await supabase.rpc('upsert_cliente_loja', {
+          p_empresa_id: empresa.id, p_nome: nomeCliente, p_telefone: tel,
+          p_email: '', p_cep: d.cep?.trim() ?? '', p_endereco: d.rua?.trim() ?? '',
+          p_numero: d.numero?.trim() ?? '', p_complemento: '',
+          p_bairro: d.bairro?.trim() ?? '', p_cidade: d.cidade?.trim() ?? '', p_estado: '',
+        })
+        clienteId = cid ?? null
+      } catch { /* cadastro falhou: o pedido não pode morrer por isso */ }
+    }
+
+    const payload = {
+      empresa_id: empresa.id,
+      cliente_id: clienteId,
+      cliente_nome: nomeCliente,
+      cliente_telefone: tel || '—',
+      tipo_entrega: d.tipo,
+      origem: 'balcao',
+      status: 'confirmado',      // quem atendeu já aceitou — não tem o que confirmar
+      itens: sacolaChat.map(i => ({
+        produto_id: i.produto_id ?? null, nome: i.nome, quantidade: i.qtd,
+        preco_unitario: Number(i.preco), subtotal: Number(i.preco) * Number(i.qtd),
+        complementos: [],
+      })),
+      subtotal: d.subtotal,
+      taxa_entrega: d.tipo === 'entrega' ? d.taxa : 0,
+      total: d.total,
+      forma_pagamento: d.pagamento,
+      troco_para: d.pagamento === 'dinheiro' && d.troco
+        ? Math.round(parseFloat(String(d.troco).replace(',', '.')) * 100) / 100
+        : null,
+      // De onde este pedido veio fica escrito: daqui a uma semana ninguém lembra
+      // que este foi montado na conversa, e o balcão vira uma caixa-preta.
+      observacoes: [d.obs?.trim(), 'Montado na conversa do WhatsApp'].filter(Boolean).join(' · '),
+    }
+    if (d.tipo === 'entrega') {
+      payload.endereco_rua = d.rua?.trim() || null
+      payload.endereco_numero = d.numero?.trim() || null
+      payload.endereco_bairro = d.bairro?.trim() || null
+      payload.endereco_cidade = d.cidade?.trim() || null
+      payload.endereco_cep = d.cep?.trim() || null
+    }
+
+    const { data: novo, error } = await supabase.from('pedidos_delivery')
+      .insert(payload).select('id, numero_pedido').maybeSingle()
+    if (error) {
+      setSalvandoPedidoChat(false)
+      setChatAviso({ ok: false, txt: `⚠️ Não consegui lançar o pedido: ${error.message}` })
+      return
+    }
+
+    // O carrinho do robô sai de cena: se ficasse lá, o robô fecharia um segundo
+    // pedido com os mesmos itens na próxima mensagem do cliente.
+    await supabase.from('whatsapp_carrinho').delete()
+      .eq('empresa_id', empresa.id).like('phone', `%${tel.slice(-8)}`)
+
+    // O cliente precisa ver o número do pedido — é por ele que ele cobra depois.
+    const linhas = sacolaChat
+      .map(i => `• ${i.nome} x${i.qtd} — R$ ${(Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')}`)
+      .join('\n')
+    const labelPgto = ({ dinheiro: 'dinheiro', pix_entrega: 'PIX', credito: 'cartão de crédito', debito: 'cartão de débito', cartao: 'cartão' })[d.pagamento] ?? d.pagamento
+    const texto =
+      `🧾 *Pedido #${novo?.numero_pedido ?? ''} anotado!*\n\n${linhas}\n` +
+      (d.tipo === 'entrega' ? `🛵 Taxa de entrega: R$ ${Number(d.taxa).toFixed(2).replace('.', ',')}\n` : '🏪 Retirada na loja\n') +
+      `💰 *Total: R$ ${Number(d.total).toFixed(2).replace('.', ',')}*\n💳 Pagamento em *${labelPgto}*\n\nJá tá na cozinha. 😉`
+
+    await supabase.from('mensagens_chat').insert({
+      empresa_id: empresa.id, canal, cliente_ref,
+      cliente_nome: thread?.cliente_nome ?? null, remetente: 'loja', texto,
+    })
+    let okZap = false
+    if (tel.length >= 10) {
+      const { data } = await supabase.functions.invoke('whatsapp-connect', {
+        body: { action: 'send_message', phone: tel, text: texto, espelhar_no_chat: false, assumir_conversa: false },
+      })
+      okZap = !!data?.ok
+    }
+
+    setSacolaChat([])
+    setSalvandoPedidoChat(false)
+    setChatAviso({
+      ok: true,
+      txt: `✓ Pedido #${novo?.numero_pedido ?? ''} lançado no sistema.` +
+        (okZap ? ' O cliente já recebeu o número no WhatsApp.' : ' ⚠️ Mas o aviso não saiu no WhatsApp do cliente.'),
+    })
+    carregarPedidos()
+  }
 
   /**
    * Manda a sacola pro cliente e devolve a conversa pro robô.
@@ -6671,6 +7064,9 @@ export default function PainelPedidos() {
                 sacola={sacolaChat}
                 onQtdSacola={mudarQtdSacola}
                 onQtdDiretaSacola={definirQtdSacola}
+                empresa={empresa}
+                onFinalizarPedido={finalizarPedidoDoChat}
+                salvandoPedido={salvandoPedidoChat}
                 onAvulsoSacola={item => setSacolaChat(prev => [...prev, item])}
                 onEnviarSacola={enviarSacolaDoChat}
                 enviandoSacola={enviandoSacola}
@@ -7331,14 +7727,28 @@ export default function PainelPedidos() {
               Não achou? Ponha o preço e mande mesmo sem cadastro.
             </div>
           ) : (
-            <SacolaNoChat
-              itens={sacolaChat}
-              onQtd={mudarQtdSacola}
-              onQtdDireta={definirQtdSacola}
-              onRemover={idx => mudarQtdSacola(idx, -999)}
-              onEnviar={enviarSacolaDoChat}
-              enviando={enviandoSacola}
-            />
+            <>
+              <SacolaNoChat
+                itens={sacolaChat}
+                onQtd={mudarQtdSacola}
+                onQtdDireta={definirQtdSacola}
+                onRemover={idx => mudarQtdSacola(idx, -999)}
+                onEnviar={enviarSacolaDoChat}
+                enviando={enviandoSacola}
+              />
+              {/* Endereço, pagamento e o botão que joga no sistema. `key` no
+                  telefone: trocou de conversa, formulário novo — senão o
+                  endereço de um cliente ia parar no pedido do outro. */}
+              <FecharPedidoNoChat
+                key={threadAberta?.cliente_ref}
+                empresa={empresa}
+                telefone={threadAberta?.cliente_ref}
+                nomeThread={threadAberta?.cliente_nome}
+                itens={sacolaChat}
+                onFinalizar={finalizarPedidoDoChat}
+                salvando={salvandoPedidoChat}
+              />
+            </>
           )}
         </aside>
       )}
