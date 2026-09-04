@@ -1028,6 +1028,67 @@ async function geocodificarEndereco(endereco) {
   return null
 }
 
+// ── Busca de rua pelo nome ───────────────────────────────────────────────────
+// O CEP quase ninguém sabe de cabeça; o nome da rua, todo mundo. O cliente
+// fala "Rua São José" no áudio e quem atende escolhe da lista — que já traz
+// bairro, cidade e CEP juntos. Endereço digitado de ouvido é o que faz o
+// motoboy rodar à toa.
+//
+// A busca do ViaCEP é literal: "Rua" na frente atrapalha, então a gente tira o
+// tipo do logradouro e, se ainda assim não achar, tenta a maior palavra.
+async function buscarRuasViaCep(uf, cidade, termo) {
+  const t = String(termo ?? '').trim()
+  const estado = String(uf ?? '').trim()
+  const cid = String(cidade ?? '').trim()
+  if (t.length < 3 || !estado || cid.length < 3) return []
+  const buscar = async (q) => {
+    if (!q || q.length < 3) return []
+    const r = await fetch(`https://viacep.com.br/ws/${estado}/${encodeURIComponent(cid)}/${encodeURIComponent(q)}/json/`)
+    const j = await r.json()
+    return Array.isArray(j) ? j : []
+  }
+  const semTipo = t.replace(/^(r|rua|av|avn|avenida|trav|travessa|al|alameda|pc|praca|praça|rod|rodovia|estr|estrada|beco|conj|conjunto|vl|vila)\.?\s+/i, '').trim()
+  let d = await buscar(semTipo || t)
+  if (!d.length) {
+    const maior = semTipo.split(/\s+/).filter(w => w.length >= 4).sort((x, y) => y.length - x.length)[0]
+    if (maior) d = await buscar(maior)
+  }
+  const vistas = new Set()
+  return d.filter(x => {
+    const k = `${x.logradouro}|${x.bairro}`
+    if (!x.logradouro || vistas.has(k)) return false
+    vistas.add(k); return true
+  }).slice(0, 6)
+}
+
+/** A listinha que cai embaixo do campo de rua. */
+function ListaDeRuas({ sugestoes, onEscolher, onFechar }) {
+  return (
+    <>
+      <div onClick={onFechar} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+      <div style={{
+        position: 'absolute', zIndex: 61, top: 'calc(100% + 4px)', left: 0, right: 0,
+        maxHeight: 220, overflowY: 'auto', padding: 4, borderRadius: 10,
+        border: '1px solid var(--border, #2a2a3a)', background: 'var(--surface, #16161f)',
+        boxShadow: '0 12px 28px rgba(0,0,0,.35)',
+      }}>
+        {sugestoes.map(r => (
+          <button key={`${r.cep}-${r.logradouro}`} type="button" onClick={() => onEscolher(r)}
+            style={{
+              display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
+              border: 'none', borderRadius: 7, background: 'none', color: 'var(--text)', cursor: 'pointer',
+            }}>
+            <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700 }}>{r.logradouro}</span>
+            <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)' }}>
+              {[r.bairro, r.localidade].filter(Boolean).join(' · ')}
+            </span>
+          </button>
+        ))}
+      </div>
+    </>
+  )
+}
+
 // ── Taxa de entrega de um endereço ───────────────────────────────────────────
 // A mesma conta da Loja Online e do robô, pra que o pedido montado na conversa
 // cobre o mesmo frete que o cliente pagaria pelo link: BAIRRO cadastrado manda
@@ -1447,27 +1508,8 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     let vivo = true
     const t = setTimeout(async () => {
       try {
-        const buscar = async (q) => {
-          if (!q || q.length < 3) return []
-          const r = await fetch(`https://viacep.com.br/ws/${uf}/${encodeURIComponent(cid)}/${encodeURIComponent(q)}/json/`)
-          const j = await r.json()
-          return Array.isArray(j) ? j : []
-        }
-        // Mesma regra do checkout: a busca do ViaCEP é literal, então tira o
-        // "Rua/Av." e, não achando, tenta a maior palavra digitada.
-        const semTipo = termo.replace(/^(r|rua|av|avn|avenida|trav|travessa|al|alameda|pc|praca|praça|rod|rodovia|estr|estrada|beco|conj|conjunto|vl|vila)\.?\s+/i, '').trim()
-        let d = await buscar(semTipo || termo)
-        if (!d.length) {
-          const maior = semTipo.split(/\s+/).filter(w => w.length >= 4).sort((x, y) => y.length - x.length)[0]
-          if (maior) d = await buscar(maior)
-        }
-        if (!vivo) return
-        const vistas = new Set()
-        setRuaSug(d.filter(x => {
-          const k = `${x.logradouro}|${x.bairro}`
-          if (!x.logradouro || vistas.has(k)) return false
-          vistas.add(k); return true
-        }).slice(0, 6))
+        const d = await buscarRuasViaCep(uf, cid, termo)
+        if (vivo) setRuaSug(d)
       } catch { if (vivo) setRuaSug([]) }
     }, 500)
     return () => { vivo = false; clearTimeout(t) }
@@ -2014,36 +2056,18 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
                   onChange={e => { setRua(e.target.value); setRuaSugAberta(true) }}
                   onFocus={() => setRuaSugAberta(true)} />
                 {ruaSugAberta && ruaSug.length > 0 && (
-                  <>
-                    <div onClick={() => setRuaSugAberta(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
-                    <div style={{
-                      position: 'absolute', zIndex: 61, top: 'calc(100% + 4px)', left: 0, right: 0,
-                      maxHeight: 220, overflowY: 'auto', padding: 4, borderRadius: 10,
-                      border: '1px solid var(--border, #2a2a3a)', background: 'var(--surface, #16161f)',
-                      boxShadow: '0 12px 28px rgba(0,0,0,.35)',
-                    }}>
-                      {ruaSug.map(r => (
-                        <button key={`${r.cep}-${r.logradouro}`} type="button"
-                          onClick={() => {
-                            const c = String(r.cep ?? '').replace(/\D/g, '')
-                            setRua(r.logradouro || rua)
-                            if (r.bairro) setBairro(r.bairro)
-                            if (r.localidade) setCidade(r.localidade)
-                            if (c.length === 8) setCep(`${c.slice(0, 5)}-${c.slice(5)}`)
-                            setRuaSug([]); setRuaSugAberta(false)
-                          }}
-                          style={{
-                            display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
-                            border: 'none', borderRadius: 7, background: 'none', color: 'var(--text)', cursor: 'pointer',
-                          }}>
-                          <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700 }}>{r.logradouro}</span>
-                          <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)' }}>
-                            {[r.bairro, r.localidade].filter(Boolean).join(' · ')}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </>
+                  <ListaDeRuas
+                    sugestoes={ruaSug}
+                    onFechar={() => setRuaSugAberta(false)}
+                    onEscolher={r => {
+                      const c = String(r.cep ?? '').replace(/\D/g, '')
+                      setRua(r.logradouro || rua)
+                      if (r.bairro) setBairro(r.bairro)
+                      if (r.localidade) setCidade(r.localidade)
+                      if (c.length === 8) setCep(`${c.slice(0, 5)}-${c.slice(5)}`)
+                      setRuaSug([]); setRuaSugAberta(false)
+                    }}
+                  />
                 )}
               </div>
               <input value={numero} onChange={e => setNumero(e.target.value)} placeholder="Nº" style={{ ...inputSt, maxWidth: 90 }} />
@@ -4373,6 +4397,23 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
   const [msgTaxa, setMsgTaxa] = useState(null)
   const [calculando, setCalculando] = useState(false)
   const [achouCliente, setAchouCliente] = useState(false)
+  const [ruaSug, setRuaSug] = useState([])
+  const [ruaSugAberta, setRuaSugAberta] = useState(false)
+
+  // Digitou o nome da rua, aparece a lista — mesma busca da tela de Vender e do
+  // checkout do cliente. Quem atende está com o cliente falando no ouvido: o
+  // CEP ele não sabe, o nome da rua sim.
+  useEffect(() => {
+    if (tipo !== 'entrega') { setRuaSug([]); return }
+    let vivo = true
+    const t = setTimeout(async () => {
+      try {
+        const d = await buscarRuasViaCep(empresa?.estado, cidade || empresa?.cidade, rua)
+        if (vivo) setRuaSug(d)
+      } catch { if (vivo) setRuaSug([]) }
+    }, 500)
+    return () => { vivo = false; clearTimeout(t) }
+  }, [rua, cidade, empresa, tipo])
 
   // O cadastro do cliente, pelos 8 últimos dígitos (o WhatsApp entrega o mesmo
   // número com e sem o 9). Quem já pediu antes não digita endereço de novo.
@@ -4486,7 +4527,30 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
             <input value={numero} onChange={e => setNumero(e.target.value)}
               placeholder="Nº" style={{ ...inp, width: 80, flexShrink: 0 }} />
           </div>
-          <input value={rua} onChange={e => setRua(e.target.value)} placeholder="Rua" style={inp} />
+          {/* Digitar o nome da rua e escolher da lista: vem com bairro, cidade
+              e CEP juntos, e sem risco de escrever errado o que veio de ouvido. */}
+          <div style={{ position: 'relative' }}>
+            <input value={rua} autoComplete="off"
+              onChange={e => { setRua(e.target.value); setRuaSugAberta(true) }}
+              onFocus={() => setRuaSugAberta(true)}
+              placeholder="Rua (digite o nome e escolha)" style={inp} />
+            {ruaSugAberta && ruaSug.length > 0 && (
+              <ListaDeRuas
+                sugestoes={ruaSug}
+                onFechar={() => setRuaSugAberta(false)}
+                onEscolher={r => {
+                  const c = String(r.cep ?? '').replace(/\D/g, '')
+                  setRua(r.logradouro || rua)
+                  if (r.bairro) setBairro(r.bairro)
+                  if (r.localidade) setCidade(r.localidade)
+                  if (c.length === 8) setCep(`${c.slice(0, 5)}-${c.slice(5)}`)
+                  setRuaSug([]); setRuaSugAberta(false)
+                  // Endereço novo, taxa velha não vale mais.
+                  setMsgTaxa(null)
+                }}
+              />
+            )}
+          </div>
           <div style={{ display: 'flex', gap: 6 }}>
             <input value={bairro} onChange={e => setBairro(e.target.value)} placeholder="Bairro" style={{ ...inp, flex: 1 }} />
             <input value={cidade} onChange={e => setCidade(e.target.value)} placeholder="Cidade" style={{ ...inp, flex: 1 }} />
@@ -4495,10 +4559,20 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <input value={taxa} onChange={e => setTaxa(e.target.value)} placeholder="Taxa R$"
               inputMode="decimal" style={{ ...inp, width: 110, flexShrink: 0 }} />
-            <button type="button" onClick={calcularTaxa} disabled={calculando}
-              style={{ ...btnEscolha(false), flex: 1, cursor: calculando ? 'wait' : 'pointer' }}>
-              {calculando ? 'Calculando…' : '📍 Calcular pelo endereço'}
-            </button>
+            {/* O botão de calcular só aparece com o NÚMERO da casa preenchido:
+                sem ele o mapa devolve o meio da rua, e numa rua comprida isso é
+                a diferença entre uma faixa de taxa e outra. */}
+            {numero.trim() ? (
+              <button type="button" onClick={calcularTaxa} disabled={calculando}
+                style={{ ...btnEscolha(false), flex: 1, cursor: calculando ? 'wait' : 'pointer' }}>
+                {calculando ? 'Calculando…' : '📍 Calcular pelo endereço'}
+              </button>
+            ) : (
+              <span style={{ flex: 1, fontSize: 11.5, lineHeight: 1.4, color: 'var(--text-muted)' }}>
+                Ponha o <strong>número da casa</strong> pra calcular a taxa — sem ele o mapa
+                erra a distância.
+              </span>
+            )}
           </div>
           {msgTaxa && (
             <div style={{ fontSize: 11.5, lineHeight: 1.4, color: msgTaxa.ok ? '#22c55e' : '#f59e0b' }}>{msgTaxa.txt}</div>
