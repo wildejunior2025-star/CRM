@@ -50,6 +50,9 @@ export default function Caixa() {
   const [resumo, setResumo] = useState(null)
   const [movimentos, setMovimentos] = useState([])
   const [historico, setHistorico] = useState([])
+  // Resumo de cada caixa da semana (null = ainda somando). É o que alimenta o
+  // total da semana embaixo da tabela.
+  const [resumosSemana, setResumosSemana] = useState(null)
   const [semanaOffset, setSemanaOffset] = useState(0)   // 0 = esta semana
   const [carregandoHist, setCarregandoHist] = useState(false)
   const [usuarios, setUsuarios] = useState([])
@@ -235,8 +238,22 @@ export default function Caixa() {
         .order('aberto_em', { ascending: false })
       if (!vivo) return
       if (err) setError(err.message)
-      setHistorico(data ?? [])
+      const caixasDaSemana = data ?? []
+      setHistorico(caixasDaSemana)
       setHistAberto(null)          // a linha aberta era de outra semana
+
+      // Os resumos de TODOS os caixas da semana numa consulta só. A tabela
+      // mostra caixa por caixa; quem quer saber quanto entrou na semana tinha
+      // que abrir os cinco e somar de cabeça.
+      setResumosSemana(null)
+      const ids = caixasDaSemana.map(c => c.id)
+      if (ids.length) {
+        const { data: rs } = await supabase.from('caixa_resumo').select('*').in('caixa_id', ids)
+        if (!vivo) return
+        setResumosSemana(rs ?? [])
+      } else {
+        setResumosSemana([])
+      }
       setCarregandoHist(false)
     }
     carregarHistorico()
@@ -439,6 +456,32 @@ export default function Caixa() {
       Number(resumo.recebimentos_cashback || 0) +
       Number(resumo.vendas_fiado || 0)
     : 0
+
+  // ── Total da semana ────────────────────────────────────────────────────────
+  // A mesma conta do faturamento de um caixa, somando os caixas todos da semana
+  // que está na tela. É a pergunta da segunda de manhã ("quanto entrou na
+  // semana, e em quê?") que a tabela não respondia: ela mostra abertura e
+  // fechamento, que é quanto tinha na gaveta — não quanto a loja vendeu.
+  const totaisSemana = (() => {
+    const rs = resumosSemana ?? []
+    const soma = (campo) => rs.reduce((t, r) => t + Number(r?.[campo] || 0), 0)
+    const dinheiro = soma('recebimentos_dinheiro')
+    const pix = soma('recebimentos_pix')
+    const cartao = soma('recebimentos_cartao')
+    const transferencia = soma('recebimentos_transferencia')
+    const fiado = soma('vendas_fiado')
+    const cashback = soma('recebimentos_cashback')
+    return {
+      dinheiro, pix, cartao, transferencia, fiado, cashback,
+      credito: soma('recebimentos_credito'),
+      debito: soma('recebimentos_debito'),
+      fiadoRecebido: soma('recebimentos_fiado'),
+      sangrias: soma('total_sangrias'),
+      suprimentos: soma('total_suprimentos'),
+      cartaoLiquido: rs.reduce((t, r) => t + cartaoLiquidoDe(r), 0),
+      total: dinheiro + pix + cartao + transferencia + cashback + fiado,
+    }
+  })()
 
   return (
     <div>
@@ -908,6 +951,61 @@ export default function Caixa() {
           </table>
         )}
       </div>
+
+      {/* Total da semana — embaixo da tabela, que é onde a pergunta aparece.
+          A tabela conta quanto tinha na gaveta em cada dia; isto conta quanto a
+          loja VENDEU na semana, e em qual forma. */}
+      {historico.length > 0 && (
+        <div className="caixa-semana">
+          <div className="caixa-semana-cab">
+            <span className="caixa-semana-rot">💰 Total da semana · {rotuloSemana(semanaOffset)}</span>
+            <strong className="caixa-semana-valor">
+              {resumosSemana === null ? '…' : `R$ ${totaisSemana.total.toFixed(2)}`}
+            </strong>
+          </div>
+
+          {resumosSemana === null ? (
+            <div className="caixa-semana-carregando">Somando os caixas da semana…</div>
+          ) : (
+            <>
+              <div className="caixa-semana-grid">
+                {[
+                  ['💵 Dinheiro', totaisSemana.dinheiro, true],
+                  ['📱 PIX', totaisSemana.pix, true],
+                  ['💳 Cartão', totaisSemana.cartao, true],
+                  ['↳ crédito', totaisSemana.credito, totaisSemana.credito > 0],
+                  ['↳ débito', totaisSemana.debito, totaisSemana.debito > 0],
+                  ['🔁 Transferência', totaisSemana.transferencia, totaisSemana.transferencia > 0],
+                  ['🧾 Vendas no fiado', totaisSemana.fiado, totaisSemana.fiado > 0],
+                  ['🎟️ Cashback usado', totaisSemana.cashback, totaisSemana.cashback > 0],
+                ].filter(([, , mostrar]) => mostrar).map(([rot, valor]) => (
+                  <div className="caixa-semana-card" key={rot}>
+                    <div className="caixa-semana-card-rot">{rot}</div>
+                    <div className="caixa-semana-card-valor">R$ {Number(valor).toFixed(2)}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* O que NÃO soma no total: explica o número, não o forma. */}
+              <div className="caixa-semana-notas">
+                <span>{historico.length} {historico.length === 1 ? 'caixa' : 'caixas'} nesta semana</span>
+                {totaisSemana.cartao > 0 && totaisSemana.cartaoLiquido !== totaisSemana.cartao && (
+                  <span>💳 cai na conta (já com as taxas): <strong>R$ {totaisSemana.cartaoLiquido.toFixed(2)}</strong></span>
+                )}
+                {totaisSemana.fiadoRecebido > 0 && (
+                  <span>🤝 fiado antigo recebido: <strong>R$ {totaisSemana.fiadoRecebido.toFixed(2)}</strong> (já está nas formas acima)</span>
+                )}
+                {(totaisSemana.sangrias > 0 || totaisSemana.suprimentos > 0) && (
+                  <span>
+                    ➖ sangrias: <strong>R$ {totaisSemana.sangrias.toFixed(2)}</strong>
+                    {' · '}➕ suprimentos: <strong>R$ {totaisSemana.suprimentos.toFixed(2)}</strong>
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {showAbertura && (
         <div className="modal-overlay" onClick={() => setShowAbertura(false)}>

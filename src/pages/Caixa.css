@@ -165,3 +165,78 @@
      em vez de espremer o rótulo da semana. */
   .caixa-hist-hoje { margin-left: 0; width: 100%; }
 }
+
+/* ── Total da semana (embaixo do histórico) ──
+   A tabela responde "quanto tinha na gaveta"; esta caixa responde "quanto a
+   loja vendeu na semana, e em quê" — que é o que o dono pergunta na segunda. */
+.caixa-semana {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: 14px;
+  border: 2px solid var(--primary);
+  background: var(--primary-bg, rgba(124, 58, 237, .08));
+}
+
+.caixa-semana-cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.caixa-semana-rot {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.caixa-semana-valor {
+  font-size: 26px;
+  font-weight: 900;
+  color: var(--primary);
+  line-height: 1;
+}
+
+.caixa-semana-carregando {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.caixa-semana-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.caixa-semana-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.caixa-semana-card-rot {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.caixa-semana-card-valor {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.caixa-semana-notas {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
