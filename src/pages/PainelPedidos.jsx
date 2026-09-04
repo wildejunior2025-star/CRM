@@ -3901,6 +3901,7 @@ function Coluna({ titulo, cor, count, vazio, children }) {
 
 // ── Conversa aberta (loja respondendo cliente) ──────────────
 function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola }) {
+  const g = useTelaGrande()
   const fimRef = useRef(null)
   useEffect(() => {
     fimRef.current?.scrollIntoView({ block: 'end' })
@@ -3933,7 +3934,8 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
           return (
             <div key={m.id} style={{ display: 'flex', justifyContent: daLoja ? 'flex-end' : 'flex-start' }}>
               <div style={{
-                maxWidth: '82%', padding: '7px 11px', borderRadius: 12, fontSize: 13.5, lineHeight: 1.35,
+                maxWidth: g ? '74%' : '82%', padding: g ? '10px 14px' : '7px 11px', borderRadius: 12,
+                fontSize: g ? 15 : 13.5, lineHeight: g ? 1.45 : 1.35,
                 // Fala do robô fica num roxo mais apagado: quem atende precisa
                 // ver de relance o que já foi respondido sem ler tudo de novo.
                 background: doRobo ? 'rgba(124,58,237,.28)' : daLoja ? '#7c3aed' : 'var(--bg, #0f0f1a)',
@@ -4008,16 +4010,16 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
           onChange={e => onTexto(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEnviar() } }}
           placeholder="Escreva uma resposta..."
-          rows={1}
+          rows={g ? 2 : 1}
           style={{
-            flex: 1, resize: 'none', maxHeight: 90, padding: '9px 11px', borderRadius: 10,
+            flex: 1, resize: 'none', maxHeight: g ? 140 : 90, padding: g ? '12px 14px' : '9px 11px', borderRadius: 10,
             border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)',
-            color: 'var(--text)', fontSize: 13.5, fontFamily: 'inherit',
+            color: 'var(--text)', fontSize: g ? 15 : 13.5, fontFamily: 'inherit',
           }}
         />
         <button type="button" onClick={onEnviar} disabled={!texto.trim() || enviando}
           style={{
-            flexShrink: 0, width: 42, borderRadius: 10, border: 'none', cursor: texto.trim() ? 'pointer' : 'default',
+            flexShrink: 0, width: g ? 54 : 42, borderRadius: 10, border: 'none', cursor: texto.trim() ? 'pointer' : 'default',
             background: texto.trim() ? '#7c3aed' : 'var(--border, #2a2a3a)', color: '#fff',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
@@ -4030,11 +4032,28 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
   )
 }
 
+// PC ou celular? No celular a gaveta ocupa a tela inteira e o desenho
+// apertado é o certo. No monitor sobra espaço dos dois lados, e aí 480px de
+// largura com letra 13 vira uma conversa que ninguém consegue ler o dia todo.
+function useTelaGrande() {
+  const [grande, setGrande] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth >= 1024,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)')
+    const ver = e => setGrande(e.matches)
+    mq.addEventListener('change', ver)
+    return () => mq.removeEventListener('change', ver)
+  }, [])
+  return grande
+}
+
 // Busca de produto DENTRO da conversa. Quando o robô transfere ("não achei
 // Galioto"), o atendente precisa do nome e do preço certos sem sair da tela — e
 // o nome que ele mandar é o que o robô vai ler pra reconhecer o produto quando
 // voltar. Escrito de cabeça, sai errado; daqui, sai do cadastro.
 function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso }) {
+  const g = useTelaGrande()
   const [termo, setTermo] = useState('')
   const [itens, setItens] = useState([])
   const [buscando, setBuscando] = useState(false)
@@ -4070,7 +4089,8 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso }) {
     return (
       <button type="button" onClick={() => setAberto(true)}
         style={{
-          marginTop: 6, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+          marginTop: 8, width: '100%', padding: g ? '12px 14px' : '8px 10px', borderRadius: 10,
+          cursor: 'pointer', fontSize: g ? 14 : 12.5, fontWeight: 700,
           border: '1px dashed var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text-muted)',
         }}>🔍 Buscar produto no cardápio</button>
     )
@@ -4085,7 +4105,7 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso }) {
           onChange={e => { setTermo(e.target.value); buscar(e.target.value) }}
           placeholder="Nome do produto (ex.: galioto, coca 2l)"
           style={{
-            flex: 1, padding: '7px 10px', borderRadius: 8, fontSize: 13,
+            flex: 1, padding: g ? '11px 13px' : '7px 10px', borderRadius: 9, fontSize: g ? 15 : 13,
             border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
           }}
         />
@@ -4094,7 +4114,7 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso }) {
       </div>
 
       {termo.trim().length >= 3 && (
-        <div style={{ marginTop: 6, maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ marginTop: 6, maxHeight: g ? 340 : 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: g ? 6 : 4 }}>
           {buscando && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Procurando…</div>}
           {!buscando && itens.length === 0 && (
             <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
@@ -4109,9 +4129,9 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso }) {
             <input value={avulsoPreco} onChange={e => setAvulsoPreco(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') addAvulso() }}
               placeholder="R$"
-              style={{ width: 66, padding: '6px 8px', borderRadius: 7, fontSize: 12, border: '1px solid #f59e0b', background: 'var(--bg, #0f0f1a)', color: 'var(--text)' }} />
+              style={{ width: g ? 90 : 66, padding: g ? '10px 12px' : '6px 8px', borderRadius: 8, fontSize: g ? 14.5 : 12, border: '1px solid #f59e0b', background: 'var(--bg, #0f0f1a)', color: 'var(--text)' }} />
             <button type="button" onClick={addAvulso}
-              style={{ flex: 1, padding: '6px 8px', borderRadius: 7, cursor: 'pointer', fontSize: 11.5, fontWeight: 700,
+              style={{ flex: 1, padding: g ? '10px 12px' : '6px 8px', borderRadius: 8, cursor: 'pointer', fontSize: g ? 13.5 : 11.5, fontWeight: 700,
                        border: '1px solid #f59e0b', background: 'rgba(245,158,11,.12)', color: '#f59e0b' }}>
               + Vender &quot;{termo.trim()}&quot; mesmo sem cadastro
             </button>
@@ -4120,11 +4140,11 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso }) {
           {itens.map(p => (
             <button key={p.id} type="button" onClick={() => onEscolher(p)}
               style={{
-                textAlign: 'left', cursor: 'pointer', padding: '7px 9px', borderRadius: 8,
+                textAlign: 'left', cursor: 'pointer', padding: g ? '11px 13px' : '7px 9px', borderRadius: 9,
                 border: '1px solid var(--border, #2a2a3a)', background: 'transparent',
               }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{p.nome}</div>
-              <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: g ? 15 : 13, fontWeight: 700, color: 'var(--text)' }}>{p.nome}</div>
+              <div style={{ fontSize: g ? 13 : 11.5, color: 'var(--text-muted)' }}>
                 {Number(p.preco) > 0 ? `R$ ${Number(p.preco).toFixed(2).replace('.', ',')}` : 'sob consulta'}
                 {p.categoria ? ` · ${p.categoria}` : ''}
               </div>
@@ -4145,49 +4165,50 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso }) {
 // botão só manda a lista pro cliente E entrega o carrinho pro robô terminar
 // endereço e pagamento. A parte chata fica com a gente; a fácil, com o robô.
 function SacolaNoChat({ itens, onQtd, onRemover, onEnviar, enviando }) {
+  const g = useTelaGrande()
   const total = itens.reduce((s, i) => s + Number(i.preco) * Number(i.qtd), 0)
 
   return (
     <div style={{
-      marginTop: 6, border: '1px solid rgba(34,197,94,.4)', borderRadius: 10,
-      background: 'rgba(34,197,94,.06)', padding: 8,
+      marginTop: 8, border: '1px solid rgba(34,197,94,.4)', borderRadius: 10,
+      background: 'rgba(34,197,94,.06)', padding: g ? 14 : 8,
     }}>
-      <div style={{ fontSize: 11, fontWeight: 800, color: '#22c55e', marginBottom: 6 }}>
+      <div style={{ fontSize: g ? 12.5 : 11, fontWeight: 800, color: '#22c55e', marginBottom: g ? 10 : 6 }}>
         🛒 SACOLA DO CLIENTE ({itens.length} {itens.length === 1 ? 'item' : 'itens'})
       </div>
 
       {itens.map((i, idx) => (
-        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: g ? 10 : 6, marginBottom: g ? 8 : 4 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ fontSize: g ? 14.5 : 12.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {i.nome}{!i.produto_id && <span style={{ fontSize: 10, color: '#f59e0b' }}> · fora do cardápio</span>}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            <div style={{ fontSize: g ? 13 : 11, color: 'var(--text-muted)' }}>
               R$ {Number(i.preco).toFixed(2).replace('.', ',')} · subtotal R$ {(Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')}
             </div>
           </div>
-          <button type="button" onClick={() => onQtd(idx, -1)} style={btnQtd}>−</button>
-          <span style={{ fontSize: 12.5, fontWeight: 800, minWidth: 16, textAlign: 'center', color: 'var(--text)' }}>{i.qtd}</span>
-          <button type="button" onClick={() => onQtd(idx, 1)} style={btnQtd}>+</button>
-          <button type="button" onClick={() => onRemover(idx)} style={{ ...btnQtd, color: '#ef4444' }}>×</button>
+          <button type="button" onClick={() => onQtd(idx, -1)} style={btnQtd(g)}>−</button>
+          <span style={{ fontSize: g ? 15 : 12.5, fontWeight: 800, minWidth: g ? 22 : 16, textAlign: 'center', color: 'var(--text)' }}>{i.qtd}</span>
+          <button type="button" onClick={() => onQtd(idx, 1)} style={btnQtd(g)}>+</button>
+          <button type="button" onClick={() => onRemover(idx)} style={{ ...btnQtd(g), color: '#ef4444' }}>×</button>
         </div>
       ))}
 
       {itens.length > 0 && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: g ? 12 : 8, fontSize: g ? 16 : 13, fontWeight: 800, color: 'var(--text)' }}>
             <span>Total dos itens</span>
             <span>R$ {total.toFixed(2).replace('.', ',')}</span>
           </div>
           <button type="button" onClick={onEnviar} disabled={enviando}
             style={{
-              width: '100%', marginTop: 8, padding: '9px 10px', borderRadius: 8, border: 'none',
-              background: '#22c55e', color: '#fff', fontSize: 12.5, fontWeight: 800,
+              width: '100%', marginTop: g ? 12 : 8, padding: g ? '14px 12px' : '9px 10px', borderRadius: 9, border: 'none',
+              background: '#22c55e', color: '#fff', fontSize: g ? 14.5 : 12.5, fontWeight: 800,
               cursor: enviando ? 'default' : 'pointer', opacity: enviando ? .6 : 1,
             }}>
             {enviando ? 'Enviando...' : '📤 Mandar pro cliente e devolver pro robô'}
           </button>
-          <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.4 }}>
+          <div style={{ fontSize: g ? 12 : 10.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.45 }}>
             O cliente recebe a lista com os preços, e o robô continua pedindo endereço e forma de pagamento.
           </div>
         </>
@@ -4195,11 +4216,11 @@ function SacolaNoChat({ itens, onQtd, onRemover, onEnviar, enviando }) {
     </div>
   )
 }
-const btnQtd = {
-  width: 24, height: 24, borderRadius: 6, cursor: 'pointer', flexShrink: 0,
+const btnQtd = (g) => ({
+  width: g ? 34 : 24, height: g ? 34 : 24, borderRadius: 7, cursor: 'pointer', flexShrink: 0,
   border: '1px solid var(--border, #2a2a3a)', background: 'transparent',
-  color: 'var(--text)', fontSize: 14, fontWeight: 800, lineHeight: 1,
-}
+  color: 'var(--text)', fontSize: g ? 17 : 14, fontWeight: 800, lineHeight: 1,
+})
 
 // Tempo previsto (min) pra ficar pronto — usa o tempo do Raio de Entrega por KM,
 // sem perguntar ao lojista. Ordem: distância→faixa; senão faixa pela taxa; senão
@@ -4565,6 +4586,7 @@ export default function PainelPedidos() {
   // Robô pausado no número da conversa aberta? É o que decide mostrar o
   // "Devolver pro robô" dentro da conversa — depois de responder, o chamado
   // fecha e o card com os botões some, mas a conversa continua na tela.
+  const telaGrande = useTelaGrande()
   const [botPausado, setBotPausado] = useState(false)
   // Sacola que o ATENDENTE monta dentro da conversa (ver SacolaNoChat).
   const [sacolaChat, setSacolaChat] = useState([])
@@ -6476,9 +6498,15 @@ export default function PainelPedidos() {
         <aside className="pp-drawer" style={{
           // right:56 reserva o menu de ícones; a largura precisa descontar isso
           // (senão no celular 94vw + 56px estoura a tela e corta o lado esquerdo).
-          position: 'fixed', top: 60, right: 56, bottom: 0, width: 'min(480px, calc(100vw - 64px))', zIndex: 39,
+          //
+          // No PC ela é quase o dobro: atender pelo gestor é ler conversa e
+          // montar sacola ao mesmo tempo, e 480px espremia as duas coisas num
+          // monitor que tem espaço sobrando.
+          position: 'fixed', top: 60, right: 56, bottom: 0, zIndex: 39,
+          width: telaGrande ? 'min(820px, calc(100vw - 80px))' : 'min(480px, calc(100vw - 64px))',
           background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
-          boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowY: 'auto', overflowX: 'hidden', padding: 16,
+          boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowY: 'auto', overflowX: 'hidden',
+          padding: telaGrande ? 22 : 16,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
@@ -6503,10 +6531,11 @@ export default function PainelPedidos() {
               </div>
               {chamados.map(c => (
                 <div key={c.id} style={{
-                  border: '1px solid rgba(220,38,38,.5)', borderRadius: 10, padding: '10px 12px',
+                  border: '1px solid rgba(220,38,38,.5)', borderRadius: 10,
+                  padding: telaGrande ? '14px 16px' : '10px 12px',
                   background: 'rgba(220,38,38,.10)',
                 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)' }}>
+                  <div style={{ fontSize: telaGrande ? 15.5 : 13.5, fontWeight: 700, color: 'var(--text)' }}>
                     {c.nome || foneBonito(c.phone)}
                   </div>
                   {c.nome && (
@@ -6522,8 +6551,9 @@ export default function PainelPedidos() {
                         celular, ele volta sem saber o que foi dito. */}
                     <button type="button" onClick={() => abrirConversaDoChamado(c.phone)}
                       style={{
-                        flex: 1, padding: '8px 10px', borderRadius: 8, cursor: 'pointer', border: 'none',
-                        background: '#22c55e', color: '#fff', fontSize: 12, fontWeight: 800,
+                        flex: 1, padding: telaGrande ? '12px 14px' : '8px 10px', borderRadius: 8,
+                        cursor: 'pointer', border: 'none',
+                        background: '#22c55e', color: '#fff', fontSize: telaGrande ? 14 : 12, fontWeight: 800,
                       }}>💬 Responder aqui</button>
                   </div>
                   {/* Duas saídas, e a diferença é quem continua falando com o
@@ -6584,11 +6614,12 @@ export default function PainelPedidos() {
                     <button key={t.key} type="button" onClick={() => abrirThread(t)}
                       style={{
                         display: 'block', width: '100%', textAlign: 'left', cursor: 'pointer',
-                        border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '10px 12px',
+                        border: '1px solid var(--border, #2a2a3a)', borderRadius: 10,
+                        padding: telaGrande ? '13px 15px' : '10px 12px',
                         background: t.unread ? 'rgba(124,58,237,.08)' : 'transparent',
                       }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                        <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontSize: telaGrande ? 15 : 13.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {t.cliente_nome || t.cliente_ref || 'Cliente'}
                         </span>
                         <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{hora}</span>
@@ -6598,7 +6629,7 @@ export default function PainelPedidos() {
                           fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 20, flexShrink: 0,
                           background: t.canal === 'app' ? '#f97316' : '#3b82f6', color: '#fff',
                         }}>{canalLbl}</span>
-                        <span style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                        <span style={{ fontSize: telaGrande ? 13.5 : 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                           {ultima.remetente === 'loja' ? (ultima.bot ? '🤖 ' : 'Você: ') : ''}{ultima.texto}
                         </span>
                         {t.unread > 0 && (
