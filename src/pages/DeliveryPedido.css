@@ -392,6 +392,167 @@
   line-height: 1.5;
 }
 
+/* ── PIX na entrega: o cliente ainda tem uma tarefa ──
+   Era um rodapé de 12px embaixo do status. Quem abre esta tela já pediu e
+   ainda não pagou — então o valor, a chave e o WhatsApp vêm em tamanho de
+   quem precisa ser lido de primeira, no celular, com a mão ocupada. */
+.dpd-pixe {
+  border-color: rgba(0, 180, 216, .45);
+  background: linear-gradient(180deg, rgba(0, 180, 216, .10), rgba(30, 27, 75, .6));
+}
+
+.dpd-pixe-topo {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.dpd-pixe-selo {
+  flex-shrink: 0;
+  padding: 7px 11px;
+  border-radius: 9px;
+  background: #00b4d8;
+  color: #04222b;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .06em;
+}
+
+.dpd-pixe-titulo {
+  margin: 0 0 3px;
+  font-size: 20px;
+  font-weight: 800;
+  color: #f1f5f9;
+}
+
+.dpd-pixe-sub {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #b6c2d4;
+}
+
+.dpd-pixe-valor {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border-radius: 12px;
+  background: #0f172a;
+  border: 1px solid #334155;
+}
+
+.dpd-pixe-valor span {
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+.dpd-pixe-valor strong {
+  font-size: 26px;
+  font-weight: 800;
+  color: #f1f5f9;
+  letter-spacing: -.01em;
+}
+
+.dpd-pixe-rot {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+/* A chave inteira, sem cortar: é o que muita gente ainda digita no banco. */
+.dpd-pixe-chave {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #0f172a;
+  border: 1px dashed #00b4d8;
+  color: #f1f5f9;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.4;
+  word-break: break-all;
+  text-align: center;
+}
+
+.dpd-pixe-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 50px;
+  margin-top: 10px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: none;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 140ms, transform 80ms;
+}
+
+.dpd-pixe-btn:active {
+  transform: scale(.99);
+}
+
+.dpd-pixe-btn--copiar {
+  background: #00b4d8;
+  color: #04222b;
+}
+
+.dpd-pixe-btn--copiar:hover {
+  background: #0098b8;
+}
+
+.dpd-pixe-btn--ok {
+  background: #16a34a;
+  color: #fff;
+}
+
+.dpd-pixe-btn--wa {
+  background: #25d366;
+  color: #06331a;
+}
+
+.dpd-pixe-btn--wa:hover {
+  background: #1fbb5a;
+}
+
+.dpd-pixe-semchave {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(234, 179, 8, .10);
+  border: 1px solid rgba(234, 179, 8, .35);
+  font-size: 14px;
+  line-height: 1.5;
+  color: #e8d9a0;
+}
+
+.dpd-pixe-passos {
+  margin: 18px 0 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #b6c2d4;
+}
+
+.dpd-pixe-passos li::marker {
+  color: #00b4d8;
+  font-weight: 800;
+}
+
 /* ── Itens do pedido ── */
 .dpd-itens {
   display: flex;

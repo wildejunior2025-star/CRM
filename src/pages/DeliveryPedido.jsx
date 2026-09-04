@@ -461,7 +461,7 @@ export default function DeliveryPedido() {
     if (!pedido?.empresa_id) return
     supabase
       .from('empresas')
-      .select('id, nome, logo_url, slug, google_ads_id, google_ads_label, meta_pixel_id, chave_pix, pix_nome, latitude, longitude')
+      .select('id, nome, logo_url, slug, google_ads_id, google_ads_label, meta_pixel_id, chave_pix, pix_nome, telefone_contato, latitude, longitude')
       .eq('id', pedido.empresa_id)
       .maybeSingle()
       .then(({ data }) => {
@@ -551,6 +551,17 @@ export default function DeliveryPedido() {
   const isCancelado = pedido.status === 'cancelado'
   const activeIdx = statusIndex(pedido.status)
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
+
+  // Conversa com a loja já com o texto pronto: o cliente só anexa o print.
+  // Sem o número cadastrado o botão some — link quebrado é pior que botão
+  // nenhum.
+  const linkComprovante = (() => {
+    const d = String(loja?.telefone_contato ?? '').replace(/\D/g, '')
+    if (d.length < 10) return null
+    const numero = d.startsWith('55') ? d : `55${d}`
+    const msg = `Olá! Segue o comprovante do PIX do pedido #${shortId(pedido.id)} — R$ ${fmt(pedido.total)}.`
+    return `https://wa.me/${numero}?text=${encodeURIComponent(msg)}`
+  })()
 
   return (
     <div className="dpd-root">
@@ -821,31 +832,63 @@ export default function DeliveryPedido() {
           </section>
         )}
 
-        {/* PIX na entrega — nada a pagar agora: o cliente transfere pra chave da
-            loja quando o pedido chegar. Sem gateway, sem QR gerado. */}
+        {/* PIX na entrega — sem gateway: o cliente transfere direto pra chave da
+            loja e manda o comprovante no WhatsApp.
+
+            Esta era a parte mais apagada da tela: três linhas de 12px embaixo do
+            status, sem valor e sem dizer o que fazer depois de pagar. Quem abre
+            aqui já pediu — falta pagar, e é isso que a tela tem que gritar: o
+            valor, a chave grande com um botão de copiar de verdade, o caminho
+            pro WhatsApp e os três passos em ordem. */}
         {pedido.forma_pagamento === 'pix_entrega' && !isCancelado && (
-          <section className="dpd-card dpd-card--pix">
-            <h2 className="dpd-card-title">Pix na entrega</h2>
-            <p className="dpd-pix-aviso" style={{ marginTop: 0 }}>
-              Você paga <strong>quando o pedido chegar</strong>, direto pra loja. Nada é cobrado agora.
-            </p>
-            {loja?.chave_pix && (
-              <div className="dpd-pix-copia-wrap">
-                <p className="dpd-pix-copia-label">
+          <section className="dpd-card dpd-pixe">
+            <div className="dpd-pixe-topo">
+              <span className="dpd-pixe-selo">PIX</span>
+              <div>
+                <h2 className="dpd-pixe-titulo">Falta pagar</h2>
+                <p className="dpd-pixe-sub">Pague na chave da loja e mande o comprovante — é assim que seu pedido é liberado.</p>
+              </div>
+            </div>
+
+            <div className="dpd-pixe-valor">
+              <span>Valor do pedido</span>
+              <strong>R$ {fmt(pedido.total)}</strong>
+            </div>
+
+            {loja?.chave_pix ? (
+              <>
+                <p className="dpd-pixe-rot">
                   Chave PIX da loja{loja.pix_nome ? ` — ${loja.pix_nome}` : ''}
                 </p>
-                <div className="dpd-pix-copia-row">
-                  <span className="dpd-pix-copia-code">{loja.chave_pix}</span>
-                  <button
-                    className={`dpd-pix-copy-btn${pixCopied ? ' dpd-pix-copy-btn--done' : ''}`}
-                    onClick={() => copiar(loja.chave_pix)}
-                    aria-label="Copiar chave Pix"
-                  >
-                    {pixCopied ? 'Copiado!' : 'Copiar'}
-                  </button>
-                </div>
-              </div>
+                <div className="dpd-pixe-chave">{loja.chave_pix}</div>
+                <button
+                  className={`dpd-pixe-btn dpd-pixe-btn--copiar${pixCopied ? ' dpd-pixe-btn--ok' : ''}`}
+                  onClick={() => copiar(loja.chave_pix)}
+                  aria-label="Copiar chave Pix"
+                >
+                  {pixCopied ? '✓ Chave copiada' : 'Copiar chave PIX'}
+                </button>
+              </>
+            ) : (
+              <p className="dpd-pixe-semchave">
+                A loja ainda não cadastrou a chave PIX aqui. Chame no WhatsApp que eles te passam.
+              </p>
             )}
+
+            {/* O botão que fecha o ciclo. Sem ele o cliente paga e não sabe pra
+                onde mandar o print — o pedido fica parado esperando um
+                comprovante que ninguém pediu direito. */}
+            {linkComprovante && (
+              <a className="dpd-pixe-btn dpd-pixe-btn--wa" href={linkComprovante} target="_blank" rel="noopener noreferrer">
+                💬 Mandar comprovante no WhatsApp
+              </a>
+            )}
+
+            <ol className="dpd-pixe-passos">
+              <li>Copie a chave e pague no app do seu banco</li>
+              <li>Mande o comprovante pra loja no WhatsApp</li>
+              <li>A loja confirma e começa a preparar</li>
+            </ol>
           </section>
         )}
 
