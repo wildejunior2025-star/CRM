@@ -3936,11 +3936,13 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
               <div style={{
                 maxWidth: g ? '76%' : '82%', padding: g ? '12px 16px' : '7px 11px', borderRadius: 13,
                 fontSize: g ? 17 : 13.5, lineHeight: g ? 1.5 : 1.35,
-                // Fala do robô fica num roxo mais apagado: quem atende precisa
-                // ver de relance o que já foi respondido sem ler tudo de novo.
-                background: doRobo ? 'rgba(124,58,237,.28)' : daLoja ? '#7c3aed' : 'var(--bg, #0f0f1a)',
-                color: doRobo ? 'var(--text)' : daLoja ? '#fff' : 'var(--text)',
-                border: doRobo ? '1px solid rgba(124,58,237,.55)' : daLoja ? 'none' : '1px solid var(--border, #2a2a3a)',
+                // Duas cores, um significado só, igual à tela de Mensagens do
+                // portal: ROXO é o robô, VERDE é você. Antes as duas falas
+                // saíam roxas (a sua em roxo cheio, a do robô apagada) e quem
+                // atende tinha que ler pra saber quem tinha falado.
+                background: doRobo ? 'rgba(124,58,237,.28)' : daLoja ? 'rgba(34,197,94,.16)' : 'var(--bg, #0f0f1a)',
+                color: 'var(--text)',
+                border: doRobo ? '1px solid rgba(124,58,237,.55)' : daLoja ? '1px solid rgba(34,197,94,.45)' : '1px solid var(--border, #2a2a3a)',
                 borderBottomRightRadius: daLoja ? 3 : 12,
                 borderBottomLeftRadius: daLoja ? 12 : 3,
                 whiteSpace: 'pre-wrap', wordBreak: 'break-word',
