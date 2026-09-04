@@ -382,6 +382,33 @@ function telefoneParaLink(phone: string): string {
 }
 
 /**
+ * Reserva um aviso automático: devolve true só pra QUEM pode mandar.
+ *
+ * Ler o histórico e concluir "ainda não avisei" não resolve nada quando duas
+ * mensagens do cliente chegam no mesmo segundo ("Bom dia" / "Ok"): os dois
+ * webhooks leem antes de qualquer um gravar, e os dois mandam. Aqui quem
+ * decide é o banco — chave única, um reserva e o outro descobre que já tem
+ * dono.
+ *
+ * Se a chamada falhar (rede, função ainda não migrada), libera: robô repetindo
+ * é chato, robô mudo é loja perdendo cliente.
+ */
+async function reservarAviso(
+  supabase: Sb, empresaId: string, phone: string, marca: string, minutos = 60,
+): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.rpc("robo_avisar_uma_vez", {
+      p_empresa_id: empresaId, p_chave: chave8(phone), p_marca: marca, p_minutos: minutos,
+    })
+    if (error) { console.error("[aviso] reserva falhou, liberando:", error.message); return true }
+    return data === true
+  } catch (e) {
+    console.error("[aviso] reserva quebrou, liberando:", e)
+    return true
+  }
+}
+
+/**
  * Robô está pausado nesse número? Pausa manual (expira_em NULL) vale pra
  * sempre; a automática (a loja assumiu a conversa) vale por algumas horas.
  */
@@ -553,8 +580,13 @@ export async function responderSemIA({
     //    esperando. Ele avisa UMA vez e cala — repetir "tamos fechados" a cada
     //    mensagem é pior que não responder.
     if (!lojaAbertaAgora(empresa)) {
+      // Duas checagens porque são dois problemas diferentes: o histórico pega
+      // o aviso que já saiu, a reserva pega o aviso que está saindo AGORA na
+      // outra execução — cliente que manda "Bom dia" e "Ok" seguidos acorda
+      // dois webhooks ao mesmo tempo, e os dois liam o histórico vazio.
       const jaAvisou = recentes.some((m: Record<string, unknown>) =>
         String(m.content ?? "").includes(MARCA_FECHADA))
+        || !(await reservarAviso(supabase, empresaId, phone, "fechada"))
       const daInfoFechada = respostaDeInfo(mensagem, empresa, link)
       if (jaAvisou) {
         // Já sabe que está fechado. Ainda assim responde o que sabe (taxa,
