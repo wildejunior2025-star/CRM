@@ -3900,7 +3900,7 @@ function Coluna({ titulo, cor, count, vazio, children }) {
 }
 
 // ── Conversa aberta (loja respondendo cliente) ──────────────
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   useEffect(() => {
@@ -3988,12 +3988,27 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
         </div>
       )}
 
-      {/* Buscar produto sem sair da conversa (ver BuscaProdutoNoChat) */}
-      {empresaId && <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} onAvulso={onAvulsoSacola} />}
+      {/* No PC a sacola mora NO PAINEL AO LADO (ver PainelSacola): montar
+          carrinho embaixo das mensagens empurra a conversa pra cima e o
+          atendente perde de vista o que o cliente pediu. Aqui fica só o botão
+          que abre. No celular não cabem dois painéis — lá continua embaixo. */}
+      {empresaId && g && (
+        <button type="button" onClick={onAbrirSacola}
+          style={{
+            marginTop: 8, width: '100%', padding: '12px 14px', borderRadius: 10, cursor: 'pointer',
+            fontSize: 15.5, fontWeight: 700,
+            border: `1px ${sacola?.length ? 'solid' : 'dashed'} ${sacola?.length ? 'rgba(34,197,94,.6)' : 'var(--border, #2a2a3a)'}`,
+            background: sacola?.length ? 'rgba(34,197,94,.10)' : 'transparent',
+            color: sacola?.length ? '#22c55e' : 'var(--text-muted)',
+          }}>
+          {sacola?.length
+            ? `🛒 Sacola do cliente (${sacola.length} ${sacola.length === 1 ? 'item' : 'itens'})`
+            : '🔍 Buscar produto / montar sacola'}
+        </button>
+      )}
 
-      {/* A sacola só aparece quando tem item — conversa de dúvida não precisa
-          ver carrinho vazio ocupando a tela. */}
-      {sacola?.length > 0 && (
+      {empresaId && !g && <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} onAvulso={onAvulsoSacola} />}
+      {!g && sacola?.length > 0 && (
         <SacolaNoChat
           itens={sacola}
           onQtd={onQtdSacola}
@@ -4052,7 +4067,7 @@ function useTelaGrande() {
 // Galioto"), o atendente precisa do nome e do preço certos sem sair da tela — e
 // o nome que ele mandar é o que o robô vai ler pra reconhecer o produto quando
 // voltar. Escrito de cabeça, sai errado; daqui, sai do cadastro.
-function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso }) {
+function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso, semBotao = false }) {
   const g = useTelaGrande()
   const [termo, setTermo] = useState('')
   const [itens, setItens] = useState([])
@@ -4085,7 +4100,7 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso }) {
     setBuscando(false)
   }
 
-  if (!aberto) {
+  if (!aberto && !semBotao) {
     return (
       <button type="button" onClick={() => setAberto(true)}
         style={{
@@ -4590,6 +4605,8 @@ export default function PainelPedidos() {
   const [botPausado, setBotPausado] = useState(false)
   // Sacola que o ATENDENTE monta dentro da conversa (ver SacolaNoChat).
   const [sacolaChat, setSacolaChat] = useState([])
+  // Painel da sacola colado na conversa (só no PC).
+  const [sacolaLateral, setSacolaLateral] = useState(false)
   const [enviandoSacola, setEnviandoSacola] = useState(false)
   // Cliente que pediu atendente no WhatsApp: o robô não inventa resposta, chama
   // gente. Toca AQUI, no gestor — é a tela que fica aberta no balcão.
@@ -4835,6 +4852,7 @@ export default function PainelPedidos() {
   // que o robô lê depois pra reconhecer o produto certo (ele passou a olhar
   // também o que a pessoa da loja escreveu).
   function escolherProdutoNoChat(p) {
+    setSacolaLateral(true)
     setSacolaChat(prev => {
       const i = prev.findIndex(x => x.produto_id === p.id)
       if (i >= 0) {
@@ -4934,6 +4952,7 @@ export default function PainelPedidos() {
   async function abrirThread(t) {
     setChatAberto(t.key)
     setSacolaChat([])   // sacola é daquela conversa, não segue pra próxima
+    setSacolaLateral(false)
     const tel = String(t.cliente_ref || '').replace(/\D/g, '')
     setBotPausado(false)
     if (tel.length >= 8 && empresa?.id) {
@@ -6599,6 +6618,7 @@ export default function PainelPedidos() {
                 onAvulsoSacola={item => setSacolaChat(prev => [...prev, item])}
                 onEnviarSacola={enviarSacolaDoChat}
                 enviandoSacola={enviandoSacola}
+                onAbrirSacola={() => setSacolaLateral(true)}
               />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -7218,6 +7238,51 @@ export default function PainelPedidos() {
               </div>
             )
           })()}
+        </aside>
+      )}
+
+      {/* ── Sacola do atendente, COLADA na gaveta de mensagens ──
+           Fica à esquerda dela: a conversa continua inteira na tela e ele
+           monta o pedido olhando o que o cliente escreveu. ── */}
+      {telaGrande && painelDireito === 'chat' && threadAberta && sacolaLateral && (
+        <aside style={{
+          position: 'fixed', top: 60, bottom: 0, zIndex: 39,
+          right: 'calc(min(50vw, calc(100vw - 80px)) + 56px)',
+          width: 'min(440px, 34vw)',
+          background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
+          boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowY: 'auto', padding: 18,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
+              🛒 Sacola do cliente
+            </h3>
+            <button type="button" onClick={() => setSacolaLateral(false)} aria-label="Fechar"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 22, lineHeight: 1 }}>
+              ×
+            </button>
+          </div>
+
+          <BuscaProdutoNoChat
+            empresaId={empresa?.id}
+            onEscolher={escolherProdutoNoChat}
+            onAvulso={item => setSacolaChat(prev => [...prev, item])}
+            semBotao
+          />
+
+          {sacolaChat.length === 0 ? (
+            <div style={{ fontSize: 13.5, color: 'var(--text-muted)', marginTop: 14, lineHeight: 1.5 }}>
+              Procure o produto acima e clique pra jogar aqui.<br />
+              Não achou? Ponha o preço e mande mesmo sem cadastro.
+            </div>
+          ) : (
+            <SacolaNoChat
+              itens={sacolaChat}
+              onQtd={mudarQtdSacola}
+              onRemover={idx => mudarQtdSacola(idx, -999)}
+              onEnviar={enviarSacolaDoChat}
+              enviando={enviandoSacola}
+            />
+          )}
         </aside>
       )}
 
