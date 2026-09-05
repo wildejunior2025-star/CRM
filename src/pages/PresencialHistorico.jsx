@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
@@ -13,6 +13,15 @@ const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractio
 const dataCurta = (d) => {
   const [, m, dia] = String(d ?? '').split('-')
   return dia && m ? `${dia}/${m}` : String(d ?? '')
+}
+// "seg 02/09" — no extrato o dia da semana diz mais que a data: o garçom lembra
+// do sábado cheio, não do dia 30. Data montada na mão pelo mesmo motivo do
+// dataCurta: new Date() num "2026-09-02" joga pro dia anterior.
+const DIAS_SEM = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
+const diaDaSemana = (d) => {
+  const [a, m, dia] = String(d ?? '').split('-').map(Number)
+  if (!a || !m || !dia) return dataCurta(d)
+  return `${DIAS_SEM[new Date(a, m - 1, dia).getDay()]} ${String(dia).padStart(2, '0')}/${String(m).padStart(2, '0')}`
 }
 const FORMA_LABEL = { dinheiro: 'Dinheiro', pix: 'PIX', credito: 'Crédito', debito: 'Débito', cartao: 'Cartão', fiado: 'Fiado', dividido: 'Dividido', transferencia: 'Transferência' }
 // Formas que dá pra escolher ao corrigir uma conta (o "dividido" não entra aqui).
@@ -44,6 +53,9 @@ export default function PresencialHistorico() {
   const [taxaDoDia, setTaxaDoDia] = useState(0)   // taxa de serviço arrecadada hoje na LOJA
   // O que cada um tem a receber somando os dias, até o dono pagar (mig 0230).
   const [acumulado, setAcumulado] = useState([])
+  // Dia a dia de um garçom (mig 0236): id de quem está aberto e as linhas.
+  const [extratoAberto, setExtratoAberto] = useState(null)
+  const [extrato, setExtrato] = useState([])
   const [pagando, setPagando]     = useState(null)
   const [loading, setLoading]   = useState(true)
   const [aberta, setAberta]     = useState(null) // id da comanda expandida
@@ -204,6 +216,22 @@ export default function PresencialHistorico() {
     if (error) return
     const lista = (data ?? []).filter(a => ehAdmin || a.garcom_id === meuId)
     setAcumulado(lista)
+  }
+
+  /**
+   * Abre (ou fecha) o dia a dia de um garçom.
+   *
+   * O acumulado é um número só, e número só o garçom tem que aceitar de olhos
+   * fechados. Aqui ele vê cada dia com o bolo daquele dia — e a soma das linhas
+   * bate com o total de cima, que é o ponto: dá pra conferir a semana antes de
+   * receber. A conta é do banco (mig 0236), a mesma do acumulado.
+   */
+  async function abrirExtrato(garcomId) {
+    if (extratoAberto === garcomId) { setExtratoAberto(null); return }
+    setExtratoAberto(garcomId)
+    setExtrato('carregando')
+    const { data, error } = await supabase.rpc('extrato_garcom', { p_garcom: garcomId })
+    setExtrato(error ? [] : (data ?? []))
   }
 
   // Marca que o dono acertou com o garçom: daqui pra frente a conta dele
@@ -505,32 +533,83 @@ export default function PresencialHistorico() {
                   dia — dia parado rende pouco, dia cheio rende mais.
                 </p>
                 {acumulado.map(a => (
-                  <div key={a.garcom_id} style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0',
-                    borderTop: '1px solid var(--border)',
-                  }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>{a.nome}</div>
-                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
-                        {a.pontos} pontos · {a.dias} dia(s) · desde {dataCurta(a.desde)}
+                  <Fragment key={a.garcom_id}>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0',
+                      borderTop: '1px solid var(--border)',
+                    }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>{a.nome}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                          {a.pontos} pontos · {a.dias} dia(s) · desde {dataCurta(a.desde)}
+                        </div>
+                        {/* Um número só é o que o garçom tem que aceitar de olhos
+                            fechados. Aqui ele abre e confere dia por dia — é o
+                            que a semana de pagamento pede. */}
+                        <button type="button" onClick={() => abrirExtrato(a.garcom_id)}
+                          style={{
+                            marginTop: 6, padding: 0, border: 'none', background: 'none', cursor: 'pointer',
+                            color: 'var(--primary)', fontSize: 12, fontWeight: 700,
+                          }}>
+                          {extratoAberto === a.garcom_id ? '▲ esconder o dia a dia' : '▼ ver dia a dia'}
+                        </button>
                       </div>
+                      <div style={{ fontSize: 18, fontWeight: 900, color: 'var(--success)', whiteSpace: 'nowrap' }}>
+                        {fmt(a.valor)}
+                      </div>
+                      {ehAdmin && (
+                        <button type="button" disabled={pagando === a.garcom_id || Number(a.valor) <= 0}
+                          onClick={() => pagarGarcom(a)}
+                          style={{
+                            flexShrink: 0, padding: '8px 12px', borderRadius: 9, fontWeight: 800, fontSize: 12.5,
+                            cursor: Number(a.valor) > 0 ? 'pointer' : 'default',
+                            opacity: Number(a.valor) > 0 ? 1 : .4,
+                            border: '1.5px solid var(--success)', background: 'transparent', color: 'var(--success)',
+                          }}>
+                          {pagando === a.garcom_id ? '...' : '✅ Paguei'}
+                        </button>
+                      )}
                     </div>
-                    <div style={{ fontSize: 18, fontWeight: 900, color: 'var(--success)', whiteSpace: 'nowrap' }}>
-                      {fmt(a.valor)}
-                    </div>
-                    {ehAdmin && (
-                      <button type="button" disabled={pagando === a.garcom_id || Number(a.valor) <= 0}
-                        onClick={() => pagarGarcom(a)}
-                        style={{
-                          flexShrink: 0, padding: '8px 12px', borderRadius: 9, fontWeight: 800, fontSize: 12.5,
-                          cursor: Number(a.valor) > 0 ? 'pointer' : 'default',
-                          opacity: Number(a.valor) > 0 ? 1 : .4,
-                          border: '1.5px solid var(--success)', background: 'transparent', color: 'var(--success)',
-                        }}>
-                        {pagando === a.garcom_id ? '...' : '✅ Paguei'}
-                      </button>
+
+                    {extratoAberto === a.garcom_id && (
+                      <div style={{
+                        margin: '0 0 10px', padding: '10px 12px', borderRadius: 10,
+                        background: 'var(--surface-hover)', border: '1px solid var(--border)',
+                      }}>
+                        {extrato === 'carregando' ? (
+                          <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Somando os dias…</div>
+                        ) : !extrato?.length ? (
+                          <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Nenhum dia ainda neste período.</div>
+                        ) : (
+                          <>
+                            {extrato.map(d => (
+                              <div key={d.dia} style={{
+                                display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                                gap: 8, padding: '7px 0', borderTop: '1px dashed var(--border)',
+                              }}>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 700 }}>{diaDaSemana(d.dia)}</div>
+                                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                    {d.pontos} de {Number(d.pts_equipe)} pontos da equipe · bolo {fmt(d.bolo_dia)}
+                                  </div>
+                                </div>
+                                <strong style={{ fontSize: 14.5, color: 'var(--success)', whiteSpace: 'nowrap' }}>
+                                  {fmt(d.valor)}
+                                </strong>
+                              </div>
+                            ))}
+                            <div style={{
+                              display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 8, paddingTop: 8,
+                              borderTop: '1px solid var(--border)', fontSize: 13, fontWeight: 800,
+                            }}>
+                              <span>Soma dos {extrato.length} dia(s)</span>
+                              <span>{fmt(extrato.reduce((s, d) => s + Number(d.valor || 0), 0))}</span>
+                            </div>
+                          </>
+                        )}
+                      </div>
                     )}
-                  </div>
+                  </Fragment>
                 ))}
                 {ehAdmin && (
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.45 }}>
