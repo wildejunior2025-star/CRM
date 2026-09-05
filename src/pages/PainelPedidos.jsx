@@ -5024,10 +5024,11 @@ function SacolaNoChat({ itens, onQtd, onQtdDireta, onRemover, onEnviar, enviando
               background: '#22c55e', color: '#fff', fontSize: g ? 16 : 12.5, fontWeight: 800,
               cursor: enviando ? 'default' : 'pointer', opacity: enviando ? .6 : 1,
             }}>
-            {enviando ? 'Enviando...' : '📤 Mandar pro cliente e devolver pro robô'}
+            {enviando ? 'Enviando...' : '📤 Mandar a sacola pro cliente'}
           </button>
           <div style={{ fontSize: g ? 13 : 10.5, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
-            O cliente recebe a lista com os preços, e o robô continua pedindo endereço e forma de pagamento.
+            O cliente recebe a lista com os preços. Você continua na conversa —
+            pra o robô assumir daqui, use o <strong>Devolver pro robô</strong>.
           </div>
         </>
       )}
@@ -6140,29 +6141,26 @@ export default function PainelPedidos() {
     })
     let okZap = false
     if (tel.length >= 10) {
-      // assumir_conversa FALSE: aqui a gente está DEVOLVENDO a conversa, não
-      // tomando ela. Pausar de novo seria o contrário do botão.
+      // Mandar a sacola NÃO devolve a conversa (era o que este botão fazia, e
+      // eram duas coisas num clique só). Quem está atendendo pode querer mandar
+      // a lista e continuar falando — combinar a troca de um item, avisar que
+      // acabou um sabor. Devolver pro robô virou decisão à parte, no botão que
+      // já existe pra isso, na barra roxa.
+      //
+      // assumir_conversa também fica FALSE: a conversa já é de quem está aqui,
+      // e pausar de novo só reiniciaria o relógio das 12h sem motivo.
       const { data } = await supabase.functions.invoke('whatsapp-connect', {
         body: { action: 'send_message', phone: tel, text: texto, espelhar_no_chat: false, assumir_conversa: false },
       })
       okZap = !!data?.ok
     }
 
-    // 3) Tira a pausa: o robô volta e continua de onde a gente parou.
-    await supabase.from('whatsapp_bot_pausado')
-      .delete().eq('empresa_id', empresa.id)
-      .like('phone', `%${tel.slice(-8)}`)
-      .not('expira_em', 'is', null)
-    const chamado = chamados.find(c => String(c.phone).replace(/\D/g, '').endsWith(tel.slice(-8)))
-    if (chamado) await atenderChamado(chamado.id, { devolverAoRobo: true })
-
-    setBotPausado(false)
     setSacolaChat([])
     setEnviandoSacola(false)
     setChatAviso(errCarrinho
       ? { ok: false, txt: '⚠️ A lista foi enviada, mas não consegui gravar o carrinho: ' + errCarrinho.message }
       : { ok: true, txt: okZap
-          ? '✓ Sacola enviada. O robô assume daqui e pede endereço e pagamento.'
+          ? '✓ Sacola enviada. Você continua na conversa — devolva pro robô quando quiser.'
           : '⚠️ Sacola gravada aqui, mas não saiu no WhatsApp do cliente.' })
   }
 
