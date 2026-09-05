@@ -60,7 +60,20 @@ export default defineConfig({
         // /api/ping tem que sair pela rede SEMPRE. Se virasse index.html servido
         // do cache, ele responderia "ok" até com a internet caída — e a tela
         // culparia o servidor quando o problema é a conexão de quem está usando.
-        navigateFallbackDenylist: [/^\/api\//],
+        //
+        // E os LINKS QUE A LOJA MANDA PRO CLIENTE também saem pela rede. O
+        // service worker guarda o index.html de quando o aparelho visitou a
+        // primeira vez; se uma rota nova nasceu depois disso, ele serve a casca
+        // velha, o React não acha a rota e a tela fica EM BRANCO — só depois de
+        // atualizar é que aparece. Foi o que aconteceu com /local/ (o link de
+        // confirmar o ponto no mapa): ninguém vai pedir pro cliente dar F5.
+        navigateFallbackDenylist: [
+          /^\/api\//,
+          /^\/local\//,      // confirmar o ponto da entrega no mapa
+          /^\/c\//,          // link do cliente
+          /^\/mesa\//,       // QR da mesa
+          /^\/pedido\//,     // acompanhar o pedido
+        ],
         // Sem skipWaiting: é o main.jsx que manda o SKIP_WAITING na hora certa.
         clientsClaim: true,
         cleanupOutdatedCaches: true,

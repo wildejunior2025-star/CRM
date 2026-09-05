@@ -211,6 +211,7 @@ const PresencialReservas = lazy(() => import('./pages/PresencialReservas'))
 const MesaCardapio = lazy(() => import('./pages/MesaCardapio'))
 const ClienteLink = lazy(() => import('./pages/ClienteLink'))
 const ConfirmarLocal = lazy(() => import('./pages/ConfirmarLocal'))
+const PaginaNaoEncontrada = lazy(() => import('./pages/PaginaNaoEncontrada'))
 const Landing = lazy(() => import('./pages/Landing'))
 const TourSistema = lazy(() => import('./pages/TourSistema'))
 
@@ -240,6 +241,7 @@ export default function App() {
             {/* Link antigo por id (ex: loja sem slug) — resolve por id no DeliveryLoja */}
             <Route path="/loja/:id" element={<DeliveryLoja />} />
             <Route path="/:slug" element={<DeliveryLoja />} />
+            <Route path="*" element={<PaginaNaoEncontrada />} />
           </Routes>
           </Suspense>
         </BrowserRouter>
@@ -282,6 +284,10 @@ export default function App() {
           <Route path="/cadastro-cliente/:empresaId" element={<CadastroCliente />} />
           <Route path="/cadastro-admin/:empresaId" element={<CadastroAdmin />} />
           <Route path="/cadastro-vendedor/:empresaId" element={<CadastroVendedor />} />
+          {/* Rota que não existe NUNCA pode virar tela preta. Ela cai aqui e
+              diz o que houve — com um botão que recarrega de verdade, que é o
+              que resolve quando o aparelho está com uma versão velha guardada. */}
+          <Route path="*" element={<PaginaNaoEncontrada />} />
 
           <Route
             element={
