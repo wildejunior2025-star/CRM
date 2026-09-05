@@ -1,4 +1,4 @@
-// Bot v188 — pede a LOCALIZAÇÃO primeiro (CEP/escrito viram a saída); endereço em pedaços vira um só; pedido do robô nasce com o ponto. v187 — promessa de retorno vira chamado de verdade; busca perdoa erro de digitação. v186: endereço+taxa no fechamento. v185: pedido de endereço pergunta rua e bairro (CEP vira a saída alternativa). v184: vendia o CEP como atalho (escrever é só a saída de quem não sabe). v183: escrito guarda bairro/cidade. v182: cadastro sem e-mail.
+// Bot v189 — link do Google Maps vira endereço escrito + link do pino (quem pede PRA OUTRA pessoa não tem como mandar a própria localização). v188 — pede a LOCALIZAÇÃO primeiro (CEP/escrito viram a saída); endereço em pedaços vira um só; pedido do robô nasce com o ponto. v187 — promessa de retorno vira chamado de verdade; busca perdoa erro de digitação. v186: endereço+taxa no fechamento. v185: pedido de endereço pergunta rua e bairro (CEP vira a saída alternativa). v184: vendia o CEP como atalho (escrever é só a saída de quem não sabe). v183: escrito guarda bairro/cidade. v182: cadastro sem e-mail.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { responderSemIA, roboPausado, pausarPorAtendimentoHumano, chamadoAberto, abrirChamado } from "../_shared/respostaSemIA.ts"
@@ -588,6 +588,174 @@ async function handleLocalizacao(
     "📍 Peguei sua localização!\n\n" +
     `Isso aqui é *${onde}*.\n\n` +
     "É aí mesmo que você quer receber? Se for, me diz só o *número* da casa. 😊" }
+}
+
+// ── LINK DO GOOGLE MAPS (mig 0240) ──────────────────────────────────────────
+//
+// Quem pede PRA OUTRA PESSOA não pode mandar a própria localização: o GPS dele
+// é o lugar errado. O que essa pessoa faz é colar um link do Maps.
+//
+// O link tem duas coisas dentro, e as duas servem:
+//   • às vezes a coordenada (@-5.76,-35.27 ou !3d..!4d..), quando é pino solto;
+//   • quase sempre o endereço ESCRITO e completo, com número, bairro e CEP.
+//
+// Então o robô lê o que der, escreve o endereço na conversa e devolve o NOSSO
+// link do mapa (mig 0238) pra pessoa arrastar o pino até a porta certa. Ela sabe
+// onde o amigo mora — foi ela que achou o lugar no Maps.
+//
+// Por que não confiar no link e pronto: link de LUGAR aponta pro estabelecimento
+// (o cliente manda o mercado da esquina como referência), não pra casa. Por isso
+// a resposta pergunta de volta, sempre.
+
+const RE_LINK_MAPA = /https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|(?:www\.)?google\.[a-z\.]+\/maps|maps\.google\.[a-z\.]+)[^\s]*/i
+
+// O link curto não diz nada: o endereço mora no destino do redirecionamento.
+async function resolverLinkDoMapa(url: string): Promise<string | null> {
+  let atual = url
+  for (let i = 0; i < 4; i++) {
+    try {
+      const res = await fetch(atual, {
+        redirect: "manual",
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; CRM-FWC/1.0)" },
+      })
+      const loc = res.headers.get("location")
+      if (!loc) return atual
+      atual = loc.startsWith("http") ? loc : new URL(loc, atual).toString()
+    } catch (e: any) {
+      console.error("[Mapa] redirect erro:", e?.message)
+      return null
+    }
+  }
+  return atual
+}
+
+function pontoDoLinkDoMapa(url: string): { lat: number; lng: number } | null {
+  let u = url
+  try { u = decodeURIComponent(url) } catch { /* url torta: usa como veio */ }
+  const padroes = [
+    /@(-?\d+\.\d+),(-?\d+\.\d+)/,
+    /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/,
+    /[?&](?:q|query|ll|daddr|destination)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,
+  ]
+  for (const re of padroes) {
+    const m = u.match(re)
+    if (m) {
+      const lat = parseFloat(m[1]), lng = parseFloat(m[2])
+      if (Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0)) return { lat, lng }
+    }
+  }
+  return null
+}
+
+// "Nordestão Igapó - Av. Bacharel Tomaz Landim, 26 - Igapó, Natal - RN, 59290-000"
+// vira rua/número/bairro/cidade/UF/CEP, e o que vier antes da rua é o nome do
+// lugar — que serve de REFERÊNCIA pro entregador, não de endereço.
+function enderecoDoLinkDoMapa(url: string):
+  { rua: string; numero: string; bairro: string; cidade: string; estado: string; cep: string; lugar: string } | null {
+  const m = url.match(/\/maps\/place\/([^/@?]+)/)
+  if (!m) return null
+  let t = ""
+  try { t = decodeURIComponent(m[1].replace(/\+/g, " ")).trim() } catch { return null }
+  if (t.length < 6) return null
+
+  const cepM = t.match(/(\d{5}-?\d{3})/)
+  const cep = cepM ? cepM[1].replace(/[^0-9]/g, "") : ""
+  if (cepM) t = t.replace(cepM[0], "")
+  t = t.replace(/[,\s-]+$/, "").trim()
+
+  const ufM = t.match(/[-,]\s*([A-Z]{2})\s*$/)
+  const estado = ufM ? ufM[1] : ""
+  if (ufM) t = t.slice(0, ufM.index).replace(/[,\s-]+$/, "").trim()
+
+  const blocos = t.split(" - ").map(b => b.trim()).filter(Boolean)
+  let rua = "", numero = "", idxRua = -1
+  for (let i = 0; i < blocos.length; i++) {
+    const comNum = blocos[i].match(/^(.+?),\s*(\d{1,6}[A-Za-z]?)$/)
+    if (comNum) { rua = comNum[1].trim(); numero = comNum[2]; idxRua = i; break }
+  }
+  if (idxRua < 0) {
+    for (let i = 0; i < blocos.length; i++) {
+      if (PREFIXO_RUA.test(blocos[i])) { rua = blocos[i]; idxRua = i; break }
+    }
+  }
+  if (!rua) return null
+
+  let bairro = "", cidade = ""
+  const resto = blocos.slice(idxRua + 1).join(" - ")
+  if (resto) {
+    const partes = resto.split(",").map(x => x.trim()).filter(Boolean)
+    if (partes.length >= 2) { bairro = partes[0]; cidade = partes[1] }
+    else if (partes.length === 1) { cidade = partes[0] }
+  }
+  const lugar = idxRua > 0 ? blocos.slice(0, idxRua).join(" - ") : ""
+  return { rua, numero, bairro, cidade, estado, cep, lugar }
+}
+
+async function handleLinkDoMapa(
+  supabase: ReturnType<typeof createClient>,
+  empresaId: string,
+  phone: string,
+  url: string,
+): Promise<{ resposta: string }> {
+  const destino = await resolverLinkDoMapa(url)
+  if (!destino) {
+    return { resposta: "Não consegui abrir esse link. \u{1F615} Me escreve o endereço da entrega: *rua*, *número* e *bairro*?" }
+  }
+  const ponto = pontoDoLinkDoMapa(destino)
+  const end   = enderecoDoLinkDoMapa(destino)
+  console.log(`[Mapa] destino="${destino.slice(0, 120)}" ponto=${ponto ? `${ponto.lat},${ponto.lng}` : "-"} rua="${end?.rua ?? "-"}"`)
+
+  if (!end && !ponto) {
+    return { resposta: "Esse link não me disse o endereço. \u{1F615} Me escreve aqui: *rua*, *número* e *bairro*?" }
+  }
+
+  const campos: Record<string, unknown> = {}
+  if (end) {
+    campos.endereco_rua    = end.rua
+    campos.endereco_numero = end.numero || null
+    if (end.bairro) campos.endereco_bairro = end.bairro
+    if (end.cidade) campos.endereco_cidade = end.cidade
+    if (end.estado) campos.endereco_estado = end.estado
+  }
+  if (ponto) { campos.endereco_lat = ponto.lat; campos.endereco_lng = ponto.lng }
+  await salvarEnderecoNoCarrinho(empresaId, phone, campos)
+
+  // O link do mapa NOSSO: quem está com o celular na mão arrasta o pino até a
+  // porta do amigo. É o único jeito de acertar a casa de outra pessoa.
+  let linkPino = ""
+  if (end?.rua) {
+    const { data, error } = await supabase.rpc("criar_pin_link_para", {
+      p_empresa_id: empresaId, p_telefone: phone,
+      p_rua: end.rua, p_numero: end.numero || null,
+      p_bairro: end.bairro || null, p_cidade: end.cidade || null,
+      p_estado: end.estado || null, p_cep: end.cep || null,
+      p_lat: ponto?.lat ?? null, p_lng: ponto?.lng ?? null, p_pedido_id: null,
+    })
+    if (error) console.error("[Mapa] criar_pin_link_para erro:", error.message)
+    else if (data?.ok) linkPino = `https://lojaonline.fwcinter.com/local/${data.token}`
+  }
+
+  const escrito = [
+    end?.rua ? `*${[end.rua, end.numero].filter(Boolean).join(", ")}*` : null,
+    [end?.bairro, end?.cidade].filter(Boolean).join(", ") || null,
+  ].filter(Boolean).join(" \u2014 ")
+
+  const linhas = [
+    "\u{1F4CD} Peguei o endereço do link:",
+    "",
+    escrito || "(o link só trouxe o ponto no mapa)",
+    end?.lugar ? `_referência: ${end.lugar}_` : null,
+    "",
+    linkPino
+      ? "Confere o ponto exato aqui, que aí o entregador vai direto na porta:\n\n"
+        + `\u{1F449} ${linkPino}\n\n`
+        + 'É só arrastar o pino e tocar em "É aqui". \u{1F642}'
+      : null,
+    "",
+    end?.numero ? "Esse é o endereço da entrega?" : "Qual o *número* da casa?",
+  ].filter(l => l !== null).join("\n")
+
+  return { resposta: linhas }
 }
 
 // ── Endereço que chega em pedaços ────────────────────────────────────────────
@@ -2088,6 +2256,31 @@ serve(async (req) => {
     ].filter((v) => Number.isFinite(v) && v > 0)
     const taxaMin = taxasCadastradas.length ? Math.min(...taxasCadastradas) : null
     const taxaMax = taxasCadastradas.length ? Math.max(...taxasCadastradas) : null
+
+    // ── O CLIENTE COLOU UM LINK DO GOOGLE MAPS ──────────────────────────────
+    // Vem antes da IA pelo mesmo motivo do pino: link não é conversa, é dado.
+    // O modelo leria a URL como texto e responderia qualquer coisa — e o
+    // endereço que estava dentro dela se perderia.
+    {
+      const achou = text.match(RE_LINK_MAPA)
+      if (achou) {
+        const { resposta: respMapa } = await handleLinkDoMapa(supabase, empresaId, phone, achou[0])
+        await supabase.from("whatsapp_conversas").insert({
+          empresa_id: empresaId, phone, role: "assistant", content: respMapa,
+        })
+        await espelharNoChat(supabase, empresaId, phone, respMapa, "loja", true)
+        if (isTest) {
+          return new Response(JSON.stringify({ ok: true, resposta: respMapa, _debug: { link: achou[0] } }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+        }
+        await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+          body: JSON.stringify({ number: phone, text: respMapa }),
+        }).catch(e => console.error("[Mapa] sendText erro:", e))
+        return new Response("ok", { headers: corsHeaders })
+      }
+    }
 
     // ── O CLIENTE MANDOU A LOCALIZAÇÃO ──────────────────────────────────────
     // Curto-circuito antes da IA: quem responde é o código. Mandar um pino pro
