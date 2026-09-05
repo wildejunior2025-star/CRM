@@ -4419,6 +4419,60 @@ function Coluna({ titulo, cor, count, vazio, children }) {
 }
 
 // ── Conversa aberta (loja respondendo cliente) ──────────────
+// FOTO E ÁUDIO DA CONVERSA (mig 0242).
+//
+// O arquivo fica num bucket PRIVADO — é foto de cliente: comprovante, receita,
+// endereço, a casa dele. Então a tela pede um link assinado na hora de mostrar,
+// e esse link vence sozinho. Sem isso a foto de um cliente ficaria numa URL
+// pública que qualquer um com o endereço abriria.
+//
+// A mídia vive 24 horas. Passou disso, o arquivo já foi apagado pela faxina e
+// a mensagem fica só com a marca ("📷 Foto") — quem precisa rever abre o
+// WhatsApp, que é onde a conversa mora de verdade.
+function MidiaDaMensagem({ path, tipo }) {
+  const [url, setUrl] = useState(null)
+  const [erro, setErro] = useState(false)
+
+  useEffect(() => {
+    if (!path) return
+    let vivo = true
+    supabase.storage.from('chat-midias').createSignedUrl(path, 60 * 60)
+      .then(({ data, error }) => {
+        if (!vivo) return
+        if (error || !data?.signedUrl) setErro(true)
+        else setUrl(data.signedUrl)
+      })
+    return () => { vivo = false }
+  }, [path])
+
+  if (erro) {
+    return <div style={{ fontSize: 11.5, opacity: .7, marginTop: 4 }}>(não consegui abrir o arquivo)</div>
+  }
+  if (!url) {
+    return <div style={{ fontSize: 11.5, opacity: .7, marginTop: 4 }}>carregando…</div>
+  }
+  if (tipo === 'audio') {
+    return (
+      <audio controls preload="none" src={url}
+        style={{ marginTop: 6, width: '100%', maxWidth: 260, height: 38 }} />
+    )
+  }
+  if (tipo === 'imagem') {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginTop: 6 }}>
+        <img src={url} alt="Foto enviada pelo cliente" loading="lazy"
+          style={{ maxWidth: '100%', maxHeight: 260, borderRadius: 8, display: 'block' }} />
+      </a>
+    )
+  }
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer"
+      style={{ display: 'inline-block', marginTop: 6, fontSize: 12, color: '#60a5fa', textDecoration: 'underline' }}>
+      abrir arquivo
+    </a>
+  )
+}
+
 function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, cadastroVersao }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
@@ -4497,6 +4551,9 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
                     )}
                   </div>
                 ) : m.texto}
+                {m.midia_path && (
+                  <MidiaDaMensagem path={m.midia_path} tipo={m.midia_tipo} />
+                )}
                 <div style={{ fontSize: 9.5, opacity: .65, marginTop: 3, textAlign: 'right' }}>
                   {new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                 </div>

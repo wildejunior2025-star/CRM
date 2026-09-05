@@ -16,6 +16,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { guardarMidiaDoChat } from "../_shared/midiaDoChat.ts"
 import { responderSemIA, pausarPorAtendimentoHumano } from "../_shared/respostaSemIA.ts"
 
 const SUPABASE_URL  = Deno.env.get("SUPABASE_URL") ?? ""
@@ -99,6 +100,8 @@ async function espelharNoChat(
   // Localização que veio na mensagem (mig 0238) — o pininho do WhatsApp traz
   // lat/lng, e é o ponto exato da casa do cliente. Antes ia pro lixo.
   coords: { lat: number; lng: number } | null = null,
+  // Foto/áudio já guardados no bucket (mig 0242): vivem 24h.
+  midia: { path: string; tipo: string; expiraEm: string } | null = null,
 ) {
   try {
     const digitos = String(phone ?? "").replace(/\D/g, "")
@@ -133,6 +136,9 @@ async function espelharNoChat(
       bot,
       lat: coords?.lat ?? null,
       lng: coords?.lng ?? null,
+      midia_path:      midia?.path ?? null,
+      midia_tipo:      midia?.tipo ?? null,
+      midia_expira_em: midia?.expiraEm ?? null,
     })
   } catch (_e) {
     // O espelho é bônus: se falhar, o atendimento pelo WhatsApp segue igual.
@@ -393,7 +399,19 @@ async function processar(body: any) {
       await supabase.from("whatsapp_conversas").insert({
         empresa_id: cfg.empresa_id, phone: from, role: "user", content: conteudo,
       })
-      await espelharNoChat(supabase, cfg.empresa_id, from, conteudo, "cliente", false, coordsDaMensagem(message))
+      // Robô desligado é quando tem gente atendendo à mão — e é essa pessoa
+      // que precisa abrir a foto do comprovante ou ouvir o áudio (mig 0242).
+      let midiaOff = null
+      const idOff = message.type === "image" ? message.image?.id
+                  : message.type === "audio" ? message.audio?.id
+                  : null
+      if (idOff) {
+        const arq = await baixarMidiaCloud(String(idOff), token)
+        if (arq?.base64) {
+          midiaOff = await guardarMidiaDoChat(supabase, cfg.empresa_id, arq.base64, arq.mimetype)
+        }
+      }
+      await espelharNoChat(supabase, cfg.empresa_id, from, conteudo, "cliente", false, coordsDaMensagem(message), midiaOff)
 
       // Resposta automática com o link do cardápio (mig 0226). Aqui a janela de
       // 24h da Meta não atrapalha: o cliente ACABOU de escrever, então texto
@@ -415,6 +433,9 @@ async function processar(body: any) {
   // exatamente o que o robô pediu. Ela segue pro cérebro como localização
   // mesmo, e lá o código lê o ponto (mig 0239).
   const coordsCloud = coordsDaMensagem(message)
+  // Id da mídia na Graph API, pra baixar e guardar depois que a empresa for
+  // conhecida (o caminho no bucket começa pelo empresa_id).
+  let midiaCrua: { id: string; legenda: string } | null = null
   let text = ""
   if (coordsCloud) {
     text = "📍 Localização"
@@ -429,6 +450,7 @@ async function processar(body: any) {
     // Áudio/nota de voz: baixa da Graph API e transcreve com Whisper.
     const mediaId = message.audio?.id
     const midia = mediaId ? await baixarMidiaCloud(String(mediaId), token) : null
+    if (mediaId) midiaCrua = { id: String(mediaId), legenda: "" }
     const transcricao = midia ? await transcreverAudio(midia.base64, midia.mimetype) : null
     if (transcricao?.trim()) {
       text = transcricao.trim()
@@ -437,12 +459,34 @@ async function processar(body: any) {
       await sendText(phoneNumberId, from, "Oi! 😊 Não consegui entender o áudio. Pode escrever por texto?", token)
       return
     }
+  } else if (message.type === "image") {
+    // A FOTO deixou de ser recusada (mig 0242). Ela é guardada pra loja abrir
+    // no chat, e a legenda — quando tem — segue pro cérebro como texto. Sem
+    // legenda, o robô diz que recebeu e pede pra escrever: ele não lê imagem,
+    // mas a pessoa que vai atender lê.
+    const cap = String(message.image?.caption ?? "").trim()
+    text = cap || "📷 Foto"
+    midiaCrua = { id: String(message.image?.id ?? ""), legenda: cap }
   } else {
-    // imagem/documento ainda não suportados por aqui
+    // documento/vídeo ainda não suportados por aqui
     await sendText(phoneNumberId, from, "Oi! 😊 Por enquanto consigo te atender melhor por *texto*. Pode escrever o que você precisa?", token)
     return
   }
   if (!text) return
+
+  // A foto/áudio vai pro bucket antes de qualquer coisa (mig 0242): a Meta só
+  // entrega o arquivo por pouco tempo depois que ele chega, e o cérebro pode
+  // demorar. Guardado aqui, a loja abre no chat mesmo que o resto falhe.
+  //
+  // O ESPELHO da mensagem do cliente é feito pelo cérebro (que roda em modo
+  // _test e grava por lá), então a mídia é anexada na linha que ele criou.
+  let midiaSalva = null
+  if (midiaCrua?.id && cfg.empresa_id) {
+    const arq = await baixarMidiaCloud(midiaCrua.id, token)
+    if (arq?.base64) {
+      midiaSalva = await guardarMidiaDoChat(supabase, cfg.empresa_id, arq.base64, arq.mimetype)
+    }
+  }
 
   // Chama o cérebro (whatsapp-webhook) em modo _test — roda tudo e devolve a
   // resposta, sem enviar pelo Evolution.
@@ -450,6 +494,9 @@ async function processar(body: any) {
     event: "messages.upsert",
     instance: instanceName,
     _test: true,
+    // A mídia já foi salva aqui; o cérebro é quem cria a linha da conversa,
+    // então ele recebe o anexo pronto pra pendurar nela.
+    _midia: midiaSalva,
     data: {
       key: { remoteJid: `${from}@s.whatsapp.net`, fromMe: false },
       messageType: coordsCloud ? "locationMessage" : "conversation",

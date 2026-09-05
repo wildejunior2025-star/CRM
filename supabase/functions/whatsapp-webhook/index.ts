@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { responderSemIA, roboPausado, pausarPorAtendimentoHumano, chamadoAberto, abrirChamado } from "../_shared/respostaSemIA.ts"
+import { guardarMidiaDoChat } from "../_shared/midiaDoChat.ts"
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? ""
 const EVOLUTION_API_URL = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$/, "")
@@ -1519,6 +1520,9 @@ async function espelharNoChat(
   // pininho e a gente jogava fora: virava o texto "📍 Localização" e pronto.
   // Guardada, ela vira o ponto da entrega com um clique no gestor.
   coords: { lat: number; lng: number } | null = null,
+  // Foto/áudio já guardados no bucket (mig 0242). A conversa fica pra sempre;
+  // o arquivo, 24 horas.
+  midia: { path: string; tipo: string; expiraEm: string } | null = null,
 ) {
   try {
     const digitos = String(phone ?? "").replace(/\D/g, "")
@@ -1553,6 +1557,9 @@ async function espelharNoChat(
       bot,
       lat: coords?.lat ?? null,
       lng: coords?.lng ?? null,
+      midia_path:      midia?.path ?? null,
+      midia_tipo:      midia?.tipo ?? null,
+      midia_expira_em: midia?.expiraEm ?? null,
     })
   } catch (_e) {
     // O espelho é bônus: se falhar, o atendimento pelo WhatsApp segue igual.
@@ -1704,7 +1711,21 @@ serve(async (req) => {
           await supabase.from("whatsapp_conversas").insert({
             empresa_id: liga.empresa_id, phone: phoneEarly, role: "user", content: conteudo,
           })
-          await espelharNoChat(supabase, liga.empresa_id, phoneEarly, conteudo, "cliente", false, coordsMsg)
+          // A foto e o áudio SÃO guardados aqui (mig 0242) — e este é o caso que
+          // mais importa: robô desligado quer dizer que tem gente atendendo à
+          // mão, e é essa pessoa que precisa abrir a foto do comprovante ou
+          // ouvir o áudio do pedido. Continua sem transcrever: Whisper com o
+          // robô desligado é cobrar da loja um trabalho que ninguém pediu.
+          let midiaOff = null
+          const tipoOff = msg?.messageType
+          if (tipoOff === "imageMessage" || tipoOff === "audioMessage" || tipoOff === "pttMessage") {
+            const m = await getMediaBase64(instanceName, msg)
+            if (m?.base64) {
+              midiaOff = await guardarMidiaDoChat(
+                supabase, liga.empresa_id, m.base64, m.mimetype?.split(";")?.[0] ?? "application/octet-stream")
+            }
+          }
+          await espelharNoChat(supabase, liga.empresa_id, phoneEarly, conteudo, "cliente", false, coordsMsg, midiaOff)
 
           // Resposta automática com o LINK do cardápio (mig 0226). Sem IA, sem
           // crédito: o cardápio é que sabe preço, taxa, cashback e agendamento —
@@ -1728,6 +1749,10 @@ serve(async (req) => {
     let text = ""
     let imageBase64: string | null = null
     let imageMimetype = "image/jpeg"
+    // O arquivo cru, pra subir no bucket assim que a empresa for conhecida
+    // (mig 0242). Não dá pra subir antes: o caminho no bucket começa pelo
+    // empresa_id, que é o que separa a foto de uma loja da foto da outra.
+    let midiaCrua: { base64: string; mimetype: string } | null = null
 
     if (msg.messageType === "conversation" || msg.messageType === "extendedTextMessage") {
       text = (msg.message?.conversation ?? msg.message?.extendedTextMessage?.text ?? "").trim()
@@ -1736,6 +1761,9 @@ serve(async (req) => {
     } else if (msg.messageType === "pttMessage" || msg.messageType === "audioMessage") {
       const media = await getMediaBase64(instanceName, msg)
       if (media?.base64) {
+        // O mesmo download serve pras duas coisas: transcrever pro robô e
+        // guardar pra loja ouvir no gestor.
+        midiaCrua = { base64: media.base64, mimetype: media.mimetype }
         const transcricao = await transcribeAudio(media.base64, media.mimetype)
         if (transcricao?.trim()) {
           text = transcricao.trim()
@@ -1770,6 +1798,7 @@ serve(async (req) => {
       if (media?.base64) {
         imageBase64 = media.base64
         imageMimetype = media.mimetype?.split(";")?.[0] ?? "image/jpeg"
+        midiaCrua = { base64: media.base64, mimetype: imageMimetype }
       }
       text = caption || "[imagem]"
 
@@ -1789,6 +1818,14 @@ serve(async (req) => {
 
     const empresa        = (config.empresas as any) ?? {}
     const empresaId      = config.empresa_id
+    // O arquivo já foi baixado lá em cima; aqui ele finalmente tem dono e pode
+    // ir pro bucket (mig 0242). Falhar aqui não derruba nada: a mensagem entra
+    // na conversa do mesmo jeito, só sem o anexo.
+    const midiaChat = midiaCrua
+      ? await guardarMidiaDoChat(supabase, empresaId, midiaCrua.base64, midiaCrua.mimetype)
+      // Na Cloud API quem baixa é o whatsapp-cloud (a Meta entrega o arquivo por
+      // um id, e o prazo é curto). Ele já guardou e manda o anexo pronto.
+      : (payload?._midia ?? null)
     const empresaNome    = empresa.nome ?? "Loja"
     const empresaSlug    = empresa.slug ?? ""
     const taxaEntrega    = Number(empresa.taxa_entrega ?? 0)
@@ -1825,7 +1862,7 @@ serve(async (req) => {
             empresa_id: empresaId, phone, role: "user", content: text,
           })
         }
-        if (text) await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg)
+        if (text) await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat)
         return new Response("ok", { headers: corsHeaders })
       }
     }
@@ -1846,7 +1883,7 @@ serve(async (req) => {
     if (await chamadoAberto(supabase, empresaId, phone)) {
       console.log("[chamado] aberto, robô calado:", phone)
       await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text })
-      await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg)
+      await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat)
       if (isTest) {
         return new Response(JSON.stringify({ ok: true, resposta: "(robô calado — chamado aberto)" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } })
@@ -1860,7 +1897,7 @@ serve(async (req) => {
     // a uma pessoa.
     if (PEDE_HUMANO.test(text)) {
       await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text })
-      await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg)
+      await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat)
       await abrirChamado(supabase, empresaId, phone, text)
       const avisa = "Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!"
       await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: avisa })
@@ -1884,7 +1921,7 @@ serve(async (req) => {
       // Espelho na aba Mensagens do gestor: é lá que a loja responde quando o
       // robô chama, e a conversa precisa estar inteira na tela pra pessoa saber
       // o que já foi dito.
-      espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg),
+      espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat),
     ])
     if (!creditRes.data || creditRes.data.whatsapp_creditos <= 0) return new Response("ok", { headers: corsHeaders })
 
