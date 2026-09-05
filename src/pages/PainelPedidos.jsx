@@ -1030,16 +1030,25 @@ async function geocodificarEndereco(endereco) {
 
 // ── Busca de rua pelo nome ───────────────────────────────────────────────────
 // O CEP quase ninguém sabe de cabeça; o nome da rua, todo mundo. O cliente
-// fala "Rua São José" no áudio e quem atende escolhe da lista — que já traz
-// bairro, cidade e CEP juntos. Endereço digitado de ouvido é o que faz o
-// motoboy rodar à toa.
+// fala "Rua Prefeita Eliane Barros" no áudio e quem atende escolhe da lista —
+// que já traz bairro, cidade e CEP juntos. Endereço digitado de ouvido é o que
+// faz o motoboy rodar à toa.
+//
+// Duas fontes, e as duas fazem falta:
+//
+// • ViaCEP conhece só rua que tem CEP PRÓPRIO, e só na cidade que a gente
+//   perguntar. Bairro novo e cidade pequena costumam ter um CEP único pra tudo
+//   — e aí a rua do cliente simplesmente não existe na lista.
+// • OpenStreetMap conhece a rua mesmo sem CEP e no estado inteiro, que é o que
+//   resolve o cliente da cidade vizinha (a loja em Natal entregando em São
+//   Gonçalo é o caso comum, não a exceção).
 //
 // A busca do ViaCEP é literal: "Rua" na frente atrapalha, então a gente tira o
 // tipo do logradouro e, se ainda assim não achar, tenta a maior palavra.
 async function buscarRuasViaCep(uf, cidade, termo) {
-  const t = String(termo ?? '').trim()
   const estado = String(uf ?? '').trim()
   const cid = String(cidade ?? '').trim()
+  const t = String(termo ?? '').trim()
   if (t.length < 3 || !estado || cid.length < 3) return []
   const buscar = async (q) => {
     if (!q || q.length < 3) return []
@@ -1053,12 +1062,43 @@ async function buscarRuasViaCep(uf, cidade, termo) {
     const maior = semTipo.split(/\s+/).filter(w => w.length >= 4).sort((x, y) => y.length - x.length)[0]
     if (maior) d = await buscar(maior)
   }
+  return d.filter(x => x.logradouro)
+}
+
+/** Ruas do mapa (OpenStreetMap): pega o que não tem CEP próprio e a cidade vizinha. */
+async function buscarRuasNoMapa(uf, termo) {
+  const t = String(termo ?? '').trim()
+  const estado = String(uf ?? '').trim()
+  if (t.length < 4 || !estado) return []
+  const q = encodeURIComponent(`${t}, ${estado}, Brasil`)
+  const r = await fetch(
+    `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=6&addressdetails=1&countrycodes=br`,
+    { headers: { 'User-Agent': 'CRM-FWC/1.0' } })
+  const j = await r.json()
+  return (Array.isArray(j) ? j : [])
+    .filter(x => x.address?.road)
+    .map(x => ({
+      logradouro: x.address.road,
+      bairro: x.address.suburb ?? x.address.neighbourhood ?? x.address.city_district ?? '',
+      localidade: x.address.city ?? x.address.town ?? x.address.municipality ?? '',
+      cep: String(x.address.postcode ?? '').replace(/\D/g, ''),
+      lat: x.lat, lon: x.lon,
+      doMapa: true,
+    }))
+}
+
+/** As duas fontes numa lista só, sem repetir rua. */
+async function buscarRuas(uf, cidade, termo) {
+  const [viacep, mapa] = await Promise.all([
+    buscarRuasViaCep(uf, cidade, termo).catch(() => []),
+    buscarRuasNoMapa(uf, termo).catch(() => []),
+  ])
   const vistas = new Set()
-  return d.filter(x => {
-    const k = `${x.logradouro}|${x.bairro}`
-    if (!x.logradouro || vistas.has(k)) return false
+  return [...viacep, ...mapa].filter(x => {
+    const k = `${normBairro(x.logradouro)}|${normBairro(x.bairro)}`
+    if (vistas.has(k)) return false
     vistas.add(k); return true
-  }).slice(0, 6)
+  }).slice(0, 8)
 }
 
 /** A listinha que cai embaixo do campo de rua. */
@@ -1081,6 +1121,9 @@ function ListaDeRuas({ sugestoes, onEscolher, onFechar }) {
             <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700 }}>{r.logradouro}</span>
             <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)' }}>
               {[r.bairro, r.localidade].filter(Boolean).join(' · ')}
+              {/* Rua que veio do mapa costuma não ter CEP próprio — quem atende
+                  precisa saber por que o campo do CEP ficou vazio. */}
+              {r.doMapa && <span style={{ color: '#7c3aed' }}> · do mapa</span>}
             </span>
           </button>
         ))}
@@ -1138,9 +1181,15 @@ async function taxaDoEndereco(empresa, end) {
       }
     }
   }
-  // Sem bairro cadastrado e sem como medir: a taxa fixa da loja, dizendo que é
-  // ela. Chutar zero seria entregar de graça sem ninguém perceber.
-  return { taxa: Number(empresa?.taxa_entrega ?? 0) || 0, texto: 'taxa fixa da loja (não deu pra medir a distância)' }
+  // Sem bairro cadastrado e sem como medir. Se a loja tem taxa fixa, é ela.
+  // Se não tem, devolve NULO e avisa — botar R$ 0,00 aqui era entregar de graça
+  // sem ninguém perceber, que é o pior jeito de errar.
+  const fixa = Number(empresa?.taxa_entrega ?? 0) || 0
+  if (fixa > 0) return { taxa: fixa, texto: 'taxa fixa da loja (não deu pra medir a distância)' }
+  return {
+    taxa: null,
+    texto: 'Não achei esse endereço no mapa e a loja não tem taxa fixa — digite a taxa na mão.',
+  }
 }
 
 // Rascunho da venda de balcão: se o vendedor sai da tela no meio do pedido,
@@ -1508,7 +1557,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     let vivo = true
     const t = setTimeout(async () => {
       try {
-        const d = await buscarRuasViaCep(uf, cid, termo)
+        const d = await buscarRuas(uf, cid, termo)
         if (vivo) setRuaSug(d)
       } catch { if (vivo) setRuaSug([]) }
     }, 500)
@@ -4397,6 +4446,7 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
   const [msgTaxa, setMsgTaxa] = useState(null)
   const [calculando, setCalculando] = useState(false)
   const [achouCliente, setAchouCliente] = useState(false)
+  const [cadastro, setCadastro] = useState(null)   // { id, telefone } do cliente que já existe
   const [ruaSug, setRuaSug] = useState([])
   const [ruaSugAberta, setRuaSugAberta] = useState(false)
 
@@ -4408,7 +4458,7 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
     let vivo = true
     const t = setTimeout(async () => {
       try {
-        const d = await buscarRuasViaCep(empresa?.estado, cidade || empresa?.cidade, rua)
+        const d = await buscarRuas(empresa?.estado, cidade || empresa?.cidade, rua)
         if (vivo) setRuaSug(d)
       } catch { if (vivo) setRuaSug([]) }
     }, 500)
@@ -4423,10 +4473,14 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
     if (!empresa?.id || chave.length < 8) return
     ;(async () => {
       const { data } = await supabase.from('clientes')
-        .select('nome, endereco, numero, bairro, cidade, cep')
+        .select('id, telefone, nome, endereco, numero, bairro, cidade, cep')
         .eq('empresa_id', empresa.id).ilike('telefone', `%${chave}`)
         .order('created_at', { ascending: false }).limit(1).maybeSingle()
       if (!vivo || !data) return
+      // Guarda QUEM é: o cadastro costuma ter o telefone sem o 55 e o WhatsApp
+      // manda com. Salvar pelo número do WhatsApp criava um cliente novo em vez
+      // de atualizar o que já existe — dois cadastros pra mesma pessoa.
+      setCadastro({ id: data.id, telefone: data.telefone })
       setAchouCliente(true)
       if (data.nome) setNome(n => n || data.nome)
       if (data.endereco) setRua(data.endereco)
@@ -4457,6 +4511,7 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
     setCalculando(true)
     const r = await taxaDoEndereco(empresa, { rua, numero, bairro, cidade, cep })
     setCalculando(false)
+    if (r.taxa == null) { setMsgTaxa({ ok: false, txt: r.texto }); return }   // não mexe na taxa que já estava lá
     setTaxa(String(r.taxa.toFixed(2)))
     setMsgTaxa({ ok: !r.bloqueado, txt: r.bloqueado ? r.texto : `Taxa R$ ${r.taxa.toFixed(2).replace('.', ',')} — ${r.texto}` })
   }
@@ -4611,7 +4666,7 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
       )}
 
       <button type="button" disabled={salvando || faltaEndereco || !itens.length}
-        onClick={() => onFinalizar({ tipo, nome, cep, rua, numero, bairro, cidade, taxa: taxaNum, pagamento, troco, obs, subtotal, total })}
+        onClick={() => onFinalizar({ tipo, nome, cep, rua, numero, bairro, cidade, taxa: taxaNum, pagamento, troco, obs, subtotal, total, cadastro })}
         style={{
           width: '100%', padding: g ? '14px 12px' : '10px', borderRadius: 9, border: 'none',
           background: (salvando || faltaEndereco || !itens.length) ? 'var(--border, #2a2a3a)' : '#7c3aed',
@@ -5302,16 +5357,22 @@ export default function PainelPedidos() {
 
     // Cadastra/atualiza o cliente com o endereço — é o que faz o PRÓXIMO pedido
     // dele vir preenchido, aqui e na Loja Online.
-    let clienteId = null
+    //
+    // Quando o cliente JÁ existe, manda o telefone do jeito que está no
+    // cadastro: o upsert casa por número exato, e o WhatsApp entrega com o 55
+    // que o cadastro não tem. Mandar o do WhatsApp criava um segundo cadastro
+    // pra mesma pessoa — e o endereço ia parar no cliente errado.
+    let clienteId = d.cadastro?.id ?? null
+    const telParaCadastro = d.cadastro?.telefone || tel
     if (tel.length >= 10) {
       try {
         const { data: cid } = await supabase.rpc('upsert_cliente_loja', {
-          p_empresa_id: empresa.id, p_nome: nomeCliente, p_telefone: tel,
+          p_empresa_id: empresa.id, p_nome: nomeCliente, p_telefone: telParaCadastro,
           p_email: '', p_cep: d.cep?.trim() ?? '', p_endereco: d.rua?.trim() ?? '',
           p_numero: d.numero?.trim() ?? '', p_complemento: '',
           p_bairro: d.bairro?.trim() ?? '', p_cidade: d.cidade?.trim() ?? '', p_estado: '',
         })
-        clienteId = cid ?? null
+        if (cid) clienteId = cid
       } catch { /* cadastro falhou: o pedido não pode morrer por isso */ }
     }
 
