@@ -1735,6 +1735,19 @@ export default function PresencialSalao() {
   // pagamento velho como se tivesse acabado de cair é pior que não anunciar.
   const pixJaAnunciados = useRef(new Set())
 
+  // O QR EM TELA CHEIA SOME QUANDO A COBRANÇA MORRE — venha a notícia de onde
+  // vier. Antes só o laço de conferência abaixo fechava esse QR; quando quem
+  // confirmava era o webhook do Mercado Pago (que é o caminho normal, e o mais
+  // rápido), a tela recarregava a mesa por baixo e o QR continuava lá, aberto,
+  // já pago. O garçom ficava mostrando pro cliente um código que não valia mais.
+  useEffect(() => {
+    if (!pixAmpliado?.cobranca_id) return
+    const aindaAberta = pixPendentes.some(
+      x => x.id === pixAmpliado.cobranca_id && x.status !== 'pago',
+    )
+    if (!aindaAberta) setPixAmpliado(null)
+  }, [pixPendentes, pixAmpliado?.cobranca_id])
+
   useEffect(() => {
     const aConferir = pixPendentes.filter(x => x.status !== 'pago')
     if (aConferir.length === 0) return

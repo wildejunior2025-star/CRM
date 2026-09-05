@@ -3,45 +3,68 @@ import './AvisoPix.css'
 
 // O aviso de "caiu o PIX" da mesa (mig 0193).
 //
-// Era um alert() do navegador: cola no topo, letra miúda, o valor perdido no
-// meio da frase — e quem lê isso está de pé, no meio do movimento, segurando o
-// celular numa mão só. Aqui o valor é a maior coisa da tela, o botão tem tamanho
-// de dedo e, no celular, a folha sobe de baixo (onde o polegar alcança).
+// Nasceu como uma folha grande no meio da tela, com o fundo escurecido. Fazia
+// sentido quando era só o dono olhando — mas essa tela é o SALÃO: fica aberta
+// no balcão o dia inteiro e várias pessoas mexem nela ao mesmo tempo. Um PIX da
+// mesa 4 parava o garçom que estava lançando item na mesa 9, e ele tinha que
+// fechar o aviso de um pagamento que não era da conta dele.
+//
+// Agora é uma tarja no ALTO da tela: pequena, sem escurecer nada, sem bloquear
+// clique, e sai sozinha depois de alguns segundos. A notícia continua chegando
+// — ela só parou de atropelar quem está trabalhando.
 //
 // Três acabamentos, porque as três notícias são diferentes:
-//   'pago'    → caiu tudo, a mesa fechou. Verde, é festa.
-//   'parcial' → caiu uma parte da conta rachada. Verde também, mas falta gente.
-//   'alerta'  → dinheiro caiu numa mesa já fechada. Âmbar: alguém tem que olhar.
+//   'pago'    → caiu tudo, a mesa fechou. Verde.
+//   'parcial' → caiu uma parte da conta rachada. Verde, mas falta gente.
+//   'alerta'  → dinheiro caiu numa mesa já fechada. Âmbar, e NÃO sai sozinho:
+//               esse pede alguém olhando, então espera ser lido.
+const SEGUNDOS_NA_TELA = 9
+
 export default function AvisoPix({ tipo = 'pago', valor, titulo, texto, onFechar }) {
   const botaoRef = useRef(null)
+  const someSozinho = tipo !== 'alerta'
 
-  // O foco vai pro botão: no PC fecha no Enter/Espaço sem procurar o mouse.
-  useEffect(() => { botaoRef.current?.focus() }, [])
-
+  // Escape fecha. O foco NÃO vai mais pro botão de propósito: roubar o foco de
+  // quem está digitando o pedido é exatamente o atropelo que este aviso deixou
+  // de fazer.
   useEffect(() => {
-    function onKey(e) { if (e.key === 'Escape' || e.key === 'Enter') onFechar() }
+    function onKey(e) { if (e.key === 'Escape') onFechar() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onFechar])
 
+  useEffect(() => {
+    if (!someSozinho) return
+    const t = setTimeout(onFechar, SEGUNDOS_NA_TELA * 1000)
+    return () => clearTimeout(t)
+  }, [someSozinho, onFechar])
+
   const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
 
   return (
-    <div className="avpix-fundo" onMouseDown={e => { if (e.target === e.currentTarget) onFechar() }}>
-      <div className={`avpix avpix--${tipo}`} role="alertdialog" aria-modal="true">
+    <div className="avpix-fundo">
+      <div className={`avpix avpix--${tipo}`} role="status" aria-live="polite">
         <div className="avpix-selo" aria-hidden="true">{tipo === 'alerta' ? '!' : '✓'}</div>
 
-        <h2 className="avpix-titulo">
-          {titulo ?? (tipo === 'alerta' ? 'PIX em mesa já fechada' : 'PIX recebido')}
-        </h2>
+        <div className="avpix-corpo">
+          <div className="avpix-linha1">
+            <h2 className="avpix-titulo">
+              {titulo ?? (tipo === 'alerta' ? 'PIX em mesa já fechada' : 'PIX recebido')}
+            </h2>
+            {valor != null && <span className="avpix-valor">{fmt(valor)}</span>}
+          </div>
+          {texto && <p className="avpix-texto">{texto}</p>}
+        </div>
 
-        {valor != null && <div className="avpix-valor">{fmt(valor)}</div>}
-
-        {texto && <p className="avpix-texto">{texto}</p>}
-
-        <button ref={botaoRef} type="button" className="avpix-botao" onClick={onFechar}>
-          {tipo === 'alerta' ? 'Entendi' : 'Beleza'}
+        <button ref={botaoRef} type="button" className="avpix-botao"
+          onClick={onFechar} aria-label="Fechar aviso">
+          ×
         </button>
+
+        {someSozinho && (
+          <span className="avpix-tempo" aria-hidden="true"
+            style={{ animationDuration: `${SEGUNDOS_NA_TELA}s` }} />
+        )}
       </div>
     </div>
   )
