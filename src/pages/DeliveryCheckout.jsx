@@ -498,6 +498,13 @@ export default function DeliveryCheckout() {
   const [ruaSugestoes, setRuaSugestoes] = useState([])
   const [ruaBuscando, setRuaBuscando] = useState(false)
   const [ruaAberta, setRuaAberta] = useState(false)
+  // Procurou e não achou. A busca de rua roda numa cidade só — a que o cliente
+  // escolheu ou, enquanto ele não escolhe, a da LOJA. Quem mora na cidade
+  // vizinha digitava a rua certa e não via a rua dele na lista, sem nenhuma
+  // explicação: uma cliente da CDBom (São Gonçalo) procurou a rua dela, que é
+  // em Natal, e ficou presa aí. Guardar o "não achei" é o que deixa a tela
+  // dizer isso em voz alta, e oferecer as duas saídas.
+  const [ruaNaoAchou, setRuaNaoAchou] = useState(false)
   // O que o ViaCEP devolveu pro último CEP válido — pra avisar se a rua/bairro
   // digitados não baterem (caso do endereço trocado na mão).
   const [cepInfo, setCepInfo] = useState(null) // { cep, rua, bairro }
@@ -872,7 +879,7 @@ export default function DeliveryCheckout() {
     const termo = form.rua.trim()
     const uf = (form.estado || lojaEndereco?.estado || '').trim()
     const cid = (form.cidade || lojaEndereco?.cidade || '').trim()
-    if (termo.length < 3 || !uf || cid.length < 3) { setRuaSugestoes([]); return }
+    if (termo.length < 3 || !uf || cid.length < 3) { setRuaSugestoes([]); setRuaNaoAchou(false); return }
     let vivo = true
     setRuaBuscando(true)
     const t = setTimeout(async () => {
@@ -909,7 +916,8 @@ export default function DeliveryCheckout() {
           return !!x.logradouro
         })
         setRuaSugestoes(lista.slice(0, 8))
-      } catch { if (vivo) setRuaSugestoes([]) }
+        setRuaNaoAchou(lista.length === 0)
+      } catch { if (vivo) { setRuaSugestoes([]); setRuaNaoAchou(true) } }
       finally { if (vivo) setRuaBuscando(false) }
     }, 500)
     return () => { vivo = false; clearTimeout(t); setRuaBuscando(false) }
@@ -1647,6 +1655,32 @@ export default function DeliveryCheckout() {
                           Buscando...
                         </span>
                       )}
+                      {ruaNaoAchou && !ruaBuscando && form.rua.trim().length >= 3 && (
+                        <div style={{
+                          marginTop: 8, padding: '10px 12px', borderRadius: 10,
+                          background: 'rgba(234,179,8,.10)', border: '1px solid rgba(234,179,8,.45)',
+                        }}>
+                          <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text, #222)' }}>
+                            Não achei essa rua em <strong>{form.cidade || lojaEndereco?.cidade}</strong>.
+                            {' '}Se você é de outra cidade, escolha ela logo abaixo e digite a rua de novo
+                            {' '}— ou informe o CEP aqui que eu preencho tudo:
+                          </div>
+                          <input
+                            className="dco-input"
+                            style={{ marginTop: 8 }}
+                            placeholder="CEP: 00000-000"
+                            value={form.cep}
+                            onChange={handleCepChange}
+                            inputMode="numeric"
+                            maxLength={9}
+                          />
+                          {erroCep && <span className="dco-field-error">{erroCep}</span>}
+                          <div style={{ fontSize: 11.5, marginTop: 6, color: 'var(--text-muted, #888)' }}>
+                            Pode escrever o nome da rua à mão também — só confira o bairro e a cidade.
+                          </div>
+                        </div>
+                      )}
+
                       {ruaAberta && ruaSugestoes.length > 0 && (
                         <>
                           {/* Toque fora fecha a lista. */}
