@@ -317,9 +317,17 @@ export default function WhatsAppConfig() {
     if (!confirm('Desconectar o WhatsApp (Cloud API) desta loja? O robô para de responder até reconectar.')) return
     setCloudBusy(true)
     setCloudError(null)
+    // O mesmo cuidado do lado de lá (whatsapp-connect/disconnect): as duas
+    // conexões dividem o `ativo`, então tirar a Meta não pode derrubar um QR
+    // que esteja funcionando. Só apaga o interruptor quando não sobra conexão.
+    const { data: cfgAtual } = await supabase
+      .from('whatsapp_config').select('instance_name')
+      .eq('empresa_id', profile.empresa_id).maybeSingle()
+    const seguePeloQr = !!String(cfgAtual?.instance_name ?? '').trim()
+
     const { error } = await supabase
       .from('whatsapp_config')
-      .update({ cloud_phone_number_id: null, cloud_display_number: null, ativo: false })
+      .update({ cloud_phone_number_id: null, cloud_display_number: null, ativo: seguePeloQr })
       .eq('empresa_id', profile.empresa_id)
     setCloudBusy(false)
     if (error) { setCloudError(error.message); return }
@@ -456,16 +464,23 @@ export default function WhatsAppConfig() {
     }
   }
 
+  // `isConnected` é do QR e continua sendo: é ele que decide se mostra o
+  // botão de conectar, o QR ou o número pareado.
   const isConnected   = connStatus === 'connected'
   const isConnecting  = connStatus === 'connecting'
   const isLoading     = connStatus === 'loading'
+  // O selo lá em cima é outra coisa: ele responde "esta loja tem WhatsApp
+  // ligado?". Olhava só o QR, então loja conectada pela Meta — que é o caminho
+  // oficial — via "Desconectado" no topo e "WhatsApp conectado pela Meta" logo
+  // abaixo, na mesma tela. Foi o que fez o lojista achar que o número caiu.
+  const temWhatsApp   = isConnected || !!cloudPhone
 
   return (
     <div className="wa-config-page">
       <div className="wa-header">
         <h1>WhatsApp</h1>
-        <span className={`wa-status-pill ${isConnected ? 'ativo' : 'inativo'}`}>
-          {isConnected ? 'Conectado' : 'Desconectado'}
+        <span className={`wa-status-pill ${temWhatsApp ? 'ativo' : 'inativo'}`}>
+          {temWhatsApp ? 'Conectado' : 'Desconectado'}
         </span>
       </div>
 

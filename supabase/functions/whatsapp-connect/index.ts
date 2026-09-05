@@ -376,8 +376,17 @@ serve(async (req) => {
         headers: { apikey: apiKey }
       })
 
+      // Desligar o QR NÃO pode derrubar a Cloud API. As duas conexões dividem o
+      // mesmo `ativo`, e o webhook da Meta só acha a loja com ele ligado: no
+      // depósito do Thiago o lojista tirou o Evolution que estava sobrando e o
+      // número oficial ficou mudo — mensagem chegava e voltava "nenhuma loja
+      // para phone_number_id".
+      const { data: cfgAtual } = await supabaseAdmin.from("whatsapp_config")
+        .select("cloud_phone_number_id").eq("empresa_id", empresaId).maybeSingle()
+      const seguePelaMeta = !!cfgAtual?.cloud_phone_number_id
+
       await supabaseAdmin.from("whatsapp_config").upsert(
-        { empresa_id: empresaId, ativo: false, instance_name: "" },
+        { empresa_id: empresaId, ativo: seguePelaMeta, instance_name: "" },
         { onConflict: "empresa_id" }
       )
 

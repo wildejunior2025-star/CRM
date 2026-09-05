@@ -275,7 +275,16 @@ async function processar(body: any) {
     .eq("ativo", true)
     .maybeSingle()
   if (!cfg) { console.error("[cloud] nenhuma loja para phone_number_id", phoneNumberId); return }
-  const instanceName = cfg.instance_name ?? `cloud_${phoneNumberId}`
+  // O cérebro (whatsapp-webhook) acha a loja pelo instance_name, então este
+  // valor tem que ser o MESMO que está gravado — e o padrão do Cadastro
+  // Incorporado é `cloud_<empresa sem hífen>` (ver whatsapp-cloud-signup).
+  //
+  // Dois detalhes que já quebraram na prática: desconectar o QR deixa o campo
+  // como string VAZIA, e `??` não pega vazio — o cérebro recebia instância em
+  // branco e não achava loja nenhuma. E o antigo palpite `cloud_<phone_id>`
+  // nunca existiu no banco, então também não achava.
+  const instanceName = String(cfg.instance_name ?? "").trim()
+    || `cloud_${String(cfg.empresa_id ?? "").replace(/-/g, "")}`
 
   // Token: o da loja (Cadastro Incorporado) quando existir; senão o do app.
   // Sem isso, número conectado pela própria loja não responderia.
