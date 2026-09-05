@@ -135,6 +135,9 @@ export default function DeliveryLoja() {
   })()
   // Cardapio que nao carregou inteiro NAO vira loja aberta pela metade (ver lerOuFalhar)
   const [erroCardapio, setErroCardapio] = useState(false)
+  // Itens/sabores que saíram da sacola porque a loja pausou depois que o
+  // cliente montou. Vira aviso na tela — não pode sumir calado.
+  const [sacolaAjustada, setSacolaAjustada] = useState(null)
   const [tentativa, setTentativa] = useState(0)
   const drawerRef = useRef(null)
   const [filtroEstoqueBaixo, setFiltroEstoqueBaixo] = useState(false)
@@ -345,6 +348,54 @@ export default function DeliveryLoja() {
       // Restaura carrinho salvo desta loja (chave = id real)
       let savedCart = {}
       try { savedCart = JSON.parse(localStorage.getItem(`sacola_${lojaData.id}`) || '{}') } catch { savedCart = {} }
+
+      // A SACOLA GUARDADA É DE ONTEM. Ela vive no localStorage e sobrevive a
+      // tudo — inclusive à loja pausar o sabor no dia seguinte. Foi assim que o
+      // pedido #1033 da CDBom saiu com sete sabores que a loja não tinha desde
+      // a véspera: a cliente montou a sacola com o cardápio de ontem, e ninguém
+      // conferiu de novo na hora de mandar.
+      //
+      // Aqui a sacola é reconferida contra o cardápio que ACABOU de ser
+      // carregado. O que não existe mais sai, e o cliente é avisado pelo nome —
+      // some calado é pior: ele conta com o sabor e a decepção chega na porta.
+      const tirados = []
+      {
+        const conferida = {}
+        for (const [chave, item] of Object.entries(savedCart)) {
+          const prod = produtosFinal.find(x => x.id === item.id)
+          if (!prod) { tirados.push(item.nome); continue }   // produto saiu do cardápio
+
+          const comps = Array.isArray(item.complementos) ? item.complementos : []
+          if (!comps.length) { conferida[chave] = item; continue }
+
+          // Nomes que a loja ainda oferece pra ESTE produto, agora.
+          const disponiveis = new Set(
+            (prod.complementos ?? []).flatMap(g => (g.opcoes ?? []).map(o => o.nome))
+          )
+          const ficam = comps.filter(c => disponiveis.has(c.nome))
+          const saem  = comps.filter(c => !disponiveis.has(c.nome))
+          if (!saem.length) { conferida[chave] = item; continue }
+
+          for (const c of saem) tirados.push(`${c.nome} (${prod.nome})`)
+
+          // No modo atacado a quantidade do item é a soma das opções: tirar um
+          // sabor tem que baixar a quantidade junto, senão a comanda mente.
+          const ehAtacado = comps.some(c => c?.absoluto)
+          if (ehAtacado) {
+            const novaQtd = ficam.reduce((soma, c) => soma + (Number(c.qtd) || 0), 0)
+            if (novaQtd > 0) conferida[chave] = { ...item, complementos: ficam, quantidade: novaQtd }
+          } else if (ficam.length) {
+            conferida[chave] = { ...item, complementos: ficam }
+          }
+          // Sem nenhuma opção de pé, o item inteiro sai — um "monte o seu" sem
+          // recheio nenhum não é pedido, é confusão pra cozinha.
+        }
+        savedCart = conferida
+        if (tirados.length) {
+          try { localStorage.setItem(`sacola_${lojaData.id}`, JSON.stringify(conferida)) } catch { /* ignora */ }
+          setSacolaAjustada([...new Set(tirados)])
+        }
+      }
 
       // Tags de anúncio da loja (Google Ads / Pixel da Meta). Loja sem ID
       // configurado não carrega script de terceiro nenhum.
@@ -850,6 +901,32 @@ export default function DeliveryLoja() {
       )}
 
       <main className="dloja-main">
+        {/* A sacola era de ontem e a loja pausou alguma coisa desde então.
+            Sumir calado é o pior dos mundos: o cliente conta com o sabor e a
+            decepção só chega na porta da casa dele. */}
+        {sacolaAjustada?.length > 0 && (
+          <div style={{
+            margin: '0 0 14px', padding: '12px 14px', borderRadius: 12,
+            background: 'rgba(234,179,8,.12)', border: '1px solid rgba(234,179,8,.5)',
+            display: 'flex', gap: 10, alignItems: 'flex-start',
+          }}>
+            <span style={{ fontSize: 18, lineHeight: 1 }}>⚠️</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 3 }}>
+                A loja pausou {sacolaAjustada.length === 1 ? 'um item' : 'alguns itens'} desde a última vez que você esteve aqui
+              </div>
+              <div style={{ fontSize: 12.5, lineHeight: 1.5, opacity: .9 }}>
+                Tirei da sua sacola: <strong>{sacolaAjustada.join(', ')}</strong>.
+                {' '}Escolha outro no cardápio, se quiser.
+              </div>
+            </div>
+            <button type="button" onClick={() => setSacolaAjustada(null)} aria-label="Fechar aviso"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, lineHeight: 1, opacity: .6 }}>
+              ×
+            </button>
+          </div>
+        )}
+
         {resultadosBusca ? (
           resultadosBusca.length === 0 ? (
             <div className="dloja-empty">
