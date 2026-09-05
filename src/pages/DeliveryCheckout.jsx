@@ -174,6 +174,34 @@ async function buscarJson(url, ms = 5000) {
   }
 }
 
+// Busca a rua no ESTADO INTEIRO. O ViaCEP não sabe fazer isso — ele exige
+// UF + cidade + rua, e por isso a busca do checkout só enxergava a cidade da
+// loja. O OpenStreetMap aceita UF + rua e devolve em que cidade e bairro ela
+// fica, que é exatamente a pergunta de quem mora na cidade vizinha.
+//
+// É a ÚLTIMA camada de propósito: o ViaCEP é a fonte oficial e traz o CEP
+// certo; o OSM entra quando ele não tem resposta, e aí uma rua achada com o
+// bairro e a cidade certos vale muito mais que uma lista vazia.
+async function buscarRuaNoEstado(uf, termo) {
+  if (!uf || !termo || termo.length < 3) return []
+  const params = new URLSearchParams({
+    street: termo, state: uf, country: 'Brazil',
+    format: 'json', addressdetails: '1', limit: '8',
+  })
+  const d = await buscarJson(`https://nominatim.openstreetmap.org/search?${params}`, 6000)
+  if (!Array.isArray(d)) return []
+  return d.map(x => {
+    const a = x.address ?? {}
+    return {
+      logradouro: a.road ?? a.pedestrian ?? a.footway ?? '',
+      bairro:     a.suburb ?? a.neighbourhood ?? a.city_district ?? '',
+      localidade: a.city ?? a.town ?? a.municipality ?? a.village ?? '',
+      uf,
+      cep:        String(a.postcode ?? '').replace(/[^0-9]/g, ''),
+    }
+  }).filter(r => r.logradouro && r.localidade)
+}
+
 async function geocodeEndereco({ rua, numero, bairro, cidade, estado, cep } = {}) {
   const uf = estado || ''
   const cepLimpo = String(cep || '').replace(/\D/g, '')
@@ -505,6 +533,10 @@ export default function DeliveryCheckout() {
   // em Natal, e ficou presa aí. Guardar o "não achei" é o que deixa a tela
   // dizer isso em voz alta, e oferecer as duas saídas.
   const [ruaNaoAchou, setRuaNaoAchou] = useState(false)
+  // Cidades em que a loja JÁ entregou (mig 0241). Loja de divisa atende as
+  // duas: a CDBom fica em São Gonçalo do Amarante e metade da freguesia é de
+  // Natal. Sem isto a busca de rua olhava só a cidade da loja.
+  const [cidadesLoja, setCidadesLoja] = useState([])
   // O que o ViaCEP devolveu pro último CEP válido — pra avisar se a rua/bairro
   // digitados não baterem (caso do endereço trocado na mão).
   const [cepInfo, setCepInfo] = useState(null) // { cep, rua, bairro }
@@ -884,11 +916,13 @@ export default function DeliveryCheckout() {
     setRuaBuscando(true)
     const t = setTimeout(async () => {
       try {
-        const buscar = async (q) => {
-          if (!q || q.length < 3) return []
-          const r = await fetch(`https://viacep.com.br/ws/${uf}/${encodeURIComponent(cid)}/${encodeURIComponent(q)}/json/`)
-          const j = await r.json()
-          return Array.isArray(j) ? j : []
+        const buscar = async (q, cidadeAlvo = cid) => {
+          if (!q || q.length < 3 || !cidadeAlvo) return []
+          try {
+            const r = await fetch(`https://viacep.com.br/ws/${uf}/${encodeURIComponent(cidadeAlvo)}/${encodeURIComponent(q)}/json/`)
+            const j = await r.json()
+            return Array.isArray(j) ? j : []
+          } catch { return [] }
         }
         // A busca do ViaCEP é literal: ela procura o texto INTEIRO dentro do
         // nome oficial. "Rua Eliane Barros" não acha "Rua Doutora Eliane
@@ -900,11 +934,22 @@ export default function DeliveryCheckout() {
         const semTipo = termo
           .replace(/^(r|rua|av|avn|avenida|trav|travessa|al|alameda|pc|praca|praça|rod|rodovia|estr|estrada|beco|conj|conjunto|lot|loteamento|vl|vila)\.?\s+/i, '')
           .trim()
-        let d = await buscar(semTipo || termo)
-        if (!d.length) {
-          const maior = semTipo.split(/\s+/).filter(w => w.length >= 4).sort((x, y) => y.length - x.length)[0]
-          if (maior) d = await buscar(maior)
+        const maior = semTipo.split(/\s+/).filter(w => w.length >= 4).sort((x, y) => y.length - x.length)[0]
+        // Procura primeiro na cidade em jogo; não achando, nas outras em que a
+        // loja já entregou. A lista mostra o bairro e a cidade de cada rua, e
+        // escolher uma delas já preenche a cidade certa no formulário — que é
+        // como a cliente de Natal acha a rua dela numa loja de São Gonçalo.
+        const cidadesParaTentar = [cid, ...cidadesLoja.filter(c => c && c !== cid)].slice(0, 3)
+        let d = []
+        for (const cidadeAlvo of cidadesParaTentar) {
+          d = await buscar(semTipo || termo, cidadeAlvo)
+          if (!d.length && maior) d = await buscar(maior, cidadeAlvo)
+          if (d.length) break
         }
+        // Nem nas cidades da loja: procura no ESTADO INTEIRO. É o caso de quem
+        // mora numa cidade em que a loja ainda não entregou — sem isto, o
+        // primeiro cliente de cada cidade nova ficava sem achar a própria rua.
+        if (!d.length) d = await buscarRuaNoEstado(uf, semTipo || termo)
         if (!vivo) return
         // Sem repetir a mesma rua em CEPs diferentes: numa avenida longa o
         // ViaCEP devolve dezenas de linhas iguais e a lista vira ruído.
@@ -921,7 +966,18 @@ export default function DeliveryCheckout() {
       finally { if (vivo) setRuaBuscando(false) }
     }, 500)
     return () => { vivo = false; clearTimeout(t); setRuaBuscando(false) }
-  }, [form.rua, form.estado, form.cidade, lojaEndereco, tipo])
+  }, [form.rua, form.estado, form.cidade, lojaEndereco, tipo, cidadesLoja])
+
+  // As cidades que a loja já atendeu — carregadas uma vez, usadas como segunda
+  // tentativa da busca de rua.
+  useEffect(() => {
+    const empId = state?.empresaId
+    if (!empId) return
+    let vivo = true
+    supabase.rpc('cidades_que_a_loja_atende', { p_empresa_id: empId })
+      .then(({ data }) => { if (vivo && Array.isArray(data)) setCidadesLoja(data) })
+    return () => { vivo = false }
+  }, [state?.empresaId])
 
   // Chegar no checkout já é sinal de intenção de compra (funil da Meta).
   // As tags já foram carregadas na vitrine — aqui só dispara o evento.
@@ -1661,9 +1717,9 @@ export default function DeliveryCheckout() {
                           background: 'rgba(234,179,8,.10)', border: '1px solid rgba(234,179,8,.45)',
                         }}>
                           <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text, #222)' }}>
-                            Não achei essa rua em <strong>{form.cidade || lojaEndereco?.cidade}</strong>.
-                            {' '}Se você é de outra cidade, escolha ela logo abaixo e digite a rua de novo
-                            {' '}— ou informe o CEP aqui que eu preencho tudo:
+                            Procurei em <strong>{form.estado || lojaEndereco?.estado}</strong> inteiro
+                            {' '}e não achei essa rua. Confere o nome, ou informe o CEP aqui
+                            {' '}que eu preencho tudo:
                           </div>
                           <input
                             className="dco-input"
