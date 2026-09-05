@@ -1,4 +1,4 @@
-// Bot v187 — promessa de retorno vira chamado de verdade; busca perdoa erro de digitação. v186: endereço+taxa no fechamento. v185: pedido de endereço pergunta rua e bairro (CEP vira a saída alternativa). v184: vendia o CEP como atalho (escrever é só a saída de quem não sabe). v183: escrito guarda bairro/cidade. v182: cadastro sem e-mail.
+// Bot v188 — pede a LOCALIZAÇÃO primeiro (CEP/escrito viram a saída); endereço em pedaços vira um só; pedido do robô nasce com o ponto. v187 — promessa de retorno vira chamado de verdade; busca perdoa erro de digitação. v186: endereço+taxa no fechamento. v185: pedido de endereço pergunta rua e bairro (CEP vira a saída alternativa). v184: vendia o CEP como atalho (escrever é só a saída de quem não sabe). v183: escrito guarda bairro/cidade. v182: cadastro sem e-mail.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { responderSemIA, roboPausado, pausarPorAtendimentoHumano, chamadoAberto, abrirChamado } from "../_shared/respostaSemIA.ts"
@@ -25,8 +25,10 @@ const corsHeaders = {
 // não mudou nada no resto do fluxo.
 const TEXTO_PEDIR_ENDERECO =
   "📍 Falta só o endereço!\n\n" +
-  "Me diz o *nome da rua*, o *número* e o *bairro* que eu já anoto. 😉\n\n" +
-  "_Se preferir, me manda o CEP que eu pego a rua e o bairro sozinho._"
+  "O jeito mais rápido é me mandar sua *localização*: toque no 📎 aqui embaixo → " +
+  "*Localização* → *Enviar sua localização atual*. Aí eu já pego a rua e o bairro sozinho " +
+  "e o entregador vai direto na sua porta. 🙂\n\n" +
+  "_Se preferir, me diz o *nome da rua*, o *número* e o *bairro* — ou me manda o CEP._"
 
 // ── "Quero falar com uma pessoa" ─────────────────────────────────────────────
 // O robô de IA não tinha como pedir socorro: se ele não dava conta, continuava
@@ -483,6 +485,160 @@ async function descobrirCidade(rua: string, bairro: string | null, estado: strin
   }
 }
 
+// ── O PONTO QUE O CLIENTE MANDOU (mig 0239) ─────────────────────────────────
+//
+// O pininho do WhatsApp é o endereço mais confiável que existe nessa conversa:
+// veio do celular dele, não da memória dele nem do chute do buscador de mapa.
+// Só falta o NÚMERO da casa, que GPS não sabe dizer.
+//
+// Quem lê isto é o CÓDIGO, não o modelo. O robô não tem como "esquecer" de
+// salvar, não gasta crédito pra entender um pino, e não corre o risco de
+// responder "não entendi" pra quem fez exatamente o que foi pedido.
+
+// Coordenada → endereço escrito. É o caminho inverso do buscador: o mapa sabe
+// dizer a rua, o bairro e a cidade daquele ponto.
+async function enderecoDoPonto(lat: number, lng: number): Promise<
+  { rua: string; bairro: string; cidade: string; estado: string; cep: string } | null
+> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
+      { headers: { "User-Agent": "CRM-FWC/1.0" } },
+    )
+    const d = await res.json()
+    const a = d?.address ?? {}
+    return {
+      rua:    a.road ?? a.pedestrian ?? a.footway ?? "",
+      bairro: a.suburb ?? a.neighbourhood ?? a.city_district ?? "",
+      cidade: a.city ?? a.town ?? a.municipality ?? a.village ?? a.county ?? "",
+      estado: String(a["ISO3166-2-lvl4"] ?? "").split("-")[1] ?? "",
+      cep:    String(a.postcode ?? "").replace(/\D/g, ""),
+    }
+  } catch (e: any) {
+    console.error("[Local] reverse erro:", e?.message)
+    return null
+  }
+}
+
+// Grava campos de endereço no carrinho. PATCH primeiro; se a linha não existe
+// ainda (cliente que mandou a localização antes de escolher qualquer coisa),
+// cria com a sacola vazia.
+async function salvarEnderecoNoCarrinho(
+  empresaId: string, phone: string, campos: Record<string, unknown>,
+): Promise<void> {
+  const phoneEnc = encodeURIComponent(phone)
+  const now = new Date().toISOString()
+  const h = {
+    "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`,
+    "Content-Type": "application/json",
+  }
+  const patch = await fetch(
+    `${SUPABASE_URL}/rest/v1/whatsapp_carrinho?empresa_id=eq.${empresaId}&phone=eq.${phoneEnc}`,
+    { method: "PATCH", headers: { ...h, "Prefer": "return=minimal,count=exact" },
+      body: JSON.stringify({ ...campos, updated_at: now }) },
+  )
+  if (patch.ok) {
+    const range = patch.headers.get("content-range") ?? ""
+    if (parseInt(range.split("/")[1] ?? "0", 10) > 0) return
+  }
+  await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_carrinho`, {
+    method: "POST",
+    headers: { ...h, "Prefer": "return=minimal" },
+    body: JSON.stringify({ empresa_id: empresaId, phone, items: [], ...campos, updated_at: now }),
+  })
+}
+
+async function handleLocalizacao(
+  empresaId: string,
+  phone: string,
+  coords: { lat: number; lng: number },
+): Promise<{ resposta: string }> {
+  const a = await enderecoDoPonto(coords.lat, coords.lng)
+
+  // O ponto vale mesmo quando o mapa não sabe dizer a rua: é ele que guia o
+  // motoboy. O texto do endereço a gente pergunta.
+  const campos: Record<string, unknown> = {
+    endereco_lat: coords.lat,
+    endereco_lng: coords.lng,
+  }
+  if (a?.rua) {
+    campos.endereco_rua = a.rua
+    // Número NÃO vem do GPS. Fica em branco de propósito: é a única coisa que
+    // ainda precisa ser perguntada.
+    campos.endereco_numero = null
+    if (a.bairro) campos.endereco_bairro = a.bairro
+    if (a.cidade) campos.endereco_cidade = a.cidade
+    if (a.estado) campos.endereco_estado = a.estado
+  }
+  await salvarEnderecoNoCarrinho(empresaId, phone, campos)
+  console.log(`[Local] ponto salvo: ${coords.lat},${coords.lng} rua="${a?.rua ?? "-"}"`)
+
+  if (!a?.rua) {
+    return { resposta:
+      "📍 Peguei sua localização, obrigado!\n\n" +
+      "Só que o mapa não soube me dizer o nome da rua aí. Me escreve o *nome da rua*, " +
+      "o *número* e o *bairro*? O ponto eu já guardei — é por ele que o entregador vai. 🙂" }
+  }
+
+  // A confirmação de volta não é enfeite: o pino é onde o CELULAR está. Quem
+  // pede do trabalho manda, sem perceber, o endereço do trabalho — e essa
+  // pergunta é a única chance de pegar isso antes de a comida sair.
+  const onde = [a.rua, a.bairro || null, a.cidade || null].filter(Boolean).join(", ")
+  return { resposta:
+    "📍 Peguei sua localização!\n\n" +
+    `Isso aqui é *${onde}*.\n\n` +
+    "É aí mesmo que você quer receber? Se for, me diz só o *número* da casa. 😊" }
+}
+
+// ── Endereço que chega em pedaços ────────────────────────────────────────────
+//
+// Muita gente escreve o endereço em duas mensagens: "Rua Eliane Barros" numa,
+// "Novo Amarante" na outra — às vezes o número numa terceira. Pra quem digita é
+// UM endereço só. Pro robô eram mensagens soltas: a rua era salva e a segunda
+// não virava nada, porque não tem prefixo de rua nem número. O bairro ficava
+// vazio, e é o bairro que define a taxa fixa da loja.
+//
+// A regra é estreita de propósito: só vale quando a rua JÁ está salva, o bairro
+// AINDA não está, e o robô tinha acabado de perguntar endereço/número. Fora
+// disso, "Novo Amarante" é só uma palavra numa conversa.
+
+// Palavras que aparecem sozinhas numa conversa e NÃO são bairro. Sem esta
+// lista, um "obrigado" ou um "pode ser" viraria o bairro do cliente.
+const NAO_E_BAIRRO = new RegExp("^(" + [
+  "sim", "s", "nao", "não", "n", "ok", "okay", "blz", "beleza", "certo", "isso",
+  "obrigad[oa]", "vlw", "valeu", "por favor", "pfv", "pode ser", "claro", "aham",
+  "entrega", "entregar", "retirada", "retirar", "buscar", "delivery",
+  "pix", "dinheiro", "cartao", "cartão", "debito", "débito", "credito", "crédito",
+  "bom dia", "boa tarde", "boa noite", "oi", "ola", "olá", "e ai", "e aí",
+  "quanto", "quanto custa", "tem", "quero", "sei nao", "sei não", "nao sei", "não sei",
+  "espera", "calma", "ja mando", "já mando", "so um minuto", "só um minuto",
+  "atendente", "pessoa", "cancelar", "cancela",
+].join("|") + ")[.!?]*$", "i")
+
+function pareceNomeDeBairro(txt: string): boolean {
+  const t = String(txt ?? "").trim()
+  if (t.length < 3 || t.length > 40) return false
+  if (NAO_E_BAIRRO.test(t)) return false
+  if (PREFIXO_RUA.test(t)) return false          // isso é rua, não bairro
+  if (t.includes("?")) return false              // pergunta não é endereço
+  // Bairro é nome: letras, espaço e no máximo um número no fim ("Panatis 1").
+  return /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s.'-]{1,36}( ?\d{1,2})?$/.test(t)
+}
+
+async function handleSalvarBairro(
+  supabase: ReturnType<typeof createClient>,
+  empresaId: string,
+  phone: string,
+  bairro: string,
+): Promise<void> {
+  const { error } = await supabase.from("whatsapp_carrinho").update({
+    endereco_bairro: bairro,
+    updated_at:      new Date().toISOString(),
+  }).eq("empresa_id", empresaId).eq("phone", phone)
+  if (error) console.error("[Bairro] update erro:", error)
+  else console.log(`[Bairro] salvo em mensagem separada: "${bairro}"`)
+}
+
 // ── handleSalvarNumero ───────────────────────────────────────────────────────
 async function handleSalvarNumero(
   supabase: ReturnType<typeof createClient>,
@@ -495,7 +651,7 @@ async function handleSalvarNumero(
   try {
     const { data: c } = await supabase
       .from("whatsapp_carrinho")
-      .select("endereco_rua, endereco_bairro, endereco_cidade, endereco_estado")
+      .select("endereco_rua, endereco_bairro, endereco_cidade, endereco_estado, endereco_lat, endereco_lng")
       .eq("empresa_id", empresaId)
       .eq("phone", phone)
       .single()
@@ -519,6 +675,21 @@ async function handleSalvarNumero(
       estado: c.endereco_estado ?? null,
     }).eq("empresa_id", empresaId)
       .or(`telefone.eq.${phoneLocal},telefone.eq.${phone}`)
+
+    // O ponto que ele mandou vira o pino do cadastro — AQUI, e não na hora da
+    // localização, porque a chave que decide se o pino ainda vale é
+    // rua+número+cidade (mig 0162). Sem o número ela não casaria com nada, e o
+    // buscador de mapa voltaria a mandar no lugar dele.
+    if (c.endereco_lat != null && c.endereco_lng != null) {
+      const { data: ok, error: pinErr } = await supabase.rpc("salvar_pino_do_cliente", {
+        p_empresa_id: empresaId,
+        p_telefone:   phoneLocal,
+        p_lat:        Number(c.endereco_lat),
+        p_lng:        Number(c.endereco_lng),
+      })
+      if (pinErr) console.error("[Pino] rpc erro:", pinErr.message)
+      else console.log(`[Pino] ponto do cliente salvo no cadastro: ${ok}`)
+    }
 
     const localidade = [c.endereco_bairro, c.endereco_cidade, c.endereco_estado].filter(Boolean).join(" — ")
     const proximaPergunta = aceitaDelivery
@@ -638,7 +809,7 @@ async function handleFecharPedido(
   supabase_url: string,
   supabase_key: string,
   instanceName: string,
-  carrinhoEndereco: { rua: string|null; numero: string|null; bairro: string|null; cidade: string|null },
+  carrinhoEndereco: { rua: string|null; numero: string|null; bairro: string|null; cidade: string|null; estado?: string|null; lat?: number|null; lng?: number|null },
   indicadorProfileId: string|null = null,
   taxaEntregaCalc: number|null = null,
   mensagensHist: any[] = [],
@@ -679,6 +850,12 @@ async function handleFecharPedido(
     const endBairro = acao.cliente_bairro ? String(acao.cliente_bairro).trim() : (carrinhoEndereco.bairro ?? cliente?.bairro   ?? null)
     const endCidade = acao.cliente_cidade ? String(acao.cliente_cidade).trim() : (carrinhoEndereco.cidade ?? cliente?.cidade   ?? null)
     const endEstado = acao.cliente_estado ? String(acao.cliente_estado).trim() : (carrinhoEndereco.estado ?? cliente?.estado ?? null)
+    // O PONTO. Sem ele o pedido saía só com o texto do endereço, e o app do
+    // entregador jogava esse texto no Google — que, sem confiar no número,
+    // larga o pino no meio da rua. Ordem: o que o cliente mandou agora, senão o
+    // pino que ele já tinha apontado no cadastro.
+    const endLat = carrinhoEndereco.lat ?? cliente?.endereco_lat ?? null
+    const endLng = carrinhoEndereco.lng ?? cliente?.endereco_lng ?? null
 
     if (tipoEntrega === "entrega" && !endRua) {
       return {
@@ -893,6 +1070,8 @@ async function handleFecharPedido(
             tipo_entrega: tipoEntrega,
             endereco_rua: endRua, endereco_numero: endNumero, endereco_bairro: endBairro,
             endereco_cidade: endCidade, endereco_estado: endEstado,
+            endereco_lat: tipoEntrega === "entrega" ? endLat : null,
+            endereco_lng: tipoEntrega === "entrega" ? endLng : null,
           }
         }),
       })
@@ -918,6 +1097,8 @@ async function handleFecharPedido(
       empresa_id: empresaId, cliente_id: clienteId, cliente_nome: clienteNomeInsert, cliente_telefone: clienteTel,
       endereco_rua: endRua, endereco_numero: endNumero, endereco_bairro: endBairro,
       endereco_cidade: endCidade, endereco_estado: endEstado,
+      endereco_lat: tipoEntrega === "entrega" ? endLat : null,
+      endereco_lng: tipoEntrega === "entrega" ? endLng : null,
       itens: itens, subtotal: totalCarrinho, taxa_entrega: taxaFinal, total: totalFinal,
       forma_pagamento: formaPgto, tipo_entrega: tipoEntrega,
       pix_status: formaPgto === "pix" ? "pendente" : "nao_aplicavel",
@@ -1109,12 +1290,18 @@ function acharBairroCfg(lista: any, bairroCliente: string | null): any {
   return lista.find((b: any) => normBairro(b.bairro) === n) || null
 }
 // Taxa (número) pela distância entre a loja e o endereço, ou null se não deu pra calcular.
-async function calcularTaxaEntregaKm(empresa: any, endStr: string): Promise<number | null> {
+async function calcularTaxaEntregaKm(
+  empresa: any,
+  endStr: string,
+  // Ponto que o cliente apontou (mig 0239). Quando existe, ele manda: veio do
+  // celular dele, o geocode é chute em cima de texto.
+  ponto: { lat: number; lng: number } | null = null,
+): Promise<number | null> {
   try {
     if (!empresa?.latitude || !empresa?.longitude) return null
     const faixas = Array.isArray(empresa.taxas_entrega_km) ? empresa.taxas_entrega_km : []
     if (faixas.length === 0) return null
-    const coords = await geocodificarEndereco(endStr)
+    const coords = ponto ?? await geocodificarEndereco(endStr)
     if (!coords) return null
     const dist = haversineKm(coords.lat, coords.lng, Number(empresa.latitude), Number(empresa.longitude))
     const ordenadas = [...faixas].sort((a: any, b: any) => a.km - b.km)
@@ -1218,7 +1405,7 @@ function textoParaRegistro(msg: any): string {
     return cap ? `📷 Foto — ${cap}` : "📷 Foto"
   }
   if (t === "documentMessage") return "📄 Documento"
-  if (t === "locationMessage") return "📍 Localização"
+  if (t === "locationMessage" || t === "liveLocationMessage") return "📍 Localização"
   if (t === "stickerMessage") return "🙂 Figurinha"
   if (t === "videoMessage") return "🎬 Vídeo"
   return ""
@@ -1228,7 +1415,10 @@ function textoParaRegistro(msg: any): string {
 // Localização que o cliente mandou pelo pininho do WhatsApp (mig 0238).
 // deno-lint-ignore-next-line no-explicit-any
 function coordsDaMensagem(msg: any): { lat: number; lng: number } | null {
-  const loc = msg?.message?.locationMessage
+  // "Localização atual" e "localização em tempo real" são a mesma coisa pra
+  // gente: quem apertou a segunda por engano não pode ficar sem resposta — o
+  // endereço dele está ali do mesmo jeito.
+  const loc = msg?.message?.locationMessage ?? msg?.message?.liveLocationMessage
   const lat = Number(loc?.degreesLatitude)
   const lng = Number(loc?.degreesLongitude)
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
@@ -1398,6 +1588,13 @@ serve(async (req) => {
         }).catch(() => {})
         return new Response("ok", { headers: corsHeaders })
       }
+
+    } else if (coordsMsg) {
+      // LOCALIZAÇÃO (mig 0239). Caía no `else` lá embaixo e o cérebro devolvia
+      // "ok" sem ler nada: o pino do cliente morria na porta. O texto aqui é só
+      // pro histórico da conversa — quem trata o ponto é o curto-circuito mais
+      // adiante, antes da IA.
+      text = "📍 Localização"
 
     } else if (msg.messageType === "imageMessage") {
       const caption = (msg.message?.imageMessage?.caption ?? "").trim()
@@ -1645,12 +1842,12 @@ serve(async (req) => {
         .order("nome")
         .limit(MENU_INTEIRO_ATE),
       supabase.from("whatsapp_carrinho")
-        .select("items, cliente_id, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, endereco_estado")
+        .select("items, cliente_id, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, endereco_estado, endereco_lat, endereco_lng")
         .eq("empresa_id", empresaId)
         .eq("phone", phone)
         .single(),
       supabase.from("clientes")
-        .select("id, nome, email, cep, numero, endereco, bairro, cidade, estado, telefone, created_at, origem")
+        .select("id, nome, email, cep, numero, endereco, bairro, cidade, estado, telefone, created_at, origem, endereco_lat, endereco_lng, endereco_pin_manual")
         .eq("empresa_id", empresaId)
         .in("telefone", [...new Set([phone, phoneLocal, `0${phoneLocal}`, `55${phoneLocal}`, phoneLocalWith9, `55${phoneLocalWith9}`, phoneLocalNo9, `55${phoneLocalNo9}`])])
         .limit(1)
@@ -1786,12 +1983,16 @@ serve(async (req) => {
       bairro: carrinhoRes.data?.endereco_bairro ?? null,
       cidade: carrinhoRes.data?.endereco_cidade ?? null,
       estado: carrinhoRes.data?.endereco_estado ?? null,
+      // O ponto que o cliente mandou (mig 0239). É ele que vai pro pedido e que
+      // o app do entregador abre — o texto acima é pro papel.
+      lat:    carrinhoRes.data?.endereco_lat    ?? null,
+      lng:    carrinhoRes.data?.endereco_lng    ?? null,
     }
 
     let cliente = clienteRes.data ?? null
     if (!cliente && clienteIdNoCarrinho) {
       const { data } = await supabase.from("clientes")
-        .select("id, nome, email, cep, numero, endereco, bairro, cidade, estado, telefone, created_at, origem")
+        .select("id, nome, email, cep, numero, endereco, bairro, cidade, estado, telefone, created_at, origem, endereco_lat, endereco_lng, endereco_pin_manual")
         .eq("id", clienteIdNoCarrinho)
         .maybeSingle()
       if (data) cliente = data
@@ -1863,8 +2064,13 @@ serve(async (req) => {
         carrinhoEndereco.bairro ?? cliente?.bairro,
         carrinhoEndereco.cidade ?? cliente?.cidade,
       ].filter(Boolean).join(", ")
-      if (endParaCalc) {
-        const t = await calcularTaxaEntregaKm(empresa, endParaCalc)
+      // Com o ponto do cliente na mão, a distância é a REAL — não precisa
+      // perguntar o endereço pro buscador de mapa (que é justamente quem erra).
+      const pontoCliente = carrinhoEndereco.lat != null && carrinhoEndereco.lng != null
+        ? { lat: Number(carrinhoEndereco.lat), lng: Number(carrinhoEndereco.lng) }
+        : null
+      if (endParaCalc || pontoCliente) {
+        const t = await calcularTaxaEntregaKm(empresa, endParaCalc, pontoCliente)
         if (t != null) taxaEntregaCalc = t
       }
     }
@@ -1882,6 +2088,29 @@ serve(async (req) => {
     ].filter((v) => Number.isFinite(v) && v > 0)
     const taxaMin = taxasCadastradas.length ? Math.min(...taxasCadastradas) : null
     const taxaMax = taxasCadastradas.length ? Math.max(...taxasCadastradas) : null
+
+    // ── O CLIENTE MANDOU A LOCALIZAÇÃO ──────────────────────────────────────
+    // Curto-circuito antes da IA: quem responde é o código. Mandar um pino pro
+    // modelo seria pagar crédito pra ele decidir o que fazer com um dado que
+    // não tem interpretação nenhuma — e arriscar ouvir "não entendi" de quem
+    // fez exatamente o que o robô pediu.
+    if (coordsMsg) {
+      const { resposta: respLoc } = await handleLocalizacao(empresaId, phone, coordsMsg)
+      await supabase.from("whatsapp_conversas").insert({
+        empresa_id: empresaId, phone, role: "assistant", content: respLoc,
+      })
+      await espelharNoChat(supabase, empresaId, phone, respLoc, "loja", true)
+      if (isTest) {
+        return new Response(JSON.stringify({ ok: true, resposta: respLoc, _debug: { coordsMsg } }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+      }
+      await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+        body: JSON.stringify({ number: phone, text: respLoc }),
+      }).catch(e => console.error("[Local] sendText erro:", e))
+      return new Response("ok", { headers: corsHeaders })
+    }
 
     // ── System prompt ────────────────────────────────────────────────────────
     const systemPrompt = `Você é o assistente virtual de vendas da ${empresaNome}. Responda sempre em português.
@@ -1953,16 +2182,18 @@ Se o cliente JÁ tem nome em CLIENTE → PULE este passo inteiro, vá direto ao 
 ⚠️ GATILHO: assim que o cliente indicar que fechou a sacola ("é só isso", "pode fechar", "só isso mesmo", "fechar"), sua PRÓXIMA mensagem JÁ deve pedir o *nome* (item 1 abaixo). NÃO pergunte "quer mais algum item?" de novo, NÃO mostre resumo ainda. Se o cliente mandar o nome por conta própria, ACEITE e siga a ordem — nunca responda "quer mais alguma coisa?".
 Colete UM POR VEZ, nesta ordem exata:
   1. "⚡ Estamos com um sistema novo por aqui! Seu cadastro é rapidinho e *uma vez só* — no próximo pedido já não precisa. 😊\n\nPra começar, qual o seu *nome*?"
-  2. Recebeu o nome → emita cadastrar_cliente IMEDIATAMENTE (sem texto antes). O sistema pede o endereço em seguida (rua, número e bairro — ou CEP, se ele preferir).
-  3. Recebeu o CEP → emita buscar_cep (sem texto antes). O sistema confirma o endereço e pede o número.
+  2. Recebeu o nome → emita cadastrar_cliente IMEDIATAMENTE (sem texto antes). O sistema pede o endereço em seguida — pedindo a LOCALIZAÇÃO primeiro, e deixando rua/número/bairro ou CEP como alternativa.
+  3. Recebeu a LOCALIZAÇÃO (o pininho do WhatsApp) → NÃO faça nada: o sistema já leu o ponto, guardou a rua/bairro/cidade e perguntou o número sozinho, antes de você. Essa mensagem nem chega em você.
+     Recebeu o CEP → emita buscar_cep (sem texto antes). O sistema confirma o endereço e pede o número.
      Recebeu o endereço ESCRITO (sem CEP) → emita salvar_rua com rua + bairro + cidade (sem texto antes). O sistema pede o número.
+     ⚠️ O cliente pode mandar o endereço em PEDAÇOS (a rua numa mensagem, o bairro na outra). Trate como um endereço só: quando vier o bairro solto depois da rua, emita salvar_rua de novo com a rua que você já tem MAIS o bairro novo.
   4. Recebeu o número → emita salvar_numero. O sistema pergunta entrega/retirada automaticamente.
 O telefone já temos (${phoneLocal}) — NUNCA peça.
 ⚠️ CRÍTICO: só o *nome* é obrigatório. ⛔ NUNCA peça e-mail — o sistema não precisa dele.
 
 ▶ PASSO 4 — ENTREGA OU RETIRADA
 ${aceitaDelivery
-  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE já temos o endereço (ver CLIENTE, ou acabou de coletar no cadastro) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → PASSO 5\n  - Quer trocar → peça o endereço novo: se vier CEP emita buscar_cep, se vier escrito emita salvar_rua (rua+bairro+cidade); depois o número (emita salvar_numero)\n• SE ainda não temos endereço → peça o *nome da rua*, o *número* e o *bairro* (é o que o cliente responde na hora; CEP quase ninguém sabe de cabeça). Se ele mandar o CEP por conta própria, aceite numa boa. Escrito → salvar_rua; CEP → buscar_cep. Depois o número (emita salvar_numero), aí siga ao PASSO 5\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá ao PASSO 5`
+  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE já temos o endereço (ver CLIENTE, ou acabou de coletar no cadastro) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → PASSO 5\n  - Quer trocar → peça o endereço novo: se vier CEP emita buscar_cep, se vier escrito emita salvar_rua (rua+bairro+cidade); depois o número (emita salvar_numero)\n• SE ainda não temos endereço → peça a *localização* dele primeiro (📎 → Localização → Enviar sua localização atual), que é o jeito mais rápido e mais preciso; e diga que, se preferir, pode escrever o *nome da rua*, o *número* e o *bairro* (CEP quase ninguém sabe de cabeça). Se ele mandar o CEP por conta própria, aceite numa boa. Escrito → salvar_rua; CEP → buscar_cep. Depois o número (emita salvar_numero), aí siga ao PASSO 5\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá ao PASSO 5`
   : `Somente retirada no local.\nInforme: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\nVá ao PASSO 5`}
 
 ▶ PASSO 5 — FORMA DE PAGAMENTO
@@ -2531,6 +2762,41 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
 
     // Safety net: usuário mandou número mas Claude não emitiu salvar_numero
     // Só dispara se: temos rua, falta número, bot tinha pedido o número, e não foi salvo ainda
+    // ── Safety net: o endereço veio em PEDAÇOS ─────────────────────────────
+    // Duas formas do mesmo caso: "600 Novo Amarante" numa mensagem só, e o
+    // bairro sozinho depois da rua. Roda antes do safety net do número puro,
+    // que só entende dígitos.
+    {
+      const ultimaBot = (mensagens.filter((m: any) => m.role === "assistant").pop()?.content ?? "").toLowerCase()
+      const botPediuEndOuNum = /n[úu]mero|sua casa|bairro|nome da rua|seu endere|falta s[oó] o endere/.test(ultimaBot)
+      const t = text.trim()
+
+      // "600 Novo Amarante" / "600, Novo Amarante"
+      const numEBairro = t.match(/^(\d{1,5}[a-zA-Z]?)[\s,]+(.{3,40})$/)
+      if (numEBairro && carrinhoEndereco.rua && !carrinhoEndereco.numero && botPediuEndOuNum
+          && pareceNomeDeBairro(numEBairro[2])) {
+        console.log(`[Endereco] pedaços: numero=${numEBairro[1]} bairro="${numEBairro[2]}"`)
+        if (!carrinhoEndereco.bairro) {
+          await handleSalvarBairro(supabase, empresaId, phone, numEBairro[2].trim())
+          carrinhoEndereco.bairro = numEBairro[2].trim()
+        }
+        const r = await handleSalvarNumero(supabase, empresaId, phone, phoneLocal, numEBairro[1], aceitaDelivery)
+        resposta = r.resposta
+        carrinhoEndereco.numero = numEBairro[1]
+      } else if (carrinhoEndereco.rua && !carrinhoEndereco.bairro && botPediuEndOuNum
+                 && pareceNomeDeBairro(t)) {
+        // Só o bairro, na mensagem seguinte à da rua.
+        await handleSalvarBairro(supabase, empresaId, phone, t)
+        carrinhoEndereco.bairro = t
+        resposta = carrinhoEndereco.numero
+          ? `✅ Anotado: *${carrinhoEndereco.rua}, ${carrinhoEndereco.numero}* — ${t}.` + "\n\n" +
+            (aceitaDelivery
+              ? "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"
+              : "Como vai pagar: *dinheiro* ou *cartão*? 💳")
+          : `✅ Anotado o bairro *${t}*!` + "\n\n" + "Qual o *número* da sua casa? 😊"
+      }
+    }
+
     const isNumeroMsg = /^\d{1,5}[a-zA-Z]?$/.test(text.trim())
     const salvarNumeroJaExecutado = acaoMatch !== null && (() => {
       try { return JSON.parse(acaoMatch![1])?.tipo === "salvar_numero" } catch { return false }

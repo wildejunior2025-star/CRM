@@ -142,8 +142,10 @@ async function espelharNoChat(
 // Localização que o cliente mandou pelo pininho do WhatsApp (mig 0238).
 // deno-lint-ignore-next-line no-explicit-any
 function coordsDaMensagem(message: any): { lat: number; lng: number } | null {
-  const lat = Number(message?.location?.latitude)
-  const lng = Number(message?.location?.longitude)
+  // "Localização atual" e "em tempo real" valem a mesma coisa aqui.
+  const loc = message?.location ?? message?.live_location
+  const lat = Number(loc?.latitude)
+  const lng = Number(loc?.longitude)
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
   if (lat === 0 && lng === 0) return null
   return { lat, lng }
@@ -163,7 +165,7 @@ function textoParaRegistroCloud(message: any): string {
     return cap ? `📷 Foto — ${cap}` : "📷 Foto"
   }
   if (t === "document") return "📄 Documento"
-  if (t === "location") return "📍 Localização"
+  if (t === "location" || t === "live_location") return "📍 Localização"
   if (t === "sticker") return "🙂 Figurinha"
   if (t === "video") return "🎬 Vídeo"
   return ""
@@ -407,8 +409,16 @@ async function processar(body: any) {
   }
 
   // Extrai o texto (MVP: texto e botões/listas)
+  //
+  // A LOCALIZAÇÃO não tem texto — e caía no "só consigo te atender por texto"
+  // logo abaixo, que é a pior resposta possível pra quem acabou de fazer
+  // exatamente o que o robô pediu. Ela segue pro cérebro como localização
+  // mesmo, e lá o código lê o ponto (mig 0239).
+  const coordsCloud = coordsDaMensagem(message)
   let text = ""
-  if (message.type === "text") {
+  if (coordsCloud) {
+    text = "📍 Localização"
+  } else if (message.type === "text") {
     text = String(message.text?.body ?? "").trim()
   } else if (message.type === "interactive") {
     text = String(
@@ -442,8 +452,10 @@ async function processar(body: any) {
     _test: true,
     data: {
       key: { remoteJid: `${from}@s.whatsapp.net`, fromMe: false },
-      messageType: "conversation",
-      message: { conversation: text },
+      messageType: coordsCloud ? "locationMessage" : "conversation",
+      message: coordsCloud
+        ? { locationMessage: { degreesLatitude: coordsCloud.lat, degreesLongitude: coordsCloud.lng } }
+        : { conversation: text },
     },
   }
 
