@@ -143,6 +143,7 @@ export default function Dashboard() {
   // sessao -> { nome, telefone, cep } de quem chegou no cadastro
   const [funilContato, setFunilContato] = useState({})
   const [verParados, setVerParados] = useState(false)   // etapas da Loja Online (mig 0216)
+  const [verTop30, setVerTop30] = useState(false)       // popup com o ranking maior de produtos
   const [op, setOp] = useState({ clientesAtivos: 0, estoqueBaixo: 0, cascosPendentes: 0, fiado: 0 })
   const [meta, setMeta] = useState(0)
   const [ifoodRates, setIfoodRates] = useState({})
@@ -194,7 +195,7 @@ export default function Dashboard() {
       const [vData, pData, iData, cnData, nRes, caRes, saRes, csRes, fiRes, empRes, fnData, fcData] = await Promise.all([
         fetchAll(() => supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes, cliente_id, clientes(nome)').neq('status', 'cancelado').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens, subtotal, taxa_entrega, ifood_valores, forma_pagamento, cliente_id, cliente_nome, cliente_telefone').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
-        fetchAll(() => supabase.from('venda_itens').select('produto_id, nome_produto, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desdeISO).order('id', { ascending: false })).then(r => r.data),
+        fetchAll(() => supabase.from('venda_itens').select('produto_id, nome_produto, quantidade, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desdeISO).order('id', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('clientes').select('created_at').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         supabase.from('produtos').select('id, nome, controla_casco'),
         supabase.from('clientes').select('id', { count: 'exact', head: true }).eq('ativo', true),
@@ -338,21 +339,35 @@ export default function Dashboard() {
     const ifoodLiq = calcIfoodLiquido(ifoodPeds, ifoodRates)
 
     // top produtos (vendas + delivery), por nome
+    // Valor E quantidade: no card cabem seis barras de R$, mas na lista maior
+    // "saíram 148 unidades" diz do giro o que o faturamento sozinho não diz.
     const agg = {}
+    const somar = (nm, valor, qtd) => {
+      const l = (agg[nm] ??= { valor: 0, qtd: 0 })
+      l.valor += Number(valor) || 0
+      l.qtd += Number(qtd) || 0
+    }
     for (const it of itens) {
       if (new Date(it.vendas.created_at) < start) continue
       // Produto excluído sai do mapa de nomes, mas a venda guardou o nome dele.
       const nm = nomes[it.produto_id] ?? it.nome_produto ?? 'Produto'
-      agg[nm] = (agg[nm] || 0) + Number(it.subtotal)
+      somar(nm, it.subtotal, it.quantidade)
     }
     for (const p of pedidos) {
       if (!validPed(p) || new Date(p.created_at) < start || new Date(p.created_at) >= now) continue
       for (const it of (Array.isArray(p.itens) ? p.itens : [])) {
-        const nm = it.nome ?? 'Item'; const sub = Number(it.subtotal ?? (it.preco_unitario || 0) * (it.quantidade || 1))
-        agg[nm] = (agg[nm] || 0) + sub
+        const nm = it.nome ?? 'Item'
+        somar(nm, it.subtotal ?? (it.preco_unitario || 0) * (it.quantidade || 1), it.quantidade ?? 1)
       }
     }
-    const top = Object.entries(agg).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 6)
+    const ordenados = Object.entries(agg)
+      .map(([label, v]) => ({ label, value: v.valor, qtd: v.qtd }))
+      .sort((a, b) => b.value - a.value)
+    const top = ordenados.slice(0, 6)
+    // O popup para no 30. Numa loja de 4 mil produtos, desenhar a lista inteira
+    // trava a tela — e ninguém decide nada olhando o 800º lugar.
+    const top30 = ordenados.slice(0, 30)
+    const nProdutos = ordenados.length
 
     // ranking de clientes (balcão + delivery). Venda sem cliente identificado fica
     // de fora — senão "Consumidor" ganha de todo mundo e o ranking não serve pra nada.
@@ -390,7 +405,7 @@ export default function Dashboard() {
     for (const v of vendas) if (new Date(v.created_at) >= mStart) fatMes += Number(v.total)
     for (const p of pedidos) if (validPed(p) && new Date(p.created_at) >= mStart) fatMes += Number(p.total)
 
-    return { fat, fatPrev, n, ticket, canal, formas, buckets, horas, top, novos, fatMes, ifoodLiq, porHora, rank, rankQtd, rankFat }
+    return { fat, fatPrev, n, ticket, canal, formas, buckets, horas, top, top30, nProdutos, novos, fatMes, ifoodLiq, porHora, rank, rankQtd, rankFat }
   }, [periodo, custIni, custFim, vendas, pedidos, itens, nomes, clientesNovos, ifoodRates])
 
   async function salvarMeta(v) {
@@ -605,7 +620,22 @@ export default function Dashboard() {
               </div>
             </div>
             <div style={cardBox}>
-              <strong style={{ fontSize: 15, display: 'block', marginBottom: 14 }}>🏆 Top produtos</strong>
+              {/* Seis barras cabem no card; o resto do cardápio não. O botão do
+                  lado abre até o 30º — é onde aparece o produto que quase não
+                  vende, pergunta que o top 6 nunca responde. */}
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 14 }}>
+                <strong style={{ fontSize: 15 }}>🏆 Top produtos</strong>
+                {m.nProdutos > m.top.length && (
+                  <button type="button" onClick={() => setVerTop30(true)}
+                    style={{
+                      flexShrink: 0, padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
+                      border: '1px solid var(--border)', background: 'transparent',
+                      color: 'var(--primary)', fontSize: 11.5, fontWeight: 700, fontFamily: 'inherit',
+                    }}>
+                    ver o top {Math.min(30, m.nProdutos)}
+                  </button>
+                )}
+              </div>
               <BarsH data={m.top} />
             </div>
           </div>
@@ -765,6 +795,52 @@ export default function Dashboard() {
           </div>
         )
       })()}
+
+      {/* ── Ranking maior dos produtos ──
+          O card mostra seis porque seis barras cabem na tela. Aqui vão até 30,
+          que é o tanto que ainda se lê de uma vez — e para aí de propósito:
+          numa loja de 4 mil produtos, desenhar a lista inteira trava o
+          navegador e ninguém decide nada olhando o 800º lugar. */}
+      {verTop30 && (
+        <div className="modal-overlay" onClick={() => setVerTop30(false)}>
+          <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <h2 style={{ margin: 0 }}>🏆 Top {m.top30.length} produtos</h2>
+              <button className="btn btn-secondary btn-sm" onClick={() => setVerTop30(false)}>Fechar</button>
+            </div>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '6px 0 14px' }}>
+              Os que mais faturaram {ehLabel(periodo)}, de {m.nProdutos} produtos diferentes que
+              saíram no período. Balcão, mesa e delivery juntos.
+            </p>
+
+            <div style={{ maxHeight: '58vh', overflowY: 'auto' }}>
+              {m.top30.map((d, i) => {
+                const fatia = m.top30[0]?.value > 0 ? (d.value / m.top30[0].value) * 100 : 0
+                const pctDoTotal = m.fat > 0 ? (d.value / m.fat) * 100 : 0
+                return (
+                  <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
+                    <span style={{ width: 30, flexShrink: 0, textAlign: 'right', fontSize: 12.5, fontWeight: 700, color: 'var(--text-muted)' }}>
+                      {i + 1}º
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</div>
+                      <div style={{ height: 6, borderRadius: 999, background: 'var(--border)', overflow: 'hidden', marginTop: 5 }}>
+                        <div style={{ height: '100%', width: `${fatia}%`, background: 'var(--primary)', borderRadius: 999 }} />
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 800 }}>{fmt(d.value)}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {d.qtd > 0 ? `${Math.round(d.qtd)} un · ` : ''}{pctDoTotal.toFixed(1)}% do faturamento
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
