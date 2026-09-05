@@ -633,9 +633,12 @@ async function resolverLinkDoMapa(url: string): Promise<string | null> {
 function pontoDoLinkDoMapa(url: string): { lat: number; lng: number } | null {
   let u = url
   try { u = decodeURIComponent(url) } catch { /* url torta: usa como veio */ }
+  // !3d/!4d é o PONTO DO LUGAR. O @ é só onde a CÂMERA do mapa estava — pode
+  // ficar a centenas de metros dali (no link do hospital deu quase 1 km de
+  // diferença). A ordem importa: o mais preciso primeiro.
   const padroes = [
-    /@(-?\d+\.\d+),(-?\d+\.\d+)/,
     /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/,
+    /@(-?\d+\.\d+),(-?\d+\.\d+)/,
     /[?&](?:q|query|ll|daddr|destination)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,
   ]
   for (const re of padroes) {
@@ -706,17 +709,31 @@ async function handleLinkDoMapa(
   const end   = enderecoDoLinkDoMapa(destino)
   console.log(`[Mapa] destino="${destino.slice(0, 120)}" ponto=${ponto ? `${ponto.lat},${ponto.lng}` : "-"} rua="${end?.rua ?? "-"}"`)
 
-  if (!end && !ponto) {
+  // Link de LUGAR muitas vezes traz só o NOME ("/maps/place/Hospital+X/") e
+  // nenhum endereço escrito. Mas traz o ponto — e ponto a gente sabe virar
+  // endereço, do mesmo jeito que faz com a localização que o cliente manda.
+  // Sem isto o robô respondia "(o link só trouxe o ponto no mapa)" e ficava
+  // esperando um endereço que estava ali, a uma consulta de distância.
+  let endFinal = end
+  if (!endFinal?.rua && ponto) {
+    const a = await enderecoDoPonto(ponto.lat, ponto.lng)
+    if (a?.rua) {
+      endFinal = { rua: a.rua, numero: "", bairro: a.bairro, cidade: a.cidade, estado: a.estado, cep: a.cep, lugar: end?.lugar ?? "" }
+      console.log(`[Mapa] endereço veio do ponto: ${a.rua}, ${a.bairro}`)
+    }
+  }
+
+  if (!endFinal && !ponto) {
     return { resposta: "Esse link não me disse o endereço. \u{1F615} Me escreve aqui: *rua*, *número* e *bairro*?" }
   }
 
   const campos: Record<string, unknown> = {}
-  if (end) {
-    campos.endereco_rua    = end.rua
-    campos.endereco_numero = end.numero || null
-    if (end.bairro) campos.endereco_bairro = end.bairro
-    if (end.cidade) campos.endereco_cidade = end.cidade
-    if (end.estado) campos.endereco_estado = end.estado
+  if (endFinal) {
+    campos.endereco_rua    = endFinal.rua
+    campos.endereco_numero = endFinal.numero || null
+    if (endFinal.bairro) campos.endereco_bairro = endFinal.bairro
+    if (endFinal.cidade) campos.endereco_cidade = endFinal.cidade
+    if (endFinal.estado) campos.endereco_estado = endFinal.estado
   }
   if (ponto) { campos.endereco_lat = ponto.lat; campos.endereco_lng = ponto.lng }
   await salvarEnderecoNoCarrinho(empresaId, phone, campos)
@@ -724,12 +741,12 @@ async function handleLinkDoMapa(
   // O link do mapa NOSSO: quem está com o celular na mão arrasta o pino até a
   // porta do amigo. É o único jeito de acertar a casa de outra pessoa.
   let linkPino = ""
-  if (end?.rua) {
+  if (endFinal?.rua) {
     const { data, error } = await supabase.rpc("criar_pin_link_para", {
       p_empresa_id: empresaId, p_telefone: phone,
-      p_rua: end.rua, p_numero: end.numero || null,
-      p_bairro: end.bairro || null, p_cidade: end.cidade || null,
-      p_estado: end.estado || null, p_cep: end.cep || null,
+      p_rua: endFinal.rua, p_numero: endFinal.numero || null,
+      p_bairro: endFinal.bairro || null, p_cidade: endFinal.cidade || null,
+      p_estado: endFinal.estado || null, p_cep: endFinal.cep || null,
       p_lat: ponto?.lat ?? null, p_lng: ponto?.lng ?? null, p_pedido_id: null,
     })
     if (error) console.error("[Mapa] criar_pin_link_para erro:", error.message)
@@ -737,15 +754,15 @@ async function handleLinkDoMapa(
   }
 
   const escrito = [
-    end?.rua ? `*${[end.rua, end.numero].filter(Boolean).join(", ")}*` : null,
-    [end?.bairro, end?.cidade].filter(Boolean).join(", ") || null,
+    endFinal?.rua ? `*${[endFinal.rua, endFinal.numero].filter(Boolean).join(", ")}*` : null,
+    [endFinal?.bairro, endFinal?.cidade].filter(Boolean).join(", ") || null,
   ].filter(Boolean).join(" \u2014 ")
 
   const linhas = [
     "\u{1F4CD} Peguei o endereço do link:",
     "",
     escrito || "(o link só trouxe o ponto no mapa)",
-    end?.lugar ? `_referência: ${end.lugar}_` : null,
+    endFinal?.lugar ? `_referência: ${endFinal.lugar}_` : null,
     "",
     linkPino
       ? "Confere o ponto exato aqui, que aí o entregador vai direto na porta:\n\n"
@@ -753,7 +770,7 @@ async function handleLinkDoMapa(
         + 'É só arrastar o pino e tocar em "É aqui". \u{1F642}'
       : null,
     "",
-    end?.numero ? "Esse é o endereço da entrega?" : "Qual o *número* da casa?",
+    endFinal?.numero ? "Esse é o endereço da entrega?" : "Qual o *número* da casa?",
   ].filter(l => l !== null).join("\n")
 
   return { resposta: linhas }
@@ -1518,6 +1535,80 @@ async function transcribeAudio(base64: string, mimetype: string): Promise<string
     console.error("[Whisper] erro:", e?.message)
     return null
   }
+}
+
+// ── O MODELO ÀS VEZES ESCREVE A AÇÃO NO FORMATO ERRADO ──────────────────────
+//
+// O combinado é "ACAO: {json}". Mas o Haiku às vezes cai no formato de
+// ferramenta que ele aprendeu em outro lugar — <function_calls> com um array
+// JSON dentro. Aí o `indexOf("ACAO:")` não acha nada, a ação NÃO É EXECUTADA e,
+// pior, o bloco inteiro vai pro cliente: ele lê "function_calls", "produto_id",
+// chaves e colchetes. Aconteceu em 05/09 com 10 Skol.
+//
+// Duas defesas, e as duas precisam existir:
+//   1. entender o formato alternativo, pra ação rodar do mesmo jeito;
+//   2. limpar QUALQUER resto de formato interno antes de mandar — mesmo o que
+//      eu não previ. O cliente nunca pode ver a tripa do sistema.
+
+const TIPOS_DE_ACAO = [
+  "atualizar_carrinho", "verificar_cliente", "cadastrar_cliente", "pedir_cep",
+  "buscar_cep", "salvar_rua", "salvar_numero", "fechar_pedido",
+  "chamar_atendente", "escalar_humano", "pausar_bot",
+]
+
+// Acha o primeiro objeto JSON BALANCEADO a partir de uma posição.
+function jsonBalanceado(txt: string, de: number): { texto: string; fim: number } | null {
+  const ini = txt.indexOf("{", de)
+  if (ini === -1) return null
+  let nivel = 0
+  let dentroDeAspas = false
+  let escapando = false
+  for (let i = ini; i < txt.length; i++) {
+    const ch = txt[i]
+    if (escapando) { escapando = false; continue }
+    if (ch === "\\") { escapando = true; continue }
+    if (ch === '"') { dentroDeAspas = !dentroDeAspas; continue }
+    if (dentroDeAspas) continue
+    if (ch === "{") nivel++
+    else if (ch === "}") { nivel--; if (nivel === 0) return { texto: txt.slice(ini, i + 1), fim: i + 1 } }
+  }
+  return null
+}
+
+// Procura uma ação escrita de qualquer jeito e devolve o JSON + onde ele estava.
+function acharAcaoSolta(txt: string): { json: string; ini: number; fim: number } | null {
+  let de = 0
+  while (de < txt.length) {
+    const bloco = jsonBalanceado(txt, de)
+    if (!bloco) return null
+    try {
+      const obj = JSON.parse(bloco.texto)
+      // Formato direto {"tipo": ...} ou embrulhado {"arguments": {"tipo": ...}}
+      const alvo = obj?.tipo ? obj : (obj?.arguments?.tipo ? obj.arguments : null)
+      if (alvo && TIPOS_DE_ACAO.includes(String(alvo.tipo))) {
+        return { json: JSON.stringify(alvo), ini: txt.indexOf("{", de), fim: bloco.fim }
+      }
+    } catch { /* não era JSON: segue procurando */ }
+    de = (txt.indexOf("{", de) ?? de) + 1
+  }
+  return null
+}
+
+// Última peneira antes de mandar. Tira o que for tripa de sistema, mesmo o que
+// não virou ação — bloco de ferramenta, cerca de código com JSON, "ACAO:" solto.
+function limparRestosInternos(txt: string): string {
+  let t = String(txt ?? "")
+  t = t.replace(/<function_calls>[\s\S]*?(<[\/]function_calls>|$)/gi, " ")
+  t = t.replace(/<[\/]?(function_calls|invoke|parameter|antml:[a-z_]+)[^>]*>/gi, " ")
+  t = t.replace(/```[a-z]*[\s\S]*?```/gi, (m) => (/"tipo"|produto_id|function_calls/i.test(m) ? " " : m))
+  // "ACAO: {...}" que sobrou (a ação já foi lida antes daqui)
+  let i = t.indexOf("ACAO:")
+  while (i !== -1) {
+    const bloco = jsonBalanceado(t, i)
+    t = bloco ? t.slice(0, i) + " " + t.slice(bloco.fim) : t.slice(0, i)
+    i = t.indexOf("ACAO:")
+  }
+  return t.replace(/[ \t]{2,}/g, " ").replace(/\n\s*\n\s*\n+/g, "\n\n").trim()
 }
 
 // ── serve ────────────────────────────────────────────────────────────────────
@@ -2656,6 +2747,19 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
         if (end !== -1) acaoMatch = ["", fromAcao.slice(braceStart, end + 1)] as any
       }
     }
+    // Sem "ACAO:" na frente? Pode ser o formato de ferramenta que o modelo às
+    // vezes usa por conta própria. Aqui a ação é resgatada e o bloco sai do
+    // texto — senão ela não roda E o cliente lê o JSON.
+    let acaoSoltaFim = -1
+    if (!acaoMatch) {
+      const solta = acharAcaoSolta(resposta)
+      if (solta) {
+        console.log("[Acao] formato fora do padrão resgatado:", solta.json.slice(0, 80))
+        acaoMatch = ["", solta.json] as any
+        resposta = (resposta.slice(0, solta.ini) + " " + resposta.slice(solta.fim)).trim()
+        acaoSoltaFim = solta.fim
+      }
+    }
 
     let acaoPromise: Promise<any> = Promise.resolve()
     let mensagemExtra             = ""
@@ -2666,7 +2770,9 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     let pixNumeroParaCloud = ""
 
     if (acaoMatch) {
-      if (acaoStart !== -1) resposta = resposta.slice(0, acaoStart).trim()
+      // Só corta pelo "ACAO:" quando foi ele que casou — no formato resgatado o
+      // texto já foi limpo acima, e cortar de novo comeria a resposta inteira.
+      if (acaoStart !== -1 && acaoSoltaFim === -1) resposta = resposta.slice(0, acaoStart).trim()
       try {
         const acao = JSON.parse(acaoMatch[1])
 
@@ -3106,6 +3212,16 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     if (ehBoasVindas && catalogoUrl && resposta && !resposta.includes("lojaonline.fwcinter.com")) {
       resposta = `${resposta}\n\n👉 ${catalogoUrl}`
       console.log("[SafeNet] link do catálogo adicionado na mensagem de boas-vindas")
+    }
+
+    // ÚLTIMA PENEIRA, logo antes de sair. Vem depois de todas as redes de
+    // segurança de propósito: se qualquer uma delas deixar passar tripa de
+    // sistema — bloco de ferramenta, JSON solto, um "ACAO:" esquecido — ela
+    // morre aqui. O cliente não pode ler o avesso do robô (05/09).
+    const respostaLimpa = limparRestosInternos(resposta)
+    if (respostaLimpa !== resposta) {
+      console.error("[Vazamento] resposta tinha formato interno e foi limpa:", resposta.slice(0, 200))
+      resposta = respostaLimpa
     }
 
     if (!resposta) {
