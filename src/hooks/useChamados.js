@@ -18,6 +18,16 @@ const REPETE_MS = 30000
 export function useChamados(empresaId, ativo = true, comSom = true) {
   const [chamados, setChamados] = useState([])
   const vistosRef = useRef(new Set())
+  // Chamados que ALGUÉM JÁ FOI ATENDER nesta tela. O alarme existe pra chamar
+  // quem está de costas pro computador; depois que a pessoa clicou em
+  // "Responder aqui", ela já está aqui — continuar tocando na cara dela é o
+  // jeito mais rápido de ela desligar o som e perder o próximo chamado.
+  //
+  // É só desta tela, de propósito: o chamado continua ABERTO no banco (só o
+  // "Devolver pro robô", o "Assumi" e a resposta enviada fecham). Assim, se a
+  // pessoa clicar e sair de perto, o F5 volta a tocar — e o computador do
+  // outro balcão nunca fica mudo por causa de um clique daqui.
+  const [silenciados, setSilenciados] = useState(() => new Set())
   // O menu lateral e a tela de Conversas usam este hook AO MESMO TEMPO. Se os
   // dois pedirem o canal pelo mesmo nome, o cliente devolve o canal que já foi
   // assinado e o segundo `.on()` estoura ("cannot add postgres_changes callbacks
@@ -61,12 +71,25 @@ export function useChamados(empresaId, ativo = true, comSom = true) {
     }
   }, [chamados, comSom])
 
-  // E continua tocando enquanto ninguém atender.
+  // E continua tocando enquanto ninguém atender — só pelos que ainda estão
+  // esperando de verdade.
+  const esperando = chamados.filter(c => !silenciados.has(c.id)).length
   useEffect(() => {
-    if (!comSom || !chamados.length) return
+    if (!comSom || !esperando) return
     const id = setInterval(tocarChamado, REPETE_MS)
     return () => clearInterval(id)
-  }, [chamados.length, comSom])
+  }, [esperando, comSom])
+
+  // "Já estou indo responder este": cala o alarme e tira o vermelho do card,
+  // sem fechar o chamado.
+  const silenciar = useCallback((chamadoId) => {
+    setSilenciados(prev => {
+      if (prev.has(chamadoId)) return prev
+      const proximo = new Set(prev)
+      proximo.add(chamadoId)
+      return proximo
+    })
+  }, [])
 
   /**
    * Fecha o chamado. Duas saídas, e a diferença é quem continua falando:
@@ -103,5 +126,5 @@ export function useChamados(empresaId, ativo = true, comSom = true) {
     setChamados(prev => prev.filter(c => c.id !== chamadoId))
   }, [chamados, empresaId])
 
-  return { chamados, atender, recarregar: carregar }
+  return { chamados, atender, recarregar: carregar, silenciados, silenciar }
 }

@@ -5462,7 +5462,7 @@ export default function PainelPedidos() {
   const [salvandoPedidoChat, setSalvandoPedidoChat] = useState(false)
   // Cliente que pediu atendente no WhatsApp: o robô não inventa resposta, chama
   // gente. Toca AQUI, no gestor — é a tela que fica aberta no balcão.
-  const { chamados, atender: atenderChamado } = useChamados(empresa?.id)
+  const { chamados, atender: atenderChamado, silenciados: chamadosSilenciados, silenciar: silenciarChamado } = useChamados(empresa?.id)
   // Catálogo (pausar/ativar itens da loja online)
   const [catalogo, setCatalogo] = useState([])
   const [complementosPorProduto, setComplementosPorProduto] = useState({}) // produtoId -> [grupos] (pausáveis)
@@ -7567,14 +7567,33 @@ export default function PainelPedidos() {
           {/* Painel: Mensagens (chat App + Loja online) */}
           {painelDireito === 'chat' && chamados.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 800, color: '#f87171', letterSpacing: '.04em' }}>
-                🔔 ESPERANDO ATENDENTE NO WHATSAPP
-              </div>
-              {chamados.map(c => (
+              {(() => {
+                // O sino só grita enquanto tem gente esperando de verdade.
+                // Depois que a loja clicou em "Responder aqui" em todos, o
+                // título deixa de ser alarme e vira lembrete.
+                const esperando = chamados.filter(c => !chamadosSilenciados.has(c.id)).length
+                return (
+                  <div style={{
+                    fontSize: 11, fontWeight: 800, letterSpacing: '.04em',
+                    color: esperando ? '#f87171' : '#eab308',
+                  }}>
+                    {esperando
+                      ? '🔔 ESPERANDO ATENDENTE NO WHATSAPP'
+                      : '💬 EM ATENDIMENTO — RESPONDA E FECHE O CHAMADO'}
+                  </div>
+                )
+              })()}
+              {chamados.map(c => {
+                const indoResponder = chamadosSilenciados.has(c.id)
+                return (
                 <div key={c.id} style={{
-                  border: '1px solid rgba(220,38,38,.5)', borderRadius: 10,
+                  // Vermelho é "ninguém foi ainda". Depois do clique vira âmbar:
+                  // o chamado continua aberto (falta responder e fechar), mas
+                  // parou de ser urgente — e parou de tocar.
+                  border: `1px solid ${indoResponder ? 'rgba(234,179,8,.55)' : 'rgba(220,38,38,.5)'}`,
+                  borderRadius: 10,
                   padding: telaGrande ? '14px 16px' : '10px 12px',
-                  background: 'rgba(220,38,38,.10)',
+                  background: indoResponder ? 'rgba(234,179,8,.10)' : 'rgba(220,38,38,.10)',
                 }}>
                   <div style={{ fontSize: telaGrande ? 17 : 13.5, fontWeight: 700, color: 'var(--text)' }}>
                     {c.nome || foneBonito(c.phone)}
@@ -7590,12 +7609,15 @@ export default function PainelPedidos() {
                         aqui fica gravada na conversa — é ela que o robô lê pra
                         continuar de onde a pessoa parou. Respondendo pelo
                         celular, ele volta sem saber o que foi dito. */}
-                    <button type="button" onClick={() => abrirConversaDoChamado(c.phone)}
+                    <button type="button"
+                      onClick={() => { silenciarChamado(c.id); abrirConversaDoChamado(c.phone) }}
                       style={{
                         flex: 1, padding: telaGrande ? '12px 14px' : '8px 10px', borderRadius: 8,
                         cursor: 'pointer', border: 'none',
-                        background: '#22c55e', color: '#fff', fontSize: telaGrande ? 15.5 : 12, fontWeight: 800,
-                      }}>💬 Responder aqui</button>
+                        background: indoResponder ? 'rgba(34,197,94,.25)' : '#22c55e',
+                        color: indoResponder ? '#4ade80' : '#fff',
+                        fontSize: telaGrande ? 15.5 : 12, fontWeight: 800,
+                      }}>{indoResponder ? '💬 Respondendo…' : '💬 Responder aqui'}</button>
                   </div>
                   {/* Duas saídas, e a diferença é quem continua falando com o
                       cliente. Devolver é o caso comum: o robô travou numa
@@ -7615,7 +7637,8 @@ export default function PainelPedidos() {
                       }}>Assumi a conversa</button>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
 
