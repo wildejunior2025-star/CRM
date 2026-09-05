@@ -4711,22 +4711,15 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
         }}>{aviso.txt}</div>
       )}
 
-      {/* O robô está fora desta conversa porque alguém assumiu. O caminho de
-          volta fica AQUI, onde a pessoa está — o card do chamado já sumiu
-          quando ela respondeu. */}
+      {/* O robô está fora desta conversa porque alguém assumiu. Fica dito em
+          uma linha; o botão de devolver desceu pra barra de ações. */}
       {botPausado && (
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '7px 10px',
-          borderRadius: 8, background: 'rgba(124,58,237,.10)', border: '1px solid rgba(124,58,237,.35)',
+          marginTop: 8, padding: '6px 10px', borderRadius: 8,
+          background: 'rgba(124,58,237,.10)', border: '1px solid rgba(124,58,237,.35)',
+          fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.4,
         }}>
-          <span style={{ fontSize: 11.5, color: 'var(--text-muted)', flex: 1, lineHeight: 1.4 }}>
-            🤖 O robô está calado nesta conversa — quem responde é você.
-          </span>
-          <button type="button" onClick={onDevolverAoRobo}
-            style={{
-              flexShrink: 0, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 800,
-              border: '1px solid rgba(124,58,237,.6)', background: 'rgba(124,58,237,.18)', color: '#a78bfa',
-            }}>Devolver pro robô</button>
+          🤖 O robô está calado nesta conversa — quem responde é você.
         </div>
       )}
 
@@ -4734,19 +4727,50 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
           carrinho embaixo das mensagens empurra a conversa pra cima e o
           atendente perde de vista o que o cliente pediu. Aqui fica só o botão
           que abre. No celular não cabem dois painéis — lá continua embaixo. */}
-      {empresaId && g && (
-        <button type="button" onClick={onAbrirSacola}
-          style={{
-            marginTop: 8, width: '100%', padding: '12px 14px', borderRadius: 10, cursor: 'pointer',
-            fontSize: 15.5, fontWeight: 700,
-            border: `1px ${sacola?.length ? 'solid' : 'dashed'} ${sacola?.length ? 'rgba(34,197,94,.6)' : 'var(--border, #2a2a3a)'}`,
-            background: sacola?.length ? 'rgba(34,197,94,.10)' : 'transparent',
-            color: sacola?.length ? '#22c55e' : 'var(--text-muted)',
-          }}>
-          {sacola?.length
-            ? `🛒 Sacola do cliente (${sacola.length} ${sacola.length === 1 ? 'item' : 'itens'})`
-            : '🔍 Buscar produto / montar sacola'}
-        </button>
+      {/* BARRA DE AÇÕES — os três numa linha só. Empilhados, eles empurravam a
+          conversa pra cima e comiam três faixas da tela; lado a lado sobra
+          espaço pras mensagens, que é o que a pessoa está lendo. No celular
+          eles quebram pra linha de baixo sozinhos em vez de espremer. */}
+      {(empresaId || botPausado || onPedirLocalizacao) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+          {empresaId && g && (
+            <button type="button" onClick={onAbrirSacola}
+              style={{
+                flex: '1 1 140px', padding: g ? '11px 10px' : '9px 8px', borderRadius: 10, cursor: 'pointer',
+                fontSize: g ? 13.5 : 12, fontWeight: 700, lineHeight: 1.2,
+                border: `1px ${sacola?.length ? 'solid' : 'dashed'} ${sacola?.length ? 'rgba(34,197,94,.6)' : 'var(--border, #2a2a3a)'}`,
+                background: sacola?.length ? 'rgba(34,197,94,.10)' : 'transparent',
+                color: sacola?.length ? '#22c55e' : 'var(--text-muted)',
+              }}>
+              {sacola?.length ? `🛒 Sacola (${sacola.length})` : '🛒 Montar sacola'}
+            </button>
+          )}
+
+          {onPedirLocalizacao && thread.canal === 'whatsapp' && (
+            <button type="button" onClick={onPedirLocalizacao} disabled={enviando}
+              title="Pede o pininho do WhatsApp — endereço ditado erra número, o ponto não erra nada"
+              style={{
+                flex: '1 1 140px', padding: g ? '11px 10px' : '9px 8px', borderRadius: 10,
+                border: '1px dashed var(--border, #2a2a3a)', background: 'transparent',
+                color: 'var(--text-muted)', fontSize: g ? 13.5 : 12, fontWeight: 700,
+                lineHeight: 1.2, cursor: 'pointer',
+              }}>
+              📍 Pedir localização
+            </button>
+          )}
+
+          {botPausado && (
+            <button type="button" onClick={onDevolverAoRobo}
+              title="O robô volta a responder este cliente e continua de onde parou"
+              style={{
+                flex: '1 1 140px', padding: g ? '11px 10px' : '9px 8px', borderRadius: 10, cursor: 'pointer',
+                fontSize: g ? 13.5 : 12, fontWeight: 700, lineHeight: 1.2,
+                border: '1px solid rgba(124,58,237,.6)', background: 'rgba(124,58,237,.18)', color: '#a78bfa',
+              }}>
+              🤖 Devolver pro robô
+            </button>
+          )}
+        </div>
       )}
 
       {empresaId && !g && <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} onAvulso={onAvulsoSacola} />}
@@ -4771,19 +4795,6 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
             cadastroVersao={cadastroVersao}
           />
         </>
-      )}
-
-      {/* Pedir o pininho do WhatsApp. Endereço ditado por áudio erra número e
-          o mapa erra o resto; o ponto que o cliente manda não erra nada. */}
-      {onPedirLocalizacao && thread.canal === 'whatsapp' && (
-        <button type="button" onClick={onPedirLocalizacao} disabled={enviando}
-          style={{
-            marginTop: 8, width: '100%', padding: g ? '10px 14px' : '8px 12px', borderRadius: 9,
-            border: '1px dashed var(--border, #2a2a3a)', background: 'transparent',
-            color: 'var(--text-muted)', fontSize: g ? 14 : 12.5, fontWeight: 600, cursor: 'pointer',
-          }}>
-          📍 Pedir a localização do cliente
-        </button>
       )}
 
       {/* Caixa de resposta */}
