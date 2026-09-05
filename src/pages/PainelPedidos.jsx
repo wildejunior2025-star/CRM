@@ -1091,14 +1091,36 @@ async function buscarRuasNoMapa(uf, termo) {
     }))
 }
 
-/** As duas fontes numa lista só, sem repetir rua. */
+/**
+ * As duas fontes numa lista só, sem repetir rua.
+ *
+ * A parte que faz a diferença é a terceira busca: o ViaCEP só procura DENTRO
+ * de uma cidade, e a gente só sabe perguntar pela cidade da loja. Cliente da
+ * cidade vizinha ficava sem CEP à toa — a Rua Prefeita Eliane Barros tem CEP
+ * (59296-391), mas em São Gonçalo do Amarante, e a busca perguntava em Natal.
+ *
+ * Então: o mapa acha a rua e diz a cidade dela; com a cidade na mão, a gente
+ * volta ao ViaCEP e pega o CEP de verdade. O CEP vem sozinho, que é o ponto —
+ * o cliente não sabe o CEP dele, e quem atende não tem como conferir chute.
+ */
 async function buscarRuas(uf, cidade, termo) {
   const [viacep, mapa] = await Promise.all([
     buscarRuasViaCep(uf, cidade, termo).catch(() => []),
     buscarRuasNoMapa(uf, termo).catch(() => []),
   ])
+
+  const jaPerguntada = normBairro(cidade)
+  const outrasCidades = [...new Set(mapa.map(m => m.localidade).filter(Boolean))]
+    .filter(c => normBairro(c) !== jaPerguntada)
+    .slice(0, 2)
+  const vizinhas = (await Promise.all(
+    outrasCidades.map(c => buscarRuasViaCep(uf, c, termo).catch(() => [])),
+  )).flat()
+
+  // Ordem importa: quem tem CEP de verdade entra primeiro e ganha da versão
+  // do mapa, que traz a mesma rua sem CEP.
   const vistas = new Set()
-  return [...viacep, ...mapa].filter(x => {
+  return [...viacep, ...vizinhas, ...mapa].filter(x => {
     const k = `${normBairro(x.logradouro)}|${normBairro(x.bairro)}`
     if (vistas.has(k)) return false
     vistas.add(k); return true
