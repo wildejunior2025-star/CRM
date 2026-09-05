@@ -4442,6 +4442,17 @@ function PlayerDeAudio({ url }) {
   const [tocando, setTocando] = useState(false)
   const [agora, setAgora] = useState(0)
   const [total, setTotal] = useState(0)
+  // Áudio de cliente é quase sempre mais longo do que precisava ser. Acelerar é
+  // o que faz ouvir 20 recados no movimento em vez de deixar pra depois — e
+  // "depois" é quando o pedido some.
+  const VELOCIDADES = [1, 1.5, 2]
+  const [velocidade, setVelocidade] = useState(1)
+
+  function trocarVelocidade() {
+    const proxima = VELOCIDADES[(VELOCIDADES.indexOf(velocidade) + 1) % VELOCIDADES.length]
+    setVelocidade(proxima)
+    if (ref.current) ref.current.playbackRate = proxima
+  }
 
   // A "onda" é decorativa — desenhar a real exigiria decodificar o áudio
   // inteiro, e o que importa aqui é ver o progresso. As alturas saem do próprio
@@ -4498,7 +4509,7 @@ function PlayerDeAudio({ url }) {
         onLoadedMetadata={aoCarregar}
         onDurationChange={aoCarregar}
         onTimeUpdate={e => setAgora(e.currentTarget.currentTime)}
-        onPlay={() => setTocando(true)}
+        onPlay={e => { e.currentTarget.playbackRate = velocidade; setTocando(true) }}
         onPause={() => setTocando(false)}
         onEnded={() => { setTocando(false); setAgora(0) }}
         style={{ display: 'none' }}
@@ -4541,6 +4552,21 @@ function PlayerDeAudio({ url }) {
           {mmss(tocando || agora ? agora : total)}
         </div>
       </div>
+
+      <button
+        type="button" onClick={trocarVelocidade}
+        title="Velocidade de reprodução"
+        aria-label={`Velocidade ${String(velocidade).replace('.', ',')} vezes`}
+        style={{
+          flexShrink: 0, minWidth: 34, height: 22, padding: '0 7px', borderRadius: 11,
+          border: 'none', cursor: 'pointer',
+          background: velocidade === 1 ? 'rgba(255,255,255,.14)' : 'rgba(96,165,250,.28)',
+          color: velocidade === 1 ? 'var(--text)' : '#93c5fd',
+          fontSize: 11, fontWeight: 800, lineHeight: 1,
+        }}
+      >
+        {String(velocidade).replace('.', ',')}×
+      </button>
     </div>
   )
 }
