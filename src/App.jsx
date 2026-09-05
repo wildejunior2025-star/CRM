@@ -210,6 +210,7 @@ const PresencialHistorico = lazy(() => import('./pages/PresencialHistorico'))
 const PresencialReservas = lazy(() => import('./pages/PresencialReservas'))
 const MesaCardapio = lazy(() => import('./pages/MesaCardapio'))
 const ClienteLink = lazy(() => import('./pages/ClienteLink'))
+const ConfirmarLocal = lazy(() => import('./pages/ConfirmarLocal'))
 const Landing = lazy(() => import('./pages/Landing'))
 const TourSistema = lazy(() => import('./pages/TourSistema'))
 
@@ -234,6 +235,8 @@ export default function App() {
             <Route path="/meus-pedidos" element={<MeusPedidos />} />
             <Route path="/mesa/:token" element={<MesaCardapio />} />
             <Route path="/c/:token" element={<ClienteLink />} />
+            {/* Cliente confere no mapa o ponto exato da entrega (mig 0238) */}
+            <Route path="/local/:token" element={<ConfirmarLocal />} />
             {/* Link antigo por id (ex: loja sem slug) — resolve por id no DeliveryLoja */}
             <Route path="/loja/:id" element={<DeliveryLoja />} />
             <Route path="/:slug" element={<DeliveryLoja />} />
@@ -269,6 +272,8 @@ export default function App() {
           <Route path="/mesa/:token" element={<MesaCardapio />} />
           {/* Link do cliente: pedido + conta do fiado, sem login (mig 0147) */}
           <Route path="/c/:token" element={<ClienteLink />} />
+          {/* Cliente confere no mapa o ponto exato da entrega (mig 0238) */}
+          <Route path="/local/:token" element={<ConfirmarLocal />} />
           {/* Link de indicação unificado — pergunta "sou cliente ou loja" */}
           <Route path="/entrar" element={<CadastroRef />} />
           {/* Cadastro de cliente livre (sem empresa) */}

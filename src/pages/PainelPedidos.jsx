@@ -1028,6 +1028,177 @@ async function geocodificarEndereco(endereco) {
   return null
 }
 
+// Endereço em campos → coordenada, do jeito mais preciso primeiro (mig 0238).
+// Com o CEP dá pra usar a busca ESTRUTURADA do Nominatim, que é bem melhor que
+// jogar o endereço inteiro num campo de texto — é a mesma da Loja Online.
+async function geocodificarPreciso({ rua, numero, bairro, cidade, estado, cep } = {}) {
+  const cepLimpo = String(cep || '').replace(/\D/g, '')
+  const pega = async (url) => {
+    try {
+      const r = await fetch(url, { headers: { 'User-Agent': 'CRM-FWC/1.0' } })
+      const d = await r.json()
+      if (d?.[0]) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
+    } catch { /* sem rede, sem ponto */ }
+    return null
+  }
+  if (cepLimpo.length === 8) {
+    const params = new URLSearchParams({
+      street: [numero, rua].filter(Boolean).join(' '),
+      city: cidade || '', state: estado || '', postalcode: cepLimpo,
+      country: 'Brazil', format: 'json', limit: '1',
+    })
+    const c = await pega(`https://nominatim.openstreetmap.org/search?${params}`)
+    if (c) return c
+  }
+  const q = [rua, numero, bairro, cidade, estado].filter(v => v && String(v).trim()).join(', ')
+  if (!q) return null
+  return pega(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Brasil')}&format=json&limit=1`)
+}
+
+// Mesma chave da Loja Online e do banco (chave_endereco, mig 0160): serve pra
+// saber se o pino guardado no cadastro é DESTE endereço. Endereço diferente,
+// pino diferente — senão o cliente que mudou de casa recebia no lugar antigo.
+function chaveEnderecoJS({ rua, numero, cidade } = {}) {
+  const junto = [rua, numero, cidade].map(v => String(v ?? '').trim()).filter(Boolean).join(' ')
+  return junto
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/\s+/g, ' ').trim() || null
+}
+
+// Coordenada → endereço escrito (o caminho inverso do buscador de mapa).
+async function reverseGeocode(lat, lng) {
+  try {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
+      { headers: { 'User-Agent': 'CRM-FWC/1.0' } },
+    )
+    const d = await r.json()
+    const a = d?.address ?? {}
+    return {
+      rua: a.road ?? a.pedestrian ?? a.footway ?? '',
+      // O GPS devolve PONTO, não número de casa. Quando vem, é bônus.
+      numero: a.house_number ?? '',
+      bairro: a.suburb ?? a.neighbourhood ?? a.city_district ?? '',
+      cidade: a.city ?? a.town ?? a.municipality ?? a.village ?? '',
+      estado: a['ISO3166-2-lvl4']?.split('-')?.[1] ?? '',
+      cep: String(a.postcode ?? '').replace(/\D/g, ''),
+    }
+  } catch {
+    return null
+  }
+}
+
+// LOCALIZAÇÃO DO WHATSAPP → CADASTRO (mig 0238).
+//
+// O cliente mandou o pininho. O mapa sabe dizer a rua, o bairro, a cidade e
+// muitas vezes o CEP — só o NÚMERO da casa ele não sabe, porque GPS devolve
+// ponto, não número. Então a tela preenche o que dá e pergunta só o que falta.
+//
+// O ponto vai pro cadastro marcado como do CLIENTE: é o único pino em que o
+// cálculo de taxa confia e que o buscador de mapa não pode sobrescrever depois.
+function ModalLocalizacaoCliente({ empresa, telefone, nome, lat, lng, onFechar, onSalvo }) {
+  const [f, setF] = useState({ rua: '', numero: '', bairro: '', cidade: '', estado: '', cep: '' })
+  const [lendo, setLendo] = useState(true)
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState(null)
+
+  useEffect(() => {
+    let vivo = true
+    reverseGeocode(lat, lng).then(a => {
+      if (!vivo) return
+      if (a) setF(p => ({ ...p, ...a }))
+      else setErro('O mapa não soube dizer o endereço deste ponto. Escreva à mão — o ponto continua valendo.')
+      setLendo(false)
+    })
+    return () => { vivo = false }
+  }, [lat, lng])
+
+  async function salvar() {
+    setSalvando(true); setErro(null)
+    try {
+      const { data: cid, error } = await supabase.rpc('upsert_cliente_loja', {
+        p_empresa_id: empresa.id,
+        p_nome: (nome || '').trim() || 'Cliente',
+        p_telefone: String(telefone || '').replace(/\D/g, ''),
+        p_email: '', p_cep: f.cep, p_endereco: f.rua, p_numero: f.numero,
+        p_complemento: '', p_bairro: f.bairro, p_cidade: f.cidade, p_estado: f.estado,
+      })
+      if (error || !cid) { setErro(error?.message || 'Não deu pra salvar o cliente.'); return }
+
+      const { error: errPin } = await supabase.from('clientes').update({
+        endereco_lat: lat,
+        endereco_lng: lng,
+        endereco_pin_manual: true,
+        endereco_pin_origem: 'cliente',
+        endereco_pin_ref: chaveEnderecoJS({ rua: f.rua, numero: f.numero, cidade: f.cidade }),
+        endereco_pin_em: new Date().toISOString(),
+      }).eq('id', cid)
+      if (errPin) { setErro(errPin.message); return }
+
+      onSalvo?.()
+      onFechar()
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  const campo = (k, ph, extra = {}) => (
+    <input value={f[k]} onChange={e => setF(p => ({ ...p, [k]: e.target.value }))} placeholder={ph}
+      style={{
+        padding: '9px 11px', borderRadius: 8, border: '1px solid var(--border, #2a2a3a)',
+        background: 'var(--bg, #0f0f1a)', color: 'var(--text)', fontSize: 13.5, width: '100%',
+        ...extra,
+      }} />
+  )
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(0,0,0,.6)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }} onClick={onFechar}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: '100%', maxWidth: 420, background: 'var(--card-bg, var(--bg, #14141f))',
+        border: '1px solid var(--border, #2a2a3a)', borderRadius: 14, padding: 18,
+        display: 'flex', flexDirection: 'column', gap: 9,
+      }}>
+        <strong style={{ fontSize: 15.5, color: 'var(--text)' }}>📍 Endereço pela localização</strong>
+        <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+          O ponto é exato — veio do celular do cliente. O que o mapa souber do
+          endereço já vem preenchido; <strong>o número da casa o GPS não traz</strong>,
+          pergunte pra ele.
+        </p>
+        {lendo ? (
+          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '10px 0' }}>Lendo o endereço no mapa…</div>
+        ) : (
+          <>
+            {campo('rua', 'Rua')}
+            <div style={{ display: 'flex', gap: 8 }}>
+              {campo('numero', 'Nº', { maxWidth: 110 })}
+              {campo('bairro', 'Bairro')}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {campo('cidade', 'Cidade')}
+              {campo('cep', 'CEP', { maxWidth: 130 })}
+            </div>
+          </>
+        )}
+        {erro && <div style={{ fontSize: 12, color: 'var(--danger,#ef4444)', fontWeight: 600 }}>{erro}</div>}
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <button type="button" onClick={onFechar} style={{
+            padding: '9px 14px', borderRadius: 8, border: '1px solid var(--border, #2a2a3a)',
+            background: 'transparent', color: 'var(--text)', fontSize: 13, cursor: 'pointer',
+          }}>Cancelar</button>
+          <button type="button" onClick={salvar} disabled={salvando || lendo} style={{
+            flex: 1, padding: '9px 14px', borderRadius: 8, border: 'none',
+            background: '#16a34a', color: '#fff', fontWeight: 700, fontSize: 13.5,
+            cursor: salvando ? 'wait' : 'pointer',
+          }}>{salvando ? 'Salvando…' : 'Salvar endereço e ponto'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Busca de rua pelo nome ───────────────────────────────────────────────────
 // O CEP quase ninguém sabe de cabeça; o nome da rua, todo mundo. O cliente
 // fala "Rua Prefeita Eliane Barros" no áudio e quem atende escolhe da lista —
@@ -1290,6 +1461,23 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const pasteRef = useRef(null)
   // Cálculo automático da taxa de entrega pela distância loja↔cliente
   const [calcTaxa, setCalcTaxa] = useState({ loading: false, msg: null })
+  // ── Ponto da entrega (mig 0238) ────────────────────────────────────────────
+  // A venda montada aqui não gravava coordenada nenhuma: o motoboy abria o TEXTO
+  // do endereço no Google, que, sem confiar no número, larga o pino no meio da
+  // rua. Rua certa, casa errada. Agora a venda leva o ponto — e, quando dá, o
+  // ponto que o próprio cliente apontou.
+  const [coordCliente, setCoordCliente] = useState(
+    pedidoEdicao?.endereco_lat != null
+      ? { lat: Number(pedidoEdicao.endereco_lat), lng: Number(pedidoEdicao.endereco_lng) }
+      : null
+  )
+  // Pino que veio do cliente (cadastro ou link confirmado): o buscador de mapa
+  // não sobrescreve o que a pessoa apontou com o dedo.
+  const pinDoCliente = useRef(false)
+  const [pinSalvo, setPinSalvo] = useState(null)   // { lat, lng, ref } do cadastro
+  const [pinLink, setPinLink] = useState(null)     // { url, enviado } do link mandado
+  const [pinMsg, setPinMsg]   = useState(null)
+  const [pinBusy, setPinBusy] = useState(false)
 
   useEffect(() => {
     if (!empresa?.id) { setLoading(false); return }
@@ -1452,8 +1640,13 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         setCalcTaxa({ loading: false, msg: { tipo: 'erro', txt: 'A loja não tem localização configurada. Vá em Configurações → Raio de entrega, ou digite a taxa manual.' } })
         return
       }
-      const coords = await geocodificarEndereco(endStr)
+      // Ponto que já está na tela (o do cliente, ou o que o buscador achou com
+      // o número) vale mais que uma busca nova por texto — e é o mesmo ponto
+      // que vai no pedido, então a taxa e o mapa do motoboy contam a mesma
+      // história.
+      const coords = coordCliente ?? await geocodificarPreciso({ rua, numero, bairro, cidade, cep })
       if (!coords) { setCalcTaxa({ loading: false, msg: { tipo: 'erro', txt: 'Não achei esse endereço no mapa. Digite a taxa manual.' } }); return }
+      if (!coordCliente) setCoordCliente(coords)
       const dist = haversineKm(coords.lat, coords.lng, Number(emp.latitude), Number(emp.longitude))
       const faixas = Array.isArray(emp.taxas_entrega_km) ? emp.taxas_entrega_km : []
       let valor
@@ -1475,6 +1668,96 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       })
     } catch {
       setCalcTaxa({ loading: false, msg: { tipo: 'erro', txt: 'Erro ao calcular. Digite a taxa manual.' } })
+    }
+  }
+
+  // ── Pino do cadastro: reaproveita o que o cliente já apontou ───────────────
+  // Só vale pro MESMO endereço. Mudou de casa, o pino velho não serve.
+  useEffect(() => {
+    if (!clienteSelId || tipo !== 'entrega') { setPinSalvo(null); return }
+    let vivo = true
+    supabase.from('clientes')
+      .select('endereco_lat, endereco_lng, endereco_pin_manual, endereco_pin_ref')
+      .eq('id', clienteSelId).maybeSingle()
+      .then(({ data }) => {
+        if (!vivo) return
+        setPinSalvo(data?.endereco_pin_manual && data.endereco_lat != null
+          ? { lat: Number(data.endereco_lat), lng: Number(data.endereco_lng), ref: data.endereco_pin_ref }
+          : null)
+      })
+    return () => { vivo = false }
+  }, [clienteSelId, tipo])
+
+  useEffect(() => {
+    if (!pinSalvo || tipo !== 'entrega') return
+    if (chaveEnderecoJS({ rua, numero, cidade }) !== pinSalvo.ref) return
+    pinDoCliente.current = true
+    setCoordCliente({ lat: pinSalvo.lat, lng: pinSalvo.lng })
+  }, [pinSalvo, rua, numero, cidade, tipo])
+
+  // ── Buscador de mapa: SÓ depois do número ─────────────────────────────────
+  // Sem o número o buscador devolve um ponto no meio da rua — e ninguém
+  // desconfia, porque o endereço na tela está certinho. Era daí que saía o
+  // motoboy rodando atrás da casa errada. Mesma regra da Loja Online.
+  useEffect(() => {
+    if (tipo !== 'entrega' || pinDoCliente.current) return
+    if (!rua.trim() || !numero.trim()) { setCoordCliente(null); return }
+    let vivo = true
+    const t = setTimeout(async () => {
+      const c = await geocodificarPreciso({ rua, numero, bairro, cidade, cep })
+      if (vivo && c && !pinDoCliente.current) setCoordCliente(c)
+    }, 900)
+    return () => { vivo = false; clearTimeout(t) }
+  }, [rua, numero, bairro, cidade, cep, tipo])
+
+  // Endereço mudou de verdade? O pino do cliente era do endereço ANTIGO.
+  useEffect(() => {
+    if (!pinSalvo) { pinDoCliente.current = false; return }
+    if (chaveEnderecoJS({ rua, numero, cidade }) !== pinSalvo.ref) pinDoCliente.current = false
+  }, [rua, numero, cidade, pinSalvo])
+
+  // ── Pedir pro cliente confirmar no mapa ───────────────────────────────────
+  // Gera o link e manda no WhatsApp dele. O cliente abre, vê o pino já na casa
+  // dele (o que o buscador achou) e só ajusta — e o acerto volta pro cadastro
+  // na hora. É a única pessoa que sabe onde mora.
+  async function pedirConfirmacaoNoMapa() {
+    if (!rua.trim()) { setPinMsg({ tipo: 'erro', txt: 'Escreva o endereço antes.' }); return }
+    setPinBusy(true); setPinMsg(null)
+    try {
+      const { data, error } = await supabase.rpc('criar_pin_link', {
+        p_telefone: telefone.trim(), p_rua: rua.trim(), p_numero: numero.trim() || null,
+        p_bairro: bairro.trim() || null, p_cidade: cidade.trim() || null,
+        p_estado: null, p_cep: cep.trim() || null,
+        p_lat: coordCliente?.lat ?? null, p_lng: coordCliente?.lng ?? null,
+        p_pedido_id: pedidoEdicao?.id ?? null,
+      })
+      if (error || !data?.ok) {
+        setPinMsg({ tipo: 'erro', txt: data?.erro || error?.message || 'Não deu pra gerar o link.' })
+        return
+      }
+      const url = `https://lojaonline.fwcinter.com/local/${data.token}`
+      try { await navigator.clipboard.writeText(url) } catch { /* sem clipboard: o link fica na tela */ }
+
+      const tel = telefone.replace(/\D/g, '')
+      if (tel.length >= 10) {
+        const texto = `Oi! Pra entrega chegar certinho, confirma no mapa o ponto exato da sua casa:
+
+${url}
+
+É só arrastar o pininho e tocar em "É aqui". 🙂`
+        const { data: env } = await supabase.functions.invoke('whatsapp-connect', {
+          body: { action: 'send_message', phone: tel, text: texto },
+        })
+        setPinLink({ url, enviado: !!env?.ok })
+        setPinMsg(env?.ok
+          ? { tipo: 'ok', txt: '✓ Link enviado no WhatsApp do cliente (e copiado aqui).' }
+          : { tipo: 'aviso', txt: 'Link copiado — no WhatsApp não foi: ' + (env?.erro || 'WhatsApp da loja desconectado.') })
+      } else {
+        setPinLink({ url, enviado: false })
+        setPinMsg({ tipo: 'aviso', txt: 'Link copiado. Sem telefone na venda, mande você mesmo.' })
+      }
+    } finally {
+      setPinBusy(false)
     }
   }
 
@@ -1729,6 +2012,10 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       payload.endereco_bairro = bairro.trim()
       payload.endereco_cidade = cidade.trim()
       payload.endereco_cep = cep.trim() || null
+      // O ponto vai junto: é ele que o app do entregador abre (sem ele, o
+      // Google chuta pelo texto e larga o motoboy no meio da rua).
+      payload.endereco_lat = coordCliente?.lat ?? null
+      payload.endereco_lng = coordCliente?.lng ?? null
     }
     let error
     if (editando) {
@@ -2181,6 +2468,54 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
                 </div>
               )}
             </div>
+
+            {/* Ponto da entrega (mig 0238) — o que o entregador vai seguir */}
+            {(() => {
+              const pinConfirmado = !!pinSalvo && chaveEnderecoJS({ rua, numero, cidade }) === pinSalvo.ref
+              const semNumero = !!rua.trim() && !numero.trim()
+              const cor = pinConfirmado ? '#16a34a' : coordCliente ? '#eab308' : 'var(--text-muted,#9aa1ad)'
+              const txt = pinConfirmado
+                ? '📍 Ponto confirmado pelo cliente — o entregador vai direto na porta.'
+                : semNumero
+                  ? '📍 Falta o número: o ponto no mapa só é buscado depois dele (sem número o mapa chuta o meio da rua).'
+                  : coordCliente
+                    ? '📍 Ponto pelo mapa, aproximado. Peça a confirmação pro cliente marcar a casa dele.'
+                    : '📍 Sem ponto no mapa — o entregador vai só pelo texto do endereço.'
+              return (
+                <div style={{
+                  padding: '9px 11px', borderRadius: 8, background: 'var(--bg-alt,rgba(255,255,255,.03))',
+                  border: '1px solid var(--border,#2a2f3a)',
+                }}>
+                  <div style={{ fontSize: 12, color: cor, fontWeight: 600, lineHeight: 1.5 }}>{txt}</div>
+                  {!pinConfirmado && (
+                    <button
+                      type="button" onClick={pedirConfirmacaoNoMapa} disabled={pinBusy || !rua.trim()}
+                      style={{
+                        marginTop: 7, padding: '7px 11px', borderRadius: 7,
+                        border: '1.5px solid #7c3aed', background: 'rgba(124,58,237,.12)',
+                        color: '#a78bfa', fontWeight: 700, fontSize: 12.5,
+                        cursor: pinBusy ? 'wait' : 'pointer',
+                      }}
+                    >
+                      {pinBusy ? '⏳ Gerando...' : '📲 Pedir confirmação no mapa'}
+                    </button>
+                  )}
+                  {pinMsg && (
+                    <div style={{
+                      marginTop: 6, fontSize: 11.5, fontWeight: 600,
+                      color: pinMsg.tipo === 'erro' ? 'var(--danger,#ef4444)' : pinMsg.tipo === 'aviso' ? '#eab308' : '#16a34a',
+                    }}>
+                      {pinMsg.txt}
+                    </div>
+                  )}
+                  {pinLink && (
+                    <div style={{ marginTop: 5, fontSize: 11, color: 'var(--text-muted,#9aa1ad)', wordBreak: 'break-all' }}>
+                      {pinLink.url}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         )}
 
@@ -4057,7 +4392,7 @@ function Coluna({ titulo, cor, count, vazio, children }) {
 }
 
 // ── Conversa aberta (loja respondendo cliente) ──────────────
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   useEffect(() => {
@@ -4107,7 +4442,34 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
                 {doRobo && (
                   <div style={{ fontSize: 9.5, fontWeight: 800, opacity: .8, marginBottom: 2 }}>🤖 Robô</div>
                 )}
-                {m.texto}
+                {/* Localização que o cliente mandou (mig 0238): o ponto exato
+                    da casa dele. Vale mais que qualquer endereço digitado —
+                    aqui ele vira endereço + pino com um clique. */}
+                {m.lat != null && m.lng != null ? (
+                  <div>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>📍 Localização enviada</div>
+                    <a
+                      href={`https://www.google.com/maps?q=${m.lat},${m.lng}`}
+                      target="_blank" rel="noopener noreferrer"
+                      style={{ fontSize: 11.5, color: '#60a5fa', textDecoration: 'underline' }}
+                    >
+                      abrir no mapa
+                    </a>
+                    {onUsarLocalizacao && (
+                      <button
+                        type="button"
+                        onClick={() => onUsarLocalizacao({ lat: Number(m.lat), lng: Number(m.lng) })}
+                        style={{
+                          display: 'block', marginTop: 6, padding: '6px 10px', borderRadius: 7,
+                          border: '1.5px solid #7c3aed', background: 'rgba(124,58,237,.15)',
+                          color: '#a78bfa', fontWeight: 700, fontSize: 11.5, cursor: 'pointer',
+                        }}
+                      >
+                        Usar como endereço do cliente
+                      </button>
+                    )}
+                  </div>
+                ) : m.texto}
                 <div style={{ fontSize: 9.5, opacity: .65, marginTop: 3, textAlign: 'right' }}>
                   {new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                 </div>
@@ -4187,6 +4549,19 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
             salvando={salvandoPedido}
           />
         </>
+      )}
+
+      {/* Pedir o pininho do WhatsApp. Endereço ditado por áudio erra número e
+          o mapa erra o resto; o ponto que o cliente manda não erra nada. */}
+      {onPedirLocalizacao && thread.canal === 'whatsapp' && (
+        <button type="button" onClick={onPedirLocalizacao} disabled={enviando}
+          style={{
+            marginTop: 8, width: '100%', padding: g ? '10px 14px' : '8px 12px', borderRadius: 9,
+            border: '1px dashed var(--border, #2a2a3a)', background: 'transparent',
+            color: 'var(--text-muted)', fontSize: g ? 14 : 12.5, fontWeight: 600, cursor: 'pointer',
+          }}>
+          📍 Pedir a localização do cliente
+        </button>
       )}
 
       {/* Caixa de resposta */}
@@ -5582,8 +5957,28 @@ export default function PainelPedidos() {
       await supabase.from('mensagens_chat').update({ lida: true }).in('id', naoLidas)
     }
   }
-  async function enviarChat() {
-    const txt = chatTexto.trim()
+  async function enviarChat() { return enviarChatTexto(chatTexto) }
+
+  // Pede o pininho do WhatsApp (mig 0238). É o caminho mais curto de todos: o
+  // cliente toca no clipe → Localização, e o ponto exato chega sozinho — sem
+  // link, sem digitar endereço, sem o buscador de mapa chutar nada.
+  async function pedirLocalizacaoNoChat() {
+    await enviarChatTexto(
+      'Pra entrega chegar certinho, me manda sua localização? 📍\n\n' +
+      'É rapidinho: toque no *clipe* (📎) aqui embaixo → *Localização* → ' +
+      '*Enviar sua localização atual*. Assim o entregador vai direto na sua porta. 🙂'
+    )
+  }
+
+  // Localização que o cliente mandou → vira o endereço + o ponto dele.
+  const [locUsar, setLocUsar] = useState(null) // { lat, lng, telefone, nome }
+
+  // Manda um texto pela conversa aberta. O "Enviar" usa o que está digitado;
+  // outros botões (pedir localização, por exemplo) mandam texto pronto — e
+  // todos passam pelo mesmo caminho: grava aqui, manda no WhatsApp, pausa o
+  // robô. Duplicar isso é como a loja acaba respondendo em dois lugares.
+  async function enviarChatTexto(bruto) {
+    const txt = String(bruto ?? '').trim()
     if (!txt || !chatAberto) return
     const sep = chatAberto.indexOf('|')
     const canal = chatAberto.slice(0, sep)
@@ -5596,7 +5991,7 @@ export default function PainelPedidos() {
       cliente_nome: thread?.cliente_nome ?? null, remetente: 'loja', texto: txt,
     })
     if (error) { setEnviandoChat(false); return }
-    setChatTexto('')
+    if (txt === chatTexto.trim()) setChatTexto('')
 
     // A mesma resposta vai também pro WhatsApp dele. O chat do link só aparece
     // pra quem está com a página aberta: quem pediu e fechou o navegador nunca
@@ -7062,6 +7457,19 @@ export default function PainelPedidos() {
         />
       )}
 
+      {/* Localização que o cliente mandou no chat → endereço + ponto dele */}
+      {locUsar && (
+        <ModalLocalizacaoCliente
+          empresa={empresa}
+          telefone={locUsar.telefone}
+          nome={locUsar.nome}
+          lat={locUsar.lat}
+          lng={locUsar.lng}
+          onFechar={() => setLocUsar(null)}
+          onSalvo={() => setChatAviso({ ok: true, txt: '✓ Endereço e ponto salvos no cadastro do cliente.' })}
+        />
+      )}
+
       {/* Modal de venda no balcão (PDV) */}
       {vendaAberta && (
         <ModalVenda
@@ -7236,6 +7644,12 @@ export default function PainelPedidos() {
                 onEnviarSacola={enviarSacolaDoChat}
                 enviandoSacola={enviandoSacola}
                 onAbrirSacola={() => setSacolaLateral(true)}
+                onPedirLocalizacao={pedirLocalizacaoNoChat}
+                onUsarLocalizacao={({ lat, lng }) => setLocUsar({
+                  lat, lng,
+                  telefone: threadAberta.cliente_ref,
+                  nome: threadAberta.cliente_nome,
+                })}
               />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

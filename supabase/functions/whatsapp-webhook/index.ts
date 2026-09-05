@@ -1160,6 +1160,10 @@ async function transcribeAudio(base64: string, mimetype: string): Promise<string
 async function espelharNoChat(
   supabase: any, empresaId: string, phone: string, texto: string,
   remetente: "cliente" | "loja", bot = false,
+  // Localização que veio na mensagem (mig 0238). O WhatsApp manda lat/lng no
+  // pininho e a gente jogava fora: virava o texto "📍 Localização" e pronto.
+  // Guardada, ela vira o ponto da entrega com um clique no gestor.
+  coords: { lat: number; lng: number } | null = null,
 ) {
   try {
     const digitos = String(phone ?? "").replace(/\D/g, "")
@@ -1192,6 +1196,8 @@ async function espelharNoChat(
       // Fala do robô entra como da loja (é o lado direito da conversa), mas
       // marcada: quem atende precisa saber o que já foi respondido por ele.
       bot,
+      lat: coords?.lat ?? null,
+      lng: coords?.lng ?? null,
     })
   } catch (_e) {
     // O espelho é bônus: se falhar, o atendimento pelo WhatsApp segue igual.
@@ -1218,6 +1224,17 @@ function textoParaRegistro(msg: any): string {
   return ""
 }
 
+
+// Localização que o cliente mandou pelo pininho do WhatsApp (mig 0238).
+// deno-lint-ignore-next-line no-explicit-any
+function coordsDaMensagem(msg: any): { lat: number; lng: number } | null {
+  const loc = msg?.message?.locationMessage
+  const lat = Number(loc?.degreesLatitude)
+  const lng = Number(loc?.degreesLongitude)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  if (lat === 0 && lng === 0) return null
+  return { lat, lng }
+}
 
 // A loja respondeu esse número na mão, pelo WhatsApp do celular dela. O robô
 // sai de cena por umas horas e a resposta entra na conversa do gestor — senão
@@ -1265,6 +1282,7 @@ serve(async (req) => {
     if (payload.event !== "messages.upsert") return new Response("ok", { headers: corsHeaders })
 
     const msg = payload.data
+    const coordsMsg = coordsDaMensagem(msg)
     if (!msg) return new Response("ok", { headers: corsHeaders })
     if (msg.key?.remoteJid?.endsWith("@g.us")) return new Response("ok", { headers: corsHeaders })
 
@@ -1328,7 +1346,7 @@ serve(async (req) => {
           await supabase.from("whatsapp_conversas").insert({
             empresa_id: liga.empresa_id, phone: phoneEarly, role: "user", content: conteudo,
           })
-          await espelharNoChat(supabase, liga.empresa_id, phoneEarly, conteudo, "cliente")
+          await espelharNoChat(supabase, liga.empresa_id, phoneEarly, conteudo, "cliente", false, coordsMsg)
 
           // Resposta automática com o LINK do cardápio (mig 0226). Sem IA, sem
           // crédito: o cardápio é que sabe preço, taxa, cashback e agendamento —
@@ -1442,7 +1460,7 @@ serve(async (req) => {
             empresa_id: empresaId, phone, role: "user", content: text,
           })
         }
-        if (text) await espelharNoChat(supabase, empresaId, phone, text, "cliente")
+        if (text) await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg)
         return new Response("ok", { headers: corsHeaders })
       }
     }
@@ -1463,7 +1481,7 @@ serve(async (req) => {
     if (await chamadoAberto(supabase, empresaId, phone)) {
       console.log("[chamado] aberto, robô calado:", phone)
       await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text })
-      await espelharNoChat(supabase, empresaId, phone, text, "cliente")
+      await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg)
       if (isTest) {
         return new Response(JSON.stringify({ ok: true, resposta: "(robô calado — chamado aberto)" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } })
@@ -1477,7 +1495,7 @@ serve(async (req) => {
     // a uma pessoa.
     if (PEDE_HUMANO.test(text)) {
       await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text })
-      await espelharNoChat(supabase, empresaId, phone, text, "cliente")
+      await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg)
       await abrirChamado(supabase, empresaId, phone, text)
       const avisa = "Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!"
       await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: avisa })
@@ -1501,7 +1519,7 @@ serve(async (req) => {
       // Espelho na aba Mensagens do gestor: é lá que a loja responde quando o
       // robô chama, e a conversa precisa estar inteira na tela pra pessoa saber
       // o que já foi dito.
-      espelharNoChat(supabase, empresaId, phone, text, "cliente"),
+      espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg),
     ])
     if (!creditRes.data || creditRes.data.whatsapp_creditos <= 0) return new Response("ok", { headers: corsHeaders })
 

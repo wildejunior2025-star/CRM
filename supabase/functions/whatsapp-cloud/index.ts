@@ -96,6 +96,9 @@ function normalizeBrNumber(n: string): string {
 async function espelharNoChat(
   supabase: any, empresaId: string, phone: string, texto: string,
   remetente: "cliente" | "loja", bot = false,
+  // Localização que veio na mensagem (mig 0238) — o pininho do WhatsApp traz
+  // lat/lng, e é o ponto exato da casa do cliente. Antes ia pro lixo.
+  coords: { lat: number; lng: number } | null = null,
 ) {
   try {
     const digitos = String(phone ?? "").replace(/\D/g, "")
@@ -128,10 +131,22 @@ async function espelharNoChat(
       // Fala do robô entra como da loja (é o lado direito da conversa), mas
       // marcada: quem atende precisa saber o que já foi respondido por ele.
       bot,
+      lat: coords?.lat ?? null,
+      lng: coords?.lng ?? null,
     })
   } catch (_e) {
     // O espelho é bônus: se falhar, o atendimento pelo WhatsApp segue igual.
   }
+}
+
+// Localização que o cliente mandou pelo pininho do WhatsApp (mig 0238).
+// deno-lint-ignore-next-line no-explicit-any
+function coordsDaMensagem(message: any): { lat: number; lng: number } | null {
+  const lat = Number(message?.location?.latitude)
+  const lng = Number(message?.location?.longitude)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  if (lat === 0 && lng === 0) return null
+  return { lat, lng }
 }
 
 // O que guardar da mensagem quando o robô está desligado (ver whatsapp-webhook).
@@ -354,6 +369,16 @@ async function processar(body: any) {
     }
   }
 
+  // LOCALIZAÇÃO: entra na conversa do gestor mesmo com o robô ligado (mig
+  // 0238). O robô não sabe o que fazer com um pino, mas quem atende sabe: é o
+  // ponto exato da entrega, e a loja aproveita com um clique.
+  {
+    const c = coordsDaMensagem(message)
+    if (c && cfg.empresa_id && cfg.ia_ativo) {
+      await espelharNoChat(supabase, cfg.empresa_id, from, "📍 Localização", "cliente", false, c)
+    }
+  }
+
   // Vendedor IA desligado: não responde NADA. Sem esta linha, as respostas de
   // "só entendo texto" (áudio e foto) saíam mesmo com o interruptor desligado,
   // porque elas são enviadas aqui, antes de chamar o cérebro.
@@ -366,7 +391,7 @@ async function processar(body: any) {
       await supabase.from("whatsapp_conversas").insert({
         empresa_id: cfg.empresa_id, phone: from, role: "user", content: conteudo,
       })
-      await espelharNoChat(supabase, cfg.empresa_id, from, conteudo, "cliente")
+      await espelharNoChat(supabase, cfg.empresa_id, from, conteudo, "cliente", false, coordsDaMensagem(message))
 
       // Resposta automática com o link do cardápio (mig 0226). Aqui a janela de
       // 24h da Meta não atrapalha: o cliente ACABOU de escrever, então texto
