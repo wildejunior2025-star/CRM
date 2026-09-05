@@ -174,6 +174,26 @@ async function buscarJson(url, ms = 5000) {
   }
 }
 
+// Quantas palavras do que o cliente digitou aparecem no nome da rua. Serve pra
+// duas coisas: ordenar a lista pelo que ele realmente escreveu, e saber se
+// alguma rua casou INTEIRA — porque o ViaCEP casa pedaço, e pedaço engana.
+function pontosDaRua(nomeRua, termo) {
+  const limpa = (t) => String(t ?? '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+  const alvo = limpa(nomeRua)
+  const palavras = limpa(termo).split(' ').filter(w => w.length >= 3)
+  if (!palavras.length) return 0
+  return palavras.filter(w => alvo.includes(w)).length
+}
+function ruaCasouInteira(nomeRua, termo) {
+  const limpa = (t) => String(t ?? '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+  const palavras = limpa(termo).split(' ').filter(w => w.length >= 3)
+  return palavras.length > 0 && pontosDaRua(nomeRua, termo) === palavras.length
+}
+
 // Busca a rua no ESTADO INTEIRO. O ViaCEP não sabe fazer isso — ele exige
 // UF + cidade + rua, e por isso a busca do checkout só enxergava a cidade da
 // loja. O OpenStreetMap aceita UF + rua e devolve em que cidade e bairro ela
@@ -940,16 +960,24 @@ export default function DeliveryCheckout() {
         // escolher uma delas já preenche a cidade certa no formulário — que é
         // como a cliente de Natal acha a rua dela numa loja de São Gonçalo.
         const cidadesParaTentar = [cid, ...cidadesLoja.filter(c => c && c !== cid)].slice(0, 3)
-        let d = []
-        for (const cidadeAlvo of cidadesParaTentar) {
-          d = await buscar(semTipo || termo, cidadeAlvo)
-          if (!d.length && maior) d = await buscar(maior, cidadeAlvo)
-          if (d.length) break
+        // Procura em TODAS as cidades e JUNTA. Parar na primeira que devolvesse
+        // alguma coisa era o furo: o ViaCEP casa pedaço de nome, então
+        // "sebastiana" achava "Sebastiana Benevides" em São Gonçalo, a busca
+        // dava por encerrada e nunca chegava em Natal — onde fica a "Sebastiana
+        // Andrade" que a cliente tinha acabado de digitar.
+        const listas = await Promise.all(cidadesParaTentar.map(c => buscar(semTipo || termo, c)))
+        let d = listas.flat()
+        if (!d.length && maior) {
+          const listas2 = await Promise.all(cidadesParaTentar.map(c => buscar(maior, c)))
+          d = listas2.flat()
         }
-        // Nem nas cidades da loja: procura no ESTADO INTEIRO. É o caso de quem
-        // mora numa cidade em que a loja ainda não entregou — sem isto, o
-        // primeiro cliente de cada cidade nova ficava sem achar a própria rua.
-        if (!d.length) d = await buscarRuaNoEstado(uf, semTipo || termo)
+        // O ESTADO INTEIRO entra sempre que NENHUMA rua casou com tudo o que ele
+        // escreveu — não só quando a lista está vazia. Uma lista com a rua
+        // errada dentro é pior que uma lista vazia: parece resposta.
+        if (!d.some(x => ruaCasouInteira(x.logradouro, semTipo || termo))) {
+          const doEstado = await buscarRuaNoEstado(uf, semTipo || termo)
+          d = [...d, ...doEstado]
+        }
         if (!vivo) return
         // Sem repetir a mesma rua em CEPs diferentes: numa avenida longa o
         // ViaCEP devolve dezenas de linhas iguais e a lista vira ruído.
@@ -960,6 +988,10 @@ export default function DeliveryCheckout() {
           vistas.add(k)
           return !!x.logradouro
         })
+        // O que ele escreveu vem primeiro. Sem isto a rua certa de Natal
+        // aparecia embaixo da rua parecida de São Gonçalo, e ninguém rola uma
+        // lista de sugestão até o fim.
+        lista.sort((a, b) => pontosDaRua(b.logradouro, semTipo || termo) - pontosDaRua(a.logradouro, semTipo || termo))
         setRuaSugestoes(lista.slice(0, 8))
         setRuaNaoAchou(lista.length === 0)
       } catch { if (vivo) { setRuaSugestoes([]); setRuaNaoAchou(true) } }
