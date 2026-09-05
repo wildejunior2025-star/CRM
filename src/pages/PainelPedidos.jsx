@@ -1104,14 +1104,40 @@ function ModalLocalizacaoCliente({ empresa, telefone, nome, lat, lng, onFechar, 
 
   useEffect(() => {
     let vivo = true
-    reverseGeocode(lat, lng).then(a => {
+    ;(async () => {
+      // O que a loja já sabe deste cliente. O GPS não devolve número de casa —
+      // se ele já pediu antes, o número está aqui e ninguém precisa digitar de
+      // novo (nem perguntar de novo ao cliente).
+      const chave = String(telefone ?? '').replace(/[^0-9]/g, '').slice(-8)
+      let jaTem = null
+      if (empresa?.id && chave.length >= 8) {
+        const { data } = await supabase.from('clientes')
+          .select('endereco, numero, complemento, bairro, cidade, estado, cep')
+          .eq('empresa_id', empresa.id).ilike('telefone', `%${chave}`)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle()
+        jaTem = data ?? null
+      }
+      const a = await reverseGeocode(lat, lng)
       if (!vivo) return
-      if (a) setF(p => ({ ...p, ...a }))
-      else setErro('O mapa não soube dizer o endereço deste ponto. Escreva à mão — o ponto continua valendo.')
+      if (!a && !jaTem) {
+        setErro('O mapa não soube dizer o endereço deste ponto. Escreva à mão — o ponto continua valendo.')
+      }
+      setF(p => ({
+        ...p,
+        // Rua/bairro/cidade: o mapa manda, porque quem escolheu o ponto foi o
+        // cliente e é o ponto que diz onde ele está de verdade.
+        rua:    a?.rua    || jaTem?.endereco || p.rua,
+        bairro: a?.bairro || jaTem?.bairro   || p.bairro,
+        cidade: a?.cidade || jaTem?.cidade   || p.cidade,
+        estado: a?.estado || jaTem?.estado   || p.estado,
+        cep:    a?.cep    || (jaTem?.cep ?? '').replace(/[^0-9]/g, '') || p.cep,
+        // Número: o cadastro manda, porque o mapa raramente sabe.
+        numero: jaTem?.numero || a?.numero || p.numero,
+      }))
       setLendo(false)
-    })
+    })()
     return () => { vivo = false }
-  }, [lat, lng])
+  }, [lat, lng, telefone, empresa?.id])
 
   async function salvar() {
     setSalvando(true); setErro(null)
@@ -1164,8 +1190,9 @@ function ModalLocalizacaoCliente({ empresa, telefone, nome, lat, lng, onFechar, 
         <strong style={{ fontSize: 15.5, color: 'var(--text)' }}>📍 Endereço pela localização</strong>
         <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
           O ponto é exato — veio do celular do cliente. O que o mapa souber do
-          endereço já vem preenchido; <strong>o número da casa o GPS não traz</strong>,
-          pergunte pra ele.
+          endereço já vem preenchido, e o <strong>número</strong> vem do cadastro
+          quando ele já pediu antes. Se estiver em branco, o GPS não traz — pergunte
+          pra ele.
         </p>
         {lendo ? (
           <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '10px 0' }}>Lendo o endereço no mapa…</div>
@@ -4392,7 +4419,7 @@ function Coluna({ titulo, cor, count, vazio, children }) {
 }
 
 // ── Conversa aberta (loja respondendo cliente) ──────────────
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, cadastroVersao }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   useEffect(() => {
@@ -4547,6 +4574,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
             itens={sacola}
             onFinalizar={onFinalizarPedido}
             salvando={salvandoPedido}
+            cadastroVersao={cadastroVersao}
           />
         </>
       )}
@@ -4835,7 +4863,7 @@ const FORMAS_PGTO = [
   ['cartao',      '💳 Cartão'],
 ]
 
-function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar, salvando }) {
+function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar, salvando, cadastroVersao = 0 }) {
   const g = useTelaGrande()
   const [tipo, setTipo] = useState('entrega')
   const [nome, setNome] = useState(nomeThread || '')
@@ -4852,6 +4880,9 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
   const [calculando, setCalculando] = useState(false)
   const [achouCliente, setAchouCliente] = useState(false)
   const [cadastro, setCadastro] = useState(null)   // { id, telefone } do cliente que já existe
+  // Pino que o cliente apontou (mandou a localização, ou arrastou no link).
+  // Vai junto no pedido: é ele que o app do entregador abre.
+  const [pinCadastro, setPinCadastro] = useState(null)  // { lat, lng, ref }
   const [ruaSug, setRuaSug] = useState([])
   const [ruaSugAberta, setRuaSugAberta] = useState(false)
 
@@ -4878,7 +4909,7 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
     if (!empresa?.id || chave.length < 8) return
     ;(async () => {
       const { data } = await supabase.from('clientes')
-        .select('id, telefone, nome, endereco, numero, bairro, cidade, cep')
+        .select('id, telefone, nome, endereco, numero, bairro, cidade, cep, endereco_lat, endereco_lng, endereco_pin_manual, endereco_pin_ref')
         .eq('empresa_id', empresa.id).ilike('telefone', `%${chave}`)
         .order('created_at', { ascending: false }).limit(1).maybeSingle()
       if (!vivo || !data) return
@@ -4893,9 +4924,15 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
       if (data.bairro) setBairro(data.bairro)
       if (data.cidade) setCidade(data.cidade)
       if (data.cep) setCep(data.cep)
+      setPinCadastro(data.endereco_pin_manual && data.endereco_lat != null
+        ? { lat: Number(data.endereco_lat), lng: Number(data.endereco_lng), ref: data.endereco_pin_ref }
+        : null)
     })()
     return () => { vivo = false }
-  }, [empresa?.id, telefone])
+    // `cadastroVersao` sobe quando a localização do chat vira endereço: aí este
+    // formulário relê o cadastro e se preenche sozinho, em vez de deixar quem
+    // atende digitando de novo um endereço que já está salvo.
+  }, [empresa?.id, telefone, cadastroVersao])
 
   // CEP preenche rua/bairro/cidade (ViaCEP), igual à tela de Vender.
   async function buscarCep(v) {
@@ -5071,7 +5108,16 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
       )}
 
       <button type="button" disabled={salvando || faltaEndereco || !itens.length}
-        onClick={() => onFinalizar({ tipo, nome, cep, rua, numero, bairro, cidade, taxa: taxaNum, pagamento, troco, obs, subtotal, total, cadastro })}
+        onClick={() => onFinalizar({
+          tipo, nome, cep, rua, numero, bairro, cidade, taxa: taxaNum,
+          pagamento, troco, obs, subtotal, total, cadastro,
+          // Só manda o pino se ele for DESTE endereço: o cliente que mudou de
+          // casa tem pino velho guardado, e ele levaria o motoboy pro lugar
+          // errado com o endereço certo escrito no papel.
+          pino: pinCadastro && chaveEnderecoJS({ rua, numero, cidade }) === pinCadastro.ref
+            ? { lat: pinCadastro.lat, lng: pinCadastro.lng }
+            : null,
+        })}
         style={{
           width: '100%', padding: g ? '14px 12px' : '10px', borderRadius: 9, border: 'none',
           background: (salvando || faltaEndereco || !itens.length) ? 'var(--border, #2a2a3a)' : '#7c3aed',
@@ -5811,6 +5857,10 @@ export default function PainelPedidos() {
       payload.endereco_bairro = d.bairro?.trim() || null
       payload.endereco_cidade = d.cidade?.trim() || null
       payload.endereco_cep = d.cep?.trim() || null
+      // O ponto que o cliente apontou. Sem ele o app do entregador abre o TEXTO
+      // do endereço no Google, que larga o pino no meio da rua.
+      payload.endereco_lat = d.pino?.lat ?? null
+      payload.endereco_lng = d.pino?.lng ?? null
     }
 
     const { data: novo, error } = await supabase.from('pedidos_delivery')
@@ -5972,6 +6022,11 @@ export default function PainelPedidos() {
 
   // Localização que o cliente mandou → vira o endereço + o ponto dele.
   const [locUsar, setLocUsar] = useState(null) // { lat, lng, telefone, nome }
+  // Sobe de 1 quando o cadastro do cliente muda por aqui (a localização virou
+  // endereço). O "Fechar o pedido" lê o cadastro uma vez, na abertura — sem
+  // este aviso ele continuava mostrando "Falta o endereço da entrega" com o
+  // endereço já salvo do lado, e não dava pra fechar o pedido.
+  const [cadastroVersao, setCadastroVersao] = useState(0)
 
   // Manda um texto pela conversa aberta. O "Enviar" usa o que está digitado;
   // outros botões (pedir localização, por exemplo) mandam texto pronto — e
@@ -7466,7 +7521,10 @@ export default function PainelPedidos() {
           lat={locUsar.lat}
           lng={locUsar.lng}
           onFechar={() => setLocUsar(null)}
-          onSalvo={() => setChatAviso({ ok: true, txt: '✓ Endereço e ponto salvos no cadastro do cliente.' })}
+          onSalvo={() => {
+            setCadastroVersao(v => v + 1)
+            setChatAviso({ ok: true, txt: '✓ Endereço e ponto salvos — já preenchi no pedido.' })
+          }}
         />
       )}
 
@@ -7673,6 +7731,7 @@ export default function PainelPedidos() {
                   telefone: threadAberta.cliente_ref,
                   nome: threadAberta.cliente_nome,
                 })}
+                cadastroVersao={cadastroVersao}
               />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -8349,6 +8408,7 @@ export default function PainelPedidos() {
                 itens={sacolaChat}
                 onFinalizar={finalizarPedidoDoChat}
                 salvando={salvandoPedidoChat}
+                cadastroVersao={cadastroVersao}
               />
             </>
           )}
