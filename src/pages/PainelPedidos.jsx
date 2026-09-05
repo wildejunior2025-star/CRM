@@ -1081,7 +1081,11 @@ async function buscarRuasNoMapa(uf, termo) {
       logradouro: x.address.road,
       bairro: x.address.suburb ?? x.address.neighbourhood ?? x.address.city_district ?? '',
       localidade: x.address.city ?? x.address.town ?? x.address.municipality ?? '',
-      cep: String(x.address.postcode ?? '').replace(/\D/g, ''),
+      // CEP do mapa NÃO vem: ele é chute. Na Rua Prefeita Eliane Barros o
+      // OpenStreetMap devolvia 59106-120, que é a Avenida Bacharel Tomaz
+      // Landim, em Igapó, OUTRA cidade. CEP errado no pedido é o entregador
+      // indo pro bairro errado — melhor campo vazio que número inventado.
+      cep: '',
       lat: x.lat, lon: x.lon,
       doMapa: true,
     }))
@@ -1175,9 +1179,11 @@ async function taxaDoEndereco(empresa, end) {
       const ordenadas = [...faixas].sort((a, b) => Number(a.km) - Number(b.km))
       const faixa = ordenadas.find(f => km <= Number(f.km)) ?? ordenadas[ordenadas.length - 1]
       const fora = empresa.raio_entrega_km && km > Number(empresa.raio_entrega_km)
+      // A faixa vai escrita junto: sem ela, uma distância de 6,6 km cobrando a
+      // faixa "até 7 km" parece erro, e quem atende não tem como conferir.
       return {
         taxa: Number(faixa.taxa) || 0,
-        texto: `${km.toFixed(1)} km da loja${fora ? ` · ⚠️ fora do raio de ${empresa.raio_entrega_km} km` : ''}`,
+        texto: `${km.toFixed(1)} km da loja · faixa até ${faixa.km} km${fora ? ` · ⚠️ fora do raio de ${empresa.raio_entrega_km} km` : ''}`,
       }
     }
   }
@@ -2113,7 +2119,9 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
                       setRua(r.logradouro || rua)
                       if (r.bairro) setBairro(r.bairro)
                       if (r.localidade) setCidade(r.localidade)
-                      if (c.length === 8) setCep(`${c.slice(0, 5)}-${c.slice(5)}`)
+                      // Rua do mapa não traz CEP: limpa o campo em vez de deixar o
+                      // CEP da rua escolhida antes, que é de outro lugar.
+                      setCep(c.length === 8 ? `${c.slice(0, 5)}-${c.slice(5)}` : '')
                       setRuaSug([]); setRuaSugAberta(false)
                     }}
                   />
@@ -4598,7 +4606,7 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
                   setRua(r.logradouro || rua)
                   if (r.bairro) setBairro(r.bairro)
                   if (r.localidade) setCidade(r.localidade)
-                  if (c.length === 8) setCep(`${c.slice(0, 5)}-${c.slice(5)}`)
+                  setCep(c.length === 8 ? `${c.slice(0, 5)}-${c.slice(5)}` : '')
                   setRuaSug([]); setRuaSugAberta(false)
                   // Endereço novo, taxa velha não vale mais.
                   setMsgTaxa(null)
