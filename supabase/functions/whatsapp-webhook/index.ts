@@ -983,7 +983,7 @@ async function handleFecharPedido(
   taxaEntregaCalc: number|null = null,
   mensagensHist: any[] = [],
   catalogoProdutos: any[] = []
-): Promise<{ mensagemExtra: string; acaoPromise: Promise<any>; pixCode?: string; bloqueioMensagem?: string }> {
+): Promise<{ mensagemExtra: string; acaoPromise: Promise<any>; pixCode?: string; pixQrBase64?: string; pixNumero?: string; bloqueioMensagem?: string }> {
   console.log(`[Pedido] fechando para ${phone}, pgto: ${acao.forma_pagamento}`)
   try {
     // Re-fetch carrinho se vazio (pode ser sobrescrito por buscar_cep ou outro upsert)
@@ -1249,17 +1249,32 @@ async function handleFecharPedido(
         return { mensagemExtra: "⚠️ Erro ao gerar PIX. Tente cartão ou dinheiro.", acaoPromise: Promise.resolve() }
       }
       const pixData = await pixRes.json()
-      await fetch(`${EVOLUTION_API_URL}/message/sendMedia/${instanceName}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
-        body: JSON.stringify({
-          number: phone, mediatype: "image",
-          media: `data:image/png;base64,${pixData.qr_code_base64}`,
-          caption: `📱 *QR Code PIX — Pedido #${pixData.numero_pedido ?? ""}*\n\n⏳ Você tem *5 minutos* para pagar.`,
-        }),
-      }).catch(e => console.error("[PIX] sendMedia erro:", e))
+
+      // O QR sai pelo cano certo. `instanceName` começando com "cloud_" é loja
+      // na API oficial da Meta: mandar pelo Evolution ali é falar com uma
+      // instância que não existe — o cliente ficava com o "⬇️ Código PIX:" e
+      // NADA embaixo. Nesse caso o QR volta pra quem chamou (o whatsapp-cloud),
+      // que sabe subir a imagem na Graph API.
+      const ehCloud = String(instanceName || "").startsWith("cloud_")
+      if (!ehCloud) {
+        await fetch(`${EVOLUTION_API_URL}/message/sendMedia/${instanceName}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+          body: JSON.stringify({
+            number: phone, mediatype: "image",
+            media: `data:image/png;base64,${pixData.qr_code_base64}`,
+            caption: `📱 *QR Code PIX — Pedido #${pixData.numero_pedido ?? ""}*\n\n⏳ Você tem *5 minutos* para pagar.`,
+          }),
+        }).catch(e => console.error("[PIX] sendMedia erro:", e))
+      }
       const acaoPromise = supabase.from("whatsapp_carrinho").delete().eq("empresa_id", empresaId).eq("phone", phone)
-      return { mensagemExtra: `\n\n✅ Assim que confirmado, seu pedido vai para a loja!\n\n⬇️ *Código PIX:*`, acaoPromise, pixCode: pixData.qr_code }
+      return {
+        mensagemExtra: `\n\n✅ Assim que confirmado, seu pedido vai para a loja!\n\n⬇️ *Código PIX:*`,
+        acaoPromise,
+        pixCode: pixData.qr_code,
+        pixQrBase64: ehCloud ? pixData.qr_code_base64 : undefined,
+        pixNumero: String(pixData.numero_pedido ?? ""),
+      }
     }
 
     const pedidoPayload = {
@@ -2645,6 +2660,10 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     let acaoPromise: Promise<any> = Promise.resolve()
     let mensagemExtra             = ""
     const extraMsgs: string[]     = []
+    // QR do PIX quando a loja é da Meta: quem envia é o whatsapp-cloud, então
+    // ele volta na resposta em vez de sair por aqui.
+    let pixQrParaCloud = ""
+    let pixNumeroParaCloud = ""
 
     if (acaoMatch) {
       if (acaoStart !== -1) resposta = resposta.slice(0, acaoStart).trim()
@@ -2783,6 +2802,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             resposta    = resultado.mensagemExtra
             acaoPromise = resultado.acaoPromise
             if (resultado.pixCode) extraMsgs.push(resultado.pixCode)
+            if (resultado.pixQrBase64) { pixQrParaCloud = resultado.pixQrBase64; pixNumeroParaCloud = resultado.pixNumero ?? "" }
           }
 
         } else if (acao.tipo === "chamar_atendente") {
@@ -2914,6 +2934,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           acaoPromise = resultado.acaoPromise
           if (resultado.mensagemExtra) resposta = resultado.mensagemExtra
           if (resultado.pixCode) extraMsgs.push(resultado.pixCode)
+          if (resultado.pixQrBase64) { pixQrParaCloud = resultado.pixQrBase64; pixNumeroParaCloud = resultado.pixNumero ?? "" }
         }
       }
     }
@@ -3101,7 +3122,10 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
 
     if (isTest) {
       return new Response(
-        JSON.stringify({ ok: true, resposta, _debug: { clienteNome, clienteAchado: !!cliente, clienteId: cliente?.id ?? null, enderecoCliente, profileGlobal, phoneLocal, phoneLocalNo9 } }),
+        // extraMsgs vinha SÓ no caminho do Evolution: na Meta o código PIX era
+        // montado, empurrado pra cá e morria aqui. O cliente via "⬇️ Código
+        // PIX:" e nada embaixo — pedido fechado, pagamento impossível.
+        JSON.stringify({ ok: true, resposta, extraMsgs, pixQr: pixQrParaCloud, pixNumero: pixNumeroParaCloud, _debug: { clienteNome, clienteAchado: !!cliente, clienteId: cliente?.id ?? null, enderecoCliente, profileGlobal, phoneLocal, phoneLocalNo9 } }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       )
     }

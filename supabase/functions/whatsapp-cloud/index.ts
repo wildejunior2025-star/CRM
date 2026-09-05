@@ -178,6 +178,49 @@ function textoParaRegistroCloud(message: any): string {
 }
 
 
+// A Graph API não aceita imagem em base64 direto: primeiro sobe o arquivo e
+// recebe um id, depois manda a mensagem com esse id. Dois passos, e o primeiro
+// é multipart — por isso o FormData.
+async function subirImagemNaMeta(phoneNumberId: string, base64: string, token: string): Promise<string | null> {
+  try {
+    const cru = atob(base64)
+    const bytes = new Uint8Array(cru.length)
+    for (let i = 0; i < cru.length; i++) bytes[i] = cru.charCodeAt(i)
+    const form = new FormData()
+    form.append("messaging_product", "whatsapp")
+    form.append("type", "image/png")
+    form.append("file", new Blob([bytes], { type: "image/png" }), "pix.png")
+    const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/media`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}` },
+      body: form,
+    })
+    if (!res.ok) { console.error("[cloud img] upload:", res.status, (await res.text()).slice(0, 300)); return null }
+    const d = await res.json()
+    return d?.id ? String(d.id) : null
+  } catch (e) {
+    console.error("[cloud img] erro:", (e as Error)?.message)
+    return null
+  }
+}
+
+async function enviarImagem(phoneNumberId: string, to: string, mediaId: string, caption: string, token: string) {
+  try {
+    const dest = normalizeBrNumber(to)
+    const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({
+        messaging_product: "whatsapp", to: dest, type: "image",
+        image: { id: mediaId, caption },
+      }),
+    })
+    if (!res.ok) console.error("[cloud img] envio:", res.status, (await res.text()).slice(0, 300))
+  } catch (e) {
+    console.error("[cloud img] envio erro:", (e as Error)?.message)
+  }
+}
+
 // ── Envio de texto pela Graph API ────────────────────────────────────────────
 async function sendText(phoneNumberId: string, to: string, text: string, token: string) {
   try {
@@ -507,6 +550,9 @@ async function processar(body: any) {
   }
 
   let resposta = ""
+  let extras: string[] = []
+  let pixQr = ""
+  let pixNumero = ""
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-webhook`, {
       method: "POST",
@@ -519,6 +565,12 @@ async function processar(body: any) {
     })
     const data = await res.json().catch(() => ({} as any))
     resposta = data?.resposta ?? ""
+    // Mensagens que vão DEPOIS da resposta — hoje é o código PIX copia-e-cola.
+    // Sem isto o cliente lia "⬇️ Código PIX:" e não vinha nada: o pedido ficava
+    // fechado esperando um pagamento que ele não tinha como fazer.
+    extras = Array.isArray(data?.extraMsgs) ? data.extraMsgs.filter(Boolean) : []
+    pixQr = String(data?.pixQr ?? "")
+    pixNumero = String(data?.pixNumero ?? "")
     // Loja fechada: o cérebro salva a mensagem mas não a devolve no corpo — busca a última do bot
     if (!resposta && data?.fechado) {
       const { data: ult } = await supabase
@@ -535,7 +587,26 @@ async function processar(body: any) {
     console.error("[cloud] erro ao chamar o cérebro", String(e))
   }
 
+  // ORDEM: QR, depois a resposta, depois o código. A resposta termina com
+  // "⬇️ *Código PIX:*" — a seta aponta pra mensagem SEGUINTE, que tem que ser o
+  // código copia-e-cola. É a mesma ordem que sai no Evolution; se o QR entrasse
+  // no meio, a seta apontaria pra imagem e o cliente ficaria procurando o texto.
+  if (pixQr) {
+    const idMidia = await subirImagemNaMeta(phoneNumberId, pixQr, token)
+    if (idMidia) {
+      await enviarImagem(
+        phoneNumberId, from, idMidia,
+        `📱 *QR Code PIX — Pedido #${pixNumero}*\n\n⏳ Você tem *5 minutos* para pagar.`,
+        token,
+      )
+    }
+  }
+
   if (resposta) await sendText(phoneNumberId, from, resposta, token)
+
+  for (const extra of extras) {
+    await sendText(phoneNumberId, from, extra, token)
+  }
 }
 
 // ── serve ────────────────────────────────────────────────────────────────────
