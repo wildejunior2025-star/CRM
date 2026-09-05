@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { supabase, fetchAll } from '../lib/supabaseClient'
@@ -4429,6 +4429,122 @@ function Coluna({ titulo, cor, count, vazio, children }) {
 // A mídia vive 24 horas. Passou disso, o arquivo já foi apagado pela faxina e
 // a mensagem fica só com a marca ("📷 Foto") — quem precisa rever abre o
 // WhatsApp, que é onde a conversa mora de verdade.
+// PLAYER DE ÁUDIO no formato do WhatsApp (mig 0242).
+//
+// O <audio controls> do navegador não cabe na bolha: ele encolhe até virar um
+// "⋯" com três pontinhos e SOME COM O BOTÃO DE PLAY. Quem atende olhava pra uma
+// mensagem de áudio sem nenhum jeito óbvio de ouvir.
+//
+// Aqui é o desenho que todo mundo já conhece: bolinha de play, a onda do áudio
+// e o tempo embaixo. Tocar é um toque, e dá pra pular pro meio clicando na onda.
+function PlayerDeAudio({ url }) {
+  const ref = useRef(null)
+  const [tocando, setTocando] = useState(false)
+  const [agora, setAgora] = useState(0)
+  const [total, setTotal] = useState(0)
+
+  // A "onda" é decorativa — desenhar a real exigiria decodificar o áudio
+  // inteiro, e o que importa aqui é ver o progresso. As alturas saem do próprio
+  // endereço do arquivo pra cada áudio ter o seu desenho, sempre o mesmo.
+  const barras = useMemo(() => {
+    let semente = 0
+    for (let i = 0; i < (url || '').length; i++) semente = (semente * 31 + url.charCodeAt(i)) % 100000
+    return Array.from({ length: 34 }, (_, i) => {
+      semente = (semente * 1103515245 + 12345) % 2147483648
+      return 24 + ((semente >> (i % 8)) % 70)   // 24% a 94% da altura
+    })
+  }, [url])
+
+  function alternar() {
+    const a = ref.current
+    if (!a) return
+    if (a.paused) { a.play().catch(() => {}); } else { a.pause() }
+  }
+
+  function pularPara(e) {
+    const a = ref.current
+    if (!a || !total) return
+    const cx = e.currentTarget.getBoundingClientRect()
+    const fracao = Math.min(1, Math.max(0, (e.clientX - cx.left) / cx.width))
+    a.currentTime = fracao * total
+    setAgora(a.currentTime)
+  }
+
+  // Áudio de WhatsApp (ogg/opus) costuma vir SEM a duração no cabeçalho: o
+  // navegador responde Infinity e a barra nunca anda. O empurrão pro fim força
+  // ele a calcular, e aí a gente volta pro começo.
+  function aoCarregar() {
+    const a = ref.current
+    if (!a) return
+    if (a.duration === Infinity || Number.isNaN(a.duration)) {
+      a.currentTime = 1e101
+      const voltar = () => { a.currentTime = 0; setTotal(a.duration || 0); a.removeEventListener('timeupdate', voltar) }
+      a.addEventListener('timeupdate', voltar)
+    } else {
+      setTotal(a.duration || 0)
+    }
+  }
+
+  const mmss = (seg) => {
+    const s2 = Math.max(0, Math.floor(seg || 0))
+    return `${Math.floor(s2 / 60)}:${String(s2 % 60).padStart(2, '0')}`
+  }
+  const progresso = total ? agora / total : 0
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, minWidth: 190 }}>
+      <audio
+        ref={ref} src={url} preload="metadata"
+        onLoadedMetadata={aoCarregar}
+        onDurationChange={aoCarregar}
+        onTimeUpdate={e => setAgora(e.currentTarget.currentTime)}
+        onPlay={() => setTocando(true)}
+        onPause={() => setTocando(false)}
+        onEnded={() => { setTocando(false); setAgora(0) }}
+        style={{ display: 'none' }}
+      />
+      <button
+        type="button" onClick={alternar}
+        aria-label={tocando ? 'Pausar áudio' : 'Ouvir áudio'}
+        style={{
+          flexShrink: 0, width: 34, height: 34, borderRadius: '50%', border: 'none',
+          background: 'rgba(255,255,255,.16)', color: 'var(--text)', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+        }}
+      >
+        {tocando ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <rect x="6" y="5" width="4" height="14" rx="1" />
+            <rect x="14" y="5" width="4" height="14" rx="1" />
+          </svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M8 5.5v13a1 1 0 0 0 1.5.87l11-6.5a1 1 0 0 0 0-1.74l-11-6.5A1 1 0 0 0 8 5.5Z" />
+          </svg>
+        )}
+      </button>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          onClick={pularPara}
+          style={{ display: 'flex', alignItems: 'center', gap: 2, height: 26, cursor: total ? 'pointer' : 'default' }}
+        >
+          {barras.map((altura, i) => (
+            <span key={i} style={{
+              flex: 1, height: `${altura}%`, borderRadius: 2, minWidth: 2,
+              background: (i / barras.length) <= progresso ? '#60a5fa' : 'rgba(255,255,255,.30)',
+              transition: 'background .15s',
+            }} />
+          ))}
+        </div>
+        <div style={{ fontSize: 10.5, opacity: .7, marginTop: 1 }}>
+          {mmss(tocando || agora ? agora : total)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function MidiaDaMensagem({ path, tipo }) {
   const [url, setUrl] = useState(null)
   const [erro, setErro] = useState(false)
@@ -4451,12 +4567,7 @@ function MidiaDaMensagem({ path, tipo }) {
   if (!url) {
     return <div style={{ fontSize: 11.5, opacity: .7, marginTop: 4 }}>carregando…</div>
   }
-  if (tipo === 'audio') {
-    return (
-      <audio controls preload="none" src={url}
-        style={{ marginTop: 6, width: '100%', maxWidth: 260, height: 38 }} />
-    )
-  }
+  if (tipo === 'audio') return <PlayerDeAudio url={url} />
   if (tipo === 'imagem') {
     return (
       <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginTop: 6 }}>
