@@ -56,6 +56,9 @@ export default function PresencialHistorico() {
   // Dia a dia de um garçom (mig 0236): id de quem está aberto e as linhas.
   const [extratoAberto, setExtratoAberto] = useState(null)
   const [extrato, setExtrato] = useState([])
+  // Dia a dia da taxa da LOJA (mig 0237) — o outro lado da mesma conta.
+  const [taxaDiasAberto, setTaxaDiasAberto] = useState(false)
+  const [taxaDias, setTaxaDias] = useState([])
   const [pagando, setPagando]     = useState(null)
   const [loading, setLoading]   = useState(true)
   const [aberta, setAberta]     = useState(null) // id da comanda expandida
@@ -257,6 +260,19 @@ export default function PresencialHistorico() {
     await carregarAcumulado()
   }
 
+  /**
+   * O dia a dia da taxa da loja. Mesmo motivo do extrato do garçom: o card de
+   * cima mostra hoje, e hoje some à meia-noite. O dono precisa do histórico pra
+   * saber quanto entrou de taxa na semana e quanto dela saiu da mão dele.
+   */
+  async function abrirTaxaDias() {
+    if (taxaDiasAberto) { setTaxaDiasAberto(false); return }
+    setTaxaDiasAberto(true)
+    setTaxaDias('carregando')
+    const { data, error } = await supabase.rpc('taxa_servico_dias', { p_dias: 30 })
+    setTaxaDias(error ? [] : (data ?? []))
+  }
+
   async function salvarPontos(campo, valor) {
     const n = Math.max(0, Math.min(99, Number(valor) || 0))
     const novo = { ...pontosCfg, [campo]: n }
@@ -408,6 +424,67 @@ export default function PresencialHistorico() {
             <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.45 }}>
               Tudo fica com a loja. Pra repassar uma parte pros garçons, defina a fatia
               logo abaixo, em <strong>Quanto vale cada gesto</strong>.
+            </div>
+          )}
+
+          {/* O outro lado da conta do garçom. Ele vê o dia a dia do que tem a
+              receber; o dono precisa ver o dia a dia do que a loja arrecadou —
+              senão o número da véspera some à meia-noite e não volta. */}
+          <button type="button" onClick={abrirTaxaDias}
+            style={{
+              marginTop: 10, padding: 0, border: 'none', background: 'none', cursor: 'pointer',
+              color: 'var(--primary)', fontSize: 12.5, fontWeight: 700,
+            }}>
+            {taxaDiasAberto ? '▲ esconder os outros dias' : '▼ ver os outros dias'}
+          </button>
+
+          {taxaDiasAberto && (
+            <div style={{
+              marginTop: 8, padding: '10px 12px', borderRadius: 10,
+              background: 'var(--surface-hover)', border: '1px solid var(--border)',
+            }}>
+              {taxaDias === 'carregando' ? (
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Somando os dias…</div>
+              ) : !taxaDias?.length ? (
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Nenhuma taxa arrecadada nos últimos 30 dias.</div>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', fontSize: 10.5, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: .4, paddingBottom: 6 }}>
+                    <span style={{ flex: 1 }}>Dia</span>
+                    <span style={{ width: 78, textAlign: 'right' }}>Taxa</span>
+                    <span style={{ width: 78, textAlign: 'right' }}>Garçons</span>
+                    <span style={{ width: 78, textAlign: 'right' }}>Loja</span>
+                  </div>
+                  {taxaDias.map(d => (
+                    <div key={d.dia} style={{
+                      display: 'flex', alignItems: 'baseline', padding: '7px 0',
+                      borderTop: '1px dashed var(--border)', fontSize: 12.5,
+                    }}>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <strong>{diaDaSemana(d.dia)}</strong>
+                        <span style={{ color: 'var(--text-muted)' }}> · {d.contas} conta(s)</span>
+                      </span>
+                      <span style={{ width: 78, textAlign: 'right' }}>{fmt(d.taxa)}</span>
+                      <span style={{ width: 78, textAlign: 'right', color: 'var(--success)' }}>{fmt(d.garcons)}</span>
+                      <span style={{ width: 78, textAlign: 'right', fontWeight: 700 }}>{fmt(d.loja)}</span>
+                    </div>
+                  ))}
+                  <div style={{
+                    display: 'flex', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)',
+                    fontSize: 12.5, fontWeight: 800,
+                  }}>
+                    <span style={{ flex: 1 }}>Total dos {taxaDias.length} dia(s)</span>
+                    <span style={{ width: 78, textAlign: 'right' }}>{fmt(taxaDias.reduce((s, d) => s + Number(d.taxa || 0), 0))}</span>
+                    <span style={{ width: 78, textAlign: 'right', color: 'var(--success)' }}>{fmt(taxaDias.reduce((s, d) => s + Number(d.garcons || 0), 0))}</span>
+                    <span style={{ width: 78, textAlign: 'right' }}>{fmt(taxaDias.reduce((s, d) => s + Number(d.loja || 0), 0))}</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.45 }}>
+                    Últimos 30 dias, contando só os dias que tiveram taxa. A coluna
+                    <strong> Garçons</strong> é o bolo daquele dia — o mesmo que aparece no
+                    dia a dia de cada um.
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
