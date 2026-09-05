@@ -487,6 +487,8 @@ export default function DeliveryCheckout() {
   const [enviando, setEnviando] = useState(false)
   const [erroGlobal, setErroGlobal] = useState(null)
   const [cidades, setCidades]       = useState([])
+  // A lista do IBGE não veio: o campo vira texto livre em vez de virar parede.
+  const [cidadeLivre, setCidadeLivre] = useState(false)
   const [loadingCidades, setLoadingCidades] = useState(false)
   const [buscandoCep, setBuscandoCep] = useState(false)
   const [erroCep, setErroCep]     = useState(null)
@@ -1054,16 +1056,46 @@ export default function DeliveryCheckout() {
     })
   }
 
+  // A lista de cidades vem do IBGE. Quando ele engasga — e engasga — o
+  // `catch` deixava a lista VAZIA: o cliente ficava com um campo obrigatório
+  // que não abre, sem retentativa, sem aviso e sem saída. Aconteceu com um
+  // cliente da CDBom em 05/09/2026: endereço todo preenchido, mapa com o pino
+  // no lugar, e o pedido travado no "Selecione a cidade".
+  //
+  // Agora são três camadas: a lista guardada do último acesso (o cliente de uma
+  // loja é quase sempre do mesmo estado), três tentativas com tempo limite, e —
+  // se ainda assim não vier — o campo vira texto livre pra pessoa digitar.
   async function carregarCidades(uf, cidadeParaSelecionar = '') {
     setLoadingCidades(true)
+    const chaveCache = `dco-cidades-${uf}`
     try {
-      const res = await fetch(
-        `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios?orderBy=nome`
-      )
-      const data = await res.json()
-      const lista = data.map(c => c.nome)
+      let lista = []
+      try {
+        const guardado = JSON.parse(localStorage.getItem(chaveCache) || 'null')
+        if (Array.isArray(guardado) && guardado.length) { lista = guardado; setCidades(guardado) }
+      } catch { /* cache torto: ignora e busca */ }
+
+      for (let tentativa = 1; tentativa <= 3 && !lista.length; tentativa++) {
+        const data = await buscarJson(
+          `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios?orderBy=nome`,
+          6000,
+        )
+        if (Array.isArray(data) && data.length) lista = data.map(c => c.nome)
+        else if (tentativa < 3) await new Promise(r => setTimeout(r, 800))
+      }
       setCidades(lista)
-      if (cidadeParaSelecionar) {
+      setCidadeLivre(!lista.length)
+      if (lista.length) {
+        try { localStorage.setItem(chaveCache, JSON.stringify(lista)) } catch { /* sem espaço: tudo bem */ }
+      }
+      if (cidadeParaSelecionar && !lista.length) {
+        // Sem lista, a cidade que o CEP (ou a rua escolhida) disse é a melhor
+        // informação que existe. Escrever ela é sempre melhor que deixar o
+        // campo vazio esperando uma lista que não vem.
+        setForm(prev => (prev.cidade ? prev : { ...prev, cidade: cidadeParaSelecionar }))
+        setErrors(prev => (prev.cidade ? { ...prev, cidade: null } : prev))
+      }
+      if (cidadeParaSelecionar && lista.length) {
         const match = lista.find(c => c.toLowerCase() === cidadeParaSelecionar.toLowerCase())
         // setForm direto, NÃO o set(): isto é preenchimento automático (cadastro
         // do cliente, CEP, ponto do mapa), não o cliente trocando de cidade — se
@@ -1075,6 +1107,7 @@ export default function DeliveryCheckout() {
       }
     } catch {
       setCidades([])
+      setCidadeLivre(true)
     } finally {
       setLoadingCidades(false)
     }
@@ -1137,6 +1170,7 @@ export default function DeliveryCheckout() {
     set('estado', uf)
     set('cidade', '')
     setCidades([])
+    setCidadeLivre(false)
     if (uf) await carregarCidades(uf)
   }
 
@@ -1677,20 +1711,50 @@ export default function DeliveryCheckout() {
                     </select>
                   </Field>
 
-                  {/* Cidade */}
+                  {/* Cidade — lista quando o IBGE responde, campo de texto quando não */}
                   <Field label="Cidade" required error={errors.cidade}>
-                    <select
-                      className={`dco-input dco-select${errors.cidade ? ' dco-input--error' : ''}`}
-                      value={form.cidade}
-                      onChange={e => set('cidade', e.target.value)}
-                      disabled={!form.estado || loadingCidades}
-                      data-field-error={errors.cidade ? true : undefined}
-                    >
-                      <option value="">
-                        {loadingCidades ? 'Carregando...' : form.estado ? 'Selecione a cidade' : 'Selecione o estado primeiro'}
-                      </option>
-                      {cidades.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
+                    {cidadeLivre && !loadingCidades ? (
+                      <>
+                        <input
+                          className={`dco-input${errors.cidade ? ' dco-input--error' : ''}`}
+                          placeholder="Digite a sua cidade"
+                          value={form.cidade}
+                          onChange={e => set('cidade', e.target.value)}
+                          disabled={!form.estado}
+                          data-field-error={errors.cidade ? true : undefined}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => form.estado && carregarCidades(form.estado, form.cidade)}
+                          style={{
+                            marginTop: 6, background: 'none', border: 'none', padding: 0,
+                            color: '#7c3aed', fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+                            textDecoration: 'underline',
+                          }}
+                        >
+                          Tentar carregar a lista de cidades de novo
+                        </button>
+                      </>
+                    ) : (
+                      <select
+                        className={`dco-input dco-select${errors.cidade ? ' dco-input--error' : ''}`}
+                        value={form.cidade}
+                        onChange={e => set('cidade', e.target.value)}
+                        disabled={!form.estado || loadingCidades}
+                        data-field-error={errors.cidade ? true : undefined}
+                      >
+                        <option value="">
+                          {loadingCidades ? 'Carregando...' : form.estado ? 'Selecione a cidade' : 'Selecione o estado primeiro'}
+                        </option>
+                        {/* Cidade que veio do CEP mas não está na lista: sem
+                            esta opção o seletor mostrava "Selecione a cidade"
+                            com o formulário já preenchido — parecia em branco. */}
+                        {form.cidade && !cidades.includes(form.cidade) && (
+                          <option value={form.cidade}>{form.cidade}</option>
+                        )}
+                        {cidades.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    )}
                   </Field>
 
                   {/* Bairro */}
