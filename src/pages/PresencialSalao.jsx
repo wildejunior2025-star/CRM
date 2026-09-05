@@ -674,9 +674,23 @@ export default function PresencialSalao() {
     const existente = comandaPorMesa[mesa.id]
     // Comanda de balcão já nasce criada (o banco é quem dá o número) — só abre.
     if (!existente && !mesa.is_comanda) {
-      await supabase.from('comandas').insert({
+      // O `existente` acima é a MEMÓRIA DESTA TELA. Com a internet do salão
+      // engasgando, o garçom toca duas vezes: no segundo toque a resposta do
+      // primeiro ainda não chegou, a tela ainda acha a mesa vazia e cria uma
+      // comanda GÊMEA. Foi o que aconteceu na Saidera na madrugada de 05/09,
+      // quatro vezes — e é de onde vem o "fecho a conta e a mesa volta": ela
+      // fechava uma comanda e a outra continuava aberta.
+      //
+      // Agora quem recusa é o banco (índice único, mig 0244). O erro 23505 aqui
+      // não é problema: significa que a mesa JÁ foi aberta — pela outra batida
+      // do mesmo dedo, ou por outro garçom no mesmo segundo. Segue em frente.
+      const { error: errAbrir } = await supabase.from('comandas').insert({
         empresa_id: empresaId, mesa_id: mesa.id, numero_mesa: mesa.numero, garcom_id: user?.id ?? null,
       })
+      if (errAbrir && errAbrir.code !== '23505') {
+        window.alert('Não consegui abrir a mesa: ' + errAbrir.message)
+        return
+      }
       await supabase.from('mesas').update({ status: 'ocupada' }).eq('id', mesa.id)
       await loadMesas()
     }
@@ -1046,27 +1060,38 @@ export default function PresencialSalao() {
     const { data: inseridos, error } = await supabase.from('comanda_itens').insert(rows).select()
     setEnviando(false)
     if (error) { window.alert('Erro ao lançar o item: ' + error.message); return }
+
+    // LIMPA O RASCUNHO AQUI, antes de imprimir. Estava lá embaixo, depois da
+    // impressão — e a impressão demora (Bluetooth, app do celular, papel). Nessa
+    // janela o botão já estava liberado e a lista ainda cheia na tela: o garçom
+    // achava que não tinha ido, tocava de novo, e os MESMOS itens entravam duas
+    // vezes. É o "entrou um bocado" da Saidera: 3× Couvert lançado às 05:14:26 e
+    // de novo às 05:14:28, junto com os espetinhos.
+    //
+    // A impressão não precisa do rascunho: ela imprime `inseridos`, que veio do
+    // banco. E se falhar, o aviso de reimpressão também usa `inseridos`.
+    const paraImprimir = inseridos ?? []
+    setRascunho([])
+    setObsEnvio('')
+    if (rascunhoKey) {
+      try { localStorage.removeItem(rascunhoKey); localStorage.removeItem(rascunhoKey + '_obs') } catch { /* ignora */ }
+    }
     // Loja sem cozinha não tem quem leia a comanda de preparo — o papel só
     // gastaria bobina.
     if (imprimir) {
-      const saiu = await imprimirComandaAgora(inseridos ?? [])
+      const saiu = await imprimirComandaAgora(paraImprimir)
       // Falhou: guarda ESTES itens pra reimpressão e avisa na tela. Limpar o
       // rascunho sem dizer nada era o que fazia o pedido sumir no caminho.
       // O aviso vermelho é só pra quando dá pra AFIRMAR que não saiu papel
       // (`false` = impressora não conectada, nada foi enviado). 'parcial' — erro
       // no meio do envio, com a impressora conectada — não entra aqui: a térmica
       // imprime o que recebe, e gritar em toda comanda tira o valor do aviso.
-      const filtro = saiu === 'filtrado' ? motivoFiltro(inseridos ?? []) : null
+      const filtro = saiu === 'filtrado' ? motivoFiltro(paraImprimir) : null
       setAvisoImpressao(
-        filtro ? { itens: inseridos ?? [], motivo: filtro, quando: Date.now() }
+        filtro ? { itens: paraImprimir, motivo: filtro, quando: Date.now() }
         : saiu ? null
-        : { itens: inseridos ?? [], quando: Date.now() },
+        : { itens: paraImprimir, quando: Date.now() },
       )
-    }
-    setRascunho([])
-    setObsEnvio('')
-    if (rascunhoKey) {
-      try { localStorage.removeItem(rascunhoKey); localStorage.removeItem(rascunhoKey + '_obs') } catch { /* ignora */ }
     }
     await loadMesas()
   }
@@ -1238,7 +1263,49 @@ export default function PresencialSalao() {
     await loadMesas()
   }
 
+  // Salva a divisão a cada mexida — não adianta guardar só ao sair, porque o
+  // caso que dói é justamente a tela sumir sem aviso (app atualizando).
+  useEffect(() => {
+    const id = comandaSel?.id
+    if (!id || !fechando) return
+    if (modoPag === 'dividir' && pagamentos.length > 0) {
+      guardarRascunho(id, { modoPag, pagamentos, aplicarTaxa })
+    } else if (modoPag === 'unico') {
+      limparRascunho(id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comandaSel?.id, fechando, modoPag, pagamentos, aplicarTaxa])
+
+  // ── Rascunho da divisão da conta ─────────────────────────────────────────
+  // Montar o rachado leva tempo: quem paga quanto, em qual forma, quem fica no
+  // fiado. Isso vivia só na memória da tela — fechar a janela, trocar de mesa ou
+  // o app se atualizar sozinho jogava tudo fora e o garçom refazia na frente do
+  // cliente. Fica guardado neste aparelho, por comanda, até a conta ser fechada.
+  function guardarRascunho(id, dados) {
+    if (!id) return
+    try { localStorage.setItem(`salao_fechamento_${id}`, JSON.stringify(dados)) } catch { /* cota cheia: é só conforto */ }
+  }
+  function lerRascunho(id) {
+    if (!id) return null
+    try { const raw = localStorage.getItem(`salao_fechamento_${id}`); return raw ? JSON.parse(raw) : null } catch { return null }
+  }
+  function limparRascunho(id) {
+    if (!id) return
+    try { localStorage.removeItem(`salao_fechamento_${id}`) } catch { /* nada a fazer */ }
+  }
+
   function abrirFechamento() {
+    // Volta a divisão que estava montada nesta comanda, se houver.
+    const salvo = lerRascunho(comandaSel?.id)
+    if (salvo?.modoPag === 'dividir' && Array.isArray(salvo.pagamentos) && salvo.pagamentos.length) {
+      setModoPag('dividir')
+      setPagamentos(salvo.pagamentos)
+      if (typeof salvo.aplicarTaxa === 'boolean') setAplicarTaxa(salvo.aplicarTaxa)
+      setForma('dinheiro')
+      setClienteSel(comandaSel?.cliente ?? null); setBuscaCliente(''); setNovoCliente(false); setNovoTelefone('')
+      setFechando(true)
+      return
+    }
     setModoPag('unico')
     setForma('dinheiro')
     setPagamentos([])
@@ -1624,6 +1691,7 @@ export default function PresencialSalao() {
       // de a conta simplesmente não existir.
       if (vaiImprimirAqui) imprimirConta({ soApp: false }).catch(() => { /* best-effort */ })
     }
+    limparRascunho(comandaSel.id)
     setFechando(false)
     setMesaSel(null)
     await loadMesas()
