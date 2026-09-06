@@ -822,6 +822,19 @@ export default function PainelEntregador() {
   // 'prompt' = ainda vai perguntar · 'granted' = liberado · 'denied' = bloqueado
   // no navegador (aí não adianta pedir de novo, tem que ir nas configurações).
   const [permGps, setPermGps] = useState('prompt')
+  const [ajudaGps, setAjudaGps] = useState(false)
+  // O caminho pra liberar a localização é DIFERENTE em cada navegador, e mandar
+  // o passo errado é pior que não mandar nada: o motoboy procura um cadeado que
+  // não existe e desiste. (Zebu, 06/09/2026: o entregador estava no Safari e a
+  // instrução era a do Chrome.)
+  const navegador = (() => {
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+    const iOS = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && typeof document !== 'undefined' && 'ontouchend' in document)
+    const safari = /Safari/.test(ua) && !/Chrome|CriOS|Chromium|Edg|OPR/.test(ua)
+    if (iOS && safari) return 'safari-ios'
+    if (safari) return 'safari-mac'
+    return 'chrome'
+  })()
 
   useEffect(() => {
     if (!navigator.permissions?.query) return
@@ -838,18 +851,16 @@ export default function PainelEntregador() {
   // caixinha de "permitir localização" em cima de um gesto. Era isso que
   // faltava — quem negou uma vez não tinha como voltar atrás por dentro do app.
   function pedirGps() {
-    if (!navigator.geolocation) { window.alert('Este celular não tem GPS disponível no navegador.'); return }
+    if (!navigator.geolocation) { window.alert('Este aparelho não tem GPS disponível no navegador.'); return }
     navigator.geolocation.getCurrentPosition(
-      pos => { setPermGps('granted'); setMinhaPos({ lat: pos.coords.latitude.toFixed(6), lng: pos.coords.longitude.toFixed(6) }); enviarPosicao(pos, true) },
+      pos => { setAjudaGps(false); setPermGps('granted'); setMinhaPos({ lat: pos.coords.latitude.toFixed(6), lng: pos.coords.longitude.toFixed(6) }); enviarPosicao(pos, true) },
       err => {
         setPermGps(err.code === 1 ? 'denied' : 'prompt')
-        if (err.code === 1) {
-          window.alert(
-            'A localização está BLOQUEADA para este site. '
-            + 'Pra liberar: toque no cadeado (ou no ícone ao lado do endereço, em cima) '
-            + '→ Permissões → Localização → Permitir. Depois volte aqui e toque em Ativar de novo.'
-          )
-        }
+        // Bloqueado: o navegador não abre mais a caixinha, então o jeito é
+        // ensinar o caminho. Na tela, e não num alert() — no Safari o alert
+        // ainda vem com o botão "Bloquear caixas de diálogo" do lado, e o
+        // motoboy some com o aviso sem querer.
+        if (err.code === 1) setAjudaGps(true)
       },
       { enableHighAccuracy: true, timeout: 15000 }
     )
@@ -887,6 +898,9 @@ export default function PainelEntregador() {
     if (!navigator.geolocation) return
     const id = navigator.geolocation.watchPosition(
       pos => {
+        // Safari não tem a API de Permissões pra localização, então o estado
+        // 'granted' nunca chegaria por lá. Posição chegando É a permissão dada.
+        setPermGps('granted'); setAjudaGps(false)
         setMinhaPos({ lat: pos.coords.latitude.toFixed(6), lng: pos.coords.longitude.toFixed(6) })
         enviarPosicao(pos)
       },
@@ -1294,6 +1308,42 @@ export default function PainelEntregador() {
             </button>
           )}
         </div>
+
+        {/* Passo a passo do navegador QUE ELE ESTÁ USANDO. */}
+        {ajudaGps && permGps !== 'granted' && (
+          <div style={{
+            marginTop: 8, border: '1px solid #f59e0b', borderRadius: 10, padding: '12px 14px',
+            background: 'rgba(245,158,11,.08)', fontSize: 13, color: 'var(--text)', lineHeight: 1.6,
+          }}>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>Como liberar neste aparelho</div>
+            {navegador === 'safari-ios' ? (
+              <ol style={{ margin: 0, paddingLeft: 18 }}>
+                <li>Toque no ícone <strong>“ᴀA”</strong> (ou no ícone à esquerda do endereço, em cima).</li>
+                <li>Escolha <strong>Ajustes do Site</strong>.</li>
+                <li>Em <strong>Localização</strong>, marque <strong>Permitir</strong> (ou “Perguntar”).</li>
+                <li>Volte aqui e toque em <strong>Ativar</strong> de novo.</li>
+                <li>Se não aparecer Localização ali: <strong>Ajustes</strong> do aparelho →
+                  <strong> Privacidade e Segurança</strong> → <strong>Serviços de Localização</strong> →
+                  <strong> Safari</strong> → <strong>Ao Usar o App</strong>.</li>
+              </ol>
+            ) : navegador === 'safari-mac' ? (
+              <ol style={{ margin: 0, paddingLeft: 18 }}>
+                <li>Menu <strong>Safari</strong> → <strong>Ajustes para entregas.fwcinter.com…</strong></li>
+                <li>Em <strong>Localização</strong>, escolha <strong>Permitir</strong>.</li>
+                <li>Volte aqui e toque em <strong>Ativar</strong> de novo.</li>
+                <li>Se estiver cinza: <strong>Ajustes do Sistema</strong> → <strong>Privacidade e Segurança</strong> →
+                  <strong> Serviços de Localização</strong> → ligue o <strong>Safari</strong>.</li>
+              </ol>
+            ) : (
+              <ol style={{ margin: 0, paddingLeft: 18 }}>
+                <li>Toque no <strong>cadeado</strong> (ou no ícone ao lado do endereço, em cima).</li>
+                <li>Toque em <strong>Permissões</strong> (ou “Configurações do site”).</li>
+                <li>Em <strong>Localização</strong>, escolha <strong>Permitir</strong>.</li>
+                <li>Volte aqui e toque em <strong>Ativar</strong> de novo.</li>
+              </ol>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Barra da fila (E4) — só quando a loja usa fila por ordem de chegada */}
