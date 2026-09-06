@@ -5289,6 +5289,10 @@ export default function PainelPedidos() {
   }, [empresa?.id])
   const [comandas, setComandas] = useState([]) // mesas (autoatendimento QR) abertas
   const [comandaFechando, setComandaFechando] = useState(null) // comanda no modal de fechar conta
+  // Controle da releitura das comandas (ver carregarComandas): qual leitura é a
+  // mais nova e quando foi o último fechamento feito aqui.
+  const comandasSeqRef = useRef(0)
+  const comandaEscritaRef = useRef(0)
   const mesaPrintRef = useRef({}) // buffer p/ imprimir itens da mesa juntos
   const contaMesaImpressaRef = useRef(null) // ids de comanda cuja CONTA já saiu (garçom fechou)
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null) // pedido aberto em detalhe (card completo)
@@ -6530,7 +6534,14 @@ export default function PainelPedidos() {
   useEffect(() => {
     if (!empresa?.id) return
     let ativo = true
+    // Mesma trava do Salão: cada aviso do tempo real dispara uma releitura, e
+    // numa noite cheia duas correm juntas. A que saiu ANTES pode chegar DEPOIS
+    // e repintar a mesa recém-liberada como "aguardando ADM" — azul de novo,
+    // sozinha. Só a leitura mais nova pinta, e nenhuma pinta por cima de um
+    // fechamento que aconteceu enquanto ela estava no ar.
     async function carregarComandas() {
+      const minhaVez = ++comandasSeqRef.current
+      const comecouEm = Date.now()
       const { data } = await supabase
         .from('comandas')
         .select('id, numero_mesa, tipo, nome_cliente, created_at, status, fechamento_pendente, preconta_pedida_em, fechada_por, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao, setor, isento_taxa)')
@@ -6565,6 +6576,7 @@ export default function PainelPedidos() {
       const novas = aguardando.filter(c => !contaMesaImpressaRef.current.has(c.id) && !c.fechamento_pendente?.conta_impressa)
       novas.forEach(c => contaMesaImpressaRef.current.add(c.id))
       if (!primeira && (fwcImprimeRef.current || deveAutoImprimir())) novas.forEach(imprimirContaMesa)
+      if (minhaVez !== comandasSeqRef.current || comandaEscritaRef.current > comecouEm) return
       if (ativo) setComandas(lista)
     }
     carregarComandas()
@@ -6796,6 +6808,7 @@ export default function PainelPedidos() {
       p_aplicar_taxa: aplicarTaxa,
     })
     if (error) { alert('Erro ao fechar a conta: ' + error.message); return }
+    comandaEscritaRef.current = Date.now()
     // Imprime a conta automaticamente ao fechar.
     try {
       const itens = Array.isArray(comanda.comanda_itens) ? comanda.comanda_itens : []
@@ -6877,6 +6890,7 @@ export default function PainelPedidos() {
       p_cliente_id: pend.cliente_id ?? null,
     })
     if (error) { alert('Erro ao liberar a mesa: ' + error.message); return }
+    comandaEscritaRef.current = Date.now()
     setComandas(cs => cs.filter(c => c.id !== comanda.id))
     setMesasFechadasHoje(prev => [
       { id: comanda.id, numero_mesa: comanda.numero_mesa, tipo: comanda.tipo, nome_cliente: comanda.nome_cliente, total, forma_pagamento: (pend.pagamentos[0]?.forma ?? 'dinheiro'), fechada_at: new Date().toISOString() },

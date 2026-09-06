@@ -236,9 +236,25 @@ export default function PresencialSalao() {
   // O cardápio não muda enquanto o garçom atende: carrega uma vez. O que muda a
   // toda hora é mesa e comanda — só isso volta ao banco.
 
+  // A MESA QUE VOLTAVA A FICAR AZUL SOZINHA (Saidera, 06/09/2026).
+  //
+  // Cada aviso do tempo real dispara uma releitura. Numa noite cheia chegam
+  // vários avisos juntos e duas leituras correm ao mesmo tempo: a que SAIU
+  // ANTES pode CHEGAR DEPOIS e repintar a tela com o estado velho. A mesa que
+  // a dona acabou de liberar reaparecia em "aguardando ADM" — azul de novo,
+  // sem ninguém tocar nela. Com muitas mesas acontecia mais, porque a consulta
+  // demora mais e a janela fica maior.
+  //
+  // Duas travas: a leitura só pinta a tela se for a MAIS NOVA, e nunca pinta
+  // por cima de um fechamento que aconteceu enquanto ela estava no ar.
+  const cargaSeq = useRef(0)
+  const escritaEm = useRef(0)
+
   // Muda o tempo todo: mesas, comandas e o caixa deste usuário.
   const loadMesas = useCallback(async () => {
     if (!empresaId) return
+    const minhaVez = ++cargaSeq.current
+    const comecouEm = Date.now()
     const [ms, cs, cx, px] = await Promise.all([
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('comandas').select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
@@ -250,6 +266,12 @@ export default function PresencialSalao() {
         .select('id, comanda_id, valor, qr_code, qr_base64, expira_em, status, parte')
         .eq('empresa_id', empresaId).in('status', ['pendente', 'pago']),
     ])
+    // Sai do "Carregando salão..." mesmo quando a leitura for descartada abaixo:
+    // a tela não pode ficar pendurada porque duas releituras se cruzaram.
+    setLoading(false)
+    // Chegou velha (outra leitura saiu depois desta) ou uma conta foi fechada
+    // enquanto ela vinha: joga fora. Quem manda é a leitura mais nova.
+    if (minhaVez !== cargaSeq.current || escritaEm.current > comecouEm) return
     setMesas(ms.data ?? [])
     setComandas(cs.data ?? [])
     setCaixaAberto(!!(cx.data && cx.data.length))
@@ -1651,6 +1673,7 @@ export default function PresencialSalao() {
       })
       setSalvando(false)
       if (error) { window.alert('Erro ao fechar a conta: ' + error.message); return }
+      escritaEm.current = Date.now()
       imprimirConta().catch(() => { /* best-effort */ })
     } else {
       // Garçom, OU ADM no celular (sem impressora): NÃO libera a mesa. Marca
@@ -1666,7 +1689,7 @@ export default function PresencialSalao() {
       // usa o celular sem a conta da mesa.
       const vaiImprimirAqui = (!ehCelular || window.__fwcBtConectada === true)
         && papelImpressora() !== 'cozinha'   // a da cozinha não tira conta
-      const { error } = await supabase.from('comandas').update({
+      const { data: mudou, error } = await supabase.from('comandas').update({
         status: 'aguardando_conferencia',
         // Quem fechou, pro ranking (mig 0187). É o garçom que mandou pra
         // conferência — não o ADM que libera a mesa depois.
@@ -1684,9 +1707,18 @@ export default function PresencialSalao() {
           // aberto noutra aba, sairiam duas vias da mesma conta.
           conta_impressa: vaiImprimirAqui,
         },
-      }).eq('id', comandaSel.id)
+      // `.eq('status','aberta')`: se a conta JÁ foi fechada (outro aparelho, ou
+      // esta tela está velha), este update sem trava a puxava de volta pra
+      // "aguardando ADM" — a mesa voltava a ficar azul depois de liberada, e
+      // dessa vez de verdade, no banco.
+      }).eq('id', comandaSel.id).eq('status', 'aberta').select('id')
       setSalvando(false)
       if (error) { window.alert('Erro ao enviar pro caixa: ' + error.message); return }
+      if (!mudou || mudou.length === 0) {
+        window.alert('Esta conta já tinha sido fechada por outro aparelho. Nada foi alterado.')
+        setFechando(false); setMesaSel(null); await loadMesas(); return
+      }
+      escritaEm.current = Date.now()
       // soApp: false num PC — se o app FWC não responder, sai pelo navegador em vez
       // de a conta simplesmente não existir.
       if (vaiImprimirAqui) imprimirConta({ soApp: false }).catch(() => { /* best-effort */ })
@@ -1921,6 +1953,7 @@ export default function PresencialSalao() {
     })
     setSalvando(false)
     if (error) { window.alert('Erro ao liberar a mesa: ' + error.message); return }
+    escritaEm.current = Date.now()
     setMesaSel(null)
     await loadMesas()
   }
