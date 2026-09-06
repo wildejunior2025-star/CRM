@@ -1019,6 +1019,13 @@
     display: none;
   }
 
+  /* A setinha some junto: ela é só a marca do sistema, mas com cara de botão
+     roxo no meio dos botões de verdade — o lojista tocava esperando alguma
+     coisa e não acontecia nada. No celular o espaço vale mais que a marca. */
+  .pp-logo-mark {
+    display: none;
+  }
+
   .pp-body {
     padding: 16px 14px;
   }
