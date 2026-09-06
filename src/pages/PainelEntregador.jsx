@@ -819,6 +819,41 @@ export default function PainelEntregador() {
   // se ele negar, fica null e a rota parte da loja (ver origemRota).
   const [minhaPos, setMinhaPos] = useState(null)
   const posUlt = useRef(0)          // quando a última posição foi pro banco
+  // 'prompt' = ainda vai perguntar · 'granted' = liberado · 'denied' = bloqueado
+  // no navegador (aí não adianta pedir de novo, tem que ir nas configurações).
+  const [permGps, setPermGps] = useState('prompt')
+
+  useEffect(() => {
+    if (!navigator.permissions?.query) return
+    let vivo = true
+    navigator.permissions.query({ name: 'geolocation' }).then(st => {
+      if (!vivo) return
+      setPermGps(st.state)
+      st.onchange = () => setPermGps(st.state)
+    }).catch(() => { /* navegador antigo: fica no 'prompt' */ })
+    return () => { vivo = false }
+  }, [])
+
+  // Pedir a permissão PRECISA sair de um toque do motoboy: navegador só abre a
+  // caixinha de "permitir localização" em cima de um gesto. Era isso que
+  // faltava — quem negou uma vez não tinha como voltar atrás por dentro do app.
+  function pedirGps() {
+    if (!navigator.geolocation) { window.alert('Este celular não tem GPS disponível no navegador.'); return }
+    navigator.geolocation.getCurrentPosition(
+      pos => { setPermGps('granted'); setMinhaPos({ lat: pos.coords.latitude.toFixed(6), lng: pos.coords.longitude.toFixed(6) }); enviarPosicao(pos, true) },
+      err => {
+        setPermGps(err.code === 1 ? 'denied' : 'prompt')
+        if (err.code === 1) {
+          window.alert(
+            'A localização está BLOQUEADA para este site. '
+            + 'Pra liberar: toque no cadeado (ou no ícone ao lado do endereço, em cima) '
+            + '→ Permissões → Localização → Permitir. Depois volte aqui e toque em Ativar de novo.'
+          )
+        }
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    )
+  }
   // A LOJA VÊ ONDE ELE ESTÁ (mig 0245).
   //
   // Navegador não rastreia com a tela apagada — mas o motoqueiro abre o app a
@@ -828,12 +863,13 @@ export default function PainelEntregador() {
   //
   // Uma linha por entregador, sem histórico: onde ele está agora resolve o
   // "cadê meu pedido"; por onde ele passou é vigília, não é operação.
-  async function enviarPosicao(pos) {
+  async function enviarPosicao(pos, forcar = false) {
     if (!empresa?.id || !user?.id) return
     // No máximo uma gravação a cada 20s: o watchPosition dispara a cada passo
-    // do GPS, e isso viraria centenas de escritas por corrida.
+    // do GPS, e isso viraria centenas de escritas por corrida. O toque em
+    // "Ativar" fura o freio — ali o motoboy está esperando ver o resultado.
     const agora = Date.now()
-    if (agora - posUlt.current < 20000) return
+    if (!forcar && agora - posUlt.current < 20000) return
     posUlt.current = agora
     try {
       await supabase.from('entregador_posicoes').upsert({
@@ -1228,6 +1264,37 @@ export default function PainelEntregador() {
           </button>
         </div>
       </header>
+
+      {/* Localização: o motoboy precisa ver se está ligada e conseguir ligar
+          por aqui. Antes o navegador perguntava uma vez e pronto — quem
+          negasse ficava invisível pra loja pra sempre, sem saber. */}
+      <div style={{ maxWidth: 560, margin: '0 auto', padding: '14px 16px 0' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+          border: `1px solid ${permGps === 'granted' ? '#16a34a' : '#f59e0b'}`,
+          background: permGps === 'granted' ? 'rgba(34,197,94,.08)' : 'rgba(245,158,11,.10)',
+          borderRadius: 10, padding: '10px 12px',
+        }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 13.5, color: 'var(--text)' }}>
+              {permGps === 'granted' ? '📍 Localização ligada' : '📍 Localização desligada'}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+              {permGps === 'granted'
+                ? (minhaPos ? 'A loja consegue ver onde você está.' : 'Procurando o sinal do GPS…')
+                : permGps === 'denied'
+                  ? 'Está bloqueada no navegador. Toque em Ativar que eu explico como liberar.'
+                  : 'A loja não consegue ver onde você está pra responder o cliente.'}
+            </div>
+          </div>
+          {permGps !== 'granted' && (
+            <button type="button" onClick={pedirGps}
+              style={{ flexShrink: 0, background: '#f59e0b', border: 'none', color: '#fff', borderRadius: 8, padding: '9px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 800 }}>
+              Ativar
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Barra da fila (E4) — só quando a loja usa fila por ordem de chegada */}
       {filaAtiva && (
