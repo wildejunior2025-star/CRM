@@ -472,11 +472,11 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
   )
 
   if (embutido) {
+    // `position: relative` + `zIndex: 0` no quadro abaixo prendem o Leaflet aqui
+    // dentro. Ele desenha as camadas dele em z-index 400 e os controles em 1000,
+    // soltos no documento — sem esta caixa, o mapa embutido subia POR CIMA do
+    // modal do "Ampliar" e os dois mapas ficavam um sobre o outro.
     return (
-      {/* `position: relative` + `zIndex: 0` prendem o Leaflet aqui dentro. Ele
-          desenha as camadas dele em z-index 400 e os controles em 1000, soltos
-          no documento — sem esta caixa, o mapa embutido subia POR CIMA do modal
-          do "Ampliar" e os dois mapas ficavam um sobre o outro. */}
       <div style={{ border: `1.5px solid ${mexeu ? '#16a34a' : 'var(--border,#2a2a3a)'}`, borderRadius: 12, overflow: 'hidden', background: 'var(--surface,#16161f)', position: 'relative', zIndex: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px' }}>
           <strong style={{ fontSize: 13.5, color: 'var(--text,#fff)' }}>📍 Onde o entregador vai chegar</strong>
