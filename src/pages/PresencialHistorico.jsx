@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import ClientePicker from '../components/ClientePicker'
 import { rotuloComanda } from '../lib/comanda'
-import { imprimirHtml, montarContaPresencialHtml } from '../utils/imprimirCupom'
+import { imprimirHtml, montarContaPresencialHtml, appFwcDisponivel } from '../utils/imprimirCupom'
 import '../components/Page.css'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
@@ -109,23 +109,57 @@ export default function PresencialHistorico() {
       empresa: { nome: nomeLoja },
     }
     // Térmica pareada neste aparelho primeiro (é o caso do celular do balcão);
-    // senão cai no app FWC / navegador. `soApp: false` de propósito: se o app
-    // não responder, é melhor abrir a janela de impressão do que não sair nada.
+    // senão o app FWC do PC. O navegador é o ÚLTIMO recurso, não o segundo:
+    // a segunda via da conta é papel de térmica, e cair na janela do Chrome
+    // sem nem tentar conectar a Bluetooth era o que fazia a loja dizer que o
+    // botão "não vai pra impressora" (Saidera, 06/09/2026).
     let via = false
-    try {
-      const mod = await import('../utils/imprimirBluetooth')
-      via = await mod.imprimirMesaSeConectada('conta', dados)
-    } catch { /* sem Bluetooth neste aparelho */ }
+    let bt = null
+    try { bt = await import('../utils/imprimirBluetooth') } catch { /* sem Bluetooth neste aparelho */ }
     // 'filtrado' = a Bluetooth existe e está conectada, mas ESTE aparelho está
     // marcado como impressora da cozinha. Não adianta tentar por outro caminho
     // (sairia via dupla) — o que faltava era DIZER isso. Antes a tela avisava
     // "enviada pra impressora" e não saía papel nenhum.
+    if (bt) { try { via = await bt.imprimirMesaSeConectada('conta', dados) } catch { via = false } }
+
+    // App Impressora FWC (PC da loja). `soApp: true`: aqui ele não pode cair no
+    // navegador sozinho — quem decide isso é o passo seguinte.
+    if (!via) via = await imprimirHtml(montarContaPresencialHtml(dados), nomeLoja, { soApp: true, origem: 'mesa' })
+
+    // Nem térmica pareada nem app: se ESTE aparelho tem Bluetooth, oferece
+    // parear agora. O clique no botão é o gesto do usuário que o navegador
+    // exige pra abrir a lista de impressoras — por isso dá pra fazer aqui e
+    // não num aviso depois.
+    // Se o app FWC ESTÁ aberto e mesmo assim recusou, o problema é a config
+    // dele (este PC não está marcado pra imprimir conta de mesa) — oferecer
+    // Bluetooth aqui só confundiria quem está no PC da loja.
+    const temApp = via ? false : await appFwcDisponivel()
+    let ofereceu = false
+    if (!via && !temApp && bt && typeof navigator !== 'undefined' && navigator.bluetooth) {
+      ofereceu = true
+      const querConectar = window.confirm(
+        'A térmica não está conectada neste aparelho.' + '\n\n'
+        + 'Conectar agora pra sair na impressora? (Cancelar imprime pelo navegador.)'
+      )
+      if (querConectar) {
+        try {
+          await bt.conectarImpressoraCelular()
+          via = await bt.imprimirMesaSeConectada('conta', dados)
+        } catch { via = false }
+      }
+    }
+
+    // Último recurso mesmo: janela de impressão do navegador.
     if (!via) via = await imprimirHtml(montarContaPresencialHtml(dados), nomeLoja, { soApp: false, origem: 'mesa' })
 
     const texto = via === 'filtrado'
       ? '⚠️ Este aparelho está marcado como impressora da COZINHA — conta sai na da frente.'
       : via === 'navegador'
-        ? '🖨️ Sem térmica neste aparelho — abri a impressão pelo navegador.'
+        ? (temApp
+          ? '⚠️ O app FWC está aberto mas recusou: confira em "O que este PC imprime" se Mesa/Salão está ligado. Abri pelo navegador.'
+          : ofereceu
+            ? '🖨️ Térmica não conectada — abri a impressão pelo navegador.'
+            : '🖨️ Sem térmica neste aparelho (app FWC fechado?) — abri pelo navegador.')
         : via
           ? '🧾 Segunda via enviada pra impressora.'
           : '⚠️ Não achei impressora neste aparelho.'
