@@ -24,6 +24,18 @@ const diaDaSemana = (d) => {
   return `${DIAS_SEM[new Date(a, m - 1, dia).getDay()]} ${String(dia).padStart(2, '0')}/${String(m).padStart(2, '0')}`
 }
 const FORMA_LABEL = { dinheiro: 'Dinheiro', pix: 'PIX', credito: 'Crédito', debito: 'Débito', cartao: 'Cartão', fiado: 'Fiado', dividido: 'Dividido', transferencia: 'Transferência' }
+
+// O PIX que entrou pelo QR do Mercado Pago (mig 0193). Não é firula de tela: o
+// dinheiro cai em lugar DIFERENTE do PIX na chave da loja — na conta do MP, com
+// a comissão do split descontada. Quem confere o caixa com o extrato precisa
+// enxergar essa separação, e ela já estava gravada, só não aparecia.
+function cobrancasOnlinePagas(c) {
+  return (c?.comanda_pix_cobrancas ?? []).filter(x => x?.status === 'pago')
+}
+function formaComOrigem(c) {
+  const base = FORMA_LABEL[c?.forma_pagamento] ?? c?.forma_pagamento ?? '—'
+  return cobrancasOnlinePagas(c).length > 0 ? `${base} online` : base
+}
 // Formas que dá pra escolher ao corrigir uma conta (o "dividido" não entra aqui).
 const FORMAS_EDIT = [['dinheiro', 'Dinheiro'], ['pix', 'PIX'], ['credito', 'Crédito'], ['debito', 'Débito'], ['cartao', 'Cartão'], ['fiado', 'Fiado']]
 
@@ -92,7 +104,7 @@ export default function PresencialHistorico() {
       total: Number(c.total || 0),
       // A forma vem da comanda: é a que foi realmente cobrada (e pode ter sido
       // corrigida aqui mesmo, no "Trocar").
-      formaPagamento: FORMA_LABEL[c.forma_pagamento] ?? c.forma_pagamento ?? '',
+      formaPagamento: formaComOrigem(c),
       pagamentos: [],
       empresa: { nome: nomeLoja },
     }
@@ -156,7 +168,11 @@ export default function PresencialHistorico() {
     // não via essa mesa em lugar nenhum — e a comissão dela sumia da vista dele.
     // Agora vem tudo e a tela separa o que é dele (participouDaConta).
     const qComandas = supabase.from('comandas')
-      .select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)')
+      // As cobranças do Mercado Pago vêm junto: é o que separa o PIX ONLINE
+      // (dinheiro na conta do MP, com a comissão do split) do PIX na chave da
+      // loja. Os dois estavam escritos só "PIX" e caíam no mesmo balaio na hora
+      // de conferir o caixa com o extrato.
+      .select('*, comanda_itens(*), cliente:clientes(id, nome, telefone), comanda_pix_cobrancas(id, mp_payment_id, valor, status)')
       .eq('empresa_id', empresaId)
       .eq('status', 'fechada')
 
@@ -757,6 +773,14 @@ export default function PresencialHistorico() {
                     </div>
                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
                       {horaBR(c.fechada_at)} · {FORMA_LABEL[c.forma_pagamento] ?? c.forma_pagamento ?? '—'}
+                      {cobrancasOnlinePagas(c).length > 0 && (
+                        <span title="Recebido pelo QR do Mercado Pago"
+                          style={{ marginLeft: 5, padding: '1px 6px', borderRadius: 20, fontSize: 10,
+                            fontWeight: 800, background: 'rgba(34,197,94,.16)', color: '#22c55e',
+                            border: '1px solid rgba(34,197,94,.45)' }}>
+                          online
+                        </span>
+                      )}
                       {' · '}{(c.comanda_itens ?? []).length} {(c.comanda_itens ?? []).length === 1 ? 'item' : 'itens'}
                     </div>
                     {/* Quanto ele ganhou nesta mesa. É a pergunta que o garçom
@@ -822,9 +846,9 @@ export default function PresencialHistorico() {
                     <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface-hover)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                         <span style={{ fontSize: 13.5 }}>
-                          💳 Pagamento: <strong>{FORMA_LABEL[c.forma_pagamento] ?? c.forma_pagamento ?? '—'}</strong>
+                          💳 Pagamento: <strong>{formaComOrigem(c)}</strong>
                         </span>
-                        {ehAdmin && editandoForma !== c.id && (
+                        {ehAdmin && editandoForma !== c.id && cobrancasOnlinePagas(c).length === 0 && (
                           <button type="button" onClick={() => setEditandoForma(c.id)}
                             style={{ padding: '5px 12px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)',
                               background: 'transparent', color: 'var(--primary)', fontSize: 12.5, fontWeight: 700 }}>
@@ -832,6 +856,18 @@ export default function PresencialHistorico() {
                           </button>
                         )}
                       </div>
+
+                      {/* O número do pagamento no Mercado Pago. É por ele que a
+                          loja acha essa venda no extrato do MP quando o valor
+                          bate em duas contas do mesmo dia — e é o que prova de
+                          onde veio o dinheiro. Trocar a forma some quando é
+                          online: não é lançamento à mão, tem comprovante. */}
+                      {cobrancasOnlinePagas(c).map(cb => (
+                        <div key={cb.id} style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-muted)' }}>
+                          🟢 Recebido no Mercado Pago · {fmt(cb.valor)} · pagamento <code>{cb.mp_payment_id}</code>
+                        </div>
+                      ))}
+
                       {editandoForma === c.id && (
                         <div style={{ marginTop: 10 }}>
                           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Escolha a forma correta:</div>
