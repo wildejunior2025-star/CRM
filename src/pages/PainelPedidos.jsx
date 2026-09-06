@@ -3901,6 +3901,7 @@ function ModalMapaEntregador({ entregador, pos, paradas = [], empresa, agora, on
         pontos.push(d)
       }
       if (pontos.length > 1) map.fitBounds(pontos, { padding: [40, 40], maxZoom: 16 })
+      setTimeout(() => map.invalidateSize(), 250)
     })()
     return () => { morto = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null } }
   }, [pos, paradas, empresa, entregador])
@@ -3922,7 +3923,7 @@ function ModalMapaEntregador({ entregador, pos, paradas = [], empresa, agora, on
           Ponto de <strong>{pos ? quantoTempo(pos.atualizado_em, agora) : '—'}</strong>. O celular só manda a
           posição com o app aberto — a cada entrega confirmada o ponto anda.
         </div>
-        <div ref={divRef} style={{ width: '100%', height: 380, borderRadius: 10, overflow: 'hidden' }} />
+        <div ref={divRef} style={{ width: '100%', height: 'clamp(380px, 60vh, 640px)', borderRadius: 10, overflow: 'hidden' }} />
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-muted)' }}>
           <span>🛵 motoboy</span><span>🏪 loja</span><span>📦 entrega na rota ({paradas.length})</span>
           {semPino > 0 && <span style={{ color: '#f59e0b' }}>{semPino} sem ponto no mapa</span>}
@@ -3967,8 +3968,21 @@ function MapaDosEntregadores({ entregadores, posicoes, paradasDe, empresa, agora
       mapRef.current = map
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map)
       camadaRef.current = L.layerGroup().addTo(map)
+      // A altura agora depende da tela. Sem avisar o Leaflet quando ela muda,
+      // metade do mapa fica cinza (ele desenha os quadradinhos pro tamanho
+      // antigo). Um tempinho depois de montar também: o painel entra animado.
+      setTimeout(() => map.invalidateSize(), 250)
+      const aoRedimensionar = () => map.invalidateSize()
+      window.addEventListener('resize', aoRedimensionar)
+      map.__aoRedimensionar = aoRedimensionar
     })()
-    return () => { morto = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; camadaRef.current = null } }
+    return () => {
+      morto = true
+      if (mapRef.current) {
+        if (mapRef.current.__aoRedimensionar) window.removeEventListener('resize', mapRef.current.__aoRedimensionar)
+        mapRef.current.remove(); mapRef.current = null; camadaRef.current = null
+      }
+    }
   }, [empresa?.latitude, empresa?.longitude])
 
   // Redesenha os pinos quando as posições mudam.
@@ -4032,7 +4046,9 @@ function MapaDosEntregadores({ entregadores, posicoes, paradasDe, empresa, agora
           {comPosicao.length} de {entregadores.length} com posição
         </span>
       </div>
-      <div ref={divRef} style={{ width: '100%', height: 300, borderRadius: 10, overflow: 'hidden' }} />
+      {/* Alto o bastante pra caber a cidade: com 300px o mapa virava uma faixa e
+          dois motoboys em pontas opostas ficavam colados na borda. */}
+      <div ref={divRef} style={{ width: '100%', height: 'clamp(340px, 58vh, 620px)', borderRadius: 10, overflow: 'hidden' }} />
       {comPosicao.length === 0 && (
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.5 }}>
           Nenhum entregador mandando posição. Cada um precisa abrir o app e ligar a
