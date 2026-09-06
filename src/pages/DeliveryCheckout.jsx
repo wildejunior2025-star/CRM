@@ -298,6 +298,9 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
   // re-renderizar quando o cliente finalmente mexe no pino.
   const [mexeu, setMexeu] = useState(false)
   const marcarMexeu = () => { interagiu.current = true; setMexeu(true) }
+  // Enquanto o Leaflet não chega, mapObj guarda a string 'montando' pra segurar
+  // o lugar (ver o init). Quem for MEXER no mapa passa por aqui.
+  const mapaPronto = () => (mapObj.current && mapObj.current !== 'montando' ? mapObj.current : null)
   const [coord, setCoord] = useState(initial || (storeLat ? { lat: Number(storeLat), lng: Number(storeLng) } : null))
   const [locLoading, setLocLoading] = useState(false)
   const [geoLoading, setGeoLoading] = useState(false)
@@ -319,8 +322,13 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
   useEffect(() => {
     let cancelado = false
     async function init() {
+      // Marca o lugar ANTES do await: o import é assíncrono e duas passadas
+      // rápidas montariam dois mapas no mesmo div — dois tile layers, dois
+      // rodapés do Leaflet e as peças fora do lugar.
+      if (mapObj.current) return
+      mapObj.current = 'montando'
       const L = (await import('leaflet')).default
-      if (cancelado || !mapRef.current || mapObj.current) return
+      if (cancelado || !mapRef.current) { mapObj.current = null; return }
       const c = coord || { lat: Number(storeLat), lng: Number(storeLng) }
       // No mapa embutido do celular o arrasto do MAPA fica desligado: com ele
       // ligado o dedo que tentava rolar a página ficava preso arrastando o mapa.
@@ -345,6 +353,15 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
       pinRef.current.on('dragend', e => { marcarMexeu(); const { lat, lng } = e.target.getLatLng(); setCoord({ lat, lng }); setDefinido(true) })
       map.on('click', e => { marcarMexeu(); const { lat, lng } = e.latlng; pinRef.current.setLatLng([lat, lng]); setCoord({ lat, lng }); setDefinido(true) })
 
+      // O Leaflet corta os quadradinhos pro tamanho que o div TINHA na hora de
+      // montar. O modal abre com o tamanho ainda assentando, então sem isto o
+      // mapa nasce desenhado pra outra medida e vaza pra fora da janela.
+      const ajustar = () => { try { map.invalidateSize() } catch { /* já foi removido */ } }
+      setTimeout(ajustar, 60)
+      setTimeout(ajustar, 300)
+      window.addEventListener('resize', ajustar)
+      map.__ajustar = ajustar
+
       // Sem ponto ainda? Tenta achar pelo endereço digitado (CEP/rua) e já leva o
       // pino pra lá — assim ele nasce perto da casa, não parado na loja.
       // No embutido quem procura é o formulário (ele já geocodifica conforme a
@@ -363,7 +380,15 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
       }
     }
     init()
-    return () => { cancelado = true; if (mapObj.current) { mapObj.current.remove(); mapObj.current = null } }
+    return () => {
+      cancelado = true
+      const m = mapObj.current
+      mapObj.current = null
+      if (m && m !== 'montando') {
+        if (m.__ajustar) window.removeEventListener('resize', m.__ajustar)
+        m.remove()
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -377,7 +402,7 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
     setCoord({ lat: initial.lat, lng: initial.lng })
     setDefinido(true)
     if (pinRef.current) pinRef.current.setLatLng([initial.lat, initial.lng])
-    if (mapObj.current) mapObj.current.setView([initial.lat, initial.lng], 16)
+    if (mapaPronto()) mapaPronto().setView([initial.lat, initial.lng], 16)
   }, [embutido, initial?.lat, initial?.lng]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Embutido não tem botão "confirmar": cada arrasto já vale como escolha.
@@ -395,7 +420,7 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
         const c = { lat: pos.coords.latitude, lng: pos.coords.longitude }
         setCoord(c); setLocLoading(false); setDefinido(true)
         if (pinRef.current) pinRef.current.setLatLng([c.lat, c.lng])
-        if (mapObj.current) mapObj.current.setView([c.lat, c.lng], 17)
+        if (mapaPronto()) mapaPronto().setView([c.lat, c.lng], 17)
       },
       () => setLocLoading(false),
       { enableHighAccuracy: true, timeout: 10000 }
@@ -464,7 +489,11 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
           <strong style={{ fontSize: 15, color: 'var(--text,#fff)' }}>📍 Marque o ponto exato da entrega</strong>
           <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted,#9aa)', fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>✕</button>
         </div>
-        <div ref={mapRef} style={{ width: '100%', height: '58vh', minHeight: 300 }} />
+        {/* `flex` + `minHeight` pequenos: o modal tem teto de 92vh e embaixo do
+            mapa ainda vêm botão, distância e avisos. Com altura fixa de 58vh a
+            soma passava do teto, o `overflow: hidden` do modal cortava o mapa
+            no meio e o rodapé do Leaflet aparecia fora do lugar. */}
+        <div ref={mapRef} style={{ width: '100%', height: '58vh', minHeight: 220, flex: '1 1 auto' }} />
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border,#2a2a3a)', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
             <button type="button" onClick={usarMinhaLocalizacao} style={{ padding: '9px 14px', borderRadius: 10, border: '1.5px solid #7c3aed', background: 'rgba(124,58,237,.12)', color: '#a78bfa', fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}>
