@@ -10,6 +10,7 @@ import { rotuloComanda } from '../lib/comanda'
 import { useChamados } from '../hooks/useChamados'
 import { calcularTaxa } from '../lib/taxaServico'
 import { fwcFetch, explicaErroFwc } from '../lib/appFwc'
+import 'leaflet/dist/leaflet.css'   // mapa da posição do entregador (mig 0245)
 import Caixa from './Caixa'
 
 // "558498180774" -> "(84) 9818-0774"
@@ -3818,6 +3819,123 @@ const RIGHTBAR_BOTOES = [
   },
 ]
 
+// ── Onde o motoboy está (mig 0245) ──────────────────────────────────────────
+// A hora do ponto vem SEMPRE junto, e em cor: sem isso, um pino de 40 minutos
+// atrás parece motoboy parado na esquina, e a loja liga cobrando à toa.
+function quantoTempo(iso, agora) {
+  const min = Math.floor((agora - new Date(iso).getTime()) / 60000)
+  if (!Number.isFinite(min)) return null
+  if (min < 1) return 'agora'
+  if (min < 60) return `há ${min} min`
+  const h = Math.floor(min / 60)
+  return h < 24 ? `há ${h}h` : `há ${Math.floor(h / 24)}d`
+}
+
+function PosicaoDoEntregador({ pos, agora, onAbrir }) {
+  if (!pos) {
+    return (
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+        📍 sem posição — ele precisa abrir o app e permitir a localização
+      </div>
+    )
+  }
+  const min = Math.floor((agora - new Date(pos.atualizado_em).getTime()) / 60000)
+  // Verde = ponto fresco; amarelo = já tem idade; cinza = velho demais pra guiar
+  // decisão (o app ficou fechado).
+  const cor = min <= 5 ? '#16a34a' : min <= 20 ? '#f59e0b' : 'var(--text-muted)'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+      <span style={{ fontSize: 11.5, fontWeight: 700, color: cor }}>
+        📍 {quantoTempo(pos.atualizado_em, agora)}
+      </span>
+      <span
+        role="button" tabIndex={0}
+        onClick={ev => { ev.stopPropagation(); onAbrir() }}
+        onKeyDown={ev => { if (ev.key === 'Enter') { ev.stopPropagation(); onAbrir() } }}
+        style={{
+          fontSize: 11.5, fontWeight: 800, color: '#7c3aed', cursor: 'pointer',
+          border: '1px solid #7c3aed', borderRadius: 20, padding: '2px 10px',
+        }}>
+        Ver no mapa
+      </span>
+    </div>
+  )
+}
+
+// Mapa com o motoboy, a loja e as entregas que ele está levando. Mesmo Leaflet +
+// OpenStreetMap do resto do sistema (sem chave paga, sem cobrança por acesso).
+function ModalMapaEntregador({ entregador, pos, paradas = [], empresa, agora, onFechar }) {
+  const divRef = useRef(null)
+  const mapRef = useRef(null)
+  useEffect(() => {
+    if (!divRef.current || mapRef.current || !pos) return
+    let morto = false
+    ;(async () => {
+      const L = (await import('leaflet')).default
+      if (morto || !divRef.current || mapRef.current) return
+      const map = L.map(divRef.current, { zoomControl: true, scrollWheelZoom: false }).setView([Number(pos.lat), Number(pos.lng)], 15)
+      mapRef.current = map
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map)
+
+      const bolha = (emoji, cor) => L.divIcon({
+        html: `<div style="width:34px;height:34px;background:${cor};border-radius:50%;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:17px;">${emoji}</div>`,
+        className: '', iconSize: [34, 34], iconAnchor: [17, 17],
+      })
+      const pontos = []
+      const moto = [Number(pos.lat), Number(pos.lng)]
+      L.marker(moto, { icon: bolha('🛵', '#7c3aed') }).addTo(map).bindPopup(`${entregador?.nome || 'Entregador'} — ${quantoTempo(pos.atualizado_em, Date.now())}`)
+      pontos.push(moto)
+
+      if (empresa?.latitude && empresa?.longitude) {
+        const loja = [Number(empresa.latitude), Number(empresa.longitude)]
+        L.marker(loja, { icon: bolha('🏪', '#ef4444'), interactive: false }).addTo(map)
+        pontos.push(loja)
+      }
+      // Só as entregas que TÊM ponto salvo: pedido sem pino não vira marcador no
+      // meio do nada.
+      for (const p of paradas) {
+        if (p.endereco_lat == null || p.endereco_lng == null) continue
+        const d = [Number(p.endereco_lat), Number(p.endereco_lng)]
+        L.marker(d, { icon: bolha('📦', '#16a34a') }).addTo(map)
+          .bindPopup(`#${p.numero_pedido ?? ''} — ${p.cliente_nome || 'Cliente'}`)
+        pontos.push(d)
+      }
+      if (pontos.length > 1) map.fitBounds(pontos, { padding: [40, 40], maxZoom: 16 })
+    })()
+    return () => { morto = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null } }
+  }, [pos, paradas, empresa, entregador])
+
+  const semPino = paradas.filter(p => p.endereco_lat == null || p.endereco_lng == null).length
+  return (
+    <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 300 }}>
+      <div onClick={ev => ev.stopPropagation()} style={{
+        width: 'min(640px, 96vw)', background: 'var(--surface, #16161f)',
+        border: '1px solid var(--border, #2a2a3a)', borderRadius: 14, padding: 16,
+        display: 'flex', flexDirection: 'column', gap: 10,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <strong style={{ fontSize: 15.5, color: 'var(--text)' }}>🛵 {entregador?.nome || 'Entregador'}</strong>
+          <button type="button" onClick={onFechar} aria-label="Fechar"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 24, lineHeight: 1 }}>×</button>
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+          Ponto de <strong>{pos ? quantoTempo(pos.atualizado_em, agora) : '—'}</strong>. O celular só manda a
+          posição com o app aberto — a cada entrega confirmada o ponto anda.
+        </div>
+        <div ref={divRef} style={{ width: '100%', height: 380, borderRadius: 10, overflow: 'hidden' }} />
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-muted)' }}>
+          <span>🛵 motoboy</span><span>🏪 loja</span><span>📦 entrega na rota ({paradas.length})</span>
+          {semPino > 0 && <span style={{ color: '#f59e0b' }}>{semPino} sem ponto no mapa</span>}
+        </div>
+        <a href={`https://www.google.com/maps?q=${pos?.lat},${pos?.lng}`} target="_blank" rel="noopener noreferrer"
+          style={{ fontSize: 12.5, color: '#60a5fa', textDecoration: 'underline' }}>
+          abrir no Google Maps
+        </a>
+      </div>
+    </div>
+  )
+}
+
 // Timer compacto para os cards "a aceitar"
 function MiniTimer({ createdAt, aguardandoDesde, onExpirado }) {
   const [restante, setRestante] = useState(() => getTempoRestante(createdAt, aguardandoDesde))
@@ -5738,6 +5856,31 @@ export default function PainelPedidos() {
   useEffect(() => {
     if (painelDireito === 'entregadores') { setEntregadorSel(null); carregarEntregasConcluidas() }
   }, [painelDireito, carregarEntregasConcluidas])
+
+  // ── Onde os motoboys estão agora (mig 0245) ─────────────────
+  // O app do entregador grava a posição enquanto está aberto — e ele abre a
+  // cada confirmação de entrega. Aqui a gente só lê, e SEMPRE mostra de quando
+  // é o ponto: pino sem hora vira motoboy parado na cabeça de quem olha.
+  const [posEntregadores, setPosEntregadores] = useState({})
+  const [posAgora, setPosAgora] = useState(() => Date.now())
+  useEffect(() => {
+    if (painelDireito !== 'entregadores' || !empresa?.id) return
+    let vivo = true
+    async function ler() {
+      const { data } = await supabase.from('entregador_posicoes')
+        .select('entregador_id, lat, lng, precisao_m, atualizado_em')
+        .eq('empresa_id', empresa.id)
+      if (!vivo) return
+      setPosEntregadores(Object.fromEntries((data ?? []).map(p => [p.entregador_id, p])))
+      // O relógio anda junto com a leitura: assim o "há X min" é calculado com
+      // um valor que veio do estado, e não de um Date.now() no meio do render.
+      setPosAgora(Date.now())
+    }
+    ler()
+    const id = setInterval(ler, 20_000)
+    return () => { vivo = false; clearInterval(id) }
+  }, [painelDireito, empresa?.id])
+  const [mapaEntregador, setMapaEntregador] = useState(null) // { entregador, pos, paradas }
 
   // ── Concluídos do dia (vendas finalizadas hoje) ─────────────
   const carregarConcluidosHoje = useCallback(async () => {
@@ -7732,6 +7875,18 @@ export default function PainelPedidos() {
         />
       )}
 
+      {/* Onde o motoboy está agora (mig 0245) */}
+      {mapaEntregador && (
+        <ModalMapaEntregador
+          entregador={mapaEntregador.entregador}
+          pos={mapaEntregador.pos}
+          paradas={mapaEntregador.paradas}
+          empresa={empresa}
+          agora={posAgora}
+          onFechar={() => setMapaEntregador(null)}
+        />
+      )}
+
       {/* Complementos do item montado na conversa (mesma tela do balcão) */}
       {produtoCompChat && (
         <ModalComplementos
@@ -8550,6 +8705,15 @@ export default function PainelPedidos() {
                     <button key={e.id} type="button" onClick={() => setEntregadorSel(e.id)}
                       style={{ textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border, #2a2a3a)', borderRadius: 12, padding: '12px 14px', background: 'transparent' }}>
                       <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>🛵 {e.nome || 'Entregador'}</div>
+                      <PosicaoDoEntregador
+                        pos={posEntregadores[e.id]}
+                        agora={posAgora}
+                        onAbrir={() => setMapaEntregador({
+                          entregador: e,
+                          pos: posEntregadores[e.id],
+                          paradas: emRota(e.id),
+                        })}
+                      />
                       <div style={{ display: 'flex', gap: 6 }}>
                         <span style={{ flex: 1, textAlign: 'center', fontSize: 12, padding: '4px 0', borderRadius: 8, background: 'rgba(124,58,237,.15)', color: '#7c3aed', fontWeight: 700 }}>Rota {r}</span>
                         <span style={{ flex: 1, textAlign: 'center', fontSize: 12, padding: '4px 0', borderRadius: 8, background: 'rgba(34,197,94,.14)', color: '#16a34a', fontWeight: 700 }}>Concl. {c}</span>

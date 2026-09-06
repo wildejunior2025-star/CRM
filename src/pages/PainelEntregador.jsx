@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase, fetchAll } from '../lib/supabaseClient'
@@ -818,15 +818,47 @@ export default function PainelEntregador() {
   // GPS do motoqueiro — só pra usar como PARTIDA da rota. Pede uma vez ao abrir;
   // se ele negar, fica null e a rota parte da loja (ver origemRota).
   const [minhaPos, setMinhaPos] = useState(null)
+  const posUlt = useRef(0)          // quando a última posição foi pro banco
+  // A LOJA VÊ ONDE ELE ESTÁ (mig 0245).
+  //
+  // Navegador não rastreia com a tela apagada — mas o motoqueiro abre o app a
+  // cada confirmação de entrega, e é aí que o ponto anda. No painel da loja o
+  // pino vem sempre com "atualizado há X min" do lado, pra ninguém confundir
+  // ponto velho com motoboy parado.
+  //
+  // Uma linha por entregador, sem histórico: onde ele está agora resolve o
+  // "cadê meu pedido"; por onde ele passou é vigília, não é operação.
+  async function enviarPosicao(pos) {
+    if (!empresa?.id || !user?.id) return
+    // No máximo uma gravação a cada 20s: o watchPosition dispara a cada passo
+    // do GPS, e isso viraria centenas de escritas por corrida.
+    const agora = Date.now()
+    if (agora - posUlt.current < 20000) return
+    posUlt.current = agora
+    try {
+      await supabase.from('entregador_posicoes').upsert({
+        entregador_id: user.id,
+        empresa_id:    empresa.id,
+        lat:           Number(pos.coords.latitude.toFixed(6)),
+        lng:           Number(pos.coords.longitude.toFixed(6)),
+        precisao_m:    pos.coords.accuracy != null ? Math.round(pos.coords.accuracy) : null,
+        atualizado_em: new Date().toISOString(),
+      }, { onConflict: 'entregador_id' })
+    } catch { /* posição é bônus: nada na entrega pode parar por causa dela */ }
+  }
+
   useEffect(() => {
     if (!navigator.geolocation) return
     const id = navigator.geolocation.watchPosition(
-      pos => setMinhaPos({ lat: pos.coords.latitude.toFixed(6), lng: pos.coords.longitude.toFixed(6) }),
+      pos => {
+        setMinhaPos({ lat: pos.coords.latitude.toFixed(6), lng: pos.coords.longitude.toFixed(6) })
+        enviarPosicao(pos)
+      },
       () => setMinhaPos(null),
       { enableHighAccuracy: true, maximumAge: 60000, timeout: 15000 }
     )
     return () => navigator.geolocation.clearWatch(id)
-  }, [])
+  }, [empresa?.id, user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Bebidas da loja (pra alertar o motoqueiro): carrega 1x os produtos das
   // categorias de bebida. Se não carregar (RLS), o fallback por palavra-chave cobre.
