@@ -1088,144 +1088,6 @@ async function reverseGeocode(lat, lng) {
   }
 }
 
-// LOCALIZAÇÃO DO WHATSAPP → CADASTRO (mig 0238).
-//
-// O cliente mandou o pininho. O mapa sabe dizer a rua, o bairro, a cidade e
-// muitas vezes o CEP — só o NÚMERO da casa ele não sabe, porque GPS devolve
-// ponto, não número. Então a tela preenche o que dá e pergunta só o que falta.
-//
-// O ponto vai pro cadastro marcado como do CLIENTE: é o único pino em que o
-// cálculo de taxa confia e que o buscador de mapa não pode sobrescrever depois.
-function ModalLocalizacaoCliente({ empresa, telefone, nome, lat, lng, onFechar, onSalvo }) {
-  const [f, setF] = useState({ rua: '', numero: '', bairro: '', cidade: '', estado: '', cep: '' })
-  const [lendo, setLendo] = useState(true)
-  const [salvando, setSalvando] = useState(false)
-  const [erro, setErro] = useState(null)
-
-  useEffect(() => {
-    let vivo = true
-    ;(async () => {
-      // O que a loja já sabe deste cliente. O GPS não devolve número de casa —
-      // se ele já pediu antes, o número está aqui e ninguém precisa digitar de
-      // novo (nem perguntar de novo ao cliente).
-      const chave = String(telefone ?? '').replace(/[^0-9]/g, '').slice(-8)
-      let jaTem = null
-      if (empresa?.id && chave.length >= 8) {
-        const { data } = await supabase.from('clientes')
-          .select('endereco, numero, complemento, bairro, cidade, estado, cep')
-          .eq('empresa_id', empresa.id).ilike('telefone', `%${chave}`)
-          .order('created_at', { ascending: false }).limit(1).maybeSingle()
-        jaTem = data ?? null
-      }
-      const a = await reverseGeocode(lat, lng)
-      if (!vivo) return
-      if (!a && !jaTem) {
-        setErro('O mapa não soube dizer o endereço deste ponto. Escreva à mão — o ponto continua valendo.')
-      }
-      setF(p => ({
-        ...p,
-        // Rua/bairro/cidade: o mapa manda, porque quem escolheu o ponto foi o
-        // cliente e é o ponto que diz onde ele está de verdade.
-        rua:    a?.rua    || jaTem?.endereco || p.rua,
-        bairro: a?.bairro || jaTem?.bairro   || p.bairro,
-        cidade: a?.cidade || jaTem?.cidade   || p.cidade,
-        estado: a?.estado || jaTem?.estado   || p.estado,
-        cep:    a?.cep    || (jaTem?.cep ?? '').replace(/[^0-9]/g, '') || p.cep,
-        // Número: o cadastro manda, porque o mapa raramente sabe.
-        numero: jaTem?.numero || a?.numero || p.numero,
-      }))
-      setLendo(false)
-    })()
-    return () => { vivo = false }
-  }, [lat, lng, telefone, empresa?.id])
-
-  async function salvar() {
-    setSalvando(true); setErro(null)
-    try {
-      const { data: cid, error } = await supabase.rpc('upsert_cliente_loja', {
-        p_empresa_id: empresa.id,
-        p_nome: (nome || '').trim() || 'Cliente',
-        p_telefone: String(telefone || '').replace(/\D/g, ''),
-        p_email: '', p_cep: f.cep, p_endereco: f.rua, p_numero: f.numero,
-        p_complemento: '', p_bairro: f.bairro, p_cidade: f.cidade, p_estado: f.estado,
-      })
-      if (error || !cid) { setErro(error?.message || 'Não deu pra salvar o cliente.'); return }
-
-      const { error: errPin } = await supabase.from('clientes').update({
-        endereco_lat: lat,
-        endereco_lng: lng,
-        endereco_pin_manual: true,
-        endereco_pin_origem: 'cliente',
-        endereco_pin_ref: chaveEnderecoJS({ rua: f.rua, numero: f.numero, cidade: f.cidade }),
-        endereco_pin_em: new Date().toISOString(),
-      }).eq('id', cid)
-      if (errPin) { setErro(errPin.message); return }
-
-      onSalvo?.()
-      onFechar()
-    } finally {
-      setSalvando(false)
-    }
-  }
-
-  const campo = (k, ph, extra = {}) => (
-    <input value={f[k]} onChange={e => setF(p => ({ ...p, [k]: e.target.value }))} placeholder={ph}
-      style={{
-        padding: '9px 11px', borderRadius: 8, border: '1px solid var(--border, #2a2a3a)',
-        background: 'var(--bg, #0f0f1a)', color: 'var(--text)', fontSize: 13.5, width: '100%',
-        ...extra,
-      }} />
-  )
-
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(0,0,0,.6)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
-    }} onClick={onFechar}>
-      <div onClick={e => e.stopPropagation()} style={{
-        width: '100%', maxWidth: 420, background: 'var(--card-bg, var(--bg, #14141f))',
-        border: '1px solid var(--border, #2a2a3a)', borderRadius: 14, padding: 18,
-        display: 'flex', flexDirection: 'column', gap: 9,
-      }}>
-        <strong style={{ fontSize: 15.5, color: 'var(--text)' }}>📍 Endereço pela localização</strong>
-        <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-          O ponto é exato — veio do celular do cliente. O que o mapa souber do
-          endereço já vem preenchido, e o <strong>número</strong> vem do cadastro
-          quando ele já pediu antes. Se estiver em branco, o GPS não traz — pergunte
-          pra ele.
-        </p>
-        {lendo ? (
-          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '10px 0' }}>Lendo o endereço no mapa…</div>
-        ) : (
-          <>
-            {campo('rua', 'Rua')}
-            <div style={{ display: 'flex', gap: 8 }}>
-              {campo('numero', 'Nº', { maxWidth: 110 })}
-              {campo('bairro', 'Bairro')}
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {campo('cidade', 'Cidade')}
-              {campo('cep', 'CEP', { maxWidth: 130 })}
-            </div>
-          </>
-        )}
-        {erro && <div style={{ fontSize: 12, color: 'var(--danger,#ef4444)', fontWeight: 600 }}>{erro}</div>}
-        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-          <button type="button" onClick={onFechar} style={{
-            padding: '9px 14px', borderRadius: 8, border: '1px solid var(--border, #2a2a3a)',
-            background: 'transparent', color: 'var(--text)', fontSize: 13, cursor: 'pointer',
-          }}>Cancelar</button>
-          <button type="button" onClick={salvar} disabled={salvando || lendo} style={{
-            flex: 1, padding: '9px 14px', borderRadius: 8, border: 'none',
-            background: '#16a34a', color: '#fff', fontWeight: 700, fontSize: 13.5,
-            cursor: salvando ? 'wait' : 'pointer',
-          }}>{salvando ? 'Salvando…' : 'Salvar endereço e ponto'}</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── Busca de rua pelo nome ───────────────────────────────────────────────────
 // O CEP quase ninguém sabe de cabeça; o nome da rua, todo mundo. O cliente
 // fala "Rua Prefeita Eliane Barros" no áudio e quem atende escolhe da lista —
@@ -4610,7 +4472,7 @@ function MidiaDaMensagem({ path, tipo }) {
   )
 }
 
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, cadastroVersao }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, cadastroVersao, pinChat }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   useEffect(() => {
@@ -4793,6 +4655,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
             onFinalizar={onFinalizarPedido}
             salvando={salvandoPedido}
             cadastroVersao={cadastroVersao}
+            pinChat={pinChat}
           />
         </>
       )}
@@ -4972,8 +4835,9 @@ function precoSacola(item, qtd) {
   const base = Number(item.precoBase) || 0
   const p = precoPorQuantidade(base, item.faixas_preco, qtd, item.preco_promocional)
   // A faixa só vale se for MENOR: preço combinado à parte não sobe por causa
-  // do atacado.
-  return Math.min(p, base)
+  // do atacado. O adicional dos complementos entra por fora — a faixa é do
+  // produto, não do que foi montado em cima dele.
+  return Math.min(p, base) + Number(item.adicionalUnit || 0)
 }
 
 // Sacola montada pelo ATENDENTE, dentro da conversa.
@@ -5003,6 +4867,14 @@ function SacolaNoChat({ itens, onQtd, onQtdDireta, onRemover, onEnviar, enviando
             <div style={{ fontSize: g ? 16 : 12.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {i.nome}{!i.produto_id && <span style={{ fontSize: 10, color: '#f59e0b' }}> · fora do cardápio</span>}
             </div>
+            {/* O que foi montado dentro do item (quentinha, açaí). Fica à
+                vista porque é isso que quem atende confere em voz alta com o
+                cliente — e é o que a cozinha vai ler no cupom. */}
+            {Array.isArray(i.complementos) && i.complementos.length > 0 && (
+              <div style={{ fontSize: g ? 12.5 : 10.5, color: '#22c55e', lineHeight: 1.45 }}>
+                {i.complementos.map(c => `${(c.qtd ?? 1) > 1 ? `${c.qtd}× ` : ''}${c.nome}`).join(' · ')}
+              </div>
+            )}
             <div style={{ fontSize: g ? 14 : 11, color: 'var(--text-muted)' }}>
               R$ {Number(i.preco).toFixed(2).replace('.', ',')} · subtotal R$ {(Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')}
               {/* Por que este preço e não o da vitrine: o atendente confere
@@ -5069,7 +4941,7 @@ const FORMAS_PGTO = [
   ['cartao',      '💳 Cartão'],
 ]
 
-function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar, salvando, cadastroVersao = 0 }) {
+function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar, salvando, cadastroVersao = 0, pinChat = null }) {
   const g = useTelaGrande()
   const [tipo, setTipo] = useState('entrega')
   const [nome, setNome] = useState(nomeThread || '')
@@ -5089,6 +4961,12 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
   // Pino que o cliente apontou (mandou a localização, ou arrastou no link).
   // Vai junto no pedido: é ele que o app do entregador abre.
   const [pinCadastro, setPinCadastro] = useState(null)  // { lat, lng, ref }
+  // Pino que o cliente mandou NESTA conversa, agora. É diferente do de cima:
+  // aquele é histórico e só vale se o endereço bater; este é o ponto que ele
+  // acabou de apontar, então manda mesmo que quem atende corrija a rua ou o
+  // número depois.
+  const [pinDoChat, setPinDoChat] = useState(null)      // { lat, lng }
+  const pinAplicado = useRef(0)
   const [ruaSug, setRuaSug] = useState([])
   const [ruaSugAberta, setRuaSugAberta] = useState(false)
 
@@ -5139,6 +5017,27 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
     // formulário relê o cadastro e se preenche sozinho, em vez de deixar quem
     // atende digitando de novo um endereço que já está salvo.
   }, [empresa?.id, telefone, cadastroVersao])
+
+  // A localização que o cliente mandou no chat cai DIRETO nos campos daqui.
+  // Antes isso abria um popup que só salvava no cadastro — quem atendia via o
+  // endereço numa janela e tinha que digitar tudo de novo na lateral pra
+  // fechar o pedido. O mapa manda em rua/bairro/cidade/CEP (foi o cliente que
+  // apontou o ponto); o número fica com o que já tinha, porque GPS devolve
+  // ponto e não número de casa.
+  useEffect(() => {
+    if (!pinChat?.versao || pinChat.versao === pinAplicado.current) return
+    pinAplicado.current = pinChat.versao
+    const a = pinChat.endereco ?? {}
+    setTipo('entrega')
+    if (a.rua) setRua(a.rua)
+    if (a.bairro) setBairro(a.bairro)
+    if (a.cidade) setCidade(a.cidade)
+    if (a.cep) setCep(a.cep.length === 8 ? `${a.cep.slice(0, 5)}-${a.cep.slice(5)}` : a.cep)
+    if (a.numero) setNumero(n => n || a.numero)
+    setPinDoChat({ lat: pinChat.lat, lng: pinChat.lng })
+    setRuaSug([]); setRuaSugAberta(false)
+    setMsgTaxa(null)   // endereço novo, taxa velha não vale mais
+  }, [pinChat])
 
   // CEP preenche rua/bairro/cidade (ViaCEP), igual à tela de Vender.
   async function buscarCep(v) {
@@ -5317,12 +5216,15 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
         onClick={() => onFinalizar({
           tipo, nome, cep, rua, numero, bairro, cidade, taxa: taxaNum,
           pagamento, troco, obs, subtotal, total, cadastro,
-          // Só manda o pino se ele for DESTE endereço: o cliente que mudou de
+          // O pino da conversa vem na frente: é o ponto que o cliente apontou
+          // agora, e vale mesmo que quem atende tenha corrigido a rua depois.
+          // O do cadastro só vale se for DESTE endereço: o cliente que mudou de
           // casa tem pino velho guardado, e ele levaria o motoboy pro lugar
           // errado com o endereço certo escrito no papel.
-          pino: pinCadastro && chaveEnderecoJS({ rua, numero, cidade }) === pinCadastro.ref
+          pino: pinDoChat ?? (pinCadastro && chaveEnderecoJS({ rua, numero, cidade }) === pinCadastro.ref
             ? { lat: pinCadastro.lat, lng: pinCadastro.lng }
-            : null,
+            : null),
+          pinoDoChat: !!pinDoChat,
         })}
         style={{
           width: '100%', padding: g ? '14px 12px' : '10px', borderRadius: 9, border: 'none',
@@ -5955,10 +5857,65 @@ export default function PainelPedidos() {
   // nome e preço EXATOS do cadastro. O atendente revisa e manda — e é esse nome
   // que o robô lê depois pra reconhecer o produto certo (ele passou a olhar
   // também o que a pessoa da loja escreveu).
-  function escolherProdutoNoChat(p) {
+  // Produto de complemento (quentinha, açaí) clicado na busca da conversa:
+  // abre o mesmo seletor da tela de Vender. Antes ele caía direto na sacola
+  // como "Quentinha" pelada — a cozinha recebia o pedido sem saber o que ia
+  // dentro, e quem atendia tinha que escrever tudo na observação.
+  async function escolherProdutoNoChat(p) {
+    if (!empresa?.id) return
+    try {
+      const { produtos, compMap } = await carregarCatalogo(empresa.id)
+      const grupos = compMap[p.id]
+      if (grupos?.length) {
+        // O catálogo tem faixa de preço e promoção; a busca do chat só devolve
+        // id/nome/preço. Pega o produto cheio pra montar com o preço certo.
+        const cheio = (produtos ?? []).find(x => String(x.id) === String(p.id))
+        setSacolaLateral(true)
+        setProdutoCompChat({ ...(cheio ?? { ...p, preco_venda: p.preco }), grupos })
+        return
+      }
+    } catch { /* catálogo fora do ar: segue pelo caminho simples */ }
+    addSimplesNaSacolaChat(p)
+  }
+
+  // Monta a linha com o que foi escolhido no seletor. Mesma escolha soma; no
+  // atacado (modo_quantidade) a quantidade é a soma dos sabores.
+  function adicionarComComplementosNoChat(prod, selecoes, precoUnit, qtdItem, adicionalUnit = 0) {
+    const sig = `${prod.id}::${selecoes.map(s => `${s.opcaoId}x${s.qtd ?? 1}`).sort().join(',')}`
+    const atacado = selecoes.some(s => s.absoluto)
+    const complementos = selecoes.map(s => ({
+      nome: s.nome, qtd: s.qtd ?? 1, grupo: s.grupo, preco: s.preco, absoluto: !!s.absoluto,
+    }))
+    setSacolaChat(prev => {
+      const i = prev.findIndex(x => x.sig === sig)
+      if (i >= 0 && !atacado) {
+        const copia = [...prev]
+        const qtd = copia[i].qtd + 1
+        copia[i] = { ...copia[i], qtd, preco: precoSacola(copia[i], qtd) }
+        return copia
+      }
+      const qtd = atacado ? Number(qtdItem || 1) : 1
+      const item = {
+        sig, produto_id: prod.id, nome: prod.nome, qtd,
+        precoBase: Number(prod.preco_venda ?? prod.preco) || 0,
+        faixas_preco: prod.faixas_preco ?? [],
+        preco_promocional: prod.preco_promocional ?? null,
+        adicionalUnit: Number(adicionalUnit) || 0,
+        complementos,
+      }
+      // `precoUnit` é o que o seletor mostrou; a partir daí a linha recalcula
+      // sozinha quando a quantidade muda.
+      return [...prev, { ...item, preco: precoSacola(item, qtd) || Number(precoUnit) || 0 }]
+    })
+    setProdutoCompChat(null)
+  }
+
+  function addSimplesNaSacolaChat(p) {
     setSacolaLateral(true)
     setSacolaChat(prev => {
-      const i = prev.findIndex(x => x.produto_id === p.id)
+      // `!x.sig`: a linha montada com complementos é outra coisa, mesmo sendo o
+      // mesmo produto — somar nela apagaria o que o cliente escolheu.
+      const i = prev.findIndex(x => x.produto_id === p.id && !x.sig)
       if (i >= 0) {
         const copia = [...prev]
         const qtd = copia[i].qtd + 1
@@ -6000,6 +5957,19 @@ export default function PainelPedidos() {
    * confirmado), então imprime, aparece pro entregador e conta no caixa do
    * mesmo jeito — o que muda é que ninguém digitou o pedido duas vezes.
    */
+  // Clicou em "Usar como endereço do cliente" na bolha da localização: lê o
+  // endereço no mapa e joga direto nos campos de fechar o pedido, ao lado. O
+  // ponto fica guardado pra ir junto no pedido e virar o pino do cadastro na
+  // hora de finalizar — quem atende não digita nada que o cliente já mandou.
+  async function usarLocalizacaoNoPedido({ lat, lng }) {
+    setChatAviso({ ok: true, txt: 'Lendo o endereço no mapa…' })
+    const a = await reverseGeocode(lat, lng)
+    setPinChat({ lat, lng, endereco: a ?? {}, versao: Date.now() })
+    setChatAviso(a?.rua
+      ? { ok: true, txt: '📍 Endereço preenchido ao lado — confira o número da casa.' }
+      : { ok: false, txt: 'O mapa não soube dizer a rua deste ponto. Escreva à mão — o ponto continua valendo.' })
+  }
+
   async function finalizarPedidoDoChat(d) {
     if (!sacolaChat.length || !chatAberto || !empresa?.id) return
     const sep = chatAberto.indexOf('|')
@@ -6033,6 +6003,22 @@ export default function PainelPedidos() {
       } catch { /* cadastro falhou: o pedido não pode morrer por isso */ }
     }
 
+    // Ponto que o cliente mandou na conversa vira o pino do cadastro. É aqui e
+    // não no clique porque só agora o endereço está conferido: o número da casa
+    // quem põe é quem atende. Sem isto o próximo pedido dele voltava sem pino.
+    if (d.pinoDoChat && d.pino && clienteId) {
+      try {
+        await supabase.from('clientes').update({
+          endereco_lat: d.pino.lat,
+          endereco_lng: d.pino.lng,
+          endereco_pin_manual: true,
+          endereco_pin_origem: 'cliente',
+          endereco_pin_ref: chaveEnderecoJS({ rua: d.rua, numero: d.numero, cidade: d.cidade }),
+          endereco_pin_em: new Date().toISOString(),
+        }).eq('id', clienteId)
+      } catch { /* o pino é bônus: o pedido já está fechado */ }
+    }
+
     const payload = {
       empresa_id: empresa.id,
       cliente_id: clienteId,
@@ -6044,7 +6030,8 @@ export default function PainelPedidos() {
       itens: sacolaChat.map(i => ({
         produto_id: i.produto_id ?? null, nome: i.nome, quantidade: i.qtd,
         preco_unitario: Number(i.preco), subtotal: Number(i.preco) * Number(i.qtd),
-        complementos: [],
+        // O que foi montado vai junto: é o que a cozinha lê no cupom.
+        complementos: Array.isArray(i.complementos) ? i.complementos : [],
       })),
       subtotal: d.subtotal,
       taxa_entrega: d.tipo === 'entrega' ? d.taxa : 0,
@@ -6084,7 +6071,12 @@ export default function PainelPedidos() {
 
     // O cliente precisa ver o número do pedido — é por ele que ele cobra depois.
     const linhas = sacolaChat
-      .map(i => `• ${i.nome} x${i.qtd} — R$ ${(Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')}`)
+      .map(i => {
+        const comps = (i.complementos ?? []).map(c => `${(c.qtd ?? 1) > 1 ? `${c.qtd}x ` : ''}${c.nome}`).join(', ')
+        return `• ${i.nome} x${i.qtd} — R$ ${(Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')}`
+          + (comps ? `
+   (${comps})` : '')
+      })
       .join('\n')
     const labelPgto = ({ dinheiro: 'dinheiro', pix_entrega: 'PIX', credito: 'cartão de crédito', debito: 'cartão de débito', cartao: 'cartão' })[d.pagamento] ?? d.pagamento
     const texto =
@@ -6132,7 +6124,12 @@ export default function PainelPedidos() {
 
     const total = sacolaChat.reduce((s, i) => s + Number(i.preco) * Number(i.qtd), 0)
     const linhas = sacolaChat
-      .map(i => `• ${i.nome} x${i.qtd} — R$ ${(Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')}`)
+      .map(i => {
+        const comps = (i.complementos ?? []).map(c => `${(c.qtd ?? 1) > 1 ? `${c.qtd}x ` : ''}${c.nome}`).join(', ')
+        return `• ${i.nome} x${i.qtd} — R$ ${(Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')}`
+          + (comps ? `
+   (${comps})` : '')
+      })
       .join('\n')
     const texto = `Montei sua sacola aqui 🛒\n\n${linhas}\n\n*Total dos itens: R$ ${total.toFixed(2).replace('.', ',')}*\n\nÉ só me confirmar o endereço e a forma de pagamento que eu fecho pra você. 😉`
 
@@ -6140,7 +6137,12 @@ export default function PainelPedidos() {
     const { error: errCarrinho } = await supabase.from('whatsapp_carrinho')
       .upsert({
         empresa_id: empresa.id, phone: tel,
-        items: sacolaChat.map(i => ({ produto_id: i.produto_id, nome: i.nome, qtd: i.qtd, preco: Number(i.preco) })),
+        items: sacolaChat.map(i => ({
+          produto_id: i.produto_id, nome: i.nome, qtd: i.qtd, preco: Number(i.preco),
+          // Mesmo formato do `atualizar_carrinho` do robô: sem isto ele fecharia
+          // a quentinha sem saber o que ia dentro.
+          complementos: (i.complementos ?? []).map(c => ({ nome: c.nome, qtd: c.qtd ?? 1 })),
+        })),
         updated_at: new Date().toISOString(),
       }, { onConflict: 'empresa_id,phone' })
 
@@ -6224,12 +6226,13 @@ export default function PainelPedidos() {
   }
 
   // Localização que o cliente mandou → vira o endereço + o ponto dele.
-  const [locUsar, setLocUsar] = useState(null) // { lat, lng, telefone, nome }
+  const [produtoCompChat, setProdutoCompChat] = useState(null) // quentinha/açaí sendo montado na conversa
+  const [pinChat, setPinChat] = useState(null) // { lat, lng, endereco, versao } — a localização do chat virando endereço
   // Sobe de 1 quando o cadastro do cliente muda por aqui (a localização virou
   // endereço). O "Fechar o pedido" lê o cadastro uma vez, na abertura — sem
   // este aviso ele continuava mostrando "Falta o endereço da entrega" com o
   // endereço já salvo do lado, e não dava pra fechar o pedido.
-  const [cadastroVersao, setCadastroVersao] = useState(0)
+  const [cadastroVersao] = useState(0)
 
   // Manda um texto pela conversa aberta. O "Enviar" usa o que está digitado;
   // outros botões (pedir localização, por exemplo) mandam texto pronto — e
@@ -7715,19 +7718,12 @@ export default function PainelPedidos() {
         />
       )}
 
-      {/* Localização que o cliente mandou no chat → endereço + ponto dele */}
-      {locUsar && (
-        <ModalLocalizacaoCliente
-          empresa={empresa}
-          telefone={locUsar.telefone}
-          nome={locUsar.nome}
-          lat={locUsar.lat}
-          lng={locUsar.lng}
-          onFechar={() => setLocUsar(null)}
-          onSalvo={() => {
-            setCadastroVersao(v => v + 1)
-            setChatAviso({ ok: true, txt: '✓ Endereço e ponto salvos — já preenchi no pedido.' })
-          }}
+      {/* Complementos do item montado na conversa (mesma tela do balcão) */}
+      {produtoCompChat && (
+        <ModalComplementos
+          produto={produtoCompChat}
+          onFechar={() => setProdutoCompChat(null)}
+          onConfirmar={adicionarComComplementosNoChat}
         />
       )}
 
@@ -7929,12 +7925,9 @@ export default function PainelPedidos() {
                 enviandoSacola={enviandoSacola}
                 onAbrirSacola={() => setSacolaLateral(true)}
                 onPedirLocalizacao={pedirLocalizacaoNoChat}
-                onUsarLocalizacao={({ lat, lng }) => setLocUsar({
-                  lat, lng,
-                  telefone: threadAberta.cliente_ref,
-                  nome: threadAberta.cliente_nome,
-                })}
+                onUsarLocalizacao={usarLocalizacaoNoPedido}
                 cadastroVersao={cadastroVersao}
+                pinChat={pinChat}
               />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -8612,6 +8605,7 @@ export default function PainelPedidos() {
                 onFinalizar={finalizarPedidoDoChat}
                 salvando={salvandoPedidoChat}
                 cadastroVersao={cadastroVersao}
+                pinChat={pinChat}
               />
             </>
           )}
