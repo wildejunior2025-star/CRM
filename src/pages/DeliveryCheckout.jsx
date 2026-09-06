@@ -397,7 +397,12 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
   // devolve a cada linha do endereço. Depois que a pessoa arrasta, o mapa é
   // dela: nada de buscador reescrevendo o acerto feito à mão.
   useEffect(() => {
-    if (!embutido || !initial || interagiu.current) return
+    // Sem `interagiu` aqui de propósito: quem decide se o buscador pode mexer no
+    // pino é o FORMULÁRIO (ele só manda ponto novo quando o pino não é manual).
+    // Com a trava dupla, confirmar no mapa grande mudava o ponto de verdade e o
+    // mapa pequeno continuava mostrando a distância antiga — duas telas, dois
+    // números, e o cliente sem saber qual valia.
+    if (!embutido || !initial) return
     if (coord && Math.abs(coord.lat - initial.lat) < 1e-7 && Math.abs(coord.lng - initial.lng) < 1e-7) return
     setCoord({ lat: initial.lat, lng: initial.lng })
     setDefinido(true)
