@@ -5977,7 +5977,10 @@ export default function PainelPedidos() {
   }
 
   useEffect(() => {
-    if (painelDireito === 'entregadores') { setEntregadorSel(null); carregarEntregasConcluidas() }
+    // Fechou o painel? O mapa volta fechado. Senão ele reabria sozinho na
+    // próxima visita e a economia de mapa ia embora sem ninguém perceber.
+    if (painelDireito !== 'entregadores') { setMapaAberto(false); return }
+    setEntregadorSel(null); carregarEntregasConcluidas()
   }, [painelDireito, carregarEntregasConcluidas])
 
   // ── Onde os motoboys estão agora (mig 0245) ─────────────────
@@ -5986,6 +5989,14 @@ export default function PainelPedidos() {
   // é o ponto: pino sem hora vira motoboy parado na cabeça de quem olha.
   const [posEntregadores, setPosEntregadores] = useState({})
   const [posAgora, setPosAgora] = useState(() => Date.now())
+  // O MAPA SÓ ABRE SE PEDIREM.
+  //
+  // Os quadradinhos do mapa vêm do OpenStreetMap, que é comunitário e tem
+  // limite de uso. Mapa aberto a noite toda em toda loja é pedido de bloqueio —
+  // e no dia em que bloqueiam, fica cinza pra todo mundo sem aviso. Quem quer
+  // ver onde o motoboy está clica; quem só quer saber se ele está andando lê o
+  // "há X min" no card, que não custa nada lá fora.
+  const [mapaAberto, setMapaAberto] = useState(false)
   useEffect(() => {
     if (painelDireito !== 'entregadores' || !empresa?.id) return
     let vivo = true
@@ -6000,9 +6011,11 @@ export default function PainelPedidos() {
       setPosAgora(Date.now())
     }
     ler()
-    const id = setInterval(ler, 20_000)
+    // Com o mapa aberto o pino tem que andar; fechado, o "há X min" do card
+    // aguenta bem um minuto de atraso.
+    const id = setInterval(ler, mapaAberto ? 20_000 : 60_000)
     return () => { vivo = false; clearInterval(id) }
-  }, [painelDireito, empresa?.id])
+  }, [painelDireito, empresa?.id, mapaAberto])
   const [mapaEntregador, setMapaEntregador] = useState(null) // { entregador, pos, paradas }
 
   // ── Concluídos do dia (vendas finalizadas hoje) ─────────────
@@ -8847,14 +8860,31 @@ export default function PainelPedidos() {
                 })}
 
                 {/* O mapa fica DEPOIS da lista: quem abre o painel quer ver os
-                    números primeiro; o mapa é pra decidir o próximo despacho. */}
-                <MapaDosEntregadores
-                  entregadores={entregadores}
-                  posicoes={posEntregadores}
-                  paradasDe={emRota}
-                  empresa={empresa}
-                  agora={posAgora}
-                />
+                    números primeiro; o mapa é pra decidir o próximo despacho.
+                    E só monta quando clicam — ver o comentário de `mapaAberto`. */}
+                {mapaAberto ? (
+                  <>
+                    <MapaDosEntregadores
+                      entregadores={entregadores}
+                      posicoes={posEntregadores}
+                      paradasDe={emRota}
+                      empresa={empresa}
+                      agora={posAgora}
+                    />
+                    <button type="button" onClick={() => setMapaAberto(false)}
+                      style={{ border: '1px solid var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text-muted)', borderRadius: 10, padding: '9px 12px', cursor: 'pointer', fontSize: 12.5, fontWeight: 700 }}>
+                      Fechar o mapa
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" onClick={() => setMapaAberto(true)}
+                    style={{ border: '1px solid #7c3aed', background: 'rgba(124,58,237,.10)', color: '#7c3aed', borderRadius: 12, padding: '13px 14px', cursor: 'pointer', fontSize: 13.5, fontWeight: 800 }}>
+                    🗺️ Ver o mapa dos motoboys
+                    <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)', marginTop: 3 }}>
+                      {Object.keys(posEntregadores).length} de {entregadores.length} mandando posição
+                    </div>
+                  </button>
+                )}
               </div>
             )
           })()}
