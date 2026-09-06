@@ -3936,6 +3936,113 @@ function ModalMapaEntregador({ entregador, pos, paradas = [], empresa, agora, on
   )
 }
 
+// Mapa com TODOS os motoboys de uma vez, embaixo da lista. O modal de um
+// entregador só responde "cadê o Fulano"; isto responde "como está a rua agora"
+// — quem está perto de voltar, quem está do outro lado da cidade, quem dá pra
+// mandar mais um pedido no caminho.
+function MapaDosEntregadores({ entregadores, posicoes, paradasDe, empresa, agora }) {
+  const divRef = useRef(null)
+  const mapRef = useRef(null)
+  const camadaRef = useRef(null)
+
+  const comPosicao = entregadores.filter(e => posicoes[e.id])
+  // `paradasDe` nasce de novo a cada render do painel (os pedidos recarregam
+  // sozinhos). Guardado num ref, ele não entra nas dependências e o mapa para
+  // de redesenhar os pinos à toa — só redesenha quando a POSIÇÃO muda.
+  const paradasRef = useRef(paradasDe)
+  useEffect(() => { paradasRef.current = paradasDe })
+
+  // Cria o mapa uma vez só. Os pinos entram e saem numa camada à parte: refazer
+  // o mapa a cada 20s piscava a tela e perdia o zoom que a loja tinha dado.
+  useEffect(() => {
+    if (!divRef.current || mapRef.current) return
+    let morto = false
+    ;(async () => {
+      const L = (await import('leaflet')).default
+      if (morto || !divRef.current || mapRef.current) return
+      const centro = empresa?.latitude && empresa?.longitude
+        ? [Number(empresa.latitude), Number(empresa.longitude)]
+        : [-5.7945, -35.211]   // Natal, só pra o mapa nascer em algum lugar
+      const map = L.map(divRef.current, { zoomControl: true, scrollWheelZoom: false }).setView(centro, 13)
+      mapRef.current = map
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map)
+      camadaRef.current = L.layerGroup().addTo(map)
+    })()
+    return () => { morto = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; camadaRef.current = null } }
+  }, [empresa?.latitude, empresa?.longitude])
+
+  // Redesenha os pinos quando as posições mudam.
+  const enquadrou = useRef(false)
+  useEffect(() => {
+    let morto = false
+    ;(async () => {
+      const L = (await import('leaflet')).default
+      if (morto || !mapRef.current || !camadaRef.current) return
+      camadaRef.current.clearLayers()
+      const pontos = []
+
+      if (empresa?.latitude && empresa?.longitude) {
+        const loja = [Number(empresa.latitude), Number(empresa.longitude)]
+        L.marker(loja, {
+          icon: L.divIcon({
+            html: '<div style="width:32px;height:32px;background:#ef4444;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:16px;">🏪</div>',
+            className: '', iconSize: [32, 32], iconAnchor: [16, 16],
+          }), interactive: false,
+        }).addTo(camadaRef.current)
+        pontos.push(loja)
+      }
+
+      for (const e of entregadores) {
+        const pos = posicoes[e.id]
+        if (!pos) continue
+        const min = Math.floor((agora - new Date(pos.atualizado_em).getTime()) / 60000)
+        // Mesma régua de cor da lista: um pino apagado é ponto velho, não
+        // motoboy sumido.
+        const cor = min <= 5 ? '#16a34a' : min <= 20 ? '#f59e0b' : '#6b7280'
+        const nome = (e.nome || 'Entregador').split(' ')[0]
+        const rota = paradasRef.current(e.id).length
+        const p = [Number(pos.lat), Number(pos.lng)]
+        L.marker(p, {
+          icon: L.divIcon({
+            html: `<div style="display:flex;align-items:center;gap:4px;white-space:nowrap;">
+                     <div style="width:30px;height:30px;background:${cor};border-radius:50%;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-size:15px;">🛵</div>
+                     <span style="background:rgba(0,0,0,.72);color:#fff;font-size:11px;font-weight:800;padding:2px 6px;border-radius:6px;">${nome}</span>
+                   </div>`,
+            className: '', iconSize: [30, 30], iconAnchor: [15, 15],
+          }),
+        }).addTo(camadaRef.current)
+          .bindPopup(`<strong>${e.nome || 'Entregador'}</strong><br>${quantoTempo(pos.atualizado_em, agora)}${rota ? `<br>${rota} na rota` : ''}`)
+        pontos.push(p)
+      }
+
+      // Enquadra uma vez só: depois disso quem manda no zoom é quem está olhando.
+      if (!enquadrou.current && pontos.length > 1) {
+        enquadrou.current = true
+        mapRef.current.fitBounds(pontos, { padding: [40, 40], maxZoom: 15 })
+      }
+    })()
+    return () => { morto = true }
+  }, [entregadores, posicoes, agora, empresa?.latitude, empresa?.longitude])
+
+  return (
+    <div style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 12, padding: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>🗺️ Onde estão os motoboys</span>
+        <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+          {comPosicao.length} de {entregadores.length} com posição
+        </span>
+      </div>
+      <div ref={divRef} style={{ width: '100%', height: 300, borderRadius: 10, overflow: 'hidden' }} />
+      {comPosicao.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.5 }}>
+          Nenhum entregador mandando posição. Cada um precisa abrir o app e ligar a
+          localização na faixa do topo.
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Timer compacto para os cards "a aceitar"
 function MiniTimer({ createdAt, aguardandoDesde, onExpirado }) {
   const [restante, setRestante] = useState(() => getTempoRestante(createdAt, aguardandoDesde))
@@ -8722,6 +8829,16 @@ export default function PainelPedidos() {
                     </button>
                   )
                 })}
+
+                {/* O mapa fica DEPOIS da lista: quem abre o painel quer ver os
+                    números primeiro; o mapa é pra decidir o próximo despacho. */}
+                <MapaDosEntregadores
+                  entregadores={entregadores}
+                  posicoes={posEntregadores}
+                  paradasDe={emRota}
+                  empresa={empresa}
+                  agora={posAgora}
+                />
               </div>
             )
           })()}
