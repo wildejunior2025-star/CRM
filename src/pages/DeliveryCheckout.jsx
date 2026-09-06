@@ -405,6 +405,23 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
     if (mapaPronto()) mapaPronto().setView([initial.lat, initial.lng], 16)
   }, [embutido, initial?.lat, initial?.lng]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // O formulário derrubou o pino (mudou rua/número/bairro/cidade)? O mapa
+  // solta o dele também. Sem isto o mapa ficava dono de uma coordenada que o
+  // pedido não tinha mais — dois pinos diferentes, duas taxas diferentes, e a
+  // que ia pro pedido era a invisível.
+  useEffect(() => {
+    if (!embutido || initial) return
+    interagiu.current = false
+    setMexeu(false)
+    setDefinido(false)
+    if (storeLat && storeLng) {
+      const c = { lat: Number(storeLat), lng: Number(storeLng) }
+      setCoord(c)
+      if (pinRef.current) pinRef.current.setLatLng([c.lat, c.lng])
+      if (mapaPronto()) mapaPronto().setView([c.lat, c.lng], 15)
+    }
+  }, [embutido, initial, storeLat, storeLng])
+
   // Embutido não tem botão "confirmar": cada arrasto já vale como escolha.
   useEffect(() => {
     if (!embutido || !coord || !definido) return
@@ -1326,7 +1343,15 @@ export default function DeliveryCheckout() {
     const cid = r.localidade || form.cidade || lojaEndereco?.cidade
     if (uf) carregarCidades(uf, cid)
     // Foi o cliente que escolheu: o pino pode ser recalculado por este endereço.
+    //
+    // E o pino VELHO cai junto. Escolher a rua pela lista mexia no endereço sem
+    // passar pelo `set()`, então a coordenada da casa anterior continuava
+    // valendo: o mapa mostrava um lugar e a taxa era cobrada de outro. Foi o
+    // que apareceu no teste de 06/09/2026 — endereço em São Gonçalo do
+    // Amarante, pino em Potengi, R$ 3,00 escrito no mapa e R$ 4,00 no resumo
+    // do pedido.
     pinManualRef.current = false
+    setCoordCliente(null)
   }
 
   function handleCepChange(e) {
