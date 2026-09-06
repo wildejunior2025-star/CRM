@@ -1123,10 +1123,7 @@ export default function DeliveryCheckout() {
   // `manual` diz se o ponto saiu do DEDO do cliente ou se ele só confirmou o que
   // o buscador de mapa tinha chutado — só o primeiro é bom o bastante pra virar
   // o pino oficial do cadastro dele (mig 0160).
-  // Mapa embutido: cada arrasto já vale, sem botão de confirmar. Aqui NÃO se
-  // faz o caminho de volta (coordenada → endereço) de propósito: a pessoa está
-  // digitando rua e bairro nesse instante, e reescrever os campos a cada arrasto
-  // seria o formulário brigando com o dedo dela. Isso continua só no mapa grande.
+  // Mapa embutido: cada arrasto já vale, sem botão de confirmar.
   // QUEM MANDA NO ENDEREÇO É O PINO.
   //
   // Dava pra digitar a rua certa, arrastar o pino pra porta da loja e pagar a
@@ -1156,6 +1153,21 @@ export default function DeliveryCheckout() {
       let mudou = false
       setForm(prev => {
         if (mesmaRua(prev.rua, a.rua)) return prev   // ajustou dentro da mesma rua: nada a fazer
+        // SÓ REESCREVE SE MUDOU DE BAIRRO.
+        //
+        // Testado em 06/09/2026: dois pontos a 45 METROS de distância, perto de
+        // uma esquina, voltaram ruas diferentes ("Avenida das Fronteiras" e
+        // "Rua dos Coqueiros"). Reescrever a cada ajuste fino trocaria a rua
+        // certa de quem mora na esquina — o motoboy iria pra rua errada, que é
+        // pior que a taxa errada.
+        //
+        // O bairro é grosso o bastante pra não errar num ajuste de metros, e é
+        // exatamente ele que denuncia a trapaça: quem digita Pajuçara e joga o
+        // pino na porta da loja cai em Nossa Senhora da Apresentação.
+        // Sem bairro no ponto (ou sem bairro digitado) não dá pra comparar:
+        // fica o que a pessoa escreveu.
+        const bairroDigitado = String(prev.bairro ?? '').trim()
+        if (bairroDigitado && (!a.bairro || mesmaRua(bairroDigitado, a.bairro))) return prev
         mudou = true
         return {
           ...prev,
