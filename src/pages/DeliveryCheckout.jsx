@@ -626,6 +626,9 @@ export default function DeliveryCheckout() {
   // 900ms depois, num timeout).
   const formRef = useRef(null)
   useEffect(() => { formRef.current = form })
+  // De qual PONTO veio o endereço que está escrito agora. É a régua pra saber
+  // se o pino andou de verdade ou se foi só um ajuste fino.
+  const pontoEnderecoRef = useRef(null)
   const [enderecoDoPino, setEnderecoDoPino] = useState(null) // { rua, bairro } que o pino trouxe
 
   // Taxa que está na tela do cliente, pro registro do funil. É ref porque o
@@ -979,7 +982,9 @@ export default function DeliveryCheckout() {
     if (!form.numero.trim()) return
     const t = setTimeout(async () => {
       const c = await geocodeEndereco({ rua, numero: form.numero, bairro: form.bairro, cidade, estado: form.estado, cep: form.cep })
-      if (c && !pinManualRef.current) setCoordCliente(c)
+      // O endereço escrito passa a valer a partir DESTE ponto (ver o reverse do
+      // pino): é daqui que se mede se o pino andou de verdade depois.
+      if (c && !pinManualRef.current) { pontoEnderecoRef.current = c; setCoordCliente(c) }
     }, 900)
     return () => clearTimeout(t)
   }, [form.rua, form.numero, form.bairro, form.cidade, form.estado, form.cep, tipo, state])
@@ -1216,22 +1221,27 @@ export default function DeliveryCheckout() {
       // aparecia, mesmo com o endereço já trocado. Trocar o endereço de alguém
       // sem avisar é o oposto do que isto veio fazer.
       const atual = formRef.current ?? {}
-      if (mesmaRua(atual.rua, a.rua)) return   // ajustou dentro da mesma rua: nada a fazer
-      // SÓ REESCREVE SE MUDOU DE BAIRRO.
+      if (mesmaRua(atual.rua, a.rua)) { pontoEnderecoRef.current = { lat, lng }; return }
+      // O QUE MANDA É QUANTO O PINO ANDOU, não o bairro.
       //
-      // Testado em 06/09/2026: dois pontos a 45 METROS de distância, perto de
-      // uma esquina, voltaram ruas diferentes ("Avenida das Fronteiras" e
-      // "Rua dos Coqueiros"). Reescrever a cada ajuste fino trocaria a rua
-      // certa de quem mora na esquina — o motoboy iria pra rua errada, que é
-      // pior que a taxa errada.
+      // Antes eu só reescrevia quando mudava de bairro, e no mapa pequeno
+      // ninguém anda o bastante pra sair do bairro: a pessoa arrastava pra
+      // outra rua e o nome ficava o mesmo. Era preciso ampliar e confirmar pra
+      // ver o endereço mudar, o que não faz sentido nenhum.
       //
-      // O bairro é grosso o bastante pra não errar num ajuste de metros, e é
-      // exatamente ele que denuncia a trapaça: quem digita Pajuçara e joga o
-      // pino na porta da loja cai em Nossa Senhora da Apresentação.
-      // Sem bairro no ponto (ou sem bairro digitado) não dá pra comparar:
-      // fica o que a pessoa escreveu.
-      const bairroDigitado = String(atual.bairro ?? '').trim()
-      if (bairroDigitado && (!a.bairro || mesmaRua(bairroDigitado, a.bairro))) return
+      // Mas reescrever a QUALQUER movimento também não serve: testado em
+      // 06/09/2026, dois pontos a 45 METROS perto de uma esquina voltaram ruas
+      // diferentes ("Avenida das Fronteiras" e "Rua dos Coqueiros"). Trocar a
+      // rua certa de quem mora na esquina manda o motoboy pro lugar errado, que
+      // é pior que taxa errada.
+      //
+      // 150 m separa as duas coisas: acertar o portão é ajuste (fica como
+      // está); mudar de rua é mudança (o pino manda). A régua é o ponto de onde
+      // veio o endereço que está escrito, não o pino anterior — senão bastava
+      // arrastar de 100 em 100 metros pra atravessar a cidade sem nunca
+      // reescrever.
+      const ref = pontoEnderecoRef.current
+      if (ref && haversineKm(lat, lng, ref.lat, ref.lng) < 0.15) return
 
       setForm(prev => ({
         ...prev,
@@ -1243,6 +1253,7 @@ export default function DeliveryCheckout() {
         cep:    cepFmt || prev.cep,
       }))
       setEnderecoDoPino({ rua: a.rua, bairro: a.bairro || '' })
+      pontoEnderecoRef.current = { lat, lng }
       if (a.estado && a.estado !== atual.estado) carregarCidades(a.estado, a.cidade || '')
     }, 900)
   }
