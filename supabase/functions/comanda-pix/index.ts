@@ -59,6 +59,17 @@ async function tokenDaLoja(sb: SB, empresaId: string): Promise<string | null> {
   return tk.access_token
 }
 
+// Comissão da plataforma no PIX de mesa — a mesma regra do delivery e do fiado
+// (chave `comissao_pix_percent`). Sem isto o PIX presencial passava inteiro pra
+// loja e a FWC não ganhava nada, além de a venda nem aparecer no marketplace.
+async function comissaoPlataforma(sb: SB, valor: number): Promise<number> {
+  const { data: cfg } = await sb.from('configuracoes_plataforma')
+    .select('valor').eq('chave', 'comissao_pix_percent').maybeSingle()
+  const pct = Number(cfg?.valor ?? 0)
+  if (!(pct > 0)) return 0
+  return Math.round(valor * pct) / 100
+}
+
 // Quanto a mesa deve, contado AQUI e não na tela. A tela do garçom pode estar
 // velha (item lançado noutro aparelho), e o QR precisa nascer com o valor certo.
 // A taxa não pega item de categoria isenta — mesma regra da mig 0192.
@@ -217,6 +228,18 @@ Deno.serve(async (req) => {
 
     const expira = new Date(Date.now() + MINUTOS_VALIDADE * 60 * 1000)
 
+    const paymentBody: Record<string, unknown> = {
+      transaction_amount: valorCobrar,
+      description: `Mesa · ${empresaNome}`,
+      payment_method_id: 'pix',
+      date_of_expiration: expira.toISOString(),
+      payer: { email: 'cliente@fwcinter.com', first_name: 'Cliente', last_name: 'Mesa' },
+      notification_url: WEBHOOK_URL,
+    }
+    // Só vale com token de OAuth (o `token` aqui sempre é o da loja conectada).
+    const applicationFee = await comissaoPlataforma(sb, valorCobrar)
+    if (applicationFee > 0) paymentBody.application_fee = applicationFee
+
     const mpRes = await fetch('https://api.mercadopago.com/v1/payments', {
       method: 'POST',
       headers: {
@@ -224,14 +247,7 @@ Deno.serve(async (req) => {
         'Content-Type': 'application/json',
         'X-Idempotency-Key': crypto.randomUUID(),
       },
-      body: JSON.stringify({
-        transaction_amount: valorCobrar,
-        description: `Mesa · ${empresaNome}`,
-        payment_method_id: 'pix',
-        date_of_expiration: expira.toISOString(),
-        payer: { email: 'cliente@fwcinter.com', first_name: 'Cliente', last_name: 'Mesa' },
-        notification_url: WEBHOOK_URL,
-      }),
+      body: JSON.stringify(paymentBody),
     })
     const mp = await mpRes.json()
     if (!mpRes.ok) {
