@@ -1357,6 +1357,18 @@
   }
   /* abrir/fechar a loja na frente de tudo */
   .pp-header-right > *:last-child { order: -1; }
+
+  /* O CONTADOR DE PEDIDOS NÃO PODE SER ENGOLIDO.
+     Com o nome da loja escondido, sobrava a logo + o contador à esquerda — mas
+     `min-width: 0` deixava esse bloco encolher até sumir, e a faixa de botões
+     (que vem depois no HTML) era desenhada POR CIMA. Com a loja fechada dava
+     pra adivinhar o número por transparência; com ela aberta o contador
+     simplesmente não existia na tela. */
+  .pp-header-left {
+    flex-shrink: 0;
+    position: relative;
+    z-index: 2;
+  }
 }
 
 /* Rótulos curtos existem só pro celular (ver .pp-salao-tabs no bloco mobile) */
