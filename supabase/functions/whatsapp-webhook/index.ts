@@ -1,7 +1,10 @@
 // Bot v189 — link do Google Maps vira endereço escrito + link do pino (quem pede PRA OUTRA pessoa não tem como mandar a própria localização). v188 — pede a LOCALIZAÇÃO primeiro (CEP/escrito viram a saída); endereço em pedaços vira um só; pedido do robô nasce com o ponto. v187 — promessa de retorno vira chamado de verdade; busca perdoa erro de digitação. v186: endereço+taxa no fechamento. v185: pedido de endereço pergunta rua e bairro (CEP vira a saída alternativa). v184: vendia o CEP como atalho (escrever é só a saída de quem não sabe). v183: escrito guarda bairro/cidade. v182: cadastro sem e-mail.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-import { responderSemIA, roboPausado, pausarPorAtendimentoHumano, chamadoAberto, abrirChamado } from "../_shared/respostaSemIA.ts"
+import {
+  responderSemIA, roboPausado, pausarPorAtendimentoHumano, chamadoAberto, abrirChamado,
+  comoFicaNoDia, carregarExcecoes, hojeNaLoja, daquiADias,
+} from "../_shared/respostaSemIA.ts"
 import { guardarMidiaDoChat } from "../_shared/midiaDoChat.ts"
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? ""
@@ -1799,7 +1802,7 @@ serve(async (req) => {
     {
       const { data: liga } = await supabase
         .from("whatsapp_config")
-        .select("empresa_id, ia_ativo, resposta_link_ativo, resposta_link_texto, empresas(nome, slug, agendamento_ativo, delivery_ativo, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
+        .select("empresa_id, ia_ativo, resposta_link_ativo, resposta_link_texto, empresas(nome, slug, agendamento_ativo, delivery_ativo, feriados_fecha, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
         .eq("instance_name", instanceName)
         .eq("ativo", true)
         .maybeSingle()
@@ -1914,7 +1917,7 @@ serve(async (req) => {
 
     const configRes = await supabase
       .from("whatsapp_config")
-      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, numero, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, indicador_profile_id, mp_conectado)")
+      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, numero, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, feriados_fecha, indicador_profile_id, mp_conectado)")
       .eq("instance_name", instanceName)
       .eq("ativo", true)
       .single()
@@ -2084,8 +2087,12 @@ serve(async (req) => {
       let horarioTexto = ""
 
       if (grade) {
-        const dia = grade[dow] as any
-        const periodosHoje = ((dia?.aberto ? (dia.periodos ?? []) : []) as any[]).filter(p => p?.i && p?.f)
+        // A grade sozinha não sabe de feriado nem de folga marcada na mão. Sem
+        // isto o robô prometia "voltamos segunda às 08:00" numa segunda que a
+        // loja já tinha fechado no calendário (mesma regra da Loja Online).
+        const excecoes = await carregarExcecoes(supabase, empresaId)
+        const doDia = comoFicaNoDia(hojeNaLoja(), empresa as Record<string, unknown>, excecoes)
+        const periodosHoje = (doDia.aberto ? doDia.periodos : []).filter(p => p?.i && p?.f)
         lojaFechada = !periodosHoje.some(p => {
           const a = toMinH(p.i), b = toMinH(p.f)
           return a <= b ? (minutoAtual >= a && minutoAtual < b) : (minutoAtual >= a || minutoAtual < b)
@@ -2094,9 +2101,13 @@ serve(async (req) => {
           horarioTexto = "Hoje atendemos das " + periodosHoje.map(p => `*${p.i}* às *${p.f}*`).join(" e ")
         } else {
           for (let k = 1; k <= 7; k++) {
-            const nd = grade[(dow + k) % 7] as any
-            const ps = ((nd?.aberto ? (nd.periodos ?? []) : []) as any[]).filter(p => p?.i && p?.f)
-            if (ps.length) { horarioTexto = `Voltamos ${DIAS_SEM[(dow + k) % 7]} às *${ps[0].i}*`; break }
+            const data = daquiADias(k)
+            const nd = comoFicaNoDia(data, empresa as Record<string, unknown>, excecoes)
+            const ps = (nd.aberto ? nd.periodos : []).filter(p => p?.i && p?.f)
+            if (!ps.length) continue
+            const [yy, mm, dd2] = data.split("-").map(Number)
+            horarioTexto = `Voltamos ${DIAS_SEM[new Date(yy, mm - 1, dd2).getDay()]} às *${ps[0].i}*`
+            break
           }
         }
       } else if (empresa.horario_abertura && empresa.horario_fechamento) {

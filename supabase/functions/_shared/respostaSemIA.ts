@@ -58,12 +58,140 @@ function agoraNaLoja() {
   })
   const [h, m] = hm.split(":").map(Number)
   const [y, mes, d] = ymd.split("-").map(Number)
-  return { min: h * 60 + m, diaSemana: new Date(y, mes - 1, d).getDay() }
+  return { min: h * 60 + m, diaSemana: new Date(y, mes - 1, d).getDay(), ymd }
 }
 
 const paraMin = (hm: string) => {
   const [h, m] = String(hm ?? "").slice(0, 5).split(":").map(Number)
   return (h || 0) * 60 + (m || 0)
+}
+
+// ── Feriado e dia marcado na mão ─────────────────────────────────────────────
+// Mesma regra da Loja Online (src/lib/feriados.js), na mesma ordem de quem
+// manda (mig 0142):
+//   1. dias_excecao   — o dono marcou ESSA data na mão (fecha ou abre)
+//   2. feriado nacional, se a loja marcou "fecha em feriado"
+//   3. a grade da semana
+//
+// Sem isso o robô só enxergava a grade: no dia 6 de setembro ele prometia
+// "amanhã a gente atende das 08:30 às 12:00" pra uma loja que tinha marcado o
+// 7 de setembro como fechado no calendário. Promessa de horário que não vai
+// acontecer é pior que não responder.
+type Excecoes = Record<string, Record<string, unknown>>
+
+const p2 = (n: number) => String(n).padStart(2, "0")
+
+function somaDiasYmd(base: string, n: number): string {
+  const [y, m, d] = base.split("-").map(Number)
+  const dt = new Date(y, m - 1, d + n)
+  return `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())}`
+}
+
+function diaDaSemanaDe(data: string): number {
+  const [y, m, d] = data.split("-").map(Number)
+  return new Date(y, m - 1, d).getDay()
+}
+
+// Domingo de Páscoa (Meeus/Jones/Butcher). Dele saem Carnaval, Sexta-feira
+// Santa e Corpus Christi, que mudam de data todo ano — por isso a lista é
+// calculada e não cadastrada: vale pra qualquer ano sem ninguém tocar nela.
+function domingoDePascoa(ano: number): string {
+  const a = ano % 19
+  const b = Math.floor(ano / 100)
+  const c = ano % 100
+  const d = Math.floor(b / 4)
+  const e = b % 4
+  const f = Math.floor((b + 8) / 25)
+  const g = Math.floor((b - f + 1) / 3)
+  const h = (19 * a + b - d - g + 15) % 30
+  const i = Math.floor(c / 4)
+  const k = c % 4
+  const l = (32 + 2 * e + 2 * i - h - k) % 7
+  const m = Math.floor((a + 11 * h + 22 * l) / 451)
+  const mes = Math.floor((h + l - 7 * m + 114) / 31)
+  const dia = ((h + l - 7 * m + 114) % 31) + 1
+  return `${ano}-${p2(mes)}-${p2(dia)}`
+}
+
+const cacheFeriados = new Map<number, Set<string>>()
+
+function feriadosDoAno(ano: number): Set<string> {
+  const guardado = cacheFeriados.get(ano)
+  if (guardado) return guardado
+  const pascoa = domingoDePascoa(ano)
+  const lista = new Set([
+    `${ano}-01-01`,                  // Confraternização Universal
+    somaDiasYmd(pascoa, -48),        // Carnaval (segunda)
+    somaDiasYmd(pascoa, -47),        // Carnaval (terça)
+    somaDiasYmd(pascoa, -46),        // Quarta-feira de Cinzas
+    somaDiasYmd(pascoa, -2),         // Sexta-feira Santa
+    `${ano}-04-21`,                  // Tiradentes
+    `${ano}-05-01`,                  // Dia do Trabalho
+    somaDiasYmd(pascoa, 60),         // Corpus Christi
+    `${ano}-09-07`,                  // Independência
+    `${ano}-10-12`,                  // Nossa Senhora Aparecida
+    `${ano}-11-02`,                  // Finados
+    `${ano}-11-15`,                  // Proclamação da República
+    `${ano}-11-20`,                  // Consciência Negra
+    `${ano}-12-25`,                  // Natal
+  ])
+  cacheFeriados.set(ano, lista)
+  return lista
+}
+
+/** Como a loja fica NUMA data: { aberto, periodos }. */
+export function comoFicaNoDia(
+  data: string, empresa: Record<string, unknown>, excecoes: Excecoes = {},
+): { aberto: boolean; periodos: Array<Record<string, string>> } {
+  const grade = Array.isArray(empresa.horarios_funcionamento)
+    ? empresa.horarios_funcionamento as Array<Record<string, unknown>>
+    : null
+  const daGrade = (grade && grade.length === 7) ? (grade[diaDaSemanaDe(data)] ?? {}) : null
+  const periodosGrade = (Array.isArray(daGrade?.periodos) ? daGrade?.periodos : []) as Array<Record<string, string>>
+
+  // 1) Marcado na mão vence tudo — inclusive ABRIR num feriado que a loja fecha.
+  const exc = excecoes[data]
+  if (exc) {
+    if (!exc.aberto) return { aberto: false, periodos: [] }
+    const proprios = Array.isArray(exc.periodos) ? exc.periodos as Array<Record<string, string>> : []
+    return { aberto: true, periodos: proprios.length ? proprios : periodosGrade }
+  }
+
+  // 2) Feriado nacional, pra quem marcou que fecha em feriado.
+  if (empresa.feriados_fecha === true && feriadosDoAno(Number(data.slice(0, 4))).has(data)) {
+    return { aberto: false, periodos: [] }
+  }
+
+  // 3) A grade da semana. Sem grade, não restringe nada.
+  if (!daGrade) return { aberto: true, periodos: [] }
+  return { aberto: !!daGrade.aberto, periodos: periodosGrade }
+}
+
+/**
+ * Os dias marcados na mão pela loja, de hoje em diante. Só os próximos dias
+ * interessam: o robô fala de hoje e do próximo dia que abre.
+ */
+/** Hoje no fuso da loja, 'YYYY-MM-DD'. */
+export const hojeNaLoja = () => agoraNaLoja().ymd
+
+/** A data de daqui a n dias, no fuso da loja. */
+export const daquiADias = (n: number) => somaDiasYmd(agoraNaLoja().ymd, n)
+
+export async function carregarExcecoes(supabase: Sb, empresaId: string): Promise<Excecoes> {
+  try {
+    const hoje = agoraNaLoja().ymd
+    const { data } = await supabase.from("dias_excecao")
+      .select("data, aberto, periodos").eq("empresa_id", empresaId)
+      .gte("data", hoje).lte("data", somaDiasYmd(hoje, 10))
+    const saida: Excecoes = {}
+    for (const linha of (Array.isArray(data) ? data : [])) {
+      saida[String((linha as Record<string, unknown>).data)] = linha as Record<string, unknown>
+    }
+    return saida
+  } catch (e) {
+    console.error("[excecao] não carregou:", e)
+    return {}
+  }
 }
 
 // "das 07:00 às 14:00" / "das 08:30 às 12:00 e das 14:00 às 18:00"
@@ -76,39 +204,44 @@ function textoDosPeriodos(periodos: Array<Record<string, string>>): string {
   return `${partes.slice(0, -1).join(", ")} e ${partes[partes.length - 1]}`
 }
 
-function respostaDeHorario(empresa: Record<string, unknown>): string | null {
-  const grade = Array.isArray(empresa.horarios_funcionamento)
-    ? empresa.horarios_funcionamento as Array<Record<string, unknown>>
-    : null
-  const { min: agora, diaSemana } = agoraNaLoja()
+function respostaDeHorario(
+  empresa: Record<string, unknown>, excecoes: Excecoes = {},
+): string | null {
+  const { ymd: hoje } = agoraNaLoja()
+  const dia = comoFicaNoDia(hoje, empresa, excecoes)
 
-  if (grade && grade.length === 7) {
-    const hoje = grade[diaSemana] ?? {}
-    const periodos = (hoje.periodos ?? []) as Array<Record<string, string>>
-    if (hoje.aberto && periodos.length) {
-      const abertoAgora = periodos.some(p => agora >= paraMin(p.i) && agora < paraMin(p.f))
-      const quando = textoDosPeriodos(periodos)
-      return abertoAgora
-        ? `Tô aqui sim! 🙌 Hoje a gente atende ${quando}.`
-        : `Hoje a gente atende ${quando}.`   // fora da faixa: quem avisa é avisoDeFechada
-    }
-    // Fechado hoje: dizer só "não abre" deixa o cliente sem saber quando volta.
-    for (let i = 1; i <= 7; i++) {
-      const idx = (diaSemana + i) % 7
-      const dia = grade[idx] ?? {}
-      const periodos2 = (dia.periodos ?? []) as Array<Record<string, string>>
-      if (dia.aberto && periodos2.length) {
-        const nome = i === 1 ? "Amanhã" : `${DIAS[idx].charAt(0).toUpperCase()}${DIAS[idx].slice(1)}`
-        return `Hoje a gente não abre. ${nome} a gente atende ${textoDosPeriodos(periodos2)}.`
-      }
-    }
-    if (hoje.aberto) return "Tô aqui sim! 🙌 Pode mandar seu pedido."
-    return "Hoje a gente não abre."
+  // Aberta agora: responde a faixa de hoje. Dia marcado como aberto SEM faixa
+  // é loja que atende o dia todo — dizer "hoje a gente não abre" nesse caso era
+  // o robô mandando o cliente embora com a porta aberta.
+  if (lojaAbertaAgora(empresa, excecoes)) {
+    return dia.periodos.length
+      ? `Tô aqui sim! 🙌 Hoje a gente atende ${textoDosPeriodos(dia.periodos)}.`
+      : "Tô aqui sim! 🙌 Pode mandar seu pedido."
   }
 
-  const abre = String(empresa.horario_abertura ?? "").slice(0, 5)
-  const fecha = String(empresa.horario_fechamento ?? "").slice(0, 5)
-  if (abre && fecha) return `A gente atende das ${abre} às ${fecha}.`
+  // Fechada agora: o que ele quer saber é QUANDO volta — e é isso que o aviso
+  // de loja fechada já sabe dizer, pulando feriado e folga marcada na mão.
+  return avisoDeFechada(empresa, excecoes)
+}
+
+/**
+ * O próximo dia em que a loja abre, olhando os 7 dias seguintes com a regra
+ * completa (dia marcado na mão, feriado, grade). É o que impede o robô de
+ * prometer "amanhã das 08:30 às 12:00" na véspera de um feriado fechado.
+ */
+function proximoDiaQueAbre(
+  hoje: string, empresa: Record<string, unknown>, excecoes: Excecoes,
+): { nome: string; periodos: Array<Record<string, string>> } | null {
+  for (let i = 1; i <= 7; i++) {
+    const data = somaDiasYmd(hoje, i)
+    const dia = comoFicaNoDia(data, empresa, excecoes)
+    if (!dia.aberto || !dia.periodos.length) continue
+    const rotulo = DIAS[diaDaSemanaDe(data)]
+    return {
+      nome: i === 1 ? "Amanhã" : `${rotulo.charAt(0).toUpperCase()}${rotulo.slice(1)}`,
+      periodos: dia.periodos,
+    }
+  }
   return null
 }
 
@@ -122,22 +255,18 @@ function respostaDeHorario(empresa: Record<string, unknown>): string | null {
 // respeita.
 const MARCA_FECHADA = "a gente tá fechado"
 
-export function lojaAbertaAgora(empresa: Record<string, unknown>): boolean {
+export function lojaAbertaAgora(
+  empresa: Record<string, unknown>, excecoes: Excecoes = {},
+): boolean {
   // O botão vermelho do gestor. Fechou na mão, está fechado — grade nenhuma
   // discute com isso.
   if (empresa.delivery_ativo === false) return false
 
-  const grade = Array.isArray(empresa.horarios_funcionamento)
-    ? empresa.horarios_funcionamento as Array<Record<string, unknown>>
-    : null
-  if (!grade || grade.length !== 7) return true    // sem grade: não sabe, não atrapalha
-
-  const { min: agora, diaSemana } = agoraNaLoja()
-  const hoje = grade[diaSemana] ?? {}
-  if (!hoje.aberto) return false
-  const periodos = (hoje.periodos ?? []) as Array<Record<string, string>>
-  if (!periodos.length) return true                // dia aberto sem faixa = sem restrição
-  return periodos.some(p => {
+  const { min: agora, ymd: hoje } = agoraNaLoja()
+  const dia = comoFicaNoDia(hoje, empresa, excecoes)
+  if (!dia.aberto) return false
+  if (!dia.periodos.length) return true            // dia aberto sem faixa = sem restrição
+  return dia.periodos.some(p => {
     const i = paraMin(p.i), f = paraMin(p.f)
     // Faixa que vira a madrugada (22:00 → 02:00) conta os dois pedaços.
     return i <= f ? (agora >= i && agora < f) : (agora >= i || agora < f)
@@ -152,37 +281,29 @@ export function lojaAbertaAgora(empresa: Record<string, unknown>): boolean {
  * saber QUANDO volta — e às 17h de um dia que fechou às 14h, "hoje a gente
  * atende das 07:00 às 14:00" é uma informação que não serve pra nada.
  */
-export function avisoDeFechada(empresa: Record<string, unknown>): string {
+export function avisoDeFechada(
+  empresa: Record<string, unknown>, excecoes: Excecoes = {},
+): string {
   const fechado = `Agora ${MARCA_FECHADA}. 😴`
-  const grade = Array.isArray(empresa.horarios_funcionamento)
-    ? empresa.horarios_funcionamento as Array<Record<string, unknown>>
-    : null
-  if (!grade || grade.length !== 7) return fechado
-
-  const { min: agora, diaSemana } = agoraNaLoja()
-  const hoje = grade[diaSemana] ?? {}
-  const periodosHoje = (hoje.aberto ? (hoje.periodos ?? []) : []) as Array<Record<string, string>>
+  const { min: agora, ymd: hoje } = agoraNaLoja()
+  const dia = comoFicaNoDia(hoje, empresa, excecoes)
 
   // Ainda abre hoje? (fechado no intervalo do almoço, ou antes de abrir)
-  const proximo = periodosHoje
-    .map(p => paraMin(p.i))
-    .filter(i => i > agora)
-    .sort((a, b) => a - b)[0]
-  if (proximo != null) {
-    const hm = `${String(Math.floor(proximo / 60)).padStart(2, "0")}:${String(proximo % 60).padStart(2, "0")}`
-    return `${fechado} A gente abre hoje às ${hm}.`
-  }
-
-  // Já passou o horário de hoje (ou hoje nem abre): o próximo dia que abre.
-  for (let i = 1; i <= 7; i++) {
-    const idx = (diaSemana + i) % 7
-    const dia = grade[idx] ?? {}
-    const periodos = (dia.periodos ?? []) as Array<Record<string, string>>
-    if (dia.aberto && periodos.length) {
-      const nome = i === 1 ? "Amanhã" : `${DIAS[idx].charAt(0).toUpperCase()}${DIAS[idx].slice(1)}`
-      return `${fechado} ${nome} a gente atende ${textoDosPeriodos(periodos)}.`
+  if (dia.aberto) {
+    const proximo = dia.periodos
+      .map(p => paraMin(p.i))
+      .filter(i => i > agora)
+      .sort((a, b) => a - b)[0]
+    if (proximo != null) {
+      const hm = `${String(Math.floor(proximo / 60)).padStart(2, "0")}:${String(proximo % 60).padStart(2, "0")}`
+      return `${fechado} A gente abre hoje às ${hm}.`
     }
   }
+
+  // Já passou o horário de hoje (ou hoje nem abre): o próximo dia que abre —
+  // pulando feriado e dia que a loja marcou como fechado no calendário.
+  const volta = proximoDiaQueAbre(hoje, empresa, excecoes)
+  if (volta) return `${fechado} ${volta.nome} a gente atende ${textoDosPeriodos(volta.periodos)}.`
   return fechado
 }
 
@@ -219,7 +340,7 @@ function respostaDeTaxa(empresa: Record<string, unknown>, link: string): string 
 }
 
 function respostaDeInfo(
-  texto: string, empresa: Record<string, unknown>, link: string,
+  texto: string, empresa: Record<string, unknown>, link: string, excecoes: Excecoes = {},
 ): string | null {
   const t = semAcento(texto)
   const tem = (...ps: string[]) => ps.some(p => t.includes(p))
@@ -230,7 +351,7 @@ function respostaDeInfo(
     return `Nosso cardápio tá aqui, com tudo e o preço certinho:${NL}${link}`
 
   if (tem("horari", "que horas", "quantas horas", "abre", "aberto", "fecha", "fechad", "funciona", "atende hoje", "ta ai", "tao ai"))
-    return respostaDeHorario(empresa)
+    return respostaDeHorario(empresa, excecoes)
 
   if (tem("taxa", "frete", "entrega", "entregam", "entregar", "delivery", "leva quanto", "demora"))
     return respostaDeTaxa(empresa, link)
@@ -547,6 +668,11 @@ export async function responderSemIA({
 
     const link = `https://lojaonline.fwcinter.com/${slug}?t=${telefoneParaLink(phone)}`
 
+    // Os dias que a loja marcou na mão (feriado que ela fecha, folga, ponto).
+    // Uma consulta por mensagem: é o que faz o robô não prometer um horário que
+    // não vai acontecer.
+    const excecoes = await carregarExcecoes(supabase, empresaId)
+
     const responder = async (texto: string) => {
       await enviar(texto)
       await supabase.from("whatsapp_conversas").insert({
@@ -579,7 +705,7 @@ export async function responderSemIA({
     //    cairia num painel que ninguém está olhando, e o cliente ficaria
     //    esperando. Ele avisa UMA vez e cala — repetir "tamos fechados" a cada
     //    mensagem é pior que não responder.
-    if (!lojaAbertaAgora(empresa)) {
+    if (!lojaAbertaAgora(empresa, excecoes)) {
       // Duas checagens porque são dois problemas diferentes: o histórico pega
       // o aviso que já saiu, a reserva pega o aviso que está saindo AGORA na
       // outra execução — cliente que manda "Bom dia" e "Ok" seguidos acorda
@@ -587,7 +713,8 @@ export async function responderSemIA({
       const jaAvisou = recentes.some((m: Record<string, unknown>) =>
         String(m.content ?? "").includes(MARCA_FECHADA))
         || !(await reservarAviso(supabase, empresaId, phone, "fechada"))
-      const daInfoFechada = respostaDeInfo(mensagem, empresa, link)
+      const aviso = avisoDeFechada(empresa, excecoes)
+      const daInfoFechada = respostaDeInfo(mensagem, empresa, link, excecoes)
       if (jaAvisou) {
         // Já sabe que está fechado. Ainda assim responde o que sabe (taxa,
         // endereço, horário) — a dúvida dele não fecha junto com a loja.
@@ -598,12 +725,14 @@ export async function responderSemIA({
       // que ninguém vai fazer. Mas deixa o cliente ver cardápio e preço agora,
       // que é o que ele veio saber — e voltar quando abrir.
       const agendavel = empresa.agendamento_ativo === true
-      const extra = daInfoFechada
+      // Pergunta de horário JÁ é respondida pelo aviso — repetir o mesmo texto
+      // duas vezes na mesma mensagem é robô falando sozinho.
+      const extra = (daInfoFechada && daInfoFechada !== aviso)
         ? `${NL}${NL}${daInfoFechada}`
         : agendavel
           ? `${NL}${NL}Se quiser, já deixa seu pedido agendado por aqui que a gente separa:${NL}${link}`
           : `${NL}${NL}Se quiser dar uma olhada no cardápio e nos preços, é aqui:${NL}${link}`
-      return await responder(`${avisoDeFechada(empresa)}${extra}`)
+      return await responder(`${aviso}${extra}`)
     }
 
     // 1) "Não precisa" fecha o assunto na hora. O "sim" fica pro fim: se a
@@ -651,7 +780,7 @@ export async function responderSemIA({
     }
 
     // 3) Cardápio, horário, taxa de entrega, endereço — o que ele SABE.
-    const daInfo = respostaDeInfo(mensagem, empresa, link)
+    const daInfo = respostaDeInfo(mensagem, empresa, link, excecoes)
     if (daInfo) return await responder(daInfo)
 
     // O cliente falando que não quer o link. Não é dúvida, é recado: ele quer
