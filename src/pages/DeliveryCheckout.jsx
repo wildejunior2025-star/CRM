@@ -613,7 +613,12 @@ export default function DeliveryCheckout() {
   const [mapaAberto, setMapaAberto]     = useState(false)
   const pinManualRef = useRef(false) // true quando o cliente marcou no mapa (não sobrescreve com geocode)
   const reverseTimer = useRef(null)  // espera o dedo parar antes de perguntar a rua do pino
+  // Espelho do formulário pra ler DE FORA do render (o reverse do pino roda
+  // 900ms depois, num timeout).
+  const formRef = useRef(null)
+  useEffect(() => { formRef.current = form })
   const [enderecoDoPino, setEnderecoDoPino] = useState(null) // { rua, bairro } que o pino trouxe
+
   // Taxa que está na tela do cliente, pro registro do funil. É ref porque o
   // efeito que anota o contato roda aqui em cima e a taxa só é calculada lá
   // embaixo (depois do `return` de sacola vazia, onde não cabe outro hook).
@@ -1196,39 +1201,40 @@ export default function DeliveryCheckout() {
       // escreveu — endereço em branco é pedido perdido.
       if (!a?.rua) return
       const cepFmt = a.cep && a.cep.length === 8 ? `${a.cep.slice(0, 5)}-${a.cep.slice(5)}` : ''
-      let mudou = false
-      setForm(prev => {
-        if (mesmaRua(prev.rua, a.rua)) return prev   // ajustou dentro da mesma rua: nada a fazer
-        // SÓ REESCREVE SE MUDOU DE BAIRRO.
-        //
-        // Testado em 06/09/2026: dois pontos a 45 METROS de distância, perto de
-        // uma esquina, voltaram ruas diferentes ("Avenida das Fronteiras" e
-        // "Rua dos Coqueiros"). Reescrever a cada ajuste fino trocaria a rua
-        // certa de quem mora na esquina — o motoboy iria pra rua errada, que é
-        // pior que a taxa errada.
-        //
-        // O bairro é grosso o bastante pra não errar num ajuste de metros, e é
-        // exatamente ele que denuncia a trapaça: quem digita Pajuçara e joga o
-        // pino na porta da loja cai em Nossa Senhora da Apresentação.
-        // Sem bairro no ponto (ou sem bairro digitado) não dá pra comparar:
-        // fica o que a pessoa escreveu.
-        const bairroDigitado = String(prev.bairro ?? '').trim()
-        if (bairroDigitado && (!a.bairro || mesmaRua(bairroDigitado, a.bairro))) return prev
-        mudou = true
-        return {
-          ...prev,
-          rua:    a.rua,
-          bairro: a.bairro || prev.bairro,
-          cidade: a.cidade || prev.cidade,
-          estado: a.estado || prev.estado,
-          // O número é da casa, e GPS não sabe número: fica o que a pessoa pôs.
-          cep:    cepFmt || prev.cep,
-        }
-      })
-      if (mudou) {
-        setEnderecoDoPino({ rua: a.rua, bairro: a.bairro || '' })
-        if (a.estado && a.estado !== form.estado) carregarCidades(a.estado, a.cidade || '')
-      }
+      // A decisão é tomada AQUI, e não dentro do setForm: o React só executa a
+      // função do setState na hora de renderizar, então a variável que marcava
+      // "mudou" ainda era falsa quando eu ia usá-la — e o aviso na tela nunca
+      // aparecia, mesmo com o endereço já trocado. Trocar o endereço de alguém
+      // sem avisar é o oposto do que isto veio fazer.
+      const atual = formRef.current ?? {}
+      if (mesmaRua(atual.rua, a.rua)) return   // ajustou dentro da mesma rua: nada a fazer
+      // SÓ REESCREVE SE MUDOU DE BAIRRO.
+      //
+      // Testado em 06/09/2026: dois pontos a 45 METROS de distância, perto de
+      // uma esquina, voltaram ruas diferentes ("Avenida das Fronteiras" e
+      // "Rua dos Coqueiros"). Reescrever a cada ajuste fino trocaria a rua
+      // certa de quem mora na esquina — o motoboy iria pra rua errada, que é
+      // pior que a taxa errada.
+      //
+      // O bairro é grosso o bastante pra não errar num ajuste de metros, e é
+      // exatamente ele que denuncia a trapaça: quem digita Pajuçara e joga o
+      // pino na porta da loja cai em Nossa Senhora da Apresentação.
+      // Sem bairro no ponto (ou sem bairro digitado) não dá pra comparar:
+      // fica o que a pessoa escreveu.
+      const bairroDigitado = String(atual.bairro ?? '').trim()
+      if (bairroDigitado && (!a.bairro || mesmaRua(bairroDigitado, a.bairro))) return
+
+      setForm(prev => ({
+        ...prev,
+        rua:    a.rua,
+        bairro: a.bairro || prev.bairro,
+        cidade: a.cidade || prev.cidade,
+        estado: a.estado || prev.estado,
+        // O número é da casa, e GPS não sabe número: fica o que a pessoa pôs.
+        cep:    cepFmt || prev.cep,
+      }))
+      setEnderecoDoPino({ rua: a.rua, bairro: a.bairro || '' })
+      if (a.estado && a.estado !== atual.estado) carregarCidades(a.estado, a.cidade || '')
     }, 900)
   }
 
