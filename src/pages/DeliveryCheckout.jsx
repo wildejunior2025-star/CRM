@@ -566,6 +566,8 @@ export default function DeliveryCheckout() {
   const [coordCliente, setCoordCliente] = useState(null) // {lat,lng} do ponto de entrega
   const [mapaAberto, setMapaAberto]     = useState(false)
   const pinManualRef = useRef(false) // true quando o cliente marcou no mapa (não sobrescreve com geocode)
+  const reverseTimer = useRef(null)  // espera o dedo parar antes de perguntar a rua do pino
+  const [enderecoDoPino, setEnderecoDoPino] = useState(null) // { rua, bairro } que o pino trouxe
   // Taxa que está na tela do cliente, pro registro do funil. É ref porque o
   // efeito que anota o contato roda aqui em cima e a taxa só é calculada lá
   // embaixo (depois do `return` de sacola vazia, onde não cabe outro hook).
@@ -1125,12 +1127,63 @@ export default function DeliveryCheckout() {
   // faz o caminho de volta (coordenada → endereço) de propósito: a pessoa está
   // digitando rua e bairro nesse instante, e reescrever os campos a cada arrasto
   // seria o formulário brigando com o dedo dela. Isso continua só no mapa grande.
+  // QUEM MANDA NO ENDEREÇO É O PINO.
+  //
+  // Dava pra digitar a rua certa, arrastar o pino pra porta da loja e pagar a
+  // taxa mínima: a conta é pela distância do pino, mas o papel saía com a rua
+  // digitada. Marajó #298 (06/09/2026): endereço na Pajuçara, pino a 50 m da
+  // pizzaria, R$ 3,00 numa entrega de R$ 6,00.
+  //
+  // Agora, mexeu no pino, o endereço passa a ser o DAQUELE ponto. Quem tentar
+  // baratear arrastando o pino pra perto da loja recebe o pedido com a rua da
+  // loja escrita — e é pra lá que o motoboy vai. No uso honesto não muda nada:
+  // o máximo que acontece é ajustar o pino dentro da própria rua.
+  const mesmaRua = (a, b) => String(a ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    === String(b ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+
+  function enderecoPeloPino(lat, lng) {
+    clearTimeout(reverseTimer.current)
+    // Espera o dedo parar: o arrasto dispara a cada movimento e o Nominatim
+    // aceita 1 consulta por segundo.
+    reverseTimer.current = setTimeout(async () => {
+      const a = await reverseGeocode(lat, lng)
+      // Mapa sem resposta (ou sem rua no ponto) NÃO apaga o que a pessoa
+      // escreveu — endereço em branco é pedido perdido.
+      if (!a?.rua) return
+      const cepFmt = a.cep && a.cep.length === 8 ? `${a.cep.slice(0, 5)}-${a.cep.slice(5)}` : ''
+      let mudou = false
+      setForm(prev => {
+        if (mesmaRua(prev.rua, a.rua)) return prev   // ajustou dentro da mesma rua: nada a fazer
+        mudou = true
+        return {
+          ...prev,
+          rua:    a.rua,
+          bairro: a.bairro || prev.bairro,
+          cidade: a.cidade || prev.cidade,
+          estado: a.estado || prev.estado,
+          // O número é da casa, e GPS não sabe número: fica o que a pessoa pôs.
+          cep:    cepFmt || prev.cep,
+        }
+      })
+      if (mudou) {
+        setEnderecoDoPino({ rua: a.rua, bairro: a.bairro || '' })
+        if (a.estado && a.estado !== form.estado) carregarCidades(a.estado, a.cidade || '')
+      }
+    }, 900)
+  }
+
   function pontoDoMapa({ lat, lng, manual }) {
     if (manual) pinManualRef.current = true
     setCoordCliente(prev =>
       prev && Math.abs(prev.lat - lat) < 1e-7 && Math.abs(prev.lng - lng) < 1e-7
         ? prev
         : { lat, lng })
+    // Só quando foi a PESSOA que mexeu. O pino que o buscador põe sozinho já
+    // veio do endereço digitado — reescrever ali seria o mapa discutindo com
+    // ele mesmo.
+    if (manual) enderecoPeloPino(lat, lng)
   }
 
   function confirmarMapa({ lat, lng, manual }) {
@@ -1148,6 +1201,7 @@ export default function DeliveryCheckout() {
         estado: a.estado || prev.estado,
         cep:    prev.cep || cepFmt,
       }))
+      if (a.rua && !mesmaRua(form.rua, a.rua)) setEnderecoDoPino({ rua: a.rua, bairro: a.bairro || '' })
       if (a.estado && a.estado !== form.estado) carregarCidades(a.estado, a.cidade || '')
     })
   }
@@ -1937,6 +1991,16 @@ export default function DeliveryCheckout() {
                         onChange={pontoDoMapa}
                         onAmpliar={() => setMapaAberto(true)}
                       />
+                      {/* O endereço mudou junto com o pino: a pessoa PRECISA
+                          ver, senão o pedido sai numa rua que ela não escreveu
+                          e ela só descobre quando o motoboy não chega. */}
+                      {enderecoDoPino && (
+                        <div style={{ marginTop: 6, fontSize: 12.5, color: '#eab308', lineHeight: 1.5 }}>
+                          📍 Endereço atualizado pelo pino: <strong>{enderecoDoPino.rua}</strong>
+                          {enderecoDoPino.bairro ? `, ${enderecoDoPino.bairro}` : ''}.
+                          {' '}A entrega vai para onde o pino está — se não for aí, arraste até a sua casa.
+                        </div>
+                      )}
                       {!form.numero.trim() && (
                         <div style={{ marginTop: 6, fontSize: 12.5, color: '#eab308' }}>
                           ✏️ Digite o <strong>número da casa</strong> — é com ele que o mapa acha o ponto certo.
