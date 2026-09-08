@@ -963,15 +963,18 @@ async function gravarIdsDoIfood(sb: any, enviados: any[], voltaram: any[]) {
   for (let i = 0; i < enviados.length; i++) {
     const g = enviados[i], vg = voltaram?.[i]
     if (!g?.localId || !vg?.grupoId) continue
-    await sb.from("complemento_grupos").update({ ifood_option_group_id: vg.grupoId })
-      .eq("id", g.localId).or(`ifood_option_group_id.is.null,ifood_option_group_id.neq.${vg.grupoId}`)
+    // Grava sempre, mesmo quando o id não mudou. Pular a escrita economizaria
+    // pouco e o erro seria silencioso: id não gravado é grupo duplicado no
+    // cardápio do iFood no envio seguinte, e ninguém descobre até ver lá.
+    await sb.from("complemento_grupos")
+      .update({ ifood_option_group_id: vg.grupoId })
+      .eq("id", g.localId)
     for (let j = 0; j < (g.opcoes ?? []).length; j++) {
       const o = g.opcoes[j], vo = vg.opcoes?.[j]
       if (!o?.localId || !vo?.opcaoId) continue
       await sb.from("complemento_opcoes")
         .update({ ifood_option_id: vo.opcaoId, ifood_product_id: vo.produtoId })
         .eq("id", o.localId)
-        .or(`ifood_option_id.is.null,ifood_option_id.neq.${vo.opcaoId}`)
     }
   }
 }
