@@ -215,9 +215,11 @@ export default function WhatsAppConversas() {
   const [soPausados, setSoPausados] = useState(false)
   const [busy, setBusy] = useState(null)
   const [aberta, setAberta] = useState(null)   // conversa aberta na tela
-  // Clientes que pediram pra falar com gente (mig 0228). O alarme toca no menu;
-  // aqui é onde ele é resolvido.
-  const { chamados, atender } = useChamados(empresaId)
+  // Clientes que pediram pra falar com gente (mig 0228). Aqui é onde o chamado
+  // é resolvido, MUDO: a campainha é do gestor de pedidos (/painel), a tela que
+  // fica aberta no balcão. No portal ela tocava por cima de quem estava mexendo
+  // em relatório — e ainda tocava em cima de quem já estava lendo a conversa.
+  const { chamados, atender } = useChamados(empresaId, true, false)
 
   const load = useCallback(async () => {
     if (!empresaId) return
