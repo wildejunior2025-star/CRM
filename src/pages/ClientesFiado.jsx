@@ -149,6 +149,11 @@ export default function ClientesFiado({ empresaId }) {
   const [salvando, setSalvando] = useState(false)
   // Histórico de compras aberto ao clicar no nome: { [cliente_id]: [vendas] | 'carregando' }
   const [compras, setCompras] = useState({})
+  // Os pagamentos daquele cliente: { cliente_id: [{valor, forma, data}] }.
+  // Andam junto com `compras` — abrem e fecham no mesmo clique do nome.
+  const [pagos, setPagos] = useState({})
+  // Clientes JÁ QUITADOS que a busca achou (não vêm na lista de devedores).
+  const [quitados, setQuitados] = useState([])
   // Telefone em edição: { cliente_id, valor }. Cliente cadastrado às pressas no
   // balcão costuma ficar sem telefone — e sem telefone não dá pra cobrar no zap.
   const [editTel, setEditTel] = useState(null)
@@ -205,18 +210,36 @@ export default function ClientesFiado({ empresaId }) {
   // Puxa o que o cliente comprou (vendas + itens) sob demanda ao clicar no nome.
   // Só busca uma vez por cliente; clicar de novo fecha.
   async function verCompras(clienteId) {
-    if (compras[clienteId]) { setCompras(p => { const n = { ...p }; delete n[clienteId]; return n }); return }
+    if (compras[clienteId]) {
+      setCompras(p => { const n = { ...p }; delete n[clienteId]; return n })
+      setPagos(p => { const n = { ...p }; delete n[clienteId]; return n })
+      return
+    }
     setCompras(p => ({ ...p, [clienteId]: 'carregando' }))
-    const { data, error } = await supabase.from('vendas')
-      .select('id, total, forma_pagamento, created_at, venda_itens(quantidade, preco_unitario, nome_produto, produtos(nome))')
-      .eq('empresa_id', empresaId)
-      .eq('cliente_id', clienteId)
-      .neq('status', 'cancelado')
-      .order('created_at', { ascending: false })
-      // 30 cortava fiado antigo em cliente de todo dia, e sem TODOS os fiados a
-      // conta de quem já pagou sai errada (ver faltaPorVenda).
-      .limit(200)
-    setCompras(p => ({ ...p, [clienteId]: error ? [] : (data ?? []) }))
+    // As COMPRAS e os PAGAMENTOS juntos: a lista de compras sozinha só dizia o
+    // que a pessoa comeu. Quando ela pagava, o pedido virava "fiado pago" e
+    // sumia a informação que interessa — QUANDO pagou e QUANTO. Isso não estava
+    // em tela nenhuma: pra saber, tinha que abrir o banco.
+    const [vd, pg] = await Promise.all([
+      supabase.from('vendas')
+        .select('id, total, forma_pagamento, created_at, venda_itens(quantidade, preco_unitario, nome_produto, produtos(nome))')
+        .eq('empresa_id', empresaId)
+        .eq('cliente_id', clienteId)
+        .neq('status', 'cancelado')
+        .order('created_at', { ascending: false })
+        // 30 cortava fiado antigo em cliente de todo dia, e sem TODOS os fiados a
+        // conta de quem já pagou sai errada (ver faltaPorVenda).
+        .limit(200),
+      supabase.from('pagamentos')
+        .select('id, valor, forma_pagamento, created_at')
+        .eq('empresa_id', empresaId)
+        .eq('cliente_id', clienteId)
+        .eq('observacao', OBS_FIADO)
+        .order('created_at', { ascending: false })
+        .limit(200),
+    ])
+    setCompras(p => ({ ...p, [clienteId]: vd.error ? [] : (vd.data ?? []) }))
+    setPagos(p => ({ ...p, [clienteId]: pg.error ? [] : (pg.data ?? []) }))
   }
 
   async function load() {
@@ -318,6 +341,39 @@ export default function ClientesFiado({ empresaId }) {
     return q ? linhas.filter(l => semAcento(l.cliente_nome).includes(q)) : linhas
   }, [linhas, busca])
 
+  // Quem QUITOU some desta tela: a lista vem de `alertas_fiado`, que só traz
+  // saldo > 0. Faz sentido pra cobrança — mas então não tinha como conferir
+  // quando e quanto um cliente pagou depois que ele acertou tudo, que é
+  // justamente quando alguém pergunta.
+  //
+  // Só busca quando o nome digitado não achou ninguém devendo: é uma consulta a
+  // mais, e o uso normal da tela é ver quem deve.
+  useEffect(() => {
+    const q = busca.trim()
+    if (q.length < 2 || filtradas.length > 0) { setQuitados([]); return }
+    let cancelado = false
+    const t = setTimeout(async () => {
+      const { data: cli } = await supabase.from('clientes')
+        .select('id, nome, telefone, token')
+        .eq('empresa_id', empresaId)
+        .ilike('nome', `%${q}%`)
+        .limit(20)
+      if (cancelado || !cli?.length) { if (!cancelado) setQuitados([]); return }
+      // A view de saldo só tem linha pra quem TEM histórico de fiado — é ela
+      // que separa "cliente que já comprou fiado e pagou" de "cliente comum".
+      const { data: sal } = await supabase.from('clientes_saldo_fiado')
+        .select('cliente_id, saldo_fiado')
+        .in('cliente_id', cli.map(c => c.id))
+      if (cancelado) return
+      const temFiado = new Set((sal ?? []).map(s => s.cliente_id))
+      setQuitados(cli.filter(c => temFiado.has(c.id)).map(c => ({
+        cliente_id: c.id, cliente_nome: c.nome, telefone: c.telefone,
+        token: c.token, saldo_fiado: 0, limite: 0,
+      })))
+    }, 350)
+    return () => { cancelado = true; clearTimeout(t) }
+  }, [busca, filtradas.length, empresaId])
+
   const total = filtradas.reduce((s, l) => s + l.saldo_fiado, 0)
   const acimaDoLimite = filtradas.filter(l => l.limite > 0 && l.saldo_fiado > l.limite).length
 
@@ -364,7 +420,7 @@ export default function ClientesFiado({ empresaId }) {
               </tr>
             </thead>
             <tbody>
-              {filtradas.map(l => {
+              {[...filtradas, ...quitados].map(l => {
                 const estourou = l.limite > 0 && l.saldo_fiado > l.limite
                 const link = zap(l.telefone)
                 const aberto = recebendo?.cliente_id === l.cliente_id
@@ -489,6 +545,49 @@ export default function ClientesFiado({ empresaId }) {
                             <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '4px 0' }}>Nenhuma compra registrada.</div>
                           ) : (
                             <div style={{ padding: '2px 0' }}>
+                              {/* Fecha a conta em três números. Sem isto a tela só
+                                  contava o que a pessoa comeu: o quanto ela já
+                                  pagou, e quando, não aparecia em lugar nenhum. */}
+                              {(() => {
+                                const comprou = compras[l.cliente_id]
+                                  .filter(v => v.forma_pagamento !== 'a_vista')
+                                  .reduce((s, v) => s + Number(v.total || 0), 0)
+                                const lista = pagos[l.cliente_id] ?? []
+                                const pagou = lista.reduce((s, p) => s + Number(p.valor || 0), 0)
+                                return (
+                                  <>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, padding: '8px 0 10px',
+                                      borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+                                      <span>Comprou no fiado <strong>{fmtBRL(comprou)}</strong></span>
+                                      <span style={{ color: 'var(--success, #16a34a)' }}>Já pagou <strong>{fmtBRL(pagou)}</strong></span>
+                                      <span style={{ color: l.saldo_fiado > 0.005 ? '#d97706' : 'var(--success, #16a34a)' }}>
+                                        {l.saldo_fiado > 0.005 ? <>Ainda deve <strong>{fmtBRL(l.saldo_fiado)}</strong></> : <strong>Quitado ✅</strong>}
+                                      </span>
+                                    </div>
+
+                                    <div style={{ padding: '8px 0 10px', borderBottom: '1px solid var(--border)' }}>
+                                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4 }}>
+                                        PAGAMENTOS
+                                      </div>
+                                      {lista.length === 0 ? (
+                                        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nunca pagou nada ainda.</div>
+                                      ) : lista.map(p => (
+                                        <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, padding: '3px 0' }}>
+                                          <span style={{ color: 'var(--text-muted)' }}>
+                                            {dataHora(p.created_at)} · {FORMAS.find(f => f.id === p.forma_pagamento)?.label ?? p.forma_pagamento}
+                                          </span>
+                                          <strong style={{ color: 'var(--success, #16a34a)' }}>{fmtBRL(p.valor)}</strong>
+                                        </div>
+                                      ))}
+                                    </div>
+
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', margin: '10px 0 2px' }}>
+                                      COMPRAS
+                                    </div>
+                                  </>
+                                )
+                              })()}
+
                               {(() => { const falta = faltaPorVenda(compras[l.cliente_id], l.saldo_fiado); return compras[l.cliente_id].map(v => {
                                 const emAberto = falta.get(v.id)                       // undefined = quitado
                                 const ehFiado  = v.forma_pagamento !== 'a_vista'
