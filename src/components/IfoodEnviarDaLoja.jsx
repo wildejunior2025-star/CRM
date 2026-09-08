@@ -25,6 +25,7 @@ const reais = (v) => Number(v ?? 0).toLocaleString('pt-BR', { minimumFractionDig
 export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
   const [aberto, setAberto] = useState(false)
   const [produtos, setProdutos] = useState(null)     // todos os ativos da loja
+  const [gruposPorProduto, setGruposPorProduto] = useState({})  // quantos complementos cada um leva
   const [catsLoja, setCatsLoja] = useState([])       // as categorias CADASTRADAS aqui
   const [categoria, setCategoria] = useState('')     // categoria DAQUI
   const [pct, setPct] = useState('20')
@@ -51,6 +52,19 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
 
     supabase.from('categorias').select('nome').eq('empresa_id', empresaId).order('ordem')
       .then(({ data }) => setCatsLoja((data ?? []).map(c => c.nome)))
+
+    // Quantos grupos de complemento cada produto leva — só pra tela avisar antes
+    // de publicar. O filtro é pela empresa do GRUPO (join interno), não por uma
+    // lista de ids: loja de depósito passa de 4 mil produtos e a URL estouraria.
+    fetchAll(() =>
+      supabase.from('produto_complemento_grupos')
+        .select('produto_id, complemento_grupos!inner(id, empresa_id)')
+        .eq('complemento_grupos.empresa_id', empresaId)
+    ).then(({ data }) => {
+      const conta = {}
+      for (const v of data ?? []) conta[v.produto_id] = (conta[v.produto_id] ?? 0) + 1
+      setGruposPorProduto(conta)
+    })
 
     chamar({ acao: 'catalogo_categorias', empresa_id: empresaId })
       .then(d => { if (d.ok) setCatsIfood(d.categorias ?? []) })
@@ -165,8 +179,8 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
           style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 18 }}>✕</button>
       </div>
       <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 12px' }}>
-        Publica no iFood os produtos que já estão cadastrados aqui, com foto e descrição.
-        Não mexe no seu cardápio da loja.
+        Publica no iFood os produtos que já estão cadastrados aqui, com foto, descrição
+        e complementos. Não mexe no seu cardápio da loja.
       </p>
 
       {!produtos && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Carregando seus produtos…</p>}
@@ -248,6 +262,13 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
                       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {p.nome}
                         {!p.foto_url && <span style={{ color: 'var(--text-muted)', fontSize: 11 }}> · sem foto</span>}
+                        {/* Os complementos sobem junto com o item — dizer quantos evita
+                            a dúvida de "será que foi só o produto?". */}
+                        {gruposPorProduto[p.id] > 0 && (
+                          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                            {' '}· {gruposPorProduto[p.id]} grupo{gruposPorProduto[p.id] > 1 ? 's' : ''} de complemento
+                          </span>
+                        )}
                         {/* Já publicado: reenviar atualiza o item de lá, não cria outro. */}
                         {p.ifood_item_id && <span style={{ color: '#16a34a', fontSize: 11 }}> · 🔗 já no iFood, vai atualizar</span>}
                       </span>

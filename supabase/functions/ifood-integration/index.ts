@@ -775,7 +775,10 @@ async function runSalvarItem(sb: any, empresaId: string, p: any) {
   if ("error" in ctx) return { ok: false, error: ctx.error }
 
   const status = p.status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE"
-  const grupos = Array.isArray(p.grupos) ? p.grupos : []
+  // Cópia própria: quando o iFood recusa um id queimado, os ids são trocados
+  // aqui dentro e quem chamou recebe os novos de volta pra gravar.
+  let grupos = (Array.isArray(p.grupos) ? p.grupos : [])
+    .map((g: any) => ({ ...g, opcoes: (Array.isArray(g.opcoes) ? g.opcoes : []).map((o: any) => ({ ...o })) }))
 
   const montaBody = (itemId: string, productId: string) => {
     // produtos: o principal + um por opção de complemento
@@ -789,7 +792,8 @@ async function runSalvarItem(sb: any, empresaId: string, p: any) {
     for (const g of grupos) {
       const opcoes = Array.isArray(g.opcoes) ? g.opcoes : []
       optionGroups.push({
-        id: g.grupoId, name: g.nome, status: "AVAILABLE",
+        id: g.grupoId, name: g.nome,
+        status: g.status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE",
         min: Number(g.min ?? 0), max: Number(g.max ?? 1),
         optionIds: opcoes.map((o: any) => o.opcaoId),
       })
@@ -839,6 +843,17 @@ async function runSalvarItem(sb: any, empresaId: string, p: any) {
     r = await manda(itemId, productId)
   }
 
+  // O mesmo acontece com grupo e opção apagados lá: o id fica queimado e todo
+  // reenvio bate no 409. Troca os ids dos complementos e manda de novo — quem
+  // chamou grava os que voltam.
+  if (!r.ok && r.status === 409 && /deleted (option|product)/i.test(r.txt) && grupos.length > 0) {
+    grupos = grupos.map((g: any) => ({
+      ...g, grupoId: uuid(),
+      opcoes: g.opcoes.map((o: any) => ({ ...o, opcaoId: uuid(), produtoId: uuid() })),
+    }))
+    r = await manda(itemId, productId)
+  }
+
   if (!r.ok) return { ok: false, error: `iFood ${r.status}: ${r.txt.slice(0, 400)}` }
   // devolve os ids gerados pra UI guardar (necessário pra depois editar/pausar)
   return { ok: true, itemId, productId, recriado,
@@ -853,6 +868,114 @@ function stripImg(u: any): string | null {
   if (!u) return null
   return String(u).replace(/^https?:\/\/static-images\.ifood\.com\.br\/(pratos|image\/upload)\//, "")
 }
+
+// ---------------------------------------------------------------------------
+// Complementos daqui -> formato de `grupos` que o runSalvarItem manda pro iFood.
+//
+// Lê pelo vínculo produto↔grupo, que é a fonte de verdade desde que o grupo
+// passou a ser criado uma vez e ligado em vários produtos. O min/max sai do
+// vínculo quando o produto tem exceção, senão vem do grupo.
+//
+// Os ids do iFood são gerados UMA VEZ por grupo/opção e guardados. Gerar por
+// produto duplicaria o grupo compartilhado: "leite" está em 6 produtos: seriam
+// 6 grupos "leite" no cardápio do iFood.
+async function complementosParaIfood(sb: any, produtoIds: string[]) {
+  const porProduto = new Map<string, any[]>()
+  const avisos: string[] = []
+  if (produtoIds.length === 0) return { porProduto, avisos, novos: [] as any[] }
+
+  const { data: vinculos } = await sb
+    .from("produto_complemento_grupos")
+    .select(`produto_id, ordem, min_override, max_override,
+      complemento_grupos ( id, nome, min, max, disponivel, regra_preco, modo_quantidade, ifood_option_group_id,
+        complemento_opcoes ( id, nome, preco_adicional, ordem, disponivel, ifood_option_id, ifood_product_id ) )`)
+    .in("produto_id", produtoIds)
+    .order("ordem")
+
+  const idsPorGrupo = new Map<string, any>()   // um id de iFood por grupo, não por produto
+  const avisados = new Set<string>()
+
+  for (const v of vinculos ?? []) {
+    const g = v.complemento_grupos
+    if (!g) continue
+    const opcoes = [...(g.complemento_opcoes ?? [])].sort((a: any, b: any) => (a.ordem ?? 0) - (b.ordem ?? 0))
+    // Grupo sem opção nenhuma o iFood recusa, e não teria o que escolher.
+    if (opcoes.length === 0) continue
+
+    // "maior" (o preço é o do item mais caro escolhido, usado em meio a meio) e
+    // "por quantidade" não existem no cardápio do iFood: lá cada opção soma o
+    // preço dela. Vai assim mesmo — melhor o complemento existir com o preço a
+    // conferir do que o item subir pelado — mas o lojista precisa saber.
+    if (g.regra_preco && g.regra_preco !== "somar" && !avisados.has(g.id + ":regra")) {
+      avisados.add(g.id + ":regra")
+      avisos.push(`"${g.nome}": aqui o preço é "${g.regra_preco}", mas no iFood cada opção soma. Confira o preço lá.`)
+    }
+    if (g.modo_quantidade && !avisados.has(g.id + ":qtd")) {
+      avisados.add(g.id + ":qtd")
+      avisos.push(`"${g.nome}": o cliente escolhe quantidade aqui, no iFood vai como marcar/desmarcar.`)
+    }
+
+    if (!idsPorGrupo.has(g.id)) {
+      idsPorGrupo.set(g.id, {
+        grupoId: g.ifood_option_group_id ?? uuid(),
+        eraNovo: !g.ifood_option_group_id,
+        opcoes: new Map(opcoes.map((o: any) => [o.id, {
+          opcaoId: o.ifood_option_id ?? uuid(),
+          produtoId: o.ifood_product_id ?? uuid(),
+          eraNovo: !o.ifood_option_id || !o.ifood_product_id,
+        }])),
+      })
+    }
+    const ids = idsPorGrupo.get(g.id)
+
+    const lista = porProduto.get(v.produto_id) ?? []
+    lista.push({
+      localId: g.id,
+      grupoId: ids.grupoId,
+      nome: g.nome || "Complementos",
+      // Exceção do produto ganha do padrão do grupo — é o mesmo que o cardápio
+      // daqui faz.
+      min: Number(v.min_override ?? g.min ?? 0),
+      max: Number(v.max_override ?? g.max ?? 1),
+      // Grupo pausado aqui sobe pausado lá, em vez de sumir: sumindo, ele ficaria
+      // no ar no iFood do jeito que estava no envio anterior.
+      status: g.disponivel === false ? "UNAVAILABLE" : "AVAILABLE",
+      opcoes: opcoes.map((o: any) => ({
+        localId: o.id,
+        opcaoId: ids.opcoes.get(o.id).opcaoId,
+        produtoId: ids.opcoes.get(o.id).produtoId,
+        nome: o.nome || "Opção",
+        preco: Number(o.preco_adicional ?? 0),
+        status: o.disponivel === false ? "UNAVAILABLE" : "AVAILABLE",
+      })),
+    })
+    porProduto.set(v.produto_id, lista)
+  }
+
+  return { porProduto, avisos, novos: [] as any[] }
+}
+
+// Grava no banco o id que o grupo/opção ficou tendo no iFood. `enviados` é o que
+// foi mandado (traz o localId) e `voltaram` é o que o runSalvarItem devolveu, na
+// mesma ordem — os dois só diferem quando o item precisou ser recriado com ids
+// novos, e é exatamente aí que gravar importa.
+async function gravarIdsDoIfood(sb: any, enviados: any[], voltaram: any[]) {
+  for (let i = 0; i < enviados.length; i++) {
+    const g = enviados[i], vg = voltaram?.[i]
+    if (!g?.localId || !vg?.grupoId) continue
+    await sb.from("complemento_grupos").update({ ifood_option_group_id: vg.grupoId })
+      .eq("id", g.localId).or(`ifood_option_group_id.is.null,ifood_option_group_id.neq.${vg.grupoId}`)
+    for (let j = 0; j < (g.opcoes ?? []).length; j++) {
+      const o = g.opcoes[j], vo = vg.opcoes?.[j]
+      if (!o?.localId || !vo?.opcaoId) continue
+      await sb.from("complemento_opcoes")
+        .update({ ifood_option_id: vo.opcaoId, ifood_product_id: vo.produtoId })
+        .eq("id", o.localId)
+        .or(`ifood_option_id.is.null,ifood_option_id.neq.${vo.opcaoId}`)
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Manda produtos do catálogo DAQUI pro iFood (o contrário do "Importar").
 //
@@ -868,6 +991,10 @@ function stripImg(u: any): string | null {
 // A imagem é buscada aqui no servidor (a URL é do nosso storage) e reenviada
 // pro iFood, que só aceita base64. Foto que falhar não derruba o item: ele vai
 // sem imagem e o nome aparece na lista de avisos.
+//
+// Os complementos vão junto (grupos e opções), com o min/max que o produto usa
+// aqui. O id de cada grupo/opção lá é guardado na migração 0246, senão todo
+// reenvio criaria um grupo novo e encheria o cardápio do iFood de repetido.
 async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
   const ids: string[] = Array.isArray(body?.produto_ids) ? body.produto_ids : []
   if (ids.length === 0) return { ok: false, error: "nenhum produto escolhido" }
@@ -883,6 +1010,8 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
     .eq("empresa_id", empresaId)
     .in("id", ids)
   if (!produtos?.length) return { ok: false, error: "produtos não encontrados" }
+
+  const comp = await complementosParaIfood(sb, ids)
 
   // Categoria de destino: uma que já existe no iFood, ou cria com o nome dado.
   let categoriaId = body?.categoria_ifood_id ?? null
@@ -900,7 +1029,7 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
     } else return { ok: false, error: `não deu pra criar a categoria: ${nova.error}` }
   }
 
-  const avisos: string[] = []
+  const avisos: string[] = [...comp.avisos]
   let enviados = 0      // itens novos no iFood
   let atualizados = 0   // já estavam lá e foram atualizados
   for (const p of produtos) {
@@ -920,11 +1049,14 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
     // id, então mandar o mesmo id atualiza (preço, foto, descrição) em vez de
     // criar um segundo. Sem isso, reenviar a categoria duplicava o cardápio —
     // e o vínculo passava a apontar pro item novo, deixando o antigo órfão.
+    // Os complementos do produto, com o min/max que ele usa aqui.
+    const grupos = comp.porProduto.get(p.id) ?? []
     const r = await runSalvarItem(sb, empresaId, {
       categoriaId, nome: p.nome, descricao: p.descricao ?? "", preco, imagePath,
       itemId: p.ifood_item_id ?? undefined,
       productId: p.ifood_product_id ?? undefined,
       externalCode: `FWC-${String(p.id).slice(0, 8)}`,
+      grupos,
     })
     if (r.ok) {
       // recriado = o item tinha sido apagado no iFood e subiu de novo com id novo
@@ -935,6 +1067,9 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
       await sb.from("produtos")
         .update({ ifood_item_id: r.itemId, ifood_product_id: r.productId })
         .eq("id", p.id)
+      // O mesmo pro grupo e pra opção: sem gravar, o próximo envio cria tudo de
+      // novo lá. `r.grupos` vem na ordem em que foi mandado, então casa por índice.
+      await gravarIdsDoIfood(sb, grupos, r.grupos)
     } else avisos.push(`${p.nome}: ${String(r.error).slice(0, 120)}`)
   }
   return { ok: true, enviados, atualizados, total: produtos.length, categoriaId, avisos, reusouCategoria }
