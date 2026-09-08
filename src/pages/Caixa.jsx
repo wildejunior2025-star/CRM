@@ -29,6 +29,21 @@ const ddmm = (d) => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-di
 // Como cada forma aparece na lista de sangrias/suprimentos.
 const rotuloForma = (f) => (f === 'pix' ? '📱 PIX' : f === 'cartao' ? '💳 Cartão' : '💵 Dinheiro')
 
+// A forma de um PAGAMENTO tem mais casos que a de uma sangria: crédito e débito
+// entram separados (o caixa soma cada um), e ainda tem transferência e cashback.
+const FORMAS_PAG = [
+  { id: 'dinheiro',      rotulo: '💵 Dinheiro',      casa: f => f === 'dinheiro' || !f },
+  { id: 'pix',           rotulo: '📱 PIX',           casa: f => f === 'pix' },
+  { id: 'cartao',        rotulo: '💳 Cartão',        casa: f => f === 'credito' || f === 'debito' || f === 'cartao' },
+  { id: 'transferencia', rotulo: '🏦 Transferência', casa: f => f === 'transferencia' },
+  { id: 'cashback',      rotulo: '🎁 Cashback',      casa: f => f === 'cashback' },
+]
+const rotuloPagamento = (f) => {
+  if (f === 'credito') return '💳 Crédito'
+  if (f === 'debito') return '💳 Débito'
+  return FORMAS_PAG.find(x => x.casa(f))?.rotulo ?? f
+}
+
 function rotuloSemana(offset) {
   const { inicio, fim } = semanaDe(offset)
   const ultimo = new Date(fim)
@@ -113,16 +128,27 @@ export default function Caixa() {
   // Sangrias/suprimentos de um caixa JÁ FECHADO. O total some no resumo, mas o
   // motivo de cada saída continua salvo — aqui ele volta pra tela.
   const [histMovs, setHistMovs] = useState({})            // { [caixaId]: movimentos[] }
+  // O que ENTROU no caixa, um por um. O resumo só dava o total por forma; pra
+  // conferir com o extrato do Mercado Pago (ou com a maquineta) é preciso ver
+  // lançamento por lançamento — e era isso que obrigava a abrir o banco.
+  const [histPagos, setHistPagos] = useState({})          // { [caixaId]: pagamentos[] }
+  const [filtroForma, setFiltroForma] = useState('todos')
   async function toggleHist(c) {
     const abrir = histAberto !== c.id
     setHistAberto(abrir ? c.id : null)
+    setFiltroForma('todos')
     if (abrir && !histResumo[c.id]) {
       setHistResumo(m => ({ ...m, [c.id]: 'loading' }))
-      const [resumoRes, movsRes] = await Promise.all([
+      const [resumoRes, movsRes, pagosRes] = await Promise.all([
         supabase.from('caixa_resumo').select('*').eq('caixa_id', c.id).maybeSingle(),
         supabase.from('caixa_movimentos').select('*').eq('caixa_id', c.id).order('created_at', { ascending: false }),
+        supabase.from('pagamentos')
+          .select('id, valor, forma_pagamento, observacao, created_at, clientes(nome)')
+          .eq('caixa_id', c.id)
+          .order('created_at', { ascending: false }),
       ])
       setHistMovs(m => ({ ...m, [c.id]: movsRes.data ?? [] }))
+      setHistPagos(m => ({ ...m, [c.id]: pagosRes.data ?? [] }))
       setHistResumo(m => ({ ...m, [c.id]: resumoRes.data || {} }))
     }
   }
@@ -900,6 +926,69 @@ export default function Caixa() {
                                 </span>
                               </div>
                             )}
+
+                            {/* O QUE ENTROU, lançamento por lançamento, com filtro por
+                                forma. Antes só existia o total por forma no resumo —
+                                e conferir o PIX do dia com o extrato do Mercado Pago,
+                                ou o cartão com a maquineta, era impossível pela tela. */}
+                            {(() => {
+                              const todos = histPagos[c.id] ?? []
+                              const grupos = FORMAS_PAG.filter(g => todos.some(p => g.casa(p.forma_pagamento)))
+                              const lista = filtroForma === 'todos'
+                                ? todos
+                                : todos.filter(p => FORMAS_PAG.find(g => g.id === filtroForma)?.casa(p.forma_pagamento))
+                              const soma = lista.reduce((s, p) => s + Number(p.valor || 0), 0)
+                              return (
+                                <div style={{ marginTop: 14 }}>
+                                  <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                                    O que entrou neste caixa
+                                  </div>
+                                  {todos.length === 0 ? (
+                                    <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nenhum recebimento neste caixa.</div>
+                                  ) : (
+                                    <>
+                                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                                        {[{ id: 'todos', rotulo: 'Todos' }, ...grupos].map(g => (
+                                          <button key={g.id} type="button" onClick={() => setFiltroForma(g.id)}
+                                            style={{
+                                              padding: '5px 11px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+                                              border: '1px solid ' + (filtroForma === g.id ? 'var(--primary)' : 'var(--border)'),
+                                              background: filtroForma === g.id ? 'var(--primary)' : 'transparent',
+                                              color: filtroForma === g.id ? '#fff' : 'var(--text)',
+                                            }}>
+                                            {g.rotulo}
+                                          </button>
+                                        ))}
+                                      </div>
+
+                                      {/* O total do filtro é o número que se compara com o
+                                          extrato — sem ele o filtro só serviria pra olhar. */}
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline',
+                                        padding: '6px 0 8px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+                                        <span style={{ color: 'var(--text-muted)' }}>
+                                          {lista.length} lançamento{lista.length === 1 ? '' : 's'}
+                                        </span>
+                                        <strong style={{ fontSize: 15 }}>R$ {soma.toFixed(2)}</strong>
+                                      </div>
+
+                                      <div style={{ display: 'grid', gap: 4, marginTop: 6 }}>
+                                        {lista.map(p => (
+                                          <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, padding: '3px 0' }}>
+                                            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
+                                              {new Date(p.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                              {' · '}{rotuloPagamento(p.forma_pagamento)}
+                                              {p.clientes?.nome ? ` · ${p.clientes.nome}` : ''}
+                                              {p.observacao ? ` · ${p.observacao}` : ''}
+                                            </span>
+                                            <strong style={{ whiteSpace: 'nowrap' }}>R$ {Number(p.valor).toFixed(2)}</strong>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              )
+                            })()}
 
                             {/* Cada sangria/suprimento com o MOTIVO — é aqui que se
                                 descobre pra onde foi o dinheiro depois do caixa fechado. */}
