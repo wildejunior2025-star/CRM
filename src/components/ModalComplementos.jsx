@@ -58,7 +58,9 @@ export default function ModalComplementos({ produto, grupos, semObrigatorios, on
 
   const selecionados = grupos.flatMap(g => (sel[g.id] ?? []).map(oid => {
     const o = g.opcoes.find(x => x.id === oid)
-    return { grupoId: g.id, nome: o.nome, preco_adicional: Number(o.preco_adicional || 0) }
+    // opcaoId liga a escolha ao cadastro depois da venda: é por ele que o custo
+    // do complemento entra na conta do dia (migração 0247).
+    return { grupoId: g.id, opcaoId: o.id, nome: o.nome, preco_adicional: Number(o.preco_adicional || 0) }
   }))
   const precoUnit = base + adicionalComplementos(
     grupos,

@@ -145,7 +145,7 @@
 /* Opções */
 .cc-opt {
   display: grid;
-  grid-template-columns: 1fr 92px auto auto;
+  grid-template-columns: 1fr 92px 104px auto auto;
   gap: 8px;
   align-items: center;
   padding: 5px 0;
@@ -204,6 +204,10 @@
 .cc-opt-desc.herdado::placeholder { font-style: italic; }
 .cc-price-wrap { position: relative; }
 .cc-price-wrap .cc-input { width: 100%; padding-left: 26px; }
+/* Campo do custo: o que a opção custa PRA LOJA, ao lado do que o cliente paga.
+   O rótulo é maior que o "R$", então o número começa mais pra dentro. */
+.cc-custo .cc-input { padding-left: 44px; }
+.cc-custo .cc-price-prefix { font-size: 11px; letter-spacing: -.2px; }
 .cc-price-prefix {
   position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
   font-size: 12px; color: var(--text-muted); pointer-events: none;
@@ -266,17 +270,18 @@
   .cc-input { min-width: 0; }
 
   .cc-opt {
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 1fr 1fr auto auto;
     grid-template-areas:
-      'nome  nome  nome'
-      'preco pausa excluir'
-      'desc  desc  desc';
+      'nome  nome  nome  nome'
+      'preco custo pausa excluir'
+      'desc  desc  desc  desc';
     gap: 6px;
     padding: 8px 0;
     border-bottom: 1px dashed var(--border);
   }
   .cc-opt > .cc-input:first-child { grid-area: nome; }
-  .cc-opt .cc-price-wrap { grid-area: preco; width: 120px; }
+  .cc-opt .cc-price-wrap { grid-area: preco; width: auto; }
+  .cc-opt .cc-custo { grid-area: custo; }
   .cc-opt > .btn { grid-area: pausa; }
   .cc-opt > .cc-iconbtn { grid-area: excluir; font-size: 18px; padding: 8px 12px; }
   .cc-opt-desc { grid-area: desc; margin-top: 2px; }

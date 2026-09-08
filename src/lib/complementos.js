@@ -51,6 +51,33 @@ export function adicionalComplementos(grupos, itens) {
 }
 
 /**
+ * As escolhas do cliente no formato que a VENDA guarda
+ * (comanda_itens.complementos / venda_itens.complementos, migração 0247).
+ *
+ * Até então a montagem só existia como texto dentro do nome do item — "Cuscuz
+ * (QUEIJO MUSSARELA, OVO)" — e sem id não dava pra saber depois quanto aquele
+ * queijo custou pra loja. O checkout do delivery já gravava assim; isto é pra
+ * o salão e o cardápio da mesa gravarem igual.
+ *
+ * Devolve null quando não tem escolha nenhuma, pra coluna ficar vazia em vez de
+ * guardar `[]` em todo item do cardápio.
+ */
+export function complementosParaGravar(escolhas) {
+  const lista = (escolhas ?? [])
+    .filter(c => c?.opcaoId)
+    .map(c => ({
+      opcaoId: String(c.opcaoId),
+      nome: c.nome ?? '',
+      preco: Number(c.preco ?? c.preco_adicional ?? 0) || 0,
+      qtd: Number(c.qtd ?? 1) || 1,
+      // Grupo que vende por quantidade: a qtd já é do total da linha e não
+      // multiplica pela quantidade do item.
+      absoluto: !!c.absoluto,
+    }))
+  return lista.length ? lista : null
+}
+
+/**
  * Separa as opções do grupo em blocos pelo sufixo entre parênteses do fim do nome:
  * "Marguerita (Promoção)" e "Marguerita (Tradicional)" viram dois blocos, "Promoção"
  * e "Tradicional", e o nome mostrado perde o sufixo (o subtítulo já diz de onde é).

@@ -117,6 +117,10 @@ export default function DespesasLucro({ empresaId }) {
   // vem da VENDA, não da baixa de estoque: 'pct' = prato no peso, 'unidade' = produto
   // que não controla estoque (o preço de custo dele nunca era usado).
   const [custoVendido, setCustoVendido] = useState([])
+  // [{opcao_id, nome, grupo, custo_unit, qtd, custo}] — o que os adicionais
+  // escolhidos custaram. Antes o dinheiro deles entrava e o custo não.
+  const [custoComplementos, setCustoComplementos] = useState([])
+  const [complementosAberto, setComplementosAberto] = useState(false)
   const [custoPctAberto, setCustoPctAberto] = useState(false)
   const [custoUnAberto, setCustoUnAberto] = useState(false)
   const [usuarios, setUsuarios] = useState([])      // funcionários já cadastrados em Usuários
@@ -152,7 +156,7 @@ export default function DespesasLucro({ empresaId }) {
       const fim = new Date(ini); fim.setDate(fim.getDate() + 1)
 
       // Traz inativos também: quem saiu depois ainda conta nos dias em que estava lá.
-      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im, vd, mp, sai, prd, cpc] = await Promise.all([
+      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im, vd, mp, sai, prd, cpc, ccp] = await Promise.all([
         supabase.from('despesas_loja').select('*').eq('empresa_id', empresaId).order('valor', { ascending: false }),
         supabase.from('funcionarios').select('*').eq('empresa_id', empresaId).order('nome'),
         supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', dia).order('created_at', { ascending: false }),
@@ -181,6 +185,9 @@ export default function DespesasLucro({ empresaId }) {
         // produto sem controle de estoque (qtd vendida × custo). Quem faz a conta é
         // o banco, que vê mesa e delivery juntos.
         supabase.rpc('custo_vendido_periodo', { p_ini: ini.toISOString(), p_fim: fim.toISOString() }),
+        // Adicional também custa: o queijo do lanche sai da geladeira igual. Só
+        // entra quem tem custo digitado no cadastro do complemento (mig 0247).
+        supabase.rpc('custo_complementos_periodo', { p_ini: ini.toISOString(), p_fim: fim.toISOString() }),
       ])
       for (const r of [dp, fn, pd, fi, fit, ped, hi, im]) if (r.error) throw r.error
 
@@ -216,6 +223,7 @@ export default function DespesasLucro({ empresaId }) {
       }).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')))
 
       setCustoVendido(cpc.error ? [] : (cpc.data || []))
+      setCustoComplementos(ccp.error ? [] : (ccp.data || []))
 
       const peds = ped.data || []
       const proprios = peds.filter(p => ['whatsapp', 'app', 'cardapio'].includes(p.origem) || !p.origem)
@@ -248,7 +256,9 @@ export default function DespesasLucro({ empresaId }) {
   const custoUn = useMemo(() => custoVendido.filter(c => c.modo !== 'pct'), [custoVendido])
   const custoPctHoje = useMemo(() => custoPct.reduce((s, c) => s + Number(c.custo || 0), 0), [custoPct])
   const custoUnHoje = useMemo(() => custoUn.reduce((s, c) => s + Number(c.custo || 0), 0), [custoUn])
-  const custoProducaoDia = producaoHoje + revendaHoje + custoPctHoje + custoUnHoje
+  const complementosHoje = useMemo(
+    () => custoComplementos.reduce((s, c) => s + Number(c.custo || 0), 0), [custoComplementos])
+  const custoProducaoDia = producaoHoje + revendaHoje + custoPctHoje + custoUnHoje + complementosHoje
   const imprevistoHoje = useMemo(() => imprevistos.reduce((s, i) => s + Number(i.valor || 0), 0), [imprevistos])
 
   // Quanto o programa de indicação custou hoje (mig 0179). Sai do extrato de
@@ -653,7 +663,7 @@ export default function DespesasLucro({ empresaId }) {
               <button className="btn btn-sm" onClick={fecharDia} disabled={fechando}
                 style={{ background: '#16a34a', color: '#fff' }}>{fechando ? 'Salvando…' : `💾 Fechar ${ehHoje ? 'o dia' : ddmm(dia)}`}</button>
             </div>}
-            rodape={(fechado ? itensFechado.length > 0 : (producao.length > 0 || revenda.length > 0 || custoVendido.length > 0)) && <>Custo de produção {rotuloDia} <strong>{brl(v.prod)}</strong></>}>
+            rodape={(fechado ? itensFechado.length > 0 : (producao.length > 0 || revenda.length > 0 || custoVendido.length > 0 || custoComplementos.length > 0)) && <>Custo de produção {rotuloDia} <strong>{brl(v.prod)}</strong></>}>
             {fechado ? (
               itensFechado.length === 0
                 ? <Vazio texto="Esse dia foi fechado sem lançamento de produção." />
@@ -776,7 +786,42 @@ export default function DespesasLucro({ empresaId }) {
                 </div>
               )}
 
-              {producao.length === 0 && revenda.length === 0 && custoVendido.length === 0 && <Vazio texto={`Lance a produção ${rotuloDia} (ex.: fiz 10kg de feijão, sobrou 2kg). Não precisa ter ficha técnica: dá pra lançar insumo ou digitar na hora.`} />}
+              {/* COMPLEMENTOS: o adicional que o cliente escolheu também sai do
+                  estoque, mas a opção não é produto e não dá baixa. Entra por
+                  aqui, pelo custo digitado em Catálogo → Complementos. */}
+              {custoComplementos.length > 0 && (
+                <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', marginBottom: 10, background: 'var(--bg)' }}>
+                  <div onClick={() => setComplementosAberto(v => !v)}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, cursor: 'pointer' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>🧀 Complementos escolhidos {rotuloDia} {complementosAberto ? '▲' : '▼'}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        entra sozinho pelo que o cliente marcou · {custoComplementos.length} opç{custoComplementos.length === 1 ? 'ão' : 'ões'}
+                      </div>
+                    </div>
+                    <strong style={{ fontSize: 17 }}>{brl(complementosHoje)}</strong>
+                  </div>
+
+                  {complementosAberto && (
+                    <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                      {custoComplementos.map(c => (
+                        <div key={c.opcao_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '4px 0', fontSize: 13 }}>
+                          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {c.nome} <span style={{ color: 'var(--text-muted)' }}>· {c.grupo} · {c.qtd} × {brl(c.custo_unit)}</span>
+                          </span>
+                          <strong>{brl(c.custo)}</strong>
+                        </div>
+                      ))}
+                      <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+                        Só aparece aqui a opção que tem custo preenchido em Catálogo → Complementos.
+                        Sem custo, o adicional continua entrando como lucro inteiro.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {producao.length === 0 && revenda.length === 0 && custoVendido.length === 0 && custoComplementos.length === 0 && <Vazio texto={`Lance a produção ${rotuloDia} (ex.: fiz 10kg de feijão, sobrou 2kg). Não precisa ter ficha técnica: dá pra lançar insumo ou digitar na hora.`} />}
               {producao.map(p => {
                 const consumido = Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0)
                 // Item digitado na hora não tem "fez/sobrou" — é só o valor gasto.

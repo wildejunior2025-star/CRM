@@ -1,4 +1,5 @@
 import { criarBuscadorDescricao, comDescricaoNasOpcoes } from './descricaoSabor'
+import { complementosParaGravar } from './complementos'
 import { fetchAll } from './supabaseClient'
 
 // Cardápio que o cliente vê SEM login: usado no QR da mesa e no link do cliente.
@@ -78,6 +79,11 @@ export function itensParaPedido(itens) {
   return itens.map(i => {
     const comps = i.complementos ?? []
     const nome = comps.length ? `${i.nome} (${comps.map(c => c.nome).join(', ')})` : i.nome
-    return { produto_id: i.produto_id ?? i.id, nome, preco: i.preco, qtd: i.qtd }
+    return {
+      produto_id: i.produto_id ?? i.id, nome, preco: i.preco, qtd: i.qtd,
+      // Além do nome, a montagem vai estruturada: é o que permite somar depois
+      // quanto os adicionais custaram pra loja (migração 0247).
+      complementos: complementosParaGravar(comps),
+    }
   })
 }

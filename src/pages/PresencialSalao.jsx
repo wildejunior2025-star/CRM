@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
-import { adicionalComplementos } from '../lib/complementos'
+import { adicionalComplementos, complementosParaGravar } from '../lib/complementos'
 import { rotuloComanda } from '../lib/comanda'
 import { calcularTaxa, itemIsento, MARCA_ISENTO } from '../lib/taxaServico'
 import AvisoPix from '../components/AvisoPix'
@@ -1069,6 +1069,9 @@ export default function PresencialSalao() {
       produto_id: (r.produto_id && !String(r.produto_id).startsWith('avulso:')) ? r.produto_id : null,
       nome: r.nome,
       preco_unitario: Number(r.preco_venda), quantidade: r.quantidade,
+      // A montagem vai estruturada também, não só dentro do nome: é ela que diz
+      // depois quanto os adicionais custaram pra loja (migração 0247).
+      complementos: complementosParaGravar(r.complementos),
       // Sem cozinha o produto sai da prateleira pra mão do cliente: nasce
       // entregue, senão a comanda fica cheia de "preparando" esperando um
       // "Marcar pronto" que ninguém vai apertar.
@@ -3926,7 +3929,10 @@ function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onCon
     Object.entries(sel[g.id] ?? {}).map(([oId, qtd]) => {
       const o = g.opcoes.find(x => String(x.id) === String(oId))
       return {
-        grupoId: g.id, nome: o?.nome ?? '', preco_adicional: Number(o?.preco_adicional || 0), qtd,
+        // opcaoId é o que liga a escolha ao cadastro depois da venda — é por ele
+        // que o custo do complemento entra na conta do dia (migração 0247).
+        grupoId: g.id, opcaoId: o?.id ?? oId,
+        nome: o?.nome ?? '', preco_adicional: Number(o?.preco_adicional || 0), qtd,
         // Pra comanda/cupom não multiplicarem de novo pela qtd do item.
         absoluto: !!g.modo_quantidade,
       }

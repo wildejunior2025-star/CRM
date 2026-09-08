@@ -187,9 +187,9 @@ export default function CategoriasComplemento() {
     setLoading(true)
     const [gruposRes, prodRes, linkRes] = await Promise.all([
       supabase.from('complemento_grupos')
-        .select('id, nome, min, max, ordem, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel)')
+        .select('id, nome, min, max, ordem, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, descricao, preco_adicional, preco_custo, ordem, disponivel)')
         .eq('empresa_id', empresaId).order('nome'),
-      fetchAll(() => supabase.from('produtos').select('id, nome, categoria, descricao, preco_venda, ativo').eq('empresa_id', empresaId).is('arquivado_em', null).order('nome').order('id')),
+      fetchAll(() => supabase.from('produtos').select('id, nome, categoria, descricao, preco_venda, preco_custo, ativo').eq('empresa_id', empresaId).is('arquivado_em', null).order('nome').order('id')),
       supabase.from('produto_complemento_grupos')
         .select('id, produto_id, grupo_id, max_override, produtos!inner(empresa_id)')
         .eq('produtos.empresa_id', empresaId),
@@ -263,6 +263,7 @@ export default function CategoriasComplemento() {
           grupo_id: nova.id,
           nome: o.nome,
           preco_adicional: o.preco_adicional,
+          preco_custo: o.preco_custo ?? null,
           ordem: o.ordem,
           disponivel: o.disponivel,
         }))
@@ -326,7 +327,10 @@ export default function CategoriasComplemento() {
         const nome = rotulo ? `${p.nome} (${rotulo})` : p.nome
         if (jaTem.has(norm(nome))) continue // já está na lista: não duplica
         jaTem.add(norm(nome))
-        rows.push({ grupo_id: cat.id, nome, preco_adicional: Number(p.preco_venda) || 0, ordem: ++ordem })
+        // O custo do produto vem junto: se o sabor já é vendido no cardápio, o
+        // que ele custa pra loja é o mesmo (vazio continua vazio).
+        rows.push({ grupo_id: cat.id, nome, preco_adicional: Number(p.preco_venda) || 0,
+                    preco_custo: p.preco_custo ?? null, ordem: ++ordem })
       }
     }
     if (!rows.length) {
@@ -667,10 +671,22 @@ export default function CategoriasComplemento() {
                         antigo depois de renomear o bloco (defaultValue só vale ao montar). */}
                     <input className="cc-input" key={op.nome} defaultValue={op.nome}
                       onBlur={e => { const v = e.target.value.trim(); if (v && v !== op.nome) salvarOpcao(cat, op, { nome: v }) }} />
-                    <div className="cc-price-wrap">
+                    <div className="cc-price-wrap" title="O que o cliente paga por essa opção">
                       <span className="cc-price-prefix">R$</span>
                       <input className="cc-input" type="number" step="0.01" min="0" defaultValue={op.preco_adicional}
                         onBlur={e => salvarOpcao(cat, op, { preco_adicional: Number(e.target.value) || 0 })} />
+                    </div>
+                    {/* Quanto essa opção custa PRA LOJA. Sem isso o adicional entrava
+                        como lucro inteiro: o dinheiro do queijo contava, o queijo não.
+                        Vazio = não sei, e aí ele simplesmente não entra na conta. */}
+                    <div className="cc-price-wrap cc-custo" title="Quanto essa opção custa pra você. Entra no custo do dia em Despesas e Lucro. Deixe vazio se não souber.">
+                      <span className="cc-price-prefix">custo</span>
+                      <input className="cc-input" type="number" step="0.01" min="0" placeholder="—"
+                        defaultValue={op.preco_custo ?? ''}
+                        onBlur={e => {
+                          const v = e.target.value.trim()
+                          salvarOpcao(cat, op, { preco_custo: v === '' ? null : Number(v) || 0 })
+                        }} />
                     </div>
                     <button className="btn btn-secondary btn-sm" title={op.disponivel === false ? 'Reativar' : 'Pausar'} onClick={() => pausarOpcao(cat, op)}>
                       {op.disponivel === false ? '▶' : '⏸'}
