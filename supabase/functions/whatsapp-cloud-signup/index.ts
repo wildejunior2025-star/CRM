@@ -74,6 +74,22 @@ const TEMPLATES_PADRAO = [
       },
     }],
   },
+  // O outro lado do fiado: o recibo de quando o cliente paga.
+  {
+    name: "fiado_pago",
+    language: "pt_BR",
+    category: "UTILITY",
+    components: [{
+      type: "BODY",
+      text: "Oi {{1}}! Aqui é da {{2}}.\n\nRecebemos o seu pagamento de {{3}} em {{4}}. Obrigado! 🙏\n\n{{5}}\n\nQualquer dúvida é só chamar por aqui.",
+      example: {
+        body_text: [[
+          "Jeilson", "Estação do Sabor", "R$ 43,20", "08/09 às 12:12",
+          "Sua conta está quitada, não ficou nada em aberto.",
+        ]],
+      },
+    }],
+  },
 ]
 
 async function criarTemplatesDaLoja(wabaId: string, token: string) {

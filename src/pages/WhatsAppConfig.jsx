@@ -42,6 +42,7 @@ const NOTIF_DEFAULTS = {
   notif_pedido:  true,
   notif_fiado:   false,
   notif_fiado_compra: false,
+  notif_fiado_pago: false,
   notif_estoque: false,
   admin_phone:   '',
   msg_pedido:    DEFAULT_MSG_PEDIDO,
@@ -116,6 +117,7 @@ export default function WhatsAppConfig() {
         notif_pedido:  data.notif_pedido  ?? true,
         notif_fiado:   data.notif_fiado   ?? false,
         notif_fiado_compra: data.notif_fiado_compra ?? false,
+        notif_fiado_pago: data.notif_fiado_pago ?? false,
         notif_estoque: data.notif_estoque ?? false,
         admin_phone:   data.admin_phone   ?? '',
         msg_pedido:    data.msg_pedido    ?? DEFAULT_MSG_PEDIDO,
@@ -966,6 +968,22 @@ export default function WhatsAppConfig() {
                     anotado, com item, valor e hora. Serve pra ele conferir no dia — depois de duas
                     semanas ninguém lembra se comprou ou se foi anotado errado. Só no fiado:
                     dinheiro, PIX e cartão não mandam nada.
+                  </small>
+                </div>
+              </label>
+
+              <label className="wa-checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={form.notif_fiado_pago}
+                  onChange={(e) => setField('notif_fiado_pago', e.target.checked)}
+                />
+                <div className="wa-checkbox-text">
+                  <span>Mandar recibo quando o fiado for pago</span>
+                  <small>
+                    Quando você dá baixa em Financeiro → Fiado, ou o cliente paga no PIX pelo link,
+                    ele recebe no WhatsApp que o pagamento entrou, com o valor e se a conta ficou
+                    quitada ou quanto ainda falta. Acaba a dúvida de “será que deram baixa?”.
                   </small>
                 </div>
               </label>
