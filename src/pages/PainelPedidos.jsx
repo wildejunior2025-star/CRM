@@ -976,7 +976,12 @@ function cartFromPedido(p) {
 // travado). Carregamos uma vez e reaproveitamos; o painel ainda pré-aquece.
 const catalogoCache = {} // { [empresaId]: { produtos, compMap } }
 
-async function carregarCatalogo(empresaId) {
+// "Completo" no nome não é enfeite: lá dentro do PainelPedidos existe um
+// `carregarCatalogo` (o do painel Catálogo), que não devolve nada e some com
+// este aqui por sombreamento. Foi o que quebrou os complementos na conversa —
+// `const { compMap } = await carregarCatalogo(...)` estourava em cima de
+// `undefined`, o catch engolia e o item entrava na sacola sem perguntar sabor.
+async function carregarCatalogoCompleto(empresaId) {
   const [prodRes, vincRes] = await Promise.all([
     // Paginado: sem isso a Nova venda de um deposito so achava os 1000 primeiros nomes.
     fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, preco_promocional, faixas_preco, categoria')
@@ -1382,7 +1387,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     // Carrega/atualiza em segundo plano (catálogo pode ter mudado).
     ;(async () => {
       try {
-        const catalogo = await carregarCatalogo(empresa.id)
+        const catalogo = await carregarCatalogoCompleto(empresa.id)
         if (!ativo) return
         setProdutos(catalogo.produtos)
         setCompMap(catalogo.compMap)
@@ -6366,7 +6371,7 @@ export default function PainelPedidos() {
   async function escolherProdutoNoChat(p) {
     if (!empresa?.id) return
     try {
-      const { produtos, compMap } = await carregarCatalogo(empresa.id)
+      const { produtos, compMap } = await carregarCatalogoCompleto(empresa.id)
       const grupos = compMap[p.id]
       if (grupos?.length) {
         // O catálogo tem faixa de preço e promoção; a busca do chat só devolve
@@ -6376,7 +6381,12 @@ export default function PainelPedidos() {
         setProdutoCompChat({ ...(cheio ?? { ...p, preco_venda: p.preco }), grupos })
         return
       }
-    } catch { /* catálogo fora do ar: segue pelo caminho simples */ }
+    } catch (e) {
+      // Catálogo fora do ar: segue pelo caminho simples, senão a venda morre.
+      // Mas deixa rastro — calado, um erro aqui vira "o sabor não aparece" e
+      // ninguém descobre por quê (foi assim com o Geladinn da CDBom).
+      console.error('[chat] complementos do produto falharam:', e)
+    }
     addSimplesNaSacolaChat(p)
   }
 
@@ -6817,6 +6827,8 @@ export default function PainelPedidos() {
   }
 
   // ── Catálogo: carrega os produtos da loja ───────────────────
+  // Só serve ao painel Catálogo (pausar item), e NÃO devolve nada. Quem precisa
+  // do catálogo com os complementos usa carregarCatalogoCompleto() lá de cima.
   const carregarCatalogo = useCallback(async () => {
     if (!empresa) return
     setLoadingCatalogo(true)
@@ -7043,7 +7055,7 @@ export default function PainelPedidos() {
   // Pré-aquece o catálogo (produtos + complementos) pro modal de venda/edição
   // abrir instantâneo, sem o "Carregando produtos..." aparecer.
   useEffect(() => {
-    if (empresa?.id) carregarCatalogo(empresa.id).catch(() => {})
+    if (empresa?.id) carregarCatalogoCompleto(empresa.id).catch(() => {})
   }, [empresa])
 
   // Mesas abertas (autoatendimento por QR) — o gestor vê os pedidos das mesas
