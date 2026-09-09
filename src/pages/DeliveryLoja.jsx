@@ -83,6 +83,36 @@ function fmt(n) {
   return Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// Quantidade digitável. Cliente que leva 20 pacotes de gelo não clica 20 vezes
+// no "+" — desiste antes, ou pede pelo WhatsApp e o pedido não passa pela loja.
+//
+// O campo aceita ficar VAZIO enquanto a pessoa apaga pra digitar outro número;
+// se saísse do vazio direto pro carrinho, o item sumia sozinho no meio da
+// digitação. Sair vazio devolve o que estava.
+function QtdCampo({ valor, onMudar, className = '' }) {
+  const [txt, setTxt] = useState(String(valor))
+  useEffect(() => { setTxt(String(valor)) }, [valor])
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      pattern="[0-9]*"
+      className={`dloja-qty-input ${className}`.trim()}
+      value={txt}
+      // 4 dígitos: dá pros 500 picolés que a CDBom vende de verdade e barra o
+      // 99999999 digitado sem querer, que a loja só descobre na hora de separar.
+      onChange={e => {
+        const v = e.target.value.replace(/\D/g, '').slice(0, 4)
+        setTxt(v)
+        if (v !== '') onMudar(parseInt(v, 10))
+      }}
+      onFocus={e => e.target.select()}
+      onBlur={() => { if (txt === '') setTxt(String(valor)) }}
+      aria-label="Quantidade"
+    />
+  )
+}
+
 // A sacola guardada traz o PREÇO de quando foi montada, e ela sobrevive dias no
 // celular do cliente. Se a loja mexeu no valor ou criou uma faixa de atacado
 // desde então, o pedido fechava no preço velho — foi assim que o #1051 da CDBom
@@ -539,6 +569,42 @@ export default function DeliveryLoja() {
     })
   }
 
+  // Quantidade digitada na SACOLA. Zero tira a linha, igual a apertar "−" até
+  // o fim. Montagem de atacado não entra: a quantidade dela é a soma dos
+  // sabores e mexer por fora faria a comanda mentir (ver qtdTravada).
+  function definirQtdKey(key, n) {
+    const qtd = Math.max(0, Math.floor(Number(n) || 0))
+    setCarrinho(prev => {
+      const item = prev[key]
+      if (!item || qtdTravada(item)) return prev
+      const next = { ...prev }
+      if (qtd <= 0) delete next[key]
+      else next[key] = comPrecoDaFaixa(item, qtd)
+      return next
+    })
+  }
+
+  // Quantidade digitada no CARD do produto (produto simples, sem montagem).
+  // Vale também pra quem ainda não pôs nada na sacola: digitou 20, entra 20 —
+  // e já com o preço da faixa, sem passar pelo preço de unidade.
+  function definirQtdProduto(prod, n) {
+    const key = String(prod.id)
+    const qtd = Math.max(0, Math.floor(Number(n) || 0))
+    setCarrinho(prev => {
+      const next = { ...prev }
+      if (qtd <= 0) { delete next[key]; return next }
+      const atual = prev[key]
+      if (atual) { next[key] = comPrecoDaFaixa(atual, qtd); return next }
+      next[key] = {
+        key, id: prod.id, nome: prod.nome, foto_url: prod.foto_url, quantidade: qtd,
+        precoBase: Number(prod.preco), faixas_preco: prod.faixas_preco ?? [],
+        preco_promocional: prod.preco_promocional ?? null,
+        preco: precoPorQuantidade(prod.preco, prod.faixas_preco, qtd, prod.preco_promocional),
+      }
+      return next
+    })
+  }
+
   function removeOne(key) {
     setCarrinho(prev => {
       const item = prev[key]
@@ -969,6 +1035,7 @@ export default function DeliveryLoja() {
               abrirProduto={abrirProduto}
               addOne={addOne}
               removeOne={removeOne}
+              definirQtdProduto={definirQtdProduto}
             />
           )
         ) : categorias.length === 0 && semCategoria.length === 0 ? (
@@ -999,6 +1066,7 @@ export default function DeliveryLoja() {
                 abrirProduto={abrirProduto}
                 addOne={addOne}
                 removeOne={removeOne}
+                definirQtdProduto={definirQtdProduto}
                 inicial={PRIMEIRO_LOTE}
               />
             </>
@@ -1016,6 +1084,7 @@ export default function DeliveryLoja() {
                 abrirProduto={abrirProduto}
                 addOne={addOne}
                 removeOne={removeOne}
+                definirQtdProduto={definirQtdProduto}
                 previa={catalogoGrande ? PREVIA_POR_CATEGORIA : null}
                 onVerMais={() => { setCatAberta(cat); window.scrollTo({ top: 0 }) }}
               />
@@ -1071,7 +1140,11 @@ export default function DeliveryLoja() {
                       <button className="dloja-qty-btn" onClick={() => removeOne(item.key)} aria-label={qtdTravada(item) ? "Remover do carrinho" : "Remover um"}>
                         <IconMinus />
                       </button>
-                      <span className="dloja-qty-val">{item.quantidade}</span>
+                      {/* Montagem de atacado é a única que não deixa digitar:
+                          a quantidade dela é a soma dos sabores. */}
+                      {qtdTravada(item)
+                        ? <span className="dloja-qty-val">{item.quantidade}</span>
+                        : <QtdCampo valor={item.quantidade} onMudar={n => definirQtdKey(item.key, n)} />}
                       {/* Montagem de atacado não soma de um em um: a quantidade
                           vem da soma dos sabores e tem que continuar batendo. */}
                       <button
@@ -1152,7 +1225,7 @@ const PREVIA_POR_CATEGORIA = 4
 const PRIMEIRO_LOTE = 50   // ao abrir a categoria inteira
 
 function SecaoProdutos({
-  titulo, cat, produtos, refCallback, qtdProduto, lojaAberta, abrirProduto, addOne, removeOne,
+  titulo, cat, produtos, refCallback, qtdProduto, lojaAberta, abrirProduto, addOne, removeOne, definirQtdProduto,
   previa = null, onVerMais = null, inicial = ITENS_POR_VEZ,
 }) {
   const [visiveis, setVisiveis] = useState(inicial)
@@ -1193,6 +1266,7 @@ function SecaoProdutos({
             lojaAberta={lojaAberta}
             onAdd={() => (p.complementos?.length ? abrirProduto(p) : addOne(p))}
             onRemove={() => removeOne(String(p.id))}
+            onQtd={p.complementos?.length ? null : (n => definirQtdProduto(p, n))}
           />
         ))}
       </div>
@@ -1233,7 +1307,7 @@ function FotoAmpliada({ src, alt, onFechar }) {
   )
 }
 
-function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
+function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove, onQtd }) {
   const [zoom, setZoom] = useState(false)
   const temComplementos = produto.complementos?.length > 0
   // Preço "a partir de" = base + as opções obrigatórias mais baratas (o `min` de
@@ -1341,7 +1415,12 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove }) {
             <button className="dloja-qty-btn" onClick={onRemove} aria-label="Remover um">
               <IconMinus size={14} />
             </button>
-            <span className="dloja-qty-val">{quantidade}</span>
+            {/* Produto montado junta vários combos numa quantidade só: digitar
+                aqui não teria como saber de qual combo tirar. Esse fica no
+                +/−, e o ajuste fino acontece dentro da sacola. */}
+            {onQtd
+              ? <QtdCampo valor={quantidade} onMudar={onQtd} />
+              : <span className="dloja-qty-val">{quantidade}</span>}
             <button className="dloja-qty-btn dloja-qty-btn--primary" onClick={onAdd} disabled={!lojaAberta} aria-label="Adicionar um">
               <IconPlus size={14} />
             </button>

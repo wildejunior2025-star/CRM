@@ -816,6 +816,43 @@
   color: var(--dl-text);
 }
 
+/* Campo de digitar a quantidade. Quem leva 20 pacotes de gelo não clica 20
+   vezes no "+" — desiste antes. Nasce parecendo o número que era antes, e só
+   se revela como campo quando a pessoa toca nele. */
+.dloja-qty-input {
+  width: 44px;
+  height: 28px;
+  padding: 0 2px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  color: var(--dl-text);
+  background: var(--dl-surface);
+  border: 1px solid var(--dl-surface-2);
+  border-radius: 7px;
+  outline: none;
+  -moz-appearance: textfield;
+}
+
+.dloja-qty-input:focus {
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.25);
+}
+
+.dloja-qty--card .dloja-qty-input {
+  width: 48px;
+  height: 36px;
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .dloja-prod-acao .dloja-qty--card .dloja-qty-input {
+    width: 42px;
+    height: 30px;
+  }
+}
+
 /* ── Empty ── */
 .dloja-empty {
   display: flex;
