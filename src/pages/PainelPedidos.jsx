@@ -5503,6 +5503,27 @@ function tempoPrevistoMin(pedido, empresa) {
   return Number(empresa?.tempo_entrega_max) || 40
 }
 
+// Mensagens soltas viram conversas (uma por canal + cliente). Fica fora do
+// componente porque a caixa monta duas listas com a mesma regra: a do dia e a
+// que a busca por número traz do banco.
+function montarThreads(msgs) {
+  return Object.values(msgs.reduce((acc, m) => {
+    const k = `${m.canal}|${m.cliente_ref}`
+    if (!acc[k]) acc[k] = { key: k, canal: m.canal, cliente_ref: m.cliente_ref, cliente_nome: m.cliente_nome, msgs: [], unread: 0 }
+    acc[k].msgs.push(m)
+    if (m.cliente_nome) acc[k].cliente_nome = m.cliente_nome
+    if (m.remetente === 'cliente' && !m.lida) acc[k].unread++
+    return acc
+  }, {}))
+}
+
+// Conversa mexida por último no topo.
+function ordenarThreads(threads) {
+  return [...threads].sort((a, b) =>
+    new Date(b.msgs[b.msgs.length - 1].created_at) - new Date(a.msgs[a.msgs.length - 1].created_at)
+  )
+}
+
 // ── Componente principal ────────────────────────────────────
 export default function PainelPedidos() {
   const { empresa, logout, profile } = useAuth()
@@ -5848,6 +5869,12 @@ export default function PainelPedidos() {
   const [chatAviso, setChatAviso]     = useState(null)   // saiu no WhatsApp? (ver enviarChat)
   const [chatTexto, setChatTexto]     = useState('')
   const [enviandoChat, setEnviandoChat] = useState(false)
+  // Procurar conversa pelo número (ou nome) do cliente. A caixa carrega só o
+  // dia de hoje — quem procura um número precisa achar o de ontem também, então
+  // a busca vai no banco e o que ela traz entra na lista junto (chatMsgsBusca).
+  const [buscaChat, setBuscaChat]         = useState('')
+  const [chatMsgsBusca, setChatMsgsBusca] = useState([])
+  const [buscandoChat, setBuscandoChat]   = useState(false)
   // Robô pausado no número da conversa aberta? É o que decide mostrar o
   // "Devolver pro robô" dentro da conversa — depois de responder, o chamado
   // fecha e o card com os botões some, mas a conversa continua na tela.
@@ -6130,6 +6157,36 @@ export default function PainelPedidos() {
       .subscribe()
     return () => { ativo = false; canal.unsubscribe() }
   }, [empresa])
+
+  // ── Procurar conversa pelo número do cliente ────────────────────────────
+  //
+  // A caixa só carrega o dia de hoje (ver acima), então filtrar o que já está
+  // na tela acharia pouca coisa: o cliente que ligou ontem simplesmente não
+  // existe ali. Aqui a busca vai no banco, sem trava de data e sem a regra do
+  // "a loja falou nesta conversa" — quem digita um número quer ACHAR aquele
+  // número, mesmo que ninguém tenha respondido ainda.
+  //
+  // Dígitos procuram no telefone; letras, no nome do cliente.
+  useEffect(() => {
+    const termo = buscaChat.trim()
+    if (!empresa || termo.length < 3) { setChatMsgsBusca([]); setBuscandoChat(false); return }
+    let ativo = true
+    setBuscandoChat(true)
+    // Espera o dedo parar de digitar: uma consulta por tecla derruba o banco à
+    // toa e a lista pisca a cada letra.
+    const id = setTimeout(async () => {
+      const dig = termo.replace(/\D/g, '')
+      let q = supabase.from('mensagens_chat').select('*').eq('empresa_id', empresa.id)
+      q = dig.length >= 3
+        ? q.like('cliente_ref', `%${dig}%`)
+        : q.ilike('cliente_nome', `%${termo}%`)
+      const { data } = await q.order('created_at', { ascending: false }).limit(600)
+      if (!ativo) return
+      setChatMsgsBusca(data ?? [])
+      setBuscandoChat(false)
+    }, 350)
+    return () => { ativo = false; clearTimeout(id) }
+  }, [buscaChat, empresa])
 
   // Abre no gestor a conversa do número que pediu atendente. O casamento é
   // pelos 8 últimos dígitos porque o WhatsApp entrega o mesmo número com e sem
@@ -6498,6 +6555,9 @@ export default function PainelPedidos() {
     const naoLidas = t.msgs.filter(m => m.remetente === 'cliente' && !m.lida).map(m => m.id)
     if (naoLidas.length) {
       setChatMsgs(prev => prev.map(m => naoLidas.includes(m.id) ? { ...m, lida: true } : m))
+      // A conversa aberta pode ter vindo da busca (dia anterior): sem isto o
+      // contador dela ficava vermelho na lista mesmo depois de lida.
+      setChatMsgsBusca(prev => prev.map(m => naoLidas.includes(m.id) ? { ...m, lida: true } : m))
       await supabase.from('mensagens_chat').update({ lida: true }).in('id', naoLidas)
     }
   }
@@ -7545,22 +7605,30 @@ export default function PainelPedidos() {
   })
 
   // Agrupa as mensagens em conversas (canal + cliente)
-  const chatThreads = Object.values(chatMsgs.reduce((acc, m) => {
-    const k = `${m.canal}|${m.cliente_ref}`
-    if (!acc[k]) acc[k] = { key: k, canal: m.canal, cliente_ref: m.cliente_ref, cliente_nome: m.cliente_nome, msgs: [], unread: 0 }
-    acc[k].msgs.push(m)
-    if (m.cliente_nome) acc[k].cliente_nome = m.cliente_nome
-    if (m.remetente === 'cliente' && !m.lida) acc[k].unread++
-    return acc
-  }, {}))
+  const threadsDoDia = montarThreads(chatMsgs)
     // Conversa de WhatsApp só entra na caixa se a LOJA tiver falado nela (ver a
     // carga acima). Vale também pro que chega em tempo real: sem isto, cada
     // "bom dia" de cliente reabria a enxurrada na tela.
     .filter(t => t.canal !== 'whatsapp' || t.msgs.some(m => m.remetente === 'loja'))
-    .sort((a, b) =>
-      new Date(b.msgs[b.msgs.length - 1].created_at) - new Date(a.msgs[a.msgs.length - 1].created_at)
-    )
-  const chatNaoLidas = chatThreads.reduce((s, t) => s + t.unread, 0)
+  // A campainha conta o DIA — não o que a busca trouxe do passado.
+  const chatNaoLidas = threadsDoDia.reduce((s, t) => s + t.unread, 0)
+
+  // Buscando: a lista passa a ser o que casa com o termo, juntando o dia de
+  // hoje com o que veio do banco (mesma conversa, mensagens dos dois lados
+  // num thread só). Fora da busca, é a caixa de sempre.
+  const buscaChatT = buscaChat.trim()
+  const chatThreads = (() => {
+    if (!buscaChatT) return ordenarThreads(threadsDoDia)
+    const jaTem = new Set(chatMsgs.map(m => m.id))
+    const todas = [...chatMsgs, ...chatMsgsBusca.filter(m => !jaTem.has(m.id))]
+      .sort((x, y) => new Date(x.created_at) - new Date(y.created_at))
+    const termo = buscaChatT.toLowerCase()
+    const dig = buscaChatT.replace(/\D/g, '')
+    return ordenarThreads(montarThreads(todas).filter(t => (
+      (dig.length >= 3 && String(t.cliente_ref || '').replace(/\D/g, '').includes(dig)) ||
+      (!!t.cliente_nome && t.cliente_nome.toLowerCase().includes(termo))
+    )))
+  })()
   const threadAberta = chatThreads.find(t => t.key === chatAberto)
   const CANAL_LABEL = { app: 'App', lojaonline: 'Loja online', whatsapp: 'WhatsApp' }
 
@@ -8242,14 +8310,53 @@ export default function PainelPedidos() {
               />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {/* Procurar conversa pelo número do cliente. A caixa mostra só
+                    o dia de hoje; a busca vai no banco e traz os dias de trás. */}
+                <div style={{ position: 'relative' }}>
+                  <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted, #9aa0b5)' }} aria-hidden="true">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  </span>
+                  <input
+                    type="search"
+                    value={buscaChat}
+                    onChange={e => setBuscaChat(e.target.value)}
+                    placeholder="Buscar conversa por número ou nome..."
+                    style={{
+                      width: '100%', padding: '9px 12px 9px 34px', borderRadius: 20,
+                      fontSize: telaGrande ? 15.5 : 14,
+                      border: '1.5px solid var(--border, #2a2a3a)', background: 'var(--surface, #16161f)',
+                      color: 'var(--text)', outline: 'none',
+                    }}
+                  />
+                </div>
+                {buscaChatT && (
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '-2px 2px 2px' }}>
+                    {buscandoChat
+                      ? 'Procurando...'
+                      : buscaChatT.length < 3
+                        ? 'Digite pelo menos 3 números do telefone'
+                        : `${chatThreads.length} conversa${chatThreads.length === 1 ? '' : 's'} — inclui dias anteriores`}
+                  </div>
+                )}
                 {chatThreads.length === 0 ? (
                   <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px 12px', fontSize: 13 }}>
-                    Nenhuma conversa ainda.<br />
-                    Mensagens do app e da loja online aparecem aqui.
+                    {buscaChatT ? (
+                      <>Nenhuma conversa com <b>{buscaChatT}</b>.<br />
+                      Tente só os últimos números do telefone.</>
+                    ) : (
+                      <>Nenhuma conversa ainda.<br />
+                      Mensagens do app e da loja online aparecem aqui.</>
+                    )}
                   </div>
                 ) : chatThreads.map(t => {
                   const ultima = t.msgs[t.msgs.length - 1]
-                  const hora = new Date(ultima.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                  const quando = new Date(ultima.created_at)
+                  // Conversa de outro dia (só aparece na busca): a hora sozinha
+                  // faria "14:20" de três semanas atrás passar por hoje.
+                  const deHoje = quando.toDateString() === new Date().toDateString()
+                  const hora = deHoje
+                    ? quando.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                    : quando.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
                   const canalLbl = CANAL_LABEL[t.canal] ?? t.canal
                   return (
                     <button key={t.key} type="button" onClick={() => abrirThread(t)}
