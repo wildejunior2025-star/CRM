@@ -6575,9 +6575,43 @@ export default function PainelPedidos() {
 
     const ped = [...pedidos, ...concluidosHoje].find(p => p.id === alt.pedido_id)
     const tel = String(ped?.cliente_telefone ?? '').replace(/\D/g, '')
+
+    // ── Já pagou online e o pedido BARATEOU? Devolve a diferença ────────────
+    //
+    // Acontece de dois jeitos: ele tirou um item, ou somou um e a quantidade
+    // passou a caber na faixa de atacado — nesse segundo o cliente ADICIONA e
+    // o pedido fica mais barato, e a loja passa a dever.
+    //
+    // O aviso vai junto com o valor certo: dizer "mudei seu pedido" sem falar
+    // do dinheiro é o que gera a ligação de cobrança meia hora depois.
+    let recado = ''
+    const aMenos = Number(alt.total_antes) - Number(alt.total_depois)
+    const pagoOnline = ped?.mp_payment_status === 'approved' || ped?.pix_status === 'pago'
+    if (data === 'aceita' && aMenos > 0.009 && pagoOnline) {
+      try {
+        const { data: est } = await supabase.functions.invoke('refund-pix', {
+          body: {
+            order_id: alt.pedido_id,
+            valor: Number(aMenos.toFixed(2)),
+            manter_pedido: true,        // é alteração, não cancelamento
+          },
+        })
+        if (est?.ok) {
+          recado = `\n\nComo ficou mais barato, devolvi *R$ ${Number(est.valor ?? aMenos).toFixed(2).replace('.', ',')}* no seu PIX. 💸`
+        } else {
+          // Falhou: a loja PRECISA saber na hora, senão acha que voltou e o
+          // cliente cobra depois.
+          alert(`A mudança foi aplicada, mas o estorno de R$ ${aMenos.toFixed(2).replace('.', ',')} NÃO saiu:\n\n`
+            + `${est?.erro ?? 'erro no Mercado Pago'}\n\nDevolva pelo app do Mercado Pago.`)
+        }
+      } catch {
+        alert(`A mudança foi aplicada, mas não consegui pedir o estorno de R$ ${aMenos.toFixed(2).replace('.', ',')}. Devolva pelo app do Mercado Pago.`)
+      }
+    }
+
     if (tel.length >= 10 && data === 'aceita') {
       avisarNoZap(tel, `Prontinho! Mudei seu pedido #${ped?.numero_pedido ?? ''} aqui. 👍\n\n`
-        + `Novo total: *R$ ${Number(alt.total_depois).toFixed(2).replace('.', ',')}*`)
+        + `Novo total: *R$ ${Number(alt.total_depois).toFixed(2).replace('.', ',')}*` + recado)
     } else if (tel.length >= 10 && data === 'recusada') {
       avisarNoZap(tel, `Oi! Não deu pra mudar o pedido #${ped?.numero_pedido ?? ''}. 😕\n\n`
         + (motivo ? `${motivo}.\n\n` : '')
@@ -8402,6 +8436,34 @@ export default function PainelPedidos() {
                       {dif < 0 ? ' — caiu na faixa de atacado' : ''})
                     </span>
                   </div>
+
+                  {/* Pagou online e vai baratear: aceitar SAI DINHEIRO da conta
+                      da loja. Ela precisa saber disso ANTES de clicar, não
+                      depois pelo extrato. */}
+                  {dif < 0 && (ped?.mp_payment_status === 'approved' || ped?.pix_status === 'pago') && (
+                    <div style={{
+                      fontSize: 12.5, lineHeight: 1.5, marginBottom: 10, padding: '8px 10px',
+                      borderRadius: 8, background: 'rgba(251,191,36,.14)',
+                      border: '1px solid rgba(251,191,36,.5)', color: '#fbbf24',
+                    }}>
+                      ⚠️ Ele já pagou pelo PIX online. Aceitando, o sistema
+                      devolve <strong>R$ {Math.abs(dif).toFixed(2).replace('.', ',')}</strong> pra
+                      ele automaticamente.
+                    </div>
+                  )}
+
+                  {/* Pagou online e vai encarecer: o sistema NÃO cobra sozinho.
+                      Falar aqui evita a loja entregar achando que está pago. */}
+                  {dif > 0 && (ped?.mp_payment_status === 'approved' || ped?.pix_status === 'pago') && (
+                    <div style={{
+                      fontSize: 12.5, lineHeight: 1.5, marginBottom: 10, padding: '8px 10px',
+                      borderRadius: 8, background: 'rgba(251,191,36,.14)',
+                      border: '1px solid rgba(251,191,36,.5)', color: '#fbbf24',
+                    }}>
+                      ⚠️ Ele já pagou o valor antigo pelo PIX online.
+                      Falta receber <strong>R$ {dif.toFixed(2).replace('.', ',')}</strong> — cobre na entrega.
+                    </div>
+                  )}
 
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <button type="button" disabled={decidindoAlt === alt.id}

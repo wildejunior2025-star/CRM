@@ -49,7 +49,12 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
   try {
-    const { order_id, motivo } = await req.json()
+    // `valor` liga o estorno PARCIAL (mig 0250): o cliente tirou um item do
+    // pedido, ou somou um e a quantidade caiu na faixa de atacado — o pedido
+    // continua de pé, só volta a diferença. Sem `valor`, é o de sempre:
+    // devolve tudo e cancela.
+    const { order_id, motivo, valor, manter_pedido } = await req.json()
+    const parcial = Number(valor) > 0
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
@@ -66,11 +71,50 @@ Deno.serve(async (req) => {
       })
     }
 
+    // Nada pago online: não há o que devolver. No parcial isso é resposta, não
+    // silêncio — quem está no balcão precisa saber que ninguém vai receber nada.
+    if (parcial && !(pedido.mp_payment_id && pedido.mp_payment_status === 'approved')) {
+      return new Response(JSON.stringify({ ok: false, erro: 'Este pedido não foi pago online.' }), {
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      })
+    }
+
     // Só reembolsa se houve pagamento aprovado
     if (pedido.mp_payment_id && pedido.mp_payment_status === 'approved') {
       // Token da LOJA dona do pagamento (fallback: central). Sem ele o MP recusa
       // o estorno de pagamentos feitos na conta da loja.
       const mpToken = await tokenDaLoja(supabase, pedido.empresa_id)
+
+      // Quanto AINDA dá pra devolver, perguntado ao MP.
+      //
+      // O valor pago não fica guardado aqui: `total` é o de agora, e no parcial
+      // ele já mudou justamente por causa da alteração. E duas alterações
+      // seguidas devolveriam duas vezes se ninguém contasse o que já voltou —
+      // quem sabe isso é o Mercado Pago, então é ele quem responde.
+      let valorFinal: number | null = null
+      if (parcial) {
+        const pgRes = await fetch(
+          `https://api.mercadopago.com/v1/payments/${pedido.mp_payment_id}`,
+          { headers: { 'Authorization': `Bearer ${mpToken}` } },
+        )
+        const pg = await pgRes.json()
+        if (!pgRes.ok) {
+          console.error('MP payment fetch error:', JSON.stringify(pg))
+          return new Response(JSON.stringify({
+            ok: false, erro: pg?.message ?? 'Não consegui falar com o Mercado Pago.',
+          }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
+        }
+        const pago      = Number(pg?.transaction_amount ?? 0)
+        const jaVoltou  = Number(pg?.transaction_amount_refunded ?? 0)
+        const disponivel = Math.round((pago - jaVoltou) * 100) / 100
+        valorFinal = Math.min(Math.round(Number(valor) * 100) / 100, disponivel)
+        if (!(valorFinal > 0)) {
+          return new Response(JSON.stringify({
+            ok: false, erro: `Não há saldo desse pagamento para devolver (pago R$ ${pago.toFixed(2)}, já voltou R$ ${jaVoltou.toFixed(2)}).`,
+          }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
+        }
+      }
+
       const mpRes = await fetch(
         `https://api.mercadopago.com/v1/payments/${pedido.mp_payment_id}/refunds`,
         {
@@ -80,7 +124,8 @@ Deno.serve(async (req) => {
             'Content-Type':      'application/json',
             'X-Idempotency-Key': crypto.randomUUID(),
           },
-          body: JSON.stringify({}), // reembolso total
+          // Sem corpo = devolve tudo. Com `amount` = devolve só a diferença.
+          body: JSON.stringify(valorFinal != null ? { amount: valorFinal } : {}),
         }
       )
 
@@ -88,8 +133,30 @@ Deno.serve(async (req) => {
 
       if (!mpRes.ok) {
         console.error('MP refund error:', JSON.stringify(refundData))
-        // Mesmo com erro no reembolso, cancela o pedido no banco
+        // No parcial o erro TEM que subir. O pedido continua de pé e a loja
+        // precisa saber que o dinheiro não voltou — senão ela acha que voltou e
+        // o cliente cobra depois. No total, segue e cancela mesmo assim: pedido
+        // recusado não pode ficar na tela por causa do MP fora do ar.
+        if (parcial) {
+          return new Response(JSON.stringify({
+            ok: false,
+            erro: refundData?.message ?? 'O Mercado Pago recusou o estorno. Confira o saldo da conta da loja.',
+          }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
+        }
       }
+
+      // Parcial deu certo: o pedido CONTINUA de pé, só voltou a diferença.
+      if (parcial) {
+        return new Response(JSON.stringify({ ok: true, valor: valorFinal }), {
+          headers: { ...CORS, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
+    if (manter_pedido) {
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      })
     }
 
     // Cancela o pedido no banco
