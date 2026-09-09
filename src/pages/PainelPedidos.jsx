@@ -4713,7 +4713,157 @@ function MidiaDaMensagem({ path, tipo }) {
   )
 }
 
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, cadastroVersao, pinChat }) {
+// "558487417625" → "(84) 8741-7625". O cadastro da loja guarda o número no
+// formato daqui, sem o 55 do país — é assim que ele aparece em Clientes e é
+// assim que quem atende reconhece a pessoa.
+//
+// Número de 10 dígitos (o WhatsApp entrega muito celular sem o 9 migratório)
+// fica com 10 mesmo: inventar o 9 é chutar um telefone que pode não existir, e
+// o sistema todo casa cliente pelos 8 últimos dígitos de qualquer jeito.
+function telefoneBonito(phone) {
+  const bruto = String(phone ?? '')
+  const d = bruto.replace(/\D/g, '')
+  const local = d.startsWith('55') ? d.slice(2) : d
+  // Não é telefone (o app e a loja online identificam o cliente por id): devolve
+  // do jeito que veio — tirar as letras de um id deixaria um número sem sentido.
+  if (local.length !== 10 && local.length !== 11) return bruto
+  const meio = local.length === 11 ? local.slice(2, 7) : local.slice(2, 6)
+  const fim  = local.length === 11 ? local.slice(7)    : local.slice(6)
+  return `(${local.slice(0, 2)}) ${meio}-${fim}`
+}
+
+// ── Cadastrar o cliente sem sair da conversa ────────────────────────────────
+//
+// O número já está aqui na tela: o que falta é o nome. Antes, pra registrar
+// quem estava falando, quem atende tinha que sair da conversa, abrir Clientes,
+// copiar o número e digitar tudo de novo — na correria ninguém faz, e a caixa
+// segue cheia de "558487417625" no lugar de gente. Cadastrado, o nome passa a
+// aparecer na lista, no pedido e no fiado.
+function CadastroRapidoNoChat({ empresaId, telefone, onNomeDoCliente }) {
+  const [cliente, setCliente]   = useState(null)   // já existe? {id, nome}
+  const [aberto, setAberto]     = useState(false)
+  const [nome, setNome]         = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro]         = useState(null)
+
+  const digitos = String(telefone ?? '').replace(/\D/g, '')
+  const chave = digitos.slice(-8)
+
+  // Já tem cadastro? O casamento é pelos 8 últimos dígitos — o WhatsApp entrega
+  // o número com o 55 e às vezes com um 9 que o cadastro não tem. Comparar
+  // inteiro faria a tela oferecer "cadastrar" pra cliente antigo, e o upsert
+  // (que casa por número exato) criaria a segunda ficha da mesma pessoa.
+  useEffect(() => {
+    let vivo = true
+    setCliente(null); setAberto(false); setErro(null); setNome('')
+    if (!empresaId || chave.length < 8) return
+    ;(async () => {
+      const { data } = await supabase.from('clientes')
+        .select('id, nome, telefone')
+        .eq('empresa_id', empresaId).ilike('telefone', `%${chave}`)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      if (!vivo || !data) return
+      setCliente(data)
+      // A conversa pode ter nascido antes do cadastro: o nome já existe, só não
+      // tinha chegado nas mensagens.
+      if (data.nome) onNomeDoCliente?.(data.nome, false)
+    })()
+    return () => { vivo = false }
+    // onNomeDoCliente muda a cada render do pai; entrar aqui refaria a consulta
+    // sem parar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empresaId, chave])
+
+  async function salvar() {
+    const n = nome.trim()
+    if (!n || salvando) return
+    setSalvando(true); setErro(null)
+    try {
+      const { data: id, error } = await supabase.rpc('upsert_cliente_loja', {
+        p_empresa_id: empresaId, p_nome: n, p_telefone: telefoneBonito(digitos),
+        p_email: '', p_cep: '', p_endereco: '', p_numero: '', p_complemento: '',
+        p_bairro: '', p_cidade: '', p_estado: '',
+      })
+      if (error) throw error
+      setCliente({ id, nome: n })
+      setAberto(false)
+      onNomeDoCliente?.(n, true)
+    } catch (e) {
+      setErro(e?.message ?? 'não deu pra salvar')
+    }
+    setSalvando(false)
+  }
+
+  // Conversa do app/loja online não tem telefone na chave — lá o cliente já
+  // entrou com conta.
+  if (chave.length < 8) return null
+
+  if (cliente) {
+    return (
+      <span
+        title={`${cliente.nome || 'Cliente'} já está no cadastro da loja`}
+        style={{
+          marginLeft: 'auto', flexShrink: 0, fontSize: 10, fontWeight: 700,
+          padding: '3px 8px', borderRadius: 20, whiteSpace: 'nowrap',
+          background: 'rgba(34,197,94,.15)', color: '#4ade80', border: '1px solid rgba(34,197,94,.4)',
+        }}
+      >✓ cadastrado</span>
+    )
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setAberto(v => !v)}
+        title={`Salvar ${telefoneBonito(digitos)} nos clientes da loja`}
+        style={{
+          marginLeft: 'auto', flexShrink: 0, cursor: 'pointer',
+          fontSize: 11, fontWeight: 800, padding: '5px 10px', borderRadius: 20,
+          whiteSpace: 'nowrap', border: '1.5px solid #7c3aed',
+          background: aberto ? '#7c3aed' : 'rgba(124,58,237,.15)',
+          color: aberto ? '#fff' : '#a78bfa',
+        }}
+      >＋ Cadastrar cliente</button>
+
+      {aberto && (
+        <div style={{ flexBasis: '100%', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+          <input
+            autoFocus
+            value={nome}
+            onChange={e => setNome(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') salvar(); if (e.key === 'Escape') setAberto(false) }}
+            placeholder={`Nome de quem usa o ${telefoneBonito(digitos)}`}
+            style={{
+              flex: 1, minWidth: 160, padding: '8px 11px', borderRadius: 8, fontSize: 14,
+              border: '1.5px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)',
+              color: 'var(--text)', outline: 'none',
+            }}
+          />
+          <button
+            type="button" onClick={salvar} disabled={salvando || !nome.trim()}
+            style={{
+              padding: '8px 14px', borderRadius: 8, border: 'none', fontSize: 13, fontWeight: 800,
+              cursor: salvando || !nome.trim() ? 'default' : 'pointer',
+              background: nome.trim() ? '#22c55e' : 'rgba(148,163,184,.2)',
+              color: nome.trim() ? '#fff' : 'var(--text-muted)',
+            }}
+          >{salvando ? 'Salvando...' : 'Salvar'}</button>
+          <button
+            type="button" onClick={() => setAberto(false)}
+            style={{
+              padding: '8px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
+              border: '1px solid var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text-muted)',
+            }}
+          >Cancelar</button>
+          {erro && <div style={{ flexBasis: '100%', fontSize: 11.5, color: '#f87171' }}>Não deu pra salvar: {erro}</div>}
+        </div>
+      )}
+    </>
+  )
+}
+
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onNomeDoCliente, cadastroVersao, pinChat }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   useEffect(() => {
@@ -4723,20 +4873,26 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
       {/* Cabeçalho da conversa */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 10, borderBottom: '1px solid var(--border, #2a2a3a)', marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 10, borderBottom: '1px solid var(--border, #2a2a3a)', marginBottom: 8 }}>
         <button type="button" onClick={onVoltar} aria-label="Voltar"
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', fontSize: 20, lineHeight: 1, padding: 0 }}>
           ‹
         </button>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {thread.cliente_nome || thread.cliente_ref || 'Cliente'}
+            {thread.cliente_nome || telefoneBonito(thread.cliente_ref) || 'Cliente'}
           </div>
           <span style={{
             fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 20,
             background: thread.canal === 'app' ? '#f97316' : '#3b82f6', color: '#fff',
           }}>{canalLabel}</span>
         </div>
+        {/* O número já está aqui — falta o nome pra virar cliente da loja. */}
+        <CadastroRapidoNoChat
+          empresaId={empresaId}
+          telefone={thread.canal === 'whatsapp' ? thread.cliente_ref : null}
+          onNomeDoCliente={onNomeDoCliente}
+        />
       </div>
 
       {/* Mensagens */}
@@ -6563,6 +6719,22 @@ export default function PainelPedidos() {
   }
   async function enviarChat() { return enviarChatTexto(chatTexto) }
 
+  // Nome do cliente descoberto (ou acabado de cadastrar) dentro da conversa.
+  // Entra na tela na hora — cabeçalho e lista — e, quando é cadastro novo,
+  // gruda nas mensagens daquela conversa: sem isso a caixa voltava a mostrar o
+  // número cru na próxima carga, e o trabalho de cadastrar parecia perdido.
+  async function nomearClienteDaConversa(nome, persistir) {
+    const ref = String(chatAberto ?? '').split('|').slice(1).join('|')
+    if (!nome || !ref) return
+    const marcar = m => (m.cliente_ref === ref ? { ...m, cliente_nome: nome } : m)
+    setChatMsgs(prev => prev.map(marcar))
+    setChatMsgsBusca(prev => prev.map(marcar))
+    if (persistir && empresa?.id) {
+      await supabase.from('mensagens_chat').update({ cliente_nome: nome })
+        .eq('empresa_id', empresa.id).eq('cliente_ref', ref)
+    }
+  }
+
   // Pede o pininho do WhatsApp (mig 0238). É o caminho mais curto de todos: o
   // cliente toca no clipe → Localização, e o ponto exato chega sozinho — sem
   // link, sem digitar endereço, sem o buscador de mapa chutar nada.
@@ -8305,6 +8477,7 @@ export default function PainelPedidos() {
                 onAbrirSacola={() => setSacolaLateral(true)}
                 onPedirLocalizacao={pedirLocalizacaoNoChat}
                 onUsarLocalizacao={usarLocalizacaoNoPedido}
+                onNomeDoCliente={nomearClienteDaConversa}
                 cadastroVersao={cadastroVersao}
                 pinChat={pinChat}
               />
@@ -8368,7 +8541,7 @@ export default function PainelPedidos() {
                       }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                         <span style={{ fontSize: telaGrande ? 16.5 : 13.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {t.cliente_nome || t.cliente_ref || 'Cliente'}
+                          {t.cliente_nome || telefoneBonito(t.cliente_ref) || 'Cliente'}
                         </span>
                         <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{hora}</span>
                       </div>
