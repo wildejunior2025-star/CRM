@@ -994,13 +994,20 @@ const catalogoCache = {} // { [empresaId]: { produtos, compMap } }
 // `const { compMap } = await carregarCatalogo(...)` estourava em cima de
 // `undefined`, o catch engolia e o item entrava na sacola sem perguntar sabor.
 async function carregarCatalogoCompleto(empresaId) {
-  const [prodRes, vincRes] = await Promise.all([
+  const [prodRes, vincRes, catRes] = await Promise.all([
     // Paginado: sem isso a Nova venda de um deposito so achava os 1000 primeiros nomes.
-    fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, preco_promocional, faixas_preco, categoria')
+    // `ativo`/`disponivel_delivery` vêm junto pro cardápio por categoria mostrar
+    // o mesmo que a busca por nome mostra (o RPC filtra os dois): item pausado
+    // aparecendo na lista e sumindo na busca é bug na cara de quem atende.
+    fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, preco_promocional, faixas_preco, categoria, ativo, disponivel_delivery')
       .eq('empresa_id', empresaId).is('arquivado_em', null).order('nome', { ascending: true }).order('id')),
     supabase.from('produto_complemento_grupos')
       .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, regra_preco, modo_quantidade, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)), produtos!inner(empresa_id)')
       .eq('produtos.empresa_id', empresaId).order('ordem'),
+    // A ordem das categorias é a MESMA do cardápio da loja. Ordenar por nome
+    // aqui deixaria a lista do gestor numa ordem e a do cliente em outra — e
+    // quem monta o pedido procura pela ordem que conhece.
+    supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId),
   ])
   if (prodRes.error) throw prodRes.error
   const compMap = {}
@@ -1020,7 +1027,8 @@ async function carregarCatalogoCompleto(empresaId) {
       modo_quantidade: g.modo_quantidade === true,
     })
   }
-  const catalogo = { produtos: prodRes.data || [], compMap }
+  const ordemCategorias = Object.fromEntries((catRes?.data ?? []).map(c => [c.nome, Number(c.ordem ?? 0)]))
+  const catalogo = { produtos: prodRes.data || [], compMap, ordemCategorias }
   catalogoCache[empresaId] = catalogo
   return catalogo
 }
@@ -5124,6 +5132,32 @@ function useTelaGrande() {
 // Galioto"), o atendente precisa do nome e do preço certos sem sair da tela — e
 // o nome que ele mandar é o que o robô vai ler pra reconhecer o produto quando
 // voltar. Escrito de cabeça, sai errado; daqui, sai do cadastro.
+// Uma linha de produto — a mesma na busca por nome e na lista da categoria.
+// Separada porque o preço com faixa de atacado tem que sair IGUAL nas duas: se
+// a busca mostra "10+ R$ 2,50" e a categoria não, o atendente combina um preço
+// e o sistema cobra outro.
+function LinhaProdutoNoChat({ p, g, onEscolher, semCategoria = false }) {
+  return (
+    <button type="button" onClick={() => onEscolher(p)}
+      style={{
+        textAlign: 'left', cursor: 'pointer', padding: g ? '11px 13px' : '7px 9px', borderRadius: 9,
+        border: '1px solid var(--border, #2a2a3a)', background: 'transparent',
+      }}>
+      <div style={{ fontSize: g ? 16.5 : 13, fontWeight: 700, color: 'var(--text)' }}>{p.nome}</div>
+      <div style={{ fontSize: g ? 14 : 11.5, color: 'var(--text-muted)' }}>
+        {Number(p.preco) > 0 ? `R$ ${Number(p.preco).toFixed(2).replace('.', ',')}` : 'sob consulta'}
+        {/* O degrau do atacado já na lista, igual à tela de Vender: o
+            atendente vê que existe preço melhor antes de bater a
+            quantidade. */}
+        {menorFaixa(p.faixas_preco)
+          ? <span style={{ color: '#22c55e', fontWeight: 700 }}> · {menorFaixa(p.faixas_preco).qtd_min}+ R$ {Number(menorFaixa(p.faixas_preco).preco).toFixed(2).replace('.', ',')}</span>
+          : null}
+        {!semCategoria && p.categoria ? ` · ${p.categoria}` : ''}
+      </div>
+    </button>
+  )
+}
+
 function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso, semBotao = false }) {
   const g = useTelaGrande()
   const [termo, setTermo] = useState('')
@@ -5131,6 +5165,42 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso, semBotao = false 
   const [buscando, setBuscando] = useState(false)
   const [aberto, setAberto] = useState(false)
   const [avulsoPreco, setAvulsoPreco] = useState('')
+  // Cardápio por categoria, pra quem NÃO sabe o nome do produto. Digitar só
+  // serve pra quem já conhece o cardápio de cor; quem está aprendendo (ou o
+  // cliente que pergunta "o que vocês têm de picolé?") ficava travado na frente
+  // de um campo vazio.
+  const [cats, setCats] = useState([])
+  const [catAberta, setCatAberta] = useState(null)
+  const [carregandoCats, setCarregandoCats] = useState(true)
+
+  useEffect(() => {
+    if (!empresaId) return
+    let vivo = true
+    ;(async () => {
+      try {
+        const { produtos, ordemCategorias } = await carregarCatalogoCompleto(empresaId)
+        if (!vivo) return
+        const grupos = new Map()
+        for (const p of (produtos ?? [])) {
+          // Mesmo filtro do RPC de busca: pausado não entra.
+          if (p.ativo === false || p.disponivel_delivery === false) continue
+          const cat = String(p.categoria ?? '').trim() || 'Sem categoria'
+          if (!grupos.has(cat)) grupos.set(cat, [])
+          // `preco` é o nome que o resto da sacola espera (a busca vem do RPC
+          // com esse campo); o catálogo traz como preco_venda.
+          grupos.get(cat).push({ ...p, preco: Number(p.preco_venda ?? 0) })
+        }
+        const pos = c => (c === 'Sem categoria'
+          ? Number.MAX_SAFE_INTEGER
+          : (ordemCategorias?.[c] ?? Number.MAX_SAFE_INTEGER - 1))
+        setCats([...grupos.entries()]
+          .map(([categoria, produtos]) => ({ categoria, produtos }))
+          .sort((a, b) => (pos(a.categoria) - pos(b.categoria)) || a.categoria.localeCompare(b.categoria, 'pt-BR')))
+      } catch { /* sem cardápio: a busca por nome continua valendo */ }
+      if (vivo) setCarregandoCats(false)
+    })()
+    return () => { vivo = false }
+  }, [empresaId])
 
   // Vender o que não está cadastrado: o nome é o que ele acabou de digitar na
   // busca, e o preço ele informa. Vai pra sacola como qualquer outro item.
@@ -5209,25 +5279,56 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso, semBotao = false 
             </button>
           </div>
 
-          {itens.map(p => (
-            <button key={p.id} type="button" onClick={() => onEscolher(p)}
-              style={{
-                textAlign: 'left', cursor: 'pointer', padding: g ? '11px 13px' : '7px 9px', borderRadius: 9,
-                border: '1px solid var(--border, #2a2a3a)', background: 'transparent',
-              }}>
-              <div style={{ fontSize: g ? 16.5 : 13, fontWeight: 700, color: 'var(--text)' }}>{p.nome}</div>
-              <div style={{ fontSize: g ? 14 : 11.5, color: 'var(--text-muted)' }}>
-                {Number(p.preco) > 0 ? `R$ ${Number(p.preco).toFixed(2).replace('.', ',')}` : 'sob consulta'}
-                {/* O degrau do atacado já na lista, igual à tela de Vender: o
-                    atendente vê que existe preço melhor antes de bater a
-                    quantidade. */}
-                {menorFaixa(p.faixas_preco)
-                  ? <span style={{ color: '#22c55e', fontWeight: 700 }}> · {menorFaixa(p.faixas_preco).qtd_min}+ R$ {Number(menorFaixa(p.faixas_preco).preco).toFixed(2).replace('.', ',')}</span>
-                  : null}
-                {p.categoria ? ` · ${p.categoria}` : ''}
+          {itens.map(p => <LinhaProdutoNoChat key={p.id} p={p} g={g} onEscolher={onEscolher} />)}
+        </div>
+      )}
+
+      {/* Sem nada digitado: o cardápio inteiro, fechado por categoria. Uma
+          aberta por vez — abrir a segunda fecha a primeira, senão numa loja de
+          15 categorias a coluna vira uma rolagem sem fim e some com a sacola. */}
+      {termo.trim().length < 3 && (
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: .4, color: 'var(--text-muted)', marginBottom: 2 }}>
+            OU ESCOLHA PELA CATEGORIA
+          </div>
+          {carregandoCats && cats.length === 0 && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Carregando o cardápio…</div>
+          )}
+          {!carregandoCats && cats.length === 0 && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              Nenhum produto no cardápio ainda. Cadastre no <strong>Catálogo</strong>.
+            </div>
+          )}
+          {cats.map(c => {
+            const abertaCat = catAberta === c.categoria
+            return (
+              <div key={c.categoria}>
+                <button type="button"
+                  onClick={() => setCatAberta(abertaCat ? null : c.categoria)}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    gap: 8, textAlign: 'left', cursor: 'pointer',
+                    padding: g ? '10px 12px' : '8px 10px', borderRadius: 9,
+                    border: `1px solid ${abertaCat ? 'rgba(124,58,237,.6)' : 'var(--border, #2a2a3a)'}`,
+                    background: abertaCat ? 'rgba(124,58,237,.12)' : 'transparent',
+                    color: abertaCat ? '#a78bfa' : 'var(--text)',
+                    fontSize: g ? 15 : 12.5, fontWeight: 700,
+                  }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {abertaCat ? '▾' : '▸'} {c.categoria}
+                  </span>
+                  <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 800, color: 'var(--text-muted)' }}>
+                    {c.produtos.length}
+                  </span>
+                </button>
+                {abertaCat && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: g ? 6 : 4, margin: '4px 0 6px 10px' }}>
+                    {c.produtos.map(p => <LinhaProdutoNoChat key={p.id} p={p} g={g} onEscolher={onEscolher} semCategoria />)}
+                  </div>
+                )}
               </div>
-            </button>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
@@ -9360,7 +9461,7 @@ export default function PainelPedidos() {
 
             {sacolaChat.length === 0 ? (
               <div style={{ fontSize: 13.5, color: 'var(--text-muted)', marginTop: 14, lineHeight: 1.5 }}>
-                Procure o produto acima e clique pra jogar aqui.<br />
+                Digite o nome ou abra uma categoria acima e clique no produto.<br />
                 Não achou? Ponha o preço e mande mesmo sem cadastro.
               </div>
             ) : (
