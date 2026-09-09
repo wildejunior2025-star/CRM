@@ -6512,6 +6512,19 @@ export default function PainelPedidos() {
 
   // ── Alterações de pedido esperando resposta ─────────────────────────────
   //
+  // Cliente pediu pra mudar um pedido que já está aqui dentro (mig 0250). Não é
+  // venda nova: é um pedido que pode já estar sendo preparado, e alguém precisa
+  // dizer se ainda dá tempo.
+  //
+  // Os três estados moram AQUI, coladinhos em quem os usa. Estavam 600 linhas
+  // abaixo, junto das abas da sacola, e o efeito lá de baixo lia `alteracoes`
+  // no array de dependências — que é avaliado durante o RENDER, antes da
+  // declaração existir. Deu "Cannot access before initialization" e a tela do
+  // gestor da Saidera não abria (09/09/2026).
+  const [alteracoes, setAlteracoes] = useState([])
+  const [decidindoAlt, setDecidindoAlt] = useState(null)   // id em processamento
+  const [recusandoAlt, setRecusandoAlt] = useState(null)   // alteração no popup do motivo
+
   // Carga + tempo real. A campainha toca no INSERT, e é um som próprio
   // (tocarSomAlteracao): igual ao de pedido novo, a pessoa aceitaria no
   // automático achando que é venda chegando.
@@ -7114,12 +7127,6 @@ export default function PainelPedidos() {
   const [editandoSacola, setEditandoSacola] = useState(null)
   // Aba da coluna da sacola: montar os itens x fechar o pedido.
   const [abaSacola, setAbaSacola] = useState('itens')
-  // Cliente pediu pra mudar um pedido que já está aqui dentro (mig 0250).
-  // Não é venda nova: é um pedido que pode já estar sendo preparado, e alguém
-  // precisa dizer se ainda dá tempo.
-  const [alteracoes, setAlteracoes] = useState([])
-  const [decidindoAlt, setDecidindoAlt] = useState(null)   // id em processamento
-  const [recusandoAlt, setRecusandoAlt] = useState(null)   // alteração no popup do motivo
   const [pinChat, setPinChat] = useState(null) // { lat, lng, endereco, versao } — a localização do chat virando endereço
   // Sobe de 1 quando o cadastro do cliente muda por aqui (a localização virou
   // endereço). O "Fechar o pedido" lê o cadastro uma vez, na abertura — sem
