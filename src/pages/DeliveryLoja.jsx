@@ -83,6 +83,31 @@ function fmt(n) {
   return Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// A sacola guardada traz o PREÇO de quando foi montada, e ela sobrevive dias no
+// celular do cliente. Se a loja mexeu no valor ou criou uma faixa de atacado
+// desde então, o pedido fechava no preço velho — foi assim que o #1051 da CDBom
+// saiu com 20 pacotes de gelo a R$ 5,00 cada, com o "10+ por R$ 2,25" já
+// cadastrado e valendo pra todo mundo.
+//
+// Pior: item guardado por uma versão antiga da tela vinha SEM `precoBase`, e aí
+// nem o +/− do carrinho recalculava (ver comPrecoDaFaixa) — ficava preso no
+// preço da unidade por mais que o cliente aumentasse a quantidade.
+//
+// Aqui a linha é recarimbada com o preço de AGORA, pela quantidade que está na
+// sacola. Vale só pro item simples: o montado ("monte sua quentinha") fecha o
+// preço na montagem, com o rateio dos sabores, e refazer essa conta por fora
+// erraria o atacado.
+function reprecificarItemSalvo(item, prod) {
+  const qtd = Number(item.quantidade) || 1
+  return {
+    ...item,
+    precoBase: Number(prod.preco),
+    faixas_preco: prod.faixas_preco ?? [],
+    preco_promocional: prod.preco_promocional ?? null,
+    preco: precoPorQuantidade(prod.preco, prod.faixas_preco, qtd, prod.preco_promocional),
+  }
+}
+
 // Leitura que NAO pode sair pela metade. O cardapio e montado com varias
 // consultas; se a dos complementos falhar e a tela seguir assim mesmo, TODO
 // produto vira "produto sem complemento": o cliente poe a quentinha na sacola
@@ -366,7 +391,9 @@ export default function DeliveryLoja() {
           if (!prod) { tirados.push(item.nome); continue }   // produto saiu do cardápio
 
           const comps = Array.isArray(item.complementos) ? item.complementos : []
-          if (!comps.length) { conferida[chave] = item; continue }
+          // Item simples: entra com o preço de hoje, não com o de quando foi
+          // posto na sacola (ver reprecificarItemSalvo).
+          if (!comps.length) { conferida[chave] = reprecificarItemSalvo(item, prod); continue }
 
           // Nomes que a loja ainda oferece pra ESTE produto, agora.
           const disponiveis = new Set(
