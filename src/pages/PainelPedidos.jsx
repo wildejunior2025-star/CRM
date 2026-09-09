@@ -6827,6 +6827,8 @@ export default function PainelPedidos() {
   // de ideia no meio da conversa; sem isto o jeito de mudar o sabor era apagar a
   // linha e montar tudo de novo.
   const [editandoSacola, setEditandoSacola] = useState(null)
+  // Aba da coluna da sacola: montar os itens x fechar o pedido.
+  const [abaSacola, setAbaSacola] = useState('itens')
   const [pinChat, setPinChat] = useState(null) // { lat, lng, endereco, versao } — a localização do chat virando endereço
   // Sobe de 1 quando o cadastro do cliente muda por aqui (a localização virou
   // endereço). O "Fechar o pedido" lê o cadastro uma vez, na abertura — sem
@@ -7887,6 +7889,10 @@ export default function PainelPedidos() {
   // a conversa tem que continuar legível enquanto se monta o item. No celular
   // não existe coluna: lá é popup mesmo.
   const seletorNaColuna = telaGrande && painelDireito === 'chat' && !!threadAberta && sacolaLateral
+  // Escolhendo sabor é montagem de item: a aba de fechamento não tem o que
+  // fazer na frente. Voltar sozinho evita o clique "por que sumiu?".
+  const abaEfetivaSacola = produtoCompChat ? 'itens' : abaSacola
+  const totalSacolaChat = sacolaChat.reduce((s, i) => s + Number(i.preco) * Number(i.qtd), 0)
   const CANAL_LABEL = { app: 'App', lojaonline: 'Loja online', whatsapp: 'WhatsApp' }
 
   // Busca de pedido: casa nº do pedido, código iFood, id, nome ou telefone.
@@ -9289,44 +9295,75 @@ export default function PainelPedidos() {
             </button>
           </div>
 
-          {/* Escolha do sabor AQUI, na coluna — a conversa segue à vista do
-              lado. Enquanto está montando, a busca some: são dois campos
-              disputando a mesma atenção. */}
-          {produtoCompChat ? (
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 800, color: '#a78bfa' }}>
-                  {editandoSacola != null ? '✏️ TROCANDO O SABOR' : '🍧 ESCOLHA DO CLIENTE'}
-                </span>
-                <button type="button" onClick={fecharSeletorDoChat}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12.5 }}>
-                  cancelar
-                </button>
-              </div>
-              <ModalComplementos
-                embutido
-                produto={produtoCompChat}
-                iniciais={produtoCompChat.iniciais ?? []}
-                onFechar={fecharSeletorDoChat}
-                onConfirmar={adicionarComComplementosNoChat}
-              />
-            </div>
-          ) : (
-            <BuscaProdutoNoChat
-              empresaId={empresa?.id}
-              onEscolher={escolherProdutoNoChat}
-              onAvulso={item => setSacolaChat(prev => [...prev, item])}
-              semBotao
-            />
-          )}
+          {/* Duas etapas, duas abas. Empilhado, o endereço e a forma de
+              pagamento moravam embaixo da sacola: mexer numa quantidade no meio
+              da conversa virava rolar a coluna inteira, e o formulário de
+              fechamento ficava na frente o tempo todo sem ter nada a ver com o
+              que estava sendo conversado. Montar é uma coisa; fechar é outra, e
+              só acontece no fim.
 
-          {sacolaChat.length === 0 ? (
-            <div style={{ fontSize: 13.5, color: 'var(--text-muted)', marginTop: 14, lineHeight: 1.5 }}>
-              Procure o produto acima e clique pra jogar aqui.<br />
-              Não achou? Ponha o preço e mande mesmo sem cadastro.
-            </div>
-          ) : (
-            <>
+              Só o `display` muda: desmontar o "Fechar" apagaria o que já foi
+              digitado (número da casa, troco) a cada ida e volta. */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            {[
+              { id: 'itens',  rot: '🛒 Produtos', extra: sacolaChat.length ? `${sacolaChat.length} ${sacolaChat.length === 1 ? 'item' : 'itens'}` : '' },
+              { id: 'fechar', rot: '📋 Fechar',   extra: totalSacolaChat > 0 ? `R$ ${totalSacolaChat.toFixed(2).replace('.', ',')}` : '' },
+            ].map(t => {
+              const ativa = abaEfetivaSacola === t.id
+              return (
+                <button key={t.id} type="button" onClick={() => setAbaSacola(t.id)}
+                  style={{
+                    flex: 1, padding: '9px 8px', borderRadius: 9, cursor: 'pointer',
+                    fontSize: 13, fontWeight: 800, lineHeight: 1.25,
+                    border: `1.5px solid ${ativa ? '#7c3aed' : 'var(--border, #2a2a3a)'}`,
+                    background: ativa ? 'rgba(124,58,237,.18)' : 'transparent',
+                    color: ativa ? '#a78bfa' : 'var(--text-muted)',
+                  }}>
+                  {t.rot}
+                  {t.extra ? <span style={{ display: 'block', fontSize: 11, fontWeight: 700, opacity: .85 }}>{t.extra}</span> : null}
+                </button>
+              )
+            })}
+          </div>
+
+          <div style={{ display: abaEfetivaSacola === 'itens' ? 'block' : 'none' }}>
+            {/* Escolha do sabor AQUI, na coluna — a conversa segue à vista do
+                lado. Enquanto está montando, a busca some: são dois campos
+                disputando a mesma atenção. */}
+            {produtoCompChat ? (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: '#a78bfa' }}>
+                    {editandoSacola != null ? '✏️ TROCANDO O SABOR' : '🍧 ESCOLHA DO CLIENTE'}
+                  </span>
+                  <button type="button" onClick={fecharSeletorDoChat}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12.5 }}>
+                    cancelar
+                  </button>
+                </div>
+                <ModalComplementos
+                  embutido
+                  produto={produtoCompChat}
+                  iniciais={produtoCompChat.iniciais ?? []}
+                  onFechar={fecharSeletorDoChat}
+                  onConfirmar={adicionarComComplementosNoChat}
+                />
+              </div>
+            ) : (
+              <BuscaProdutoNoChat
+                empresaId={empresa?.id}
+                onEscolher={escolherProdutoNoChat}
+                onAvulso={item => setSacolaChat(prev => [...prev, item])}
+                semBotao
+              />
+            )}
+
+            {sacolaChat.length === 0 ? (
+              <div style={{ fontSize: 13.5, color: 'var(--text-muted)', marginTop: 14, lineHeight: 1.5 }}>
+                Procure o produto acima e clique pra jogar aqui.<br />
+                Não achou? Ponha o preço e mande mesmo sem cadastro.
+              </div>
+            ) : (
               <SacolaNoChat
                 itens={sacolaChat}
                 onQtd={mudarQtdSacola}
@@ -9336,9 +9373,18 @@ export default function PainelPedidos() {
                 onEnviar={enviarSacolaDoChat}
                 enviando={enviandoSacola}
               />
-              {/* Endereço, pagamento e o botão que joga no sistema. `key` no
-                  telefone: trocou de conversa, formulário novo — senão o
-                  endereço de um cliente ia parar no pedido do outro. */}
+            )}
+          </div>
+
+          <div style={{ display: abaEfetivaSacola === 'fechar' ? 'block' : 'none' }}>
+            {sacolaChat.length === 0 ? (
+              <div style={{ fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                Sacola vazia. Ponha os produtos em <strong>🛒 Produtos</strong> e volte aqui pra fechar.
+              </div>
+            ) : (
+              /* Endereço, pagamento e o botão que joga no sistema. `key` no
+                 telefone: trocou de conversa, formulário novo — senão o
+                 endereço de um cliente ia parar no pedido do outro. */
               <FecharPedidoNoChat
                 key={threadAberta?.cliente_ref}
                 empresa={empresa}
@@ -9350,8 +9396,8 @@ export default function PainelPedidos() {
                 cadastroVersao={cadastroVersao}
                 pinChat={pinChat}
               />
-            </>
-          )}
+            )}
+          </div>
         </aside>
       )}
 
