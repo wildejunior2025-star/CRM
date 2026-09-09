@@ -166,6 +166,71 @@ function tocarSom() {
   }
 }
 
+// O que mudou entre as duas listas, em palavras de balcão.
+//
+// Mostrar as duas listas lado a lado obrigaria quem atende a conferir item por
+// item com o cliente esperando. Aqui sai pronto: "+2 Coca 2L", "−1 Picolé".
+// A chave junta produto e sabores — trocar o sabor é sair um e entrar outro,
+// e é assim que tem que aparecer.
+function diffDeItens(antes, depois) {
+  const mapa = (lista) => {
+    const m = new Map()
+    for (const it of (Array.isArray(lista) ? lista : [])) {
+      const comps = (it.complementos ?? []).map(c => `${c.qtd ?? 1}x ${c.nome}`).sort().join(', ')
+      const chave = `${it.produto_id ?? it.nome}|${comps}`
+      const anterior = m.get(chave)
+      m.set(chave, {
+        nome: it.nome + (comps ? ` (${comps})` : ''),
+        qtd: (anterior?.qtd ?? 0) + (Number(it.quantidade) || 0),
+      })
+    }
+    return m
+  }
+  const a = mapa(antes), b = mapa(depois)
+  const linhas = []
+  for (const [k, v] of b) {
+    const antesQtd = a.get(k)?.qtd ?? 0
+    if (v.qtd > antesQtd) linhas.push({ tipo: 'entrou', qtd: v.qtd - antesQtd, nome: v.nome })
+  }
+  for (const [k, v] of a) {
+    const depoisQtd = b.get(k)?.qtd ?? 0
+    if (v.qtd > depoisQtd) linhas.push({ tipo: 'saiu', qtd: v.qtd - depoisQtd, nome: v.nome })
+  }
+  return linhas
+}
+
+// Campainha da ALTERAÇÃO de pedido — de propósito nada parecida com a de
+// pedido novo.
+//
+// Pedido novo são 3 bipes curtos e agudos (880 Hz). Se a alteração tocasse
+// igual, a pessoa aceitaria no automático achando que é venda chegando — e
+// alteração não é venda nova: é um pedido que pode já estar na garupa da moto,
+// e responder errado manda o cliente esperar um item que ninguém vai fazer.
+//
+// Aqui é o contrário: duas notas GRAVES, longas, uma subindo na outra. Do outro
+// lado do balcão dá pra saber qual é sem olhar a tela.
+function tocarSomAlteracao() {
+  try {
+    const ctx = getAudioCtx()
+    if (ctx.state === 'suspended') ctx.resume()
+    const notas = [{ hz: 330, em: 0, dur: 0.34 }, { hz: 494, em: 0.30, dur: 0.46 }]
+    notas.forEach(({ hz, em, dur }) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'triangle'          // mais macio que o bipe seco do pedido novo
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.frequency.setValueAtTime(hz, ctx.currentTime + em)
+      gain.gain.setValueAtTime(0.30, ctx.currentTime + em)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + em + dur)
+      osc.start(ctx.currentTime + em)
+      osc.stop(ctx.currentTime + em + dur)
+    })
+  } catch {
+    // Web Audio não disponível — ignora silenciosamente
+  }
+}
+
 function getUrgencia(ms) {
   if (ms > 3 * 60 * 1000) return 'ok'
   if (ms > 60 * 1000)     return 'atencao'
@@ -6445,6 +6510,91 @@ export default function PainelPedidos() {
     return () => { ativo = false; canal.unsubscribe() }
   }, [empresa])
 
+  // ── Alterações de pedido esperando resposta ─────────────────────────────
+  //
+  // Carga + tempo real. A campainha toca no INSERT, e é um som próprio
+  // (tocarSomAlteracao): igual ao de pedido novo, a pessoa aceitaria no
+  // automático achando que é venda chegando.
+  const carregarAlteracoes = useCallback(async () => {
+    if (!empresa?.id) return
+    const { data } = await supabase
+      .from('pedido_alteracoes')
+      .select('*')
+      .eq('empresa_id', empresa.id)
+      .eq('status', 'pendente')
+      .gt('expira_em', new Date().toISOString())
+      .order('created_at', { ascending: true })
+    setAlteracoes(data ?? [])
+  }, [empresa])
+
+  useEffect(() => { carregarAlteracoes() }, [carregarAlteracoes])
+
+  useEffect(() => {
+    if (!empresa?.id) return
+    const canal = supabase
+      .channel(`alteracoes_${empresa.id}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'pedido_alteracoes', filter: `empresa_id=eq.${empresa.id}` },
+        payload => {
+          if (payload.eventType === 'INSERT' && somAtivoConfig()) tocarSomAlteracao()
+          carregarAlteracoes()
+        })
+      .subscribe()
+    return () => { supabase.removeChannel(canal) }
+  }, [empresa, carregarAlteracoes])
+
+  // Vencida some da tela sozinha: o card ficaria lá oferecendo um aceite que o
+  // banco já vai recusar, e quem está no balcão clicaria à toa.
+  useEffect(() => {
+    if (alteracoes.length === 0) return
+    const t = setInterval(() => {
+      setAlteracoes(prev => prev.filter(a => new Date(a.expira_em) > new Date()))
+    }, 10_000)
+    return () => clearInterval(t)
+  }, [alteracoes.length])
+
+  // Aceitar ou recusar. O aviso pro cliente sai daqui: ele está com a tela do
+  // pedido aberta esperando, e no WhatsApp é onde ele realmente olha.
+  async function decidirAlteracao(alt, aceitar, motivo = null) {
+    if (decidindoAlt) return
+    setDecidindoAlt(alt.id)
+    const { data, error } = await supabase.rpc('decidir_alteracao_pedido', {
+      p_alteracao_id: alt.id, p_aceitar: aceitar, p_motivo: motivo,
+    })
+    setDecidindoAlt(null)
+    setRecusandoAlt(null)
+    if (error) {
+      // A tranca do banco fala em português por design — mostrar cru é melhor
+      // que "erro inesperado", porque a mensagem diz o que fazer.
+      alert(error.message)
+      carregarAlteracoes()
+      return
+    }
+    setAlteracoes(prev => prev.filter(a => a.id !== alt.id))
+    carregarPedidos()
+
+    const ped = [...pedidos, ...concluidosHoje].find(p => p.id === alt.pedido_id)
+    const tel = String(ped?.cliente_telefone ?? '').replace(/\D/g, '')
+    if (tel.length >= 10 && data === 'aceita') {
+      avisarNoZap(tel, `Prontinho! Mudei seu pedido #${ped?.numero_pedido ?? ''} aqui. 👍\n\n`
+        + `Novo total: *R$ ${Number(alt.total_depois).toFixed(2).replace('.', ',')}*`)
+    } else if (tel.length >= 10 && data === 'recusada') {
+      avisarNoZap(tel, `Oi! Não deu pra mudar o pedido #${ped?.numero_pedido ?? ''}. 😕\n\n`
+        + (motivo ? `${motivo}.\n\n` : '')
+        + 'Ele segue como estava e já está a caminho.')
+    }
+  }
+
+  // Mensagem avulsa pro cliente, pelo WhatsApp da loja. Sem assumir a conversa:
+  // é aviso automático, não atendimento — assumir calaria o robô à toa.
+  async function avisarNoZap(telefone, texto) {
+    try {
+      await supabase.functions.invoke('whatsapp-connect', {
+        body: { action: 'send_message', phone: telefone, text: texto },
+      })
+    } catch { /* o aviso é bônus: a decisão já está gravada */ }
+  }
+
   // ── Procurar conversa pelo número do cliente ────────────────────────────
   //
   // A caixa só carrega o dia de hoje (ver acima), então filtrar o que já está
@@ -6930,6 +7080,12 @@ export default function PainelPedidos() {
   const [editandoSacola, setEditandoSacola] = useState(null)
   // Aba da coluna da sacola: montar os itens x fechar o pedido.
   const [abaSacola, setAbaSacola] = useState('itens')
+  // Cliente pediu pra mudar um pedido que já está aqui dentro (mig 0250).
+  // Não é venda nova: é um pedido que pode já estar sendo preparado, e alguém
+  // precisa dizer se ainda dá tempo.
+  const [alteracoes, setAlteracoes] = useState([])
+  const [decidindoAlt, setDecidindoAlt] = useState(null)   // id em processamento
+  const [recusandoAlt, setRecusandoAlt] = useState(null)   // alteração no popup do motivo
   const [pinChat, setPinChat] = useState(null) // { lat, lng, endereco, versao } — a localização do chat virando endereço
   // Sobe de 1 quando o cadastro do cliente muda por aqui (a localização virou
   // endereço). O "Fechar o pedido" lê o cadastro uma vez, na abertura — sem
@@ -8191,6 +8347,86 @@ export default function PainelPedidos() {
           <SkeletonGrid />
         ) : (
           <>
+            {/* ── Cliente quer mudar um pedido (mig 0250) ──────────────────
+                No topo do quadro, antes de tudo: é a única coisa aqui que tem
+                relógio correndo do outro lado — o cliente está com a tela
+                aberta esperando, e em 15 minutos a solicitação vence sozinha.
+
+                A cor é roxa e o título diz "MUDANÇA", não "pedido": se parecer
+                pedido novo, a pessoa aceita no automático — e isto pode ser um
+                pedido que já está na garupa da moto. */}
+            {alteracoes.map(alt => {
+              const ped = [...pedidos, ...concluidosHoje].find(p => p.id === alt.pedido_id)
+              const linhas = diffDeItens(alt.itens_antes, alt.itens_depois)
+              const dif = Number(alt.total_depois) - Number(alt.total_antes)
+              return (
+                <div key={alt.id} style={{
+                  marginBottom: 12, padding: '14px 16px', borderRadius: 12,
+                  border: '2px solid #7c3aed', background: 'rgba(124,58,237,.12)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                    <span style={{ fontSize: 14.5, fontWeight: 900, color: '#a78bfa' }}>
+                      ✏️ MUDANÇA NO PEDIDO #{ped?.numero_pedido ?? '—'}
+                    </span>
+                    <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                      {ped?.cliente_nome ?? 'Cliente'}
+                    </span>
+                    {/* O que a pessoa precisa pra decidir "dá tempo?": em que pé
+                        está o pedido e se já tem entregador com ele. */}
+                    <span className="badge badge-neutral" style={{ fontSize: 11 }}>
+                      {ped?.status === 'saiu_entrega' ? '⚠️ já saiu pra entrega'
+                        : ped?.entregador_id ? '⚠️ já tem entregador'
+                        : ped?.status === 'pronto' ? 'já está pronto'
+                        : ped?.status === 'em_preparo' ? 'em preparo'
+                        : 'aceito'}
+                    </span>
+                  </div>
+
+                  <div style={{ fontSize: 14, lineHeight: 1.7, marginBottom: 8 }}>
+                    {linhas.length === 0
+                      ? <span style={{ color: 'var(--text-muted)' }}>Sem mudança nos itens.</span>
+                      : linhas.map((l, i) => (
+                          <div key={i} style={{ color: l.tipo === 'entrou' ? '#22c55e' : '#f87171', fontWeight: 700 }}>
+                            {l.tipo === 'entrou' ? '+' : '−'}{l.qtd} {l.nome}
+                          </div>
+                        ))}
+                  </div>
+
+                  <div style={{ fontSize: 13.5, marginBottom: 10 }}>
+                    Total: R$ {Number(alt.total_antes).toFixed(2).replace('.', ',')} →{' '}
+                    <strong>R$ {Number(alt.total_depois).toFixed(2).replace('.', ',')}</strong>
+                    {/* O total pode CAIR somando item: 9 + 1 = 10 entra na faixa
+                        de atacado. Sem esta linha parece erro do sistema. */}
+                    <span style={{ color: dif >= 0 ? '#22c55e' : '#fbbf24', fontWeight: 700 }}>
+                      {' '}({dif >= 0 ? '+' : '−'}R$ {Math.abs(dif).toFixed(2).replace('.', ',')}
+                      {dif < 0 ? ' — caiu na faixa de atacado' : ''})
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" disabled={decidindoAlt === alt.id}
+                      onClick={() => decidirAlteracao(alt, true)}
+                      style={{
+                        flex: '1 1 160px', padding: '11px 12px', borderRadius: 9, border: 'none',
+                        background: '#22c55e', color: '#fff', fontWeight: 800, fontSize: 14,
+                        cursor: decidindoAlt === alt.id ? 'default' : 'pointer',
+                      }}>
+                      {decidindoAlt === alt.id ? 'Aplicando...' : '✓ Dá tempo — aceitar'}
+                    </button>
+                    <button type="button" disabled={decidindoAlt === alt.id}
+                      onClick={() => setRecusandoAlt(alt)}
+                      style={{
+                        flex: '1 1 160px', padding: '11px 12px', borderRadius: 9, cursor: 'pointer',
+                        border: '1.5px solid rgba(239,68,68,.6)', background: 'transparent',
+                        color: '#ef4444', fontWeight: 800, fontSize: 14,
+                      }}>
+                      ✕ Não dá
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+
             {/* Barra de busca de pedido (nº, código iFood, nome ou telefone) */}
             <div style={{ position: 'relative', maxWidth: 320, marginBottom: 10 }}>
               <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted, #9aa0b5)' }} aria-hidden="true">
@@ -8459,6 +8695,52 @@ export default function PainelPedidos() {
           agora={posAgora}
           onFechar={() => setMapaEntregador(null)}
         />
+      )}
+
+      {/* Por que não deu. O cliente está com a tela aberta esperando — um
+          "recusado" seco é o que faz ele ligar reclamando.
+
+          Motivos prontos porque na correria ninguém digita: sem os botões,
+          o campo volta vazio e o cliente fica sem explicação do mesmo jeito. */}
+      {recusandoAlt && (
+        <div className="pp-modal-overlay" onClick={() => setRecusandoAlt(null)} style={{ zIndex: 210 }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            width: 'min(420px, 94vw)', background: 'var(--surface, #16161f)',
+            border: '1px solid var(--border, #2a2a3a)', borderRadius: 14, padding: 20,
+          }}>
+            <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>
+              Por que não dá?
+            </h3>
+            <p style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              O cliente recebe isso no WhatsApp junto com o aviso.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {['Já saiu para entrega', 'O pedido já está pronto e embalado', 'Não tenho mais esse item'].map(m => (
+                <button key={m} type="button"
+                  disabled={decidindoAlt === recusandoAlt.id}
+                  onClick={() => decidirAlteracao(recusandoAlt, false, m)}
+                  style={{
+                    padding: '11px 13px', borderRadius: 9, cursor: 'pointer', textAlign: 'left',
+                    border: '1.5px solid var(--border, #2a2a3a)', background: 'transparent',
+                    color: 'var(--text)', fontSize: 14, fontWeight: 700,
+                  }}>{m}</button>
+              ))}
+              <button type="button"
+                disabled={decidindoAlt === recusandoAlt.id}
+                onClick={() => decidirAlteracao(recusandoAlt, false, null)}
+                style={{
+                  padding: '11px 13px', borderRadius: 9, cursor: 'pointer', textAlign: 'left',
+                  border: '1px dashed var(--border, #2a2a3a)', background: 'transparent',
+                  color: 'var(--text-muted)', fontSize: 13.5,
+                }}>Outro motivo (não avisa qual)</button>
+            </div>
+            <button type="button" onClick={() => setRecusandoAlt(null)}
+              style={{
+                width: '100%', marginTop: 12, padding: '9px', borderRadius: 9, cursor: 'pointer',
+                border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 13,
+              }}>Voltar</button>
+          </div>
+        </div>
       )}
 
       {/* Complementos do item montado na conversa (mesma tela do balcão).

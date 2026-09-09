@@ -170,8 +170,29 @@ export default function DeliveryLoja() {
   const catRefs = useRef({})
   const navRef = useRef(null)
   const [carrinho, setCarrinho] = useState({})
+  // ── Modo alteração (?alterar=<id do pedido>) ──────────────────────────────
+  //
+  // "Finalizei e esqueci a Coca." Em vez de uma tela nova com meio cardápio, a
+  // própria Loja Online abre com a sacola JÁ CARREGADA com o que ele pediu.
+  // Assim ele mexe com o cardápio inteiro na frente — categorias, sabores,
+  // preço de atacado, tudo o que já existe aqui — e o botão do fim, em vez de
+  // criar pedido, manda o pedido de alteração pra loja autorizar.
+  const alterandoId = (() => {
+    try {
+      const v = new URLSearchParams(window.location.search).get('alterar')
+      return /^[0-9a-f-]{36}$/i.test(String(v ?? '')) ? v : null
+    } catch { return null }
+  })()
+  const [pedidoAlterando, setPedidoAlterando] = useState(null)
+  const [enviandoAlteracao, setEnviandoAlteracao] = useState(false)
+  const [erroAlteracao, setErroAlteracao] = useState(null)
+
   // Carrinho é chaveado pelo id REAL da loja (uuid) — bate com a limpeza do checkout.
-  const cartKey = loja?.id ? `sacola_${loja.id}` : null
+  //
+  // Em modo alteração a chave fica NULA de propósito: a sacola daqui é a do
+  // pedido que ele está mudando, e gravá-la no aparelho apagaria a sacola de
+  // compras normal dele — sairia daqui sem os itens que estava juntando.
+  const cartKey = (loja?.id && !alterandoId) ? `sacola_${loja.id}` : null
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [optProduto, setOptProduto] = useState(null) // produto aberto no modal de complementos
   // Categoria aberta por inteiro (só no catálogo grande). null = tela inicial
@@ -464,6 +485,53 @@ export default function DeliveryLoja() {
       // feriado em que ninguém vai atender e o cliente monta a sacola à toa.
       setExcecoes(await carregarExcecoes(supabase, lojaData.id))
 
+      // Modo alteração: a sacola não vem do aparelho, vem do PEDIDO.
+      //
+      // Cada linha é remontada contra o cardápio de agora (preço-base, faixas,
+      // promoção), igual à sacola guardada -- senão o cliente mexeria num
+      // pedido com preço velho e a loja aceitaria um valor que não é o dela.
+      if (alterandoId) {
+        const { data: ped } = await supabase.from('pedidos_delivery')
+          .select('id, numero_pedido, status, origem, itens, subtotal, total, taxa_entrega, empresa_id')
+          .eq('id', alterandoId).maybeSingle()
+        const podeAlterar = ped && ped.empresa_id === lojaData.id && ped.origem !== 'ifood'
+          && ['aguardando', 'confirmado', 'em_preparo', 'pronto'].includes(ped.status)
+        if (podeAlterar) {
+          const doPedido = {}
+          for (const it of (Array.isArray(ped.itens) ? ped.itens : [])) {
+            const prod = produtosFinal.find(x => String(x.id) === String(it.produto_id))
+            if (!prod) continue                       // saiu do cardápio: não volta
+            const comps = Array.isArray(it.complementos) ? it.complementos : []
+            // Montado usa a mesma chave do addCombo (produto + o que foi
+            // escolhido), pra clicar de novo no mesmo combo somar em vez de
+            // criar uma segunda linha igual.
+            const chave = comps.length
+              ? `${prod.id}::${comps.map(c => `${c.nome}x${c.qtd ?? 1}`).sort().join('-')}`
+              : String(prod.id)
+            const qtd = Number(it.quantidade) || 1
+            doPedido[chave] = comps.length
+              ? {
+                  key: chave, id: prod.id, nome: prod.nome, foto_url: prod.foto_url,
+                  quantidade: qtd, preco: Number(it.preco_unitario) || 0,
+                  complementos: comps,
+                }
+              : {
+                  key: chave, id: prod.id, nome: prod.nome, foto_url: prod.foto_url,
+                  quantidade: qtd,
+                  precoBase: Number(prod.preco), faixas_preco: prod.faixas_preco ?? [],
+                  preco_promocional: prod.preco_promocional ?? null,
+                  preco: precoPorQuantidade(prod.preco, prod.faixas_preco, qtd, prod.preco_promocional),
+                }
+          }
+          setPedidoAlterando(ped)
+          savedCart = doPedido
+        } else {
+          setErroAlteracao(ped
+            ? 'Este pedido não pode mais ser alterado.'
+            : 'Pedido não encontrado.')
+        }
+      }
+
       setLoja(lojaData)
       setProdutos(produtosFinal)
       setCatOrdem(ordemMap)
@@ -478,7 +546,7 @@ export default function DeliveryLoja() {
       setErroCardapio(true)
       setLoading(false)
     })
-  }, [id, slug, tentativa])
+  }, [id, slug, tentativa, alterandoId])
 
   useEffect(() => {
     if (!drawerOpen) return
@@ -815,6 +883,37 @@ export default function DeliveryLoja() {
     irAteCategoria(cat)
   }
 
+  // Manda a alteração pra loja AUTORIZAR — não muda o pedido aqui.
+  //
+  // Quem decide se dá tempo é a pessoa no balcão: o status mente (a loja
+  // raramente marca "saiu pra entrega" na hora), então "em preparo" não prova
+  // que a moto ainda está lá.
+  //
+  // A taxa de entrega NÃO entra de novo: é a mesma viagem. Cobrar duas vezes
+  // por ter esquecido a Coca é o jeito mais rápido de o cliente nunca mais usar.
+  async function pedirAlteracao() {
+    if (!pedidoAlterando || enviandoAlteracao) return
+    setEnviandoAlteracao(true); setErroAlteracao(null)
+    const taxaOriginal = Number(pedidoAlterando.taxa_entrega) || 0
+    const { error } = await supabase.rpc('solicitar_alteracao_pedido', {
+      p_pedido_id: pedidoAlterando.id,
+      p_itens: itens.map(i => ({
+        produto_id: i.id,
+        nome: i.nome,
+        quantidade: i.quantidade,
+        preco_unitario: Number(i.preco),
+        subtotal: Number(i.preco) * Number(i.quantidade),
+        complementos: i.complementos ?? [],
+      })),
+      p_subtotal: Number(subtotal.toFixed(2)),
+      p_total: Number((subtotal + taxaOriginal).toFixed(2)),
+    })
+    setEnviandoAlteracao(false)
+    if (error) { setErroAlteracao(error.message || 'Não deu pra enviar. Tente de novo.'); return }
+    setDrawerOpen(false)
+    navigate(`/pedido/${pedidoAlterando.id}?alteracao=enviada`)
+  }
+
   function handleFinalizar() {
     setDrawerOpen(false)
     navigate('/checkout', {
@@ -994,6 +1093,45 @@ export default function DeliveryLoja() {
       )}
 
       <main className="dloja-main">
+        {/* Modo alteração: precisa ficar gritado o tempo todo. Sem isto o
+            cliente acha que está montando um pedido NOVO e leva um susto
+            quando o total aparece com o que ele já tinha pedido dentro. */}
+        {pedidoAlterando && (
+          <div style={{
+            margin: '0 0 14px', padding: '12px 14px', borderRadius: 12,
+            background: 'rgba(124,58,237,.12)', border: '1px solid rgba(124,58,237,.55)',
+            display: 'flex', gap: 10, alignItems: 'flex-start',
+          }}>
+            <span style={{ fontSize: 18, lineHeight: 1 }}>✏️</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 3 }}>
+                Você está mudando o pedido #{pedidoAlterando.numero_pedido}
+              </div>
+              <div style={{ fontSize: 12.5, lineHeight: 1.5, opacity: .9 }}>
+                O que você já pediu está na sacola. Tire, mude a quantidade ou
+                junte mais coisa — e no fim <strong>a loja precisa confirmar</strong>,
+                porque o pedido pode já estar sendo preparado.
+              </div>
+            </div>
+            <button type="button" onClick={() => navigate(`/pedido/${pedidoAlterando.id}`)}
+              aria-label="Sair da alteração"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, lineHeight: 1, opacity: .6 }}>
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* Entrou com ?alterar= mas o pedido não aceita mais mudança. */}
+        {!pedidoAlterando && erroAlteracao && (
+          <div style={{
+            margin: '0 0 14px', padding: '12px 14px', borderRadius: 12,
+            background: 'rgba(239,68,68,.12)', border: '1px solid rgba(239,68,68,.5)',
+            fontSize: 13, lineHeight: 1.5,
+          }}>
+            {erroAlteracao} Você pode fazer um pedido novo por aqui.
+          </div>
+        )}
+
         {/* A sacola era de ontem e a loja pausou alguma coisa desde então.
             Sumir calado é o pior dos mundos: o cliente conta com o sabor e a
             decepção só chega na porta da casa dele. */}
@@ -1179,15 +1317,40 @@ export default function DeliveryLoja() {
               </div>
               <div className="dloja-drawer-linha dloja-drawer-total">
                 <span>Total</span>
-                <strong>R$ {fmt(total)}{taxaIndefinida ? ' + entrega' : ''}</strong>
+                <strong>
+                  R$ {fmt(pedidoAlterando ? subtotal + (Number(pedidoAlterando.taxa_entrega) || 0) : total)}
+                  {(!pedidoAlterando && taxaIndefinida) ? ' + entrega' : ''}
+                </strong>
               </div>
-              <button
-                className="dloja-btn-finalizar"
-                onClick={handleFinalizar}
-                disabled={!podePedir}
-              >
-                {lojaAberta ? 'Finalizar pedido' : (agendamentoLigado ? '🗓️ Agendar pedido' : 'Loja fechada')}
-              </button>
+
+              {pedidoAlterando ? (
+                <>
+                  {/* O total pode CAIR mesmo somando item: 9 + 1 = 10 entra na
+                      faixa de atacado e o pedido inteiro barateia. Dizer isso
+                      aqui evita o "por que baixou?" no WhatsApp depois. */}
+                  <div style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 8, color: 'var(--dl-text-muted)' }}>
+                    Antes: R$ {fmt(pedidoAlterando.total)} · a entrega não é cobrada de novo.
+                  </div>
+                  {erroAlteracao && (
+                    <div style={{ fontSize: 12.5, color: '#dc2626', marginBottom: 8 }}>{erroAlteracao}</div>
+                  )}
+                  <button
+                    className="dloja-btn-finalizar"
+                    onClick={pedirAlteracao}
+                    disabled={enviandoAlteracao || itens.length === 0}
+                  >
+                    {enviandoAlteracao ? 'Enviando...' : `Pedir alteração do #${pedidoAlterando.numero_pedido}`}
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="dloja-btn-finalizar"
+                  onClick={handleFinalizar}
+                  disabled={!podePedir}
+                >
+                  {lojaAberta ? 'Finalizar pedido' : (agendamentoLigado ? '🗓️ Agendar pedido' : 'Loja fechada')}
+                </button>
+              )}
             </div>
           </aside>
         </div>

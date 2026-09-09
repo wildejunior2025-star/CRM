@@ -388,6 +388,109 @@ function ChatLojaOnline({ empresaId, telefone, nome }) {
   )
 }
 
+// ── "Esqueci a Coca" (mig 0250) ─────────────────────────────────────────────
+//
+// O cliente mexe no pedido, mas quem decide se dá tempo é a loja: o status
+// mente (raramente marcam "saiu pra entrega" na hora), então quem sabe se a
+// moto já saiu é a pessoa no balcão. Por isso aqui é PEDIR, não mudar.
+const ALTERAVEL = ['aguardando', 'confirmado', 'em_preparo', 'pronto']
+
+function AlterarMeuPedido({ pedido, loja }) {
+  const navigate = useNavigate()
+  const [alt, setAlt] = useState(null)      // a última alteração deste pedido
+  const [carregando, setCarregando] = useState(true)
+
+  const pedidoId = pedido?.id
+  const carregar = useCallback(async () => {
+    if (!pedidoId) return
+    const { data } = await supabase
+      .from('pedido_alteracoes')
+      .select('id, status, motivo_recusa, total_antes, total_depois, expira_em, created_at')
+      .eq('pedido_id', pedidoId)
+      .order('created_at', { ascending: false })
+      .limit(1).maybeSingle()
+    setAlt(data ?? null)
+    setCarregando(false)
+  }, [pedidoId])
+
+  useEffect(() => { carregar() }, [carregar])
+
+  // A resposta da loja tem que chegar sozinha: o cliente fica olhando esta tela
+  // esperando o "pode" ou o "não dá".
+  useEffect(() => {
+    if (!pedidoId) return
+    const canal = supabase
+      .channel(`alteracao_${pedidoId}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'pedido_alteracoes', filter: `pedido_id=eq.${pedidoId}` },
+        () => carregar())
+      .subscribe()
+    return () => { supabase.removeChannel(canal) }
+  }, [pedidoId, carregar])
+
+  if (!pedido || carregando) return null
+
+  const pendente = alt?.status === 'pendente' && new Date(alt.expira_em) > new Date()
+  const podeMexer = ALTERAVEL.includes(pedido.status) && pedido.origem !== 'ifood' && !pendente
+  const caminho = loja?.slug ? `/${loja.slug}` : `/loja/${pedido.empresa_id}`
+
+  // Nada a dizer: pedido já fechado e sem alteração nenhuma no histórico.
+  if (!podeMexer && !pendente && !alt) return null
+
+  return (
+    <section className="dpd-card">
+      {pendente ? (
+        <>
+          <h2 className="dpd-card-title">⏳ Esperando a loja responder</h2>
+          <p style={{ fontSize: 13.5, lineHeight: 1.6, margin: '4px 0 0', opacity: .85 }}>
+            Você pediu pra mudar este pedido. A loja vai confirmar se ainda dá
+            tempo — se ela não responder em alguns minutos, o pedido segue como
+            estava e você pode tentar de novo.
+          </p>
+        </>
+      ) : alt?.status === 'recusada' ? (
+        <>
+          <h2 className="dpd-card-title">A loja não conseguiu mudar</h2>
+          <p style={{ fontSize: 13.5, lineHeight: 1.6, margin: '4px 0 10px', opacity: .85 }}>
+            {alt.motivo_recusa
+              ? <>Motivo: <strong>{alt.motivo_recusa}</strong>.</>
+              : 'O pedido já estava adiantado demais.'}
+            {' '}Seu pedido continua como estava.
+          </p>
+          {podeMexer && (
+            <button className="dpd-btn-refresh" onClick={() => navigate(`${caminho}?alterar=${pedido.id}`)}>
+              Tentar de novo
+            </button>
+          )}
+        </>
+      ) : alt?.status === 'aceita' ? (
+        <>
+          <h2 className="dpd-card-title">✅ A loja aceitou a mudança</h2>
+          <p style={{ fontSize: 13.5, lineHeight: 1.6, margin: '4px 0 10px', opacity: .85 }}>
+            O resumo abaixo já está atualizado.
+          </p>
+          {podeMexer && (
+            <button className="dpd-btn-refresh" onClick={() => navigate(`${caminho}?alterar=${pedido.id}`)}>
+              Mudar de novo
+            </button>
+          )}
+        </>
+      ) : (
+        <>
+          <h2 className="dpd-card-title">Esqueceu alguma coisa?</h2>
+          <p style={{ fontSize: 13.5, lineHeight: 1.6, margin: '4px 0 10px', opacity: .85 }}>
+            Dá pra juntar mais itens ou tirar o que não quer mais — sem pagar
+            entrega de novo, é a mesma viagem. A loja confirma se ainda dá tempo.
+          </p>
+          <button className="dpd-btn-refresh" onClick={() => navigate(`${caminho}?alterar=${pedido.id}`)}>
+            ✏️ Mudar meu pedido
+          </button>
+        </>
+      )}
+    </section>
+  )
+}
+
 export default function DeliveryPedido() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -891,6 +994,12 @@ export default function DeliveryPedido() {
             </ol>
           </section>
         )}
+
+        {/* Esqueceu alguma coisa? (mig 0250)
+            É aqui que o cliente cai depois de fechar, e é aqui que ele lembra.
+            Sem isto o caminho é o WhatsApp da loja — que numa loja movimentada
+            some no meio de 280 conversas. */}
+        <AlterarMeuPedido pedido={pedido} loja={loja} />
 
         {/* Resumo do pedido */}
         <section className="dpd-card">
