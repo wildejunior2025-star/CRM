@@ -1740,6 +1740,23 @@ async function lojaAssumiu(supabase: any, instanceName: string, msg: any) {
     await supabase.from("whatsapp_conversas").insert({
       empresa_id: cfg.empresa_id as string, phone, role: "assistant", content: texto, origem: "loja",
     })
+
+    // A conversa também tem que APARECER NO GESTOR, não só no Portal.
+    //
+    // São duas tabelas: o Portal lê whatsapp_conversas (acima) e o gestor de
+    // pedidos lê mensagens_chat — e lá a conversa de WhatsApp só entra se a
+    // LOJA tiver falado nela. A resposta dada no celular do dono não passava
+    // por aqui, então do lado do gestor a loja nunca tinha falado e o número
+    // não existia. Foi o que a CDBom viu em 09/09/2026: a conversa inteira no
+    // Portal e nada no gestor, que é onde dá pra montar o pedido junto.
+    await espelharNoChat(supabase, cfg.empresa_id as string, phone, texto, "loja")
+    // Já respondido no celular: não pode entrar no gestor como não lida, senão
+    // a campainha toca por conversa que o dono acabou de atender.
+    await supabase.from("mensagens_chat").update({ lida: true })
+      .eq("empresa_id", cfg.empresa_id as string)
+      .eq("remetente", "cliente")
+      .eq("lida", false)
+      .like("cliente_ref", `%${phone.slice(-8)}`)
   } catch (e) {
     console.error("[fromMe] falhou:", e)
   }

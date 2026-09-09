@@ -272,6 +272,18 @@ async function lojaAssumiuCloud(supabase: any, phoneNumberId: string, eco: any) 
     await supabase.from("whatsapp_conversas").insert({
       empresa_id: cfg.empresa_id, phone, role: "assistant", content: texto, origem: "loja",
     })
+
+    // Mesma coisa que no Evolution (ver lojaAssumiu no whatsapp-webhook): o
+    // Portal lê whatsapp_conversas, o gestor lê mensagens_chat — e lá a
+    // conversa de WhatsApp só aparece se a LOJA tiver falado nela. Sem este
+    // espelho, quem responde pelo celular some do gestor.
+    await espelharNoChat(supabase, cfg.empresa_id, phone, texto, "loja")
+    // Já respondido no celular: não entra como não lida no gestor.
+    await supabase.from("mensagens_chat").update({ lida: true })
+      .eq("empresa_id", cfg.empresa_id)
+      .eq("remetente", "cliente")
+      .eq("lida", false)
+      .like("cliente_ref", `%${phone.slice(-8)}`)
   } catch (e) {
     console.error("[eco] falhou:", e)
   }

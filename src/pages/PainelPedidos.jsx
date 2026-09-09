@@ -6075,15 +6075,20 @@ export default function PainelPedidos() {
 
       // WhatsApp: só a conversa em que a LOJA falou.
       //
-      // O WhatsApp da loja é atendido no celular dela (coexistência), e o CRM
-      // só espelha o que ENTRA — a resposta que ela dá no aparelho não volta
-      // pra cá. Espelhando tudo, a caixa virava mão única: na CDBom deu 476 não
-      // lidas num dia, de gente que já tinha sido atendida. Pior: enchia o teto
-      // da consulta e empurrava pra fora as mensagens do App e da Loja Online,
-      // que são as que ninguém mais responde.
+      // O WhatsApp da loja é atendido no celular dela (coexistência). Espelhando
+      // TUDO, a caixa virava mão única: na CDBom deu 476 não lidas num dia, de
+      // gente que já tinha sido atendida. Pior: enchia o teto da consulta e
+      // empurrava pra fora as mensagens do App e da Loja Online, que são as que
+      // ninguém mais responde.
       //
-      // Quando a loja escreve pelo gestor (o "Enviar mensagem" do pedido), a
-      // conversa passa a aparecer — e as respostas do cliente vêm junto.
+      // "A loja falou" conta os três jeitos: pelo gestor, pelo Portal e pelo
+      // celular dela (o webhook espelha o fromMe desde 09/09/2026). Antes só os
+      // dois primeiros chegavam aqui, e quem era atendido no aparelho sumia do
+      // gestor — a CDBom via a conversa inteira no Portal e nada aqui, que é
+      // justamente onde dá pra montar o pedido junto com o cliente.
+      //
+      // Teto alto e do mais NOVO pro mais velho: a loja passa de 300 falas num
+      // dia, e cortar pelo começo derrubava a conversa que acabou de chegar.
       const { data: daLoja } = await supabase
         .from('mensagens_chat')
         .select('cliente_ref')
@@ -6091,7 +6096,8 @@ export default function PainelPedidos() {
         .eq('canal', 'whatsapp')
         .eq('remetente', 'loja')
         .gte('created_at', inicioHoje.toISOString())
-        .limit(300)
+        .order('created_at', { ascending: false })
+        .limit(2000)
       const refsAbertas = [...new Set((daLoja ?? []).map(r => r.cliente_ref).filter(Boolean))]
       let doZap = []
       if (refsAbertas.length) {
@@ -6102,8 +6108,8 @@ export default function PainelPedidos() {
           .eq('canal', 'whatsapp')
           .in('cliente_ref', refsAbertas)
           .gte('created_at', inicioHoje.toISOString())
-          .order('created_at', { ascending: true })
-          .limit(500)
+          .order('created_at', { ascending: false })
+          .limit(2000)
         doZap = data ?? []
       }
       const todas = [...(internas ?? []), ...doZap]
