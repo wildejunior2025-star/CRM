@@ -706,7 +706,11 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
 // ── Modal de venda no balcão (PDV do gestor) ────────────────
 // O vendedor monta o pedido pelo catálogo; ele entra na lista do painel.
 // Seletor de complementos ("monte sua quentinha") na venda de balcão.
-function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
+// `embutido`: em vez de cobrir a tela, o seletor entra DENTRO da coluna da
+// sacola. É o que deixa a conversa à vista enquanto se escolhe o sabor —
+// coberta, quem atende não conseguia ler o que o cliente tinha pedido e
+// escolhia de cabeça.
+function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [], embutido = false }) {
   const grupos = produto.grupos ?? []
   // A escolha é { grupoId: { opcaoId: quantidade } }. No grupo comum a
   // quantidade é sempre 1 e o que vale é estar ou não na lista; no grupo de
@@ -785,12 +789,14 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
     : escolhidas(g) < (g.min ?? 0))
   const podeAdd = faltando.length === 0 && qtdItem > 0
 
-  return (
-    <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 200 }}>
+  const corpo = (
       <div onClick={e => e.stopPropagation()} style={{
-        width: 'min(440px, 94vw)', maxHeight: '90vh', overflowY: 'auto',
-        background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)',
-        borderRadius: 14, padding: 20,
+        width: embutido ? '100%' : 'min(440px, 94vw)',
+        maxHeight: embutido ? 'none' : '90vh',
+        overflowY: embutido ? 'visible' : 'auto',
+        background: 'var(--surface, #16161f)',
+        border: embutido ? '1.5px solid #7c3aed' : '1px solid var(--border, #2a2a3a)',
+        borderRadius: 14, padding: embutido ? 14 : 20,
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <div style={{ minWidth: 0 }}>
@@ -912,6 +918,12 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [] }) {
             : (faltando[0] ? `Escolha: ${faltando[0].nome}` : 'Escolha os obrigatórios')}
         </button>
       </div>
+  )
+
+  if (embutido) return corpo
+  return (
+    <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 200 }}>
+      {corpo}
     </div>
   )
 }
@@ -4868,7 +4880,7 @@ function CadastroRapidoNoChat({ empresaId, telefone, onNomeDoCliente }) {
   )
 }
 
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onNomeDoCliente, cadastroVersao, pinChat }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onNomeDoCliente, cadastroVersao, pinChat }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   useEffect(() => {
@@ -5045,6 +5057,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
             onQtd={onQtdSacola}
             onQtdDireta={onQtdDiretaSacola}
             onRemover={idx => onQtdSacola(idx, -999)}
+            onEditar={onEditarSacola}
             onEnviar={onEnviarSacola}
             enviando={enviandoSacola}
           />
@@ -5250,7 +5263,7 @@ function precoSacola(item, qtd) {
 // atendente acha o produto (ou digita um que não está cadastrado), monta, e um
 // botão só manda a lista pro cliente E entrega o carrinho pro robô terminar
 // endereço e pagamento. A parte chata fica com a gente; a fácil, com o robô.
-function SacolaNoChat({ itens, onQtd, onQtdDireta, onRemover, onEnviar, enviando }) {
+function SacolaNoChat({ itens, onQtd, onQtdDireta, onRemover, onEditar, onEnviar, enviando }) {
   const g = useTelaGrande()
   const total = itens.reduce((s, i) => s + Number(i.preco) * Number(i.qtd), 0)
 
@@ -5275,6 +5288,18 @@ function SacolaNoChat({ itens, onQtd, onQtdDireta, onRemover, onEnviar, enviando
             {Array.isArray(i.complementos) && i.complementos.length > 0 && (
               <div style={{ fontSize: g ? 12.5 : 10.5, color: '#22c55e', lineHeight: 1.45 }}>
                 {i.complementos.map(c => `${(c.qtd ?? 1) > 1 ? `${c.qtd}× ` : ''}${c.nome}`).join(' · ')}
+                {/* Cliente troca de ideia no meio da conversa. Sem este lápis o
+                    jeito de mudar o sabor era apagar a linha e montar de novo —
+                    e aí perdia a quantidade que já tinha sido combinada. */}
+                {onEditar && (
+                  <button type="button" onClick={() => onEditar(idx)}
+                    title="Trocar o sabor deste item"
+                    style={{
+                      marginLeft: 6, padding: '1px 7px', borderRadius: 20, cursor: 'pointer',
+                      fontSize: g ? 11.5 : 10, fontWeight: 800, verticalAlign: 'middle',
+                      border: '1px solid rgba(124,58,237,.6)', background: 'rgba(124,58,237,.15)', color: '#a78bfa',
+                    }}>✏️ trocar</button>
+                )}
               </div>
             )}
             <div style={{ fontSize: g ? 14 : 11, color: 'var(--text-muted)' }}>
@@ -6398,15 +6423,9 @@ export default function PainelPedidos() {
     const complementos = selecoes.map(s => ({
       nome: s.nome, qtd: s.qtd ?? 1, grupo: s.grupo, preco: s.preco, absoluto: !!s.absoluto,
     }))
-    setSacolaChat(prev => {
-      const i = prev.findIndex(x => x.sig === sig)
-      if (i >= 0 && !atacado) {
-        const copia = [...prev]
-        const qtd = copia[i].qtd + 1
-        copia[i] = { ...copia[i], qtd, preco: precoSacola(copia[i], qtd) }
-        return copia
-      }
-      const qtd = atacado ? Number(qtdItem || 1) : 1
+    // `precoUnit` é o que o seletor mostrou; a partir daí a linha recalcula
+    // sozinha quando a quantidade muda.
+    const montarLinha = (qtd) => {
       const item = {
         sig, produto_id: prod.id, nome: prod.nome, qtd,
         precoBase: Number(prod.preco_venda ?? prod.preco) || 0,
@@ -6415,11 +6434,57 @@ export default function PainelPedidos() {
         adicionalUnit: Number(adicionalUnit) || 0,
         complementos,
       }
-      // `precoUnit` é o que o seletor mostrou; a partir daí a linha recalcula
-      // sozinha quando a quantidade muda.
-      return [...prev, { ...item, preco: precoSacola(item, qtd) || Number(precoUnit) || 0 }]
+      return { ...item, preco: precoSacola(item, qtd) || Number(precoUnit) || 0 }
+    }
+    const idxEdit = editandoSacola
+    setSacolaChat(prev => {
+      // Corrigindo uma linha que já existe: troca no LUGAR, sem virar item
+      // novo. Fora do atacado a quantidade que já estava lá é mantida — quem
+      // só errou o sabor não pode perder as 10 unidades já combinadas.
+      if (idxEdit != null && prev[idxEdit]) {
+        const copia = [...prev]
+        copia[idxEdit] = montarLinha(atacado ? Number(qtdItem || 1) : (Number(prev[idxEdit].qtd) || 1))
+        return copia
+      }
+      const i = prev.findIndex(x => x.sig === sig)
+      if (i >= 0 && !atacado) {
+        const copia = [...prev]
+        const qtd = copia[i].qtd + 1
+        copia[i] = { ...copia[i], qtd, preco: precoSacola(copia[i], qtd) }
+        return copia
+      }
+      return [...prev, montarLinha(atacado ? Number(qtdItem || 1) : 1)]
     })
+    setEditandoSacola(null)
     setProdutoCompChat(null)
+  }
+
+  // Trocar o sabor de um item que JÁ está na sacola. Reabre o mesmo seletor com
+  // o que estava marcado; confirmar substitui a linha em vez de criar outra.
+  async function editarItemDaSacola(idx) {
+    const it = sacolaChat[idx]
+    if (!it?.produto_id || !empresa?.id) return
+    try {
+      const { produtos, compMap } = await carregarCatalogoCompleto(empresa.id)
+      const grupos = compMap[it.produto_id]
+      if (!grupos?.length) return
+      const cheio = (produtos ?? []).find(x => String(x.id) === String(it.produto_id))
+      setSacolaLateral(true)
+      setEditandoSacola(idx)
+      setProdutoCompChat({
+        ...(cheio ?? { id: it.produto_id, nome: it.nome, preco_venda: it.precoBase }),
+        grupos,
+        iniciais: it.complementos ?? [],
+      })
+    } catch (e) {
+      console.error('[chat] não deu pra reabrir os complementos:', e)
+    }
+  }
+
+  // Fechar o seletor sem confirmar: a linha em edição fica como estava.
+  function fecharSeletorDoChat() {
+    setProdutoCompChat(null)
+    setEditandoSacola(null)
   }
 
   function addSimplesNaSacolaChat(p) {
@@ -6758,6 +6823,10 @@ export default function PainelPedidos() {
 
   // Localização que o cliente mandou → vira o endereço + o ponto dele.
   const [produtoCompChat, setProdutoCompChat] = useState(null) // quentinha/açaí sendo montado na conversa
+  // Linha da sacola que está sendo CORRIGIDA (null = item novo). O cliente troca
+  // de ideia no meio da conversa; sem isto o jeito de mudar o sabor era apagar a
+  // linha e montar tudo de novo.
+  const [editandoSacola, setEditandoSacola] = useState(null)
   const [pinChat, setPinChat] = useState(null) // { lat, lng, endereco, versao } — a localização do chat virando endereço
   // Sobe de 1 quando o cadastro do cliente muda por aqui (a localização virou
   // endereço). O "Fechar o pedido" lê o cadastro uma vez, na abertura — sem
@@ -7814,6 +7883,10 @@ export default function PainelPedidos() {
     )))
   })()
   const threadAberta = chatThreads.find(t => t.key === chatAberto)
+  // No PC a escolha de sabor mora na coluna da sacola, não por cima da tela —
+  // a conversa tem que continuar legível enquanto se monta o item. No celular
+  // não existe coluna: lá é popup mesmo.
+  const seletorNaColuna = telaGrande && painelDireito === 'chat' && !!threadAberta && sacolaLateral
   const CANAL_LABEL = { app: 'App', lojaonline: 'Loja online', whatsapp: 'WhatsApp' }
 
   // Busca de pedido: casa nº do pedido, código iFood, id, nome ou telefone.
@@ -8281,11 +8354,16 @@ export default function PainelPedidos() {
         />
       )}
 
-      {/* Complementos do item montado na conversa (mesma tela do balcão) */}
-      {produtoCompChat && (
+      {/* Complementos do item montado na conversa (mesma tela do balcão).
+          No PC ele vai DENTRO da coluna da sacola (ver o aside lá embaixo),
+          pra conversa continuar à vista: coberta, quem atende escolhia o sabor
+          de cabeça, sem poder reler o que o cliente pediu. Aqui fica só o
+          caminho do celular, onde não existe coluna e a tela é uma só. */}
+      {produtoCompChat && !seletorNaColuna && (
         <ModalComplementos
           produto={produtoCompChat}
-          onFechar={() => setProdutoCompChat(null)}
+          iniciais={produtoCompChat.iniciais ?? []}
+          onFechar={fecharSeletorDoChat}
           onConfirmar={adicionarComComplementosNoChat}
         />
       )}
@@ -8484,6 +8562,7 @@ export default function PainelPedidos() {
                 onFinalizarPedido={finalizarPedidoDoChat}
                 salvandoPedido={salvandoPedidoChat}
                 onAvulsoSacola={item => setSacolaChat(prev => [...prev, item])}
+                onEditarSacola={editarItemDaSacola}
                 onEnviarSacola={enviarSacolaDoChat}
                 enviandoSacola={enviandoSacola}
                 onAbrirSacola={() => setSacolaLateral(true)}
@@ -9210,12 +9289,36 @@ export default function PainelPedidos() {
             </button>
           </div>
 
-          <BuscaProdutoNoChat
-            empresaId={empresa?.id}
-            onEscolher={escolherProdutoNoChat}
-            onAvulso={item => setSacolaChat(prev => [...prev, item])}
-            semBotao
-          />
+          {/* Escolha do sabor AQUI, na coluna — a conversa segue à vista do
+              lado. Enquanto está montando, a busca some: são dois campos
+              disputando a mesma atenção. */}
+          {produtoCompChat ? (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: '#a78bfa' }}>
+                  {editandoSacola != null ? '✏️ TROCANDO O SABOR' : '🍧 ESCOLHA DO CLIENTE'}
+                </span>
+                <button type="button" onClick={fecharSeletorDoChat}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12.5 }}>
+                  cancelar
+                </button>
+              </div>
+              <ModalComplementos
+                embutido
+                produto={produtoCompChat}
+                iniciais={produtoCompChat.iniciais ?? []}
+                onFechar={fecharSeletorDoChat}
+                onConfirmar={adicionarComComplementosNoChat}
+              />
+            </div>
+          ) : (
+            <BuscaProdutoNoChat
+              empresaId={empresa?.id}
+              onEscolher={escolherProdutoNoChat}
+              onAvulso={item => setSacolaChat(prev => [...prev, item])}
+              semBotao
+            />
+          )}
 
           {sacolaChat.length === 0 ? (
             <div style={{ fontSize: 13.5, color: 'var(--text-muted)', marginTop: 14, lineHeight: 1.5 }}>
@@ -9229,6 +9332,7 @@ export default function PainelPedidos() {
                 onQtd={mudarQtdSacola}
                 onQtdDireta={definirQtdSacola}
                 onRemover={idx => mudarQtdSacola(idx, -999)}
+                onEditar={editarItemDaSacola}
                 onEnviar={enviarSacolaDoChat}
                 enviando={enviandoSacola}
               />
