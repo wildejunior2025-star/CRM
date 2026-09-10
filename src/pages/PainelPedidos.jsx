@@ -6625,10 +6625,34 @@ export default function PainelPedidos() {
     if (tel.length >= 10 && data === 'aceita') {
       avisarNoZap(tel, `Prontinho! Mudei seu pedido #${ped?.numero_pedido ?? ''} aqui. 👍\n\n`
         + `Novo total: *R$ ${Number(alt.total_depois).toFixed(2).replace('.', ',')}*` + recado)
-    } else if (tel.length >= 10 && data === 'recusada') {
-      avisarNoZap(tel, `Oi! Não deu pra mudar o pedido #${ped?.numero_pedido ?? ''}. 😕\n\n`
-        + (motivo ? `${motivo}.\n\n` : '')
-        + 'Ele segue como estava e já está a caminho.')
+    } else if (data === 'recusada') {
+      // ── Ele pagou a diferença e a loja recusou: devolve TUDO daquele PIX ──
+      //
+      // A diferença é um pagamento SEPARADO (o pedido original continua pago
+      // como sempre), então aqui é estorno total daquele pagamento — não
+      // encosta no dinheiro do pedido.
+      let recadoRec = ''
+      if (Number(alt.valor_a_pagar) > 0 && alt.mp_payment_id) {
+        try {
+          const { data: est } = await supabase.functions.invoke('refund-pix', {
+            body: { pagamento_id: alt.mp_payment_id, empresa_id: alt.empresa_id },
+          })
+          recadoRec = est?.ok
+            ? `\n\nJá devolvi os *R$ ${Number(alt.valor_a_pagar).toFixed(2).replace('.', ',')}* que você pagou a mais. 💸`
+            : ''
+          if (!est?.ok) {
+            alert(`A recusa foi registrada, mas o estorno de R$ ${Number(alt.valor_a_pagar).toFixed(2).replace('.', ',')} NÃO saiu:\n\n`
+              + `${est?.erro ?? 'erro no Mercado Pago'}\n\nDevolva pelo app do Mercado Pago.`)
+          }
+        } catch {
+          alert(`A recusa foi registrada, mas não consegui pedir o estorno de R$ ${Number(alt.valor_a_pagar).toFixed(2).replace('.', ',')}. Devolva pelo app do Mercado Pago.`)
+        }
+      }
+      if (tel.length >= 10) {
+        avisarNoZap(tel, `Oi! Não deu pra mudar o pedido #${ped?.numero_pedido ?? ''}. 😕\n\n`
+          + (motivo ? `${motivo}.\n\n` : '')
+          + 'Ele segue como estava e já está a caminho.' + recadoRec)
+      }
     }
   }
 

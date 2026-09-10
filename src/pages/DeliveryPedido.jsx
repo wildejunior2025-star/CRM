@@ -405,7 +405,7 @@ function AlterarMeuPedido({ pedido, loja }) {
     if (!pedidoId) return
     const { data } = await supabase
       .from('pedido_alteracoes')
-      .select('id, status, motivo_recusa, total_antes, total_depois, expira_em, created_at')
+      .select('id, status, motivo_recusa, total_antes, total_depois, expira_em, created_at, valor_a_pagar, pix_qr')
       .eq('pedido_id', pedidoId)
       .order('created_at', { ascending: false })
       .limit(1).maybeSingle()
@@ -431,7 +431,10 @@ function AlterarMeuPedido({ pedido, loja }) {
   if (!pedido || carregando) return null
 
   const pendente = alt?.status === 'pendente' && new Date(alt.expira_em) > new Date()
-  const podeMexer = ALTERAVEL.includes(pedido.status) && pedido.origem !== 'ifood' && !pendente
+  // Esperando o PIX da diferença: a loja ainda NÃO sabe da mudança.
+  const aguardandoPix = alt?.status === 'aguardando_pagamento' && new Date(alt.expira_em) > new Date()
+  const podeMexer = ALTERAVEL.includes(pedido.status) && pedido.origem !== 'ifood'
+    && !pendente && !aguardandoPix
   const caminho = loja?.slug ? `/${loja.slug}` : `/loja/${pedido.empresa_id}`
 
   // Nada a dizer: pedido já fechado e sem alteração nenhuma no histórico.
@@ -439,7 +442,22 @@ function AlterarMeuPedido({ pedido, loja }) {
 
   return (
     <section className="dpd-card">
-      {pendente ? (
+      {aguardandoPix ? (
+        <>
+          <h2 className="dpd-card-title">💸 Falta pagar R$ {fmt(alt.valor_a_pagar)}</h2>
+          <p style={{ fontSize: 13.5, lineHeight: 1.6, margin: '4px 0 10px', opacity: .85 }}>
+            É o que você juntou depois de já ter pago. <strong>A loja só recebe
+            seu pedido de mudança quando esse PIX cair</strong> — e depois ela
+            ainda confirma se dá tempo. Se não der, o dinheiro volta.
+          </p>
+          {alt.pix_qr && (
+            <button className="dpd-btn-refresh"
+              onClick={() => { navigator.clipboard?.writeText(alt.pix_qr); alert('Código PIX copiado!') }}>
+              Copiar código PIX
+            </button>
+          )}
+        </>
+      ) : pendente ? (
         <>
           <h2 className="dpd-card-title">⏳ Esperando a loja responder</h2>
           <p style={{ fontSize: 13.5, lineHeight: 1.6, margin: '4px 0 0', opacity: .85 }}>

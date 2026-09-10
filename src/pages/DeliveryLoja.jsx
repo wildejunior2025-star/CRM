@@ -186,6 +186,10 @@ export default function DeliveryLoja() {
   const [pedidoAlterando, setPedidoAlterando] = useState(null)
   const [enviandoAlteracao, setEnviandoAlteracao] = useState(false)
   const [erroAlteracao, setErroAlteracao] = useState(null)
+  // QR da diferença: pedido já pago online que vai ficar mais caro. Enquanto
+  // ele não paga, a loja nem fica sabendo da mudança.
+  const [pixAlteracao, setPixAlteracao] = useState(null)
+  const [pixCopiado, setPixCopiado] = useState(false)
 
   // Carrinho é chaveado pelo id REAL da loja (uuid) — bate com a limpeza do checkout.
   //
@@ -895,7 +899,7 @@ export default function DeliveryLoja() {
     if (!pedidoAlterando || enviandoAlteracao) return
     setEnviandoAlteracao(true); setErroAlteracao(null)
     const taxaOriginal = Number(pedidoAlterando.taxa_entrega) || 0
-    const { error } = await supabase.rpc('solicitar_alteracao_pedido', {
+    const { data, error } = await supabase.rpc('solicitar_alteracao_pedido', {
       p_pedido_id: pedidoAlterando.id,
       p_itens: itens.map(i => ({
         produto_id: i.id,
@@ -908,8 +912,30 @@ export default function DeliveryLoja() {
       p_subtotal: Number(subtotal.toFixed(2)),
       p_total: Number((subtotal + taxaOriginal).toFixed(2)),
     })
+    if (error) {
+      setEnviandoAlteracao(false)
+      setErroAlteracao(error.message || 'Não deu pra enviar. Tente de novo.')
+      return
+    }
+
+    // Pedido já pago online e o valor SUBIU: ele paga a diferença agora, e só
+    // com o dinheiro na conta a loja passa a ver a mudança. Enquanto isso a
+    // alteração existe mas é invisível pra ela.
+    const res = Array.isArray(data) ? data[0] : data
+    if (res?.situacao === 'aguardando_pagamento') {
+      const { data: pix, error: errPix } = await supabase.functions.invoke('alteracao-pix', {
+        body: { alteracao_id: res.alteracao_id },
+      })
+      setEnviandoAlteracao(false)
+      if (errPix || !pix?.ok) {
+        setErroAlteracao(pix?.erro || 'Não consegui gerar o PIX da diferença. Tente de novo.')
+        return
+      }
+      setPixAlteracao({ ...pix, valor: Number(res.a_pagar), alteracaoId: res.alteracao_id })
+      return
+    }
+
     setEnviandoAlteracao(false)
-    if (error) { setErroAlteracao(error.message || 'Não deu pra enviar. Tente de novo.'); return }
     setDrawerOpen(false)
     navigate(`/pedido/${pedidoAlterando.id}?alteracao=enviada`)
   }
@@ -1353,6 +1379,67 @@ export default function DeliveryLoja() {
               )}
             </div>
           </aside>
+        </div>
+      )}
+
+      {/* PIX da diferença. Fica por cima de tudo porque é o passo que decide:
+          sem esse pagamento a loja nunca vê a mudança, e o cliente precisa
+          entender isso ANTES de fechar a tela achando que já pediu. */}
+      {pixAlteracao && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,.75)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div style={{
+            width: 'min(400px, 100%)', maxHeight: '92vh', overflowY: 'auto',
+            background: 'var(--dl-surface, #fff)', color: 'var(--dl-text)',
+            borderRadius: 16, padding: 20, textAlign: 'center',
+          }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: 17, fontWeight: 800 }}>
+              Falta pagar R$ {fmt(pixAlteracao.valor)}
+            </h3>
+            <p style={{ margin: '0 0 14px', fontSize: 13, lineHeight: 1.55, opacity: .8 }}>
+              Você já pagou o pedido, e o que você juntou agora custa isso a mais.
+              Pague o PIX e a loja recebe seu pedido de mudança na hora — ela ainda
+              confirma se dá tempo, e se não der o dinheiro volta.
+            </p>
+
+            {pixAlteracao.qr_code_base64 && (
+              <img
+                src={`data:image/png;base64,${pixAlteracao.qr_code_base64}`}
+                alt="QR code do PIX"
+                style={{ width: 220, height: 220, margin: '0 auto 12px', display: 'block', borderRadius: 8, background: '#fff' }}
+              />
+            )}
+
+            <button type="button"
+              onClick={() => {
+                navigator.clipboard?.writeText(pixAlteracao.qr_code ?? '')
+                setPixCopiado(true)
+                setTimeout(() => setPixCopiado(false), 2500)
+              }}
+              style={{
+                width: '100%', padding: '13px', borderRadius: 10, border: 'none', cursor: 'pointer',
+                background: '#7c3aed', color: '#fff', fontSize: 15, fontWeight: 800, marginBottom: 8,
+              }}>
+              {pixCopiado ? '✓ Copiado!' : 'Copiar código PIX'}
+            </button>
+
+            <p style={{ fontSize: 11.5, lineHeight: 1.5, opacity: .7, margin: '0 0 12px' }}>
+              Assim que o pagamento cair, a tela do pedido avisa sozinha.
+              O código vale por 30 minutos.
+            </p>
+
+            <button type="button"
+              onClick={() => { setPixAlteracao(null); setDrawerOpen(false); navigate(`/pedido/${pedidoAlterando.id}`) }}
+              style={{
+                width: '100%', padding: '11px', borderRadius: 10, cursor: 'pointer',
+                border: '1px solid var(--dl-border-2, #ddd)', background: 'transparent',
+                color: 'var(--dl-text-muted)', fontSize: 13.5,
+              }}>
+              Já paguei / acompanhar o pedido
+            </button>
+          </div>
         </div>
       )}
 

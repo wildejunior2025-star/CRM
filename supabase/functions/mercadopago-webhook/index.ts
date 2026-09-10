@@ -31,6 +31,13 @@ async function tokenDoPagamento(sb: SB, paymentId: string): Promise<string> {
       .select('empresa_id').eq('mp_payment_id', String(paymentId)).maybeSingle()
     empresaId = mesa?.empresa_id ?? null
   }
+  if (!empresaId) {
+    // Diferença de uma ALTERAÇÃO de pedido (mig 0252): o cliente somou item num
+    // pedido já pago e está pagando só o que faltou.
+    const { data: alt } = await sb.from('pedido_alteracoes')
+      .select('empresa_id').eq('mp_payment_id', String(paymentId)).maybeSingle()
+    empresaId = alt?.empresa_id ?? null
+  }
   if (!empresaId) return MP_ACCESS_TOKEN
   const { data: conta } = await sb.from('mercadopago_contas')
     .select('access_token, refresh_token, expires_at').eq('empresa_id', empresaId).maybeSingle()
@@ -208,6 +215,25 @@ Deno.serve(async (req) => {
     }
 
     if (payment.status === 'approved') {
+      // ── Diferença de uma ALTERAÇÃO de pedido (mig 0252) ──────────────────
+      //
+      // O cliente somou item num pedido já pago e pagou só o que faltou. Este
+      // mp_payment_id nunca existe em pedidos_delivery, então os dois caminhos
+      // não se cruzam — mesmo desenho dos créditos e do PIX da mesa.
+      //
+      // É AQUI que a loja passa a enxergar a mudança: antes de o dinheiro
+      // entrar ela fica 'aguardando_pagamento', e o gestor só lista 'pendente'.
+      {
+        const { data: quemEh } = await supabase.from('pedido_alteracoes')
+          .select('id').eq('mp_payment_id', String(paymentId)).maybeSingle()
+        if (quemEh) {
+          const { data: virou } = await supabase
+            .rpc('confirmar_pagamento_alteracao', { p_mp_payment_id: String(paymentId) })
+          console.log('[alteracao] pagamento confirmado →', virou)
+          return new Response('ok', { status: 200 })
+        }
+      }
+
       // Atualiza pedido para aguardando (entra na fila da loja)
       const { data: pedido } = await supabase
         .from('pedidos_delivery')

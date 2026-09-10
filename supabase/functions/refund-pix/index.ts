@@ -53,8 +53,40 @@ Deno.serve(async (req) => {
     // pedido, ou somou um e a quantidade caiu na faixa de atacado — o pedido
     // continua de pé, só volta a diferença. Sem `valor`, é o de sempre:
     // devolve tudo e cancela.
-    const { order_id, motivo, valor, manter_pedido } = await req.json()
+    const { order_id, motivo, valor, manter_pedido, pagamento_id, empresa_id } = await req.json()
     const parcial = Number(valor) > 0
+
+    // ── Estorno de um pagamento AVULSO (mig 0252) ─────────────────────────
+    //
+    // A diferença de uma alteração de pedido é um pagamento separado, que não
+    // vive em pedidos_delivery. A loja recusou a mudança: devolve aquele PIX
+    // inteiro, sem encostar no pagamento do pedido original.
+    if (pagamento_id) {
+      const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
+      const mpToken = await tokenDaLoja(supabase, empresa_id ?? null)
+      const mpRes = await fetch(
+        `https://api.mercadopago.com/v1/payments/${pagamento_id}/refunds`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${mpToken}`,
+            'Content-Type': 'application/json',
+            'X-Idempotency-Key': crypto.randomUUID(),
+          },
+          body: JSON.stringify({}),   // devolve tudo daquele pagamento
+        },
+      )
+      const rd = await mpRes.json()
+      if (!mpRes.ok) {
+        console.error('MP refund avulso:', JSON.stringify(rd))
+        return new Response(JSON.stringify({
+          ok: false, erro: rd?.message ?? 'O Mercado Pago recusou o estorno.',
+        }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      })
+    }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
