@@ -121,10 +121,34 @@ function normBairro(s) {
     .join(' ')
     .trim()
 }
+// Acha a linha da tabela de bairros da loja pro bairro que veio no endereço.
+//
+// Não dá pra exigir nome igualzinho: a loja escreve "Nossa Senhora" e o CEP
+// devolve "Nossa Senhora da Apresentação"; escreve "Amarante" e vem "Novo
+// Amarante". Com igualdade pura a taxa cadastrada simplesmente não pegava e o
+// pedido caía na tabela por quilômetro sem ninguém entender por quê.
+//
+// A ordem: nome igual > o nome cadastrado aparece dentro do que veio > o que
+// veio aparece dentro do nome cadastrado. Nos dois casos de "aparece dentro",
+// ganha o nome MAIS ESPECÍFICO — senão "Redinha" roubaria o endereço de
+// "Redinha Nova", que tem taxa própria.
 function acharBairroCfg(lista, bairroCliente) {
-  if (!Array.isArray(lista) || !bairroCliente) return null
   const n = normBairro(bairroCliente)
-  return lista.find(b => normBairro(b.bairro) === n) || null
+  if (!n || !Array.isArray(lista)) return null
+  const cfgs = lista
+    .map(b => ({ cfg: b, nome: normBairro(b?.bairro ?? '') }))
+    .filter(x => x.nome)
+
+  const exato = cfgs.find(x => x.nome === n)
+  if (exato) return exato.cfg
+
+  const dentro = cfgs.filter(x => x.nome.length >= 3 && n.includes(x.nome))
+    .sort((a, b) => b.nome.length - a.nome.length)[0]
+  if (dentro) return dentro.cfg
+
+  const contem = cfgs.filter(x => n.length >= 3 && x.nome.includes(n))
+    .sort((a, b) => a.nome.length - b.nome.length)[0]
+  return contem ? contem.cfg : null
 }
 // Chave do endereço — tem que dar a MESMA string que a chave_endereco() do banco
 // (mig 0160), senão o pino salvo nunca casaria com o endereço da tela.

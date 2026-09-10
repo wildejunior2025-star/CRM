@@ -390,16 +390,35 @@ function normBairro(v: string): string {
     .trim()
 }
 
-function acharBairroCfg(lista: unknown, bairroCliente: string): Record<string, unknown> | null {
-  if (!Array.isArray(lista) || !bairroCliente) return null
-  const n = normBairro(bairroCliente)
-  if (!n) return null
-  // O cliente escreve a frase inteira ("rua tal, no Potengi"), então o casamento
-  // é por CONTER o nome do bairro — não por igualdade.
-  return lista.find((b: Record<string, unknown>) => {
-    const alvo = normBairro(String(b?.bairro ?? ""))
-    return alvo.length >= 3 && n.includes(alvo)
-  }) ?? null
+// Aqui o "bairroCliente" costuma ser a FRASE inteira que a pessoa escreveu
+// ("rua tal, no Potengi"), então o casamento por conter é o caminho normal.
+//
+// Não dá pra exigir nome igualzinho: a loja escreve "Nossa Senhora" e o CEP
+// devolve "Nossa Senhora da Apresentação"; escreve "Amarante" e vem "Novo
+// Amarante". Com igualdade pura a taxa cadastrada simplesmente não pegava e o
+// pedido caía na tabela por quilômetro sem ninguém entender por quê.
+//
+// A ordem: nome igual > o nome cadastrado aparece dentro do que veio > o que
+// veio aparece dentro do nome cadastrado. Nos dois casos de "aparece dentro",
+// ganha o nome MAIS ESPECÍFICO — senão "Redinha" roubaria o endereço de
+// "Redinha Nova", que tem taxa própria.
+function acharBairroCfg(lista: any, bairroCliente: string | null): any {
+  const n = normBairro(bairroCliente || "")
+  if (!n || !Array.isArray(lista)) return null
+  const cfgs = lista
+    .map((b: any) => ({ cfg: b, nome: normBairro(String(b?.bairro ?? "")) }))
+    .filter((x: any) => x.nome)
+
+  const exato = cfgs.find((x: any) => x.nome === n)
+  if (exato) return exato.cfg
+
+  const dentro = cfgs.filter((x: any) => x.nome.length >= 3 && n.includes(x.nome))
+    .sort((a: any, b: any) => b.nome.length - a.nome.length)[0]
+  if (dentro) return dentro.cfg
+
+  const contem = cfgs.filter((x: any) => n.length >= 3 && x.nome.includes(n))
+    .sort((a: any, b: any) => a.nome.length - b.nome.length)[0]
+  return contem ? contem.cfg : null
 }
 
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
