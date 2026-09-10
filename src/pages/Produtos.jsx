@@ -257,6 +257,7 @@ export default function Produtos() {
   // Renumeração da ordem das categorias só pode acontecer uma vez por sessão
   // (se o update falhar, não pode ficar tentando em loop).
   const renumerouRef = useRef(false)
+  const criouOrfasRef = useRef(false)
 
   const [produtos, setProdutos] = useState([])
   // Produto com o menuzinho de foto aberto (só no celular, onde galeria e
@@ -528,6 +529,40 @@ export default function Produtos() {
   const [savingEmb, setSavingEmb] = useState(false)
   const [embError, setEmbError] = useState(null)
 
+  // Categoria que só existe ESCRITA no produto (veio de importação de cardápio,
+  // ou o nome foi trocado depois) não tinha linha aqui — e por isso não aparecia
+  // na lista pra loja marcar o setor. Ela caía calada no padrão "salão" e o
+  // pedido não saía na impressora da cozinha: foi o que segurou 27 comandas de
+  // espetinho da Saidera numa noite só, com a loja achando que a impressora
+  // estava com defeito (o papel de teste saía, os produtos não).
+  //
+  // Aqui a linha que falta é criada, SEM mexer no setor de nada: ela nasce no
+  // padrão de sempre, só passa a existir pra poder ser configurada.
+  async function criarCategoriasOrfas(lista) {
+    if (!profile?.empresa_id || criouOrfasRef.current) return false
+    const chave = v => String(v ?? '').trim().toLowerCase()
+    const prods = await fetchAll((de, ate) => supabase.from('produtos')
+      .select('categoria').eq('empresa_id', profile.empresa_id)
+      .is('arquivado_em', null).range(de, ate))
+    const existentes = new Set(lista.map(c => chave(c.nome)))
+    const vistas = new Set()
+    const faltando = []
+    for (const pr of (prods ?? [])) {
+      const nome = String(pr.categoria ?? '').trim()
+      const k = chave(nome)
+      if (!nome || existentes.has(k) || vistas.has(k)) continue
+      vistas.add(k)
+      faltando.push(nome)
+    }
+    if (!faltando.length) return false
+    criouOrfasRef.current = true
+    let ordem = Math.max(0, ...lista.map(c => Number(c.ordem) || 0))
+    const { error } = await supabase.from('categorias').insert(
+      faltando.map(nome => ({ empresa_id: profile.empresa_id, nome, ordem: ++ordem })),
+    )
+    return !error
+  }
+
   async function loadCategorias() {
     const { data } = await supabase
       .from('categorias')
@@ -536,6 +571,7 @@ export default function Produtos() {
       .order('nome', { ascending: true })
     const lista = data ?? []
     setCategorias(lista)
+    if (await criarCategoriasOrfas(lista)) { await loadCategorias(); return }
     // Conserta lista antiga com ordem 0 ou empatada (categoria criada antes do
     // fix). Renumera 1..n mantendo a ordem que já está aparecendo na tela.
     const ordens = lista.map(c => c.ordem ?? 0)
