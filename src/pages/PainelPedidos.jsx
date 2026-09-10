@@ -768,6 +768,19 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
   )
 }
 
+// Uma linha por item da sacola, com cada complemento embaixo dele, um por
+// linha. Amontoados entre parênteses (era assim), 10 sabores de picolé viravam
+// um parágrafo embolado onde nem o cliente nem a cozinha achavam o que era o quê.
+function linhasDaSacola(itens) {
+  return (itens ?? []).map(i => {
+    const total = (Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')
+    const comps = (i.complementos ?? [])
+      .map(c => `\n   ↳ ${(c.qtd ?? 1) > 1 ? `${c.qtd}x ` : ''}${c.nome}`)
+      .join('')
+    return `• ${i.nome} x${i.qtd} — R$ ${total}${comps}`
+  }).join('\n')
+}
+
 // ── Modal de venda no balcão (PDV do gestor) ────────────────
 // O vendedor monta o pedido pelo catálogo; ele entra na lista do painel.
 // Seletor de complementos ("monte sua quentinha") na venda de balcão.
@@ -775,7 +788,7 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
 // sacola. É o que deixa a conversa à vista enquanto se escolhe o sabor —
 // coberta, quem atende não conseguia ler o que o cliente tinha pedido e
 // escolhia de cabeça.
-function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [], embutido = false }) {
+function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [], embutido = false, onEnviarLista, enviandoLista = false }) {
   const grupos = produto.grupos ?? []
   // A escolha é { grupoId: { opcaoId: quantidade } }. No grupo comum a
   // quantidade é sempre 1 e o que vale é estar ou não na lista; no grupo de
@@ -881,15 +894,28 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [], embu
           const incompleto = qtdSel < (grupo.min ?? 0)
           return (
             <div key={grupo.id} style={{ marginBottom: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                 <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{grupo.nome}</span>
-                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6,
-                  background: incompleto ? 'rgba(239,68,68,.15)' : 'var(--border,#2a2a3a)',
-                  color: incompleto ? '#f87171' : 'var(--text-muted)' }}>
-                  {grupo.modo_quantidade
-                    ? `${qtdSel} un${obrig ? ` · min ${grupo.min}` : ''}`
-                    : `${obrig ? `Obrigatório${grupo.min > 1 ? ` · min ${grupo.min}` : ''}` : 'Opcional'}${grupo.max > 1 ? ` · até ${grupo.max}` : ''}`}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {/* No chat: manda a lista pronta pro cliente escolher. Sem
+                      isto, quem atende digitava os sabores um a um na mão. */}
+                  {onEnviarLista && (grupo.opcoes ?? []).length > 0 && (
+                    <button type="button" onClick={() => onEnviarLista(grupo)} disabled={enviandoLista}
+                      title="Manda esta lista de sabores na conversa do cliente"
+                      style={{ fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 6,
+                        border: '1px solid rgba(124,58,237,.55)', background: 'rgba(124,58,237,.12)',
+                        color: '#a78bfa', cursor: enviandoLista ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}>
+                      {enviandoLista ? 'enviando…' : '📤 Mandar no chat'}
+                    </button>
+                  )}
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6,
+                    background: incompleto ? 'rgba(239,68,68,.15)' : 'var(--border,#2a2a3a)',
+                    color: incompleto ? '#f87171' : 'var(--text-muted)' }}>
+                    {grupo.modo_quantidade
+                      ? `${qtdSel} un${obrig ? ` · min ${grupo.min}` : ''}`
+                      : `${obrig ? `Obrigatório${grupo.min > 1 ? ` · min ${grupo.min}` : ''}` : 'Opcional'}${grupo.max > 1 ? ` · até ${grupo.max}` : ''}`}
+                  </span>
+                </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {grupo.opcoes.map(opcao => {
@@ -6247,6 +6273,7 @@ export default function PainelPedidos() {
   const [botPausado, setBotPausado] = useState(false)
   // Sacola que o ATENDENTE monta dentro da conversa (ver SacolaNoChat).
   const [sacolaChat, setSacolaChat] = useState([])
+  const [enviandoLista, setEnviandoLista] = useState(false)  // mandando os sabores no chat
   // Painel da sacola colado na conversa (só no PC).
   const [sacolaLateral, setSacolaLateral] = useState(false)
   const [enviandoSacola, setEnviandoSacola] = useState(false)
@@ -6999,14 +7026,7 @@ export default function PainelPedidos() {
       .eq('empresa_id', empresa.id).like('phone', `%${tel.slice(-8)}`)
 
     // O cliente precisa ver o número do pedido — é por ele que ele cobra depois.
-    const linhas = sacolaChat
-      .map(i => {
-        const comps = (i.complementos ?? []).map(c => `${(c.qtd ?? 1) > 1 ? `${c.qtd}x ` : ''}${c.nome}`).join(', ')
-        return `• ${i.nome} x${i.qtd} — R$ ${(Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')}`
-          + (comps ? `
-   (${comps})` : '')
-      })
-      .join('\n')
+    const linhas = linhasDaSacola(sacolaChat)
     const labelPgto = ({ dinheiro: 'dinheiro', pix_entrega: 'PIX', credito: 'cartão de crédito', debito: 'cartão de débito', cartao: 'cartão' })[d.pagamento] ?? d.pagamento
     const texto =
       `🧾 *Pedido #${novo?.numero_pedido ?? ''} anotado!*\n\n${linhas}\n` +
@@ -7052,14 +7072,7 @@ export default function PainelPedidos() {
     setChatAviso(null)
 
     const total = sacolaChat.reduce((s, i) => s + Number(i.preco) * Number(i.qtd), 0)
-    const linhas = sacolaChat
-      .map(i => {
-        const comps = (i.complementos ?? []).map(c => `${(c.qtd ?? 1) > 1 ? `${c.qtd}x ` : ''}${c.nome}`).join(', ')
-        return `• ${i.nome} x${i.qtd} — R$ ${(Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')}`
-          + (comps ? `
-   (${comps})` : '')
-      })
-      .join('\n')
+    const linhas = linhasDaSacola(sacolaChat)
     const texto = `Montei sua sacola aqui 🛒\n\n${linhas}\n\n*Total dos itens: R$ ${total.toFixed(2).replace('.', ',')}*\n\nÉ só me confirmar o endereço e a forma de pagamento que eu fecho pra você. 😉`
 
     // 1) O carrinho do robô. Sem isso ele fecharia o pedido sem os itens.
@@ -7104,6 +7117,52 @@ export default function PainelPedidos() {
       : { ok: true, txt: okZap
           ? '✓ Sacola enviada. Você continua na conversa — devolva pro robô quando quiser.'
           : '⚠️ Sacola gravada aqui, mas não saiu no WhatsApp do cliente.' })
+  }
+
+  // Manda um texto solto pro cliente: grava no chat do gestor e sai no WhatsApp.
+  async function mandarTextoNoChat(texto) {
+    if (!chatAberto || !empresa?.id) return { ok: false }
+    const sep = chatAberto.indexOf('|')
+    const canal = chatAberto.slice(0, sep)
+    const cliente_ref = chatAberto.slice(sep + 1)
+    const tel = String(cliente_ref).replace(/\D/g, '')
+    const thread = chatMsgs.find(m => `${m.canal}|${m.cliente_ref}` === chatAberto)
+    await supabase.from('mensagens_chat').insert({
+      empresa_id: empresa.id, canal, cliente_ref,
+      cliente_nome: thread?.cliente_nome ?? null, remetente: 'loja', texto,
+    })
+    if (tel.length < 10) return { ok: false, semZap: true }
+    const { data } = await supabase.functions.invoke('whatsapp-connect', {
+      body: { action: 'send_message', phone: tel, text: texto, espelhar_no_chat: false, assumir_conversa: false },
+    })
+    return { ok: !!data?.ok }
+  }
+
+  // "Quais sabores tem?" — a pergunta de sempre. Em vez de quem atende digitar
+  // 16 nomes na mão (e esquecer três), o seletor de complementos manda a lista
+  // pronta na conversa, só com o que está disponível e com o acréscimo de cada.
+  async function enviarListaDeSabores(grupo) {
+    if (!grupo || !chatAberto || !empresa?.id) return
+    const disp = (grupo.opcoes ?? []).filter(o => o.disponivel !== false)
+    if (!disp.length) {
+      setChatAviso({ ok: false, txt: '⚠️ Esta lista está sem nenhum sabor disponível.' })
+      return
+    }
+    setEnviandoLista(true)
+    setChatAviso(null)
+    const linhas = disp.map(o => {
+      const extra = Number(o.preco_adicional) > 0
+        ? ` (+R$ ${Number(o.preco_adicional).toFixed(2).replace('.', ',')})`
+        : ''
+      return `• ${o.nome}${extra}`
+    }).join('\n')
+    const nomeProd = produtoCompChat?.nome ? `*${produtoCompChat.nome}*\n` : ''
+    const texto = `${nomeProd}${grupo.nome}:\n\n${linhas}\n\nÉ só me dizer qual você quer 😉`
+    const r = await mandarTextoNoChat(texto)
+    setEnviandoLista(false)
+    setChatAviso(r.ok
+      ? { ok: true, txt: '✓ Lista de sabores enviada.' }
+      : { ok: false, txt: '⚠️ A lista ficou aqui no chat, mas não saiu no WhatsApp do cliente.' })
   }
 
   // Devolve a conversa pro robô sem sair dela: tira a pausa automática e ele
@@ -8892,6 +8951,8 @@ export default function PainelPedidos() {
           iniciais={produtoCompChat.iniciais ?? []}
           onFechar={fecharSeletorDoChat}
           onConfirmar={adicionarComComplementosNoChat}
+          onEnviarLista={enviarListaDeSabores}
+          enviandoLista={enviandoLista}
         />
       )}
 
@@ -9868,6 +9929,8 @@ export default function PainelPedidos() {
                   iniciais={produtoCompChat.iniciais ?? []}
                   onFechar={fecharSeletorDoChat}
                   onConfirmar={adicionarComComplementosNoChat}
+                  onEnviarLista={enviarListaDeSabores}
+                  enviandoLista={enviandoLista}
                 />
               </div>
             ) : (
