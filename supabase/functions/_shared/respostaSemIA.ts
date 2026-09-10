@@ -259,8 +259,10 @@ export function lojaAbertaAgora(
   empresa: Record<string, unknown>, excecoes: Excecoes = {},
 ): boolean {
   // O botão vermelho do gestor. Fechou na mão, está fechado — grade nenhuma
-  // discute com isso.
-  if (empresa.delivery_ativo === false) return false
+  // discute com isso. Mas fechado com motivo "horario" foi o painel se fechando
+  // sozinho no fim do expediente: aí quem manda é a grade, senão a loja fica
+  // fechada pro robô o dia inteiro depois do primeiro intervalo (mig 0256).
+  if (empresa.delivery_ativo === false && empresa.delivery_fechado_por !== "horario") return false
 
   const { min: agora, ymd: hoje } = agoraNaLoja()
   const dia = comoFicaNoDia(hoje, empresa, excecoes)

@@ -758,7 +758,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, numero, telefone_contato, bairro, cidade, estado, latitude, longitude, delivery_ativo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, agendamento_faixas, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct')
+      .select('endereco, numero, telefone_contato, bairro, cidade, estado, latitude, longitude, delivery_ativo, delivery_fechado_por, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, agendamento_faixas, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -826,7 +826,9 @@ export default function DeliveryCheckout() {
     // Config ainda não chegou: vale o que a vitrine disse (não dá pra travar
     // ninguém por causa de uma consulta lenta).
     if (!lojaEndereco) return state?.lojaAberta !== false
-    if (lojaEndereco.delivery_ativo === false) return false
+    // Fechado com motivo "horario" foi o painel no fim do expediente: quem manda
+    // é a grade daqui pra frente. Pausa na MÃO continua fechando tudo.
+    if (lojaEndereco.delivery_ativo === false && lojaEndereco.delivery_fechado_por !== 'horario') return false
     return abertaAgora({
       grade: lojaEndereco.horarios_funcionamento,
       excecoes,

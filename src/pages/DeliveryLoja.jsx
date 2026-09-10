@@ -816,8 +816,14 @@ export default function DeliveryLoja() {
     return () => clearInterval(id)
   }, [])
 
-  // Loja aberta = pausa manual ligada (delivery_ativo) E dentro da grade semanal de horário.
-  const lojaAberta = useMemo(() => !!loja?.delivery_ativo && abertaAgora({
+  // Loja aberta = dentro da grade semanal E sem pausa MANUAL.
+  //
+  // `delivery_ativo` desligado com motivo "horario" é o painel tendo fechado
+  // sozinho no fim do expediente anterior — não é decisão de ninguém, e não
+  // pode segurar a loja fechada quando o horário volta (o painel pode estar
+  // desligado, ou noutro aparelho, e ninguém reabre).
+  const pausaManual = !loja?.delivery_ativo && loja?.delivery_fechado_por !== 'horario'
+  const lojaAberta = useMemo(() => !pausaManual && abertaAgora({
     grade: loja?.horarios_funcionamento, excecoes, fechaFeriado: !!loja?.feriados_fecha,
   // tiqueRelogio entra de propósito: é ele que faz a conta ser refeita sozinha.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1418,7 +1424,10 @@ export default function DeliveryLoja() {
           entender isso ANTES de fechar a tela achando que já pediu. */}
       {pixAlteracao && (
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,.75)',
+          // 3100: acima de TUDO — a barra de categorias é 90, a sacola 200 e a
+          // foto ampliada 3000. Em 60 a barra de categorias atravessava o QR
+          // no meio, e o cliente não conseguia apontar a câmera.
+          position: 'fixed', inset: 0, zIndex: 3100, background: 'rgba(0,0,0,.75)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
         }}>
           <div style={{

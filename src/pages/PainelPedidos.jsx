@@ -7608,16 +7608,40 @@ export default function PainelPedidos() {
     return () => { vivo = false }
   }, [empresa?.id])
 
-  // ── Auto-fecha pelo horário de funcionamento ───────────────
+  // ── Fecha E REABRE sozinho pelo horário de funcionamento ───
+  //
+  // Só fechava. Numa grade com intervalo (08:30-12:00 e 14:00-18:00) a loja
+  // fechava ao meio-dia e continuava fechada no cardápio online depois das
+  // 14:00, com o lojista vendo "Loja aberta" no botão dele — quem apagou foi
+  // outro aparelho, e o botão de cá nunca soube. Foi o que aconteceu com a
+  // CD Bom em 10/09/2026.
+  //
+  // Reabrir só vale pra quem foi fechado PELO HORÁRIO. Loja que fechou na mão
+  // (acabou o produto, cozinha lotada) fica fechada até a loja mandar abrir.
   useEffect(() => {
     if (!empresa) return
     function verificarHorario() {
-      if (!lojaAbertaPorHorario(empresa, excecoesLoja)) {
+      const noHorario = lojaAbertaPorHorario(empresa, excecoesLoja)
+      if (!noHorario) {
         setLojaAberta(prev => {
           if (prev) {
-            supabase.from('empresas').update({ delivery_ativo: false }).eq('id', empresa.id).then(() => {})
+            supabase.from('empresas')
+              .update({ delivery_ativo: false, delivery_fechado_por: 'horario' })
+              .eq('id', empresa.id).then(() => {})
           }
           return false
+        })
+        return
+      }
+      // Voltou o horário e quem fechou foi o relógio: abre de novo.
+      if (empresa.delivery_fechado_por === 'horario') {
+        setLojaAberta(prev => {
+          if (!prev) {
+            supabase.from('empresas')
+              .update({ delivery_ativo: true, delivery_fechado_por: null })
+              .eq('id', empresa.id).then(() => {})
+          }
+          return true
         })
       }
     }
@@ -8354,9 +8378,14 @@ export default function PainelPedidos() {
       return
     }
     setTogglingLoja(true)
+    // Fechar na mão fica marcado como manual: assim o auto-reabre pelo horário
+    // não passa por cima da decisão de quem está na loja.
     const { error } = await supabase
       .from('empresas')
-      .update({ delivery_ativo: tentandoAbrir })
+      .update({
+        delivery_ativo: tentandoAbrir,
+        delivery_fechado_por: tentandoAbrir ? null : 'manual',
+      })
       .eq('id', empresa.id)
     if (!error) setLojaAberta(tentandoAbrir)
     setTogglingLoja(false)
