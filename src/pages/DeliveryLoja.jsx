@@ -190,6 +190,7 @@ export default function DeliveryLoja() {
   // ele não paga, a loja nem fica sabendo da mudança.
   const [pixAlteracao, setPixAlteracao] = useState(null)
   const [pixCopiado, setPixCopiado] = useState(false)
+  const [pixConfirmado, setPixConfirmado] = useState(false)
 
   // Carrinho é chaveado pelo id REAL da loja (uuid) — bate com a limpeza do checkout.
   //
@@ -940,6 +941,36 @@ export default function DeliveryLoja() {
     navigate(`/pedido/${pedidoAlterando.id}?alteracao=enviada`)
   }
 
+  // O PIX caiu? A tela tem que virar SOZINHA.
+  //
+  // Perguntar "já paguei" pro cliente é jogar pra ele uma conta que o sistema
+  // sabe fazer: quem confirma pagamento é o Mercado Pago, não a palavra dele.
+  //
+  // Tempo real + uma conferida a cada 4s. O tempo real resolve em quase todos
+  // os casos; a conferida cobre o celular que dormiu no meio do pagamento e
+  // perdeu o evento — e é justamente aí que o cliente fica olhando a tela.
+  useEffect(() => {
+    if (!pixAlteracao?.alteracaoId || pixConfirmado) return
+    const alvo = pixAlteracao.alteracaoId
+    let vivo = true
+
+    const conferir = async () => {
+      const { data } = await supabase.from('pedido_alteracoes')
+        .select('status').eq('id', alvo).maybeSingle()
+      if (vivo && data && data.status !== 'aguardando_pagamento') setPixConfirmado(true)
+    }
+
+    const canal = supabase
+      .channel(`pix-alteracao-${alvo}`)
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'pedido_alteracoes', filter: `id=eq.${alvo}` },
+        payload => { if (payload.new?.status !== 'aguardando_pagamento') setPixConfirmado(true) })
+      .subscribe()
+
+    const t = setInterval(conferir, 4000)
+    return () => { vivo = false; clearInterval(t); supabase.removeChannel(canal) }
+  }, [pixAlteracao, pixConfirmado])
+
   function handleFinalizar() {
     setDrawerOpen(false)
     navigate('/checkout', {
@@ -1395,50 +1426,83 @@ export default function DeliveryLoja() {
             background: 'var(--dl-surface, #fff)', color: 'var(--dl-text)',
             borderRadius: 16, padding: 20, textAlign: 'center',
           }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: 17, fontWeight: 800 }}>
-              Falta pagar R$ {fmt(pixAlteracao.valor)}
-            </h3>
-            <p style={{ margin: '0 0 14px', fontSize: 13, lineHeight: 1.55, opacity: .8 }}>
-              Você já pagou o pedido, e o que você juntou agora custa isso a mais.
-              Pague o PIX e a loja recebe seu pedido de mudança na hora — ela ainda
-              confirma se dá tempo, e se não der o dinheiro volta.
-            </p>
+            {pixConfirmado ? (
+              /* O Mercado Pago confirmou. Quem diz que pagou é ele, não o
+                 cliente — por isso não existe botão "já paguei" aqui. */
+              <>
+                <div style={{ fontSize: 46, lineHeight: 1, marginBottom: 8 }}>✅</div>
+                <h3 style={{ margin: '0 0 6px', fontSize: 17, fontWeight: 800 }}>
+                  Pagamento confirmado!
+                </h3>
+                <p style={{ margin: '0 0 16px', fontSize: 13, lineHeight: 1.55, opacity: .8 }}>
+                  A loja já recebeu seu pedido de mudança e está confirmando se
+                  dá tempo. Se não der, o dinheiro volta.
+                </p>
+                <button type="button"
+                  onClick={() => { setPixAlteracao(null); setPixConfirmado(false); setDrawerOpen(false); navigate(`/pedido/${pedidoAlterando.id}`) }}
+                  style={{
+                    width: '100%', padding: '13px', borderRadius: 10, border: 'none', cursor: 'pointer',
+                    background: '#22c55e', color: '#fff', fontSize: 15, fontWeight: 800,
+                  }}>
+                  Acompanhar o pedido
+                </button>
+              </>
+            ) : (
+              <>
+                <h3 style={{ margin: '0 0 6px', fontSize: 17, fontWeight: 800 }}>
+                  Falta pagar R$ {fmt(pixAlteracao.valor)}
+                </h3>
+                <p style={{ margin: '0 0 14px', fontSize: 13, lineHeight: 1.55, opacity: .8 }}>
+                  Você já pagou o pedido, e o que você juntou agora custa isso a mais.
+                  Pague o PIX e a loja recebe seu pedido de mudança na hora — ela ainda
+                  confirma se dá tempo, e se não der o dinheiro volta.
+                </p>
 
-            {pixAlteracao.qr_code_base64 && (
-              <img
-                src={`data:image/png;base64,${pixAlteracao.qr_code_base64}`}
-                alt="QR code do PIX"
-                style={{ width: 220, height: 220, margin: '0 auto 12px', display: 'block', borderRadius: 8, background: '#fff' }}
-              />
+                {pixAlteracao.qr_code_base64 && (
+                  <img
+                    src={`data:image/png;base64,${pixAlteracao.qr_code_base64}`}
+                    alt="QR code do PIX"
+                    style={{ width: 220, height: 220, margin: '0 auto 12px', display: 'block', borderRadius: 8, background: '#fff' }}
+                  />
+                )}
+
+                <button type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(pixAlteracao.qr_code ?? '')
+                    setPixCopiado(true)
+                    setTimeout(() => setPixCopiado(false), 2500)
+                  }}
+                  style={{
+                    width: '100%', padding: '13px', borderRadius: 10, border: 'none', cursor: 'pointer',
+                    background: '#7c3aed', color: '#fff', fontSize: 15, fontWeight: 800, marginBottom: 10,
+                  }}>
+                  {pixCopiado ? '✓ Copiado!' : 'Copiar código PIX'}
+                </button>
+
+                {/* Fica claro que ninguém precisa avisar nada: a tela vira
+                    sozinha assim que o dinheiro entra. */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                  fontSize: 12.5, opacity: .75, marginBottom: 12,
+                }}>
+                  <span style={{
+                    width: 8, height: 8, borderRadius: 999, background: '#7c3aed',
+                    display: 'inline-block', animation: 'dlojaPulse 1.2s ease-in-out infinite',
+                  }} />
+                  Esperando o pagamento — esta tela avisa sozinha
+                </div>
+
+                <button type="button"
+                  onClick={() => { setPixAlteracao(null); setDrawerOpen(false); navigate(`/pedido/${pedidoAlterando.id}`) }}
+                  style={{
+                    width: '100%', padding: '11px', borderRadius: 10, cursor: 'pointer',
+                    border: '1px solid var(--dl-border-2, #ddd)', background: 'transparent',
+                    color: 'var(--dl-text-muted)', fontSize: 13.5,
+                  }}>
+                  Pagar depois
+                </button>
+              </>
             )}
-
-            <button type="button"
-              onClick={() => {
-                navigator.clipboard?.writeText(pixAlteracao.qr_code ?? '')
-                setPixCopiado(true)
-                setTimeout(() => setPixCopiado(false), 2500)
-              }}
-              style={{
-                width: '100%', padding: '13px', borderRadius: 10, border: 'none', cursor: 'pointer',
-                background: '#7c3aed', color: '#fff', fontSize: 15, fontWeight: 800, marginBottom: 8,
-              }}>
-              {pixCopiado ? '✓ Copiado!' : 'Copiar código PIX'}
-            </button>
-
-            <p style={{ fontSize: 11.5, lineHeight: 1.5, opacity: .7, margin: '0 0 12px' }}>
-              Assim que o pagamento cair, a tela do pedido avisa sozinha.
-              O código vale por 30 minutos.
-            </p>
-
-            <button type="button"
-              onClick={() => { setPixAlteracao(null); setDrawerOpen(false); navigate(`/pedido/${pedidoAlterando.id}`) }}
-              style={{
-                width: '100%', padding: '11px', borderRadius: 10, cursor: 'pointer',
-                border: '1px solid var(--dl-border-2, #ddd)', background: 'transparent',
-                color: 'var(--dl-text-muted)', fontSize: 13.5,
-              }}>
-              Já paguei / acompanhar o pedido
-            </button>
           </div>
         </div>
       )}

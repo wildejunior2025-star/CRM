@@ -6524,6 +6524,9 @@ export default function PainelPedidos() {
   const [alteracoes, setAlteracoes] = useState([])
   const [decidindoAlt, setDecidindoAlt] = useState(null)   // id em processamento
   const [recusandoAlt, setRecusandoAlt] = useState(null)   // alteração no popup do motivo
+  // Quem já tocou a campainha. Sem isto, recarregar a lista faria a mesma
+  // mudança tocar de novo a cada evento do tempo real.
+  const anunciadasRef = useRef(new Set())
 
   // Carga + tempo real. A campainha toca no INSERT, e é um som próprio
   // (tocarSomAlteracao): igual ao de pedido novo, a pessoa aceitaria no
@@ -6549,7 +6552,21 @@ export default function PainelPedidos() {
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'pedido_alteracoes', filter: `empresa_id=eq.${empresa.id}` },
         payload => {
-          if (payload.eventType === 'INSERT' && somAtivoConfig()) tocarSomAlteracao()
+          // A campainha toca quando a mudança fica PRONTA PRA DECIDIR, não
+          // quando a linha nasce.
+          //
+          // Alteração de pedido pago online nasce 'aguardando_pagamento': tocar
+          // no INSERT chamaria a loja pra uma mudança que ela nem pode ver, e
+          // depois, quando o PIX caísse (um UPDATE), não tocaria nada — que é
+          // o buraco que apareceu no teste real.
+          //
+          // O `ref` guarda quem já foi anunciado: assim vale pro caminho direto
+          // (nasce 'pendente') e pro pago (vira 'pendente' depois), sem tocar
+          // duas vezes pela mesma.
+          if (payload.new?.status === 'pendente' && !anunciadasRef.current.has(payload.new.id)) {
+            anunciadasRef.current.add(payload.new.id)
+            if (somAtivoConfig()) tocarSomAlteracao()
+          }
           carregarAlteracoes()
         })
       .subscribe()
@@ -8483,16 +8500,31 @@ export default function PainelPedidos() {
                     </div>
                   )}
 
-                  {/* Pagou online e vai encarecer: o sistema NÃO cobra sozinho.
-                      Falar aqui evita a loja entregar achando que está pago. */}
-                  {dif > 0 && (ped?.mp_payment_status === 'approved' || ped?.pix_status === 'pago') && (
+                  {/* Encareceu e a diferença JÁ ESTÁ PAGA (mig 0252): esta
+                      mudança só chegou aqui porque o PIX caiu — antes disso ela
+                      nem aparece. Dizer isso evita a loja cobrar de novo na
+                      porta um dinheiro que já entrou. */}
+                  {dif > 0 && Number(alt.valor_a_pagar) > 0 && (
+                    <div style={{
+                      fontSize: 12.5, lineHeight: 1.5, marginBottom: 10, padding: '8px 10px',
+                      borderRadius: 8, background: 'rgba(34,197,94,.14)',
+                      border: '1px solid rgba(34,197,94,.5)', color: '#4ade80',
+                    }}>
+                      ✅ Ele <strong>já pagou</strong> os R$ {Number(alt.valor_a_pagar).toFixed(2).replace('.', ',')} da
+                      diferença pelo PIX. Não cobre de novo na entrega.
+                    </div>
+                  )}
+
+                  {/* Encareceu num pedido que se paga na ENTREGA: aí sim o
+                      motoboy recebe o valor novo. */}
+                  {dif > 0 && !(Number(alt.valor_a_pagar) > 0) && (
                     <div style={{
                       fontSize: 12.5, lineHeight: 1.5, marginBottom: 10, padding: '8px 10px',
                       borderRadius: 8, background: 'rgba(251,191,36,.14)',
                       border: '1px solid rgba(251,191,36,.5)', color: '#fbbf24',
                     }}>
-                      ⚠️ Ele já pagou o valor antigo pelo PIX online.
-                      Falta receber <strong>R$ {dif.toFixed(2).replace('.', ',')}</strong> — cobre na entrega.
+                      ⚠️ Cobre <strong>R$ {Number(alt.total_depois).toFixed(2).replace('.', ',')}</strong> na
+                      entrega — o valor novo, não o antigo.
                     </div>
                   )}
 

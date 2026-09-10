@@ -1280,3 +1280,10 @@
   }
   .dloja-drawer-foto { height: 34dvh; }
 }
+
+/* Bolinha piscando enquanto o PIX da diferença não cai. É o sinal de que a
+   tela está viva e ninguém precisa apertar "já paguei". */
+@keyframes dlojaPulse {
+  0%, 100% { opacity: 1;   transform: scale(1); }
+  50%      { opacity: .35; transform: scale(.8); }
+}
