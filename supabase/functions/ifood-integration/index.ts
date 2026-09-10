@@ -31,6 +31,11 @@ const IFOOD = "https://merchant-api.ifood.com.br"
 const LIMITE_ENVIO = 25
 
 type Config = {
+  // Uma empresa pode ter VÁRIAS lojas no iFood (mesma cozinha, marcas
+  // diferentes). Cada linha de ifood_config é uma loja; `id` é dela, não da empresa.
+  id?: string
+  apelido?: string | null
+  principal?: boolean
   empresa_id: string
   client_id: string | null
   client_secret: string | null
@@ -59,7 +64,7 @@ Deno.serve(async (req) => {
 
   try {
     if (acao === "poll") return json(await runPoll(sb))
-    if (acao === "test") return json(await runTest(sb, body?.empresa_id))
+    if (acao === "test") return json(await runTest(sb, body?.empresa_id, body?.merchant_id))
     if (acao === "status") return json(await runStatus(sb, body?.pedido_id, body?.novo_status))
     if (acao === "verify_delivery_code") return json(await runVerifyDeliveryCode(sb, body?.pedido_id, body?.codigo))
     if (acao === "catalogo") return json(await runImportarCatalogo(sb, body?.empresa_id, body?.categoria_ids))
@@ -78,7 +83,7 @@ Deno.serve(async (req) => {
     if (acao === "catalogo_excluir_item") return json(await runExcluirItem(sb, body?.empresa_id, body?.categoria_id, body?.product_id))
     if (acao === "catalogo_itens") return json(await runCatalogoItensCompletos(sb, body?.empresa_id))
     if (acao === "catalogo_pausar_complemento") return json(await runPausarComplemento(sb, body?.empresa_id, body?.option_id, body?.pausar))
-    if (acao === "detectar_merchant") return json(await runDetectarMerchant(sb, body?.empresa_id, body?.merchant_id))
+    if (acao === "detectar_merchant") return json(await runDetectarMerchant(sb, body?.empresa_id, body?.merchant_id, body?.apelido))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
   } catch (e) {
     return json({ ok: false, error: String(e?.message ?? e) }, 500)
@@ -130,12 +135,31 @@ async function getToken(sb: any, cfg: Config): Promise<string> {
   const token: string = data.accessToken ?? data.access_token
   const expiresIn: number = data.expiresIn ?? data.expires_in ?? 10800
 
-  await sb.from("ifood_config").update({
+  const upd = sb.from("ifood_config").update({
     access_token: token,
     token_expira_em: new Date(Date.now() + expiresIn * 1000).toISOString(),
-  }).eq("empresa_id", cfg.empresa_id)
+  })
+  await (cfg.id ? upd.eq("id", cfg.id) : upd.eq("empresa_id", cfg.empresa_id))
 
   return token
+}
+
+// Acha a loja do iFood de uma empresa. Com merchantId, é aquela loja; sem ele
+// (cardápio, teste), vale a principal. Nunca usar .maybeSingle() aqui: empresa
+// com duas lojas devolve duas linhas e o maybeSingle estoura.
+async function cfgDaEmpresa(sb: any, empresaId: string, merchantId?: string | null): Promise<Config | null> {
+  if (!empresaId) return null
+  if (merchantId) {
+    const { data } = await sb.from("ifood_config").select("*")
+      .eq("empresa_id", empresaId).eq("merchant_id", merchantId).limit(1)
+    if ((data ?? []).length) return data[0] as Config
+  }
+  const { data } = await sb.from("ifood_config").select("*")
+    .eq("empresa_id", empresaId)
+    .order("principal", { ascending: false })
+    .order("created_at", { ascending: true })
+    .limit(1)
+  return ((data ?? [])[0] ?? null) as Config | null
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -168,7 +192,7 @@ async function runPoll(sb: any) {
       if (evRes.status === 204) {
         await sb.from("ifood_config").update({
           ultimo_polling_em: new Date().toISOString(), ultimo_erro: null,
-        }).eq("empresa_id", cfg.empresa_id)
+        }).eq("id", cfg.id)
         continue
       }
       if (!evRes.ok) throw new Error(`polling ${evRes.status}: ${(await evRes.text()).slice(0, 200)}`)
@@ -211,11 +235,11 @@ async function runPoll(sb: any) {
 
       await sb.from("ifood_config").update({
         ultimo_polling_em: new Date().toISOString(), ultimo_erro: null,
-      }).eq("empresa_id", cfg.empresa_id)
+      }).eq("id", cfg.id)
     } catch (e) {
       const msg = String(e?.message ?? e)
-      erros.push(`${cfg.empresa_id}: ${msg}`)
-      await sb.from("ifood_config").update({ ultimo_erro: msg.slice(0, 500) }).eq("empresa_id", cfg.empresa_id)
+      erros.push(`${cfg.apelido ?? cfg.merchant_id}: ${msg}`)
+      await sb.from("ifood_config").update({ ultimo_erro: msg.slice(0, 500) }).eq("id", cfg.id)
     }
   }
 
@@ -317,6 +341,9 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     incentivos_total: Number(incTotal.toFixed(2)),
     pago: Number(total.orderAmount ?? 0),
     pago_online: pagoOnline, // true = pago no app; false = cobrar na entrega
+    // Nome da loja do iFood congelado no pedido: o painel e o cupom mostram de
+    // qual marca é o pedido sem precisar consultar nada.
+    loja: cfg.apelido ?? null,
   }
 
   const novo: Record<string, unknown> = {
@@ -351,6 +378,7 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     observacoes,
 
     ifood_order_id: o.id ?? orderId,
+    ifood_merchant_id: cfg.merchant_id,
     ifood_display_id: o.displayId ?? null,
     ifood_status: "PLACED",
     ifood_valores: ifoodValores,
@@ -560,7 +588,7 @@ async function upsertProduto(
 // só o Prato Executivo não precisa trazer o resto junto.
 async function runImportarCatalogo(sb: any, empresaId: string, categoriaIds?: string[]) {
   if (!empresaId) return { ok: false, error: "empresa_id obrigatório" }
-  const { data: cfg } = await sb.from("ifood_config").select("*").eq("empresa_id", empresaId).maybeSingle()
+  const cfg = await cfgDaEmpresa(sb, empresaId)
   if (!cfg) return { ok: false, error: "iFood não configurado" }
   if (!cfg.merchant_id) return { ok: false, error: "Informe o Merchant ID primeiro" }
 
@@ -623,7 +651,7 @@ async function runImportarCatalogo(sb: any, empresaId: string, categoriaIds?: st
 // ─────────────────────────────────────────────────────────────────────
 async function runCatalogoListar(sb: any, empresaId: string) {
   if (!empresaId) return { ok: false, error: "empresa_id obrigatório" }
-  const { data: cfg } = await sb.from("ifood_config").select("*").eq("empresa_id", empresaId).maybeSingle()
+  const cfg = await cfgDaEmpresa(sb, empresaId)
   if (!cfg) return { ok: false, error: "iFood não configurado" }
   if (!cfg.merchant_id) return { ok: false, error: "Informe o Merchant ID primeiro" }
   const token = await getToken(sb, cfg as Config)
@@ -661,7 +689,7 @@ async function runCatalogoListar(sb: any, empresaId: string) {
 
 async function runCatalogoPausar(sb: any, empresaId: string, itemId: string, pausar: boolean) {
   if (!empresaId || !itemId) return { ok: false, error: "empresa_id e item_id obrigatórios" }
-  const { data: cfg } = await sb.from("ifood_config").select("*").eq("empresa_id", empresaId).maybeSingle()
+  const cfg = await cfgDaEmpresa(sb, empresaId)
   if (!cfg) return { ok: false, error: "iFood não configurado" }
   if (!cfg.merchant_id) return { ok: false, error: "Informe o Merchant ID primeiro" }
   const token = await getToken(sb, cfg as Config)
@@ -691,7 +719,7 @@ type CatCtx = { mid: string; auth: Record<string, string>; catalogId: string }
 // Resolve merchant + token + primeiro catálogo DEFAULT da loja (o que a UI usa).
 async function catalogoCtx(sb: any, empresaId: string): Promise<CatCtx | { error: string }> {
   if (!empresaId) return { error: "empresa_id obrigatório" }
-  const { data: cfg } = await sb.from("ifood_config").select("*").eq("empresa_id", empresaId).maybeSingle()
+  const cfg = await cfgDaEmpresa(sb, empresaId)
   if (!cfg) return { error: "iFood não configurado" }
   if (!cfg.merchant_id) return { error: "Informe o Merchant ID primeiro" }
   const token = await getToken(sb, cfg as Config)
@@ -1276,7 +1304,7 @@ async function runStatus(sb: any, pedidoId: string, novoStatus: string) {
 
   const { data: pedido } = await sb
     .from("pedidos_delivery")
-    .select("id, empresa_id, origem, ifood_order_id, tipo_entrega")
+    .select("id, empresa_id, origem, ifood_order_id, ifood_merchant_id, tipo_entrega")
     .eq("id", pedidoId)
     .maybeSingle()
 
@@ -1285,11 +1313,9 @@ async function runStatus(sb: any, pedidoId: string, novoStatus: string) {
     return { ok: true, skip: "pedido não é do iFood" }
   }
 
-  const { data: cfg } = await sb
-    .from("ifood_config")
-    .select("*")
-    .eq("empresa_id", pedido.empresa_id)
-    .maybeSingle()
+  // A empresa pode ter mais de uma loja no iFood: o status volta pra loja que
+  // mandou ESTE pedido, não pra "a loja da empresa".
+  const cfg = await cfgDaEmpresa(sb, pedido.empresa_id, pedido.ifood_merchant_id)
   if (!cfg) return { ok: false, error: "iFood não configurado para esta empresa" }
 
   const token = await getToken(sb, cfg as Config)
@@ -1362,7 +1388,7 @@ async function runVerifyDeliveryCode(sb: any, pedidoId: string, codigo: string) 
 
   const { data: pedido } = await sb
     .from("pedidos_delivery")
-    .select("id, empresa_id, origem, ifood_order_id")
+    .select("id, empresa_id, origem, ifood_order_id, ifood_merchant_id")
     .eq("id", pedidoId)
     .maybeSingle()
   if (!pedido) return { ok: false, error: "pedido não encontrado" }
@@ -1370,11 +1396,7 @@ async function runVerifyDeliveryCode(sb: any, pedidoId: string, codigo: string) 
     return { ok: false, error: "pedido não é do iFood" }
   }
 
-  const { data: cfg } = await sb
-    .from("ifood_config")
-    .select("*")
-    .eq("empresa_id", pedido.empresa_id)
-    .maybeSingle()
+  const cfg = await cfgDaEmpresa(sb, pedido.empresa_id, pedido.ifood_merchant_id)
   if (!cfg) return { ok: false, error: "iFood não configurado para esta empresa" }
 
   const token = await getToken(sb, cfg as Config)
@@ -1430,12 +1452,11 @@ function merchantsDoToken(token: string): string[] {
   return [...new Set(ids)]
 }
 
-async function runDetectarMerchant(sb: any, empresaId: string, merchantEscolhido?: string) {
+async function runDetectarMerchant(sb: any, empresaId: string, merchantEscolhido?: string, apelido?: string) {
   if (!empresaId) return { ok: false, error: "empresa_id obrigatório" }
 
   // Autentica com as credenciais da plataforma (ou as da empresa, se tiver).
-  const { data: cfgAtual } = await sb
-    .from("ifood_config").select("*").eq("empresa_id", empresaId).maybeSingle()
+  const cfgAtual = await cfgDaEmpresa(sb, empresaId)
   const creds = await resolverCreds(sb, (cfgAtual ?? { empresa_id: empresaId }) as Config)
   if (!creds.clientId || !creds.clientSecret) {
     return { ok: false, error: "Credenciais do iFood não configuradas na plataforma" }
@@ -1463,13 +1484,13 @@ async function runDetectarMerchant(sb: any, empresaId: string, merchantEscolhido
     }
   }
 
-  // Merchants já vinculados a OUTRAS empresas do CRM
+  // Merchants já vinculados no CRM. Agora tira também os desta empresa: como
+  // ela pode ter várias lojas, conectar a segunda não pode reoferecer a primeira.
   const { data: usados } = await sb
     .from("ifood_config").select("empresa_id, merchant_id").not("merchant_id", "is", null)
-  const deOutros = new Set(
-    (usados ?? []).filter((u: any) => u.empresa_id !== empresaId).map((u: any) => u.merchant_id),
-  )
-  const livres = autorizados.filter((m) => !deOutros.has(m))
+  const jaLigados = new Set((usados ?? []).map((u: any) => u.merchant_id))
+  const jaMinhas = (usados ?? []).filter((u: any) => u.empresa_id === empresaId).length
+  const livres = autorizados.filter((m) => !jaLigados.has(m))
 
   let merchantId: string | null = null
   if (merchantEscolhido) {
@@ -1482,15 +1503,22 @@ async function runDetectarMerchant(sb: any, empresaId: string, merchantEscolhido
   } else if (livres.length === 0) {
     return {
       ok: false,
-      error: "As lojas autorizadas já estão ligadas a outras contas do CRM. Autorize o app no iFood com a loja certa.",
+      error: jaMinhas > 0
+        ? "Todas as lojas que autorizaram o CRM FWC já estão conectadas aqui. Se falta alguma, autorize o app no iFood pela outra loja."
+        : "As lojas autorizadas já estão ligadas a outras contas do CRM. Autorize o app no iFood com a loja certa.",
     }
   } else {
     // Mais de uma candidata: quem escolhe é o lojista.
     return { ok: false, escolher: true, opcoes: livres }
   }
 
-  const { error } = await sb.from("ifood_config").upsert({
-    empresa_id: empresaId,
+  // Cada loja é uma LINHA. Se a empresa tem uma linha meia-boca (salva no
+  // formulário e nunca detectada, sem merchant), aproveita ela em vez de deixar
+  // lixo pra trás.
+  const { data: minhas } = await sb
+    .from("ifood_config").select("id, merchant_id").eq("empresa_id", empresaId)
+  const vazia = (minhas ?? []).find((r: any) => !r.merchant_id)
+  const patch: Record<string, unknown> = {
     merchant_id: merchantId,
     ambiente: "producao",
     ativo: true,
@@ -1498,25 +1526,30 @@ async function runDetectarMerchant(sb: any, empresaId: string, merchantEscolhido
     access_token: null,
     token_expira_em: null,
     ultimo_erro: null,
-  }, { onConflict: "empresa_id" })
+  }
+  if (apelido) patch.apelido = String(apelido).slice(0, 60)
+
+  const { error } = vazia
+    ? await sb.from("ifood_config").update(patch).eq("id", vazia.id)
+    : await sb.from("ifood_config").insert({
+        ...patch,
+        empresa_id: empresaId,
+        principal: (minhas ?? []).length === 0,
+      })
   if (error) return { ok: false, error: error.message }
 
-  return { ok: true, merchant_id: merchantId }
+  return { ok: true, merchant_id: merchantId, lojas: (minhas ?? []).length + (vazia ? 0 : 1) }
 }
 
-async function runTest(sb: any, empresaId: string) {
+async function runTest(sb: any, empresaId: string, merchantId?: string) {
   if (!empresaId) return { ok: false, error: "empresa_id obrigatório" }
-  const { data: cfg } = await sb
-    .from("ifood_config")
-    .select("*")
-    .eq("empresa_id", empresaId)
-    .maybeSingle()
+  const cfg = await cfgDaEmpresa(sb, empresaId, merchantId)
   if (!cfg) return { ok: false, error: "iFood não configurado" }
   const creds = await resolverCreds(sb, cfg as Config)
   if (!creds.clientId || !creds.clientSecret) return { ok: false, error: "Credenciais do iFood não configuradas na plataforma" }
 
   // Força reautenticação ignorando o cache
-  await sb.from("ifood_config").update({ access_token: null, token_expira_em: null }).eq("empresa_id", empresaId)
+  await sb.from("ifood_config").update({ access_token: null, token_expira_em: null }).eq("id", cfg.id)
   await getToken(sb, { ...cfg, access_token: null, token_expira_em: null } as Config)
   return { ok: true, mensagem: "Autenticação no iFood OK" }
 }

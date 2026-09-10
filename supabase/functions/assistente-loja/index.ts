@@ -433,7 +433,7 @@ async function situacaoAgora(sb: any, empresaId: string) {
     sb.from("empresas")
       .select("nome, delivery_ativo, mp_conectado, meta_faturamento_mensal, slug")
       .eq("id", empresaId).maybeSingle(),
-    sb.from("ifood_config").select("ativo").eq("empresa_id", empresaId).maybeSingle(),
+    sb.from("ifood_config").select("ativo").eq("empresa_id", empresaId).eq("ativo", true).limit(1),
     consultarVendas(sb, mesIni, hoje, iniISO(mesIni), fimISO(hoje)),
   ])
 
@@ -464,7 +464,7 @@ async function situacaoAgora(sb: any, empresaId: string) {
       loja: empRes.data?.nome ?? null,
       delivery_ligado: empRes.data?.delivery_ativo !== false,
       mercado_pago_conectado: empRes.data?.mp_conectado === true,
-      ifood_conectado: ifoodRes.data?.ativo === true,
+      ifood_conectado: (ifoodRes.data ?? []).length > 0,
       endereco_da_loja_online: empRes.data?.slug ? `lojaonline.fwcinter.com/${empRes.data.slug}` : null,
     },
   }

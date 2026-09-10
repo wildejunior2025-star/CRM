@@ -37,11 +37,15 @@ export default function CardapioIfood() {
 
   useEffect(() => {
     if (!empresa?.id) return
+    // A empresa pode ter várias lojas no iFood; o cardápio daqui trabalha na
+    // principal (as outras continuam sendo editadas no próprio iFood).
     supabase.from('ifood_config')
       .select('merchant_id, ambiente, ativo, ultimo_polling_em')
       .eq('empresa_id', empresa.id)
-      .maybeSingle()
-      .then(({ data }) => setCfg(data ?? null))
+      .order('principal', { ascending: false })
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .then(({ data }) => setCfg((data ?? [])[0] ?? null))
   }, [empresa?.id])
 
   async function abrirImportar() {

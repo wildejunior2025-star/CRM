@@ -112,7 +112,7 @@ export function montarCupomHtml(pedido, empresa = {}) {
   .ifood { background: #000; color: #fff; text-align: center; font-weight: 800;
            padding: 5px 4px; margin: 0 0 5px; font-size: ${lgPx + 2}px; letter-spacing: 1px; }
 </style></head><body>
-  ${pedido.origem === 'ifood' ? `<div class="ifood">★ PEDIDO iFOOD ★${pedido.ifood_display_id ? ` Nº ${esc(pedido.ifood_display_id)}` : ''}</div>` : ''}
+  ${pedido.origem === 'ifood' ? `<div class="ifood">★ PEDIDO iFOOD ★${pedido.ifood_display_id ? ` Nº ${esc(pedido.ifood_display_id)}` : ''}${pedido.ifood_valores?.loja ? `<br>${esc(pedido.ifood_valores.loja)}` : ''}</div>` : ''}
   <div class="center b lg">${esc(empresa.nome || 'Pedido')}</div>
   ${empresa.telefone ? `<div class="center">${esc(empresa.telefone)}</div>` : ''}
   <hr>

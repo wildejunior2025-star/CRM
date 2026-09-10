@@ -69,13 +69,11 @@ export default function MinhaLoja({ secao = 'loja' }) {
   const [adsMsg, setAdsMsg] = useState(null) // { tipo: 'ok'|'erro', texto }
   const [adsAjuda, setAdsAjuda] = useState(null) // 'google' | 'meta' | null
 
-  const [ifoodCfg, setIfoodCfg] = useState({
-    client_id: '', client_secret: '', merchant_id: '', ambiente: 'producao', ativo: false,
-    auto_criar_produtos: false,
-  })
-  const [ifoodStatus, setIfoodStatus] = useState(null) // { ultimo_polling_em, ultimo_erro }
-  const [ifoodSalvando, setIfoodSalvando] = useState(false)
-  const [ifoodTestando, setIfoodTestando] = useState(false)
+  // A empresa pode ter MAIS DE UMA loja no iFood (mesma cozinha, marcas
+  // diferentes) — todas jogando pedido no mesmo painel. Por isso é uma lista.
+  const [ifoodLojas, setIfoodLojas] = useState([])
+  const [ifoodSalvando, setIfoodSalvando] = useState(null) // id da loja salvando
+  const [ifoodTestando, setIfoodTestando] = useState(null) // id da loja testando
   const [ifoodDetectando, setIfoodDetectando] = useState(false)
   const [ifoodOpcoes, setIfoodOpcoes] = useState(null) // lojas autorizadas quando há mais de uma
   const [ifoodMsg, setIfoodMsg] = useState(null) // { tipo: 'ok'|'erro', texto }
@@ -226,23 +224,49 @@ export default function MinhaLoja({ secao = 'loja' }) {
     setTimeout(() => setAdsMsg(null), 6000)
   }
 
-  async function handleSalvarIfood(e) {
-    e.preventDefault()
-    if (!empresa) return
-    setIfoodSalvando(true)
+  async function carregarIfood(empresaId) {
+    const { data } = await supabase.from('ifood_config').select('*')
+      .eq('empresa_id', empresaId)
+      .order('principal', { ascending: false })
+      .order('created_at', { ascending: true })
+    setIfoodLojas((data ?? []).map(l => ({ ...l, merchant_id: l.merchant_id ?? '', apelido: l.apelido ?? '' })))
+  }
+
+  // Mexe numa loja da lista sem tocar nas outras
+  function mudarLoja(id, campo, valor) {
+    setIfoodLojas(ls => ls.map(l => (l.id === id ? { ...l, [campo]: valor } : l)))
+  }
+
+  async function handleSalvarLoja(loja) {
+    setIfoodSalvando(loja.id)
     setIfoodMsg(null)
-    const { error } = await supabase
-      .from('ifood_config')
-      .upsert({
-        empresa_id: empresa.id,
-        merchant_id: ifoodCfg.merchant_id.trim() || null,
-        ambiente: ifoodCfg.ambiente,
-        ativo: ifoodCfg.ativo,
-        auto_criar_produtos: ifoodCfg.auto_criar_produtos,
-      }, { onConflict: 'empresa_id' })
-    setIfoodSalvando(false)
+    const { error } = await supabase.from('ifood_config').update({
+      apelido: (loja.apelido ?? '').trim() || null,
+      merchant_id: (loja.merchant_id ?? '').trim() || null,
+      ambiente: loja.ambiente,
+      ativo: loja.ativo,
+      auto_criar_produtos: loja.auto_criar_produtos,
+    }).eq('id', loja.id)
+    setIfoodSalvando(null)
     if (error) { setIfoodMsg({ tipo: 'erro', texto: error.message }); return }
-    setIfoodMsg({ tipo: 'ok', texto: 'Configuração do iFood salva.' })
+    setIfoodMsg({ tipo: 'ok', texto: 'Loja do iFood salva.' })
+    setTimeout(() => setIfoodMsg(null), 3000)
+  }
+
+  // Desconectar uma loja NAO apaga os pedidos que ela ja trouxe — so para de
+  // buscar os novos. Se a que saiu era a principal, a proxima assume (o cardapio
+  // e o teste de conexao se apoiam nela).
+  async function handleRemoverLoja(loja) {
+    const nome = (loja.apelido ?? '').trim() || 'esta loja'
+    if (!window.confirm('Desconectar ' + nome + ' do iFood? Os pedidos que já entraram continuam no painel.')) return
+    const { error } = await supabase.from('ifood_config').delete().eq('id', loja.id)
+    if (error) { setIfoodMsg({ tipo: 'erro', texto: error.message }); return }
+    const sobrou = ifoodLojas.filter(l => l.id !== loja.id)
+    if (loja.principal && sobrou.length > 0) {
+      await supabase.from('ifood_config').update({ principal: true }).eq('id', sobrou[0].id)
+    }
+    await carregarIfood(empresa.id)
+    setIfoodMsg({ tipo: 'ok', texto: 'Loja desconectada.' })
     setTimeout(() => setIfoodMsg(null), 3000)
   }
 
@@ -266,8 +290,8 @@ export default function MinhaLoja({ secao = 'loja' }) {
       })
       const data = await res.json()
       if (data.ok) {
-        setIfoodCfg(c => ({ ...c, merchant_id: data.merchant_id, ambiente: 'producao', ativo: true }))
-        setIfoodMsg({ tipo: 'ok', texto: 'Loja encontrada e integração ligada! Os pedidos do iFood já vão cair no painel.' })
+        await carregarIfood(empresa.id)
+        setIfoodMsg({ tipo: 'ok', texto: 'Loja conectada! Os pedidos dela já vão cair no painel junto com os das outras.' })
       } else if (data.escolher) {
         setIfoodOpcoes(data.opcoes ?? [])
         setIfoodMsg({ tipo: 'erro', texto: 'Achei mais de uma loja autorizada. Escolha qual é a sua abaixo.' })
@@ -280,18 +304,18 @@ export default function MinhaLoja({ secao = 'loja' }) {
     setIfoodDetectando(false)
   }
 
-  async function handleTestarIfood() {
+  async function handleTestarIfood(loja) {
     if (!empresa) return
-    setIfoodTestando(true)
+    setIfoodTestando(loja.id)
     setIfoodMsg(null)
     // Salva antes de testar pra garantir que a edge function lê o que está na tela
-    await supabase.from('ifood_config').upsert({
-      empresa_id: empresa.id,
-      merchant_id: ifoodCfg.merchant_id.trim() || null,
-      ambiente: ifoodCfg.ambiente,
-      ativo: ifoodCfg.ativo,
-      auto_criar_produtos: ifoodCfg.auto_criar_produtos,
-    }, { onConflict: 'empresa_id' })
+    await supabase.from('ifood_config').update({
+      apelido: (loja.apelido ?? '').trim() || null,
+      merchant_id: (loja.merchant_id ?? '').trim() || null,
+      ambiente: loja.ambiente,
+      ativo: loja.ativo,
+      auto_criar_produtos: loja.auto_criar_produtos,
+    }).eq('id', loja.id)
 
     try {
       const { data: { session } } = await supabase.auth.getSession()
@@ -302,7 +326,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session?.access_token ?? ''}`,
         },
-        body: JSON.stringify({ acao: 'test', empresa_id: empresa.id }),
+        body: JSON.stringify({ acao: 'test', empresa_id: empresa.id, merchant_id: (loja.merchant_id ?? '').trim() || undefined }),
       })
       const data = await res.json()
       if (data.ok) setIfoodMsg({ tipo: 'ok', texto: data.mensagem ?? 'Conexão OK!' })
@@ -310,7 +334,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
     } catch (err) {
       setIfoodMsg({ tipo: 'erro', texto: String(err.message ?? err) })
     }
-    setIfoodTestando(false)
+    setIfoodTestando(null)
   }
 
   async function handleAlterarSenha(e) {
@@ -365,19 +389,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user?.email) setEmailLogin(user.email)
     })
-    supabase.from('ifood_config').select('*').eq('empresa_id', empresa.id).maybeSingle()
-      .then(({ data }) => {
-        if (!data) return
-        setIfoodCfg({
-          client_id: data.client_id ?? '',
-          client_secret: data.client_secret ?? '',
-          merchant_id: data.merchant_id ?? '',
-          ambiente: data.ambiente ?? 'teste',
-          ativo: data.ativo ?? false,
-          auto_criar_produtos: data.auto_criar_produtos ?? false,
-        })
-        setIfoodStatus({ ultimo_polling_em: data.ultimo_polling_em, ultimo_erro: data.ultimo_erro })
-      })
+    carregarIfood(empresa.id)
     supabase.from('empresa_fiscal').select('*').eq('empresa_id', empresa.id).maybeSingle()
       .then(({ data }) => {
         if (!data) return
@@ -1287,198 +1299,250 @@ export default function MinhaLoja({ secao = 'loja' }) {
         </div>
       )}
 
-      {/* Card de integração com o iFood */}
-      <form onSubmit={handleSalvarIfood} style={{ marginTop: 16 }}>
-        <div className="card" style={{ marginBottom: 16, borderTop: '3px solid #ea1d2c' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+      {/* Card de integração com o iFood — a empresa pode ter várias lojas lá */}
+      <div className="card" style={{ marginTop: 16, marginBottom: 16, borderTop: '3px solid #ea1d2c' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
+          <span style={{
+            background: '#ea1d2c', color: '#fff', borderRadius: 6,
+            padding: '3px 8px', fontSize: 12, fontWeight: 800, letterSpacing: '.02em',
+          }}>iFood</span>
+          <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Integração com o iFood</h2>
+          {ifoodLojas.length > 1 && (
             <span style={{
-              background: '#ea1d2c', color: '#fff', borderRadius: 6,
-              padding: '3px 8px', fontSize: 12, fontWeight: 800, letterSpacing: '.02em',
-            }}>iFood</span>
-            <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Integração com o iFood</h2>
-          </div>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
-            Os pedidos que caírem no iFood aparecem aqui no painel automaticamente. Autorize o
-            aplicativo <strong>CRM FWC</strong> no Portal do Parceiro do iFood (Integrações →
-            Aplicativos) e clique no botão abaixo — o resto a gente acha sozinho.
-          </p>
-
-          {ifoodMsg && (
-            <div style={{
-              background: ifoodMsg.tipo === 'ok' ? 'var(--success-bg)' : 'var(--danger-bg)',
-              color: ifoodMsg.tipo === 'ok' ? 'var(--success)' : 'var(--danger)',
-              border: `1px solid ${ifoodMsg.tipo === 'ok' ? 'var(--success)' : 'var(--danger)'}`,
-              borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 14,
-            }}>
-              {ifoodMsg.texto}
-            </div>
+              background: 'rgba(234,29,44,.12)', color: '#ea1d2c', borderRadius: 999,
+              padding: '2px 10px', fontSize: 11, fontWeight: 700,
+            }}>{ifoodLojas.length} lojas conectadas</span>
           )}
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 8 }}>
+          Os pedidos que caírem no iFood aparecem aqui no painel automaticamente. Autorize o
+          aplicativo <strong>CRM FWC</strong> no Portal do Parceiro do iFood (Integrações →
+          Aplicativos) e clique no botão abaixo — o resto a gente acha sozinho.
+        </p>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
+          <strong>Tem mais de uma loja no iFood?</strong> Conecte todas: os pedidos das duas caem
+          no mesmo painel, cada um com a etiqueta da loja de onde veio. O cardápio de cada loja
+          continua sendo editado no iFood, como é hoje.
+        </p>
 
-          {/* Caminho principal: o lojista não precisa saber o que é Merchant ID */}
+        {ifoodMsg && (
           <div style={{
-            border: '1.5px solid #ea1d2c', borderRadius: 10, padding: 16, marginBottom: 16,
-            background: 'rgba(234,29,44,.06)',
+            background: ifoodMsg.tipo === 'ok' ? 'var(--success-bg)' : 'var(--danger-bg)',
+            color: ifoodMsg.tipo === 'ok' ? 'var(--success)' : 'var(--danger)',
+            border: `1px solid ${ifoodMsg.tipo === 'ok' ? 'var(--success)' : 'var(--danger)'}`,
+            borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 14,
           }}>
-            <p style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700 }}>
-              Já autorizou o CRM FWC no iFood?
-            </p>
-            <button
-              type="button"
-              onClick={() => handleDetectarLoja()}
-              disabled={ifoodDetectando}
-              style={{
-                padding: '10px 20px', borderRadius: 8, border: 'none',
-                background: '#ea1d2c', color: '#fff', fontWeight: 700, fontSize: 14,
-                cursor: ifoodDetectando ? 'wait' : 'pointer', opacity: ifoodDetectando ? 0.6 : 1,
-              }}
-            >
-              {ifoodDetectando ? 'Procurando sua loja...' : '🔎 Detectar minha loja e ligar'}
-            </button>
-            <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
-              A gente descobre o código da sua loja no iFood e liga a integração. Você não
-              precisa copiar nada.
-            </p>
-
-            {ifoodOpcoes?.length > 0 && (
-              <div style={{ marginTop: 14 }}>
-                <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 700 }}>
-                  Qual dessas é a sua loja?
-                </p>
-                {ifoodOpcoes.map(id => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => handleDetectarLoja(id)}
-                    style={{
-                      display: 'block', width: '100%', textAlign: 'left', marginBottom: 6,
-                      padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
-                      border: '1px solid var(--border)', background: 'var(--input-bg, transparent)',
-                      color: 'var(--text)', fontSize: 13, fontFamily: 'monospace',
-                    }}
-                  >
-                    {id}
-                  </button>
-                ))}
-                <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
-                  Na dúvida, chame a FWC que a gente identifica pra você.
-                </p>
-              </div>
-            )}
+            {ifoodMsg.texto}
           </div>
+        )}
 
-          <label style={{
-            display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
-            padding: '10px 14px', borderRadius: 8, marginBottom: 16,
-            border: `1.5px solid ${ifoodCfg.ativo ? '#ea1d2c' : 'var(--border)'}`,
-            background: ifoodCfg.ativo ? 'rgba(234,29,44,.08)' : 'transparent',
+        {/* Uma ficha por loja conectada */}
+        {ifoodLojas.map((loja, i) => (
+          <div key={loja.id} style={{
+            border: `1.5px solid ${loja.ativo ? '#ea1d2c' : 'var(--border)'}`,
+            borderRadius: 10, padding: 14, marginBottom: 12,
+            background: loja.ativo ? 'rgba(234,29,44,.05)' : 'transparent',
           }}>
-            <input
-              type="checkbox"
-              checked={ifoodCfg.ativo}
-              onChange={e => setIfoodCfg(c => ({ ...c, ativo: e.target.checked }))}
-              style={{ width: 18, height: 18, cursor: 'pointer' }}
-            />
-            <span style={{ fontWeight: 700, fontSize: 14 }}>
-              Receber pedidos do iFood {ifoodCfg.ativo ? '(ativo)' : '(desligado)'}
-            </span>
-          </label>
-
-          <div className="form-grid">
-            <div className="form-field full">
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                ID da sua loja no iFood (Merchant ID)
-                <button
-                  type="button"
-                  onClick={() => setIfoodAjuda(true)}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    background: 'var(--primary-bg, #f5f0ff)', color: 'var(--primary)',
-                    border: '1px solid var(--primary)', borderRadius: 999,
-                    padding: '2px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                  }}
-                >
-                  ❓ Onde encontro?
-                </button>
-              </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
               <input
                 type="text"
-                value={ifoodCfg.merchant_id}
-                onChange={e => setIfoodCfg(c => ({ ...c, merchant_id: e.target.value }))}
-                placeholder="ex: 1b2c3d4e-5678-..."
+                value={loja.apelido}
+                onChange={e => mudarLoja(loja.id, 'apelido', e.target.value)}
+                placeholder={`Loja ${i + 1} — dê um nome (ex: Pastelaria)`}
+                style={{ flex: 1, minWidth: 170, fontWeight: 700 }}
               />
-              <small style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                É o código da sua loja no iFood. Não tem em mãos? Fale com a FWC que a gente pega pra você.
-              </small>
-            </div>
-            <div className="form-field">
-              <label>Ambiente</label>
-              <select
-                value={ifoodCfg.ambiente}
-                onChange={e => setIfoodCfg(c => ({ ...c, ambiente: e.target.value }))}
-              >
-                <option value="producao">Produção (loja real)</option>
-                <option value="teste">Teste</option>
-              </select>
-            </div>
-          </div>
-
-          {ifoodStatus?.ultimo_polling_em && (
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12, marginBottom: 0 }}>
-              Última verificação: {new Date(ifoodStatus.ultimo_polling_em).toLocaleString('pt-BR')}
-              {ifoodStatus.ultimo_erro && (
-                <span style={{ color: 'var(--danger)' }}> · último erro: {ifoodStatus.ultimo_erro}</span>
+              {loja.principal && (
+                <span
+                  title="A loja principal é a que responde pelo cardápio e pelo teste de conexão."
+                  style={{
+                    background: 'rgba(234,29,44,.12)', color: '#ea1d2c', borderRadius: 999,
+                    padding: '3px 10px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap',
+                  }}
+                >principal</span>
               )}
-            </p>
-          )}
-
-          <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
-            <button type="submit" className="btn btn-primary" disabled={ifoodSalvando}>
-              {ifoodSalvando ? 'Salvando...' : 'Salvar integração'}
-            </button>
-            <button
-              type="button"
-              onClick={handleTestarIfood}
-              disabled={ifoodTestando}
-              style={{
-                padding: '8px 18px', borderRadius: 8, cursor: 'pointer',
-                border: '1.5px solid var(--border)', background: 'var(--surface)',
-                fontWeight: 700, fontSize: 14, color: 'var(--text)',
-              }}
-            >
-              {ifoodTestando ? 'Testando...' : 'Testar conexão'}
-            </button>
-            {ifoodCfg.merchant_id && (
-              <Link
-                to="/cardapio-ifood"
+              <button
+                type="button"
+                onClick={() => handleRemoverLoja(loja)}
                 style={{
-                  padding: '8px 18px', borderRadius: 8, textDecoration: 'none',
-                  border: 'none', background: '#ea1d2c', color: '#fff',
-                  fontWeight: 700, fontSize: 14, display: 'inline-block',
+                  padding: '6px 12px', borderRadius: 8, cursor: 'pointer', whiteSpace: 'nowrap',
+                  border: '1px solid var(--danger)', background: 'transparent',
+                  color: 'var(--danger)', fontSize: 12, fontWeight: 700,
+                }}
+              >Desconectar</button>
+            </div>
+
+            <label style={{
+              display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+              padding: '8px 12px', borderRadius: 8, marginBottom: 12,
+              border: '1px solid var(--border)',
+            }}>
+              <input
+                type="checkbox"
+                checked={loja.ativo}
+                onChange={e => mudarLoja(loja.id, 'ativo', e.target.checked)}
+                style={{ width: 18, height: 18, cursor: 'pointer' }}
+              />
+              <span style={{ fontWeight: 700, fontSize: 14 }}>
+                Receber pedidos desta loja {loja.ativo ? '(ativo)' : '(desligado)'}
+              </span>
+            </label>
+
+            <div className="form-grid">
+              <div className="form-field full">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  ID da loja no iFood (Merchant ID)
+                  <button
+                    type="button"
+                    onClick={() => setIfoodAjuda(true)}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      background: 'var(--primary-bg, #f5f0ff)', color: 'var(--primary)',
+                      border: '1px solid var(--primary)', borderRadius: 999,
+                      padding: '2px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                    }}
+                  >
+                    ❓ Onde encontro?
+                  </button>
+                </label>
+                <input
+                  type="text"
+                  value={loja.merchant_id}
+                  onChange={e => mudarLoja(loja.id, 'merchant_id', e.target.value)}
+                  placeholder="ex: 1b2c3d4e-5678-..."
+                />
+              </div>
+              <div className="form-field">
+                <label>Ambiente</label>
+                <select
+                  value={loja.ambiente}
+                  onChange={e => mudarLoja(loja.id, 'ambiente', e.target.value)}
+                >
+                  <option value="producao">Produção (loja real)</option>
+                  <option value="teste">Teste</option>
+                </select>
+              </div>
+            </div>
+
+            {loja.ultimo_polling_em && (
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12, marginBottom: 0 }}>
+                Última verificação: {new Date(loja.ultimo_polling_em).toLocaleString('pt-BR')}
+                {loja.ultimo_erro && (
+                  <span style={{ color: 'var(--danger)' }}> · último erro: {loja.ultimo_erro}</span>
+                )}
+              </p>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => handleSalvarLoja(loja)}
+                disabled={ifoodSalvando === loja.id}
+              >
+                {ifoodSalvando === loja.id ? 'Salvando...' : 'Salvar'}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTestarIfood(loja)}
+                disabled={ifoodTestando === loja.id}
+                style={{
+                  padding: '8px 18px', borderRadius: 8, cursor: 'pointer',
+                  border: '1.5px solid var(--border)', background: 'var(--surface)',
+                  fontWeight: 700, fontSize: 14, color: 'var(--text)',
                 }}
               >
-                🍽 Abrir cardápio do iFood
-              </Link>
-            )}
+                {ifoodTestando === loja.id ? 'Testando...' : 'Testar conexão'}
+              </button>
+              {loja.principal && loja.merchant_id && (
+                <Link
+                  to="/cardapio-ifood"
+                  style={{
+                    padding: '8px 18px', borderRadius: 8, textDecoration: 'none',
+                    border: 'none', background: '#ea1d2c', color: '#fff',
+                    fontWeight: 700, fontSize: 14, display: 'inline-block',
+                  }}
+                >
+                  🍽 Abrir cardápio do iFood
+                </Link>
+              )}
+            </div>
+
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', fontSize: 13, marginTop: 12 }}>
+              <input
+                type="checkbox"
+                checked={loja.auto_criar_produtos ?? false}
+                onChange={e => mudarLoja(loja.id, 'auto_criar_produtos', e.target.checked)}
+                style={{ width: 16, height: 16, marginTop: 1, cursor: 'pointer', flexShrink: 0 }}
+              />
+              <span>
+                Criar produtos automaticamente pelos pedidos
+                <span style={{ color: 'var(--text-muted)' }}> — deixe <strong>desligado</strong> se sua loja já tem o cardápio cadastrado (evita itens duplicados).</span>
+              </span>
+            </label>
           </div>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 10 }}>
-            Esta tela é só a conexão. Editar o cardápio (criar item, mudar preço, pausar o que esgotou)
-            e trazer os produtos do iFood pra cá ficam em <strong>Catálogo → Cardápio iFood</strong>.
+        ))}
+
+        {/* Conectar (mais) uma loja: o lojista não precisa saber o que é Merchant ID */}
+        <div style={{
+          border: '1.5px solid #ea1d2c', borderRadius: 10, padding: 16,
+          background: 'rgba(234,29,44,.06)',
+        }}>
+          <p style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700 }}>
+            {ifoodLojas.length > 0 ? 'Tem outra loja no iFood?' : 'Já autorizou o CRM FWC no iFood?'}
+          </p>
+          <button
+            type="button"
+            onClick={() => handleDetectarLoja()}
+            disabled={ifoodDetectando}
+            style={{
+              padding: '10px 20px', borderRadius: 8, border: 'none',
+              background: '#ea1d2c', color: '#fff', fontWeight: 700, fontSize: 14,
+              cursor: ifoodDetectando ? 'wait' : 'pointer', opacity: ifoodDetectando ? 0.6 : 1,
+            }}
+          >
+            {ifoodDetectando
+              ? 'Procurando sua loja...'
+              : (ifoodLojas.length > 0 ? '➕ Conectar outra loja' : '🔎 Detectar minha loja e ligar')}
+          </button>
+          <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+            {ifoodLojas.length > 0
+              ? 'A outra loja também precisa ter autorizado o CRM FWC no Portal do Parceiro dela. Os pedidos das duas caem no mesmo painel.'
+              : 'A gente descobre o código da sua loja no iFood e liga a integração. Você não precisa copiar nada.'}
           </p>
 
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', fontSize: 13 }}>
-            <input
-              type="checkbox"
-              checked={ifoodCfg.auto_criar_produtos}
-              onChange={e => setIfoodCfg(c => ({ ...c, auto_criar_produtos: e.target.checked }))}
-              style={{ width: 16, height: 16, marginTop: 1, cursor: 'pointer', flexShrink: 0 }}
-            />
-            <span>
-              Criar produtos automaticamente pelos pedidos
-              <span style={{ color: 'var(--text-muted)' }}> — deixe <strong>desligado</strong> se sua loja já tem o cardápio cadastrado (evita itens duplicados).</span>
-            </span>
-          </label>
+          {ifoodOpcoes?.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 700 }}>
+                Qual dessas é a loja que você quer conectar?
+              </p>
+              {ifoodOpcoes.map(id => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => handleDetectarLoja(id)}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', marginBottom: 6,
+                    padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
+                    border: '1px solid var(--border)', background: 'var(--input-bg, transparent)',
+                    color: 'var(--text)', fontSize: 13, fontFamily: 'monospace',
+                  }}
+                >
+                  {id}
+                </button>
+              ))}
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                Na dúvida, chame a FWC que a gente identifica pra você.
+              </p>
+            </div>
+          )}
         </div>
-      </form>
+
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12, marginBottom: 0 }}>
+          Esta tela é só a conexão. Editar o cardápio (criar item, mudar preço, pausar o que esgotou)
+          e trazer os produtos do iFood pra cá ficam em <strong>Catálogo → Cardápio iFood</strong>
+          {ifoodLojas.length > 1 ? ', que hoje trabalha na loja principal — o cardápio das outras continua sendo mexido no próprio iFood.' : '.'}
+        </p>
+      </div>
 
       {/* Popup: onde encontrar o Merchant ID */}
       {ifoodAjuda && (

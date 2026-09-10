@@ -2901,6 +2901,14 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           ) : (
             <span className="pp-numero">#{pedido.numero_pedido ?? pedido.id.slice(-4).toUpperCase()}</span>
           )}
+          {/* Loja do iFood: a empresa pode ter mais de uma lá, e quem está na
+              cozinha precisa saber de qual marca é o pedido. */}
+          {pedido.origem === 'ifood' && pedido.ifood_valores?.loja && (
+            <span style={{
+              background: 'rgba(234,29,44,.12)', color: '#ea1d2c', fontSize: 10,
+              fontWeight: 700, padding: '2px 7px', borderRadius: 999,
+            }}>{pedido.ifood_valores.loja}</span>
+          )}
           {/* Badge de origem */}
           <span style={{
             background: origemCfg.bg,
@@ -4353,6 +4361,11 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
       </div>
       <div className="pp-mini-sub">{hora} · {pedido.cliente_nome || '—'}</div>
       <div className="pp-mini-tags">
+        {pedido.origem === 'ifood' && pedido.ifood_valores?.loja && (
+          <span className="pp-mini-badge" style={{ background: 'rgba(234,29,44,.15)', color: '#ea1d2c' }}>
+            {pedido.ifood_valores.loja}
+          </span>
+        )}
         {pedido.agendado_para && (
           <span className="pp-mini-badge" style={{ background: 'rgba(14,165,233,.18)', color: '#0284c7' }}>
             🗓️ {rotuloAgendado(pedido.agendado_para, { comData: true, ate: pedido.agendado_ate })}

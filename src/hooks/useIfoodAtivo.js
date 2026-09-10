@@ -24,9 +24,11 @@ export function useIfoodAtivo(empresaId) {
       .from('ifood_config')
       .select('merchant_id')
       .eq('empresa_id', empresaId)
-      .maybeSingle()
+      .not('merchant_id', 'is', null)
+      .limit(1)
       .then(({ data }) => {
-        const tem = !!data?.merchant_id
+        // Sem maybeSingle: a empresa pode ter mais de uma loja no iFood.
+        const tem = (data ?? []).length > 0
         cache.set(empresaId, tem)
         if (vivo) setAtivo(tem)
       })
