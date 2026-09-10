@@ -44,6 +44,11 @@
      ocupando a linha inteira; em tela grande as 3 ficam lado a lado. */
   .re-coluna { flex: 1 1 380px; }
 
+  /* A lista de bairros tem nome + 4 controles na mesma linha: em 380px o nome
+     virava "Nos…", "Nov…". Pedindo mais largura, em tela média ela desce e fica
+     com a linha inteira; em tela grande continua ao lado das outras duas. */
+  .re-coluna-bairros { flex: 1 1 640px; }
+
   /* Nada de sticky aqui: com endereço e raio embaixo, o mapa fixo passava por
      cima dos cards ao rolar. */
   .re-coluna > .re-map-wrapper { height: 400px; }
@@ -674,9 +679,14 @@
   padding-right: 2px;
 }
 
+/* Flex com quebra, não grid de colunas fixas: este cartão mora numa coluna
+   estreita do formulário, e media query olha a largura da JANELA, não a do
+   cartão — num monitor grande a linha continuava apertada e o nome do bairro
+   saía cortado em "Nos…", "Nov…". Com flex, quando não cabe, o nome fica com a
+   linha inteira e os controles descem sozinhos. */
 .re-bairro-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 152px 96px 84px 32px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
@@ -690,7 +700,10 @@
 .re-bairro-row.modo-taxa     { border-left-color: #22c55e; }
 .re-bairro-row.modo-bloqueio { border-left-color: #dc2626; }
 
+/* O nome é o que a pessoa procura: ele fica com o espaço que sobrar e, quando
+   não sobra, toma a linha inteira em vez de virar reticências. */
 .re-bairro-nome {
+  flex: 1 1 165px;
   min-width: 0;
   display: flex;
   align-items: baseline;
@@ -701,15 +714,19 @@
 .re-bairro-nome strong {
   font-size: 13.5px;
   font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .re-bairro-nome span {
   font-size: 11px;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.re-bairro-row select {
+  flex: 0 1 148px;
+  min-width: 112px;
 }
 
 .re-bairro-row select,
@@ -729,7 +746,10 @@
   position: relative;
   display: flex;
   align-items: center;
+  flex: 0 0 88px;
 }
+
+.re-bairro-campo.sufixo { flex: 0 0 78px; }
 
 .re-bairro-campo input { padding-left: 26px; text-align: right; }
 .re-bairro-campo.sufixo input { padding-left: 8px; padding-right: 30px; text-align: right; }
@@ -747,13 +767,14 @@
 .re-bairro-campo.sufixo em { left: auto; right: 8px; }
 
 .re-bairro-vazio {
+  flex: 1 1 auto;
   font-size: 12px;
   color: var(--text-muted);
-  text-align: center;
-  align-self: center;
 }
 
 .re-bairro-x {
+  flex: 0 0 30px;
+  margin-left: auto;
   width: 30px;
   height: 30px;
   display: flex;
@@ -769,12 +790,3 @@
 }
 
 .re-bairro-x:hover { border-color: #dc2626; color: #dc2626; }
-
-/* No celular a linha vira duas: o nome em cima, os controles embaixo. */
-@media (max-width: 720px) {
-  .re-bairro-row {
-    grid-template-columns: minmax(0, 1fr) 96px 84px 32px;
-  }
-  .re-bairro-nome { grid-column: 1 / -1; }
-  .re-bairro-row select { grid-column: 1 / 2; }
-}

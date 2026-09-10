@@ -931,7 +931,7 @@ export default function RaioEntrega() {
         </div>
 
         </div>{/* fim da coluna do meio */}
-        <div className="re-coluna">
+        <div className="re-coluna re-coluna-bairros">
 
         {/* ── Taxa por bairro (opcional) ── */}
         {aceitaDelivery && (
@@ -1042,7 +1042,7 @@ export default function RaioEntrega() {
                           </label>
                         </>
                       ) : (
-                        <span className="re-bairro-vazio" style={{ gridColumn: 'span 2' }}>
+                        <span className="re-bairro-vazio">
                           {b.modo === 'bloqueio' ? 'o cliente não consegue pedir' : 'usa a tabela por distância'}
                         </span>
                       )}
