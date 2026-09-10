@@ -5605,6 +5605,7 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
   const [pinBusy, setPinBusy] = useState(false)
   const [pinMsg, setPinMsg] = useState(null)   // { ok, txt }
   const [pinLink, setPinLink] = useState(null)
+  const [pinToken, setPinToken] = useState(null)  // amarra o link a ESTE pedido ao fechar
 
   // Digitou o nome da rua, aparece a lista — mesma busca da tela de Vender e do
   // checkout do cliente. Quem atende está com o cliente falando no ouvido: o
@@ -5710,6 +5711,7 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
       }
       const url = `https://lojaonline.fwcinter.com/local/${data.token}`
       setPinLink(url)
+      setPinToken(data.token)
       try { await navigator.clipboard.writeText(url) } catch { /* sem clipboard: o link fica na tela */ }
       if (tel.length >= 10) {
         const texto = `Oi! Pra entrega chegar certinho, confirma no mapa o ponto exato da sua casa:
@@ -5913,7 +5915,7 @@ ${url}
       <button type="button" disabled={salvando || faltaEndereco || !itens.length}
         onClick={() => onFinalizar({
           tipo, nome, cep, rua, numero, bairro, cidade, taxa: taxaNum,
-          pagamento, troco, obs, subtotal, total, cadastro,
+          pagamento, troco, obs, subtotal, total, cadastro, pinToken,
           // O pino da conversa vem na frente: é o ponto que o cliente apontou
           // agora, e vale mesmo que quem atende tenha corrigido a rua depois.
           // O do cadastro só vale se for DESTE endereço: o cliente que mudou de
@@ -7110,12 +7112,30 @@ export default function PainelPedidos() {
       payload.endereco_lng = d.pino?.lng ?? null
     }
 
+    // O cliente pode ter arrastado o pino DEPOIS que quem atende digitou o
+    // endereço. Se o link do mapa já voltou confirmado, quem manda é ele.
+    if (d.pinToken && d.tipo === 'entrega') {
+      const { data: pin } = await supabase.from('pin_links')
+        .select('lat, lng, confirmado_em').eq('token', d.pinToken).maybeSingle()
+      if (pin?.confirmado_em && pin.lat != null) {
+        payload.endereco_lat = pin.lat
+        payload.endereco_lng = pin.lng
+      }
+    }
+
     const { data: novo, error } = await supabase.from('pedidos_delivery')
       .insert(payload).select('id, numero_pedido').maybeSingle()
     if (error) {
       setSalvandoPedidoChat(false)
       setChatAviso({ ok: false, txt: `⚠️ Não consegui lançar o pedido: ${error.message}` })
       return
+    }
+
+    // Amarra o link do mapa a ESTE pedido. O link do chat nasce antes do pedido
+    // existir; sem amarrar, o cliente arrastar o pino depois só arrumava o
+    // cadastro dele e o pedido que já estava na rua seguia com o ponto velho.
+    if (d.pinToken && novo?.id) {
+      await supabase.rpc('amarrar_pin_link_ao_pedido', { p_token: d.pinToken, p_pedido_id: novo.id })
     }
 
     // O carrinho do robô sai de cena: se ficasse lá, o robô fecharia um segundo
