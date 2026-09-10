@@ -136,11 +136,19 @@ export default function Usuarios() {
     if (profile.id === user?.id) await refreshProfile()
   }
 
-  // E5 — desconto por entrega do entregador (liga/desliga e valor)
-  async function saveDesconto(p, patch) {
+  // E5 — quanto a LOJA fica de cada corrida do motoqueiro. São dois valores
+  // independentes: um pras corridas do iFood, outro pras da própria loja. Tem
+  // loja que só cobra no iFood e loja que só cobra no delivery próprio.
+  const CAMPOS_DESCONTO = {
+    ifood: { ativo: 'entregador_desconto_ativo', valor: 'entregador_desconto_valor' },
+    loja: { ativo: 'entregador_desconto_loja_ativo', valor: 'entregador_desconto_loja_valor' },
+  }
+
+  async function saveDesconto(p, qual, patch) {
+    const campos = CAMPOS_DESCONTO[qual]
     const novo = {
-      entregador_desconto_ativo: patch.ativo ?? p.entregador_desconto_ativo ?? false,
-      entregador_desconto_valor: patch.valor ?? p.entregador_desconto_valor ?? 0,
+      [campos.ativo]: patch.ativo ?? p[campos.ativo] ?? false,
+      [campos.valor]: patch.valor ?? p[campos.valor] ?? 0,
     }
     setPerfis(prev => prev.map(x => (x.id === p.id ? { ...x, ...novo } : x)))
     const { error } = await supabase.from('profiles').update(novo).eq('id', p.id)
@@ -324,25 +332,37 @@ export default function Usuarios() {
                   </td>
                   <td>
                     {p.perfil === 'entregador' ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <input
-                          type="checkbox"
-                          checked={!!p.entregador_desconto_ativo}
-                          onChange={(e) => saveDesconto(p, { ativo: e.target.checked })}
-                          title="Descontar um valor por cada entrega deste motoqueiro"
-                        />
-                        {p.entregador_desconto_ativo && (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            R$
-                            <input
-                              type="number" min="0" step="0.50"
-                              value={p.entregador_desconto_valor ?? 0}
-                              onChange={(e) => setPerfis(prev => prev.map(x => x.id === p.id ? { ...x, entregador_desconto_valor: e.target.value } : x))}
-                              onBlur={(e) => saveDesconto(p, { valor: Number(e.target.value) || 0 })}
-                              style={{ width: 72 }}
-                            />
-                          </span>
-                        )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {[
+                          ['ifood', 'iFood', 'Fica com a loja em cada corrida vinda do iFood'],
+                          ['loja', 'Loja', 'Fica com a loja em cada corrida do delivery próprio (app, loja online, WhatsApp, balcão)'],
+                        ].map(([qual, rot, ajuda]) => {
+                          const campos = CAMPOS_DESCONTO[qual]
+                          const ligado = !!p[campos.ativo]
+                          return (
+                            <label key={qual} title={ajuda}
+                              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={ligado}
+                                onChange={(e) => saveDesconto(p, qual, { ativo: e.target.checked })}
+                              />
+                              <span style={{ width: 38, fontWeight: 700, color: ligado ? 'var(--text)' : 'var(--text-muted, #9ca3af)' }}>{rot}</span>
+                              {ligado && (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                  R$
+                                  <input
+                                    type="number" min="0" step="0.50"
+                                    value={p[campos.valor] ?? 0}
+                                    onChange={(e) => setPerfis(prev => prev.map(x => x.id === p.id ? { ...x, [campos.valor]: e.target.value } : x))}
+                                    onBlur={(e) => saveDesconto(p, qual, { valor: Number(e.target.value) || 0 })}
+                                    style={{ width: 72 }}
+                                  />
+                                </span>
+                              )}
+                            </label>
+                          )
+                        })}
                       </div>
                     ) : (
                       <span style={{ color: 'var(--text-muted, #9ca3af)' }}>—</span>

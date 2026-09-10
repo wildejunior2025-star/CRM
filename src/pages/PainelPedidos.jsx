@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
+import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto } from '../lib/descontoEntrega'
 import { precoPorQuantidade, faixaAplicada, menorFaixa } from '../lib/precoQuantidade'
 import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
 import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
@@ -7646,7 +7647,7 @@ export default function PainelPedidos() {
     if (!empresa) return
     supabase
       .from('profiles')
-      .select('id, nome, entregador_desconto_ativo, entregador_desconto_valor')
+      .select('id, nome, entregador_desconto_ativo, entregador_desconto_valor, entregador_desconto_loja_ativo, entregador_desconto_loja_valor')
       .eq('empresa_id', empresa.id)
       .eq('perfil', 'entregador')
       .eq('ativo', true)
@@ -9771,9 +9772,10 @@ export default function PainelPedidos() {
               const concl = concluidas(entregadorSel).filter(p => dentroDoPeriodo(p.created_at, 'hoje'))
               const pendentes = concl.filter(p => !p.entregador_pago)
               const pagos = concl.filter(p => p.entregador_pago)
-              // Ganho LÍQUIDO do motoqueiro: taxa cheia, menos o desconto SÓ nas do iFood.
-              const descValor = (ent?.entregador_desconto_ativo && Number(ent?.entregador_desconto_valor) > 0) ? Number(ent.entregador_desconto_valor) : 0
-              const ganho = p => Math.max(0, Number(p.taxa_entrega || 0) - (p.origem === 'ifood' ? descValor : 0))
+              // Ganho LÍQUIDO do motoqueiro: taxa cheia, menos o que fica com a loja
+              // (um valor pras corridas do iFood, outro pras da própria loja).
+              const descontos = descontosDoEntregador(ent)
+              const ganho = p => ganhoDaCorrida(descontos, p)
               const somaTaxa = arr => arr.reduce((s, p) => s + ganho(p), 0)
               // Pagamento do CLIENTE: o motoqueiro cobrou na entrega (dinheiro/cartão)
               // ou já estava pago (PIX confirmado / iFood)?
@@ -9810,7 +9812,7 @@ export default function PainelPedidos() {
                     <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <strong style={{ fontSize: 13, color: corTaxa }}
-                        title={p.origem === 'ifood' && descValor > 0 ? `Taxa ${fmt(p.taxa_entrega)} − iFood ${fmt(descValor)}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
+                        title={descontoDoPedido(descontos, p) > 0 ? `Taxa ${fmt(p.taxa_entrega)} − ${rotuloDoDesconto(p)} ${fmt(descontoDoPedido(descontos, p))}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
                       {!ehRota && (pago
                         ? <span style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '2px 8px', borderRadius: 20 }}>✓ Pago</span>
                         : <button type="button" onClick={() => pagarCorridas([p.id])}
@@ -9821,7 +9823,7 @@ export default function PainelPedidos() {
                   </div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
                     {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
-                    {p.origem === 'ifood' && descValor > 0 && <span style={{ color: '#f59e0b' }}> · iFood −{fmt(descValor)}</span>}
+                    {descontoDoPedido(descontos, p) > 0 && <span style={{ color: '#f59e0b' }}> · {rotuloDoDesconto(p)} −{fmt(descontoDoPedido(descontos, p))}</span>}
                   </div>
                   {/* Valor do pedido: laranja = cobrar na entrega; verde = já pago */}
                   <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: 'flex', justifyContent: 'space-between', gap: 8, color: pgc.pago ? '#16a34a' : '#f59e0b' }}>

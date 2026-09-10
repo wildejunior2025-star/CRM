@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
+import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto } from '../lib/descontoEntrega'
 import '../components/Page.css'
 import './Entregadores.css'
 
@@ -591,7 +592,7 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
         if (faixa.ate) q = q.lte('created_at', faixa.ate)
         return q.order('created_at', { ascending: false })
       }),
-      supabase.from('profiles').select('nome, entregador_desconto_ativo, entregador_desconto_valor').eq('id', id).maybeSingle(),
+      supabase.from('profiles').select('nome, entregador_desconto_ativo, entregador_desconto_valor, entregador_desconto_loja_ativo, entregador_desconto_loja_valor').eq('id', id).maybeSingle(),
     ])
     setPedidos(pd || [])
     setPerfil(pf || null)
@@ -600,8 +601,9 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
 
   useEffect(() => { carregar() }, [carregar])
 
-  const descValor = (perfil?.entregador_desconto_ativo && num(perfil?.entregador_desconto_valor) > 0) ? num(perfil.entregador_desconto_valor) : 0
-  const ganho = p => Math.max(0, num(p.taxa_entrega) - (p.origem === 'ifood' ? descValor : 0))
+  // Dois descontos separados: um pras corridas do iFood, outro pras da loja.
+  const descontos = descontosDoEntregador(perfil)
+  const ganho = p => ganhoDaCorrida(descontos, p)
   const somaGanho = arr => arr.reduce((s, p) => s + ganho(p), 0)
 
   const concluidas = pedidos.filter(p => p.status === 'entregue')
@@ -673,7 +675,7 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
         </div>
         <div className="ent-corrida-meta">
           {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
-          {p.origem === 'ifood' && descValor > 0 ? ` · iFood −${fmt(descValor)}` : ''}
+          {descontoDoPedido(descontos, p) > 0 ? ` · ${rotuloDoDesconto(p)} −${fmt(descontoDoPedido(descontos, p))}` : ''}
         </div>
         {pago && p.entregador_pago_em && (
           <div className="ent-corrida-meta c-ok">🧾 Pago em {dataHora(p.entregador_pago_em)}</div>

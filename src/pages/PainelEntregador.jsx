@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { separarItem } from '../lib/itensPedido'
+import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto } from '../lib/descontoEntrega'
 
 // Cada aba tem seu endereço (/entregas?aba=minhas). O motoqueiro sai pro Waze,
 // pro iFood, atende o telefone — e quando volta o celular já descarregou a
@@ -368,7 +369,7 @@ function previstaEntregaTxt(p, tempoMax) {
   return dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
-function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descValor = 0, bebidas = null, exigeCodigo = true, tempoEntregaMax, empresa, ordemRota, totalRota = 0, checagemEndereco, foraDaRota = false, onAlternarRota }) {
+function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmarIfood, onDesistir, descontos = null, bebidas = null, exigeCodigo = true, tempoEntregaMax, empresa, ordemRota, totalRota = 0, checagemEndereco, foraDaRota = false, onAlternarRota }) {
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
@@ -637,16 +638,16 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
           🥤 Não esqueça: {bebidasNomes.join(', ')}
         </div>
       )}
-      {/* O que o motoqueiro RECEBE nesta corrida (iFood já com o desconto abatido) */}
+      {/* O que o motoqueiro RECEBE nesta corrida (já com o desconto abatido) */}
       {pedido.taxa_entrega != null && Number(pedido.taxa_entrega) > 0 && (() => {
-        const desc = pedido.origem === 'ifood' ? Number(descValor || 0) : 0
+        const desc = descontoDoPedido(descontos, pedido)
         const liquido = Math.max(0, Number(pedido.taxa_entrega) - desc)
         return (
           <div style={{
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
             fontSize: 13.5, color: 'var(--text-muted)', margin: '0 2px 12px',
           }}>
-            <span>🛵 Você recebe{desc > 0 ? <span style={{ fontSize: 11 }}> (taxa {fmt(pedido.taxa_entrega)} − iFood {fmt(desc)})</span> : ''}</span>
+            <span>🛵 Você recebe{desc > 0 ? <span style={{ fontSize: 11 }}> (taxa {fmt(pedido.taxa_entrega)} − {rotuloDoDesconto(pedido)} {fmt(desc)})</span> : ''}</span>
             <strong style={{ color: 'var(--text)', fontSize: 15 }}>{fmt(liquido)}</strong>
           </div>
         )
@@ -1245,8 +1246,9 @@ export default function PainelEntregador() {
   const disponiveisF = filtraBusca(disponiveis)
   const minhasF = filtraBusca(minhas)
 
-  // Desconto por corrida (só iFood) deste motoqueiro — abatido do que ele recebe.
-  const descValorEntrega = (profile?.entregador_desconto_ativo && Number(profile?.entregador_desconto_valor) > 0) ? Number(profile.entregador_desconto_valor) : 0
+  // Desconto por corrida deste motoqueiro — abatido do que ele recebe. São dois:
+  // um pras corridas do iFood, outro pras da loja (cada loja usa o que quiser).
+  const descontosEntrega = descontosDoEntregador(profile)
 
   // Fila (E4): com a fila ativa, só quem está online, sem pausa e na vez aceita.
   const filaAtiva = !!fila?.fila_ativa
@@ -1480,7 +1482,7 @@ export default function PainelEntregador() {
                   </button>
                 )}
                 {minhasF.map(p => (
-                  <CardEntrega key={p.id} pedido={p} mine bebidas={bebidasDoPedido(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} empresa={empresa}
+                  <CardEntrega key={p.id} pedido={p} mine bebidas={bebidasDoPedido(p)} exigeCodigo={exigeCodigo} descontos={descontosEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} empresa={empresa}
                     ordemRota={ordemRota.get(p.id)} totalRota={ordemRota.size}
                     checagemEndereco={checagem.get(p.id)}
                     foraDaRota={foraDaRota.has(p.id)} onAlternarRota={alternarForaDaRota}
@@ -1506,7 +1508,7 @@ export default function PainelEntregador() {
                 Nenhum pedido encontrado pra <strong>“{busca}”</strong>.
               </div>
             ) : disponiveisF.map(p => (
-              <CardEntrega key={p.id} pedido={p} mine={false} bebidas={bebidasDoPedido(p)} exigeCodigo={exigeCodigo} descValor={descValorEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} empresa={empresa} onAceitar={podeAceitar ? aceitar : undefined} />
+              <CardEntrega key={p.id} pedido={p} mine={false} bebidas={bebidasDoPedido(p)} exigeCodigo={exigeCodigo} descontos={descontosEntrega} tempoEntregaMax={empresa?.tempo_entrega_max} empresa={empresa} onAceitar={podeAceitar ? aceitar : undefined} />
             ))
           )
         ) : (
@@ -1524,9 +1526,9 @@ export default function PainelEntregador() {
                 const base = historico.filter(p => dentroDoPeriodo(p.created_at, periodoHist))
                 const pend = base.filter(p => !p.entregador_pago)
                 const pagos = base.filter(p => p.entregador_pago)
-                // Ganho LÍQUIDO: taxa cheia, menos o desconto SÓ nas do iFood.
-                const descValor = (profile?.entregador_desconto_ativo && Number(profile?.entregador_desconto_valor) > 0) ? Number(profile.entregador_desconto_valor) : 0
-                const ganho = p => Math.max(0, Number(p.taxa_entrega || 0) - (p.origem === 'ifood' ? descValor : 0))
+                // Ganho LÍQUIDO: taxa cheia, menos o desconto da corrida.
+                const descontos = descontosEntrega
+                const ganho = p => ganhoDaCorrida(descontos, p)
                 const soma = arr => arr.reduce((s, p) => s + ganho(p), 0)
                 const dataDe = p => new Date(p.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
                 const grupos = arr => {
@@ -1540,7 +1542,7 @@ export default function PainelEntregador() {
                       <span style={{ fontWeight: 800, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <strong style={{ color: '#16a34a' }}
-                          title={p.origem === 'ifood' && descValor > 0 ? `Taxa ${fmt(p.taxa_entrega)} − iFood ${fmt(descValor)}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
+                          title={descontoDoPedido(descontos, p) > 0 ? `Taxa ${fmt(p.taxa_entrega)} − ${rotuloDoDesconto(p)} ${fmt(descontoDoPedido(descontos, p))}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
                         {p.entregador_pago
                           ? <span style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '2px 8px', borderRadius: 20 }}>✓ Pago</span>
                           : <span style={{ fontSize: 11, fontWeight: 800, color: '#f59e0b', background: 'rgba(245,158,11,.14)', padding: '2px 8px', borderRadius: 20 }}>A receber</span>}
@@ -1550,7 +1552,7 @@ export default function PainelEntregador() {
                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>{[[p.endereco_rua, p.endereco_numero].filter(Boolean).join(', '), [p.endereco_bairro, p.endereco_cidade].filter(Boolean).join(', ')].filter(Boolean).join(' — ')}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
                       {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{p.forma_pagamento ? ` · ${p.forma_pagamento}` : ''}
-                      {p.origem === 'ifood' && descValor > 0 && <span style={{ color: '#f59e0b' }}> · iFood −{fmt(descValor)}</span>}
+                      {descontoDoPedido(descontos, p) > 0 && <span style={{ color: '#f59e0b' }}> · {rotuloDoDesconto(p)} −{fmt(descontoDoPedido(descontos, p))}</span>}
                     </div>
                   </div>
                 )
@@ -1578,15 +1580,17 @@ export default function PainelEntregador() {
                       </div>
                     </div>
 
-                    {descValor > 0 && base.some(p => p.origem === 'ifood') && (() => {
-                      const nIfood = base.filter(p => p.origem === 'ifood').length
-                      return (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(245,158,11,.10)', border: '1px solid #f59e0b', borderRadius: 12, padding: '9px 14px', fontSize: 12.5, color: 'var(--text-muted)' }}>
-                          <span>iFood: {fmt(descValor)}/corrida já descontado · {nIfood} corrida{nIfood > 1 ? 's' : ''}</span>
-                          <strong style={{ color: '#f59e0b' }}>−{fmt(nIfood * descValor)}</strong>
+                    {/* Uma faixa por tipo de corrida: quem desconta no iFood e na
+                        loja vê os dois, quem só usa um vê só o dele. */}
+                    {[['iFood', descontos.ifood, base.filter(p => p.origem === 'ifood')],
+                      ['loja', descontos.loja, base.filter(p => p.origem !== 'ifood')]].map(([rot, val, ps]) => (
+                      val > 0 && ps.length > 0 ? (
+                        <div key={rot} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(245,158,11,.10)', border: '1px solid #f59e0b', borderRadius: 12, padding: '9px 14px', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                          <span>{rot}: {fmt(val)}/corrida já descontado · {ps.length} corrida{ps.length > 1 ? 's' : ''}</span>
+                          <strong style={{ color: '#f59e0b' }}>−{fmt(ps.length * val)}</strong>
                         </div>
-                      )
-                    })()}
+                      ) : null
+                    ))}
 
                     <div style={{ fontSize: 14, fontWeight: 800, color: '#f59e0b', marginTop: 4 }}>A receber</div>
                     {pend.length === 0
