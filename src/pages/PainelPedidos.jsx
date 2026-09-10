@@ -5601,6 +5601,10 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
   const pinAplicado = useRef(0)
   const [ruaSug, setRuaSug] = useState([])
   const [ruaSugAberta, setRuaSugAberta] = useState(false)
+  // Link do mapa: o cliente é a única pessoa que sabe onde ele mora.
+  const [pinBusy, setPinBusy] = useState(false)
+  const [pinMsg, setPinMsg] = useState(null)   // { ok, txt }
+  const [pinLink, setPinLink] = useState(null)
 
   // Digitou o nome da rua, aparece a lista — mesma busca da tela de Vender e do
   // checkout do cliente. Quem atende está com o cliente falando no ouvido: o
@@ -5683,6 +5687,48 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
       if (d.bairro) setBairro(d.bairro)
       if (d.localidade) setCidade(d.localidade)
     } catch { /* CEP fora do ar: segue na mão */ }
+  }
+
+  // Manda no WhatsApp do cliente um mapa com o pino já na casa dele: ele arrasta,
+  // toca em "É aqui" e o ponto volta pro cadastro sozinho. Sem isso o app do
+  // entregador abre o TEXTO do endereço no Google, que larga o pino no meio da rua.
+  async function pedirPinNoMapa() {
+    if (!rua.trim()) { setPinMsg({ ok: false, txt: 'Escreva a rua antes de pedir o ponto.' }); return }
+    setPinBusy(true); setPinMsg(null); setPinLink(null)
+    try {
+      const sug = pinDoChat ?? pinCadastro
+      const tel = String(telefone ?? '').replace(/\D/g, '')
+      const { data, error } = await supabase.rpc('criar_pin_link', {
+        p_telefone: tel, p_rua: rua.trim(), p_numero: numero.trim() || null,
+        p_bairro: bairro.trim() || null, p_cidade: cidade.trim() || null,
+        p_estado: null, p_cep: cep.trim() || null,
+        p_lat: sug?.lat ?? null, p_lng: sug?.lng ?? null, p_pedido_id: null,
+      })
+      if (error || !data?.ok) {
+        setPinMsg({ ok: false, txt: data?.erro || error?.message || 'Não deu pra gerar o link.' })
+        return
+      }
+      const url = `https://lojaonline.fwcinter.com/local/${data.token}`
+      setPinLink(url)
+      try { await navigator.clipboard.writeText(url) } catch { /* sem clipboard: o link fica na tela */ }
+      if (tel.length >= 10) {
+        const texto = `Oi! Pra entrega chegar certinho, confirma no mapa o ponto exato da sua casa:
+
+${url}
+
+É só arrastar o pininho e tocar em "É aqui". 🙂`
+        const { data: env } = await supabase.functions.invoke('whatsapp-connect', {
+          body: { action: 'send_message', phone: tel, text: texto },
+        })
+        setPinMsg(env?.ok
+          ? { ok: true, txt: '✓ Link enviado no WhatsApp do cliente (e copiado aqui).' }
+          : { ok: false, txt: 'Link copiado — no WhatsApp não foi: ' + (env?.erro || 'WhatsApp da loja desconectado.') })
+      } else {
+        setPinMsg({ ok: false, txt: 'Link copiado. Sem telefone na conversa, mande você mesmo.' })
+      }
+    } finally {
+      setPinBusy(false)
+    }
   }
 
   async function calcularTaxa() {
@@ -5810,6 +5856,26 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
           </div>
           {msgTaxa && (
             <div style={{ fontSize: 11.5, lineHeight: 1.4, color: msgTaxa.ok ? '#22c55e' : '#f59e0b' }}>{msgTaxa.txt}</div>
+          )}
+
+          {/* Quem sabe onde mora é o cliente. Este link abre o mapa no celular
+              dele com o pino já na casa; ele ajusta e o ponto cai no cadastro. */}
+          <button type="button" onClick={pedirPinNoMapa} disabled={pinBusy || !rua.trim()}
+            title={rua.trim() ? 'Manda no WhatsApp um mapa pro cliente marcar o ponto exato da casa' : 'Escreva a rua primeiro'}
+            style={{ ...btnEscolha(false), width: '100%', cursor: pinBusy ? 'wait' : 'pointer', opacity: rua.trim() ? 1 : 0.5 }}>
+            {pinBusy ? 'Gerando o link…' : '🗺️ Cliente marca o ponto no mapa'}
+          </button>
+          {(pinDoChat || pinCadastro) && !pinLink && (
+            <div style={{ fontSize: 11.5, lineHeight: 1.4, color: '#22c55e' }}>
+              📍 Já tem o ponto {pinDoChat ? 'que o cliente mandou nesta conversa' : 'guardado no cadastro dele'} — vai junto no pedido.
+            </div>
+          )}
+          {pinMsg && (
+            <div style={{ fontSize: 11.5, lineHeight: 1.4, color: pinMsg.ok ? '#22c55e' : '#f59e0b' }}>{pinMsg.txt}</div>
+          )}
+          {pinLink && (
+            <a href={pinLink} target="_blank" rel="noreferrer"
+              style={{ fontSize: 11, wordBreak: 'break-all', color: '#a78bfa' }}>{pinLink}</a>
           )}
         </div>
       )}
@@ -6274,6 +6340,38 @@ export default function PainelPedidos() {
   // Sacola que o ATENDENTE monta dentro da conversa (ver SacolaNoChat).
   const [sacolaChat, setSacolaChat] = useState([])
   const [enviandoLista, setEnviandoLista] = useState(false)  // mandando os sabores no chat
+
+  // A sacola montada na conversa fica guardada no navegador. Quem atende sai do
+  // painel no meio do pedido (despausar um produto que acabou, conferir preço) e
+  // voltava com a sacola vazia, tendo que remontar tudo de novo.
+  //
+  // Guardada POR CONVERSA: a sacola de um cliente não pode aparecer na do outro.
+  // Some sozinha em 12h — sacola de ontem não serve pra ninguém.
+  const chaveSacola = empresa?.id ? `sacola-chat-${empresa.id}` : null
+  const VALIDADE_SACOLA = 12 * 60 * 60 * 1000
+
+  function sacolaGuardada(conversa) {
+    if (!chaveSacola || !conversa) return []
+    try {
+      const d = JSON.parse(localStorage.getItem(chaveSacola) || 'null')
+      const g = d?.[conversa]
+      if (g?.itens?.length && Date.now() - (g.ts ?? 0) < VALIDADE_SACOLA) return g.itens
+    } catch { /* rascunho inválido */ }
+    return []
+  }
+
+  useEffect(() => {
+    if (!chaveSacola || !chatAberto) return
+    try {
+      const d = JSON.parse(localStorage.getItem(chaveSacola) || 'null') ?? {}
+      const limite = Date.now() - VALIDADE_SACOLA
+      const novo = {}
+      for (const [k, v] of Object.entries(d)) if ((v?.ts ?? 0) > limite) novo[k] = v
+      if (sacolaChat.length) novo[chatAberto] = { itens: sacolaChat, ts: Date.now() }
+      else delete novo[chatAberto]
+      localStorage.setItem(chaveSacola, JSON.stringify(novo))
+    } catch { /* sem espaço: paciência, a sacola na tela continua valendo */ }
+  }, [chaveSacola, chatAberto, sacolaChat])
   // Painel da sacola colado na conversa (só no PC).
   const [sacolaLateral, setSacolaLateral] = useState(false)
   const [enviandoSacola, setEnviandoSacola] = useState(false)
@@ -7182,7 +7280,9 @@ export default function PainelPedidos() {
   // Marca como lidas as mensagens do cliente ao abrir a conversa, e envia resposta
   async function abrirThread(t) {
     setChatAberto(t.key)
-    setSacolaChat([])   // sacola é daquela conversa, não segue pra próxima
+    // A sacola é daquela conversa: não segue pra próxima, mas volta se quem
+    // atende tinha saído do painel no meio da montagem.
+    setSacolaChat(sacolaGuardada(t.key))
     setSacolaLateral(false)
     const tel = String(t.cliente_ref || '').replace(/\D/g, '')
     setBotPausado(false)
