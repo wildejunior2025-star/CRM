@@ -75,7 +75,12 @@
 }
 .cc-fechada:hover { background: var(--surface-hover); }
 .cc-fechada-nome { font-size: 15px; font-weight: 700; }
-.cc-fechada-resumo { flex: 1; font-size: 12.5px; color: var(--text-muted); }
+/* Traz o nome do produto: como toda categoria se chama "Escolha o sabor",
+   é o produto que diz qual é qual. Nome comprido corta com reticências. */
+.cc-fechada-resumo {
+  flex: 1; min-width: 0; font-size: 12.5px; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .cc-fechada-abrir { font-size: 12px; font-weight: 600; color: var(--primary); flex-shrink: 0; }
 .cc-chevron { font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
 .cc-chevron-btn {

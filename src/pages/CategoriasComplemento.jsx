@@ -182,6 +182,19 @@ export default function CategoriasComplemento() {
     return m
   }, [produtos])
 
+  // Quase toda categoria se chama "Escolha o sabor" — o que diferencia uma da
+  // outra é o PRODUTO em que ela está pendurada. Por isso o nome do produto
+  // aparece na linha fechada e a busca também acha por ele.
+  const produtosDaCat = useCallback(
+    cat => (cat.links ?? []).map(l => nomeProduto[l.produto_id]).filter(Boolean),
+    [nomeProduto],
+  )
+  function resumoProdutos(nomes) {
+    if (nomes.length === 0) return 'ainda sem produto'
+    if (nomes.length <= 2) return nomes.join(', ')
+    return `${nomes.slice(0, 2).join(', ')} +${nomes.length - 2}`
+  }
+
   const load = useCallback(async () => {
     if (!empresaId) return
     setLoading(true)
@@ -475,6 +488,7 @@ export default function CategoriasComplemento() {
   const nt = norm(busca)
   const catsFiltradas = !nt ? cats : cats.map(cat => {
     if (norm(cat.nome).includes(nt)) return cat
+    if (produtosDaCat(cat).some(n => norm(n).includes(nt))) return cat
     const opcoes = cat.opcoes.filter(o => norm(o.nome).includes(nt))
     return opcoes.length ? { ...cat, opcoes } : null
   }).filter(Boolean)
@@ -514,7 +528,7 @@ export default function CategoriasComplemento() {
           <input
             className="cc-input"
             value={busca}
-            placeholder="Pesquisar categoria ou opção (ex.: frango)…"
+            placeholder="Pesquisar por produto, categoria ou opção (ex.: Picolé Delícia)…"
             onChange={e => setBusca(e.target.value)}
           />
           {busca && (
@@ -535,7 +549,7 @@ export default function CategoriasComplemento() {
         <div className="empty-state">
           <div className="empty-state-icon" style={{ fontSize: 22 }}>🔍</div>
           <strong>Nada encontrado</strong>
-          <p>Nenhuma categoria ou opção com “{busca}”.</p>
+          <p>Nenhum produto, categoria ou opção com “{busca}”.</p>
         </div>
       )}
 
@@ -544,7 +558,9 @@ export default function CategoriasComplemento() {
         // Pesquisa que sobrou UMA categoria já abre sozinha — a loja pesquisou
         // justamente pra chegar nela.
         const aberta = cat.id === abertaId || (!!nt && catsFiltradas.length === 1)
+        const nomesProd = produtosDaCat(cat)
         const casouPeloNome = !nt || norm(cat.nome).includes(nt)
+          || nomesProd.some(n => norm(n).includes(nt))
 
         if (!aberta) return (
           <div key={cat.id} className={`card cc-card cc-card-fechado${cat.disponivel ? '' : ' paused'}`}>
@@ -556,7 +572,7 @@ export default function CategoriasComplemento() {
               </span>
               <span className="cc-fechada-resumo">
                 {casouPeloNome
-                  ? `${cat.opcoes.length} opç${cat.opcoes.length === 1 ? 'ão' : 'ões'} · ${cat.links.length} produto${cat.links.length === 1 ? '' : 's'}`
+                  ? `${cat.opcoes.length} opç${cat.opcoes.length === 1 ? 'ão' : 'ões'} · ${resumoProdutos(nomesProd)}`
                   : `${cat.opcoes.length} opç${cat.opcoes.length === 1 ? 'ão' : 'ões'} com “${busca}”`}
               </span>
               <span className="cc-fechada-abrir">Editar</span>

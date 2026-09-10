@@ -408,6 +408,91 @@ export default function Produtos() {
     setGrupos(prev => prev.map((g, i) => (i === gi ? { ...g, ...patch } : g)))
   }
 
+  // ── Sabores da categoria DENTRO do modal do produto ─────────────────────
+  // Antes daqui só dava pra pendurar a categoria: criar um sabor novo, apagar
+  // um ou mexer no preço obrigava a sair e ir na tela Complementos. Agora a
+  // categoria abre e edita na hora.
+  //
+  // Estas edições gravam NA HORA (não esperam o "Salvar" do produto) porque a
+  // lista é compartilhada: é a mesma para todos os produtos que usam a categoria.
+  const [opcoesPorGrupo, setOpcoesPorGrupo] = useState({}) // grupo_id -> [opções]
+  const [usosPorGrupo, setUsosPorGrupo] = useState({})     // grupo_id -> nº de produtos que usam
+  const [grupoAberto, setGrupoAberto] = useState(null)     // categoria expandida no modal
+  const [opcaoOcupada, setOpcaoOcupada] = useState(null)   // id em gravação ('nova' = criando)
+  const [novaOpcao, setNovaOpcao] = useState({ nome: '', preco: '' })
+
+  function setOpcoes(grupoId, fn) {
+    setOpcoesPorGrupo(prev => ({ ...prev, [grupoId]: fn(prev[grupoId] ?? []) }))
+  }
+
+  async function abrirOpcoes(grupoId) {
+    if (grupoAberto === grupoId) { setGrupoAberto(null); return }
+    setGrupoAberto(grupoId)
+    setNovaOpcao({ nome: '', preco: '' })
+    if (opcoesPorGrupo[grupoId]) return
+    const [opRes, usoRes] = await Promise.all([
+      supabase.from('complemento_opcoes')
+        .select('id, nome, preco_adicional, disponivel, ordem')
+        .eq('grupo_id', grupoId).order('ordem').order('nome'),
+      supabase.from('produto_complemento_grupos')
+        .select('produto_id', { count: 'exact', head: true }).eq('grupo_id', grupoId),
+    ])
+    if (opRes.error) { setError('Não consegui abrir os sabores: ' + opRes.error.message); return }
+    setOpcoes(grupoId, () => opRes.data ?? [])
+    setUsosPorGrupo(prev => ({ ...prev, [grupoId]: usoRes.count ?? 0 }))
+  }
+
+  async function salvarOpcao(grupoId, op, patch) {
+    setOpcaoOcupada(op.id)
+    setOpcoes(grupoId, arr => arr.map(o => (o.id === op.id ? { ...o, ...patch } : o)))
+    const { error: err } = await supabase.from('complemento_opcoes').update(patch).eq('id', op.id)
+    setOpcaoOcupada(null)
+    if (err) {
+      setError('Não consegui salvar: ' + err.message)
+      setOpcoes(grupoId, arr => arr.map(o => (o.id === op.id ? op : o)))
+    }
+  }
+
+  async function adicionarOpcao(grupoId) {
+    const nome = novaOpcao.nome.trim()
+    if (!nome) return
+    const atual = opcoesPorGrupo[grupoId] ?? []
+    if (atual.some(o => (o.nome ?? '').trim().toLowerCase() === nome.toLowerCase())) {
+      setError(`“${nome}” já está nesta lista.`)
+      return
+    }
+    const preco = Number(String(novaOpcao.preco).replace(',', '.')) || 0
+    const ordem = atual.reduce((m, o) => Math.max(m, Number(o.ordem) || 0), 0) + 1
+    setOpcaoOcupada('nova')
+    setError(null)
+    const { data, error: err } = await supabase.from('complemento_opcoes')
+      .insert({ grupo_id: grupoId, nome, preco_adicional: preco, ordem, disponivel: true })
+      .select('id, nome, preco_adicional, disponivel, ordem')
+      .single()
+    setOpcaoOcupada(null)
+    if (err) { setError('Não consegui criar o sabor: ' + err.message); return }
+    setOpcoes(grupoId, arr => [...arr, data])
+    setNovaOpcao({ nome: '', preco: '' })
+  }
+
+  async function apagarOpcao(grupoId, op) {
+    const usos = usosPorGrupo[grupoId] ?? 1
+    const ok = await confirmar({
+      titulo: `Apagar “${op.nome}” da lista?`,
+      texto: 'Ele some da lista de escolha do cliente — não dá pra desfazer.',
+      aviso: usos > 1
+        ? `Esta lista é usada em ${usos} produtos, então ele some de todos eles.`
+        : 'Se é só porque acabou, use o Pausar ao lado — aí volta com um clique.',
+      textoOk: 'Sim, apagar',
+    })
+    if (!ok) return
+    setOpcaoOcupada(op.id)
+    const { error: err } = await supabase.from('complemento_opcoes').delete().eq('id', op.id)
+    setOpcaoOcupada(null)
+    if (err) { setError('Não consegui apagar: ' + err.message); return }
+    setOpcoes(grupoId, arr => arr.filter(o => o.id !== op.id))
+  }
+
   // Sobe/desce um grupo de complemento na ordem que aparece pro cliente.
   // A ordem é salva (campo `ordem`) quando o produto é salvo.
   function moverVinculo(i, dir) {
@@ -2074,9 +2159,23 @@ export default function Produtos() {
                     </p>
                   )}
 
-                  {vinculos.map((v, i) => (
-                    <div key={v.grupo_id} className="pf-vinculo" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 120px auto', gap: 8, alignItems: 'center', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px', marginTop: 8, background: 'var(--surface-hover)' }}>
-                      <span style={{ fontWeight: 600 }}>{v.nome}</span>
+                  {vinculos.map((v, i) => {
+                    const aberta = grupoAberto === v.grupo_id
+                    const ops = opcoesPorGrupo[v.grupo_id]
+                    const usos = usosPorGrupo[v.grupo_id] ?? 0
+                    return (
+                    <div key={v.grupo_id} style={{ border: '1px solid var(--border)', borderRadius: 10, marginTop: 8, background: 'var(--surface-hover)' }}>
+                     <div className="pf-vinculo" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 120px auto', gap: 8, alignItems: 'center', padding: '8px 12px' }}>
+                      {/* Clicar no nome abre os sabores da categoria pra editar aqui mesmo */}
+                      <button type="button" onClick={() => abrirOpcoes(v.grupo_id)}
+                        title="Ver e editar os sabores desta categoria"
+                        style={{ background: 'none', border: 'none', padding: 0, minWidth: 0, cursor: 'pointer', color: 'var(--text)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, textAlign: 'left' }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{aberta ? '▾' : '▸'}</span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.nome}</span>
+                        {ops && !aberta && (
+                          <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)' }}>· {ops.length} sabor{ops.length === 1 ? '' : 'es'}</span>
+                        )}
+                      </button>
                       <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
                         máx.:
                         <input type="number" min="1" style={{ width: 60 }}
@@ -2094,8 +2193,68 @@ export default function Produtos() {
                           Tirar
                         </button>
                       </div>
+                     </div>
+
+                     {aberta && (
+                      <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', background: 'var(--surface)', borderRadius: '0 0 10px 10px' }}>
+                        {usos > 1 && (
+                          <p style={{ fontSize: 12, color: 'var(--warning, #d97706)', margin: '0 0 8px' }}>
+                            ⚠ Esta lista é usada em <b>{usos} produtos</b> — o que mudar aqui vale pra todos eles.
+                          </p>
+                        )}
+                        {!ops && <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>Carregando os sabores…</p>}
+                        {ops?.length === 0 && (
+                          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 8px' }}>
+                            Esta categoria ainda não tem nenhum sabor. Cadastre o primeiro aí embaixo.
+                          </p>
+                        )}
+                        {(ops ?? []).map(op => (
+                          <div key={op.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 118px auto auto', gap: 6, alignItems: 'center', marginBottom: 6, opacity: op.disponivel === false ? 0.55 : 1 }}>
+                            <input defaultValue={op.nome} disabled={opcaoOcupada === op.id}
+                              onBlur={e => { const val = e.target.value.trim(); if (val && val !== op.nome) salvarOpcao(v.grupo_id, op, { nome: val }) }} />
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)' }}>
+                              + R$
+                              <input type="number" step="0.01" min="0" style={{ width: 66 }} placeholder="0,00"
+                                defaultValue={Number(op.preco_adicional) ? Number(op.preco_adicional) : ''}
+                                onBlur={e => {
+                                  const val = Number(String(e.target.value).replace(',', '.')) || 0
+                                  if (val !== Number(op.preco_adicional ?? 0)) salvarOpcao(v.grupo_id, op, { preco_adicional: val })
+                                }} />
+                            </label>
+                            <button type="button" className="btn btn-secondary btn-sm" disabled={opcaoOcupada === op.id}
+                              title={op.disponivel === false ? 'Voltar a vender' : 'Pausar (acabou)'}
+                              onClick={() => salvarOpcao(v.grupo_id, op, { disponivel: op.disponivel === false })}>
+                              {op.disponivel === false ? '▶' : '❚❚'}
+                            </button>
+                            <button type="button" className="btn btn-danger btn-sm" title="Apagar da lista"
+                              disabled={opcaoOcupada === op.id} onClick={() => apagarOpcao(v.grupo_id, op)}>✕</button>
+                          </div>
+                        ))}
+
+                        {ops && (
+                          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 118px auto', gap: 6, alignItems: 'center', marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)' }}>
+                            <input placeholder="Novo sabor (ex.: Manga)" value={novaOpcao.nome}
+                              onChange={e => setNovaOpcao(n => ({ ...n, nome: e.target.value }))}
+                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); adicionarOpcao(v.grupo_id) } }} />
+                            <input type="number" step="0.01" min="0" placeholder="+ R$ 0,00" value={novaOpcao.preco}
+                              onChange={e => setNovaOpcao(n => ({ ...n, preco: e.target.value }))}
+                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); adicionarOpcao(v.grupo_id) } }} />
+                            <button type="button" className="btn btn-primary btn-sm"
+                              disabled={!novaOpcao.nome.trim() || opcaoOcupada === 'nova'}
+                              onClick={() => adicionarOpcao(v.grupo_id)}>
+                              {opcaoOcupada === 'nova' ? 'Criando…' : '+ Adicionar'}
+                            </button>
+                          </div>
+                        )}
+                        <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '8px 0 0' }}>
+                          Os sabores salvam sozinhos, na hora — não precisa clicar em Salvar embaixo.
+                          Deixe o preço em branco (ou 0) pra sabor que não cobra a mais.
+                        </p>
+                      </div>
+                     )}
                     </div>
-                  ))}
+                    )
+                  })}
                   {vinculos.length > 1 && (
                     <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 0' }}>
                       Use <b>↑ ↓</b> pra mudar a ordem que os grupos aparecem pro cliente (ex.: sabores em cima, bordas embaixo). Salve pra valer.
@@ -2117,7 +2276,8 @@ export default function Produtos() {
                     </select>
                   )}
                   <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
-                    Pra criar uma categoria nova ou editar/pausar as opções, vá no menu <b>Complementos</b>.
+                    Clique no <b>nome da categoria</b> pra criar sabor novo, apagar, pausar o que
+                    acabou e mexer no preço. Pra criar uma categoria <b>nova</b>, vá no menu <b>Complementos</b>.
                     O “máx.” aqui é só deste produto (ex.: Proteínas 1 na P e 2 na M/G).
                   </p>
                 </div>
