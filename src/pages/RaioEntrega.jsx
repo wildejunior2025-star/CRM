@@ -127,6 +127,9 @@ export default function RaioEntrega() {
   const [bairrosOcultos, setBairrosOcultos] = useState([]) // norms que a loja tirou da lista
   const [novoBairro, setNovoBairro] = useState('')
   const [bairroOpen, setBairroOpen] = useState(false) // dropdown de sugestões de bairro
+  // Filtro da lista: com 30+ bairros, rolar tudo pra achar um é o que tornava
+  // esta tela insuportável. 'todos' | 'taxa' | 'km' | 'bloqueio'
+  const [filtroBairro, setFiltroBairro] = useState('todos')
 
   // Formato que o checkout e o bot leem. Um só lugar pra não divergir do salvar.
   const paraTaxasSalvas = (lista) => lista
@@ -935,8 +938,8 @@ export default function RaioEntrega() {
         <div style={{ background: 'var(--surface, #fff)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
           <h2 className="re-card-title">🏘️ Taxa por bairro (opcional)</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 14px' }}>
-            Puxei os bairros dos seus pedidos. Pra cada um: <b>cobrar taxa fixa</b>, <b>não entregar</b>, ou deixar no <b>cálculo por km</b> (padrão). Bairro fora da lista usa o km.
-            {' '}Bairro repetido ou que você nem atende: tire da lista no <b>×</b>.
+            Puxei os bairros dos seus pedidos. Escolha o que fazer com cada um — e use a busca
+            pra achar um bairro na lista ou cadastrar um que ainda não apareceu.
           </p>
           <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
             <div style={{ position: 'relative', flex: 1, minWidth: 180 }}>
@@ -945,7 +948,7 @@ export default function RaioEntrega() {
                 onFocus={() => setBairroOpen(true)}
                 onBlur={() => setTimeout(() => setBairroOpen(false), 150)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); adicionarBairro(novoBairro) } }}
-                placeholder="Buscar/adicionar bairro (ex.: potengi)..." autoComplete="off"
+                placeholder="Buscar na lista ou cadastrar um bairro (ex.: potengi)…" autoComplete="off"
                 style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', boxSizing: 'border-box' }} />
               {bairroOpen && (() => {
                 const q = normBairro(novoBairro)
@@ -972,53 +975,91 @@ export default function RaioEntrega() {
             </div>
             <button type="button" className="btn btn-secondary" onClick={() => adicionarBairro(novoBairro)}>+ Adicionar</button>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {taxasBairro.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Carregando bairros…</p>}
-            {taxasBairro.map((b, i) => (
-              <div key={b.norm} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8 }}>
-                <div style={{ flex: 1, minWidth: 130 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{b.bairro}</div>
-                  {b.total > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{b.total} pedido{b.total === 1 ? '' : 's'}</div>}
+          {(() => {
+            // A busca de cima serve pras duas coisas: filtrar a lista que já
+            // existe e oferecer o "+ Adicionar" quando o bairro é novo.
+            const q = normBairro(novoBairro)
+            const conta = {
+              todos: taxasBairro.length,
+              taxa: taxasBairro.filter(b => b.modo === 'taxa').length,
+              km: taxasBairro.filter(b => b.modo === 'km').length,
+              bloqueio: taxasBairro.filter(b => b.modo === 'bloqueio').length,
+            }
+            const visiveis = taxasBairro
+              .map((b, i) => ({ b, i }))
+              .filter(({ b }) => (filtroBairro === 'todos' || b.modo === filtroBairro)
+                && (!q || normBairro(b.bairro).includes(q)))
+            const mudar = (i, patch) => setTaxasBairro(prev => prev.map((x, j) => (j === i ? { ...x, ...patch } : x)))
+            return (
+              <>
+                <div className="re-bairro-resumo">
+                  {[['todos', 'Todos', conta.todos],
+                    ['taxa', '💰 Taxa fixa', conta.taxa],
+                    ['km', '📏 Pelo km', conta.km],
+                    ['bloqueio', '🚫 Não entrego', conta.bloqueio]].map(([id, rot, n]) => (
+                    <button key={id} type="button"
+                      className={`re-bairro-chip${filtroBairro === id ? ' ativo' : ''}`}
+                      onClick={() => setFiltroBairro(id)}>
+                      {rot} <b>{n}</b>
+                    </button>
+                  ))}
                 </div>
-                <select value={b.modo}
-                  onChange={e => { const v = e.target.value; setTaxasBairro(prev => prev.map((x, j) => j === i ? { ...x, modo: v } : x)) }}
-                  style={{ padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }}>
-                  <option value="km">Usar km (padrão)</option>
-                  <option value="taxa">Cobrar taxa fixa</option>
-                  <option value="bloqueio">🚫 Não entrego</option>
-                </select>
-                {b.modo === 'taxa' && (
-                  <>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>R$</span>
-                    <input type="number" step="0.01" min="0" value={b.taxa} placeholder="taxa"
-                      onChange={e => { const v = e.target.value; setTaxasBairro(prev => prev.map((x, j) => j === i ? { ...x, taxa: v } : x)) }}
-                      style={{ width: 80, padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border)' }} />
-                    <input type="number" min="0" value={b.tempo} placeholder="min"
-                      onChange={e => { const v = e.target.value; setTaxasBairro(prev => prev.map((x, j) => j === i ? { ...x, tempo: v } : x)) }}
-                      style={{ width: 68, padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border)' }} />
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>min</span>
-                  </>
-                )}
-                {b.modo === 'bloqueio' && <span style={{ fontSize: 13, fontWeight: 700, color: '#dc2626' }}>Cliente não consegue pedir</span>}
-                <button
-                  type="button"
-                  onClick={() => esconderBairro(b)}
-                  title={`Tirar "${b.bairro}" da lista`}
-                  aria-label={`Tirar ${b.bairro} da lista`}
-                  style={{
-                    width: 30, height: 30, flexShrink: 0, marginLeft: 'auto',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    borderRadius: 8, cursor: 'pointer', fontSize: 16, lineHeight: 1,
-                    border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = '#dc2626'; e.currentTarget.style.color = '#dc2626' }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)' }}
-                >×</button>
-              </div>
-            ))}
-          </div>
+
+                <div className="re-bairro-lista">
+                  {taxasBairro.length === 0 && (
+                    <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>Carregando bairros…</p>
+                  )}
+                  {taxasBairro.length > 0 && visiveis.length === 0 && (
+                    <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+                      {q ? <>Nenhum bairro da lista com “{novoBairro}”. Use o <b>+ Adicionar</b> pra criar.</>
+                         : 'Nenhum bairro nesse filtro.'}
+                    </p>
+                  )}
+                  {visiveis.map(({ b, i }) => (
+                    <div key={b.norm} className={`re-bairro-row modo-${b.modo}`}>
+                      <div className="re-bairro-nome">
+                        <strong title={b.bairro}>{b.bairro}</strong>
+                        {b.total > 0 && <span>{b.total} pedido{b.total === 1 ? '' : 's'}</span>}
+                      </div>
+
+                      <select value={b.modo} onChange={e => mudar(i, { modo: e.target.value })}>
+                        <option value="km">Pelo km (padrão)</option>
+                        <option value="taxa">Taxa fixa</option>
+                        <option value="bloqueio">Não entrego</option>
+                      </select>
+
+                      {b.modo === 'taxa' ? (
+                        <>
+                          <label className="re-bairro-campo" title="Taxa de entrega deste bairro">
+                            <em>R$</em>
+                            <input type="number" step="0.01" min="0" value={b.taxa} placeholder="0,00"
+                              onChange={e => mudar(i, { taxa: e.target.value })} />
+                          </label>
+                          <label className="re-bairro-campo sufixo" title="Tempo de entrega deste bairro (opcional)">
+                            <input type="number" min="0" value={b.tempo} placeholder="—"
+                              onChange={e => mudar(i, { tempo: e.target.value })} />
+                            <em>min</em>
+                          </label>
+                        </>
+                      ) : (
+                        <span className="re-bairro-vazio" style={{ gridColumn: 'span 2' }}>
+                          {b.modo === 'bloqueio' ? 'o cliente não consegue pedir' : 'usa a tabela por distância'}
+                        </span>
+                      )}
+
+                      <button type="button" className="re-bairro-x"
+                        onClick={() => esconderBairro(b)}
+                        title={`Tirar "${b.bairro}" da lista`}
+                        aria-label={`Tirar ${b.bairro} da lista`}>×</button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )
+          })()}
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
-            ⚠️ O cálculo por bairro entra no ar na próxima etapa. Por enquanto você pode cadastrar; ainda vale o km.
+            A taxa do bairro <b>manda</b> na tabela por km: quem está aqui como “Taxa fixa” paga esse valor,
+            e só quem não está na lista cai na distância. Vale no cardápio online, no balcão e nos robôs.
           </p>
         </div>
         )}
