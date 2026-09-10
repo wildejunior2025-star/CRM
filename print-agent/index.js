@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 26
+const APP_VERSION = 27
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -108,14 +108,38 @@ async function carregarCategorias() {
 
 // 'cozinha' | 'salao' | 'nenhum'. Item sem categoria conhecida vai pro salão —
 // a regra da loja é "salão sai tudo, menos o que é da cozinha", então nada some.
-function setorDoItem(nome) {
+// Acha a categoria pelo nome do item. O nome que sai na comanda nem sempre e o
+// nome do produto: item com montagem sai como "Porcao de Pastel (2x Carne Moida,
+// 2x Queijo)", que nao existe no cadastro. Antes isso caia direto no 'salao' e
+// sumia da impressora da cozinha — por isso tenta de novo sem o parenteses.
+function categoriaDoNome(nome) {
   const cat = mapaCategoria[norm(nome)]
+  if (cat != null) return cat
+  const semMontagem = norm(String(nome || '').replace(/\s*\(.*$/, ''))
+  if (semMontagem && mapaCategoria[semMontagem] != null) return mapaCategoria[semMontagem]
+  return undefined
+}
+function setorDoItem(nome) {
+  const cat = categoriaDoNome(nome)
   if (lojaMarcouSetor) return (cat && catSetor[cat]) || 'salao'
   if (cat && catBebida.has(cat)) return 'salao'   // reserva
   return 'cozinha'
 }
+// O setor que o BANCO ja resolveu manda em qualquer adivinhacao: o gatilho da
+// migracao 0184 copia o setor da categoria pelo produto_id, na hora do pedido —
+// nao depende de o nome bater com nada. Item de delivery nao tem esse campo, e
+// ai continua valendo o palpite pelo nome.
+//
+// Foi isto que segurou a comida da Saidera em 09/09/2026: pastel e frango a
+// passarinho saem com a montagem no nome, o app nao achava o produto, marcava
+// como salao e o papel nao saia na impressora da cozinha. O cupom de teste saia
+// normal — ele nao passa por este filtro — e parecia defeito da impressora.
+function setorDe(it) {
+  const s = it && it.setor
+  if (s === 'cozinha' || s === 'salao' || s === 'nenhum') return s
+  return setorDoItem(it && it.nome)
+}
 function ehBebida(nome) { return setorDoItem(nome) === 'salao' }
-function naoImprime(nome) { return setorDoItem(nome) === 'nenhum' }
 const config = () => { try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) } catch (e) { return {} } }
 const setConfig = o => fs.writeFileSync(CONFIG_FILE, JSON.stringify({ ...config(), ...o }, null, 2))
 
@@ -433,16 +457,16 @@ async function imprimirComandaMesa(cid, itens) {
   const bar = config().printerBar
   // Categoria marcada como "nao imprime" nao vira papel em impressora nenhuma,
   // nem quando a loja so tem uma. A loja disse que ali nao precisa.
-  let paraPapel = itens.filter(it => !naoImprime(it.nome))
+  let paraPapel = itens.filter(it => setorDe(it) !== 'nenhum')
   // Este PC so cuida de um setor? Entao o resto nao e problema dele.
   const papel = papelDoPc()
   if (papel !== 'tudo') {
-    paraPapel = paraPapel.filter(it => (setorDoItem(it.nome) === 'cozinha' ? 'cozinha' : 'frente') === papel)
+    paraPapel = paraPapel.filter(it => (setorDe(it) === 'cozinha' ? 'cozinha' : 'frente') === papel)
   }
   if (!paraPapel.length) return
   if (bar) {
-    const cozinha = paraPapel.filter(it => setorDoItem(it.nome) === 'cozinha')
-    const salao = paraPapel.filter(it => setorDoItem(it.nome) !== 'cozinha')
+    const cozinha = paraPapel.filter(it => setorDe(it) === 'cozinha')
+    const salao = paraPapel.filter(it => setorDe(it) !== 'cozinha')
     if (cozinha.length) imprimirBytes(comandaMesaBytes(numero, cozinha, nomeLoja, base), 'mesa-' + cid)
     if (salao.length) imprimirBytes(comandaMesaBytes(numero, salao, nomeLoja, { ...base, sufixo: ' - BEBIDAS' }), 'mesa-bar-' + cid, bar)
     return
@@ -751,8 +775,8 @@ const server = http.createServer(async (req, res) => {
         const bar = config().printerBar
         let ok = false
         if (bar) {
-          const comida = itens.filter(it => !ehBebida(it.nome))
-          const bebida = itens.filter(it => ehBebida(it.nome))
+          const comida = itens.filter(it => setorDe(it) !== 'salao')
+          const bebida = itens.filter(it => setorDe(it) === 'salao')
           if (comida.length) ok = imprimirBytes(comandaMesaBytes(numero, comida, nomeLoja, base), 'mesa-man')
           if (bebida.length) imprimirBytes(comandaMesaBytes(numero, bebida, nomeLoja, { ...base, sufixo: ' - BEBIDAS' }), 'mesa-man-bar', bar)
         } else {
