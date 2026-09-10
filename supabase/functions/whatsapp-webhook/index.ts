@@ -1484,9 +1484,18 @@ async function geocodificarEndereco(endereco: string): Promise<{ lat: number; ln
   return null
 }
 // Normaliza bairro pra casar cliente <-> config (mesma regra da tela Raio de Entrega e do site).
+// Mesmas abreviações que o gestor e o checkout entendem. Sem isto o robô lia
+// "Nossa Sra. da Apresentação" (o jeito que o CEP mais devolve por aqui) como
+// um bairro diferente de "Nossa Senhora da Apresentação" e perdia a taxa.
+const ABREV_BAIRRO: Record<string, string> = {
+  sra: "senhora", sr: "senhor", sto: "santo", sta: "santa",
+  n: "nossa", na: "nossa", jd: "jardim", pq: "parque",
+  vl: "vila", cj: "conjunto", res: "residencial", pres: "presidente",
+}
 function normBairro(s: string): string {
   return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim()
-    .replace(/^bairro\s+/, "").replace(/\s+/g, " ")
+    .replace(/^bairro\s+/, "").replace(/\./g, " ").replace(/\s+/g, " ")
+    .split(" ").map(p => ABREV_BAIRRO[p] ?? p).join(" ").trim()
 }
 // Acha a linha da tabela de bairros da loja pro bairro que veio no endereço.
 //
