@@ -289,12 +289,123 @@ async function lojaAssumiuCloud(supabase: any, phoneNumberId: string, eco: any) 
   }
 }
 
+// ── Número oficial da FWC (mig 0257) ─────────────────────────────────────────
+// O número da plataforma ("FWC Inter") não é de loja nem tem robô: o que chega
+// nele vai pra caixa de Atendimento do Super ADM (admin_chat). Antes ele estava
+// plugado numa loja, e o lojista que respondia a cobrança da mensalidade
+// recebia o cardápio do depósito.
+//
+// O id vem do config_global e fica guardado 1 minuto: este webhook roda a cada
+// mensagem de TODAS as lojas, não dá pra ir no banco toda vez só por isso.
+let numeroFwcCache: { id: string; em: number } | null = null
+// deno-lint-ignore-next-line no-explicit-any
+async function numeroDaFwc(supabase: any): Promise<string> {
+  if (numeroFwcCache && Date.now() - numeroFwcCache.em < 60_000) return numeroFwcCache.id
+  const { data } = await supabase.from("config_global")
+    .select("valor").eq("chave", "admin_cloud_phone_number_id").maybeSingle()
+  const id = String(data?.valor ?? "").trim()
+  numeroFwcCache = { id, em: Date.now() }
+  return id
+}
+
+// Aviso de entrega de mensagem que a FWC mandou. Nunca volta atrás: um
+// "entregue" atrasado não pode apagar o "lido" que já chegou.
+// deno-lint-ignore-next-line no-explicit-any
+async function statusDaFwc(supabase: any, st: any) {
+  const err = st.errors?.[0]
+  if (st.status === "failed") {
+    await supabase.from("admin_chat").update({
+      status: "falhou",
+      erro: err ? `${err.code ?? ""} ${err.error_data?.details ?? err.title ?? err.message ?? ""}`.trim() : "falhou na Meta",
+    }).eq("message_id", st.id)
+  } else if (st.status === "read") {
+    await supabase.from("admin_chat").update({ status: "lido" }).eq("message_id", st.id)
+  } else if (st.status === "delivered") {
+    await supabase.from("admin_chat").update({ status: "entregue" })
+      .eq("message_id", st.id).not("status", "in", "(lido,falhou)")
+  }
+}
+
+// Mensagem que o lojista (ou quem for) mandou pro número oficial.
+// deno-lint-ignore-next-line no-explicit-any
+async function caixaDaFwc(supabase: any, value: any, message: any) {
+  const from = String(message?.from ?? "").replace(/D/g, "")
+  if (!from) return
+
+  // A Meta reenvia o webhook quando demora a receber o 200. Sem isto a mesma
+  // mensagem aparecia duas vezes na conversa.
+  if (message.id) {
+    const { data: ja } = await supabase.from("admin_chat").select("id").eq("message_id", message.id).maybeSingle()
+    if (ja) return
+  }
+
+  const nome = String(value?.contacts?.[0]?.profile?.name ?? "").trim() || null
+  let texto = ""
+  let midia: { path: string; tipo: string; expiraEm: string } | null = null
+
+  const c = coordsDaMensagem(message)
+  if (c) {
+    texto = `📍 Localização: https://www.google.com/maps?q=${c.lat},${c.lng}`
+  } else if (message.type === "text") {
+    texto = String(message.text?.body ?? "").trim()
+  } else if (message.type === "interactive") {
+    texto = String(message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? "").trim()
+  } else if (message.type === "button") {
+    texto = String(message.button?.text ?? message.button?.payload ?? "").trim()
+  } else if (["image", "audio", "video", "document", "sticker"].includes(message.type)) {
+    // Comprovante de PIX da mensalidade chega assim — tem que dar pra abrir.
+    // Mesmo bucket e mesmas 24h das lojas, na pasta "admin/".
+    const obj = message[message.type] ?? {}
+    const arq = obj.id ? await baixarMidiaCloud(String(obj.id), CLOUD_TOKEN) : null
+    if (arq?.base64) midia = await guardarMidiaDoChat(supabase, "admin", arq.base64, arq.mimetype)
+    const legenda = String(obj.caption ?? "").trim()
+    if (message.type === "audio") {
+      const t = arq?.base64 ? await transcreverAudio(arq.base64, arq.mimetype) : null
+      texto = t?.trim() ? `🎤 ${t.trim()}` : "🎤 Áudio"
+    } else {
+      const padrao: Record<string, string> = {
+        image: "📷 Foto", video: "🎬 Vídeo", sticker: "🙂 Figurinha",
+        document: `📄 ${String(obj.filename ?? "Documento")}`,
+      }
+      texto = legenda || padrao[message.type]
+    }
+  } else {
+    texto = `(mensagem do tipo ${message.type} — abra pelo celular pra ver)`
+  }
+  if (!texto) return
+
+  // Lojista conhecido? O telefone_contato da loja é o mesmo que recebe a
+  // cobrança. Casa pelos 8 últimos dígitos (a Meta tira o 9 do celular).
+  const chave = from.slice(-8)
+  const { data: emps } = await supabase.from("empresas").select("id, telefone_contato").not("telefone_contato", "is", null)
+  const emp = (Array.isArray(emps) ? emps : [])
+    .find((e: Record<string, unknown>) => String(e.telefone_contato ?? "").replace(/D/g, "").endsWith(chave))
+
+  const { error } = await supabase.from("admin_chat").insert({
+    telefone: from, nome, empresa_id: emp?.id ?? null,
+    remetente: "cliente", texto, tipo: midia ? "midia" : "texto",
+    midia_path: midia?.path ?? null, midia_tipo: midia?.tipo ?? null, midia_expira_em: midia?.expiraEm ?? null,
+    message_id: message.id ?? null, lida: false,
+  })
+  if (error) console.error("[fwc] não gravou a mensagem:", error.message)
+}
+
 // ── Processa uma mensagem recebida ───────────────────────────────────────────
 async function processar(body: any) {
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
   const value   = body?.entry?.[0]?.changes?.[0]?.value
   const phoneNumberId = value?.metadata?.phone_number_id
+
+  // ── Número oficial da FWC: caixa do Super ADM, sem robô (mig 0257) ──
+  // Vem ANTES de procurar loja: esse número não é de loja nenhuma.
+  if (phoneNumberId && phoneNumberId === await numeroDaFwc(supabase)) {
+    const sts = Array.isArray(value?.statuses) ? value.statuses : []
+    for (const st of sts) await statusDaFwc(supabase, st)
+    const msgs = Array.isArray(value?.messages) ? value.messages : []
+    for (const m of msgs) await caixaDaFwc(supabase, value, m)
+    return
+  }
 
   // ── Aviso de entrega (mig 0150) ──
   // A Meta responde 200 na hora ("aceitei") e só aqui diz se ENTREGOU ou falhou,

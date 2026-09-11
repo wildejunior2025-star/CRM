@@ -56,14 +56,16 @@ function valorBr(v: unknown): string {
 }
 
 // Envia o template de cobrança pela Graph API.
-// Devolve null se deu certo, ou o motivo da falha (para cair no Evolution).
+// `erro` é null se deu certo, ou o motivo da falha (para cair no Evolution).
+// `id` é o da Meta: a conversa do Atendimento FWC usa ele pra saber se
+// entregou e se o lojista leu (mig 0257).
 async function enviarTemplateCobranca(
   phoneNumberId: string,
   to: string,
   params: string[],
-): Promise<string | null> {
-  if (!CLOUD_TOKEN)   return "sem WHATSAPP_CLOUD_TOKEN"
-  if (!phoneNumberId) return "sem admin_cloud_phone_number_id"
+): Promise<{ erro: string | null; id: string | null }> {
+  if (!CLOUD_TOKEN)   return { erro: "sem WHATSAPP_CLOUD_TOKEN", id: null }
+  if (!phoneNumberId) return { erro: "sem admin_cloud_phone_number_id", id: null }
   try {
     const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/messages`, {
       method: "POST",
@@ -83,10 +85,13 @@ async function enviarTemplateCobranca(
         },
       }),
     })
-    if (res.ok) return null
-    return `Graph ${res.status}: ${(await res.text()).slice(0, 300)}`
+    if (res.ok) {
+      const d = await res.json().catch(() => ({}))
+      return { erro: null, id: d?.messages?.[0]?.id ?? null }
+    }
+    return { erro: `Graph ${res.status}: ${(await res.text()).slice(0, 300)}`, id: null }
   } catch (e) {
-    return String(e)
+    return { erro: String(e), id: null }
   }
 }
 
@@ -208,14 +213,25 @@ serve(async (req) => {
 
       const phoneFormatado = phoneEmp.startsWith("55") ? phoneEmp : "55" + phoneEmp
 
-      const falhaCloud = await enviarTemplateCobranca(cloudPhoneId, phoneFormatado, [
+      const params = [
         emp.nome,
         mesDeReferencia(emp.vencimento),
         valorBr((emp as { valor_mensalidade?: unknown }).valor_mensalidade),
         dataBr(emp.vencimento),
-      ])
+      ]
+      const envio = await enviarTemplateCobranca(cloudPhoneId, phoneFormatado, params)
+      const falhaCloud = envio.erro
 
       if (!falhaCloud) {
+        // Entra na conversa do Atendimento FWC: o número oficial não tem
+        // celular, e quando o lojista responder quem atende precisa ver a que
+        // ele está respondendo.
+        const { error: errChat } = await supabaseAdmin.from("admin_chat").insert({
+          telefone: phoneFormatado, empresa_id: emp.id, remetente: "fwc", tipo: "modelo",
+          texto: `🧾 Aviso de mensalidade — ${params[0]}: referência ${params[1]}, ${params[2]}, venceu em ${params[3]}.`,
+          message_id: envio.id, status: "enviado", lida: true,
+        })
+        if (errChat) console.error("[alertas] não entrou no atendimento:", errChat.message)
         enviadas++
         porTemplate++
         continue

@@ -4,6 +4,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import ThemeToggle from './ThemeToggle'
+import AtendimentoFWC from './AtendimentoFWC'
 import './Layout.css'
 
 function HamburgerIcon() {
@@ -173,6 +174,8 @@ export default function SuperAdminLayout() {
 
       <main className="content">
         <Outlet />
+        {/* Conversa do número oficial da FWC (mig 0257): fica em todas as telas do Super ADM. */}
+        <AtendimentoFWC />
       </main>
     </div>
   )
