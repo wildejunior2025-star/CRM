@@ -79,6 +79,53 @@ const numeroParaMoeda = (n) => maskMoeda(String(Math.round(Number(n || 0) * 100)
 // Logo do WhatsApp. É SVG e não emoji porque emoji de zap não existe — o 📲 que
 // estava ali antes é "celular com seta" e ninguém lia como WhatsApp. Herda a cor
 // do botão (currentColor), então serve em qualquer tema.
+// Troco do dinheiro. O atendente digita com quanto o cliente pagou e a tela faz
+// a conta — antes era de cabeça, no meio do movimento. Só mostra: o que entra no
+// caixa continua sendo o valor da conta, não a nota que o cliente entregou.
+// `compacto` é a versão da linha do "Dividir conta" (sem os botões de nota).
+function TrocoDinheiro({ valor, compacto = false }) {
+  const [pagou, setPagou] = useState('')
+  const devido = Math.round(Number(valor || 0) * 100) / 100
+  if (!(devido > 0)) return null
+  const recebido = Number(String(pagou).replace(',', '.'))
+  const temValor = pagou !== '' && recebido > 0
+  const troco = Math.round((recebido - devido) * 100) / 100
+  // Só as notas que cobrem a conta, e no máximo 3: é o que o cliente costuma dar.
+  const notas = compacto ? [] : [5, 10, 20, 50, 100, 200].filter(n => n > devido).slice(0, 3)
+  const cor = troco >= 0 ? 'var(--success)' : 'var(--danger)'
+
+  return (
+    <div style={{ flex: '1 1 100%', marginTop: compacto ? 4 : 2, padding: compacto ? '6px 8px' : '10px 12px', borderRadius: 10,
+      border: `1.5px solid ${temValor ? cor : 'var(--border)'}`, color: 'var(--text)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: compacto ? 12.5 : 13.5, fontWeight: 700 }}>💵 Cliente pagou com</span>
+        <input type="number" step="0.01" min="0" inputMode="decimal" value={pagou} placeholder="R$ 0,00"
+          onChange={e => setPagou(e.target.value)}
+          style={{ flex: '1 1 90px', minWidth: 0, padding: compacto ? '6px 8px' : '9px 10px', borderRadius: 8, border: '1px solid var(--border)',
+            background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: compacto ? 13 : 16, fontWeight: 700 }} />
+      </div>
+      {notas.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+          {notas.map(n => (
+            <button key={n} type="button" onClick={() => setPagou(String(n))}
+              style={{ flex: '1 1 0', padding: '7px 0', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                border: `1.5px solid ${recebido === n ? 'var(--primary)' : 'var(--border)'}`,
+                background: recebido === n ? 'rgba(134,59,255,.1)' : 'transparent', color: 'var(--text)' }}>
+              {fmt(n)}
+            </button>
+          ))}
+        </div>
+      )}
+      {temValor && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: compacto ? 4 : 10, fontWeight: 800, color: cor }}>
+          <span style={{ fontSize: compacto ? 13 : 15 }}>{troco > 0 ? 'Troco' : troco === 0 ? '✓ Sem troco' : 'Falta'}</span>
+          {troco !== 0 && <span style={{ fontSize: compacto ? 15 : 22 }}>{fmt(Math.abs(troco))}</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function IconeZap() {
   return (
     <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true" focusable="false">
@@ -3572,6 +3619,7 @@ export default function PresencialSalao() {
                     {f.label}
                   </button>
                 ))}
+                {forma === 'dinheiro' && <TrocoDinheiro valor={totalAPagar} />}
                 {/* PIX ONLINE (mig 0193) — só pra loja que conectou o Mercado Pago.
                     Fica fora da fileira das outras formas de propósito: as de cima o
                     atendente MARCA (ele viu o dinheiro); esta COBRA de verdade e a
@@ -3645,6 +3693,8 @@ export default function PresencialSalao() {
                       <button type="button" onClick={() => removePagamento(i)}
                         style={{ width: 30, height: 34, borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--danger)', fontSize: 16 }}>×</button>
                     </div>
+
+                    {p.forma === 'dinheiro' && <TrocoDinheiro compacto valor={Number(String(p.valor ?? '').replace(',', '.'))} />}
 
                     {/* Linha de PIX online: gera (ou mostra) o QR daquela parte. */}
                     {p.forma === 'pix_online' && (() => {
