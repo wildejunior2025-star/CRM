@@ -10,6 +10,7 @@
 //   modelos        → lista os modelos (templates) APROVADOS da conta.
 //   enviar_modelo  → modelo aprovado com os valores de {{1}}, {{2}}… É o único
 //                    jeito de escrever primeiro, ou depois que a janela fechou.
+//   foto_perfil    → troca a foto do número oficial (JPG/PNG em base64).
 //
 // Tudo que sai daqui entra em admin_chat, com o id da Meta: é por ele que o
 // whatsapp-cloud marca depois se ENTREGOU, se foi LIDO ou se falhou.
@@ -146,6 +147,54 @@ serve(async (req) => {
           }
         })
       return json({ ok: true, modelos })
+    }
+
+    // ── Foto do perfil do número oficial ─────────────────────────────────────
+    // O número não tem celular, então a foto só troca por aqui. A Meta não
+    // recebe a imagem direto no perfil: ela sobe antes pelo "upload retomável"
+    // do app dono da chave, que devolve um handle — é o handle que vai pro perfil.
+    if (acao === "foto_perfil") {
+      const tipo = String(body?.tipo ?? "image/jpeg")
+      if (tipo !== "image/jpeg" && tipo !== "image/png") return json({ ok: false, erro: "Use JPG ou PNG." }, 400)
+      const base64 = String(body?.imagem_base64 ?? "").replace(/^data:[^,]+,/, "")
+      if (!base64) return json({ ok: false, erro: "Mande a imagem." }, 400)
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+      if (bytes.length > 5 * 1024 * 1024) return json({ ok: false, erro: "A imagem passa de 5 MB." }, 400)
+
+      const graph = `https://graph.facebook.com/${GRAPH_VERSION}`
+      const auth = { Authorization: `Bearer ${CLOUD_TOKEN}` }
+
+      const app = await fetch(`${graph}/app`, { headers: auth }).then((r) => r.json()).catch(() => ({}))
+      const appId = String(app?.id ?? Deno.env.get("WHATSAPP_APP_ID") ?? "")
+      if (!appId) return json({ ok: false, erro: "Não achei o app dono da chave da Meta." })
+
+      const resSessao = await fetch(
+        `${graph}/${appId}/uploads?file_name=perfil-fwc&file_length=${bytes.length}&file_type=${encodeURIComponent(tipo)}`,
+        { method: "POST", headers: auth },
+      )
+      const sessao = await resSessao.json().catch(() => ({}))
+      if (!resSessao.ok || !sessao?.id) return json({ ok: false, erro: motivoEmPortugues(sessao, resSessao.status) })
+
+      // Nesse passo a Meta pede "OAuth", não "Bearer".
+      const resUpload = await fetch(`${graph}/${sessao.id}`, {
+        method: "POST",
+        headers: { Authorization: `OAuth ${CLOUD_TOKEN}`, file_offset: "0", "Content-Type": tipo },
+        body: bytes,
+      })
+      const upload = await resUpload.json().catch(() => ({}))
+      if (!resUpload.ok || !upload?.h) return json({ ok: false, erro: motivoEmPortugues(upload, resUpload.status) })
+
+      const res = await fetch(`${graph}/${phoneId}/whatsapp_business_profile`, {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json" },
+        body: JSON.stringify({ messaging_product: "whatsapp", profile_picture_handle: upload.h }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) return json({ ok: false, erro: motivoEmPortugues(data, res.status) })
+
+      const perfilNovo = await fetch(`${graph}/${phoneId}/whatsapp_business_profile?fields=profile_picture_url`, { headers: auth })
+        .then((r) => r.json()).catch(() => ({}))
+      return json({ ok: true, foto: perfilNovo?.data?.[0]?.profile_picture_url ?? null })
     }
 
     const telefone = comDDI(String(body?.telefone ?? ""))
