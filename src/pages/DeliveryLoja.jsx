@@ -347,7 +347,7 @@ export default function DeliveryLoja() {
       // fetchAll pagina: loja de deposito passa de 4 mil itens e o PostgREST corta
       // em 1000 por request — sem isso a vitrine perdia produto sem avisar ninguem.
       const produtosData = await lerOuFalhar(() => fetchAll(() => supabase.from('produtos')
-        .select('id, nome, descricao, preco:preco_venda, preco_promocional, faixas_preco, foto_url, categoria, ordem, disponivel_delivery, estoque_minimo')
+        .select('id, nome, descricao, preco:preco_venda, preco_promocional, faixas_preco, foto_url, categoria, ordem, disponivel_delivery, estoque_minimo, destaque')
         .eq('empresa_id', lojaData.id)
         .eq('ativo', true)
         .eq('disponivel_delivery', true)
@@ -736,6 +736,9 @@ export default function DeliveryLoja() {
     return m
   }, [produtosFiltrados])
 
+  // Produtos com a estrela da loja (mig 0258), na ordem do cardápio.
+  const destaquesTodos = useMemo(() => produtosFiltrados.filter(p => p.destaque), [produtosFiltrados])
+
   // Categoria dentro do horário de venda? (sem horário = sempre). Usa horário de Brasília
   // (America/Fortaleza) pra não depender do fuso do aparelho do cliente. Trata janela
   // que vira a noite (fim < inicio, ex.: 22:00-02:00).
@@ -766,6 +769,9 @@ export default function DeliveryLoja() {
       return a.localeCompare(b)
     })
   const semCategoria = porCategoria.get('__sem__') ?? []
+  // A faixa respeita o horário da categoria: produto de categoria fechada agora
+  // não aparece nem lá em cima (senão o cliente pede e a loja não pode vender).
+  const destaques = destaquesTodos.filter(p => !p.categoria || catDisponivelAgora(p.categoria))
   const todasCats = semCategoria.length > 0 ? [...categorias, '__sem__'] : categorias
   // Mercado/depósito (4.278 itens no maior) abre em prévia; restaurante (o mais
   // gordo tem 218) segue mostrando tudo. O corte é automático — a loja não
@@ -1273,6 +1279,18 @@ export default function DeliveryLoja() {
             </>
           ) : (
           <>
+            {/* Destaques da loja (mig 0258): antes das categorias, rolando pro lado. */}
+            {destaques.length > 0 && (
+              <FaixaDestaques
+                produtos={destaques}
+                qtdProduto={qtdProduto}
+                lojaAberta={podePedir}
+                abrirProduto={abrirProduto}
+                addOne={addOne}
+                removeOne={removeOne}
+                definirQtdProduto={definirQtdProduto}
+              />
+            )}
             {catsVisiveis.map(cat => (
               <SecaoProdutos
                 key={cat}
@@ -1546,6 +1564,34 @@ const ITENS_POR_VEZ = 30
 const CATALOGO_GRANDE = 300
 const PREVIA_POR_CATEGORIA = 4
 const PRIMEIRO_LOTE = 50   // ao abrir a categoria inteira
+
+// Faixa "Destaques" (mig 0258). A loja escolhe com a estrela o que vai aqui —
+// os que mais vendem, a promoção do dia. Rola pro LADO de propósito: fica no
+// topo sem empurrar pra baixo o cardápio, que é o que o cliente veio ver.
+// É o mesmo ProdutoCard do resto da loja (preço, promoção, +/−), só que em pé.
+function FaixaDestaques({ produtos, qtdProduto, lojaAberta, abrirProduto, addOne, removeOne, definirQtdProduto }) {
+  return (
+    <section className="dloja-destaques" aria-label="Destaques">
+      <div className="dloja-cat-head">
+        <h2 className="dloja-destaques-titulo">⭐ Destaques</h2>
+        {produtos.length > 2 && <span className="dloja-destaques-dica">arraste pro lado →</span>}
+      </div>
+      <div className="dloja-destaques-trilho">
+        {produtos.map(p => (
+          <ProdutoCard
+            key={p.id}
+            produto={p}
+            quantidade={qtdProduto(p.id)}
+            lojaAberta={lojaAberta}
+            onAdd={() => (p.complementos?.length ? abrirProduto(p) : addOne(p))}
+            onRemove={() => removeOne(String(p.id))}
+            onQtd={p.complementos?.length ? null : (n => definirQtdProduto(p, n))}
+          />
+        ))}
+      </div>
+    </section>
+  )
+}
 
 function SecaoProdutos({
   titulo, cat, produtos, refCallback, qtdProduto, lojaAberta, abrirProduto, addOne, removeOne, definirQtdProduto,

@@ -91,6 +91,7 @@ const emptyForm = {
   custo_pct_venda: '',
   preco_venda: 0,
   preco_promocional: '',
+  destaque: false,
   preco_app: 0,
   faixas_preco: [],
   estoque_minimo: 0,
@@ -748,6 +749,18 @@ export default function Produtos() {
     }
   }
 
+  // Estrela da Loja Online (mig 0258): põe ou tira o produto da faixa de
+  // destaques do topo do cardápio. 1 clique, sem abrir o produto.
+  async function toggleDestaque(p) {
+    const novo = !p.destaque
+    setProdutos(prev => prev.map(x => x.id === p.id ? { ...x, destaque: novo } : x))
+    const { error } = await supabase.from('produtos').update({ destaque: novo }).eq('id', p.id)
+    if (error) {
+      setProdutos(prev => prev.map(x => x.id === p.id ? { ...x, destaque: !novo } : x))
+      setError(error.message)
+    }
+  }
+
   function handleSearch(val) {
     setSearch(val)
     setPage(0)
@@ -933,6 +946,7 @@ export default function Produtos() {
       custo_pct_venda: produto.custo_pct_venda ?? '',
       preco_venda: produto.preco_venda ?? 0,
       preco_promocional: produto.preco_promocional ?? '',
+      destaque: !!produto.destaque,
       preco_app: produto.preco_app ?? 0,
       faixas_preco: produto.faixas_preco ?? [],
       estoque_minimo: produto.estoque_minimo ?? 0,
@@ -1134,6 +1148,7 @@ export default function Produtos() {
       preco_promocional: (Number(form.preco_promocional) > 0
         && Number(form.preco_promocional) < (Number(form.preco_venda) || 0))
         ? Number(form.preco_promocional) : null,
+      destaque: !!form.destaque,
       preco_app: Number(form.preco_app) || 0,
       estoque_minimo: Number(form.estoque_minimo) || 0,
       faixas_preco: form.faixas_preco ?? [],
@@ -1543,7 +1558,17 @@ export default function Produtos() {
                         )}
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, minWidth: 0 }}>
-                        <span>{p.nome}</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <button
+                            type="button"
+                            onClick={() => toggleDestaque(p)}
+                            aria-pressed={!!p.destaque}
+                            title={p.destaque ? 'Tirar dos destaques da Loja Online' : 'Pôr nos destaques da Loja Online'}
+                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 16, lineHeight: 1,
+                              filter: p.destaque ? 'none' : 'grayscale(1)', opacity: p.destaque ? 1 : 0.35 }}
+                          >⭐</button>
+                          {p.nome}
+                        </span>
                         {(compProd[p.id]?.length > 0) && (
                           <button
                             type="button"
@@ -2009,6 +2034,16 @@ export default function Produtos() {
                       <strong style={{ color: '#22c55e' }}>R$ {Number(form.preco_promocional).toFixed(2)}</strong>
                     </span>
                   )}
+                </div>
+
+                <div className="form-field">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#f59e0b' }}>
+                    <input type="checkbox" name="destaque" checked={!!form.destaque} onChange={handleChange} style={{ width: 18, height: 18 }} />
+                    ⭐ Destaque na Loja Online
+                  </label>
+                  <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                    Aparece na faixa lá de cima do cardápio, que o cliente arrasta pro lado. Bom pros mais vendidos e pra promoção do dia.
+                  </span>
                 </div>
 
                 {MOSTRAR_PRECO_APP && (

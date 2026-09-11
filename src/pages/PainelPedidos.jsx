@@ -7461,7 +7461,7 @@ export default function PainelPedidos() {
     setLoadingCatalogo(true)
     const { data } = await supabase
       .from('produtos')
-      .select('id, nome, preco_venda, categoria, disponivel_delivery')
+      .select('id, nome, preco_venda, categoria, disponivel_delivery, destaque')
       .eq('empresa_id', empresa.id)
       .is('arquivado_em', null)
       .order('nome', { ascending: true })
@@ -7561,6 +7561,15 @@ export default function PainelPedidos() {
       // reverte em caso de falha
       setCatalogo(prev => prev.map(p => p.id === prod.id ? { ...p, disponivel_delivery: prod.disponivel_delivery } : p))
     }
+  }
+
+  // Estrela da Loja Online (mig 0258), pelo celular: põe ou tira o item da
+  // faixa "Destaques" do topo do cardápio.
+  async function toggleDestaqueProduto(prod) {
+    const novo = !prod.destaque
+    setCatalogo(prev => prev.map(p => p.id === prod.id ? { ...p, destaque: novo } : p))
+    const { error } = await supabase.from('produtos').update({ destaque: novo }).eq('id', prod.id)
+    if (error) setCatalogo(prev => prev.map(p => p.id === prod.id ? { ...p, destaque: !novo } : p))
   }
 
   // ── Ref para o intervalo do loop de som ───────────────────
@@ -9556,7 +9565,7 @@ export default function PainelPedidos() {
           {painelDireito === 'catalogo' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <p style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
-                Pause um item quando ele acabar — ele <strong>some da loja online na hora</strong>. Reative quando voltar ao estoque.
+                Pause um item quando ele acabar — ele <strong>some da loja online na hora</strong>. Reative quando voltar ao estoque. A <strong>⭐</strong> põe o item nos destaques do topo da loja online.
               </p>
               <input
                 type="search"
@@ -9654,6 +9663,18 @@ export default function PainelPedidos() {
                                 </svg>
                               </button>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => toggleDestaqueProduto(prod)}
+                              aria-pressed={!!prod.destaque}
+                              title={prod.destaque ? 'Tirar dos destaques da loja online' : 'Pôr nos destaques da loja online'}
+                              style={{
+                                padding: '6px 9px', borderRadius: 8, cursor: 'pointer', fontSize: 14, lineHeight: 1, border: '1.5px solid',
+                                borderColor: prod.destaque ? '#f59e0b' : 'var(--border, #2a2a3a)',
+                                background: prod.destaque ? 'rgba(245,158,11,.15)' : 'transparent',
+                                filter: prod.destaque ? 'none' : 'grayscale(1)', opacity: prod.destaque ? 1 : 0.55,
+                              }}
+                            >⭐</button>
                             <button
                               type="button"
                               onClick={() => togglePausarProduto(prod)}
