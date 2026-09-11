@@ -41,6 +41,23 @@ export default function AssistenteLoja() {
   const inputRef = useRef(null)
 
   useEffect(() => { fimRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs, enviando])
+
+  // Tem modal aberto na tela? Olha só quando entra ou sai elemento (é assim
+  // que os modais montam e desmontam), no máximo uma vez por quadro.
+  const [temModal, setTemModal] = useState(false)
+  useEffect(() => {
+    const SEL = '.modal-overlay, [aria-modal="true"], [role="dialog"], dialog[open], .confirmar-fundo'
+    let quadro = 0
+    const checar = () => {
+      quadro = 0
+      setTemModal([...document.querySelectorAll(SEL)]
+        .some(el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'))
+    }
+    const obs = new MutationObserver(() => { if (!quadro) quadro = requestAnimationFrame(checar) })
+    obs.observe(document.body, { childList: true, subtree: true })
+    checar()
+    return () => { obs.disconnect(); if (quadro) cancelAnimationFrame(quadro) }
+  }, [])
   useEffect(() => { if (aberto) inputRef.current?.focus() }, [aberto])
 
   // Busca o histórico só na primeira vez que ele abre o balão. Buscar no
@@ -138,6 +155,10 @@ export default function AssistenteLoja() {
   if (profile?.perfil !== 'admin' && profile?.perfil !== 'super_admin') return null
 
   if (!aberto) {
+    // Com um formulário aberto (modal), o botão some: ele fica no canto de
+    // baixo e cobria justo o rodapé do modal — no Editar produto, escondia o
+    // "Cancelar". Fechou o modal, ele volta.
+    if (temModal) return null
     return (
       <button type="button" className="ia-fab" onClick={() => setAberto(true)} title="Perguntar à IA" style={S.fab}>
         <span aria-hidden style={{ fontSize: 17 }}>🤖</span>
