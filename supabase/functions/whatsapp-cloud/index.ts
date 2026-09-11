@@ -329,7 +329,7 @@ async function statusDaFwc(supabase: any, st: any) {
 // Mensagem que o lojista (ou quem for) mandou pro número oficial.
 // deno-lint-ignore-next-line no-explicit-any
 async function caixaDaFwc(supabase: any, value: any, message: any) {
-  const from = String(message?.from ?? "").replace(/D/g, "")
+  const from = String(message?.from ?? "").replace(/[^0-9]/g, "")
   if (!from) return
 
   // A Meta reenvia o webhook quando demora a receber o 200. Sem isto a mesma
@@ -377,9 +377,9 @@ async function caixaDaFwc(supabase: any, value: any, message: any) {
   // Lojista conhecido? O telefone_contato da loja é o mesmo que recebe a
   // cobrança. Casa pelos 8 últimos dígitos (a Meta tira o 9 do celular).
   const chave = from.slice(-8)
-  const { data: emps } = await supabase.from("empresas").select("id, telefone_contato").not("telefone_contato", "is", null)
+  const { data: emps } = await supabase.from("empresas").select("id, nome, telefone_contato").not("telefone_contato", "is", null)
   const emp = (Array.isArray(emps) ? emps : [])
-    .find((e: Record<string, unknown>) => String(e.telefone_contato ?? "").replace(/D/g, "").endsWith(chave))
+    .find((e: Record<string, unknown>) => String(e.telefone_contato ?? "").replace(/[^0-9]/g, "").endsWith(chave))
 
   const { error } = await supabase.from("admin_chat").insert({
     telefone: from, nome, empresa_id: emp?.id ?? null,
@@ -387,7 +387,48 @@ async function caixaDaFwc(supabase: any, value: any, message: any) {
     midia_path: midia?.path ?? null, midia_tipo: midia?.tipo ?? null, midia_expira_em: midia?.expiraEm ?? null,
     message_id: message.id ?? null, lida: false,
   })
-  if (error) console.error("[fwc] não gravou a mensagem:", error.message)
+  if (error) { console.error("[fwc] não gravou a mensagem:", error.message); return }
+  await avisarDono(supabase, from, (emp?.nome as string) ?? nome, texto)
+}
+
+// O dono não fica olhando o Super ADM o dia todo: conversa nova no número
+// oficial vira um aviso no WhatsApp pessoal dele (config_global.super_admin_phone).
+// Sai pelo Evolution (admin_sender_instance), porque o número oficial não pode
+// escrever primeiro sem modelo aprovado. Quem manda 5 mensagens seguidas gera
+// 1 aviso só: se já havia outra não lida dele nos últimos 30 min, fica quieto.
+// deno-lint-ignore-next-line no-explicit-any
+async function avisarDono(supabase: any, from: string, quem: string | null, texto: string) {
+  try {
+    const url = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/[/]$/, "")
+    const key = Deno.env.get("EVOLUTION_API_KEY") ?? ""
+    if (!url || !key) return
+
+    const desde = new Date(Date.now() - 30 * 60_000).toISOString()
+    const { count } = await supabase.from("admin_chat").select("id", { count: "exact", head: true })
+      .eq("remetente", "cliente").eq("lida", false).eq("telefone", from).gte("created_at", desde)
+    if ((count ?? 0) > 1) return
+
+    const { data: cfgs } = await supabase.from("config_global").select("chave, valor")
+      .in("chave", ["super_admin_phone", "admin_sender_instance"])
+    const cfg: Record<string, string> = {}
+    for (const r of cfgs ?? []) cfg[r.chave] = String(r.valor ?? "").trim()
+    let destino = String(cfg.super_admin_phone ?? "").replace(/[^0-9]/g, "")
+    if (!destino) return
+    if (!destino.startsWith("55")) destino = "55" + destino
+
+    const tel = from.length >= 12 ? `(${from.slice(2, 4)}) ${from.slice(4, -4)}-${from.slice(-4)}` : from
+    const trecho = texto.length > 300 ? texto.slice(0, 300) + "…" : texto
+    const aviso = `🔔 *Mensagem no número oficial da FWC*\n\n*${quem ?? "Sem nome"}* · ${tel}\n${trecho}\n\nResponder: https://app.fwcinter.com/super-admin`
+
+    const res = await fetch(`${url}/message/sendText/${cfg.admin_sender_instance || "crmadmin"}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: key },
+      body: JSON.stringify({ number: destino, text: aviso }),
+    })
+    if (!res.ok) console.error("[fwc] aviso ao dono falhou:", res.status, (await res.text()).slice(0, 200))
+  } catch (e) {
+    console.error("[fwc] aviso ao dono falhou:", (e as Error)?.message)
+  }
 }
 
 // ── Processa uma mensagem recebida ───────────────────────────────────────────
