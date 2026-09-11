@@ -11,6 +11,7 @@
 //   enviar_modelo  → modelo aprovado com os valores de {{1}}, {{2}}… É o único
 //                    jeito de escrever primeiro, ou depois que a janela fechou.
 //   foto_perfil    → troca a foto do número oficial (JPG/PNG em base64).
+//   criar_modelo   → manda um modelo novo pra análise da Meta.
 //
 // Tudo que sai daqui entra em admin_chat, com o id da Meta: é por ele que o
 // whatsapp-cloud marca depois se ENTREGOU, se foi LIDO ou se falhou.
@@ -90,12 +91,25 @@ serve(async (req) => {
   try {
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
-    // Só o super admin fala em nome da FWC.
+    // Só o super admin fala em nome da FWC. A chave de serviço também passa:
+    // é o próprio servidor (script de manutenção), e quem tem ela já manda no
+    // banco inteiro — não abre porta nenhuma que já não estivesse aberta.
     const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "")
-    const { data: u } = await supabase.auth.getUser(jwt)
-    if (!u?.user) return json({ ok: false, erro: "Sessão expirada. Entre de novo." }, 401)
-    const { data: perfil } = await supabase.from("profiles").select("perfil").eq("id", u.user.id).maybeSingle()
-    if (perfil?.perfil !== "super_admin") return json({ ok: false, erro: "Só o super admin pode usar." }, 403)
+    // A chave do ambiente e a do painel podem vir em formatos diferentes, então
+    // vale também qualquer JWT com papel service_role. Olhar só o papel é seguro
+    // PORQUE esta função roda com verify_jwt ligado: o portão da Supabase já
+    // conferiu a assinatura antes de a chamada chegar aqui.
+    let papel = ""
+    try {
+      const p = jwt.split(".")[1] ?? ""
+      papel = JSON.parse(atob(p.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (p.length % 4)) % 4)))?.role ?? ""
+    } catch { /* não é JWT */ }
+    if (!jwt || (jwt !== SUPABASE_KEY && papel !== "service_role")) {
+      const { data: u } = await supabase.auth.getUser(jwt)
+      if (!u?.user) return json({ ok: false, erro: "Sessão expirada. Entre de novo." }, 401)
+      const { data: perfil } = await supabase.from("profiles").select("perfil").eq("id", u.user.id).maybeSingle()
+      if (perfil?.perfil !== "super_admin") return json({ ok: false, erro: "Só o super admin pode usar." }, 403)
+    }
 
     const { data: cfgs } = await supabase.from("config_global").select("chave, valor")
       .in("chave", ["admin_cloud_phone_number_id", "admin_cloud_waba_id"])
@@ -195,6 +209,44 @@ serve(async (req) => {
       const perfilNovo = await fetch(`${graph}/${phoneId}/whatsapp_business_profile?fields=profile_picture_url`, { headers: auth })
         .then((r) => r.json()).catch(() => ({}))
       return json({ ok: true, foto: perfilNovo?.data?.[0]?.profile_picture_url ?? null })
+    }
+
+    // ── Criar modelo (vai pra análise da Meta) ───────────────────────────────
+    // Sai com exemplo pra cada {{n}} — sem isso a Meta recusa na hora — e os
+    // botões são de resposta rápida: um toque do lojista já abre as 24h de
+    // conversa livre. A Meta pode trocar a categoria na análise (Utilidade que
+    // ela acha promocional vira Marketing); a resposta diz qual ficou.
+    if (acao === "criar_modelo") {
+      if (!wabaId) return json({ ok: false, erro: "Falta admin_cloud_waba_id no config_global." }, 503)
+      const nome = String(body?.nome ?? "").trim().toLowerCase()
+      const categoria = String(body?.categoria ?? "UTILITY").toUpperCase()
+      const idioma = String(body?.idioma ?? "pt_BR").trim()
+      const corpo = String(body?.corpo ?? "").trim()
+      const exemplos = (Array.isArray(body?.exemplos) ? body.exemplos : []).map((e: unknown) => limparParam(String(e ?? "")))
+      const rodape = String(body?.rodape ?? "").trim()
+      const botoes = (Array.isArray(body?.botoes) ? body.botoes : []).map((b: unknown) => String(b ?? "").trim()).filter(Boolean)
+      if (!/^[a-z0-9_]{1,512}$/.test(nome)) return json({ ok: false, erro: "Nome só com letras minúsculas, números e _." }, 400)
+      if (!["UTILITY", "MARKETING"].includes(categoria)) return json({ ok: false, erro: "Categoria: UTILITY ou MARKETING." }, 400)
+      if (!corpo) return json({ ok: false, erro: "Escreva o texto do modelo." }, 400)
+      const campos = new Set(corpo.match(/\{\{(\d+)\}\}/g) ?? []).size
+      if (exemplos.length !== campos || exemplos.some((e: string) => !e)) {
+        return json({ ok: false, erro: `O texto tem ${campos} campo(s): mande um exemplo pra cada.` }, 400)
+      }
+
+      const componentes: Record<string, unknown>[] = [
+        campos ? { type: "BODY", text: corpo, example: { body_text: [exemplos] } } : { type: "BODY", text: corpo },
+      ]
+      if (rodape) componentes.push({ type: "FOOTER", text: rodape })
+      if (botoes.length) componentes.push({ type: "BUTTONS", buttons: botoes.map((t: string) => ({ type: "QUICK_REPLY", text: t })) })
+
+      const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${wabaId}/message_templates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${CLOUD_TOKEN}` },
+        body: JSON.stringify({ name: nome, language: idioma, category: categoria, components: componentes }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) return json({ ok: false, erro: motivoEmPortugues(data, res.status), detalhe: data?.error ?? null })
+      return json({ ok: true, id: data?.id ?? null, status: data?.status ?? null, categoria: data?.category ?? categoria })
     }
 
     const telefone = comDDI(String(body?.telefone ?? ""))
