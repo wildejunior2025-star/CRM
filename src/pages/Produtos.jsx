@@ -2237,15 +2237,21 @@ export default function Produtos() {
                     return (
                     <div key={v.grupo_id} style={{ border: '1px solid var(--border)', borderRadius: 10, marginTop: 8, background: 'var(--surface-hover)' }}>
                      <div className="pf-vinculo" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 120px auto', gap: 8, alignItems: 'center', padding: '8px 12px' }}>
-                      {/* Clicar no nome abre os sabores da categoria pra editar aqui mesmo */}
+                      {/* Clicar abre os sabores da categoria pra editar aqui mesmo. A setinha
+                          sozinha (▸) era pequena demais: no celular o lojista não percebia que
+                          dava pra abrir. Agora é um botão escrito, na cor do sistema. */}
                       <button type="button" onClick={() => abrirOpcoes(v.grupo_id)}
-                        title="Ver e editar os sabores desta categoria"
-                        style={{ background: 'none', border: 'none', padding: 0, minWidth: 0, cursor: 'pointer', color: 'var(--text)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, textAlign: 'left' }}>
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{aberta ? '▾' : '▸'}</span>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.nome}</span>
-                        {ops && !aberta && (
-                          <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)' }}>· {ops.length} sabor{ops.length === 1 ? '' : 'es'}</span>
-                        )}
+                        aria-expanded={aberta}
+                        title="Ver e editar as opções desta categoria"
+                        style={{ background: 'none', border: 'none', padding: 0, minWidth: 0, cursor: 'pointer', color: 'var(--text)', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6, textAlign: 'left' }}>
+                        <span style={{ fontWeight: 700, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.nome}</span>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 20,
+                          fontSize: 12.5, fontWeight: 700, whiteSpace: 'nowrap', border: '1.5px solid var(--primary)',
+                          color: aberta ? '#fff' : 'var(--primary)', background: aberta ? 'var(--primary)' : 'rgba(124,58,237,.08)',
+                        }}>
+                          {aberta ? '▲ Fechar opções' : `▼ Ver opções${ops ? ` (${ops.length})` : ''}`}
+                        </span>
                       </button>
                       <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
                         máx.:
