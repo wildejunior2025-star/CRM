@@ -771,7 +771,14 @@ export default function DeliveryLoja() {
   const semCategoria = porCategoria.get('__sem__') ?? []
   // A faixa respeita o horário da categoria: produto de categoria fechada agora
   // não aparece nem lá em cima (senão o cliente pede e a loja não pode vender).
-  const destaques = destaquesTodos.filter(p => !p.categoria || catDisponivelAgora(p.categoria))
+  // E segue a ORDEM DO CARDÁPIO (a das categorias, depois a do produto nela) —
+  // a lista chega do banco por nome de categoria, e aí "Cremes" passava na
+  // frente de "Picolés" mesmo com Picolés em 5º e Cremes em 31º no cardápio.
+  const destaques = destaquesTodos
+    .filter(p => !p.categoria || catDisponivelAgora(p.categoria))
+    .sort((a, b) => ((catOrdem[a.categoria] ?? 999) - (catOrdem[b.categoria] ?? 999))
+      || ((a.ordem ?? 9999) - (b.ordem ?? 9999))
+      || String(a.nome).localeCompare(String(b.nome)))
   const todasCats = semCategoria.length > 0 ? [...categorias, '__sem__'] : categorias
   // Mercado/depósito (4.278 itens no maior) abre em prévia; restaurante (o mais
   // gordo tem 218) segue mostrando tudo. O corte é automático — a loja não
