@@ -5020,9 +5020,24 @@ function CadastroRapidoNoChat({ empresaId, telefone, onNomeDoCliente }) {
 function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onNomeDoCliente, cadastroVersao, pinChat }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
+  // No celular a sacola + o "fechar pedido" abriam empilhados embaixo da
+  // conversa e empurravam as mensagens até não sobrar nada: quem estava
+  // atendendo ficava preso numa tela de formulário, sem caminho de volta.
+  // Agora é gaveta: abre no botão, fecha no botão, e a conversa nunca some.
+  const [sacolaAberta, setSacolaAberta] = useState(false)
   useEffect(() => {
     fimRef.current?.scrollIntoView({ block: 'end' })
   }, [thread.msgs.length])
+  // Trocou de conversa: a gaveta da anterior não fica aberta na nova.
+  useEffect(() => { setSacolaAberta(false) }, [thread.cliente_ref])
+  // Entrou o primeiro item por fora (o robô transferiu com produto, a busca do
+  // chamado): a gaveta abre sozinha — senão o item cai num lugar que ninguém vê.
+  const nItens = sacola?.length ?? 0
+  const antesItens = useRef(nItens)
+  useEffect(() => {
+    if (!g && antesItens.current === 0 && nItens > 0) setSacolaAberta(true)
+    antesItens.current = nItens
+  }, [nItens, g])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
@@ -5049,8 +5064,9 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
         />
       </div>
 
-      {/* Mensagens */}
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 2px' }}>
+      {/* Mensagens. O minHeight é o que garante que a conversa continue à vista
+          mesmo com a gaveta da sacola aberta no celular. */}
+      <div style={{ flex: 1, minHeight: g ? undefined : 110, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 2px' }}>
         {thread.msgs.map(m => {
           const daLoja = m.remetente === 'loja'
           const doRobo = daLoja && m.bot
@@ -5146,8 +5162,8 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
           eles quebram pra linha de baixo sozinhos em vez de espremer. */}
       {(empresaId || botPausado || onPedirLocalizacao) && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-          {empresaId && g && (
-            <button type="button" onClick={onAbrirSacola}
+          {empresaId && (
+            <button type="button" onClick={g ? onAbrirSacola : () => setSacolaAberta(v => !v)}
               style={{
                 flex: '1 1 140px', padding: g ? '11px 10px' : '9px 8px', borderRadius: 10, cursor: 'pointer',
                 fontSize: g ? 13.5 : 12, fontWeight: 700, lineHeight: 1.2,
@@ -5155,7 +5171,9 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
                 background: sacola?.length ? 'rgba(34,197,94,.10)' : 'transparent',
                 color: sacola?.length ? '#22c55e' : 'var(--text-muted)',
               }}>
-              {sacola?.length ? `🛒 Sacola (${sacola.length})` : '🛒 Montar sacola'}
+              {!g && sacolaAberta
+                ? '🛒 Fechar a sacola'
+                : sacola?.length ? `🛒 Sacola (${sacola.length})` : '🛒 Montar sacola'}
             </button>
           )}
 
@@ -5186,30 +5204,53 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
         </div>
       )}
 
-      {empresaId && !g && <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} onAvulso={onAvulsoSacola} />}
-      {!g && sacola?.length > 0 && (
-        <>
-          <SacolaNoChat
-            itens={sacola}
-            onQtd={onQtdSacola}
-            onQtdDireta={onQtdDiretaSacola}
-            onRemover={idx => onQtdSacola(idx, -999)}
-            onEditar={onEditarSacola}
-            onEnviar={onEnviarSacola}
-            enviando={enviandoSacola}
-          />
-          <FecharPedidoNoChat
-            key={thread.cliente_ref}
-            empresa={empresa}
-            telefone={thread.cliente_ref}
-            nomeThread={thread.cliente_nome}
-            itens={sacola}
-            onFinalizar={onFinalizarPedido}
-            salvando={salvandoPedido}
-            cadastroVersao={cadastroVersao}
-            pinChat={pinChat}
-          />
-        </>
+      {/* GAVETA DA SACOLA (só no celular). Rola dentro dela mesma e nunca passa
+          de 58% da tela — o resto continua sendo a conversa. A volta fica
+          grudada no topo: de qualquer ponto da gaveta dá pra sair. */}
+      {!g && empresaId && sacolaAberta && (
+        <div style={{
+          marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border, #2a2a3a)',
+          maxHeight: '58vh', overflowY: 'auto',
+        }}>
+          <button type="button" onClick={() => setSacolaAberta(false)}
+            style={{
+              position: 'sticky', top: 0, zIndex: 2, width: '100%', marginBottom: 8,
+              padding: '9px 10px', borderRadius: 10, cursor: 'pointer',
+              border: '1px solid var(--border, #2a2a3a)', background: 'var(--card, #14141f)',
+              color: 'var(--text)', fontSize: 12.5, fontWeight: 700,
+            }}>
+            ‹ Voltar pra conversa
+          </button>
+
+          <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} onAvulso={onAvulsoSacola} />
+
+          {sacola?.length > 0 && (
+            <>
+              <SacolaNoChat
+                itens={sacola}
+                onQtd={onQtdSacola}
+                onQtdDireta={onQtdDiretaSacola}
+                onRemover={idx => onQtdSacola(idx, -999)}
+                onEditar={onEditarSacola}
+                // Mandou a lista pro cliente: a gaveta sai da frente sozinha,
+                // porque o passo seguinte é ler o que ele responde.
+                onEnviar={() => Promise.resolve(onEnviarSacola?.()).then(() => setSacolaAberta(false))}
+                enviando={enviandoSacola}
+              />
+              <FecharPedidoNoChat
+                key={thread.cliente_ref}
+                empresa={empresa}
+                telefone={thread.cliente_ref}
+                nomeThread={thread.cliente_nome}
+                itens={sacola}
+                onFinalizar={onFinalizarPedido}
+                salvando={salvandoPedido}
+                cadastroVersao={cadastroVersao}
+                pinChat={pinChat}
+              />
+            </>
+          )}
+        </div>
       )}
 
       {/* Caixa de resposta */}
