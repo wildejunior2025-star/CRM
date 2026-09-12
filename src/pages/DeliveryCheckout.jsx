@@ -7,6 +7,7 @@ import { registrarPedido } from '../lib/meusPedidos'
 import { iniciarCheckout } from '../lib/tracking'
 import { marcarEtapa, anotarContato } from '../lib/funil'
 import { formasAtivas, repassePct } from '../lib/constants'
+import { precoPorQuantidade } from '../lib/precoQuantidade'
 import { carregarExcecoes, abertaAgora } from '../lib/feriados'
 import { diasParaAgendar, paraISO, rotuloAgendado } from '../lib/agendamento'
 import 'leaflet/dist/leaflet.css'
@@ -1111,11 +1112,52 @@ export default function DeliveryCheckout() {
     iniciarCheckout(state.itens, Number(state.subtotal ?? 0) + Number(state.taxaEntrega ?? 0))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── O preço que vale é o do banco, não o que está no navegador ──────────
+  // A sacola mora no localStorage e sobrevive dias. A loja conferiu isso ao
+  // ABRIR a vitrine, mas quem deixou a aba aberta desde de manhã pula essa
+  // conferência: foi assim que o #1090 da CDBom fechou 12 pacotes de gelo a
+  // R$ 5,00 com o "5+ por R$ 2,50" cadastrado e valendo o dia inteiro.
+  //
+  // Aqui é o funil por onde TODO pedido passa. Só corrige pra baixo: o cliente
+  // não pode ser surpreendido com preço maior do que o que ele viu na sacola.
+  const [itensConferidos, setItensConferidos] = useState(null)
+  useEffect(() => {
+    const lista = state?.itens
+    if (!Array.isArray(lista) || !lista.length) return
+    let vivo = true
+    ;(async () => {
+      const ids = [...new Set(lista.map(i => i.id).filter(Boolean))]
+      if (!ids.length) return
+      const { data } = await supabase.from('produtos')
+        .select('id, preco_venda, preco_promocional, faixas_preco').in('id', ids)
+      if (!vivo || !Array.isArray(data) || !data.length) return
+      const porId = new Map(data.map(p => [String(p.id), p]))
+      let mudou = false
+      const conferida = lista.map(i => {
+        const prod = porId.get(String(i.id))
+        // Item montado fecha o preço na montagem (com o rateio dos sabores
+        // pagos); refazer essa conta aqui erraria o adicional.
+        if (!prod || i.complementos?.length) return i
+        const hoje = precoPorQuantidade(prod.preco_venda, prod.faixas_preco, i.quantidade, prod.preco_promocional)
+        const valor = Math.min(Number(i.preco) || 0, hoje)
+        if (valor === Number(i.preco)) return i
+        mudou = true
+        return { ...i, preco: valor }
+      })
+      if (mudou) setItensConferidos(conferida)
+    })()
+    return () => { vivo = false }
+  }, [state?.itens])
+
   if (!state?.itens?.length) {
     return <Navigate to="/lojas" replace />
   }
 
-  const { empresaId, empresaNome, itens, subtotal, taxaEntrega } = state
+  const { empresaId, empresaNome, taxaEntrega } = state
+  const itens = itensConferidos ?? state.itens
+  const subtotal = itensConferidos
+    ? Math.round(itens.reduce((s, i) => s + Number(i.quantidade) * Number(i.preco), 0) * 100) / 100
+    : state.subtotal
   // Taxa por distância (faixas por km da loja) a partir do ponto do cliente;
   // se não der pra calcular, cai na taxa fixa passada pela loja.
   const temFaixas = Array.isArray(lojaEndereco?.taxas_entrega_km) && lojaEndereco.taxas_entrega_km.length > 0

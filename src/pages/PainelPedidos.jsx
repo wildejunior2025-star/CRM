@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
-import { supabase, fetchAll } from '../lib/supabaseClient'
+import { supabase, invocarEdge, fetchAll } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto } from '../lib/descontoEntrega'
 import { precoPorQuantidade, faixaAplicada, menorFaixa } from '../lib/precoQuantidade'
@@ -7342,7 +7342,7 @@ export default function PainelPedidos() {
       ? { ok: false, txt: '⚠️ A lista foi enviada, mas não consegui gravar o carrinho: ' + errCarrinho.message }
       : { ok: true, txt: okZap
           ? '✓ Sacola enviada. Você continua na conversa — devolva pro robô quando quiser.'
-          : '⚠️ Sacola gravada aqui, mas não saiu no WhatsApp do cliente.' })
+          : `⚠️ Sacola gravada aqui, mas não saiu no WhatsApp. ${r.erro ?? ''}`.trim() })
   }
 
   // Manda um texto solto pro cliente: grava no chat do gestor e sai no WhatsApp.
@@ -7357,11 +7357,16 @@ export default function PainelPedidos() {
       empresa_id: empresa.id, canal, cliente_ref,
       cliente_nome: thread?.cliente_nome ?? null, remetente: 'loja', texto,
     })
-    if (tel.length < 10) return { ok: false, semZap: true }
-    const { data } = await supabase.functions.invoke('whatsapp-connect', {
-      body: { action: 'send_message', phone: tel, text: texto, espelhar_no_chat: false, assumir_conversa: false },
+    if (tel.length < 10) return { ok: false, semZap: true, erro: 'Esta conversa não tem um número de WhatsApp.' }
+    const { data, error, sessaoExpirada } = await invocarEdge('whatsapp-connect', {
+      action: 'send_message', phone: tel, text: texto, espelhar_no_chat: false, assumir_conversa: false,
     })
-    return { ok: !!data?.ok }
+    // O porquê SEMPRE volta junto: "não enviou" sem motivo faz quem está no
+    // balcão tentar de novo pra sempre — e a causa costuma ser login vencido
+    // (tela aberta desde de manhã) ou a janela de 24h da Meta.
+    if (sessaoExpirada) return { ok: false, erro: 'Sua sessão expirou. Atualize a página (F5) e mande de novo.' }
+    if (error) return { ok: false, erro: 'Não consegui falar com o servidor agora.' }
+    return { ok: !!data?.ok, erro: data?.erro ?? null }
   }
 
   // "Quais sabores tem?" — a pergunta de sempre. Em vez de quem atende digitar
@@ -7388,7 +7393,7 @@ export default function PainelPedidos() {
     setEnviandoLista(false)
     setChatAviso(r.ok
       ? { ok: true, txt: '✓ Lista de sabores enviada.' }
-      : { ok: false, txt: '⚠️ A lista ficou aqui no chat, mas não saiu no WhatsApp do cliente.' })
+      : { ok: false, txt: `⚠️ A lista ficou aqui no chat, mas não saiu no WhatsApp. ${r.erro ?? ''}`.trim() })
   }
 
   /**
@@ -7436,7 +7441,7 @@ export default function PainelPedidos() {
     setEnviandoLista(false)
     setChatAviso(r.ok
       ? { ok: true, txt: `✓ ${linhas.length} ${linhas.length === 1 ? 'item enviado' : 'itens enviados'} de ${categoria}.` }
-      : { ok: false, txt: '⚠️ A lista ficou aqui no chat, mas não saiu no WhatsApp do cliente.' })
+      : { ok: false, txt: `⚠️ A lista ficou aqui no chat, mas não saiu no WhatsApp. ${r.erro ?? ''}`.trim() })
   }
 
   // Devolve a conversa pro robô sem sair dela: tira a pausa automática e ele

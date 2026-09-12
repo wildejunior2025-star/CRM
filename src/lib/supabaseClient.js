@@ -40,3 +40,26 @@ export async function fetchAll(makeQuery, page = 1000) {
     from += PAGINAS_JUNTAS * page
   }
 }
+
+/**
+ * Chama uma edge function renovando a sessão se ela tiver vencido.
+ *
+ * O gestor fica aberto o dia inteiro no balcão. Quando o token expira, todo
+ * invoke passa a voltar 401 e a tela só sabe dizer "não enviou" — foi o que
+ * aconteceu com a CD Bom às 13:33: a lista de sabores ficou no chat e nunca
+ * saiu no WhatsApp, sem ninguém entender por quê.
+ *
+ * Aqui o 401 vira uma tentativa de renovar o login e uma segunda chamada. Se
+ * nem assim for, devolve o erro com a causa escrita, pra tela poder dizer o que
+ * a pessoa tem que fazer.
+ */
+export async function invocarEdge(nome, body) {
+  let r = await supabase.functions.invoke(nome, { body })
+  const status = r.error?.context?.status ?? r.error?.status
+  if (status === 401) {
+    const { data } = await supabase.auth.refreshSession()
+    if (data?.session) r = await supabase.functions.invoke(nome, { body })
+    else return { data: null, error: r.error, sessaoExpirada: true }
+  }
+  return r
+}
