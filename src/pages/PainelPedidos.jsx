@@ -5017,7 +5017,7 @@ function CadastroRapidoNoChat({ empresaId, telefone, onNomeDoCliente }) {
   )
 }
 
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onNomeDoCliente, cadastroVersao, pinChat, onEnviarCategoria, enviandoCategoria }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onNomeDoCliente, cadastroVersao, pinChat, onEnviarCategoria, enviandoCategoria, roboLigado }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   // No celular a sacola + o "fechar pedido" abriam empilhados embaixo da
@@ -5142,7 +5142,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
 
       {/* O robô está fora desta conversa porque alguém assumiu. Fica dito em
           uma linha; o botão de devolver desceu pra barra de ações. */}
-      {botPausado && (
+      {botPausado && roboLigado && (
         <div style={{
           marginTop: 8, padding: '6px 10px', borderRadius: 8,
           background: 'rgba(124,58,237,.10)', border: '1px solid rgba(124,58,237,.35)',
@@ -5160,7 +5160,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
           conversa pra cima e comiam três faixas da tela; lado a lado sobra
           espaço pras mensagens, que é o que a pessoa está lendo. No celular
           eles quebram pra linha de baixo sozinhos em vez de espremer. */}
-      {(empresaId || botPausado || onPedirLocalizacao) && (
+      {(empresaId || (botPausado && roboLigado) || onPedirLocalizacao) && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
           {empresaId && (
             <button type="button" onClick={g ? onAbrirSacola : () => setSacolaAberta(v => !v)}
@@ -5190,7 +5190,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
             </button>
           )}
 
-          {botPausado && (
+          {botPausado && roboLigado && (
             <button type="button" onClick={onDevolverAoRobo}
               title="O robô volta a responder este cliente e continua de onde parou"
               style={{
@@ -5228,6 +5228,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
           {sacola?.length > 0 && (
             <>
               <SacolaNoChat
+                roboLigado={roboLigado}
                 itens={sacola}
                 onQtd={onQtdSacola}
                 onQtdDireta={onQtdDiretaSacola}
@@ -5552,7 +5553,7 @@ function precoSacola(item, qtd) {
 // atendente acha o produto (ou digita um que não está cadastrado), monta, e um
 // botão só manda a lista pro cliente E entrega o carrinho pro robô terminar
 // endereço e pagamento. A parte chata fica com a gente; a fácil, com o robô.
-function SacolaNoChat({ itens, onQtd, onQtdDireta, onRemover, onEditar, onEnviar, enviando }) {
+function SacolaNoChat({ itens, onQtd, onQtdDireta, onRemover, onEditar, onEnviar, enviando, roboLigado = false }) {
   const g = useTelaGrande()
   const total = itens.reduce((s, i) => s + Number(i.preco) * Number(i.qtd), 0)
 
@@ -5626,8 +5627,10 @@ function SacolaNoChat({ itens, onQtd, onQtdDireta, onRemover, onEditar, onEnviar
             {enviando ? 'Enviando...' : '📤 Mandar a sacola pro cliente'}
           </button>
           <div style={{ fontSize: g ? 13 : 10.5, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
-            O cliente recebe a lista com os preços. Você continua na conversa —
-            pra o robô assumir daqui, use o <strong>Devolver pro robô</strong>.
+            O cliente recebe a lista com os preços. Você continua na conversa
+            {roboLigado
+              ? <> — pra o robô assumir daqui, use o <strong>Devolver pro robô</strong>.</>
+              : '.'}
           </div>
         </>
       )}
@@ -6423,6 +6426,10 @@ export default function PainelPedidos() {
   // fecha e o card com os botões some, mas a conversa continua na tela.
   const telaGrande = useTelaGrande()
   const [botPausado, setBotPausado] = useState(false)
+  // A loja usa robô pra responder? Quem atende tudo na mão não tem pra quem
+  // "devolver a conversa" — o botão só confundia, e o aviso de "robô calado"
+  // falava de um robô que nunca existiu nessa loja.
+  const [roboLigado, setRoboLigado] = useState(false)
   // Sacola que o ATENDENTE monta dentro da conversa (ver SacolaNoChat).
   const [sacolaChat, setSacolaChat] = useState([])
   const [enviandoLista, setEnviandoLista] = useState(false)  // mandando os sabores no chat
@@ -6465,6 +6472,23 @@ export default function PainelPedidos() {
   // Cliente que pediu atendente no WhatsApp: o robô não inventa resposta, chama
   // gente. Toca AQUI, no gestor — é a tela que fica aberta no balcão.
   const { chamados, atender: atenderChamado, silenciados: chamadosSilenciados, silenciar: silenciarChamado } = useChamados(empresa?.id)
+
+  // Robô ligado = o vendedor de IA ou a resposta automática do link. Um dos dois
+  // basta; nenhum dos dois quer dizer que a conversa é 100% humana.
+  useEffect(() => {
+    if (!empresa?.id) { setRoboLigado(false); return }
+    let vivo = true
+    ;(async () => {
+      const { data } = await supabase.from('whatsapp_config')
+        .select('ativo, ia_ativo, resposta_link_ativo')
+        .eq('empresa_id', empresa.id).maybeSingle()
+      if (vivo) {
+        setRoboLigado(data?.ativo !== false
+          && (data?.ia_ativo === true || data?.resposta_link_ativo === true))
+      }
+    })()
+    return () => { vivo = false }
+  }, [empresa?.id])
   // Catálogo (pausar/ativar itens da loja online)
   const [catalogo, setCatalogo] = useState([])
   const [complementosPorProduto, setComplementosPorProduto] = useState({}) // produtoId -> [grupos] (pausáveis)
@@ -9451,6 +9475,7 @@ export default function PainelPedidos() {
                 pinChat={pinChat}
                 onEnviarCategoria={enviarListaDaCategoria}
                 enviandoCategoria={enviandoLista}
+                roboLigado={roboLigado}
               />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -10256,6 +10281,7 @@ export default function PainelPedidos() {
               </div>
             ) : (
               <SacolaNoChat
+                roboLigado={roboLigado}
                 itens={sacolaChat}
                 onQtd={mudarQtdSacola}
                 onQtdDireta={definirQtdSacola}
