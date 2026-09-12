@@ -5017,7 +5017,7 @@ function CadastroRapidoNoChat({ empresaId, telefone, onNomeDoCliente }) {
   )
 }
 
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onNomeDoCliente, cadastroVersao, pinChat }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onNomeDoCliente, cadastroVersao, pinChat, onEnviarCategoria, enviandoCategoria }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   // No celular a sacola + o "fechar pedido" abriam empilhados embaixo da
@@ -5222,7 +5222,8 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
             ‹ Voltar pra conversa
           </button>
 
-          <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} onAvulso={onAvulsoSacola} />
+          <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} onAvulso={onAvulsoSacola}
+            onEnviarCategoria={onEnviarCategoria} enviandoCategoria={enviandoCategoria} />
 
           {sacola?.length > 0 && (
             <>
@@ -5328,7 +5329,7 @@ function LinhaProdutoNoChat({ p, g, onEscolher, semCategoria = false }) {
   )
 }
 
-function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso, semBotao = false }) {
+function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso, semBotao = false, onEnviarCategoria, enviandoCategoria = false }) {
   const g = useTelaGrande()
   const [termo, setTermo] = useState('')
   const [itens, setItens] = useState([])
@@ -5493,6 +5494,23 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso, semBotao = false 
                 </button>
                 {abertaCat && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: g ? 6 : 4, margin: '4px 0 6px 10px' }}>
+                    {/* A categoria inteira na conversa, igual à lista de sabores
+                        do produto: "o que vocês têm de picolé?" é uma pergunta
+                        só, e a resposta não pode ser o atendente digitando 15
+                        nomes com preço na mão. */}
+                    {onEnviarCategoria && (
+                      <button type="button"
+                        onClick={() => onEnviarCategoria(c.categoria, c.produtos)}
+                        disabled={enviandoCategoria}
+                        title={`Manda os ${c.produtos.length} itens de ${c.categoria} com preço na conversa do cliente`}
+                        style={{
+                          padding: g ? '9px 12px' : '7px 10px', borderRadius: 8, cursor: enviandoCategoria ? 'wait' : 'pointer',
+                          fontSize: g ? 13.5 : 11.5, fontWeight: 700, textAlign: 'left',
+                          border: '1px solid rgba(124,58,237,.55)', background: 'rgba(124,58,237,.12)', color: '#a78bfa',
+                        }}>
+                        {enviandoCategoria ? 'enviando…' : `📤 Mandar os ${c.produtos.length} no chat`}
+                      </button>
+                    )}
                     {c.produtos.map(p => <LinhaProdutoNoChat key={p.id} p={p} g={g} onEscolher={onEscolher} semCategoria />)}
                   </div>
                 )}
@@ -7346,6 +7364,54 @@ export default function PainelPedidos() {
     setEnviandoLista(false)
     setChatAviso(r.ok
       ? { ok: true, txt: '✓ Lista de sabores enviada.' }
+      : { ok: false, txt: '⚠️ A lista ficou aqui no chat, mas não saiu no WhatsApp do cliente.' })
+  }
+
+  /**
+   * Manda a categoria INTEIRA na conversa — "o que vocês têm de picolé?" sem o
+   * atendente digitar produto por produto. Vai com preço e com o degrau do
+   * atacado, que é o que faz o cliente levar mais.
+   *
+   * O WhatsApp corta mensagem em 4096 caracteres: categoria grande vai até onde
+   * cabe e o resto vira convite pra ele dizer o que procura, em vez de sumir.
+   */
+  async function enviarListaDaCategoria(categoria, produtos) {
+    if (!chatAberto || !empresa?.id) return
+    const lista = (produtos ?? []).filter(p => Number(p.preco) > 0 || p.nome)
+    if (!lista.length) {
+      setChatAviso({ ok: false, txt: '⚠️ Esta categoria está sem produto disponível.' })
+      return
+    }
+    setEnviandoLista(true)
+    setChatAviso(null)
+
+    const linhaDe = p => {
+      const preco = Number(p.preco) > 0
+        ? ` — R$ ${Number(p.preco).toFixed(2).replace('.', ',')}`
+        : ' — sob consulta'
+      const f = menorFaixa(p.faixas_preco)
+      const atacado = f ? ` (${f.qtd_min}+ por R$ ${Number(f.preco).toFixed(2).replace('.', ',')})` : ''
+      return `• ${p.nome}${preco}${atacado}`
+    }
+
+    const TETO = 3800   // sobra folga pro cabeçalho e pro rodapé
+    const linhas = []
+    let tamanho = 0
+    let sobraram = 0
+    for (const p of lista) {
+      const l = linhaDe(p)
+      if (tamanho + l.length + 1 > TETO) { sobraram++; continue }
+      linhas.push(l)
+      tamanho += l.length + 1
+    }
+
+    const rodape = sobraram
+      ? `\n\n…e mais ${sobraram} ${sobraram === 1 ? 'opção' : 'opções'}. Me diga o que você procura que eu confiro 😉`
+      : '\n\nÉ só me dizer o que você quer 😉'
+    const r = await mandarTextoNoChat(`*${categoria}*\n\n${linhas.join('\n')}${rodape}`)
+    setEnviandoLista(false)
+    setChatAviso(r.ok
+      ? { ok: true, txt: `✓ ${linhas.length} ${linhas.length === 1 ? 'item enviado' : 'itens enviados'} de ${categoria}.` }
       : { ok: false, txt: '⚠️ A lista ficou aqui no chat, mas não saiu no WhatsApp do cliente.' })
   }
 
@@ -9383,6 +9449,8 @@ export default function PainelPedidos() {
                 onNomeDoCliente={nomearClienteDaConversa}
                 cadastroVersao={cadastroVersao}
                 pinChat={pinChat}
+                onEnviarCategoria={enviarListaDaCategoria}
+                enviandoCategoria={enviandoLista}
               />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -10175,6 +10243,8 @@ export default function PainelPedidos() {
                 empresaId={empresa?.id}
                 onEscolher={escolherProdutoNoChat}
                 onAvulso={item => setSacolaChat(prev => [...prev, item])}
+                onEnviarCategoria={enviarListaDaCategoria}
+                enviandoCategoria={enviandoLista}
                 semBotao
               />
             )}
