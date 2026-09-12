@@ -258,6 +258,11 @@ export default function DeliveryLoja() {
   const [rascunho, setRascunho] = useState(null)
   const rascunhoLido = useRef(false)
 
+  // Troca de sabores de um item que já está na sacola: qual linha vai ser
+  // substituída e como o modal abre marcado (ver trocarMontagem).
+  const [refazendo, setRefazendo] = useState(null)
+  const [preMarcado, setPreMarcado] = useState(null)
+
   const limparRascunho = useCallback(() => {
     setRascunho(null)
     try { if (draftKey) localStorage.removeItem(draftKey) } catch { /* ignora */ }
@@ -602,19 +607,55 @@ export default function DeliveryLoja() {
       : String(prod.id)
     adicionarAoCarrinho(prod, precoUnit)
     marcarEtapa(loja?.id, 'sacola', precoUnit)
-    setCarrinho(prev => ({
-      ...prev,
+    setCarrinho(prev => {
+      // Trocar os sabores de um item que já está na sacola SUBSTITUI a linha
+      // antiga. Sem isso a montagem nova viraria uma segunda linha e o cliente
+      // levaria (e pagaria) as duas.
+      const base = { ...prev }
+      const trocando = refazendo
+      if (trocando) delete base[trocando]
+      const jaTinha = trocando ? 0 : (base[key]?.quantidade ?? 0)
+      return {
+      ...base,
       [key]: {
         key, id: prod.id, nome: prod.nome, preco: precoUnit, foto_url: prod.foto_url,
+        // grupoId/opcaoId ficam guardados pra sacola conseguir REABRIR a
+        // montagem já marcada quando o cliente quiser trocar os sabores.
         complementos: selecoes.map(s => ({
+          grupoId: s.grupoId, opcaoId: s.opcaoId,
           grupo: s.grupo, nome: s.nome, preco: s.preco, qtd: s.qtd ?? 1, absoluto: !!s.absoluto,
         })),
         // Combo já sai com o preço fechado da montagem (o unitário veio da faixa
         // certa lá dentro), então o +/- do carrinho repete a montagem inteira.
-        quantidade: (prev[key]?.quantidade ?? 0) + (Number(qtdItem) || 1),
+        quantidade: jaTinha + (Number(qtdItem) || 1),
       },
-    }))
+      }
+    })
+    setRefazendo(null)
     setOptProduto(null)
+  }
+
+  // Sacola: trocar os sabores de uma montagem. Reabre o mesmo produto já
+  // marcado do jeito que está na sacola, e o que o cliente confirmar substitui
+  // a linha antiga. É o caminho que faltava pra quem montou 10 e quer 15 —
+  // antes o "+" só ficava apagado, sem dizer o que fazer.
+  function trocarMontagem(item) {
+    const prod = produtos.find(p => String(p.id) === String(item.id))
+    if (!prod) return
+    // Sacola salva antes dessa versão não tem os ids da montagem: nesse caso o
+    // modal abre limpo, mas a troca continua valendo (a linha velha sai).
+    const marcado = {}
+    let temIds = (item.complementos ?? []).length > 0
+    for (const c of item.complementos ?? []) {
+      if (c?.grupoId == null || c?.opcaoId == null) { temIds = false; break }
+      marcado[c.grupoId] = { ...(marcado[c.grupoId] ?? {}), [c.opcaoId]: Number(c.qtd) || 1 }
+    }
+    setRefazendo(item.key)
+    setDrawerOpen(false)
+    setPreMarcado(temIds ? marcado : null)
+    // Direto no modal, sem passar pelo abrirProduto: editar o que já está na
+    // sacola não é "viu o produto" e não deve contar de novo no funil da Meta.
+    setOptProduto(prod)
   }
 
   // Item montado no atacado (o cliente disse 500 de um sabor e 100 de outro) não
@@ -1362,27 +1403,31 @@ export default function DeliveryLoja() {
                     <span className="dloja-drawer-item-preco">R$ {fmt(item.preco)} cada</span>
                   </div>
                   <div className="dloja-drawer-item-ctrl">
-                    <div className="dloja-qty">
-                      <button className="dloja-qty-btn" onClick={() => removeOne(item.key)} aria-label={qtdTravada(item) ? "Remover do carrinho" : "Remover um"}>
-                        <IconMinus />
-                      </button>
-                      {/* Montagem de atacado é a única que não deixa digitar:
-                          a quantidade dela é a soma dos sabores. */}
-                      {qtdTravada(item)
-                        ? <span className="dloja-qty-val">{item.quantidade}</span>
-                        : <QtdCampo valor={item.quantidade} onMudar={n => definirQtdKey(item.key, n)} />}
-                      {/* Montagem de atacado não soma de um em um: a quantidade
-                          vem da soma dos sabores e tem que continuar batendo. */}
+                    {/* Montagem de atacado: a quantidade É a soma dos sabores, e
+                        mexer nela por fora faria a comanda mentir. Os botões
+                        +/− ficavam só apagados, sem dizer o que fazer — quem
+                        montou 10 e queria 15 achava que o site tinha travado.
+                        No lugar deles vai o caminho certo: reabrir a montagem. */}
+                    {qtdTravada(item) ? (
                       <button
-                        className="dloja-qty-btn"
-                        onClick={() => incKey(item.key)}
-                        disabled={qtdTravada(item)}
-                        style={qtdTravada(item) ? { opacity: 0.3, cursor: 'not-allowed' } : undefined}
-                        aria-label="Adicionar um"
+                        type="button"
+                        className="dloja-item-trocar"
+                        onClick={() => trocarMontagem(item)}
                       >
-                        <IconPlus />
+                        <span className="dloja-item-trocar-qtd">{item.quantidade}</span>
+                        Trocar sabores
                       </button>
-                    </div>
+                    ) : (
+                      <div className="dloja-qty">
+                        <button className="dloja-qty-btn" onClick={() => removeOne(item.key)} aria-label="Remover um">
+                          <IconMinus />
+                        </button>
+                        <QtdCampo valor={item.quantidade} onMudar={n => definirQtdKey(item.key, n)} />
+                        <button className="dloja-qty-btn" onClick={() => incKey(item.key)} aria-label="Adicionar um">
+                          <IconPlus />
+                        </button>
+                      </div>
+                    )}
                     <span className="dloja-drawer-item-sub">R$ {fmt(item.quantidade * Number(item.preco))}</span>
                     <button className="dloja-drawer-item-del" onClick={() => removeItem(item.key)} aria-label={`Remover ${item.nome}`}>
                       <IconTrash />
@@ -1546,9 +1591,9 @@ export default function DeliveryLoja() {
           key={optProduto.id}
           produto={optProduto}
           draftKey={draftKey}
-          rascunho={rascunho?.produtoId === optProduto.id ? rascunho.sel : null}
-          onClose={() => { limparRascunho(); setOptProduto(null) }}
-          onConfirm={(selecoes, precoUnit, qtdItem) => { limparRascunho(); addCombo(optProduto, selecoes, precoUnit, qtdItem) }}
+          rascunho={preMarcado ?? (rascunho?.produtoId === optProduto.id ? rascunho.sel : null)}
+          onClose={() => { limparRascunho(); setPreMarcado(null); setRefazendo(null); setOptProduto(null) }}
+          onConfirm={(selecoes, precoUnit, qtdItem) => { limparRascunho(); setPreMarcado(null); addCombo(optProduto, selecoes, precoUnit, qtdItem) }}
         />
       )}
 

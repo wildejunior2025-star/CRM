@@ -1359,3 +1359,39 @@
     height: 140px;
   }
 }
+
+/* Item montado por sabor na sacola. No lugar do "+" apagado (que só parecia
+   site travado) vai o caminho certo: reabrir a montagem já marcada. O número
+   continua à vista, porque é ele que o cliente confere. */
+.dloja-item-trocar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px 0 4px;
+  border-radius: 7px;
+  border: 1px solid var(--dl-border);
+  background: transparent;
+  color: var(--dl-text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dloja-item-trocar:hover {
+  border-color: var(--dl-price);
+  color: var(--dl-text);
+}
+
+.dloja-item-trocar-qtd {
+  min-width: 24px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--dl-border);
+  color: var(--dl-text);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
