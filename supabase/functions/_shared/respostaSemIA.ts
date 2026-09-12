@@ -204,6 +204,15 @@ function textoDosPeriodos(periodos: Array<Record<string, string>>): string {
   return `${partes.slice(0, -1).join(", ")} e ${partes[partes.length - 1]}`
 }
 
+/** A faixa de hoje pro {horario} da mensagem da loja. Vazio = não promete nada. */
+export function horarioDeHoje(
+  empresa: Record<string, unknown>, excecoes: Excecoes = {},
+): string {
+  const { ymd } = agoraNaLoja()
+  const dia = comoFicaNoDia(ymd, empresa, excecoes)
+  return dia.aberto ? textoDosPeriodos(dia.periodos) : ""
+}
+
 function respostaDeHorario(
   empresa: Record<string, unknown>, excecoes: Excecoes = {},
 ): string | null {
@@ -629,6 +638,9 @@ export async function abrirChamado(supabase: Sb, empresaId: string, phone: strin
 // chamar pelo nome.
 // {link} = o link da loja com o telefone dele. Se o texto não tiver o token, o
 // link entra no fim: loja nenhuma pode mandar uma saudação SEM o link.
+// {horario} = a faixa de HOJE ("das 08:30 às 12:00 e das 14:00 às 18:00"), já
+// com feriado e dia marcado na mão descontados. A loja que escrevia o horário
+// na unha prometia sábado igual a terça — e o cliente ia bater na porta.
 export const TEXTO_PRIMEIRA_FALA_PADRAO = [
   "Oi {nome}! 👋",
   "Para entrega ou retirada, é só acessar nossa loja online 👇",
@@ -637,12 +649,21 @@ export const TEXTO_PRIMEIRA_FALA_PADRAO = [
   "Estamos à disposição!",
 ].join(String.fromCharCode(10))
 
-export function montarPrimeiraFala(modelo: string, nome: string, link: string): string {
+export function montarPrimeiraFala(
+  modelo: string, nome: string, link: string, horario = "",
+): string {
   const texto = (modelo?.trim() || TEXTO_PRIMEIRA_FALA_PADRAO)
   const comLink = texto.includes("{link}") ? texto : `${texto}${NL}{link}`
-  return comLink
+  // Hoje sem faixa (loja fechada, ou dia aberto sem restrição): a linha que
+  // prometia horário sai INTEIRA. Deixar "Entregas ." no meio da mensagem é
+  // pior do que não falar de horário.
+  const comHorario = horario
+    ? comLink
+    : comLink.split(NL).filter(l => !l.includes("{horario}")).join(NL)
+  return comHorario
     .replace(/\{nome\}/g, nome)
     .replace(/\{link\}/g, link)
+    .replace(/\{horario\}/g, horario)
     // Faxina de quando o nome não veio: ", ," vira ",", "Oi !" vira "Oi!",
     // e vírgula sozinha no começo da linha some.
     .replace(/,[ ]*,/g, ",")
@@ -851,7 +872,7 @@ export async function responderSemIA({
       // {nome} não paga por uma consulta que não vai usar.
       const querNome = (modelo.trim() || TEXTO_PRIMEIRA_FALA_PADRAO).includes("{nome}")
       const nome = querNome ? await primeiroNomeDoCliente(supabase, empresaId, phone) : ""
-      return await responder(montarPrimeiraFala(modelo, nome, link))
+      return await responder(montarPrimeiraFala(modelo, nome, link, horarioDeHoje(empresa, excecoes)))
     }
 
     // 7) Segunda vez que ele não entende: manda o link de novo, agora dizendo o

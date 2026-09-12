@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { conectarWhatsAppCloud } from '../lib/waEmbeddedSignup'
 import { useAuth } from '../hooks/useAuth'
-import { TEXTO_PRIMEIRA_FALA_PADRAO, montarPrimeiraFala } from '../lib/primeiraFala'
+import { TEXTO_PRIMEIRA_FALA_PADRAO, montarPrimeiraFala, horarioDeHojeDaGrade } from '../lib/primeiraFala'
 import '../components/Page.css'
 import './WhatsAppConfig.css'
 
@@ -740,7 +740,10 @@ export default function WhatsAppConfig() {
                 <code>{'{nome}'}</code> — o primeiro nome dele, quando já tem cadastro na loja
                 (sem cadastro a mensagem sai sem o nome, sem ficar estranha) — e{' '}
                 <code>{'{link}'}</code> — o link do seu cardápio já com o telefone dele. Se você
-                não escrever <code>{'{link}'}</code>, ele entra no fim sozinho.
+                não escrever <code>{'{link}'}</code>, ele entra no fim sozinho.{' '}
+                <code>{'{horario}'}</code> — o horário de HOJE, do jeito que está na sua grade
+                ("das 08:30 às 12:00 e das 14:00 às 18:00"), já pulando feriado e dia que você
+                marcou como fechado. Em dia sem horário marcado, a linha inteira some.
               </p>
               <textarea
                 id="wa-msg-boas-vindas"
@@ -792,6 +795,7 @@ export default function WhatsAppConfig() {
                         linkTexto,
                         caso.nome,
                         `https://lojaonline.fwcinter.com/${empresaData?.slug ?? 'sua-loja'}?t=84998180774`,
+                        horarioDeHojeDaGrade(empresaData),
                       )}
                     </div>
                   </div>
