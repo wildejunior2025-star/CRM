@@ -85,6 +85,58 @@ export default function Financeiro() {
   const [importMsg, setImportMsg] = useState(null)
   const fileRef = useRef(null)
 
+  // ── iFood: repasse automático pela API Financial (mig 0260) ──
+  // { status: 'ok'|'sem_permissao'|'erro'|null, syncEm, erro } — null = loja sem iFood
+  const [syncIfood, setSyncIfood] = useState(null)
+  const [sincronizando, setSincronizando] = useState(false)
+
+  // Uma empresa pode ter mais de uma loja no iFood. O status que aparece é o
+  // "melhor que dá pra afirmar": se alguma sincronizou, está sincronizando; se
+  // nenhuma e alguma deu erro, é erro; senão é o iFood que ainda não liberou.
+  async function loadSyncIfood() {
+    if (!empresaId) return
+    const { data } = await supabase.from('ifood_config')
+      .select('financeiro_status, financeiro_sync_em, financeiro_erro')
+      .eq('empresa_id', empresaId).not('merchant_id', 'is', null)
+    const linhas = data ?? []
+    if (!linhas.length) { setSyncIfood(null); return }
+    const ok = linhas.filter(l => l.financeiro_status === 'ok')
+    const erro = linhas.find(l => l.financeiro_status === 'erro')
+    const ultima = (arr) => arr.map(l => l.financeiro_sync_em).filter(Boolean).sort().pop() ?? null
+    if (ok.length) setSyncIfood({ status: 'ok', syncEm: ultima(ok), erro: null })
+    else if (erro) setSyncIfood({ status: 'erro', syncEm: erro.financeiro_sync_em, erro: erro.financeiro_erro })
+    else if (linhas.some(l => l.financeiro_status === 'sem_permissao')) setSyncIfood({ status: 'sem_permissao', syncEm: ultima(linhas), erro: null })
+    else setSyncIfood({ status: null, syncEm: null, erro: null })
+  }
+  useEffect(() => { loadSyncIfood() }, [empresaId])
+
+  async function atualizarRepasseIfood() {
+    if (!empresaId || sincronizando) return
+    setSincronizando(true)
+    setImportMsg(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('ifood-integration', {
+        body: { acao: 'financeiro_sync', empresa_id: empresaId },
+      })
+      if (error) throw new Error(error.message)
+      const r = data?.resultados ?? []
+      if (r.some(x => x.status === 'ok')) {
+        const n = r.reduce((s, x) => s + (x.lancamentos || 0), 0)
+        setImportMsg({ tipo: 'ok', txt: `Repasse atualizado com o iFood — ${n} lançamento${n === 1 ? '' : 's'} conferido${n === 1 ? '' : 's'}.` })
+      } else if (r.some(x => x.status === 'erro')) {
+        setImportMsg({ tipo: 'erro', txt: 'O iFood não respondeu agora. Tente de novo em alguns minutos.' })
+      } else {
+        setImportMsg({ tipo: 'erro', txt: 'O iFood ainda não liberou o repasse automático pra sua loja. Enquanto isso, importe o PDF do repasse.' })
+      }
+    } catch (err) {
+      setImportMsg({ tipo: 'erro', txt: `Não consegui falar com o iFood: ${err.message || err}` })
+    }
+    await loadSyncIfood()
+    await loadSemanas()
+    if (mesFiltro) await loadSemanasMes(mesFiltro)
+    setSincronizando(false)
+  }
+
   async function loadDelivery() {
     setLoadingD(true)
     const { start, end } = rangeFin(periodoD, custIni, custFim)
@@ -232,6 +284,10 @@ export default function Financeiro() {
   // a receber: se tem PDF importado da semana → valor EXATO; senão estimativa − anúncio
   const aReceberDe = s => repImp[s.iniYMD] ? Number(repImp[s.iniYMD].valor_repasse) : s.liq.repasse - (ads[s.iniYMD] || 0)
   const ehExato = s => !!repImp[s.iniYMD]
+  // De onde veio o número exato: a API do iFood (automático) ou o PDF importado.
+  // A diferença importa pro dono: "do iFood" ele não precisa fazer nada; "PDF"
+  // foi ele que trouxe; e sem nenhum dos dois é estimativa.
+  const rotuloExato = s => (repImp[s.iniYMD]?.fonte === 'api' ? 'do iFood ✔' : 'exato ✔')
 
   // Vendas por canal próprio
   const pedWA  = pedidos.filter(p => p.origem === 'whatsapp')
@@ -288,7 +344,7 @@ export default function Financeiro() {
           </div>
           <div style={{ textAlign: 'right', minWidth: 110 }}>
             <div style={{ fontSize: 16, fontWeight: 800, color: '#16a34a' }}>{ehExato(s) ? '' : '≈ '}{fmtBRL(aReceberDe(s))}</div>
-            <div style={{ fontSize: 10, color: ehExato(s) ? 'var(--success)' : 'var(--text-muted)' }}>{ehExato(s) ? 'exato ✔' : (ads[s.iniYMD] > 0 ? 'a receber' : 'informe o anúncio')}</div>
+            <div style={{ fontSize: 10, color: ehExato(s) ? 'var(--success)' : 'var(--text-muted)' }}>{ehExato(s) ? rotuloExato(s) : (ads[s.iniYMD] > 0 ? 'a receber' : 'informe o anúncio')}</div>
           </div>
         </div>
         {aberta && (
@@ -352,7 +408,11 @@ export default function Financeiro() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><IfoodIcon size={18} /> iFood — a receber na quarta ({ddmm(atual.pagamento)})</span>
             {ehExato(atual)
-              ? <span title="Valor exato, do PDF de repasse que você importou." style={{ ...badge, color: 'var(--success)', borderColor: 'var(--success)' }}>exato ✔</span>
+              ? <span
+                  title={repImp[atual.iniYMD]?.fonte === 'api'
+                    ? 'Valor exato, que veio direto do iFood — atualiza sozinho todo dia.'
+                    : 'Valor exato, do PDF de repasse que você importou.'}
+                  style={{ ...badge, color: 'var(--success)', borderColor: 'var(--success)' }}>{rotuloExato(atual)}</span>
               : <span title="Vendas e taxas calculadas dos seus pedidos; o anúncio você informa. Importe o PDF do repasse pra ficar exato." style={badge}>estimado ⓘ</span>}
             <span style={{ flex: 1 }} />
             <input ref={fileRef} type="file" accept=".pdf" onChange={onImportarPdf} style={{ display: 'none' }} />
@@ -381,6 +441,31 @@ export default function Financeiro() {
               ))}
             </div>
           </div>
+          {/* Repasse automático pela API do iFood. Diz em uma linha se o número
+              exato está chegando sozinho, se o iFood ainda não liberou (aí o PDF
+              continua sendo o caminho) ou se a última busca falhou. */}
+          {syncIfood && (() => {
+            const quando = syncIfood.syncEm ? (() => {
+              const d = new Date(syncIfood.syncEm)
+              const hoje = new Date()
+              const hh = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+              return d.toDateString() === hoje.toDateString() ? `hoje às ${hh}` : `${ddmm(d)} às ${hh}`
+            })() : null
+            const cfg = {
+              ok: { icone: '🔄', cor: 'var(--success)', txt: <>Repasse automático do iFood ligado{quando ? <> · atualizado {quando}</> : null}</>, botao: 'Atualizar agora' },
+              sem_permissao: { icone: '⏳', cor: 'var(--text-muted)', txt: <>Repasse automático: o iFood ainda está liberando pra sua loja. Enquanto isso, importe o PDF do repasse.</>, botao: 'Tentar agora' },
+              erro: { icone: '⚠️', cor: '#b45309', txt: <>Não consegui buscar o repasse no iFood na última tentativa{quando ? <> ({quando})</> : null}.</>, botao: 'Tentar de novo' },
+            }[syncIfood.status] ?? { icone: '🔄', cor: 'var(--text-muted)', txt: <>Repasse automático do iFood: ainda não buscou nenhuma semana.</>, botao: 'Buscar agora' }
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12, padding: '9px 14px', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                <span style={{ flex: '1 1 240px', fontSize: 12.5, lineHeight: 1.45, color: cfg.cor }}>{cfg.icone} {cfg.txt}</span>
+                <button type="button" onClick={atualizarRepasseIfood} disabled={sincronizando}
+                  style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--primary)', background: 'transparent', border: '1px solid var(--primary)', borderRadius: 20, padding: '4px 12px', cursor: sincronizando ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}>
+                  {sincronizando ? 'Buscando no iFood…' : cfg.botao}
+                </button>
+              </div>
+            )
+          })()}
           {importMsg && (
             <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.5,
               background: importMsg.tipo === 'ok' ? 'rgba(22,163,74,.10)' : 'rgba(239,68,68,.10)',

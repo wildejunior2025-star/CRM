@@ -216,13 +216,15 @@ export async function runFinanceiroSync(
     semanas[emp] = rpcErr ? `erro: ${rpcErr.message}` : Number(data ?? 0)
   }
 
+  // A função aceita chamada sem login (o cron chama assim), então a resposta
+  // não carrega id de merchant nem de empresa: só o que a tela precisa saber.
   return {
     ok: true,
     dias,
     lojas: resultados.length,
     sem_permissao: resultados.filter((r) => r.status === "sem_permissao").length,
     com_erro: resultados.filter((r) => r.status === "erro").length,
-    resultados,
-    semanas_atualizadas: semanas,
+    resultados: resultados.map((r) => ({ status: r.status, lancamentos: r.lancamentos })),
+    semanas_atualizadas: Object.values(semanas).reduce<number>((s, v) => s + (typeof v === "number" ? v : 0), 0),
   }
 }
