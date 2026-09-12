@@ -848,7 +848,10 @@ export default function WhatsAppConfig() {
                       {montarPrimeiraFala(
                         linkTexto,
                         caso.nome,
-                        `https://lojaonline.fwcinter.com/${empresaData?.slug ?? 'sua-loja'}?t=84998180774`,
+                        // Número de exemplo, não o de ninguém: aqui ficava o
+                        // celular do dono da FWC aparecendo na prévia de TODAS
+                        // as lojas.
+                        `https://lojaonline.fwcinter.com/${empresaData?.slug ?? 'sua-loja'}?t=84999999999`,
                         horarioDeHojeDaGrade(empresaData),
                       )}
                     </div>
@@ -1067,7 +1070,7 @@ export default function WhatsAppConfig() {
                   value={form.admin_phone}
                   onChange={(e) => setField('admin_phone', e.target.value)}
                 />
-                <span className="wa-hint">DDD + número, sem espaços. Ex: 84998180774. Usado para alertas de estoque e quando o bot escalar um problema para humano.</span>
+                <span className="wa-hint">DDD + número, sem espaços. Ex: 84999999999. Usado para alertas de estoque e quando o bot escalar um problema para humano.</span>
               </div>
             </div>
           )}

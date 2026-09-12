@@ -664,6 +664,9 @@ export function montarPrimeiraFala(
     .replace(/\{nome\}/g, nome)
     .replace(/\{link\}/g, link)
     .replace(/\{horario\}/g, horario)
+    // O {horario} já vem com o "das" na frente. Quem escreveu "a partir das
+    // {horario}" — o jeito natural — recebia "a partir das das 08:00".
+    .replace(/\bdas\s+das\b/gi, "das")
     // Faxina de quando o nome não veio: ", ," vira ",", "Oi !" vira "Oi!",
     // e vírgula sozinha no começo da linha some.
     .replace(/,[ ]*,/g, ",")

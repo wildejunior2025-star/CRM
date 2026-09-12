@@ -33,6 +33,9 @@ export function montarPrimeiraFala(modelo, nome, link, horario = '') {
     .replace(/\{nome\}/g, nome ?? '')
     .replace(/\{link\}/g, link ?? '')
     .replace(/\{horario\}/g, horario ?? '')
+    // O {horario} já chega com o "das" na frente. Quem escreveu "a partir das
+    // {horario}" (o jeito natural de escrever) recebia "a partir das das 08:00".
+    .replace(/\bdas\s+das\b/gi, 'das')
     .replace(/,[ ]*,/g, ',')
     .replace(/[ ]{2,}/g, ' ')
     .replace(/[ ]+([!?.,:])/g, '$1')
