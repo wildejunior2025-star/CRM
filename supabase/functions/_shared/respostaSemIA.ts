@@ -862,6 +862,9 @@ export async function responderSemIA({
     //    dúvida de novo). Aí vira gente: insistir com robô em quem já não foi
     //    entendido é o que faz o cliente desistir.
     if (perguntouDoAtendente) {
+      // Sem a trava, duas mensagens juntas abriam DOIS chamados pra mesma
+      // pessoa — e a loja via o sino tocar duas vezes pelo mesmo cliente.
+      if (!(await reservarAviso(supabase, empresaId, phone, "chamado", 60))) return false
       await abrirChamado(supabase, empresaId, phone, mensagem)
       return await responder("Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!")
     }
@@ -870,6 +873,14 @@ export async function responderSemIA({
     //    pergunta que a gente não entendeu. É a mensagem que faz o pedido sair
     //    do WhatsApp e cair no sistema.
     if (!linkRecente) {
+      // Cliente que dispara "oi", "boa tarde", "tem gelo?" em sequência acorda
+      // um webhook por mensagem, e todos leem o histórico ANTES de qualquer um
+      // gravar a resposta: sem esta trava, cada um manda o seu link. Quem não
+      // reserva, cala — o link já está saindo na outra execução.
+      if (!(await reservarAviso(supabase, empresaId, phone, "link", 60))) {
+        console.log("[link] outro webhook já está mandando a primeira fala:", phone)
+        return false
+      }
       const modelo = String(cfg.resposta_link_texto ?? "")
       // Só vai no banco atrás do nome se o texto pedir — loja que tirou o
       // {nome} não paga por uma consulta que não vai usar.
@@ -881,6 +892,7 @@ export async function responderSemIA({
     // 7) Segunda vez que ele não entende: manda o link de novo, agora dizendo o
     //    que tem lá dentro. Pode ser que o cliente nem tenha aberto na primeira.
     if (vezesQueMandouOLink === 1) {
+      if (!(await reservarAviso(supabase, empresaId, phone, "link2", 60))) return false
       return await responder(
         `Nossos produtos e as promoções tão todos aqui, dá uma conferida: 👇${NL}${link}`,
       )
@@ -889,6 +901,7 @@ export async function responderSemIA({
     // 8) Terceira. Já mandou o link duas vezes e ele continua perguntando por
     //    aqui — o cliente não quer o link, e insistir vira teimosia de robô.
     //    Oferece gente, que é o que ele está pedindo desde a segunda pergunta.
+    if (!(await reservarAviso(supabase, empresaId, phone, "oferece-atendente", 60))) return false
     return await responder(`Essa eu não sei te responder por aqui. 😅 Quer que eu ${MARCA_ATENDENTE} pra te ajudar?`)
   } catch (e) {
     console.error("[link] falhou:", e)
