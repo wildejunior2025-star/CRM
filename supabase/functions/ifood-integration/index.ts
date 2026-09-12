@@ -1,6 +1,7 @@
 // Versão fixa: o "@2" hoje cai na 2.112.2, que está quebrada no esm.sh
 // (postgrest-js 404) e faz o deploy falhar no bundle.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.111.0"
+import { runFinanceiroSync } from "./financeiro.ts"
 
 // =====================================================================
 // ifood-integration
@@ -84,6 +85,8 @@ Deno.serve(async (req) => {
     if (acao === "catalogo_itens") return json(await runCatalogoItensCompletos(sb, body?.empresa_id))
     if (acao === "catalogo_pausar_complemento") return json(await runPausarComplemento(sb, body?.empresa_id, body?.option_id, body?.pausar))
     if (acao === "detectar_merchant") return json(await runDetectarMerchant(sb, body?.empresa_id, body?.merchant_id, body?.apelido))
+    // Repasse pela API Financial (mig 0260). Sem empresa_id = todas as lojas (cron).
+    if (acao === "financeiro_sync") return json(await runFinanceiroSync(sb, getToken, { empresaId: body?.empresa_id, dias: body?.dias }))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
   } catch (e) {
     return json({ ok: false, error: String(e?.message ?? e) }, 500)
