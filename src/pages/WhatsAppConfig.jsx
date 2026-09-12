@@ -35,6 +35,26 @@ function AlertIcon() {
   )
 }
 
+// O que a loja pode colar na mensagem de boas-vindas. A explicação longa vive
+// no title da etiqueta: na tela ficava um parágrafo que ninguém lia inteiro.
+const VARIAVEIS_PRIMEIRA_FALA = [
+  {
+    token: '{nome}',
+    curta: 'nome do cliente',
+    ajuda: 'O primeiro nome do cliente, quando ele já tem cadastro na loja. Quem nunca comprou recebe a mensagem sem o nome — e sem ficar estranha ("Oi!" em vez de "Oi , !").',
+  },
+  {
+    token: '{link}',
+    curta: 'link da loja',
+    ajuda: 'O link do seu cardápio já com o telefone do cliente. Se você não escrever, ele entra no fim da mensagem sozinho.',
+  },
+  {
+    token: '{horario}',
+    curta: 'horário de hoje',
+    ajuda: 'O horário de HOJE, do jeito que está na sua grade ("das 08:30 às 12:00 e das 14:00 às 18:00"), já pulando feriado e dia que você marcou como fechado. Em dia sem horário marcado, a linha inteira some da mensagem.',
+  },
+]
+
 const DEFAULT_MSG_PEDIDO = 'Olá {nome}! Seu pedido foi recebido com sucesso. Em breve entraremos em contato para confirmar a entrega.'
 const DEFAULT_MSG_FIADO  = 'Olá {nome}! Você tem um saldo em aberto de R$ {valor}. Entre em contato para regularizar.'
 
@@ -91,6 +111,8 @@ export default function WhatsAppConfig() {
   const [iaSaveMsg,       setIaSaveMsg]       = useState(null)
   const [gerandoRoteiro,  setGerandoRoteiro]  = useState(false)
   const [empresaData,     setEmpresaData]     = useState(null)
+  // Qual etiqueta acabou de ser copiada (só pra dizer "copiado ✓" por 1,5s).
+  const [varCopiada,      setVarCopiada]      = useState(null)
 
   const pollRef    = useRef(null)
   const qrRefRef   = useRef(null)
@@ -101,6 +123,26 @@ export default function WhatsAppConfig() {
     checkStatus()
     return () => stopPolling()
   }, [profile?.empresa_id])
+
+  // Copia a etiqueta pra área de transferência. O navegador pode negar
+  // (aba sem foco, permissão), então tem o jeito antigo de reserva — a loja não
+  // pode ficar sem conseguir copiar o {horario} por causa disso.
+  async function copiarVariavel(token) {
+    try {
+      await navigator.clipboard.writeText(token)
+    } catch {
+      const campo = document.createElement('textarea')
+      campo.value = token
+      campo.style.position = 'fixed'
+      campo.style.opacity = '0'
+      document.body.appendChild(campo)
+      campo.select()
+      try { document.execCommand('copy') } catch { /* sem clipboard, paciência */ }
+      document.body.removeChild(campo)
+    }
+    setVarCopiada(token)
+    setTimeout(() => setVarCopiada(atual => (atual === token ? null : atual)), 1500)
+  }
 
   async function loadConfig() {
     setLoading(true)
@@ -736,15 +778,27 @@ export default function WhatsAppConfig() {
               </label>
               <p className="wa-hint" style={{ margin: '2px 0 8px' }}>
                 É o que o cliente recebe quando manda a primeira mensagem. Deixe em branco
-                pra usar a nossa. Você pode usar:{' '}
-                <code>{'{nome}'}</code> — o primeiro nome dele, quando já tem cadastro na loja
-                (sem cadastro a mensagem sai sem o nome, sem ficar estranha) — e{' '}
-                <code>{'{link}'}</code> — o link do seu cardápio já com o telefone dele. Se você
-                não escrever <code>{'{link}'}</code>, ele entra no fim sozinho.{' '}
-                <code>{'{horario}'}</code> — o horário de HOJE, do jeito que está na sua grade
-                ("das 08:30 às 12:00 e das 14:00 às 18:00"), já pulando feriado e dia que você
-                marcou como fechado. Em dia sem horário marcado, a linha inteira some.
+                pra usar a nossa.
               </p>
+
+              {/* As três etiquetas no lugar do parágrafo de instrução que estava
+                  aqui: toca, copia, cola. A explicação de cada uma continua
+                  inteira no title — quem quer saber, passa o mouse. */}
+              <div className="wa-vars">
+                <span className="wa-vars-titulo">Toque pra copiar:</span>
+                {VARIAVEIS_PRIMEIRA_FALA.map(v => (
+                  <button
+                    key={v.token}
+                    type="button"
+                    className={`wa-var${varCopiada === v.token ? ' copiada' : ''}`}
+                    title={v.ajuda}
+                    onClick={() => copiarVariavel(v.token)}
+                  >
+                    <code>{v.token}</code>
+                    <span className="wa-var-acao">{varCopiada === v.token ? 'copiado ✓' : v.curta}</span>
+                  </button>
+                ))}
+              </div>
               <textarea
                 id="wa-msg-boas-vindas"
                 className="wa-textarea"

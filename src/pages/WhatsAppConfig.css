@@ -506,3 +506,59 @@
   border: 1px solid rgba(37, 211, 102, .35);
   color: var(--text);
 }
+
+/* ── Etiquetas da mensagem de boas-vindas ──
+   Ficava um parágrafo de três linhas explicando {nome}, {link} e {horario}.
+   Virou etiqueta: toca, copia, cola. A explicação inteira mora no title. */
+.wa-vars {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+
+.wa-vars-titulo {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.wa-var {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2, transparent);
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+
+.wa-var:hover {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+
+.wa-var code {
+  font-family: 'Menlo', 'Consolas', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.wa-var-acao {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.wa-var.copiada {
+  border-color: #22c55e;
+}
+
+.wa-var.copiada .wa-var-acao {
+  color: #22c55e;
+  font-weight: 600;
+}
