@@ -965,6 +965,11 @@ function tipoEntregaDaConversa(mensagens: any[]): "entrega" | "retirada" | null 
 // Acima do teto o sistema PROCURA: pega as palavras do que o cliente vem
 // falando e manda só o que casou, mais o que já está no carrinho (senão o
 // modelo perde de vista o item que ele mesmo adicionou três mensagens atrás).
+// Quanto o robô espera por mais mensagens antes de responder. Quem manda o
+// pedido picado leva uns 2-4 s entre uma e outra; mais que isso atrasa quem
+// manda tudo numa mensagem só.
+const ESPERA_RAJADA_MS = 4000
+
 const MENU_INTEIRO_ATE = 300      // itens: abaixo disso, vai tudo
 const MENU_BUSCA_MAX   = 80       // itens que a busca pode mandar
 
@@ -2436,15 +2441,38 @@ serve(async (req) => {
       return new Response("ok", { headers: corsHeaders })
     }
 
-    const [creditRes] = await Promise.all([
+    const [creditRes, minhaMsgRes] = await Promise.all([
       supabase.from("empresas").select("whatsapp_creditos, credito_alerta_minimo, credito_alerta_enviado, credito_alerta_numeros").eq("id", empresaId).single(),
-      supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text }),
+      supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text }).select("created_at").single(),
       // Espelho na aba Mensagens do gestor: é lá que a loja responde quando o
       // robô chama, e a conversa precisa estar inteira na tela pra pessoa saber
       // o que já foi dito.
       espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat),
     ])
     if (!creditRes.data || creditRes.data.whatsapp_creditos <= 0) return new Response("ok", { headers: corsHeaders })
+
+    // ── RAJADA: "quero sorvete" / "100 picolé" / "e caixa de açaí" ─────────────
+    // Cada mensagem chegava numa chamada própria, e o cliente recebia três
+    // respostas — três "Oi, seja bem-vindo", nenhuma anotando nada (teste
+    // CDBom, 13/09). Agora a chamada espera um pouco: se entrou mensagem mais
+    // nova do mesmo cliente, ela sai calada e quem responde é a última, que já
+    // lê as três juntas no histórico (mensagens seguidas do cliente viram uma).
+    // Foto e localização não esperam: o anexo só existe na chamada que o trouxe.
+    if (minhaMsgRes?.data?.created_at && !imageBase64 && !coordsMsg) {
+      await new Promise(r => setTimeout(r, ESPERA_RAJADA_MS))
+      const { data: maisNova } = await supabase.from("whatsapp_conversas")
+        .select("created_at")
+        .eq("empresa_id", empresaId).eq("phone", phone).eq("role", "user")
+        .gt("created_at", minhaMsgRes.data.created_at)
+        .limit(1)
+      if (maisNova?.length) {
+        console.log(`[rajada] "${text.slice(0, 40)}" — chegou mensagem mais nova, quem responde é ela`)
+        // Sem `resposta` de propósito: o whatsapp-cloud chama este cérebro no
+        // modo teste e manda ao cliente qualquer texto que voltar aqui.
+        return new Response(JSON.stringify({ ok: true, agrupada: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+      }
+    }
 
     // ── Alerta de crédito baixo pro dono (uma vez só; reseta após recarregar) ──
     {
@@ -2562,7 +2590,7 @@ serve(async (req) => {
         // `origem` diz quem escreveu do lado da loja: 'loja' é gente, o resto é
         // o robô. Serve pra busca de produto enxergar o nome CERTO que o
         // atendente digitou quando assumiu a conversa.
-        .select("role, content, origem")
+        .select("role, content, origem, created_at")
         .eq("empresa_id", empresaId)
         .eq("phone", phone)
         .order("created_at", { ascending: false })
@@ -2593,6 +2621,20 @@ serve(async (req) => {
     ])
 
     const mensagensRaw = (historicoRes.data ?? []).reverse()
+    // Cliente que responde ENQUANTO o robô ainda responde a anterior: a resposta
+    // velha é gravada depois da mensagem nova, e o histórico terminava na fala
+    // do robô. O modelo entendia que já tinha respondido e devolvia vazio
+    // ("Desculpe, não entendi bem" — teste 13/09). A mensagem que esta chamada
+    // está respondendo vai pro fim, que é o lugar dela.
+    {
+      const minhaData = minhaMsgRes?.data?.created_at
+      const idx = minhaData ? mensagensRaw.findIndex((m: any) => m.role === "user" && m.created_at === minhaData) : -1
+      if (idx !== -1 && mensagensRaw.slice(idx + 1).some((m: any) => m.role === "assistant")) {
+        const [minha] = mensagensRaw.splice(idx, 1)
+        mensagensRaw.push(minha)
+        console.log("[rajada] resposta anterior chegou depois desta mensagem — histórico reordenado")
+      }
+    }
     // Mescla mensagens consecutivas do mesmo role (evita 400 da API do Claude)
     const mensagens = mensagensRaw.reduce((acc: any[], m: any) => {
       const last = acc[acc.length - 1]
