@@ -1007,6 +1007,22 @@ function precoPorQuantidade(prod: any, qtd: number): number {
 function reprecificarItens(itens: any[], catalogo: any[], precoOpcaoMap: Record<string, number> = {}): void {
   const porId = new Map<string, any>()
   for (const p of catalogo ?? []) porId.set(String(p.id), p)
+  // Nome e id que não batem: o modelo escreveu "Açaí CDBOM (Caixa 5 litros)"
+  // com o id do SORVETE de 5 litros, e a sacola mostrou R$ 35 em vez de R$ 60
+  // (teste 13/09). Se o nome é exatamente o de outro produto, vale o nome;
+  // senão fica o id e o nome é corrigido pelo dele.
+  const normNome = (s: any) => String(s ?? "").normalize("NFD").replace(RE_ACENTOS_PRECO, "").toLowerCase().replace(/\s+/g, " ").trim()
+  for (const it of itens ?? []) {
+    const peloId = porId.get(String(it?.produto_id ?? ""))
+    if (!peloId || normNome(peloId.nome) === normNome(it.nome)) continue
+    const peloNome = (catalogo ?? []).find((p: any) => normNome(p.nome) === normNome(it.nome))
+    if (peloNome) {
+      console.log(`[Item] id trocado pelo nome: "${it.nome}" (${peloId.nome} → ${peloNome.nome})`)
+      it.produto_id = peloNome.id
+    } else {
+      it.nome = peloId.nome
+    }
+  }
   const qtdPorProduto: Record<string, number> = {}
   for (const it of itens ?? []) {
     const id = String(it?.produto_id ?? "")
@@ -1107,6 +1123,51 @@ function corrigirResumo(texto: string, itens: any[], taxa: number): string {
     return l
   }).join("\n")
 }
+
+/**
+ * Cardápio do prompt separado por categoria. Em ordem alfabética, "Açaí CDBOM
+ * (Balde 10 litros)" e "Sorvete CDBOM (Balde 10 litros)" ficavam com nome quase
+ * igual e preços longe um do outro — o modelo mostrou o balde de SORVETE a
+ * R$ 125, que é o preço do açaí (conversa real, 13/09). Com o título da
+ * categoria em cima, cada preço fica perto do que ele é.
+ */
+function cardapioPorCategoria(produtos: any[]): string {
+  const grupos = new Map<string, any[]>()
+  for (const p of produtos ?? []) {
+    const cat = String(p.categoria ?? "").trim() || "Outros"
+    if (!grupos.has(cat)) grupos.set(cat, [])
+    grupos.get(cat)!.push(p)
+  }
+  return [...grupos.entries()]
+    .map(([cat, ps]) => `【${cat.toUpperCase()}】\n${ps.map(linhaDoCardapio).join("\n")}`)
+    .join("\n\n")
+}
+
+/**
+ * Preço citado pelo modelo ao lado do nome EXATO de um produto tem que ser um
+ * dos preços dele (normal, promoção ou faixa). Se não for, troca pelo normal.
+ * Pega o "Balde 10 litros de sorvete — R$ 125,00" antes de o cliente ler.
+ */
+function corrigirPrecosCitados(texto: string, produtos: any[]): string {
+  const norm = (s: string) => String(s ?? "").normalize("NFD").replace(RE_ACENTOS_PRECO, "").toLowerCase().replace(/[*_]/g, "")
+  const ordenados = [...(produtos ?? [])].sort((a, b) => String(b.nome).length - String(a.nome).length)
+  return texto.split("\n").map(linha => {
+    const ln = norm(linha)
+    const prod = ordenados.find(p => String(p.nome).length >= 6 && ln.includes(norm(p.nome)))
+    if (!prod) return linha
+    const m = linha.match(/R\$\s*([\d.]+(?:,\d{1,2})?|\d+(?:\.\d{1,2})?)/)
+    if (!m) return linha
+    const citado = Number(m[1].includes(",") ? m[1].replace(/\./g, "").replace(",", ".") : m[1])
+    const base = Number(prod.preco_venda) || 0
+    const validos = [base, Number(prod.preco_promocional) || 0, ...faixasOrdenadas(prod.faixas_preco).map(f => f.preco)].filter(v => v > 0)
+    if (!Number.isFinite(citado) || validos.some(v => Math.abs(v - citado) < 0.01)) return linha
+    // Linha de item com quantidade ("x2 — R$ 24") é total, não unitário: não mexe.
+    if (/\bx\s*\d+|\d+\s*x\b/i.test(linha)) return linha
+    console.log(`[Preço citado] ${prod.nome}: R$ ${citado} → R$ ${base}`)
+    return linha.replace(m[0], `R$ ${base.toFixed(2).replace(".", ",")}`)
+  }).join("\n")
+}
+const RE_ACENTOS_PRECO = new RegExp("[\\u0300-\\u036f]", "g")
 
 /** Como o produto aparece na lista do prompt: preço, promoção, atacado e descrição. */
 function linhaDoCardapio(p: any): string {
@@ -2959,7 +3020,7 @@ ${totalProdutos > MENU_INTEIRO_ATE ? `⚠️ CATÁLOGO GRANDE: esta loja tem ${t
 • Se ele pedir algo que não está aí, NUNCA diga que a loja não tem. Diga que vai conferir e peça a MARCA e o TAMANHO ("Skol lata 350?"): o sistema procura com essas palavras e o item aparece aqui na próxima mensagem.
 • Categorias da loja: ${(catsHorario ?? []).map((c: any) => c.nome).join(", ") || "—"}
 ` : ""}PRODUTOS DISPONÍVEIS${totalProdutos > MENU_INTEIRO_ATE ? " (o que casou com o que ele pediu)" : ""}:
-${produtos.map(linhaDoCardapio).join("\n") || (totalProdutos > MENU_INTEIRO_ATE ? "Nada casou com o que ele falou — peça a marca e o tamanho, ou ofereça o link do catálogo." : "Nenhum produto cadastrado")}
+${cardapioPorCategoria(produtos) || (totalProdutos > MENU_INTEIRO_ATE ? "Nada casou com o que ele falou — peça a marca e o tamanho, ou ofereça o link do catálogo." : "Nenhum produto cadastrado")}
 ${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n⚠️ Confira pelo [id:] qual produto o cliente pediu antes de mostrar opções. Produto cujo id NÃO aparece neste bloco não tem sabor/complemento pra escolher: adicione direto com atualizar_carrinho, sem perguntar sabor (ex.: açaí em caixa ou balde não é o mesmo produto que o sorvete de mesmo tamanho).\n` : ""}
 CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) => {
   const comps = Array.isArray(i.complementos) && i.complementos.length ? ` (${i.complementos.map((c: any) => c.nome).join(", ")})` : ""
@@ -3001,6 +3062,8 @@ Já verificamos pelo telefone se o cliente tem conta nesta loja (ver CLIENTE aci
 
 ▶ PASSO 2 — MONTAR A SACOLA
 Ajude o cliente a escolher os produtos. A CADA produto escolhido, emita atualizar_carrinho (ver AÇÕES).
+Cliente pediu VÁRIOS produtos de uma vez ("um balde, dez picolés e um açaí"): guarde a lista. Ao anotar um, na MESMA resposta pergunte o que falta do PRÓXIMO ("Agora os 10 picolés: qual tipo e sabor?"). Só pergunte "deseja mais algum item?" quando todos os que ele pediu estiverem no carrinho.
+Preço: use SEMPRE o da linha do produto, dentro da categoria certa (【SORVETES】 não é 【AÇAÍ】, mesmo com o mesmo tamanho).
 Produto com complementos (Quentinha): mostre TODAS as categorias DE UMA VEZ, numa ÚNICA mensagem. Use EXATAMENTE o formato do bloco "PRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS": cada categoria com a barra separadora (━━━━━━━━━━━━━), o *nome da categoria* em negrito com o máximo do lado (ex.: "escolha 1", "escolha até 2"), e CADA opção numa linha própria começando com "• ". NUNCA junte as opções com vírgula na mesma linha — elas têm que ficar uma embaixo da outra. A linha "(em falta hoje ...)" é só pra você: NUNCA mostre ela na lista. NUNCA pergunte categoria por categoria (uma mensagem por categoria) — isso cansa o cliente e gasta crédito à toa. Peça pro cliente responder tudo numa mensagem só; quando ele responder, monte o item com atualizar_carrinho. Se faltar escolher alguma categoria, aí sim pergunte só as que faltam.
 Continue somando itens até o cliente dizer que é só isso / que quer fechar.
 ⚠️ Enquanto monta a sacola, NUNCA peça nome, e-mail, CEP, endereço, entrega ou pagamento. Isso é SÓ depois que a sacola fechar.
@@ -3370,7 +3433,20 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
                 ? `${cabecalho}\n\nPrefere *entrega* 🚚 ou vai *retirar* na loja? 🏪`
                 : `${cabecalho}\n\nPode retirar em: *${empresaEndereco || empresaNome}*. Como vai pagar: ${pgtoOpcoes}? 💳`
             } else {
-              resposta = `${cabecalho}\n\n${temComp ? "Está certo? " : ""}Deseja mais algum item ou pode fechar o pedido? 😊`
+              // Pedido de vários itens de uma vez ("balde, dez picolés e um
+              // açaí"): anotado o balde, o modelo já pergunta dos picolés. O
+              // "deseja mais algum item?" fixo apagava essa pergunta, e o
+              // cliente fechava sem os outros dois (conversa real, 13/09).
+              // Tudo o que o modelo disse depois da parte da sacola (a lista dos
+              // tipos de picolé + a pergunta), e não só o último parágrafo — senão
+              // sobrava um "O que você prefere?" solto, sem a lista.
+              const resto = resposta.split(/\n\s*\n/).map(p => p.trim())
+                .filter(p => p && !/(anotei|anotado|adicionad|confere|carrinho|sacola|✅|🍽️|deixa eu confirmar|s[oó] pra confirmar|vamos confirmar|fechar|mais algum|mais alguma)/i.test(p))
+                .join("\n\n")
+              const perguntaDoModelo = resto.includes("?") && resto.length <= 1200 ? resto : ""
+              resposta = perguntaDoModelo
+                ? `${cabecalho}\n\n${perguntaDoModelo}`
+                : `${cabecalho}\n\n${temComp ? "Está certo? " : ""}Deseja mais algum item ou pode fechar o pedido? 😊`
             }
           }
 
@@ -3807,6 +3883,17 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       resposta = `${resposta}\n\n👉 ${catalogoUrl}`
       console.log("[SafeNet] link do catálogo adicionado na mensagem de boas-vindas")
     }
+
+    // Resumo com "Pagamento: Como vai pagar…?" dentro: o modelo pulou a etapa do
+    // pagamento e colou a pergunta no resumo (conversa real, 13/09). Pergunta
+    // só o pagamento; o resumo vem depois, com ele escolhido.
+    if (/resumo do pedido/i.test(resposta) && /como vai pagar/i.test(resposta)) {
+      resposta = `Antes do resumo: como vai pagar — ${pgtoOpcoes}? 💳`
+      console.log("[SafeNet] resumo sem pagamento escolhido — perguntei o pagamento")
+    }
+
+    // Preço errado ao lado do nome de um produto (balde de sorvete a R$ 125).
+    if (!/resumo do pedido/i.test(resposta)) resposta = corrigirPrecosCitados(resposta, produtos)
 
     // RESUMO COM A CONTA DO SISTEMA. O modelo lê "a partir de 5: R$ 2,50" na
     // lista e aplica em 3 pacotes de gelo — o resumo dizia R$ 21,50 e o pedido
