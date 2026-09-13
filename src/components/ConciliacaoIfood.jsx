@@ -740,9 +740,12 @@ function Relatorio({ empresaId, versao, nomeLoja, variasLojas }) {
         <button type="button" className="ci-btn" onClick={buscarMensal} disabled={!!ocupado}>
           {ocupado === 'mensal' ? <><span className="ci-giro" />Buscando…</> : '📥 Buscar arquivo do mês'}
         </button>
-        <button type="button" className="ci-btn" onClick={solicitar} disabled={!!ocupado || acompanhando}>
-          {ocupado === 'solicitar' ? <><span className="ci-giro" />Pedindo…</> : acompanhando ? <><span className="ci-giro" />Acompanhando o pedido…</> : '🧾 Gerar relatório sob demanda'}
+        {/* Fica liberado enquanto acompanha: pedir de novo com um pedido em andamento
+            faz o iFood responder 409, e o sistema segue o mesmo requestId. */}
+        <button type="button" className="ci-btn" onClick={solicitar} disabled={!!ocupado}>
+          {ocupado === 'solicitar' ? <><span className="ci-giro" />Pedindo…</> : '🧾 Gerar relatório sob demanda'}
         </button>
+        {acompanhando && <span className="ci-muted" style={{ fontSize: 12 }}><span className="ci-giro" />Acompanhando o pedido no iFood…</span>}
       </div>
       {msg && <div className={`ci-msg ${msg.tipo}`} style={{ marginBottom: 10 }}>{msg.txt}</div>}
 
