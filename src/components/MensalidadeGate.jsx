@@ -25,7 +25,6 @@ export default function MensalidadeGate() {
   const [excecoes, setExcecoes] = useState({})
   const [relogio, setRelogio] = useState(() => Date.now())
   const [avisoFechado, setAvisoFechado] = useState(false)
-  const [msgJaPaguei, setMsgJaPaguei] = useState(null)
   const [pagarAberto, setPagarAberto] = useState(false)
 
   const perfil = profile?.perfil
@@ -76,11 +75,6 @@ export default function MensalidadeGate() {
 
   if (!participa || publica || !situacao?.ativa) return null
 
-  async function jaPaguei() {
-    const { data } = await supabase.rpc('mensalidade_ja_paguei')
-    if (data?.ok) { setMsgJaPaguei(null); carregar() } else setMsgJaPaguei(data?.erro ?? 'Não deu pra liberar agora.')
-  }
-
   // ── Termo aceito uma vez (só admin) ────────────────────────────────────────
   if (admin && !situacao.termo_aceito_em) {
     return (
@@ -125,14 +119,14 @@ export default function MensalidadeGate() {
           O acesso fica bloqueado até o pagamento. Os pedidos continuam chegando, mas os funcionários estão sem acesso.
         </div>
         <MensalidadePagamento situacao={situacao} empresaId={empresa?.id} onPago={carregar} />
+        {/* Sem "Já paguei": o Wilde tirou (13/09) — o PIX libera sozinho, e o botão
+            dava 1 hora livre por dia pra quem não pagou. */}
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
-          <button type="button" onClick={jaPaguei} style={linkBotao}>Já paguei — liberar por 1 hora</button>
           <a href="https://wa.me/5584998214212" target="_blank" rel="noreferrer" style={linkBotao}>Falar com a FWC</a>
           {impersonando && (
             <button type="button" style={linkBotao} onClick={async () => { await voltarSuperAdmin(); navigate('/super-admin') }}>← Voltar ao Super Admin</button>
           )}
         </div>
-        {msgJaPaguei && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 8 }}>{msgJaPaguei}</div>}
       </Tela>
     )
   }
