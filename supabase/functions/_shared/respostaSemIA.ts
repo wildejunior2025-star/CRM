@@ -164,7 +164,10 @@ export function comoFicaNoDia(
 
   // 3) A grade da semana. Sem grade, não restringe nada.
   if (!daGrade) return { aberto: true, periodos: [] }
-  return { aberto: !!daGrade.aberto, periodos: periodosGrade }
+  // Dia "aberto" sem horário é dia fechado (mig 0262, igual a src/lib/feriados.js).
+  const periodosValidos = periodosGrade.filter(p => p?.i && p?.f)
+  if (!periodosValidos.length) return { aberto: false, periodos: [] }
+  return { aberto: !!daGrade.aberto, periodos: periodosValidos }
 }
 
 /**

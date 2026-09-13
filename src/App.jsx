@@ -141,6 +141,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 import PortalLayout from './components/PortalLayout'
 import SuperAdminLayout from './components/SuperAdminLayout'
+import MensalidadeGate from './components/MensalidadeGate'
 import Login from './pages/Login'
 const Cadastro = lazy(() => import('./pages/Cadastro'))
 const CadastroCliente = lazy(() => import('./pages/CadastroCliente'))
@@ -198,6 +199,8 @@ const LojaOnlineHome = lazy(() => import('./pages/LojaOnlineHome'))
 const RaioEntrega = lazy(() => import('./pages/RaioEntrega'))
 const HorariosLoja = lazy(() => import('./pages/HorariosLoja'))
 const WhatsAppCreditos = lazy(() => import('./pages/WhatsAppCreditos'))
+const MinhaMensalidade = lazy(() => import('./pages/MinhaMensalidade'))
+const SuperAdminMensalidades = lazy(() => import('./pages/SuperAdminMensalidades'))
 const AssistenteIA = lazy(() => import('./pages/AssistenteIA'))
 const Termos = lazy(() => import('./pages/Termos'))
 const Privacidade = lazy(() => import('./pages/Privacidade'))
@@ -255,6 +258,8 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <HostnameRedirect />
+        {/* Mensalidade atrasada: aviso/pop-up do admin e bloqueio de funcionário (mig 0263) */}
+        <MensalidadeGate />
         <ErroNaTela>
         <Suspense fallback={<TelaCarregando />}>
           <Routes>
@@ -308,6 +313,7 @@ export default function App() {
             <Route path="/super-admin/empresa-rede" element={<SuperAdminEmpresaRede />} />
             <Route path="/super-admin/financeiro" element={<SuperAdminFinanceiro />} />
             <Route path="/super-admin/despesas" element={<SuperAdminDespesas />} />
+            <Route path="/super-admin/mensalidades" element={<SuperAdminMensalidades />} />
             <Route path="/super-admin/videos" element={<SuperAdminVideos />} />
             <Route path="/super-admin/assistente" element={<SuperAdminAssistente />} />
           </Route>
@@ -420,6 +426,10 @@ export default function App() {
             <Route
               path="entregadores"
               element={<ProtectedRoute roles={['admin']} modulo="delivery"><EntregadoresHistorico /></ProtectedRoute>}
+            />
+            <Route
+              path="mensalidade"
+              element={<ProtectedRoute roles={['admin']}><MinhaMensalidade /></ProtectedRoute>}
             />
             <Route
               path="whatsapp-creditos"

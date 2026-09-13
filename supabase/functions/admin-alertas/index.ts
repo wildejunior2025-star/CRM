@@ -152,6 +152,15 @@ serve(async (req) => {
       return json({ ok: false, error: "Erro ao buscar empresas: " + empError.message }, 500)
     }
 
+    // Loja na cobrança nova (semanal, mig 0263) é avisada pela função
+    // `mensalidade`, uma vez no atraso e outra no bloqueio. Aqui ela receberia
+    // o aviso mensal antigo todo dia, em dobro.
+    const { data: naNova } = await supabaseAdmin.from("mensalidade_config").select("empresa_id").eq("ativa", true)
+    const idsNova = new Set((naNova ?? []).map((c: { empresa_id: string }) => c.empresa_id))
+    if (empresas) {
+      for (let i = empresas.length - 1; i >= 0; i--) if (idsNova.has(empresas[i].id)) empresas.splice(i, 1)
+    }
+
     if (!empresas || empresas.length === 0) {
       return json({ ok: true, enviadas: 0 })
     }
