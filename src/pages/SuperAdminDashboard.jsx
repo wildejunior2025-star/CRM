@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
+import { hojeBR } from '../lib/feriados'
+import { faseDaMensalidade, dataCurtaBR, somaDiasYmd } from '../lib/mensalidade'
 import '../components/Page.css'
 
 const STATUS_LABELS = {
@@ -28,14 +30,28 @@ function fmt(val) {
 const CAP_METRICAS = [
   { key: 'bot_conversas_ativas', label: 'Conversas no bot', sub: 'atendimentos nos últimos 10 min', limite: 10,   alerta: 6,    unidade: '',     limiteLabel: '10' },
   { key: 'ia_por_minuto',        label: 'IA por minuto',    sub: 'respostas do bot no último minuto', limite: 50, alerta: 35,   unidade: '',     limiteLabel: '50/min' },
-  { key: 'lojas_bot_ativo',      label: 'Lojas com bot',    sub: 'lojas ativas com crédito',          limite: 15, alerta: 10,   unidade: '',     limiteLabel: '15' },
+  { key: 'lojas_bot_ativo',      label: 'Lojas com bot',    sub: 'lojas com robô ligado (IA ou link)',          limite: 15, alerta: 10,   unidade: '',     limiteLabel: '15' },
   { key: 'banco_mb',             label: 'Banco de dados',   sub: 'espaço usado (8 GB inclusos)',      limite: 8192, alerta: 6000, unidade: ' MB', limiteLabel: '8 GB' },
 ]
+
+function Card({ titulo, valor, sub, cor, onClick }) {
+  return (
+    <div className="card" onClick={onClick} style={{ padding: '18px 22px', cursor: onClick ? 'pointer' : 'default' }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>{titulo}</div>
+      <div style={{ fontSize: 24, fontWeight: 800, color: cor ?? 'var(--text)' }}>{valor}</div>
+      <div style={{ fontSize: 11, color: onClick ? 'var(--primary)' : 'var(--text-muted)', marginTop: 2 }}>{sub}</div>
+    </div>
+  )
+}
 
 export default function SuperAdminDashboard() {
   const [empresas, setEmpresas] = useState([])
   const [pedidosMes, setPedidosMes] = useState([])
   const [comissaoCfg, setComissaoCfg] = useState({})
+  // Mensalidade semanal (mig 0263): o Dashboard lia o valor_mensalidade antigo
+  // e mostrava MRR de R$ 399 com R$ 412,50 entrando por SEMANA (13/09).
+  const [mensCfg, setMensCfg] = useState([])
+  const [mensCob, setMensCob] = useState([])
   const [loading, setLoading] = useState(true)
   const [refToken, setRefToken] = useState(null)
   const [copiado, setCopiado] = useState(false)
@@ -65,20 +81,27 @@ export default function SuperAdminDashboard() {
         .then(({ data }) => { if (data?.ref_token) setRefToken(data.ref_token) })
     })
 
+    const hojeYmd = hojeBR()
     Promise.all([
-      supabase.from('empresas').select('*').order('created_at'),
-      supabase
+      supabase.from('empresas').select('*').order('nome'),
+      // Paginado: no mês passa de mil pedidos, e a consulta simples cortava em mil.
+      fetchAll(() => supabase
         .from('pedidos_delivery')
         .select('origem, total, status')
         .gte('created_at', inicioMes.toISOString())
-        .neq('status', 'cancelado'),
+        .neq('status', 'cancelado')),
       supabase
         .from('configuracoes_plataforma')
         .select('chave, valor')
         .in('chave', ['comissao_vendas_pct', 'comissao_vendas_ativo']),
-    ]).then(([{ data: emp }, { data: ped }, { data: cfg }]) => {
+      supabase.rpc('mensalidade_atualizar_todas').then(() => supabase.from('mensalidade_config').select('*').eq('ativa', true)),
+      supabase.from('mensalidade_cobrancas').select('empresa_id, vencimento, referencia, valor, valor_pago, status, pago_em')
+        .gte('vencimento', somaDiasYmd(hojeYmd, -120)).order('vencimento'),
+    ]).then(([{ data: emp }, { data: ped }, { data: cfg }, { data: mcfg }, { data: mcob }]) => {
       setEmpresas(emp ?? [])
       setPedidosMes(ped ?? [])
+      setMensCfg(mcfg ?? [])
+      setMensCob(mcob ?? [])
       const cfgMap = {}
       for (const c of cfg ?? []) cfgMap[c.chave] = c.valor
       setComissaoCfg(cfgMap)
@@ -88,16 +111,36 @@ export default function SuperAdminDashboard() {
 
   if (loading) return <div className="page-loading">Carregando...</div>
 
-  const hoje = new Date()
-  const hojeStr = hoje.toISOString().slice(0, 10)
-  const em7dias = new Date(hoje.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 
   const ativas    = empresas.filter(e => e.status === 'ativo')
   const trial     = empresas.filter(e => e.status === 'trial')
-  const atrasadas = empresas.filter(e => e.status === 'atrasado')
   const suspensas = empresas.filter(e => e.status === 'suspenso')
 
-  const mrr = ativas.reduce((s, e) => s + Number(e.valor_mensalidade ?? 0), 0)
+  // ── Mensalidade semanal ────────────────────────────────────────────────────
+  const hojeYmd = hojeBR()
+  const cfgPorLoja = Object.fromEntries(mensCfg.map(c => [c.empresa_id, c]))
+  const porSemana = mensCfg.reduce((s, c) => s + (c.periodicidade === 'semanal' ? Number(c.valor) : Number(c.valor) * 12 / 52), 0)
+  const mrr = porSemana * 52 / 12
+  const mensDe = (emp) => {
+    const cfg = cfgPorLoja[emp.id]
+    if (!cfg) return null
+    const vencidas = mensCob.filter(c => c.empresa_id === emp.id && c.status === 'aberta' && c.vencimento <= hojeYmd)
+    const estado = faseDaMensalidade({
+      ativa: true, hoje: hojeYmd, mais_antiga_vencida: vencidas[0]?.vencimento ?? null,
+      carencia_dias: cfg.carencia_dias, prazo_ate: cfg.prazo_ate, liberado_ate: null,
+    }, { grade: emp.horarios_funcionamento, excecoes: {}, fechaFeriado: !!emp.feriados_fecha })
+    return { cfg, estado, emAberto: vencidas.reduce((s, c) => s + Number(c.valor), 0) }
+  }
+  const mensLojas = empresas.map(e => ({ e, m: mensDe(e) })).filter(x => x.m)
+  const emAtraso = mensLojas.filter(x => ['carencia', 'prazo'].includes(x.m.estado.fase))
+  const bloqueadas = mensLojas.filter(x => x.m.estado.fase === 'bloqueio')
+  const totalEmAberto = mensLojas.reduce((s, x) => s + x.m.emAberto, 0)
+  const inicioMesYmd = hojeYmd.slice(0, 8) + '01'
+  const recebidoMes = mensCob
+    .filter(c => c.status === 'paga' && c.pago_em && new Date(c.pago_em).toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' }) >= inicioMesYmd)
+    .reduce((s, c) => s + Number(c.valor_pago ?? c.valor), 0)
+  const nomeLoja = id => empresas.find(e => e.id === id)?.nome ?? '—'
+  const vencendo = mensCob.filter(c => c.status === 'aberta' && c.vencimento >= hojeYmd && c.vencimento <= somaDiasYmd(hojeYmd, 7))
 
   const comissaoPct   = Number(comissaoCfg.comissao_vendas_pct ?? 0)
   const comissaoAtiva = comissaoCfg.comissao_vendas_ativo !== 'false'
@@ -110,10 +153,6 @@ export default function SuperAdminDashboard() {
   const gmvApp     = pedidosApp.reduce((s, p) => s + Number(p.total ?? 0), 0)
   const gmvCar     = pedidosCar.reduce((s, p) => s + Number(p.total ?? 0), 0)
   const comissaoMes = comissaoAtiva ? gmvApp * comissaoPct / 100 : 0
-
-  const vencendoEm7 = empresas.filter(
-    e => e.status === 'ativo' && e.vencimento && e.vencimento >= hojeStr && e.vencimento <= em7dias
-  )
 
   const semCreditoWA = empresas.filter(
     e => ['ativo', 'trial'].includes(e.status) && (e.whatsapp_creditos ?? 0) === 0
@@ -152,44 +191,20 @@ export default function SuperAdminDashboard() {
         </div>
       )}
 
-      {/* Cards principais */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 24 }}>
-        <div className="card" style={{ padding: '18px 22px' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>MRR</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--primary)' }}>{fmt(mrr)}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>receita mensal recorrente</div>
-        </div>
-        <div className="card" style={{ padding: '18px 22px' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>Ativas</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--success)' }}>{ativas.length}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>lojas pagantes</div>
-        </div>
-        <div className="card" style={{ padding: '18px 22px' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>Trial</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--primary)' }}>{trial.length}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>em período de teste</div>
-        </div>
-        <div className="card" style={{ padding: '18px 22px' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>Atrasadas</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--warning)' }}>{atrasadas.length}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>pagamento pendente</div>
-        </div>
-        <div className="card" style={{ padding: '18px 22px' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>Suspensas</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--danger)' }}>{suspensas.length}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>acesso bloqueado</div>
-        </div>
-        <div
-          className="card"
-          style={{ padding: '18px 22px', cursor: 'pointer', transition: 'box-shadow 150ms' }}
-          onClick={() => navigate('/super-admin/empresas')}
-          onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow-md)'}
-          onMouseLeave={e => e.currentTarget.style.boxShadow = ''}
-        >
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>Total</div>
-          <div style={{ fontSize: 24, fontWeight: 800 }}>{empresas.length}</div>
-          <div style={{ fontSize: 11, color: 'var(--primary)', marginTop: 2 }}>ver todas →</div>
-        </div>
+      {/* Cards principais — mensalidade semanal (mig 0263) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, marginBottom: 24 }}>
+        <Card titulo="Receita por mês" valor={fmt(mrr)} cor="var(--primary)"
+          sub={`${fmt(porSemana)} por semana · ${mensCfg.length} loja${mensCfg.length !== 1 ? 's' : ''} pagando`}
+          onClick={() => navigate('/super-admin/mensalidades')} />
+        <Card titulo="Recebido este mês" valor={fmt(recebidoMes)} cor="var(--success)" sub="mensalidades pagas no mês"
+          onClick={() => navigate('/super-admin/mensalidades')} />
+        <Card titulo="Em aberto (vencido)" valor={fmt(totalEmAberto)} cor={totalEmAberto > 0 ? 'var(--danger)' : 'var(--text)'}
+          sub={`${emAtraso.length} em atraso · ${bloqueadas.length} bloqueada${bloqueadas.length !== 1 ? 's' : ''}`}
+          onClick={() => navigate('/super-admin/mensalidades')} />
+        <Card titulo="Ativas" valor={ativas.length} cor="var(--success)" sub="lojas em operação" />
+        <Card titulo="Em teste" valor={trial.length} cor="var(--primary)" sub="período de teste" />
+        <Card titulo="Suspensas" valor={suspensas.length} cor="var(--danger)" sub="acesso bloqueado" />
+        <Card titulo="Total" valor={empresas.length} sub="ver todas →" onClick={() => navigate('/super-admin/empresas')} />
       </div>
 
       {/* Card vendas App */}
@@ -239,50 +254,34 @@ export default function SuperAdminDashboard() {
         </div>
       )}
 
-      {/* Alerta vencendo em 7 dias */}
-      {vencendoEm7.length > 0 && (
+      {/* Mensalidades que vencem nos próximos 7 dias (cobrança semanal) */}
+      {vencendo.length > 0 && (
         <div className="card" style={{ marginBottom: 20 }}>
           <div style={{
-            padding: '12px 16px 10px',
-            fontWeight: 700,
-            fontSize: 14,
-            color: 'var(--warning)',
-            borderBottom: '1px solid var(--border)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
+            padding: '12px 16px 10px', fontWeight: 700, fontSize: 14, color: 'var(--warning)',
+            borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
           }}>
-            ⏳ Vencendo nos próximos 7 dias ({vencendoEm7.length})
+            <span>⏳ Vencendo nos próximos 7 dias ({vencendo.length}) · {fmt(vencendo.reduce((s, c) => s + Number(c.valor), 0))}</span>
+            <button className="btn btn-secondary btn-sm" onClick={() => navigate('/super-admin/mensalidades')}>Mensalidades →</button>
           </div>
           <div className="data-table" style={{ marginBottom: 0 }}>
             <table>
               <thead>
-                <tr>
-                  <th>Empresa</th>
-                  <th>Vencimento</th>
-                  <th className="caixa-amount-col">Mensalidade</th>
-                  <th>Telefone</th>
-                </tr>
+                <tr><th>Empresa</th><th>Vence</th><th>Referência</th><th className="caixa-amount-col">Valor</th></tr>
               </thead>
               <tbody>
-                {vencendoEm7.map(e => {
-                  const dias = Math.round((new Date(e.vencimento) - hoje) / (1000 * 60 * 60 * 24))
-                  return (
-                    <tr key={e.id}>
-                      <td style={{ fontWeight: 600 }}>{e.nome}</td>
-                      <td>
-                        <span style={{ color: dias <= 3 ? 'var(--danger)' : 'var(--warning)', fontWeight: 700 }}>
-                          {e.vencimento}
-                        </span>
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>
-                          ({dias <= 0 ? 'hoje' : `em ${dias} dia${dias !== 1 ? 's' : ''}`})
-                        </span>
-                      </td>
-                      <td className="caixa-amount-col">{fmt(e.valor_mensalidade ?? 0)}</td>
-                      <td style={{ color: 'var(--text-muted)' }}>{e.telefone_contato || '-'}</td>
-                    </tr>
-                  )
-                })}
+                {vencendo.map(c => (
+                  <tr key={`${c.empresa_id}-${c.vencimento}`}>
+                    <td style={{ fontWeight: 600 }}>{nomeLoja(c.empresa_id)}</td>
+                    <td>
+                      <span style={{ color: c.vencimento === hojeYmd ? 'var(--danger)' : 'var(--warning)', fontWeight: 700 }}>
+                        {c.vencimento === hojeYmd ? 'hoje' : dataCurtaBR(c.vencimento)}
+                      </span>
+                    </td>
+                    <td style={{ color: 'var(--text-muted)' }}>{c.referencia}</td>
+                    <td className="caixa-amount-col">{fmt(c.valor)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -349,7 +348,7 @@ export default function SuperAdminDashboard() {
               <tr>
                 <th>Empresa</th>
                 <th>Status</th>
-                <th className="caixa-amount-col">Mensalidade</th>
+                <th>Mensalidade</th>
                 <th className="caixa-amount-col">WA</th>
               </tr>
             </thead>
@@ -362,7 +361,13 @@ export default function SuperAdminDashboard() {
                       {STATUS_LABELS[e.status] ?? e.status}
                     </span>
                   </td>
-                  <td className="caixa-amount-col">{fmt(e.valor_mensalidade ?? 0)}</td>
+                  <td>{(() => {
+                    const m = mensDe(e)
+                    if (!m) return <span style={{ color: 'var(--text-muted)' }}>—</span>
+                    const FASE = { em_dia: ['Em dia', 'var(--success)'], vence_hoje: ['Vence hoje', 'var(--warning)'], carencia: ['Atrasada', 'var(--danger)'], prazo: ['Prazo', 'var(--primary)'], bloqueio: ['BLOQUEADA', 'var(--danger)'] }
+                    const [txt, cor] = FASE[m.estado.fase] ?? ['', 'var(--text-muted)']
+                    return <>{fmt(m.cfg.valor)}<span style={{ color: 'var(--text-muted)' }}>/{m.cfg.periodicidade === 'semanal' ? 'sem' : 'mês'}</span> <strong style={{ color: cor, fontSize: 12 }}>{txt}</strong></>
+                  })()}</td>
                   <td
                     className="caixa-amount-col"
                     style={{
