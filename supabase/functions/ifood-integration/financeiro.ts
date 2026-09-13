@@ -1,230 +1,241 @@
 // =====================================================================
-// Repasse do iFood pela API Financial v3.0 (migração 0260)
+// Conciliação iFood — módulo Financial (migrações 0260 e 0261)
 // ---------------------------------------------------------------------
-// acao "financeiro_sync" -> { empresa_id?, dias? }
-//   Busca os lançamentos financeiros de cada loja conectada, grava crus em
-//   ifood_eventos_financeiros e soma por semana em ifood_repasse_semanal —
-//   a tabela que a tela Financeiro já lê (é a mesma do PDF importado).
+// acao "financeiro_sync"       { empresa_id?, dias? }
+//   Lançamentos + vendas + liquidações das últimas semanas (seg-dom), o
+//   arquivo mensal dos meses encerrados que ainda não baixou, e as conferências.
+//   Sem empresa_id: todas as lojas (é o cron das 06:15).
 //
-// O que se sabe da API (testado em 12/09/2026):
-//   - A rota é /financial/v3.0/merchants/{id}/financial-events (com hífen; a
-//     versão camelCase "financialEvents" dá 404).
-//   - Pagina com page/size/hasNextPage.
-//   - O escopo que libera é `conciliator`. Sem ele: 403.
-//   - No app de TESTE, o header x-request-homologation: true devolve um
-//     exemplo FIXO, igual pra qualquer data ou página. Serve pra validar o
-//     formato e a gravação, não o filtro de datas.
+// acao "conciliacao_mensal"    { empresa_id, competencia }   baixa o arquivo do mês agora
+// acao "conciliacao_solicitar" { empresa_id, competencia }   pede o relatório sob demanda
+// acao "conciliacao_status"    { empresa_id, competencia }   acompanha o pedido
 //
-// O que NÃO se sabe ainda (só vai aparecer com dado real de produção):
-//   - Sobre qual data o beginDate/endDate filtra (apuração, pedido ou repasse).
-//     Por isso a janela é pedida em fatias de 7 dias e cada lançamento é
-//     deduplicado pela chave — pedir a mesma coisa duas vezes não duplica.
-//   - Todos os nomes de lançamento que existem. As quebras (comissão, anúncio)
-//     são a melhor leitura; o valor do repasse soma tudo que impacta o repasse,
-//     que não depende de nome.
+// As ações com empresa_id exigem login DAQUELA loja (ou super admin, ou a chave
+// de serviço). A função aceita chamada sem login porque o cron chama assim — mas
+// sem login ela só roda a rotina de todas as lojas, nunca a de uma escolhida.
 // =====================================================================
+import { type CtxIfood, ErroIfood } from "./fin_http.ts"
+import { buscarEventosDaSemana, linhasDeEventos } from "./fin_eventos.ts"
+import { buscarVendasDaSemana, linhasDeVendas } from "./fin_vendas.ts"
+import { buscarLiquidacaoDaSemana, linhasDeLiquidacao } from "./fin_liquidacoes.ts"
+import { baixarRelatorioMensal, consultarRelatorio, solicitarRelatorio } from "./fin_conciliacao.ts"
+import { gravarEmLotes, semanasDeLiquidacao } from "./fin_util.ts"
 
-const IFOOD = "https://merchant-api.ifood.com.br"
-const FATIA_DIAS = 7
-const MAX_PAGINAS = 50
-const TAMANHO_PAGINA = 100
+type GetToken = (sb: any, cfg: any) => Promise<string>
 
-type Cfg = {
-  id?: string
-  empresa_id: string
-  merchant_id: string | null
-  ambiente: string
-  apelido?: string | null
-}
+// Rotina de todas as lojas não roda de novo antes disto (protege o limite de
+// chamadas do iFood de quem chamar a função repetidamente).
+const INTERVALO_MIN_MS = 30 * 60 * 1000
 
-type Resultado = {
-  empresa_id: string
-  merchant_id: string | null
-  loja: string | null
-  status: "ok" | "sem_permissao" | "erro"
-  lancamentos: number
-  erro?: string
-}
+// ── Quem está chamando ────────────────────────────────────────────────────────
+export async function podeMexerNaEmpresa(req: Request, sb: any, empresaId: string): Promise<boolean> {
+  if (!empresaId) return false
+  const jwt = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim()
+  if (!jwt) return false
+  const servico = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+  if (servico && jwt === servico) return true
 
-const ymd = (d: Date) => d.toISOString().slice(0, 10)
-const addDias = (d: Date, n: number) => new Date(d.getTime() + n * 86400000)
-const numOuNull = (v: unknown) => {
-  if (v === null || v === undefined || v === "") return null
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
-}
-
-// Chave do lançamento. Ficam de FORA os campos que o iFood pode mudar depois no
-// mesmo lançamento (a data prevista do repasse, por exemplo, anda quando o
-// repasse atrasa): se entrassem no hash, a mudança criaria uma segunda linha e
-// o repasse contaria o lançamento duas vezes. Eles são atualizados na linha.
-async function hashDoEvento(ev: any, merchantId: string): Promise<string> {
-  const base = JSON.stringify([
-    merchantId,
-    ev?.name ?? null,
-    ev?.description ?? null,
-    ev?.trigger ?? null,
-    ev?.product ?? null,
-    ev?.competence ?? null,
-    ev?.period?.beginDate ?? null,
-    ev?.period?.endDate ?? null,
-    ev?.period?.idSaldo ?? null,
-    ev?.reference?.type ?? null,
-    ev?.reference?.id ?? null,
-    ev?.reference?.date ?? null,
-    ev?.amount?.value ?? null,
-    ev?.payment?.method ?? null,
-    ev?.payment?.liability ?? null,
-    ev?.billing?.baseValue ?? null,
-    ev?.billing?.feePercentage ?? null,
-  ])
-  const dig = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(base))
-  return Array.from(new Uint8Array(dig)).map((b) => b.toString(16).padStart(2, "0")).join("")
-}
-
-// Uma fatia de datas, todas as páginas. Devolve a lista ou "sem_permissao".
-async function buscarFatia(
-  token: string, cfg: Cfg, ini: string, fim: string,
-): Promise<any[] | "sem_permissao"> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
-  // Loja de teste do iFood: sem este header a API devolve 204 (sem dados).
-  if (cfg.ambiente === "teste") headers["x-request-homologation"] = "true"
-
-  const todos: any[] = []
-  for (let pagina = 1; pagina <= MAX_PAGINAS; pagina++) {
-    const url = `${IFOOD}/financial/v3.0/merchants/${cfg.merchant_id}/financial-events`
-      + `?beginDate=${ini}&endDate=${fim}&page=${pagina}&size=${TAMANHO_PAGINA}`
-    const r = await fetch(url, { headers })
-    if (r.status === 403) return "sem_permissao"
-    if (r.status === 204) break
-    if (!r.ok) throw new Error(`financial-events ${r.status}: ${(await r.text()).slice(0, 200)}`)
-    const j = await r.json().catch(() => null)
-    const lista = Array.isArray(j?.financialEvents) ? j.financialEvents : []
-    todos.push(...lista)
-    if (!j?.hasNextPage || lista.length === 0) break
+  // Login de gente: a loja dona ou o super admin.
+  const { data } = await sb.auth.getUser(jwt)
+  const uid = data?.user?.id
+  if (uid) {
+    const { data: p } = await sb.from("profiles").select("empresa_id, perfil").eq("id", uid).maybeSingle()
+    return !!p && (p.perfil === "super_admin" || p.empresa_id === empresaId)
   }
-  return todos
-}
 
-async function linhasDaFatia(cfg: Cfg, eventos: any[]) {
-  // Lançamentos idênticos na MESMA resposta viram chaves diferentes (#0, #1…).
-  // Idênticos em fatias diferentes caem na mesma chave — é o mesmo lançamento
-  // aparecendo em duas janelas que se encostam.
-  const vistos = new Map<string, number>()
-  const linhas = []
-  for (const ev of eventos) {
-    const h = await hashDoEvento(ev, cfg.merchant_id!)
-    const n = vistos.get(h) ?? 0
-    vistos.set(h, n + 1)
-    linhas.push({
-      empresa_id: cfg.empresa_id,
-      merchant_id: cfg.merchant_id,
-      chave: `${h}#${n}`,
-      nome: String(ev?.name ?? "DESCONHECIDO"),
-      descricao: ev?.description ?? null,
-      gatilho: ev?.trigger ?? null,
-      produto: ev?.product ?? null,
-      competencia: ev?.competence ?? null,
-      periodo_ini: ev?.period?.beginDate ?? null,
-      periodo_fim: ev?.period?.endDate ?? null,
-      id_saldo: ev?.period?.idSaldo != null ? String(ev.period.idSaldo) : null,
-      referencia_tipo: ev?.reference?.type ?? null,
-      referencia_id: ev?.reference?.id ?? null,
-      referencia_em: ev?.reference?.date ?? null,
-      valor: numOuNull(ev?.amount?.value) ?? 0,
-      impacta_repasse: ev?.hasTransferImpact !== false,
-      previsao_pagamento: ev?.settlement?.expectedDate ?? null,
-      metodo_pagamento: ev?.payment?.method ?? null,
-      responsavel: ev?.payment?.liability ?? null,
-      base_calculo: numOuNull(ev?.billing?.baseValue),
-      percentual: numOuNull(ev?.billing?.feePercentage),
-      bruto: ev,
-      sincronizado_em: new Date().toISOString(),
+  // Não é login de pessoa: pode ser a chave de serviço em outro formato (a
+  // variável do ambiente nem sempre vem igual à chave do painel). Em vez de
+  // comparar texto, pergunta ao banco: ifood_app só é visível pra serviço e
+  // super admin (RLS), então quem enxerga a linha tem esse poder.
+  try {
+    const url = Deno.env.get("SUPABASE_URL")
+    const anon = Deno.env.get("SUPABASE_ANON_KEY")
+    if (!url || !anon) return false
+    const r = await fetch(`${url}/rest/v1/ifood_app?select=id&limit=1`, {
+      headers: { apikey: anon, Authorization: `Bearer ${jwt}` },
     })
+    if (!r.ok) return false
+    const linhas = await r.json()
+    return Array.isArray(linhas) && linhas.length > 0
+  } catch {
+    return false
   }
-  return linhas
 }
 
-export async function runFinanceiroSync(
-  sb: any,
-  getToken: (sb: any, cfg: any) => Promise<string>,
-  opts: { empresaId?: string; dias?: number } = {},
-) {
-  const dias = Math.min(Math.max(Number(opts.dias) || 45, 1), 180)
-
+async function lojasDoIfood(sb: any, empresaId?: string) {
   let q = sb.from("ifood_config").select("*").eq("ativo", true).not("merchant_id", "is", null)
-  if (opts.empresaId) q = q.eq("empresa_id", opts.empresaId)
-  const { data: configs, error } = await q
-  if (error) return { ok: false, error: error.message }
+  if (empresaId) q = q.eq("empresa_id", empresaId)
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
 
+// Meses encerrados que ainda não têm arquivo pronto (olha os 2 últimos).
+async function competenciasPendentes(sb: any, cfg: any) {
   const hoje = new Date()
-  const inicio = addDias(hoje, -dias)
-  const resultados: Resultado[] = []
-  const empresasComDados = new Set<string>()
+  const comps: string[] = []
+  for (let i = 1; i <= 2; i++) {
+    const d = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth() - i, 1))
+    comps.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`)
+  }
+  const { data } = await sb.from("ifood_conciliacao_mensal")
+    .select("competencia, status, atualizado_em")
+    .eq("empresa_id", cfg.empresa_id).eq("merchant_id", cfg.merchant_id).eq("origem", "mensal")
+    .in("competencia", comps)
+  const prontos = new Set((data ?? []).filter((r: any) => r.status === "pronto").map((r: any) => r.competencia))
+  return comps.filter((c) => !prontos.has(c))
+}
 
-  for (const cfg of (configs ?? []) as Cfg[]) {
-    const res: Resultado = {
-      empresa_id: cfg.empresa_id, merchant_id: cfg.merchant_id, loja: cfg.apelido ?? null,
-      status: "ok", lancamentos: 0,
+async function marcarStatus(sb: any, cfg: any, status: string, erro: string | null) {
+  const upd = sb.from("ifood_config").update({
+    financeiro_status: status,
+    financeiro_sync_em: new Date().toISOString(),
+    financeiro_erro: erro,
+  })
+  await (cfg.id ? upd.eq("id", cfg.id) : upd.eq("empresa_id", cfg.empresa_id))
+}
+
+// ── Rotina completa de uma loja do iFood ──────────────────────────────────────
+async function sincronizarLoja(sb: any, getToken: GetToken, cfg: any, dias: number) {
+  const ctx: CtxIfood = { sb, cfg, getToken }
+  const res = {
+    status: "ok" as "ok" | "sem_permissao" | "erro",
+    lancamentos: 0, vendas: 0, semanas_liquidacao: 0, titulos: 0,
+    relatorios: [] as { competencia: string; status: string; erro?: string }[],
+    descartados: 0,
+    erro: null as string | null,
+  }
+
+  try {
+    const semanas = semanasDeLiquidacao(dias)
+    const eventos = new Map<string, any>()
+    const vendas = new Map<string, any>()
+    const semanasLiq: any[] = []
+    const titulos: any[] = []
+
+    for (const s of semanas) {
+      const ev = await linhasDeEventos(cfg, await buscarEventosDaSemana(ctx, s.ini, s.fim))
+      for (const l of ev.linhas) eventos.set(l.chave, l)
+      res.descartados += ev.descartados
+
+      const vd = linhasDeVendas(cfg, await buscarVendasDaSemana(ctx, s.ini, s.fim))
+      for (const l of vd.linhas) vendas.set(l.venda_id, l)
+      res.descartados += vd.descartadas
+
+      const lq = await linhasDeLiquidacao(cfg, s.ini, s.fim, await buscarLiquidacaoDaSemana(ctx, s.ini, s.fim))
+      semanasLiq.push(lq.semana)
+      titulos.push(...lq.titulos)
     }
-    try {
-      const token = await getToken(sb, cfg)
-      let semPermissao = false
-      const porChave = new Map<string, any>()
 
-      // Fatias de 7 dias, do mais antigo pro mais novo.
-      for (let a = inicio; a <= hoje; a = addDias(a, FATIA_DIAS)) {
-        const b = addDias(a, FATIA_DIAS - 1) > hoje ? hoje : addDias(a, FATIA_DIAS - 1)
-        const eventos = await buscarFatia(token, cfg, ymd(a), ymd(b))
-        if (eventos === "sem_permissao") { semPermissao = true; break }
-        for (const linha of await linhasDaFatia(cfg, eventos)) porChave.set(linha.chave, linha)
-      }
+    await gravarEmLotes(sb, "ifood_eventos_financeiros", [...eventos.values()], "empresa_id,chave")
+    await gravarEmLotes(sb, "ifood_vendas", [...vendas.values()], "empresa_id,venda_id")
+    await gravarEmLotes(sb, "ifood_liquidacao_semanas", semanasLiq, "empresa_id,merchant_id,semana_ini")
+    await gravarEmLotes(sb, "ifood_liquidacoes", titulos, "empresa_id,chave")
+    res.lancamentos = eventos.size
+    res.vendas = vendas.size
+    res.semanas_liquidacao = semanasLiq.length
+    res.titulos = titulos.length
 
-      if (semPermissao) {
-        res.status = "sem_permissao"
-      } else {
-        const linhas = [...porChave.values()]
-        for (let i = 0; i < linhas.length; i += 500) {
-          const { error: upErr } = await sb.from("ifood_eventos_financeiros")
-            .upsert(linhas.slice(i, i + 500), { onConflict: "empresa_id,chave" })
-          if (upErr) throw new Error(`gravar lançamentos: ${upErr.message}`)
-        }
-        res.lancamentos = linhas.length
-        if (linhas.length) empresasComDados.add(cfg.empresa_id)
-      }
-    } catch (e) {
+    for (const comp of await competenciasPendentes(sb, cfg)) {
+      const r = await baixarRelatorioMensal(ctx, comp)
+      res.relatorios.push({ competencia: comp, status: r.status, ...(r.erro ? { erro: r.erro } : {}) })
+    }
+  } catch (e) {
+    if (e instanceof ErroIfood && e.status === 403) {
+      res.status = "sem_permissao"
+    } else {
       res.status = "erro"
       res.erro = String((e as Error)?.message ?? e).slice(0, 500)
     }
-
-    // Status fica na linha da loja do iFood: o Financeiro mostra se está
-    // sincronizando, esperando liberação do iFood ou com erro.
-    const upd = sb.from("ifood_config").update({
-      financeiro_status: res.status,
-      financeiro_sync_em: new Date().toISOString(),
-      financeiro_erro: res.erro ?? null,
-    })
-    await (cfg.id ? upd.eq("id", cfg.id) : upd.eq("empresa_id", cfg.empresa_id))
-    resultados.push(res)
   }
 
-  // Soma por semana. Depois de gravar TODAS as lojas do iFood da empresa, pra
-  // uma empresa com duas lojas não recalcular com metade dos lançamentos.
-  const semanas: Record<string, number | string> = {}
-  for (const emp of empresasComDados) {
-    const { data, error: rpcErr } = await sb.rpc("recalcular_repasse_ifood", { p_empresa: emp })
-    semanas[emp] = rpcErr ? `erro: ${rpcErr.message}` : Number(data ?? 0)
+  const aviso = res.status === "ok" && res.descartados
+    ? `${res.descartados} registro(s) do iFood vieram incompletos e ficaram de fora.`
+    : null
+  await marcarStatus(sb, cfg, res.status, res.erro ?? aviso)
+  return res
+}
+
+export async function runFinanceiroSync(
+  req: Request, sb: any, getToken: GetToken,
+  opts: { empresaId?: string; dias?: number } = {},
+) {
+  const dias = Math.min(Math.max(Number(opts.dias) || 42, 7), 120)
+
+  if (opts.empresaId && !(await podeMexerNaEmpresa(req, sb, opts.empresaId))) {
+    return { ok: false, error: "Sem permissão pra atualizar essa loja." }
   }
 
-  // A função aceita chamada sem login (o cron chama assim), então a resposta
-  // não carrega id de merchant nem de empresa: só o que a tela precisa saber.
+  let lojas = await lojasDoIfood(sb, opts.empresaId)
+  if (!opts.empresaId) {
+    const limite = Date.now() - INTERVALO_MIN_MS
+    lojas = lojas.filter((c: any) => !c.financeiro_sync_em || new Date(c.financeiro_sync_em).getTime() < limite)
+  }
+
+  const resultados = []
+  const empresas = new Set<string>()
+  for (const cfg of lojas) {
+    const r = await sincronizarLoja(sb, getToken, cfg, dias)
+    resultados.push(r)
+    if (r.status === "ok") empresas.add(cfg.empresa_id)
+  }
+
+  // Conferências por empresa, depois de TODAS as lojas dela gravarem.
+  let semanas = 0
+  for (const emp of empresas) {
+    const { data } = await sb.rpc("recalcular_repasse_ifood", { p_empresa: emp })
+    semanas += Number(data ?? 0)
+  }
+
+  // Sem id de merchant nem de empresa na resposta: a função aceita chamada sem login.
   return {
     ok: true,
     dias,
     lojas: resultados.length,
     sem_permissao: resultados.filter((r) => r.status === "sem_permissao").length,
     com_erro: resultados.filter((r) => r.status === "erro").length,
-    resultados: resultados.map((r) => ({ status: r.status, lancamentos: r.lancamentos })),
-    semanas_atualizadas: Object.values(semanas).reduce<number>((s, v) => s + (typeof v === "number" ? v : 0), 0),
+    resultados: resultados.map(({ erro: _e, ...r }) => r),
+    semanas_atualizadas: semanas,
   }
 }
+
+// ── Relatório mensal: ações pedidas pela tela ─────────────────────────────────
+async function porLoja(
+  req: Request, sb: any, getToken: GetToken, empresaId: string,
+  fn: (ctx: CtxIfood, cfg: any) => Promise<any>,
+) {
+  if (!(await podeMexerNaEmpresa(req, sb, empresaId))) {
+    return { ok: false, error: "Sem permissão pra essa loja." }
+  }
+  const lojas = await lojasDoIfood(sb, empresaId)
+  if (!lojas.length) return { ok: false, error: "Essa loja não tem iFood conectado." }
+  const resultados = []
+  for (const cfg of lojas) {
+    try {
+      resultados.push(await fn({ sb, cfg, getToken }, cfg))
+    } catch (e) {
+      resultados.push(e instanceof ErroIfood && e.status === 403
+        ? { status: "sem_permissao", erro: "O iFood ainda não liberou o módulo financeiro pra esta loja." }
+        : { status: "erro", erro: String((e as Error)?.message ?? e).slice(0, 300) })
+    }
+  }
+  const { data } = await sb.rpc("recalcular_repasse_ifood", { p_empresa: empresaId })
+  return { ok: true, resultados, semanas_atualizadas: Number(data ?? 0) }
+}
+
+export const runConciliacaoMensal = (req: Request, sb: any, getToken: GetToken, empresaId: string, competencia: string) =>
+  porLoja(req, sb, getToken, empresaId, (ctx) => baixarRelatorioMensal(ctx, competencia))
+
+export const runConciliacaoSolicitar = (req: Request, sb: any, getToken: GetToken, empresaId: string, competencia: string) =>
+  porLoja(req, sb, getToken, empresaId, (ctx) => solicitarRelatorio(ctx, competencia))
+
+export const runConciliacaoStatus = (req: Request, sb: any, getToken: GetToken, empresaId: string, competencia: string) =>
+  porLoja(req, sb, getToken, empresaId, async (ctx, cfg) => {
+    const { data } = await sb.from("ifood_conciliacao_mensal")
+      .select("request_id, status")
+      .eq("empresa_id", cfg.empresa_id).eq("merchant_id", cfg.merchant_id)
+      .eq("competencia", competencia).eq("origem", "sob_demanda").maybeSingle()
+    if (!data?.request_id) return { status: "nao_solicitado" }
+    if (data.status === "pronto" || data.status === "erro") return { status: data.status }
+    return await consultarRelatorio(ctx, competencia, data.request_id)
+  })
