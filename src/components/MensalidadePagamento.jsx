@@ -185,6 +185,18 @@ function CartaoRecorrente({ situacao, onPago }) {
   }
 
   const set = (k) => (e) => setF(v => ({ ...v, [k]: e.target.value }))
+  // Máscaras: o lojista digita só os números e a formatação aparece sozinha.
+  const soDigitos = (t, max) => String(t ?? '').replace(/[^0-9]/g, '').slice(0, max)
+  const mascara = {
+    numero: t => soDigitos(t, 19).replace(/(.{4})(?=.)/g, '$1 '),
+    validade: t => { const d = soDigitos(t, 4); return d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d },
+    cvv: t => soDigitos(t, 4),
+    cpf: t => {
+      const d = soDigitos(t, 11)
+      return d.replace(/^(\d{3})(\d)/, '$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1-$2')
+    },
+  }
+  const setMasc = (k) => (e) => { const val = mascara[k](e.target.value); setF(v => ({ ...v, [k]: val })) }
 
   async function enviar(e) {
     e.preventDefault()
@@ -221,13 +233,13 @@ function CartaoRecorrente({ situacao, onPago }) {
         Cadastre uma vez e a mensalidade é cobrada sozinha no vencimento — o que já venceu é cobrado agora. Os dados vão direto pro Mercado Pago.
       </div>
       {msg && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,.1)', color: '#dc2626', fontSize: 13 }}>{msg}</div>}
-      <input style={campo} placeholder="Número do cartão" inputMode="numeric" value={f.numero} onChange={set('numero')} required />
-      <input style={campo} placeholder="Nome impresso no cartão" value={f.nome} onChange={e => setF(v => ({ ...v, nome: e.target.value.toUpperCase() }))} required />
+      <input style={campo} placeholder="Número do cartão" inputMode="numeric" autoComplete="cc-number" value={f.numero} onChange={setMasc('numero')} required />
+      <input style={campo} placeholder="Nome impresso no cartão" autoComplete="cc-name" value={f.nome} onChange={e => setF(v => ({ ...v, nome: e.target.value.toUpperCase() }))} required />
       <div style={{ display: 'flex', gap: 8 }}>
-        <input style={campo} placeholder="MM/AA" value={f.validade} maxLength={5} onChange={set('validade')} required />
-        <input style={campo} placeholder="CVV" inputMode="numeric" maxLength={4} value={f.cvv} onChange={set('cvv')} required />
+        <input style={campo} placeholder="Validade (MM/AA)" inputMode="numeric" autoComplete="cc-exp" value={f.validade} maxLength={5} onChange={setMasc('validade')} required />
+        <input style={campo} placeholder="CVV" inputMode="numeric" autoComplete="cc-csc" maxLength={4} value={f.cvv} onChange={setMasc('cvv')} required />
       </div>
-      <input style={campo} placeholder="CPF do titular" inputMode="numeric" value={f.cpf} onChange={set('cpf')} required />
+      <input style={campo} placeholder="CPF do titular" inputMode="numeric" value={f.cpf} maxLength={14} onChange={setMasc('cpf')} required />
       <input style={campo} placeholder="E-mail pra receber o recibo" type="email" value={f.email} onChange={set('email')} required />
       <button type="submit" disabled={!pronto || enviando} style={botaoPrincipal}>
         {enviando ? 'Confirmando…' : 'Ativar cobrança automática'}
