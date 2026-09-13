@@ -590,6 +590,13 @@ function Relatorio({ empresaId, versao, nomeLoja, variasLojas }) {
     ].filter(([, v]) => v != null && Number(v) !== 0)
     return (
       <>
+        {/* Arquivo de outro mês ou de outra loja: os números abaixo NÃO são desta
+            conciliação. Fica escrito em cima, antes de qualquer valor. */}
+        {Array.isArray(r.alertas) && r.alertas.length > 0 && (
+          <div className="ci-msg erro" style={{ marginTop: 10 }}>
+            ⚠ <b>Este arquivo não confere com o que foi pedido:</b> {r.alertas.join(' ')} Os valores abaixo não são desta loja neste mês.
+          </div>
+        )}
         <div className="ci-resumo">
           {itens.map(([rot, v]) => (
             <div key={rot}><span>{rot}</span><strong className={Number(v) < 0 ? 'ci-neg' : ''}>{fmt(v)}</strong></div>

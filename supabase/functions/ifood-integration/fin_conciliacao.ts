@@ -45,6 +45,8 @@ export function resumirArquivo(linhas: Record<string, string>[]) {
   let anuncios = 0, entregas = 0, mensalidade = 0, reembolsos = 0, recebidoNaLoja = 0
   let creditos = 0, debitos = 0, repasse = 0
   const pedidosCancelados = new Set<string>()
+  const competenciasNoArquivo = new Set<string>()
+  const lojasNoArquivo = new Set<string>()
   const porCategoria = new Map<string, { fato: string; tipo: string; descricao: string; impacto: string; qtd: number; valor: number }>()
   const titulos = new Map<string, { titulo: string; data_repasse: string | null; valor: number | null }>()
 
@@ -54,6 +56,8 @@ export function resumirArquivo(linhas: Record<string, string>[]) {
     const tipo = l.tipo_lancamento ?? ""
     const desc = l.descricao_lancamento ?? ""
     const cancel = /cancel/i.test(fato) || (l.motivo_cancelamento ?? "") !== ""
+    if (l.competencia) competenciasNoArquivo.add(l.competencia)
+    if (l.loja_id) lojasNoArquivo.add(l.loja_id)
 
     if (sim(l)) { repasse += valor; if (valor >= 0) creditos += valor; else debitos += valor }
 
@@ -88,6 +92,8 @@ export function resumirArquivo(linhas: Record<string, string>[]) {
 
   return {
     linhas: linhas.length,
+    competencias_arquivo: [...competenciasNoArquivo].sort(),
+    lojas_arquivo: [...lojasNoArquivo].sort(),
     vendas: redondo(vendas),
     recebido_na_loja: redondo(recebidoNaLoja),
     cancelamentos: redondo(cancelamentos),
@@ -125,12 +131,25 @@ async function processarArquivo(ctx: CtxIfood, competencia: string, origem: stri
     throw new Error("O arquivo do iFood veio num formato diferente do esperado (sem valor/impacto_no_repasse).")
   }
 
+  // Integridade: o arquivo tem que ser DESTE mês e DESTA loja. Não descarta —
+  // guarda e marca, pra tela avisar em vez de mostrar número de outro lugar como
+  // se fosse daqui. (No ambiente de teste do iFood isso acontece sempre: o
+  // exemplo fixo é de agosto/2025 e de uma loja fictícia.)
+  const resumo = resumirArquivo(linhas)
+  const alertas: string[] = []
+  if (resumo.competencias_arquivo.length && !resumo.competencias_arquivo.includes(competencia)) {
+    alertas.push(`O arquivo veio com lançamentos de ${resumo.competencias_arquivo.join(", ")}, não de ${competencia}.`)
+  }
+  if (resumo.lojas_arquivo.length && !resumo.lojas_arquivo.includes(ctx.cfg.merchant_id)) {
+    alertas.push("O arquivo veio com lançamentos de outra loja do iFood, não desta.")
+  }
+
   const caminho = `${ctx.cfg.empresa_id}/${ctx.cfg.merchant_id}/${competencia}-${origem}.csv`
   const { error } = await ctx.sb.storage.from(BUCKET)
     .upload(caminho, new Blob([texto], { type: "text/csv" }), { upsert: true, contentType: "text/csv" })
   if (error) throw new Error(`guardar arquivo: ${error.message}`)
 
-  return { caminho, resumo: resumirArquivo(linhas) }
+  return { caminho, resumo: { ...resumo, alertas } }
 }
 
 async function gravarLinha(ctx: CtxIfood, competencia: string, origem: string, campos: Record<string, unknown>) {
