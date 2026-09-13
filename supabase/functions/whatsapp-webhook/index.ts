@@ -449,8 +449,23 @@ function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; 
   let bairro: string | null = partes[1] ?? null
 
   // Número colado na rua ("Rua Eliane Barros 600") ou na própria vírgula.
-  const comNumero = rua.match(/^(.+?)[ ,]+(\d{1,5}[a-zA-Z]?)$/)
+  const comNumero = rua.match(/^(.+?)[ ,]+(?:n[º°o.]?\s*)?(\d{1,5}[a-zA-Z]?)$/i)
   if (comNumero) { rua = comNumero[1].trim(); numero = comNumero[2] }
+  // Tudo sem vírgula: "rua eliane barros 600 novo amarante". Antes a frase
+  // inteira virava o nome da rua — sem bairro a taxa caía na distância (R$ 5
+  // em vez dos R$ 4 do bairro) e o número nunca era salvo. Pega o ÚLTIMO
+  // número ("Rua 7 de Setembro 120 Centro" → rua "Rua 7 de Setembro"), e o
+  // que vem depois só vale como bairro se não tiver dígito.
+  // Só com prefixo de rua: sem ele, "quero 10 picolé" virava rua "quero".
+  if (!numero && PREFIXO_RUA.test(rua)) {
+    const noMeio = rua.match(/^(.+?)\s+(?:n[º°o.]?\s*)?(\d{1,5}[a-zA-Z]?)\s+(?:[-–]\s*)?(?:bairro\s+)?([^\d]{3,50})$/i)
+    if (noMeio) {
+      rua = noMeio[1].trim()
+      numero = noMeio[2]
+      // Colado no número é o bairro; o que vier depois da vírgula costuma ser a cidade.
+      bairro = noMeio[3].trim()
+    }
+  }
   if (!numero && bairro && /^\d{1,5}[a-zA-Z]?$/.test(bairro)) {
     numero = bairro
     bairro = partes[2] ?? null
@@ -884,8 +899,26 @@ async function handleSalvarNumero(
     const proximaPergunta = aceitaDelivery
       ? `Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪`
       : `Como vai pagar: *dinheiro* ou *cartão*? 💳`
+
+    // Endereço ESCRITO não tem ponto: o entregador depende do mapa achar o
+    // número, e rua nova/sem número oficial cai longe. O link deixa o próprio
+    // cliente pôr o pino na porta. Quem mandou a localização já tem o ponto.
+    let blocoPino = ""
+    if (aceitaDelivery && (c.endereco_lat == null || c.endereco_lng == null)) {
+      const { data: pin, error: pinErr } = await supabase.rpc("criar_pin_link_para", {
+        p_empresa_id: empresaId, p_telefone: phone,
+        p_rua: c.endereco_rua, p_numero: numero,
+        p_bairro: c.endereco_bairro ?? null, p_cidade: c.endereco_cidade ?? null,
+        p_estado: c.endereco_estado ?? null, p_cep: null,
+        p_lat: null, p_lng: null, p_pedido_id: null,
+      })
+      if (pinErr) console.error("[Mapa] criar_pin_link_para erro:", pinErr.message)
+      else if (pin?.ok) {
+        blocoPino = `\n\n📌 Pra entrega cair certinho na sua porta, confere o ponto no mapa:\n👉 https://lojaonline.fwcinter.com/local/${pin.token}\n_É só arrastar o pino até a sua casa e tocar em "É aqui"._`
+      }
+    }
     return {
-      resposta: `✅ Endereço salvo!\n\n📍 *${c.endereco_rua}, ${numero}*\n${localidade}\n\n${proximaPergunta}`
+      resposta: `✅ Endereço salvo!\n\n📍 *${c.endereco_rua}, ${numero}*\n${localidade}${blocoPino}\n\n${proximaPergunta}`
     }
   } catch (e: any) {
     console.error("[Numero] exceção:", e?.message ?? String(e))
@@ -1004,6 +1037,58 @@ function avisoDeAtacado(itens: any[], catalogo: any[]): string {
     }
   }
   return linhas.join("\n")
+}
+
+/** As duas sacolas têm os mesmos itens, quantidades e escolhas? (preço não conta) */
+function mesmoCarrinho(a: any[], b: any[]): boolean {
+  const chave = (itens: any[]) => (itens ?? [])
+    .map((i: any) => [
+      String(i?.produto_id ?? i?.nome ?? ""), Number(i?.qtd) || 0,
+      (Array.isArray(i?.complementos) ? i.complementos : []).map((c: any) => String(c?.nome ?? "").trim().toLowerCase()).sort().join("|"),
+    ].join("#"))
+    .sort().join(";")
+  return chave(a) === chave(b)
+}
+
+/** Total da sacola, pra mostrar a cada item que entra. */
+function totalDaSacola(itens: any[]): number {
+  return (itens ?? []).reduce((s: number, i: any) => s + (Number(i?.qtd) || 0) * (Number(i?.preco) || 0), 0)
+}
+
+/**
+ * Troca, no resumo escrito pelo modelo, as linhas dos itens, a taxa e o total
+ * pelos números da sacola. Endereço, pagamento e troco ficam como ele escreveu.
+ * As linhas saem no formato "• Nome x2 — R$ 10.00", que é o que
+ * extrairItensDoResumo sabe ler se o carrinho sumir.
+ */
+function corrigirResumo(texto: string, itens: any[], taxa: number): string {
+  const linhas = texto.split("\n")
+  const ini = linhas.findIndex(l => /resumo do pedido/i.test(l))
+  if (ini === -1) return texto
+  const ehItem = (l: string) => /^\s*[•●▪\-]\s+/.test(l) && /R\$/.test(l) && !/taxa|total|troco|entrega em|retirada em|pagamento/i.test(l)
+  const primeiro = linhas.findIndex((l, i) => i > ini && ehItem(l))
+  if (primeiro === -1) return texto
+  let fim = primeiro
+  // Até o último item do bloco (sub-linha de sabor "   • Coco" sem R$ também sai).
+  for (let i = primeiro + 1; i < linhas.length; i++) {
+    if (ehItem(linhas[i])) fim = i
+    else if (/^\s+[•●▪\-]\s+/.test(linhas[i])) continue
+    else break
+  }
+
+  const novas = itens.map((i: any) => {
+    const comps = Array.isArray(i.complementos) && i.complementos.length ? ` (${i.complementos.map((c: any) => c.nome).join(", ")})` : ""
+    return `• ${i.nome}${comps} x${Number(i.qtd) || 1} — R$ ${((Number(i.qtd) || 0) * (Number(i.preco) || 0)).toFixed(2)}`
+  })
+  const saida = [...linhas.slice(0, primeiro), ...novas, ...linhas.slice(fim + 1)]
+
+  const temTaxa = saida.some(l => /taxa de entrega/i.test(l))
+  const total = totalDaSacola(itens) + (temTaxa ? taxa : 0)
+  return saida.map(l => {
+    if (/taxa de entrega/i.test(l)) return l.replace(/R\$\s*[\d.,]+/, `R$ ${taxa.toFixed(2)}`)
+    if (/total/i.test(l) && !/sacola/i.test(l)) return l.replace(/R\$\s*[\d.,]+/, `R$ ${total.toFixed(2)}`)
+    return l
+  }).join("\n")
 }
 
 /** Como o produto aparece na lista do prompt: preço, promoção, atacado e descrição. */
@@ -1470,6 +1555,36 @@ async function handleFecharPedido(
       console.error(`[Pedido] INSERT falhou: ${pedidoText.slice(0, 400)}`)
     }
 
+    // Link do mapa que o robô mandou e o cliente ainda não confirmou: amarra no
+    // pedido. Quem arrasta o pino DEPOIS de fechar (o normal — ele fecha e só
+    // então abre o link) corrige o ponto do pedido que vai pra rua, e não só o
+    // cadastro (confirmar_pin_link atualiza o pedido pelo pedido_id, mig 0240).
+    if (pedidoNovo?.id && tipoEntrega === "entrega") {
+      const { error: pinErr } = await supabase.from("pin_links")
+        .update({ pedido_id: pedidoNovo.id })
+        .eq("empresa_id", empresaId)
+        .is("confirmado_em", null)
+        .gt("expira_em", new Date().toISOString())
+        .like("telefone", `%${phone.replace(/\D/g, "").slice(-8)}`)
+      if (pinErr) console.error("[Pino] amarrar link ao pedido:", pinErr.message)
+    }
+
+    // Pedido de entrega que saiu SEM ponto (endereço escrito, cadastro antigo,
+    // CEP): o link vai junto da confirmação, já amarrado ao pedido. Pega todos
+    // os caminhos do endereço de uma vez — o do salvar_numero é só o primeiro.
+    let linhaPino = ""
+    if (pedidoNovo?.id && tipoEntrega === "entrega" && (endLat == null || endLng == null) && endRua) {
+      const { data: pin, error: pinErr } = await supabase.rpc("criar_pin_link_para", {
+        p_empresa_id: empresaId, p_telefone: phone,
+        p_rua: endRua, p_numero: endNumero, p_bairro: endBairro, p_cidade: endCidade,
+        p_estado: endEstado, p_cep: null, p_lat: null, p_lng: null, p_pedido_id: pedidoNovo.id,
+      })
+      if (pinErr) console.error("[Mapa] link no fechamento:", pinErr.message)
+      else if (pin?.ok) {
+        linhaPino = `\n\n📌 *Confere o ponto da entrega* pro entregador ir direto na sua porta:\n👉 https://lojaonline.fwcinter.com/local/${pin.token}\n_Arraste o pino até a sua casa e toque em "É aqui"._`
+      }
+    }
+
     const acaoPromise    = supabase.from("whatsapp_carrinho").delete().eq("empresa_id", empresaId).eq("phone", phone)
     const numPedido      = pedidoNovo?.numero_pedido ?? ""
     const labelPgto      = formaPgto === "pix" ? "PIX" : formaPgto === "cartao" ? "cartão" : "dinheiro"
@@ -1484,7 +1599,7 @@ async function handleFecharPedido(
       ? `\n🚚 Taxa de entrega: *R$ ${taxaFinal.toFixed(2)}*\n💰 Total: *R$ ${totalFinal.toFixed(2)}*`
       : `\n💰 Total: *R$ ${totalFinal.toFixed(2)}*`
     const linhaTroco = trocoPara ? `\n💵 Troco para *R$ ${trocoPara.toFixed(2)}* (volta R$ ${(trocoPara - totalFinal).toFixed(2)})` : ""
-    mensagemExtra = `🧾 *Pedido #${numPedido} recebido!*${linhaValores}\n\n💳 Pagamento em *${labelPgto}* ${labelEntrega}.${linhaTroco}\n\n⏳ Aguardando a loja confirmar — assim que confirmarem você recebe uma mensagem aqui! 🎉` + mensagemExtra
+    mensagemExtra = `🧾 *Pedido #${numPedido} recebido!*${linhaValores}\n\n💳 Pagamento em *${labelPgto}* ${labelEntrega}.${linhaTroco}${linhaPino}\n\n⏳ Aguardando a loja confirmar — assim que confirmarem você recebe uma mensagem aqui! 🎉` + mensagemExtra
     return { mensagemExtra, acaoPromise }
   } catch (e) {
     console.error("[Pedido] erro:", e)
@@ -3041,7 +3156,13 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           const ini = txt.indexOf("ACAO:")
           const bloco = ini !== -1 ? jsonBalanceado(txt, ini) : null
           const achado = bloco?.texto ?? acharAcaoSolta(txt)?.json ?? null
-          if (achado && JSON.parse(achado)?.tipo === "atualizar_carrinho") {
+          const recuperada = achado ? JSON.parse(achado) : null
+          // "Anotei o troco de 200" também casa a peneira. Se a sacola que
+          // voltou é a mesma que já está salva, não havia item esquecido — e
+          // aplicar a ação reabria a conferência da sacola no meio do pagamento.
+          if (recuperada?.tipo === "atualizar_carrinho" && mesmoCarrinho(recuperada.items, carrinho)) {
+            console.log("[Acao] 2ª chamada devolveu a sacola igual — nada a gravar")
+          } else if (recuperada?.tipo === "atualizar_carrinho") {
             console.log("[Acao] recuperada na 2ª chamada:", achado.slice(0, 120))
             acaoMatch = ["", achado] as any
             acaoSoltaFim = 0   // não cortar a resposta por um "ACAO:" que ela não tem
@@ -3073,8 +3194,13 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           reprecificarItens(acao.items, produtos, precoOpcaoMap)
           const carrinhoResult = await handleAtualizar_carrinho(supabase, empresaId, phone, acao.items)
           if (!carrinhoResult.ok) console.error("[Carrinho] falhou:", carrinhoResult)
+          // Sacola igual à que já estava e o modelo disse algo: a fala dele
+          // segue (ele reenviou a sacola por garantia no meio do pagamento).
+          // Trocar pela conferência fazia o cliente voltar um passo.
+          const semMudanca = mesmoCarrinho(acao.items, carrinho) && resposta.trim().length > 0
+          if (semMudanca) console.log("[Carrinho] reenviado sem mudança — mantém a resposta do modelo")
           // Sempre substitui resposta do Haiku — evita "Vou adicionar..." (REGRA 10 não é respeitada pelo modelo)
-          if (acao.items.length > 0) {
+          if (acao.items.length > 0 && !semMudanca) {
             const nomes = acao.items.map((i: any) => `${i.nome} x${i.qtd}`).join(", ")
             // Detalhe com os complementos escolhidos — pro cliente CONFERIR o que foi anotado
             // (se a IA anotou errado, ele corrige antes de fechar).
@@ -3090,6 +3216,9 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
               ? `✅ Anotei! Confere se está tudo certo:\n\n${detalhe}`
               : `✅ ${nomes} adicionado${acao.items.length > 1 ? "s" : ""} ao carrinho!`)
               + (atacado ? `\n\n${atacado}` : "")
+              // O valor da sacola a cada item: o cliente não chega no resumo
+              // levando susto, e ajusta a quantidade enquanto escolhe.
+              + `\n\n🛒 Sacola até agora: *R$ ${totalDaSacola(acao.items).toFixed(2).replace(".", ",")}*`
             // Transição determinística: se o cliente já sinalizou fechar a sacola,
             // não pergunta "quer mais?" — segue direto para cadastro (se novo) ou entrega (se já cliente).
             const querFechar = /\b(pode fechar|só isso|so isso|é só isso|e so isso|só isso mesmo|so isso mesmo|fechar( o)? pedido|finaliza|encerra|é isso|e isso|pode mandar|pode confirmar)\b/i.test(text)
@@ -3493,6 +3622,20 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     if (ehBoasVindas && catalogoUrl && resposta && !resposta.includes("lojaonline.fwcinter.com")) {
       resposta = `${resposta}\n\n👉 ${catalogoUrl}`
       console.log("[SafeNet] link do catálogo adicionado na mensagem de boas-vindas")
+    }
+
+    // RESUMO COM A CONTA DO SISTEMA. O modelo lê "a partir de 5: R$ 2,50" na
+    // lista e aplica em 3 pacotes de gelo — o resumo dizia R$ 21,50 e o pedido
+    // gravava R$ 29,00 (teste CDBom, 13/09). Itens e total saem da sacola salva.
+    if (/resumo do pedido/i.test(resposta)) {
+      const { data: sacola } = await supabase.from("whatsapp_carrinho")
+        .select("items").eq("empresa_id", empresaId).eq("phone", phone).maybeSingle()
+      const itensSacola = (sacola?.items ?? []) as any[]
+      if (itensSacola.length) {
+        const corrigido = corrigirResumo(resposta, itensSacola, Number(taxaEntregaCalc) || 0)
+        if (corrigido !== resposta) console.log("[Resumo] itens/total reescritos pela sacola")
+        resposta = corrigido
+      }
     }
 
     // ÚLTIMA PENEIRA, logo antes de sair. Vem depois de todas as redes de
