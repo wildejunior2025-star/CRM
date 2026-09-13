@@ -37,6 +37,20 @@ const emptyForm = {
   observacoes: '',
 }
 
+// Logo da loja no cartão (a mesma da Loja Online). Sem logo, ou com o link
+// quebrado, vira a inicial do nome na cor da loja.
+function LogoLoja({ emp }) {
+  const [quebrou, setQuebrou] = useState(false)
+  if (emp.logo_url && !quebrou) {
+    return <img className="emp-logo" src={emp.logo_url} alt="" loading="lazy" onError={() => setQuebrou(true)} />
+  }
+  return (
+    <span className="emp-logo emp-logo-letra" style={{ background: emp.cor_primaria || 'var(--primary)' }}>
+      {String(emp.nome ?? '?').trim().charAt(0).toUpperCase()}
+    </span>
+  )
+}
+
 function WhatsAppIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
@@ -503,7 +517,7 @@ export default function SuperAdminEmpresas() {
             return (
               <div key={emp.id} className={`emp-card${mens?.estado.fase === 'bloqueio' ? ' bloq' : ''}`}>
                 <div className="emp-topo">
-                  <span className="emp-bolinha" style={{ background: emp.cor_primaria || 'var(--primary)' }} />
+                  <LogoLoja emp={emp} />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div className="emp-nome" title={emp.nome}>{emp.nome}</div>
                     <div className="emp-contato">
