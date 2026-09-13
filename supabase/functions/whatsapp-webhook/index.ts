@@ -1081,6 +1081,35 @@ async function catalogoRelevante(
   return (data ?? []) as any[]
 }
 
+// ── Troco ────────────────────────────────────────────────────────────────────
+/** "R$ 200", "200,00", "uma de 100" → número. Sem número, null. */
+function valorEmReais(txt: string): number | null {
+  const m = String(txt ?? "").match(/(\d{1,5}(?:\.\d{3})*(?:[.,]\d{1,2})?)/)
+  if (!m) return null
+  let s = m[1]
+  if (/,\d{1,2}$/.test(s)) s = s.replace(/\./g, "").replace(",", ".")
+  else if (/\.\d{3}$/.test(s)) s = s.replace(/\./g, "")
+  const n = Number(s)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+/** A resposta do cliente logo depois de o robô perguntar do troco. */
+function trocoDaConversa(mensagens: any[]): number | null {
+  for (let i = (mensagens ?? []).length - 2; i >= 0; i--) {
+    const m = mensagens[i]
+    if (m?.role !== "assistant" || !/troco/i.test(m.content ?? "")) continue
+    const resp = mensagens[i + 1]
+    if (resp?.role !== "user") continue
+    // Número manda ("não tenho trocado, é nota de 100"); valor menor que o
+    // total quem descarta é o fechamento.
+    const valor = valorEmReais(resp.content ?? "")
+    if (valor != null) return valor
+    if (/\b(n[ãa]o|sem troco|trocado|certinho|exato)\b/i.test(resp.content ?? "")) return null
+    // "sim" / "confirmo" depois do resumo: o valor foi dito antes, segue voltando.
+  }
+  return null
+}
+
 // ── handleFecharPedido ───────────────────────────────────────────────────────
 async function handleFecharPedido(
   supabase: ReturnType<typeof createClient>,
@@ -1190,6 +1219,15 @@ async function handleFecharPedido(
       }
     }
     const totalFinal     = totalCarrinho + taxaFinal
+    // Troco: o que o modelo mandou na ação ou, se ele esqueceu, o que o cliente
+    // respondeu à pergunta do troco. Nota menor que o total não é troco — o
+    // entregador sairia com o valor errado, então fica sem.
+    let trocoPara: number | null = null
+    if (formaPgto === "dinheiro") {
+      const bruto = acao.troco_para != null && acao.troco_para !== "" ? valorEmReais(String(acao.troco_para)) : trocoDaConversa(mensagensHist)
+      if (bruto != null && bruto > totalFinal) trocoPara = bruto
+      else if (bruto != null) console.log(`[Troco] ignorado: R$ ${bruto} não passa do total R$ ${totalFinal.toFixed(2)}`)
+    }
 
     let clienteId         = cliente?.id ?? null
     let clienteTel        = cliente?.telefone ?? phoneLocal
@@ -1405,6 +1443,7 @@ async function handleFecharPedido(
       endereco_lng: tipoEntrega === "entrega" ? endLng : null,
       itens: itens, subtotal: totalCarrinho, taxa_entrega: taxaFinal, total: totalFinal,
       forma_pagamento: formaPgto, tipo_entrega: tipoEntrega,
+      troco_para: trocoPara,
       pix_status: formaPgto === "pix" ? "pendente" : "nao_aplicavel",
       origem: "whatsapp",
       status: "aguardando", aguardando_desde: new Date().toISOString(),
@@ -1444,7 +1483,8 @@ async function handleFecharPedido(
     const linhaValores = tipoEntrega === "entrega"
       ? `\n🚚 Taxa de entrega: *R$ ${taxaFinal.toFixed(2)}*\n💰 Total: *R$ ${totalFinal.toFixed(2)}*`
       : `\n💰 Total: *R$ ${totalFinal.toFixed(2)}*`
-    mensagemExtra = `🧾 *Pedido #${numPedido} recebido!*${linhaValores}\n\n💳 Pagamento em *${labelPgto}* ${labelEntrega}.\n\n⏳ Aguardando a loja confirmar — assim que confirmarem você recebe uma mensagem aqui! 🎉` + mensagemExtra
+    const linhaTroco = trocoPara ? `\n💵 Troco para *R$ ${trocoPara.toFixed(2)}* (volta R$ ${(trocoPara - totalFinal).toFixed(2)})` : ""
+    mensagemExtra = `🧾 *Pedido #${numPedido} recebido!*${linhaValores}\n\n💳 Pagamento em *${labelPgto}* ${labelEntrega}.${linhaTroco}\n\n⏳ Aguardando a loja confirmar — assim que confirmarem você recebe uma mensagem aqui! 🎉` + mensagemExtra
     return { mensagemExtra, acaoPromise }
   } catch (e) {
     console.error("[Pedido] erro:", e)
@@ -2738,7 +2778,8 @@ ${aceitaDelivery
 
 ▶ PASSO 5 — FORMA DE PAGAMENTO
 "Como vai pagar: ${pgtoOpcoes}? 💳"
-Aguarde a resposta.${mpConectado ? "\nSe escolher PIX: NÃO mande chave nem texto de pagamento — apenas siga para o resumo (PASSO 6) e, ao confirmar, emita fechar_pedido com forma_pagamento \"pix\". O sistema gera o QR e o copia-e-cola sozinho." : ""}
+Aguarde a resposta.
+Se escolher DINHEIRO: pergunte "Vai precisar de troco? Se sim, pra quanto? 💵" e aguarde. Ele pode responder "não", "pra 50", "nota de 100"... Só depois vá ao resumo. Se ele já disse o valor antes (ex.: "dinheiro, troco pra 100"), não pergunte de novo.${mpConectado ? "\nSe escolher PIX: NÃO mande chave nem texto de pagamento — apenas siga para o resumo (PASSO 6) e, ao confirmar, emita fechar_pedido com forma_pagamento \"pix\". O sistema gera o QR e o copia-e-cola sozinho." : ""}
 
 ▶ PASSO 6 — RESUMO E CONFIRMAÇÃO
 Após ter entrega/retirada E pagamento confirmados, envie o resumo completo:
@@ -2751,6 +2792,7 @@ ${aceitaDelivery ? `🚚 Taxa de entrega: R$ ${taxaEntregaCalc.toFixed(2)} (só 
 
 📍 [Entrega em: endereço / Retirada em: endereço da loja]
 💳 Pagamento: ${mpConectado ? "[dinheiro/cartão/PIX]" : "[dinheiro/cartão]"}
+[só se for dinheiro com troco: 💵 Troco para: R$ valor]
 
 Confirma? 😊"
 
@@ -2814,7 +2856,7 @@ ACAO: {"tipo": "salvar_numero", "numero": "42"}
 
 Fechar pedido — CLIENTE IDENTIFICADO (tem nome em CLIENTE acima, ou cadastrar_cliente foi emitido nesta sessão):
 ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "entrega", "forma_pagamento": "dinheiro", "cliente_rua": "[rua confirmada na conversa]", "cliente_numero": "[número confirmado]", "cliente_bairro": "[bairro]", "cliente_cidade": "[cidade]", "cliente_estado": "[estado]", "items": [{"produto_id": "ID_REAL", "nome": "Nome", "qtd": 1, "preco": 0.00}]}
-[tipo_entrega: "entrega" ou "retirada" | forma_pagamento: ${mpConectado ? `"dinheiro", "cartao" ou "pix"` : `"dinheiro" ou "cartao"`}]
+[tipo_entrega: "entrega" ou "retirada" | forma_pagamento: ${mpConectado ? `"dinheiro", "cartao" ou "pix"` : `"dinheiro" ou "cartao"`} | dinheiro com troco: acrescente "troco_para": 100 (o valor da nota que ele vai dar; sem troco, não mande o campo)]
 ⚠️ SEMPRE inclua os "items" do carrinho atual E o endereço confirmado na conversa no ACAO fechar_pedido
 ⚠️ SE for retirada, omita os campos cliente_rua/numero/bairro/cidade/estado
 
