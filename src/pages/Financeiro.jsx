@@ -350,6 +350,7 @@ export default function Financeiro() {
         {aberta && (
           <div style={{ marginLeft: 14, paddingBottom: 6 }}>
             <QuebraRepasse s={s} rep={repImp[s.iniYMD]} anuncio={ads[s.iniYMD] || 0} aReceber={aReceberDe(s)} />
+            {repImp[s.iniYMD]?.fonte === 'api' && <PedidosDaSemanaIfood empresaId={empresaId} periodoIni={s.iniYMD} />}
           </div>
         )}
       </div>
@@ -494,7 +495,10 @@ export default function Financeiro() {
             {abertoAtual && (
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: 2 }}>
                 {ehExato(atual) ? (
-                  <QuebraRepasse rep={repImp[atual.iniYMD]} aReceber={aReceberDe(atual)} semTotal />
+                  <>
+                    <QuebraRepasse rep={repImp[atual.iniYMD]} aReceber={aReceberDe(atual)} semTotal />
+                    {repImp[atual.iniYMD]?.fonte === 'api' && <PedidosDaSemanaIfood empresaId={empresaId} periodoIni={atual.iniYMD} />}
+                  </>
                 ) : (
                   <>
                     <Linha label={atual.liq.freteIfood > 0 ? 'Vendas (só os itens)' : 'Vendas (itens + entrega)'} valor={fmtBRL(atual.liq.vendasOnline)} />
@@ -692,6 +696,159 @@ function QuebraRepasse({ s, rep, anuncio = 0, aReceber, semTotal }) {
         </div>
       )}
     </>
+  )
+}
+
+// Pedido por pedido da semana, com o que sobrou EXATO de cada um — só pra semana
+// que veio da API do iFood (é de lá que saem os lançamentos por pedido; PDF e
+// estimativa não têm esse nível).
+//
+// O líquido do pedido é a soma de todos os lançamentos dele: venda + ajuda do
+// iFood − comissão − taxas. Conferido com o saldo que o próprio iFood informa
+// por pedido (billingSummary.saleBalance): R$ 50,71 nos dois.
+//
+// Carrega só quando a semana é aberta: uma semana cheia do Zebu passa de 3 mil
+// lançamentos, e isso não pode pesar a tela de quem só olhou o total.
+const VISIVEIS_INICIO = 30
+
+function PedidosDaSemanaIfood({ empresaId, periodoIni }) {
+  const [linhas, setLinhas] = useState(null)   // null = carregando
+  const [foraDePedido, setForaDePedido] = useState([])
+  const [todos, setTodos] = useState(false)
+  const [erro, setErro] = useState(null)
+
+  useEffect(() => {
+    if (!empresaId || !periodoIni) return
+    let vivo = true
+    ;(async () => {
+      try {
+        const evs = await fetchAll(() => supabase.from('ifood_eventos_financeiros')
+          .select('id, nome, valor, impacta_repasse, referencia_tipo, referencia_id, referencia_em')
+          .eq('empresa_id', empresaId).eq('periodo_ini', periodoIni).order('id'))
+
+        const porPedido = new Map()
+        const fora = new Map()
+        for (const e of (evs ?? [])) {
+          const v = Number(e.valor || 0)
+          if (e.referencia_tipo === 'ORDER' && e.referencia_id) {
+            const p = porPedido.get(e.referencia_id) ?? {
+              id: e.referencia_id, em: e.referencia_em, venda: 0, ajuda: 0, taxas: 0, liquido: 0, naLoja: false,
+            }
+            if (e.nome === 'ORDER_PAYMENT') { p.venda += v; if (e.impacta_repasse === false) p.naLoja = true }
+            else if (e.nome === 'IFOOD_SUBSIDY') p.ajuda += v
+            else if (v < 0) p.taxas += v
+            p.liquido += v
+            porPedido.set(e.referencia_id, p)
+          } else {
+            // Anúncio e outras cobranças da semana que não são de um pedido
+            fora.set(e.nome, (fora.get(e.nome) ?? 0) + v)
+          }
+        }
+
+        // Número e cliente vêm do nosso pedido. Pedido de antes da integração
+        // (ou de outra loja do iFood não conectada) aparece só com o código.
+        const ids = [...porPedido.keys()]
+        const nossos = new Map()
+        for (let i = 0; i < ids.length; i += 150) {
+          const { data } = await supabase.from('pedidos_delivery')
+            .select('ifood_order_id, ifood_display_id, numero_pedido, cliente_nome, created_at')
+            .eq('empresa_id', empresaId).in('ifood_order_id', ids.slice(i, i + 150))
+          for (const p of (data ?? [])) nossos.set(p.ifood_order_id, p)
+        }
+
+        const lista = [...porPedido.values()].map(p => {
+          const n = nossos.get(p.id)
+          return {
+            ...p,
+            numero: n?.ifood_display_id ? `#${n.ifood_display_id}` : `…${String(p.id).slice(-6)}`,
+            cliente: n?.cliente_nome ?? null,
+            em: n?.created_at ?? p.em,
+          }
+        }).sort((a, b) => String(b.em ?? '').localeCompare(String(a.em ?? '')))
+
+        if (!vivo) return
+        setLinhas(lista)
+        setForaDePedido([...fora.entries()].map(([nome, valor]) => ({ nome, valor })))
+      } catch (err) {
+        if (vivo) { setErro(String(err?.message ?? err)); setLinhas([]) }
+      }
+    })()
+    return () => { vivo = false }
+  }, [empresaId, periodoIni])
+
+  if (linhas === null) {
+    return <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 0' }}>Carregando os pedidos da semana…</div>
+  }
+  if (erro) return <div style={{ fontSize: 12, color: 'var(--danger)', padding: '8px 0' }}>Não consegui carregar os pedidos: {erro}</div>
+  if (!linhas.length) return null
+
+  const soma = (k) => linhas.reduce((s, p) => s + p[k], 0)
+  const visiveis = todos ? linhas : linhas.slice(0, VISIVEIS_INICIO)
+  const nomeFora = (n) => (/an.ncio|advertis/i.test(n) ? '📢 Anúncios' : n)
+  const cel = { padding: '6px 6px', fontSize: 12, whiteSpace: 'nowrap', textAlign: 'right' }
+
+  return (
+    <div style={{ marginTop: 10, borderTop: '1px dashed var(--border)', paddingTop: 10 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 6 }}>
+        Pedido por pedido <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>· {linhas.length} pedido{linhas.length === 1 ? '' : 's'} · valores do iFood</span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+              <th style={{ ...cel, textAlign: 'left' }}>Pedido</th>
+              <th style={cel}>Venda</th>
+              <th style={cel} title="O iFood banca parte do desconto e devolve pra loja">Ajuda iFood</th>
+              <th style={cel} title="Comissão, taxa de transação, taxa de serviço e entrega do iFood">Taxas</th>
+              <th style={cel}>Sobrou</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visiveis.map(p => (
+              <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                <td style={{ ...cel, textAlign: 'left' }}>
+                  <div style={{ fontWeight: 700 }}>{p.numero}{p.naLoja && <span title="O cliente pagou direto na loja (maquininha/dinheiro/vale) — esse valor não vem no repasse" style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#b45309' }}>pago na loja</span>}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
+                    {p.em ? new Date(p.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
+                    {p.cliente ? ` · ${p.cliente}` : ''}
+                  </div>
+                </td>
+                <td style={cel}>{fmtBRL(p.venda)}</td>
+                <td style={{ ...cel, color: p.ajuda > 0 ? 'var(--success)' : 'var(--text-muted)' }}>{p.ajuda > 0 ? `+ ${fmtBRL(p.ajuda)}` : '—'}</td>
+                <td style={{ ...cel, color: 'var(--danger)' }}>{p.taxas < 0 ? `− ${fmtBRL(Math.abs(p.taxas))}` : '—'}</td>
+                <td style={{ ...cel, fontWeight: 800, color: '#16a34a' }}>{fmtBRL(p.liquido)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr style={{ fontWeight: 800 }}>
+              <td style={{ ...cel, textAlign: 'left' }}>Total dos pedidos</td>
+              <td style={cel}>{fmtBRL(soma('venda'))}</td>
+              <td style={{ ...cel, color: 'var(--success)' }}>+ {fmtBRL(soma('ajuda'))}</td>
+              <td style={{ ...cel, color: 'var(--danger)' }}>− {fmtBRL(Math.abs(soma('taxas')))}</td>
+              <td style={{ ...cel, color: '#16a34a' }}>{fmtBRL(soma('liquido'))}</td>
+            </tr>
+            {foraDePedido.map(f => (
+              <tr key={f.nome} style={{ color: f.valor < 0 ? 'var(--danger)' : 'var(--success)' }}>
+                <td style={{ ...cel, textAlign: 'left' }} colSpan={4}>{nomeFora(f.nome)} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(da semana, fora de pedido)</span></td>
+                <td style={cel}>{f.valor < 0 ? '− ' : '+ '}{fmtBRL(Math.abs(f.valor))}</td>
+              </tr>
+            ))}
+          </tfoot>
+        </table>
+      </div>
+      {linhas.length > VISIVEIS_INICIO && (
+        <button type="button" onClick={() => setTodos(t => !t)}
+          style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: 'var(--primary)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>
+          {todos ? 'Mostrar menos' : `Mostrar todos os ${linhas.length} pedidos`}
+        </button>
+      )}
+      {linhas.some(p => p.naLoja) && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.45 }}>
+          "Sobrou" é o que a loja fica de cada pedido. Nos pedidos <b>pagos na loja</b> esse dinheiro já está com você — por isso o repasse da semana é menor que a soma.
+        </div>
+      )}
+    </div>
   )
 }
 
