@@ -94,6 +94,13 @@ function DadoOriginal({ bruto, destaques = [] }) {
   )
 }
 
+// Tudo que entra num pedido (pagamento online + subsídios do iFood). Vem das
+// entradas do billingSummary: positivas somam aqui, negativas são as taxas, e
+// Créditos − Taxas fecha exatamente com o saleBalance.
+function creditosDaVenda(v) {
+  return Math.round((Number(v.saldo || 0) + Number(v.comissoes_taxas || 0)) * 100) / 100
+}
+
 function Conferencia({ bate, diferenca, semDados, textoSemDados = 'aguardando lançamentos' }) {
   if (semDados || bate === null || bate === undefined) return <span className="ci-selo">{textoSemDados}</span>
   if (bate) return <span className="ci-selo ok" title="Bate com a soma dos lançamentos que impactam o repasse">✓ bate</span>
@@ -327,18 +334,19 @@ function Vendas({ empresaId, versao }) {
 
   const tot = lista.reduce((a, v) => ({
     bruto: a.bruto + Number(v.valor_itens || 0) + Number(v.taxa_entrega || 0),
-    ben: a.ben + Number(v.beneficios || 0),
+    cred: a.cred + creditosDaVenda(v),
     taxas: a.taxas + Number(v.comissoes_taxas || 0),
     liq: a.liq + Number(v.saldo || 0),
-  }), { bruto: 0, ben: 0, taxas: 0, liq: 0 })
+  }), { bruto: 0, cred: 0, taxas: 0, liq: 0 })
   const divergentes = lista.filter(v => v.conferido === false).length
 
   return (
     <div className="ci-card">
       <h3>Vendas no iFood</h3>
       <p className="ci-sub">
-        Cada pedido com o valor bruto, o que o iFood cobrou e o <b>líquido</b> que ele calcula pra você. A coluna
-        <b> Confere</b> compara o líquido com a soma dos lançamentos daquele pedido.
+        Cada pedido com o valor bruto, o que entra (pagamento do cliente + o que o iFood banca), o que o iFood cobra e o
+        <b> líquido</b>: <b>Créditos − Taxas = Líquido</b>. A coluna <b>Confere</b> compara o líquido com a soma dos
+        lançamentos daquele pedido. Clique no pedido pra ver a resposta original do iFood.
       </p>
       <div className="ci-filtros">
         <select value={dias} onChange={e => setDias(Number(e.target.value))}>
@@ -358,8 +366,8 @@ function Vendas({ empresaId, versao }) {
                   <th className="esq">Status</th>
                   <th className="esq">Pagamento</th>
                   <th>Bruto</th>
-                  <th title="Desconto bancado pelo iFood">Benefícios</th>
-                  <th>Comissões e taxas</th>
+                  <th title="Pagamento do cliente + subsídios do iFood (soma dos lançamentos positivos)">Créditos</th>
+                  <th title="Comissão, taxa de transação, taxa de serviço (soma dos lançamentos negativos)">Taxas</th>
                   <th>Líquido</th>
                   <th>Confere</th>
                 </tr>
@@ -370,8 +378,8 @@ function Vendas({ empresaId, versao }) {
                     <td className="esq"><b>{aberta === v.venda_id ? '▾' : '▸'} #{v.numero_curto || String(v.venda_id).slice(-6)}</b><span className="pequeno">{dataHora(v.criado_em)}</span></td>
                     <td className="esq">{STATUS_VENDA[v.status] ?? v.status ?? '—'}</td>
                     <td className="esq" style={{ whiteSpace: 'normal', minWidth: 120 }}>{v.metodos || '—'}</td>
-                    <td>{fmt(Number(v.valor_itens || 0) + Number(v.taxa_entrega || 0))}</td>
-                    <td className={Number(v.beneficios) > 0 ? 'ci-pos' : 'ci-muted'}>{Number(v.beneficios) > 0 ? fmt(v.beneficios) : '—'}</td>
+                    <td>{fmt(Number(v.valor_itens || 0) + Number(v.taxa_entrega || 0))}{Number(v.beneficios) > 0 && <span className="pequeno">desconto {fmt(v.beneficios)}</span>}</td>
+                    <td className="ci-pos">{v.saldo != null ? `+ ${fmt(creditosDaVenda(v))}` : '—'}</td>
                     <td className="ci-neg">{Number(v.comissoes_taxas) > 0 ? `− ${fmt(v.comissoes_taxas)}` : '—'}</td>
                     <td><b>{v.saldo != null ? fmt(v.saldo) : '—'}</b></td>
                     <td><Conferencia bate={v.conferido} diferenca={v.soma_lancamentos != null && v.saldo != null ? v.saldo - v.soma_lancamentos : null} /></td>
@@ -394,7 +402,7 @@ function Vendas({ empresaId, versao }) {
                 <tr>
                   <td className="esq" colSpan={3}>{lista.length} pedido{lista.length === 1 ? '' : 's'}</td>
                   <td>{fmt(tot.bruto)}</td>
-                  <td className="ci-pos">{fmt(tot.ben)}</td>
+                  <td className="ci-pos">+ {fmt(tot.cred)}</td>
                   <td className="ci-neg">− {fmt(tot.taxas)}</td>
                   <td>{fmt(tot.liq)}</td>
                   <td />
@@ -457,7 +465,7 @@ function Lancamentos({ empresaId, versao }) {
     <div className="ci-card">
       <h3>Lançamentos financeiros</h3>
       <p className="ci-sub">
-        Cada crédito e débito que o iFood registrou, no período de apuração. Só os marcados com <b>impacto no repasse</b>
+        Cada crédito e débito que o iFood registrou, no período de apuração. Só os marcados com <b>impacto no repasse</b>{' '}
         entram no valor transferido; os outros são informativos (ex.: pagamento recebido direto na loja).
       </p>
       <div className="ci-filtros">
@@ -652,7 +660,14 @@ function Relatorio({ empresaId, versao, nomeLoja, variasLojas }) {
       <>
         {/* Arquivo de outro mês ou de outra loja: os números abaixo NÃO são desta
             conciliação. Fica escrito em cima, antes de qualquer valor. */}
-        {Array.isArray(r.alertas) && r.alertas.length > 0 && (
+        {Array.isArray(r.alertas) && r.alertas.length > 0 && r.ambiente_teste && (
+          <div className="ci-msg aviso" style={{ marginTop: 10 }}>
+            🧪 <b>Ambiente de teste do iFood.</b> Aqui o iFood devolve sempre o mesmo arquivo de exemplo (uma loja fictícia,
+            competência agosto de 2025), qualquer que seja o mês pedido. A checagem de integridade do sistema detectou: {r.alertas.join(' ')}
+            {' '}Com a loja em produção o arquivo é desta loja e deste mês, e este aviso não aparece.
+          </div>
+        )}
+        {Array.isArray(r.alertas) && r.alertas.length > 0 && !r.ambiente_teste && (
           <div className="ci-msg erro" style={{ marginTop: 10 }}>
             ⚠ <b>Este arquivo não confere com o que foi pedido:</b> {r.alertas.join(' ')} Os valores abaixo não são desta loja neste mês.
           </div>
@@ -670,6 +685,11 @@ function Relatorio({ empresaId, versao, nomeLoja, variasLojas }) {
           <Conferencia bate={l.conferido} semDados={l.soma_lancamentos == null}
             diferenca={l.soma_lancamentos != null ? Number(r.repasse_arquivo) - Number(l.soma_lancamentos) : null}
             textoSemDados="sem lançamentos do mês pra comparar" />
+          {r.ambiente_teste && (
+            <span className="ci-muted" style={{ fontSize: 11.5 }}>
+              (no teste, a API de lançamentos só devolve a 1ª semana, 01 a 03/08/2025 — por isso a diferença)
+            </span>
+          )}
         </div>
         {Array.isArray(r.titulos) && r.titulos.length > 0 && (
           <div className="ci-tabela-wrap">

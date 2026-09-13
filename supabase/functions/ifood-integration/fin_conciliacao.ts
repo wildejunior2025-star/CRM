@@ -149,7 +149,8 @@ async function processarArquivo(ctx: CtxIfood, competencia: string, origem: stri
     .upload(caminho, new Blob([texto], { type: "text/csv" }), { upsert: true, contentType: "text/csv" })
   if (error) throw new Error(`guardar arquivo: ${error.message}`)
 
-  return { caminho, resumo: { ...resumo, alertas } }
+  // Marca de onde veio: no teste a tela explica o exemplo fixo em vez de acusar erro.
+  return { caminho, resumo: { ...resumo, alertas, ambiente_teste: ctx.cfg?.ambiente === "teste" } }
 }
 
 async function gravarLinha(ctx: CtxIfood, competencia: string, origem: string, campos: Record<string, unknown>) {

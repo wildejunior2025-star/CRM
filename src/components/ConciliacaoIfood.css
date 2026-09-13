@@ -84,6 +84,7 @@
 .ci-msg { padding: 9px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.45; }
 .ci-msg.ok { background: rgba(22,163,74,.10); border: 1px solid rgba(22,163,74,.4); }
 .ci-msg.erro { background: rgba(239,68,68,.10); border: 1px solid rgba(239,68,68,.4); }
+.ci-msg.aviso { background: rgba(245,158,11,.10); border: 1px solid rgba(245,158,11,.45); }
 .ci-vazio { font-size: 12.5px; color: var(--text-muted); padding: 10px 0; }
 
 /* Dado original do iFood (prova da origem de cada número) */
