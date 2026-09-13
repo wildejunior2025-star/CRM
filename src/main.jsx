@@ -52,7 +52,16 @@ window.addEventListener('vite:preloadError', (evento) => {
 //
 // Nos dois casos aparece um aviso pra atualizar na hora que quiser — e, no caso
 // do formulário, o app tenta de novo sozinho quando a tela ficar parada.
-const impressoraBtConectada = () => window.__fwcBtConectada === true
+// Vale também quando a térmica está só CAÍDA naquele segundo: toda impressora
+// BLE derruba o link de vez em quando e religa sozinha em segundos. Se a
+// versão nova chegasse justo nessa queda, a página recarregava, o celular
+// esquecia o aparelho e a impressora ficava "desconectada" até alguém parear na
+// mão — foi o que a Saidera viu em 13/09, dia de muitos deploys. Celular que
+// tem térmica cadastrada nunca recarrega sozinho: só mostra o aviso.
+const impressoraBtConectada = () => {
+  if (window.__fwcBtConectada === true) return true
+  try { return !!localStorage.getItem('bt_printer_id') } catch { return false }
+}
 
 // Última vez que a pessoa mexeu na tela (captura na fase de captura pra pegar
 // também o que acontece dentro de modal).
