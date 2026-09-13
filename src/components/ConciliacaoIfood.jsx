@@ -272,11 +272,14 @@ function Vendas({ empresaId, versao }) {
     if (!empresaId) return
     let vivo = true
     setVendas(null); setMostrar(VENDAS_PAGINA)
-    const desde = new Date(Date.now() - dias * 86400000).toISOString()
-    fetchAll(() => supabase.from('ifood_vendas')
-      .select('venda_id, numero_curto, criado_em, status, metodos, valor_itens, taxa_entrega, beneficios, comissoes_taxas, saldo, conferido, soma_lancamentos')
-      .eq('empresa_id', empresaId).gte('criado_em', desde)
-      .order('criado_em', { ascending: false }).order('venda_id'))
+    fetchAll(() => {
+      let q = supabase.from('ifood_vendas')
+        .select('venda_id, numero_curto, criado_em, status, metodos, valor_itens, taxa_entrega, beneficios, comissoes_taxas, saldo, conferido, soma_lancamentos')
+        .eq('empresa_id', empresaId)
+      // 0 = tudo que já foi sincronizado (o histórico cresce a cada dia).
+      if (dias > 0) q = q.gte('criado_em', new Date(Date.now() - dias * 86400000).toISOString())
+      return q.order('criado_em', { ascending: false }).order('venda_id')
+    })
       .then(d => { if (vivo) setVendas(d ?? []) })
     return () => { vivo = false }
   }, [empresaId, dias, versao])
@@ -303,7 +306,8 @@ function Vendas({ empresaId, versao }) {
       </p>
       <div className="ci-filtros">
         <select value={dias} onChange={e => setDias(Number(e.target.value))}>
-          {[7, 14, 30, 42].map(d => <option key={d} value={d}>Últimos {d} dias</option>)}
+          {[7, 14, 30, 90].map(d => <option key={d} value={d}>Últimos {d} dias</option>)}
+          <option value={0}>Todo o histórico</option>
         </select>
         <input type="search" placeholder="Buscar nº do pedido" value={busca} onChange={e => setBusca(e.target.value)} />
         {divergentes > 0 && <span className="ci-selo aviso">⚠ {divergentes} pedido{divergentes === 1 ? '' : 's'} com diferença</span>}
