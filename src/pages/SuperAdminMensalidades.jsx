@@ -195,7 +195,9 @@ function Detalhe({ l, hoje, recarregar }) {
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, paddingTop: 10 }}>
       <div>
         <div style={subtitulo}>Cobrança</div>
-        <label style={rotulo}><input type="checkbox" checked={f.ativa} onChange={set('ativa')} /> Cobrança ligada</label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 700, marginBottom: 10, cursor: 'pointer' }}>
+          <input type="checkbox" checked={f.ativa} onChange={set('ativa')} style={{ width: 18, height: 18 }} /> Cobrança ligada
+        </label>
         <div style={duas}>
           <label style={rotulo}>Valor (R$)<input style={campo} type="number" step="0.01" value={f.valor} onChange={set('valor')} /></label>
           <label style={rotulo}>Periodicidade

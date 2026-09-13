@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { hojeBR } from '../lib/feriados'
+import { faseDaMensalidade } from '../lib/mensalidade'
 import { supabase } from '../lib/supabaseClient'
 import { MODULOS, BLOQUEADO } from '../lib/modulos'
 import '../components/Page.css'
@@ -81,6 +84,12 @@ export default function SuperAdminEmpresas() {
   const [modulosModal, setModulosModal] = useState(null) // { id, nome }
   const [modulosForm, setModulosForm]   = useState({})   // { [key]: bool }
   const [savingModulos, setSavingModulos] = useState(false)
+
+  // Mensalidade nova (mig 0263)
+  const [mensCfg, setMensCfg] = useState({})
+  const [mensAbertas, setMensAbertas] = useState({})
+  const navigate = useNavigate()
+  const hojeBRLoja = hojeBR()
 
   const hoje = new Date().toISOString().split('T')[0]
 
@@ -169,10 +178,18 @@ export default function SuperAdminEmpresas() {
     setLoading(true)
     setError(null)
 
-    const [empresasRes, profilesRes] = await Promise.all([
-      supabase.from('empresas').select('*').order('created_at'),
+    // Gera as semanas que já venceram antes de mostrar quem está devendo.
+    await supabase.rpc('mensalidade_atualizar_todas')
+    const [empresasRes, profilesRes, cfgRes, cobRes] = await Promise.all([
+      supabase.from('empresas').select('*').order('nome'),
       supabase.from('profiles').select('empresa_id'),
+      supabase.from('mensalidade_config').select('*'),
+      supabase.from('mensalidade_cobrancas').select('empresa_id, vencimento, valor').eq('status', 'aberta').order('vencimento'),
     ])
+    setMensCfg(Object.fromEntries((cfgRes.data ?? []).map(c => [c.empresa_id, c])))
+    const porLoja = {}
+    for (const c of cobRes.data ?? []) (porLoja[c.empresa_id] ??= []).push(c)
+    setMensAbertas(porLoja)
 
     const firstError = empresasRes.error || profilesRes.error
     if (firstError) setError(firstError.message)
@@ -388,315 +405,198 @@ export default function SuperAdminEmpresas() {
     e => ['ativo', 'trial'].includes(e.status) && (e.whatsapp_creditos ?? 0) === 0
   )
 
-  const empresasFiltradas = empresas.filter(e => {
-    if (filtroStatus !== 'todos' && e.status !== filtroStatus) return false
+  // ── Mensalidade nova (mig 0263): fase de cada loja ─────────────────────────
+  function mensalidadeDe(emp) {
+    const cfg = mensCfg[emp.id]
+    if (!cfg?.ativa) return null
+    const vencidas = (mensAbertas[emp.id] ?? []).filter(c => c.vencimento <= hojeBRLoja)
+    const estado = faseDaMensalidade({
+      ativa: true, hoje: hojeBRLoja, mais_antiga_vencida: vencidas[0]?.vencimento ?? null,
+      carencia_dias: cfg.carencia_dias, prazo_ate: cfg.prazo_ate,
+      liberado_ate: cfg.liberado_ate && new Date(cfg.liberado_ate) > new Date() ? cfg.liberado_ate : null,
+    }, { grade: emp.horarios_funcionamento, excecoes: {}, fechaFeriado: !!emp.feriados_fecha })
+    return { cfg, estado, emAberto: vencidas.reduce((s, c) => s + Number(c.valor), 0), qtd: vencidas.length }
+  }
+
+  const FASE_CHIP = {
+    em_dia:     ['Em dia', 'ok'],
+    vence_hoje: ['Vence hoje', 'aviso'],
+    carencia:   ['Atrasada', 'erro'],
+    prazo:      ['Prazo combinado', 'roxo'],
+    liberado:   ['"Já paguei"', 'roxo'],
+    bloqueio:   ['BLOQUEADA', 'bloq'],
+  }
+
+  const contagem = {
+    todos: empresas.length,
+    ativo: empresas.filter(e => e.status === 'ativo').length,
+    trial: empresas.filter(e => e.status === 'trial').length,
+    atrasada: empresas.filter(e => ['carencia', 'bloqueio', 'prazo', 'liberado'].includes(mensalidadeDe(e)?.estado.fase)).length,
+    sem_credito: semCreditoWA.length,
+    suspenso: empresas.filter(e => e.status === 'suspenso' || e.status === 'cancelado').length,
+  }
+  const FILTROS = [
+    ['todos', 'Todas'], ['ativo', 'Ativas'], ['trial', 'Em teste'], ['atrasada', 'Mensalidade atrasada'],
+    ['sem_credito', 'Sem crédito no robô'], ['suspenso', 'Suspensas'],
+  ]
+  const lista = empresas.filter(e => {
+    if (filtroStatus === 'atrasada' && !['carencia', 'bloqueio', 'prazo', 'liberado'].includes(mensalidadeDe(e)?.estado.fase)) return false
+    if (filtroStatus === 'sem_credito' && !semCreditoWA.includes(e)) return false
+    if (filtroStatus === 'suspenso' && !['suspenso', 'cancelado'].includes(e.status)) return false
+    if (['ativo', 'trial'].includes(filtroStatus) && e.status !== filtroStatus) return false
     if (busca) {
       const q = busca.toLowerCase()
-      return (
-        (e.nome ?? '').toLowerCase().includes(q) ||
-        (e.email_contato ?? '').toLowerCase().includes(q) ||
-        (e.telefone_contato ?? '').toLowerCase().includes(q)
-      )
+      return [e.nome, e.email_contato, e.telefone_contato].some(v => (v ?? '').toLowerCase().includes(q))
     }
     return true
   })
+  const fmtBRL = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
   return (
-    <div>
+    <div className="emp-pagina">
       <div className="page-header">
-        <h1>Empresas</h1>
-        <button className="btn btn-primary" onClick={openNew}>
-          Nova empresa
-        </button>
+        <div>
+          <h1 style={{ marginBottom: 2 }}>Empresas</h1>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{empresas.length} lojas no sistema</div>
+        </div>
+        <button className="btn btn-primary" onClick={openNew}>+ Nova empresa</button>
       </div>
 
       {error && <p className="error-text">{error}</p>}
 
-      {semCreditoWA.length > 0 && (
-        <div style={{
-          marginBottom: 16,
-          padding: '10px 14px',
-          borderRadius: 10,
-          background: 'rgba(239,68,68,.1)',
-          border: '1px solid rgba(239,68,68,.3)',
-          color: 'var(--danger)',
-          fontSize: 13,
-        }}>
-          <strong>⚠️ {semCreditoWA.length} loja{semCreditoWA.length !== 1 ? 's' : ''} com crédito WhatsApp zerado:</strong>{' '}
-          {semCreditoWA.map(e => e.nome).join(', ')}
-        </div>
-      )}
-
-      {/* Busca e filtro */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-        <input
-          type="search"
-          placeholder="Buscar empresa, e-mail ou telefone..."
-          value={busca}
-          onChange={e => setBusca(e.target.value)}
-          style={{
-            flex: 1, minWidth: 200, padding: '7px 12px',
-            borderRadius: 8, border: '1.5px solid var(--border)',
-            background: 'var(--surface)', color: 'var(--text)', fontSize: 13,
-          }}
-        />
-        <select
-          value={filtroStatus}
-          onChange={e => setFiltroStatus(e.target.value)}
-          style={{
-            padding: '7px 10px', borderRadius: 8,
-            border: '1.5px solid var(--border)',
-            background: 'var(--surface)', color: 'var(--text)', fontSize: 13,
-          }}
-        >
-          <option value="todos">Todos os status</option>
-          <option value="trial">Trial</option>
-          <option value="ativo">Ativo</option>
-          <option value="atrasado">Atrasado</option>
-          <option value="suspenso">Suspenso</option>
-          <option value="cancelado">Cancelado</option>
-        </select>
-        <span style={{ alignSelf: 'center', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-          {empresasFiltradas.length} de {empresas.length}
-        </span>
-      </div>
-
       {inviteLink && (
         <div className="card" style={{ marginBottom: 16 }}>
-          <p style={{ margin: '0 0 8px', fontWeight: 600 }}>Empresa criada! Envie este link para o administrador criar a conta de acesso:</p>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              readOnly
-              value={inviteLink}
-              onFocus={(e) => e.target.select()}
-              style={{ flex: 1, padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }}
-            />
-            <button type="button" className="btn btn-secondary btn-sm" onClick={copiarLink}>
-              {inviteCopiado ? 'Copiado!' : 'Copiar'}
-            </button>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setInviteLink(null)}>
-              Fechar
-            </button>
+          <p style={{ margin: '0 0 8px', fontWeight: 600 }}>Envie este link para o administrador criar a conta de acesso:</p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input readOnly value={inviteLink} onFocus={(e) => e.target.select()} className="emp-busca" style={{ flex: 1 }} />
+            <button type="button" className="btn btn-secondary btn-sm" onClick={copiarLink}>{inviteCopiado ? 'Copiado!' : 'Copiar'}</button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setInviteLink(null)}>Fechar</button>
           </div>
         </div>
       )}
 
-      <div className="data-table">
-        {loading ? (
-          <div className="empty-state">Carregando...</div>
-        ) : empresasFiltradas.length === 0 ? (
-          <div className="empty-state">{empresas.length === 0 ? 'Nenhuma empresa cadastrada.' : 'Nenhuma empresa encontrada para o filtro aplicado.'}</div>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Empresa</th>
-                <th>E-mail</th>
-                <th>Telefone</th>
-                <th className="caixa-amount-col">Mensalidade</th>
-                <th>Status</th>
-                <th>Vencimento / Trial</th>
-                <th className="caixa-amount-col">Taxa %</th>
-                <th>Usuários</th>
-                <th className="caixa-amount-col">Créditos WA</th>
-                <th>Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {empresasFiltradas.map((emp) => (
-                <tr key={emp.id}>
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {emp.cor_primaria && (
-                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: emp.cor_primaria, flexShrink: 0, display: 'inline-block' }} title={emp.cor_primaria} />
-                      )}
-                      {emp.nome}
-                      {emp.dominio_personalizado && (
-                        <span style={{ color: 'var(--text-muted)', marginLeft: 2, display: 'inline-flex', alignItems: 'center' }} title={emp.dominio_personalizado}>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
-                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-                          </svg>
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td>{emp.email_contato || '-'}</td>
-                  <td>{emp.telefone_contato || '-'}</td>
-                  <td className="caixa-amount-col">
-                    {Number(emp.valor_mensalidade ?? 0).toLocaleString('pt-BR', {
-                      style: 'currency',
-                      currency: 'BRL',
-                    })}
-                  </td>
-                  <td>
-                    <span className={`badge ${STATUS_BADGES[emp.status] ?? 'badge-neutral'}`}>
-                      {STATUS_LABELS[emp.status] ?? emp.status}
-                    </span>
-                  </td>
-                  <td>{emp.vencimento || emp.trial_fim || '-'}</td>
-                  <td className="caixa-amount-col">
-                    {editandoTaxaId === emp.id ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <input
-                          ref={taxaInputRef}
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          max="100"
-                          value={taxaTemp}
-                          onChange={e => setTaxaTemp(e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') salvarTaxa(emp.id)
-                            if (e.key === 'Escape') setEditandoTaxaId(null)
-                          }}
-                          onBlur={() => salvarTaxa(emp.id)}
-                          style={{
-                            width: 60,
-                            padding: '4px 6px',
-                            borderRadius: 6,
-                            border: '1.5px solid var(--primary)',
-                            background: 'var(--bg)',
-                            color: 'var(--text)',
-                            fontSize: 13,
-                            textAlign: 'right',
-                          }}
-                        />
-                        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>%</span>
-                      </div>
-                    ) : (
-                      <button
-                        title="Clique para editar a taxa"
-                        onClick={() => abrirEditTaxa(emp)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          color: 'var(--primary)',
-                          fontWeight: 700,
-                          fontSize: 14,
-                          padding: '2px 6px',
-                          borderRadius: 6,
-                          transition: 'background 120ms',
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'var(--primary-bg)'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                      >
-                        {Number(emp.taxa_plataforma ?? 5).toFixed(1)}%
-                      </button>
-                    )}
-                  </td>
-                  <td>{usuariosPorEmpresa[emp.id] ?? 0}</td>
-                  <td className="caixa-amount-col">
-                    <button
-                      title="Adicionar créditos WhatsApp"
-                      onClick={() => { setCreditModal({ id: emp.id, nome: emp.nome, creditos: emp.whatsapp_creditos ?? 0 }); setCreditQtd(String(emp.whatsapp_creditos ?? 0)) }}
-                      style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        color: (emp.whatsapp_creditos ?? 0) === 0 ? 'var(--danger)' : (emp.whatsapp_creditos ?? 0) < 10 ? 'var(--warning, #f59e0b)' : 'var(--success)',
-                        fontWeight: 700, fontSize: 14, padding: '2px 6px', borderRadius: 6,
-                      }}
-                    >
-                      {emp.whatsapp_creditos ?? 0}
-                    </button>
-                  </td>
-                  <td>
-                    <div className="empresa-table-actions">
-                      {(emp.status === 'ativo' || emp.status === 'atrasado') && emp.vencimento && emp.vencimento < hoje && (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                          <button
-                            title="Cobrar mensalidade por WhatsApp"
-                            disabled={cobrando === emp.id}
-                            onClick={() => cobrarEmpresa(emp)}
-                            style={{
-                              background: cobrando === emp.id ? 'var(--border)' : '#25d36622',
-                              border: '1px solid #25d366',
-                              color: '#25d366',
-                              borderRadius: 8,
-                              padding: '4px 8px',
-                              cursor: cobrando === emp.id ? 'wait' : 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 5,
-                              fontSize: 12,
-                              fontWeight: 600,
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            <WhatsAppIcon />
-                            {cobrando === emp.id ? '...' : 'Cobrar'}
-                          </button>
-                          {cobrancaMsg[emp.id] && (
-                            <span style={{ fontSize: 11, color: cobrancaMsg[emp.id].startsWith('Erro') ? '#ef4444' : '#22c55e', maxWidth: 90, textAlign: 'center', lineHeight: 1.2 }}>
-                              {cobrancaMsg[emp.id]}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      <button className="btn btn-secondary btn-sm" onClick={() => openEdit(emp)}>
-                        Editar
-                      </button>
-                      <button
-                        className="btn btn-primary btn-sm"
-                        disabled={savingId === emp.id}
-                        onClick={() => acessarEmpresa(emp)}
-                      >
-                        {savingId === emp.id ? 'Aguarde...' : 'Acessar'}
-                      </button>
-                      <div className="empresa-dropdown" ref={openMenuId === emp.id ? menuRef : null}>
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={(e) => {
-                            if (openMenuId === emp.id) { setOpenMenuId(null); return }
-                            const rect = e.currentTarget.getBoundingClientRect()
-                            setDropRect(rect)
-                            setOpenMenuId(emp.id)
-                          }}
-                        >
-                          Mais ▾
-                        </button>
-                        {openMenuId === emp.id && dropRect && (
-                          <div className="empresa-dropdown-menu" style={{
-                            position: 'fixed',
-                            top: dropRect.bottom + 4 > window.innerHeight - 200
-                              ? dropRect.top - 4
-                              : dropRect.bottom + 4,
-                            right: window.innerWidth - dropRect.right,
-                            transform: dropRect.bottom + 4 > window.innerHeight - 200 ? 'translateY(-100%)' : 'none',
-                            zIndex: 9999,
-                          }}>
-                            <button onClick={() => { abrirModulos(emp); setOpenMenuId(null) }}>
-                              Funcionalidades
-                            </button>
-                            <button onClick={() => { setInviteLink(`${window.location.origin}/cadastro-admin/${emp.id}`); setOpenMenuId(null) }}>
-                              Link admin
-                            </button>
-                            <button onClick={() => { setCreditModal({ id: emp.id, nome: emp.nome, creditos: emp.whatsapp_creditos ?? 0 }); setCreditQtd(String(emp.whatsapp_creditos ?? 0)); setOpenMenuId(null) }}>
-                              Créditos WhatsApp
-                            </button>
-                            <button disabled={savingId === emp.id} onClick={() => { renovarEmpresa(emp); setOpenMenuId(null) }}>
-                              Renovar (+30 dias)
-                            </button>
-                            <button disabled={savingId === emp.id} onClick={() => { handleStatus(emp, 'suspenso'); setOpenMenuId(null) }}>
-                              Suspender
-                            </button>
-                            <button className="danger" disabled={savingId === emp.id} onClick={() => { handleStatus(emp, 'cancelado'); setOpenMenuId(null) }}>
-                              Cancelar assinatura
-                            </button>
-                            <button className="danger" disabled={savingId === emp.id} onClick={() => { setOpenMenuId(null); excluirEmpresa(emp) }}>
-                              Excluir empresa
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <div className="emp-filtros">
+        {FILTROS.map(([id, rotulo]) => (
+          <button key={id} type="button" onClick={() => setFiltroStatus(id)}
+            className={`emp-filtro${filtroStatus === id ? ' on' : ''}${id === 'atrasada' && contagem.atrasada ? ' alerta' : ''}${id === 'sem_credito' && contagem.sem_credito ? ' alerta' : ''}`}>
+            {rotulo} <span>{contagem[id]}</span>
+          </button>
+        ))}
       </div>
+      <input type="search" className="emp-busca" placeholder="🔎 Buscar por nome, e-mail ou telefone…"
+        value={busca} onChange={e => setBusca(e.target.value)} />
+
+      {loading ? (
+        <div className="empty-state">Carregando...</div>
+      ) : lista.length === 0 ? (
+        <div className="empty-state">{empresas.length === 0 ? 'Nenhuma empresa cadastrada.' : 'Nenhuma loja nesse filtro.'}</div>
+      ) : (
+        <div className="emp-grade">
+          {lista.map(emp => {
+            const mens = mensalidadeDe(emp)
+            const chip = mens ? FASE_CHIP[mens.estado.fase] : null
+            const creditos = emp.whatsapp_creditos ?? 0
+            const tel = String(emp.telefone_contato ?? '').replace(/\D/g, '')
+            const cobrarLegado = !mens && (emp.status === 'ativo' || emp.status === 'atrasado') && emp.vencimento && emp.vencimento < hoje
+            return (
+              <div key={emp.id} className={`emp-card${mens?.estado.fase === 'bloqueio' ? ' bloq' : ''}`}>
+                <div className="emp-topo">
+                  <span className="emp-bolinha" style={{ background: emp.cor_primaria || 'var(--primary)' }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="emp-nome" title={emp.nome}>{emp.nome}</div>
+                    <div className="emp-contato">
+                      {tel ? <a href={`https://wa.me/${tel.startsWith('55') ? tel : `55${tel}`}`} target="_blank" rel="noreferrer">{emp.telefone_contato}</a> : <span>sem telefone</span>}
+                      {emp.email_contato && <span title={emp.email_contato}> · {emp.email_contato}</span>}
+                    </div>
+                  </div>
+                  <span className={`badge ${STATUS_BADGES[emp.status] ?? 'badge-neutral'}`}>{STATUS_LABELS[emp.status] ?? emp.status}</span>
+                </div>
+
+                <button type="button" className="emp-mens" onClick={() => navigate('/super-admin/mensalidades')}>
+                  <div>
+                    <div className="emp-rotulo">Mensalidade</div>
+                    {mens ? (
+                      <div className="emp-valor">{fmtBRL(mens.cfg.valor)}<small> / {mens.cfg.periodicidade === 'semanal' ? 'semana' : 'mês'}</small></div>
+                    ) : (
+                      <div className="emp-valor apagado">Não configurada</div>
+                    )}
+                    {mens?.qtd > 0 && <div className="emp-deve">Em aberto: {fmtBRL(mens.emAberto)}</div>}
+                    {!mens && emp.vencimento && <div className="emp-legado">Antigo: {fmtBRL(emp.valor_mensalidade)} · venc. {emp.vencimento.split('-').reverse().join('/')}</div>}
+                  </div>
+                  {chip ? <span className={`emp-chip ${chip[1]}`}>{chip[0]}</span> : <span className="emp-configurar">Configurar →</span>}
+                </button>
+
+                <div className="emp-numeros">
+                  <button type="button" onClick={() => { setCreditModal({ id: emp.id, nome: emp.nome, creditos }); setCreditQtd(String(creditos)) }}
+                    title="Mudar créditos do robô">
+                    <strong className={creditos === 0 ? 'zero' : creditos < 50 ? 'pouco' : 'ok'}>{creditos.toLocaleString('pt-BR')}</strong>
+                    <span>créditos robô</span>
+                  </button>
+                  <div>
+                    <strong>{usuariosPorEmpresa[emp.id] ?? 0}</strong>
+                    <span>usuários</span>
+                  </div>
+                  {editandoTaxaId === emp.id ? (
+                    <div>
+                      <input ref={taxaInputRef} type="number" step="0.1" min="0" max="100" value={taxaTemp}
+                        onChange={e => setTaxaTemp(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') salvarTaxa(emp.id); if (e.key === 'Escape') setEditandoTaxaId(null) }}
+                        onBlur={() => salvarTaxa(emp.id)} className="emp-taxa-input" />
+                      <span>taxa %</span>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => abrirEditTaxa(emp)} title="Mudar a taxa da plataforma">
+                      <strong>{Number(emp.taxa_plataforma ?? 5).toFixed(1)}%</strong>
+                      <span>taxa</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="emp-acoes">
+                  <button className="btn btn-primary emp-acessar" disabled={savingId === emp.id} onClick={() => acessarEmpresa(emp)}>
+                    {savingId === emp.id ? 'Entrando…' : 'Entrar na loja'}
+                  </button>
+                  {cobrarLegado && (
+                    <button type="button" className="emp-zap" disabled={cobrando === emp.id} onClick={() => cobrarEmpresa(emp)} title="Cobrar mensalidade por WhatsApp">
+                      <WhatsAppIcon /> {cobrando === emp.id ? '…' : 'Cobrar'}
+                    </button>
+                  )}
+                  <button className="btn btn-secondary" onClick={() => openEdit(emp)}>Editar</button>
+                  <div className="empresa-dropdown" ref={openMenuId === emp.id ? menuRef : null}>
+                    <button className="btn btn-secondary" aria-label="Mais opções"
+                      onClick={(e) => {
+                        if (openMenuId === emp.id) { setOpenMenuId(null); return }
+                        setDropRect(e.currentTarget.getBoundingClientRect())
+                        setOpenMenuId(emp.id)
+                      }}>⋯</button>
+                    {openMenuId === emp.id && dropRect && (
+                      <div className="empresa-dropdown-menu" style={{
+                        position: 'fixed',
+                        top: dropRect.bottom + 4 > window.innerHeight - 320 ? dropRect.top - 4 : dropRect.bottom + 4,
+                        right: Math.max(8, window.innerWidth - dropRect.right),
+                        transform: dropRect.bottom + 4 > window.innerHeight - 320 ? 'translateY(-100%)' : 'none',
+                        zIndex: 9999,
+                      }}>
+                        <button onClick={() => { navigate('/super-admin/mensalidades'); setOpenMenuId(null) }}>Mensalidade</button>
+                        <button onClick={() => { abrirModulos(emp); setOpenMenuId(null) }}>Funcionalidades</button>
+                        <button onClick={() => { setInviteLink(`${window.location.origin}/cadastro-admin/${emp.id}`); setOpenMenuId(null) }}>Link do administrador</button>
+                        <button onClick={() => { setCreditModal({ id: emp.id, nome: emp.nome, creditos }); setCreditQtd(String(creditos)); setOpenMenuId(null) }}>Créditos do robô</button>
+                        <button disabled={savingId === emp.id} onClick={() => { renovarEmpresa(emp); setOpenMenuId(null) }}>Renovar (+30 dias)</button>
+                        <button disabled={savingId === emp.id} onClick={() => { handleStatus(emp, 'suspenso'); setOpenMenuId(null) }}>Suspender</button>
+                        <button className="danger" disabled={savingId === emp.id} onClick={() => { handleStatus(emp, 'cancelado'); setOpenMenuId(null) }}>Cancelar assinatura</button>
+                        <button className="danger" disabled={savingId === emp.id} onClick={() => { setOpenMenuId(null); excluirEmpresa(emp) }}>Excluir empresa</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {cobrancaMsg[emp.id] && (
+                  <div className={`emp-msg${cobrancaMsg[emp.id].startsWith('Erro') ? ' erro' : ''}`}>{cobrancaMsg[emp.id]}</div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
