@@ -101,7 +101,12 @@ export function comoFicaNoDia(dataYMD, { grade, excecoes = {}, fechaFeriado = fa
   // 3) A grade da semana. Sem grade cadastrada, não restringe nada (é o que o
   //    sistema fazia antes de existir grade — não dá pra fechar a loja de ninguém).
   if (!gradeValida(grade)) return { aberto: true, periodos: [], motivo: '' }
-  return { aberto: !!daGrade?.aberto, periodos: periodosGrade, motivo: '' }
+  // Dia marcado "aberto" mas SEM horário é dia fechado. Antes contava como
+  // "aberto o dia todo": a CDBom tinha o domingo assim, o robô dizia "estamos
+  // fechados" e a Loja Online recebeu pedido às 13h de domingo (13/09).
+  const periodosValidos = periodosGrade.filter(p => p?.i && p?.f)
+  if (!periodosValidos.length) return { aberto: false, periodos: [], motivo: '' }
+  return { aberto: !!daGrade?.aberto, periodos: periodosValidos, motivo: '' }
 }
 
 // Hoje no fuso da loja (o sistema inteiro usa America/Fortaleza).

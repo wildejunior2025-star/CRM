@@ -96,9 +96,18 @@ export default function HorariosLoja() {
   async function handleSalvar() {
     if (!empresaId) return
     setSalvando(true); setMsg(null)
+    // Dia "Aberta" sem nenhuma faixa completa é dia fechado. A CDBom salvou o
+    // domingo assim e a Loja Online aceitou pedido às 13h de domingo (13/09):
+    // o robô entendia fechado, o cardápio entendia "o dia todo".
+    const viraramFechados = []
+    const limpos = horarios.map((d, idx) => {
+      const periodos = d.periodos.filter(p => p.i && p.f)
+      if (d.aberto && !periodos.length) viraramFechados.push(DIAS_SEMANA[idx])
+      return { aberto: d.aberto && periodos.length > 0, periodos }
+    })
     const { error } = await supabase.from('empresas')
       .update({
-        horarios_funcionamento: horarios,
+        horarios_funcionamento: limpos,
         agendamento_ativo: ag.ativo,
         agendamento_dias: Math.max(0, Math.min(30, Number(ag.dias) || 0)),
         agendamento_antecedencia_min: Math.max(0, Math.min(1440, Number(ag.antecedencia) || 0)),
@@ -112,6 +121,11 @@ export default function HorariosLoja() {
       .eq('id', empresaId)
     setSalvando(false)
     if (error) { setMsg({ type: 'error', text: `Erro: ${error.message}` }); return }
+    setHorarios(limpos)
+    if (viraramFechados.length) {
+      setMsg({ type: 'error', text: `Salvo. ${viraramFechados.join(', ')} ficou FECHADO: estava "Aberta" sem nenhum horário. Coloque o horário se a loja abre nesse dia.` })
+      return
+    }
     setMsg({ type: 'success', text: 'Horários e agendamento salvos.' })
     setTimeout(() => setMsg(null), 3000)
   }
