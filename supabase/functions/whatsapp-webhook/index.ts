@@ -850,7 +850,8 @@ async function handleSalvarNumero(
   phone: string,
   phoneLocal: string,
   numero: string,
-  aceitaDelivery: boolean
+  aceitaDelivery: boolean,
+  pgtoOpcoes = "*dinheiro* ou *cartão*"
 ): Promise<{ resposta: string }> {
   try {
     const { data: c } = await supabase
@@ -898,7 +899,7 @@ async function handleSalvarNumero(
     const localidade = [c.endereco_bairro, c.endereco_cidade, c.endereco_estado].filter(Boolean).join(" — ")
     const proximaPergunta = aceitaDelivery
       ? `Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪`
-      : `Como vai pagar: *dinheiro* ou *cartão*? 💳`
+      : `Como vai pagar: ${pgtoOpcoes}? 💳`
 
     // Endereço ESCRITO não tem ponto: o entregador depende do mapa achar o
     // número, e rua nova/sem número oficial cai longe. O link deixa o próprio
@@ -1166,6 +1167,71 @@ async function catalogoRelevante(
   return (data ?? []) as any[]
 }
 
+// ── Formas de pagamento da loja ──────────────────────────────────────────────
+// O robô só conhecia "dinheiro ou cartão" (+ PIX online com Mercado Pago) e
+// ignorava o que a loja marcou em Minha Loja → Pagamento. A CDBom aceita PIX NA
+// ENTREGA (direto na chave dela, sem gateway) e o robô nem oferecia. Mesma lista
+// que liga os botões da Loja Online (src/lib/constants.js):
+//   pix         → cobrança online, exige MP conectado
+//   pix_entrega → paga na entrega, na chave PIX da loja
+type Pagamentos = {
+  dinheiro: boolean; pixOnline: boolean; pixEntrega: boolean
+  credito: boolean; debito: boolean; cartao: boolean
+  chavePix: string; pixNome: string
+}
+
+function pagamentosDaLoja(empresa: any): Pagamentos {
+  const mp = empresa?.mp_conectado === true
+  const lista: string[] = Array.isArray(empresa?.formas_pagamento) ? empresa.formas_pagamento.map(String) : []
+  const chavePix = String(empresa?.chave_pix ?? "").trim()
+  const pixNome = String(empresa?.pix_nome ?? "").trim()
+  // Loja que nunca abriu a tela de pagamento: o comportamento de antes.
+  if (!lista.length) {
+    return { dinheiro: true, pixOnline: mp, pixEntrega: false, credito: false, debito: false, cartao: true, chavePix, pixNome }
+  }
+  const p: Pagamentos = {
+    dinheiro: lista.includes("dinheiro"),
+    pixOnline: mp && lista.includes("pix"),
+    pixEntrega: lista.includes("pix_entrega"),
+    credito: lista.includes("credito"),
+    debito: lista.includes("debito"),
+    cartao: lista.includes("cartao"),
+    chavePix, pixNome,
+  }
+  if (!p.dinheiro && !p.pixOnline && !p.pixEntrega && !p.credito && !p.debito && !p.cartao) p.dinheiro = true
+  return p
+}
+
+const aceitaCartao = (p: Pagamentos) => p.credito || p.debito || p.cartao
+const RE_ACENTOS_PGTO = new RegExp("[\\u0300-\\u036f]", "g")
+
+/** "*dinheiro*, *PIX na entrega* ou *cartão*" — o que o robô pergunta. */
+function opcoesDePagamento(p: Pagamentos): string {
+  const ops: string[] = []
+  if (p.dinheiro) ops.push("*dinheiro*")
+  if (p.pixOnline) ops.push("*PIX*")
+  if (p.pixEntrega) ops.push(p.pixOnline ? "*PIX na entrega*" : "*PIX*")
+  if (aceitaCartao(p)) ops.push("*cartão*")
+  return ops.length > 1 ? `${ops.slice(0, -1).join(", ")} ou ${ops[ops.length - 1]}` : ops[0]
+}
+
+/** O que o modelo (ou a conversa) mandou → o valor que a loja realmente aceita. */
+function normalizarFormaPgto(forma: any, p: Pagamentos): string {
+  const f = String(forma ?? "").normalize("NFD").replace(RE_ACENTOS_PGTO, "").toLowerCase().trim()
+  const cartaoPadrao = p.cartao ? "cartao" : (p.credito && !p.debito) ? "credito" : (p.debito && !p.credito) ? "debito" : "cartao"
+  if (/pix.*entrega|entrega.*pix|pix_entrega/.test(f)) return p.pixEntrega ? "pix_entrega" : p.pixOnline ? "pix" : "pix_entrega"
+  if (/pix/.test(f)) return p.pixOnline ? "pix" : "pix_entrega"
+  if (/credito/.test(f)) return p.credito ? "credito" : cartaoPadrao
+  if (/debito/.test(f)) return p.debito ? "debito" : cartaoPadrao
+  if (/cart|maquin/.test(f)) return cartaoPadrao
+  if (/dinh|especie/.test(f)) return "dinheiro"
+  return f || "dinheiro"
+}
+
+function rotuloPgto(forma: string): string {
+  return ({ pix: "PIX", pix_entrega: "PIX na entrega", credito: "cartão de crédito", debito: "cartão de débito", cartao: "cartão", dinheiro: "dinheiro" } as Record<string, string>)[forma] ?? forma
+}
+
 // ── Troco ────────────────────────────────────────────────────────────────────
 /** "R$ 200", "200,00", "uma de 100" → número. Sem número, null. */
 function valorEmReais(txt: string): number | null {
@@ -1246,7 +1312,7 @@ async function handleFecharPedido(
 
     const taxaEntrega    = Number(empresa.taxa_entrega ?? 0)
     const tipoEntrega    = acao.tipo_entrega === "entrega" ? "entrega" : "retirada"
-    const formaPgto      = acao.forma_pagamento ?? "dinheiro"
+    const formaPgto      = normalizarFormaPgto(acao.forma_pagamento ?? "dinheiro", pagamentosDaLoja(empresa))
 
     const endRua    = acao.cliente_rua    ? String(acao.cliente_rua).trim()    : (carrinhoEndereco.rua    ?? cliente?.endereco ?? null)
     const endNumero = acao.cliente_numero ? String(acao.cliente_numero).trim() : (carrinhoEndereco.numero ?? cliente?.numero   ?? null)
@@ -1587,7 +1653,7 @@ async function handleFecharPedido(
 
     const acaoPromise    = supabase.from("whatsapp_carrinho").delete().eq("empresa_id", empresaId).eq("phone", phone)
     const numPedido      = pedidoNovo?.numero_pedido ?? ""
-    const labelPgto      = formaPgto === "pix" ? "PIX" : formaPgto === "cartao" ? "cartão" : "dinheiro"
+    const labelPgto      = rotuloPgto(formaPgto)
     const labelEntrega   = tipoEntrega === "entrega" ? "na entrega" : "na retirada"
 
     // Cliente só da loja — sem conta no app, sem credenciais/senha (sem mensagem de senha).
@@ -1598,8 +1664,18 @@ async function handleFecharPedido(
     const linhaValores = tipoEntrega === "entrega"
       ? `\n🚚 Taxa de entrega: *R$ ${taxaFinal.toFixed(2)}*\n💰 Total: *R$ ${totalFinal.toFixed(2)}*`
       : `\n💰 Total: *R$ ${totalFinal.toFixed(2)}*`
-    const linhaTroco = trocoPara ? `\n💵 Troco para *R$ ${trocoPara.toFixed(2)}* (volta R$ ${(trocoPara - totalFinal).toFixed(2)})` : ""
-    mensagemExtra = `🧾 *Pedido #${numPedido} recebido!*${linhaValores}\n\n💳 Pagamento em *${labelPgto}* ${labelEntrega}.${linhaTroco}${linhaPino}\n\n⏳ Aguardando a loja confirmar — assim que confirmarem você recebe uma mensagem aqui! 🎉` + mensagemExtra
+    // PIX na entrega: a chave vai junto, pro cliente já deixar salvo e pagar
+    // quando o pedido chegar.
+    const pgLoja = pagamentosDaLoja(empresa)
+    const linhaPixEntrega = formaPgto === "pix_entrega"
+      ? (pgLoja.chavePix
+        ? `\n📱 Chave PIX da loja: *${pgLoja.chavePix}*${pgLoja.pixNome ? ` (${pgLoja.pixNome})` : ""}\n${tipoEntrega === "entrega"
+          ? "_Pode pagar quando o pedido chegar e mostrar o comprovante ao entregador — ou já mandar o comprovante aqui._"
+          : "_Pode pagar na hora de retirar e mostrar o comprovante no balcão — ou já mandar o comprovante aqui._"}`
+        : tipoEntrega === "entrega" ? `\n📱 O entregador passa a chave PIX na hora da entrega.` : `\n📱 A loja passa a chave PIX na hora da retirada.`)
+      : ""
+    const linhaTroco = trocoPara ?`\n💵 Troco para *R$ ${trocoPara.toFixed(2)}* (volta R$ ${(trocoPara - totalFinal).toFixed(2)})` : ""
+    mensagemExtra = `🧾 *Pedido #${numPedido} recebido!*${linhaValores}\n\n💳 Pagamento em *${formaPgto === "pix_entrega" ? "PIX" : labelPgto}* ${labelEntrega}.${linhaPixEntrega}${linhaTroco}${linhaPino}\n\n⏳ Aguardando a loja confirmar — assim que confirmarem você recebe uma mensagem aqui! 🎉` + mensagemExtra
     return { mensagemExtra, acaoPromise }
   } catch (e) {
     console.error("[Pedido] erro:", e)
@@ -2241,7 +2317,7 @@ serve(async (req) => {
 
     const configRes = await supabase
       .from("whatsapp_config")
-      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, numero, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, feriados_fecha, indicador_profile_id, mp_conectado)")
+      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, numero, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, feriados_fecha, indicador_profile_id, mp_conectado, formas_pagamento)")
       .eq("instance_name", instanceName)
       .eq("ativo", true)
       .single()
@@ -2266,7 +2342,8 @@ serve(async (req) => {
     // PIX no bot: só oferecido se a loja conectou o Mercado Pago dela (dinheiro cai na conta da loja,
     // pedido só vai pro painel após pagamento confirmado). Loja sem MP conectado: nada muda, segue dinheiro/cartão.
     const mpConectado         = empresa.mp_conectado === true
-    const pgtoOpcoes          = mpConectado ? "*dinheiro*, *cartão* ou *PIX*" : "*dinheiro* ou *cartão*"
+    const pagamentos          = pagamentosDaLoja(empresa)
+    const pgtoOpcoes          = opcoesDePagamento(pagamentos)
     const iaInstrucoes        = (config.ia_instrucoes ?? "").trim()
     const adminPhone          = (config.admin_phone ?? "").replace(/\D/g, "")
     const indicadorProfileId  = empresa.indicador_profile_id ?? null
@@ -2817,7 +2894,8 @@ ${aceitaDelivery ? (bairroBloqueado ? `⛔ ENTREGA BLOQUEADA NESTE BAIRRO: a loj
   : enderecoCliente ? `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (já calculada pela distância do endereço do cliente)`
   : taxaMin != null ? `ENTREGA: a taxa depende do endereço — vai de R$ ${taxaMin.toFixed(2)} a R$ ${taxaMax!.toFixed(2)}. ⛔ NUNCA diga um valor exato, e MUITO MENOS "R$ 0,00" ou frete grátis, enquanto não souber o endereço: diga a faixa e peça a rua, o número e o bairro — o sistema calcula a taxa certa na hora de fechar.`
   : `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (taxa base — pode mudar conforme a distância do endereço)`) : "ENTREGA: somente retirada no local"}
-FORMAS DE PAGAMENTO: ${mpConectado ? "Dinheiro, Cartão ou PIX. Se o cliente escolher PIX, o sistema gera o QR Code e o código copia-e-cola automaticamente ao fechar o pedido — o pedido só vai para a loja depois que o pagamento for confirmado. Você NÃO envia chave PIX manualmente." : "Dinheiro ou Cartão (PIX não disponível nesta loja pelo WhatsApp)"}
+FORMAS DE PAGAMENTO (SÓ estas — nunca ofereça outra): ${opcoesDePagamento(pagamentos).replace(/\*/g, "")}
+${pagamentos.pixOnline ? `• PIX (online): o sistema gera o QR Code e o copia-e-cola ao fechar o pedido — o pedido só vai para a loja depois que o pagamento for confirmado. Você NÃO envia chave PIX nesse caso.\n` : ""}${pagamentos.pixEntrega ? `• PIX${pagamentos.pixOnline ? " na entrega" : ""}: o cliente faz a transferência pelo app do banco dele, para a chave PIX da loja${pagamentos.chavePix ? ` (${pagamentos.chavePix})` : ""}, na hora que recebe o pedido (ou no balcão, se retirar). NÃO usa maquininha, não tem QR e não paga antes — o sistema manda a chave na confirmação do pedido.${pagamentos.pixOnline ? "" : " Quando o cliente disser \"PIX\", é este."}\n` : ""}${!pagamentos.pixOnline && !pagamentos.pixEntrega ? `• PIX NÃO é aceito nesta loja pelo WhatsApp — se pedirem, ofereça as formas acima.\n` : ""}${aceitaCartao(pagamentos) ? `• Cartão: se for ENTREGA, o entregador leva a maquininha. Se for RETIRADA, paga no balcão da loja (aí não tem entregador — nunca fale dele).${pagamentos.credito && pagamentos.debito ? " Pergunte se é *crédito* ou *débito*." : ""}\n` : ""}
 
 ${totalProdutos > MENU_INTEIRO_ATE ? `⚠️ CATÁLOGO GRANDE: esta loja tem ${totalProdutos} produtos e eles NÃO cabem aqui. A lista abaixo é só o que casou com o que o cliente falou até agora — NÃO é o catálogo inteiro.
 • Venda só o que está na lista (com [id:]), como sempre.
@@ -2894,7 +2972,7 @@ ${aceitaDelivery
 ▶ PASSO 5 — FORMA DE PAGAMENTO
 "Como vai pagar: ${pgtoOpcoes}? 💳"
 Aguarde a resposta.
-Se escolher DINHEIRO: pergunte "Vai precisar de troco? Se sim, pra quanto? 💵" e aguarde. Ele pode responder "não", "pra 50", "nota de 100"... Só depois vá ao resumo. Se ele já disse o valor antes (ex.: "dinheiro, troco pra 100"), não pergunte de novo.${mpConectado ? "\nSe escolher PIX: NÃO mande chave nem texto de pagamento — apenas siga para o resumo (PASSO 6) e, ao confirmar, emita fechar_pedido com forma_pagamento \"pix\". O sistema gera o QR e o copia-e-cola sozinho." : ""}
+Se escolher DINHEIRO: pergunte "Vai precisar de troco? Se sim, pra quanto? 💵" e aguarde. Ele pode responder "não", "pra 50", "nota de 100"... Só depois vá ao resumo. Se ele já disse o valor antes (ex.: "dinheiro, troco pra 100"), não pergunte de novo.${pagamentos.pixOnline ? "\nSe escolher PIX: NÃO mande chave nem texto de pagamento — apenas siga para o resumo (PASSO 6) e, ao confirmar, emita fechar_pedido com forma_pagamento \"pix\". O sistema gera o QR e o copia-e-cola sozinho." : ""}${pagamentos.pixEntrega ? `\nSe escolher PIX NA ENTREGA${pagamentos.pixOnline ? "" : " (ou só \"PIX\")"}: siga para o resumo e, ao confirmar, emita fechar_pedido com forma_pagamento "pix_entrega". Não precisa de troco.` : ""}${pagamentos.credito && pagamentos.debito ? `\nSe escolher CARTÃO: pergunte "Crédito ou débito?" e use forma_pagamento "credito" ou "debito".` : ""}
 
 ▶ PASSO 6 — RESUMO E CONFIRMAÇÃO
 Após ter entrega/retirada E pagamento confirmados, envie o resumo completo:
@@ -2906,7 +2984,7 @@ ${aceitaDelivery ? `🚚 Taxa de entrega: R$ ${taxaEntregaCalc.toFixed(2)} (só 
 💰 *Total: R$ [total]*
 
 📍 [Entrega em: endereço / Retirada em: endereço da loja]
-💳 Pagamento: ${mpConectado ? "[dinheiro/cartão/PIX]" : "[dinheiro/cartão]"}
+💳 Pagamento: [${opcoesDePagamento(pagamentos).replace(/\*/g, "").replace(/, | ou /g, "/")}]
 [só se for dinheiro com troco: 💵 Troco para: R$ valor]
 
 Confirma? 😊"
@@ -2971,7 +3049,7 @@ ACAO: {"tipo": "salvar_numero", "numero": "42"}
 
 Fechar pedido — CLIENTE IDENTIFICADO (tem nome em CLIENTE acima, ou cadastrar_cliente foi emitido nesta sessão):
 ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "entrega", "forma_pagamento": "dinheiro", "cliente_rua": "[rua confirmada na conversa]", "cliente_numero": "[número confirmado]", "cliente_bairro": "[bairro]", "cliente_cidade": "[cidade]", "cliente_estado": "[estado]", "items": [{"produto_id": "ID_REAL", "nome": "Nome", "qtd": 1, "preco": 0.00}]}
-[tipo_entrega: "entrega" ou "retirada" | forma_pagamento: ${mpConectado ? `"dinheiro", "cartao" ou "pix"` : `"dinheiro" ou "cartao"`} | dinheiro com troco: acrescente "troco_para": 100 (o valor da nota que ele vai dar; sem troco, não mande o campo)]
+[tipo_entrega: "entrega" ou "retirada" | forma_pagamento: ${[pagamentos.dinheiro && `"dinheiro"`, pagamentos.pixOnline && `"pix"`, pagamentos.pixEntrega && `"pix_entrega"`, pagamentos.credito && `"credito"`, pagamentos.debito && `"debito"`, (pagamentos.cartao || (aceitaCartao(pagamentos) && !(pagamentos.credito && pagamentos.debito))) && `"cartao"`].filter(Boolean).join(", ")} | dinheiro com troco: acrescente "troco_para": 100 (o valor da nota que ele vai dar; sem troco, não mande o campo)]
 ⚠️ SEMPRE inclua os "items" do carrinho atual E o endereço confirmado na conversa no ACAO fechar_pedido
 ⚠️ SE for retirada, omita os campos cliente_rua/numero/bairro/cidade/estado
 
@@ -3270,7 +3348,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           resposta = resultado.resposta
 
         } else if (acao.tipo === "salvar_numero" && acao.numero) {
-          const resultado = await handleSalvarNumero(supabase, empresaId, phone, phoneLocal, String(acao.numero), aceitaDelivery)
+          const resultado = await handleSalvarNumero(supabase, empresaId, phone, phoneLocal, String(acao.numero), aceitaDelivery, pgtoOpcoes)
           resposta = resultado.resposta
 
         } else if (acao.tipo === "fechar_pedido") {
@@ -3398,12 +3476,9 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           .filter((m: any) => m.role === "user")
           .map((m: any) => (m.content ?? "").toLowerCase())
         const lastPayMsg = [...userMsgs].reverse().find(c =>
-          c.includes("pix") || c.includes("cart") || c.includes("dinh")
+          c.includes("pix") || c.includes("cart") || c.includes("dinh") || c.includes("crédito") || c.includes("credito") || c.includes("débito") || c.includes("debito")
         )
-        const forma_pagamento = lastPayMsg?.includes("dinh") ? "dinheiro"
-          : lastPayMsg?.includes("cart") ? "cartao"
-          : (lastPayMsg?.includes("pix") && mpConectado) ? "pix"
-          : "dinheiro"
+        const forma_pagamento = lastPayMsg ? normalizarFormaPgto(lastPayMsg, pagamentos) : (pagamentos.dinheiro ? "dinheiro" : normalizarFormaPgto("", pagamentos))
         const tipo_entrega = tipoEntregaDaConversa(mensagens) ?? "entrega"
         const safeAcao: any = { tipo_entrega, forma_pagamento }
 
@@ -3521,7 +3596,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
         )
         resposta = r.resposta
         if (end.numero) {
-          const n = await handleSalvarNumero(supabase, empresaId, phone, phoneLocal, end.numero, aceitaDelivery)
+          const n = await handleSalvarNumero(supabase, empresaId, phone, phoneLocal, end.numero, aceitaDelivery, pgtoOpcoes)
           resposta = n.resposta
         }
       }
@@ -3547,7 +3622,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           await handleSalvarBairro(supabase, empresaId, phone, numEBairro[2].trim())
           carrinhoEndereco.bairro = numEBairro[2].trim()
         }
-        const r = await handleSalvarNumero(supabase, empresaId, phone, phoneLocal, numEBairro[1], aceitaDelivery)
+        const r = await handleSalvarNumero(supabase, empresaId, phone, phoneLocal, numEBairro[1], aceitaDelivery, pgtoOpcoes)
         resposta = r.resposta
         carrinhoEndereco.numero = numEBairro[1]
       } else if (carrinhoEndereco.rua && !carrinhoEndereco.bairro && botPediuEndOuNum
@@ -3559,7 +3634,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           ? `✅ Anotado: *${carrinhoEndereco.rua}, ${carrinhoEndereco.numero}* — ${t}.` + "\n\n" +
             (aceitaDelivery
               ? "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"
-              : "Como vai pagar: *dinheiro* ou *cartão*? 💳")
+              : `Como vai pagar: ${pgtoOpcoes}? 💳`)
           : `✅ Anotado o bairro *${t}*!` + "\n\n" + "Qual o *número* da sua casa? 😊"
       }
     }
@@ -3572,7 +3647,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     const botPediuNumero = /n[úu]mero|sua casa|apt|complemento/.test(ultimaMsgBot)
     if (isNumeroMsg && carrinhoEndereco.rua && !carrinhoEndereco.numero && !salvarNumeroJaExecutado && botPediuNumero) {
       console.log("[Numero] safety net para:", text)
-      const resultado = await handleSalvarNumero(supabase, empresaId, phone, phoneLocal, text.trim(), aceitaDelivery)
+      const resultado = await handleSalvarNumero(supabase, empresaId, phone, phoneLocal, text.trim(), aceitaDelivery, pgtoOpcoes)
       resposta = resultado.resposta
     }
 
