@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
+import RoboRetorno from '../components/RoboRetorno'
 
 const fmt = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
@@ -273,6 +274,8 @@ export default function WhatsAppCreditos() {
         </div>
         <div style={{ fontSize: 40, opacity: 0.3 }}>💬</div>
       </div>
+
+      <RoboRetorno empresaId={empresa?.id} />
 
       {/* Abas */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
