@@ -542,9 +542,10 @@ export default function Produtos() {
   async function criarCategoriasOrfas(lista) {
     if (!profile?.empresa_id || criouOrfasRef.current) return false
     const chave = v => String(v ?? '').trim().toLowerCase()
-    const prods = await fetchAll((de, ate) => supabase.from('produtos')
+    const { data: prods, error: errProds } = await fetchAll(() => supabase.from('produtos')
       .select('categoria').eq('empresa_id', profile.empresa_id)
-      .is('arquivado_em', null).range(de, ate))
+      .is('arquivado_em', null).order('id'))
+    if (errProds) return false
     const existentes = new Set(lista.map(c => chave(c.nome)))
     const vistas = new Set()
     const faltando = []

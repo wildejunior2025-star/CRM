@@ -728,9 +728,10 @@ function PedidosDaSemanaIfood({ empresaId, periodoIni }) {
     let vivo = true
     ;(async () => {
       try {
-        const evs = await fetchAll(() => supabase.from('ifood_eventos_financeiros')
+        const { data: evs, error: errEvs } = await fetchAll(() => supabase.from('ifood_eventos_financeiros')
           .select('id, nome, valor, impacta_repasse, referencia_tipo, referencia_id, referencia_em, bruto')
           .eq('empresa_id', empresaId).eq('periodo_ini', periodoIni).order('id'))
+        if (errEvs) throw new Error(errEvs.message)
 
         const porPedido = new Map()
         const fora = new Map()

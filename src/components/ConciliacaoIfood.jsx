@@ -177,7 +177,7 @@ function Repasses({ empresaId, versao, nomeLoja, variasLojas }) {
       ])
       if (!vivo) return
       const porSemana = {}
-      for (const t of (tit ?? [])) (porSemana[`${t.merchant_id}|${t.semana_ini}`] ??= []).push(t)
+      for (const t of (tit.data ?? [])) (porSemana[`${t.merchant_id}|${t.semana_ini}`] ??= []).push(t)
       setSemanas(sem.data ?? [])
       setTitulos(porSemana)
     })()
@@ -280,7 +280,7 @@ function Vendas({ empresaId, versao }) {
       if (dias > 0) q = q.gte('criado_em', new Date(Date.now() - dias * 86400000).toISOString())
       return q.order('criado_em', { ascending: false }).order('venda_id')
     })
-      .then(d => { if (vivo) setVendas(d ?? []) })
+      .then(({ data }) => { if (vivo) setVendas(data ?? []) })
     return () => { vivo = false }
   }, [empresaId, dias, versao])
 
@@ -394,7 +394,7 @@ function Lancamentos({ empresaId, versao }) {
       .select('id, nome, descricao, gatilho, referencia_tipo, referencia_id, referencia_em, valor, impacta_repasse, previsao_pagamento, metodo_pagamento, responsavel, percentual, bruto')
       .eq('empresa_id', empresaId).eq('periodo_ini', periodo)
       .order('referencia_em', { ascending: false, nullsFirst: false }).order('id'))
-      .then(d => { if (vivo) setItens(d ?? []) })
+      .then(({ data }) => { if (vivo) setItens(data ?? []) })
     return () => { vivo = false }
   }, [empresaId, periodo, versao])
 
