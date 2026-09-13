@@ -1713,6 +1713,22 @@ function jsonBalanceado(txt: string, de: number): { texto: string; fim: number }
 
 // Procura uma ação escrita de qualquer jeito e devolve o JSON + onde ele estava.
 function acharAcaoSolta(txt: string): { json: string; ini: number; fim: number } | null {
+  // Formato XML de ferramenta: <invoke name="atualizar_carrinho"><parameter
+  // name="items">[...]</parameter></invoke>. O Haiku usou esse no teste da
+  // CDBom (13/09) com os 10 picolés — a peneira limpava o bloco, o cliente lia
+  // "anotei" e a sacola ficava vazia.
+  const inv = /<invoke\s+name="([a-z_]+)"\s*>([\s\S]*?)(<[\/]invoke>|$)/i.exec(txt)
+  if (inv && TIPOS_DE_ACAO.includes(inv[1])) {
+    const obj: Record<string, unknown> = { tipo: inv[1] }
+    for (const p of inv[2].matchAll(/<parameter\s+name="([a-z_]+)"\s*>([\s\S]*?)<[\/]parameter>/gi)) {
+      const bruto = p[2].trim()
+      try { obj[p[1]] = JSON.parse(bruto) } catch { obj[p[1]] = bruto }
+    }
+    const ini = txt.lastIndexOf("<function_calls>", inv.index) !== -1 ? txt.lastIndexOf("<function_calls>", inv.index) : inv.index
+    const fechaBloco = txt.indexOf("</function_calls>", inv.index)
+    const fim = fechaBloco !== -1 ? fechaBloco + "</function_calls>".length : inv.index + inv[0].length
+    return { json: JSON.stringify(obj), ini, fim }
+  }
   let de = 0
   while (de < txt.length) {
     const bloco = jsonBalanceado(txt, de)
@@ -1944,6 +1960,9 @@ serve(async (req) => {
       || req.headers.get("x-bot-test") === "1"
       || payload._test === true
       || phoneEarly === "5500000000001"
+    // Testar a IA de uma loja que ainda não ligou (ou fora do horário) sem abrir
+    // nada pro cliente de verdade: só vale junto com o modo teste.
+    const forcarIa = isTest && url.searchParams.get("forcar_ia") === "true"
 
     // Vendedor IA desligado: cala a boca AQUI, antes de qualquer coisa.
     // A checagem ficava lá embaixo, depois do tratamento de áudio/imagem — e
@@ -1956,7 +1975,7 @@ serve(async (req) => {
         .eq("instance_name", instanceName)
         .eq("ativo", true)
         .maybeSingle()
-      if (!liga?.ia_ativo) {
+      if (!liga?.ia_ativo && !forcarIa) {
         // Robô desligado não é caixa postal fechada. A mensagem do cliente era
         // jogada fora aqui, e a loja nunca ficava sabendo que alguém chamou —
         // nem depois, olhando a tela. Guardar é tudo o que fazemos: responder
@@ -2073,7 +2092,7 @@ serve(async (req) => {
       .single()
 
     const config = configRes.data
-    if (!config?.ia_ativo) return new Response("ok", { headers: corsHeaders })
+    if (!config?.ia_ativo && !forcarIa) return new Response("ok", { headers: corsHeaders })
 
     const empresa        = (config.empresas as any) ?? {}
     const empresaId      = config.empresa_id
@@ -2270,7 +2289,7 @@ serve(async (req) => {
       horarioLojaTexto = horarioTexto
       agoraTexto = `${DIAS_SEM[dow]}, ${String(horaBR.getHours()).padStart(2, "0")}:${String(horaBR.getMinutes()).padStart(2, "0")}`
 
-      if (lojaFechada) {
+      if (lojaFechada && !forcarIa) {
         // Só avisa uma vez — se a última mensagem do bot já foi "fechado", ignora
         const { data: ultimaBotMsg } = await supabase
           .from("whatsapp_conversas")
@@ -2447,8 +2466,14 @@ serve(async (req) => {
                     : `• ${o.nome}`)
                   .join("\n")
                 const quant = g.max > 1 ? `escolha até ${g.max}` : (g.min > 0 ? "escolha 1" : "opcional")
+                // Pausado entra à parte: sem isto, "tem de castanha?" virava "não
+                // temos esse sabor" — e a loja tem, só acabou hoje.
+                const pausadas = (g.complemento_opcoes ?? [])
+                  .filter((o: any) => !o.disponivel && !soSemOpcao(o.nome))
+                  .map((o: any) => o.nome)
+                const emFalta = pausadas.length ? `\n(em falta hoje — NÃO ofereça nem anote; se pedirem, diga que acabou no momento: ${pausadas.join(", ")})` : ""
                 // Barra separadora + nome da categoria em negrito, uma opção por linha.
-                return `━━━━━━━━━━━━━\n*${g.nome}* (${quant})\n${ops}`
+                return `━━━━━━━━━━━━━\n*${g.nome}* (${quant})\n${ops}${emFalta}`
               }).join("\n\n")
             if (!linhas) continue
             blocos.push(`▸ ${nomeDoProduto(pid)}:\n${linhas}`)
@@ -2686,7 +2711,7 @@ Já verificamos pelo telefone se o cliente tem conta nesta loja (ver CLIENTE aci
 
 ▶ PASSO 2 — MONTAR A SACOLA
 Ajude o cliente a escolher os produtos. A CADA produto escolhido, emita atualizar_carrinho (ver AÇÕES).
-Produto com complementos (Quentinha): mostre TODAS as categorias DE UMA VEZ, numa ÚNICA mensagem. Use EXATAMENTE o formato do bloco "PRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS": cada categoria com a barra separadora (━━━━━━━━━━━━━), o *nome da categoria* em negrito com o máximo do lado (ex.: "escolha 1", "escolha até 2"), e CADA opção numa linha própria começando com "• ". NUNCA junte as opções com vírgula na mesma linha — elas têm que ficar uma embaixo da outra. NUNCA pergunte categoria por categoria (uma mensagem por categoria) — isso cansa o cliente e gasta crédito à toa. Peça pro cliente responder tudo numa mensagem só; quando ele responder, monte o item com atualizar_carrinho. Se faltar escolher alguma categoria, aí sim pergunte só as que faltam.
+Produto com complementos (Quentinha): mostre TODAS as categorias DE UMA VEZ, numa ÚNICA mensagem. Use EXATAMENTE o formato do bloco "PRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS": cada categoria com a barra separadora (━━━━━━━━━━━━━), o *nome da categoria* em negrito com o máximo do lado (ex.: "escolha 1", "escolha até 2"), e CADA opção numa linha própria começando com "• ". NUNCA junte as opções com vírgula na mesma linha — elas têm que ficar uma embaixo da outra. A linha "(em falta hoje ...)" é só pra você: NUNCA mostre ela na lista. NUNCA pergunte categoria por categoria (uma mensagem por categoria) — isso cansa o cliente e gasta crédito à toa. Peça pro cliente responder tudo numa mensagem só; quando ele responder, monte o item com atualizar_carrinho. Se faltar escolher alguma categoria, aí sim pergunte só as que faltam.
 Continue somando itens até o cliente dizer que é só isso / que quer fechar.
 ⚠️ Enquanto monta a sacola, NUNCA peça nome, e-mail, CEP, endereço, entrega ou pagamento. Isso é SÓ depois que a sacola fechar.
 
@@ -2768,7 +2793,7 @@ ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome":
   ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Picolé Delícia", "qtd": 5, "preco": 4.00, "complementos": [{"nome": "Morango", "qtd": 1}]}, {"produto_id": "ID_REAL", "nome": "Picolé Delícia", "qtd": 5, "preco": 4.00, "complementos": [{"nome": "Chocolate", "qtd": 1}]}]}
   • A soma das linhas conta pro preço de atacado — o sistema junta sozinho.
   • Se ele disser a quantidade e não disser os sabores, mostre a lista e pergunte quantos de cada. Se disser os sabores e não a divisão ("10 de morango e chocolate"), pergunte quantos de cada antes de anotar.
-  • Sabor que ele pedir e NÃO está na lista do produto está em falta hoje: diga que acabou no momento e ofereça os que tem. Nunca anote sabor fora da lista.
+  • Sabor que ele pedir e NÃO está na lista do produto está em falta hoje: responda como atendente ("Castanha acabou no momento 😕, mas tem esses:") e ofereça os que tem. NUNCA fale em "lista", "cadastro" ou "sistema" pro cliente. Nunca anote sabor fora da lista.
   • Cada produto tem a SUA lista de sabores (o pote de 1 litro pode não ter o mesmo sabor do balde). Use a lista daquele produto.
 
 Cadastrar cliente novo (após coletar o nome — PASSO 3, só depois da sacola fechada):
@@ -2947,6 +2972,42 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
         resposta = (resposta.slice(0, solta.ini) + " " + resposta.slice(solta.fim)).trim()
         acaoSoltaFim = solta.fim
       }
+    }
+
+    // DISSE QUE ANOTOU E NÃO ANOTOU. O Haiku às vezes responde "Anotei! Vou
+    // adicionar o gelo" sem a ação — o cliente acredita, e a sacola fica sem o
+    // item (teste da CDBom, 13/09). Uma segunda chamada curta pedindo SÓ a ação
+    // custa uma fração do crédito e salva o pedido.
+    if (!acaoMatch && /\b(anotei|anotado|adicionei|adicionad[oa]s?|vou adicionar|coloquei|inclu[ií])\b/i.test(resposta)) {
+      try {
+        const retry = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+          body: JSON.stringify({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 600,
+            system: systemPrompt,
+            messages: [
+              ...mensagens.map((m: any) => ({ role: m.role, content: m.content })),
+              { role: "assistant", content: resposta },
+              { role: "user", content: "[SISTEMA — não é o cliente] Você disse ao cliente que anotou, mas não emitiu a ação, e o carrinho NÃO foi salvo. Responda SOMENTE com a linha ACAO: atualizar_carrinho com TODOS os itens do carrinho (os que já estavam no CARRINHO ATUAL + os novos), com o produto_id real da lista. Nenhum texto além da ACAO." },
+            ],
+          }),
+        })
+        if (retry.ok) {
+          const txt: string = (await retry.json()).content?.[0]?.text ?? ""
+          const ini = txt.indexOf("ACAO:")
+          const bloco = ini !== -1 ? jsonBalanceado(txt, ini) : null
+          const achado = bloco?.texto ?? acharAcaoSolta(txt)?.json ?? null
+          if (achado && JSON.parse(achado)?.tipo === "atualizar_carrinho") {
+            console.log("[Acao] recuperada na 2ª chamada:", achado.slice(0, 120))
+            acaoMatch = ["", achado] as any
+            acaoSoltaFim = 0   // não cortar a resposta por um "ACAO:" que ela não tem
+          } else {
+            console.error("[Acao] 2ª chamada não trouxe atualizar_carrinho:", txt.slice(0, 200))
+          }
+        }
+      } catch (e: any) { console.error("[Acao] 2ª chamada falhou:", e?.message) }
     }
 
     let acaoPromise: Promise<any> = Promise.resolve()
