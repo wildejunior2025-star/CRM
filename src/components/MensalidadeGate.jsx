@@ -155,20 +155,24 @@ export default function MensalidadeGate() {
       ? `Mensalidade em atraso — prazo combinado até ${dataCurtaBR(situacao.prazo_ate)}.`
       : `Mensalidade atrasada. O sistema será bloqueado na abertura de ${dataCurtaBR(estado.diaBloqueio)}${faltam ? ` (faltam ${faltam} dia${faltam > 1 ? 's' : ''} de funcionamento)` : ''}.`
   const vermelho = estado.fase !== 'vence_hoje'
+  // No computador o aviso ficava pequeno demais no canto da tela grande.
+  const pc = typeof window !== 'undefined' && window.innerWidth >= 900
   return (
     <div role="alert" style={{
-      position: 'fixed', right: 16, bottom: 16, zIndex: 9000, maxWidth: 'min(380px, calc(100vw - 32px))',
-      background: vermelho ? '#b91c1c' : '#b45309', color: '#fff', borderRadius: 14, padding: '12px 14px',
-      boxShadow: '0 10px 30px rgba(0,0,0,.35)', fontSize: 13.5, lineHeight: 1.4,
+      position: 'fixed', right: pc ? 24 : 16, bottom: pc ? 24 : 16, zIndex: 9000,
+      maxWidth: pc ? 480 : 'min(380px, calc(100vw - 32px))',
+      background: vermelho ? '#b91c1c' : '#b45309', color: '#fff', borderRadius: pc ? 18 : 14,
+      padding: pc ? '18px 20px' : '12px 14px',
+      boxShadow: '0 14px 40px rgba(0,0,0,.4)', fontSize: pc ? 16.5 : 13.5, lineHeight: 1.4,
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
         <strong>{vermelho ? '⚠️' : '🧾'} {texto}</strong>
         <button type="button" aria-label="Fechar aviso" onClick={() => setAvisoFechado(true)}
-          style={{ background: 'none', border: 'none', color: '#fff', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
+          style={{ background: 'none', border: 'none', color: '#fff', fontSize: pc ? 24 : 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
       </div>
       <button type="button" onClick={() => setPagarAberto(true)} style={{
-        marginTop: 8, background: '#fff', color: vermelho ? '#b91c1c' : '#b45309', border: 'none', borderRadius: 8,
-        padding: '7px 12px', fontWeight: 800, cursor: 'pointer',
+        marginTop: pc ? 14 : 8, background: '#fff', color: vermelho ? '#b91c1c' : '#b45309', border: 'none', borderRadius: 10,
+        padding: pc ? '11px 22px' : '7px 12px', fontSize: pc ? 15.5 : 13.5, fontWeight: 800, cursor: 'pointer',
       }}>Pagar agora</button>
     </div>
   )
