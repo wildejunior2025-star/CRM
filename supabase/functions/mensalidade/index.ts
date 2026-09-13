@@ -148,7 +148,10 @@ async function cronDiario(sb: any) {
     const { data: exc } = await sb.from("dias_excecao").select("data, aberto, periodos")
       .eq("empresa_id", c.empresa_id).gte("data", vencida.vencimento).lte("data", somaDiasYmd(hoje, 30))
     const excecoes = Object.fromEntries((exc ?? []).map((r: any) => [r.data, r]))
-    const bloqueio = diaDoBloqueio(vencida.vencimento, Number(c.carencia_dias ?? 2), c.empresas ?? {}, excecoes)
+    let bloqueio = diaDoBloqueio(vencida.vencimento, Number(c.carencia_dias ?? 2), c.empresas ?? {}, excecoes)
+    // Prazo combinado além da carência: o dia de travar passa a ser o primeiro
+    // dia de funcionamento depois do prazo (mesma regra de src/lib/mensalidade.js).
+    if (c.prazo_ate && c.prazo_ate >= bloqueio) bloqueio = diaDoBloqueio(c.prazo_ate, 0, c.empresas ?? {}, excecoes)
 
     // Dois avisos por cobrança: no dia seguinte ao vencimento e no dia que trava.
     let tipo: string | null = null

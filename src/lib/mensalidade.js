@@ -50,7 +50,14 @@ export function faseDaMensalidade(situacao, loja, agora = new Date()) {
   const venc = situacao.mais_antiga_vencida
   if (!venc) return { fase: 'em_dia', travaAgora: false }
 
-  const diaBloqueio = diaDoBloqueio(venc, Number(situacao.carencia_dias ?? 2), loja)
+  let diaBloqueio = diaDoBloqueio(venc, Number(situacao.carencia_dias ?? 2), loja)
+  // Prazo combinado que vai além da carência: trava no primeiro dia de
+  // funcionamento DEPOIS do prazo — e, como no bloqueio normal, só a partir da
+  // abertura. Antes travava à meia-noite, no meio do expediente de quem vira
+  // a madrugada (Saidera).
+  if (situacao.prazo_ate && situacao.prazo_ate >= diaBloqueio) {
+    diaBloqueio = diaDoBloqueio(situacao.prazo_ate, 0, loja)
+  }
   const base = { vencimento: venc, diaBloqueio }
 
   if (situacao.liberado_ate && new Date(situacao.liberado_ate) > agora) return { ...base, fase: 'liberado', travaAgora: false }
