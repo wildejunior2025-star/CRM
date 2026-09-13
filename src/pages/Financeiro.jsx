@@ -4,6 +4,7 @@ import { calcIfoodLiquido, FORMA_ENTREGA_LABEL } from '../lib/ifoodLiquido'
 import IfoodIcon from '../components/IfoodIcon'
 import DespesasLucro from './DespesasLucro'
 import ClientesFiado from './ClientesFiado'
+import ConciliacaoIfood from '../components/ConciliacaoIfood'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 import './Financeiro.css'
@@ -119,6 +120,7 @@ export default function Financeiro() {
         body: { acao: 'financeiro_sync', empresa_id: empresaId },
       })
       if (error) throw new Error(error.message)
+      if (data?.ok === false) throw new Error(data.error || 'o iFood não respondeu')
       const r = data?.resultados ?? []
       if (r.some(x => x.status === 'ok')) {
         const n = r.reduce((s, x) => s + (x.lancamentos || 0), 0)
@@ -388,7 +390,9 @@ export default function Financeiro() {
 
       {/* Abas do Financeiro */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
-        {[['recebimentos', '💵 Recebimentos'], ['lucro', '📊 Despesas & Lucro'], ['fiado', '🧾 Fiado']].map(([id, lb]) => (
+        {[['recebimentos', '💵 Recebimentos'], ['lucro', '📊 Despesas & Lucro'], ['fiado', '🧾 Fiado'],
+          // Só pra quem tem loja conectada no iFood (syncIfood null = não tem).
+          ...(syncIfood ? [['ifood', '🧾 Conciliação iFood']] : [])].map(([id, lb]) => (
           <button key={id} type="button" onClick={() => trocarAba(id)}
             style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13.5, fontWeight: 700,
               background: aba === id ? 'var(--primary)' : 'var(--card, var(--bg))', color: aba === id ? '#fff' : 'var(--text)' }}>
@@ -400,6 +404,8 @@ export default function Financeiro() {
       {aba === 'lucro' && <DespesasLucro empresaId={empresaId} />}
 
       {aba === 'fiado' && <ClientesFiado empresaId={empresaId} />}
+
+      {aba === 'ifood' && <ConciliacaoIfood empresaId={empresaId} />}
 
       {aba === 'recebimentos' && (<>
 
@@ -723,21 +729,26 @@ function PedidosDaSemanaIfood({ empresaId, periodoIni }) {
     ;(async () => {
       try {
         const evs = await fetchAll(() => supabase.from('ifood_eventos_financeiros')
-          .select('id, nome, valor, impacta_repasse, referencia_tipo, referencia_id, referencia_em')
+          .select('id, nome, valor, impacta_repasse, referencia_tipo, referencia_id, referencia_em, bruto')
           .eq('empresa_id', empresaId).eq('periodo_ini', periodoIni).order('id'))
 
         const porPedido = new Map()
         const fora = new Map()
         for (const e of (evs ?? [])) {
+          // Lançamento pendente ainda não conta (guia de mapeamento do iFood).
+          if (String(e.bruto?.status ?? '').toUpperCase() === 'PENDING') continue
           const v = Number(e.valor || 0)
           if (e.referencia_tipo === 'ORDER' && e.referencia_id) {
             const p = porPedido.get(e.referencia_id) ?? {
-              id: e.referencia_id, em: e.referencia_em, venda: 0, ajuda: 0, taxas: 0, liquido: 0, naLoja: false,
+              id: e.referencia_id, em: e.referencia_em, venda: 0, ajuda: 0, taxas: 0, liquido: 0, naLoja: 0,
             }
-            if (e.nome === 'ORDER_PAYMENT') { p.venda += v; if (e.impacta_repasse === false) p.naLoja = true }
+            if (e.nome === 'ORDER_PAYMENT') { p.venda += v; if (e.impacta_repasse === false) p.naLoja += v }
             else if (e.nome === 'IFOOD_SUBSIDY') p.ajuda += v
             else if (v < 0) p.taxas += v
-            p.liquido += v
+            // Líquido oficial do iFood (saleBalance) = só o que impacta o repasse.
+            // O que o cliente pagou direto na maquininha da loja fica de fora — já
+            // está com a loja — e aparece à parte como "pago na loja".
+            if (e.impacta_repasse !== false) p.liquido += v
             porPedido.set(e.referencia_id, p)
           } else {
             // Anúncio e outras cobranças da semana que não são de um pedido
@@ -800,14 +811,14 @@ function PedidosDaSemanaIfood({ empresaId, periodoIni }) {
               <th style={cel}>Venda</th>
               <th style={cel} title="O iFood banca parte do desconto e devolve pra loja">Ajuda iFood</th>
               <th style={cel} title="Comissão, taxa de transação, taxa de serviço e entrega do iFood">Taxas</th>
-              <th style={cel}>Sobrou</th>
+              <th style={cel} title="Líquido oficial do iFood: soma dos lançamentos que impactam o repasse">Líquido iFood</th>
             </tr>
           </thead>
           <tbody>
             {visiveis.map(p => (
               <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td style={{ ...cel, textAlign: 'left' }}>
-                  <div style={{ fontWeight: 700 }}>{p.numero}{p.naLoja && <span title="O cliente pagou direto na loja (maquininha/dinheiro/vale) — esse valor não vem no repasse" style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#b45309' }}>pago na loja</span>}</div>
+                  <div style={{ fontWeight: 700 }}>{p.numero}{p.naLoja > 0 && <span title="O cliente pagou direto na loja (maquininha/dinheiro/vale) — esse valor não vem no repasse" style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#b45309' }}>pago na loja {fmtBRL(p.naLoja)}</span>}</div>
                   <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
                     {p.em ? new Date(p.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
                     {p.cliente ? ` · ${p.cliente}` : ''}
@@ -843,9 +854,9 @@ function PedidosDaSemanaIfood({ empresaId, periodoIni }) {
           {todos ? 'Mostrar menos' : `Mostrar todos os ${linhas.length} pedidos`}
         </button>
       )}
-      {linhas.some(p => p.naLoja) && (
+      {linhas.some(p => p.naLoja > 0) && (
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.45 }}>
-          "Sobrou" é o que a loja fica de cada pedido. Nos pedidos <b>pagos na loja</b> esse dinheiro já está com você — por isso o repasse da semana é menor que a soma.
+          "Líquido iFood" é o que o iFood transfere de cada pedido. Nos pedidos <b>pagos na loja</b> o cliente pagou direto na sua maquininha — esse dinheiro já está com você e não entra no repasse.
         </div>
       )}
     </div>
