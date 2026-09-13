@@ -23,6 +23,33 @@ const diaDaSemana = (d) => {
   if (!a || !m || !dia) return dataCurta(d)
   return `${DIAS_SEM[new Date(a, m - 1, dia).getDay()]} ${String(dia).padStart(2, '0')}/${String(m).padStart(2, '0')}`
 }
+// Segunda-feira da semana daquele dia ('YYYY-MM-DD'). A Saidera acerta a taxa
+// com os garçons por semana — e a lista de 30 dias só dava o total do mês.
+const segundaDaSemana = (d) => {
+  const [a, m, dia] = String(d ?? '').split('-').map(Number)
+  const dt = new Date(a, m - 1, dia)
+  dt.setDate(dt.getDate() - ((dt.getDay() + 6) % 7))
+  return dt
+}
+const ddmm = (dt) => `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`
+function agruparPorSemana(dias) {
+  const semanas = new Map()
+  for (const d of dias ?? []) {
+    const seg = segundaDaSemana(d.dia)
+    const chave = seg.toDateString()
+    if (!semanas.has(chave)) {
+      const dom = new Date(seg); dom.setDate(seg.getDate() + 6)
+      semanas.set(chave, { rotulo: `${ddmm(seg)} a ${ddmm(dom)}`, inicio: seg.getTime(), dias: [], contas: 0, taxa: 0, garcons: 0, loja: 0 })
+    }
+    const s = semanas.get(chave)
+    s.dias.push(d)
+    s.contas += Number(d.contas || 0)
+    s.taxa += Number(d.taxa || 0)
+    s.garcons += Number(d.garcons || 0)
+    s.loja += Number(d.loja || 0)
+  }
+  return [...semanas.values()].sort((x, y) => y.inicio - x.inicio)
+}
 const FORMA_LABEL = { dinheiro: 'Dinheiro', pix: 'PIX', credito: 'Crédito', debito: 'Débito', cartao: 'Cartão', fiado: 'Fiado', dividido: 'Dividido', transferencia: 'Transferência' }
 
 // O PIX que entrou pelo QR do Mercado Pago (mig 0193). Não é firula de tela: o
@@ -505,18 +532,36 @@ export default function PresencialHistorico() {
                     <span style={{ width: 78, textAlign: 'right' }}>Garçons</span>
                     <span style={{ width: 78, textAlign: 'right' }}>Loja</span>
                   </div>
-                  {taxaDias.map(d => (
-                    <div key={d.dia} style={{
-                      display: 'flex', alignItems: 'baseline', padding: '7px 0',
-                      borderTop: '1px dashed var(--border)', fontSize: 12.5,
-                    }}>
-                      <span style={{ flex: 1, minWidth: 0 }}>
-                        <strong>{diaDaSemana(d.dia)}</strong>
-                        <span style={{ color: 'var(--text-muted)' }}> · {d.contas} conta(s)</span>
-                      </span>
-                      <span style={{ width: 78, textAlign: 'right' }}>{fmt(d.taxa)}</span>
-                      <span style={{ width: 78, textAlign: 'right', color: 'var(--success)' }}>{fmt(d.garcons)}</span>
-                      <span style={{ width: 78, textAlign: 'right', fontWeight: 700 }}>{fmt(d.loja)}</span>
+                  {agruparPorSemana(taxaDias).map(s => (
+                    <div key={s.inicio} style={{ marginTop: 6 }}>
+                      {/* Total da semana: é o número do acerto com os garçons. */}
+                      <div style={{
+                        display: 'flex', alignItems: 'baseline', padding: '8px 8px', borderRadius: 8,
+                        background: 'rgba(124,58,237,.10)', border: '1px solid rgba(124,58,237,.30)',
+                        fontSize: 12.5, fontWeight: 800,
+                      }}>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          Semana {s.rotulo}
+                          <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}> · {s.contas} conta(s)</span>
+                        </span>
+                        <span style={{ width: 78, textAlign: 'right' }}>{fmt(s.taxa)}</span>
+                        <span style={{ width: 78, textAlign: 'right', color: 'var(--success)' }}>{fmt(s.garcons)}</span>
+                        <span style={{ width: 78, textAlign: 'right' }}>{fmt(s.loja)}</span>
+                      </div>
+                      {s.dias.map(d => (
+                        <div key={d.dia} style={{
+                          display: 'flex', alignItems: 'baseline', padding: '7px 8px',
+                          borderTop: '1px dashed var(--border)', fontSize: 12.5,
+                        }}>
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <strong>{diaDaSemana(d.dia)}</strong>
+                            <span style={{ color: 'var(--text-muted)' }}> · {d.contas} conta(s)</span>
+                          </span>
+                          <span style={{ width: 78, textAlign: 'right' }}>{fmt(d.taxa)}</span>
+                          <span style={{ width: 78, textAlign: 'right', color: 'var(--success)' }}>{fmt(d.garcons)}</span>
+                          <span style={{ width: 78, textAlign: 'right', fontWeight: 700 }}>{fmt(d.loja)}</span>
+                        </div>
+                      ))}
                     </div>
                   ))}
                   <div style={{
@@ -529,7 +574,8 @@ export default function PresencialHistorico() {
                     <span style={{ width: 78, textAlign: 'right' }}>{fmt(taxaDias.reduce((s, d) => s + Number(d.loja || 0), 0))}</span>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.45 }}>
-                    Últimos 30 dias, contando só os dias que tiveram taxa. A coluna
+                    Últimos 30 dias, contando só os dias que tiveram taxa, separados por semana
+                    (segunda a domingo). A coluna
                     <strong> Garçons</strong> é o bolo daquele dia — o mesmo que aparece no
                     dia a dia de cada um.
                   </div>
