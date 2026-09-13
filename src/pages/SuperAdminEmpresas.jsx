@@ -393,11 +393,13 @@ export default function SuperAdminEmpresas() {
 
   async function excluirEmpresa(empresa) {
     if (!window.confirm(`Excluir "${empresa.nome}" permanentemente? Esta ação não pode ser desfeita.`)) return
-    if (!window.confirm(`Tem certeza? Todos os dados da loja serão apagados.`)) return
+    if (!window.confirm(`Tem certeza? Produtos, vendas, comandas, clientes e os logins dos usuários dessa loja serão apagados.`)) return
     setSavingId(empresa.id)
-    const { error } = await supabase.from('empresas').delete().eq('id', empresa.id)
+    // O DELETE direto sempre falhava: várias tabelas apontam pra empresa sem
+    // cascata e a proteção da mesa Balcão barrava (mig 0265).
+    const { data, error } = await supabase.rpc('excluir_empresa_completa', { p_empresa: empresa.id })
     setSavingId(null)
-    if (error) { setError(error.message); return }
+    if (error || data?.ok === false) { setError(error?.message ?? data?.erro ?? 'Não foi possível excluir.'); return }
     await loadAll()
   }
 
