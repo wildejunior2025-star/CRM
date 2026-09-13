@@ -69,6 +69,31 @@ async function chamarFuncao(body) {
   return data
 }
 
+// O dado exatamente como o iFood mandou. Existe pra PROVAR a origem de cada
+// número: no ambiente de teste do iFood os valores não aparecem no Portal do
+// Parceiro (são um exemplo fixo), então a prova é mostrar a resposta da API ao
+// lado do que a tela exibe. Os campos que viram número na tela vêm em destaque.
+function DadoOriginal({ bruto, destaques = [] }) {
+  if (!bruto) return <span className="ci-muted">Carregando o dado original…</span>
+  const pegar = (obj, caminho) => caminho.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj)
+  return (
+    <div className="ci-original">
+      <div className="ci-original-titulo">Resposta original do iFood (API Financial)</div>
+      {destaques.length > 0 && (
+        <div className="ci-original-destaques">
+          {destaques.map(([rot, caminho]) => (
+            <div key={caminho}><span>{rot}</span><code>{caminho}</code><strong>{JSON.stringify(pegar(bruto, caminho), null, 1) ?? '—'}</strong></div>
+          ))}
+        </div>
+      )}
+      <details>
+        <summary>Ver JSON completo</summary>
+        <pre>{JSON.stringify(bruto, null, 2)}</pre>
+      </details>
+    </div>
+  )
+}
+
 function Conferencia({ bate, diferenca, semDados, textoSemDados = 'aguardando lançamentos' }) {
   if (semDados || bate === null || bate === undefined) return <span className="ci-selo">{textoSemDados}</span>
   if (bate) return <span className="ci-selo ok" title="Bate com a soma dos lançamentos que impactam o repasse">✓ bate</span>
@@ -267,6 +292,17 @@ function Vendas({ empresaId, versao }) {
   const [busca, setBusca] = useState('')
   const [vendas, setVendas] = useState(null)
   const [mostrar, setMostrar] = useState(VENDAS_PAGINA)
+  const [aberta, setAberta] = useState(null)       // venda_id com o original aberto
+  const [originais, setOriginais] = useState({})   // venda_id -> bruto (carrega sob demanda: é pesado)
+
+  async function abrirOriginal(vendaId) {
+    if (aberta === vendaId) { setAberta(null); return }
+    setAberta(vendaId)
+    if (originais[vendaId]) return
+    const { data } = await supabase.from('ifood_vendas').select('bruto')
+      .eq('empresa_id', empresaId).eq('venda_id', vendaId).maybeSingle()
+    setOriginais(o => ({ ...o, [vendaId]: data?.bruto ?? { erro: 'sem dado original' } }))
+  }
 
   useEffect(() => {
     if (!empresaId) return
@@ -329,9 +365,9 @@ function Vendas({ empresaId, versao }) {
                 </tr>
               </thead>
               <tbody>
-                {lista.slice(0, mostrar).map(v => (
-                  <tr key={v.venda_id}>
-                    <td className="esq"><b>#{v.numero_curto || String(v.venda_id).slice(-6)}</b><span className="pequeno">{dataHora(v.criado_em)}</span></td>
+                {lista.slice(0, mostrar).map(v => [
+                  <tr key={v.venda_id} className="clicavel" onClick={() => abrirOriginal(v.venda_id)} title="Clique pra ver o dado original do iFood">
+                    <td className="esq"><b>{aberta === v.venda_id ? '▾' : '▸'} #{v.numero_curto || String(v.venda_id).slice(-6)}</b><span className="pequeno">{dataHora(v.criado_em)}</span></td>
                     <td className="esq">{STATUS_VENDA[v.status] ?? v.status ?? '—'}</td>
                     <td className="esq" style={{ whiteSpace: 'normal', minWidth: 120 }}>{v.metodos || '—'}</td>
                     <td>{fmt(Number(v.valor_itens || 0) + Number(v.taxa_entrega || 0))}</td>
@@ -339,8 +375,20 @@ function Vendas({ empresaId, versao }) {
                     <td className="ci-neg">{Number(v.comissoes_taxas) > 0 ? `− ${fmt(v.comissoes_taxas)}` : '—'}</td>
                     <td><b>{v.saldo != null ? fmt(v.saldo) : '—'}</b></td>
                     <td><Conferencia bate={v.conferido} diferenca={v.soma_lancamentos != null && v.saldo != null ? v.saldo - v.soma_lancamentos : null} /></td>
-                  </tr>
-                ))}
+                  </tr>,
+                  aberta === v.venda_id && (
+                    <tr key={`${v.venda_id}-o`}>
+                      <td className="ci-detalhe" colSpan={8}>
+                        <DadoOriginal bruto={originais[v.venda_id]} destaques={[
+                          ['Pedido', 'shortId'], ['Status', 'currentStatus'],
+                          ['Itens (bruto)', 'saleGrossValue.bag'], ['Taxa de entrega', 'saleGrossValue.deliveryFee'],
+                          ['Benefícios', 'benefits.totalValue'], ['Pagamentos', 'payments.methods'],
+                          ['Taxas e comissões', 'billingSummary.billingEntries'], ['Líquido', 'billingSummary.saleBalance'],
+                        ]} />
+                      </td>
+                    </tr>
+                  ),
+                ])}
               </tbody>
               <tfoot>
                 <tr>
@@ -374,6 +422,7 @@ function Lancamentos({ empresaId, versao }) {
   const [soImpacto, setSoImpacto] = useState(false)
   const [itens, setItens] = useState(null)
   const [mostrar, setMostrar] = useState(LANC_PAGINA)
+  const [aberto, setAberto] = useState(null)
 
   useEffect(() => {
     if (!empresaId) return
@@ -438,9 +487,9 @@ function Lancamentos({ empresaId, versao }) {
                 </tr>
               </thead>
               <tbody>
-                {lista.slice(0, mostrar).map(e => (
-                  <tr key={e.id}>
-                    <td className="esq">{e.referencia_em ? dataHora(e.referencia_em) : '—'}</td>
+                {lista.slice(0, mostrar).map(e => [
+                  <tr key={e.id} className="clicavel" onClick={() => setAberto(aberto === e.id ? null : e.id)} title="Clique pra ver o dado original do iFood">
+                    <td className="esq">{aberto === e.id ? '▾ ' : '▸ '}{e.referencia_em ? dataHora(e.referencia_em) : '—'}</td>
                     <td className="esq">
                       {NOME_EVENTO[e.nome] ?? e.nome}
                       <span className="pequeno">{e.nome}{e.percentual != null ? ` · ${e.percentual}%` : ''}{e.metodo_pagamento ? ` · ${e.metodo_pagamento}` : ''}{pendente(e) ? ' · PENDENTE' : ''}</span>
@@ -450,8 +499,19 @@ function Lancamentos({ empresaId, versao }) {
                     <td className={Number(e.valor) < 0 ? 'ci-neg' : 'ci-pos'}><b>{fmtSinal(e.valor)}</b></td>
                     <td>{ddmmaa(e.previsao_pagamento)}</td>
                     <td>{e.impacta_repasse ? <span className="ci-selo ok">Sim</span> : <span className="ci-selo">Não</span>}</td>
-                  </tr>
-                ))}
+                  </tr>,
+                  aberto === e.id && (
+                    <tr key={`${e.id}-o`}>
+                      <td className="ci-detalhe" colSpan={7}>
+                        <DadoOriginal bruto={e.bruto} destaques={[
+                          ['Tipo', 'name'], ['Gatilho', 'trigger'], ['Valor', 'amount.value'],
+                          ['Impacta repasse', 'hasTransferImpact'], ['Período', 'period'],
+                          ['Repasse previsto', 'settlement.expectedDate'], ['Pedido', 'reference.id'],
+                        ]} />
+                      </td>
+                    </tr>
+                  ),
+                ])}
               </tbody>
               <tfoot>
                 <tr>

@@ -85,3 +85,24 @@
 .ci-msg.ok { background: rgba(22,163,74,.10); border: 1px solid rgba(22,163,74,.4); }
 .ci-msg.erro { background: rgba(239,68,68,.10); border: 1px solid rgba(239,68,68,.4); }
 .ci-vazio { font-size: 12.5px; color: var(--text-muted); padding: 10px 0; }
+
+/* Dado original do iFood (prova da origem de cada número) */
+.ci-original { display: flex; flex-direction: column; gap: 8px; }
+.ci-original-titulo { font-size: 12px; font-weight: 800; }
+.ci-original-destaques { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; }
+.ci-original-destaques div {
+  display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 8px; background: var(--card); min-width: 0;
+}
+.ci-original-destaques span { font-size: 10.5px; color: var(--text-muted); }
+.ci-original-destaques code { font-size: 10.5px; color: var(--primary); word-break: break-all; }
+.ci-original-destaques strong {
+  font-size: 12px; font-weight: 700; word-break: break-word; white-space: pre-wrap;
+  font-family: ui-monospace, Consolas, monospace; max-height: 180px; overflow: auto;
+}
+.ci-original summary { cursor: pointer; font-size: 12px; font-weight: 700; }
+.ci-original pre {
+  margin: 6px 0 0; max-height: 360px; overflow: auto; padding: 10px; border-radius: 8px;
+  background: var(--card); border: 1px solid var(--border); font-size: 11px; line-height: 1.45;
+  white-space: pre; font-family: ui-monospace, Consolas, monospace;
+}
