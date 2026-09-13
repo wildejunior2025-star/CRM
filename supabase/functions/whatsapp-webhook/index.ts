@@ -34,6 +34,17 @@ const TEXTO_PEDIR_ENDERECO =
   "e o entregador vai direto na sua porta. 🙂\n\n" +
   "_Se preferir, me diz o *nome da rua*, o *número* e o *bairro* — ou me manda o CEP._"
 
+// Quem vai buscar na loja fala de muitos jeitos — "retirar" era o único que o
+// robô entendia.
+const RE_RETIRADA = /\b(retir\w*|vou buscar|vou pegar a[ií]|vou pegar na loja|eu (busco|pego)|busco a[ií]|pego a[ií]|passo a[ií]|(buscar|pegar) (a[ií]|na loja|no balc[aã]o)|eu mesm[oa] (busco|pego|vou)|n[aã]o precisa entregar)\b/i
+
+/** Depois do nome: endereço (com a saída da retirada à vista) ou, sem entrega, a retirada. */
+function textoDepoisDoCadastro(aceitaDelivery: boolean, enderecoLoja: string, pgtoOpcoes: string): string {
+  return aceitaDelivery
+    ? `${TEXTO_PEDIR_ENDERECO}\n\n🏪 Vai *retirar* na loja? É só me dizer.`
+    : `✅ Cadastro feito!\n\nPode retirar em: *${enderecoLoja}*.\n\nComo vai pagar: ${pgtoOpcoes}? 💳`
+}
+
 // ── "Quero falar com uma pessoa" ─────────────────────────────────────────────
 // O robô de IA não tinha como pedir socorro: se ele não dava conta, continuava
 // tentando até o cliente desistir. Isto abre o chamado que toca no gestor (o
@@ -938,7 +949,7 @@ function tipoEntregaDaConversa(mensagens: any[]): "entrega" | "retirada" | null 
   const userMsgs = mensagens.filter((m: any) => m.role === "user").map((m: any) => (m.content ?? "").toLowerCase())
   for (let i = userMsgs.length - 1; i >= 0; i--) {
     const c = userMsgs[i]
-    if (/\bretir|vou pegar|pegar na loja|buscar na loja/.test(c)) return "retirada"
+    if (RE_RETIRADA.test(c)) return "retirada"
     if (/\bentreg|em casa|delivery/.test(c)) return "entrega"
   }
   return null
@@ -2708,7 +2719,10 @@ serve(async (req) => {
                 return `━━━━━━━━━━━━━\n*${g.nome}* (${quant})\n${ops}${emFalta}`
               }).join("\n\n")
             if (!linhas) continue
-            blocos.push(`▸ ${nomeDoProduto(pid)}:\n${linhas}`)
+            // Com o id: "Açaí CDBOM (Caixa 5 litros)" e "Sorvete CDBOM (Caixa 5
+            // litros)" são quase o mesmo nome, e o modelo mostrou os sabores de
+            // sorvete pra quem pediu açaí (teste 13/09).
+            blocos.push(`▸ ${nomeDoProduto(pid)} [id:${pid}]:\n${linhas}`)
           }
           complementosTexto = blocos.join("\n\n")
         }
@@ -2890,6 +2904,7 @@ ${horarioLojaTexto  ? `- ${horarioLojaTexto.replace(/\*/g, "")}` : (empresaHorar
 🟢 A LOJA ESTÁ ABERTA NESTE MOMENTO — o sistema já conferiu a grade de horários antes de te chamar. NUNCA diga que a loja está fechada, nem repita um aviso de "estamos fechados" que apareça no histórico da conversa: aquilo era de antes. Se o cliente perguntar o horário, informe o da linha acima e nenhum outro.
 ${empresa.chave_pix ? `- PIX: ${empresa.chave_pix} (${empresa.pix_nome ?? ""})` : ""}
 CATÁLOGO: ${catalogoUrl}
+📍 "Vocês entregam em [cidade/bairro]?": NUNCA responda "sim" nem "não" de cabeça — a entrega vai até uma distância da loja e só o endereço diz. Responda que a loja fica em ${empresaEndereco || "—"}, e peça a localização ou rua, número e bairro pra conferir na hora.
 ${aceitaDelivery ? (bairroBloqueado ? `⛔ ENTREGA BLOQUEADA NESTE BAIRRO: a loja NÃO entrega no bairro do cliente (${bairroCliente}). Avise educadamente que ainda não entregam nesse bairro e ofereça RETIRADA no local. NUNCA feche um pedido de ENTREGA para este cliente — só retirada.`
   : enderecoCliente ? `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (já calculada pela distância do endereço do cliente)`
   : taxaMin != null ? `ENTREGA: a taxa depende do endereço — vai de R$ ${taxaMin.toFixed(2)} a R$ ${taxaMax!.toFixed(2)}. ⛔ NUNCA diga um valor exato, e MUITO MENOS "R$ 0,00" ou frete grátis, enquanto não souber o endereço: diga a faixa e peça a rua, o número e o bairro — o sistema calcula a taxa certa na hora de fechar.`
@@ -2903,7 +2918,7 @@ ${totalProdutos > MENU_INTEIRO_ATE ? `⚠️ CATÁLOGO GRANDE: esta loja tem ${t
 • Categorias da loja: ${(catsHorario ?? []).map((c: any) => c.nome).join(", ") || "—"}
 ` : ""}PRODUTOS DISPONÍVEIS${totalProdutos > MENU_INTEIRO_ATE ? " (o que casou com o que ele pediu)" : ""}:
 ${produtos.map(linhaDoCardapio).join("\n") || (totalProdutos > MENU_INTEIRO_ATE ? "Nada casou com o que ele falou — peça a marca e o tamanho, ou ofereça o link do catálogo." : "Nenhum produto cadastrado")}
-${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n` : ""}
+${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n⚠️ Confira pelo [id:] qual produto o cliente pediu antes de mostrar opções. Produto cujo id NÃO aparece neste bloco não tem sabor/complemento pra escolher: adicione direto com atualizar_carrinho, sem perguntar sabor (ex.: açaí em caixa ou balde não é o mesmo produto que o sorvete de mesmo tamanho).\n` : ""}
 CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) => {
   const comps = Array.isArray(i.complementos) && i.complementos.length ? ` (${i.complementos.map((c: any) => c.nome).join(", ")})` : ""
   return `• ${i.nome}${comps} x${i.qtd} = R$ ${(i.qtd * Number(i.preco)).toFixed(2)}`
@@ -3213,7 +3228,13 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     // adicionar o gelo" sem a ação — o cliente acredita, e a sacola fica sem o
     // item (teste da CDBom, 13/09). Uma segunda chamada curta pedindo SÓ a ação
     // custa uma fração do crédito e salva o pedido.
-    if (!acaoMatch && /\b(anotei|anotado|adicionei|adicionad[oa]s?|vou adicionar|coloquei|inclu[ií])\b/i.test(resposta)) {
+    // Também quando ele lista a sacola com preço sem gravar: "Então fica: 2x Pote
+    // 1 litro Flocos — R$ 24,00". Foi assim no cliente que trocou o balde três
+    // vezes (teste 13/09): quatro "confirmações" e a sacola vazia no banco.
+    // O resumo fica de fora — nele a sacola já está salva.
+    const falaDeSacola = /\b(anotei|anotado|adicionei|adicionad[oa]s?|vou adicionar|coloquei|inclu[ií]|troquei|tirei|removi|entao fica|então fica|fica assim|vai ficar|deixa eu confirmar|s[oó] pra confirmar|sua sacola|seu carrinho)\b/i.test(resposta)
+    const listaItemComPreco = /(\b\d+\s*x\s+\S|\bx\s*\d+\b)[^\n]*R\$/i.test(resposta)
+    if (!acaoMatch && !/resumo do pedido/i.test(resposta) && (falaDeSacola || listaItemComPreco)) {
       try {
         const retry = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -3328,8 +3349,8 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             String(acao.nome), acao.email ? String(acao.email) : null,
             SUPABASE_URL, SUPABASE_KEY, indicadorProfileId
           )
-          // Após cadastro, coleta endereço antes de perguntar entrega/retirada
-          resposta = TEXTO_PEDIR_ENDERECO
+          // Após cadastro, coleta endereço — com a saída da retirada à vista
+          resposta = textoDepoisDoCadastro(aceitaDelivery, empresaEndereco || empresaNome, pgtoOpcoes)
 
         } else if (acao.tipo === "pedir_cep") {
           // sem ação — Claude já pediu o CEP na resposta
@@ -3682,6 +3703,52 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           resposta = "⚡ Estamos com um sistema novo por aqui! Seu cadastro é rapidinho e *uma vez só* — no próximo pedido já não precisa. 😊\n\nPra começar, qual o seu *nome*?"
           console.log("[SafeNet] cliente novo — forcei a pergunta do NOME (Haiku pulou o cadastro)")
         }
+      }
+    }
+
+    // ── Fechar com a sacola VAZIA ────────────────────────────────────────────
+    // "Pode fechar" sem nada anotado seguia pro nome, endereço e pagamento — e
+    // lá no fim o pedido não nascia. Melhor dizer agora o que falta.
+    {
+      const tipoAcao = (() => { try { return acaoMatch ? JSON.parse(acaoMatch[1])?.tipo : null } catch { return null } })()
+      // "Prefere entrega?" fica de fora: é também a resposta pra "vocês entregam?".
+      const avancando = /(seu\s*\*?nome|falta s[oó] o endere|como vai pagar|resumo do pedido)/i.test(resposta)
+      if (carrinho.length === 0 && tipoAcao !== "atualizar_carrinho" && avancando) {
+        const { data: sacolaAgora } = await supabase.from("whatsapp_carrinho")
+          .select("items").eq("empresa_id", empresaId).eq("phone", phone).maybeSingle()
+        if (!(sacolaAgora?.items ?? []).length) {
+          resposta = "🛒 Sua sacola ainda está vazia — não consegui anotar nada até agora. 😕\n\nMe diz de novo o *produto* e a *quantidade* que eu coloco pra você!"
+          console.log("[SafeNet] tentou avançar com a sacola vazia")
+        }
+      }
+    }
+
+    // ── O cliente respondeu o NOME e o cadastro não foi feito ─────────────────
+    // O modelo às vezes só agradece ("Obrigado, Teste Robo! 😊") sem a ação:
+    // a conversa parava ali, sem cadastro e sem próxima pergunta (teste 13/09).
+    {
+      const ultimaBotAntes = mensagens.filter((m: any) => m.role === "assistant").pop()?.content ?? ""
+      const tipoAcao = (() => { try { return acaoMatch ? JSON.parse(acaoMatch[1])?.tipo : null } catch { return null } })()
+      const nomeDigitado = text.trim()
+      const pareceNome = /^[A-Za-zÀ-ÿ' .-]{2,40}$/.test(nomeDigitado) && !NAO_E_BAIRRO.test(nomeDigitado) && !RE_RETIRADA.test(nomeDigitado)
+      if (!cliente?.nome && carrinho.length > 0 && /seu\s*\*?nome/i.test(ultimaBotAntes) && !tipoAcao && pareceNome) {
+        await handleCadastrarCliente(supabase, empresaId, phone, phoneLocal, nomeDigitado, null, SUPABASE_URL, SUPABASE_KEY, indicadorProfileId)
+        cliente = { ...(cliente ?? {}), nome: nomeDigitado }
+        resposta = textoDepoisDoCadastro(aceitaDelivery, empresaEndereco || empresaNome, pgtoOpcoes)
+        console.log(`[SafeNet] nome respondido sem cadastrar_cliente — cadastrei "${nomeDigitado}"`)
+      }
+    }
+
+    // ── "Vou buscar" na hora do endereço ─────────────────────────────────────
+    // Depois do cadastro o robô pede o endereço. Quem vai RETIRAR respondia
+    // "vou buscar" e ouvia "manda a localização quando estiver pronto" — o
+    // pedido de retirada de cliente novo não andava.
+    {
+      const ultimaBotAntes = mensagens.filter((m: any) => m.role === "assistant").pop()?.content ?? ""
+      const tipoAcao = (() => { try { return acaoMatch ? JSON.parse(acaoMatch[1])?.tipo : null } catch { return null } })()
+      if (/falta s[oó] o endere/i.test(ultimaBotAntes) && RE_RETIRADA.test(text) && !carrinhoEndereco.rua && tipoAcao !== "fechar_pedido") {
+        resposta = `✅ Beleza, você retira na loja! 🏪\n\nPode retirar em: *${empresaEndereco || empresaNome}*.\n\nComo vai pagar: ${pgtoOpcoes}? 💳`
+        console.log("[SafeNet] cliente escolheu retirada no pedido de endereço")
       }
     }
 
