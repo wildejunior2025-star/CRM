@@ -923,6 +923,102 @@ function tipoEntregaDaConversa(mensagens: any[]): "entrega" | "retirada" | null 
 const MENU_INTEIRO_ATE = 300      // itens: abaixo disso, vai tudo
 const MENU_BUSCA_MAX   = 80       // itens que a busca pode mandar
 
+// ── Preço por quantidade (atacado) e promoção ────────────────────────────────
+// A CDBom vende "picolé R$ 4,00, a partir de 10 sai a R$ 2,50". A Loja Online e
+// a tela de Vender já cobravam assim; o robô não lia `faixas_preco` nem
+// `preco_promocional` — quem pedia 10 picolés pagava R$ 40 em vez de R$ 25, e o
+// combo de R$ 30 saía a R$ 50. Mesma conta de src/lib/precoQuantidade.js.
+const PRODUTO_COLUNAS = "id, nome, preco_venda, preco_promocional, faixas_preco, embalagem, categoria, descricao"
+
+function faixasOrdenadas(faixas: any): { qtd_min: number; preco: number }[] {
+  return (Array.isArray(faixas) ? faixas : [])
+    .map((f: any) => ({ qtd_min: Number(f?.qtd_min) || 0, preco: Number(f?.preco) || 0 }))
+    .filter(f => f.qtd_min > 1 && f.preco > 0)
+    .sort((a, b) => b.qtd_min - a.qtd_min)
+}
+
+/** Preço unitário do produto para essa quantidade: vale o MENOR que couber. */
+function precoPorQuantidade(prod: any, qtd: number): number {
+  const base = Number(prod?.preco_venda) || 0
+  const faixa = faixasOrdenadas(prod?.faixas_preco).find(f => qtd >= f.qtd_min)
+  const promo = Number(prod?.preco_promocional) || 0
+  let preco = base
+  if (promo > 0 && promo < preco) preco = promo
+  if (faixa && faixa.preco < preco) preco = faixa.preco
+  return preco
+}
+
+/**
+ * Refaz o preço de cada item pela verdade do banco. A faixa conta a SOMA do
+ * produto no carrinho: "5 de morango e 5 de chocolate" são duas linhas do mesmo
+ * picolé, e juntas batem os 10 da faixa — igual à montagem da Loja Online.
+ * Item cujo produto não está no catálogo fica como veio.
+ */
+function reprecificarItens(itens: any[], catalogo: any[], precoOpcaoMap: Record<string, number> = {}): void {
+  const porId = new Map<string, any>()
+  for (const p of catalogo ?? []) porId.set(String(p.id), p)
+  const qtdPorProduto: Record<string, number> = {}
+  for (const it of itens ?? []) {
+    const id = String(it?.produto_id ?? "")
+    if (id) qtdPorProduto[id] = (qtdPorProduto[id] ?? 0) + (Number(it.qtd) || 0)
+  }
+  for (const it of itens ?? []) {
+    const prod = porId.get(String(it?.produto_id ?? ""))
+    if (!prod) continue
+    let adicionais = 0
+    for (const c of (Array.isArray(it.complementos) ? it.complementos : [])) {
+      const add = precoOpcaoMap[String(c?.nome ?? "").trim().toLowerCase()]
+      if (add) adicionais += add * Number(c?.qtd ?? 1)
+    }
+    const novo = +(precoPorQuantidade(prod, qtdPorProduto[String(prod.id)]) + adicionais).toFixed(2)
+    if (novo !== Number(it.preco)) console.log(`[Preço] corrigido ${it.nome}: ${it.preco} → ${novo}`)
+    it.preco = novo
+  }
+}
+
+/**
+ * O que o cliente lê depois de pôr o item na sacola: o desconto que já pegou, ou
+ * quanto falta pro próximo degrau quando está perto (7 de 10). Desconto que o
+ * cliente não sabe que existe não vende nada.
+ */
+function avisoDeAtacado(itens: any[], catalogo: any[]): string {
+  const rs = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`
+  const qtdPorProduto = new Map<string, number>()
+  for (const it of itens ?? []) {
+    const id = String(it?.produto_id ?? "")
+    if (id) qtdPorProduto.set(id, (qtdPorProduto.get(id) ?? 0) + (Number(it.qtd) || 0))
+  }
+  const linhas: string[] = []
+  for (const [id, qtd] of qtdPorProduto) {
+    const prod = (catalogo ?? []).find((p: any) => String(p.id) === id)
+    const faixas = faixasOrdenadas(prod?.faixas_preco)
+    if (!prod || !faixas.length) continue
+    const aplicada = faixas.find(f => qtd >= f.qtd_min)
+    const proxima = [...faixas].reverse().find(f => qtd < f.qtd_min)
+    if (proxima && proxima.qtd_min - qtd <= Math.ceil(proxima.qtd_min / 2)) {
+      const falta = proxima.qtd_min - qtd
+      const comSabor = (itens ?? []).some((it: any) => String(it?.produto_id ?? "") === id && Array.isArray(it.complementos) && it.complementos.length > 0)
+      linhas.push(`💡 *${prod.nome}*: com mais ${falta} (${proxima.qtd_min} no total${comSabor ? ", pode misturar os sabores" : ""}) sai a *${rs(proxima.preco)}* cada!`)
+    } else if (aplicada && aplicada.preco < (Number(prod.preco_venda) || 0)) {
+      linhas.push(`💰 *${prod.nome}*: levando ${qtd}, sai a *${rs(aplicada.preco)}* cada (preço de atacado).`)
+    }
+  }
+  return linhas.join("\n")
+}
+
+/** Como o produto aparece na lista do prompt: preço, promoção, atacado e descrição. */
+function linhaDoCardapio(p: any): string {
+  const rs = (v: number) => `R$ ${Number(v).toFixed(2)}`
+  const base = Number(p.preco_venda) || 0
+  const promo = Number(p.preco_promocional) || 0
+  let preco = promo > 0 && promo < base ? `de ${rs(base)} por ${rs(promo)} (PROMOÇÃO)` : rs(base)
+  const faixas = faixasOrdenadas(p.faixas_preco).reverse()
+  if (faixas.length) preco += " | " + faixas.map(f => `a partir de ${f.qtd_min} un: ${rs(f.preco)} cada`).join(" | ")
+  const desc = String(p.descricao ?? "").replace(/\s+/g, " ").trim()
+  const descCurta = desc.length > 110 ? desc.slice(0, 107) + "..." : desc
+  return `• ${p.nome} [id:${p.id}] — ${preco} (${p.embalagem || "un"})${descCurta ? ` — ${descCurta}` : ""}`
+}
+
 const PALAVRAS_SEM_PRODUTO = new Set([
   "quero", "queria", "gostaria", "tem", "temos", "tens", "voces", "vcs", "voce",
   "quanto", "quantos", "custa", "preco", "valor", "para", "pra", "com", "sem",
@@ -977,7 +1073,7 @@ async function catalogoRelevante(
   // A busca devolve id/nome/preço; o prompt precisa da embalagem também, e o
   // preço tem que sair da tabela (a RPC não conhece preço especial de cliente).
   const { data } = await supabase.from("produtos")
-    .select("id, nome, preco_venda, embalagem, categoria")
+    .select(PRODUTO_COLUNAS)
     .eq("empresa_id", empresaId)
     .eq("ativo", true)
     .in("id", [...ids])
@@ -1002,7 +1098,8 @@ async function handleFecharPedido(
   indicadorProfileId: string|null = null,
   taxaEntregaCalc: number|null = null,
   mensagensHist: any[] = [],
-  catalogoProdutos: any[] = []
+  catalogoProdutos: any[] = [],
+  precoOpcaoMap: Record<string, number> = {}
 ): Promise<{ mensagemExtra: string; acaoPromise: Promise<any>; pixCode?: string; pixQrBase64?: string; pixNumero?: string; bloqueioMensagem?: string }> {
   console.log(`[Pedido] fechando para ${phone}, pgto: ${acao.forma_pagamento}`)
   try {
@@ -1025,6 +1122,9 @@ async function handleFecharPedido(
     // não estão no carrinho (o modelo às vezes diz "adicionado" e não grava). Assim
     // o total COBRADO bate com o que foi mostrado. Só adiciona o que falta.
     itens = reconciliarComResumo(itens, mensagensHist, catalogoProdutos)
+    // Preço de novo pela quantidade final: item que veio do resumo ou do ACAO
+    // não passou pelo atualizar_carrinho, e sem isto saía sem o atacado.
+    reprecificarItens(itens, catalogoProdutos, precoOpcaoMap)
     if (itens.length === 0) {
       console.error("[Pedido] abortado — carrinho vazio mesmo após re-fetch e fallback")
       return { mensagemExtra: "⚠️ Não encontrei itens no carrinho. Pode me falar novamente o que gostaria de pedir? 😊", acaoPromise: Promise.resolve() }
@@ -2208,9 +2308,13 @@ serve(async (req) => {
       // Até MENU_INTEIRO_ATE itens vem o cardápio todo; passou disso, esta
       // consulta volta vazia (head) e quem monta o menu é catalogoRelevante.
       supabase.from("produtos")
-        .select("id, nome, preco_venda, embalagem, categoria", { count: "exact" })
+        .select(PRODUTO_COLUNAS, { count: "exact" })
         .eq("empresa_id", empresaId)
         .eq("ativo", true)
+        // Pausado no delivery some da Loja Online e da busca do catálogo grande
+        // (buscar_produto_nome); aqui o robô ainda oferecia.
+        .eq("disponivel_delivery", true)
+        .is("arquivado_em", null)
         .order("nome")
         .limit(MENU_INTEIRO_ATE),
       supabase.from("whatsapp_carrinho")
@@ -2243,13 +2347,22 @@ serve(async (req) => {
     // montagem (lista + complementos + preços) usa `produtos`, o filtro cobre tudo.
     const { data: catsHorario } = await supabase
       .from("categorias")
-      .select("nome, hora_inicio, hora_fim")
+      .select("nome, hora_inicio, hora_fim, dias_semana")
       .eq("empresa_id", empresaId)
     const nowBRT = new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit" })
     const toMinBRT = (t: string) => { const [h, m] = String(t).slice(0, 5).split(":").map(Number); return h * 60 + m }
     const nowMinBRT = toMinBRT(nowBRT)
+    // Dia da semana em Brasília, 0 = domingo (o mesmo getDay() da Loja Online).
+    const diaBRT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+      .indexOf(new Date().toLocaleDateString("en-US", { timeZone: "America/Fortaleza", weekday: "short" }))
     const catForaHorario = new Set<string>()
     for (const c of ((catsHorario ?? []) as any[])) {
+      // Categoria só de alguns dias ("Promoção de Quarta"): a Loja Online já
+      // escondia fora do dia; o robô vendia a promoção a semana inteira.
+      if (Array.isArray(c.dias_semana) && c.dias_semana.length > 0 && !c.dias_semana.map(Number).includes(diaBRT)) {
+        catForaHorario.add(c.nome)
+        continue
+      }
       if (!c.hora_inicio || !c.hora_fim) continue
       const a = toMinBRT(c.hora_inicio), b = toMinBRT(c.hora_fim)
       const disp = a <= b ? (nowMinBRT >= a && nowMinBRT < b) : (nowMinBRT >= a || nowMinBRT < b)
@@ -2295,9 +2408,7 @@ serve(async (req) => {
     // Mapas de preço (verdade do banco) para recalcular o preço no servidor —
     // NUNCA confiar na conta feita pelo modelo.
     let complementosTexto = ""
-    const precoBaseMap: Record<string, number> = {}   // produto_id → preço base
     const precoOpcaoMap: Record<string, number> = {}  // nome da opção (minúsculo) → adicional
-    for (const p of produtos as any[]) precoBaseMap[p.id] = Number(p.preco_venda ?? 0)
     try {
       const produtoIds = produtos.map((p: any) => p.id)
       if (produtoIds.length) {
@@ -2533,13 +2644,20 @@ ${totalProdutos > MENU_INTEIRO_ATE ? `⚠️ CATÁLOGO GRANDE: esta loja tem ${t
 • Se ele pedir algo que não está aí, NUNCA diga que a loja não tem. Diga que vai conferir e peça a MARCA e o TAMANHO ("Skol lata 350?"): o sistema procura com essas palavras e o item aparece aqui na próxima mensagem.
 • Categorias da loja: ${(catsHorario ?? []).map((c: any) => c.nome).join(", ") || "—"}
 ` : ""}PRODUTOS DISPONÍVEIS${totalProdutos > MENU_INTEIRO_ATE ? " (o que casou com o que ele pediu)" : ""}:
-${produtos.map((p: any) => `• ${p.nome} [id:${p.id}] — R$ ${Number(p.preco_venda).toFixed(2)} (${p.embalagem || "un"})`).join("\n") || (totalProdutos > MENU_INTEIRO_ATE ? "Nada casou com o que ele falou — peça a marca e o tamanho, ou ofereça o link do catálogo." : "Nenhum produto cadastrado")}
+${produtos.map(linhaDoCardapio).join("\n") || (totalProdutos > MENU_INTEIRO_ATE ? "Nada casou com o que ele falou — peça a marca e o tamanho, ou ofereça o link do catálogo." : "Nenhum produto cadastrado")}
 ${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n` : ""}
 CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) => {
   const comps = Array.isArray(i.complementos) && i.complementos.length ? ` (${i.complementos.map((c: any) => c.nome).join(", ")})` : ""
   return `• ${i.nome}${comps} x${i.qtd} = R$ ${(i.qtd * Number(i.preco)).toFixed(2)}`
 }).join("\n")}\nSUBTOTAL: R$ ${totalCarrinho.toFixed(2)}`}
 ⚠️ No resumo (PASSO 6) use EXATAMENTE estes preços e este SUBTOTAL do CARRINHO ATUAL. Itens montados (quentinha) já têm os adicionais embutidos no preço — NUNCA use o preço base da lista de produtos nem recalcule.
+💰 PREÇO POR QUANTIDADE (ATACADO) E PROMOÇÃO:
+• Na lista, "a partir de 10 un: R$ 2.50 cada" quer dizer que levando 10 ou mais daquele produto CADA UM sai por esse valor. Abaixo disso vale o preço normal. A quantidade conta a SOMA do produto no carrinho, mesmo com sabores diferentes (5 de morango + 5 de chocolate = 10).
+• Quando o cliente perguntar o preço de um produto assim, diga os DOIS valores ("R$ 4,00 a unidade, ou R$ 2,50 cada a partir de 10").
+• Se ele pedir um pouco menos que a faixa (ex.: 7 ou 8 de 10), avise UMA vez quanto sairia completando a faixa. Não insista.
+• "de R$ X por R$ Y (PROMOÇÃO)" = o valor que vale é o Y.
+• No atualizar_carrinho mande o preço que quiser: o SISTEMA aplica atacado e promoção sozinho, e o CARRINHO ATUAL já mostra o valor certo.
+• A descrição depois do produto (tamanho, avisos, "só na quarta") vale como informação da loja — use pra responder o cliente.
 
 CLIENTE: ${cliente?.nome ? `✅ JÁ CADASTRADO — ${cliente.nome}${enderecoCliente ? ` (Endereço: ${enderecoCliente})` : ""}
 ⛔ PROIBIDO pedir nome ou e-mail deste cliente — ele JÁ é cadastrado. Cumprimente-o pelo nome. Quando ele fechar a sacola, vá DIRETO para entrega/retirada (PASSO 4), NUNCA para o cadastro (PASSO 3).` : "Não cadastrado nesta loja"}
@@ -2839,20 +2957,8 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
 
         if (acao.tipo === "atualizar_carrinho" && Array.isArray(acao.items)) {
           // Recalcula o preço no servidor (verdade do banco) — o modelo erra a conta.
-          // preço = base do produto + soma dos adicionais das opções escolhidas.
-          for (const it of acao.items) {
-            const base = it.produto_id != null ? precoBaseMap[String(it.produto_id)] : undefined
-            if (base != null) {
-              let adicionais = 0
-              for (const c of (Array.isArray(it.complementos) ? it.complementos : [])) {
-                const add = precoOpcaoMap[String(c?.nome ?? "").trim().toLowerCase()]
-                if (add) adicionais += add * Number(c?.qtd ?? 1)
-              }
-              const novo = +(base + adicionais).toFixed(2)
-              if (novo !== Number(it.preco)) console.log(`[Preço] corrigido ${it.nome}: ${it.preco} → ${novo}`)
-              it.preco = novo
-            }
-          }
+          // preço = preço da quantidade (promoção/atacado) + adicionais das opções.
+          reprecificarItens(acao.items, produtos, precoOpcaoMap)
           const carrinhoResult = await handleAtualizar_carrinho(supabase, empresaId, phone, acao.items)
           if (!carrinhoResult.ok) console.error("[Carrinho] falhou:", carrinhoResult)
           // Sempre substitui resposta do Haiku — evita "Vou adicionar..." (REGRA 10 não é respeitada pelo modelo)
@@ -2867,9 +2973,11 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
                 : ""
               return `🍽️ *${i.nome}*${Number(i.qtd) > 1 ? ` x${i.qtd}` : ""}${comps}`
             }).join("\n\n")
-            const cabecalho = temComp
+            const atacado = avisoDeAtacado(acao.items, produtos)
+            const cabecalho = (temComp
               ? `✅ Anotei! Confere se está tudo certo:\n\n${detalhe}`
-              : `✅ ${nomes} adicionado${acao.items.length > 1 ? "s" : ""} ao carrinho!`
+              : `✅ ${nomes} adicionado${acao.items.length > 1 ? "s" : ""} ao carrinho!`)
+              + (atacado ? `\n\n${atacado}` : "")
             // Transição determinística: se o cliente já sinalizou fechar a sacola,
             // não pergunta "quer mais?" — segue direto para cadastro (se novo) ou entrega (se já cliente).
             const querFechar = /\b(pode fechar|só isso|so isso|é só isso|e so isso|só isso mesmo|so isso mesmo|fechar( o)? pedido|finaliza|encerra|é isso|e isso|pode mandar|pode confirmar)\b/i.test(text)
@@ -2960,7 +3068,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           const resultado = await handleFecharPedido(
             supabase, empresaId, phone, phoneLocal, acao, carrinho,
             cliente, empresa, SUPABASE_URL, SUPABASE_KEY, instanceName, carrinhoEndereco,
-            indicadorProfileId, taxaEntregaCalc, mensagens, produtos
+            indicadorProfileId, taxaEntregaCalc, mensagens, produtos, precoOpcaoMap
           )
           if (resultado.bloqueioMensagem) {
             resposta = resultado.bloqueioMensagem
@@ -3088,7 +3196,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           supabase, empresaId, phone, phoneLocal, safeAcao,
           carrinho, cliente, empresa,
           SUPABASE_URL, SUPABASE_KEY, instanceName, carrinhoEndereco,
-          indicadorProfileId, taxaEntregaCalc, mensagens, produtos
+          indicadorProfileId, taxaEntregaCalc, mensagens, produtos, precoOpcaoMap
         )
         if (resultado.bloqueioMensagem) {
           // O bloqueio VAI pro cliente. Antes ele era descartado aqui e ficava
