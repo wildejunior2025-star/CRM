@@ -2762,6 +2762,15 @@ ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome":
      - inclua SEMPRE "complementos": lista com o que ele escolheu, cada um {"nome": "opção", "qtd": 1}. Sem os complementos a cozinha não sabe o que fazer.
   ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Quentinha (M)", "qtd": 1, "preco": 17.00, "complementos": [{"nome": "Feijão Preto", "qtd": 1}, {"nome": "Arroz refogado", "qtd": 1}, {"nome": "Frango Assado", "qtd": 1}]}]}
 
+▸ SABOR (picolé, sorvete, pote — categoria "escolha 1" de sabor) com VÁRIAS unidades:
+  • "escolha 1" vale POR UNIDADE, não pro pedido todo. Cliente que quer 10 picolés de sabores diferentes PODE — nunca diga que só dá um sabor.
+  • Monte UMA LINHA POR SABOR, com a quantidade de cada. "10 Picolé Delícia, 5 de morango e 5 de chocolate" vira:
+  ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Picolé Delícia", "qtd": 5, "preco": 4.00, "complementos": [{"nome": "Morango", "qtd": 1}]}, {"produto_id": "ID_REAL", "nome": "Picolé Delícia", "qtd": 5, "preco": 4.00, "complementos": [{"nome": "Chocolate", "qtd": 1}]}]}
+  • A soma das linhas conta pro preço de atacado — o sistema junta sozinho.
+  • Se ele disser a quantidade e não disser os sabores, mostre a lista e pergunte quantos de cada. Se disser os sabores e não a divisão ("10 de morango e chocolate"), pergunte quantos de cada antes de anotar.
+  • Sabor que ele pedir e NÃO está na lista do produto está em falta hoje: diga que acabou no momento e ofereça os que tem. Nunca anote sabor fora da lista.
+  • Cada produto tem a SUA lista de sabores (o pote de 1 litro pode não ter o mesmo sabor do balde). Use a lista daquele produto.
+
 Cadastrar cliente novo (após coletar o nome — PASSO 3, só depois da sacola fechada):
 ACAO: {"tipo": "cadastrar_cliente", "nome": "[nome]"}
 ⚠️ Emita IMEDIATAMENTE após receber o nome. SEM texto antes. O sistema pede o endereço (rua, número e bairro) em seguida.
