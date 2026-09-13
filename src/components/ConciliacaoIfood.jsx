@@ -76,13 +76,17 @@ async function chamarFuncao(body) {
 function DadoOriginal({ bruto, destaques = [] }) {
   if (!bruto) return <span className="ci-muted">Carregando o dado original…</span>
   const pegar = (obj, caminho) => caminho.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj)
+  // Lista (taxas, pagamentos): um item por linha, pra caber tudo sem rolar.
+  const mostrarValor = v => v === undefined ? '—'
+    : Array.isArray(v) ? v.map(item => JSON.stringify(item)).join('\n')
+    : JSON.stringify(v, null, 1)
   return (
     <div className="ci-original">
       <div className="ci-original-titulo">Resposta original do iFood (API Financial)</div>
       {destaques.length > 0 && (
         <div className="ci-original-destaques">
           {destaques.map(([rot, caminho]) => (
-            <div key={caminho}><span>{rot}</span><code>{caminho}</code><strong>{JSON.stringify(pegar(bruto, caminho), null, 1) ?? '—'}</strong></div>
+            <div key={caminho} className={Array.isArray(pegar(bruto, caminho)) ? 'largo' : undefined}><span>{rot}</span><code>{caminho}</code><strong>{mostrarValor(pegar(bruto, caminho))}</strong></div>
           ))}
         </div>
       )}

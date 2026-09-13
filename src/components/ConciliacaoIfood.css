@@ -91,6 +91,7 @@
 .ci-original { display: flex; flex-direction: column; gap: 8px; }
 .ci-original-titulo { font-size: 12px; font-weight: 800; }
 .ci-original-destaques { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; }
+.ci-original-destaques .largo { grid-column: span 2; }
 .ci-original-destaques div {
   display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--border);
   border-radius: 8px; padding: 6px 8px; background: var(--card); min-width: 0;
@@ -99,7 +100,7 @@
 .ci-original-destaques code { font-size: 10.5px; color: var(--primary); word-break: break-all; }
 .ci-original-destaques strong {
   font-size: 12px; font-weight: 700; word-break: break-word; white-space: pre-wrap;
-  font-family: ui-monospace, Consolas, monospace; max-height: 180px; overflow: auto;
+  font-family: ui-monospace, Consolas, monospace; max-height: 260px; overflow: auto;
 }
 .ci-original summary { cursor: pointer; font-size: 12px; font-weight: 700; }
 .ci-original pre {
