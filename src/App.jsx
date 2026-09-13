@@ -121,7 +121,8 @@ function HostnameRedirect() {
       // devolvia ele pro salão, e daqui ele era empurrado pro /painel de novo —
       // sem parar.
       if (usaPainelDePedidos(perfil)) {
-        if (!pathname.startsWith('/painel') && pathname !== '/login') {
+        // /mensalidade também: é onde o dono paga a mensalidade (mig 0263).
+        if (!pathname.startsWith('/painel') && !pathname.startsWith('/mensalidade') && pathname !== '/login') {
           navigate('/painel', { replace: true })
         }
         return

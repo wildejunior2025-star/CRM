@@ -26,6 +26,7 @@ export default function MensalidadeGate() {
   const [relogio, setRelogio] = useState(() => Date.now())
   const [avisoFechado, setAvisoFechado] = useState(false)
   const [msgJaPaguei, setMsgJaPaguei] = useState(null)
+  const [pagarAberto, setPagarAberto] = useState(false)
 
   const perfil = profile?.perfil
   const admin = perfil === 'admin'
@@ -69,7 +70,8 @@ export default function MensalidadeGate() {
     if (estado.travaAgora) tipo = admin ? 'popup' : 'bloqueio_funcionario'
     else if (admin && estado.fase === 'vence_hoje') tipo = 'faixa_vence_hoje'
     else if (admin && (estado.fase === 'carencia' || estado.fase === 'prazo')) tipo = 'faixa_carencia'
-    if (tipo) supabase.rpc('mensalidade_registrar_aviso', { p_tipo: tipo, p_cobranca: cobranca, p_detalhe: `fase ${estado.fase}; trava ${estado.diaBloqueio ?? '-'}` })
+    // O .then() é o que dispara: sem ele o supabase-js monta a chamada e não envia.
+    if (tipo) supabase.rpc('mensalidade_registrar_aviso', { p_tipo: tipo, p_cobranca: cobranca, p_detalhe: `fase ${estado.fase}; trava ${estado.diaBloqueio ?? '-'}` }).then(() => {})
   }, [situacao, estado.fase, estado.travaAgora, estado.vencimento, estado.diaBloqueio, admin, publica])
 
   if (!participa || publica || !situacao?.ativa) return null
@@ -135,6 +137,20 @@ export default function MensalidadeGate() {
     )
   }
 
+  // ── Admin: pagar pelo aviso, sem sair da tela onde está ────────────────────
+  if (pagarAberto) {
+    return (
+      <Tela>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ fontSize: 19, fontWeight: 900 }}>🧾 Mensalidade</div>
+          <button type="button" aria-label="Fechar" onClick={() => setPagarAberto(false)}
+            style={{ background: 'none', border: 'none', color: 'var(--text)', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>×</button>
+        </div>
+        <MensalidadePagamento situacao={situacao} empresaId={empresa?.id} onPago={() => { setPagarAberto(false); carregar() }} />
+      </Tela>
+    )
+  }
+
   // ── Admin: aviso no canto (vence hoje / carência / prazo) ──────────────────
   if (avisoFechado || !['vence_hoje', 'carencia', 'prazo'].includes(estado.fase)) return null
   const faltam = estado.diaBloqueio ? diasAteTravar(situacao.hoje, estado.diaBloqueio, loja) : null
@@ -156,7 +172,7 @@ export default function MensalidadeGate() {
         <button type="button" aria-label="Fechar aviso" onClick={() => setAvisoFechado(true)}
           style={{ background: 'none', border: 'none', color: '#fff', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
       </div>
-      <button type="button" onClick={() => navigate('/mensalidade')} style={{
+      <button type="button" onClick={() => setPagarAberto(true)} style={{
         marginTop: 8, background: '#fff', color: vermelho ? '#b91c1c' : '#b45309', border: 'none', borderRadius: 8,
         padding: '7px 12px', fontWeight: 800, cursor: 'pointer',
       }}>Pagar agora</button>
