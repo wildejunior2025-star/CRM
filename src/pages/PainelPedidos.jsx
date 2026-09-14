@@ -5000,7 +5000,7 @@ function CadastroRapidoNoChat({ empresaId, telefone, onNomeDoCliente }) {
   )
 }
 
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, onPausarRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onNomeDoCliente, cadastroVersao, pinChat, onEnviarCategoria, enviandoCategoria, roboLigado }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, onPausarRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onNomeDoCliente, cadastroVersao, pinChat, enderecoRobo, onEnviarCategoria, enviandoCategoria, roboLigado }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   // No celular a sacola + o "fechar pedido" abriam empilhados embaixo da
@@ -5251,6 +5251,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
                 salvando={salvandoPedido}
                 cadastroVersao={cadastroVersao}
                 pinChat={pinChat}
+                enderecoRobo={enderecoRobo}
               />
             </>
           )}
@@ -5662,7 +5663,7 @@ const FORMAS_PGTO = [
   ['cartao',      '💳 Cartão'],
 ]
 
-function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar, salvando, cadastroVersao = 0, pinChat = null }) {
+function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar, salvando, cadastroVersao = 0, pinChat = null, enderecoRobo = null }) {
   const g = useTelaGrande()
   const [tipo, setTipo] = useState('entrega')
   const [nome, setNome] = useState(nomeThread || '')
@@ -5764,6 +5765,26 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
     setRuaSug([]); setRuaSugAberta(false)
     setMsgTaxa(null)   // endereço novo, taxa velha não vale mais
   }, [pinChat])
+
+  // O que o ROBÔ já coletou na conversa (whatsapp_carrinho) cai aqui ao vivo:
+  // entrega/retirada, rua, número, bairro, cidade e o pino. Quem assume depois
+  // de o robô travar só confere e finaliza. Só preenche o que veio — campo que
+  // o robô não sabe fica como está.
+  const roboAplicado = useRef(0)
+  useEffect(() => {
+    if (!enderecoRobo?.versao || enderecoRobo.versao === roboAplicado.current) return
+    roboAplicado.current = enderecoRobo.versao
+    if (enderecoRobo.tipo === 'entrega' || enderecoRobo.tipo === 'retirada') setTipo(enderecoRobo.tipo)
+    if (enderecoRobo.rua) setRua(enderecoRobo.rua)
+    if (enderecoRobo.numero) setNumero(enderecoRobo.numero)
+    if (enderecoRobo.bairro) setBairro(enderecoRobo.bairro)
+    if (enderecoRobo.cidade) setCidade(enderecoRobo.cidade)
+    if (enderecoRobo.lat != null && enderecoRobo.lng != null) {
+      setPinDoChat({ lat: Number(enderecoRobo.lat), lng: Number(enderecoRobo.lng) })
+    }
+    setRuaSug([]); setRuaSugAberta(false)
+    setMsgTaxa(null)
+  }, [enderecoRobo])
 
   // CEP preenche rua/bairro/cidade (ViaCEP), igual à tela de Vender.
   async function buscarCep(v) {
@@ -7553,6 +7574,84 @@ export default function PainelPedidos() {
   // Aba da coluna da sacola: montar os itens x fechar o pedido.
   const [abaSacola, setAbaSacola] = useState('itens')
   const [pinChat, setPinChat] = useState(null) // { lat, lng, endereco, versao } — a localização do chat virando endereço
+
+  // ── A SACOLA QUE O ROBÔ ESTÁ MONTANDO, AO VIVO ────────────────────────────
+  // O robô guarda o pedido em whatsapp_carrinho enquanto conversa. Aqui ele
+  // aparece na sacola do gestor (itens) e no "Fechar" (endereço, pino, entrega)
+  // conforme o robô vai preenchendo. Se o robô travar, quem assume encontra
+  // tudo pronto e só finaliza (pedido da loja, 14/09/2026).
+  //
+  // Quem atende manda: se a sacola na tela já foi mexida à mão (diferente da
+  // última versão que veio do robô), o robô não passa por cima.
+  const [enderecoRobo, setEnderecoRobo] = useState(null) // { rua, numero, bairro, cidade, lat, lng, tipo, versao }
+  const sacolaChatRef = useRef([])
+  useEffect(() => { sacolaChatRef.current = sacolaChat }, [sacolaChat])
+  useEffect(() => {
+    setEnderecoRobo(null)
+    if (!chatAberto || !empresa?.id) return
+    const tel = String(chatAberto.slice(chatAberto.indexOf('|') + 1)).replace(/\D/g, '')
+    if (tel.length < 10) return
+    let vivo = true
+    const estado = { atualizado: null, chaveRobo: null, enderecoJson: null }
+    const chaveDe = itens => JSON.stringify((itens ?? []).map(i => [
+      String(i.produto_id ?? i.nome), Number(i.qtd) || 0,
+      (i.complementos ?? []).map(c => String(c.nome ?? '').trim().toLowerCase()).sort().join('|'),
+    ]))
+
+    async function puxar() {
+      const { data } = await supabase.from('whatsapp_carrinho')
+        .select('items, updated_at, tipo_entrega, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, endereco_lat, endereco_lng')
+        .eq('empresa_id', empresa.id).like('phone', `%${tel.slice(-8)}`)
+        .order('updated_at', { ascending: false }).limit(1).maybeSingle()
+      if (!vivo || !data || data.updated_at === estado.atualizado) return
+      estado.atualizado = data.updated_at
+
+      const end = {
+        rua: data.endereco_rua, numero: data.endereco_numero, bairro: data.endereco_bairro,
+        cidade: data.endereco_cidade, lat: data.endereco_lat, lng: data.endereco_lng,
+        tipo: data.tipo_entrega,
+      }
+      const endJson = JSON.stringify(end)
+      if ((end.rua || end.lat != null || end.tipo) && endJson !== estado.enderecoJson) {
+        estado.enderecoJson = endJson
+        setEnderecoRobo({ ...end, versao: Date.now() })
+      }
+
+      const itensRobo = (Array.isArray(data.items) ? data.items : []).filter(i => Number(i?.qtd) > 0)
+      if (!itensRobo.length) return
+      const chaveRobo = chaveDe(itensRobo)
+      const chaveTela = chaveDe(sacolaChatRef.current)
+      if (chaveTela === chaveRobo) { estado.chaveRobo = chaveRobo; return }
+      const intocada = sacolaChatRef.current.length === 0 || chaveTela === estado.chaveRobo
+      if (!intocada) return
+
+      // Preço cheio e faixas do catálogo: é o que deixa a linha recalcular se
+      // quem atende mudar a quantidade depois.
+      let catalogo = []
+      try { catalogo = (await carregarCatalogoCompleto(empresa.id)).produtos ?? [] } catch { /* segue sem */ }
+      if (!vivo) return
+      const linhas = itensRobo.map(i => {
+        const p = catalogo.find(x => String(x.id) === String(i.produto_id))
+        const complementos = (i.complementos ?? []).map(c => ({ nome: c.nome, qtd: c.qtd ?? 1 }))
+        return {
+          sig: `${i.produto_id}::robo::${complementos.map(c => c.nome).sort().join(',')}`,
+          produto_id: i.produto_id ?? null, nome: i.nome, qtd: Number(i.qtd) || 1,
+          precoBase: Number(p?.preco_venda ?? i.preco) || 0,
+          faixas_preco: p?.faixas_preco ?? [],
+          preco_promocional: p?.preco_promocional ?? null,
+          adicionalUnit: 0,
+          complementos,
+          preco: Number(i.preco) || 0,
+        }
+      })
+      estado.chaveRobo = chaveRobo
+      setSacolaChat(linhas)
+    }
+
+    puxar()
+    const id = setInterval(puxar, 5000)
+    return () => { vivo = false; clearInterval(id) }
+  }, [chatAberto, empresa?.id])
   // Sobe de 1 quando o cadastro do cliente muda por aqui (a localização virou
   // endereço). O "Fechar o pedido" lê o cadastro uma vez, na abertura — sem
   // este aviso ele continuava mostrando "Falta o endereço da entrega" com o
@@ -9518,6 +9617,7 @@ export default function PainelPedidos() {
                 onNomeDoCliente={nomearClienteDaConversa}
                 cadastroVersao={cadastroVersao}
                 pinChat={pinChat}
+                enderecoRobo={enderecoRobo}
                 onEnviarCategoria={enviarListaDaCategoria}
                 enviandoCategoria={enviandoLista}
                 roboLigado={roboLigado}
@@ -10356,6 +10456,7 @@ export default function PainelPedidos() {
                 salvando={salvandoPedidoChat}
                 cadastroVersao={cadastroVersao}
                 pinChat={pinChat}
+                enderecoRobo={enderecoRobo}
               />
             )}
           </div>
