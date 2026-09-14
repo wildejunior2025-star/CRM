@@ -7297,6 +7297,15 @@ export default function PainelPedidos() {
       okZap = !!data?.ok
     }
 
+    // Encerra a sacola do robô desta conversa: o pedido já saiu. Apaga a
+    // linha (o admin pode; o vendedor não, e aí vale a marca) e marca pra a
+    // sincronização não reencher a sacola com os mesmos itens.
+    roboEncerrado.current[chatAberto] = ultimoRobo.current[chatAberto] ?? 'fechado'
+    if (tel.length >= 10) {
+      supabase.from('whatsapp_carrinho').delete()
+        .eq('empresa_id', empresa.id).like('phone', `%${tel.slice(-8)}`)
+        .then(() => {}, () => {})
+    }
     setSacolaChat([])
     setSalvandoPedidoChat(false)
     setChatAviso({
@@ -7584,6 +7593,12 @@ export default function PainelPedidos() {
   // Quem atende manda: se a sacola na tela já foi mexida à mão (diferente da
   // última versão que veio do robô), o robô não passa por cima.
   const [enderecoRobo, setEnderecoRobo] = useState(null) // { rua, numero, bairro, cidade, lat, lng, tipo, versao }
+  // Pedido finalizado aqui encerra a sacola do robô daquela conversa. Sem isto
+  // a sacola esvaziava, a sincronização via "vazia" e enchia de novo com os
+  // itens do robô — e saiu um pedido em dobro (#1112 e #1113 da CDBom,
+  // 14/09/2026, 4 s de diferença). Só volta se o robô mexer de novo (pedido novo).
+  const ultimoRobo = useRef({})       // conversa → updated_at visto por último
+  const roboEncerrado = useRef({})    // conversa → updated_at no momento em que o pedido foi fechado
   const sacolaChatRef = useRef([])
   useEffect(() => { sacolaChatRef.current = sacolaChat }, [sacolaChat])
   useEffect(() => {
@@ -7603,7 +7618,16 @@ export default function PainelPedidos() {
         .select('items, updated_at, tipo_entrega, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, endereco_lat, endereco_lng')
         .eq('empresa_id', empresa.id).like('phone', `%${tel.slice(-8)}`)
         .order('updated_at', { ascending: false }).limit(1).maybeSingle()
-      if (!vivo || !data || data.updated_at === estado.atualizado) return
+      if (!vivo || !data) return
+      ultimoRobo.current[chatAberto] = data.updated_at
+      const encerrado = roboEncerrado.current[chatAberto]
+      if (encerrado) {
+        // Fechado antes de ver qualquer versão: a de agora é a do pedido que já saiu.
+        if (encerrado === 'fechado') { roboEncerrado.current[chatAberto] = data.updated_at; return }
+        if (encerrado === data.updated_at) return
+        delete roboEncerrado.current[chatAberto]   // o robô mexeu depois: pedido novo
+      }
+      if (data.updated_at === estado.atualizado) return
       estado.atualizado = data.updated_at
 
       const end = {
