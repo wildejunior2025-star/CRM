@@ -452,7 +452,8 @@ serve(async (req) => {
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${cloudToken}` },
           body: JSON.stringify({
             messaging_product: "whatsapp", recipient_type: "individual",
-            to: numeroFull, type: "text", text: { body: text, preview_url: false },
+            // Prévia do link (miniatura + título), igual ao WhatsApp do celular.
+            to: numeroFull, type: "text", text: { body: text, preview_url: true },
           }),
         })
         data = await res.json().catch(() => ({}))
@@ -471,7 +472,9 @@ serve(async (req) => {
         const res = await fetch(`${apiBase}/message/sendText/${instanceName}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", apikey: apiKey },
-          body: JSON.stringify({ number: numeroFull, text }),
+          // linkPreview: sem ele o link do YouTube saía cru, sem a miniatura e o
+          // título que aparecem quando a loja manda pelo celular (14/09/2026).
+          body: JSON.stringify({ number: numeroFull, text, linkPreview: true }),
         })
         data = await res.json().catch(() => ({}))
         ok = res.ok
