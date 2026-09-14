@@ -50,6 +50,7 @@ const links = [
     to: '/produtos', label: 'Catálogo', roles: ['admin'], mod: 'produtos',
     children: [
       { to: '/produtos', label: 'Produtos', roles: ['admin'], mod: 'produtos' },
+      { to: '/banners-ia', label: 'Banners com IA', roles: ['admin'], mod: 'produtos' },
       // `ifood: true` — só aparece pra quem tem loja conectada no iFood (ver useIfoodAtivo).
       { to: '/cardapio-ifood', label: 'Cardápio iFood', roles: ['admin'], mod: 'produtos', ifood: true },
       { to: '/complementos', label: 'Complementos', roles: ['admin'], mod: 'produtos' },

@@ -1,0 +1,52 @@
+.bia-intro { color: var(--text-muted, #9ca3af); margin: -6px 0 16px; max-width: 760px; line-height: 1.5; }
+.bia-cota { font-size: 13px; font-weight: 700; padding: 6px 12px; border-radius: 999px; background: rgba(124,58,237,.15); color: #a78bfa; }
+.bia-cota-fim { background: rgba(239,68,68,.15); color: #f87171; }
+.bia-erro { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.5); color: #fca5a5; padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; }
+.bia-aviso { background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.5); color: #4ade80; padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; }
+
+.bia-grade { display: grid; grid-template-columns: minmax(300px, 420px) 1fr; gap: 16px; align-items: start; }
+@media (max-width: 980px) { .bia-grade { grid-template-columns: 1fr; } }
+
+.bia-card { background: var(--surface, #16161f); border: 1px solid var(--border, #2a2a3a); border-radius: 14px; padding: 16px; }
+.bia-card h2 { font-size: 15px; margin: 14px 0 8px; }
+.bia-card h2:first-child { margin-top: 0; }
+.bia-sub { font-size: 13px; margin: 14px 0 6px; color: var(--text-muted, #9ca3af); }
+
+.bia-input { width: 100%; box-sizing: border-box; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--border, #2a2a3a); background: var(--bg, #0f0f17); color: var(--text, #e5e7eb); font-size: 14px; }
+
+.bia-produtos { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; max-height: 330px; overflow-y: auto; margin-top: 8px; padding-right: 2px; }
+.bia-produto { display: flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 10px; border: 2px solid transparent; background: var(--bg, #0f0f17); color: var(--text, #e5e7eb); cursor: pointer; text-align: left; }
+.bia-produto.sel { border-color: #7c3aed; background: rgba(124,58,237,.12); }
+.bia-produto img, .bia-sem-foto { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 7px; }
+.bia-sem-foto { display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text-muted, #9ca3af); background: rgba(255,255,255,.04); }
+.bia-produto-nome { font-size: 12px; font-weight: 600; line-height: 1.2; }
+.bia-produto-preco { font-size: 11px; color: #22c55e; font-weight: 700; }
+
+.bia-dica { font-size: 12.5px; color: var(--text-muted, #9ca3af); margin: 8px 0; }
+.bia-vazio { color: var(--text-muted, #9ca3af); font-size: 13px; }
+.bia-gerar { width: 100%; margin-top: 16px; padding: 12px; font-size: 15px; }
+
+.bia-progresso { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.bia-progresso small { color: var(--text-muted, #9ca3af); }
+.bia-barra { height: 8px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden; }
+.bia-barra > div { height: 100%; background: linear-gradient(90deg, #7c3aed, #f59e0b); transition: width .5s ease; }
+
+.bia-placeholder { aspect-ratio: 3 / 2; border-radius: 12px; border: 1px dashed var(--border, #2a2a3a); display: flex; align-items: center; justify-content: center; color: var(--text-muted, #9ca3af); font-size: 14px; }
+.bia-pulsa { animation: bia-pulsa 1.4s ease-in-out infinite; }
+@keyframes bia-pulsa { 50% { opacity: .5; } }
+.bia-canvas { width: 100%; height: auto; border-radius: 12px; }
+
+.bia-campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.bia-campos label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted, #9ca3af); }
+.bia-selo-linha { display: grid; grid-template-columns: 1fr 160px; gap: 8px; margin-bottom: 6px; }
+.bia-acoes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+.bia-biblioteca { margin-top: 16px; }
+.bia-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.bia-item { border: 1px solid var(--border, #2a2a3a); border-radius: 12px; overflow: hidden; background: var(--bg, #0f0f17); }
+.bia-item.off img { opacity: .45; filter: grayscale(.6); }
+.bia-item img { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; display: block; }
+.bia-item-info { padding: 8px 10px 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.bia-item-info small { color: var(--text-muted, #9ca3af); }
+.bia-item-acoes { display: flex; align-items: center; gap: 6px; padding: 8px 10px 10px; }
+.bia-switch { display: flex; align-items: center; gap: 6px; font-size: 12.5px; margin-right: auto; cursor: pointer; }

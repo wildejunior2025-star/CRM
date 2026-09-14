@@ -3,6 +3,7 @@ import React from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useConfirmar } from '../hooks/useConfirmar'
 import { useAuth } from '../hooks/useAuth'
+import { useNavigate } from 'react-router-dom'
 import '../components/Page.css'
 
 const PAGE_SIZE = 50
@@ -231,6 +232,7 @@ function CategoriaCombobox({ categorias, value, onChange, onCriar }) {
 
 export default function Produtos() {
   const { profile, empresa } = useAuth()
+  const navigate = useNavigate()
   const [confirmar, avisoConfirmar] = useConfirmar()
   const [copiadoLink, setCopiadoLink] = useState(false)
 
@@ -1390,6 +1392,10 @@ export default function Produtos() {
       <div className="page-header">
         <h1>Produtos</h1>
         <div className="prod-header-acoes">
+          <button className="btn btn-secondary" onClick={() => navigate('/banners-ia')}
+            title="Crie banners de promoção com IA pra sua Loja Online">
+            ✨ Banners com IA
+          </button>
           <button className="btn btn-secondary" onClick={() => { setCategError(null); setShowCategModal(true) }}>
             ☰ Categorias
           </button>

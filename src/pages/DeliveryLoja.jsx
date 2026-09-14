@@ -160,6 +160,15 @@ export default function DeliveryLoja() {
   const navigate = useNavigate()
 
   const [loja, setLoja] = useState(null)
+  // Banners de promoção da loja (mig 0270), só os ativos.
+  const [banners, setBanners] = useState([])
+  useEffect(() => {
+    if (!loja?.id) return
+    supabase.from('banners').select('id, produto_id, imagem_url, promocao')
+      .eq('empresa_id', loja.id).eq('ativo', true)
+      .order('ordem').order('criado_em', { ascending: false }).limit(10)
+      .then(({ data }) => setBanners(data ?? []), () => {})
+  }, [loja?.id])
   const [produtos, setProdutos] = useState([])
   const [excecoes, setExcecoes] = useState({})  // feriados/folgas da loja (mig 0142)
   const [catOrdem, setCatOrdem] = useState({}) // { nomeCategoria: ordem }
@@ -820,6 +829,25 @@ export default function DeliveryLoja() {
     .sort((a, b) => ((catOrdem[a.categoria] ?? 999) - (catOrdem[b.categoria] ?? 999))
       || ((a.ordem ?? 9999) - (b.ordem ?? 9999))
       || String(a.nome).localeCompare(String(b.nome)))
+
+  // Banners de promoção (mig 0270): só os de produto que está à venda agora —
+  // banner de item pausado levaria o cliente pra lugar nenhum.
+  const bannersVisiveis = useMemo(() => banners.filter(b =>
+    !b.produto_id || produtos.some(p => String(p.id) === String(b.produto_id))), [banners, produtos])
+
+  function abrirBanner(b) {
+    const p = produtos.find(x => String(x.id) === String(b.produto_id))
+    if (!p) return
+    if (p.complementos?.length) { abrirProduto(p); return }
+    // Sem complementos não tem tela de escolha: leva até o card do produto
+    // (o da categoria, que é o último na página) e pisca ele.
+    const cards = document.querySelectorAll(`[data-prod-id="${p.id}"]`)
+    const alvo = cards[cards.length - 1]
+    if (!alvo) return
+    alvo.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    alvo.classList.add('dloja-prod-card--piscar')
+    setTimeout(() => alvo.classList.remove('dloja-prod-card--piscar'), 1800)
+  }
   const todasCats = semCategoria.length > 0 ? [...categorias, '__sem__'] : categorias
   // Mercado/depósito (4.278 itens no maior) abre em prévia; restaurante (o mais
   // gordo tem 218) segue mostrando tudo. O corte é automático — a loja não
@@ -1327,6 +1355,10 @@ export default function DeliveryLoja() {
             </>
           ) : (
           <>
+            {/* Banners de promoção (mig 0270): o primeiro que o cliente vê. */}
+            {bannersVisiveis.length > 0 && (
+              <BannersLoja banners={bannersVisiveis} onAbrir={abrirBanner} />
+            )}
             {/* Destaques da loja (mig 0258): antes das categorias, rolando pro lado. */}
             {destaques.length > 0 && (
               <FaixaDestaques
@@ -1621,6 +1653,48 @@ const PRIMEIRO_LOTE = 50   // ao abrir a categoria inteira
 // os que mais vendem, a promoção do dia. Rola pro LADO de propósito: fica no
 // topo sem empurrar pra baixo o cardápio, que é o que o cliente veio ver.
 // É o mesmo ProdutoCard do resto da loja (preço, promoção, +/−), só que em pé.
+// Carrossel dos banners de promoção (mig 0270). Passa sozinho a cada 5 s e
+// para enquanto o cliente arrasta.
+function BannersLoja({ banners, onAbrir }) {
+  const trilho = useRef(null)
+  const [atual, setAtual] = useState(0)
+  const mexendo = useRef(false)
+
+  useEffect(() => {
+    if (banners.length < 2) return
+    const id = setInterval(() => {
+      const el = trilho.current
+      if (!el || mexendo.current) return
+      const prox = (Math.round(el.scrollLeft / el.clientWidth) + 1) % banners.length
+      el.scrollTo({ left: prox * el.clientWidth, behavior: 'smooth' })
+    }, 5000)
+    return () => clearInterval(id)
+  }, [banners.length])
+
+  return (
+    <section className="dloja-banners" aria-label="Promoções">
+      <div
+        className="dloja-banners-trilho"
+        ref={trilho}
+        onScroll={e => setAtual(Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth))}
+        onPointerDown={() => { mexendo.current = true }}
+        onPointerUp={() => { setTimeout(() => { mexendo.current = false }, 3000) }}
+      >
+        {banners.map(b => (
+          <button key={b.id} type="button" className="dloja-banner-item" onClick={() => onAbrir(b)}>
+            <img src={b.imagem_url} alt={b.promocao || 'Promoção'} loading="lazy" />
+          </button>
+        ))}
+      </div>
+      {banners.length > 1 && (
+        <div className="dloja-banners-pontos">
+          {banners.map((b, i) => <span key={b.id} className={i === atual ? 'on' : ''} />)}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function FaixaDestaques({ produtos, qtdProduto, lojaAberta, abrirProduto, addOne, removeOne, definirQtdProduto }) {
   return (
     <section className="dloja-destaques" aria-label="Destaques">
@@ -1749,7 +1823,7 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove, onQtd }
   const riscado = precoRiscado(produto.preco, produto.preco_promocional)
   const precoMostrado = riscado ? Number(produto.preco_promocional) + minExtra : precoBase
   return (
-    <div className="dloja-prod-card">
+    <div className="dloja-prod-card" data-prod-id={produto.id}>
       <div className="dloja-prod-foto">
         {produto.foto_url
           ? (

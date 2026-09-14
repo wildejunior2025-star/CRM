@@ -1395,3 +1395,56 @@
   font-weight: 700;
   text-align: center;
 }
+
+/* Banners de promoção (mig 0270) */
+.dloja-banners {
+  margin: 4px 0 22px;
+}
+.dloja-banners-trilho {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  border-radius: 16px;
+  scrollbar-width: none;
+}
+.dloja-banners-trilho::-webkit-scrollbar { display: none; }
+.dloja-banner-item {
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.dloja-banner-item img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  border-radius: 16px;
+}
+.dloja-banners-pontos {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.dloja-banners-pontos span {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--dl-text);
+  opacity: .25;
+  transition: width .25s, opacity .25s;
+}
+.dloja-banners-pontos span.on {
+  width: 20px;
+  opacity: .8;
+}
+.dloja-prod-card--piscar {
+  animation: dloja-piscar 0.6s ease-in-out 3;
+}
+@keyframes dloja-piscar {
+  50% { box-shadow: 0 0 0 4px #f59e0b; transform: scale(1.02); }
+}
