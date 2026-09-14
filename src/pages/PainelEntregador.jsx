@@ -979,11 +979,13 @@ export default function PainelEntregador() {
   // da própria loja. Por isso basta filtrar por status e deixar o banco filtrar o resto.
   const carregar = useCallback(async () => {
     if (!user) return
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('pedidos_delivery')
       .select('*')
       .in('status', ['confirmado', 'em_preparo', 'pronto', 'saiu_entrega'])
       .order('created_at')
+    // Sinal ruim na rua: falhou a leitura, fica a lista que já estava (não some tudo).
+    if (error) { setLoading(false); return }
     setPedidos(data ?? [])
     setLoading(false)
   }, [user])
@@ -1005,6 +1007,28 @@ export default function PainelEntregador() {
         () => carregar())
       .subscribe()
     return () => { canal.unsubscribe() }
+  }, [user, carregar])
+
+  // Reserva do Realtime. No celular, com a tela bloqueada ou o app em segundo
+  // plano, o sistema derruba a conexão ao vivo — e ela não volta sozinha. O
+  // motoqueiro abria o app e a lista estava congelada na hora em que ele saiu:
+  // na CDBom (14/09/2026) o Jonathan saiu às 15:45 com 4 pedidos e os que
+  // chegaram depois (#1111, #1112, #1114) nunca apareceram pra ele; a loja
+  // despachou sem entregador. Agora a lista também atualiza sozinha a cada
+  // 20 s e na hora em que o app volta pra frente.
+  useEffect(() => {
+    if (!user) return
+    const id = setInterval(() => { if (document.visibilityState === 'visible') carregar() }, 20000)
+    const aoVoltar = () => { if (document.visibilityState === 'visible') carregar() }
+    document.addEventListener('visibilitychange', aoVoltar)
+    window.addEventListener('focus', aoVoltar)
+    window.addEventListener('online', aoVoltar)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', aoVoltar)
+      window.removeEventListener('focus', aoVoltar)
+      window.removeEventListener('online', aoVoltar)
+    }
   }, [user, carregar])
 
   // Estado da fila (E4). Faz polling curto porque a fila muda no profile de
