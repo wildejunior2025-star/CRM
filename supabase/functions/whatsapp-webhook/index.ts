@@ -1054,6 +1054,73 @@ const normSabor = (s: unknown) => String(s ?? "")
 
 const RE_MISTURADO = /^(misturad[oa]s?|sortid[oa]s?|variad[oa]s?|mix|sabores? variados?|a loja escolhe)$/
 
+// ── SABOR QUE MUDA CONFORME O TAMANHO ────────────────────────────────────────
+// CDBom, 14/09/2026: "quais são os sabores dos sorvetes?" e o robô listou os 15
+// sabores do balde e da caixa. O pote de 200 ml só tem 3. Quando o mesmo
+// produto vem em vários tamanhos com sabores diferentes, a pergunta certa é
+// "qual tamanho?" antes de qualquer lista.
+type FamiliaTamanho = {
+  nome: string                  // "Sorvete CDBOM"
+  chave: string                 // "sorvete" — a palavra que o cliente usa
+  marcas: Set<string>           // palavras que já dizem o tamanho ("pote", "200", "balde")
+  tamanhos: { rotulo: string; preco: number; sabores: string[] }[]
+}
+
+const baseDoNome = (nome: string) => String(nome ?? "").replace(/\([^)]*\)/g, " ").replace(/\s-\s.*$/, "").replace(/\s+/g, " ").trim()
+const rotuloDoTamanho = (nome: string) => {
+  const dentro = (String(nome).match(/\(([^)]*)\)/) ?? [])[1] ?? ""
+  const depois = (String(nome).match(/\)\s*-\s*(.+)$/) ?? [])[1] ?? ""
+  return [dentro, depois].filter(Boolean).join(" - ").trim()
+}
+
+function familiasPorTamanho(produtos: any[], sabores: SaboresPorProduto): FamiliaTamanho[] {
+  const grupos = new Map<string, any[]>()
+  for (const p of produtos) {
+    if (!sabores[p.id]?.disponiveis?.length || !rotuloDoTamanho(p.nome)) continue
+    const k = normSabor(baseDoNome(p.nome))
+    if (k) (grupos.get(k) ?? grupos.set(k, []).get(k)!).push(p)
+  }
+  const familias: FamiliaTamanho[] = []
+  for (const [k, lista] of grupos) {
+    if (lista.length < 2) continue
+    const assinaturas = new Set(lista.map(p => sabores[p.id].disponiveis.map(normSabor).sort().join("|")))
+    if (assinaturas.size < 2) continue // todos os tamanhos têm os mesmos sabores: lista única serve
+    const marcas = new Set<string>()
+    for (const p of lista) {
+      for (const w of normSabor(rotuloDoTamanho(p.nome)).split(" ")) if (w.length >= 2 || /\d/.test(w)) marcas.add(w)
+    }
+    ["litro", "litros", "lt", "l", "ml"].forEach(w => marcas.delete(w)) // "litro" sozinho não escolhe entre 10 e 5
+    familias.push({
+      nome: baseDoNome(lista[0].nome),
+      chave: k.split(" ")[0],
+      marcas,
+      tamanhos: lista.map(p => {
+        const promo = Number(p.preco_promocional)
+        return {
+          rotulo: rotuloDoTamanho(p.nome),
+          preco: promo > 0 && promo < Number(p.preco_venda) ? promo : Number(p.preco_venda),
+          sabores: sabores[p.id].disponiveis,
+        }
+      }).sort((a, b) => b.preco - a.preco),
+    })
+  }
+  return familias
+}
+
+/** Perguntou os sabores de um produto que muda por tamanho, sem dizer o tamanho? */
+function saborSemTamanho(texto: string, familias: FamiliaTamanho[]): FamiliaTamanho | null {
+  const t = normSabor(texto)
+  if (!/\bsabor/.test(t)) return null
+  const palavras = new Set(t.split(" "))
+  for (const f of familias) {
+    const falouDoProduto = palavras.has(f.chave) || palavras.has(`${f.chave}s`) || palavras.has(f.chave.replace(/s$/, ""))
+    if (!falouDoProduto) continue
+    if ([...f.marcas].some(m => palavras.has(m))) return null
+    return f
+  }
+  return null
+}
+
 /**
  * "Misturado": divide a quantidade igualmente entre os sabores DISPONÍVEIS do
  * produto (pedido da loja, 14/09/2026). 40 misturado com Coco, Uva e Morango
@@ -2993,6 +3060,8 @@ serve(async (req) => {
     const precoOpcaoMap: Record<string, number> = {}  // nome da opção (minúsculo) → adicional
     // Sabores de cada produto, pra conferir o que a IA grava (conferirSabores).
     const saboresPorProduto: SaboresPorProduto = {}
+    // Produto em vários tamanhos com sabores diferentes (ver saborSemTamanho).
+    let familiasTamanho: FamiliaTamanho[] = []
     try {
       const produtoIds = produtos.map((p: any) => p.id)
       if (produtoIds.length) {
@@ -3055,6 +3124,7 @@ serve(async (req) => {
             blocos.push(`▸ ${nomeDoProduto(pid)} [id:${pid}]:\n${linhas}`)
           }
           complementosTexto = blocos.join("\n\n")
+          familiasTamanho = familiasPorTamanho(produtos, saboresPorProduto)
         }
       }
     } catch (e) { console.error("[Complementos] erro ao carregar:", e) }
@@ -3244,6 +3314,35 @@ serve(async (req) => {
       return new Response("ok", { headers: corsHeaders })
     }
 
+    // ── "QUAIS OS SABORES DO SORVETE?" SEM DIZER O TAMANHO ──────────────────
+    // Curto-circuito: os sabores dependem do tamanho, então a primeira resposta
+    // é a lista de tamanhos com preço. A IA, com tudo junto no prompt, listava
+    // os sabores do maior tamanho como se valessem pra todos.
+    {
+      const familia = saborSemTamanho(text, familiasTamanho)
+      if (familia) {
+        const brl = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`
+        const respTam = `Temos *${familia.nome}* em mais de um tamanho, e os sabores mudam de um pro outro 😊\n\n`
+          + familia.tamanhos.map(t => `• ${t.rotulo} — ${brl(t.preco)}`).join("\n")
+          + `\n\nQual tamanho você quer? Aí te mando os sabores dele.`
+        await supabase.from("whatsapp_conversas").insert({
+          empresa_id: empresaId, phone, role: "assistant", content: respTam,
+        })
+        await espelharNoChat(supabase, empresaId, phone, respTam, "loja", true)
+        console.log("[Tamanho] perguntou sabores sem tamanho:", familia.nome)
+        if (isTest) {
+          return new Response(JSON.stringify({ ok: true, resposta: respTam }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+        }
+        await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+          body: JSON.stringify({ number: phone, text: respTam }),
+        }).catch(e => console.error("[Tamanho] sendText erro:", e))
+        return new Response("ok", { headers: corsHeaders })
+      }
+    }
+
     // ── System prompt ────────────────────────────────────────────────────────
     const systemPrompt = `Você é o assistente virtual de vendas da ${empresaNome}. Responda sempre em português.
 Seja inteligente e conversacional — entenda o que o cliente quer e responda naturalmente.
@@ -3272,7 +3371,7 @@ ${totalProdutos > MENU_INTEIRO_ATE ? `⚠️ CATÁLOGO GRANDE: esta loja tem ${t
 • Categorias da loja: ${(catsHorario ?? []).map((c: any) => c.nome).join(", ") || "—"}
 ` : ""}PRODUTOS DISPONÍVEIS${totalProdutos > MENU_INTEIRO_ATE ? " (o que casou com o que ele pediu)" : ""}:
 ${cardapioPorCategoria(produtos) || (totalProdutos > MENU_INTEIRO_ATE ? "Nada casou com o que ele falou — peça a marca e o tamanho, ou ofereça o link do catálogo." : "Nenhum produto cadastrado")}
-${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n⚠️ Confira pelo [id:] qual produto o cliente pediu antes de mostrar opções. Produto cujo id NÃO aparece neste bloco não tem sabor/complemento pra escolher: adicione direto com atualizar_carrinho, sem perguntar sabor (ex.: açaí em caixa ou balde não é o mesmo produto que o sorvete de mesmo tamanho).\n` : ""}
+${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n${familiasTamanho.length ? `📏 SABORES QUE MUDAM CONFORME O TAMANHO — nunca liste sabores desses produtos sem saber o tamanho. Se o cliente não disse o tamanho (nem antes na conversa), PERGUNTE primeiro qual tamanho, mostrando tamanhos e preços; depois mostre só os sabores DAQUELE tamanho:\n${familiasTamanho.map(f => `▸ ${f.nome}: ` + f.tamanhos.map(t => `${t.rotulo} (${t.sabores.length} sabores)`).join("; ")).join("\n")}\n` : ""}⚠️ Confira pelo [id:] qual produto o cliente pediu antes de mostrar opções. Produto cujo id NÃO aparece neste bloco não tem sabor/complemento pra escolher: adicione direto com atualizar_carrinho, sem perguntar sabor (ex.: açaí em caixa ou balde não é o mesmo produto que o sorvete de mesmo tamanho).\n` : ""}
 CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) => {
   const comps = Array.isArray(i.complementos) && i.complementos.length ? ` (${i.complementos.map((c: any) => c.nome).join(", ")})` : ""
   return `• ${i.nome}${comps} x${i.qtd} = R$ ${(i.qtd * Number(i.preco)).toFixed(2)}`
