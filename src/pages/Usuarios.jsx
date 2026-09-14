@@ -139,16 +139,21 @@ export default function Usuarios() {
   // E5 — quanto a LOJA fica de cada corrida do motoqueiro. São dois valores
   // independentes: um pras corridas do iFood, outro pras da própria loja. Tem
   // loja que só cobra no iFood e loja que só cobra no delivery próprio.
+  // Cada um pode ser em R$ fixo ou em % da taxa de entrega (mig 0268).
   const CAMPOS_DESCONTO = {
-    ifood: { ativo: 'entregador_desconto_ativo', valor: 'entregador_desconto_valor' },
-    loja: { ativo: 'entregador_desconto_loja_ativo', valor: 'entregador_desconto_loja_valor' },
+    ifood: { ativo: 'entregador_desconto_ativo', valor: 'entregador_desconto_valor', tipo: 'entregador_desconto_tipo' },
+    loja: { ativo: 'entregador_desconto_loja_ativo', valor: 'entregador_desconto_loja_valor', tipo: 'entregador_desconto_loja_tipo' },
   }
 
   async function saveDesconto(p, qual, patch) {
     const campos = CAMPOS_DESCONTO[qual]
+    const tipo = patch.tipo ?? p[campos.tipo] ?? 'valor'
+    let valor = Number(patch.valor ?? p[campos.valor]) || 0
+    if (tipo === 'percentual') valor = Math.min(valor, 100)
     const novo = {
       [campos.ativo]: patch.ativo ?? p[campos.ativo] ?? false,
-      [campos.valor]: patch.valor ?? p[campos.valor] ?? 0,
+      [campos.valor]: valor,
+      [campos.tipo]: tipo,
     }
     setPerfis(prev => prev.map(x => (x.id === p.id ? { ...x, ...novo } : x)))
     const { error } = await supabase.from('profiles').update(novo).eq('id', p.id)
@@ -350,9 +355,19 @@ export default function Usuarios() {
                               <span style={{ width: 38, fontWeight: 700, color: ligado ? 'var(--text)' : 'var(--text-muted, #9ca3af)' }}>{rot}</span>
                               {ligado && (
                                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                  R$
+                                  <select
+                                    value={p[campos.tipo] === 'percentual' ? 'percentual' : 'valor'}
+                                    onChange={(e) => saveDesconto(p, qual, { tipo: e.target.value })}
+                                    title="R$ fixo por corrida ou % da taxa de entrega"
+                                    style={{ width: 52 }}
+                                  >
+                                    <option value="valor">R$</option>
+                                    <option value="percentual">%</option>
+                                  </select>
                                   <input
-                                    type="number" min="0" step="0.50"
+                                    type="number" min="0"
+                                    step={p[campos.tipo] === 'percentual' ? '1' : '0.50'}
+                                    max={p[campos.tipo] === 'percentual' ? '100' : undefined}
                                     value={p[campos.valor] ?? 0}
                                     onChange={(e) => setPerfis(prev => prev.map(x => x.id === p.id ? { ...x, [campos.valor]: e.target.value } : x))}
                                     onBlur={(e) => saveDesconto(p, qual, { valor: Number(e.target.value) || 0 })}

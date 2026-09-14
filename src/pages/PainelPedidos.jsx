@@ -3,7 +3,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { supabase, invocarEdge, fetchAll } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
-import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto } from '../lib/descontoEntrega'
+import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto } from '../lib/descontoEntrega'
 import { precoPorQuantidade, faixaAplicada, menorFaixa } from '../lib/precoQuantidade'
 import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
 import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
@@ -7843,7 +7843,7 @@ export default function PainelPedidos() {
     if (!empresa) return
     supabase
       .from('profiles')
-      .select('id, nome, entregador_desconto_ativo, entregador_desconto_valor, entregador_desconto_loja_ativo, entregador_desconto_loja_valor')
+      .select('id, nome, entregador_desconto_ativo, entregador_desconto_valor, entregador_desconto_tipo, entregador_desconto_loja_ativo, entregador_desconto_loja_valor, entregador_desconto_loja_tipo')
       .eq('empresa_id', empresa.id)
       .eq('perfil', 'entregador')
       .eq('ativo', true)
@@ -10076,17 +10076,16 @@ export default function PainelPedidos() {
                     ))}
                   </div>
 
-                  {/* Desconto que a loja fica por corrida — SÓ nas entregas do iFood */}
-                  {ent?.entregador_desconto_ativo && Number(ent?.entregador_desconto_valor) > 0 && (() => {
-                    const nIfood = concl.filter(p => p.origem === 'ifood').length
-                    const valor = Number(ent.entregador_desconto_valor)
-                    return (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(245,158,11,.12)', border: '1.5px solid #f59e0b', borderRadius: 10, padding: '9px 12px', fontSize: 12.5, color: 'var(--text-muted)' }}>
-                        <span>💰 Desconto da loja (só iFood): {nIfood} × {fmt(valor)}</span>
-                        <strong style={{ color: '#f59e0b', fontSize: 14 }}>{fmt(nIfood * valor)}</strong>
+                  {/* Desconto que a loja fica por corrida — uma faixa pro iFood, outra pra loja */}
+                  {[['iFood', descontos.ifood, concl.filter(p => p.origem === 'ifood')],
+                    ['loja', descontos.loja, concl.filter(p => p.origem !== 'ifood')]].map(([rot, d, ps]) => (
+                    d && ps.length > 0 ? (
+                      <div key={rot} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(245,158,11,.12)', border: '1.5px solid #f59e0b', borderRadius: 10, padding: '9px 12px', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                        <span>💰 Desconto da loja ({rot}): {ps.length} × {d.pct ? `${textoDoDesconto(d)} da taxa` : textoDoDesconto(d)}</span>
+                        <strong style={{ color: '#f59e0b', fontSize: 14 }}>{fmt(ps.reduce((s, p) => s + descontoDoPedido(descontos, p), 0))}</strong>
                       </div>
-                    )
-                  })()}
+                    ) : null
+                  ))}
 
                   {rota.length > 0 && (
                     <>

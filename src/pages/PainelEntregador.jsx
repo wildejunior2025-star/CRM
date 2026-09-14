@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { separarItem } from '../lib/itensPedido'
-import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto } from '../lib/descontoEntrega'
+import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto } from '../lib/descontoEntrega'
 
 // Cada aba tem seu endereço (/entregas?aba=minhas). O motoqueiro sai pro Waze,
 // pro iFood, atende o telefone — e quando volta o celular já descarregou a
@@ -1584,10 +1584,10 @@ export default function PainelEntregador() {
                         loja vê os dois, quem só usa um vê só o dele. */}
                     {[['iFood', descontos.ifood, base.filter(p => p.origem === 'ifood')],
                       ['loja', descontos.loja, base.filter(p => p.origem !== 'ifood')]].map(([rot, val, ps]) => (
-                      val > 0 && ps.length > 0 ? (
+                      val && ps.length > 0 ? (
                         <div key={rot} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(245,158,11,.10)', border: '1px solid #f59e0b', borderRadius: 12, padding: '9px 14px', fontSize: 12.5, color: 'var(--text-muted)' }}>
-                          <span>{rot}: {fmt(val)}/corrida já descontado · {ps.length} corrida{ps.length > 1 ? 's' : ''}</span>
-                          <strong style={{ color: '#f59e0b' }}>−{fmt(ps.length * val)}</strong>
+                          <span>{rot}: {val.pct ? `${textoDoDesconto(val)} da taxa` : textoDoDesconto(val)}/corrida já descontado · {ps.length} corrida{ps.length > 1 ? 's' : ''}</span>
+                          <strong style={{ color: '#f59e0b' }}>−{fmt(ps.reduce((s, p) => s + descontoDoPedido(descontos, p), 0))}</strong>
                         </div>
                       ) : null
                     ))}

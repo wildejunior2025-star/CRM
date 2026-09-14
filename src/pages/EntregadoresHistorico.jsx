@@ -592,7 +592,7 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
         if (faixa.ate) q = q.lte('created_at', faixa.ate)
         return q.order('created_at', { ascending: false })
       }),
-      supabase.from('profiles').select('nome, entregador_desconto_ativo, entregador_desconto_valor, entregador_desconto_loja_ativo, entregador_desconto_loja_valor').eq('id', id).maybeSingle(),
+      supabase.from('profiles').select('nome, entregador_desconto_ativo, entregador_desconto_valor, entregador_desconto_tipo, entregador_desconto_loja_ativo, entregador_desconto_loja_valor, entregador_desconto_loja_tipo').eq('id', id).maybeSingle(),
     ])
     setPedidos(pd || [])
     setPerfil(pf || null)
