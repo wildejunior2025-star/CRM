@@ -714,6 +714,17 @@ export async function responderSemIA({
       return false
     }
 
+    // Áudio, foto sem legenda, figurinha, vídeo, documento, localização: chegam
+    // só como a marca ("🎤 Áudio"), sem transcrever. Responder isso era o robô
+    // "ouvindo" um áudio que ele não ouviu — "Essa eu não sei te responder" em
+    // cima do pedido do cliente (Zebu, 12-14/09). Quem atende abre e ouve.
+    // Foto COM legenda ("📷 Foto — quanto custa?") segue: a legenda é texto.
+    const marca = mensagem.trim()
+    if (marca === "📷 Foto" || /^(🎤 Áudio|🙂 Figurinha|🎬 Vídeo|📄 |📍 Localização)/u.test(marca)) {
+      console.log("[link] mídia sem texto, robô calado:", phone)
+      return false
+    }
+
     const link = `https://lojaonline.fwcinter.com/${slug}?t=${telefoneParaLink(phone)}`
 
     // Os dias que a loja marcou na mão (feriado que ela fecha, folga, ponto).
