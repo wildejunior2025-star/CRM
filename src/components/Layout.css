@@ -291,3 +291,7 @@
 @media (prefers-reduced-motion: reduce) {
   .sidebar-chamado { animation: none; }
 }
+
+/* Configurar Loja (mig 0273) */
+.cfg-voltar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 8500; background: var(--primary); color: var(--primary-contrast); border: none; border-radius: 999px; padding: 10px 18px; font-size: 14px; font-weight: 700; box-shadow: 0 10px 30px rgba(0,0,0,.3); cursor: pointer; white-space: nowrap; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis; }
+.sidebar-cfg-pend { margin-left: 6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--danger, #dc2626); color: #fff; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }

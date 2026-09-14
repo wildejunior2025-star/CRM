@@ -219,6 +219,7 @@ const ConfirmarLocal = lazy(() => import('./pages/ConfirmarLocal'))
 const PaginaNaoEncontrada = lazy(() => import('./pages/PaginaNaoEncontrada'))
 const Landing = lazy(() => import('./pages/Landing'))
 const TourSistema = lazy(() => import('./pages/TourSistema'))
+const ConfigurarLoja = lazy(() => import('./pages/ConfigurarLoja'))
 
 export default function App() {
   // lojaonline.fwcinter.com — vitrine pública da loja (sem login).
@@ -364,6 +365,10 @@ export default function App() {
             <Route
               path="fidelidade"
               element={<ProtectedRoute roles={['admin']} modulo="fidelidade"><Fidelidade /></ProtectedRoute>}
+            />
+            <Route
+              path="configurar-loja"
+              element={<ProtectedRoute roles={['admin']}><ConfigurarLoja /></ProtectedRoute>}
             />
             <Route
               path="minha-loja"

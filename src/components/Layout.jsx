@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate, useMatch } from 'react-router-dom'
 import { useTheme } from '../hooks/useTheme'
 import { useAuth } from '../hooks/useAuth'
 import { moduloVisivel, moduloBloqueado } from '../lib/modulos'
 import { useIfoodAtivo } from '../hooks/useIfoodAtivo'
 import { useChamados } from '../hooks/useChamados'
+import { useConfigurarLoja } from '../hooks/useConfigurarLoja'
 import ThemeToggle from './ThemeToggle'
 import SubscriptionGate from './SubscriptionGate'
 import InstallPWA from './InstallPWA'
@@ -17,6 +18,9 @@ import './Layout.css'
 // (ver src/lib/modulos.js). Itens sem `mod` (Dashboard) ficam sempre visíveis.
 const links = [
   { group: 'Operações' },
+  // Loja nova: o passo a passo fica no topo até terminar (mig 0273). Depois
+  // mora em Minha Loja, pra quem quiser revisar.
+  { to: '/configurar-loja', label: 'Configurar Loja', roles: ['admin'], cfg: 'pendente' },
   { to: '/', label: 'Dashboard', end: true, roles: ['admin'] },
   {
     // "Vendas física" saiu: quem vende no balcão usa Mesa/Balcão (Serviço
@@ -63,6 +67,7 @@ const links = [
   {
     to: '/minha-loja', label: 'Minha Loja', roles: ['admin'], mod: 'delivery',
     children: [
+      { to: '/configurar-loja', label: 'Configurar Loja', roles: ['admin'], cfg: 'concluido' },
       { to: '/raio-entrega', label: 'Raio de Entrega', roles: ['admin'] },
       { to: '/loja-horarios', label: 'Horários', roles: ['admin'] },
       { to: '/loja-pagamento', label: 'Pagamento', roles: ['admin'] },
@@ -136,6 +141,31 @@ export default function Layout() {
   )
   const location = useLocation()
   const navigate = useNavigate()
+  const cfgLoja = useConfigurarLoja({ ativo: profile?.perfil === 'admin' })
+  const cfgPendente = !!cfgLoja.status && !cfgLoja.concluido
+  const cfgFaltam = cfgLoja.pendentesObrigatorias.length
+  const cfgVisivel = (link) => !link.cfg || (link.cfg === 'pendente' ? cfgPendente : !cfgPendente)
+
+  // Loja nova que ainda não terminou: ao entrar no sistema cai no passo a
+  // passo. Uma vez por sessão — se ele sair pra outra tela, não é empurrado de volta.
+  useEffect(() => {
+    if (!cfgPendente || location.pathname !== '/') return
+    try {
+      if (sessionStorage.getItem('cfg_loja_auto')) return
+      sessionStorage.setItem('cfg_loja_auto', '1')
+    } catch { return }
+    navigate('/configurar-loja', { replace: true })
+  }, [cfgPendente, location.pathname, navigate])
+
+  // Veio do passo a passo pra alguma tela: um botão leva de volta.
+  const [cfgVoltar, setCfgVoltar] = useState(false)
+  // O número vermelho do menu confere de novo a cada tela enquanto falta
+  // coisa: é salvando em outra tela que a etapa se resolve.
+  const { recarregar: cfgRecarregar } = cfgLoja
+  useEffect(() => { if (cfgPendente) cfgRecarregar() }, [location.pathname]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    try { setCfgVoltar(!!sessionStorage.getItem('cfg_loja_voltar') && location.pathname !== '/configurar-loja') } catch { setCfgVoltar(false) }
+  }, [location.pathname])
   const [menuOpen, setMenuOpen] = useState(false)
   // Todos os submenus começam FECHADOS (mais limpo). Abre na setinha quando quiser.
   const [expandidos, setExpandidos] = useState(() => new Set())
@@ -159,7 +189,7 @@ export default function Layout() {
   // Módulo BLOQUEADO continua aparecendo (com cadeado) — é o que faz o dono
   // descobrir que existe e querer o upgrade. Só o OCULTO some daqui.
   const porPerfilEModulo = links.filter(
-    (link) => link.group || (link.roles?.includes(profile?.perfil) && moduloVisivel(empresa, link.mod) && (!link.ifood || ifoodAtivo))
+    (link) => link.group || (link.roles?.includes(profile?.perfil) && moduloVisivel(empresa, link.mod) && (!link.ifood || ifoodAtivo) && cfgVisivel(link))
   )
   // Remove cabeçalhos de grupo que ficaram sem nenhum item visível abaixo.
   const visibleLinks = porPerfilEModulo.filter((link, i) => {
@@ -238,7 +268,7 @@ export default function Layout() {
                 {expandidos.has(link.to) && (
                   <div style={{ paddingLeft: 12 }}>
                     {link.children
-                      .filter(c => c.roles?.includes(profile?.perfil) && moduloVisivel(empresa, c.mod) && (!c.ifood || ifoodAtivo))
+                      .filter(c => c.roles?.includes(profile?.perfil) && moduloVisivel(empresa, c.mod) && (!c.ifood || ifoodAtivo) && cfgVisivel(c))
                       .map(child => (
                         <NavLink
                           key={child.to}
@@ -267,6 +297,9 @@ export default function Layout() {
                 style={moduloBloqueado(empresa, link.mod) ? { opacity: .6 } : undefined}
               >
                 {link.label}
+                {link.cfg === 'pendente' && cfgFaltam > 0 && (
+                  <span className="sidebar-cfg-pend" title={`${cfgFaltam} etapa${cfgFaltam > 1 ? 's' : ''} obrigatória${cfgFaltam > 1 ? 's' : ''} faltando`}>{cfgFaltam}</span>
+                )}
                 {moduloBloqueado(empresa, link.mod) && <span style={{ marginLeft: 6 }} title="Não incluído no seu plano">🔒</span>}
               </NavLink>
             )
@@ -300,6 +333,12 @@ export default function Layout() {
       {/* Fica fora do <main> de propósito: é fixo na tela e acompanha o dono em
           qualquer página do Portal, sem depender de qual tela está aberta. */}
       <AssistenteLoja />
+
+      {cfgVoltar && (
+        <button type="button" className="cfg-voltar" onClick={() => navigate('/configurar-loja')}>
+          ← Voltar pro passo a passo{cfgPendente && cfgFaltam > 0 ? ` (faltam ${cfgFaltam})` : ''}
+        </button>
+      )}
 
       <InstallPWA />
     </div>

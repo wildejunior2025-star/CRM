@@ -60,6 +60,18 @@ export default function AssistenteLoja() {
   }, [])
   useEffect(() => { if (aberto) inputRef.current?.focus() }, [aberto])
 
+  // Outras telas abrem o balão já com o começo da pergunta (o "Tenho uma
+  // dúvida" do Configurar Loja).
+  useEffect(() => {
+    const abrir = (e) => {
+      setAberto(true)
+      const p = e?.detail?.pergunta
+      if (p) setTexto(p)
+    }
+    window.addEventListener('assistente-loja:abrir', abrir)
+    return () => window.removeEventListener('assistente-loja:abrir', abrir)
+  }, [])
+
   // Busca o histórico só na primeira vez que ele abre o balão. Buscar no
   // carregamento do sistema seria uma consulta a mais em toda tela, pra uma
   // caixa que na maioria dos dias nem é aberta.
