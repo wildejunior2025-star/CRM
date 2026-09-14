@@ -4099,6 +4099,17 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       resposta = "Desculpe, não entendi bem. Pode repetir? 😊"
     }
 
+    // PRIMEIRO CONTATO: ninguém (robô ou loja) tinha falado com este número
+    // antes desta resposta. Agenda o vídeo tutorial pra 5 min depois — o worker
+    // tutorial-followup só manda se o cliente continuar calado (mig 0269).
+    // A unique empresa+telefone garante uma vez só na vida.
+    if (!retomada && !url.searchParams.get("test") && !mensagensRaw.some((m: any) => m.role === "assistant")) {
+      await supabase.from("tutorial_followup").upsert({
+        empresa_id: empresaId, phone,
+        agendado_para: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      }, { onConflict: "empresa_id,phone", ignoreDuplicates: true }).then(() => {}, () => {})
+    }
+
     // Salva resposta no histórico e desconta crédito sempre; em teste pula envio ao WhatsApp
     await Promise.all([
       supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: resposta }),

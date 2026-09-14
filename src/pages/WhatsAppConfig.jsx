@@ -108,6 +108,10 @@ export default function WhatsAppConfig() {
   // "Já abrimos!" pra quem chamou com a loja fechada no mesmo dia (mig 0267).
   const [avisoAbertura,   setAvisoAbertura]   = useState(true)
   const [salvandoAviso,   setSalvandoAviso]   = useState(false)
+  // Vídeo tutorial pro cliente de primeiro contato que some (mig 0269).
+  const [tutorialAtivo,   setTutorialAtivo]   = useState(true)
+  const [tutorialUrl,     setTutorialUrl]     = useState('')
+  const [salvandoTutorial, setSalvandoTutorial] = useState(false)
   const [iaNome,          setIaNome]          = useState('Assistente')
   const [iaInstrucoes,    setIaInstrucoes]    = useState('')
   const [savingIa,        setSavingIa]        = useState(false)
@@ -171,6 +175,8 @@ export default function WhatsAppConfig() {
       setIaAtivo(data.ia_ativo ?? false)
       setLinkAtivo(data.resposta_link_ativo ?? false)
       setAvisoAbertura(data.aviso_abertura_ativo ?? true)
+      setTutorialAtivo(data.tutorial_ativo ?? true)
+      setTutorialUrl(data.tutorial_url ?? '')
       setLinkTexto(data.resposta_link_texto ?? '')
       setIaNome(data.ia_nome ?? 'Assistente')
       setIaInstrucoes(data.ia_instrucoes ?? '')
@@ -496,6 +502,25 @@ export default function WhatsAppConfig() {
       return
     }
     setIaSaveMsg({ type: 'success', text: novoValor ? 'Aviso de abertura ligado.' : 'Aviso de abertura desligado.' })
+    setTimeout(() => setIaSaveMsg(null), 2500)
+  }
+
+  async function salvarTutorial(patch) {
+    if ('tutorial_ativo' in patch) setTutorialAtivo(patch.tutorial_ativo)
+    setSalvandoTutorial(true)
+    setIaSaveMsg(null)
+    const { error } = await supabase
+      .from('whatsapp_config')
+      .upsert({ empresa_id: profile.empresa_id, ...patch }, { onConflict: 'empresa_id' })
+    setSalvandoTutorial(false)
+    if (error) {
+      setIaSaveMsg({ type: 'error', text: error.message })
+      if ('tutorial_ativo' in patch) setTutorialAtivo(!patch.tutorial_ativo)
+      return
+    }
+    setIaSaveMsg({ type: 'success', text: 'tutorial_ativo' in patch
+      ? (patch.tutorial_ativo ? 'Vídeo tutorial ligado.' : 'Vídeo tutorial desligado.')
+      : 'Link do vídeo salvo.' })
     setTimeout(() => setIaSaveMsg(null), 2500)
   }
 
@@ -931,6 +956,41 @@ export default function WhatsAppConfig() {
                 </small>
               </div>
             </label>
+          )}
+
+          {iaAtivo && (
+            <label className="wa-checkbox-row" style={{ marginTop: 12 }}>
+              <input
+                type="checkbox"
+                checked={tutorialAtivo}
+                disabled={salvandoTutorial}
+                onChange={(e) => salvarTutorial({ tutorial_ativo: e.target.checked })}
+              />
+              <div className="wa-checkbox-text">
+                <span>Mandar vídeo tutorial pra cliente novo</span>
+                <small>
+                  Quem fala com a loja <strong>pela primeira vez</strong> e não responde em 5 minutos
+                  recebe <em>"Tá com dificuldade de comprar pelo link? Assiste esse tutorial"</em> com
+                  o vídeo. Uma vez só por cliente. Não manda se ele respondeu, já pediu ou alguém da
+                  loja assumiu a conversa.
+                </small>
+              </div>
+            </label>
+          )}
+
+          {iaAtivo && tutorialAtivo && (
+            <div className="wa-input-group" style={{ marginTop: 8 }}>
+              <label htmlFor="wa-tutorial-url">Link do vídeo (YouTube)</label>
+              <input
+                id="wa-tutorial-url"
+                type="url"
+                placeholder="Vazio = vídeo padrão da FWC"
+                value={tutorialUrl}
+                onChange={(e) => setTutorialUrl(e.target.value)}
+                onBlur={(e) => salvarTutorial({ tutorial_url: e.target.value.trim() || null })}
+              />
+              <span className="wa-hint">Deixe em branco pra usar o tutorial da FWC.</span>
+            </div>
           )}
 
           {iaSaveMsg && (
