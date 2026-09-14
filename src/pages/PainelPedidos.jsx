@@ -4,6 +4,7 @@ import { useTheme } from '../hooks/useTheme'
 import { supabase, invocarEdge, fetchAll } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto } from '../lib/descontoEntrega'
+import { tocarPedidoNovo } from '../lib/somChamado'
 import { precoPorQuantidade, faixaAplicada, menorFaixa } from '../lib/precoQuantidade'
 import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
 import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
@@ -144,28 +145,10 @@ function getAudioCtx() {
   return _audioCtx
 }
 
-function tocarSom() {
-  try {
-    const ctx = getAudioCtx()
-    if (ctx.state === 'suspended') ctx.resume()
-
-    // 3 bipes curtos em sequência
-    const bipes = [0, 0.18, 0.36]
-    bipes.forEach(offset => {
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.frequency.setValueAtTime(880, ctx.currentTime + offset)
-      gain.gain.setValueAtTime(0.28, ctx.currentTime + offset)
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.14)
-      osc.start(ctx.currentTime + offset)
-      osc.stop(ctx.currentTime + offset + 0.14)
-    })
-  } catch {
-    // Web Audio não disponível — ignora silenciosamente
-  }
-}
+// Pedido novo = a campainha "triririn" (o chamado de atendente é que faz os
+// bipes). Mora em lib/somChamado.js junto do outro, pra os dois nunca ficarem
+// parecidos.
+const tocarSom = tocarPedidoNovo
 
 // O que mudou entre as duas listas, em palavras de balcão.
 //
@@ -203,7 +186,7 @@ function diffDeItens(antes, depois) {
 // Campainha da ALTERAÇÃO de pedido — de propósito nada parecida com a de
 // pedido novo.
 //
-// Pedido novo são 3 bipes curtos e agudos (880 Hz). Se a alteração tocasse
+// Pedido novo é a campainha "triririn". Se a alteração tocasse
 // igual, a pessoa aceitaria no automático achando que é venda chegando — e
 // alteração não é venda nova: é um pedido que pode já estar na garupa da moto,
 // e responder errado manda o cliente esperar um item que ninguém vai fazer.

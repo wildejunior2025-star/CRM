@@ -1,16 +1,19 @@
-// Som do CHAMADO DE ATENDENTE — de propósito diferente do som de pedido novo.
+// Os dois sons do gestor, de propósito bem diferentes um do outro.
 //
-// Pedido novo são três bipes curtos e agudos (880 Hz). O chamado é uma
-// CAMPAINHA de telefone antigo: dois martelos batendo rápido no sino
-// ("trin-trin-trin"), três toques com respiro entre eles. Alto e insistente —
-// tem gente parada no WhatsApp esperando alguém responder, e o balcão está de
-// costas pro computador.
+// PEDIDO NOVO é a CAMPAINHA de telefone antigo: dois martelos batendo rápido no
+// sino ("trin-trin-trin"). Alto e insistente — é venda chegando, e o balcão
+// está de costas pro computador.
+//
+// CHAMADO DE ATENDENTE (cliente no WhatsApp pedindo uma pessoa) são três bipes
+// curtos e agudos ("tu-tu-tu").
+//
+// Até 14/09/2026 era o contrário; a troca foi pedido da loja.
 let _ctx = null
 
 function ctxAudio() {
   if (!_ctx) {
     _ctx = new (window.AudioContext || window.webkitAudioContext)()
-    // O navegador só deixa tocar depois de um gesto do usuário. Como o chamado
+    // O navegador só deixa tocar depois de um gesto do usuário. Como o aviso
     // chega sozinho, o desbloqueio fica pendurado em qualquer clique.
     const soltar = () => { if (_ctx.state === 'suspended') _ctx.resume() }
     document.addEventListener('click', soltar)
@@ -22,10 +25,11 @@ function ctxAudio() {
 
 const TOQUE_S = 0.85   // duração de cada "trinnn"
 const PAUSA_S = 0.28   // respiro entre um toque e outro
-const TOQUES  = 3
 const BATIDAS = 26     // batidas do martelo por segundo — é o que faz o "trin"
 
-export function tocarChamado() {
+// Campainha ("triririn"). `toques` × 1,13 s — o loop do pedido novo repete a
+// cada 3 s, então ele usa 2 toques pra um não atropelar o outro.
+export function tocarCampainha(toques = 3) {
   try {
     const ctx = ctxAudio()
     if (ctx.state === 'suspended') ctx.resume()
@@ -39,7 +43,7 @@ export function tocarChamado() {
     mestre.connect(limite)
     limite.connect(ctx.destination)
 
-    for (let i = 0; i < TOQUES; i++) {
+    for (let i = 0; i < toques; i++) {
       const t0 = ctx.currentTime + i * (TOQUE_S + PAUSA_S)
       const t1 = t0 + TOQUE_S
 
@@ -82,3 +86,27 @@ export function tocarChamado() {
     // Sem Web Audio (navegador antigo, aba sem permissão): o aviso visual fica.
   }
 }
+
+// Três bipes curtos e agudos (880 Hz) — "tu-tu-tu".
+export function tocarBipes() {
+  try {
+    const ctx = ctxAudio()
+    if (ctx.state === 'suspended') ctx.resume()
+    ;[0, 0.18, 0.36].forEach(offset => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.frequency.setValueAtTime(880, ctx.currentTime + offset)
+      gain.gain.setValueAtTime(0.28, ctx.currentTime + offset)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.14)
+      osc.start(ctx.currentTime + offset)
+      osc.stop(ctx.currentTime + offset + 0.14)
+    })
+  } catch {
+    // Web Audio não disponível — o aviso visual fica.
+  }
+}
+
+export const tocarPedidoNovo = () => tocarCampainha(2)
+export const tocarChamado = tocarBipes
