@@ -5176,7 +5176,11 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
           {/* Pausar sem sair do gestor (antes só dava pelo Portal → Conversas).
               Pausa de vez, até alguém devolver: quem aperta aqui decidiu
               atender essa pessoa na mão. */}
-          {!botPausado && roboLigado && onPausarRobo && thread.canal === 'whatsapp' && (
+          {/* Conversa que começou na Loja Online e continuou no WhatsApp fica
+              com o canal da primeira (lojaonline), mas o robô fala nela. Vale
+              o robô ter falado, não o canal. */}
+          {!botPausado && roboLigado && onPausarRobo
+            && (thread.canal === 'whatsapp' || (thread.msgs ?? []).some(m => m.bot)) && (
             <button type="button" onClick={onPausarRobo}
               title="O robô para de responder este cliente até você devolver a conversa"
               style={{
