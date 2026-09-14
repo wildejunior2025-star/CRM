@@ -1025,6 +1025,64 @@ function precoPorQuantidade(prod: any, qtd: number): number {
  * picolé, e juntas batem os 10 da faixa — igual à montagem da Loja Online.
  * Item cujo produto não está no catálogo fica como veio.
  */
+// ── SABOR QUE A LOJA NÃO TEM ─────────────────────────────────────────────────
+// A IA gravava na sacola o sabor que quisesse. Na CDBom (14/09/2026), num pedido
+// grande de revenda, "Cremosinho uva, morango e leite condensado" virou 3x
+// "Chiclete + Banana" no Picolé Cremoso, "Moreninha chocolate" virou leite
+// condensado e "azul" entrou como sabor de um picolé que não tem azul — e a
+// conferência saiu assim pro cliente. O roteiro já mandava não fazer isso; o
+// Haiku não obedeceu. Agora o código confere: só passa sabor que existe no
+// produto e não está pausado. Qualquer um fora disso, nada é gravado e o robô
+// pergunta ao cliente.
+type SaboresPorProduto = Record<string, { disponiveis: string[]; pausadas: string[] }>
+
+const normSabor = (s: unknown) => String(s ?? "")
+  .normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+  .replace(/\bcom\b|\+|&/g, " ").replace(/[^a-z0-9]+/g, " ").trim()
+
+/**
+ * Confere (e acerta a grafia de) cada sabor dos itens. Devolve a mensagem pro
+ * cliente quando algum não vale, ou null quando está tudo certo.
+ */
+function conferirSabores(itens: any[], sabores: SaboresPorProduto, catalogo: any[]): string | null {
+  const problemas = new Map<string, { produto: string; faltam: Set<string>; acabaram: Set<string>; tem: string[] }>()
+  for (const it of itens ?? []) {
+    const sp = sabores[String(it?.produto_id ?? "")]
+    if (!sp || !Array.isArray(it?.complementos)) continue
+    for (const c of it.complementos) {
+      const alvo = normSabor(c?.nome)
+      if (!alvo) continue
+      let achado = sp.disponiveis.find(n => normSabor(n) === alvo)
+      // Só aceita parecido quando o cliente escreveu MAIS que o nome ("sabor
+      // morango" → Morango) e há um único candidato. O contrário ("uva" →
+      // "Nata + Uva") é exatamente a troca que não pode acontecer.
+      if (!achado) {
+        const parecidos = sp.disponiveis.filter(n => {
+          const k = normSabor(n)
+          return k.length >= 3 && new RegExp(`\\b${k}\\b`).test(alvo)
+        })
+        if (parecidos.length === 1) achado = parecidos[0]
+      }
+      if (achado) { c.nome = achado; continue }
+      const nomeProduto = String(catalogo.find((p: any) => p.id === it.produto_id)?.nome ?? it.nome ?? "produto")
+      const p = problemas.get(it.produto_id) ?? { produto: nomeProduto, faltam: new Set(), acabaram: new Set(), tem: sp.disponiveis }
+      const pausado = sp.pausadas.find(n => normSabor(n) === alvo)
+      if (pausado) p.acabaram.add(pausado)
+      else p.faltam.add(String(c?.nome ?? "").trim())
+      problemas.set(it.produto_id, p)
+    }
+  }
+  if (!problemas.size) return null
+  const linhas = [...problemas.values()].map(p => {
+    const partes: string[] = []
+    if (p.acabaram.size) partes.push(`*${[...p.acabaram].join(", ")}* acabou no momento`)
+    if (p.faltam.size) partes.push(`não tem *${[...p.faltam].join(", ")}*`)
+    const tem = p.tem.length ? ` Sabores que tem: ${p.tem.join(", ")}.` : ""
+    return `• *${p.produto}*: ${partes.join(" e ")}.${tem}`
+  })
+  return `Antes de anotar, preciso acertar uns sabores: 😊\n\n${linhas.join("\n")}\n\nQual você prefere no lugar? Aí eu anoto o pedido todo.`
+}
+
 function reprecificarItens(itens: any[], catalogo: any[], precoOpcaoMap: Record<string, number> = {}): void {
   const porId = new Map<string, any>()
   for (const p of catalogo ?? []) porId.set(String(p.id), p)
@@ -2819,6 +2877,8 @@ serve(async (req) => {
     // NUNCA confiar na conta feita pelo modelo.
     let complementosTexto = ""
     const precoOpcaoMap: Record<string, number> = {}  // nome da opção (minúsculo) → adicional
+    // Sabores de cada produto, pra conferir o que a IA grava (conferirSabores).
+    const saboresPorProduto: SaboresPorProduto = {}
     try {
       const produtoIds = produtos.map((p: any) => p.id)
       if (produtoIds.length) {
@@ -2832,6 +2892,14 @@ serve(async (req) => {
           const porProduto: Record<string, any[]> = {}
           for (const v of vincComp as any[]) {
             const g = v.complemento_grupos
+            if (g) {
+              const sp = (saboresPorProduto[v.produto_id] ||= { disponiveis: [], pausadas: [] })
+              for (const o of (g.complemento_opcoes ?? [])) {
+                // Grupo pausado pausa todas as opções dele.
+                if (g.disponivel === false || !o.disponivel) sp.pausadas.push(String(o.nome))
+                else sp.disponiveis.push(String(o.nome))
+              }
+            }
             if (!g || g.disponivel === false) continue // grupo pausado: bot não oferece
             const gEff = { ...g, min: v.min_override ?? g.min, max: v.max_override ?? g.max, ordem: v.ordem ?? 0 }
             ;(porProduto[v.produto_id] ||= []).push(gEff)
@@ -3467,6 +3535,17 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       if (acaoStart !== -1 && acaoSoltaFim === -1) resposta = resposta.slice(0, acaoStart).trim()
       try {
         const acao = JSON.parse(acaoMatch[1])
+
+        // Sabor que o produto não tem ou que está pausado: nada é gravado nem
+        // fechado, e o cliente escolhe de novo (ver conferirSabores).
+        if ((acao.tipo === "atualizar_carrinho" || acao.tipo === "fechar_pedido") && Array.isArray(acao.items)) {
+          const avisoSabor = conferirSabores(acao.items, saboresPorProduto, produtos)
+          if (avisoSabor) {
+            console.log(`[Sabor] ${acao.tipo} barrado:`, avisoSabor.slice(0, 200))
+            acao.tipo = "sabor_invalido"
+            resposta = avisoSabor
+          }
+        }
 
         if (acao.tipo === "atualizar_carrinho" && Array.isArray(acao.items)) {
           // Recalcula o preço no servidor (verdade do banco) — o modelo erra a conta.
