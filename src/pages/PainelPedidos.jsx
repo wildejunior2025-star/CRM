@@ -7215,7 +7215,12 @@ export default function PainelPedidos() {
       cliente_nome: nomeCliente,
       cliente_telefone: tel || '—',
       tipo_entrega: d.tipo,
-      origem: 'balcao',
+      // Pedido montado numa conversa de WhatsApp é pedido do WhatsApp, não do
+      // balcão (a CDBom via o pedido da María de Fátima como "Balcão", 14/09).
+      // Conversa que começou na Loja Online e seguiu no WhatsApp também conta:
+      // o robô falou nela.
+      origem: (canal === 'whatsapp'
+        || chatMsgs.some(m => `${m.canal}|${m.cliente_ref}` === chatAberto && m.bot)) ? 'whatsapp' : 'balcao',
       status: 'confirmado',      // quem atendeu já aceitou — não tem o que confirmar
       itens: sacolaChat.map(i => ({
         produto_id: i.produto_id ?? null, nome: i.nome, quantidade: i.qtd,
@@ -8413,7 +8418,10 @@ export default function PainelPedidos() {
               if (guardado) agendadosPendentesRef.current.add(novo.id)
               // Imprime pedido novo (aguardando) OU venda de balcão (já confirmada).
               // Se o app Impressora FWC está imprimindo, o navegador não imprime (evita 2 vias).
-              if (!guardado && deveAutoImprimir() && !fwcImprimeRef.current && (novo.status === 'aguardando' || novo.origem === 'balcao')) {
+              // Pedido do WhatsApp lançado JÁ confirmado (montado no chat do
+              // gestor) imprime igual à venda de balcão — antes ele era balcão.
+              if (!guardado && deveAutoImprimir() && !fwcImprimeRef.current && (novo.status === 'aguardando' || novo.origem === 'balcao'
+                  || (novo.origem === 'whatsapp' && novo.status === 'confirmado'))) {
                 autoImprimirPedido(novo)
               }
               if (!guardado && novo.status === 'aguardando') {

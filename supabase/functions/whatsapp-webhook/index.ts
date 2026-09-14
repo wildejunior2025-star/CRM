@@ -1938,12 +1938,14 @@ async function handleFecharPedido(
     const linhaPixEntrega = formaPgto === "pix_entrega"
       ? (pgLoja.chavePix
         ? `\n📱 Chave PIX da loja: *${pgLoja.chavePix}*${pgLoja.pixNome ? ` (${pgLoja.pixNome})` : ""}\n${tipoEntrega === "entrega"
-          ? "_Pode pagar quando o pedido chegar e mostrar o comprovante ao entregador — ou já mandar o comprovante aqui._"
-          : "_Pode pagar na hora de retirar e mostrar o comprovante no balcão — ou já mandar o comprovante aqui._"}`
-        : tipoEntrega === "entrega" ? `\n📱 O entregador passa a chave PIX na hora da entrega.` : `\n📱 A loja passa a chave PIX na hora da retirada.`)
+          ? "_Faça o PIX e mande o comprovante aqui pra concluir o pedido. 🧾_"
+          : "_Faça o PIX e mande o comprovante aqui pra concluir o pedido. 🧾_"}`
+        // PIX manual é pago ANTES, com comprovante na conversa — o mesmo que a
+        // Loja Online pede. O robô mandava pagar na entrega (CDBom, 14/09/2026).
+        : `\n📱 A loja te passa a chave PIX por aqui — é só fazer o PIX e mandar o comprovante. 🧾`)
       : ""
     const linhaTroco = trocoPara ?`\n💵 Troco para *R$ ${trocoPara.toFixed(2)}* (volta R$ ${(trocoPara - totalFinal).toFixed(2)})` : ""
-    mensagemExtra = `🧾 *Pedido #${numPedido} recebido!*${linhaValores}\n\n💳 Pagamento em *${formaPgto === "pix_entrega" ? "PIX" : labelPgto}* ${labelEntrega}.${linhaPixEntrega}${linhaTroco}${linhaPino}\n\n⏳ Aguardando a loja confirmar — assim que confirmarem você recebe uma mensagem aqui! 🎉` + mensagemExtra
+    mensagemExtra = `🧾 *Pedido #${numPedido} recebido!*${linhaValores}\n\n💳 Pagamento em *${formaPgto === "pix_entrega" ? "PIX" : labelPgto}*${formaPgto === "pix_entrega" ? "" : ` ${labelEntrega}`}.${linhaPixEntrega}${linhaTroco}${linhaPino}\n\n⏳ Aguardando a loja confirmar — assim que confirmarem você recebe uma mensagem aqui! 🎉` + mensagemExtra
     return { mensagemExtra, acaoPromise }
   } catch (e) {
     console.error("[Pedido] erro:", e)
@@ -3262,7 +3264,7 @@ ${aceitaDelivery ? (bairroBloqueado ? `⛔ ENTREGA BLOQUEADA NESTE BAIRRO: a loj
   : taxaMin != null ? `ENTREGA: a taxa depende do endereço — vai de R$ ${taxaMin.toFixed(2)} a R$ ${taxaMax!.toFixed(2)}. ⛔ NUNCA diga um valor exato, e MUITO MENOS "R$ 0,00" ou frete grátis, enquanto não souber o endereço: diga a faixa e peça a rua, o número e o bairro — o sistema calcula a taxa certa na hora de fechar.`
   : `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (taxa base — pode mudar conforme a distância do endereço)`) : "ENTREGA: somente retirada no local"}
 FORMAS DE PAGAMENTO (SÓ estas — nunca ofereça outra): ${opcoesDePagamento(pagamentos).replace(/\*/g, "")}
-${pagamentos.pixOnline ? `• PIX (online): o sistema gera o QR Code e o copia-e-cola ao fechar o pedido — o pedido só vai para a loja depois que o pagamento for confirmado. Você NÃO envia chave PIX nesse caso.\n` : ""}${pagamentos.pixEntrega ? `• PIX${pagamentos.pixOnline ? " na entrega" : ""}: o cliente faz a transferência pelo app do banco dele, para a chave PIX da loja${pagamentos.chavePix ? ` (${pagamentos.chavePix})` : ""}, na hora que recebe o pedido (ou no balcão, se retirar). NÃO usa maquininha, não tem QR e não paga antes — o sistema manda a chave na confirmação do pedido.${pagamentos.pixOnline ? "" : " Quando o cliente disser \"PIX\", é este."}\n` : ""}${!pagamentos.pixOnline && !pagamentos.pixEntrega ? `• PIX NÃO é aceito nesta loja pelo WhatsApp — se pedirem, ofereça as formas acima.\n` : ""}${aceitaCartao(pagamentos) ? `• Cartão: se for ENTREGA, o entregador leva a maquininha. Se for RETIRADA, paga no balcão da loja (aí não tem entregador — nunca fale dele).${pagamentos.credito && pagamentos.debito ? " Pergunte se é *crédito* ou *débito*." : ""}\n` : ""}
+${pagamentos.pixOnline ? `• PIX (online): o sistema gera o QR Code e o copia-e-cola ao fechar o pedido — o pedido só vai para a loja depois que o pagamento for confirmado. Você NÃO envia chave PIX nesse caso.\n` : ""}${pagamentos.pixEntrega ? `• PIX${pagamentos.pixOnline ? " na entrega" : ""}: o cliente faz o PIX pelo app do banco dele, para a chave PIX da loja${pagamentos.chavePix ? ` (${pagamentos.chavePix})` : ""}, e manda o COMPROVANTE aqui na conversa pra concluir o pedido — igual à Loja Online. NÃO usa maquininha e não tem QR. NUNCA diga pra pagar só quando o pedido chegar. O sistema manda a chave junto da confirmação do pedido; você nunca confirma que o pagamento caiu (quem confere é a loja).${pagamentos.pixOnline ? "" : " Quando o cliente disser \"PIX\", é este."}\n` : ""}${!pagamentos.pixOnline && !pagamentos.pixEntrega ? `• PIX NÃO é aceito nesta loja pelo WhatsApp — se pedirem, ofereça as formas acima.\n` : ""}${aceitaCartao(pagamentos) ? `• Cartão: se for ENTREGA, o entregador leva a maquininha. Se for RETIRADA, paga no balcão da loja (aí não tem entregador — nunca fale dele).${pagamentos.credito && pagamentos.debito ? " Pergunte se é *crédito* ou *débito*." : ""}\n` : ""}
 
 ${totalProdutos > MENU_INTEIRO_ATE ? `⚠️ CATÁLOGO GRANDE: esta loja tem ${totalProdutos} produtos e eles NÃO cabem aqui. A lista abaixo é só o que casou com o que o cliente falou até agora — NÃO é o catálogo inteiro.
 • Venda só o que está na lista (com [id:]), como sempre.
