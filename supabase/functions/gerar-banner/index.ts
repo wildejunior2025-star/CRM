@@ -27,7 +27,9 @@ const json = (data: unknown, status = 200) =>
 
 async function textosDoBanner(produto: string, tema: string, promocao: string) {
   const system = `Você organiza textos de um banner promocional de delivery brasileiro. Responda SÓ com JSON.
-Corrija acentuação e ortografia do português (cafe → café, gratis → grátis, voce → você), sem mudar o sentido.
+Corrija acentuação e ortografia do português SÓ onde estiver claramente errado (cafe → café, gratis → grátis, voce → você), sem mudar o sentido.
+O NOME DO PRODUTO vem do cadastro da loja e já está certo: copie a grafia dele exatamente (ex.: "Acerola" continua "ACEROLA", nunca "AÇEROLA"). Na dúvida, mantenha como a loja escreveu. Nunca acrescente cedilha ou acento que não existe na palavra.
+Ignore marcações do cadastro como "|" e "Sabor:" (ex.: "Polpa | Sabor: Acerola" → título "POLPA", subtítulo "ACEROLA").
 Campos:
 - "titulo": o nome principal do produto em 1 ou 2 palavras curtas, MAIÚSCULAS (ex.: "Cuscuz + Adicionais" → "CUSCUZ"; "Picolé Sabor da Fruta" → "PICOLÉ").
 - "subtitulo": o complemento do nome, curto, MAIÚSCULAS, começando com "+" quando for adicional (ex.: "+ ADICIONAIS"; "SABOR DA FRUTA"). Vazio se não houver.
