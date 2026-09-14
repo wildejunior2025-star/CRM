@@ -2292,6 +2292,8 @@ serve(async (req) => {
     // Testar a IA de uma loja que ainda não ligou (ou fora do horário) sem abrir
     // nada pro cliente de verdade: só vale junto com o modo teste.
     const forcarIa = isTest && url.searchParams.get("forcar_ia") === "true"
+    // "Devolver pro robô" com mensagens do cliente sem resposta (robo-retomar).
+    const retomada = payload._retomada === true
 
     // Vendedor IA desligado: cala a boca AQUI, antes de qualquer coisa.
     // A checagem ficava lá embaixo, depois do tratamento de áudio/imagem — e
@@ -2465,12 +2467,12 @@ serve(async (req) => {
       if (await roboPausado(supabase, empresaId, phone)) {
         // Pausado = tem gente atendendo à mão. Antes a mensagem era descartada
         // aqui — justamente na conversa em que alguém está esperando por ela.
-        if (text && !isTest) {
+        if (text && !isTest && !retomada) {
           await supabase.from("whatsapp_conversas").insert({
             empresa_id: empresaId, phone, role: "user", content: text,
           })
         }
-        if (text) await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat)
+        if (text && !retomada) await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat)
         return new Response("ok", { headers: corsHeaders })
       }
     }
@@ -2490,8 +2492,10 @@ serve(async (req) => {
     // exatamente o que o cliente não quer quando pede uma pessoa.
     if (await chamadoAberto(supabase, empresaId, phone)) {
       console.log("[chamado] aberto, robô calado:", phone)
-      await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text })
-      await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat)
+      if (!retomada) {
+        await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text })
+        await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat)
+      }
       if (isTest) {
         return new Response(JSON.stringify({ ok: true, resposta: "(robô calado — chamado aberto)" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } })
@@ -2504,8 +2508,10 @@ serve(async (req) => {
     // não corre o risco de o modelo tentar resolver sozinho o que já foi pedido
     // a uma pessoa.
     if (PEDE_HUMANO.test(text)) {
-      await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text })
-      await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat)
+      if (!retomada) {
+        await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text })
+        await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat)
+      }
       await abrirChamado(supabase, empresaId, phone, text)
       const avisa = "Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!"
       await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: avisa })
@@ -2525,11 +2531,18 @@ serve(async (req) => {
 
     const [creditRes, minhaMsgRes] = await Promise.all([
       supabase.from("empresas").select("whatsapp_creditos, credito_alerta_minimo, credito_alerta_enviado, credito_alerta_numeros").eq("id", empresaId).single(),
-      supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text }).select("created_at").single(),
+      // Retomada (robo-retomar): as mensagens já estão gravadas desde que
+      // chegaram com o robô pausado. Gravar de novo duplicaria a conversa — e
+      // sem created_at a espera de rajada lá embaixo também não roda.
+      retomada
+        ? Promise.resolve({ data: null })
+        : supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "user", content: text }).select("created_at").single(),
       // Espelho na aba Mensagens do gestor: é lá que a loja responde quando o
       // robô chama, e a conversa precisa estar inteira na tela pra pessoa saber
       // o que já foi dito.
-      espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat),
+      retomada
+        ? Promise.resolve()
+        : espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat),
     ])
     if (!creditRes.data || creditRes.data.whatsapp_creditos <= 0) return new Response("ok", { headers: corsHeaders })
 

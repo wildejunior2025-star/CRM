@@ -109,11 +109,16 @@ export function useChamados(empresaId, ativo = true, comSom = true) {
       if (devolverAoRobo) {
         // Só as pausas automáticas. A pausa manual (expira_em nulo) foi a loja
         // que apertou de propósito — não é este botão que desfaz.
+        // Casa pelos 8 últimos dígitos: a pausa pode ter sido gravada com o
+        // número com ou sem o 9.
         await supabase.from('whatsapp_bot_pausado')
           .delete()
           .eq('empresa_id', empresaId)
-          .eq('phone', chamado.phone)
+          .like('phone', `%${String(chamado.phone).replace(/\D/g, '').slice(-8)}`)
           .not('expira_em', 'is', null)
+        // E responde na hora o que o cliente mandou enquanto esperava.
+        supabase.functions.invoke('robo-retomar', { body: { phone: chamado.phone } })
+          .catch(() => {})
       } else {
         const expira = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString()
         await supabase.from('whatsapp_bot_pausado').upsert({

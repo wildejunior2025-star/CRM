@@ -7442,6 +7442,12 @@ export default function PainelPedidos() {
       .not('expira_em', 'is', null)
     setBotPausado(false)
     setChatAviso({ ok: true, txt: '🤖 Robô de volta nesta conversa — ele continua de onde você parou.' })
+    // Se o cliente escreveu enquanto o robô estava pausado, ele responde agora
+    // em vez de esperar a próxima mensagem (robo-retomar).
+    const { data } = await supabase.functions.invoke('robo-retomar', { body: { phone: tel } })
+    if (data?.respondeu) {
+      setChatAviso({ ok: true, txt: '🤖 Robô de volta — já respondendo o que o cliente mandou.' })
+    }
   }
 
   // Marca como lidas as mensagens do cliente ao abrir a conversa, e envia resposta
