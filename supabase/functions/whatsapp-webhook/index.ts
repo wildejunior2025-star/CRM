@@ -3721,6 +3721,27 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       console.log("[chamado] SafeNet: o robô prometeu retorno, chamado aberto")
     }
 
+    // Safety net: o robô se perdeu e inventou. Foi na CDBom em 14/09/2026, com
+    // um fornecedor que fala com a loja pelo mesmo número: ele mandou "1 essência
+    // de chiclete" e o robô respondeu "Anotei tudo aqui" (itens que nem existem
+    // no cardápio, sacola vazia, nenhuma ação) e "quando a gente abrir hoje
+    // (08:00)" às 09:44, com a loja aberta — copiou de um aviso antigo da
+    // conversa. Nos dois casos a resposta dele vai pro lixo e quem fala é gente.
+    //   1. Disse que anotou, sem ação nenhuma e com a sacola vazia (a segunda
+    //      chamada lá em cima já tentou gravar e não conseguiu).
+    //   2. Disse que a loja está fechada. Aqui ela está aberta: o aviso de
+    //      fechada sai antes, sem chamar a IA.
+    if (!chamouAtendente && !ehResumoOuFechamento) {
+      const semAcao = acaoMatch === null
+      const disseQueAnotou = /\b(anotei|anotad[oa]s?|adicionei|coloquei)\b/i.test(resposta)
+      const disseFechada = !forcarIa && /((estamos|a gente (t[áa]|est[áa])|a loja (t[áa]|est[áa])) fechad|quando (a gente|a loja|n[óo]s) abrir|(a gente|a loja) abre (hoje|amanh[ãa]|[àa]s))/i.test(resposta)
+      if ((semAcao && disseQueAnotou && carrinho.length === 0) || disseFechada) {
+        await abrirChamado(supabase, empresaId, phone, text)
+        resposta = "Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!"
+        console.log(`[chamado] SafeNet: robô ${disseFechada ? "disse que a loja está fechada" : "anotou sem sacola"} — chamado aberto`)
+      }
+    }
+
     // Safety net: cliente ESCREVEU o endereço e o Claude não emitiu salvar_rua.
     // Sem isto o endereço só existia no texto da conversa — o cadastro ficava
     // vazio e a taxa era calculada sobre o nada.
