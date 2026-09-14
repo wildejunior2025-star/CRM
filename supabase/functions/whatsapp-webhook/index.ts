@@ -1052,6 +1052,12 @@ function conferirSabores(itens: any[], sabores: SaboresPorProduto, catalogo: any
     for (const c of it.complementos) {
       const alvo = normSabor(c?.nome)
       if (!alvo) continue
+      // "Misturado/sortido/variado": a loja escolhe os sabores (CDBom, 14/09).
+      // Com um sabor só disponível, "misturado" é esse sabor.
+      if (/^(misturad[oa]s?|sortid[oa]s?|variad[oa]s?|mix|sabores? variados?|a loja escolhe)$/.test(alvo)) {
+        c.nome = sp.disponiveis.length === 1 ? sp.disponiveis[0] : "Misturado"
+        continue
+      }
       let achado = sp.disponiveis.find(n => normSabor(n) === alvo)
       // Só aceita parecido quando o cliente escreveu MAIS que o nome ("sabor
       // morango" → Morango) e há um único candidato. O contrário ("uva" →
@@ -3329,6 +3335,13 @@ ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome":
   • Sabor que ele pedir e NÃO está na lista do produto está em falta hoje: responda como atendente ("Castanha acabou no momento 😕, mas tem esses:") e ofereça os que tem. NUNCA fale em "lista", "cadastro" ou "sistema" pro cliente. Nunca anote sabor fora da lista.
   • Cada produto tem a SUA lista de sabores (o pote de 1 litro pode não ter o mesmo sabor do balde). Use a lista daquele produto.
 
+▸ "MISTURADO" / "SORTIDO" / "VARIADO" / "O RESTO MISTURADO":
+  • Quer dizer que a LOJA escolhe os sabores. NÃO pergunte sabor por sabor. Anote a linha com o sabor "Misturado":
+  ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Picolé Sabor da Fruta", "qtd": 40, "preco": 1.50, "complementos": [{"nome": "Misturado", "qtd": 1}]}]}
+  • Pode ter sabor escolhido + resto misturado: "50 picolés, 10 de coco e o resto misturado" = uma linha de 10 Coco + uma linha de 40 Misturado (do mesmo produto).
+  • "80 misturado de A e B" (DOIS produtos juntos) é UM total de 80, NUNCA 80 de cada. Pergunte UMA vez como dividir, já sugerindo: "Divido meio a meio — 40 de A e 40 de B — pode ser?". Se o cliente não se importar, anote meio a meio com "Misturado".
+  • NUNCA anote item com quantidade 0 ou sem quantidade. Sem a quantidade, pergunte.
+
 Cadastrar cliente novo (após coletar o nome — PASSO 3, só depois da sacola fechada):
 ACAO: {"tipo": "cadastrar_cliente", "nome": "[nome]"}
 ⚠️ Emita IMEDIATAMENTE após receber o nome. SEM texto antes. O sistema pede o endereço (rua, número e bairro) em seguida.
@@ -3583,6 +3596,17 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
 
         // Sabor que o produto não tem ou que está pausado: nada é gravado nem
         // fechado, e o cliente escolhe de novo (ver conferirSabores).
+        if ((acao.tipo === "atualizar_carrinho" || acao.tipo === "fechar_pedido") && Array.isArray(acao.items)) {
+          // Item sem quantidade não entra: saía "Picolé Cremoso" com a sacola
+          // em R$ 0,00 (CDBom, 14/09). Se não sobrar nada, não mexe na sacola
+          // salva — fica a fala do modelo, que é a pergunta da quantidade.
+          const antes = acao.items.length
+          acao.items = acao.items.filter((i: any) => Number(i?.qtd) > 0)
+          if (antes && !acao.items.length) {
+            console.log(`[Carrinho] ${acao.tipo} sem quantidade em nenhum item — ignorado`)
+            acao.tipo = "sem_quantidade"
+          }
+        }
         if ((acao.tipo === "atualizar_carrinho" || acao.tipo === "fechar_pedido") && Array.isArray(acao.items)) {
           const avisoSabor = conferirSabores(acao.items, saboresPorProduto, produtos)
           if (avisoSabor) {
