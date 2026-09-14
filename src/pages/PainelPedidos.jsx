@@ -6310,6 +6310,9 @@ export default function PainelPedidos() {
         return
       }
     } catch { /* sem Bluetooth ou falhou — usa o caminho normal abaixo */ }
+    // Celular sem a térmica: a janela do Android por cima do Painel a cada
+    // pedido novo atrapalha mais do que ajuda (ver semJanelaDoNavegador).
+    if (semJanelaDoNavegador()) return
     imprimirCupom(pedido, empresa, { auto: true })
   }
 
@@ -7993,6 +7996,14 @@ export default function PainelPedidos() {
     } catch { return false }   // sem Bluetooth neste aparelho
   }
 
+  // Impressão AUTOMÁTICA no celular com a térmica Bluetooth caída não pode
+  // cair no navegador: a janela "Selec. impressora" do Android abre sozinha por
+  // cima do Painel a cada pré-conta, no meio do atendimento (Saidera, 13/09).
+  // No PC o navegador continua sendo a rede de segurança.
+  const semJanelaDoNavegador = () => typeof navigator !== 'undefined' && (
+    navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')
+  )
+
   async function flushImpressaoMesa(cid) {
     const entry = mesaPrintRef.current[cid]
     delete mesaPrintRef.current[cid]
@@ -8009,7 +8020,7 @@ export default function PainelPedidos() {
     // disse que ali não precisa de papel.
     const paraPapel = dados.itens.filter(i => i.setor !== 'nenhum')
     if (!paraPapel.length) return
-    imprimirHtml(montarComandaCozinhaHtml({ ...dados, itens: paraPapel }))
+    imprimirHtml(montarComandaCozinhaHtml({ ...dados, itens: paraPapel }), null, { soApp: semJanelaDoNavegador() })
   }
 
   // A CONTA da mesa também respeita o filtro "Mesa" deste PC: se a Mesa está
@@ -8033,7 +8044,7 @@ export default function PainelPedidos() {
       formaPagamento: '', pagamentos: [], empresa, preConta: true,
     }
     if (await viaBluetooth('conta', dados)) return
-    imprimirHtml(montarContaPresencialHtml(dados), empresa?.nome, { origem: 'mesa' })
+    imprimirHtml(montarContaPresencialHtml(dados), empresa?.nome, { origem: 'mesa', soApp: semJanelaDoNavegador() })
   }
 
   // Recebe os DADOS da conta (não o HTML pronto): a Bluetooth monta em ESC/POS,
@@ -8041,7 +8052,7 @@ export default function PainelPedidos() {
   async function imprimirContaSeMesa(dados, titulo) {
     if (fwcFiltros?.mesa === false) return
     if (await viaBluetooth('conta', dados)) return
-    imprimirHtml(montarContaPresencialHtml(dados), titulo, { origem: 'mesa' }) // o app também filtra por origem
+    imprimirHtml(montarContaPresencialHtml(dados), titulo, { origem: 'mesa', soApp: semJanelaDoNavegador() }) // o app também filtra por origem
   }
 
   // Imprime a CONTA da mesa na loja (chamado quando o garçom fecha e a mesa entra em
