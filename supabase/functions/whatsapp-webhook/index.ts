@@ -1189,12 +1189,18 @@ function detalheDaSacola(itens: any[]): string {
     if (comps.length) g.linhas.push({ texto: comps.join(", "), qtd } as any)
     grupos.set(chave, g)
   }
+  // O mínimo que o cliente precisa pra conferir: produto, quantidade, valor e
+  // os sabores numa linha só. O nome vai inteiro: o que está entre parênteses
+  // costuma ser o TAMANHO ("Quentinha (M)", "Sorvete (Pote 200 ml)").
   return [...grupos.values()].map(g => {
-    const cab = `🍽️ *${g.nome}* — ${g.qtd} un · *${rs(g.valor)}*`
-    const linhas = (g.linhas as any[]).map(l =>
-      // Uma linha só com 1 unidade é item montado (quentinha): sem "— 1".
-      (g.linhas.length === 1 && l.qtd === g.qtd) ? `   • ${l.texto}` : `   • ${l.texto} — ${l.qtd}`)
-    return [cab, ...linhas].join("\n")
+    const cab = `*${g.nome}* ${g.qtd} un — ${rs(g.valor)}`
+    const itens = g.linhas as any[]
+    if (!itens.length) return cab
+    // Um sabor só pro produto todo (ou item montado): sem repetir a quantidade.
+    const sabores = (itens.length === 1 && itens[0].qtd === g.qtd)
+      ? itens[0].texto
+      : itens.map(l => `${l.texto} ${l.qtd}`).join(" · ")
+    return `${cab}\n${sabores}`
   }).join("\n\n")
 }
 
@@ -3604,14 +3610,18 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             // (se a IA anotou errado, ele corrige antes de fechar).
             const temComp = acao.items.some((i: any) => Array.isArray(i.complementos) && i.complementos.length > 0)
             const detalhe = detalheDaSacola(acao.items)
-            const atacado = avisoDeAtacado(acao.items, produtos)
-            const cabecalho = (temComp
-              ? `✅ Anotei! Confere se está tudo certo:\n\n${detalhe}`
-              : `✅ ${nomes} adicionado${acao.items.length > 1 ? "s" : ""} ao carrinho!`)
-              + (atacado ? `\n\n${atacado}` : "")
+            // Enxuto de propósito (pedido da loja, 14/09/2026): produto,
+            // quantidade, valor e sabores numa linha. Do aviso de atacado só
+            // fica a DICA ("com mais 2 sai a R$ X") — o "levando 30 sai a R$ 2"
+            // repetia o que o valor do produto já mostra.
+            const dicaAtacado = avisoDeAtacado(acao.items, produtos)
+              .split("\n").filter(l => l.startsWith("💡")).join("\n")
+            void nomes
+            const cabecalho = `✅ Anotei! Confere:\n\n${detalhe}`
+              + (dicaAtacado ? `\n\n${dicaAtacado}` : "")
               // O valor da sacola a cada item: o cliente não chega no resumo
               // levando susto, e ajusta a quantidade enquanto escolhe.
-              + `\n\n🛒 Sacola até agora: *R$ ${totalDaSacola(acao.items).toFixed(2).replace(".", ",")}*`
+              + `\n\n🛒 Total: *R$ ${totalDaSacola(acao.items).toFixed(2).replace(".", ",")}*`
             // Transição determinística: se o cliente já sinalizou fechar a sacola,
             // não pergunta "quer mais?" — segue direto para cadastro (se novo) ou entrega (se já cliente).
             const querFechar = /\b(pode fechar|só isso|so isso|é só isso|e so isso|só isso mesmo|so isso mesmo|fechar( o)? pedido|finaliza|encerra|é isso|e isso|pode mandar|pode confirmar)\b/i.test(text)
@@ -3635,7 +3645,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
               const perguntaDoModelo = resto.includes("?") && resto.length <= 1200 ? resto : ""
               resposta = perguntaDoModelo
                 ? `${cabecalho}\n\n${perguntaDoModelo}`
-                : `${cabecalho}\n\n${temComp ? "Está certo? " : ""}Deseja mais algum item ou pode fechar o pedido? 😊`
+                : `${cabecalho}\n\n${temComp ? "Tá certo? " : ""}Mais alguma coisa ou posso fechar? 😊`
             }
           }
 
