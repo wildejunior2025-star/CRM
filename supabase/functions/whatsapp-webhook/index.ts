@@ -451,8 +451,20 @@ async function handleSalvarRua(
 // não é calculada e o pedido não sai. Aqui o sistema grava sem depender dele.
 const PREFIXO_RUA = /^(rua|r[.]|av|av[.]|avenida|travessa|trav|estrada|rod|rodovia|praca|praça|alameda|al[.]|beco|conj|conjunto|quadra|qd|loteamento|sitio|sítio|vila)[ .]/i
 
+// "O endereço:\nAvenida dos Expedicionários 565\nParque dos coqueiros" → sem o
+// rótulo e com as linhas viradas vírgula. Com o rótulo na frente o endereço
+// não era reconhecido, o robô dizia "Anotei" sem gravar e a taxa nunca saía
+// (CDBom, 14/09/2026 — terminou em chamado de atendente).
+function limparRotuloEndereco(txt: string): string {
+  return String(txt ?? "")
+    .replace(/^\s*(?:(?:o|meu|segue(?: o)?|esse [ée] o|aqui (?:vai|est[áa]) o)\s+)?(?:endere[çc]o|end\.?)\s*(?:[ée]\s*)?[:\-–]?\s*/i, "")
+    .replace(/^\s*(?:entregar|entrega|mora|moro)\s+(?:na|no|em)\s+/i, "")
+    .split(/\n+/).map(l => l.trim()).filter(Boolean).join(", ")
+    .trim()
+}
+
 function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; bairro: string | null } | null {
-  const bruto = String(txt ?? "").trim()
+  const bruto = limparRotuloEndereco(txt)
   if (bruto.length < 8 || bruto.length > 160) return null
   const partes = bruto.split(",").map(p => p.trim()).filter(Boolean)
   let rua = partes[0] ?? ""
@@ -1040,6 +1052,59 @@ const normSabor = (s: unknown) => String(s ?? "")
   .normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
   .replace(/\bcom\b|\+|&/g, " ").replace(/[^a-z0-9]+/g, " ").trim()
 
+const RE_MISTURADO = /^(misturad[oa]s?|sortid[oa]s?|variad[oa]s?|mix|sabores? variados?|a loja escolhe)$/
+
+/**
+ * "Misturado": divide a quantidade igualmente entre os sabores DISPONÍVEIS do
+ * produto (pedido da loja, 14/09/2026). 40 misturado com Coco, Uva e Morango
+ * vira 14 Coco + 13 Uva + 13 Morango. Menos unidades que sabores: 1 de cada
+ * até acabar. No fim junta linhas repetidas do mesmo sabor ("10 Coco + o resto
+ * misturado" não aparece com Coco duas vezes).
+ */
+function distribuirMisturado(itens: any[], sabores: SaboresPorProduto): any[] {
+  const saida: any[] = []
+  // Sabores que o cliente já escolheu, por produto: "10 de coco e o resto
+  // misturado" manda o resto pros OUTROS sabores, não mais coco.
+  const escolhidos = new Map<string, Set<string>>()
+  for (const it of itens ?? []) {
+    const comps = Array.isArray(it?.complementos) ? it.complementos : []
+    if (comps.length === 1 && !RE_MISTURADO.test(normSabor(comps[0]?.nome))) {
+      const k = String(it?.produto_id ?? "")
+      if (!escolhidos.has(k)) escolhidos.set(k, new Set())
+      escolhidos.get(k)!.add(normSabor(comps[0]?.nome))
+    }
+  }
+  for (const it of itens ?? []) {
+    const comps = Array.isArray(it?.complementos) ? it.complementos : []
+    const sp = sabores[String(it?.produto_id ?? "")]
+    const ehMisturado = comps.length === 1 && RE_MISTURADO.test(normSabor(comps[0]?.nome))
+    const todas = (sp?.disponiveis ?? []).filter(n => !/^\s*sem\s|n[ãa]o\s*quero/i.test(n))
+    const jaTem = escolhidos.get(String(it?.produto_id ?? "")) ?? new Set<string>()
+    const outras = todas.filter(n => !jaTem.has(normSabor(n)))
+    const opcoes = outras.length ? outras : todas
+    if (!ehMisturado || !opcoes.length) { saida.push(it); continue }
+    const qtd = Math.max(0, Math.floor(Number(it.qtd) || 0))
+    const base = Math.floor(qtd / opcoes.length)
+    let resto = qtd - base * opcoes.length
+    for (const sabor of opcoes) {
+      const q = base + (resto > 0 ? 1 : 0)
+      if (resto > 0) resto--
+      if (q > 0) saida.push({ ...it, qtd: q, complementos: [{ ...comps[0], nome: sabor }] })
+    }
+  }
+  // Junta mesmo produto + mesmo sabor único.
+  const juntos: any[] = []
+  for (const it of saida) {
+    const comps = Array.isArray(it?.complementos) ? it.complementos : []
+    const igual = comps.length === 1 && juntos.find(j =>
+      String(j.produto_id) === String(it.produto_id) && Array.isArray(j.complementos) && j.complementos.length === 1
+      && normSabor(j.complementos[0]?.nome) === normSabor(comps[0]?.nome))
+    if (igual) igual.qtd = (Number(igual.qtd) || 0) + (Number(it.qtd) || 0)
+    else juntos.push({ ...it })
+  }
+  return juntos
+}
+
 /**
  * Confere (e acerta a grafia de) cada sabor dos itens. Devolve a mensagem pro
  * cliente quando algum não vale, ou null quando está tudo certo.
@@ -1054,7 +1119,7 @@ function conferirSabores(itens: any[], sabores: SaboresPorProduto, catalogo: any
       if (!alvo) continue
       // "Misturado/sortido/variado": a loja escolhe os sabores (CDBom, 14/09).
       // Com um sabor só disponível, "misturado" é esse sabor.
-      if (/^(misturad[oa]s?|sortid[oa]s?|variad[oa]s?|mix|sabores? variados?|a loja escolhe)$/.test(alvo)) {
+      if (RE_MISTURADO.test(alvo)) {
         c.nome = sp.disponiveis.length === 1 ? sp.disponiveis[0] : "Misturado"
         continue
       }
@@ -3190,6 +3255,7 @@ ${horarioLojaTexto  ? `- ${horarioLojaTexto.replace(/\*/g, "")}` : (empresaHorar
 🟢 A LOJA ESTÁ ABERTA NESTE MOMENTO — o sistema já conferiu a grade de horários antes de te chamar. NUNCA diga que a loja está fechada, nem repita um aviso de "estamos fechados" que apareça no histórico da conversa: aquilo era de antes. Se o cliente perguntar o horário, informe o da linha acima e nenhum outro.
 ${empresa.chave_pix ? `- PIX: ${empresa.chave_pix} (${empresa.pix_nome ?? ""})` : ""}
 CATÁLOGO: ${catalogoUrl}
+🚚 TAXA, DISTÂNCIA E CIDADE VIZINHA NUNCA SÃO MOTIVO PRA CHAMAR ATENDENTE. Quem calcula a taxa é o SISTEMA, pela distância do endereço. Cliente mandou a cidade/bairro que faltava → emita salvar_rua com rua + bairro + cidade na hora (mesmo que seja outra cidade, ex.: Natal) e o valor sai certo. Só diga que não entrega quando aparecer "ENTREGA BLOQUEADA" aqui.
 📍 "Vocês entregam em [cidade/bairro]?": NUNCA responda "sim" nem "não" de cabeça — a entrega vai até uma distância da loja e só o endereço diz. Responda que a loja fica em ${empresaEndereco || "—"}, e peça a localização ou rua, número e bairro pra conferir na hora.
 ${aceitaDelivery ? (bairroBloqueado ? `⛔ ENTREGA BLOQUEADA NESTE BAIRRO: a loja NÃO entrega no bairro do cliente (${bairroCliente}). Avise educadamente que ainda não entregam nesse bairro e ofereça RETIRADA no local. NUNCA feche um pedido de ENTREGA para este cliente — só retirada.`
   : enderecoCliente ? `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (já calculada pela distância do endereço do cliente)`
@@ -3336,7 +3402,7 @@ ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome":
   • Cada produto tem a SUA lista de sabores (o pote de 1 litro pode não ter o mesmo sabor do balde). Use a lista daquele produto.
 
 ▸ "MISTURADO" / "SORTIDO" / "VARIADO" / "O RESTO MISTURADO":
-  • Quer dizer que a LOJA escolhe os sabores. NÃO pergunte sabor por sabor. Anote a linha com o sabor "Misturado":
+  • Quer dizer que a LOJA escolhe os sabores. NÃO pergunte sabor por sabor. Anote a linha com o sabor "Misturado" — o SISTEMA divide a quantidade igualmente entre os sabores disponíveis do produto e a conferência já mostra a divisão:
   ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Picolé Sabor da Fruta", "qtd": 40, "preco": 1.50, "complementos": [{"nome": "Misturado", "qtd": 1}]}]}
   • Pode ter sabor escolhido + resto misturado: "50 picolés, 10 de coco e o resto misturado" = uma linha de 10 Coco + uma linha de 40 Misturado (do mesmo produto).
   • "80 misturado de A e B" (DOIS produtos juntos) é UM total de 80, NUNCA 80 de cada. Pergunte UMA vez como dividir, já sugerindo: "Divido meio a meio — 40 de A e 40 de B — pode ser?". Se o cliente não se importar, anote meio a meio com "Misturado".
@@ -3605,6 +3671,8 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           if (antes && !acao.items.length) {
             console.log(`[Carrinho] ${acao.tipo} sem quantidade em nenhum item — ignorado`)
             acao.tipo = "sem_quantidade"
+          } else {
+            acao.items = distribuirMisturado(acao.items, saboresPorProduto)
           }
         }
         if ((acao.tipo === "atualizar_carrinho" || acao.tipo === "fechar_pedido") && Array.isArray(acao.items)) {
@@ -3984,7 +4052,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     // Não depende só de o bot ter pedido: se o cliente mandou algo que É um
     // endereço ("Rua tal, 600, bairro"), grava do mesmo jeito. O modelo às
     // vezes desvia do assunto no meio e a mensagem boa do cliente se perdia.
-    const pareceEndereco = PREFIXO_RUA.test(text.trim()) && /\d/.test(text)
+    const pareceEndereco = PREFIXO_RUA.test(limparRotuloEndereco(text)) && /\d/.test(text)
     if (!salvarRuaJaExecutado && !carrinhoEndereco.rua && (botPediuEndereco || pareceEndereco)) {
       const end = lerEnderecoEscrito(text)
       if (end) {
