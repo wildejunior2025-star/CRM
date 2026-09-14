@@ -3333,7 +3333,11 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       },
       body: JSON.stringify({
         model:      "claude-haiku-4-5-20251001",
-        max_tokens: 900,
+        // Pedido grande de revenda (CDBom, 14/09/2026: 16 linhas de picolé,
+        // cremosinho, gelo e sorvete) não cabia em 900: o modelo escrevia a lista
+        // pro cliente e a ACAO com os produto_id ficava de fora. Só custa mais
+        // quando a resposta é grande de verdade.
+        max_tokens: 2000,
         system:     systemPrompt,
         messages:   mensagens.map((m: any, idx: number) => {
           if (imageBase64 && idx === mensagens.length - 1 && m.role === "user") {
@@ -3415,7 +3419,10 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
           body: JSON.stringify({
             model: "claude-haiku-4-5-20251001",
-            max_tokens: 600,
+            // Cada item da sacola leva produto_id + nome + sabor (~100 tokens).
+            // Com 600 a ACAO de um pedido de 16 linhas saía cortada, o JSON não
+            // fechava e a sacola ficava vazia (CDBom, 14/09/2026).
+            max_tokens: 3000,
             system: systemPrompt,
             messages: [
               ...mensagens.map((m: any) => ({ role: m.role, content: m.content })),
