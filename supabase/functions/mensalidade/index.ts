@@ -341,8 +341,10 @@ Deno.serve(async (req) => {
         payer_email: email,
         card_token_id: body?.card_token,
         auto_recurring: {
-          frequency: cfg.periodicidade === "semanal" ? 7 : 1,
-          frequency_type: cfg.periodicidade === "semanal" ? "days" : "months",
+          // Quinzenal (dia 1 e 15, mig 0272): o cartão do Mercado Pago só
+          // repete em intervalo fixo — de 15 em 15 dias é o mais perto.
+          frequency: cfg.periodicidade === "semanal" ? 7 : cfg.periodicidade === "quinzenal" ? 15 : 1,
+          frequency_type: cfg.periodicidade === "mensal" ? "months" : "days",
           transaction_amount: Number(cfg.valor),
           currency_id: "BRL",
           start_date: inicio,

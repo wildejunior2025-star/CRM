@@ -84,6 +84,18 @@ export function diasAteTravar(hoje, diaBloqueio, loja) {
   return n
 }
 
+// "semana" | "quinzena" | "mês" — quinzenal vence dia 1 e dia 15 (mig 0272).
+export const periodoTexto = (periodicidade) =>
+  periodicidade === 'semanal' ? 'semana' : periodicidade === 'quinzenal' ? 'quinzena' : 'mês'
+
+// Quanto a cobrança dá por semana, pra somar lojas com planos diferentes.
+export const valorPorSemana = (cfg) => {
+  const v = Number(cfg?.valor) || 0
+  if (cfg?.periodicidade === 'semanal') return v
+  if (cfg?.periodicidade === 'quinzenal') return v * 24 / 52
+  return v * 12 / 52
+}
+
 export const dataCurtaBR = (ymd) => {
   const [y, m, d] = String(ymd ?? '').split('-')
   if (!d) return ymd ?? ''

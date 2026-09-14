@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { hojeBR } from '../lib/feriados'
-import { faseDaMensalidade, dataCurtaBR, somaDiasYmd } from '../lib/mensalidade'
+import { faseDaMensalidade, dataCurtaBR, somaDiasYmd, valorPorSemana } from '../lib/mensalidade'
 import '../components/Page.css'
 
 const STATUS_LABELS = {
@@ -119,7 +119,7 @@ export default function SuperAdminDashboard() {
   // ── Mensalidade semanal ────────────────────────────────────────────────────
   const hojeYmd = hojeBR()
   const cfgPorLoja = Object.fromEntries(mensCfg.map(c => [c.empresa_id, c]))
-  const porSemana = mensCfg.reduce((s, c) => s + (c.periodicidade === 'semanal' ? Number(c.valor) : Number(c.valor) * 12 / 52), 0)
+  const porSemana = mensCfg.reduce((s, c) => s + valorPorSemana(c), 0)
   const mrr = porSemana * 52 / 12
   const mensDe = (emp) => {
     const cfg = cfgPorLoja[emp.id]
@@ -366,7 +366,7 @@ export default function SuperAdminDashboard() {
                     if (!m) return <span style={{ color: 'var(--text-muted)' }}>—</span>
                     const FASE = { em_dia: ['Em dia', 'var(--success)'], vence_hoje: ['Vence hoje', 'var(--warning)'], carencia: ['Atrasada', 'var(--danger)'], prazo: ['Prazo', 'var(--primary)'], bloqueio: ['BLOQUEADA', 'var(--danger)'] }
                     const [txt, cor] = FASE[m.estado.fase] ?? ['', 'var(--text-muted)']
-                    return <>{fmt(m.cfg.valor)}<span style={{ color: 'var(--text-muted)' }}>/{m.cfg.periodicidade === 'semanal' ? 'sem' : 'mês'}</span> <strong style={{ color: cor, fontSize: 12 }}>{txt}</strong></>
+                    return <>{fmt(m.cfg.valor)}<span style={{ color: 'var(--text-muted)' }}>/{m.cfg.periodicidade === 'semanal' ? 'sem' : m.cfg.periodicidade === 'quinzenal' ? 'quinz' : 'mês'}</span> <strong style={{ color: cor, fontSize: 12 }}>{txt}</strong></>
                   })()}</td>
                   <td
                     className="caixa-amount-col"

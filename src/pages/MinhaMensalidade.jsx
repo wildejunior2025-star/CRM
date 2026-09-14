@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
-import { dataCurtaBR } from '../lib/mensalidade'
+import { dataCurtaBR, periodoTexto } from '../lib/mensalidade'
 import MensalidadePagamento from '../components/MensalidadePagamento'
 import '../components/Page.css'
 
@@ -63,7 +63,7 @@ export default function MinhaMensalidade() {
         <div className="card">
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Seu plano</div>
           <div style={{ fontSize: 26, fontWeight: 900, margin: '4px 0' }}>
-            {fmt(situacao.valor)} <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>/ {situacao.periodicidade === 'semanal' ? 'semana' : 'mês'}</span>
+            {fmt(situacao.valor)} <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>/ {periodoTexto(situacao.periodicidade)}{situacao.periodicidade === 'quinzenal' ? ' (dia 1 e 15)' : ''}</span>
           </div>
           <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5 }}>
             Depois do vencimento, a loja tem {situacao.carencia_dias} dia(s) de funcionamento pra pagar antes do bloqueio.

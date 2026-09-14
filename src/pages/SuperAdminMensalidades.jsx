@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { hojeBR } from '../lib/feriados'
-import { faseDaMensalidade, dataCurtaBR, somaDiasYmd } from '../lib/mensalidade'
+import { faseDaMensalidade, dataCurtaBR, somaDiasYmd, valorPorSemana } from '../lib/mensalidade'
 import '../components/Page.css'
 
 // Super ADM: cobrança de cada loja (migs 0263/0264). Configura valor e dia,
@@ -85,7 +85,7 @@ export default function SuperAdminMensalidades() {
         <Resumo titulo="Lojas bloqueadas agora" valor={bloqueadas} cor={bloqueadas ? '#dc2626' : 'var(--text)'} />
         <Resumo titulo="Lojas com cobrança ligada" valor={linhas.filter(l => l.cfg?.ativa).length} />
         <Resumo titulo="Receita por semana (ligadas)" valor={fmt(linhas.filter(l => l.cfg?.ativa).reduce((s, l) =>
-          s + (l.cfg.periodicidade === 'semanal' ? Number(l.cfg.valor) : Number(l.cfg.valor) * 12 / 52), 0))} />
+          s + valorPorSemana(l.cfg), 0))} />
       </div>
 
       <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
@@ -117,7 +117,7 @@ function FragmentoLoja({ l, hoje, aberta, alternar, recarregar }) {
         <td style={td}><strong>{e.nome}</strong><div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{e.status}</div></td>
         <td style={td}>
           {cfg?.ativa
-            ? <>{fmt(cfg.valor)} / {cfg.periodicidade === 'semanal' ? `semana (${diaSemana})` : 'mês'}{cfg.mp_assinatura_id ? ' · 💳' : ''}</>
+            ? <>{fmt(cfg.valor)} / {cfg.periodicidade === 'semanal' ? `semana (${diaSemana})` : cfg.periodicidade === 'quinzenal' ? 'quinzena (dia 1 e 15)' : 'mês'}{cfg.mp_assinatura_id ? ' · 💳' : ''}</>
             : <span style={{ color: 'var(--text-muted)' }}>{cfg ? 'Desligada' : 'Não configurada'}</span>}
         </td>
         <td style={td}>{l.vencidas.length ? <strong style={{ color: '#dc2626' }}>{fmt(l.total)} <span style={{ fontWeight: 500 }}>({l.vencidas.length})</span></strong> : '—'}</td>
@@ -163,8 +163,19 @@ function Detalhe({ l, hoje, recarregar }) {
       inicio: f.inicio || null, carencia_dias: Number(f.carencia_dias) || 0, desconto_antecipado: Number(f.desconto_antecipado) || 0,
       observacao: f.observacao || null, atualizado_em: new Date().toISOString(),
     })
+    if (error) { setSalvando(false); setMsg(error.message); return }
+    // Mudou o plano (periodicidade, 1º vencimento ou valor): as cobranças FUTURAS
+    // do plano antigo saem, e o sistema gera as do novo. Senão a loja ficava
+    // com a semanal de 21/09 e a quinzenal do dia 15 ao mesmo tempo. O que já
+    // venceu fica: é dívida de verdade.
+    const mudouPlano = cfg && (cfg.periodicidade !== f.periodicidade || (cfg.inicio ?? '') !== (f.inicio || '')
+      || Number(cfg.valor) !== (Number(f.valor) || 0))
+    if (mudouPlano) {
+      await supabase.from('mensalidade_cobrancas')
+        .update({ status: 'cancelada', observacao: `Plano mudou para ${f.periodicidade} em ${dataCurtaBR(hoje)}` })
+        .eq('empresa_id', e.id).eq('status', 'aberta').gt('vencimento', hoje)
+    }
     setSalvando(false)
-    if (error) { setMsg(error.message); return }
     recarregar()
   }
 
@@ -202,7 +213,7 @@ function Detalhe({ l, hoje, recarregar }) {
           <label style={rotulo}>Valor (R$)<input style={campo} type="number" step="0.01" value={f.valor} onChange={set('valor')} /></label>
           <label style={rotulo}>Periodicidade
             <select style={campo} value={f.periodicidade} onChange={set('periodicidade')}>
-              <option value="semanal">Semanal</option><option value="mensal">Mensal</option>
+              <option value="semanal">Semanal</option><option value="quinzenal">Quinzenal (dia 1 e 15)</option><option value="mensal">Mensal</option>
             </select>
           </label>
         </div>
@@ -211,7 +222,9 @@ function Detalhe({ l, hoje, recarregar }) {
           <label style={rotulo}>Carência (dias abertos)<input style={campo} type="number" min="0" max="30" value={f.carencia_dias} onChange={set('carencia_dias')} /></label>
         </div>
         {f.inicio && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-          {f.periodicidade === 'semanal' ? `Vence toda ${DIAS[new Date(`${f.inicio}T12:00:00`).getDay()]}` : `Vence todo dia ${f.inicio.slice(8)}`}
+          {f.periodicidade === 'semanal' ? `Vence toda ${DIAS[new Date(`${f.inicio}T12:00:00`).getDay()]}`
+            : f.periodicidade === 'quinzenal' ? 'Vence todo dia 1 e dia 15 (o 1º vencimento vai pro próximo dia 1 ou 15)'
+            : `Vence todo dia ${f.inicio.slice(8)}`}
         </div>}
         <label style={rotulo}>Desconto se pagar antes (R$)<input style={campo} type="number" step="0.01" value={f.desconto_antecipado} onChange={set('desconto_antecipado')} /></label>
         <label style={rotulo}>Observação<input style={campo} value={f.observacao} placeholder="ex.: inclui computador e impressora" onChange={set('observacao')} /></label>

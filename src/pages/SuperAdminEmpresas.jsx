@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { hojeBR } from '../lib/feriados'
-import { faseDaMensalidade } from '../lib/mensalidade'
+import { faseDaMensalidade, periodoTexto } from '../lib/mensalidade'
 import { supabase } from '../lib/supabaseClient'
 import { MODULOS, BLOQUEADO } from '../lib/modulos'
 import '../components/Page.css'
@@ -532,7 +532,7 @@ export default function SuperAdminEmpresas() {
                   <div>
                     <div className="emp-rotulo">Mensalidade</div>
                     {mens ? (
-                      <div className="emp-valor">{fmtBRL(mens.cfg.valor)}<small> / {mens.cfg.periodicidade === 'semanal' ? 'semana' : 'mês'}</small></div>
+                      <div className="emp-valor">{fmtBRL(mens.cfg.valor)}<small> / {periodoTexto(mens.cfg.periodicidade)}</small></div>
                     ) : (
                       <div className="emp-valor apagado">Não configurada</div>
                     )}

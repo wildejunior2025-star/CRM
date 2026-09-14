@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { carregarExcecoes } from '../lib/feriados'
-import { faseDaMensalidade, diasAteTravar, dataCurtaBR, somaDiasYmd } from '../lib/mensalidade'
+import { faseDaMensalidade, diasAteTravar, dataCurtaBR, somaDiasYmd, periodoTexto } from '../lib/mensalidade'
 import MensalidadePagamento from './MensalidadePagamento'
 
 // Mensalidade atrasada (migs 0263/0264) — decidido com o Wilde em 13/09/2026:
@@ -81,7 +81,7 @@ export default function MensalidadeGate() {
       <Tela>
         <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 10 }}>📋 Como funciona a mensalidade</div>
         <ul style={{ fontSize: 14.5, lineHeight: 1.6, paddingLeft: 18, margin: '0 0 16px' }}>
-          <li>Valor: <strong>{Number(situacao.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong> por {situacao.periodicidade === 'semanal' ? 'semana' : 'mês'}.</li>
+          <li>Valor: <strong>{Number(situacao.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong> por {periodoTexto(situacao.periodicidade)}{situacao.periodicidade === 'quinzenal' ? ' (vence dia 1 e dia 15)' : ''}.</li>
           <li>No dia do vencimento aparece um aviso aqui no sistema, e a FWC avisa no WhatsApp.</li>
           <li>Depois do vencimento, a loja tem <strong>{situacao.carencia_dias} dia(s) de funcionamento</strong> pra pagar.</li>
           <li>Passado esse prazo, na abertura do dia seguinte o sistema fica <strong>bloqueado por um aviso de pagamento</strong> até pagar, e os funcionários ficam sem acesso. Pedidos, iFood, Loja Online e robô continuam chegando.</li>
