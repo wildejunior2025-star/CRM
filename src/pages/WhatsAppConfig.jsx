@@ -105,6 +105,9 @@ export default function WhatsAppConfig() {
   const [linkTexto,       setLinkTexto]       = useState('')
   const [salvandoTexto,   setSalvandoTexto]   = useState(false)
   const [textoMsg,        setTextoMsg]        = useState(null)
+  // "Já abrimos!" pra quem chamou com a loja fechada no mesmo dia (mig 0267).
+  const [avisoAbertura,   setAvisoAbertura]   = useState(true)
+  const [salvandoAviso,   setSalvandoAviso]   = useState(false)
   const [iaNome,          setIaNome]          = useState('Assistente')
   const [iaInstrucoes,    setIaInstrucoes]    = useState('')
   const [savingIa,        setSavingIa]        = useState(false)
@@ -167,6 +170,7 @@ export default function WhatsAppConfig() {
       })
       setIaAtivo(data.ia_ativo ?? false)
       setLinkAtivo(data.resposta_link_ativo ?? false)
+      setAvisoAbertura(data.aviso_abertura_ativo ?? true)
       setLinkTexto(data.resposta_link_texto ?? '')
       setIaNome(data.ia_nome ?? 'Assistente')
       setIaInstrucoes(data.ia_instrucoes ?? '')
@@ -476,6 +480,23 @@ export default function WhatsAppConfig() {
     }
     setLinkMsg({ type: 'success', text: novoValor ? 'Resposta automática ligada.' : 'Resposta automática desligada.' })
     setTimeout(() => setLinkMsg(null), 2500)
+  }
+
+  async function handleToggleAviso(novoValor) {
+    setAvisoAbertura(novoValor)
+    setSalvandoAviso(true)
+    setIaSaveMsg(null)
+    const { error } = await supabase
+      .from('whatsapp_config')
+      .upsert({ empresa_id: profile.empresa_id, aviso_abertura_ativo: novoValor }, { onConflict: 'empresa_id' })
+    setSalvandoAviso(false)
+    if (error) {
+      setIaSaveMsg({ type: 'error', text: error.message })
+      setAvisoAbertura(!novoValor)
+      return
+    }
+    setIaSaveMsg({ type: 'success', text: novoValor ? 'Aviso de abertura ligado.' : 'Aviso de abertura desligado.' })
+    setTimeout(() => setIaSaveMsg(null), 2500)
   }
 
   async function handleSalvarTexto(novo) {
@@ -892,6 +913,25 @@ export default function WhatsAppConfig() {
               </small>
             </div>
           </label>
+
+          {iaAtivo && (
+            <label className="wa-checkbox-row" style={{ marginTop: 12 }}>
+              <input
+                type="checkbox"
+                checked={avisoAbertura}
+                disabled={salvandoAviso}
+                onChange={(e) => handleToggleAviso(e.target.checked)}
+              />
+              <div className="wa-checkbox-text">
+                <span>Avisar quando a loja abrir</span>
+                <small>
+                  Quem chamou com a loja fechada recebe <em>"Já estamos abertos! Pode fazer seu
+                  pedido pelo link"</em> assim que você abrir — <strong>só no mesmo dia</strong>.
+                  Quem chamou ontem não recebe. Não manda pra quem já pediu ou já foi atendido.
+                </small>
+              </div>
+            </label>
+          )}
 
           {iaSaveMsg && (
             <div className={`wa-test-result ${iaSaveMsg.type}`} style={{ marginTop: 8 }}>

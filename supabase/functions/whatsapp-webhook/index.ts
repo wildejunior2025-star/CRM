@@ -2634,6 +2634,17 @@ serve(async (req) => {
         if (!jaAvisou) {
           const msgFechado = `😴 Estamos fechados no momento!\n\n${horarioTexto || "Confira nosso cardápio"}.\n\nMas você já pode ver nosso cardápio e se planejar! 😊\n👉 ${catalogoUrl}`
           await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: msgFechado })
+          // Anota pra mandar "Já abrimos" quando a loja abrir HOJE (mig 0267,
+          // worker aviso-abertura). Cada "fechado" novo reabre o aviso: quem
+          // chamou no intervalo do almoço recebe de novo quando voltar. O teste
+          // pela URL não entra — ele usa número de verdade.
+          if (url.searchParams.get("test") !== "true") {
+            await supabase.from("aviso_abertura").upsert({
+              empresa_id: empresaId, phone, dia: hojeNaLoja(),
+              criado_em: new Date().toISOString(),
+              status: "pendente", motivo: null, enviado_em: null,
+            }, { onConflict: "empresa_id,phone,dia" }).then(() => {}, () => {})
+          }
           if (!isTest) {
             await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
               method: "POST",
