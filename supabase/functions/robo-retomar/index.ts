@@ -60,9 +60,15 @@ serve(async (req) => {
     const chave = digitos(body.phone).slice(-8)
     if (chave.length < 8) return json({ ok: false, erro: "telefone inválido" }, 400)
 
-    // Pausa automática sai (a manual, expira_em nulo, é decisão da loja e fica).
-    await sb.from("whatsapp_bot_pausado").delete()
-      .eq("empresa_id", empresaId).like("phone", `%${chave}`).not("expira_em", "is", null)
+    // Pausa automática sai. A manual (expira_em nulo) só sai quando quem chama
+    // pediu — é o "Devolver pro robô" de dentro da conversa, que também tem o
+    // botão de pausar sem prazo. O card do chamado não tira a manual.
+    {
+      let del = sb.from("whatsapp_bot_pausado").delete()
+        .eq("empresa_id", empresaId).like("phone", `%${chave}`)
+      if (body.incluir_manual !== true) del = del.not("expira_em", "is", null)
+      await del
+    }
     // Chamado aberto deixa o robô calado — devolver é dar a conversa por atendida.
     await sb.from("whatsapp_chamados").update({ atendido_em: new Date().toISOString() })
       .eq("empresa_id", empresaId).like("phone", `%${chave}`).is("atendido_em", null)

@@ -5000,7 +5000,7 @@ function CadastroRapidoNoChat({ empresaId, telefone, onNomeDoCliente }) {
   )
 }
 
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onNomeDoCliente, cadastroVersao, pinChat, onEnviarCategoria, enviandoCategoria, roboLigado }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, onPausarRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onNomeDoCliente, cadastroVersao, pinChat, onEnviarCategoria, enviandoCategoria, roboLigado }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   // No celular a sacola + o "fechar pedido" abriam empilhados embaixo da
@@ -5143,7 +5143,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
           conversa pra cima e comiam três faixas da tela; lado a lado sobra
           espaço pras mensagens, que é o que a pessoa está lendo. No celular
           eles quebram pra linha de baixo sozinhos em vez de espremer. */}
-      {(empresaId || (botPausado && roboLigado) || onPedirLocalizacao) && (
+      {(empresaId || roboLigado || onPedirLocalizacao) && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
           {empresaId && (
             <button type="button" onClick={g ? onAbrirSacola : () => setSacolaAberta(v => !v)}
@@ -5170,6 +5170,21 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
                 lineHeight: 1.2, cursor: 'pointer',
               }}>
               📍 Pedir localização
+            </button>
+          )}
+
+          {/* Pausar sem sair do gestor (antes só dava pelo Portal → Conversas).
+              Pausa de vez, até alguém devolver: quem aperta aqui decidiu
+              atender essa pessoa na mão. */}
+          {!botPausado && roboLigado && onPausarRobo && thread.canal === 'whatsapp' && (
+            <button type="button" onClick={onPausarRobo}
+              title="O robô para de responder este cliente até você devolver a conversa"
+              style={{
+                flex: '1 1 140px', padding: g ? '11px 10px' : '9px 8px', borderRadius: 10, cursor: 'pointer',
+                fontSize: g ? 13.5 : 12, fontWeight: 700, lineHeight: 1.2,
+                border: '1px dashed rgba(245,158,11,.6)', background: 'transparent', color: '#f59e0b',
+              }}>
+              ⏸️ Pausar robô
             </button>
           )}
 
@@ -7432,19 +7447,39 @@ export default function PainelPedidos() {
 
   // Devolve a conversa pro robô sem sair dela: tira a pausa automática e ele
   // volta a responder aquele número, já tendo lido o que a pessoa escreveu.
+  // "Pausar robô" na conversa: pausa sem prazo (igual à do Portal → Conversas).
+  // Só volta quando alguém apertar "Devolver pro robô".
+  async function pausarConversaRobo() {
+    const sep = chatAberto?.indexOf('|') ?? -1
+    let tel = sep >= 0 ? String(chatAberto.slice(sep + 1)).replace(/\D/g, '') : ''
+    if (tel.length < 10 || !empresa?.id) return
+    if (!tel.startsWith('55')) tel = `55${tel}`
+    const { error } = await supabase.from('whatsapp_bot_pausado').upsert({
+      empresa_id: empresa.id, phone: tel, pausado_em: new Date().toISOString(),
+      expira_em: null, motivo: 'pausado no gestor',
+    }, { onConflict: 'empresa_id,phone' })
+    if (error) {
+      setChatAviso({ ok: false, txt: 'Não consegui pausar o robô: ' + error.message })
+      return
+    }
+    setBotPausado(true)
+    setChatAviso({ ok: true, txt: '⏸️ Robô pausado nesta conversa — ele não responde até você devolver.' })
+  }
+
   async function devolverConversaAoRobo() {
     const sep = chatAberto?.indexOf('|') ?? -1
     const tel = sep >= 0 ? String(chatAberto.slice(sep + 1)).replace(/\D/g, '') : ''
     if (!tel || !empresa?.id) return
+    // Dentro da conversa, devolver tira QUALQUER pausa — inclusive a do botão
+    // "Pausar robô" daqui mesmo, que não tem prazo.
     await supabase.from('whatsapp_bot_pausado')
       .delete().eq('empresa_id', empresa.id)
       .like('phone', `%${tel.slice(-8)}`)
-      .not('expira_em', 'is', null)
     setBotPausado(false)
     setChatAviso({ ok: true, txt: '🤖 Robô de volta nesta conversa — ele continua de onde você parou.' })
     // Se o cliente escreveu enquanto o robô estava pausado, ele responde agora
     // em vez de esperar a próxima mensagem (robo-retomar).
-    const { data } = await supabase.functions.invoke('robo-retomar', { body: { phone: tel } })
+    const { data } = await supabase.functions.invoke('robo-retomar', { body: { phone: tel, incluir_manual: true } })
     if (data?.respondeu) {
       setChatAviso({ ok: true, txt: '🤖 Robô de volta — já respondendo o que o cliente mandou.' })
     }
@@ -9462,6 +9497,7 @@ export default function PainelPedidos() {
                 onEscolherProduto={escolherProdutoNoChat}
                 botPausado={botPausado}
                 onDevolverAoRobo={devolverConversaAoRobo}
+                onPausarRobo={pausarConversaRobo}
                 sacola={sacolaChat}
                 onQtdSacola={mudarQtdSacola}
                 onQtdDiretaSacola={definirQtdSacola}

@@ -469,16 +469,46 @@ serve(async (req) => {
             : (msgMeta || `erro ${res.status}`)
         }
       } else {
-        const res = await fetch(`${apiBase}/message/sendText/${instanceName}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", apikey: apiKey },
-          // linkPreview: sem ele o link do YouTube saía cru, sem a miniatura e o
-          // título que aparecem quando a loja manda pelo celular (14/09/2026).
-          body: JSON.stringify({ number: numeroFull, text, linkPreview: true }),
-        })
-        data = await res.json().catch(() => ({}))
-        ok = res.ok
-        if (!ok) erro = String(data?.message ?? data?.error ?? `erro ${res.status}`)
+        // Link do YouTube: a prévia (miniatura + título) quem monta é o servidor
+        // do Evolution abrindo a página — e o YouTube não entrega pra servidor.
+        // Mesmo com linkPreview o link chegava cru (14/09/2026). Então a gente
+        // pega título e miniatura no oEmbed oficial e manda como foto com a
+        // mensagem (e o link) na legenda. Falhou qualquer coisa: texto normal.
+        let foiComoFoto = false
+        const linkYoutube = text.match(/https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?[^\s]*v=|shorts\/)|youtu\.be\/)[^\s]+/i)?.[0]
+        if (linkYoutube) {
+          try {
+            const oe = await fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(linkYoutube)}`)
+            const info = oe.ok ? await oe.json() : null
+            if (info?.thumbnail_url) {
+              const resFoto = await fetch(`${apiBase}/message/sendMedia/${instanceName}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", apikey: apiKey },
+                body: JSON.stringify({
+                  number: numeroFull, mediatype: "image", mimetype: "image/jpeg",
+                  fileName: "video.jpg", media: info.thumbnail_url,
+                  caption: `▶️ *${info.title ?? "Vídeo"}*\n\n${text}`,
+                }),
+              })
+              data = await resFoto.json().catch(() => ({}))
+              foiComoFoto = resFoto.ok
+              ok = resFoto.ok
+              if (!resFoto.ok) console.error("[send_message] foto do YouTube falhou:", JSON.stringify(data).slice(0, 300))
+            }
+          } catch (e) {
+            console.error("[send_message] oEmbed falhou:", String(e))
+          }
+        }
+        if (!foiComoFoto) {
+          const res = await fetch(`${apiBase}/message/sendText/${instanceName}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", apikey: apiKey },
+            body: JSON.stringify({ number: numeroFull, text, linkPreview: true }),
+          })
+          data = await res.json().catch(() => ({}))
+          ok = res.ok
+          if (!ok) erro = String(data?.message ?? data?.error ?? `erro ${res.status}`)
+        }
       }
 
       // Enviou? Entra na conversa daquele número, marcada como escrita pela LOJA
