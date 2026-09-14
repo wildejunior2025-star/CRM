@@ -1163,6 +1163,41 @@ function mesmoCarrinho(a: any[], b: any[]): boolean {
 }
 
 /** Total da sacola, pra mostrar a cada item que entra. */
+/**
+ * A conferência da sacola, agrupada por produto:
+ *
+ *   🍽️ *Dunaszinho (Sorvete de Iogurte)* — 30 un · *R$ 60,00*
+ *      • Uva — 10
+ *      • Leite condensado — 10
+ *
+ * O robô grava uma linha por sabor (é o que o preço de atacado precisa), e a
+ * mensagem saía repetindo o nome do produto em cada sabor — 13 blocos pra um
+ * pedido de 4 produtos (CDBom, 14/09/2026). Aqui o nome aparece uma vez, com o
+ * total de unidades e o valor; embaixo, cada sabor com a sua quantidade.
+ */
+function detalheDaSacola(itens: any[]): string {
+  const rs = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`
+  const grupos = new Map<string, { nome: string; qtd: number; valor: number; linhas: string[] }>()
+  for (const it of itens ?? []) {
+    const chave = String(it?.produto_id ?? it?.nome ?? "")
+    const g = grupos.get(chave) ?? { nome: String(it?.nome ?? ""), qtd: 0, valor: 0, linhas: [] }
+    const qtd = Number(it?.qtd) || 0
+    g.qtd += qtd
+    g.valor += qtd * (Number(it?.preco) || 0)
+    const comps = (Array.isArray(it?.complementos) ? it.complementos : [])
+      .map((c: any) => String(c?.nome ?? "").trim()).filter(Boolean)
+    if (comps.length) g.linhas.push({ texto: comps.join(", "), qtd } as any)
+    grupos.set(chave, g)
+  }
+  return [...grupos.values()].map(g => {
+    const cab = `🍽️ *${g.nome}* — ${g.qtd} un · *${rs(g.valor)}*`
+    const linhas = (g.linhas as any[]).map(l =>
+      // Uma linha só com 1 unidade é item montado (quentinha): sem "— 1".
+      (g.linhas.length === 1 && l.qtd === g.qtd) ? `   • ${l.texto}` : `   • ${l.texto} — ${l.qtd}`)
+    return [cab, ...linhas].join("\n")
+  }).join("\n\n")
+}
+
 function totalDaSacola(itens: any[]): number {
   return (itens ?? []).reduce((s: number, i: any) => s + (Number(i?.qtd) || 0) * (Number(i?.preco) || 0), 0)
 }
@@ -3568,12 +3603,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             // Detalhe com os complementos escolhidos — pro cliente CONFERIR o que foi anotado
             // (se a IA anotou errado, ele corrige antes de fechar).
             const temComp = acao.items.some((i: any) => Array.isArray(i.complementos) && i.complementos.length > 0)
-            const detalhe = acao.items.map((i: any) => {
-              const comps = (Array.isArray(i.complementos) && i.complementos.length > 0)
-                ? "\n" + i.complementos.map((c: any) => `   • ${c.nome}`).join("\n")
-                : ""
-              return `🍽️ *${i.nome}*${Number(i.qtd) > 1 ? ` x${i.qtd}` : ""}${comps}`
-            }).join("\n\n")
+            const detalhe = detalheDaSacola(acao.items)
             const atacado = avisoDeAtacado(acao.items, produtos)
             const cabecalho = (temComp
               ? `✅ Anotei! Confere se está tudo certo:\n\n${detalhe}`
