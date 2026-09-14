@@ -3314,6 +3314,10 @@ Fechar pedido — CLIENTE SEM CADASTRO (raro: CLIENTE = "Não identificado" e ca
 ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "retirada", "forma_pagamento": "dinheiro", "cliente_nome": "[nome]", "cliente_telefone": "${phoneLocal}", "items": [{"produto_id": "ID_REAL", "nome": "Nome", "qtd": 1, "preco": 0.00}]}
 ⚠️ CRÍTICO: sem cliente_nome o pedido NÃO é criado
 
+COMPROVANTE DE PAGAMENTO (foto ou print de PIX/transferência):
+⛔ Você NUNCA confirma pagamento. Uma foto não prova que o dinheiro caiu — comprovante pode ser falso, agendado ou de outro valor. PROIBIDO dizer "pagamento confirmado", "PIX confirmado", "recebemos seu pagamento" ou "pedido pago".
+Responda: "Recebi seu comprovante! 🙌 A loja confere o pagamento e confirma seu pedido por aqui." Pode citar o valor que aparece na foto, mas sempre como algo que a loja ainda vai conferir.
+
 Chamar uma pessoa da loja (VOCÊ NÃO SABE responder, ou o cliente está insistindo/incomodado):
 Mande antes: "Já chamei alguém aqui da loja pra te ajudar. 🙌 Só um instante!" e emita:
 ACAO: {"tipo": "chamar_atendente", "motivo": "o que o cliente quer, em poucas palavras"}
@@ -3883,6 +3887,25 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
         await abrirChamado(supabase, empresaId, phone, text)
         resposta = "Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!"
         console.log(`[chamado] SafeNet: robô ${disseFechada ? "disse que a loja está fechada" : "anotou sem sacola"} — chamado aberto`)
+      }
+    }
+
+    // Safety net: o robô CONFIRMOU PAGAMENTO olhando a foto do comprovante.
+    // Foi na CDBom em 14/09/2026: "Comprovante recebido! PIX de R$ 19,80 para
+    // CREME DELICIA BOM confirmado! Seu pedido já foi anotado com o pagamento."
+    // Uma foto não prova que o dinheiro caiu (comprovante falso, agendado, de
+    // outro valor) — quem confirma é a loja ou o PIX automático, que não passa
+    // por esta resposta. Só olha a fala livre da IA (sem ação): as mensagens do
+    // próprio sistema sobre PIX não entram aqui.
+    if (acaoMatch === null) {
+      const trecho = resposta.match(/\b(pagamento|pix|transfer[eê]ncia|dep[oó]sito)\b[^\n.!?]{0,60}\b(confirmad[oa]|aprovad[oa]|recebid[oa]|compensad[oa]|caiu)\b|\bconfirm(ei|amos)\b[^\n.!?]{0,20}\b(o |seu )?(pagamento|pix)\b|\bpedido (j[áa] )?(est[áa] )?pago\b/i)?.[0] ?? ""
+      // "depois que o pagamento for confirmado" / "assim que o PIX cair" é
+      // explicação do PIX automático, não confirmação.
+      const condicional = /\b(for|ser|seja|assim que|depois que|quando|ap[oó]s|at[ée] que|se|precisa|aguard\w*|esper\w*)\b/i.test(trecho)
+      const confirmouPagamento = !!trecho && !condicional
+      if (confirmouPagamento) {
+        console.log("[SafeNet] robô confirmou pagamento pela foto — resposta trocada:", resposta.slice(0, 160))
+        resposta = "Recebi seu comprovante! 🙌\n\nA loja confere o pagamento e confirma seu pedido por aqui. Qualquer dúvida é só chamar! 😊"
       }
     }
 
