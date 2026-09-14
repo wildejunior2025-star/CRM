@@ -579,6 +579,7 @@ async function salvarEnderecoNoCarrinho(
 }
 
 async function handleLocalizacao(
+  supabase: ReturnType<typeof createClient>,
   empresaId: string,
   phone: string,
   coords: { lat: number; lng: number },
@@ -603,21 +604,41 @@ async function handleLocalizacao(
   await salvarEnderecoNoCarrinho(empresaId, phone, campos)
   console.log(`[Local] ponto salvo: ${coords.lat},${coords.lng} rua="${a?.rua ?? "-"}"`)
 
+  // O link do mapa vai SEMPRE junto (CDBom, 14/09/2026). O nome da rua que o
+  // mapa devolve é só a rua mais perto do GPS: o cliente num quiosque em frente
+  // à "casa da banana" recebeu "Rua Palmácea", corrigiu pra "Avenida das
+  // Mangueiras", disse que não tinha número — e o endereço nunca fechou. O que
+  // guia o motoboy é o PINO; com o link o cliente confere e arrasta até a porta.
+  // O pino é onde o CELULAR está, e quem pede do trabalho manda o do trabalho:
+  // o link também é a chance de pegar isso antes de a comida sair.
+  let link = ""
+  {
+    const { data: pin, error: pinErr } = await supabase.rpc("criar_pin_link_para", {
+      p_empresa_id: empresaId, p_telefone: phone,
+      p_rua: a?.rua || "Localização enviada pelo WhatsApp", p_numero: null,
+      p_bairro: a?.bairro || null, p_cidade: a?.cidade || null,
+      p_estado: a?.estado || null, p_cep: null,
+      p_lat: coords.lat, p_lng: coords.lng, p_pedido_id: null,
+    })
+    if (pinErr) console.error("[Local] criar_pin_link_para erro:", pinErr.message)
+    else if (pin?.ok) link = `https://lojaonline.fwcinter.com/local/${pin.token}`
+  }
+  const blocoLink = link
+    ? `📌 Confere se o ponto está certinho na sua porta — se não estiver, é só arrastar:\n👉 ${link}\n\n`
+    : ""
+
   if (!a?.rua) {
     return { resposta:
-      "📍 Peguei sua localização, obrigado!\n\n" +
-      "Só que o mapa não soube me dizer o nome da rua aí. Me escreve o *nome da rua*, " +
-      "o *número* e o *bairro*? O ponto eu já guardei — é por ele que o entregador vai. 🙂" }
+      "📍 Peguei sua localização, obrigado!\n\n" + blocoLink +
+      "O mapa não soube me dizer o nome da rua aí. Me escreve o *nome da rua* e o *número* " +
+      "(se não tiver número, é só dizer *sem número*). 🙂" }
   }
 
-  // A confirmação de volta não é enfeite: o pino é onde o CELULAR está. Quem
-  // pede do trabalho manda, sem perceber, o endereço do trabalho — e essa
-  // pergunta é a única chance de pegar isso antes de a comida sair.
   const onde = [a.rua, a.bairro || null, a.cidade || null].filter(Boolean).join(", ")
   return { resposta:
     "📍 Peguei sua localização!\n\n" +
-    `Isso aqui é *${onde}*.\n\n` +
-    "É aí mesmo que você quer receber? Se for, me diz só o *número* da casa. 😊" }
+    `Pelo mapa fica perto de *${onde}*.\n\n` + blocoLink +
+    "Agora me diz o *número* da casa. Não tem número? Responda *sem número*. 😊" }
 }
 
 // ── LINK DO GOOGLE MAPS (mig 0240) ──────────────────────────────────────────
@@ -2982,13 +3003,36 @@ serve(async (req) => {
       }
     }
 
+    // ── "SEM NÚMERO" ────────────────────────────────────────────────────────
+    // Quiosque, sítio, casa sem número oficial. A IA respondia "anotei s/n" e
+    // não gravava nada: a sacola ficava sem número e o endereço nunca fechava
+    // (CDBom, 14/09/2026). Com a rua já na sacola, o código grava S/N e segue.
+    if (!coordsMsg && carrinhoEndereco.rua && !carrinhoEndereco.numero &&
+        /^\s*(sem[\s-]*n[uú]mero|s\s*\/\s*n[º°o]?|sn|n[aã]o\s+(tem|possui|tenho)\s+n[uú]mero)\s*[.!]?\s*$/i.test(text)) {
+      const { resposta: respSn } = await handleSalvarNumero(supabase, empresaId, phone, phoneLocal, "S/N", aceitaDelivery, pgtoOpcoes)
+      await supabase.from("whatsapp_conversas").insert({
+        empresa_id: empresaId, phone, role: "assistant", content: respSn,
+      })
+      await espelharNoChat(supabase, empresaId, phone, respSn, "loja", true)
+      if (isTest) {
+        return new Response(JSON.stringify({ ok: true, resposta: respSn }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+      }
+      await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+        body: JSON.stringify({ number: phone, text: respSn }),
+      }).catch(e => console.error("[SemNumero] sendText erro:", e))
+      return new Response("ok", { headers: corsHeaders })
+    }
+
     // ── O CLIENTE MANDOU A LOCALIZAÇÃO ──────────────────────────────────────
     // Curto-circuito antes da IA: quem responde é o código. Mandar um pino pro
     // modelo seria pagar crédito pra ele decidir o que fazer com um dado que
     // não tem interpretação nenhuma — e arriscar ouvir "não entendi" de quem
     // fez exatamente o que o robô pediu.
     if (coordsMsg) {
-      const { resposta: respLoc } = await handleLocalizacao(empresaId, phone, coordsMsg)
+      const { resposta: respLoc } = await handleLocalizacao(supabase, empresaId, phone, coordsMsg)
       await supabase.from("whatsapp_conversas").insert({
         empresa_id: empresaId, phone, role: "assistant", content: respLoc,
       })
@@ -3092,6 +3136,7 @@ Colete UM POR VEZ, nesta ordem exata:
      Recebeu o endereço ESCRITO (sem CEP) → emita salvar_rua com rua + bairro + cidade (sem texto antes). O sistema pede o número.
      ⚠️ O cliente pode mandar o endereço em PEDAÇOS (a rua numa mensagem, o bairro na outra). Trate como um endereço só: quando vier o bairro solto depois da rua, emita salvar_rua de novo com a rua que você já tem MAIS o bairro novo.
   4. Recebeu o número → emita salvar_numero. O sistema pergunta entrega/retirada automaticamente.
+     Lugar SEM número (quiosque, sítio, barraca, "não tem número", só um ponto de referência) → emita salvar_numero com "S/N" na hora. Ponto de referência NÃO é número e NUNCA diga "anotei" sem emitir a ação — o pino do mapa é que guia o entregador.
 O telefone já temos (${phoneLocal}) — NUNCA peça.
 ⚠️ CRÍTICO: só o *nome* é obrigatório. ⛔ NUNCA peça e-mail — o sistema não precisa dele.
 
