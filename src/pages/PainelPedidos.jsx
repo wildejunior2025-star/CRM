@@ -6598,7 +6598,15 @@ export default function PainelPedidos() {
   }
 
   function escolherLargura(v) { setLarguraCupom(v); patchPainelConfig({ larguraCupom: v }) }
-  function toggleSom() { const novo = !somAtivo; setSomAtivo(novo); patchPainelConfig({ somAtivo: novo }) }
+  function toggleSom() {
+    const novo = !somAtivo
+    setSomAtivo(novo)
+    patchPainelConfig({ somAtivo: novo })
+    // Vale na hora: desligar cala a campainha que já está tocando, e religar
+    // com pedido esperando volta a tocar (senão o pedido fica mudo até o próximo).
+    if (!novo) pararLoopSom()
+    else if (pedidos.some(p => p.status === 'aguardando')) iniciarLoopSom()
+  }
   function setCupom(patch) {
     setCupomCfg(prev => {
       const novo = { ...prev, ...patch }
@@ -10656,6 +10664,27 @@ export default function PainelPedidos() {
             </button>
           )
         })}
+
+        {/* Mudo da campainha. Ficava só dentro de Impressora, e ninguém achava.
+            Desligado fica vermelho, pra ninguém esquecer a loja muda. */}
+        <button type="button" onClick={toggleSom}
+          title={somAtivo ? 'Campainha de pedido ligada (clique pra silenciar)' : 'Campainha de pedido SILENCIADA (clique pra ligar)'}
+          aria-pressed={!somAtivo}
+          style={{
+            marginTop: 'auto',
+            width: 44, height: 48, borderRadius: 10, cursor: 'pointer',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
+            border: `1px solid ${somAtivo ? 'transparent' : '#dc2626'}`,
+            background: somAtivo ? 'transparent' : 'rgba(220,38,38,.12)',
+            color: somAtivo ? 'var(--text-muted, #9aa0b5)' : '#dc2626',
+          }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+            {!somAtivo && <line x1="2" y1="2" x2="22" y2="22"/>}
+          </svg>
+          <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '.02em' }}>{somAtivo ? 'Som' : 'Mudo'}</span>
+        </button>
       </nav>
 
       {/* ── MESAS / SALÃO em painel. Cobre da esquerda até ANTES da barra de menu
