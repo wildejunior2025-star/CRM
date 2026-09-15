@@ -6,6 +6,7 @@ import '../components/Page.css'
 import './PedidosDelivery.css'
 import { imprimirCupom } from '../utils/imprimirCupom'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
+import { ehDividido, textoPagamento } from '../lib/pagamentoPartes'
 
 const TIMER_LIMITE_MS = 7 * 60 * 1000 // 7 minutos
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
@@ -166,7 +167,7 @@ ${pedido.subtotal != null ? `<div style="display:flex;justify-content:space-betw
 ${pedido.taxa_entrega != null ? `<div style="display:flex;justify-content:space-between"><span>Taxa entrega</span><span>${fmt(pedido.taxa_entrega)}</span></div>` : ''}
 <div style="display:flex;justify-content:space-between" class="total"><span>TOTAL</span><span>${fmt(pedido.total)}</span></div>
 <div class="sep"></div>
-<div>Pagamento: ${pedido.forma_pagamento?.toUpperCase() || '—'}</div>
+<div>Pagamento: ${ehDividido(pedido) ? textoPagamento(pedido) : (pedido.forma_pagamento?.toUpperCase() || '—')}</div>
 ${troco}
 ${obs}
 </body>
@@ -257,7 +258,7 @@ function OrigemBadge({ origem }) {
 
 function CardPedido({ pedido, onAtualizarStatus, onCancelar, onImprimirPedido, onExpirado }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
-  const pagamento = pedido.forma_pagamento || ''
+  const pagamento = ehDividido(pedido) ? textoPagamento(pedido) : (pedido.forma_pagamento || '')
   const origemCfg = ORIGEM_CONFIG[pedido.origem] ?? ORIGEM_CONFIG.cardapio
 
   return (
@@ -547,7 +548,7 @@ function EmptyState({ aba, foraDoPeriodo = 0, onVerHistorico }) {
 
 function DrawerDetalhe({ pedido, onFechar, onAtualizarStatus, onCancelar }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
-  const pagamento = pedido.forma_pagamento || ''
+  const pagamento = ehDividido(pedido) ? textoPagamento(pedido) : (pedido.forma_pagamento || '')
   const dataHora = new Date(pedido.created_at).toLocaleString('pt-BR')
   const endereco = enderecoCompleto(pedido)
 

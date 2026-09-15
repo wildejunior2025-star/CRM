@@ -94,6 +94,8 @@ function fmt(n) {
   return Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+const NOME_PAG = { pix: 'PIX', pix_entrega: 'PIX na entrega', dinheiro: 'Dinheiro', credito: 'Crédito', debito: 'Débito', cartao: 'Cartão' }
+
 function fmtTelefone(val) {
   const digits = val.replace(/\D/g, '').slice(0, 11)
   if (digits.length <= 2) return digits
@@ -613,6 +615,10 @@ export default function DeliveryCheckout() {
   const [lojaEndereco, setLojaEndereco] = useState(null)
   const [errors, setErrors]     = useState({})
   const [enviando, setEnviando] = useState(false)
+  // Pagar com duas formas (mig 0274): a 1ª é form.pagamento, a 2ª fica com o resto.
+  const [dividir, setDividir] = useState(false)
+  const [forma2, setForma2]   = useState('')
+  const [valor1, setValor1]   = useState('')
   const [erroGlobal, setErroGlobal] = useState(null)
   const [cidades, setCidades]       = useState([])
   // A lista do IBGE não veio: o campo vira texto livre em vez de virar parede.
@@ -892,6 +898,12 @@ export default function DeliveryCheckout() {
     if (!lojaEndereco) return
     if (!formasLoja.includes(form.pagamento)) set('pagamento', formasLoja[0])
   }, [lojaEndereco, form.pagamento]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Dividindo e escolheu em cima a mesma forma do "resto": o resto troca pra outra.
+  useEffect(() => {
+    if (dividir && (!forma2 || forma2 === form.pagamento || !formasLoja.includes(forma2))) {
+      setForma2(formasLoja.find(f => f !== form.pagamento) ?? '')
+    }
+  }, [dividir, form.pagamento, forma2, lojaEndereco]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Se a loja desligou a retirada e o cliente tinha um rascunho salvo com ela
   // escolhida, volta pra entrega — senão ele fecharia um pedido inválido.
@@ -1228,8 +1240,30 @@ export default function DeliveryCheckout() {
   // errada. Marcado o endereço, os dois números sobem juntos.
   const baseCartao = Math.max(0, Math.round(
     ((subtotal + (taxaIndefinida ? 0 : taxaAplicada)) - cashbackUsado) * 100) / 100)
-  const acrescimoPagamento = Math.round(baseCartao * repassePct(lojaEndereco, form.pagamento)) / 100
+
+  // Duas formas (mig 0274): o cliente diz quanto vai na 1ª e o resto cai na 2ª
+  // sozinho — a conta sempre fecha. A divisão é sobre o valor SEM a taxa do
+  // cartão; o acréscimo incide só na parte que passa na maquineta.
+  const dividindo = dividir && !!forma2 && forma2 !== form.pagamento
+  // Com a entrega "a calcular" a base ainda não é número — a divisão espera.
+  const baseDividir = Number.isFinite(baseCartao) ? baseCartao : 0
+  const base1 = dividindo
+    ? Math.min(baseDividir, Math.max(0, Math.round((parseFloat(String(valor1).replace(',', '.')) || 0) * 100) / 100))
+    : baseCartao
+  const base2 = dividindo ? Math.round((baseDividir - base1) * 100) / 100 : 0
+  const acrescimo1 = Math.round(base1 * repassePct(lojaEndereco, form.pagamento)) / 100
+  const acrescimo2 = dividindo ? Math.round(base2 * repassePct(lojaEndereco, forma2)) / 100 : 0
+  const acrescimoPagamento = Math.round((acrescimo1 + acrescimo2) * 100) / 100
   const total = Math.round((baseCartao + acrescimoPagamento) * 100) / 100
+  const partesPag = dividindo
+    ? [
+        { forma: form.pagamento, valor: Math.round((base1 + acrescimo1) * 100) / 100 },
+        { forma: forma2, valor: Math.round((base2 + acrescimo2) * 100) / 100 },
+      ]
+    : null
+  const formasEscolhidas = dividindo ? [form.pagamento, forma2] : [form.pagamento]
+  const valorDinheiro = partesPag ? (partesPag.find(p => p.forma === 'dinheiro')?.valor ?? 0) : total
+  const pctCartaoEscolhido = formasEscolhidas.map(f => repassePct(lojaEndereco, f)).find(p => p > 0) ?? 0
 
   // Pedido mínimo (só entrega, conta o subtotal dos produtos — sem a taxa)
   const pedidoMinimo = Number(lojaEndereco?.pedido_minimo ?? 0)
@@ -1495,9 +1529,12 @@ export default function DeliveryCheckout() {
       if (!form.cidade) e.cidade = 'Cidade obrigatória'
       if (!form.bairro.trim()) e.bairro = 'Bairro obrigatório'
     }
-    if (form.pagamento === 'dinheiro' && form.troco) {
+    if (formasEscolhidas.includes('dinheiro') && form.troco) {
       const val = parseFloat(form.troco.replace(',', '.'))
-      if (isNaN(val) || val < total) e.troco = `Valor deve ser maior que R$ ${fmt(total)}`
+      if (isNaN(val) || val < valorDinheiro) e.troco = `Valor deve ser maior que R$ ${fmt(valorDinheiro)}`
+    }
+    if (dividindo && (!(base1 > 0) || !(base2 > 0))) {
+      e.divisao = `Digite quanto vai no ${NOME_PAG[form.pagamento] ?? form.pagamento} — tem que ser menos que R$ ${fmt(baseDividir)}`
     }
     return e
   }
@@ -1638,8 +1675,18 @@ export default function DeliveryCheckout() {
       } catch { /* ok */ }
     }
 
+    // Troco é da parte em DINHEIRO. Nas partes, vai junto da parte (o banco
+    // copia pro troco_para do pedido, que as telas antigas leem).
+    const trocoPara = formasEscolhidas.includes('dinheiro') && form.troco
+      ? Math.round(parseFloat(form.troco.replace(',', '.')) * 100) / 100
+      : null
+    const pagamentosPedido = partesPag
+      ? partesPag.map(p => (p.forma === 'dinheiro' && trocoPara ? { ...p, troco_para: trocoPara } : p))
+      : null
+
     // ── PIX: gera o QR pelo create-pix-payment (cai na conta da loja, se conectada) ──
-    if (form.pagamento === 'pix') {
+    // Dividido com PIX: o QR sai só com a parte do PIX; o resto é cobrado na entrega.
+    if (formasEscolhidas.includes('pix')) {
       const pedidoPix = {
         empresa_id:   empresaId,
         empresa_nome: empresaNome,
@@ -1674,6 +1721,8 @@ export default function DeliveryCheckout() {
         agendado_para: agendadoPara,
         agendado_ate: agendadoAte,
         acrescimo: acrescimoPagamento,
+        pagamentos: pagamentosPedido,
+        troco_para: trocoPara,
       }
       let pixData = null, pixErr = null
       try {
@@ -1717,10 +1766,9 @@ export default function DeliveryCheckout() {
         taxa_entrega:   taxaAplicada,
         cashback_usado: cashbackUsado,
         total,
-        forma_pagamento: form.pagamento,
-        troco_para: form.pagamento === 'dinheiro' && form.troco
-          ? Math.round(parseFloat(form.troco.replace(',', '.')) * 100) / 100
-          : null,
+        forma_pagamento: pagamentosPedido ? 'dividido' : form.pagamento,
+        pagamentos: pagamentosPedido,
+        troco_para: trocoPara,
         observacoes: form.observacoes.trim() || null,
         agendado_para: agendadoPara,
         agendado_ate: agendadoAte,
@@ -2236,13 +2284,80 @@ export default function DeliveryCheckout() {
                     )
                   })}
                 </div>
+                {/* Duas formas: quanto vai na escolhida acima, e o resto em qual. */}
+                {formasLoja.length >= 2 && (
+                  <label style={{
+                    display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, cursor: 'pointer',
+                    fontSize: 14, fontWeight: 600, userSelect: 'none', flexWrap: 'wrap',
+                  }}>
+                    <input type="checkbox" checked={dividir} style={{ width: 18, height: 18, accentColor: '#7c3aed' }}
+                      onChange={e => {
+                        const on = e.target.checked
+                        setDividir(on)
+                        setErrors(prev => ({ ...prev, divisao: undefined }))
+                        if (on) {
+                          if (!forma2 || forma2 === form.pagamento) setForma2(formasLoja.find(f => f !== form.pagamento) ?? '')
+                          if (!valor1 && baseDividir > 0) setValor1(fmt(Math.floor(baseDividir / 2)))
+                        }
+                      }} />
+                    Pagar com duas formas <span style={{ fontWeight: 400, opacity: .75 }}>(ex.: parte no dinheiro, parte no PIX)</span>
+                  </label>
+                )}
+                {dividir && formasLoja.length >= 2 && (
+                  <div style={{
+                    marginTop: 10, padding: '12px', borderRadius: 12,
+                    border: `1px solid ${errors.divisao ? '#dc2626' : 'rgba(124,58,237,.45)'}`, background: 'rgba(124,58,237,.07)',
+                  }} data-field-error={errors.divisao ? true : undefined}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 6 }}>
+                      Quanto vai no <span style={{ color: '#a78bfa' }}>{NOME_PAG[form.pagamento] ?? form.pagamento}</span>?
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontWeight: 700 }}>R$</span>
+                      <input
+                        className={`dco-input${errors.divisao ? ' dco-input--error' : ''}`}
+                        style={{ flex: 1 }}
+                        inputMode="decimal"
+                        placeholder="0,00"
+                        value={valor1}
+                        onChange={e => { setValor1(e.target.value.replace(/[^0-9.,]/g, '')); setErrors(prev => ({ ...prev, divisao: undefined })) }}
+                      />
+                    </div>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, margin: '12px 0 6px' }}>
+                      O resto, <span style={{ color: '#a78bfa' }}>R$ {fmt(base2)}</span>, em:
+                    </div>
+                    <div className="dco-payment-row">
+                      {formasLoja.filter(f => f !== form.pagamento).map(f => (
+                        <button key={f} type="button"
+                          className={`dco-pay-btn${forma2 === f ? ' dco-pay-btn--active' : ''}`}
+                          onClick={() => setForma2(f)}>
+                          {f === 'dinheiro' ? <IconMoney /> : (f === 'pix' || f === 'pix_entrega') ? <IconPix /> : <IconCard />}
+                          <span>{NOME_PAG[f] ?? f}</span>
+                          {forma2 === f && <span className="dco-pay-check"><IconCheck /></span>}
+                        </button>
+                      ))}
+                    </div>
+                    {errors.divisao ? (
+                      <div style={{ marginTop: 8, fontSize: 12.5, color: '#dc2626', fontWeight: 600 }}>{errors.divisao}</div>
+                    ) : dividindo && base1 > 0 && base2 > 0 && (
+                      <div style={{ marginTop: 10, fontSize: 13.5, lineHeight: 1.5 }}>
+                        ✓ <strong>R$ {fmt(partesPag[0].valor)}</strong> no {NOME_PAG[partesPag[0].forma]}
+                        {' '}+ <strong>R$ {fmt(partesPag[1].valor)}</strong> no {NOME_PAG[partesPag[1].forma]}
+                      </div>
+                    )}
+                    {dividindo && formasEscolhidas.includes('pix') && (
+                      <div style={{ marginTop: 6, fontSize: 12.5, opacity: .85, lineHeight: 1.5 }}>
+                        Você paga a parte do PIX agora, pelo QR. O resto é na entrega.
+                      </div>
+                    )}
+                  </div>
+                )}
                 {acrescimoPagamento > 0 && (
                   <div style={{
                     marginTop: 10, padding: '10px 12px', borderRadius: 10,
                     background: 'rgba(234,179,8,.10)', border: '1px solid rgba(234,179,8,.35)',
                     fontSize: 13, lineHeight: 1.5,
                   }}>
-                    Nesta forma a loja cobra <strong>+{String(repassePct(lojaEndereco, form.pagamento)).replace('.', ',')}%</strong>
+                    {dividindo ? 'Na parte do cartão' : 'Nesta forma'} a loja cobra <strong>+{String(pctCartaoEscolhido).replace('.', ',')}%</strong>
                     {' '}(<strong>R$ {fmt(acrescimoPagamento)}</strong>), que é a taxa da maquineta. Já está no total.
                   </div>
                 )}
@@ -2250,7 +2365,7 @@ export default function DeliveryCheckout() {
                     da loja. Mostra a chave já aqui pra ele saber pra quem vai
                     pagar, e pede o comprovante no WhatsApp: é assim que a loja
                     sabe que o pagamento saiu antes de separar o pedido. */}
-                {form.pagamento === 'pix_entrega' && (
+                {formasEscolhidas.includes('pix_entrega') && (
                   <div style={{
                     marginTop: 10, padding: '10px 12px', borderRadius: 10,
                     background: 'rgba(0,180,216,.10)', border: '1px solid rgba(0,180,216,.35)',
@@ -2265,11 +2380,11 @@ export default function DeliveryCheckout() {
                     )}
                   </div>
                 )}
-                {form.pagamento === 'dinheiro' && (
-                  <Field label="Troco para R$" error={errors.troco}>
+                {formasEscolhidas.includes('dinheiro') && (
+                  <Field label={dividindo ? `Troco para R$ (dos R$ ${fmt(valorDinheiro)} no dinheiro)` : 'Troco para R$'} error={errors.troco}>
                     <input
                       className={`dco-input dco-input--troco${errors.troco ? ' dco-input--error' : ''}`}
-                      placeholder={`Ex: ${fmt(Math.ceil(total / 10) * 10)}`}
+                      placeholder={`Ex: ${fmt(Math.ceil(valorDinheiro / 10) * 10)}`}
                       value={form.troco}
                       onChange={e => set('troco', e.target.value)}
                       inputMode="decimal"
@@ -2358,7 +2473,7 @@ export default function DeliveryCheckout() {
                   )}
                   {acrescimoPagamento > 0 && (
                     <div className="dco-resumo-linha">
-                      <span>Taxa do cartão ({String(repassePct(lojaEndereco, form.pagamento)).replace('.', ',')}%)</span>
+                      <span>Taxa do cartão ({String(pctCartaoEscolhido).replace('.', ',')}%)</span>
                       <span>R$ {fmt(acrescimoPagamento)}</span>
                     </div>
                   )}
@@ -2366,6 +2481,12 @@ export default function DeliveryCheckout() {
                     <span>Total</span>
                     <strong>{taxaPendente ? `R$ ${fmt(subtotal)}+` : `R$ ${fmt(total)}`}</strong>
                   </div>
+                  {dividindo && !taxaPendente && base1 > 0 && base2 > 0 && partesPag.map(p => (
+                    <div key={p.forma} className="dco-resumo-linha" style={{ fontSize: 13, opacity: .85 }}>
+                      <span>• {NOME_PAG[p.forma] ?? p.forma}</span>
+                      <span>R$ {fmt(p.valor)}</span>
+                    </div>
+                  ))}
                 </div>
 
                 {faltaMinimo && (

@@ -7,6 +7,7 @@
 // ⚠️ Web Bluetooth só conversa com impressoras Bluetooth "BLE". Impressoras
 // "Bluetooth Classic" (SPP) NÃO aparecem aqui — nesse caso, usar o app RawBT.
 // ============================================================================
+import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma } from '../lib/pagamentoPartes'
 import { separarItem } from '../lib/itensPedido'
 
 const ESC = 0x1b, GS = 0x1d
@@ -310,7 +311,20 @@ export function montarCupomBytes(pedido, empresa = {}) {
   if (!isRetirada && pedido.taxa_entrega != null) b.row('Taxa entrega', fmt(pedido.taxa_entrega))
   b.big(true).row('TOTAL', fmt(pedido.total)).big(false)
   b.line()
-  b.txt('Pagamento: ' + (pedido.forma_pagamento || '-')).nl()
+  if (ehDividido(pedido)) {
+    // Duas formas (mig 0274): uma linha por parte e, no fim, quanto cobrar.
+    b.txt('Pagamento em duas formas:').nl()
+    for (const x of partesPagamento(pedido)) {
+      b.row(semAcento(nomeForma(x.forma)) + (partePaga(pedido, x) ? ' (PAGO)' : ''), fmt(x.valor))
+      if (x.forma === 'dinheiro') {
+        if (x.troco_para > 0) {
+          b.bold(true).alto(true).txt('LEVAR TROCO DE ' + fmt(trocoALevar(x))).nl().alto(false).bold(false)
+          b.txt('(cliente paga com ' + fmt(x.troco_para) + ')').nl()
+        } else b.txt('(troco nao informado - confirmar)').nl()
+      }
+    }
+    if (aCobrarNaEntrega(pedido) > 0) b.bold(true).txt('COBRAR NA ENTREGA: ' + fmt(aCobrarNaEntrega(pedido))).nl().bold(false)
+  } else b.txt('Pagamento: ' + (pedido.forma_pagamento || '-')).nl()
   if (pedido.forma_pagamento === 'dinheiro') {
     const trocoPara = Number(pedido.troco_para || 0)
     if (trocoPara > 0) {

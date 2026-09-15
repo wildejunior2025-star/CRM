@@ -108,11 +108,31 @@ Deno.serve(async (req) => {
         : Number(pedido.total ?? baseTotal)) * 100
     ) / 100
 
+    // Pagamento em duas formas (mig 0274): o QR cobra só a parte do PIX; o resto
+    // é cobrado na entrega. O total do pedido continua o total inteiro — e o
+    // banco confere que as partes fecham com ele.
+    const partes = Array.isArray(pedido.pagamentos) && pedido.pagamentos.length > 1 ? pedido.pagamentos : null
+    const partePix = partes ? partes.find((x: { forma: string }) => x.forma === 'pix') : null
+    if (partes && !partePix) {
+      return new Response(JSON.stringify({ error: 'Pagamento dividido sem parte no PIX.' }), {
+        status: 400, headers: { ...CORS, 'Content-Type': 'application/json' },
+      })
+    }
+    if (partes) { pontosUsados = 0; desconto = 0 }
+    const totalPedido = partes ? Math.round(Number(pedido.total ?? baseTotal) * 100) / 100 : null
+    const valorPix = partes ? Math.round(Number(partePix.valor) * 100) / 100 : null
+    if (partes && !(valorPix! > 0 && valorPix! < totalPedido!)) {
+      return new Response(JSON.stringify({ error: 'Valor da parte no PIX inválido.' }), {
+        status: 400, headers: { ...CORS, 'Content-Type': 'application/json' },
+      })
+    }
+    const valorQr = partes ? valorPix! : totalCobrar
+
     // MP exige mínimo 30 min para PIX — nosso cron cancela internamente aos 5 min
     const expiration = new Date(Date.now() + 30 * 60 * 1000).toISOString()
 
     // Token da loja (marketplace) + comissão da plataforma. Fallback: conta central.
-    const { token: mpToken, applicationFee } = await resolverContaMp(supabaseSrv, pedido.empresa_id, totalCobrar)
+    const { token: mpToken, applicationFee } = await resolverContaMp(supabaseSrv, pedido.empresa_id, valorQr)
 
     // O Mercado Pago rejeita (400 "payer.email must be a valid email") qualquer e-mail
     // fora do formato. Se o e-mail do cliente vier vazio/inválido (ex.: telefone em branco
@@ -125,7 +145,7 @@ Deno.serve(async (req) => {
     const sobrenome = (String(pedido.cliente_nome ?? '').trim().split(/\s+/).slice(1).join(' ')) || 'Cliente'
 
     const paymentBody: Record<string, unknown> = {
-      transaction_amount: totalCobrar,
+      transaction_amount: valorQr,
       description:        `Pedido ${pedido.empresa_nome ?? 'FWC Inter'}`,
       payment_method_id:  'pix',
       date_of_expiration: expiration,
@@ -173,12 +193,14 @@ Deno.serve(async (req) => {
         cliente_nome:          pedido.cliente_nome,
         cliente_telefone:      pedido.cliente_telefone,
         itens:                 pedido.itens,
-        total:                 totalCobrar,
+        total:                 partes ? totalPedido : totalCobrar,
         subtotal:              pedido.subtotal,
         taxa_entrega:          pedido.taxa_entrega,
         desconto:              desconto,
         pontos_usados:         pontosUsados,
-        forma_pagamento:       'pix',
+        forma_pagamento:       partes ? 'dividido' : 'pix',
+        pagamentos:            partes,
+        acrescimo:             Number(pedido.acrescimo ?? 0) || 0,
         pix_status:            'pendente',
         pix_copia_cola:        qr_code,
         pix_qrcode:            qr_code_base64,

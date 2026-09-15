@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto } from '../lib/descontoEntrega'
+import { partesPagamento, ehDividido, textoPagamento } from '../lib/pagamentoPartes'
 import '../components/Page.css'
 import './Entregadores.css'
 
@@ -58,7 +59,20 @@ function FiltroPeriodo({ periodo, setPeriodo, de, setDe, ate, setAte }) {
 
 // Como o cliente pagou: se o entregador ficou com o dinheiro na mão, é repasse pra loja.
 // PIX confirmado e pedido pago online (iFood) já caíram na conta — não se repassa.
+// Pagamento em duas formas (mig 0274): cada parte cai no seu balde. Só o que é
+// dinheiro/cartão/PIX não confirmado fica "na mão" do motoqueiro.
+function partesCobranca(p) {
+  return partesPagamento(p).map(x => ({
+    ...cobranca({ ...p, forma_pagamento: x.forma, pagamentos: null }),
+    valor: x.valor,
+  }))
+}
+
 function cobranca(p) {
+  if (ehDividido(p)) {
+    const partes = partesCobranca(p)
+    return { tipo: partes.every(x => x.tipo === 'conta') ? 'conta' : 'dividido', label: textoPagamento(p) }
+  }
   const f = p.forma_pagamento, ehIfood = p.origem === 'ifood'
   if (f === 'dinheiro') return { tipo: 'dinheiro', label: 'Dinheiro' + (ehIfood ? ' (via iFood)' : '') }
   if (['cartao', 'cartão', 'credito', 'debito'].includes(f)) {
@@ -245,7 +259,7 @@ export default function EntregadoresHistorico() {
   async function alertaEmRota(entregadorId, qtd) {
     const faixa = faixaDe(periodo, de, ate)
     let q = supabase.from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, status, forma_pagamento, created_at')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, status, forma_pagamento, pagamentos, created_at')
       .eq('empresa_id', empresa.id).eq('entregador_id', entregadorId)
       .neq('status', 'entregue').neq('status', 'cancelado')
       .or('entregador_pago.is.null,entregador_pago.eq.false')
@@ -586,7 +600,7 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
     const [{ data: pd }, { data: pf }] = await Promise.all([
       fetchAll(() => {
         let q = supabase.from('pedidos_delivery')
-          .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, pix_status, mp_payment_status, created_at, origem, status, entregador_pago, entregador_pago_em')
+          .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, pagamentos, pix_status, mp_payment_status, created_at, origem, status, entregador_pago, entregador_pago_em')
           .eq('empresa_id', empresa.id).eq('entregador_id', id).neq('status', 'cancelado')
         if (faixa.desde) q = q.gte('created_at', faixa.desde)
         if (faixa.ate) q = q.lte('created_at', faixa.ate)
@@ -613,8 +627,9 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
 
   // Quanto ele tem em mãos, por forma de pagamento (só das corridas não acertadas).
   const emMaos = pendentes.reduce((acc, p) => {
-    const t = cobranca(p).tipo
-    if (t !== 'conta') acc[t] = (acc[t] || 0) + num(p.total)
+    for (const x of partesCobranca(p)) {
+      if (x.tipo !== 'conta') acc[x.tipo] = (acc[x.tipo] || 0) + num(x.valor)
+    }
     return acc
   }, {})
   const totalEmMaos = FORMAS.reduce((s, [k]) => s + num(emMaos[k]), 0)

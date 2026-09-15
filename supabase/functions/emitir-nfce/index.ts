@@ -220,8 +220,15 @@ async function emitir(sb: any, pedidoId: string, cpf?: string) {
   })
 
   const total = Number(ped.total ?? ped.subtotal ?? 0) || items.reduce((s, i) => s + i.valor_bruto, 0)
-  const formaPed = String(ped.forma_pagamento ?? "outro").toLowerCase()
-  const formaFocus = PAGAMENTO_FOCUS[formaPed] ?? "99"
+  // Pagamento em duas formas (mig 0274): cada parte sai como uma forma na nota.
+  const partesPag: { forma: string; valor: number }[] =
+    Array.isArray(ped.pagamentos) && ped.pagamentos.length > 1
+      ? ped.pagamentos.map((x: { forma: string; valor: number }) => ({ forma: String(x.forma ?? "outro").toLowerCase(), valor: Number(x.valor) || 0 }))
+      : [{ forma: String(ped.forma_pagamento ?? "outro").toLowerCase(), valor: total }]
+  const formasNota = partesPag.map(x => ({
+    forma_pagamento: PAGAMENTO_FOCUS[x.forma] ?? "99",
+    valor_pagamento: Number(x.valor.toFixed(2)),
+  }))
 
   const ref = `nfce-${pedidoId}`
   const nfce: Record<string, unknown> = {
@@ -232,7 +239,7 @@ async function emitir(sb: any, pedidoId: string, cpf?: string) {
     modalidade_frete: "9",
     local_destino: "1",
     items,
-    formas_pagamento: [{ forma_pagamento: formaFocus, valor_pagamento: Number(total.toFixed(2)) }],
+    formas_pagamento: formasNota,
   }
   const cpfLimpo = soDigitos(cpf)
   if (cpfLimpo.length === 11) nfce.cpf_destinatario = cpfLimpo

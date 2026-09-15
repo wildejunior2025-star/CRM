@@ -30,6 +30,7 @@ function aceitarAutoAtivo() {
   catch { return false }
 }
 import { FORMAS_PAGAMENTO, formasAtivas } from '../lib/constants'
+import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma, textoPagamento } from '../lib/pagamentoPartes'
 import { separarItem } from '../lib/itensPedido'
 import { semAcento } from '../lib/texto'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
@@ -1483,8 +1484,11 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   // depois, cai na primeira ativa — senão o botão sumiria com ela selecionada.
   const formasLoja = formasAtivas(empresa)
   const pagInicial = draft?.pagamento ?? pedidoEdicao?.forma_pagamento ?? 'dinheiro'
+  // Pedido pago em duas formas (mig 0274) abre como está; clicar numa forma
+  // troca o pedido pra forma única (o banco apaga as partes).
   const [pagamento, setPagamento] = useState(
-    formasLoja.includes(pagInicial) ? pagInicial : formasLoja[0]
+    pagInicial === 'dividido' && ehDividido(pedidoEdicao) ? 'dividido'
+      : formasLoja.includes(pagInicial) ? pagInicial : formasLoja[0]
   )
   const [troco, setTroco]       = useState(draft?.troco ?? (pedidoEdicao?.troco_para ? String(pedidoEdicao.troco_para) : ''))
   const [obs, setObs]           = useState(draft?.obs ?? (pedidoEdicao?.observacoes ?? ''))
@@ -2056,6 +2060,9 @@ ${url}
         : null,
       observacoes: obs.trim() || null,
     }
+    // Dividido: as partes ficam no banco (ele acerta a parte da entrega se o
+    // total mudou); o troco é o da parte em dinheiro, que já está lá.
+    if (pagamento === 'dividido') delete payload.troco_para
     if (tipo === 'entrega') {
       payload.endereco_rua = rua.trim()
       payload.endereco_numero = numero.trim()
@@ -2570,6 +2577,12 @@ ${url}
         )}
 
         {/* Pagamento — só as formas ligadas em Minha Loja → Pagamento */}
+        {pagamento === 'dividido' && (
+          <div style={{ fontSize: 13, marginBottom: 8, padding: '8px 10px', borderRadius: 8, border: '1px solid #7c3aed', background: 'rgba(124,58,237,.10)' }}>
+            Pago em duas formas: <b>{textoPagamento(pedidoEdicao)}</b>.
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>Se o total mudar, a diferença vai na parte cobrada na entrega. Clicar numa forma abaixo troca pra forma única.</div>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
           {FORMAS_PAGAMENTO.filter(f => formasLoja.includes(f.value)).map(f => (
             <button key={f.value} type="button" style={pagBtn(f.value)} onClick={() => setPagamento(f.value)}>
@@ -3261,6 +3274,26 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
       )}
 
       {/* Pagamento */}
+      {ehDividido(pedido) ? (
+      <div className="pp-pagamento-row">
+        {/* Duas formas (mig 0274): cada parte com a sua etiqueta e o valor.
+            O "Cobrar" soma só o que não foi pago antes (PIX online confirmado). */}
+        {partesPagamento(pedido).map((x, i) => (
+          <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span className={`pp-badge ${x.forma === 'dinheiro' ? 'pp-badge-dinheiro' : (x.forma === 'pix' || x.forma === 'pix_entrega') ? 'pp-badge-pix' : 'pp-badge-outro'}`}>
+              {nomeForma(x.forma)} {fmt(x.valor)}
+            </span>
+            {partePaga(pedido, x) && <span className="pp-badge-pix-pago">PIX pago</span>}
+            {trocoALevar(x) > 0 && <span className="pp-troco">Troco para {fmt(x.troco_para)}</span>}
+          </span>
+        ))}
+        {aCobrarNaEntrega(pedido) > 0 && (
+          <span className="pp-badge" style={{ background: 'rgba(245,158,11,.15)', color: '#b45309', fontWeight: 800, border: '1px solid #f59e0b' }}>
+            💵 Cobrar do cliente · {fmt(aCobrarNaEntrega(pedido))}
+          </span>
+        )}
+      </div>
+      ) : (
       <div className="pp-pagamento-row">
         {pagamento === 'pix' && (
           <span className="pp-badge pp-badge-pix">Pix</span>
@@ -3293,6 +3326,7 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           </span>
         )}
       </div>
+      )}
 
       {/* Observacoes */}
       {pedido.observacoes && (
@@ -6683,7 +6717,7 @@ export default function PainelPedidos() {
     if (!empresa) return
     const { data } = await supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, pix_status, created_at, entregador_id, origem, endereco_bairro, endereco_cidade, entregador_pago, entregador_pago_em')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, pagamentos, pix_status, created_at, entregador_id, origem, endereco_bairro, endereco_cidade, entregador_pago, entregador_pago_em')
       .eq('empresa_id', empresa.id)
       .eq('status', 'entregue')
       .not('entregador_id', 'is', null)
@@ -10296,6 +10330,10 @@ export default function PainelPedidos() {
               // Pagamento do CLIENTE: o motoqueiro cobrou na entrega (dinheiro/cartão)
               // ou já estava pago (PIX confirmado / iFood)?
               const pagCliente = p => {
+                if (ehDividido(p)) {
+                  const falta = aCobrarNaEntrega(p)
+                  return { pago: falta <= 0, label: textoPagamento(p) + (partesPagamento(p).some(x => partePaga(p, x)) ? ' (PIX pago)' : '') }
+                }
                 const f = p.forma_pagamento
                 const ehIfood = p.origem === 'ifood'
                 if (f === 'dinheiro') return { pago: false, label: 'Dinheiro' + (ehIfood ? ' (via iFood)' : '') }

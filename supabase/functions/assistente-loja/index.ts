@@ -223,7 +223,7 @@ async function carregarVendasEPedidos(sb: any, de: string, ate: string) {
       .neq("status", "cancelado").gte("created_at", de).lt("created_at", ate)
       .order("created_at").range(a, b)),
     todos((a, b) => sb.from("pedidos_delivery")
-      .select("total, created_at, forma_pagamento, origem, status")
+      .select("total, created_at, forma_pagamento, pagamentos, origem, status")
       .gte("created_at", de).lt("created_at", ate)
       .order("created_at").range(a, b)),
     todos((a, b) => sb.from("pagamentos")
@@ -280,7 +280,13 @@ async function consultarVendas(sb: any, ini: string, fim: string, de: string, at
     const linhas = v.forma_pagamento === "fiado" ? undefined : pagPorVenda[v.id]
     somar(v.created_at, Number(v.total), ch, v.forma_pagamento, linhas)
   }
-  for (const p of pedidos) somar(p.created_at, Number(p.total), canalDoPedido(p.origem), p.forma_pagamento)
+  // Pedido pago em duas formas (mig 0274): cada parte soma na sua forma.
+  for (const p of pedidos) {
+    const partes = Array.isArray(p.pagamentos) && p.pagamentos.length > 1
+      ? p.pagamentos.map((x: { forma: string; valor: number }) => ({ forma: String(x.forma), valor: Number(x.valor) || 0 }))
+      : undefined
+    somar(p.created_at, Number(p.total), canalDoPedido(p.origem), p.forma_pagamento, partes)
+  }
 
   const ordena = (o: Record<string, number>) =>
     Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ nome: k, valor: brl(v) }))

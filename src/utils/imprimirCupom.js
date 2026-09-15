@@ -6,6 +6,7 @@
 //  2) Janela do navegador (window.print num iframe oculto): quando o app não
 //     está rodando naquele computador.
 
+import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar } from '../lib/pagamentoPartes'
 import { fwcFetch } from '../lib/appFwc'
 import { separarItem } from '../lib/itensPedido'
 
@@ -133,12 +134,17 @@ export function montarCupomHtml(pedido, empresa = {}) {
   ${Number(pedido.desconto || 0) > 0 ? `<div class="row"><span>Desconto</span><span>-${fmt(pedido.desconto)}</span></div>` : ''}
   <div class="row b lg"><span>TOTAL</span><span>${fmt(pedido.total)}</span></div>
   <hr>
-  <div><span class="b">Pagamento:</span> ${esc(labelPagamento(pedido))}</div>
+  ${ehDividido(pedido) ? `<div class="b">Pagamento em duas formas:</div>
+  ${partesPagamento(pedido).map(x => `<div class="row"><span>${esc(labelPagamento({ ...pedido, forma_pagamento: x.forma, pagamentos: null }))}${partePaga(pedido, x) ? ' (PAGO)' : ''}</span><span>${fmt(x.valor)}</span></div>`
+    + (x.forma === 'dinheiro' ? (x.troco_para > 0
+      ? `<div class="b lg">Levar troco de ${fmt(trocoALevar(x))}</div><div>(cliente paga com ${fmt(x.troco_para)})</div>`
+      : '<div>(troco não informado — confirmar)</div>') : '')).join('')}
+  ${aCobrarNaEntrega(pedido) > 0 ? `<div class="b lg">COBRAR NA ENTREGA: ${fmt(aCobrarNaEntrega(pedido))}</div>` : ''}` : `<div><span class="b">Pagamento:</span> ${esc(labelPagamento(pedido))}</div>`}
   ${pedido.forma_pagamento === 'dinheiro' ? (Number(pedido.troco_para) > 0
     ? `<div class="b lg">Levar troco de ${fmt(Math.max(0, Number(pedido.troco_para) - Number(pedido.total || 0)))}</div>
        <div>(cliente paga com ${fmt(pedido.troco_para)})</div>`
     : '<div>(troco não informado — confirmar)</div>') : ''}
-  ${pedido.forma_pagamento === 'pix_entrega' && empresa?.chave_pix ? `<div><span class="b">Chave PIX:</span> ${esc(empresa.chave_pix)}${empresa.pix_nome ? ` — ${esc(empresa.pix_nome)}` : ''}</div>` : ''}
+  ${partesPagamento(pedido).some(x => x.forma === 'pix_entrega') && empresa?.chave_pix ? `<div><span class="b">Chave PIX:</span> ${esc(empresa.chave_pix)}${empresa.pix_nome ? ` — ${esc(empresa.pix_nome)}` : ''}</div>` : ''}
   ${pedido.observacoes && showObs ? `<div style="margin-top:4px"><span class="b">Obs:</span> ${esc(pedido.observacoes)}</div>` : ''}
   ${pedido.codigo_entrega && showCodigo ? `<hr><div class="center b">Código de entrega: ${esc(pedido.codigo_entrega)}</div>` : ''}
   <hr>

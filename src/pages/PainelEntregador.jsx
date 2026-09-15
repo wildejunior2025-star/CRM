@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { separarItem } from '../lib/itensPedido'
+import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma, textoPagamento } from '../lib/pagamentoPartes'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto } from '../lib/descontoEntrega'
 
 // Cada aba tem seu endereço (/entregas?aba=minhas). O motoqueiro sai pro Waze,
@@ -300,6 +301,18 @@ function soDigitos(tel) {
 // Cobrar na entrega (laranja): dinheiro, cartão/crédito/débito (maquininha), vale
 // — inclusive quando vem do iFood como "via loja" (o cliente paga na entrega).
 function pagamentoInfo(p) {
+  // Duas formas (mig 0274): diz QUANTO cobrar e em quê — "COBRAR R$ 30 NA
+  // ENTREGA · Dinheiro R$ 30 + PIX R$ 20 (já pago)". Sem isso ele via uma
+  // forma só e cobrava o pedido inteiro.
+  if (ehDividido(p)) {
+    const falta = aCobrarNaEntrega(p)
+    const detalhe = partesPagamento(p)
+      .map(x => `${nomeForma(x.forma)} ${fmt(x.valor)}${partePaga(p, x) ? ' (já pago)' : ''}`)
+      .join(' + ')
+    return falta > 0
+      ? { pago: false, titulo: `COBRAR ${fmt(falta)} NA ENTREGA`, detalhe, cor: '#f59e0b' }
+      : { pago: true, titulo: 'JÁ PAGO', detalhe, cor: '#16a34a' }
+  }
   const forma = p.forma_pagamento
   const ehIfood = p.origem === 'ifood'
   const sufIfood = ehIfood ? ' (via iFood)' : ''
@@ -388,9 +401,11 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
   const pg = pagamentoInfo(pedido)
   // Troco: troco_para = com quanto o cliente paga; troco a levar = paga − total.
   // (numeric vem como string do banco, por isso o Number()).
-  const ehDinheiro = pedido.forma_pagamento === 'dinheiro'
-  const trocoPara = Number(pedido.troco_para || 0)
-  const trocoLevar = trocoPara > 0 ? Math.max(0, trocoPara - Number(pedido.total || 0)) : 0
+  // No pagamento dividido o troco é da PARTE em dinheiro, não do total.
+  const parteDinheiro = partesPagamento(pedido).find(x => x.forma === 'dinheiro')
+  const ehDinheiro = !!parteDinheiro
+  const trocoPara = Number(parteDinheiro?.troco_para || 0)
+  const trocoLevar = parteDinheiro ? trocoALevar(parteDinheiro) : 0
   // iFood não expõe o telefone real do cliente: liga num 0800 e digita um ID.
   // Por isso, nos pedidos do iFood some o WhatsApp e o "Ligar" vai no 0800.
   const isIfood = pedido.origem === 'ifood'
@@ -1174,7 +1189,7 @@ export default function PainelEntregador() {
     setHistLoading(true)
     supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, origem, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, pagamentos, origem, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
       .eq('entregador_id', user.id)
       .eq('status', 'entregue')
       .order('created_at', { ascending: false })
@@ -1575,7 +1590,7 @@ export default function PainelEntregador() {
                     <div style={{ fontSize: 13.5, color: 'var(--text)', marginTop: 4 }}>{p.cliente_nome || 'Cliente'}</div>
                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>{[[p.endereco_rua, p.endereco_numero].filter(Boolean).join(', '), [p.endereco_bairro, p.endereco_cidade].filter(Boolean).join(', ')].filter(Boolean).join(' — ')}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                      {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{p.forma_pagamento ? ` · ${p.forma_pagamento}` : ''}
+                      {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{p.forma_pagamento ? ` · ${ehDividido(p) ? textoPagamento(p) : p.forma_pagamento}` : ''}
                       {descontoDoPedido(descontos, p) > 0 && <span style={{ color: '#f59e0b' }}> · {rotuloDoDesconto(p)} −{fmt(descontoDoPedido(descontos, p))}</span>}
                     </div>
                   </div>

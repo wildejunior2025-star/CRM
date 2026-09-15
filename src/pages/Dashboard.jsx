@@ -4,6 +4,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import { calcIfoodLiquido, FORMA_ENTREGA_LABEL } from '../lib/ifoodLiquido'
 import IfoodIcon from '../components/IfoodIcon'
 import { useAuth } from '../hooks/useAuth'
+import { partesPagamento } from '../lib/pagamentoPartes'
 import '../components/Page.css'
 
 const fmt = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -194,7 +195,7 @@ export default function Dashboard() {
       const desdeISO = desde.toISOString()
       const [vData, pData, iData, cnData, nRes, caRes, saRes, csRes, fiRes, empRes, fnData, fcData] = await Promise.all([
         fetchAll(() => supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes, cliente_id, clientes(nome)').neq('status', 'cancelado').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
-        fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens, subtotal, taxa_entrega, ifood_valores, forma_pagamento, cliente_id, cliente_nome, cliente_telefone').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
+        fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens, subtotal, taxa_entrega, ifood_valores, forma_pagamento, pagamentos, cliente_id, cliente_nome, cliente_telefone').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('venda_itens').select('produto_id, nome_produto, quantidade, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desdeISO).order('id', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('clientes').select('created_at').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         supabase.from('produtos').select('id, nome, controla_casco'),
@@ -331,8 +332,8 @@ export default function Dashboard() {
       if (new Date(p.created_at) >= start && new Date(p.created_at) < now) {
         fat += val; n++; addBucket(p.created_at, val)
         if (p.origem === 'ifood') { canal.ifood += val; ifoodPeds.push(p); addForma('ifood', p.forma_pagamento, val) }
-        else if (p.origem === 'app') { canal.app += val; addForma('app', p.forma_pagamento, val) }
-        else if (p.origem === 'whatsapp' || p.origem === 'cardapio') { canal.wpp += val; addForma('wpp', p.forma_pagamento, val) }
+        else if (p.origem === 'app') { canal.app += val; partesPagamento(p).forEach(x => addForma('app', x.forma, x.valor)) }
+        else if (p.origem === 'whatsapp' || p.origem === 'cardapio') { canal.wpp += val; partesPagamento(p).forEach(x => addForma('wpp', x.forma, x.valor)) }
       }
       if (inRange(p.created_at, prevStart, prevEnd)) fatPrev += val
     }

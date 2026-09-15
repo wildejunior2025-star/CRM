@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { rotuloAgendado } from '../lib/agendamento'
+import { partesPagamento, ehDividido, temPixOnline, textoPagamento, nomeForma } from '../lib/pagamentoPartes'
 import { iniciarTags, registrarCompra } from '../lib/tracking'
 import AvisoCookies from '../components/AvisoCookies'
 import 'leaflet/dist/leaflet.css'
@@ -603,7 +604,7 @@ export default function DeliveryPedido() {
     if (!pedido || !loja) return
     if (pedido.status === 'cancelado') return
     const pixPago = pedido.pix_status === 'pago' || pedido.mp_payment_status === 'approved'
-    if (pedido.forma_pagamento === 'pix' && !pixPago) return
+    if (temPixOnline(pedido) && !pixPago) return
     registrarCompra({
       pedidoId: pedido.id,
       valor: Number(pedido.total ?? 0),
@@ -914,11 +915,22 @@ export default function DeliveryPedido() {
         )}
 
         {/* Pix pendente */}
-        {pedido.forma_pagamento === 'pix' && pedido.pix_status === 'pendente' && !isCancelado && (
+        {temPixOnline(pedido) && pedido.pix_status === 'pendente' && !isCancelado && (
           <section className="dpd-card dpd-card--pix">
             {pedido.pix_qrcode ? (
               <>
-                <h2 className="dpd-card-title">Pague com Pix</h2>
+                <h2 className="dpd-card-title">
+                  {ehDividido(pedido)
+                    ? `Pague R$ ${fmt(partesPagamento(pedido).find(x => x.forma === 'pix')?.valor)} com Pix`
+                    : 'Pague com Pix'}
+                </h2>
+                {ehDividido(pedido) && (
+                  <p className="dpd-pix-aviso" style={{ marginTop: 0 }}>
+                    O resto você paga na entrega:{' '}
+                    {partesPagamento(pedido).filter(x => x.forma !== 'pix')
+                      .map(x => `R$ ${fmt(x.valor)} no ${nomeForma(x.forma)}`).join(' + ')}.
+                  </p>
+                )}
                 <div className="dpd-pix-qr-wrap">
                   <img
                     src={`data:image/png;base64,${pedido.pix_qrcode}`}
@@ -961,7 +973,7 @@ export default function DeliveryPedido() {
             aqui já pediu — falta pagar, e é isso que a tela tem que gritar: o
             valor, a chave grande com um botão de copiar de verdade, o caminho
             pro WhatsApp e os três passos em ordem. */}
-        {pedido.forma_pagamento === 'pix_entrega' && !isCancelado && (
+        {partesPagamento(pedido).some(x => x.forma === 'pix_entrega') && !isCancelado && (
           <section className="dpd-card dpd-pixe">
             <div className="dpd-pixe-topo">
               <span className="dpd-pixe-selo">PIX</span>
@@ -972,8 +984,8 @@ export default function DeliveryPedido() {
             </div>
 
             <div className="dpd-pixe-valor">
-              <span>Valor do pedido</span>
-              <strong>R$ {fmt(pedido.total)}</strong>
+              <span>{ehDividido(pedido) ? 'Valor no PIX' : 'Valor do pedido'}</span>
+              <strong>R$ {fmt(partesPagamento(pedido).find(x => x.forma === 'pix_entrega')?.valor ?? pedido.total)}</strong>
             </div>
 
             {loja?.chave_pix ? (
@@ -1052,7 +1064,7 @@ export default function DeliveryPedido() {
 
           <div className="dpd-pagamento">
             <span className="dpd-pagamento-label">Pagamento</span>
-            <span className="dpd-pagamento-val">{paymLabel(pedido.forma_pagamento)}</span>
+            <span className="dpd-pagamento-val">{ehDividido(pedido) ? textoPagamento(pedido) : paymLabel(pedido.forma_pagamento)}</span>
             {pedido.troco_para && (
               <span className="dpd-troco">Troco para R$ {fmt(pedido.troco_para)}</span>
             )}

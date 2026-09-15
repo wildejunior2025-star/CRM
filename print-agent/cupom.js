@@ -96,6 +96,14 @@ function separarItem(item) {
   return { nome, complementos }
 }
 
+// Pagamento em duas formas (mig 0274): pedidos_delivery.pagamentos = [{forma, valor, troco_para}].
+function partesPagamento(p) {
+  if (Array.isArray(p.pagamentos) && p.pagamentos.length > 1) {
+    return p.pagamentos.map(x => ({ forma: x.forma, valor: Number(x.valor) || 0, troco_para: Number(x.troco_para) || 0 }))
+  }
+  return null
+}
+
 function formaPagamento(p) {
   const f = p.forma_pagamento
   const ifood = p.origem === 'ifood'
@@ -187,8 +195,30 @@ function montarCupom(pedido, empresa) {
   // Pagamento — deixa MUITO claro se cobra ou ja pagou
   parts.push(NL)
   const pg = formaPagamento(p)
+  const partes = partesPagamento(p)
   parts.push(ALIGN(1), BOLD(1), SIZE(0x01))
-  if (pg.cobrar) {
+  if (partes) {
+    // Duas formas: uma linha por parte e o valor A COBRAR em destaque — o
+    // motoqueiro nao pode cobrar o total inteiro quando metade ja foi no PIX.
+    const pixPago = p.pix_status === 'pago' || p.mp_payment_status === 'approved'
+    const paga = x => x.forma === 'pix' && pixPago
+    const falta = partes.filter(x => !paga(x)).reduce((s2, x) => s2 + x.valor, 0)
+    parts.push(linha(falta > 0 ? '*** COBRAR ' + money(falta) + ' NA ENTREGA ***' : '*** JA PAGO ***'))
+    parts.push(SIZE(0), BOLD(1), linha('Pagamento em duas formas:'), BOLD(0), ALIGN(0))
+    for (const x of partes) {
+      const nome = formaPagamento({ ...p, forma_pagamento: x.forma, pagamentos: null }).label
+      parts.push(kv(nome + (paga(x) ? '' : ' (cobrar)'), money(x.valor)))
+      if (x.forma === 'dinheiro') {
+        if (x.troco_para > 0) {
+          parts.push(SIZE(0x01), BOLD(1), linha('LEVAR TROCO DE ' + money(Math.max(0, x.troco_para - x.valor))), BOLD(0), SIZE(0))
+          parts.push(linha('(cliente paga com ' + money(x.troco_para) + ')'))
+        } else {
+          parts.push(linha('(troco nao informado - confirmar)'))
+        }
+      }
+    }
+    parts.push(ALIGN(1), BOLD(1))
+  } else if (pg.cobrar) {
     parts.push(linha('*** COBRAR NA ENTREGA ***'))
     parts.push(SIZE(0), linha(pg.label + ' - ' + money(p.total)))
     // Troco: o gestor e o app do motoqueiro ja mostravam quanto levar, so o
@@ -209,7 +239,7 @@ function montarCupom(pedido, empresa) {
     parts.push(SIZE(0), linha(pg.label))
   }
   // Chave PIX da loja no cupom: e o que o motoqueiro mostra pro cliente pagar.
-  if (p.forma_pagamento === 'pix_entrega' && e.chave_pix) {
+  if ((p.forma_pagamento === 'pix_entrega' || (partes && partes.some(x => x.forma === 'pix_entrega'))) && e.chave_pix) {
     parts.push(SIZE(0), linha('Chave PIX: ' + e.chave_pix))
     if (e.pix_nome) parts.push(linha(e.pix_nome))
   }

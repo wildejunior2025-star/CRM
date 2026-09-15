@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useNavigate } from 'react-router-dom'
 import './PortalLoja.css'
 import './Portal.css'
+import { ehDividido, textoPagamento } from '../lib/pagamentoPartes'
 
 // ── Timer regressivo inline para o cliente acompanhar o aceite ──
 // Mostra quanto tempo falta para a loja aceitar (7 min = padrão do painel).
@@ -300,7 +301,7 @@ export default function PortalPedidos() {
 
                 <div className="portal-pedido-card-body">
                   <span className="portal-pedido-forma">
-                    {p.forma_pagamento === 'pix' ? 'Pix' : 'Dinheiro'}
+                    {ehDividido(p) ? textoPagamento(p) : p.forma_pagamento === 'pix' ? 'Pix' : 'Dinheiro'}
                     {p.tipo_entrega === 'retirada'
                       ? ' · 🏪 Retirada'
                       : ' · 🛵 Delivery'}
@@ -461,7 +462,8 @@ export default function PortalPedidos() {
                   Pagamento
                 </p>
                 <p style={{ margin: 0, fontSize: 13, color: 'var(--text)' }}>
-                  {detalhe.forma_pagamento === 'pix'
+                  {ehDividido(detalhe) ? textoPagamento(detalhe)
+                    : detalhe.forma_pagamento === 'pix'
                     ? 'Pix'
                     : `Dinheiro${detalhe.troco_para ? ` (troco p/ R$ ${Number(detalhe.troco_para).toFixed(2)})` : ''}`
                   }
