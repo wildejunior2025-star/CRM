@@ -11,6 +11,8 @@ import './Login.css'
 
 // Botão "Entrar com Google" oculto por enquanto — religar trocando para true.
 const MOSTRAR_GOOGLE = false
+// Botão "Quero ser cliente" oculto: por enquanto só entram lojas (15/09/2026).
+const CADASTRO_CLIENTE_ABERTO = false
 
 export default function Login() {
   const { session, login, loading: authLoading } = useAuth()
@@ -205,7 +207,11 @@ export default function Login() {
             <span>Não tem conta?</span>
           </div>
 
-          <div className="login-cadastro-btns">
+          {/* Só "Quero ser empresa" por enquanto: a compra pelo app ainda não
+              está aberta pro público, então o cadastro de cliente fica
+              escondido (a rota /cadastro-cliente continua existindo). Pra
+              voltar, é só trocar CADASTRO_CLIENTE_ABERTO pra true. */}
+          <div className="login-cadastro-btns" style={CADASTRO_CLIENTE_ABERTO ? undefined : { gridTemplateColumns: '1fr' }}>
             <Link to="/cadastro" className="login-cadastro-btn">
               <span className="login-cadastro-icon" aria-hidden="true">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -218,7 +224,7 @@ export default function Login() {
                 <small>Cadastrar no CRM</small>
               </span>
             </Link>
-            <Link to="/cadastro-cliente" className="login-cadastro-btn">
+            {CADASTRO_CLIENTE_ABERTO && <Link to="/cadastro-cliente" className="login-cadastro-btn">
               <span className="login-cadastro-icon" aria-hidden="true">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="8" r="4" />
@@ -229,7 +235,7 @@ export default function Login() {
                 <strong>Quero ser cliente</strong>
                 <small>Criar conta grátis</small>
               </span>
-            </Link>
+            </Link>}
           </div>
         </div>
 
