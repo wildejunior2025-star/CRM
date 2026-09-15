@@ -862,6 +862,26 @@ const NAO_E_BAIRRO = new RegExp("^(" + [
   "atendente", "pessoa", "cancelar", "cancela",
 ].join("|") + ")[.!?]*$", "i")
 
+// Confirmação repetida ("sim sim", "ok ok", "isso mesmo") não é nome.
+const SO_CONFIRMACAO = /^((sim|s|ok|okay|isso|certo|pode|claro|beleza|blz|show|perfeito|mesmo|ser|t[aá]|bom|n[aã]o|obrigad[oa])[\s,.!]*)+$/i
+
+function pareceNomeDePessoa(txt: string): boolean {
+  const t = String(txt ?? "").trim()
+  return /^[A-Za-zÀ-ÿ' .-]{2,40}$/.test(t) && t.split(/\s+/).length <= 5 && !NAO_E_BAIRRO.test(t) && !SO_CONFIRMACAO.test(t) && !RE_RETIRADA.test(t)
+}
+
+/**
+ * O nome entre as mensagens que o cliente mandou desde a última fala do robô.
+ * Mensagens seguidas chegam juntas no histórico ("Lorena\nSim sim"); vale a
+ * primeira linha que parece nome.
+ */
+function nomeDaRajada(mensagens: any[], textoAtual: string): string | null {
+  const ultima = mensagens[mensagens.length - 1]
+  const bloco = ultima?.role === "user" ? String(ultima.content ?? "") : ""
+  const linhas = [...bloco.split("\n"), textoAtual].map(l => l.trim()).filter(Boolean)
+  return linhas.find(pareceNomeDePessoa) ?? null
+}
+
 function pareceNomeDeBairro(txt: string): boolean {
   const t = String(txt ?? "").trim()
   if (t.length < 3 || t.length > 40) return false
@@ -3897,6 +3917,12 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           if (resultado.cliente) cliente = resultado.cliente
 
         } else if (acao.tipo === "cadastrar_cliente" && acao.nome) {
+          // O modelo também pode pegar a confirmação ("Sim sim") como nome.
+          if (!pareceNomeDePessoa(String(acao.nome))) {
+            const achado = nomeDaRajada(mensagens, text)
+            console.log(`[Nome] cadastrar_cliente veio com "${acao.nome}" — usando "${achado ?? "-"}"`)
+            if (achado) acao.nome = achado
+          }
           await handleCadastrarCliente(
             supabase, empresaId, phone, phoneLocal,
             String(acao.nome), acao.email ? String(acao.email) : null,
@@ -4322,8 +4348,11 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     {
       const ultimaBotAntes = mensagens.filter((m: any) => m.role === "assistant").pop()?.content ?? ""
       const tipoAcao = (() => { try { return acaoMatch ? JSON.parse(acaoMatch[1])?.tipo : null } catch { return null } })()
-      const nomeDigitado = text.trim()
-      const pareceNome = /^[A-Za-zÀ-ÿ' .-]{2,40}$/.test(nomeDigitado) && !NAO_E_BAIRRO.test(nomeDigitado) && !RE_RETIRADA.test(nomeDigitado)
+      // Rajada "Lorena" + "Sim sim": quem responde é a última mensagem, e o
+      // cadastro saía com o nome "Sim sim" (CDBom, 15/09/2026). Procura o nome
+      // em todas as mensagens desde a pergunta.
+      const nomeDigitado = nomeDaRajada(mensagens, text) ?? ""
+      const pareceNome = !!nomeDigitado
       if (!cliente?.nome && carrinho.length > 0 && /seu\s*\*?nome/i.test(ultimaBotAntes) && !tipoAcao && pareceNome) {
         await handleCadastrarCliente(supabase, empresaId, phone, phoneLocal, nomeDigitado, null, SUPABASE_URL, SUPABASE_KEY, indicadorProfileId)
         cliente = { ...(cliente ?? {}), nome: nomeDigitado }
