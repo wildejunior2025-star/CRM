@@ -6594,7 +6594,7 @@ export default function PainelPedidos() {
   const [salvandoPedidoChat, setSalvandoPedidoChat] = useState(false)
   // Cliente que pediu atendente no WhatsApp: o robô não inventa resposta, chama
   // gente. Toca AQUI, no gestor — é a tela que fica aberta no balcão.
-  const { chamados, atender: atenderChamado, silenciados: chamadosSilenciados, silenciar: silenciarChamado } = useChamados(empresa?.id)
+  const { chamados, atender: atenderChamado, silenciados: chamadosSilenciados, silenciar: silenciarChamado } = useChamados(empresa?.id, true, somAtivo)
 
   // Robô ligado = o vendedor de IA ou a resposta automática do link. Um dos dois
   // basta; nenhum dos dois quer dizer que a conversa é 100% humana.
@@ -9985,7 +9985,7 @@ export default function PainelPedidos() {
                   ⚠️ Todo pedido novo é aceito sozinho, sem revisar. Bom pra quem confia no fluxo (ex.: iFood/app).
                 </p>
               )}
-              <ToggleRow label="Som de novo pedido" ativo={somAtivo} onToggle={toggleSom} />
+              <ToggleRow label="Som (pedidos e WhatsApp)" ativo={somAtivo} onToggle={toggleSom} />
 
               <button type="button" onClick={imprimirTeste} style={{
                 padding: '10px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
@@ -10703,10 +10703,12 @@ export default function PainelPedidos() {
           )
         })}
 
-        {/* Mudo da campainha. Ficava só dentro de Impressora, e ninguém achava.
+        {/* Mudo do gestor: cala a campainha de pedido, a de alteração E o bipe
+            de chamado do WhatsApp (a loja pediu silêncio de verdade, 15/09).
+            Ficava só dentro de Impressora, e ninguém achava.
             Desligado fica vermelho, pra ninguém esquecer a loja muda. */}
         <button type="button" onClick={toggleSom}
-          title={somAtivo ? 'Campainha de pedido ligada (clique pra silenciar)' : 'Campainha de pedido SILENCIADA (clique pra ligar)'}
+          title={somAtivo ? 'Som ligado: pedidos e WhatsApp (clique pra silenciar)' : 'Som SILENCIADO: pedidos e WhatsApp (clique pra ligar)'}
           aria-pressed={!somAtivo}
           style={{
             marginTop: 'auto',
