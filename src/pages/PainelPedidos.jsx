@@ -1288,6 +1288,42 @@ async function buscarRuas(uf, cidade, termo) {
   }).slice(0, 8)
 }
 
+// ── Endereço escrito na conversa ─────────────────────────────────────────────
+// "Rua Pedra Branca, 747\nNossa senhora da apresentação" → rua, número e bairro.
+// O endereço ficava só na bolha do chat e o "Fechar o pedido" do lado seguia
+// vazio: quem atende digitava tudo de novo (CDBom, 15/09/2026). Mesma leitura
+// do robô (lerEnderecoEscrito no whatsapp-webhook), só que mais exigente: aqui
+// SEM "Rua/Av/Travessa..." na frente não é endereço — "queria 10" não pode
+// virar a rua "queria".
+const PREFIXO_RUA = /^(rua|r[.]|av|av[.]|avenida|travessa|trav|estrada|rod|rodovia|praca|praça|alameda|al[.]|beco|conj|conjunto|quadra|qd|loteamento|sitio|sítio|vila)[ .]/i
+
+function enderecoDoTexto(txt) {
+  const bruto = String(txt ?? '')
+    .replace(/^\s*(?:(?:o|meu|segue(?: o)?|esse [ée] o|aqui (?:vai|est[áa]) o)\s+)?(?:endere[çc]o|end\.?)\s*(?:[ée]\s*)?[:\-–]?\s*/i, '')
+    .replace(/^\s*(?:entregar|entrega|mora|moro)\s+(?:na|no|em)\s+/i, '')
+    .split(/\n+/).map(l => l.trim()).filter(Boolean).join(', ')
+    .trim()
+  if (bruto.length < 8 || bruto.length > 160 || /https?:\/\//i.test(bruto)) return null
+  if (!PREFIXO_RUA.test(bruto)) return null
+  const partes = bruto.split(',').map(p => p.trim()).filter(Boolean)
+  let rua = partes[0] ?? ''
+  let numero = null
+  let bairro = partes[1] ?? null
+  const comNumero = rua.match(/^(.+?)[ ,]+(?:n[º°o.]?\s*)?(\d{1,5}[a-zA-Z]?)$/i)
+  if (comNumero) { rua = comNumero[1].trim(); numero = comNumero[2] }
+  if (!numero) {
+    // Tudo sem vírgula: "rua pedra branca 747 nossa senhora da apresentação".
+    const noMeio = rua.match(/^(.+?)\s+(?:n[º°o.]?\s*)?(\d{1,5}[a-zA-Z]?)\s+(?:[-–]\s*)?(?:bairro\s+)?([^\d]{3,50})$/i)
+    if (noMeio) { rua = noMeio[1].trim(); numero = noMeio[2]; bairro = noMeio[3].trim() }
+  }
+  if (!numero && bairro && /^(?:n[º°o.]?\s*)?\d{1,5}[a-zA-Z]?$/i.test(bairro)) {
+    numero = bairro.replace(/^n[º°o.]?\s*/i, '')
+    bairro = partes[2] ?? null
+  }
+  if (!rua || rua.length < 5) return null
+  return { rua, numero, bairro: bairro && bairro.length >= 3 && !/\d{3,}/.test(bairro) ? bairro : null }
+}
+
 /** A listinha que cai embaixo do campo de rua. */
 function ListaDeRuas({ sugestoes, onEscolher, onFechar }) {
   return (
@@ -5000,7 +5036,7 @@ function CadastroRapidoNoChat({ empresaId, telefone, onNomeDoCliente }) {
   )
 }
 
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, onPausarRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onNomeDoCliente, cadastroVersao, pinChat, enderecoRobo, onEnviarCategoria, enviandoCategoria, roboLigado }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, onPausarRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onUsarEndereco, onNomeDoCliente, cadastroVersao, pinChat, enderecoRobo, onEnviarCategoria, enviandoCategoria, roboLigado }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   // No celular a sacola + o "fechar pedido" abriam empilhados embaixo da
@@ -5100,6 +5136,22 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
                     )}
                   </div>
                 ) : m.texto}
+                {/* Endereço escrito na conversa: um clique leva pro "Fechar o
+                    pedido". O mais novo já entra sozinho; o botão serve pra
+                    escolher outro (o cliente corrigiu, mandou dois). */}
+                {!doRobo && m.lat == null && onUsarEndereco && (() => {
+                  const end = enderecoDoTexto(m.texto)
+                  return end && (
+                    <button type="button" onClick={() => onUsarEndereco(end)}
+                      style={{
+                        display: 'block', marginTop: 6, padding: '6px 10px', borderRadius: 7,
+                        border: '1.5px solid #7c3aed', background: 'rgba(124,58,237,.15)',
+                        color: '#a78bfa', fontWeight: 700, fontSize: 11.5, cursor: 'pointer',
+                      }}>
+                      📍 Usar como endereço da entrega
+                    </button>
+                  )
+                })()}
                 {m.midia_path && (
                   <MidiaDaMensagem path={m.midia_path} tipo={m.midia_tipo} />
                 )}
@@ -5712,6 +5764,9 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
     return () => { vivo = false; clearTimeout(t) }
   }, [rua, cidade, empresa, tipo])
 
+  // Rua que chegou pela conversa (robô ou escrita no chat): o cadastro não passa por cima.
+  const ruaDaConversa = useRef(false)
+
   // O cadastro do cliente, pelos 8 últimos dígitos (o WhatsApp entrega o mesmo
   // número com e sem o 9). Quem já pediu antes não digita endereço de novo.
   useEffect(() => {
@@ -5730,6 +5785,10 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
       setCadastro({ id: data.id, telefone: data.telefone })
       setAchouCliente(true)
       if (data.nome) setNome(n => n || data.nome)
+      // O endereço que chegou pela conversa (robô ou escrito no chat) é o de
+      // HOJE; o do cadastro é o do último pedido. Esta leitura termina depois
+      // e passava por cima dele.
+      if (ruaDaConversa.current) return
       if (data.endereco) setRua(data.endereco)
       if (data.numero) setNumero(data.numero)
       if (data.bairro) setBairro(data.bairro)
@@ -5775,10 +5834,14 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
     if (!enderecoRobo?.versao || enderecoRobo.versao === roboAplicado.current) return
     roboAplicado.current = enderecoRobo.versao
     if (enderecoRobo.tipo === 'entrega' || enderecoRobo.tipo === 'retirada') setTipo(enderecoRobo.tipo)
-    if (enderecoRobo.rua) setRua(enderecoRobo.rua)
+    if (enderecoRobo.rua) { ruaDaConversa.current = true; setRua(enderecoRobo.rua) }
     if (enderecoRobo.numero) setNumero(enderecoRobo.numero)
     if (enderecoRobo.bairro) setBairro(enderecoRobo.bairro)
     if (enderecoRobo.cidade) setCidade(enderecoRobo.cidade)
+    if (enderecoRobo.cep) {
+      const c = String(enderecoRobo.cep).replace(/\D/g, '')
+      setCep(c.length === 8 ? `${c.slice(0, 5)}-${c.slice(5)}` : '')
+    }
     if (enderecoRobo.lat != null && enderecoRobo.lng != null) {
       setPinDoChat({ lat: Number(enderecoRobo.lat), lng: Number(enderecoRobo.lng) })
     }
@@ -7682,6 +7745,69 @@ export default function PainelPedidos() {
   // este aviso ele continuava mostrando "Falta o endereço da entrega" com o
   // endereço já salvo do lado, e não dava pra fechar o pedido.
   const [cadastroVersao] = useState(0)
+
+  // ── ENDEREÇO ESCRITO NA CONVERSA → "FECHAR O PEDIDO" ─────────────────────
+  // O cliente (ou quem atende, repetindo o que ouviu) escreve "Rua Pedra
+  // Branca, 747 / Nossa senhora da apresentação" e o formulário do lado ficava
+  // vazio (CDBom, 15/09/2026). Agora o endereço mais novo da conversa preenche
+  // sozinho, e cada bolha com endereço ganha o botão pra escolher outro.
+  // Cidade e CEP saem da mesma busca de ruas do campo, casando pelo bairro.
+  const chatAbertoAgora = useRef(chatAberto)
+  useEffect(() => { chatAbertoAgora.current = chatAberto }, [chatAberto])
+  const enderecoLidoDaConversa = useRef({})   // conversa → id da mensagem já usada
+
+  async function usarEnderecoDaConversa(end, { automatico = false } = {}) {
+    const conversa = chatAberto
+    const base = { rua: end.rua, numero: end.numero, bairro: end.bairro, cidade: null, cep: null, lat: null, lng: null, tipo: 'entrega' }
+    setEnderecoRobo({ ...base, versao: Date.now() })
+    setChatAviso({ ok: true, txt: automatico
+      ? '📍 Peguei o endereço escrito na conversa e preenchi ao lado — confira.'
+      : '📍 Endereço preenchido ao lado — confira.' })
+    try {
+      const ruas = await buscarRuas(empresa?.estado, empresa?.cidade, end.rua)
+      if (chatAbertoAgora.current !== conversa) return
+      const nb = normBairro(end.bairro)
+      const mesmaRua = ruas.filter(r => normBairro(r.logradouro) === normBairro(end.rua))
+      const candidatas = mesmaRua.length ? mesmaRua : ruas
+      const achada = nb
+        ? candidatas.find(r => { const b = normBairro(r.bairro); return b && (b.includes(nb) || nb.includes(b)) })
+        : (candidatas.length === 1 ? candidatas[0] : null)
+      if (!achada) return
+      setEnderecoRobo({
+        ...base,
+        // O nome oficial ("Redinha Nova", não "Redinha Nova Extremoz"): é o que
+        // casa com a tabela de taxa por bairro.
+        bairro: achada.bairro || end.bairro || null,
+        cidade: achada.localidade || null,
+        cep: achada.cep || null,
+        versao: Date.now(),
+      })
+    } catch { /* sem cidade/CEP: fica o que foi escrito */ }
+  }
+
+  // As mensagens da conversa aberta (a caixa do dia). Mesma montagem da lista.
+  const msgsDaConversaAberta = chatAberto
+    ? (montarThreads(chatMsgs).find(t => t.key === chatAberto)?.msgs ?? [])
+    : []
+  const ultimaComEndereco = (() => {
+    const lojaNorm = normBairro(empresa?.endereco)
+    for (let i = msgsDaConversaAberta.length - 1; i >= 0; i--) {
+      const m = msgsDaConversaAberta[i]
+      if (m.bot || m.lat != null) continue
+      const end = enderecoDoTexto(m.texto)
+      // O endereço da PRÓPRIA loja ("pode retirar na Rua Santo Antônio, 12")
+      // não é endereço de entrega.
+      if (end && !(lojaNorm && normBairro(end.rua) === lojaNorm)) return { id: m.id, end }
+    }
+    return null
+  })()
+  useEffect(() => {
+    if (!chatAberto || !ultimaComEndereco) return
+    if (enderecoLidoDaConversa.current[chatAberto] === ultimaComEndereco.id) return
+    enderecoLidoDaConversa.current[chatAberto] = ultimaComEndereco.id
+    usarEnderecoDaConversa(ultimaComEndereco.end, { automatico: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatAberto, ultimaComEndereco?.id])
 
   // Manda um texto pela conversa aberta. O "Enviar" usa o que está digitado;
   // outros botões (pedir localização, por exemplo) mandam texto pronto — e
@@ -9642,6 +9768,7 @@ export default function PainelPedidos() {
                 onAbrirSacola={() => setSacolaLateral(true)}
                 onPedirLocalizacao={pedirLocalizacaoNoChat}
                 onUsarLocalizacao={usarLocalizacaoNoPedido}
+                onUsarEndereco={end => usarEnderecoDaConversa(end)}
                 onNomeDoCliente={nomearClienteDaConversa}
                 cadastroVersao={cadastroVersao}
                 pinChat={pinChat}

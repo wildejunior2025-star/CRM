@@ -3746,7 +3746,10 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     // 1 litro Flocos — R$ 24,00". Foi assim no cliente que trocou o balde três
     // vezes (teste 13/09): quatro "confirmações" e a sacola vazia no banco.
     // O resumo fica de fora — nele a sacola já está salva.
-    const falaDeSacola = /\b(anotei|anotado|adicionei|adicionad[oa]s?|vou adicionar|coloquei|inclu[ií]|troquei|tirei|removi|entao fica|então fica|fica assim|vai ficar|deixa eu confirmar|s[oó] pra confirmar|sua sacola|seu carrinho)\b/i.test(resposta)
+    // "Deixa eu anotar: 20 Moreninhas" também (CDBom, 15/09/2026): sem esta
+    // forma a 2ª chamada não rodava, e no "só isso" o cliente ouviu que a
+    // sacola estava vazia.
+    const falaDeSacola = /\b(anotei|anotado|(deixa eu|deixe-me|vou|j[aá] vou) anotar|anotando|adicionei|adicionad[oa]s?|vou adicionar|coloquei|inclu[ií]|troquei|tirei|removi|entao fica|então fica|fica assim|vai ficar|deixa eu confirmar|s[oó] pra confirmar|sua sacola|seu carrinho)\b/i.test(resposta)
     const listaItemComPreco = /(\b\d+\s*x\s+\S|\bx\s*\d+\b)[^\n]*R\$/i.test(resposta)
     if (!acaoMatch && !/resumo do pedido/i.test(resposta) && (falaDeSacola || listaItemComPreco)) {
       try {
@@ -4457,6 +4460,10 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       console.error("[Vazamento] resposta tinha formato interno e foi limpa:", resposta.slice(0, 200))
       resposta = respostaLimpa
     }
+
+    // Negrito do WhatsApp é *um* asterisco. O "**Moreninha Napolitano**" do
+    // modelo chegava com os asteriscos sobrando na tela do cliente.
+    resposta = resposta.replace(/\*\*([^*\n]+)\*\*/g, "*$1*")
 
     if (!resposta) {
       resposta = "Desculpe, não entendi bem. Pode repetir? 😊"
