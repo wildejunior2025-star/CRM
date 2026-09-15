@@ -1422,14 +1422,35 @@ export default function PresencialSalao() {
     setPagamentos(prev => [...prev, { forma: 'dinheiro', valor: falta > 0 ? falta.toFixed(2) : '', cliente: null }])
   }
   function updatePagamento(i, campo, val) {
-    setPagamentos(prev => prev.map((p, idx) => {
-      if (idx !== i) return p
-      const novo = { ...p, [campo]: val }
-      // Virou fiado: já sugere o cliente ligado à mesa (dá pra trocar). Saiu do fiado:
-      // limpa o dono, senão sobraria um devedor numa linha que foi paga.
-      if (campo === 'forma') novo.cliente = val === 'fiado' ? (p.cliente ?? comandaSel?.cliente ?? null) : null
-      return novo
-    }))
+    setPagamentos(prev => {
+      const lista = prev.map((p, idx) => {
+        if (idx !== i) return p
+        const novo = { ...p, [campo]: val }
+        // Virou fiado: já sugere o cliente ligado à mesa (dá pra trocar). Saiu do fiado:
+        // limpa o dono, senão sobraria um devedor numa linha que foi paga.
+        if (campo === 'forma') novo.cliente = val === 'fiado' ? (p.cliente ?? comandaSel?.cliente ?? null) : null
+        return novo
+      })
+      return campo === 'valor' ? reparteSobra(lista, i) : lista
+    })
+  }
+  // Digitou o valor de uma linha: as de BAIXO dividem o que sobrou. As de cima
+  // ficam como estão (já foram combinadas). Linha de PIX online com QR gerado
+  // não mexe: o QR tem valor fixo, mudar a linha desencontraria do que o
+  // cliente vai pagar.
+  function reparteSobra(lista, i) {
+    const travada = idx => lista[idx].forma === 'pix_online' && pixDaMesaTodos.some(x => x.parte === idx)
+    const ajustar = lista.map((_, idx) => idx).filter(idx => idx > i && !travada(idx))
+    if (!ajustar.length) return lista
+    const fixo = lista.reduce((s, p, idx) => ajustar.includes(idx) ? s : s + (Number(String(p.valor ?? '').replace(',', '.')) || 0), 0)
+    const sobra = Math.max(0, Math.round((totalSel - fixo) * 100) / 100)
+    const cada = Math.floor((sobra / ajustar.length) * 100) / 100
+    const ultimo = Math.round((sobra - cada * (ajustar.length - 1)) * 100) / 100
+    return lista.map((p, idx) => {
+      const k = ajustar.indexOf(idx)
+      if (k < 0) return p
+      return { ...p, valor: (k === ajustar.length - 1 ? ultimo : cada).toFixed(2) }
+    })
   }
   // Quem fica devendo NESTA linha do fiado.
   function setClienteLinha(i, cliente) {
