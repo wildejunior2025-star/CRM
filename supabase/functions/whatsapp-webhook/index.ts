@@ -27,12 +27,10 @@ const corsHeaders = {
 //
 // O CEP fica como saída pra quem preferir — o caminho dele continua inteiro,
 // não mudou nada no resto do fluxo.
+// Curto de propósito (pedido da loja, 15/09/2026): o passo a passo do clipe
+// não ensinava ninguém, só alongava a mensagem.
 const TEXTO_PEDIR_ENDERECO =
-  "📍 Falta só o endereço!\n\n" +
-  "O jeito mais rápido é me mandar sua *localização*: toque no 📎 aqui embaixo → " +
-  "*Localização* → *Enviar sua localização atual*. Aí eu já pego a rua e o bairro sozinho " +
-  "e o entregador vai direto na sua porta. 🙂\n\n" +
-  "_Se preferir, me diz o *nome da rua*, o *número* e o *bairro* — ou me manda o CEP._"
+  "📍 Me manda sua *localização* ou o endereço (rua, número e bairro)."
 
 // Quem vai buscar na loja fala de muitos jeitos — "retirar" era o único que o
 // robô entendia.
@@ -425,14 +423,15 @@ async function handleSalvarRua(
     // Bairro e cidade também são salvos quando vêm junto (cliente que digitou o
     // endereço sem CEP). Sem eles a taxa sai errada: o bairro define a taxa fixa e,
     // no cálculo por km, o mapa procuraria a rua no Brasil inteiro.
-    const { error: ruaErr } = await supabase.from("whatsapp_carrinho").update({
+    // Cria a sacola se ainda não existe: quem só pergunta "entrega na Redinha?"
+    // e manda o endereço não tinha linha, o update não gravava nada e o número
+    // respondia "Não encontrei o endereço salvo" (CDBom, 15/09/2026).
+    await salvarEnderecoNoCarrinho(empresaId, phone, {
       endereco_rua: rua,
       ...(bairro ? { endereco_bairro: bairro } : {}),
       ...(cidade ? { endereco_cidade: cidade } : {}),
       ...(estado ? { endereco_estado: estado } : {}),
-      updated_at:   new Date().toISOString(),
-    }).eq("empresa_id", empresaId).eq("phone", phone)
-    if (ruaErr) console.error("[Rua] update erro:", ruaErr)
+    })
 
     const detalhe = [rua, bairro, cidade].filter(Boolean).join(" — ")
     return { resposta: `✅ Endereço salvo!\n\n📍 ${detalhe}\n\nQual o *número* da sua casa? 😊` }
@@ -879,12 +878,8 @@ async function handleSalvarBairro(
   phone: string,
   bairro: string,
 ): Promise<void> {
-  const { error } = await supabase.from("whatsapp_carrinho").update({
-    endereco_bairro: bairro,
-    updated_at:      new Date().toISOString(),
-  }).eq("empresa_id", empresaId).eq("phone", phone)
-  if (error) console.error("[Bairro] update erro:", error)
-  else console.log(`[Bairro] salvo em mensagem separada: "${bairro}"`)
+  await salvarEnderecoNoCarrinho(empresaId, phone, { endereco_bairro: bairro })
+  console.log(`[Bairro] salvo em mensagem separada: "${bairro}"`)
 }
 
 // ── handleSalvarNumero ───────────────────────────────────────────────────────
@@ -3461,7 +3456,7 @@ O telefone já temos (${phoneLocal}) — NUNCA peça.
 
 ▶ PASSO 4 — ENTREGA OU RETIRADA
 ${aceitaDelivery
-  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE já temos o endereço (ver CLIENTE, ou acabou de coletar no cadastro) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → PASSO 5\n  - Quer trocar → peça o endereço novo: se vier CEP emita buscar_cep, se vier escrito emita salvar_rua (rua+bairro+cidade); depois o número (emita salvar_numero)\n• SE ainda não temos endereço → peça a *localização* dele primeiro (📎 → Localização → Enviar sua localização atual), que é o jeito mais rápido e mais preciso; e diga que, se preferir, pode escrever o *nome da rua*, o *número* e o *bairro* (CEP quase ninguém sabe de cabeça). Se ele mandar o CEP por conta própria, aceite numa boa. Escrito → salvar_rua; CEP → buscar_cep. Depois o número (emita salvar_numero), aí siga ao PASSO 5\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá ao PASSO 5`
+  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE já temos o endereço (ver CLIENTE, ou acabou de coletar no cadastro) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → PASSO 5\n  - Quer trocar → peça o endereço novo: se vier CEP emita buscar_cep, se vier escrito emita salvar_rua (rua+bairro+cidade); depois o número (emita salvar_numero)\n• SE ainda não temos endereço → peça numa frase curta: "📍 Me manda sua *localização* ou o endereço (rua, número e bairro)." NÃO ensine como mandar a localização (clipe, menu etc.). Se ele mandar o CEP por conta própria, aceite numa boa. Escrito → salvar_rua; CEP → buscar_cep. Depois o número (emita salvar_numero), aí siga ao PASSO 5\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá ao PASSO 5`
   : `Somente retirada no local.\nInforme: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\nVá ao PASSO 5`}
 
 ▶ PASSO 5 — FORMA DE PAGAMENTO
@@ -4197,7 +4192,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       try { return JSON.parse(acaoMatch![1])?.tipo === "salvar_rua" } catch { return false }
     })()
     const ultimaDoBot = (mensagens.filter((m: any) => m.role === "assistant").pop()?.content ?? "").toLowerCase()
-    const botPediuEndereco = /nome da rua|seu endere|preciso do seu endere|falta s[oó] o endere/.test(ultimaDoBot)
+    const botPediuEndereco = /nome da rua|seu endere|preciso do seu endere|falta s[oó] o endere|sua \*?localiza/.test(ultimaDoBot)
     // Não depende só de o bot ter pedido: se o cliente mandou algo que É um
     // endereço ("Rua tal, 600, bairro"), grava do mesmo jeito. O modelo às
     // vezes desvia do assunto no meio e a mensagem boa do cliente se perdia.
@@ -4229,7 +4224,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     // que só entende dígitos.
     {
       const ultimaBot = (mensagens.filter((m: any) => m.role === "assistant").pop()?.content ?? "").toLowerCase()
-      const botPediuEndOuNum = /n[úu]mero|sua casa|bairro|nome da rua|seu endere|falta s[oó] o endere/.test(ultimaBot)
+      const botPediuEndOuNum = /n[úu]mero|sua casa|bairro|nome da rua|seu endere|falta s[oó] o endere|sua \*?localiza/.test(ultimaBot)
       const t = text.trim()
 
       // "600 Novo Amarante" / "600, Novo Amarante"
@@ -4374,6 +4369,41 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
 
     // Preço errado ao lado do nome de um produto (balde de sorvete a R$ 125).
     if (!/resumo do pedido/i.test(resposta)) resposta = corrigirPrecosCitados(resposta, produtos)
+
+    // TAXA JUNTO DO ENDEREÇO. "Vcs entregam na Redinha?" → endereço → e o valor
+    // da taxa só saía no resumo; a cliente perguntou de novo e o atendente
+    // respondeu na mão (CDBom, 15/09/2026). A taxa é calculada no começo da
+    // mensagem, antes de o endereço existir — aqui lê o que acabou de ser salvo.
+    if (aceitaDelivery && /^✅ Endereço salvo!/.test(resposta) && /\?\s*[🏪💳]\s*$/u.test(resposta)) {
+      try {
+        const { data: e } = await supabase.from("whatsapp_carrinho")
+          .select("endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, endereco_lat, endereco_lng")
+          .eq("empresa_id", empresaId).eq("phone", phone).maybeSingle()
+        if (e?.endereco_rua && e?.endereco_numero) {
+          const cfg = acharBairroCfg(empresa.taxas_entrega_bairro, e.endereco_bairro)
+          let linhaTaxa = ""
+          if (cfg && cfg.entrega === false) {
+            linhaTaxa = `😕 No bairro *${e.endereco_bairro}* a gente não está entregando.`
+          } else {
+            let taxa: number | null = cfg ? Number(cfg.taxa) || 0 : null
+            if (taxa == null) {
+              const ponto = e.endereco_lat != null && e.endereco_lng != null ? { lat: Number(e.endereco_lat), lng: Number(e.endereco_lng) } : null
+              const endStr = [e.endereco_rua, e.endereco_numero, e.endereco_bairro, e.endereco_cidade].filter(Boolean).join(", ")
+              taxa = await calcularTaxaEntregaKm(empresa, endStr, ponto)
+            }
+            // Taxa fixa só pra loja sem tabela: com tabela, mapa que não achou a
+            // rua prometeria R$ 5 pra quem mora a 20 km.
+            const temTabela = (empresa.taxas_entrega_km ?? []).length || (empresa.taxas_entrega_bairro ?? []).length
+            if (taxa == null && !temTabela) taxa = taxaEntrega
+            if (taxa != null) linhaTaxa = taxa > 0 ? `🚚 Taxa de entrega: *R$ ${taxa.toFixed(2).replace(".", ",")}*` : "🚚 Entrega *grátis*!"
+          }
+          if (linhaTaxa) {
+            const corte = resposta.lastIndexOf("\n\n")
+            resposta = `${resposta.slice(0, corte)}\n\n${linhaTaxa}${resposta.slice(corte)}`
+          }
+        }
+      } catch (err: any) { console.error("[Taxa] junto do endereço:", err?.message) }
+    }
 
     // RESUMO COM A CONTA DO SISTEMA. O modelo lê "a partir de 5: R$ 2,50" na
     // lista e aplica em 3 pacotes de gelo — o resumo dizia R$ 21,50 e o pedido

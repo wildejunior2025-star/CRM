@@ -7572,11 +7572,7 @@ export default function PainelPedidos() {
   // cliente toca no clipe → Localização, e o ponto exato chega sozinho — sem
   // link, sem digitar endereço, sem o buscador de mapa chutar nada.
   async function pedirLocalizacaoNoChat() {
-    await enviarChatTexto(
-      'Pra entrega chegar certinho, me manda sua localização? 📍\n\n' +
-      'É rapidinho: toque no *clipe* (📎) aqui embaixo → *Localização* → ' +
-      '*Enviar sua localização atual*. Assim o entregador vai direto na sua porta. 🙂'
-    )
+    await enviarChatTexto('Me manda sua localização? 📍')
   }
 
   // Localização que o cliente mandou → vira o endereço + o ponto dele.
