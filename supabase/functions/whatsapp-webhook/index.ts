@@ -1053,6 +1053,21 @@ const normSabor = (s: unknown) => String(s ?? "")
   .replace(/\bcom\b|\+|&/g, " ").replace(/[^a-z0-9]+/g, " ").trim()
 
 const RE_MISTURADO = /^(misturad[oa]s?|sortid[oa]s?|variad[oa]s?|mix|sabores? variados?|a loja escolhe)$/
+// "Misturado menos paçoca" (CDBom, 15/09/2026): 20 picolés de cobertura em
+// todos os sabores tirando um. A IA manda {"nome": "Misturado", "exceto":
+// ["Paçoca"]}, ou escreve tudo no nome — aqui separa as duas partes.
+const RE_MISTURADO_EXCETO = /^(misturad[oa]s?|sortid[oa]s?|variad[oa]s?|mix|sabores? variados?|a loja escolhe|todos( os sabores)?)\s+(menos|sem|tirando|exceto|fora)\s+(.+)$/
+
+/** Nome do sabor "Misturado" e a lista de sabores que o cliente não quer. */
+function lerMisturado(c: any): { misturado: boolean; exceto: string[] } {
+  const alvo = normSabor(c?.nome)
+  const exceto = (Array.isArray(c?.exceto) ? c.exceto : []).map(normSabor).filter(Boolean)
+  if (RE_MISTURADO.test(alvo)) return { misturado: true, exceto }
+  const m = alvo.match(RE_MISTURADO_EXCETO)
+  if (!m) return { misturado: false, exceto: [] }
+  const doNome = m[4].replace(/\bde\b|\bo\b|\ba\b|\bos\b|\bas\b/g, " ").split(/\s+e\s+|\s+ou\s+/).map(normSabor).filter(Boolean)
+  return { misturado: true, exceto: [...exceto, ...doNome] }
+}
 
 // ── SABOR QUE MUDA CONFORME O TAMANHO ────────────────────────────────────────
 // CDBom, 14/09/2026: "quais são os sabores dos sorvetes?" e o robô listou os 15
@@ -1135,7 +1150,7 @@ function distribuirMisturado(itens: any[], sabores: SaboresPorProduto): any[] {
   const escolhidos = new Map<string, Set<string>>()
   for (const it of itens ?? []) {
     const comps = Array.isArray(it?.complementos) ? it.complementos : []
-    if (comps.length === 1 && !RE_MISTURADO.test(normSabor(comps[0]?.nome))) {
+    if (comps.length === 1 && !lerMisturado(comps[0]).misturado) {
       const k = String(it?.produto_id ?? "")
       if (!escolhidos.has(k)) escolhidos.set(k, new Set())
       escolhidos.get(k)!.add(normSabor(comps[0]?.nome))
@@ -1144,19 +1159,25 @@ function distribuirMisturado(itens: any[], sabores: SaboresPorProduto): any[] {
   for (const it of itens ?? []) {
     const comps = Array.isArray(it?.complementos) ? it.complementos : []
     const sp = sabores[String(it?.produto_id ?? "")]
-    const ehMisturado = comps.length === 1 && RE_MISTURADO.test(normSabor(comps[0]?.nome))
-    const todas = (sp?.disponiveis ?? []).filter(n => !/^\s*sem\s|n[ãa]o\s*quero/i.test(n))
+    const mist = comps.length === 1 ? lerMisturado(comps[0]) : { misturado: false, exceto: [] as string[] }
+    // "Menos paçoca": tira o sabor que casar pelo nome ("paçoca" tira "Paçoca"
+    // e "Paçoca + Nata"). Sabor que o produto nem tem não muda nada.
+    const naoQuer = (n: string) => mist.exceto.some(x => new RegExp(`\\b${x}\\b`).test(normSabor(n)))
+    const todas = (sp?.disponiveis ?? []).filter(n => !/^\s*sem\s|n[ãa]o\s*quero/i.test(n) && !naoQuer(n))
     const jaTem = escolhidos.get(String(it?.produto_id ?? "")) ?? new Set<string>()
     const outras = todas.filter(n => !jaTem.has(normSabor(n)))
     const opcoes = outras.length ? outras : todas
-    if (!ehMisturado || !opcoes.length) { saida.push(it); continue }
+    if (!mist.misturado) { saida.push(it); continue }
+    // Nada sobrou pra misturar: vai sem sabor, e a loja escolhe.
+    if (!opcoes.length) { saida.push({ ...it, complementos: [] }); continue }
     const qtd = Math.max(0, Math.floor(Number(it.qtd) || 0))
     const base = Math.floor(qtd / opcoes.length)
     let resto = qtd - base * opcoes.length
+    const { exceto: _exceto, ...compBase } = comps[0] ?? {}
     for (const sabor of opcoes) {
       const q = base + (resto > 0 ? 1 : 0)
       if (resto > 0) resto--
-      if (q > 0) saida.push({ ...it, qtd: q, complementos: [{ ...comps[0], nome: sabor }] })
+      if (q > 0) saida.push({ ...it, qtd: q, complementos: [{ ...compBase, nome: sabor }] })
     }
   }
   // Junta mesmo produto + mesmo sabor único.
@@ -1186,7 +1207,8 @@ function conferirSabores(itens: any[], sabores: SaboresPorProduto, catalogo: any
       if (!alvo) continue
       // "Misturado/sortido/variado": a loja escolhe os sabores (CDBom, 14/09).
       // Com um sabor só disponível, "misturado" é esse sabor.
-      if (RE_MISTURADO.test(alvo)) {
+      if (lerMisturado(c).misturado) {
+        delete c.exceto
         c.nome = sp.disponiveis.length === 1 ? sp.disponiveis[0] : "Misturado"
         continue
       }
@@ -1419,8 +1441,10 @@ function corrigirPrecosCitados(texto: string, produtos: any[]): string {
     const base = Number(prod.preco_venda) || 0
     const validos = [base, Number(prod.preco_promocional) || 0, ...faixasOrdenadas(prod.faixas_preco).map(f => f.preco)].filter(v => v > 0)
     if (!Number.isFinite(citado) || validos.some(v => Math.abs(v - citado) < 0.01)) return linha
-    // Linha de item com quantidade ("x2 — R$ 24") é total, não unitário: não mexe.
-    if (/\bx\s*\d+|\d+\s*x\b/i.test(linha)) return linha
+    // Linha de item com quantidade ("x2 — R$ 24", "70 un — R$ 42,00") é total,
+    // não unitário: não mexe. O "70 un" é o da conferência da sacola — virava
+    // "R$ 1,50" ao lado de 70 picolés (CDBom, 15/09/2026).
+    if (/\bx\s*\d+|\d+\s*x\b|\b\d+\s*un\b/i.test(linha)) return linha
     console.log(`[Preço citado] ${prod.nome}: R$ ${citado} → R$ ${base}`)
     return linha.replace(m[0], `R$ ${base.toFixed(2).replace(".", ",")}`)
   }).join("\n")
@@ -3371,7 +3395,7 @@ ${totalProdutos > MENU_INTEIRO_ATE ? `⚠️ CATÁLOGO GRANDE: esta loja tem ${t
 • Categorias da loja: ${(catsHorario ?? []).map((c: any) => c.nome).join(", ") || "—"}
 ` : ""}PRODUTOS DISPONÍVEIS${totalProdutos > MENU_INTEIRO_ATE ? " (o que casou com o que ele pediu)" : ""}:
 ${cardapioPorCategoria(produtos) || (totalProdutos > MENU_INTEIRO_ATE ? "Nada casou com o que ele falou — peça a marca e o tamanho, ou ofereça o link do catálogo." : "Nenhum produto cadastrado")}
-${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n${familiasTamanho.length ? `📏 SABORES QUE MUDAM CONFORME O TAMANHO — nunca liste sabores desses produtos sem saber o tamanho. Se o cliente não disse o tamanho (nem antes na conversa), PERGUNTE primeiro qual tamanho, mostrando tamanhos e preços; depois mostre só os sabores DAQUELE tamanho:\n${familiasTamanho.map(f => `▸ ${f.nome}: ` + f.tamanhos.map(t => `${t.rotulo} (${t.sabores.length} sabores)`).join("; ")).join("\n")}\n` : ""}⚠️ Confira pelo [id:] qual produto o cliente pediu antes de mostrar opções. Produto cujo id NÃO aparece neste bloco não tem sabor/complemento pra escolher: adicione direto com atualizar_carrinho, sem perguntar sabor (ex.: açaí em caixa ou balde não é o mesmo produto que o sorvete de mesmo tamanho).\n` : ""}
+${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n${familiasTamanho.length ? `📏 SABORES QUE MUDAM CONFORME O TAMANHO — nunca liste sabores desses produtos sem saber o tamanho. Se o cliente não disse o tamanho (nem antes na conversa), PERGUNTE primeiro qual tamanho, mostrando tamanhos e preços; depois mostre só os sabores DAQUELE tamanho:\n${familiasTamanho.map(f => `▸ ${f.nome}: ` + f.tamanhos.map(t => `${t.rotulo} (${t.sabores.length} sabores)`).join("; ")).join("\n")}\n` : ""}⚠️ Confira pelo [id:] qual produto o cliente pediu antes de mostrar opções. Produto cujo id NÃO aparece neste bloco não tem sabor/complemento pra escolher: adicione direto com atualizar_carrinho, sem perguntar sabor (ex.: açaí em caixa ou balde não é o mesmo produto que o sorvete de mesmo tamanho).\n🍦 SABOR NÃO ESCOLHIDO NÃO SE PERGUNTA: nos produtos em que só se escolhe o SABOR (picolé, sorvete, moreninha, pote), se o cliente disse produto + quantidade sem sabor, emita atualizar_carrinho NA HORA com a linha SEM "complementos" (nem "Misturado" — Misturado é só quando ele FALA misturado/sortido/menos X) — a loja manda sortido. Não liste sabores, não pergunte "qual sabor?" nem "prefere misturado?". Só use sabor quando ELE disser um.\n` : ""}
 CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) => {
   const comps = Array.isArray(i.complementos) && i.complementos.length ? ` (${i.complementos.map((c: any) => c.nome).join(", ")})` : ""
   return `• ${i.nome}${comps} x${i.qtd} = R$ ${(i.qtd * Number(i.preco)).toFixed(2)}`
@@ -3412,7 +3436,7 @@ Já verificamos pelo telefone se o cliente tem conta nesta loja (ver CLIENTE aci
 
 ▶ PASSO 2 — MONTAR A SACOLA
 Ajude o cliente a escolher os produtos. A CADA produto escolhido, emita atualizar_carrinho (ver AÇÕES).
-Cliente pediu VÁRIOS produtos de uma vez ("um balde, dez picolés e um açaí"): guarde a lista. Ao anotar um, na MESMA resposta pergunte o que falta do PRÓXIMO ("Agora os 10 picolés: qual tipo e sabor?"). Só pergunte "deseja mais algum item?" quando todos os que ele pediu estiverem no carrinho.
+Cliente pediu VÁRIOS produtos de uma vez ("um balde, dez picolés e um açaí"): anote de uma vez todos que você já sabe QUAL produto é (sabor não escolhido não segura: vai sem sabor). Só pergunte do que ficou em dúvida de QUAL produto é ("Agora os 10 picolés: qual tipo?"). Só pergunte "deseja mais algum item?" quando todos os que ele pediu estiverem no carrinho.
 Preço: use SEMPRE o da linha do produto, dentro da categoria certa (【SORVETES】 não é 【AÇAÍ】, mesmo com o mesmo tamanho).
 Produto com complementos (Quentinha): mostre TODAS as categorias DE UMA VEZ, numa ÚNICA mensagem. Use EXATAMENTE o formato do bloco "PRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS": cada categoria com a barra separadora (━━━━━━━━━━━━━), o *nome da categoria* em negrito com o máximo do lado (ex.: "escolha 1", "escolha até 2"), e CADA opção numa linha própria começando com "• ". NUNCA junte as opções com vírgula na mesma linha — elas têm que ficar uma embaixo da outra. A linha "(em falta hoje ...)" é só pra você: NUNCA mostre ela na lista. NUNCA pergunte categoria por categoria (uma mensagem por categoria) — isso cansa o cliente e gasta crédito à toa. Peça pro cliente responder tudo numa mensagem só; quando ele responder, monte o item com atualizar_carrinho. Se faltar escolher alguma categoria, aí sim pergunte só as que faltam.
 Continue somando itens até o cliente dizer que é só isso / que quer fechar.
@@ -3485,7 +3509,7 @@ AÇÕES DISPONÍVEIS
 Atualizar carrinho (ao adicionar/remover produto — OBRIGATÓRIO ao confirmar produto escolhido):
 ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Nome", "qtd": 1, "preco": 0.00}]}
 
-▸ PRODUTO COM COMPLEMENTOS (ex.: Quentinha) — fluxo obrigatório:
+▸ PRODUTO COM COMPLEMENTOS (ex.: Quentinha) — fluxo obrigatório (produto que só tem SABOR pra escolher — picolé, sorvete, pote — NÃO segue este fluxo: vale a regra SABOR logo abaixo):
   1. Quando o cliente escolher um produto que está na lista "PRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS", NÃO adicione direto. Primeiro mostre TODAS as categorias daquele produto no MESMO formato do bloco de referência: barra separadora (━━━━━━━━━━━━━), *nome da categoria* em negrito com o máximo ("escolha 1"/"escolha até 2"), e cada opção numa linha própria com "• " (NUNCA vírgula na mesma linha). Peça que ele diga o que quer em cada categoria.
   2. Respeite o máximo de cada categoria — nunca aceite mais opções do que o "escolha até N" permite. Mas se o cliente escolher menos do que o máximo permitido (ex.: 1 salada quando pode 2), está OK — NÃO fique insistindo para ele adicionar mais. Assim que ele disser as opções, emita atualizar_carrinho na hora.
   3. Assim que o cliente disser as opções (mesmo que junto com "só isso"), sua PRÓXIMA ação é emitir atualizar_carrinho com a quentinha montada. ⛔ NUNCA mostre uma lista de confirmação com ✓ ("Deixa eu confirmar sua Quentinha: • X ✓") antes de emitir — isso deixa o carrinho VAZIO e o pedido sai errado. Emita a ACAO direto; a confirmação vem automática do sistema.
@@ -3498,7 +3522,10 @@ ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome":
   • Monte UMA LINHA POR SABOR, com a quantidade de cada. "10 Picolé Delícia, 5 de morango e 5 de chocolate" vira:
   ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Picolé Delícia", "qtd": 5, "preco": 4.00, "complementos": [{"nome": "Morango", "qtd": 1}]}, {"produto_id": "ID_REAL", "nome": "Picolé Delícia", "qtd": 5, "preco": 4.00, "complementos": [{"nome": "Chocolate", "qtd": 1}]}]}
   • A soma das linhas conta pro preço de atacado — o sistema junta sozinho.
-  • Se ele disser a quantidade e não disser os sabores, mostre a lista e pergunte quantos de cada. Se disser os sabores e não a divisão ("10 de morango e chocolate"), pergunte quantos de cada antes de anotar.
+  • ⛔ Se ele disser o produto e a quantidade e NÃO disser sabor ("70 picolé de gelo", "20 moreninha"), NÃO pergunte o sabor: anote NA HORA sem sabor — a linha SEM "complementos" (não invente "Misturado"). A loja já sabe que sem sabor escolhido ela manda sortido. Ex.: {"produto_id": "ID_REAL", "nome": "Picolé Sabor da Fruta", "qtd": 70, "preco": 1.50}
+  • "Todos menos X" / "menos de X" / "tirando X" / "sem X" = misturado sem aquele sabor: {"nome": "Misturado", "qtd": 1, "exceto": ["X"]}. O sistema divide entre os outros sabores. Se X nem existe no produto, só anote — não diga que X acabou.
+  • Se disser os sabores e não a divisão ("10 de morango e chocolate"), pergunte quantos de cada antes de anotar.
+  • Pedido com vários produtos, uns com sabor e outros sem: anote TODOS numa ACAO só (os com sabor, uma linha por sabor; os sem sabor, só o produto e a quantidade). O sistema responde com a conferência e o valor total.
   • Sabor que ele pedir e NÃO está na lista do produto está em falta hoje: responda como atendente ("Castanha acabou no momento 😕, mas tem esses:") e ofereça os que tem. NUNCA fale em "lista", "cadastro" ou "sistema" pro cliente. Nunca anote sabor fora da lista.
   • Cada produto tem a SUA lista de sabores (o pote de 1 litro pode não ter o mesmo sabor do balde). Use a lista daquele produto.
 
@@ -3506,6 +3533,7 @@ ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome":
   • Quer dizer que a LOJA escolhe os sabores. NÃO pergunte sabor por sabor. Anote a linha com o sabor "Misturado" — o SISTEMA divide a quantidade igualmente entre os sabores disponíveis do produto e a conferência já mostra a divisão:
   ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Picolé Sabor da Fruta", "qtd": 40, "preco": 1.50, "complementos": [{"nome": "Misturado", "qtd": 1}]}]}
   • Pode ter sabor escolhido + resto misturado: "50 picolés, 10 de coco e o resto misturado" = uma linha de 10 Coco + uma linha de 40 Misturado (do mesmo produto).
+  • "20 picolé cobertura menos de paçoca": ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Picolé Premium", "qtd": 20, "preco": 4.00, "complementos": [{"nome": "Misturado", "qtd": 1, "exceto": ["Paçoca"]}]}]}
   • "80 misturado de A e B" (DOIS produtos juntos) é UM total de 80, NUNCA 80 de cada. Pergunte UMA vez como dividir, já sugerindo: "Divido meio a meio — 40 de A e 40 de B — pode ser?". Se o cliente não se importar, anote meio a meio com "Misturado".
   • NUNCA anote item com quantidade 0 ou sem quantidade. Sem a quantidade, pergunte.
 
@@ -3773,6 +3801,24 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             console.log(`[Carrinho] ${acao.tipo} sem quantidade em nenhum item — ignorado`)
             acao.tipo = "sem_quantidade"
           } else {
+            // "Misturado" que o cliente não pediu: "70 picolé de gelo" saía
+            // dividido em 10 sabores. Sem sabor escolhido a linha vai só com o
+            // nome e a loja manda sortido (pedido da loja, 15/09/2026). Vale o
+            // que ele escreveu agora e nas últimas mensagens dele.
+            const falasDoCliente = normSabor([text, ...mensagens.filter((m: any) => m.role === "user").slice(-4).map((m: any) => m.content)].join(" "))
+            const pediuMisturar = /\b(misturad[oa]s?|mistura|misturar|sortid[oa]s?|variad[oa]s?|mix|loja escolhe|voces escolhem|tanto faz)\b/.test(falasDoCliente)
+            const pediuTirar = /\b(menos|tirando|exceto|fora|sem)\b/.test(falasDoCliente)
+            for (const it of acao.items) {
+              const comps = Array.isArray(it?.complementos) ? it.complementos : []
+              if (comps.length !== 1) continue
+              const mist = lerMisturado(comps[0])
+              if (!mist.misturado) continue
+              const vale = mist.exceto.length ? (pediuTirar || pediuMisturar) : pediuMisturar
+              if (!vale) {
+                console.log(`[Sabor] Misturado sem o cliente pedir — ${it.nome} vai sem sabor`)
+                it.complementos = []
+              }
+            }
             acao.items = distribuirMisturado(acao.items, saboresPorProduto)
           }
         }
@@ -3833,7 +3879,9 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
               // tipos de picolé + a pergunta), e não só o último parágrafo — senão
               // sobrava um "O que você prefere?" solto, sem a lista.
               const resto = resposta.split(/\n\s*\n/).map(p => p.trim())
-                .filter(p => p && !/(anotei|anotado|adicionad|confere|carrinho|sacola|✅|🍽️|deixa eu confirmar|s[oó] pra confirmar|vamos confirmar|fechar|mais algum|mais alguma)/i.test(p))
+                // Sabor que ele não escolheu não se pergunta: vai sem sabor e a
+                // loja manda sortido (15/09/2026).
+                .filter(p => p && !/(anotei|anotado|adicionad|confere|carrinho|sacola|✅|🍽️|deixa eu confirmar|s[oó] pra confirmar|vamos confirmar|fechar|mais algum|mais alguma|misturad|qual sabor|quais sabores|sabor espec[ií]fico|tem dispon[ií]vel)/i.test(p))
                 .join("\n\n")
               const perguntaDoModelo = resto.includes("?") && resto.length <= 1200 ? resto : ""
               resposta = perguntaDoModelo
