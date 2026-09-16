@@ -1,9 +1,53 @@
-/* ── DeliveryPedido — order tracking ── */
+/* ── DeliveryPedido — acompanhamento do pedido ──
+ *
+ * Mesmo tema do catálogo e do checkout (`dloja-tema`): a tela nascia sempre
+ * escura, e quem pediu no claro caía numa página preta logo depois de pagar.
+ *
+ * Desenho: um cartão "herói" com tudo que o cliente quer saber de relance
+ * (número, entrega ou retirada, pagamento, endereço, previsão e total), os
+ * itens atrás de um botão, e o status numa régua horizontal com o passo atual
+ * em destaque. O roxo da marca não vira token: funciona nos dois fundos.
+ */
+
+.dpd-root {
+  /* escuro */
+  --dpd-bg:          #0f172a;
+  --dpd-surface:     #1e1b4b;
+  --dpd-surface-2:   #0f172a;
+  --dpd-border:      #312e81;
+  --dpd-border-2:    #334155;
+  --dpd-text:        #f1f5f9;
+  --dpd-text-2:      #e2e8f0;
+  --dpd-muted:       #94a3b8;
+  --dpd-muted-2:     #64748b;
+  --dpd-roxo-txt:    #a78bfa;
+  --dpd-roxo-bg:     rgba(124, 58, 237, .14);
+  --dpd-roxo-borda:  rgba(124, 58, 237, .40);
+  --dpd-linha:       #334155;
+  --dpd-sombra:      0 6px 24px rgba(0, 0, 0, .25);
+}
+
+.dpd-root[data-tema="claro"] {
+  --dpd-bg:          #f4f3fb;
+  --dpd-surface:     #ffffff;
+  --dpd-surface-2:   #f8f8fc;
+  --dpd-border:      #e9e7f3;
+  --dpd-border-2:    #e2e8f0;
+  --dpd-text:        #1e1b3a;
+  --dpd-text-2:      #334155;
+  --dpd-muted:       #64748b;
+  --dpd-muted-2:     #94a3b8;
+  --dpd-roxo-txt:    #6d28d9;
+  --dpd-roxo-bg:     #f5f3ff;
+  --dpd-roxo-borda:  #ddd6fe;
+  --dpd-linha:       #e5e7eb;
+  --dpd-sombra:      0 6px 24px rgba(76, 29, 149, .08);
+}
 
 .dpd-root {
   min-height: 100vh;
-  background: #0f172a;
-  color: #f1f5f9;
+  background: var(--dpd-bg);
+  color: var(--dpd-text);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -14,8 +58,8 @@
 /* ── Loading ── */
 .dpd-loading {
   min-height: 100vh;
-  background: #0f172a;
-  color: #94a3b8;
+  background: #f4f3fb;
+  color: #64748b;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -28,7 +72,7 @@
 .dpd-spinner {
   width: 28px;
   height: 28px;
-  border: 2.5px solid #1e293b;
+  border: 2.5px solid #e9e7f3;
   border-top-color: #7c3aed;
   border-radius: 50%;
   animation: dpd-spin 0.7s linear infinite;
@@ -38,116 +82,371 @@
   to { transform: rotate(360deg); }
 }
 
-.dpd-back-link {
-  padding: 8px 18px;
-  border-radius: 8px;
-  border: 1px solid #334155;
-  background: transparent;
-  color: #94a3b8;
-  font-family: inherit;
-  font-size: 14px;
-  cursor: pointer;
-  transition: border-color 140ms, color 140ms;
-}
-
-.dpd-back-link:hover {
-  border-color: #7c3aed;
-  color: #f1f5f9;
-}
-
-/* ── Header ── */
-.dpd-header {
-  background: #0f172a;
-  border-bottom: 1px solid #1e293b;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-}
-
-.dpd-header-inner {
-  max-width: 700px;
-  margin: 0 auto;
-  padding: 14px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.dpd-logo-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-}
-
-.dpd-logo {
-  font-size: 20px;
-  font-weight: 800;
-  color: #f1f5f9;
-  letter-spacing: -0.03em;
-}
-
-.dpd-logo-plus {
-  color: #7c3aed;
-}
-
-.dpd-header-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.dpd-pedido-id {
-  font-size: 12px;
-  font-weight: 700;
-  color: #64748b;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.dpd-refresh-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: 1px solid #1e293b;
-  background: #1e293b;
-  color: #94a3b8;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 140ms, color 140ms;
-}
-
-.dpd-refresh-btn:hover {
-  background: #334155;
-  color: #f1f5f9;
-}
-
 /* ── Main ── */
 .dpd-main {
-  max-width: 700px;
+  max-width: 560px;
   margin: 0 auto;
-  padding: 24px 16px 60px;
+  padding: 16px 16px 110px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 /* ── Cards ── */
 .dpd-card {
-  background: #1e1b4b;
-  border: 1px solid #312e81;
-  border-radius: 12px;
+  background: var(--dpd-surface);
+  border: 1px solid var(--dpd-border);
+  border-radius: 20px;
   padding: 20px;
+  box-shadow: var(--dpd-sombra);
 }
 
 .dpd-card-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: #f1f5f9;
-  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--dpd-text);
+  margin: 0 0 14px;
   letter-spacing: 0.01em;
+}
+
+/* ── Herói ── */
+.dpd-hero-topo {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.dpd-hero-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  object-fit: cover;
+  border: 3px solid var(--dpd-surface);
+  box-shadow: 0 4px 14px rgba(124, 58, 237, .25);
+  background: #7c3aed;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  font-weight: 900;
+  cursor: pointer;
+  padding: 0;
+}
+
+.dpd-hero-num {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: -.02em;
+  color: var(--dpd-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.1;
+}
+
+.dpd-hero-num svg {
+  color: var(--dpd-roxo-txt);
+}
+
+.dpd-hero-sub {
+  margin: 4px 0 0;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--dpd-muted);
+}
+
+.dpd-hero-loja {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--dpd-muted-2);
+  margin: 0 0 2px;
+}
+
+.dpd-info {
+  border: 1.5px solid var(--dpd-border-2);
+  border-radius: 16px;
+  padding: 13px 18px;
+  margin-bottom: 12px;
+  background: var(--dpd-surface);
+}
+
+.dpd-info-rot {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--dpd-text);
+  margin-bottom: 4px;
+}
+
+.dpd-info-val {
+  display: block;
+  font-size: 16.5px;
+  font-weight: 600;
+  color: var(--dpd-text);
+}
+
+.dpd-info--roxo {
+  background: var(--dpd-roxo-bg);
+  border-color: var(--dpd-roxo-borda);
+}
+
+.dpd-info--roxo .dpd-info-rot {
+  color: var(--dpd-roxo-txt);
+}
+
+.dpd-info--roxo .dpd-info-val {
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.dpd-info-extra {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--dpd-muted);
+}
+
+.dpd-endereco {
+  border: 1px solid var(--dpd-border-2);
+  background: var(--dpd-surface-2);
+  border-radius: 12px;
+  padding: 11px 18px;
+  margin-bottom: 12px;
+  font-size: 15px;
+  color: var(--dpd-muted);
+  line-height: 1.45;
+}
+
+.dpd-previsao {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--dpd-surface-2);
+  border-radius: 16px;
+  padding: 14px 18px;
+  margin-bottom: 4px;
+}
+
+.dpd-previsao > svg {
+  flex-shrink: 0;
+  color: var(--dpd-text);
+}
+
+.dpd-previsao .dpd-info-rot {
+  font-size: 11.5px;
+}
+
+.dpd-previsao .dpd-info-val {
+  font-weight: 700;
+}
+
+.dpd-hero-rodape {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--dpd-linha);
+}
+
+.dpd-qtd-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: var(--dpd-surface-2);
+  border: 1px solid var(--dpd-border-2);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--dpd-text-2);
+}
+
+.dpd-hero-total {
+  font-size: 26px;
+  font-weight: 900;
+  color: var(--dpd-roxo-txt);
+  letter-spacing: -.01em;
+}
+
+/* ── Botão "Ver itens" ── */
+.dpd-ver-itens {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid var(--dpd-border);
+  background: var(--dpd-surface);
+  box-shadow: var(--dpd-sombra);
+  color: var(--dpd-roxo-txt);
+  font-family: inherit;
+  font-size: 19px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.dpd-ver-itens:active {
+  transform: scale(.99);
+}
+
+/* ── Status (régua horizontal) ── */
+.dpd-status-topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.dpd-status-rot {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: .16em;
+  color: var(--dpd-muted);
+}
+
+.dpd-ao-vivo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  color: var(--dpd-roxo-txt);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.dpd-ao-vivo::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7c3aed;
+  animation: dpd-piscar 1.6s ease-in-out infinite;
+}
+
+@keyframes dpd-piscar {
+  50% { opacity: .25; }
+}
+
+.dpd-status-sub {
+  margin: 4px 0 18px;
+  font-size: 15px;
+  color: var(--dpd-muted);
+}
+
+.dpd-regua {
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+}
+
+.dpd-regua-ponto {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2.5px solid var(--dpd-linha);
+  background: var(--dpd-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
+.dpd-regua-ponto svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 3.5;
+}
+
+.dpd-regua-ponto--feito {
+  background: #7c3aed;
+  border-color: #c4b5fd;
+  box-shadow: 0 0 0 2px var(--dpd-roxo-bg);
+}
+
+.dpd-regua-ponto--atual {
+  border: 3px solid #7c3aed;
+  background: var(--dpd-surface);
+  box-shadow: 0 0 0 4px var(--dpd-roxo-bg);
+  position: relative;
+}
+
+.dpd-regua-ponto--atual::after {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--dpd-roxo-bg);
+}
+
+.dpd-regua-linha {
+  flex: 1;
+  height: 3px;
+  background: var(--dpd-linha);
+  border-radius: 2px;
+}
+
+.dpd-regua-linha--feita {
+  background: #7c3aed;
+}
+
+.dpd-status-atual {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.dpd-status-icone {
+  width: 74px;
+  height: 74px;
+  border-radius: 24px;
+  border: 2px solid var(--dpd-roxo-borda);
+  background: var(--dpd-surface);
+  color: #7c3aed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: dpd-pulse 2s ease-in-out infinite;
+}
+
+.dpd-status-icone svg {
+  width: 36px;
+  height: 36px;
+  stroke-width: 2.2;
+}
+
+@keyframes dpd-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, .18); }
+  50%       { box-shadow: 0 0 0 10px rgba(124, 58, 237, 0); }
+}
+
+.dpd-status-nome {
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--dpd-text);
+}
+
+.dpd-update-time {
+  font-size: 11.5px;
+  color: var(--dpd-muted-2);
+  margin: 12px 0 0;
+  text-align: center;
 }
 
 /* ── Card cancelado ── */
@@ -166,7 +465,7 @@
   height: 52px;
   border-radius: 50%;
   background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
+  color: #ef4444;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -174,114 +473,30 @@
 }
 
 .dpd-cancelado-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: #fca5a5;
+  font-size: 17px;
+  font-weight: 800;
+  color: #dc2626;
   margin: 0;
 }
 
 .dpd-cancelado-motivo {
-  font-size: 13px;
-  color: #94a3b8;
+  font-size: 13.5px;
+  color: var(--dpd-muted);
   margin: 0;
   max-width: 340px;
 }
 
-/* ── Timeline ── */
-.dpd-card--timeline {
-  padding-bottom: 16px;
-}
-
-.dpd-timeline {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.dpd-step {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-}
-
-.dpd-step-icon-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.dpd-step-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: 2px solid #334155;
-  background: #0f172a;
-  color: #475569;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: border-color 200ms, background 200ms, color 200ms;
-  flex-shrink: 0;
-}
-
-.dpd-step--done .dpd-step-icon {
-  border-color: #16a34a;
-  background: rgba(22, 163, 74, 0.12);
-  color: #4ade80;
-}
-
-.dpd-step--current .dpd-step-icon {
-  border-color: #7c3aed;
-  background: rgba(124, 58, 237, 0.15);
-  color: #a78bfa;
-  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.15);
-  animation: dpd-pulse 2s ease-in-out infinite;
-}
-
-@keyframes dpd-pulse {
-  0%, 100% { box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.15); }
-  50%       { box-shadow: 0 0 0 8px rgba(124, 58, 237, 0.08); }
-}
-
-.dpd-step-line {
-  width: 2px;
-  flex: 1;
-  min-height: 20px;
-  background: #1e293b;
-  margin: 4px 0;
-}
-
-.dpd-step-line--done {
-  background: #16a34a;
-}
-
-.dpd-step-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: #475569;
-  padding: 10px 0;
-  line-height: 1.3;
-  padding-top: 11px;
-}
-
-.dpd-step--done .dpd-step-label {
-  color: #94a3b8;
-}
-
-.dpd-step--current .dpd-step-label {
-  color: #f1f5f9;
+/* ── Botões secundários ── */
+.dpd-btn-refresh {
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1.5px solid #7c3aed;
+  background: transparent;
+  color: var(--dpd-roxo-txt);
+  font-family: inherit;
+  font-size: 14px;
   font-weight: 700;
-}
-
-.dpd-update-time {
-  font-size: 11px;
-  color: #475569;
-  margin: 12px 0 0;
-  text-align: right;
+  cursor: pointer;
 }
 
 /* ── Pix ── */
@@ -301,18 +516,17 @@
 .dpd-pix-msg {
   font-size: 14px;
   font-weight: 600;
-  color: #f1f5f9;
+  color: var(--dpd-text);
   margin: 0;
 }
 
 .dpd-pix-sub {
   font-size: 12px;
-  color: #64748b;
+  color: var(--dpd-muted-2);
   margin: 0;
   max-width: 260px;
 }
 
-/* QR Code real */
 .dpd-pix-qr-wrap {
   display: flex;
   justify-content: center;
@@ -328,7 +542,6 @@
   display: block;
 }
 
-/* Copia e cola */
 .dpd-pix-copia-wrap {
   text-align: left;
   margin-bottom: 12px;
@@ -337,7 +550,7 @@
 .dpd-pix-copia-label {
   font-size: 11px;
   font-weight: 600;
-  color: #64748b;
+  color: var(--dpd-muted-2);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin: 0 0 6px;
@@ -347,8 +560,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #0f172a;
-  border: 1px solid #334155;
+  background: var(--dpd-surface-2);
+  border: 1px solid var(--dpd-border-2);
   border-radius: 8px;
   padding: 10px 12px;
 }
@@ -356,7 +569,7 @@
 .dpd-pix-copia-code {
   flex: 1;
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--dpd-muted);
   word-break: break-all;
   line-height: 1.4;
   font-family: 'Courier New', monospace;
@@ -387,18 +600,17 @@
 
 .dpd-pix-aviso {
   font-size: 12px;
-  color: #64748b;
+  color: var(--dpd-muted-2);
   margin: 0;
   line-height: 1.5;
 }
 
 /* ── PIX na entrega: o cliente ainda tem uma tarefa ──
-   Era um rodapé de 12px embaixo do status. Quem abre esta tela já pediu e
-   ainda não pagou — então o valor, a chave e o WhatsApp vêm em tamanho de
-   quem precisa ser lido de primeira, no celular, com a mão ocupada. */
+   Quem abre esta tela já pediu e ainda não pagou — então o valor, a chave e
+   o WhatsApp vêm em tamanho de quem precisa ser lido de primeira. */
 .dpd-pixe {
   border-color: rgba(0, 180, 216, .45);
-  background: linear-gradient(180deg, rgba(0, 180, 216, .10), rgba(30, 27, 75, .6));
+  background: linear-gradient(180deg, rgba(0, 180, 216, .10), var(--dpd-surface) 70%);
 }
 
 .dpd-pixe-topo {
@@ -423,14 +635,14 @@
   margin: 0 0 3px;
   font-size: 20px;
   font-weight: 800;
-  color: #f1f5f9;
+  color: var(--dpd-text);
 }
 
 .dpd-pixe-sub {
   margin: 0;
   font-size: 14px;
   line-height: 1.5;
-  color: #b6c2d4;
+  color: var(--dpd-muted);
 }
 
 .dpd-pixe-valor {
@@ -441,19 +653,19 @@
   padding: 14px 16px;
   margin-bottom: 16px;
   border-radius: 12px;
-  background: #0f172a;
-  border: 1px solid #334155;
+  background: var(--dpd-surface-2);
+  border: 1px solid var(--dpd-border-2);
 }
 
 .dpd-pixe-valor span {
   font-size: 14px;
-  color: #94a3b8;
+  color: var(--dpd-muted);
 }
 
 .dpd-pixe-valor strong {
   font-size: 26px;
   font-weight: 800;
-  color: #f1f5f9;
+  color: var(--dpd-text);
   letter-spacing: -.01em;
 }
 
@@ -461,7 +673,7 @@
   margin: 0 0 6px;
   font-size: 12px;
   font-weight: 700;
-  color: #94a3b8;
+  color: var(--dpd-muted);
   text-transform: uppercase;
   letter-spacing: .05em;
 }
@@ -470,9 +682,9 @@
 .dpd-pixe-chave {
   padding: 14px 16px;
   border-radius: 12px;
-  background: #0f172a;
+  background: var(--dpd-surface-2);
   border: 1px dashed #00b4d8;
-  color: #f1f5f9;
+  color: var(--dpd-text);
   font-size: 17px;
   font-weight: 700;
   line-height: 1.4;
@@ -534,7 +746,7 @@
   border: 1px solid rgba(234, 179, 8, .35);
   font-size: 14px;
   line-height: 1.5;
-  color: #e8d9a0;
+  color: var(--dpd-text-2);
 }
 
 .dpd-pixe-passos {
@@ -545,7 +757,7 @@
   gap: 7px;
   font-size: 14px;
   line-height: 1.45;
-  color: #b6c2d4;
+  color: var(--dpd-muted);
 }
 
 .dpd-pixe-passos li::marker {
@@ -557,7 +769,7 @@
 .dpd-itens {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 16px;
 }
 
@@ -565,27 +777,32 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 13px;
+  font-size: 14.5px;
 }
 
 .dpd-item-qty {
-  color: #7c3aed;
-  font-weight: 700;
-  min-width: 24px;
+  color: var(--dpd-roxo-txt);
+  font-weight: 800;
+  min-width: 26px;
   flex-shrink: 0;
 }
 
 .dpd-item-nome {
-  color: #e2e8f0;
+  color: var(--dpd-text-2);
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+}
+
+.dpd-item-comp {
+  display: block;
+  font-size: 12.5px;
+  color: var(--dpd-muted);
+  margin-top: 2px;
 }
 
 .dpd-item-sub {
-  color: #94a3b8;
-  font-weight: 600;
+  color: var(--dpd-muted);
+  font-weight: 700;
   flex-shrink: 0;
 }
 
@@ -595,73 +812,34 @@
   flex-direction: column;
   gap: 8px;
   padding-top: 12px;
-  border-top: 1px solid #1e293b;
-  margin-bottom: 16px;
+  border-top: 1px solid var(--dpd-linha);
 }
 
 .dpd-total-linha {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
-  color: #94a3b8;
+  font-size: 14px;
+  color: var(--dpd-muted);
 }
 
 .dpd-total-linha--total {
-  font-size: 15px;
-  font-weight: 700;
-  color: #f1f5f9;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--dpd-text);
   padding-top: 8px;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid var(--dpd-linha);
   margin-top: 4px;
 }
 
 .dpd-total-linha--total strong {
-  color: #a78bfa;
-  font-size: 17px;
-}
-
-/* ── Pagamento ── */
-.dpd-pagamento {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: rgba(124, 58, 237, 0.07);
-  border: 1px solid rgba(124, 58, 237, 0.15);
-  border-radius: 8px;
-  flex-wrap: wrap;
-}
-
-.dpd-pagamento-label {
-  font-size: 12px;
-  color: #64748b;
-  flex-shrink: 0;
-}
-
-.dpd-pagamento-val {
-  font-size: 13px;
-  font-weight: 700;
-  color: #a78bfa;
-}
-
-.dpd-troco {
-  font-size: 12px;
-  color: #94a3b8;
-  margin-left: auto;
-}
-
-/* ── Endereço ── */
-.dpd-address {
-  font-size: 13px;
-  color: #94a3b8;
-  line-height: 1.7;
-  font-style: normal;
+  color: var(--dpd-roxo-txt);
+  font-size: 18px;
 }
 
 /* ── Mapa da entrega (cliente confere e corrige o ponto) ── */
 .dpd-mapa-hint {
-  font-size: 12.5px;
-  color: #94a3b8;
+  font-size: 13px;
+  color: var(--dpd-muted);
   line-height: 1.55;
   margin: 0 0 10px;
 }
@@ -669,15 +847,14 @@
 .dpd-mapa {
   width: 100%;
   height: 230px;
-  border-radius: 10px;
+  border-radius: 14px;
   overflow: hidden;
-  border: 1px solid #334155;
-  background: #1e293b;
+  border: 1px solid var(--dpd-border-2);
+  background: var(--dpd-surface-2);
 }
 
-/* O Leaflet nasce com fundo branco e z-index alto; aqui ele se comporta */
 .dpd-mapa .leaflet-container {
-  background: #1e293b;
+  background: var(--dpd-surface-2);
   font-family: inherit;
 }
 
@@ -690,13 +867,13 @@
 
 .dpd-mapa-btn {
   flex: 1 1 150px;
-  padding: 10px 12px;
-  border-radius: 9px;
-  border: 1.5px solid #334155;
+  padding: 11px 12px;
+  border-radius: 11px;
+  border: 1.5px solid var(--dpd-border-2);
   background: transparent;
-  color: #cbd5e1;
+  color: var(--dpd-text-2);
   font-family: inherit;
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
   cursor: pointer;
   transition: border-color 140ms, color 140ms, background 140ms;
@@ -704,7 +881,6 @@
 
 .dpd-mapa-btn:hover:not(:disabled) {
   border-color: #7c3aed;
-  color: #f1f5f9;
 }
 
 .dpd-mapa-btn--salvar {
@@ -729,38 +905,94 @@
   border-radius: 8px;
   font-size: 12.5px;
   line-height: 1.5;
-  color: #6ee7b7;
+  color: #059669;
   background: rgba(16, 185, 129, 0.12);
   border: 1px solid rgba(16, 185, 129, 0.35);
 }
 
 .dpd-mapa-aviso--erro {
-  color: #fca5a5;
-  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+  background: rgba(239, 68, 68, 0.10);
   border-color: rgba(239, 68, 68, 0.35);
 }
 
 .dpd-mapa-aviso--neutro {
-  color: #c4b5fd;
-  background: rgba(124, 58, 237, 0.12);
-  border-color: rgba(124, 58, 237, 0.35);
+  color: var(--dpd-roxo-txt);
+  background: var(--dpd-roxo-bg);
+  border-color: var(--dpd-roxo-borda);
 }
 
 /* ── Observações ── */
 .dpd-obs {
-  font-size: 13px;
-  color: #94a3b8;
+  font-size: 14px;
+  color: var(--dpd-muted);
   margin: 0;
   line-height: 1.6;
   white-space: pre-wrap;
 }
 
+/* ── Contato ── */
+.dpd-contato {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dpd-contato-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 24px;
+  border-radius: 999px;
+  background: #25d366;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 800;
+  text-decoration: none;
+  box-shadow: 0 4px 14px rgba(37, 211, 102, .35);
+}
+
 /* ── Rodapé ── */
 .dpd-footer-note {
   font-size: 12px;
-  color: #475569;
+  color: var(--dpd-muted-2);
   text-align: center;
   margin: 0;
   padding: 0 8px;
   line-height: 1.6;
+}
+
+/* Botão fixo embaixo: é o caminho de volta pra pedir de novo. */
+.dpd-voltar-wrap {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, transparent, var(--dpd-bg) 40%);
+  pointer-events: none;
+}
+
+.dpd-voltar {
+  pointer-events: auto;
+  display: block;
+  width: 100%;
+  max-width: 528px;
+  margin: 0 auto;
+  padding: 17px;
+  border: none;
+  border-radius: 18px;
+  background: linear-gradient(90deg, #6d28d9, #a78bfa);
+  color: #fff;
+  font-family: inherit;
+  font-size: 19px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(109, 40, 217, .35);
+}
+
+.dpd-voltar:active {
+  transform: scale(.99);
 }

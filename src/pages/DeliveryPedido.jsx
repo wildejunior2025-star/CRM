@@ -48,8 +48,20 @@ function IconStore() {
   return <svg {...iconProps()}><path d="M3 9l1-5h16l1 5" /><path d="M3 9h18v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9z" /><path d="M9 21V9m6 0v12" /></svg>
 }
 
-function IconRefresh() {
-  return <svg {...iconProps()} width={14} height={14}><path d="M21 2v6h-6" /><path d="M21 13a9 9 0 1 1-3-7.7L21 8" /></svg>
+function IconRecibo() {
+  return <svg {...iconProps()} width={24} height={24}><path d="M4 2v20l3-2 3 2 2-2 2 2 3-2 3 2V2l-3 2-3-2-2 2-2-2-3 2z" /><path d="M8 9h8M8 13h8" /></svg>
+}
+
+function IconCesta() {
+  return <svg {...iconProps()}><path d="M5 11l4-7M19 11l-4-7" /><path d="M2 11h20l-2 9H4z" /><path d="M9 15v2M15 15v2" /></svg>
+}
+
+function IconLista() {
+  return <svg {...iconProps()} width={24} height={24}><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6h.01M4 12h.01M4 18h.01" strokeWidth={3} /></svg>
+}
+
+function IconZap() {
+  return <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.7.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.8 11.9 11.9 0 0 0 4.6 4c1.7.7 2.4.8 3.2.7a2.8 2.8 0 0 0 1.8-1.3 2.3 2.3 0 0 0 .2-1.3c-.1-.1-.2-.2-.4-.3z" /></svg>
 }
 
 function fmt(n) {
@@ -263,7 +275,18 @@ function paymLabel(forma) {
   if (forma === 'pix_entrega') return 'Pix na entrega'
   if (forma === 'dinheiro') return 'Dinheiro'
   if (forma === 'cartao') return 'Cartão'
+  if (forma === 'credito') return 'Cartão de crédito'
+  if (forma === 'debito') return 'Cartão de débito'
   return forma ?? '—'
+}
+
+// "Hoje · 19:15" / "17/09 · 12:00"
+function diaHora(iso) {
+  const d = new Date(iso)
+  const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const hoje = new Date()
+  const mesmoDia = d.toDateString() === hoje.toDateString()
+  return `${mesmoDia ? 'Hoje' : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} · ${hora}`
 }
 
 // O banco tem status que não são exatamente as chaves da timeline
@@ -517,7 +540,12 @@ export default function DeliveryPedido() {
   const [loading, setLoading] = useState(true)
   const [lastUpdate, setLastUpdate] = useState(null)
   const [pixCopied, setPixCopied] = useState(false)
+  const [verItens, setVerItens] = useState(false)
   const [loja, setLoja] = useState(null) // loja onde o pedido foi feito (cabeçalho + voltar)
+  // Mesmo tema que o catálogo e o checkout gravam (claro é o padrão).
+  const tema = (() => {
+    try { return localStorage.getItem('dloja-tema') || 'claro' } catch { return 'claro' }
+  })()
   // Avaliação (pós-entrega)
   const [nota, setNota] = useState(0)
   const [hoverNota, setHoverNota] = useState(0)
@@ -685,87 +713,159 @@ export default function DeliveryPedido() {
     return `https://wa.me/${numero}?text=${encodeURIComponent(msg)}`
   })()
 
-  return (
-    <div className="dpd-root">
-      <header className="dpd-header">
-        <div className="dpd-header-inner">
-          <button
-            className="dpd-logo-btn"
-            onClick={() => navigate(`/loja/${pedido.empresa_id}`)}
-            title="Voltar à loja para pedir de novo"
-            style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-          >
-            {loja?.logo_url
-              ? <img src={loja.logo_url} alt={loja.nome} style={{ width: 30, height: 30, borderRadius: 8, objectFit: 'cover' }} />
-              : <span style={{
-                  width: 30, height: 30, borderRadius: 8, background: 'rgba(124,58,237,.25)', color: '#fff',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 15,
-                }}>{(loja?.nome ?? 'L').trim().charAt(0).toUpperCase()}</span>}
-            <span className="dpd-logo" style={{ fontSize: 16 }}>{loja?.nome ?? 'Loja'}</span>
-          </button>
-          <div className="dpd-header-right">
-            <span className="dpd-pedido-id">Pedido #{shortId(pedido.id)}</span>
-            <button className="dpd-refresh-btn" onClick={fetchPedido} aria-label="Atualizar">
-              <IconRefresh />
-            </button>
-          </div>
-        </div>
-      </header>
+  const retirada = (pedido.tipo_entrega || 'entrega') === 'retirada'
+  const caminhoLoja = loja?.slug ? `/${loja.slug}` : `/loja/${pedido.empresa_id}`
+  const qtdItens = itens.reduce((s, i) => s + (Number(i.quantidade) || 1), 0)
+  const passos = STATUS_STEPS.map(s => (s.key === 'saiu' && retirada ? { ...s, label: 'Pronto para retirada' } : s))
+  const passoAtual = passos[Math.max(0, activeIdx)]
+  const subtituloHero = isCancelado ? 'Este pedido foi cancelado.'
+    : pedido.status === 'entregue' ? (retirada ? 'Pedido retirado. Bom apetite!' : 'Pedido entregue. Bom apetite!')
+    : pedido.status === 'saiu_entrega' ? (retirada ? 'Seu pedido está pronto pra retirar.' : 'Seu pedido está a caminho.')
+    : 'Recebemos seu pedido — acompanhe abaixo.'
+  const subtituloStatus = activeIdx >= 4 ? 'Pedido concluído'
+    : activeIdx === 3 ? (retirada ? 'Pronto no balcão' : 'A caminho de você')
+    : 'Do pedido ao preparo'
+  const numeroPedido = pedido.numero_pedido ?? shortId(pedido.id)
+  const telLoja = (() => {
+    const d = String(loja?.telefone_contato ?? '').replace(/\D/g, '')
+    return d.length >= 10 ? (d.startsWith('55') ? d : `55${d}`) : null
+  })()
 
+  return (
+    <div className="dpd-root" data-tema={tema}>
       <main className="dpd-main">
-        {/* Pedido agendado: a hora combinada é a primeira coisa que o cliente
-            precisa ver aqui — senão ele acha que o pedido travou. */}
-        {pedido.agendado_para && (
-          <section className="dpd-card" style={{ borderLeft: '3px solid #0284c7' }}>
-            <h2 className="dpd-card-title">🗓️ Pedido agendado</h2>
-            <p style={{ margin: 0, fontSize: 15, lineHeight: 1.5 }}>
-              Está tudo certo — seu pedido fica guardado para{' '}
-              <strong>{rotuloAgendado(pedido.agendado_para, { comData: true })}</strong>.
-              {' '}A loja começa a preparar perto do horário.
-            </p>
+        {/* Herói: o que o cliente quer saber de relance */}
+        <section className="dpd-card">
+          <div className="dpd-hero-topo">
+            <button type="button" className="dpd-hero-logo" onClick={() => navigate(caminhoLoja)} title="Voltar à loja">
+              {loja?.logo_url
+                ? <img src={loja.logo_url} alt={loja.nome} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                : (loja?.nome ?? 'L').trim().charAt(0).toUpperCase()}
+            </button>
+            <div style={{ minWidth: 0 }}>
+              {loja?.nome && <p className="dpd-hero-loja">{loja.nome}</p>}
+              <h1 className="dpd-hero-num">Pedido <IconRecibo /> {numeroPedido}</h1>
+              <p className="dpd-hero-sub">{subtituloHero}</p>
+            </div>
+          </div>
+
+          <div className="dpd-info">
+            <span className="dpd-info-rot">Modalidade</span>
+            <span className="dpd-info-val">{retirada ? 'Retirada na loja' : 'Entrega no endereço'}</span>
+          </div>
+
+          <div className="dpd-info dpd-info--roxo">
+            <span className="dpd-info-rot">Pagamento</span>
+            <span className="dpd-info-val">{ehDividido(pedido) ? textoPagamento(pedido) : paymLabel(pedido.forma_pagamento)}</span>
+            {Number(pedido.troco_para) > 0 && (
+              <span className="dpd-info-extra">Troco para R$ {fmt(pedido.troco_para)}</span>
+            )}
+          </div>
+
+          {!retirada && pedido.endereco_rua && (
+            <div className="dpd-endereco">
+              {pedido.endereco_rua}{pedido.endereco_numero ? ` ${pedido.endereco_numero}` : ''}
+              {pedido.endereco_complemento && ` · ${pedido.endereco_complemento}`}
+              {pedido.endereco_bairro && ` · ${pedido.endereco_bairro}`}
+            </div>
+          )}
+
+          {!isCancelado && pedido.status !== 'entregue' && (pedido.agendado_para || pedido.pronto_previsto_at) && (
+            <div className="dpd-previsao">
+              <IconClock />
+              <div>
+                <span className="dpd-info-rot">
+                  {pedido.agendado_para ? 'Agendado para' : retirada ? 'Pronto para retirar' : 'Previsão'}
+                </span>
+                <span className="dpd-info-val">{diaHora(pedido.agendado_para || pedido.pronto_previsto_at)}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="dpd-hero-rodape">
+            <span className="dpd-qtd-pill"><IconCesta /> {qtdItens} {qtdItens === 1 ? 'item' : 'itens'}</span>
+            <span className="dpd-hero-total">R$ {fmt(pedido.total)}</span>
+          </div>
+        </section>
+
+        {/* Itens atrás de um botão: a tela abre no que importa agora */}
+        <button type="button" className="dpd-ver-itens" onClick={() => setVerItens(v => !v)} aria-expanded={verItens}>
+          <IconLista /> {verItens ? 'Esconder itens' : 'Ver itens do pedido'}
+        </button>
+        {verItens && (
+          <section className="dpd-card">
+            {itens.length > 0 && (
+              <div className="dpd-itens">
+                {itens.map((item, i) => (
+                  <div key={item.produto_id ?? i} className="dpd-item">
+                    <span className="dpd-item-qty">{item.quantidade}x</span>
+                    <span className="dpd-item-nome">{item.nome}</span>
+                    <span className="dpd-item-sub">R$ {fmt(item.subtotal)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="dpd-totais">
+              <div className="dpd-total-linha">
+                <span>Subtotal</span>
+                <span>R$ {fmt(pedido.subtotal)}</span>
+              </div>
+              {!retirada && (
+                <div className="dpd-total-linha">
+                  <span>Taxa de entrega</span>
+                  <span>{Number(pedido.taxa_entrega) === 0 ? 'Grátis' : `R$ ${fmt(pedido.taxa_entrega)}`}</span>
+                </div>
+              )}
+              {Number(pedido.acrescimo) > 0 && (
+                <div className="dpd-total-linha">
+                  <span>Taxa do cartão</span>
+                  <span>R$ {fmt(pedido.acrescimo)}</span>
+                </div>
+              )}
+              <div className="dpd-total-linha dpd-total-linha--total">
+                <span>Total</span>
+                <strong>R$ {fmt(pedido.total)}</strong>
+              </div>
+            </div>
           </section>
         )}
 
-        {/* Timeline de status */}
+        {/* Status: régua horizontal com o passo atual em destaque */}
         {!isCancelado ? (
-          <section className="dpd-card dpd-card--timeline">
-            <h2 className="dpd-card-title">Status do pedido</h2>
-            <ol className="dpd-timeline" aria-label="Progresso do pedido">
-              {STATUS_STEPS.map((step, i) => {
-                const done = i < activeIdx
-                const current = i === activeIdx
-                const Icon = step.icon
+          <section className="dpd-card">
+            <div className="dpd-status-topo">
+              <span className="dpd-status-rot">STATUS</span>
+              {pedido.status !== 'entregue' && (
+                <button type="button" className="dpd-ao-vivo" onClick={fetchPedido} title="Atualizar agora">AO VIVO</button>
+              )}
+            </div>
+            <p className="dpd-status-sub">{subtituloStatus}</p>
+            <div className="dpd-regua" aria-label="Progresso do pedido">
+              {passos.map((step, i) => {
+                const feito = i < activeIdx || (i === activeIdx && pedido.status === 'entregue')
+                const atual = i === activeIdx && !feito
                 return (
-                  <li key={step.key} className={`dpd-step${done ? ' dpd-step--done' : ''}${current ? ' dpd-step--current' : ''}`}>
-                    <div className="dpd-step-icon-wrap">
-                      <span className="dpd-step-icon">
-                        <Icon />
-                      </span>
-                      {i < STATUS_STEPS.length - 1 && (
-                        <span className={`dpd-step-line${done ? ' dpd-step-line--done' : ''}`} />
-                      )}
-                    </div>
-                    <span className="dpd-step-label">{step.label}</span>
-                  </li>
+                  <div key={step.key} style={{ display: 'contents' }}>
+                    <span className={`dpd-regua-ponto${feito ? ' dpd-regua-ponto--feito' : ''}${atual ? ' dpd-regua-ponto--atual' : ''}`}
+                      title={step.label}>
+                      {feito && <IconCheck />}
+                    </span>
+                    {i < passos.length - 1 && (
+                      <span className={`dpd-regua-linha${i < activeIdx ? ' dpd-regua-linha--feita' : ''}`} />
+                    )}
+                  </div>
                 )
               })}
-            </ol>
-            {['confirmado', 'em_preparo'].includes(pedido.status) && pedido.pronto_previsto_at && (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, padding: '10px 12px',
-                borderRadius: 12, background: '#ecfdf5', color: '#047857',
-                fontSize: 14, fontWeight: 600,
-              }}>
-                <span style={{ display: 'flex', flexShrink: 0 }}><IconChef /></span>
-                <span>
-                  {(pedido.tipo_entrega || 'entrega') === 'retirada' ? 'Pronto para retirada' : 'Fica pronto'} por volta de{' '}
-                  <strong>{new Date(pedido.pronto_previsto_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</strong>
-                </span>
+            </div>
+            {passoAtual && (
+              <div className="dpd-status-atual">
+                <span className="dpd-status-icone"><passoAtual.icon /></span>
+                <span className="dpd-status-nome">{passoAtual.label}</span>
               </div>
             )}
-            {lastUpdate && (
+            {lastUpdate && pedido.status !== 'entregue' && (
               <p className="dpd-update-time">
-                Atualizado às {lastUpdate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                Atualizado às {lastUpdate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · a tela atualiza sozinha
               </p>
             )}
           </section>
@@ -778,6 +878,19 @@ export default function DeliveryPedido() {
             {pedido.motivo_cancelamento && (
               <p className="dpd-cancelado-motivo">{pedido.motivo_cancelamento}</p>
             )}
+          </section>
+        )}
+
+        {/* Pedido agendado: a hora combinada é a primeira coisa que o cliente
+            precisa ver aqui — senão ele acha que o pedido travou. */}
+        {pedido.agendado_para && (
+          <section className="dpd-card" style={{ borderLeft: '3px solid #0284c7' }}>
+            <h2 className="dpd-card-title">🗓️ Pedido agendado</h2>
+            <p style={{ margin: 0, fontSize: 15, lineHeight: 1.5 }}>
+              Está tudo certo — seu pedido fica guardado para{' '}
+              <strong>{rotuloAgendado(pedido.agendado_para, { comData: true })}</strong>.
+              {' '}A loja começa a preparar perto do horário.
+            </p>
           </section>
         )}
 
@@ -1031,57 +1144,6 @@ export default function DeliveryPedido() {
             some no meio de 280 conversas. */}
         <AlterarMeuPedido pedido={pedido} loja={loja} />
 
-        {/* Resumo do pedido */}
-        <section className="dpd-card">
-          <h2 className="dpd-card-title">Resumo</h2>
-
-          {itens.length > 0 && (
-            <div className="dpd-itens">
-              {itens.map((item, i) => (
-                <div key={item.produto_id ?? i} className="dpd-item">
-                  <span className="dpd-item-qty">{item.quantidade}x</span>
-                  <span className="dpd-item-nome">{item.nome}</span>
-                  <span className="dpd-item-sub">R$ {fmt(item.subtotal)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="dpd-totais">
-            <div className="dpd-total-linha">
-              <span>Subtotal</span>
-              <span>R$ {fmt(pedido.subtotal)}</span>
-            </div>
-            <div className="dpd-total-linha">
-              <span>Taxa de entrega</span>
-              <span>{Number(pedido.taxa_entrega) === 0 ? 'Grátis' : `R$ ${fmt(pedido.taxa_entrega)}`}</span>
-            </div>
-            <div className="dpd-total-linha dpd-total-linha--total">
-              <span>Total</span>
-              <strong>R$ {fmt(pedido.total)}</strong>
-            </div>
-          </div>
-
-          <div className="dpd-pagamento">
-            <span className="dpd-pagamento-label">Pagamento</span>
-            <span className="dpd-pagamento-val">{ehDividido(pedido) ? textoPagamento(pedido) : paymLabel(pedido.forma_pagamento)}</span>
-            {pedido.troco_para && (
-              <span className="dpd-troco">Troco para R$ {fmt(pedido.troco_para)}</span>
-            )}
-          </div>
-        </section>
-
-        {/* Endereço */}
-        <section className="dpd-card">
-          <h2 className="dpd-card-title">Endereço de entrega</h2>
-          <address className="dpd-address">
-            {pedido.endereco_rua}{pedido.endereco_numero ? `, ${pedido.endereco_numero}` : ''}
-            {pedido.endereco_complemento && ` — ${pedido.endereco_complemento}`}
-            {pedido.endereco_bairro && <><br />{pedido.endereco_bairro}</>}
-            <br />{pedido.endereco_cidade}
-          </address>
-        </section>
-
         {/* O ponto no mapa, pro cliente conferir e consertar antes do motoboy sair */}
         {(pedido.tipo_entrega || 'entrega') === 'entrega' && (
           <MapaEntrega key={pedido.id} pedido={pedido} loja={loja} />
@@ -1103,10 +1165,25 @@ export default function DeliveryPedido() {
           />
         )}
 
+        {telLoja && (
+          <div className="dpd-contato">
+            <a className="dpd-contato-btn" target="_blank" rel="noopener noreferrer"
+              href={`https://wa.me/${telLoja}?text=${encodeURIComponent(`Olá! Sobre o meu pedido #${numeroPedido}...`)}`}>
+              <IconZap /> WhatsApp
+            </a>
+          </div>
+        )}
+
         <p className="dpd-footer-note">
           Guarde este link para acompanhar seu pedido. Esta página atualiza automaticamente.
         </p>
       </main>
+
+      <div className="dpd-voltar-wrap">
+        <button type="button" className="dpd-voltar" onClick={() => navigate(caminhoLoja)}>
+          Voltar ao cardápio
+        </button>
+      </div>
 
       {/* Quem cai direto aqui (link do PIX, histórico) não passou pela vitrine */}
       <AvisoCookies loja={loja} />
