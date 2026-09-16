@@ -5760,6 +5760,11 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
   const [cidade, setCidade] = useState('')
   const [taxa, setTaxa] = useState('')
   const [pagamento, setPagamento] = useState('dinheiro')
+  // Duas formas (mig 0274), igual à Loja Online: o valor da 1ª é digitado e o
+  // resto cai na 2ª sozinho.
+  const [dividir, setDividir] = useState(false)
+  const [forma2, setForma2] = useState('')
+  const [valor1, setValor1] = useState('')
   const [troco, setTroco] = useState('')
   const [obs, setObs] = useState('')
   const [msgTaxa, setMsgTaxa] = useState(null)
@@ -5965,9 +5970,27 @@ ${url}
   const taxaNum = tipo === 'entrega' ? (parseFloat(String(taxa).replace(',', '.')) || 0) : 0
   // Repasse da maquineta, igual à Loja Online: o cliente que paga no cartão
   // cobre a taxa que a loja configurou em Minha Loja (ex.: CDBom +5% no crédito).
-  const pctCartao = repassePct(empresa, pagamento)
-  const acrescimo = Math.round((subtotal + taxaNum) * pctCartao) / 100
-  const total = Math.round((subtotal + taxaNum + acrescimo) * 100) / 100
+  // Dividido: o acréscimo incide só na parte que passa na maquineta.
+  const base = Math.round((subtotal + taxaNum) * 100) / 100
+  const dividindo = dividir && !!forma2 && forma2 !== pagamento
+  const base1 = dividindo
+    ? Math.min(base, Math.max(0, Math.round((parseFloat(String(valor1).replace(',', '.')) || 0) * 100) / 100))
+    : base
+  const base2 = dividindo ? Math.round((base - base1) * 100) / 100 : 0
+  const acrescimo1 = Math.round(base1 * repassePct(empresa, pagamento)) / 100
+  const acrescimo2 = dividindo ? Math.round(base2 * repassePct(empresa, forma2)) / 100 : 0
+  const acrescimo = Math.round((acrescimo1 + acrescimo2) * 100) / 100
+  const total = Math.round((base + acrescimo) * 100) / 100
+  const partes = dividindo
+    ? [
+        { forma: pagamento, valor: Math.round((base1 + acrescimo1) * 100) / 100 },
+        { forma: forma2, valor: Math.round((base2 + acrescimo2) * 100) / 100 },
+      ]
+    : null
+  const pctCartao = (dividindo ? [pagamento, forma2] : [pagamento]).map(f => repassePct(empresa, f)).find(p => p > 0) ?? 0
+  const valorDinheiro = partes ? (partes.find(p => p.forma === 'dinheiro')?.valor ?? 0) : total
+  const temDinheiro = partes ? partes.some(p => p.forma === 'dinheiro') : pagamento === 'dinheiro'
+  const divisaoIncompleta = dividindo && (base1 <= 0 || base2 <= 0)
   const faltaEndereco = tipo === 'entrega' && !rua.trim()
 
   const inp = {
@@ -6097,17 +6120,59 @@ ${url}
         <p style={rotulo}>Forma de pagamento</p>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {formasFinais.map(([id, lab]) => (
-            <button key={id} type="button" onClick={() => setPagamento(id)} style={btnEscolha(pagamento === id)}>{lab}</button>
+            <button key={id} type="button" style={btnEscolha(pagamento === id)}
+              onClick={() => {
+                setPagamento(id)
+                if (forma2 === id) setForma2(formasFinais.find(([f]) => f !== id)?.[0] ?? '')
+              }}>{lab}</button>
           ))}
         </div>
-        {pagamento === 'dinheiro' && (
+        {formasFinais.length >= 2 && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: g ? 13.5 : 12, fontWeight: 700, color: 'var(--text)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={dividir} style={{ width: 16, height: 16, accentColor: '#7c3aed' }}
+              onChange={e => {
+                const on = e.target.checked
+                setDividir(on)
+                if (on) {
+                  if (!forma2 || forma2 === pagamento) setForma2(formasFinais.find(([f]) => f !== pagamento)?.[0] ?? '')
+                  if (!valor1 && base > 0) setValor1(String(Math.floor(base / 2)))
+                }
+              }} />
+            Pagar em duas formas
+          </label>
+        )}
+        {dividir && formasFinais.length >= 2 && (
+          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                Valor em {formasFinais.find(([f]) => f === pagamento)?.[1] ?? pagamento}: R$
+              </span>
+              <input value={valor1} onChange={e => setValor1(e.target.value)} inputMode="decimal"
+                placeholder="0,00" style={{ ...inp, flex: 1 }} />
+            </div>
+            <p style={{ ...rotulo, margin: '4px 0 0' }}>O resto em</p>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {formasFinais.filter(([f]) => f !== pagamento).map(([id, lab]) => (
+                <button key={id} type="button" onClick={() => setForma2(id)} style={btnEscolha(forma2 === id)}>{lab}</button>
+              ))}
+            </div>
+            {dividindo && (
+              <div style={{ fontSize: 12, lineHeight: 1.4, color: divisaoIncompleta ? '#f59e0b' : 'var(--text-muted)' }}>
+                {divisaoIncompleta
+                  ? 'Ponha um valor menor que o total na 1ª forma.'
+                  : partes.map(p => `${formasFinais.find(([f]) => f === p.forma)?.[1] ?? p.forma} R$ ${p.valor.toFixed(2).replace('.', ',')}`).join('  +  ')}
+              </div>
+            )}
+          </div>
+        )}
+        {temDinheiro && (
           <input value={troco} onChange={e => setTroco(e.target.value)} inputMode="decimal"
-            placeholder={`Troco para R$ (total ${total.toFixed(2).replace('.', ',')})`}
+            placeholder={`Troco para R$ (${partes ? 'no dinheiro' : 'total'} ${valorDinheiro.toFixed(2).replace('.', ',')})`}
             style={{ ...inp, marginTop: 6 }} />
         )}
         {acrescimo > 0 && (
           <div style={{ fontSize: 11.5, lineHeight: 1.4, color: '#f59e0b', marginTop: 6 }}>
-            Nesta forma a loja cobra +{String(pctCartao).replace('.', ',')}% (R$ {acrescimo.toFixed(2).replace('.', ',')}) — taxa da maquineta, já está no total.
+            {dividindo ? 'Na parte do cartão' : 'Nesta forma'} a loja cobra +{String(pctCartao).replace('.', ',')}% (R$ {acrescimo.toFixed(2).replace('.', ',')}) — taxa da maquineta, já está no total.
           </div>
         )}
       </div>
@@ -6130,10 +6195,10 @@ ${url}
         </div>
       )}
 
-      <button type="button" disabled={salvando || faltaEndereco || !itens.length}
+      <button type="button" disabled={salvando || faltaEndereco || !itens.length || divisaoIncompleta}
         onClick={() => onFinalizar({
           tipo, nome, cep, rua, numero, bairro, cidade, taxa: taxaNum,
-          pagamento, troco, obs, subtotal, acrescimo, total, cadastro, pinToken,
+          pagamento, partes, troco: temDinheiro ? troco : '', obs, subtotal, acrescimo, total, cadastro, pinToken,
           // O pino da conversa vem na frente: é o ponto que o cliente apontou
           // agora, e vale mesmo que quem atende tenha corrigido a rua depois.
           // O do cadastro só vale se for DESTE endereço: o cliente que mudou de
@@ -6146,11 +6211,11 @@ ${url}
         })}
         style={{
           width: '100%', padding: g ? '14px 12px' : '10px', borderRadius: 9, border: 'none',
-          background: (salvando || faltaEndereco || !itens.length) ? 'var(--border, #2a2a3a)' : '#7c3aed',
+          background: (salvando || faltaEndereco || !itens.length || divisaoIncompleta) ? 'var(--border, #2a2a3a)' : '#7c3aed',
           color: '#fff', fontSize: g ? 16 : 13, fontWeight: 800,
-          cursor: (salvando || faltaEndereco || !itens.length) ? 'default' : 'pointer',
+          cursor: (salvando || faltaEndereco || !itens.length || divisaoIncompleta) ? 'default' : 'pointer',
         }}>
-        {salvando ? 'Lançando...' : faltaEndereco ? 'Falta o endereço da entrega' : '✅ Finalizar e jogar no sistema'}
+        {salvando ? 'Lançando...' : faltaEndereco ? 'Falta o endereço da entrega' : divisaoIncompleta ? 'Confira a divisão do pagamento' : '✅ Finalizar e jogar no sistema'}
       </button>
       <div style={{ fontSize: g ? 12.5 : 10.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: -6 }}>
         O pedido entra já confirmado, igual ao da tela de Vender — imprime, vai pro
@@ -7325,6 +7390,9 @@ export default function PainelPedidos() {
       } catch { /* o pino é bônus: o pedido já está fechado */ }
     }
 
+    const trocoPara = d.troco
+      ? (Math.round(parseFloat(String(d.troco).replace(',', '.')) * 100) / 100) || null
+      : null
     const payload = {
       empresa_id: empresa.id,
       cliente_id: clienteId,
@@ -7348,9 +7416,11 @@ export default function PainelPedidos() {
       taxa_entrega: d.tipo === 'entrega' ? d.taxa : 0,
       acrescimo: d.acrescimo || 0,
       total: d.total,
-      forma_pagamento: d.pagamento,
-      troco_para: d.pagamento === 'dinheiro' && d.troco
-        ? Math.round(parseFloat(String(d.troco).replace(',', '.')) * 100) / 100
+      forma_pagamento: d.partes ? 'dividido' : d.pagamento,
+      troco_para: trocoPara,
+      // Dividido: o troco mora na parte do dinheiro (é o que o entregador lê).
+      pagamentos: d.partes
+        ? d.partes.map(p => (p.forma === 'dinheiro' && trocoPara ? { ...p, troco_para: trocoPara } : p))
         : null,
       // De onde este pedido veio fica escrito: daqui a uma semana ninguém lembra
       // que este foi montado na conversa, e o balcão vira uma caixa-preta.
@@ -7401,12 +7471,15 @@ export default function PainelPedidos() {
 
     // O cliente precisa ver o número do pedido — é por ele que ele cobra depois.
     const linhas = linhasDaSacola(sacolaChat)
-    const labelPgto = ({ dinheiro: 'dinheiro', pix_entrega: 'PIX', credito: 'cartão de crédito', debito: 'cartão de débito', cartao: 'cartão' })[d.pagamento] ?? d.pagamento
+    const nomePgto = f => ({ dinheiro: 'dinheiro', pix_entrega: 'PIX', credito: 'cartão de crédito', debito: 'cartão de débito', cartao: 'cartão' })[f] ?? f
+    const labelPgto = d.partes
+      ? d.partes.map(p => `${nomePgto(p.forma)} (R$ ${Number(p.valor).toFixed(2).replace('.', ',')})`).join(' + ')
+      : nomePgto(d.pagamento)
     const texto =
       `🧾 *Pedido #${novo?.numero_pedido ?? ''} anotado!*\n\n${linhas}\n` +
       (d.tipo === 'entrega' ? `🛵 Taxa de entrega: R$ ${Number(d.taxa).toFixed(2).replace('.', ',')}\n` : '🏪 Retirada na loja\n') +
       (d.acrescimo > 0 ? `💳 Taxa do cartão: R$ ${Number(d.acrescimo).toFixed(2).replace('.', ',')}\n` : '') +
-      `💰 *Total: R$ ${Number(d.total).toFixed(2).replace('.', ',')}*\n💳 Pagamento em *${labelPgto}*\n\nJá tá na cozinha. 😉`
+      `💰 *Total: R$ ${Number(d.total).toFixed(2).replace('.', ',')}*\n💳 Pagamento em *${labelPgto}*`
 
     await supabase.from('mensagens_chat').insert({
       empresa_id: empresa.id, canal, cliente_ref,
