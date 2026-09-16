@@ -188,37 +188,38 @@ function Detalhe({ l, hoje, recarregar }) {
     recarregar()
   }
 
-  async function marcarPaga(c) {
-    const obs = window.prompt(`Marcar "${c.referencia}" (${fmt(c.valor)}) como paga? Anote como foi pago:`, 'PIX direto')
-    if (obs === null) return
+  // Popup aberto: { tipo: 'paga' | 'abater', c }
+  const [popup, setPopup] = useState(null)
+
+  // Devolve o erro (texto) pro popup mostrar; null = deu certo.
+  async function marcarPaga(c, obs) {
     const { error } = await supabase.rpc('mensalidade_marcar_paga', { p_cobranca: c.id, p_obs: obs })
-    if (error) { setMsg(error.message); return }
+    if (error) return error.message
+    setPopup(null)
     recarregar()
+    return null
   }
 
   // Abate da cobrança o que a FWC consumiu na loja (ou qualquer acerto). O
   // motivo fica escrito na cobrança, com o valor de antes e o de depois.
-  async function abater(c) {
-    const txt = window.prompt(`Quanto abater de "${c.referencia}" (${fmt(c.valor)})?`, '')
-    if (txt === null) return
-    const desconto = Math.round((parseFloat(String(txt).replace(/[^0-9,.-]/g, '').replace(',', '.')) || 0) * 100) / 100
-    if (desconto <= 0) { setMsg('Valor inválido.'); return }
+  async function abater(c, desconto, motivo) {
     const atual = Number(c.valor)
-    if (desconto > atual) { setMsg(`O abatimento (${fmt(desconto)}) é maior que a cobrança (${fmt(atual)}).`); return }
-    const motivo = window.prompt('Motivo do abatimento:', 'Compra na loja')
-    if (motivo === null) return
+    if (!(desconto > 0)) return 'Digite quanto abater.'
+    if (desconto > atual) return `O abatimento (${fmt(desconto)}) é maior que a cobrança (${fmt(atual)}).`
     const novo = Math.round((atual - desconto) * 100) / 100
     const nota = `${dataCurtaBR(hoje)}: abatido ${fmt(desconto)} — ${motivo || 'sem motivo'} (${fmt(atual)} → ${fmt(novo)})`
     const { error } = await supabase.from('mensalidade_cobrancas')
       .update({ valor: novo, observacao: c.observacao ? `${c.observacao} · ${nota}` : nota })
       .eq('id', c.id).eq('status', 'aberta')
-    if (error) { setMsg(error.message); return }
+    if (error) return error.message
     // Abateu tudo: a cobrança está quitada.
     if (novo === 0) await supabase.rpc('mensalidade_marcar_paga', { p_cobranca: c.id, p_obs: `Abatimento: ${motivo}` })
+    setPopup(null)
     recarregar()
+    return null
   }
 
-  const tel =String(e.telefone_contato ?? '').replace(/\D/g, '')
+  const tel = String(e.telefone_contato ?? '').replace(/\D/g, '')
   const textoZap = encodeURIComponent(
     `Olá, ${e.nome}! Aqui é a FWC Inter. A mensalidade do sistema está em aberto: ` +
     l.vencidas.map(c => `${c.referencia} (${fmt(c.valor)})`).join(', ') +
@@ -226,6 +227,10 @@ function Detalhe({ l, hoje, recarregar }) {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, paddingTop: 10 }}>
+      {popup && (
+        <PopupCobranca key={`${popup.tipo}-${popup.c.id}`} tipo={popup.tipo} c={popup.c} loja={e.nome}
+          onFechar={() => setPopup(null)} onAbater={abater} onPagar={marcarPaga} />
+      )}
       <div>
         <div style={subtitulo}>Cobrança</div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 700, marginBottom: 10, cursor: 'pointer' }}>
@@ -268,8 +273,8 @@ function Detalhe({ l, hoje, recarregar }) {
               )}
             </span>
             <span style={{ display: 'flex', gap: 6 }}>
-              <button type="button" onClick={() => abater(c)} style={botaoPequeno}>Abater</button>
-              <button type="button" onClick={() => marcarPaga(c)} style={botaoPequeno}>Marcar paga</button>
+              <button type="button" onClick={() => setPopup({ tipo: 'abater', c })} style={botaoPequeno}>Abater</button>
+              <button type="button" onClick={() => setPopup({ tipo: 'paga', c })} style={botaoPequeno}>Marcar paga</button>
             </span>
           </div>
         ))}
@@ -302,6 +307,85 @@ function Detalhe({ l, hoje, recarregar }) {
           ))}
         </div>
       </div>
+    </div>
+  )
+}
+
+// Popup de Abater / Marcar paga (no lugar do window.prompt do navegador).
+function PopupCobranca({ tipo, c, loja, onFechar, onAbater, onPagar }) {
+  const abatendo = tipo === 'abater'
+  const [valor, setValor] = useState('')
+  const [texto, setTexto] = useState(abatendo ? 'Compra na loja' : 'PIX direto')
+  const [erro, setErro] = useState(null)
+  const [salvando, setSalvando] = useState(false)
+  const atual = Number(c.valor)
+  const desconto = Math.round((parseFloat(String(valor).replace(/[^0-9,.]/g, '').replace(',', '.')) || 0) * 100) / 100
+  const novo = Math.max(0, Math.round((atual - desconto) * 100) / 100)
+
+  useEffect(() => {
+    const esc = ev => { if (ev.key === 'Escape') onFechar() }
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [onFechar])
+
+  async function confirmar(ev) {
+    ev.preventDefault()
+    setSalvando(true); setErro(null)
+    const e = abatendo ? await onAbater(c, desconto, texto.trim()) : await onPagar(c, texto.trim())
+    setSalvando(false)
+    if (e) setErro(e)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onFechar} style={{ background: 'rgba(0,0,0,.55)', backdropFilter: 'blur(2px)', padding: 16 }}>
+      <form className="modal" onClick={ev => ev.stopPropagation()} onSubmit={confirmar}
+        style={{ maxWidth: 420, padding: '24px 24px 20px', borderRadius: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <div style={{ width: 42, height: 42, borderRadius: 12, display: 'grid', placeItems: 'center', fontSize: 22, flexShrink: 0,
+            background: abatendo ? 'rgba(124,58,237,.14)' : 'rgba(22,163,74,.14)' }}>{abatendo ? '➖' : '✅'}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 18, fontWeight: 900 }}>{abatendo ? 'Abater da cobrança' : 'Marcar como paga'}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{loja} · {c.referencia}</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '12px 14px', borderRadius: 12,
+          background: 'var(--bg)', border: '1px solid var(--border)', marginBottom: 14 }}>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Valor da cobrança</span>
+          <strong style={{ fontSize: 18 }}>{fmt(atual)}</strong>
+        </div>
+
+        {abatendo && (
+          <label style={rotulo}>Quanto abater (R$)
+            <input autoFocus style={{ ...campo, fontSize: 18, fontWeight: 800, padding: '10px 12px' }} inputMode="decimal"
+              placeholder="0,00" value={valor} onChange={ev => setValor(ev.target.value)} />
+          </label>
+        )}
+        <label style={rotulo}>{abatendo ? 'Motivo' : 'Como foi pago'}
+          <input autoFocus={!abatendo} style={campo} value={texto} onChange={ev => setTexto(ev.target.value)} />
+        </label>
+
+        {abatendo && desconto > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '10px 14px', borderRadius: 12, marginTop: 4,
+            background: desconto > atual ? 'rgba(220,38,38,.10)' : 'rgba(22,163,74,.10)',
+            border: `1px solid ${desconto > atual ? 'rgba(220,38,38,.35)' : 'rgba(22,163,74,.35)'}` }}>
+            <span style={{ fontSize: 13 }}>{desconto > atual ? 'Maior que a cobrança' : novo === 0 ? 'Fica quitada' : 'Fica devendo'}</span>
+            <strong style={{ fontSize: 18, color: desconto > atual ? '#dc2626' : '#16a34a' }}>{desconto > atual ? '—' : fmt(novo)}</strong>
+          </div>
+        )}
+
+        {erro && <div style={{ color: '#dc2626', fontSize: 12.5, marginTop: 10 }}>{erro}</div>}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <button type="button" onClick={onFechar}
+            style={{ ...botao, background: 'transparent', color: 'var(--text)', border: '1px solid var(--border)' }}>Cancelar</button>
+          <button type="submit" disabled={salvando || (abatendo && (!(desconto > 0) || desconto > atual))}
+            style={{ ...botao, background: abatendo ? '#7c3aed' : '#16a34a',
+              opacity: salvando || (abatendo && (!(desconto > 0) || desconto > atual)) ? 0.5 : 1 }}>
+            {salvando ? 'Salvando…' : abatendo ? 'Abater' : 'Marcar paga'}
+          </button>
+        </div>
+      </form>
     </div>
   )
 }
