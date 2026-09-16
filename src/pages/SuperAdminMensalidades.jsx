@@ -36,7 +36,7 @@ export default function SuperAdminMensalidades() {
     const [emp, cfg, cob, av, exc] = await Promise.all([
       supabase.from('empresas').select('id, nome, status, telefone_contato, horarios_funcionamento, feriados_fecha').order('nome'),
       supabase.from('mensalidade_config').select('*'),
-      supabase.from('mensalidade_cobrancas').select('id, empresa_id, vencimento, referencia, valor, status, pago_em, forma')
+      supabase.from('mensalidade_cobrancas').select('id, empresa_id, vencimento, referencia, valor, status, pago_em, forma, observacao')
         .gte('vencimento', somaDiasYmd(hoje, -120)).order('vencimento'),
       supabase.from('mensalidade_avisos').select('id, empresa_id, tipo, quem, detalhe, created_at')
         .order('created_at', { ascending: false }).limit(600),
@@ -196,7 +196,29 @@ function Detalhe({ l, hoje, recarregar }) {
     recarregar()
   }
 
-  const tel = String(e.telefone_contato ?? '').replace(/\D/g, '')
+  // Abate da cobrança o que a FWC consumiu na loja (ou qualquer acerto). O
+  // motivo fica escrito na cobrança, com o valor de antes e o de depois.
+  async function abater(c) {
+    const txt = window.prompt(`Quanto abater de "${c.referencia}" (${fmt(c.valor)})?`, '')
+    if (txt === null) return
+    const desconto = Math.round((parseFloat(String(txt).replace(/[^0-9,.-]/g, '').replace(',', '.')) || 0) * 100) / 100
+    if (desconto <= 0) { setMsg('Valor inválido.'); return }
+    const atual = Number(c.valor)
+    if (desconto > atual) { setMsg(`O abatimento (${fmt(desconto)}) é maior que a cobrança (${fmt(atual)}).`); return }
+    const motivo = window.prompt('Motivo do abatimento:', 'Compra na loja')
+    if (motivo === null) return
+    const novo = Math.round((atual - desconto) * 100) / 100
+    const nota = `${dataCurtaBR(hoje)}: abatido ${fmt(desconto)} — ${motivo || 'sem motivo'} (${fmt(atual)} → ${fmt(novo)})`
+    const { error } = await supabase.from('mensalidade_cobrancas')
+      .update({ valor: novo, observacao: c.observacao ? `${c.observacao} · ${nota}` : nota })
+      .eq('id', c.id).eq('status', 'aberta')
+    if (error) { setMsg(error.message); return }
+    // Abateu tudo: a cobrança está quitada.
+    if (novo === 0) await supabase.rpc('mensalidade_marcar_paga', { p_cobranca: c.id, p_obs: `Abatimento: ${motivo}` })
+    recarregar()
+  }
+
+  const tel =String(e.telefone_contato ?? '').replace(/\D/g, '')
   const textoZap = encodeURIComponent(
     `Olá, ${e.nome}! Aqui é a FWC Inter. A mensalidade do sistema está em aberto: ` +
     l.vencidas.map(c => `${c.referencia} (${fmt(c.valor)})`).join(', ') +
@@ -238,8 +260,17 @@ function Detalhe({ l, hoje, recarregar }) {
         {!l.abertas.length && <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nada em aberto.</div>}
         {l.abertas.map(c => (
           <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px dashed var(--border)', fontSize: 13 }}>
-            <span>{c.referencia}<br /><span style={{ color: c.vencimento <= hoje ? '#dc2626' : 'var(--text-muted)', fontSize: 12 }}>vence {dataCurtaBR(c.vencimento)} · {fmt(c.valor)}</span></span>
-            <button type="button" onClick={() => marcarPaga(c)} style={botaoPequeno}>Marcar paga</button>
+            <span>{c.referencia}<br /><span style={{ color: c.vencimento <= hoje ? '#dc2626' : 'var(--text-muted)', fontSize: 12 }}>vence {dataCurtaBR(c.vencimento)} · {fmt(c.valor)}</span>
+              {/abatido/.test(c.observacao ?? '') && (
+                <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: 11.5 }}>
+                  {c.observacao.split(' · ').filter(s => s.includes('abatido')).join(' · ')}
+                </span>
+              )}
+            </span>
+            <span style={{ display: 'flex', gap: 6 }}>
+              <button type="button" onClick={() => abater(c)} style={botaoPequeno}>Abater</button>
+              <button type="button" onClick={() => marcarPaga(c)} style={botaoPequeno}>Marcar paga</button>
+            </span>
           </div>
         ))}
         {l.vencidas.length > 0 && tel && (
