@@ -36,8 +36,9 @@ export default function SuperAdminMensalidades() {
     const [emp, cfg, cob, av, exc] = await Promise.all([
       supabase.from('empresas').select('id, nome, status, telefone_contato, horarios_funcionamento, feriados_fecha').order('nome'),
       supabase.from('mensalidade_config').select('*'),
-      supabase.from('mensalidade_cobrancas').select('id, empresa_id, vencimento, referencia, valor, status, pago_em, forma, observacao')
-        .gte('vencimento', somaDiasYmd(hoje, -120)).order('vencimento'),
+      // As pagas vêm todas (é o histórico); o resto só dos últimos 120 dias.
+      supabase.from('mensalidade_cobrancas').select('id, empresa_id, vencimento, referencia, valor, status, pago_em, valor_pago, forma, observacao, comprovante_path')
+        .or(`status.eq.paga,vencimento.gte.${somaDiasYmd(hoje, -120)}`).order('vencimento'),
       supabase.from('mensalidade_avisos').select('id, empresa_id, tipo, quem, detalhe, created_at')
         .order('created_at', { ascending: false }).limit(600),
       supabase.from('dias_excecao').select('empresa_id, data, aberto, periodos, motivo')
@@ -67,7 +68,8 @@ export default function SuperAdminMensalidades() {
       const avisos = dados.avisos.filter(a => a.empresa_id === e.id)
       const ultimoVisto = avisos.find(a => ['faixa_vence_hoje', 'faixa_carencia', 'popup'].includes(a.tipo))
       return { e, cfg, abertas, vencidas, total: vencidas.reduce((s, c) => s + Number(c.valor), 0), estado, avisos, ultimoVisto,
-        pagas: dados.cobrancas.filter(c => c.empresa_id === e.id && c.status === 'paga') }
+        pagas: dados.cobrancas.filter(c => c.empresa_id === e.id && c.status === 'paga')
+          .sort((a, b) => String(b.pago_em ?? '').localeCompare(String(a.pago_em ?? ''))) }
     }).sort((a, b) => (b.total - a.total) || String(a.e.nome).localeCompare(String(b.e.nome)))
   }, [dados, hoje])
 
@@ -192,12 +194,50 @@ function Detalhe({ l, hoje, recarregar }) {
   const [popup, setPopup] = useState(null)
 
   // Devolve o erro (texto) pro popup mostrar; null = deu certo.
-  async function marcarPaga(c, obs) {
+  async function marcarPaga(c, obs, arquivo) {
     const { error } = await supabase.rpc('mensalidade_marcar_paga', { p_cobranca: c.id, p_obs: obs })
     if (error) return error.message
+    if (arquivo) {
+      const erroUp = await subirComprovante(c, arquivo)
+      if (erroUp) { recarregar(); return `Marcada como paga, mas o comprovante não subiu: ${erroUp}` }
+    }
     setPopup(null)
     recarregar()
     return null
+  }
+
+  // Comprovante de quem pagou direto (PIX, dinheiro). Bucket privado (mig 0275).
+  async function subirComprovante(c, arquivo) {
+    const ext = (arquivo.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const path = `${c.empresa_id}/${c.id}-${Date.now()}.${ext}`
+    const { error } = await supabase.storage.from('mensalidade-comprovantes').upload(path, arquivo, { contentType: arquivo.type || undefined })
+    if (error) return error.message
+    const { error: e2 } = await supabase.from('mensalidade_cobrancas').update({ comprovante_path: path }).eq('id', c.id)
+    if (e2) return e2.message
+    // O arquivo antigo (se trocou) sai, pra não acumular lixo no bucket.
+    if (c.comprovante_path && c.comprovante_path !== path) {
+      await supabase.storage.from('mensalidade-comprovantes').remove([c.comprovante_path])
+    }
+    return null
+  }
+
+  const [anexando, setAnexando] = useState(null)   // id da cobrança subindo comprovante
+  async function anexarDepois(c, arquivo) {
+    if (!arquivo) return
+    setAnexando(c.id); setMsg(null)
+    const erro = await subirComprovante(c, arquivo)
+    setAnexando(null)
+    if (erro) setMsg(`Comprovante não subiu: ${erro}`)
+    recarregar()
+  }
+
+  async function verComprovante(c) {
+    // Abre a aba antes do await: senão o navegador bloqueia como pop-up.
+    const aba = window.open('', '_blank')
+    const { data, error } = await supabase.storage.from('mensalidade-comprovantes').createSignedUrl(c.comprovante_path, 600)
+    if (error || !data?.signedUrl) { aba?.close(); setMsg(error?.message || 'Não achei o comprovante.'); return }
+    if (aba) aba.location.href = data.signedUrl
+    else window.location.href = data.signedUrl
   }
 
   // Abate da cobrança o que a FWC consumiu na loja (ou qualquer acerto). O
@@ -290,9 +330,44 @@ function Detalhe({ l, hoje, recarregar }) {
           <input style={campo} placeholder="motivo" value={motivo} onChange={ev => setMotivo(ev.target.value)} />
         </div>
         <button type="button" onClick={darPrazo} style={{ ...botao, background: '#7c3aed' }}>{prazo ? 'Salvar prazo' : 'Tirar prazo'}</button>
-        {l.pagas.length > 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>
-          Últimas pagas: {l.pagas.slice(-4).reverse().map(c => `${dataCurtaBR(c.vencimento)} (${c.forma})`).join(' · ')}
-        </div>}
+      </div>
+
+      <div>
+        <div style={subtitulo}>Histórico de pagamentos</div>
+        {!l.pagas.length && <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nenhum pagamento ainda.</div>}
+        {l.pagas.length > 0 && (
+          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 6 }}>
+            Total recebido: <strong style={{ color: '#16a34a' }}>{fmt(l.pagas.reduce((s, c) => s + Number(c.valor_pago ?? c.valor), 0))}</strong>
+          </div>
+        )}
+        <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+          {l.pagas.map(c => {
+            const notas = String(c.observacao ?? '').split(' · ').filter(s => /abatido|^Pago:/.test(s))
+            return (
+              <div key={c.id} style={{ padding: '8px 0', borderBottom: '1px dashed var(--border)', fontSize: 13 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+                  <span style={{ fontWeight: 700 }}>{c.referencia}</span>
+                  <strong style={{ color: '#16a34a', whiteSpace: 'nowrap' }}>{fmt(c.valor_pago ?? c.valor)}</strong>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Pago em {c.pago_em ? new Date(c.pago_em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
+                  {' · '}{c.forma === 'manual' ? 'marcado à mão' : c.forma ?? '—'}
+                </div>
+                {notas.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{notas.join(' · ')}</div>}
+                <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
+                  {c.comprovante_path && (
+                    <button type="button" onClick={() => verComprovante(c)} style={botaoPequeno}>📎 Ver comprovante</button>
+                  )}
+                  <label style={{ ...botaoPequeno, display: 'inline-block', cursor: anexando === c.id ? 'wait' : 'pointer' }}>
+                    {anexando === c.id ? 'Subindo…' : c.comprovante_path ? 'Trocar' : '📎 Anexar comprovante'}
+                    <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={anexando === c.id}
+                      onChange={ev => { anexarDepois(c, ev.target.files?.[0]); ev.target.value = '' }} />
+                  </label>
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       <div>
@@ -317,6 +392,7 @@ function PopupCobranca({ tipo, c, loja, onFechar, onAbater, onPagar }) {
   const [valor, setValor] = useState('')
   const [texto, setTexto] = useState(abatendo ? 'Compra na loja' : 'PIX direto')
   const [erro, setErro] = useState(null)
+  const [arquivo, setArquivo] = useState(null)
   const [salvando, setSalvando] = useState(false)
   const atual = Number(c.valor)
   const desconto = Math.round((parseFloat(String(valor).replace(/[^0-9,.]/g, '').replace(',', '.')) || 0) * 100) / 100
@@ -331,7 +407,7 @@ function PopupCobranca({ tipo, c, loja, onFechar, onAbater, onPagar }) {
   async function confirmar(ev) {
     ev.preventDefault()
     setSalvando(true); setErro(null)
-    const e = abatendo ? await onAbater(c, desconto, texto.trim()) : await onPagar(c, texto.trim())
+    const e = abatendo ? await onAbater(c, desconto, texto.trim()) : await onPagar(c, texto.trim(), arquivo)
     setSalvando(false)
     if (e) setErro(e)
   }
@@ -364,6 +440,19 @@ function PopupCobranca({ tipo, c, loja, onFechar, onAbater, onPagar }) {
         <label style={rotulo}>{abatendo ? 'Motivo' : 'Como foi pago'}
           <input autoFocus={!abatendo} style={campo} value={texto} onChange={ev => setTexto(ev.target.value)} />
         </label>
+
+        {!abatendo && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 12, cursor: 'pointer',
+            border: `1.5px dashed ${arquivo ? '#16a34a' : 'var(--border)'}`, background: arquivo ? 'rgba(22,163,74,.08)' : 'transparent',
+            fontSize: 13.5, fontWeight: 600, marginTop: 2 }}>
+            <span style={{ fontSize: 20 }}>{arquivo ? '✅' : '📎'}</span>
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {arquivo ? arquivo.name : 'Anexar comprovante (foto ou PDF, opcional)'}
+            </span>
+            <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
+              onChange={ev => setArquivo(ev.target.files?.[0] ?? null)} />
+          </label>
+        )}
 
         {abatendo && desconto > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '10px 14px', borderRadius: 12, marginTop: 4,
