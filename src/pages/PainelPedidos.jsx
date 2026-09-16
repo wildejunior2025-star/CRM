@@ -29,7 +29,7 @@ function aceitarAutoAtivo() {
   try { return JSON.parse(localStorage.getItem('painelConfig') || '{}').aceitarAuto === true }
   catch { return false }
 }
-import { FORMAS_PAGAMENTO, formasAtivas } from '../lib/constants'
+import { FORMAS_PAGAMENTO, formasAtivas, repassePct } from '../lib/constants'
 import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma, textoPagamento } from '../lib/pagamentoPartes'
 import { separarItem } from '../lib/itensPedido'
 import { semAcento } from '../lib/texto'
@@ -5963,7 +5963,11 @@ ${url}
 
   const subtotal = itens.reduce((s, i) => s + Number(i.preco) * Number(i.qtd), 0)
   const taxaNum = tipo === 'entrega' ? (parseFloat(String(taxa).replace(',', '.')) || 0) : 0
-  const total = subtotal + taxaNum
+  // Repasse da maquineta, igual à Loja Online: o cliente que paga no cartão
+  // cobre a taxa que a loja configurou em Minha Loja (ex.: CDBom +5% no crédito).
+  const pctCartao = repassePct(empresa, pagamento)
+  const acrescimo = Math.round((subtotal + taxaNum) * pctCartao) / 100
+  const total = Math.round((subtotal + taxaNum + acrescimo) * 100) / 100
   const faltaEndereco = tipo === 'entrega' && !rua.trim()
 
   const inp = {
@@ -6101,6 +6105,11 @@ ${url}
             placeholder={`Troco para R$ (total ${total.toFixed(2).replace('.', ',')})`}
             style={{ ...inp, marginTop: 6 }} />
         )}
+        {acrescimo > 0 && (
+          <div style={{ fontSize: 11.5, lineHeight: 1.4, color: '#f59e0b', marginTop: 6 }}>
+            Nesta forma a loja cobra +{String(pctCartao).replace('.', ',')}% (R$ {acrescimo.toFixed(2).replace('.', ',')}) — taxa da maquineta, já está no total.
+          </div>
+        )}
       </div>
 
       <div>
@@ -6113,16 +6122,18 @@ ${url}
         <span>Total do pedido</span>
         <span>R$ {total.toFixed(2).replace('.', ',')}</span>
       </div>
-      {tipo === 'entrega' && (
+      {(tipo === 'entrega' || acrescimo > 0) && (
         <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: -8 }}>
-          itens R$ {subtotal.toFixed(2).replace('.', ',')} + taxa R$ {taxaNum.toFixed(2).replace('.', ',')}
+          itens R$ {subtotal.toFixed(2).replace('.', ',')}
+          {tipo === 'entrega' && ` + taxa R$ ${taxaNum.toFixed(2).replace('.', ',')}`}
+          {acrescimo > 0 && ` + cartão R$ ${acrescimo.toFixed(2).replace('.', ',')}`}
         </div>
       )}
 
       <button type="button" disabled={salvando || faltaEndereco || !itens.length}
         onClick={() => onFinalizar({
           tipo, nome, cep, rua, numero, bairro, cidade, taxa: taxaNum,
-          pagamento, troco, obs, subtotal, total, cadastro, pinToken,
+          pagamento, troco, obs, subtotal, acrescimo, total, cadastro, pinToken,
           // O pino da conversa vem na frente: é o ponto que o cliente apontou
           // agora, e vale mesmo que quem atende tenha corrigido a rua depois.
           // O do cadastro só vale se for DESTE endereço: o cliente que mudou de
@@ -7335,6 +7346,7 @@ export default function PainelPedidos() {
       })),
       subtotal: d.subtotal,
       taxa_entrega: d.tipo === 'entrega' ? d.taxa : 0,
+      acrescimo: d.acrescimo || 0,
       total: d.total,
       forma_pagamento: d.pagamento,
       troco_para: d.pagamento === 'dinheiro' && d.troco
@@ -7393,6 +7405,7 @@ export default function PainelPedidos() {
     const texto =
       `🧾 *Pedido #${novo?.numero_pedido ?? ''} anotado!*\n\n${linhas}\n` +
       (d.tipo === 'entrega' ? `🛵 Taxa de entrega: R$ ${Number(d.taxa).toFixed(2).replace('.', ',')}\n` : '🏪 Retirada na loja\n') +
+      (d.acrescimo > 0 ? `💳 Taxa do cartão: R$ ${Number(d.acrescimo).toFixed(2).replace('.', ',')}\n` : '') +
       `💰 *Total: R$ ${Number(d.total).toFixed(2).replace('.', ',')}*\n💳 Pagamento em *${labelPgto}*\n\nJá tá na cozinha. 😉`
 
     await supabase.from('mensagens_chat').insert({
