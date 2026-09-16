@@ -1213,7 +1213,7 @@ function distribuirMisturado(itens: any[], sabores: SaboresPorProduto): any[] {
  * cliente quando algum não vale, ou null quando está tudo certo.
  */
 function conferirSabores(itens: any[], sabores: SaboresPorProduto, catalogo: any[]): string | null {
-  const problemas = new Map<string, { produto: string; faltam: Set<string>; acabaram: Set<string>; tem: string[] }>()
+  const problemas = new Map<string, { produto: string; faltam: Set<string>; acabaram: Set<string>; duvidas: Set<string>; tem: string[] }>()
   for (const it of itens ?? []) {
     const sp = sabores[String(it?.produto_id ?? "")]
     if (!sp || !Array.isArray(it?.complementos)) continue
@@ -1238,27 +1238,108 @@ function conferirSabores(itens: any[], sabores: SaboresPorProduto, catalogo: any
         })
         if (parecidos.length === 1) achado = parecidos[0]
       }
+      // Sem o sufixo do bloco: "Calabresa Acebolada" é "Calabresa Acebolada
+      // (Promoção)" na pizza meio a meio da Marajó. Se o mesmo nome existe em
+      // dois blocos ("3 Queijos (Promoção)" R$ 34,99 e "(Especiais)" R$ 40), o
+      // preço muda — aí pergunta, não escolhe.
+      const semSufixo = (n: string) => normSabor(String(n).replace(/\s*\([^()]*\)\s*$/, ""))
+      let emDois: string[] = []
+      if (!achado) {
+        const curtos = sp.disponiveis.filter(n => semSufixo(n) === alvo)
+        if (curtos.length === 1) achado = curtos[0]
+        else if (curtos.length > 1) emDois = curtos
+      }
       if (achado) { c.nome = achado; continue }
       const nomeProduto = String(catalogo.find((p: any) => p.id === it.produto_id)?.nome ?? it.nome ?? "produto")
-      const p = problemas.get(it.produto_id) ?? { produto: nomeProduto, faltam: new Set(), acabaram: new Set(), tem: sp.disponiveis }
-      const pausado = sp.pausadas.find(n => normSabor(n) === alvo)
-      if (pausado) p.acabaram.add(pausado)
+      const p = problemas.get(it.produto_id) ?? { produto: nomeProduto, faltam: new Set(), acabaram: new Set(), duvidas: new Set(), tem: sp.disponiveis }
+      const pausado = sp.pausadas.find(n => normSabor(n) === alvo || semSufixo(n) === alvo)
+      if (emDois.length) {
+        // "3 Queijos: Promoção ou Especiais"
+        const blocos = emDois.map(n => (String(n).match(/\(([^()]*)\)\s*$/)?.[1] ?? n).trim())
+        p.duvidas.add(`${String(c?.nome ?? "").trim()}: ${blocos.slice(0, -1).join(", ")} ou ${blocos[blocos.length - 1]}`)
+      }
+      else if (pausado) p.acabaram.add(pausado)
       else p.faltam.add(String(c?.nome ?? "").trim())
       problemas.set(it.produto_id, p)
     }
   }
   if (!problemas.size) return null
   const linhas = [...problemas.values()].map(p => {
+    // Só dúvida de qual versão do sabor: pergunta sem despejar a lista inteira.
+    if (p.duvidas.size && !p.acabaram.size && !p.faltam.size) {
+      return `• *${p.produto}*: qual você quer — ${[...p.duvidas].join("; ")}?`
+    }
     const partes: string[] = []
+    if (p.duvidas.size) partes.push(`preciso saber qual: ${[...p.duvidas].join("; ")}`)
     if (p.acabaram.size) partes.push(`*${[...p.acabaram].join(", ")}* acabou no momento`)
     if (p.faltam.size) partes.push(`não tem *${[...p.faltam].join(", ")}*`)
     const tem = p.tem.length ? ` Sabores que tem: ${p.tem.join(", ")}.` : ""
     return `• *${p.produto}*: ${partes.join(" e ")}.${tem}`
   })
-  return `Antes de anotar, preciso acertar uns sabores: 😊\n\n${linhas.join("\n")}\n\nQual você prefere no lugar? Aí eu anoto o pedido todo.`
+  const soDuvida = [...problemas.values()].every(p => !p.acabaram.size && !p.faltam.size)
+  return soDuvida
+    ? `Só pra eu anotar certinho: 😊\n\n${linhas.join("\n")}`
+    : `Antes de anotar, preciso acertar uns sabores: 😊\n\n${linhas.join("\n")}\n\nQual você prefere no lugar? Aí eu anoto o pedido todo.`
 }
 
-function reprecificarItens(itens: any[], catalogo: any[], precoOpcaoMap: Record<string, number> = {}): void {
+// Opção de complemento → de qual grupo ela é e se o grupo cobra pelo maior.
+type RegrasOpcao = Record<string, Record<string, { grupo: string; maior: boolean; preco: number }>>
+
+/**
+ * Quanto os complementos de UM item somam, com a regra de cada grupo — a mesma
+ * conta de src/lib/complementos.js (adicionalComplementos). Pizza meio a meio
+ * ("Escolha 2 sabores", regra 'maior'): meia Promoção R$ 34,99 + meia Especial
+ * R$ 45 = R$ 45, não R$ 79,99. A borda, que soma, entra por cima.
+ */
+function adicionalDoItem(it: any, precoOpcaoMap: Record<string, number>, regras: RegrasOpcao): number {
+  const doProduto = regras[String(it?.produto_id ?? "")] ?? {}
+  const maiorPorGrupo = new Map<string, number>()
+  let soma = 0
+  for (const c of (Array.isArray(it?.complementos) ? it.complementos : [])) {
+    const nome = String(c?.nome ?? "").trim().toLowerCase()
+    const r = doProduto[nome]
+    if (r?.maior) {
+      maiorPorGrupo.set(r.grupo, Math.max(maiorPorGrupo.get(r.grupo) ?? 0, r.preco))
+      continue
+    }
+    const add = r ? r.preco : precoOpcaoMap[nome]
+    if (add) soma += add * Number(c?.qtd ?? 1)
+  }
+  for (const v of maiorPorGrupo.values()) soma += v
+  return soma
+}
+
+/**
+ * Id do produto que não combina com as ESCOLHAS do item. Na recuperação da
+ * sacola (2ª chamada) a IA mandou a meia a meia com o id da pizza inteira de
+ * Calabresa: os sabores não existem nela, a conferência barrava tudo e o robô
+ * travou repetindo o aviso (teste Marajó, 16/09/2026). Se só UM produto do
+ * cardápio tem todas aquelas escolhas, é ele. Roda antes de conferirSabores.
+ */
+function acertarProdutoPelasEscolhas(itens: any[], catalogo: any[], sabores: SaboresPorProduto): void {
+  const semSufixo = (n: string) => normSabor(String(n).replace(/\s*\([^()]*\)\s*$/, ""))
+  const temTudo = (pid: string, comps: string[]) => {
+    const sp = sabores[pid]
+    if (!sp) return false
+    const todas = [...sp.disponiveis, ...sp.pausadas]
+    const cheias = new Set(todas.map(normSabor))
+    const curtas = new Set(todas.map(semSufixo))
+    return comps.every(c => cheias.has(normSabor(c)) || curtas.has(normSabor(c)))
+  }
+  for (const it of itens ?? []) {
+    const comps = (Array.isArray(it?.complementos) ? it.complementos : [])
+      .map((c: any) => String(c?.nome ?? "").trim())
+      .filter((n: string) => n && !lerMisturado({ nome: n }).misturado)
+    if (!comps.length || temTudo(String(it?.produto_id ?? ""), comps)) continue
+    const certos = (catalogo ?? []).filter((p: any) => temTudo(String(p.id), comps))
+    if (certos.length !== 1) continue
+    console.log(`[Item] id trocado pelas escolhas: "${it.nome}" → ${certos[0].nome}`)
+    it.produto_id = certos[0].id
+    it.nome = certos[0].nome
+  }
+}
+
+function reprecificarItens(itens: any[], catalogo: any[], precoOpcaoMap: Record<string, number> = {}, regrasOpcao: RegrasOpcao = {}): void {
   const porId = new Map<string, any>()
   for (const p of catalogo ?? []) porId.set(String(p.id), p)
   // Nome e id que não batem: o modelo escreveu "Açaí CDBOM (Caixa 5 litros)"
@@ -1285,11 +1366,7 @@ function reprecificarItens(itens: any[], catalogo: any[], precoOpcaoMap: Record<
   for (const it of itens ?? []) {
     const prod = porId.get(String(it?.produto_id ?? ""))
     if (!prod) continue
-    let adicionais = 0
-    for (const c of (Array.isArray(it.complementos) ? it.complementos : [])) {
-      const add = precoOpcaoMap[String(c?.nome ?? "").trim().toLowerCase()]
-      if (add) adicionais += add * Number(c?.qtd ?? 1)
-    }
+    const adicionais = adicionalDoItem(it, precoOpcaoMap, regrasOpcao)
     const novo = +(precoPorQuantidade(prod, qtdPorProduto[String(prod.id)]) + adicionais).toFixed(2)
     if (novo !== Number(it.preco)) console.log(`[Preço] corrigido ${it.nome}: ${it.preco} → ${novo}`)
     it.preco = novo
@@ -1443,13 +1520,17 @@ function cardapioPorCategoria(produtos: any[]): string {
  * dos preços dele (normal, promoção ou faixa). Se não for, troca pelo normal.
  * Pega o "Balde 10 litros de sorvete — R$ 125,00" antes de o cliente ler.
  */
-function corrigirPrecosCitados(texto: string, produtos: any[]): string {
+function corrigirPrecosCitados(texto: string, produtos: any[], montados: Set<string> = new Set()): string {
   const norm = (s: string) => String(s ?? "").normalize("NFD").replace(RE_ACENTOS_PRECO, "").toLowerCase().replace(/[*_]/g, "")
   const ordenados = [...(produtos ?? [])].sort((a, b) => String(b.nome).length - String(a.nome).length)
   return texto.split("\n").map(linha => {
     const ln = norm(linha)
     const prod = ordenados.find(p => String(p.nome).length >= 6 && ln.includes(norm(p.nome)))
     if (!prod) return linha
+    // Produto montado com complementos (pizza com borda, meio a meio): o valor
+    // certo é base + escolhas, que não está na lista de preços dele. "Mussarela
+    // com borda cheddar R$ 38,99" virava R$ 31,99, e a Pizza 2 Sabores, R$ 0,00.
+    if (montados.has(String(prod.id)) || /\b(meia|metade|borda|sabores)\b/i.test(linha)) return linha
     const m = linha.match(/R\$\s*([\d.]+(?:,\d{1,2})?|\d+(?:\.\d{1,2})?)/)
     if (!m) return linha
     const citado = Number(m[1].includes(",") ? m[1].replace(/\./g, "").replace(",", ".") : m[1])
@@ -1653,7 +1734,8 @@ async function handleFecharPedido(
   taxaEntregaCalc: number|null = null,
   mensagensHist: any[] = [],
   catalogoProdutos: any[] = [],
-  precoOpcaoMap: Record<string, number> = {}
+  precoOpcaoMap: Record<string, number> = {},
+  regrasOpcao: RegrasOpcao = {}
 ): Promise<{ mensagemExtra: string; acaoPromise: Promise<any>; pixCode?: string; pixQrBase64?: string; pixNumero?: string; bloqueioMensagem?: string }> {
   console.log(`[Pedido] fechando para ${phone}, pgto: ${acao.forma_pagamento}`)
   try {
@@ -1678,7 +1760,7 @@ async function handleFecharPedido(
     itens = reconciliarComResumo(itens, mensagensHist, catalogoProdutos)
     // Preço de novo pela quantidade final: item que veio do resumo ou do ACAO
     // não passou pelo atualizar_carrinho, e sem isto saía sem o atacado.
-    reprecificarItens(itens, catalogoProdutos, precoOpcaoMap)
+    reprecificarItens(itens, catalogoProdutos, precoOpcaoMap, regrasOpcao)
     if (itens.length === 0) {
       console.error("[Pedido] abortado — carrinho vazio mesmo após re-fetch e fallback")
       return { mensagemExtra: "⚠️ Não encontrei itens no carrinho. Pode me falar novamente o que gostaria de pedir? 😊", acaoPromise: Promise.resolve() }
@@ -3097,10 +3179,13 @@ serve(async (req) => {
     // NUNCA confiar na conta feita pelo modelo.
     let complementosTexto = ""
     const precoOpcaoMap: Record<string, number> = {}  // nome da opção (minúsculo) → adicional
+    const regrasOpcao: RegrasOpcao = {}               // produto → opção → grupo e regra de preço
     // Sabores de cada produto, pra conferir o que a IA grava (conferirSabores).
     const saboresPorProduto: SaboresPorProduto = {}
     // Produto em vários tamanhos com sabores diferentes (ver saborSemTamanho).
     let familiasTamanho: FamiliaTamanho[] = []
+    // Loja com pizza meio a meio (grupo que cobra pelo maior): o roteiro ganha a regra.
+    let temMeioAMeio = false
     try {
       const produtoIds = produtos.map((p: any) => p.id)
       if (produtoIds.length) {
@@ -3108,7 +3193,7 @@ serve(async (req) => {
         // e cada vínculo pode ter min/max próprio (ex.: proteína P=1, M/G=2).
         const { data: vincComp } = await supabase
           .from("produto_complemento_grupos")
-          .select("produto_id, ordem, min_override, max_override, complemento_grupos(nome, min, max, disponivel, complemento_opcoes(nome, preco_adicional, ordem, disponivel))")
+          .select("produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(nome, preco_adicional, ordem, disponivel))")
           .in("produto_id", produtoIds)
         if (vincComp && vincComp.length) {
           const porProduto: Record<string, any[]> = {}
@@ -3123,10 +3208,17 @@ serve(async (req) => {
               }
             }
             if (!g || g.disponivel === false) continue // grupo pausado: bot não oferece
+            if (g.regra_preco === "maior") temMeioAMeio = true
             const gEff = { ...g, min: v.min_override ?? g.min, max: v.max_override ?? g.max, ordem: v.ordem ?? 0 }
             ;(porProduto[v.produto_id] ||= []).push(gEff)
             for (const o of (g.complemento_opcoes ?? [])) {
               precoOpcaoMap[String(o.nome).trim().toLowerCase()] = Number(o.preco_adicional ?? 0)
+              // De qual grupo é a opção e como ele cobra (mig 0120): pizza meio a
+              // meio vale o sabor mais caro, a borda soma.
+              ;(regrasOpcao[v.produto_id] ||= {})[String(o.nome).trim().toLowerCase()] = {
+                grupo: String(g.id ?? g.nome), maior: g.regra_preco === "maior",
+                preco: Number(o.preco_adicional ?? 0),
+              }
             }
           }
           const nomeDoProduto = (id: string) => produtos.find((p: any) => p.id === id)?.nome ?? ""
@@ -3143,10 +3235,13 @@ serve(async (req) => {
                   .filter((o: any) => o.disponivel)
                   .sort((a: any, b: any) => (a.ordem ?? 0) - (b.ordem ?? 0))
                   .map((o: any) => Number(o.preco_adicional) > 0
-                    ? `• ${o.nome} (+R$ ${Number(o.preco_adicional).toFixed(2)})`
+                    ? `• ${o.nome} (${g.regra_preco === "maior" ? "" : "+"}R$ ${Number(o.preco_adicional).toFixed(2)})`
                     : `• ${o.nome}`)
                   .join("\n")
-                const quant = g.max > 1 ? `escolha até ${g.max}` : (g.min > 0 ? "escolha 1" : "opcional")
+                const quant = (g.max > 1 ? (g.min === g.max ? `escolha ${g.max}` : `escolha até ${g.max}`) : (g.min > 0 ? "escolha 1" : "opcional"))
+                  // Pizza meio a meio: o preço de cada opção é o da pizza inteira
+                  // daquele sabor, e vale o MAIS CARO dos escolhidos — não soma.
+                  + (g.regra_preco === "maior" ? " — cada sabor é uma metade; o preço é o do sabor MAIS CARO, NÃO soma" : "")
                 // Pausado entra à parte: sem isto, "tem de castanha?" virava "não
                 // temos esse sabor" — e a loja tem, só acabou hoje.
                 const pausadas = (g.complemento_opcoes ?? [])
@@ -3544,7 +3639,16 @@ ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome":
   • Sabor que ele pedir e NÃO está na lista do produto está em falta hoje: responda como atendente ("Castanha acabou no momento 😕, mas tem esses:") e ofereça os que tem. NUNCA fale em "lista", "cadastro" ou "sistema" pro cliente. Nunca anote sabor fora da lista.
   • Cada produto tem a SUA lista de sabores (o pote de 1 litro pode não ter o mesmo sabor do balde). Use a lista daquele produto.
 
-▸ "MISTURADO" / "SORTIDO" / "VARIADO" / "O RESTO MISTURADO":
+${temMeioAMeio ? `▸ PIZZA MEIO A MEIO (o grupo que diz "o preço é o do sabor MAIS CARO"):
+  • "Meia X e meia Y", "metade X metade Y", "2 sabores", "X com Y" = o produto que tem esse grupo, com os DOIS sabores em "complementos" (e a borda, se o produto tiver).
+  • Preço = o do sabor MAIS CARO (+ a borda, que soma). NUNCA some os dois sabores. Ex.: meia de R$ 34,99 + meia de R$ 45,00 = R$ 45,00. O sistema calcula sozinho; no texto, cite só o do mais caro.
+  • Pizza de UM sabor só (inteira) = o produto daquele sabor na categoria dele, não o de 2 sabores.
+  • Mesmo sabor em dois blocos (ex.: "3 Queijos (Promoção)" e "3 Queijos (Especiais)") tem preço diferente: pergunte qual antes de anotar.
+  • Escreva a opção com o nome COMPLETO, igual à lista (com o que está entre parênteses).
+  • Borda que o produto exige ("escolha 1"): pergunte junto com os sabores, numa mensagem só ("Sem borda" é uma opção).
+  ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Pizza 2 Sabores", "qtd": 1, "preco": 45.00, "complementos": [{"nome": "Calabresa Acebolada (Promoção)", "qtd": 1}, {"nome": "4 Queijos (Especiais)", "qtd": 1}, {"nome": "Sem borda", "qtd": 1}]}]}
+
+` : ""}▸ "MISTURADO" / "SORTIDO" / "VARIADO" / "O RESTO MISTURADO":
   • Quer dizer que a LOJA escolhe os sabores. NÃO pergunte sabor por sabor. Anote a linha com o sabor "Misturado" — o SISTEMA divide a quantidade igualmente entre os sabores disponíveis do produto e a conferência já mostra a divisão:
   ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome": "Picolé Sabor da Fruta", "qtd": 40, "preco": 1.50, "complementos": [{"nome": "Misturado", "qtd": 1}]}]}
   • Pode ter sabor escolhido + resto misturado: "50 picolés, 10 de coco e o resto misturado" = uma linha de 10 Coco + uma linha de 40 Misturado (do mesmo produto).
@@ -3841,6 +3945,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           }
         }
         if ((acao.tipo === "atualizar_carrinho" || acao.tipo === "fechar_pedido") && Array.isArray(acao.items)) {
+          acertarProdutoPelasEscolhas(acao.items, produtos, saboresPorProduto)
           const avisoSabor = conferirSabores(acao.items, saboresPorProduto, produtos)
           if (avisoSabor) {
             console.log(`[Sabor] ${acao.tipo} barrado:`, avisoSabor.slice(0, 200))
@@ -3852,7 +3957,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
         if (acao.tipo === "atualizar_carrinho" && Array.isArray(acao.items)) {
           // Recalcula o preço no servidor (verdade do banco) — o modelo erra a conta.
           // preço = preço da quantidade (promoção/atacado) + adicionais das opções.
-          reprecificarItens(acao.items, produtos, precoOpcaoMap)
+          reprecificarItens(acao.items, produtos, precoOpcaoMap, regrasOpcao)
           const carrinhoResult = await handleAtualizar_carrinho(supabase, empresaId, phone, acao.items)
           if (!carrinhoResult.ok) console.error("[Carrinho] falhou:", carrinhoResult)
           // Sacola igual à que já estava e o modelo disse algo: a fala dele
@@ -3990,7 +4095,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           const resultado = await handleFecharPedido(
             supabase, empresaId, phone, phoneLocal, acao, carrinho,
             cliente, empresa, SUPABASE_URL, SUPABASE_KEY, instanceName, carrinhoEndereco,
-            indicadorProfileId, taxaEntregaCalc, mensagens, produtos, precoOpcaoMap
+            indicadorProfileId, taxaEntregaCalc, mensagens, produtos, precoOpcaoMap, regrasOpcao
           )
           if (resultado.bloqueioMensagem) {
             resposta = resultado.bloqueioMensagem
@@ -4115,7 +4220,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           supabase, empresaId, phone, phoneLocal, safeAcao,
           carrinho, cliente, empresa,
           SUPABASE_URL, SUPABASE_KEY, instanceName, carrinhoEndereco,
-          indicadorProfileId, taxaEntregaCalc, mensagens, produtos, precoOpcaoMap
+          indicadorProfileId, taxaEntregaCalc, mensagens, produtos, precoOpcaoMap, regrasOpcao
         )
         if (resultado.bloqueioMensagem) {
           // O bloqueio VAI pro cliente. Antes ele era descartado aqui e ficava
@@ -4400,7 +4505,10 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     }
 
     // Preço errado ao lado do nome de um produto (balde de sorvete a R$ 125).
-    if (!/resumo do pedido/i.test(resposta)) resposta = corrigirPrecosCitados(resposta, produtos)
+    if (!/resumo do pedido/i.test(resposta)) resposta = corrigirPrecosCitados(resposta, produtos,
+      // Só conta como montado o produto em que a escolha MUDA o preço (borda,
+      // sabor de pizza). Sabor de picolé a R$ 0 continua sendo conferido.
+      new Set(Object.entries(regrasOpcao).filter(([, ops]) => Object.values(ops).some(o => o.preco > 0)).map(([id]) => id)))
 
     // TAXA JUNTO DO ENDEREÇO. "Vcs entregam na Redinha?" → endereço → e o valor
     // da taxa só saía no resumo; a cliente perguntou de novo e o atendente
