@@ -1309,6 +1309,38 @@ function adicionalDoItem(it: any, precoOpcaoMap: Record<string, number>, regras:
   return soma
 }
 
+// ── ESCOLHA OBRIGATÓRIA (mig 0120 + min/max do grupo) ────────────────────────
+// A pizza da Marajó tem "Borda (escolha 1)" — obrigatória, e "Sem borda" é uma
+// das opções — e "Escolha 2 sabores" (exatamente 2). A IA anotava sem borda
+// nenhuma, e a cozinha recebia a pizza sem saber o que fazer na beirada.
+//
+// Só vale pro grupo em que a escolha MUDA O PREÇO. O sabor do picolé da CDBom
+// também é "escolha 1", mas é de graça e a loja manda sortido quando o cliente
+// não escolhe — exigir ali quebraria o fluxo dela (roteiro de 15/09/2026).
+type Exigencias = Record<string, { nome: string; min: number; max: number; opcoes: string[] }[]>
+
+function conferirEscolhas(itens: any[], exigencias: Exigencias, catalogo: any[]): string | null {
+  const linhas: string[] = []
+  for (const it of itens ?? []) {
+    const grupos = exigencias[String(it?.produto_id ?? "")]
+    if (!grupos?.length) continue
+    const escolhidos = (Array.isArray(it?.complementos) ? it.complementos : [])
+      .map((c: any) => normSabor(c?.nome))
+    const nomeProduto = String(catalogo.find((p: any) => p.id === it.produto_id)?.nome ?? it.nome ?? "produto")
+    for (const g of grupos) {
+      const doGrupo = g.opcoes.filter(o => escolhidos.includes(normSabor(o))).length
+      if (g.min > 0 && doGrupo < g.min) {
+        const quantos = g.min === 1 ? "" : ` (são ${g.min})`
+        linhas.push(`• *${nomeProduto}* — falta escolher: *${g.nome}*${quantos}\n${g.opcoes.map(o => `  • ${o}`).join("\n")}`)
+      } else if (g.max > 0 && doGrupo > g.max) {
+        linhas.push(`• *${nomeProduto}* — em *${g.nome}* dá pra escolher ${g.max === 1 ? "só 1" : `${g.max}`}, e vieram ${doGrupo}. Quais ficam?`)
+      }
+    }
+  }
+  if (!linhas.length) return null
+  return `Falta só isso pra eu anotar: 😊\n\n${linhas.join("\n\n")}`
+}
+
 /**
  * Id do produto que não combina com as ESCOLHAS do item. Na recuperação da
  * sacola (2ª chamada) a IA mandou a meia a meia com o id da pizza inteira de
@@ -2777,7 +2809,7 @@ serve(async (req) => {
 
     const configRes = await supabase
       .from("whatsapp_config")
-      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, numero, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, feriados_fecha, indicador_profile_id, mp_conectado, formas_pagamento)")
+      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, numero, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, feriados_fecha, indicador_profile_id, mp_conectado, formas_pagamento, delivery_ativo, delivery_fechado_por)")
       .eq("instance_name", instanceName)
       .eq("ativo", true)
       .single()
@@ -3015,6 +3047,18 @@ serve(async (req) => {
       horarioLojaTexto = horarioTexto
       agoraTexto = `${DIAS_SEM[dow]}, ${String(horaBR.getHours()).padStart(2, "0")}:${String(horaBR.getMinutes()).padStart(2, "0")}`
 
+      // O BOTÃO VERMELHO DO GESTOR ("Loja fechada"). A Loja Online e o robô sem
+      // IA já param nele; o de IA olhava só a grade e continuava vendendo com a
+      // loja fechada na tela — pedido caindo num painel que ninguém olha.
+      // Fechado por "horario" é o painel se fechando sozinho no fim do
+      // expediente: aí quem manda é a grade (mesma regra do respostaSemIA).
+      const fechadaNoBotao = empresa.delivery_ativo === false && empresa.delivery_fechado_por !== "horario"
+      if (fechadaNoBotao) {
+        lojaFechada = true
+        // Sem prometer horário: quem fechou na mão volta quando quiser.
+        horarioTexto = ""
+      }
+
       if (lojaFechada && !forcarIa) {
         // Só avisa uma vez — se a última mensagem do bot já foi "fechado", ignora
         const { data: ultimaBotMsg } = await supabase
@@ -3026,7 +3070,9 @@ serve(async (req) => {
 
         const jaAvisou = ultimaBotMsg?.content?.includes("Estamos fechados")
         if (!jaAvisou) {
-          const msgFechado = `😴 Estamos fechados no momento!\n\n${horarioTexto || "Confira nosso cardápio"}.\n\nMas você já pode ver nosso cardápio e se planejar! 😊\n👉 ${catalogoUrl}`
+          // Sem horário (fechou no botão do gestor): a linha sai inteira, senão
+          // vira "Confira nosso cardápio" e logo abaixo "já pode ver o cardápio".
+          const msgFechado = `😴 Estamos fechados no momento!\n\n${horarioTexto ? `${horarioTexto}.\n\n` : ""}Mas você já pode ver nosso cardápio e se planejar! 😊\n👉 ${catalogoUrl}`
           await supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: msgFechado })
           // Anota pra mandar "Já abrimos" quando a loja abrir HOJE (mig 0267,
           // worker aviso-abertura). Cada "fechado" novo reabre o aviso: quem
@@ -3180,6 +3226,7 @@ serve(async (req) => {
     let complementosTexto = ""
     const precoOpcaoMap: Record<string, number> = {}  // nome da opção (minúsculo) → adicional
     const regrasOpcao: RegrasOpcao = {}               // produto → opção → grupo e regra de preço
+    const exigencias: Exigencias = {}                 // produto → grupos que o pedido precisa respeitar
     // Sabores de cada produto, pra conferir o que a IA grava (conferirSabores).
     const saboresPorProduto: SaboresPorProduto = {}
     // Produto em vários tamanhos com sabores diferentes (ver saborSemTamanho).
@@ -3211,6 +3258,18 @@ serve(async (req) => {
             if (g.regra_preco === "maior") temMeioAMeio = true
             const gEff = { ...g, min: v.min_override ?? g.min, max: v.max_override ?? g.max, ordem: v.ordem ?? 0 }
             ;(porProduto[v.produto_id] ||= []).push(gEff)
+            // Quanto o produto EXIGE de cada grupo. Só entra o grupo em que a
+            // escolha muda o preço (borda, sabor de pizza): o sabor de picolé
+            // da CDBom é de graça e a loja manda sortido quando ninguém escolhe.
+            {
+              const ops = (g.complemento_opcoes ?? []).filter((o: any) => o.disponivel)
+              if (ops.some((o: any) => Number(o.preco_adicional) > 0)) {
+                (exigencias[v.produto_id] ||= []).push({
+                  nome: String(g.nome), min: Number(gEff.min) || 0, max: Number(gEff.max) || 0,
+                  opcoes: ops.map((o: any) => String(o.nome)),
+                })
+              }
+            }
             for (const o of (g.complemento_opcoes ?? [])) {
               precoOpcaoMap[String(o.nome).trim().toLowerCase()] = Number(o.preco_adicional ?? 0)
               // De qual grupo é a opção e como ele cobra (mig 0120): pizza meio a
@@ -3505,7 +3564,7 @@ ${totalProdutos > MENU_INTEIRO_ATE ? `⚠️ CATÁLOGO GRANDE: esta loja tem ${t
 • Categorias da loja: ${(catsHorario ?? []).map((c: any) => c.nome).join(", ") || "—"}
 ` : ""}PRODUTOS DISPONÍVEIS${totalProdutos > MENU_INTEIRO_ATE ? " (o que casou com o que ele pediu)" : ""}:
 ${cardapioPorCategoria(produtos) || (totalProdutos > MENU_INTEIRO_ATE ? "Nada casou com o que ele falou — peça a marca e o tamanho, ou ofereça o link do catálogo." : "Nenhum produto cadastrado")}
-${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n${familiasTamanho.length ? `📏 SABORES QUE MUDAM CONFORME O TAMANHO — nunca liste sabores desses produtos sem saber o tamanho. Se o cliente não disse o tamanho (nem antes na conversa), PERGUNTE primeiro qual tamanho, mostrando tamanhos e preços; depois mostre só os sabores DAQUELE tamanho:\n${familiasTamanho.map(f => `▸ ${f.nome}: ` + f.tamanhos.map(t => `${t.rotulo} (${t.sabores.length} sabores)`).join("; ")).join("\n")}\n` : ""}⚠️ Confira pelo [id:] qual produto o cliente pediu antes de mostrar opções. Produto cujo id NÃO aparece neste bloco não tem sabor/complemento pra escolher: adicione direto com atualizar_carrinho, sem perguntar sabor (ex.: açaí em caixa ou balde não é o mesmo produto que o sorvete de mesmo tamanho).\n🍦 SABOR NÃO ESCOLHIDO NÃO SE PERGUNTA: nos produtos em que só se escolhe o SABOR (picolé, sorvete, moreninha, pote), se o cliente disse produto + quantidade sem sabor, emita atualizar_carrinho NA HORA com a linha SEM "complementos" (nem "Misturado" — Misturado é só quando ele FALA misturado/sortido/menos X) — a loja manda sortido. Não liste sabores, não pergunte "qual sabor?" nem "prefere misturado?". Só use sabor quando ELE disser um.\n` : ""}
+${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n${Object.keys(exigencias).length ? `⚠️ ESCOLHA OBRIGATÓRIA: nesses produtos, a categoria que tem PREÇO nas opções (borda, sabores da pizza) é obrigatória — pergunte junto com o resto e NÃO anote sem ela. "Sem borda" também é uma escolha: se o cliente disser que não quer, anote "Sem borda".\n` : ""}${familiasTamanho.length ? `📏 SABORES QUE MUDAM CONFORME O TAMANHO — nunca liste sabores desses produtos sem saber o tamanho. Se o cliente não disse o tamanho (nem antes na conversa), PERGUNTE primeiro qual tamanho, mostrando tamanhos e preços; depois mostre só os sabores DAQUELE tamanho:\n${familiasTamanho.map(f => `▸ ${f.nome}: ` + f.tamanhos.map(t => `${t.rotulo} (${t.sabores.length} sabores)`).join("; ")).join("\n")}\n` : ""}⚠️ Confira pelo [id:] qual produto o cliente pediu antes de mostrar opções. Produto cujo id NÃO aparece neste bloco não tem sabor/complemento pra escolher: adicione direto com atualizar_carrinho, sem perguntar sabor (ex.: açaí em caixa ou balde não é o mesmo produto que o sorvete de mesmo tamanho).\n🍦 SABOR NÃO ESCOLHIDO NÃO SE PERGUNTA: nos produtos em que só se escolhe o SABOR (picolé, sorvete, moreninha, pote), se o cliente disse produto + quantidade sem sabor, emita atualizar_carrinho NA HORA com a linha SEM "complementos" (nem "Misturado" — Misturado é só quando ele FALA misturado/sortido/menos X) — a loja manda sortido. Não liste sabores, não pergunte "qual sabor?" nem "prefere misturado?". Só use sabor quando ELE disser um.\n` : ""}
 CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) => {
   const comps = Array.isArray(i.complementos) && i.complementos.length ? ` (${i.complementos.map((c: any) => c.nome).join(", ")})` : ""
   return `• ${i.nome}${comps} x${i.qtd} = R$ ${(i.qtd * Number(i.preco)).toFixed(2)}`
@@ -3951,6 +4010,15 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             console.log(`[Sabor] ${acao.tipo} barrado:`, avisoSabor.slice(0, 200))
             acao.tipo = "sabor_invalido"
             resposta = avisoSabor
+          } else {
+            // Escolha obrigatória que ficou faltando (a borda da pizza) ou que
+            // passou do limite (3 sabores numa de 2).
+            const avisoEscolha = conferirEscolhas(acao.items, exigencias, produtos)
+            if (avisoEscolha) {
+              console.log(`[Escolha] ${acao.tipo} barrado:`, avisoEscolha.slice(0, 160))
+              acao.tipo = "escolha_incompleta"
+              resposta = avisoEscolha
+            }
           }
         }
 
