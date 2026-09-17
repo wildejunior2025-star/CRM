@@ -57,6 +57,11 @@ const contaNoMes = d =>
     ((d.recorrencia === 'anual' || d.recorrencia === 'unico') &&
       String(d.data_vencimento || '').slice(0, 7) === mesRef()))
 
+// Cotação só pra dar uma ideia do que a mensalidade viraria em real — o preço
+// de verdade é em dólar e sai no cartão convertido pelo câmbio do dia.
+const USD_BRL = 5.4
+const nomeEhCloudflare = n => /cloudflare/i.test(n || '')
+
 // vencida primeiro, depois a que vence antes, sem data no fim
 const porVencimento = (a, b) => {
   const va = a.data_vencimento || '9999-12-31'
@@ -247,6 +252,79 @@ export default function SuperAdminDespesas() {
   )
 }
 
+/* ── Barra do consumo do Cloudflare ───────────────────────────────────────────
+   O plano grátis dá 100 mil requisições por dia somando todos os workers da
+   conta. A barra mostra o pico dos últimos 7 dias, que é o que conta pra saber
+   se está chegando perto — e quanto custaria a mensalidade se passar.        */
+function UsoCloudflare() {
+  const [uso, setUso] = useState(null)
+
+  useEffect(() => {
+    let vivo = true
+    supabase.functions.invoke('cloudflare-uso')
+      .then(({ data, error }) => { if (vivo) setUso(error ? { ok: false } : (data ?? { ok: false })) })
+      .catch(() => { if (vivo) setUso({ ok: false }) })
+    return () => { vivo = false }
+  }, [])
+
+  if (!uso) return <div className="desp-uso"><span className="desp-uso-titulo">medindo o consumo…</span></div>
+  if (!uso.ok) {
+    return (
+      <div className="desp-uso">
+        <span className="desp-uso-titulo">
+          {uso.motivo === 'sem_token'
+            ? '⚙️ Falta cadastrar o token do Cloudflare pra mostrar o consumo aqui.'
+            : '⚠️ Não consegui ler o consumo do Cloudflare agora.'}
+        </span>
+      </div>
+    )
+  }
+
+  const pct   = uso.pct_pico ?? 0
+  const nivel = pct >= 80 ? 'perigo' : pct >= 50 ? 'atencao' : 'ok'
+  const mil   = n => Number(n || 0).toLocaleString('pt-BR')
+  const maxDia = Math.max(1, ...(uso.dias || []).map(d => d.requisicoes))
+
+  return (
+    <div className="desp-uso">
+      <div className="desp-uso-topo">
+        <span className="desp-uso-titulo">Cota do plano grátis</span>
+        <span className={`desp-uso-pct ${nivel}`}>{pct}%</span>
+      </div>
+
+      <div className="desp-uso-bar">
+        <div className={`desp-uso-fill ${nivel}`} style={{ width: `${Math.max(1.5, pct)}%` }} />
+      </div>
+
+      <div className="desp-uso-legenda">
+        pico de <b>{mil(uso.pico7d)}</b> requisições num dia, de {mil(uso.limite_dia)} por dia
+        {' · '}hoje: {mil(uso.hoje)}
+      </div>
+
+      {(uso.dias || []).length > 1 && (
+        <div className="desp-uso-dias" title="últimos 7 dias">
+          {uso.dias.map(d => (
+            <span
+              key={d.data}
+              className="desp-uso-dia"
+              style={{ height: `${Math.max(8, (d.requisicoes / maxDia) * 100)}%` }}
+              title={`${new Date(d.data + 'T00:00:00').toLocaleDateString('pt-BR')} — ${mil(d.requisicoes)} requisições`}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className={`desp-uso-aviso ${nivel}`}>
+        {pct >= 80
+          ? `Chegando no limite! Passando, vira Workers Paid: US$ ${uso.plano_pago_usd}/mês (≈ ${fmt(uso.plano_pago_usd * USD_BRL)}).`
+          : pct >= 50
+            ? `Mais da metade da cota. Se passar, vira US$ ${uso.plano_pago_usd}/mês (≈ ${fmt(uso.plano_pago_usd * USD_BRL)}).`
+            : `Tranquilo — dá pra crescer ${Math.max(2, Math.floor(100 / Math.max(pct, 1)))}× antes de pagar. Depois do limite: US$ ${uso.plano_pago_usd}/mês (≈ ${fmt(uso.plano_pago_usd * USD_BRL)}).`}
+      </div>
+    </div>
+  )
+}
+
 /* ── Um cartão de despesa: leitura limpa, edição só ao clicar no lápis ─────── */
 function Despesa({ d, salvar, excluir, editId, setEditId, savingId, setLista }) {
   const cat     = catInfo(d.categoria)
@@ -298,6 +376,7 @@ function Despesa({ d, salvar, excluir, editId, setEditId, savingId, setLista }) 
             )}
           </div>
           {d.observacoes && <div className="desp-obs" title={d.observacoes}>{d.observacoes}</div>}
+          {nomeEhCloudflare(d.nome) && d.ativo && <UsoCloudflare />}
         </div>
 
         <div>
