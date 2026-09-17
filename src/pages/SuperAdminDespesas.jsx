@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import '../components/Page.css'
+import './SuperAdminDespesas.css'
 
 const fmt = (v, moeda = 'BRL') =>
   Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: moeda })
@@ -24,30 +25,6 @@ const RECORRENCIAS = [
 ]
 const recLabel = r => (RECORRENCIAS.find(x => x.valor === r) || {}).label || r
 
-function diasAte(dataStr) {
-  if (!dataStr) return null
-  const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
-  const alvo = new Date(dataStr + 'T00:00:00')
-  return Math.round((alvo - hoje) / 86400000)
-}
-
-function badgeVenc(dias) {
-  if (dias === null) return null
-  if (dias < 0)  return { txt: `venceu há ${Math.abs(dias)}d`, cor: '#dc2626', bg: 'rgba(220,38,38,.12)' }
-  if (dias === 0) return { txt: 'vence hoje',                  cor: '#dc2626', bg: 'rgba(220,38,38,.12)' }
-  if (dias <= 5) return { txt: `em ${dias}d`,                  cor: '#d97706', bg: 'rgba(217,119,6,.12)' }
-  return { txt: `em ${dias}d`, cor: 'var(--text-muted)', bg: 'transparent' }
-}
-
-const inputStyle = {
-  padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)',
-  background: 'var(--bg)', color: 'var(--text)', fontSize: 13,
-}
-
-// ── Gastos do mês ────────────────────────────────────────────────────────────
-// A barra usa a coluna `pago_em`: pagou, marca a data; a soma do que está pago
-// no mês corrente é o quanto ela enche. Vira o mês, `pago_em` fica no mês
-// anterior e tudo volta a "em aberto" sozinho — sem cron, sem zerar nada.
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
   'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
 
@@ -55,8 +32,19 @@ function hojeISO() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
-const mesRef = () => hojeISO().slice(0, 7)   // "2026-08"
+const mesRef = () => hojeISO().slice(0, 7)   // "2026-09"
 
+function diasAte(dataStr) {
+  if (!dataStr) return null
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
+  return Math.round((new Date(dataStr + 'T00:00:00') - hoje) / 86400000)
+}
+const dataBR = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : ''
+
+// ── Gastos do mês ────────────────────────────────────────────────────────────
+// A barra usa a coluna `pago_em`: pagou, marca a data; a soma do que está pago
+// no mês corrente é o quanto ela enche. Vira o mês, `pago_em` fica no mês
+// anterior e tudo volta a "em aberto" sozinho — sem cron, sem zerar nada.
 const pagoEsteMes = d => !!d.pago_em && String(d.pago_em).slice(0, 7) === mesRef()
 
 // Entra na conta do mês: mensal sempre; anual/única só no mês em que vence.
@@ -69,10 +57,19 @@ const contaNoMes = d =>
     ((d.recorrencia === 'anual' || d.recorrencia === 'unico') &&
       String(d.data_vencimento || '').slice(0, 7) === mesRef()))
 
+// vencida primeiro, depois a que vence antes, sem data no fim
+const porVencimento = (a, b) => {
+  const va = a.data_vencimento || '9999-12-31'
+  const vb = b.data_vencimento || '9999-12-31'
+  return va < vb ? -1 : va > vb ? 1 : 0
+}
+
 export default function SuperAdminDespesas() {
-  const [lista, setLista]     = useState([])
-  const [loading, setLoading] = useState(true)
+  const [lista, setLista]       = useState([])
+  const [loading, setLoading]   = useState(true)
   const [savingId, setSavingId] = useState(null)
+  const [editId, setEditId]     = useState(null)
+  const [verInativas, setVerInativas] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -89,8 +86,7 @@ export default function SuperAdminDespesas() {
 
   async function salvar(id, patch) {
     setSavingId(id)
-    // otimista
-    setLista(l => l.map(d => d.id === id ? { ...d, ...patch } : d))
+    setLista(l => l.map(d => d.id === id ? { ...d, ...patch } : d))   // otimista
     await supabase.from('despesas_sistema')
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq('id', id)
@@ -101,7 +97,7 @@ export default function SuperAdminDespesas() {
     const { data } = await supabase.from('despesas_sistema')
       .insert({ nome: 'Nova despesa', categoria: 'outro', recorrencia: 'mensal' })
       .select().single()
-    if (data) setLista(l => [...l, data])
+    if (data) { setLista(l => [...l, data]); setEditId(data.id) }
   }
 
   async function excluir(id) {
@@ -117,12 +113,11 @@ export default function SuperAdminDespesas() {
   const totalAnualBRL = ativas
     .filter(d => d.recorrencia === 'anual' && d.moeda === 'BRL')
     .reduce((s, d) => s + Number(d.valor || 0), 0)
-  // custo mensal aproximado = mensais + anuais/12
   const custoMensalAprox = totalMensalBRL + totalAnualBRL / 12
   const comAlerta = ativas.filter(d => d.alerta_ativo).length
 
   // Barra do mês
-  const doMes    = lista.filter(contaNoMes)
+  const doMes    = lista.filter(contaNoMes).sort(porVencimento)
   const totalMes = doMes.reduce((s, d) => s + Number(d.valor || 0), 0)
   const pagoMes  = doMes.filter(pagoEsteMes).reduce((s, d) => s + Number(d.valor || 0), 0)
   const faltaMes = Math.max(0, totalMes - pagoMes)
@@ -130,230 +125,307 @@ export default function SuperAdminDespesas() {
   const quitado  = totalMes > 0 && faltaMes < 0.01
   const qtdPagas = doMes.filter(pagoEsteMes).length
 
+  const porUso   = ativas.filter(d => d.recorrencia === 'por_uso')
+  const outras   = ativas.filter(d => d.recorrencia !== 'por_uso' && !contaNoMes(d)).sort(porVencimento)
+  const inativas = lista.filter(d => !d.ativo)
+
+  const cardProps = { salvar, excluir, editId, setEditId, savingId, setLista }
+
   return (
     <div className="page-container">
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 className="page-title">Despesas fixas do sistema</h1>
+        <h1 className="page-title">Despesas do sistema</h1>
         <button className="btn btn-primary btn-sm" onClick={adicionar}>+ Nova despesa</button>
       </div>
 
       <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: -8, marginBottom: 20 }}>
-        O que <strong>você paga</strong> para manter a plataforma no ar. Preencha o valor e a data de
-        vencimento de cada serviço, e ligue o alerta para ser lembrado antes de cada pagamento.
+        O que <strong>você paga</strong> para manter a plataforma no ar. Marque cada conta como paga
+        conforme for pagando — na virada do mês tudo volta a ficar em aberto sozinho.
       </p>
 
-      {/* Barra do mês — enche conforme paga */}
+      {/* Hero — quanto falta pagar neste mês */}
       {totalMes > 0 && (
-        <div style={{
-          background: 'var(--card)', border: '1px solid var(--border)',
-          borderRadius: 14, padding: '16px 20px', marginBottom: 16,
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div className="desp-hero">
+          <div className="desp-hero-top">
             <div>
-              <strong style={{ fontSize: 15 }}>
-                💸 Gastos fixos de {MESES[new Date().getMonth()]}
-              </strong>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 3 }}>
-                {fmt(pagoMes)} <span style={{ opacity: 0.75 }}>de {fmt(totalMes)}</span>
-                <span style={{ marginLeft: 8, fontSize: 12 }}>
-                  · {qtdPagas} de {doMes.length} pagas
-                </span>
+              <div className="desp-hero-label">Contas de {MESES[new Date().getMonth()]}</div>
+              <div className="desp-hero-valor">
+                {quitado ? 'Tudo pago! 🎉' : `Faltam ${fmt(faltaMes)}`}
               </div>
             </div>
-            <strong style={{ fontSize: 22, fontWeight: 900, color: quitado ? '#16a34a' : '#ef4444' }}>
-              {pctMes}%
-            </strong>
+            <div className="desp-hero-pct">{pctMes}%</div>
           </div>
-
-          <div style={{ height: 12, borderRadius: 999, background: 'var(--border)', overflow: 'hidden', marginTop: 12 }}>
-            <div style={{
-              height: '100%', width: `${pctMes}%`, borderRadius: 999,
-              background: quitado
-                ? 'linear-gradient(90deg,#15803d,#22c55e)'
-                : 'linear-gradient(90deg,#b91c1c,#ef4444)',
-              transition: 'width 500ms ease',
-            }} />
+          <div className="desp-bar">
+            <div className={`desp-bar-fill${quitado ? ' ok' : ''}`} style={{ width: `${pctMes}%` }} />
           </div>
-
-          <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 8, color: quitado ? '#16a34a' : '#ef4444' }}>
-            {quitado
-              ? '✅ Tudo pago este mês!'
-              : `Faltam ${fmt(faltaMes)} para quitar o mês`}
+          <div className="desp-hero-sub">
+            {fmt(pagoMes)} pagos de {fmt(totalMes)} · {qtdPagas} de {doMes.length} contas
           </div>
         </div>
       )}
 
-      {/* Resumo */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 24 }}>
-        <div style={{ background: 'var(--primary)', color: '#fff', borderRadius: 12, padding: '16px 20px' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.85, textTransform: 'uppercase', letterSpacing: 0.5 }}>Custo mensal aprox.</div>
-          <div style={{ fontSize: 24, fontWeight: 900 }}>{fmt(custoMensalAprox)}</div>
-          <div style={{ fontSize: 11, opacity: 0.8, marginTop: 2 }}>mensais + anuais÷12</div>
+      <div className="desp-stats">
+        <div className="desp-stat">
+          <div className="desp-stat-label">Custo mensal aprox.</div>
+          <div className="desp-stat-valor">{fmt(custoMensalAprox)}</div>
+          <div className="desp-stat-hint">mensais + anuais ÷ 12</div>
         </div>
-        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderLeft: '4px solid #3b82f6', borderRadius: 12, padding: '16px 20px' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Total mensal</div>
-          <div style={{ fontSize: 24, fontWeight: 900 }}>{fmt(totalMensalBRL)}</div>
+        <div className="desp-stat">
+          <div className="desp-stat-label">Total mensal</div>
+          <div className="desp-stat-valor">{fmt(totalMensalBRL)}</div>
+          <div className="desp-stat-hint">contas que repetem todo mês</div>
         </div>
-        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderLeft: '4px solid #8b5cf6', borderRadius: 12, padding: '16px 20px' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Total anual</div>
-          <div style={{ fontSize: 24, fontWeight: 900 }}>{fmt(totalAnualBRL)}</div>
+        <div className="desp-stat">
+          <div className="desp-stat-label">Total anual</div>
+          <div className="desp-stat-valor">{fmt(totalAnualBRL)}</div>
+          <div className="desp-stat-hint">cobradas uma vez por ano</div>
         </div>
-        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderLeft: '4px solid #16a34a', borderRadius: 12, padding: '16px 20px' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Alertas ligados</div>
-          <div style={{ fontSize: 24, fontWeight: 900 }}>{comAlerta}<span style={{ fontSize: 14, color: 'var(--text-muted)' }}> / {ativas.length}</span></div>
+        <div className="desp-stat">
+          <div className="desp-stat-label">Alertas ligados</div>
+          <div className="desp-stat-valor">
+            {comAlerta}<span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}> / {ativas.length}</span>
+          </div>
+          <div className="desp-stat-hint">avisam antes de vencer</div>
         </div>
       </div>
 
       {loading ? (
-        <div className="empty-state">Carregando...</div>
+        <div className="empty-state">Carregando…</div>
       ) : lista.length === 0 ? (
         <div className="empty-state">Nenhuma despesa cadastrada. Clique em “+ Nova despesa”.</div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {lista.map(d => {
-            const cat = catInfo(d.categoria)
-            const dias = badgeVenc(diasAte(d.data_vencimento))
-            const naoMostraVenc = d.recorrencia === 'por_uso' || d.recorrencia === 'unico'
-            const noMes = contaNoMes(d)
-            const pago = pagoEsteMes(d)
-            return (
-              <div key={d.id} style={{
-                background: pago ? 'rgba(22,163,74,.07)' : 'var(--card)',
-                border: '1px solid var(--border)',
-                borderLeft: `4px solid ${pago ? '#16a34a' : cat.cor}`, borderRadius: 12, padding: '14px 18px',
-                opacity: d.ativo ? 1 : 0.55,
-              }}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
-                  {/* Nome */}
-                  <input
-                    value={d.nome}
-                    onChange={e => setLista(l => l.map(x => x.id === d.id ? { ...x, nome: e.target.value } : x))}
-                    onBlur={e => salvar(d.id, { nome: e.target.value })}
-                    style={{ ...inputStyle, flex: '1 1 200px', fontWeight: 700, fontSize: 14 }}
-                  />
-                  {/* Categoria */}
-                  <select value={d.categoria} onChange={e => salvar(d.id, { categoria: e.target.value })} style={{ ...inputStyle }}>
-                    {CATEGORIAS.map(c => <option key={c.valor} value={c.valor}>{c.label}</option>)}
-                  </select>
-                  {/* Recorrência */}
-                  <select value={d.recorrencia} onChange={e => salvar(d.id, { recorrencia: e.target.value })} style={{ ...inputStyle }}>
-                    {RECORRENCIAS.map(r => <option key={r.valor} value={r.valor}>{r.label}</option>)}
-                  </select>
-                  {/* Valor */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <select value={d.moeda} onChange={e => salvar(d.id, { moeda: e.target.value })} style={{ ...inputStyle, padding: '5px 4px' }}>
-                      <option value="BRL">R$</option>
-                      <option value="USD">US$</option>
-                    </select>
-                    <input
-                      type="number" min="0" step="0.01" placeholder="0,00"
-                      value={d.valor ?? ''}
-                      onChange={e => setLista(l => l.map(x => x.id === d.id ? { ...x, valor: e.target.value } : x))}
-                      onBlur={e => salvar(d.id, { valor: e.target.value === '' ? null : Number(e.target.value) })}
-                      style={{ ...inputStyle, width: 90, textAlign: 'right' }}
-                    />
-                  </div>
-                  {/* Vencimento */}
-                  {!naoMostraVenc && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <input
-                        type="date"
-                        value={d.data_vencimento ?? ''}
-                        onChange={e => salvar(d.id, { data_vencimento: e.target.value || null })}
-                        style={{ ...inputStyle }}
-                      />
-                      {dias && (
-                        <span style={{ fontSize: 11, fontWeight: 700, color: dias.cor, background: dias.bg, padding: '2px 7px', borderRadius: 20, whiteSpace: 'nowrap' }}>
-                          {dias.txt}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  {naoMostraVenc && (
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                      {recLabel(d.recorrencia)} — sem vencimento fixo
-                    </span>
-                  )}
-                  {/* Ações à direita */}
-                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-                    {savingId === d.id && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>salvando…</span>}
-                    {/* Pago no mês — é o que enche a barra lá em cima */}
-                    {noMes && (
-                      <button
-                        onClick={() => salvar(d.id, { pago_em: pago ? null : hojeISO() })}
-                        title={pago
-                          ? `Pago em ${new Date(d.pago_em + 'T00:00:00').toLocaleDateString('pt-BR')} — clique pra desmarcar`
-                          : 'Marcar como paga neste mês'}
-                        style={{
-                          border: `1px solid ${pago ? '#16a34a' : '#ef4444'}`,
-                          background: pago ? 'rgba(22,163,74,.14)' : 'transparent',
-                          color: pago ? '#16a34a' : '#ef4444',
-                          fontSize: 12, fontWeight: 700, padding: '4px 11px',
-                          borderRadius: 20, cursor: 'pointer', whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {pago ? '✅ Paga' : 'Marcar paga'}
-                      </button>
-                    )}
-                    {/* Alerta */}
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer', userSelect: 'none' }}>
-                      <input
-                        type="checkbox"
-                        checked={!!d.alerta_ativo}
-                        disabled={naoMostraVenc}
-                        onChange={e => salvar(d.id, { alerta_ativo: e.target.checked })}
-                      />
-                      <span style={{ color: d.alerta_ativo ? 'var(--primary)' : 'var(--text-muted)', fontWeight: 600 }}>
-                        🔔 Alerta
-                      </span>
-                    </label>
-                    {d.alerta_ativo && !naoMostraVenc && (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 12, color: 'var(--text-muted)' }}>
-                        <input
-                          type="number" min="0" max="60"
-                          value={d.alerta_dias_antes ?? 3}
-                          onChange={e => setLista(l => l.map(x => x.id === d.id ? { ...x, alerta_dias_antes: e.target.value } : x))}
-                          onBlur={e => salvar(d.id, { alerta_dias_antes: Number(e.target.value || 0) })}
-                          style={{ ...inputStyle, width: 48, textAlign: 'right', padding: '3px 6px' }}
-                        />
-                        dias antes
-                      </span>
-                    )}
-                    {/* Ativo/inativo */}
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => salvar(d.id, { ativo: !d.ativo })}
-                      title={d.ativo ? 'Marcar como inativa' : 'Reativar'}
-                    >
-                      {d.ativo ? 'Ativa' : 'Inativa'}
-                    </button>
-                    <button
-                      onClick={() => excluir(d.id)}
-                      title="Excluir"
-                      style={{ border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-                {/* Observações */}
-                <input
-                  value={d.observacoes ?? ''}
-                  placeholder="Observação (ex: cartão usado, onde pagar, link…)"
-                  onChange={e => setLista(l => l.map(x => x.id === d.id ? { ...x, observacoes: e.target.value } : x))}
-                  onBlur={e => salvar(d.id, { observacoes: e.target.value })}
-                  style={{ ...inputStyle, width: '100%', marginTop: 10, border: 'none', borderTop: '1px solid var(--border)', borderRadius: 0, background: 'transparent', color: 'var(--text-muted)', paddingLeft: 0 }}
-                />
+        <>
+          {doMes.length > 0 && (
+            <>
+              <div className="desp-secao">A pagar este mês</div>
+              <div className="desp-lista">
+                {doMes.map(d => <Despesa key={d.id} d={d} {...cardProps} />)}
               </div>
-            )
-          })}
-        </div>
+            </>
+          )}
+
+          {outras.length > 0 && (
+            <>
+              <div className="desp-secao">Outras contas</div>
+              <div className="desp-lista">
+                {outras.map(d => <Despesa key={d.id} d={d} {...cardProps} />)}
+              </div>
+            </>
+          )}
+
+          {porUso.length > 0 && (
+            <>
+              <div className="desp-secao">Cobram por uso — sem vencimento fixo</div>
+              <div className="desp-lista">
+                {porUso.map(d => <Despesa key={d.id} d={d} {...cardProps} />)}
+              </div>
+            </>
+          )}
+
+          {inativas.length > 0 && (
+            <>
+              <div className="desp-secao">
+                <button className="desp-secao-btn" onClick={() => setVerInativas(v => !v)}>
+                  {verInativas ? '▾' : '▸'} Inativas ({inativas.length})
+                </button>
+              </div>
+              {verInativas && (
+                <div className="desp-lista">
+                  {inativas.map(d => <Despesa key={d.id} d={d} {...cardProps} />)}
+                </div>
+              )}
+            </>
+          )}
+        </>
       )}
 
-      <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 20 }}>
-        Serviços “por uso” (Mercado Pago, Efí, IA, WhatsApp Cloud) não têm vencimento fixo — cobram por
-        transação/uso, então ficam aqui só como referência de custo.
+      <p className="desp-rodape">
+        Serviços “por uso” (Mercado Pago, Efí, IA, WhatsApp Cloud) cobram por transação, então ficam
+        aqui só como referência de custo — não entram na conta do mês.
       </p>
+    </div>
+  )
+}
+
+/* ── Um cartão de despesa: leitura limpa, edição só ao clicar no lápis ─────── */
+function Despesa({ d, salvar, excluir, editId, setEditId, savingId, setLista }) {
+  const cat     = catInfo(d.categoria)
+  const editando = editId === d.id
+  const semVenc  = d.recorrencia === 'por_uso' || d.recorrencia === 'unico'
+  const noMes    = contaNoMes(d)
+  const pago     = pagoEsteMes(d)
+  const dias     = diasAte(d.data_vencimento)
+  const vencida  = !pago && dias !== null && dias < 0
+
+  const editar = patch => setLista(l => l.map(x => x.id === d.id ? { ...x, ...patch } : x))
+
+  let venc = null
+  if (pago) {
+    venc = { cls: '', txt: <>✓ paga em <b>{dataBR(d.pago_em)}</b></> }
+  } else if (d.recorrencia === 'por_uso') {
+    venc = { cls: '', txt: 'conforme o uso' }
+  } else if (dias === null) {
+    venc = { cls: '', txt: 'sem data' }
+  } else if (dias < 0) {
+    venc = { cls: 'vencida', txt: <>venceu há <b>{Math.abs(dias)} dias</b></> }
+  } else if (dias === 0) {
+    venc = { cls: 'vencida', txt: <b>vence hoje</b> }
+  } else if (dias <= 5) {
+    venc = { cls: 'alerta', txt: <>vence {dataBR(d.data_vencimento)} · <b>em {dias}d</b></> }
+  } else {
+    venc = { cls: '', txt: <>vence {dataBR(d.data_vencimento)} · em {dias}d</> }
+  }
+
+  const valorNum = Number(d.valor || 0)
+  const temValor = d.valor !== null && d.valor !== '' && valorNum > 0
+
+  return (
+    <div
+      className={`desp-card${pago ? ' paga' : ''}${vencida ? ' vencida' : ''}${d.ativo ? '' : ' inativa'}`}
+      style={{ '--cat': cat.cor, '--cat-bg': cat.cor + '22' }}
+    >
+      <div className="desp-linha">
+        <div className="desp-info">
+          <div className="desp-nome">
+            {d.nome}
+            {!d.ativo && <span className="desp-chip cinza">inativa</span>}
+          </div>
+          <div className="desp-chips">
+            <span className="desp-chip">{cat.label}</span>
+            <span className="desp-chip cinza">{recLabel(d.recorrencia)}</span>
+            {d.alerta_ativo && !semVenc && (
+              <span className="desp-chip cinza">🔔 {d.alerta_dias_antes ?? 3}d antes</span>
+            )}
+          </div>
+          {d.observacoes && <div className="desp-obs" title={d.observacoes}>{d.observacoes}</div>}
+        </div>
+
+        <div>
+          <div className={`desp-valor${temValor ? '' : ' vazio'}`}>
+            {temValor ? fmt(d.valor, d.moeda || 'BRL')
+              : d.recorrencia === 'por_uso' ? 'variável'
+              : valorNum === 0 && d.valor !== null ? 'sem custo'
+              : 'sem valor'}
+          </div>
+          <div className={`desp-venc ${venc.cls}`}>{venc.txt}</div>
+        </div>
+
+        <div className="desp-acoes">
+          {savingId === d.id && <span className="desp-salvando">salvando…</span>}
+          {noMes && (
+            <button
+              className={`desp-pagar${pago ? ' paga' : ''}`}
+              onClick={() => salvar(d.id, { pago_em: pago ? null : hojeISO() })}
+              title={pago ? 'Clique pra desmarcar' : 'Marcar como paga neste mês'}
+            >
+              {pago ? '✓ Paga' : 'Marcar paga'}
+            </button>
+          )}
+          <button
+            className={`desp-icone${editando ? ' ativo' : ''}`}
+            onClick={() => setEditId(editando ? null : d.id)}
+            title={editando ? 'Fechar' : 'Editar'}
+          >
+            {editando ? '✕' : '✏️'}
+          </button>
+        </div>
+      </div>
+
+      {editando && (
+        <div className="desp-edit">
+          <div className="desp-campo largo">
+            <label>Nome do serviço</label>
+            <input
+              value={d.nome ?? ''}
+              onChange={e => editar({ nome: e.target.value })}
+              onBlur={e => salvar(d.id, { nome: e.target.value })}
+            />
+          </div>
+
+          <div className="desp-campo">
+            <label>Categoria</label>
+            <select value={d.categoria} onChange={e => salvar(d.id, { categoria: e.target.value })}>
+              {CATEGORIAS.map(c => <option key={c.valor} value={c.valor}>{c.label}</option>)}
+            </select>
+          </div>
+
+          <div className="desp-campo">
+            <label>Cobrança</label>
+            <select value={d.recorrencia} onChange={e => salvar(d.id, { recorrencia: e.target.value })}>
+              {RECORRENCIAS.map(r => <option key={r.valor} value={r.valor}>{r.label}</option>)}
+            </select>
+          </div>
+
+          <div className="desp-campo">
+            <label>Valor</label>
+            <div className="desp-moeda">
+              <select value={d.moeda ?? 'BRL'} onChange={e => salvar(d.id, { moeda: e.target.value })}>
+                <option value="BRL">R$</option>
+                <option value="USD">US$</option>
+              </select>
+              <input
+                type="number" min="0" step="0.01" placeholder="0,00"
+                value={d.valor ?? ''}
+                onChange={e => editar({ valor: e.target.value })}
+                onBlur={e => salvar(d.id, { valor: e.target.value === '' ? null : Number(e.target.value) })}
+              />
+            </div>
+          </div>
+
+          {!semVenc && (
+            <div className="desp-campo">
+              <label>Próximo vencimento</label>
+              <input
+                type="date"
+                value={d.data_vencimento ?? ''}
+                onChange={e => salvar(d.id, { data_vencimento: e.target.value || null })}
+              />
+            </div>
+          )}
+
+          {!semVenc && (
+            <>
+              <label className="desp-check">
+                <input
+                  type="checkbox"
+                  checked={!!d.alerta_ativo}
+                  onChange={e => salvar(d.id, { alerta_ativo: e.target.checked })}
+                />
+                🔔 Avisar antes de vencer
+              </label>
+              {d.alerta_ativo && (
+                <div className="desp-campo">
+                  <label>Avisar quantos dias antes</label>
+                  <input
+                    type="number" min="0" max="60"
+                    value={d.alerta_dias_antes ?? 3}
+                    onChange={e => editar({ alerta_dias_antes: e.target.value })}
+                    onBlur={e => salvar(d.id, { alerta_dias_antes: Number(e.target.value || 0) })}
+                  />
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="desp-campo largo">
+            <label>Observação</label>
+            <input
+              value={d.observacoes ?? ''}
+              placeholder="ex: cartão usado, onde pagar, link…"
+              onChange={e => editar({ observacoes: e.target.value })}
+              onBlur={e => salvar(d.id, { observacoes: e.target.value })}
+            />
+          </div>
+
+          <div className="desp-edit-rodape">
+            <button className="btn btn-secondary btn-sm" onClick={() => salvar(d.id, { ativo: !d.ativo })}>
+              {d.ativo ? 'Marcar como inativa' : 'Reativar'}
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setEditId(null)}>Fechar</button>
+            <button className="desp-excluir" onClick={() => excluir(d.id)}>Excluir despesa</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
