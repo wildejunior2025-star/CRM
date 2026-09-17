@@ -44,6 +44,31 @@ const inputStyle = {
   background: 'var(--bg)', color: 'var(--text)', fontSize: 13,
 }
 
+// ── Gastos do mês ────────────────────────────────────────────────────────────
+// A barra usa a coluna `pago_em`: pagou, marca a data; a soma do que está pago
+// no mês corrente é o quanto ela enche. Vira o mês, `pago_em` fica no mês
+// anterior e tudo volta a "em aberto" sozinho — sem cron, sem zerar nada.
+const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+  'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
+
+function hojeISO() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+const mesRef = () => hojeISO().slice(0, 7)   // "2026-08"
+
+const pagoEsteMes = d => !!d.pago_em && String(d.pago_em).slice(0, 7) === mesRef()
+
+// Entra na conta do mês: mensal sempre; anual/única só no mês em que vence.
+// "Por uso" fica de fora — não tem valor fechado pra cobrar.
+const contaNoMes = d =>
+  !!d.ativo &&
+  d.moeda === 'BRL' &&
+  Number(d.valor || 0) > 0 &&
+  (d.recorrencia === 'mensal' ||
+    ((d.recorrencia === 'anual' || d.recorrencia === 'unico') &&
+      String(d.data_vencimento || '').slice(0, 7) === mesRef()))
+
 export default function SuperAdminDespesas() {
   const [lista, setLista]     = useState([])
   const [loading, setLoading] = useState(true)
@@ -96,6 +121,15 @@ export default function SuperAdminDespesas() {
   const custoMensalAprox = totalMensalBRL + totalAnualBRL / 12
   const comAlerta = ativas.filter(d => d.alerta_ativo).length
 
+  // Barra do mês
+  const doMes    = lista.filter(contaNoMes)
+  const totalMes = doMes.reduce((s, d) => s + Number(d.valor || 0), 0)
+  const pagoMes  = doMes.filter(pagoEsteMes).reduce((s, d) => s + Number(d.valor || 0), 0)
+  const faltaMes = Math.max(0, totalMes - pagoMes)
+  const pctMes   = totalMes > 0 ? Math.min(100, Math.round((pagoMes / totalMes) * 100)) : 0
+  const quitado  = totalMes > 0 && faltaMes < 0.01
+  const qtdPagas = doMes.filter(pagoEsteMes).length
+
   return (
     <div className="page-container">
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -107,6 +141,47 @@ export default function SuperAdminDespesas() {
         O que <strong>você paga</strong> para manter a plataforma no ar. Preencha o valor e a data de
         vencimento de cada serviço, e ligue o alerta para ser lembrado antes de cada pagamento.
       </p>
+
+      {/* Barra do mês — enche conforme paga */}
+      {totalMes > 0 && (
+        <div style={{
+          background: 'var(--card)', border: '1px solid var(--border)',
+          borderRadius: 14, padding: '16px 20px', marginBottom: 16,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <strong style={{ fontSize: 15 }}>
+                💸 Gastos fixos de {MESES[new Date().getMonth()]}
+              </strong>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 3 }}>
+                {fmt(pagoMes)} <span style={{ opacity: 0.75 }}>de {fmt(totalMes)}</span>
+                <span style={{ marginLeft: 8, fontSize: 12 }}>
+                  · {qtdPagas} de {doMes.length} pagas
+                </span>
+              </div>
+            </div>
+            <strong style={{ fontSize: 22, fontWeight: 900, color: quitado ? '#16a34a' : '#ef4444' }}>
+              {pctMes}%
+            </strong>
+          </div>
+
+          <div style={{ height: 12, borderRadius: 999, background: 'var(--border)', overflow: 'hidden', marginTop: 12 }}>
+            <div style={{
+              height: '100%', width: `${pctMes}%`, borderRadius: 999,
+              background: quitado
+                ? 'linear-gradient(90deg,#15803d,#22c55e)'
+                : 'linear-gradient(90deg,#b91c1c,#ef4444)',
+              transition: 'width 500ms ease',
+            }} />
+          </div>
+
+          <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 8, color: quitado ? '#16a34a' : '#ef4444' }}>
+            {quitado
+              ? '✅ Tudo pago este mês!'
+              : `Faltam ${fmt(faltaMes)} para quitar o mês`}
+          </div>
+        </div>
+      )}
 
       {/* Resumo */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 24 }}>
@@ -139,10 +214,13 @@ export default function SuperAdminDespesas() {
             const cat = catInfo(d.categoria)
             const dias = badgeVenc(diasAte(d.data_vencimento))
             const naoMostraVenc = d.recorrencia === 'por_uso' || d.recorrencia === 'unico'
+            const noMes = contaNoMes(d)
+            const pago = pagoEsteMes(d)
             return (
               <div key={d.id} style={{
-                background: 'var(--card)', border: '1px solid var(--border)',
-                borderLeft: `4px solid ${cat.cor}`, borderRadius: 12, padding: '14px 18px',
+                background: pago ? 'rgba(22,163,74,.07)' : 'var(--card)',
+                border: '1px solid var(--border)',
+                borderLeft: `4px solid ${pago ? '#16a34a' : cat.cor}`, borderRadius: 12, padding: '14px 18px',
                 opacity: d.ativo ? 1 : 0.55,
               }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
@@ -199,6 +277,24 @@ export default function SuperAdminDespesas() {
                   {/* Ações à direita */}
                   <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
                     {savingId === d.id && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>salvando…</span>}
+                    {/* Pago no mês — é o que enche a barra lá em cima */}
+                    {noMes && (
+                      <button
+                        onClick={() => salvar(d.id, { pago_em: pago ? null : hojeISO() })}
+                        title={pago
+                          ? `Pago em ${new Date(d.pago_em + 'T00:00:00').toLocaleDateString('pt-BR')} — clique pra desmarcar`
+                          : 'Marcar como paga neste mês'}
+                        style={{
+                          border: `1px solid ${pago ? '#16a34a' : '#ef4444'}`,
+                          background: pago ? 'rgba(22,163,74,.14)' : 'transparent',
+                          color: pago ? '#16a34a' : '#ef4444',
+                          fontSize: 12, fontWeight: 700, padding: '4px 11px',
+                          borderRadius: 20, cursor: 'pointer', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {pago ? '✅ Paga' : 'Marcar paga'}
+                      </button>
+                    )}
                     {/* Alerta */}
                     <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer', userSelect: 'none' }}>
                       <input
