@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, acharAluno, situacaoAluno,
+  zoomNoRosto, entrarTelaCheia, sairTelaCheia,
 } from '../../lib/reconhecimentoFacial'
 
 // Tablet da recepção (academia.fwcinter.com/recepcao).
@@ -71,6 +72,7 @@ export default function AcademiaRecepcao() {
         const video = videoRef.current
         if (!video || video.readyState < 2) { await esperar(200); continue }
         const r = await lerRosto(video).catch(() => null)
+        zoomNoRosto(video, r?.caixa, 0.5)
         if (!vivo) break
         if (!r) {
           candidato = null; seguidas = 0; desconhecidas = 0
@@ -128,12 +130,13 @@ export default function AcademiaRecepcao() {
       clearTimeout(timerCartao)
       desligarCamera(stream)
       wakeLock?.release?.().catch(() => {})
+      sairTelaCheia()
     }
   }, [iniciado, empresa.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function comecar() {
     destravarSom()
-    document.documentElement.requestFullscreen?.().catch(() => {})
+    entrarTelaCheia()
     setIniciado(true)
   }
 

@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, miniaturaDoRosto, situacaoAluno, acharAluno,
+  acharCaixaRosto, zoomNoRosto, entrarTelaCheia, sairTelaCheia,
 } from '../../lib/reconhecimentoFacial'
 
 // Quantas "digitais do rosto" o cadastro guarda. Mais de uma deixa o
@@ -170,7 +171,7 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
           <div className="ac-rosto-pronto">
             {fotoAtual ? <img src={fotoAtual} alt="" /> : <div className="ac-foto ac-foto-vazia grande">?</div>}
             {rosto && <span className="ac-status ac-liberado">Rosto capturado ✓</span>}
-            <button type="button" className={`btn ${fotoAtual ? 'btn-secondary btn-sm' : 'btn-primary'}`} onClick={() => setCameraAberta(true)}>
+            <button type="button" className={`btn ${fotoAtual ? 'btn-secondary btn-sm' : 'btn-primary'}`} onClick={() => { entrarTelaCheia(); setCameraAberta(true) }}>
               {fotoAtual ? 'Tirar de novo' : '📷 Cadastrar rosto'}
             </button>
           </div>
@@ -244,8 +245,23 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
         setMsg(e.name === 'NotAllowedError' ? 'A câmera foi bloqueada. Libere nas permissões do navegador.' : e.message)
       }
     })()
-    return () => { vivo = false; desligarCamera(stream) }
+    return () => { vivo = false; desligarCamera(stream); sairTelaCheia() }
   }, [])
+
+  // Enquanto espera o "Capturar", o zoom fica seguindo o rosto.
+  useEffect(() => {
+    if (fase !== 'pronto') return
+    let vivo = true
+    ;(async () => {
+      while (vivo) {
+        const caixa = await acharCaixaRosto(videoRef.current).catch(() => null)
+        if (!vivo) break
+        zoomNoRosto(videoRef.current, caixa)
+        await esperar(120)
+      }
+    })()
+    return () => { vivo = false }
+  }, [fase])
 
   async function capturar() {
     setFase('capturando')
@@ -257,6 +273,7 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
       tentativas++
       setMsg(dicas[descritores.length] || 'Segure...')
       const r = await lerRosto(videoRef.current)
+      zoomNoRosto(videoRef.current, r?.caixa)
       if (!r) { await esperar(150); continue }
       if (r.quantos > 1) { setMsg('Tem mais de uma pessoa na câmera.'); await esperar(400); continue }
       if (!foto) foto = miniaturaDoRosto(videoRef.current, r.caixa, 280)
