@@ -17,6 +17,16 @@ const DESCONHECIDO_LEITURAS = 4  // rosto sem cadastro por 4 leituras → "não 
 const MOSTRAR_MS = 5000          // quanto tempo o cartão fica na tela
 const NAO_REGISTRAR_DE_NOVO_MS = 3 * 60 * 1000 // mesma pessoa não conta 2 entradas em 3 min
 const RECARREGAR_ALUNOS_MS = 60 * 1000
+// Prova de vida (piscar): olho abaixo de 75% do aberto = fechou; volta acima
+// de 88% = abriu. Uma foto mostrada no celular nunca faz isso.
+const PISCOU_FECHADO = 0.75
+const PISCOU_ABERTO = 0.88
+const PISCAR_PRAZO_MS = 6000
+const CHAVE_PISCAR = 'academia_exigir_piscar'
+
+function lerExigirPiscar() {
+  try { return localStorage.getItem(CHAVE_PISCAR) !== 'nao' } catch { return true }
+}
 
 export default function AcademiaRecepcao() {
   const { empresa } = useAuth()
@@ -27,6 +37,13 @@ export default function AcademiaRecepcao() {
   const [cartao, setCartao] = useState(null) // { aluno, situacao } | { desconhecido: true }
   const [ultimas, setUltimas] = useState([])
   const [qtdAlunos, setQtdAlunos] = useState(0)
+  const [exigirPiscar, setExigirPiscar] = useState(lerExigirPiscar)
+  const [pedindoPiscar, setPedindoPiscar] = useState(null) // { nome, demorou }
+
+  function trocarPiscar(v) {
+    setExigirPiscar(v)
+    try { localStorage.setItem(CHAVE_PISCAR, v ? 'sim' : 'nao') } catch { /* só não lembra */ }
+  }
 
   async function carregarAlunos() {
     const { data } = await supabase
@@ -49,6 +66,28 @@ export default function AcademiaRecepcao() {
     let desconhecidas = 0
     let cartaoAte = 0
     let cartaoAtualId = null
+    let semRosto = 0
+    let piscar = null // { alunoId, inicio, base, fechou } enquanto espera a piscada
+
+    // Olho aberto → fechado → aberto de novo = piscou. A "base" é o olho
+    // aberto dessa pessoa (cada um tem um tamanho), medida enquanto espera.
+    function provouVida(aluno, olhos) {
+      const agora = Date.now()
+      if (!piscar || piscar.alunoId !== aluno.id) {
+        piscar = { alunoId: aluno.id, inicio: agora, base: olhos, fechou: false }
+        setPedindoPiscar({ nome: aluno.nome.split(' ')[0], demorou: false })
+        return false
+      }
+      if (!piscar.fechou) piscar.base = Math.max(piscar.base * 0.97, olhos)
+      if (olhos < piscar.base * PISCOU_FECHADO) piscar.fechou = true
+      else if (piscar.fechou && olhos > piscar.base * PISCOU_ABERTO) return true
+      if (agora - piscar.inicio > PISCAR_PRAZO_MS) {
+        // Não viu a piscada: pede de novo, mais devagar.
+        piscar = { alunoId: aluno.id, inicio: agora, base: olhos, fechou: false }
+        setPedindoPiscar({ nome: aluno.nome.split(' ')[0], demorou: true })
+      }
+      return false
+    }
 
     function mostrar(c) {
       setCartao(c)
@@ -75,34 +114,52 @@ export default function AcademiaRecepcao() {
         if (!vivo) break
         if (!r) {
           candidato = null; seguidas = 0; desconhecidas = 0
-          await esperar(250)
+          semRosto++
+          // Saiu da frente da câmera: cancela o "pisque".
+          if (piscar && semRosto >= 6) { piscar = null; setPedindoPiscar(null) }
+          await esperar(piscar ? 40 : 250)
           continue
         }
+        semRosto = 0
         const achado = acharAluno(r.descritor, alunosRef.current)
+        // Com o olho fechado a leitura às vezes não bate com ninguém: durante
+        // o "pisque", uma leitura dessas conta como a mesma pessoa.
+        if (!achado && piscar && r.olhos < piscar.base * PISCOU_FECHADO) {
+          piscar.fechou = true
+          await esperar(40)
+          continue
+        }
         if (achado) {
           desconhecidas = 0
           if (candidato === achado.aluno.id) seguidas++
           else { candidato = achado.aluno.id; seguidas = 1 }
-          if (seguidas >= CONFIRMAR_LEITURAS) {
-            const situacao = situacaoAluno(achado.aluno)
-            // Mesmo aluno ainda na frente da câmera: não pisca o cartão de novo.
-            if (Date.now() > cartaoAte - 1000 || cartaoAtualId !== achado.aluno.id) {
-              cartaoAtualId = achado.aluno.id
-              mostrar({ aluno: achado.aluno, situacao })
-              bipe(situacao.status === 'liberado')
+          const jaNaTela = cartaoAtualId === achado.aluno.id && Date.now() < cartaoAte - 1000
+          if (seguidas >= CONFIRMAR_LEITURAS && !jaNaTela) {
+            // Prova de vida: antes de mostrar o resultado, a pessoa pisca.
+            if (exigirPiscar && !provouVida(achado.aluno, r.olhos)) {
+              await esperar(40)
+              continue
             }
+            piscar = null
+            setPedindoPiscar(null)
+            const situacao = situacaoAluno(achado.aluno)
+            cartaoAtualId = achado.aluno.id
+            mostrar({ aluno: achado.aluno, situacao })
+            bipe(situacao.status === 'liberado')
             registrar(achado.aluno, situacao, achado.distancia)
           }
         } else {
           candidato = null; seguidas = 0
           desconhecidas++
           if (desconhecidas === DESCONHECIDO_LEITURAS && Date.now() > cartaoAte) {
+            piscar = null
+            setPedindoPiscar(null)
             cartaoAtualId = null
             mostrar({ desconhecido: true })
             bipe(false)
           }
         }
-        await esperar(150)
+        await esperar(piscar ? 40 : 150)
       }
     }
 
@@ -131,7 +188,7 @@ export default function AcademiaRecepcao() {
       wakeLock?.release?.().catch(() => {})
       sairTelaCheia()
     }
-  }, [iniciado, empresa.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [iniciado, empresa.id, exigirPiscar]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function comecar() {
     destravarSom()
@@ -145,6 +202,10 @@ export default function AcademiaRecepcao() {
         <div className="ac-logo">🏋️</div>
         <h1>{empresa?.nome}</h1>
         <p>Tela da recepção. Deixe o tablet de pé, com a câmera na altura do rosto.</p>
+        <label className="ac-rec-opcao">
+          <input type="checkbox" checked={exigirPiscar} onChange={e => trocarPiscar(e.target.checked)} />
+          Pedir pra piscar os olhos (não deixa passar com foto do aluno no celular)
+        </label>
         <button className="btn btn-primary ac-rec-comecar" onClick={comecar}>Começar</button>
         <Link to="/" className="ac-rec-voltar">← Voltar pros alunos</Link>
       </div>
@@ -158,8 +219,15 @@ export default function AcademiaRecepcao() {
         {estado.fase !== 'rodando' && (
           <div className="ac-rec-overlay"><p className={estado.fase === 'erro' ? 'ac-erro' : ''}>{estado.msg}</p></div>
         )}
-        {estado.fase === 'rodando' && !cartao && (
+        {estado.fase === 'rodando' && !cartao && !pedindoPiscar && (
           <div className="ac-rec-dica">Olhe para a câmera</div>
+        )}
+        {estado.fase === 'rodando' && !cartao && pedindoPiscar && (
+          <div className="ac-rec-piscar">
+            <div className="ac-rec-piscar-olho">👁️</div>
+            <strong>Olá, {pedindoPiscar.nome}!</strong>
+            <span>{pedindoPiscar.demorou ? 'Pisque devagar, olhando pra câmera' : 'Pisque os olhos'}</span>
+          </div>
         )}
         {cartao && <CartaoAcesso cartao={cartao} />}
       </div>

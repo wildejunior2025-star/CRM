@@ -9,6 +9,9 @@ import {
 // Quantas "digitais do rosto" o cadastro guarda. Mais de uma deixa o
 // reconhecimento firme com o aluno de lado, de óculos, com luz diferente.
 const AMOSTRAS = 4
+// Quanto tem que virar a cabeça pra etapa "vire pro lado" contar.
+const GIRO_LADO = 0.15
+const GIRO_FRENTE = 0.08 // até aqui conta como "de frente"
 
 function hojeMais(dias) {
   const d = new Date()
@@ -219,14 +222,15 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
   )
 }
 
-// Liga a câmera, espera um rosto só e junta AMOSTRAS leituras com uns
-// instantes entre elas (pedindo pra virar um pouco a cabeça).
+// Liga a câmera e guia a pessoa em 4 etapas (frente, um lado, outro lado,
+// frente + piscar), guardando uma "digital do rosto" em cada.
 function CapturaRosto({ alunos, onPronto, onCancelar }) {
   const videoRef = useRef(null)
   const [fase, setFase] = useState('carregando') // carregando | pronto | capturando | revisar | erro
   const [msg, setMsg] = useState('Preparando a câmera...')
   const [feitas, setFeitas] = useState(0)
   const [resultado, setResultado] = useState(null) // { descritores, foto } esperando o "ficou boa?"
+  const capturaRef = useRef(0) // muda a cada captura; captura antiga que ainda estiver rodando para sozinha
 
   useEffect(() => {
     let stream = null
@@ -245,32 +249,68 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
         setMsg(e.name === 'NotAllowedError' ? 'A câmera foi bloqueada. Libere nas permissões do navegador.' : e.message)
       }
     })()
-    return () => { vivo = false; desligarCamera(stream); sairTelaCheia() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- é um contador, não um nó
+    return () => { vivo = false; capturaRef.current++; desligarCamera(stream); sairTelaCheia() }
   }, [])
 
+  // Cada etapa só passa quando a pessoa FEZ o que a tela pediu — conferido
+  // pela posição do nariz (virar) e pelos olhos (piscar). Sem pular por tempo;
+  // quem desistir aperta Cancelar.
   async function capturar() {
     setFase('capturando')
+    const minha = ++capturaRef.current
+    const cancelou = () => capturaRef.current !== minha
     const descritores = []
-    let foto = null
-    const dicas = ['Olhe pra câmera', 'Vire um pouco pra esquerda', 'Agora um pouco pra direita', 'Olhe pra câmera de novo']
-    let tentativas = 0
-    while (descritores.length < AMOSTRAS && tentativas < 40) {
-      tentativas++
-      setMsg(dicas[descritores.length] || 'Segure...')
-      const r = await lerRosto(videoRef.current)
-      if (!r) { await esperar(150); continue }
-      if (r.quantos > 1) { setMsg('Tem mais de uma pessoa na câmera.'); await esperar(400); continue }
-      if (!foto) foto = miniaturaDoRosto(videoRef.current, r.caixa, 280)
-      descritores.push(Array.from(r.descritor))
-      setFeitas(descritores.length)
-      await esperar(700)
+    let foto
+    let ladoVirado = 0
+    const ok = async texto => { setMsg(`✓ ${texto}`); setFeitas(descritores.length); await esperar(900) }
+
+    // Espera uma leitura que cumpra `condicao` por `seguidas` vezes seguidas.
+    async function esperarQue(dica, condicao, seguidas = 2) {
+      let n = 0
+      setMsg(dica)
+      while (!cancelou()) {
+        const r = await lerRosto(videoRef.current).catch(() => null)
+        if (cancelou()) return null
+        if (!r) { setMsg(`${dica} — não estou vendo o rosto`); n = 0; await esperar(120); continue }
+        if (r.quantos > 1) { setMsg('Tem mais de uma pessoa na câmera.'); n = 0; await esperar(300); continue }
+        setMsg(dica)
+        if (condicao(r)) { if (++n >= seguidas) return r } else n = 0
+        await esperar(80)
+      }
+      return null
     }
-    if (descritores.length < AMOSTRAS) {
-      setFase('pronto')
-      setFeitas(0)
-      setMsg('Não achei o rosto direito. Chegue mais perto e com mais luz.')
-      return
-    }
+
+    // 1. De frente
+    let r = await esperarQue('Olhe de frente pra câmera', x => Math.abs(x.giro) < GIRO_FRENTE, 3)
+    if (!r) return
+    foto = miniaturaDoRosto(videoRef.current, r.caixa, 280)
+    descritores.push(Array.from(r.descritor))
+    await ok('Muito bem!')
+
+    // 2. Vira pra um lado
+    r = await esperarQue('Vire o rosto devagar pra um lado', x => Math.abs(x.giro) > GIRO_LADO)
+    if (!r) return
+    ladoVirado = Math.sign(r.giro)
+    descritores.push(Array.from(r.descritor))
+    await ok('Isso!')
+
+    // 3. Vira pro outro lado
+    r = await esperarQue('Agora vire pro outro lado', x => Math.sign(x.giro) === -ladoVirado && Math.abs(x.giro) > GIRO_LADO)
+    if (!r) return
+    descritores.push(Array.from(r.descritor))
+    await ok('Perfeito!')
+
+    // 4. De frente de novo + piscar (prova de que é gente, não foto)
+    r = await esperarQue('Olhe de frente de novo', x => Math.abs(x.giro) < GIRO_FRENTE, 3)
+    if (!r) return
+    descritores.push(Array.from(r.descritor))
+    const aberto = r.olhos
+    const fechou = await esperarQue('Agora pisque os olhos', x => x.olhos < aberto * 0.75, 1)
+    if (!fechou) return
+    const abriu = await esperarQue('Agora pisque os olhos', x => x.olhos > aberto * 0.88, 1)
+    if (!abriu) return
+    await ok('Pronto!')
     // Já é outro aluno? Evita cadastrar a mesma pessoa duas vezes.
     const repetido = acharAluno(descritores[0], alunos)
     if (repetido && !window.confirm(`Esse rosto parece com ${repetido.aluno.nome}, que já está cadastrado. Salvar assim mesmo?`)) {
@@ -318,7 +358,10 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
           </>
         ) : (
           <>
-            <button type="button" className="btn btn-secondary" onClick={onCancelar} disabled={fase === 'capturando'}>Cancelar</button>
+            <button type="button" className="btn btn-secondary" onClick={() => {
+              // No meio da captura, Cancelar só para e volta pro começo.
+              if (fase === 'capturando') { capturaRef.current++; tirarDeNovo() } else onCancelar()
+            }}>{fase === 'capturando' ? 'Parar' : 'Cancelar'}</button>
             <button type="button" className="btn btn-primary" onClick={capturar} disabled={fase !== 'pronto'}>
               {fase === 'capturando' ? 'Capturando...' : '📷 Capturar rosto'}
             </button>

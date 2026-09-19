@@ -89,6 +89,14 @@
 .ac-rec-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.6); font-size: 18px; padding: 24px; text-align: center; }
 .ac-rec-dica { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.55); padding: 10px 22px; border-radius: 999px; font-size: 20px; }
 
+.ac-rec-opcao { display: flex; align-items: center; gap: 10px; max-width: 440px; text-align: left; color: #dde; font-size: 16px; }
+.ac-rec-opcao input { width: 22px; height: 22px; flex-shrink: 0; }
+.ac-rec-piscar { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(124, 58, 237, .92); padding: 16px 32px; border-radius: 20px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; min-width: 260px; }
+.ac-rec-piscar strong { font-size: clamp(22px, 3.5vh, 32px); }
+.ac-rec-piscar span { font-size: clamp(18px, 3vh, 26px); }
+.ac-rec-piscar-olho { font-size: 40px; animation: ac-piscar 1.4s infinite; }
+@keyframes ac-piscar { 0%, 80%, 100% { transform: scaleY(1); } 88% { transform: scaleY(.1); } }
+
 .ac-rec-cartao { position: absolute; inset: 8% 10%; border-radius: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 20px; animation: ac-entra .2s ease-out; }
 .ac-rec-cartao img { width: min(34vh, 220px); height: min(34vh, 220px); border-radius: 50%; object-fit: cover; border: 5px solid rgba(255,255,255,.85); }
 .ac-rec-cartao h2 { margin: 0; font-size: clamp(28px, 6vh, 52px); }

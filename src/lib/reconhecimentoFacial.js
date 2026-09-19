@@ -58,7 +58,31 @@ export async function lerRosto(video) {
     .withFaceDescriptors()
   if (!achados.length) return null
   const maior = achados.reduce((a, b) => (b.detection.box.area > a.detection.box.area ? b : a))
-  return { descritor: maior.descriptor, caixa: maior.detection.box, quantos: achados.length }
+  return {
+    descritor: maior.descriptor,
+    caixa: maior.detection.box,
+    quantos: achados.length,
+    olhos: aberturaDosOlhos(maior.landmarks.positions),
+    giro: giroDaCabeca(maior.landmarks.positions),
+  }
+}
+
+// Quanto a cabeça está virada pro lado: 0 = de frente; passa de ±0,12 quando
+// a pessoa vira de verdade. O sinal diz o lado. Mede a ponta do nariz (30)
+// contra o meio dos cantos de fora dos olhos (36 e 45).
+function giroDaCabeca(p) {
+  const meio = (p[36].x + p[45].x) / 2
+  const largura = Math.abs(p[45].x - p[36].x) || 1
+  return (p[30].x - meio) / largura
+}
+
+// Quanto os olhos estão abertos (média dos dois). Olho aberto fica por volta
+// de 0,25–0,35; piscando cai pra perto de 0,1. Serve pra prova de vida:
+// foto no celular não pisca. Pontos 36–41 e 42–47 do modelo de 68 pontos.
+function aberturaDosOlhos(p) {
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y)
+  const olho = i => (d(p[i + 1], p[i + 5]) + d(p[i + 2], p[i + 4])) / (2 * d(p[i], p[i + 3]))
+  return (olho(36) + olho(42)) / 2
 }
 
 // Tela cheia de verdade (some a barra do navegador). No iPad é o webkit*.
