@@ -148,6 +148,37 @@ function distancia(a, b) {
 
 // Compara com todos os alunos e devolve o mais parecido abaixo do limite.
 // Cada aluno pode ter vários descritores (fotos do cadastro); vale o melhor.
+// Aprender com a câmera da catraca: junta a leitura de agora às do cadastro.
+// Guarda as 4 do cadastro + as 8 mais recentes aprendidas (a mais velha sai).
+export const LEITURAS_CADASTRO = 4
+export const LEITURAS_APRENDIDAS = 8
+export function juntarLeitura(descritores, nova) {
+  const cadastro = descritores.slice(0, LEITURAS_CADASTRO)
+  const aprendidas = [...descritores.slice(LEITURAS_CADASTRO), Array.from(nova)].slice(-LEITURAS_APRENDIDAS)
+  return [...cadastro, ...aprendidas]
+}
+
+// O rosto está INTEIRO na parte da imagem que aparece na tela? A tela recorta
+// o vídeo pra preencher o espaço (object-fit: cover), então a câmera enxerga
+// mais do que aparece: sem isto, reconhecia gente com meio rosto fora da tela
+// — e meio rosto dá leitura ruim. Também exige um tamanho mínimo de rosto.
+export function rostoInteiroNaTela(caixa, video) {
+  const vw = video.videoWidth
+  const vh = video.videoHeight
+  const W = video.clientWidth || vw
+  const H = video.clientHeight || vh
+  if (!vw || !vh) return false
+  const escala = Math.max(W / vw, H / vh) * Number(video.dataset.zoom || 1)
+  const visivelW = W / escala
+  const visivelH = H / escala
+  const margemX = (vw - visivelW) / 2 + visivelW * 0.02
+  const margemY = (vh - visivelH) / 2 + visivelH * 0.02
+  const dentro = caixa.x >= margemX && caixa.y >= margemY
+    && caixa.x + caixa.width <= vw - margemX && caixa.y + caixa.height <= vh - margemY
+  const grande = caixa.width >= visivelW * 0.14
+  return dentro && grande
+}
+
 export function acharAluno(descritor, alunos) {
   let melhor = null
   for (const aluno of alunos) {
@@ -161,22 +192,16 @@ export function acharAluno(descritor, alunos) {
   return melhor
 }
 
-// Zoom FIXO da câmera: a câmera da frente do tablet é grande-angular e o
-// rosto ficava pequeno. Tentamos antes seguir o rosto com zoom, mas a imagem
-// tremia — então é um zoom parado e a pessoa encaixa o rosto no oval.
-const ZOOM = 1.5
-
-// Liga a câmera da frente no <video>. Devolve o stream pra desligar depois.
-// Pede HD pra o zoom não borrar a imagem. Se a câmera tiver zoom de verdade
-// (Android/Chrome), usa ele; senão amplia na tela.
-export async function ligarCamera(video) {
+// `leve`: resolução menor (640x480). A recepção usa — o reconhecimento reduz a
+// imagem de qualquer jeito, e em PC antigo a imagem grande só deixa lento.
+export async function ligarCamera(video, { leve = false } = {}) {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Este navegador não libera a câmera. No iPad, use o Safari.')
   }
   let stream
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } },
+      video: { facingMode: 'user', width: { ideal: leve ? 640 : 1280 }, height: { ideal: leve ? 480 : 960 } },
       audio: false,
     })
   } catch {
@@ -194,16 +219,10 @@ export async function ligarCamera(video) {
   video.muted = true
   await video.play()
 
-  let zoomNaTela = ZOOM
-  try {
-    const track = stream.getVideoTracks()[0]
-    const cap = track.getCapabilities?.().zoom
-    if (cap && cap.max >= ZOOM) {
-      await track.applyConstraints({ advanced: [{ zoom: Math.max(cap.min, ZOOM) }] })
-      zoomNaTela = 1
-    }
-  } catch { /* sem zoom na câmera: amplia na tela */ }
-  video.style.transform = `scale(${zoomNaTela}) scaleX(-1)`
+  // Sem zoom (tirado a pedido em 19/09): a tela mostra exatamente o que a
+  // câmera lê — nada de reconhecer quem aparece cortado.
+  video.style.transform = 'scaleX(-1)'
+  video.dataset.zoom = '1'
   return stream
 }
 

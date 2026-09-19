@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, acharAluno, situacaoAluno,
-  entrarTelaCheia, sairTelaCheia, lerOlhos, criarDetectorPiscada, GIRO_LADO,
+  entrarTelaCheia, sairTelaCheia, lerOlhos, criarDetectorPiscada, GIRO_LADO, juntarLeitura, rostoInteiroNaTela,
 } from '../../lib/reconhecimentoFacial'
 import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '../../lib/catracaSerial'
 
@@ -14,6 +14,10 @@ import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '.
 // quem está na recepção olha a tela e libera.
 
 const CONFIRMAR_LEITURAS = 2     // mesma pessoa em 2 leituras seguidas antes de mostrar
+const CERTEZA_ALTA = 0.42        // abaixo disso uma leitura só basta (quase igual ao cadastro)
+// Aprender: leitura reconhecida com segurança, mas não idêntica ao que já
+// tem guardado, entra no cadastro do aluno (uma vez por aluno por visita).
+const APRENDER_ENTRE = [0.3, 0.48]
 const DESCONHECIDO_LEITURAS = 4  // rosto sem cadastro por 4 leituras → "não reconhecido"
 const MOSTRAR_MS = 5000          // quanto tempo o cartão fica na tela
 const NAO_REGISTRAR_DE_NOVO_MS = 3 * 60 * 1000 // mesma pessoa não conta 2 entradas em 3 min
@@ -37,6 +41,9 @@ export default function AcademiaRecepcao() {
   const [cartao, setCartao] = useState(null) // { aluno, situacao } | { desconhecido: true }
   const [ultimas, setUltimas] = useState([])
   const [qtdAlunos, setQtdAlunos] = useState(0)
+  // Diagnóstico: quanto leva cada leitura neste aparelho e a última semelhança.
+  const [diag, setDiag] = useState({})
+  const [ajuste, setAjuste] = useState(null) // pedido pra centralizar o rosto
   const [exigirPiscar, setExigirPiscar] = useState(lerExigirPiscar)
   const [pedindoPiscar, setPedindoPiscar] = useState(null) // { nome, demorou }
   // Catraca ligada neste PC: null = não usa (tablet), 'ok', 'abrindo' ou o texto do erro.
@@ -89,6 +96,7 @@ export default function AcademiaRecepcao() {
     let cartaoAte = 0
     let cartaoAtualId = null
     let semRosto = 0
+    let tempos = []
     // Enquanto espera a prova de vida: { achado, inicio, piscou, giro0 }.
     // Nessa fase o laço só lê os pontos do rosto (rápido); a pessoa já foi
     // reconhecida antes de entrar aqui.
@@ -109,6 +117,20 @@ export default function AcademiaRecepcao() {
       // PC com a catraca ligada (configurada em /catraca): abre sozinha.
       if (situacao.status === 'liberado') abrirCatraca()
       registrar(achado.aluno, situacao, achado.distancia)
+      aprender(achado)
+    }
+
+    // Guarda a leitura desta câmera no aluno — com o tempo, cada aluno tem
+    // leituras da própria câmera da catraca e o reconhecimento fica mais rápido.
+    const aprendidoHoje = new Set()
+    async function aprender(achado) {
+      const { aluno, distancia, descritor } = achado
+      if (!descritor || aprendidoHoje.has(aluno.id)) return
+      if (distancia < APRENDER_ENTRE[0] || distancia > APRENDER_ENTRE[1]) return
+      aprendidoHoje.add(aluno.id)
+      const novos = juntarLeitura(aluno.descritores || [], descritor)
+      aluno.descritores = novos // já vale na próxima leitura, sem esperar recarregar
+      await supabase.from('academia_alunos').update({ descritores: novos }).eq('id', aluno.id)
     }
 
     function mostrar(c) {
@@ -152,21 +174,40 @@ export default function AcademiaRecepcao() {
           continue
         }
 
+        const t0 = performance.now()
         const r = await lerRosto(video).catch(() => null)
         if (!vivo) break
+        tempos.push(performance.now() - t0)
+        if (tempos.length >= 10) {
+          const media = tempos.reduce((a, b) => a + b, 0) / tempos.length
+          setDiag(d => ({ ...d, ms: Math.round(media), backend: window.faceapi?.tf?.getBackend?.() }))
+          tempos = []
+        }
         if (!r) {
           candidato = null; seguidas = 0; desconhecidas = 0
+          setAjuste(null)
           await esperar(250)
           continue
         }
         semRosto = 0
+        // Meio rosto fora da tela, ou longe demais: não lê, pede pra ajeitar.
+        if (!rostoInteiroNaTela(r.caixa, video)) {
+          candidato = null; seguidas = 0
+          setAjuste('Chegue mais perto, com o rosto no meio da tela')
+          await esperar(60)
+          continue
+        }
+        setAjuste(null)
         const achado = acharAluno(r.descritor, alunosRef.current)
         if (achado) {
+          achado.descritor = r.descritor
+          setDiag(d => ({ ...d, dist: achado.distancia }))
           desconhecidas = 0
           if (candidato === achado.aluno.id) seguidas++
           else { candidato = achado.aluno.id; seguidas = 1 }
           const jaNaTela = cartaoAtualId === achado.aluno.id && Date.now() < cartaoAte - 1000
-          if (seguidas >= CONFIRMAR_LEITURAS && !jaNaTela) {
+          const confirmado = seguidas >= CONFIRMAR_LEITURAS || achado.distancia < CERTEZA_ALTA
+          if (confirmado && !jaNaTela) {
             // Prova de vida: antes de mostrar o resultado, a pessoa vira o rosto.
             if (exigirPiscar) pedirPiscar(achado)
             else liberarResultado(achado)
@@ -180,7 +221,7 @@ export default function AcademiaRecepcao() {
             bipe(false)
           }
         }
-        await esperar(150)
+        await esperar(60)
       }
     }
 
@@ -190,7 +231,7 @@ export default function AcademiaRecepcao() {
         await Promise.all([carregarFaceApi(), carregarAlunos()])
         if (!vivo) return
         setEstado({ fase: 'carregando', msg: 'Ligando a câmera...' })
-        stream = await ligarCamera(videoRef.current)
+        stream = await ligarCamera(videoRef.current, { leve: true })
         if (!vivo) return desligarCamera(stream)
         try { wakeLock = await navigator.wakeLock?.request('screen') } catch { /* sem wake lock, segue */ }
         setEstado({ fase: 'rodando', msg: '' })
@@ -254,7 +295,7 @@ export default function AcademiaRecepcao() {
           <div className="ac-rec-overlay"><p className={estado.fase === 'erro' ? 'ac-erro' : ''}>{estado.msg}</p></div>
         )}
         {estado.fase === 'rodando' && !cartao && !pedindoPiscar && (
-          <div className="ac-rec-dica">Olhe para a câmera</div>
+          <div className="ac-rec-dica">{ajuste || 'Olhe para a câmera'}</div>
         )}
         {estado.fase === 'rodando' && !cartao && pedindoPiscar && (
           <div className="ac-rec-piscar">
@@ -288,6 +329,11 @@ export default function AcademiaRecepcao() {
             <div className={catraca === 'ok' || catraca === 'abrindo' ? 'ok' : 'erro'}>
               {catraca === 'ok' ? '● Catraca conectada' : catraca === 'abrindo' ? '● Abrindo a catraca...' : `● ${catraca}`}
             </div>
+          </div>
+        )}
+        {diag.ms && (
+          <div className="ac-rec-diag">
+            leitura {diag.ms} ms · {diag.backend}{diag.dist != null ? ` · semelhança ${(1 - diag.dist).toFixed(2)}` : ''}
           </div>
         )}
         <Link to="/" className="ac-rec-voltar">← Alunos</Link>

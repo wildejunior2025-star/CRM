@@ -124,3 +124,4 @@
 .ac-rec-catraca .ok { color: #4ade80; font-size: 13px; }
 .ac-rec-catraca .erro { color: #f87171; font-size: 13px; }
 .ac-rec-catraca + .ac-rec-voltar { margin-top: 0; }
+.ac-rec-diag { font: 12px/1.4 ui-monospace, Consolas, monospace; color: #6b7280; }
