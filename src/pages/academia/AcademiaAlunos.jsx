@@ -3,14 +3,12 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, miniaturaDoRosto, situacaoAluno, acharAluno,
-  entrarTelaCheia, sairTelaCheia,
+  entrarTelaCheia, sairTelaCheia, GIRO_LADO,
 } from '../../lib/reconhecimentoFacial'
 
 // Quantas "digitais do rosto" o cadastro guarda. Mais de uma deixa o
 // reconhecimento firme com o aluno de lado, de óculos, com luz diferente.
 const AMOSTRAS = 4
-// Quanto tem que virar a cabeça pra etapa "vire pro lado" contar.
-const GIRO_LADO = 0.15
 const GIRO_FRENTE = 0.08 // até aqui conta como "de frente"
 
 function hojeMais(dias) {
@@ -223,7 +221,7 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
 }
 
 // Liga a câmera e guia a pessoa em 4 etapas (frente, um lado, outro lado,
-// frente + piscar), guardando uma "digital do rosto" em cada.
+// frente de novo), guardando uma "digital do rosto" em cada.
 function CapturaRosto({ alunos, onPronto, onCancelar }) {
   const videoRef = useRef(null)
   const [fase, setFase] = useState('carregando') // carregando | pronto | capturando | revisar | erro
@@ -254,7 +252,7 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
   }, [])
 
   // Cada etapa só passa quando a pessoa FEZ o que a tela pediu — conferido
-  // pela posição do nariz (virar) e pelos olhos (piscar). Sem pular por tempo;
+  // pela posição do nariz em relação aos olhos. Sem pular por tempo;
   // quem desistir aperta Cancelar.
   async function capturar() {
     setFase('capturando')
@@ -301,15 +299,10 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
     descritores.push(Array.from(r.descritor))
     await ok('Perfeito!')
 
-    // 4. De frente de novo + piscar (prova de que é gente, não foto)
+    // 4. De frente de novo
     r = await esperarQue('Olhe de frente de novo', x => Math.abs(x.giro) < GIRO_FRENTE, 3)
     if (!r) return
     descritores.push(Array.from(r.descritor))
-    const aberto = r.olhos
-    const fechou = await esperarQue('Agora pisque os olhos', x => x.olhos < aberto * 0.75, 1)
-    if (!fechou) return
-    const abriu = await esperarQue('Agora pisque os olhos', x => x.olhos > aberto * 0.88, 1)
-    if (!abriu) return
     await ok('Pronto!')
     // Já é outro aluno? Evita cadastrar a mesma pessoa duas vezes.
     const repetido = acharAluno(descritores[0], alunos)

@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, acharAluno, situacaoAluno,
-  entrarTelaCheia, sairTelaCheia,
+  entrarTelaCheia, sairTelaCheia, lerOlhos, criarDetectorPiscada, GIRO_LADO,
 } from '../../lib/reconhecimentoFacial'
 
 // Tablet da recepção (academia.fwcinter.com/recepcao).
@@ -17,11 +17,10 @@ const DESCONHECIDO_LEITURAS = 4  // rosto sem cadastro por 4 leituras → "não 
 const MOSTRAR_MS = 5000          // quanto tempo o cartão fica na tela
 const NAO_REGISTRAR_DE_NOVO_MS = 3 * 60 * 1000 // mesma pessoa não conta 2 entradas em 3 min
 const RECARREGAR_ALUNOS_MS = 60 * 1000
-// Prova de vida (piscar): olho abaixo de 75% do aberto = fechou; volta acima
-// de 88% = abriu. Uma foto mostrada no celular nunca faz isso.
-const PISCOU_FECHADO = 0.75
-const PISCOU_ABERTO = 0.88
-const PISCAR_PRAZO_MS = 6000
+// Prova de vida: depois de reconhecer, pede pra virar o rosto. Vale se o
+// giro MUDAR (foto parada não muda, nem uma foto já de lado). Piscar também
+// conta quando o modelo consegue ver (criarDetectorPiscada).
+const PISCAR_PRAZO_MS = 8000
 const CHAVE_PISCAR = 'academia_exigir_piscar'
 
 function lerExigirPiscar() {
@@ -67,26 +66,24 @@ export default function AcademiaRecepcao() {
     let cartaoAte = 0
     let cartaoAtualId = null
     let semRosto = 0
-    let piscar = null // { alunoId, inicio, base, fechou } enquanto espera a piscada
+    // Enquanto espera a prova de vida: { achado, inicio, piscou, giro0 }.
+    // Nessa fase o laço só lê os pontos do rosto (rápido); a pessoa já foi
+    // reconhecida antes de entrar aqui.
+    let piscar = null
 
-    // Olho aberto → fechado → aberto de novo = piscou. A "base" é o olho
-    // aberto dessa pessoa (cada um tem um tamanho), medida enquanto espera.
-    function provouVida(aluno, olhos) {
-      const agora = Date.now()
-      if (!piscar || piscar.alunoId !== aluno.id) {
-        piscar = { alunoId: aluno.id, inicio: agora, base: olhos, fechou: false }
-        setPedindoPiscar({ nome: aluno.nome.split(' ')[0], demorou: false })
-        return false
-      }
-      if (!piscar.fechou) piscar.base = Math.max(piscar.base * 0.97, olhos)
-      if (olhos < piscar.base * PISCOU_FECHADO) piscar.fechou = true
-      else if (piscar.fechou && olhos > piscar.base * PISCOU_ABERTO) return true
-      if (agora - piscar.inicio > PISCAR_PRAZO_MS) {
-        // Não viu a piscada: pede de novo, mais devagar.
-        piscar = { alunoId: aluno.id, inicio: agora, base: olhos, fechou: false }
-        setPedindoPiscar({ nome: aluno.nome.split(' ')[0], demorou: true })
-      }
-      return false
+    function pedirPiscar(achado, demorou = false) {
+      piscar = { achado, inicio: Date.now(), piscou: criarDetectorPiscada(), giro0: null }
+      setPedindoPiscar({ nome: achado.aluno.nome.split(' ')[0], demorou })
+    }
+
+    function liberarResultado(achado) {
+      piscar = null
+      setPedindoPiscar(null)
+      const situacao = situacaoAluno(achado.aluno)
+      cartaoAtualId = achado.aluno.id
+      mostrar({ aluno: achado.aluno, situacao })
+      bipe(situacao.status === 'liberado')
+      registrar(achado.aluno, situacao, achado.distancia)
     }
 
     function mostrar(c) {
@@ -110,56 +107,55 @@ export default function AcademiaRecepcao() {
       while (vivo) {
         const video = videoRef.current
         if (!video || video.readyState < 2) { await esperar(200); continue }
+
+        // Fase da prova de vida: leitura rápida, sem pausa.
+        if (piscar) {
+          const o = await lerOlhos(video).catch(() => null)
+          if (!vivo) break
+          if (!o) {
+            // Saiu da frente da câmera: cancela o pedido.
+            if (++semRosto >= 15) { piscar = null; setPedindoPiscar(null) }
+          } else {
+            semRosto = 0
+            if (piscar.giro0 === null) piscar.giro0 = o.giro
+            // Virou o rosto de verdade (mexeu desde o pedido) ou piscou.
+            const virou = Math.abs(o.giro) > GIRO_LADO && Math.abs(o.giro - piscar.giro0) > GIRO_LADO
+            if (virou || piscar.piscou(o.olhos)) liberarResultado(piscar.achado)
+            else if (Date.now() - piscar.inicio > PISCAR_PRAZO_MS) pedirPiscar(piscar.achado, true)
+          }
+          await esperar(0)
+          continue
+        }
+
         const r = await lerRosto(video).catch(() => null)
         if (!vivo) break
         if (!r) {
           candidato = null; seguidas = 0; desconhecidas = 0
-          semRosto++
-          // Saiu da frente da câmera: cancela o "pisque".
-          if (piscar && semRosto >= 6) { piscar = null; setPedindoPiscar(null) }
-          await esperar(piscar ? 40 : 250)
+          await esperar(250)
           continue
         }
         semRosto = 0
         const achado = acharAluno(r.descritor, alunosRef.current)
-        // Com o olho fechado a leitura às vezes não bate com ninguém: durante
-        // o "pisque", uma leitura dessas conta como a mesma pessoa.
-        if (!achado && piscar && r.olhos < piscar.base * PISCOU_FECHADO) {
-          piscar.fechou = true
-          await esperar(40)
-          continue
-        }
         if (achado) {
           desconhecidas = 0
           if (candidato === achado.aluno.id) seguidas++
           else { candidato = achado.aluno.id; seguidas = 1 }
           const jaNaTela = cartaoAtualId === achado.aluno.id && Date.now() < cartaoAte - 1000
           if (seguidas >= CONFIRMAR_LEITURAS && !jaNaTela) {
-            // Prova de vida: antes de mostrar o resultado, a pessoa pisca.
-            if (exigirPiscar && !provouVida(achado.aluno, r.olhos)) {
-              await esperar(40)
-              continue
-            }
-            piscar = null
-            setPedindoPiscar(null)
-            const situacao = situacaoAluno(achado.aluno)
-            cartaoAtualId = achado.aluno.id
-            mostrar({ aluno: achado.aluno, situacao })
-            bipe(situacao.status === 'liberado')
-            registrar(achado.aluno, situacao, achado.distancia)
+            // Prova de vida: antes de mostrar o resultado, a pessoa vira o rosto.
+            if (exigirPiscar) pedirPiscar(achado)
+            else liberarResultado(achado)
           }
         } else {
           candidato = null; seguidas = 0
           desconhecidas++
           if (desconhecidas === DESCONHECIDO_LEITURAS && Date.now() > cartaoAte) {
-            piscar = null
-            setPedindoPiscar(null)
             cartaoAtualId = null
             mostrar({ desconhecido: true })
             bipe(false)
           }
         }
-        await esperar(piscar ? 40 : 150)
+        await esperar(150)
       }
     }
 
@@ -204,7 +200,7 @@ export default function AcademiaRecepcao() {
         <p>Tela da recepção. Deixe o tablet de pé, com a câmera na altura do rosto.</p>
         <label className="ac-rec-opcao">
           <input type="checkbox" checked={exigirPiscar} onChange={e => trocarPiscar(e.target.checked)} />
-          Pedir pra piscar os olhos (não deixa passar com foto do aluno no celular)
+          Pedir pra virar o rosto (não deixa passar com foto do aluno no celular)
         </label>
         <button className="btn btn-primary ac-rec-comecar" onClick={comecar}>Começar</button>
         <Link to="/" className="ac-rec-voltar">← Voltar pros alunos</Link>
@@ -224,9 +220,9 @@ export default function AcademiaRecepcao() {
         )}
         {estado.fase === 'rodando' && !cartao && pedindoPiscar && (
           <div className="ac-rec-piscar">
-            <div className="ac-rec-piscar-olho">👁️</div>
+            <div className="ac-rec-piscar-olho">↔️</div>
             <strong>Olá, {pedindoPiscar.nome}!</strong>
-            <span>{pedindoPiscar.demorou ? 'Pisque devagar, olhando pra câmera' : 'Pisque os olhos'}</span>
+            <span>{pedindoPiscar.demorou ? 'Vire o rosto devagar pro lado' : 'Vire o rosto pro lado'}</span>
           </div>
         )}
         {cartao && <CartaoAcesso cartao={cartao} />}

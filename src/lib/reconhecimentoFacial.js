@@ -76,6 +76,40 @@ function giroDaCabeca(p) {
   return (p[30].x - meio) / largura
 }
 
+// Leitura rápida dos pontos do rosto (sem a digital, que é o que pesa):
+// olhos e giro da cabeça, pra prova de vida com muitas leituras por segundo.
+//
+// Prova de vida: VIRAR O ROSTO é o que funciona. Foto no celular, mesmo
+// girando o aparelho, não muda o nariz em relação aos olhos. Piscar ficou
+// como extra — o modelo de 68 pontos desenha o olho meio aberto mesmo
+// fechado, e no iPad a piscada não era vista (teste de 19/09/2026).
+export const GIRO_LADO = 0.15
+export async function lerOlhos(video) {
+  const r = await window.faceapi
+    .detectSingleFace(video, new window.faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.4 }))
+    .withFaceLandmarks()
+  if (!r) return null
+  const p = r.landmarks.positions
+  return { olhos: aberturaDosOlhos(p), giro: giroDaCabeca(p), caixa: r.detection.box }
+}
+
+// Detector de piscada: compara cada leitura com o olho mais aberto das
+// últimas leituras (cada pessoa tem um tamanho de olho). Caiu pra menos de
+// 80% = fechou; voltou pra mais de 90% depois de fechar = piscou.
+export function criarDetectorPiscada() {
+  const hist = []
+  let fechou = false
+  return olhos => {
+    hist.push(olhos)
+    if (hist.length > 20) hist.shift()
+    const aberto = Math.max(...hist)
+    if (hist.length < 3) return false
+    if (olhos < aberto * 0.8) fechou = true
+    else if (fechou && olhos > aberto * 0.9) return true
+    return false
+  }
+}
+
 // Quanto os olhos estão abertos (média dos dois). Olho aberto fica por volta
 // de 0,25–0,35; piscando cai pra perto de 0,1. Serve pra prova de vida:
 // foto no celular não pisca. Pontos 36–41 e 42–47 do modelo de 68 pontos.
