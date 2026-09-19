@@ -112,7 +112,7 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
   const [consentiu, setConsentiu] = useState(!!aluno?.consentimento_em)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
-  const [cameraAberta, setCameraAberta] = useState(!aluno)
+  const [cameraAberta, setCameraAberta] = useState(false)
 
   const set = (k, v) => setDados(d => ({ ...d, [k]: v }))
   const fotoAtual = rosto?.foto || aluno?.foto
@@ -160,21 +160,20 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
 
       <div className="ac-form-grade">
         <div className="ac-form-rosto">
-          {cameraAberta ? (
+          {cameraAberta && (
             <CapturaRosto
               alunos={alunos.filter(a => a.id !== aluno?.id)}
               onPronto={r => { setRosto(r); setCameraAberta(false) }}
-              onCancelar={aluno ? () => setCameraAberta(false) : null}
+              onCancelar={() => setCameraAberta(false)}
             />
-          ) : (
-            <div className="ac-rosto-pronto">
-              {fotoAtual ? <img src={fotoAtual} alt="" /> : <div className="ac-foto ac-foto-vazia grande">?</div>}
-              {rosto && <span className="ac-status ac-liberado">Rosto capturado ✓</span>}
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setCameraAberta(true)}>
-                {fotoAtual ? 'Tirar de novo' : 'Cadastrar rosto'}
-              </button>
-            </div>
           )}
+          <div className="ac-rosto-pronto">
+            {fotoAtual ? <img src={fotoAtual} alt="" /> : <div className="ac-foto ac-foto-vazia grande">?</div>}
+            {rosto && <span className="ac-status ac-liberado">Rosto capturado ✓</span>}
+            <button type="button" className={`btn ${fotoAtual ? 'btn-secondary btn-sm' : 'btn-primary'}`} onClick={() => setCameraAberta(true)}>
+              {fotoAtual ? 'Tirar de novo' : '📷 Cadastrar rosto'}
+            </button>
+          </div>
         </div>
 
         <div className="ac-form-campos">
@@ -213,7 +212,7 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
       {erro && <div className="ac-erro">{erro}</div>}
       <div className="ac-form-botoes">
         {aluno && <button type="button" className="btn btn-danger" onClick={apagar}>Apagar</button>}
-        <button className="btn btn-primary" disabled={salvando || cameraAberta}>{salvando ? 'Salvando...' : 'Salvar'}</button>
+        <button className="btn btn-primary" disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar'}</button>
       </div>
     </form>
   )
@@ -223,9 +222,10 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
 // instantes entre elas (pedindo pra virar um pouco a cabeça).
 function CapturaRosto({ alunos, onPronto, onCancelar }) {
   const videoRef = useRef(null)
-  const [fase, setFase] = useState('carregando') // carregando | pronto | capturando | erro
+  const [fase, setFase] = useState('carregando') // carregando | pronto | capturando | revisar | erro
   const [msg, setMsg] = useState('Preparando a câmera...')
   const [feitas, setFeitas] = useState(0)
+  const [resultado, setResultado] = useState(null) // { descritores, foto } esperando o "ficou boa?"
 
   useEffect(() => {
     let stream = null
@@ -259,7 +259,7 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
       const r = await lerRosto(videoRef.current)
       if (!r) { await esperar(150); continue }
       if (r.quantos > 1) { setMsg('Tem mais de uma pessoa na câmera.'); await esperar(400); continue }
-      if (!foto) foto = miniaturaDoRosto(videoRef.current, r.caixa)
+      if (!foto) foto = miniaturaDoRosto(videoRef.current, r.caixa, 280)
       descritores.push(Array.from(r.descritor))
       setFeitas(descritores.length)
       await esperar(700)
@@ -278,22 +278,51 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
       setMsg('Capture de novo ou volte.')
       return
     }
-    onPronto({ descritores, foto })
+    // Antes de usar, mostra a foto grande e pergunta se ficou boa.
+    setResultado({ descritores, foto })
+    setFase('revisar')
   }
 
+  function tirarDeNovo() {
+    setResultado(null)
+    setFeitas(0)
+    setFase('pronto')
+    setMsg('Rosto de frente, bem iluminado. Aperte Capturar.')
+  }
+
+  // Tela cheia por cima de tudo: no tablet a câmera pequena no canto do
+  // formulário não dava pra enquadrar direito.
   return (
-    <div className="ac-captura">
-      <div className="ac-video-caixa">
+    <div className="ac-captura-tela">
+      <div className="ac-captura-video">
         <video ref={videoRef} className="ac-video" playsInline muted />
-        <div className="ac-guia-rosto" />
+        {fase !== 'revisar' && <div className="ac-guia-rosto" />}
+        {fase !== 'revisar' && <div className={`ac-captura-msg${fase === 'erro' ? ' erro' : ''}`}>{msg}</div>}
+        {fase === 'capturando' && (
+          <div className="ac-captura-progresso"><div style={{ width: `${(feitas / AMOSTRAS) * 100}%` }} /></div>
+        )}
+        {fase === 'revisar' && resultado && (
+          <div className="ac-captura-revisar">
+            <img src={resultado.foto} alt="" />
+            <h2>Ficou boa?</h2>
+            <p>O rosto tem que estar nítido, de frente e sem sombra forte.</p>
+          </div>
+        )}
       </div>
-      <p className={fase === 'erro' ? 'ac-erro' : 'ac-muted'}>{msg}</p>
-      {fase === 'capturando' && <div className="ac-progresso"><div style={{ width: `${(feitas / AMOSTRAS) * 100}%` }} /></div>}
-      <div className="ac-form-botoes">
-        {onCancelar && <button type="button" className="btn btn-secondary btn-sm" onClick={onCancelar}>Cancelar</button>}
-        <button type="button" className="btn btn-primary" onClick={capturar} disabled={fase !== 'pronto'}>
-          {fase === 'capturando' ? 'Capturando...' : 'Capturar rosto'}
-        </button>
+      <div className="ac-captura-botoes">
+        {fase === 'revisar' ? (
+          <>
+            <button type="button" className="btn btn-secondary" onClick={tirarDeNovo}>Tirar de novo</button>
+            <button type="button" className="btn btn-primary" onClick={() => onPronto(resultado)}>Ficou boa ✓</button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="btn btn-secondary" onClick={onCancelar} disabled={fase === 'capturando'}>Cancelar</button>
+            <button type="button" className="btn btn-primary" onClick={capturar} disabled={fase !== 'pronto'}>
+              {fase === 'capturando' ? 'Capturando...' : '📷 Capturar rosto'}
+            </button>
+          </>
+        )}
       </div>
     </div>
   )
