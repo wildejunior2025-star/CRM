@@ -173,10 +173,23 @@ export async function ligarCamera(video) {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Este navegador não libera a câmera. No iPad, use o Safari.')
   }
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } },
-    audio: false,
-  })
+  let stream
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } },
+      audio: false,
+    })
+  } catch (e) {
+    // Webcam USB de PC às vezes não aceita os pedidos acima: tenta qualquer câmera.
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+    } catch (e2) {
+      const erro = e2 || e
+      if (erro.name === 'NotFoundError') throw new Error('Nenhuma câmera encontrada. Confira se a webcam está ligada no USB e aparece no Windows; depois feche e abra o Chrome.')
+      if (erro.name === 'NotReadableError') throw new Error('A câmera está sendo usada por outro programa. Feche o outro programa e recarregue.')
+      throw erro
+    }
+  }
   video.srcObject = stream
   video.setAttribute('playsinline', '')
   video.muted = true
