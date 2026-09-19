@@ -648,6 +648,14 @@ export default function DeliveryCheckout() {
   const [cepInfo, setCepInfo] = useState(null) // { cep, rua, bairro }
   const [userId, setUserId]         = useState(null)
   const [reconhecido, setReconhecido] = useState(false) // cadastro achado pelo telefone
+  // Nome do dono do cadastro achado pelo telefone. Link copiado de outra
+  // conversa (?t= da Célia mandado pra Joyce, CDBom 19/09/2026) abria o checkout
+  // com o número de outra pessoa: a Joyce trocou nome e endereço, o pedido saiu
+  // no telefone da Célia, o aviso foi pra ela e o cadastro dela virou o da
+  // Joyce. Nome diferente do dono = pergunta se o WhatsApp é mesmo dele.
+  const [nomeCadastro, setNomeCadastro] = useState(null)
+  const [telDuvida, setTelDuvida] = useState(false)
+  const telConfirmadoRef = useRef(false)
   const [reconfirmar, setReconfirmar] = useState(false) // só a minoria com endereço errado: obriga remarcar o pino uma vez
   const [coordCliente, setCoordCliente] = useState(null) // {lat,lng} do ponto de entrega
   const [mapaAberto, setMapaAberto]     = useState(false)
@@ -972,6 +980,7 @@ export default function DeliveryCheckout() {
       if (!data) return
       reconhecidoRef.current = true
       setReconhecido(true)
+      setNomeCadastro(data.nome || null)
       setReconfirmar(!!data.reconfirmar_endereco) // marcado no banco → força remarcar o mapa
       // Pino que ESTE cliente já apontou no mapa (mig 0160). Só o manual volta:
       // ponto que o buscador chutou não é confiável pra calcular taxa — foi ele
@@ -1617,6 +1626,21 @@ export default function DeliveryCheckout() {
       return
     }
 
+    // O WhatsApp é mesmo dele? Cadastro achado pelo telefone em nome de OUTRA
+    // pessoa (primeiro nome diferente) — quase sempre link copiado de outra
+    // conversa. Sem perguntar, o pedido sai no número errado e o cadastro do
+    // dono é sobrescrito.
+    const primeiroNome = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .toLowerCase().trim().split(/\s+/)[0] || ''
+    if (nomeCadastro && !telConfirmadoRef.current
+        && primeiroNome(form.nome) && primeiroNome(form.nome) !== primeiroNome(nomeCadastro)) {
+      setTelDuvida(true)
+      setTimeout(() => {
+        document.querySelector('[data-tel-duvida]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 50)
+      return
+    }
+
     setEnviando(true)
 
     // Cria/atualiza o cliente da loja (sem login, identificado pelo telefone)
@@ -1819,12 +1843,59 @@ export default function DeliveryCheckout() {
                       className={`dco-input${errors.telefone ? ' dco-input--error' : ''}`}
                       placeholder="(11) 99999-9999"
                       value={form.telefone}
-                      onChange={e => set('telefone', fmtTelefone(e.target.value))}
+                      onChange={e => {
+                        set('telefone', fmtTelefone(e.target.value))
+                        // Número novo: a confirmação e o dono antigo não valem mais.
+                        telConfirmadoRef.current = false
+                        setTelDuvida(false)
+                        if (reconhecidoRef.current) {
+                          reconhecidoRef.current = false
+                          setReconhecido(false)
+                          setNomeCadastro(null)
+                        }
+                      }}
                       inputMode="tel"
                       autoFocus
                       data-field-error={errors.telefone ? true : undefined}
                     />
                   </Field>
+                  {telDuvida && (
+                    <div data-tel-duvida style={{
+                      margin: '-4px 0 4px', padding: '11px 12px', borderRadius: 10,
+                      background: 'rgba(245,158,11,.12)', border: '1px solid rgba(245,158,11,.45)',
+                      fontSize: 13.5, lineHeight: 1.45,
+                    }}>
+                      <div style={{ fontWeight: 700, marginBottom: 4 }}>⚠️ Esse WhatsApp é seu?</div>
+                      <div style={{ opacity: .85 }}>
+                        O número <strong>{form.telefone}</strong> já está cadastrado aqui em nome de outra
+                        pessoa. Os avisos do pedido vão pra esse WhatsApp.
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                        <button type="button"
+                          style={{ flex: '1 1 150px', padding: '9px 10px', borderRadius: 9, border: '1px solid rgba(245,158,11,.6)', background: 'transparent', color: 'inherit', fontWeight: 700, cursor: 'pointer' }}
+                          onClick={() => {
+                            // Limpa e manda digitar o dele. O cadastro reconhece de novo pelo número novo.
+                            set('telefone', '')
+                            setTelDuvida(false)
+                            reconhecidoRef.current = false
+                            setReconhecido(false)
+                            setNomeCadastro(null)
+                            setTimeout(() => document.querySelector('input[inputmode="tel"]')?.focus(), 30)
+                          }}>
+                          Não, vou pôr o meu
+                        </button>
+                        <button type="button"
+                          style={{ flex: '1 1 150px', padding: '9px 10px', borderRadius: 9, border: 'none', background: '#f59e0b', color: '#1a1300', fontWeight: 800, cursor: 'pointer' }}
+                          onClick={e => {
+                            telConfirmadoRef.current = true
+                            setTelDuvida(false)
+                            e.currentTarget.closest('form')?.requestSubmit()
+                          }}>
+                          É meu, pode seguir
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {reconhecido && (
                     <div style={{
                       margin: '-4px 0 4px', padding: '9px 12px', borderRadius: 10,

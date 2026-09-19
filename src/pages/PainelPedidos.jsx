@@ -1325,6 +1325,25 @@ function enderecoDoTexto(txt) {
   return { rua, numero, bairro: bairro && bairro.length >= 3 && !/\d{3,}/.test(bairro) ? bairro : null }
 }
 
+/**
+ * Troca o `?t=` dos links da Loja Online pelo telefone desta conversa (sem o
+ * 55, com o 9 do celular — o formato que o checkout entende). Conversa sem
+ * telefone de verdade: o `t` sai do link, que abre em branco em vez de abrir no
+ * cadastro de outra pessoa.
+ */
+function linkComTelefoneDaConversa(texto, clienteRef) {
+  if (!/lojaonline\.fwcinter\.com\/[^\s]*[?&]t=/.test(texto)) return texto
+  let d = String(clienteRef ?? '').replace(/[^0-9]/g, '')
+  if (d.startsWith('55') && d.length >= 12) d = d.slice(2)
+  if (d.length === 10 && /^[6-9]/.test(d.slice(2))) d = `${d.slice(0, 2)}9${d.slice(2)}`
+  const valido = d.length === 10 || d.length === 11
+  return texto.replace(/(https?:\/\/lojaonline\.fwcinter\.com\/[^\s?]*)\?([^\s]*)/g, (_m, base, qs) => {
+    const partes = qs.split('&').filter(p => p && !p.startsWith('t='))
+    if (valido) partes.push(`t=${d}`)
+    return partes.length ? `${base}?${partes.join('&')}` : base
+  })
+}
+
 /** A listinha que cai embaixo do campo de rua. */
 function ListaDeRuas({ sugestoes, onEscolher, onFechar }) {
   return (
@@ -7945,11 +7964,16 @@ export default function PainelPedidos() {
   // todos passam pelo mesmo caminho: grava aqui, manda no WhatsApp, pausa o
   // robô. Duplicar isso é como a loja acaba respondendo em dois lugares.
   async function enviarChatTexto(bruto) {
-    const txt = String(bruto ?? '').trim()
-    if (!txt || !chatAberto) return
+    const original = String(bruto ?? '').trim()
+    if (!original || !chatAberto) return
     const sep = chatAberto.indexOf('|')
     const canal = chatAberto.slice(0, sep)
     const cliente_ref = chatAberto.slice(sep + 1)
+    // Link da loja copiado de OUTRA conversa leva o telefone daquele cliente
+    // (?t=). Quem abria caía no checkout com o número dele: foi assim que o
+    // pedido da Joyce saiu no WhatsApp da Célia (CDBom, 19/09/2026). Aqui o link
+    // sai sempre com o número de quem está nesta conversa.
+    const txt = linkComTelefoneDaConversa(original, cliente_ref)
     const thread = chatMsgs.find(m => `${m.canal}|${m.cliente_ref}` === chatAberto)
     setEnviandoChat(true)
     setChatAviso(null)
@@ -7958,7 +7982,7 @@ export default function PainelPedidos() {
       cliente_nome: thread?.cliente_nome ?? null, remetente: 'loja', texto: txt,
     })
     if (error) { setEnviandoChat(false); return }
-    if (txt === chatTexto.trim()) setChatTexto('')
+    if (original === chatTexto.trim()) setChatTexto('')
 
     // A mesma resposta vai também pro WhatsApp dele. O chat do link só aparece
     // pra quem está com a página aberta: quem pediu e fechou o navegador nunca
