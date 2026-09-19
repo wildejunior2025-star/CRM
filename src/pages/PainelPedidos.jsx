@@ -8,7 +8,7 @@ import { tocarPedidoNovo } from '../lib/somChamado'
 import { precoPorQuantidade, faixaAplicada, menorFaixa } from '../lib/precoQuantidade'
 import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
 import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
-import { rotuloComanda } from '../lib/comanda'
+import { rotuloComanda, agruparItensComanda } from '../lib/comanda'
 import { useChamados } from '../hooks/useChamados'
 import { calcularTaxa } from '../lib/taxaServico'
 import { fwcFetch, explicaErroFwc } from '../lib/appFwc'
@@ -4515,7 +4515,9 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
 // que só tem valor depois de pesar. Vale só pra essa comanda.
 function LinhaItemMesa({ comanda, it, onItemPronto, onEditarPreco, podeEditarPreco }) {
   const { nome, complementos } = separarItem(it)
-  const pronto = it.status === 'pronto' || it.status === 'entregue'
+  // `it` é um grupo (agruparItensComanda): pronto só quando todos os
+  // lançamentos dele já estão prontos.
+  const pronto = (it.itens ?? [it]).every(x => x.status === 'pronto' || x.status === 'entregue')
   const q = Number(it.quantidade ?? 1)
   const pu = Number(it.preco_unitario ?? 0)
   const [editando, setEditando] = useState(false)
@@ -4600,8 +4602,9 @@ function CardMesa({ comanda, taxaPct = 0, onPronto, onItemPronto, onFecharConta,
       </div>
       <div className="pp-mini-sub">{hora} · autoatendimento (QR)</div>
       <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 5 }}>
-        {itens.map(it => (
-          <LinhaItemMesa key={it.id} comanda={comanda} it={it} onItemPronto={onItemPronto}
+        {/* Mesmo produto lançado várias vezes aparece numa linha só ("3× Amstel"). */}
+        {agruparItensComanda(itens).map(it => (
+          <LinhaItemMesa key={it.chave} comanda={comanda} it={it} onItemPronto={onItemPronto}
             onEditarPreco={onEditarPreco} podeEditarPreco={podeEditarPreco} />
         ))}
       </div>
@@ -8337,11 +8340,15 @@ export default function PainelPedidos() {
       : c))
     await supabase.from('comanda_itens').update({ status: 'pronto' }).in('id', ids)
   }
+  // `item` pode ser um grupo da linha do card (vários lançamentos do mesmo
+  // produto): marca os que ainda faltam.
   async function handleMesaItemPronto(comanda, item) {
+    const ids = (item.itens ?? [item]).filter(it => it.status !== 'pronto' && it.status !== 'entregue').map(it => it.id)
+    if (!ids.length) return
     setComandas(cs => cs.map(c => c.id === comanda.id
-      ? { ...c, comanda_itens: (c.comanda_itens ?? []).map(it => it.id === item.id ? { ...it, status: 'pronto' } : it) }
+      ? { ...c, comanda_itens: (c.comanda_itens ?? []).map(it => ids.includes(it.id) ? { ...it, status: 'pronto' } : it) }
       : c))
-    await supabase.from('comanda_itens').update({ status: 'pronto' }).eq('id', item.id)
+    await supabase.from('comanda_itens').update({ status: 'pronto' }).in('id', ids)
   }
   // ADM ajusta o preço de UM item da comanda (ex.: açaí no peso, que só tem valor
   // depois de pesar). Grava direto no comanda_itens — total do card e da conta
@@ -8349,10 +8356,11 @@ export default function PainelPedidos() {
   async function handleEditarPrecoMesaItem(comanda, item, novoPreco) {
     const preco = Math.max(0, Math.round(Number(novoPreco) * 100) / 100)
     if (!Number.isFinite(preco)) return
+    const ids = (item.itens ?? [item]).map(it => it.id)
     setComandas(cs => cs.map(c => c.id === comanda.id
-      ? { ...c, comanda_itens: (c.comanda_itens ?? []).map(it => it.id === item.id ? { ...it, preco_unitario: preco } : it) }
+      ? { ...c, comanda_itens: (c.comanda_itens ?? []).map(it => ids.includes(it.id) ? { ...it, preco_unitario: preco } : it) }
       : c))
-    const { error } = await supabase.from('comanda_itens').update({ preco_unitario: preco }).eq('id', item.id)
+    const { error } = await supabase.from('comanda_itens').update({ preco_unitario: preco }).in('id', ids)
     if (error) alert('Erro ao salvar o preço: ' + error.message)
   }
 

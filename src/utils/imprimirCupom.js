@@ -9,6 +9,7 @@
 import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar } from '../lib/pagamentoPartes'
 import { fwcFetch } from '../lib/appFwc'
 import { separarItem } from '../lib/itensPedido'
+import { agruparItensComanda } from '../lib/comanda'
 
 
 function fmt(v) {
@@ -344,7 +345,9 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
   const lgPx = fontePx + 3
   // Divisória em TRACINHOS (texto): o app FWC apaga <hr>, então itens e totais grudavam.
   const tracos = '-'.repeat(largura === '58mm' ? 32 : 42)
-  const linhas = itens.map(it => {
+  // Cada lançamento é uma linha no banco; no papel o mesmo produto sai uma vez
+  // só, com a quantidade somada ("3x Amstel", não três "1x Amstel").
+  const linhas = agruparItensComanda(itens, { porObs: false }).map(it => {
     const q = it.quantidade ?? it.qtd ?? 1
     const sub = it.subtotal != null ? Number(it.subtotal) : q * Number(it.preco_unitario ?? it.preco ?? 0)
     // Couvert e afins saem marcados: o cliente vê no papel POR QUE aquele valor

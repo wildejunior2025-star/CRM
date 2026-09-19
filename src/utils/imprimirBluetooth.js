@@ -9,6 +9,7 @@
 // ============================================================================
 import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma } from '../lib/pagamentoPartes'
 import { separarItem } from '../lib/itensPedido'
+import { agruparItensComanda } from '../lib/comanda'
 
 const ESC = 0x1b, GS = 0x1d
 
@@ -419,7 +420,8 @@ export function montarContaMesaBytes({
   if (preConta) b.bold(true).txt('** PRE-CONTA **').nl().bold(false)
   b.left().bold(true).txt(`${titulo} - ${hora}`).nl().bold(false)
   b.line()
-  for (const it of itens) {
+  // Mesmo produto lançado várias vezes sai numa linha só ("3x Amstel").
+  for (const it of agruparItensComanda(itens, { porObs: false })) {
     const q = it.quantidade ?? it.qtd ?? 1
     const sub = it.subtotal != null
       ? Number(it.subtotal)

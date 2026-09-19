@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { adicionalComplementos, complementosParaGravar } from '../lib/complementos'
-import { rotuloComanda } from '../lib/comanda'
+import { rotuloComanda, agruparItensComanda } from '../lib/comanda'
 import { calcularTaxa, itemIsento, MARCA_ISENTO } from '../lib/taxaServico'
 import AvisoPix from '../components/AvisoPix'
 import { useConfirmar } from '../hooks/useConfirmar'
@@ -1180,21 +1180,6 @@ export default function PresencialSalao() {
     await loadMesas()
   }
 
-  // Digitar a quantidade em vez de clicar no + vinte vezes. O campo fica vazio
-  // enquanto o garçom apaga pra redigitar; só grava quando ele sai do campo,
-  // senão apagar o "1" pra escrever "12" apagaria o item no meio do caminho.
-  async function definirQtd(item, valor) {
-    if (comandaSel?.status === 'aguardando_conferencia') {
-      window.alert('Conta já fechada, aguardando o ADM liberar a mesa. Não dá pra mexer nos itens.')
-      return
-    }
-    const n = Math.max(0, Math.floor(Number(valor) || 0))
-    if (n === Number(item.quantidade)) return
-    if (n <= 0) await supabase.from('comanda_itens').delete().eq('id', item.id)
-    else await supabase.from('comanda_itens').update({ quantidade: n }).eq('id', item.id)
-    await loadMesas()
-  }
-
   function definirQtdRascunho(linha, valor) {
     const n = Math.max(0, Math.floor(Number(valor) || 0))
     setRascunho(prev => prev.flatMap(r => {
@@ -1203,50 +1188,113 @@ export default function PresencialSalao() {
     }))
   }
 
-  async function mudarQtd(item, delta) {
-    if (comandaSel?.status === 'aguardando_conferencia') {
-      window.alert('Conta já fechada, aguardando o ADM liberar a mesa. Não dá pra mexer nos itens.')
-      return
+  // A MESMA CERVEJA DE NOVO.
+  //
+  // A comanda mostra o mesmo produto numa linha só (agruparItensComanda), mas no
+  // banco cada "mais uma" é um LANÇAMENTO novo: linha própria, com o nome de
+  // quem lançou. Antes o + só aumentava a quantidade da linha antiga — o ponto
+  // ia pra quem tinha lançado a primeira, não pra quem atendeu agora, e a
+  // cozinha/bar não ficava sabendo. Então o garçom lançava "normal" pra ganhar o
+  // ponto e a comanda virava uma lista de "1x Amstel" sem fim.
+  //
+  // Agora o + é igual a lançar: vai pro nome de quem apertou e sai no papel.
+  function travadoNaConferencia() {
+    if (comandaSel?.status !== 'aguardando_conferencia') return false
+    window.alert('Conta já fechada, aguardando o ADM liberar a mesa. Não dá pra mexer nos itens.')
+    return true
+  }
+
+  async function lancarMaisDoGrupo(grupo, qtd = 1) {
+    if (!comandaSel || qtd <= 0) return
+    const base = grupo.itens[grupo.itens.length - 1]
+    const { data: inseridos, error } = await supabase.from('comanda_itens').insert({
+      empresa_id: empresaId, comanda_id: comandaSel.id,
+      produto_id: base.produto_id ?? null, nome: base.nome,
+      preco_unitario: Number(base.preco_unitario), quantidade: qtd,
+      complementos: base.complementos ?? null, observacao: base.observacao ?? null,
+      ...(semCozinha ? { status: 'entregue' } : {}),
+    }).select()
+    if (error) { window.alert('Erro ao lançar o item: ' + error.message); return }
+    if (!semCozinha) {
+      const paraImprimir = inseridos ?? []
+      const saiu = await imprimirComandaAgora(paraImprimir)
+      const filtro = saiu === 'filtrado' ? motivoFiltro(paraImprimir) : null
+      setAvisoImpressao(
+        filtro ? { itens: paraImprimir, motivo: filtro, quando: Date.now() }
+        : saiu ? null
+        : { itens: paraImprimir, quando: Date.now() },
+      )
     }
-    const nova = item.quantidade + delta
-    if (nova <= 0) await supabase.from('comanda_itens').delete().eq('id', item.id)
-    else await supabase.from('comanda_itens').update({ quantidade: nova }).eq('id', item.id)
     await loadMesas()
   }
 
-  // Dar o "pronto" sem depender do app da cozinha. Loja que não usa a tela da
-  // cozinha (é o caso da Estação) tinha que abrir o Painel só pra isso.
-  async function marcarItemPronto(item) {
-    const { error } = await supabase.from('comanda_itens').update({ status: 'pronto' }).eq('id', item.id)
-    if (error) { window.alert('Erro ao marcar pronto: ' + error.message); return }
+  // Tirar sai do lançamento MAIS NOVO: foi o último que entrou, é o que o
+  // garçom está corrigindo — e o ponto sai de quem lançou ele.
+  async function tirarDoGrupo(grupo, qtd = 1) {
+    let falta = qtd
+    for (const it of [...grupo.itens].reverse()) {
+      if (falta <= 0) break
+      const q = Number(it.quantidade) || 0
+      if (q <= falta) await supabase.from('comanda_itens').delete().eq('id', it.id)
+      else await supabase.from('comanda_itens').update({ quantidade: q - falta }).eq('id', it.id)
+      falta -= q
+    }
     await loadMesas()
   }
-  async function marcarTudoPronto() {
-    const ids = (comandaSel?.comanda_itens ?? [])
-      .filter(it => it.status !== 'pronto' && it.status !== 'entregue').map(it => it.id)
+
+  async function mudarQtdGrupo(grupo, delta) {
+    if (travadoNaConferencia()) return
+    if (delta > 0) await lancarMaisDoGrupo(grupo, delta)
+    else await tirarDoGrupo(grupo, -delta)
+  }
+
+  // Digitou a quantidade: a diferença vira lançamento novo (se subiu) ou sai
+  // dos mais novos (se desceu). O campo fica vazio enquanto o garçom apaga pra
+  // redigitar; só grava quando ele sai do campo.
+  async function definirQtdGrupo(grupo, valor) {
+    if (travadoNaConferencia()) return
+    const n = Math.max(0, Math.floor(Number(valor) || 0))
+    const diff = n - grupo.quantidade
+    if (diff > 0) await lancarMaisDoGrupo(grupo, diff)
+    else if (diff < 0) await tirarDoGrupo(grupo, -diff)
+  }
+
+  async function marcarGrupoPronto(grupo) {
+    const ids = grupo.itens.filter(it => it.status !== 'pronto' && it.status !== 'entregue').map(it => it.id)
     if (!ids.length) return
     const { error } = await supabase.from('comanda_itens').update({ status: 'pronto' }).in('id', ids)
     if (error) { window.alert('Erro ao marcar pronto: ' + error.message); return }
     await loadMesas()
   }
 
-  async function entregarItem(item) {
-    // registra QUEM entregou (quem clicou) — atribuição por entrega
+  async function entregarGrupo(grupo) {
+    const ids = grupo.itens.filter(it => it.status === 'pronto').map(it => it.id)
+    if (!ids.length) return
     await supabase.from('comanda_itens')
       .update({ status: 'entregue', entregue_por: user?.id ?? null, entregue_at: new Date().toISOString() })
-      .eq('id', item.id)
+      .in('id', ids)
     await loadMesas()
   }
 
-  // Edita o preço unitário de um item já lançado (só admin) — ex.: prato por peso.
-  async function salvarPreco(item) {
-    const texto = precoEdit[item.id]
-    setPrecoEdit(prev => { const n = { ...prev }; delete n[item.id]; return n })
+  // Preço editado vale pra linha que o ADM vê — todos os lançamentos dela.
+  async function salvarPrecoGrupo(grupo) {
+    const texto = precoEdit[grupo.chave]
+    setPrecoEdit(prev => { const n = { ...prev }; delete n[grupo.chave]; return n })
     if (texto === undefined) return
     const preco = Math.max(0, valorMoeda(texto))
-    if (!Number.isFinite(preco) || preco === Number(item.preco_unitario)) return
-    const { error } = await supabase.from('comanda_itens').update({ preco_unitario: preco }).eq('id', item.id)
+    if (!Number.isFinite(preco) || preco === Number(grupo.preco_unitario)) return
+    const { error } = await supabase.from('comanda_itens').update({ preco_unitario: preco })
+      .in('id', grupo.itens.map(it => it.id))
     if (error) { window.alert('Erro ao salvar o preço: ' + error.message); return }
+    await loadMesas()
+  }
+
+  async function marcarTudoPronto() {
+    const ids = (comandaSel?.comanda_itens ?? [])
+      .filter(it => it.status !== 'pronto' && it.status !== 'entregue').map(it => it.id)
+    if (!ids.length) return
+    const { error } = await supabase.from('comanda_itens').update({ status: 'pronto' }).in('id', ids)
+    if (error) { window.alert('Erro ao marcar pronto: ' + error.message); return }
     await loadMesas()
   }
 
@@ -1583,8 +1631,8 @@ export default function PresencialSalao() {
       return
     }
 
-    const linhas = (comandaSel.comanda_itens ?? [])
-      .slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    // Mesmo produto numa linha só, igual à pré-conta impressa.
+    const linhas = agruparItensComanda(comandaSel.comanda_itens, { porObs: false })
       .map(i => {
         const qtd = Number(i.quantidade) || 1
         const total = Number(i.preco_unitario) * qtd
@@ -2611,31 +2659,40 @@ export default function PresencialSalao() {
               {(comandaSel.comanda_itens ?? []).length === 0 ? (
                 <p className="sal-vazio" style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum item ainda — lance o primeiro produto.</p>
               ) : (
-                (comandaSel.comanda_itens ?? [])
-                  .slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-                  .map(item => (
-                    <div key={item.id} className="sal-item" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                // Mesmo produto lançado várias vezes = uma linha só, com a soma.
+                // Cada lançamento continua separado no banco (é o ponto de quem
+                // lançou); aqui só a leitura fica curta.
+                agruparItensComanda(comandaSel.comanda_itens)
+                  .map(grupo => {
+                    const qtdPor = st => grupo.itens.filter(st).reduce((n, it) => n + Number(it.quantidade || 0), 0)
+                    const nPreparando = qtdPor(it => it.status !== 'pronto' && it.status !== 'entregue')
+                    const nPronto = qtdPor(it => it.status === 'pronto')
+                    const nEntregue = qtdPor(it => it.status === 'entregue')
+                    const entregadores = [...new Set(grupo.itens
+                      .filter(it => it.status === 'entregue' && it.entregue_por && garcons[it.entregue_por])
+                      .map(it => garcons[it.entregue_por].split(' ')[0]))]
+                    const misturado = [nPreparando, nPronto, nEntregue].filter(n => n > 0).length > 1
+                    const textoStatus = misturado
+                      ? [nEntregue && `🍽️ ${nEntregue} entregue`, nPronto && `🔔 ${nPronto} pronto`, nPreparando && `⏳ ${nPreparando} preparando`].filter(Boolean).join(' · ')
+                      : nPronto ? '🔔 pronto'
+                      : nEntregue ? `🍽️ entregue${entregadores.length ? ' por ' + entregadores.join(', ') : ''}`
+                      : '⏳ preparando'
+                    return (
+                    <div key={grupo.chave} className="sal-item" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ flex: 1 }}>
-                          <div className="sal-item-nome" style={{ fontSize: 15.5, fontWeight: 700 }}>{item.nome}</div>
+                          <div className="sal-item-nome" style={{ fontSize: 15.5, fontWeight: 700 }}>{grupo.nome}</div>
                           <div className="sal-item-sub" style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <span>
-                              {fmt(item.preco_unitario)} · {
-                                item.status === 'pronto' ? '🔔 pronto'
-                                : item.status === 'entregue'
-                                  ? `🍽️ entregue${item.entregue_por && garcons[item.entregue_por] ? ' por ' + garcons[item.entregue_por].split(' ')[0] : ''}`
-                                : '⏳ preparando'
-                              }
-                            </span>
-                            {item.status !== 'pronto' && item.status !== 'entregue' && (
-                              <button type="button" onClick={() => marcarItemPronto(item)}
+                            <span>{fmt(grupo.preco_unitario)} · {textoStatus}</span>
+                            {nPreparando > 0 && (
+                              <button type="button" onClick={() => marcarGrupoPronto(grupo)}
                                 style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
                                   border: '1.5px solid #3b82f6', background: 'rgba(59,130,246,.15)', color: '#2563eb' }}>
                                 🔔 Marcar pronto
                               </button>
                             )}
-                            {item.status === 'pronto' && (
-                              <button type="button" onClick={() => entregarItem(item)}
+                            {nPronto > 0 && (
+                              <button type="button" onClick={() => entregarGrupo(grupo)}
                                 style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
                                   border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.15)', color: '#16a34a' }}>
                                 Marcar entregue
@@ -2643,37 +2700,37 @@ export default function PresencialSalao() {
                             )}
                           </div>
                         </div>
-                        <button type="button" onClick={() => mudarQtd(item, -1)} style={qtdBtn}>−</button>
+                        <button type="button" onClick={() => mudarQtdGrupo(grupo, -1)} style={qtdBtn}>−</button>
                         <input type="number" min="0" inputMode="numeric"
                           className="sal-item-qtd sal-item-qtd-inp"
-                          aria-label={`Quantidade de ${item.nome}`}
-                          value={qtdEdit[item.id] ?? item.quantidade}
+                          aria-label={`Quantidade de ${grupo.nome}`}
+                          value={qtdEdit[grupo.chave] ?? grupo.quantidade}
                           onFocus={e => e.target.select()}
-                          onChange={e => setQtdEdit(prev => ({ ...prev, [item.id]: e.target.value }))}
-                          onBlur={e => { definirQtd(item, e.target.value); setQtdEdit(prev => { const n = { ...prev }; delete n[item.id]; return n }) }}
+                          onChange={e => setQtdEdit(prev => ({ ...prev, [grupo.chave]: e.target.value }))}
+                          onBlur={e => { definirQtdGrupo(grupo, e.target.value); setQtdEdit(prev => { const n = { ...prev }; delete n[grupo.chave]; return n }) }}
                           onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }} />
-                        <button type="button" onClick={() => mudarQtd(item, +1)} style={qtdBtn}>+</button>
-                        {precoEdit[item.id] !== undefined ? (
+                        <button type="button" onClick={() => mudarQtdGrupo(grupo, +1)} style={qtdBtn}>+</button>
+                        {precoEdit[grupo.chave] !== undefined ? (
                           <input
                             autoFocus type="text" inputMode="decimal"
-                            value={precoEdit[item.id]}
-                            onChange={e => setPrecoEdit(prev => ({ ...prev, [item.id]: maskMoeda(e.target.value) }))}
-                            onBlur={() => salvarPreco(item)}
-                            onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); else if (e.key === 'Escape') setPrecoEdit(prev => { const n = { ...prev }; delete n[item.id]; return n }) }}
+                            value={precoEdit[grupo.chave]}
+                            onChange={e => setPrecoEdit(prev => ({ ...prev, [grupo.chave]: maskMoeda(e.target.value) }))}
+                            onBlur={() => salvarPrecoGrupo(grupo)}
+                            onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); else if (e.key === 'Escape') setPrecoEdit(prev => { const n = { ...prev }; delete n[grupo.chave]; return n }) }}
                             placeholder="0,00"
                             style={{ minWidth: 70, width: 70, padding: '4px 6px', fontSize: 13, borderRadius: 6, textAlign: 'right',
                               border: '1.5px solid var(--primary)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }}
                           />
                         ) : ehAdmin ? (
                           <button type="button" title="Editar preço deste item"
-                            onClick={() => setPrecoEdit(prev => ({ ...prev, [item.id]: Number(item.preco_unitario) > 0 ? numeroParaMoeda(item.preco_unitario) : '' }))}
+                            onClick={() => setPrecoEdit(prev => ({ ...prev, [grupo.chave]: Number(grupo.preco_unitario) > 0 ? numeroParaMoeda(grupo.preco_unitario) : '' }))}
                             style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
                               border: '1px dashed var(--border)', borderRadius: 6, padding: '3px 6px', background: 'transparent', color: 'var(--text)' }}>
-                            {fmt(item.preco_unitario * item.quantidade)} ✎
+                            {fmt(grupo.preco_unitario * grupo.quantidade)} ✎
                           </button>
                         ) : (
                           <span style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>
-                            {fmt(item.preco_unitario * item.quantidade)}
+                            {fmt(grupo.preco_unitario * grupo.quantidade)}
                           </span>
                         )}
                       </div>
@@ -2683,13 +2740,14 @@ export default function PresencialSalao() {
                           avisando alguém. O recado se escreve ANTES de enviar, na
                           linha do rascunho.
                           O que já foi escrito continua à vista, só que como texto. */}
-                      {item.observacao && (
+                      {grupo.observacao && (
                         <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-muted)', marginTop: 5 }}>
-                          📝 {item.observacao}
+                          📝 {grupo.observacao}
                         </div>
                       )}
                     </div>
-                  ))
+                    )
+                  })
               )}
 
               {/* A enviar (rascunho) — ainda não foi pra cozinha */}
