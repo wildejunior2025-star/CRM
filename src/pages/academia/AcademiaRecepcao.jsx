@@ -6,7 +6,7 @@ import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, acharAluno, situacaoAluno,
   entrarTelaCheia, sairTelaCheia, lerOlhos, criarDetectorPiscada, GIRO_LADO,
 } from '../../lib/reconhecimentoFacial'
-import { liberarCatraca, conectarCatraca, serialSuportado } from '../../lib/catracaSerial'
+import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '../../lib/catracaSerial'
 
 // Tablet da recepção (academia.fwcinter.com/recepcao).
 // A câmera fica ligada; quando reconhece um aluno mostra foto, nome e se está
@@ -39,12 +39,27 @@ export default function AcademiaRecepcao() {
   const [qtdAlunos, setQtdAlunos] = useState(0)
   const [exigirPiscar, setExigirPiscar] = useState(lerExigirPiscar)
   const [pedindoPiscar, setPedindoPiscar] = useState(null) // { nome, demorou }
-  // Catraca ligada neste PC: null = não usa (tablet/sem config), 'ok', 'abrindo' ou o texto do erro.
-  const [catraca, setCatraca] = useState(null)
+  // Catraca ligada neste PC: null = não usa (tablet), 'ok', 'abrindo' ou o texto do erro.
+  // Tudo automático — a academia funciona sem ninguém na recepção.
+  const [catraca, setCatracaEstado] = useState(null)
+  const catracaRef = useRef(null)
+  const setCatraca = v => { catracaRef.current = v; setCatracaEstado(v) }
 
   async function abrirCatraca() {
     setCatraca('abrindo')
-    try { await liberarCatraca(); setCatraca('ok') } catch (e) { setCatraca(e.message) }
+    try {
+      await liberarCatraca()
+      setCatraca('ok')
+    } catch {
+      // Porta caiu (cabo mexido, Windows dormiu): fecha, reabre e tenta de novo.
+      try {
+        await fecharPorta()
+        await liberarCatraca()
+        setCatraca('ok')
+      } catch (e2) {
+        setCatraca(e2.message)
+      }
+    }
   }
 
   function trocarPiscar(v) {
@@ -191,9 +206,17 @@ export default function AcademiaRecepcao() {
     })()
 
     const recarga = setInterval(carregarAlunos, RECARREGAR_ALUNOS_MS)
+    // Sem ninguém na recepção: se a catraca desconectou, tenta de novo sozinha.
+    const reconecta = serialSuportado() ? setInterval(() => {
+      const atual = catracaRef.current
+      if (atual && atual !== 'ok' && atual !== 'abrindo') {
+        fecharPorta().then(conectarCatraca).then(() => setCatraca('ok'), e => setCatraca(e.message))
+      }
+    }, 20000) : null
     return () => {
       vivo = false
       clearInterval(recarga)
+      clearInterval(reconecta)
       clearTimeout(timerCartao)
       desligarCamera(stream)
       wakeLock?.release?.().catch(() => {})
@@ -265,7 +288,6 @@ export default function AcademiaRecepcao() {
             <div className={catraca === 'ok' || catraca === 'abrindo' ? 'ok' : 'erro'}>
               {catraca === 'ok' ? '● Catraca conectada' : catraca === 'abrindo' ? '● Abrindo a catraca...' : `● ${catraca}`}
             </div>
-            <button className="btn btn-primary" onClick={abrirCatraca} disabled={catraca === 'abrindo'}>🔓 Abrir catraca</button>
           </div>
         )}
         <Link to="/" className="ac-rec-voltar">← Alunos</Link>
