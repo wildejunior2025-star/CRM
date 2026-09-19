@@ -60,8 +60,11 @@ export async function enviarBytes(bytes) {
 
 // Configuração que funcionou, guardada neste computador.
 const CHAVE = 'academia_catraca_config'
+// O que destravou a catraca eletromecânica da primeira academia no teste de
+// 19/09/2026 (botão "DTR + RTS juntos"). Vale quando ninguém guardou outro.
+const PADRAO = { tipo: 'pino', dtr: true, rts: true, ms: 3000, baudRate: 9600, nome: 'DTR + RTS juntos' }
 export function lerConfigCatraca() {
-  try { return JSON.parse(localStorage.getItem(CHAVE)) || null } catch { return null }
+  try { return JSON.parse(localStorage.getItem(CHAVE)) || PADRAO } catch { return PADRAO }
 }
 export function salvarConfigCatraca(cfg) {
   try { localStorage.setItem(CHAVE, JSON.stringify(cfg)) } catch { /* só não lembra */ }
