@@ -140,6 +140,20 @@ export default function PresencialSalao() {
   // Só o ADM confere o pagamento e libera a mesa. Garçom fecha, mas não libera.
   const ehAdmin = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
 
+  // QUEM DIZ QUE O PRATO FICOU PRONTO É A COZINHA.
+  //
+  // O "pronto" da cozinha é o aviso de que a comida saiu da panela — quem sabe
+  // isso é quem está cozinhando. Na Saidera o garçom vinha dando pronto na
+  // comida pela tela do Salão (18/09), e aí o item aparecia pronto sem estar,
+  // ou a tela da Cozinha perdia o item da fila.
+  //
+  // Bebida, sobremesa pronta, couvert — tudo que não é da cozinha (setor da
+  // categoria, mig 0184) o garçom continua marcando: é ele mesmo que pega no
+  // balcão e leva. O ADM pode tudo, porque é ele quem desatola a mesa quando a
+  // cozinha esquece de marcar.
+  const podeProntoDaCozinha = ehAdmin || profile?.perfil === 'cozinheiro'
+  const ehDaCozinha = (it) => it?.setor === 'cozinha'
+
   // Começa em 0, NUNCA em 10: chutar 10% enquanto a config da loja não chegou já
   // colocou taxa de serviço numa loja que cobra 0% e travou a mesa na hora de
   // liberar (mig 0144). Sem valor carregado, o certo é não cobrar nada.
@@ -1269,7 +1283,10 @@ export default function PresencialSalao() {
   }
 
   async function marcarGrupoPronto(grupo) {
-    const ids = grupo.itens.filter(it => it.status !== 'pronto' && it.status !== 'entregue').map(it => it.id)
+    const ids = grupo.itens
+      .filter(it => it.status !== 'pronto' && it.status !== 'entregue')
+      .filter(it => podeProntoDaCozinha || !ehDaCozinha(it))
+      .map(it => it.id)
     if (!ids.length) return
     const { error } = await supabase.from('comanda_itens').update({ status: 'pronto' }).in('id', ids)
     if (error) { window.alert('Erro ao marcar pronto: ' + error.message); return }
@@ -1298,9 +1315,13 @@ export default function PresencialSalao() {
     await loadMesas()
   }
 
+  // "Tudo pronto" na mão do garçom marca tudo MENOS a comida: essa quem libera
+  // é a cozinha.
   async function marcarTudoPronto() {
     const ids = (comandaSel?.comanda_itens ?? [])
-      .filter(it => it.status !== 'pronto' && it.status !== 'entregue').map(it => it.id)
+      .filter(it => it.status !== 'pronto' && it.status !== 'entregue')
+      .filter(it => podeProntoDaCozinha || !ehDaCozinha(it))
+      .map(it => it.id)
     if (!ids.length) return
     const { error } = await supabase.from('comanda_itens').update({ status: 'pronto' }).in('id', ids)
     if (error) { window.alert('Erro ao marcar pronto: ' + error.message); return }
@@ -2578,11 +2599,12 @@ export default function PresencialSalao() {
                     {reimprimindo ? '🖨️ ...' : '🖨️ Reimprimir'}
                   </button>
                 )}
-                {!semCozinha && (comandaSel.comanda_itens ?? []).some(i => i.status !== 'pronto' && i.status !== 'entregue') && (
+                {!semCozinha && (comandaSel.comanda_itens ?? []).some(i => i.status !== 'pronto' && i.status !== 'entregue'
+                  && (podeProntoDaCozinha || !ehDaCozinha(i))) && (
                   <button type="button" onClick={marcarTudoPronto}
                     style={{ fontSize: 12, fontWeight: 800, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
                       border: '1.5px solid #3b82f6', background: 'rgba(59,130,246,.12)', color: '#2563eb' }}>
-                    🔔 Marcar tudo pronto
+                    {podeProntoDaCozinha ? '🔔 Marcar tudo pronto' : '🔔 Prontos (menos a cozinha)'}
                   </button>
                 )}
                 </div>
@@ -2693,13 +2715,19 @@ export default function PresencialSalao() {
                           <div className="sal-item-nome" style={{ fontSize: 15.5, fontWeight: 700 }}>{grupo.nome}</div>
                           <div className="sal-item-sub" style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                             <span>{fmt(grupo.preco_unitario)} · {textoStatus}</span>
-                            {nPreparando > 0 && (
+                            {nPreparando > 0 && (podeProntoDaCozinha || !ehDaCozinha(grupo) ? (
                               <button type="button" onClick={() => marcarGrupoPronto(grupo)}
                                 style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
                                   border: '1.5px solid #3b82f6', background: 'rgba(59,130,246,.15)', color: '#2563eb' }}>
                                 🔔 Marcar pronto
                               </button>
-                            )}
+                            ) : (
+                              // Comida: quem dá o pronto é a cozinha. Dizer o porquê
+                              // evita o garçom achar que a tela travou.
+                              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>
+                                🍳 a cozinha avisa quando ficar pronto
+                              </span>
+                            ))}
                             {nPronto > 0 && (
                               <button type="button" onClick={() => entregarGrupo(grupo)}
                                 style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
