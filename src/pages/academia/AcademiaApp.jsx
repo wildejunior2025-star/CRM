@@ -6,10 +6,12 @@ import './academia.css'
 // academia.fwcinter.com — sistema da academia (mig 0276).
 //   /           → alunos (cadastro com foto do rosto)
 //   /recepcao   → tablet da recepção: câmera reconhece e mostra se está em dia
+//   /catraca    → descobrir no PC da catraca qual sinal destrava ela
 // Por enquanto só o dono (admin da empresa) entra. Instrutor e aluno vêm depois.
 
 const AcademiaAlunos = lazy(() => import('./AcademiaAlunos'))
 const AcademiaRecepcao = lazy(() => import('./AcademiaRecepcao'))
+const AcademiaCatraca = lazy(() => import('./AcademiaCatraca'))
 
 function Carregando() {
   return <div className="ac-centro ac-muted">Carregando...</div>
@@ -58,6 +60,7 @@ function Topo() {
       <nav>
         <NavLink to="/" end>Alunos</NavLink>
         <NavLink to="/recepcao">Recepção</NavLink>
+        <NavLink to="/catraca">Catraca</NavLink>
       </nav>
       <button className="btn btn-secondary btn-sm" onClick={logout}>Sair</button>
     </header>
@@ -87,6 +90,7 @@ function Portaria() {
         <Route path="*" element={<><Topo /><main className="ac-main">
           <Routes>
             <Route path="/" element={<AcademiaAlunos />} />
+            <Route path="/catraca" element={<AcademiaCatraca />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main></>} />

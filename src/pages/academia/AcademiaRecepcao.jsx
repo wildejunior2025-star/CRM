@@ -6,6 +6,7 @@ import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, acharAluno, situacaoAluno,
   entrarTelaCheia, sairTelaCheia, lerOlhos, criarDetectorPiscada, GIRO_LADO,
 } from '../../lib/reconhecimentoFacial'
+import { liberarCatraca } from '../../lib/catracaSerial'
 
 // Tablet da recepção (academia.fwcinter.com/recepcao).
 // A câmera fica ligada; quando reconhece um aluno mostra foto, nome e se está
@@ -83,6 +84,8 @@ export default function AcademiaRecepcao() {
       cartaoAtualId = achado.aluno.id
       mostrar({ aluno: achado.aluno, situacao })
       bipe(situacao.status === 'liberado')
+      // PC com a catraca ligada (configurada em /catraca): abre sozinha.
+      if (situacao.status === 'liberado') liberarCatraca().catch(() => {})
       registrar(achado.aluno, situacao, achado.distancia)
     }
 
