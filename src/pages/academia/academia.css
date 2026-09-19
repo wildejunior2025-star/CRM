@@ -118,3 +118,9 @@
   .ac-rec-lado { width: auto; height: 130px; flex-direction: row; flex-wrap: wrap; align-content: flex-start; }
   .ac-rec-titulo { width: 100%; }
 }
+
+/* Catraca ligada no PC da recepção */
+.ac-rec-catraca { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 10px; border-top: 1px solid #2a2f3a; }
+.ac-rec-catraca .ok { color: #4ade80; font-size: 13px; }
+.ac-rec-catraca .erro { color: #f87171; font-size: 13px; }
+.ac-rec-catraca + .ac-rec-voltar { margin-top: 0; }

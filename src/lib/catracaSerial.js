@@ -67,16 +67,26 @@ export function salvarConfigCatraca(cfg) {
   try { localStorage.setItem(CHAVE, JSON.stringify(cfg)) } catch { /* só não lembra */ }
 }
 
+// Deixa a porta da catraca aberta e pronta (a recepção chama ao começar).
+// Erro vem com o motivo em português pra aparecer na tela.
+export async function conectarCatraca() {
+  const cfg = lerConfigCatraca()
+  if (!serialSuportado()) throw new Error('Este navegador não fala com a catraca (use o Chrome do computador).')
+  if (!cfg) throw new Error('Catraca não configurada neste computador. Vá em "Catraca" e aperte "foi esse!".')
+  if (porta) return
+  const p = await portaLembrada()
+  if (!p) throw new Error('A porta da catraca não foi escolhida neste computador. Vá em "Catraca" e escolha a porta.')
+  try {
+    await abrirPorta(p, cfg.baudRate || 9600)
+  } catch (e) {
+    throw new Error('Não consegui abrir a porta da catraca. O SCA ou outra aba está usando? Feche e tente de novo.', { cause: e })
+  }
+}
+
 // Abre a catraca com a configuração salva (usada pela recepção).
 export async function liberarCatraca() {
+  await conectarCatraca()
   const cfg = lerConfigCatraca()
-  if (!cfg) return false
-  if (!porta) {
-    const p = await portaLembrada()
-    if (!p) return false
-    await abrirPorta(p, cfg.baudRate || 9600)
-  }
   if (cfg.tipo === 'bytes') await enviarBytes(cfg.bytes)
   else await pulso({ dtr: cfg.dtr, rts: cfg.rts, ms: cfg.ms || 3000 })
-  return true
 }

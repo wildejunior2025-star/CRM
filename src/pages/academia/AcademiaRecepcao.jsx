@@ -6,7 +6,7 @@ import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, acharAluno, situacaoAluno,
   entrarTelaCheia, sairTelaCheia, lerOlhos, criarDetectorPiscada, GIRO_LADO,
 } from '../../lib/reconhecimentoFacial'
-import { liberarCatraca } from '../../lib/catracaSerial'
+import { liberarCatraca, conectarCatraca, serialSuportado } from '../../lib/catracaSerial'
 
 // Tablet da recepção (academia.fwcinter.com/recepcao).
 // A câmera fica ligada; quando reconhece um aluno mostra foto, nome e se está
@@ -39,6 +39,13 @@ export default function AcademiaRecepcao() {
   const [qtdAlunos, setQtdAlunos] = useState(0)
   const [exigirPiscar, setExigirPiscar] = useState(lerExigirPiscar)
   const [pedindoPiscar, setPedindoPiscar] = useState(null) // { nome, demorou }
+  // Catraca ligada neste PC: null = não usa (tablet/sem config), 'ok', 'abrindo' ou o texto do erro.
+  const [catraca, setCatraca] = useState(null)
+
+  async function abrirCatraca() {
+    setCatraca('abrindo')
+    try { await liberarCatraca(); setCatraca('ok') } catch (e) { setCatraca(e.message) }
+  }
 
   function trocarPiscar(v) {
     setExigirPiscar(v)
@@ -85,7 +92,7 @@ export default function AcademiaRecepcao() {
       mostrar({ aluno: achado.aluno, situacao })
       bipe(situacao.status === 'liberado')
       // PC com a catraca ligada (configurada em /catraca): abre sozinha.
-      if (situacao.status === 'liberado') liberarCatraca().catch(() => {})
+      if (situacao.status === 'liberado') abrirCatraca()
       registrar(achado.aluno, situacao, achado.distancia)
     }
 
@@ -172,6 +179,11 @@ export default function AcademiaRecepcao() {
         if (!vivo) return desligarCamera(stream)
         try { wakeLock = await navigator.wakeLock?.request('screen') } catch { /* sem wake lock, segue */ }
         setEstado({ fase: 'rodando', msg: '' })
+        // Computador (Chrome com porta serial): já deixa a porta da catraca aberta e
+        // mostra na tela se deu certo — ou o motivo, inclusive "não configurada".
+        if (serialSuportado()) {
+          conectarCatraca().then(() => setCatraca('ok'), e => setCatraca(e.message))
+        }
         laco()
       } catch (e) {
         setEstado({ fase: 'erro', msg: e.name === 'NotAllowedError' ? 'A câmera foi bloqueada. Libere nas permissões do Safari/Chrome e recarregue.' : e.message })
@@ -248,6 +260,14 @@ export default function AcademiaRecepcao() {
             </div>
           </div>
         ))}
+        {catraca && (
+          <div className="ac-rec-catraca">
+            <div className={catraca === 'ok' || catraca === 'abrindo' ? 'ok' : 'erro'}>
+              {catraca === 'ok' ? '● Catraca conectada' : catraca === 'abrindo' ? '● Abrindo a catraca...' : `● ${catraca}`}
+            </div>
+            <button className="btn btn-primary" onClick={abrirCatraca} disabled={catraca === 'abrindo'}>🔓 Abrir catraca</button>
+          </div>
+        )}
         <Link to="/" className="ac-rec-voltar">← Alunos</Link>
       </aside>
     </div>
