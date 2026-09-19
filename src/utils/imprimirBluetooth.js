@@ -79,7 +79,7 @@ function marcarEstado() {
 let _religarTimer = null
 let _vigiando = false
 
-const temImpressoraConhecida = () => {
+export const temImpressoraConhecida = () => {
   if (_device) return true
   try { return !!localStorage.getItem(LS_DEV) } catch { return false }
 }

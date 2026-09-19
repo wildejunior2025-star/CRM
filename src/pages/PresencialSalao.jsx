@@ -1039,9 +1039,18 @@ export default function PresencialSalao() {
       if (await mod.appFwcDisponivel()) return 'app'
     } catch { /* sem app neste aparelho */ }
 
-    // Aí sim não saiu em lugar nenhum: desfaz a marca, senão o item fica "já
-    // impresso" pra sempre e nem o caminho de reserva do Painel tentaria.
+    // Desfaz a marca, senão o item fica "já impresso" pra sempre e nem o caminho
+    // de reserva do Painel tentaria.
     for (const i of itens) jaSaiu.delete(i.id)
+
+    // Este aparelho nunca teve térmica (garçom no celular dele, ADM no PC de
+    // casa): quem imprime é a estação da loja, pelo tempo real. Gritar "o papel
+    // NÃO saiu" aqui era alarme falso a cada cerveja (Saidera, 18/09). O aviso
+    // fica pra quando existe impressora AQUI e ela não respondeu.
+    try {
+      const bt = await import('../utils/imprimirBluetooth')
+      if (!bt.temImpressoraConhecida()) return 'estacao'
+    } catch { return 'estacao' }
     return false
   }
 
