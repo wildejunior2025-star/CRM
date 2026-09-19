@@ -58,7 +58,7 @@
 .ac-rosto-pronto img { width: 160px; height: 160px; border-radius: 50%; object-fit: cover; }
 .ac-rosto-pronto .ac-status { align-self: center; }
 
-.ac-video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); transform-origin: center; transition: transform .35s ease-out; display: block; }
+.ac-video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); transform-origin: center; display: block; }
 
 /* Captura do rosto em tela cheia */
 .ac-captura-tela { position: fixed; inset: 0; z-index: 50; background: #000; display: flex; flex-direction: column; color: #fff; }

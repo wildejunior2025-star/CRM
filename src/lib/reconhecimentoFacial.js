@@ -61,44 +61,6 @@ export async function lerRosto(video) {
   return { descritor: maior.descriptor, caixa: maior.detection.box, quantos: achados.length }
 }
 
-// Só acha onde está o rosto (sem calcular a digital) — leve, serve pro zoom.
-export async function acharCaixaRosto(video) {
-  const r = await window.faceapi.detectSingleFace(video, opcoesDetector())
-  return r ? r.box : null
-}
-
-// Zoom que segue o rosto: aproxima o <video> até o rosto ocupar boa parte da
-// tela e centraliza nele. Mexe só no CSS do vídeo (a leitura do rosto continua
-// usando a imagem inteira da câmera). O vídeo tem que estar com object-fit:
-// cover, espelhado, ocupando a caixa em que está.
-const semRosto = new WeakMap()
-export function zoomNoRosto(video, caixa, ocupar = 0.6) {
-  if (!video) return
-  if (!caixa) {
-    // Uma leitura sem rosto não desfaz o zoom (piscava); só depois de ~1,5s.
-    const n = (semRosto.get(video) || 0) + 1
-    semRosto.set(video, n)
-    if (n >= 8) video.style.transform = 'scaleX(-1)'
-    return
-  }
-  semRosto.set(video, 0)
-  const W = video.clientWidth
-  const H = video.clientHeight
-  const vw = video.videoWidth
-  const vh = video.videoHeight
-  if (!W || !H || !vw || !vh) return
-  const s0 = Math.max(W / vw, H / vh)            // escala do object-fit: cover
-  const ox = (W - vw * s0) / 2
-  const oy = (H - vh * s0) / 2
-  const fx = W - (ox + (caixa.x + caixa.width / 2) * s0) // espelhado
-  const fy = oy + (caixa.y + caixa.height / 2) * s0
-  const z = Math.min(3, Math.max(1, (ocupar * H) / (caixa.height * 1.5 * s0)))
-  const lim = v => (z - 1) * v / 2
-  const tx = Math.max(-lim(W), Math.min(lim(W), -z * (fx - W / 2)))
-  const ty = Math.max(-lim(H), Math.min(lim(H), -z * (fy - H / 2)))
-  video.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${z.toFixed(3)}) scaleX(-1)`
-}
-
 // Tela cheia de verdade (some a barra do navegador). No iPad é o webkit*.
 // Tem que ser chamado direto no toque do botão.
 export function entrarTelaCheia() {
@@ -141,19 +103,37 @@ export function acharAluno(descritor, alunos) {
   return melhor
 }
 
+// Zoom FIXO da câmera: a câmera da frente do tablet é grande-angular e o
+// rosto ficava pequeno. Tentamos antes seguir o rosto com zoom, mas a imagem
+// tremia — então é um zoom parado e a pessoa encaixa o rosto no oval.
+const ZOOM = 1.5
+
 // Liga a câmera da frente no <video>. Devolve o stream pra desligar depois.
+// Pede HD pra o zoom não borrar a imagem. Se a câmera tiver zoom de verdade
+// (Android/Chrome), usa ele; senão amplia na tela.
 export async function ligarCamera(video) {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Este navegador não libera a câmera. No iPad, use o Safari.')
   }
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } },
     audio: false,
   })
   video.srcObject = stream
   video.setAttribute('playsinline', '')
   video.muted = true
   await video.play()
+
+  let zoomNaTela = ZOOM
+  try {
+    const track = stream.getVideoTracks()[0]
+    const cap = track.getCapabilities?.().zoom
+    if (cap && cap.max >= ZOOM) {
+      await track.applyConstraints({ advanced: [{ zoom: Math.max(cap.min, ZOOM) }] })
+      zoomNaTela = 1
+    }
+  } catch { /* sem zoom na câmera: amplia na tela */ }
+  video.style.transform = `scale(${zoomNaTela}) scaleX(-1)`
   return stream
 }
 

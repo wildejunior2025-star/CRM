@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, miniaturaDoRosto, situacaoAluno, acharAluno,
-  acharCaixaRosto, zoomNoRosto, entrarTelaCheia, sairTelaCheia,
+  entrarTelaCheia, sairTelaCheia,
 } from '../../lib/reconhecimentoFacial'
 
 // Quantas "digitais do rosto" o cadastro guarda. Mais de uma deixa o
@@ -248,21 +248,6 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
     return () => { vivo = false; desligarCamera(stream); sairTelaCheia() }
   }, [])
 
-  // Enquanto espera o "Capturar", o zoom fica seguindo o rosto.
-  useEffect(() => {
-    if (fase !== 'pronto') return
-    let vivo = true
-    ;(async () => {
-      while (vivo) {
-        const caixa = await acharCaixaRosto(videoRef.current).catch(() => null)
-        if (!vivo) break
-        zoomNoRosto(videoRef.current, caixa)
-        await esperar(120)
-      }
-    })()
-    return () => { vivo = false }
-  }, [fase])
-
   async function capturar() {
     setFase('capturando')
     const descritores = []
@@ -273,7 +258,6 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
       tentativas++
       setMsg(dicas[descritores.length] || 'Segure...')
       const r = await lerRosto(videoRef.current)
-      zoomNoRosto(videoRef.current, r?.caixa)
       if (!r) { await esperar(150); continue }
       if (r.quantos > 1) { setMsg('Tem mais de uma pessoa na câmera.'); await esperar(400); continue }
       if (!foto) foto = miniaturaDoRosto(videoRef.current, r.caixa, 280)
