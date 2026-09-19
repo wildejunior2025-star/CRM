@@ -179,15 +179,14 @@ export async function ligarCamera(video) {
       video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } },
       audio: false,
     })
-  } catch (e) {
+  } catch {
     // Webcam USB de PC às vezes não aceita os pedidos acima: tenta qualquer câmera.
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
     } catch (e2) {
-      const erro = e2 || e
-      if (erro.name === 'NotFoundError') throw new Error('Nenhuma câmera encontrada. Confira se a webcam está ligada no USB e aparece no Windows; depois feche e abra o Chrome.')
-      if (erro.name === 'NotReadableError') throw new Error('A câmera está sendo usada por outro programa. Feche o outro programa e recarregue.')
-      throw erro
+      if (e2.name === 'NotFoundError') throw new Error('Nenhuma câmera encontrada. Confira se a webcam está ligada no USB e aparece no Windows; depois feche e abra o Chrome.', { cause: e2 })
+      if (e2.name === 'NotReadableError') throw new Error('A câmera está sendo usada por outro programa. Feche o outro programa e recarregue.', { cause: e2 })
+      throw e2
     }
   }
   video.srcObject = stream
