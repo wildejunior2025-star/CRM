@@ -220,12 +220,27 @@ const PaginaNaoEncontrada = lazy(() => import('./pages/PaginaNaoEncontrada'))
 const Landing = lazy(() => import('./pages/Landing'))
 const TourSistema = lazy(() => import('./pages/TourSistema'))
 const ConfigurarLoja = lazy(() => import('./pages/ConfigurarLoja'))
+const AcademiaApp = lazy(() => import('./pages/academia/AcademiaApp'))
 
 export default function App() {
   // lojaonline.fwcinter.com — vitrine pública da loja (sem login).
   // lojaonline.fwcinter.com/{slug} abre o catálogo daquela loja.
   const isLojaOnline = typeof window !== 'undefined'
     && window.location.hostname === 'lojaonline.fwcinter.com'
+
+  // academia.fwcinter.com — sistema da academia, com o tablet de
+  // reconhecimento facial na recepção (mig 0276). Roteamento próprio.
+  if (typeof window !== 'undefined' && window.location.hostname === 'academia.fwcinter.com') {
+    return (
+      <BrandingProvider>
+      <AuthProvider>
+        <Suspense fallback={<TelaCarregando />}>
+          <AcademiaApp />
+        </Suspense>
+      </AuthProvider>
+      </BrandingProvider>
+    )
+  }
 
   if (isLojaOnline) {
     return (
