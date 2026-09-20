@@ -72,6 +72,31 @@ Deno.serve(async (req) => {
 
     const supabaseSrv = createClient(SUPABASE_URL, SUPABASE_KEY)
 
+    // ── Taxa de entrega: confere ANTES de cobrar ────────────────────────────
+    // Quem calcula a taxa é o navegador do cliente, e navegador preso numa
+    // versão velha já fechou entrega com taxa ZERO (Zebu, pedido #44 de
+    // 20/09/2026: R$ 17 de comida, R$ 0 de entrega, PIX pago).
+    //
+    // O banco recusa isso no insert (mig 0277) — só que o insert acontece lá
+    // embaixo, DEPOIS que o QR do Mercado Pago já existe. Sem esta conferência
+    // aqui em cima, o pedido morreria no banco deixando uma cobrança órfã na
+    // conta da loja. Aqui ele para antes de virar dinheiro.
+    if (pedido.tipo_entrega === 'entrega') {
+      const { data: taxaCerta } = await supabaseSrv.rpc('taxa_entrega_esperada', {
+        p_empresa: pedido.empresa_id,
+        p_bairro:  pedido.endereco_bairro ?? null,
+        p_lat:     pedido.endereco_lat ?? null,
+        p_lng:     pedido.endereco_lng ?? null,
+      })
+      const esperada = Number(taxaCerta ?? 0)
+      if (esperada > 0 && Number(pedido.taxa_entrega ?? 0) < esperada - 0.009) {
+        return new Response(JSON.stringify({
+          error: `A taxa de entrega deste endereço é R$ ${esperada.toFixed(2).replace('.', ',')}. `
+               + 'Atualize a página e faça o pedido de novo.',
+        }), { status: 400, headers: { ...CORS, 'Content-Type': 'application/json' } })
+      }
+    }
+
     // ── Desconto por pontos (validado no servidor) ──────────────────────────
     // O cliente informa pontos_usados, mas quem manda é o saldo real + a config.
     // Garante que a cobrança do PIX e os pontos a debitar batem com o saldo.

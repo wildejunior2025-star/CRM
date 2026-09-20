@@ -116,13 +116,33 @@ const ABREV_BAIRRO = {
 }
 function normBairro(s) {
   return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
-    .replace(/^bairro\s+/, '')
-    .replace(/\./g, ' ')            // "sra." → "sra "
-    .replace(/\s+/g, ' ')
+    // Tudo que não é letra nem número vira espaço: ponto de "Sra.", vírgula,
+    // traço e principalmente o apóstrofo, que vem reto do teclado do
+    // computador e CURVO do teclado do celular — "Olho d'água" e "Olho d’água"
+    // precisam dar na mesma coisa, aqui e na trava do banco (mig 0277).
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/^bairro /, '')
     .split(' ')
     .map(p => ABREV_BAIRRO[p] ?? p)
     .join(' ')
     .trim()
+}
+// Nome de lugar comparável — serve pra rua e pra bairro. Tira o tipo do
+// logradouro ("Rua", "Av.") porque o OpenStreetMap escreve por extenso o que o
+// cliente abrevia, e o tipo não distingue nada: quem manda é o nome.
+const TIPO_LOGRADOURO = /^(r|rua|av|avenida|tv|travessa|al|alameda|pc|praca|rod|rodovia|estr|estrada|via|lot|loteamento)\s+/
+function nomeLugar(s) {
+  return normBairro(s).replace(TIPO_LOGRADOURO, '').trim()
+}
+// Os dois nomes falam do mesmo lugar? Tolerante de propósito: "Nossa Senhora da
+// Apresentação" x "Nossa Sra. da Apresentação", "Amarante" x "Novo Amarante".
+// Faltando um dos lados, responde SIM — ausência de informação não desmente
+// nada, e negar aqui viraria pino recusado à toa.
+function mesmoLugar(a, b) {
+  const x = nomeLugar(a), y = nomeLugar(b)
+  if (!x || !y) return true
+  return x.includes(y) || y.includes(x)
 }
 // Acha a linha da tabela de bairros da loja pro bairro que veio no endereço.
 //
@@ -249,25 +269,60 @@ async function buscarRuaNoEstado(uf, termo) {
   }).filter(r => r.logradouro && r.localidade)
 }
 
+// O ponto que voltou é MESMO o endereço que o cliente escreveu?
+//
+// O Nominatim quase nunca responde "não achei": ele devolve uma rua de nome
+// parecido em outro canto da cidade, e a busca parece ter dado certo. Caso real
+// de 20/09/2026, medido: "Rua Acari, 66, Nossa Senhora da Apresentação, Natal"
+// — a casa fica a 1,6 km da loja — voltava como a Rua Acari da LAGOA SECA, a
+// 7,3 km daqui. O CEP ia junto na busca e foi simplesmente ignorado: o ponto
+// devolvido tinha outro CEP. Na tabela de km da loja isso é R$ 9 em vez de R$ 4,
+// e do lado de cá ninguém enxergava o erro — o pino parecia certo no mapa.
+//
+// Então o ponto só vale se a RUA, o BAIRRO e a CIDADE que vêm com ele baterem
+// com o que foi digitado. Quando não bate é melhor ficar SEM ponto: o checkout
+// pede o pino no mapa e a taxa sai do lugar certo, em vez de sair errada com
+// cara de certa.
+function pontoConfere(item, { rua, bairro, cidade } = {}) {
+  const a = item?.address
+  if (!a) return true
+  const ruaOsm = a.road ?? a.pedestrian ?? a.footway ?? ''
+  // O OSM reparte o bairro em várias camadas (suburb, neighbourhood, quarter) e
+  // qual delas guarda o nome que a pessoa usa muda de lugar pra lugar. Basta UMA
+  // bater: em "Rua Acari, Boa Sorte, Nossa Senhora da Apresentação" o cliente
+  // escreveu a de cima e o OSM pôs a de baixo em neighbourhood.
+  const bairrosOsm = [a.suburb, a.neighbourhood, a.quarter, a.city_district, a.residential].filter(Boolean)
+  const cidadeOsm = a.city ?? a.town ?? a.municipality ?? a.village ?? ''
+  if (rua && ruaOsm && !mesmoLugar(rua, ruaOsm)) return false
+  if (bairro && bairrosOsm.length && !bairrosOsm.some(b => mesmoLugar(bairro, b))) return false
+  if (cidade && cidadeOsm && !mesmoLugar(cidade, cidadeOsm)) return false
+  return true
+}
 async function geocodeEndereco({ rua, numero, bairro, cidade, estado, cep } = {}) {
   const uf = estado || ''
   const cepLimpo = String(cep || '').replace(/\D/g, '')
+  // Todo ponto passa pela conferência antes de virar taxa — por isso o
+  // `addressdetails` vai em TODAS as buscas: é ele que diz em que rua e em que
+  // bairro o ponto caiu de verdade.
+  const confere = d => (d?.[0] && pontoConfere(d[0], { rua, bairro, cidade })
+    ? { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
+    : null)
   // 1) Busca ESTRUTURADA com o CEP — bem mais precisa que a busca por texto
   //    (ajuda em endereços que a busca livre erra, tipo em São Gonçalo/RN).
   if (cepLimpo.length === 8) {
     const params = new URLSearchParams({
       street: [numero, rua].filter(Boolean).join(' '),
       city: cidade || '', state: uf, postalcode: cepLimpo,
-      country: 'Brazil', format: 'json', limit: '1',
+      country: 'Brazil', format: 'json', limit: '1', addressdetails: '1',
     })
-    const d = await buscarJson(`https://nominatim.openstreetmap.org/search?${params}`)
-    if (d?.[0]) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
+    const c = confere(await buscarJson(`https://nominatim.openstreetmap.org/search?${params}`))
+    if (c) return c
   }
   // 2) Fallback: busca livre por texto (com o CEP junto quando tiver)
   {
     const q = [rua, numero, bairro, cidade, uf, cepLimpo].filter(s => s && String(s).trim()).join(', ')
-    const d = await buscarJson(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Brasil')}&format=json&limit=1`)
-    if (d?.[0]) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
+    const c = confere(await buscarJson(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Brasil')}&format=json&limit=1&addressdetails=1`))
+    if (c) return c
   }
   // 3) O Nominatim limita 1 consulta por segundo e devolve vazio quando está
   //    apertado. Uma repetida depois de 1,2s costuma passar — e é a diferença
@@ -275,8 +330,8 @@ async function geocodeEndereco({ rua, numero, bairro, cidade, estado, cep } = {}
   await new Promise(r => setTimeout(r, 1200))
   {
     const q = [rua, numero, bairro, cidade, uf].filter(s => s && String(s).trim()).join(', ')
-    const d = await buscarJson(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Brasil')}&format=json&limit=1`)
-    if (d?.[0]) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
+    const c = confere(await buscarJson(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Brasil')}&format=json&limit=1&addressdetails=1`))
+    if (c) return c
   }
   return null
 }
@@ -345,6 +400,18 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
     return () => { cancelado = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [endereco?.bairro, endereco?.cidade, endereco?.estado])
+
+  // Sem ponto ainda? O mapa abre no BAIRRO, não na loja. Desde que o buscador
+  // passou a recusar ponto que não bate com o endereço, cai mais gente aqui — e
+  // arrastar o pino uma quadra é outra conversa que arrastar do outro lado da
+  // cidade. Mexe só na VISTA: o ponto continua não existindo até ela encostar.
+  useEffect(() => {
+    if (!bairroCentro || definido || interagiu.current) return
+    const m = mapaPronto()
+    if (!m) return
+    m.setView([bairroCentro.lat, bairroCentro.lng], 15)
+    pinRef.current?.setLatLng([bairroCentro.lat, bairroCentro.lng])
+  }, [bairroCentro, definido])
 
   useEffect(() => {
     let cancelado = false
@@ -1217,11 +1284,10 @@ export default function DeliveryCheckout() {
   // endereço de outro bairro (caso do pedido torto), avisa — sem bloquear.
   const cepDivergente = (() => {
     if (!cepInfo || tipo !== 'entrega') return null
-    const tipoLogr = /^(r|rua|av|avenida|tv|travessa|al|alameda|pc|praca|rod|rodovia|estr|estrada)\.?\s+/
-    const soNome = s => normBairro(s).replace(tipoLogr, '')
-    const casa = (a, b) => { const x = soNome(a), y = soNome(b); return !x || !y || x.includes(y) || y.includes(x) }
-    const bairroBate = !cepInfo.bairro || !form.bairro.trim() || casa(form.bairro, cepInfo.bairro)
-    const ruaBate = !cepInfo.rua || !form.rua.trim() || casa(form.rua, cepInfo.rua)
+    // Mesma régua que confere o ponto do buscador (mesmoLugar): "Av. Industrial"
+    // e "Avenida Industrial" são a mesma rua, e o aviso não pode disparar à toa.
+    const bairroBate = !cepInfo.bairro || !form.bairro.trim() || mesmoLugar(form.bairro, cepInfo.bairro)
+    const ruaBate = !cepInfo.rua || !form.rua.trim() || mesmoLugar(form.rua, cepInfo.rua)
     if (bairroBate && ruaBate) return null
     return { rua: cepInfo.rua, bairro: cepInfo.bairro }
   })()

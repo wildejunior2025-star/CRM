@@ -180,7 +180,39 @@ function mostrarAvisoAtualizacao(motivo = 'impressora') {
   document.body.appendChild(barra)
 }
 
-updateSW = registerSW({
+// ── Loja Online: sempre a versão de hoje ────────────────────────────────────
+// Quem abre o cardápio é o CLIENTE da loja. Ele não precisa de app offline —
+// precisa que a conta feche. E o service worker guardava o HTML da primeira
+// visita e, junto com ele, o código daquele dia: aparelho que não atualizou
+// seguia calculando a taxa de entrega pela regra velha. Em 20/09/2026 um pedido
+// do Zebu saiu com entrega GRÁTIS porque o celular da cliente ainda rodava o
+// checkout de julho — o de hoje nem deixaria fechar.
+//
+// Aqui o cardápio deixa de ter service worker: apaga o que existe, joga fora o
+// que ele guardou e recarrega UMA vez (a página na tela nasceu do cache velho,
+// então sem a recarga a correção só valeria na próxima visita). O gestor e o
+// app seguem com PWA normal — lá o offline paga o próprio preço.
+const ehLojaOnline = window.location.hostname.startsWith('lojaonline.')
+
+async function tirarServiceWorkerDoCardapio() {
+  const regs = await navigator.serviceWorker?.getRegistrations?.() ?? []
+  if (!regs.length) return
+  await Promise.all(regs.map(r => r.unregister().catch(() => false)))
+  try {
+    for (const nome of await caches.keys()) await caches.delete(nome)
+  } catch { /* navegador sem Cache API: o unregister já resolve */ }
+  // Trava de uma recarga só. Se o navegador não soltar o service worker (aba
+  // em modo privado, por exemplo), recarregar de novo não resolveria nada e a
+  // pessoa ficaria num laço, olhando a tela piscar sem entender.
+  try {
+    if (sessionStorage.getItem('fwc_sw_limpo')) return
+    sessionStorage.setItem('fwc_sw_limpo', '1')
+  } catch { return }
+  window.location.reload()
+}
+
+if (ehLojaOnline) tirarServiceWorkerDoCardapio().catch(() => {})
+else updateSW = registerSW({
   immediate: true,
   onNeedRefresh() {
     // Impressora BT: só o dono decide (recarregar derruba o pareamento).

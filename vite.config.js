@@ -73,6 +73,11 @@ export default defineConfig({
           /^\/c\//,          // link do cliente
           /^\/mesa\//,       // QR da mesa
           /^\/pedido\//,     // acompanhar o pedido
+          // O checkout é onde a TAXA é calculada. Casca velha ali significa
+          // regra de taxa velha — e foi assim que um pedido saiu de graça em
+          // 20/09/2026. No domínio do cardápio nem existe mais service worker
+          // (ver main.jsx); esta linha cobre quem chega pelo domínio principal.
+          /^\/checkout/,
         ],
         // Sem skipWaiting: é o main.jsx que manda o SKIP_WAITING na hora certa.
         clientsClaim: true,
