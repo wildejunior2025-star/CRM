@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { hojeBR } from '../lib/feriados'
-import { faseDaMensalidade, dataCurtaBR, somaDiasYmd, valorPorSemana } from '../lib/mensalidade'
+import { faseDaMensalidade, dataCurtaBR, somaDiasYmd, valorPorSemana, vencimentosDoPlano } from '../lib/mensalidade'
 import '../components/Page.css'
 
 // Super ADM: cobrança de cada loja (migs 0263/0264). Configura valor e dia,
@@ -166,17 +166,12 @@ function Detalhe({ l, hoje, recarregar }) {
       observacao: f.observacao || null, atualizado_em: new Date().toISOString(),
     })
     if (error) { setSalvando(false); setMsg(error.message); return }
-    // Mudou o plano (periodicidade, 1º vencimento ou valor): as cobranças FUTURAS
-    // do plano antigo saem, e o sistema gera as do novo. Senão a loja ficava
-    // com a semanal de 21/09 e a quinzenal do dia 15 ao mesmo tempo. O que já
-    // venceu fica: é dívida de verdade.
-    const mudouPlano = cfg && (cfg.periodicidade !== f.periodicidade || (cfg.inicio ?? '') !== (f.inicio || '')
-      || Number(cfg.valor) !== (Number(f.valor) || 0))
-    if (mudouPlano) {
-      await supabase.from('mensalidade_cobrancas')
-        .update({ status: 'cancelada', observacao: `Plano mudou para ${f.periodicidade} em ${dataCurtaBR(hoje)}` })
-        .eq('empresa_id', e.id).eq('status', 'aberta').gt('vencimento', hoje)
-    }
+    // Mudar o plano NÃO cancela mais cobrança nenhuma (21/09/2026). Antes, ao
+    // trocar valor, dia ou periodicidade, as cobranças futuras do plano antigo
+    // eram canceladas sozinhas — e a semana que a loja já tinha usado sumia com
+    // elas (Zebu, Marajó e CDBom ficaram com 14/09 a 20/09 de graça). A cobrança
+    // só sai por decisão sua: "Marcar paga" ou "Cancelar". O que sobrou de um
+    // plano anterior aparece marcado na lista "Em aberto".
     setSalvando(false)
     recarregar()
   }
@@ -259,6 +254,23 @@ function Detalhe({ l, hoje, recarregar }) {
     return null
   }
 
+  // Tira a cobrança de cena sem dizer que foi paga (ex.: sobrou de um plano
+  // antigo, ou foi lançada errada). É o único jeito de uma cobrança sumir.
+  async function cancelarCobranca(c) {
+    if (!window.confirm(`Cancelar "${c.referencia}" (${fmt(c.valor)}) de ${e.nome}?\n\nA loja deixa de dever essa semana. Se ela pagou, use "Marcar paga".`)) return
+    const nota = `${dataCurtaBR(hoje)}: cancelada na mão no Super ADM`
+    const { error } = await supabase.from('mensalidade_cobrancas')
+      .update({ status: 'cancelada', observacao: c.observacao ? `${c.observacao} · ${nota}` : nota })
+      .eq('id', c.id).eq('status', 'aberta')
+    if (error) { setMsg(error.message); return }
+    recarregar()
+  }
+
+  // Cobrança em aberto que o plano de hoje não geraria: sobra de um plano
+  // anterior. Fica marcada, mas só sai se você mandar.
+  const doPlano = new Set(vencimentosDoPlano(cfg, [somaDiasYmd(hoje, 7), ...l.abertas.map(c => c.vencimento)].sort().pop() ?? hoje))
+  const foraDoPlano = c => !!cfg?.ativa && !!cfg.inicio && c.vencimento >= cfg.inicio && !doPlano.has(c.vencimento)
+
   const tel = String(e.telefone_contato ?? '').replace(/\D/g, '')
   const textoZap = encodeURIComponent(
     `Olá, ${e.nome}! Aqui é a FWC Inter. A mensalidade do sistema está em aberto: ` +
@@ -311,10 +323,14 @@ function Detalhe({ l, hoje, recarregar }) {
                   {c.observacao.split(' · ').filter(s => s.includes('abatido')).join(' · ')}
                 </span>
               )}
+              {foraDoPlano(c) && (
+                <span style={{ display: 'block', color: '#d97706', fontSize: 11.5 }}>sobrou do plano anterior</span>
+              )}
             </span>
             <span style={{ display: 'flex', gap: 6 }}>
               <button type="button" onClick={() => setPopup({ tipo: 'abater', c })} style={botaoPequeno}>Abater</button>
               <button type="button" onClick={() => setPopup({ tipo: 'paga', c })} style={botaoPequeno}>Marcar paga</button>
+              <button type="button" onClick={() => cancelarCobranca(c)} style={{ ...botaoPequeno, color: '#dc2626' }}>Cancelar</button>
             </span>
           </div>
         ))}

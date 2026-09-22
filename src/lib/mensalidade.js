@@ -84,6 +84,38 @@ export function diasAteTravar(hoje, diaBloqueio, loja) {
   return n
 }
 
+/** Soma meses sem estourar o mês (31/01 + 1 mês = 28/02, igual ao Postgres). */
+export function somaMesesYmd(ymd, n) {
+  const [y, m, d] = String(ymd).split('-').map(Number)
+  const ultimo = new Date(Date.UTC(y, m - 1 + n + 1, 0)).getUTCDate()
+  return new Date(Date.UTC(y, m - 1 + n, Math.min(d, ultimo))).toISOString().slice(0, 10)
+}
+
+/**
+ * Os vencimentos que o plano atual gera, do 1º vencimento até `ate`.
+ * Mesma conta de mensalidade_gerar() no banco (migs 0263/0272) — serve pra
+ * apontar na tela a cobrança que sobrou de um plano anterior.
+ */
+export function vencimentosDoPlano(cfg, ate) {
+  const venc = []
+  if (!cfg?.ativa || !cfg.inicio || !(Number(cfg.valor) > 0)) return venc
+  let dia = cfg.inicio
+  if (cfg.periodicidade === 'quinzenal') {
+    const d = Number(dia.slice(8, 10))
+    const mes = dia.slice(0, 7)
+    if (d > 15) dia = `${somaMesesYmd(`${mes}-01`, 1).slice(0, 7)}-01`
+    else if (d !== 1) dia = `${mes}-15`
+  }
+  for (let n = 0; dia <= ate && n < 520; n++) {
+    venc.push(dia)
+    if (cfg.periodicidade === 'semanal') dia = somaDiasYmd(cfg.inicio, 7 * (n + 1))
+    else if (cfg.periodicidade === 'quinzenal') {
+      dia = dia.slice(8, 10) === '01' ? `${dia.slice(0, 7)}-15` : `${somaMesesYmd(`${dia.slice(0, 7)}-01`, 1).slice(0, 7)}-01`
+    } else dia = somaMesesYmd(cfg.inicio, n + 1)
+  }
+  return venc
+}
+
 // "semana" | "quinzena" | "mês" — quinzenal vence dia 1 e dia 15 (mig 0272).
 export const periodoTexto = (periodicidade) =>
   periodicidade === 'semanal' ? 'semana' : periodicidade === 'quinzenal' ? 'quinzena' : 'mês'
