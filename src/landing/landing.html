@@ -242,6 +242,52 @@
   }
   .fwc-landing .btn-white:hover { opacity: .9; }
 
+  /* ── PARCEIROS ──
+     Prova social. O lojista que o Wilde visitou pessoalmente entra aqui pra
+     conferir se a FWC é real antes de responder. Por isso os cards levam pra
+     Loja Online de cada parceiro: dá pra clicar e ver o sistema rodando de
+     verdade, e de quebra manda visita pro parceiro (que é o que faz ele topar
+     aparecer aqui). */
+  .fwc-landing .partners { padding: 80px 24px; background: var(--purple-bg); }
+  /* Flex centralizado em vez de grid: o número de parceiros vai crescer e nem
+     sempre fecha a fila. Assim a última linha fica centrada em vez de sobrar
+     um buraco à direita. */
+  .fwc-landing .partner-grid {
+    max-width: 1100px; margin: 40px auto 0;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 20px;
+  }
+  .fwc-landing .partner-card {
+    flex: 0 1 calc(33.333% - 14px);
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: 14px; padding: 24px 20px; text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    transition: transform .15s, box-shadow .15s, border-color .15s;
+  }
+  .fwc-landing .partner-card:hover {
+    transform: translateY(-3px); border-color: var(--purple-light);
+    box-shadow: 0 10px 28px rgba(124,58,237,.12);
+  }
+  .fwc-landing .partner-logo {
+    width: 72px; height: 72px; border-radius: 50%;
+    overflow: hidden; flex-shrink: 0; background: var(--purple-bg);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .fwc-landing .partner-logo img { width: 100%; height: 100%; object-fit: cover; }
+  /* Parceiro sem logo cadastrada cai nas iniciais em vez de um quadrado quebrado. */
+  .fwc-landing .partner-initials {
+    font-size: 24px; font-weight: 800; color: var(--purple);
+    letter-spacing: -.5px;
+  }
+  .fwc-landing .partner-name { font-size: 16px; font-weight: 800; line-height: 1.3; }
+  .fwc-landing .partner-type { font-size: 13px; color: var(--text-muted); }
+  .fwc-landing .partner-link {
+    margin-top: 2px; font-size: 13px; font-weight: 700; color: var(--purple);
+  }
+  .fwc-landing .partners-note {
+    max-width: 620px; margin: 36px auto 0; text-align: center;
+    font-size: 15px; color: var(--text-muted);
+  }
+
   /* ── FOOTER ── */
   .fwc-landing footer {
     background: #111827; color: rgba(255,255,255,.5);
@@ -255,9 +301,13 @@
     .fwc-landing .features-grid { grid-template-columns: 1fr; }
     .fwc-landing .seg-grid      { grid-template-columns: repeat(2, 1fr); }
     .fwc-landing .step          { flex-direction: column; gap: 16px; }
+    .fwc-landing .partner-grid  { gap: 14px; }
+    .fwc-landing .partner-card  { flex-basis: calc(50% - 7px); }
   }
   @media (max-width: 480px) {
     .fwc-landing .seg-grid { grid-template-columns: 1fr; }
+    .fwc-landing .partner-card { flex-basis: calc(50% - 7px); padding: 18px 12px; }
+    .fwc-landing .partner-logo { width: 58px; height: 58px; }
   }
 </style>
 
@@ -298,20 +348,25 @@
   <p style="margin-top:16px;font-size:13px;color:var(--text-muted)">Fala direto com a gente no WhatsApp · Resposta na hora</p>
 </section>
 
-<!-- STATS -->
+<!-- STATS
+     Números reais, conferidos no banco em 21/09/2026: pedidos_delivery + vendas
+     das lojas que têm mensalidade_config (ou seja, cliente pagante de verdade —
+     loja de teste NÃO entra na conta). "100% digital / PIX / 24h" não provava
+     nada; quem chega aqui quer saber se tem gente usando. Reconferir de tempos
+     em tempos pra não envelhecer, com a mesma regra. -->
 <section class="stats">
   <div class="stats-inner">
     <div>
-      <div class="stat-num">100%</div>
-      <div class="stat-label">Digital — sem papel, sem planilha</div>
+      <div class="stat-num">4.454</div>
+      <div class="stat-label">Pedidos nos últimos 30 dias</div>
     </div>
     <div>
-      <div class="stat-num">PIX</div>
-      <div class="stat-label">Pagamentos integrados nativos</div>
+      <div class="stat-num">8.777</div>
+      <div class="stat-label">Pedidos processados desde o início</div>
     </div>
     <div>
-      <div class="stat-num">24h</div>
-      <div class="stat-label">Portal do cliente ativo</div>
+      <div class="stat-num">5</div>
+      <div class="stat-label">Comércios parceiros em Natal/RN</div>
     </div>
   </div>
 </section>
@@ -413,22 +468,70 @@
   </div>
 </section>
 
+<!-- PARCEIROS -->
+<section class="partners" id="parceiros">
+  <div class="section-label">Quem já usa</div>
+  <h2 class="section-title">Comércios de Natal que confiaram na FWC</h2>
+  <p class="section-sub">Não é demonstração: são lojas abertas, atendendo hoje. Clique em qualquer uma e veja o sistema rodando de verdade.</p>
+
+  <div class="partner-grid">
+    <a class="partner-card" href="https://lojaonline.fwcinter.com/zebu-restaurante" target="_blank" rel="noopener">
+      <div class="partner-logo"><img src="https://ycytrsqdvrviihkqfvno.supabase.co/storage/v1/object/public/empresa-banners/8086398c-04e5-4ba4-927a-936edf15cc20/logo.jpg" alt="Zebu Restaurante" loading="lazy"></div>
+      <div class="partner-name">Zebu Restaurante</div>
+      <div class="partner-type">Restaurante · Natal/RN</div>
+      <div class="partner-link">Ver a loja →</div>
+    </a>
+
+    <a class="partner-card" href="https://lojaonline.fwcinter.com/saidera-botequim" target="_blank" rel="noopener">
+      <div class="partner-logo"><img src="https://ycytrsqdvrviihkqfvno.supabase.co/storage/v1/object/public/empresa-banners/d3d6359c-bc29-4992-a8e3-cbdb875d62b3/logo.png" alt="Saidera Botequim" loading="lazy"></div>
+      <div class="partner-name">Saidera Botequim</div>
+      <div class="partner-type">Botequim · Natal/RN</div>
+      <div class="partner-link">Ver a loja →</div>
+    </a>
+
+    <a class="partner-card" href="https://lojaonline.fwcinter.com/restaurante-do-darlan" target="_blank" rel="noopener">
+      <div class="partner-logo"><img src="https://ycytrsqdvrviihkqfvno.supabase.co/storage/v1/object/public/empresa-banners/39c20133-3272-4ee5-add3-7a54895d4f29/logo.png" alt="Estação do Sabor" loading="lazy"></div>
+      <div class="partner-name">Estação do Sabor</div>
+      <div class="partner-type">Restaurante · Natal/RN</div>
+      <div class="partner-link">Ver a loja →</div>
+    </a>
+
+    <a class="partner-card" href="https://lojaonline.fwcinter.com/marajo-pizzaria" target="_blank" rel="noopener">
+      <div class="partner-logo"><img src="https://ycytrsqdvrviihkqfvno.supabase.co/storage/v1/object/public/empresa-banners/129d48c6-70af-43bb-94f2-98604f245c54/logo.jpg" alt="Marajó Pizzaria" loading="lazy"></div>
+      <div class="partner-name">Marajó Pizzaria</div>
+      <div class="partner-type">Pizzaria delivery · Natal/RN</div>
+      <div class="partner-link">Ver a loja →</div>
+    </a>
+
+    <a class="partner-card" href="https://lojaonline.fwcinter.com/cd-bom" target="_blank" rel="noopener">
+      <div class="partner-logo"><img src="https://ycytrsqdvrviihkqfvno.supabase.co/storage/v1/object/public/empresa-banners/a95b716b-d973-42ab-ace9-dae0fd1acd62/logo.jpeg" alt="Sorveteria CDBom" loading="lazy"></div>
+      <div class="partner-name">Sorveteria CDBom</div>
+      <div class="partner-type">Sorveteria · Natal/RN</div>
+      <div class="partner-link">Ver a loja →</div>
+    </a>
+
+  </div>
+
+  <p class="partners-note">Cada parceiro aqui foi visitado, instalado e treinado pessoalmente. É assim que a gente trabalha.</p>
+</section>
+
 <!-- PLANOS -->
 <section style="padding:80px 24px;text-align:center" id="planos">
   <div class="section-label">Planos</div>
   <h2 class="section-title">Um plano, tudo incluído</h2>
-  <p class="section-sub">Sem comissão por pedido. Você usa todos os recursos por um valor fixo por mês.</p>
+  <p class="section-sub">Sem comissão por pedido. Você usa todos os recursos por um valor fixo por semana.</p>
   <div style="max-width:440px;margin:36px auto 0;background:#fff;border:2px solid var(--purple);border-radius:20px;padding:40px 32px;box-shadow:0 20px 50px rgba(124,58,237,.15)">
     <div style="display:inline-block;background:#dcfce7;color:#15803d;font-size:13px;font-weight:800;padding:5px 14px;border-radius:999px;margin-bottom:18px">🔥 Promoção de lançamento</div>
-    <div style="margin-bottom:2px">
-      <span style="font-size:18px;color:var(--text-muted);text-decoration:line-through">De R$ 399,90/mês</span>
-    </div>
+    <!-- Cobrança SEMANAL. É de propósito: o dono de lanchonete pensa o caixa por
+         semana, não por mês, e R$ 49,99 cabe na cabeça dele de um jeito que
+         R$ 216 não cabe. A quebra por dia está logo abaixo porque é com ela que
+         ele compara (um prato feito custa mais que isso). -->
     <div style="margin-bottom:6px">
-      <span style="font-size:22px;font-weight:700;color:var(--text-muted);vertical-align:top;line-height:1">por R$ </span>
-      <span style="font-size:56px;font-weight:900;letter-spacing:-2px">199,90</span>
-      <span style="font-size:17px;color:var(--text-muted)">/mês</span>
+      <span style="font-size:22px;font-weight:700;color:var(--text-muted);vertical-align:top;line-height:1">R$ </span>
+      <span style="font-size:56px;font-weight:900;letter-spacing:-2px">49,99</span>
+      <span style="font-size:17px;color:var(--text-muted)">/semana</span>
     </div>
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:22px">Preço promocional do <strong>1º ano</strong> · com <strong>todos os recursos liberados</strong></p>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:22px">Menos de <strong>R$ 7,15 por dia</strong> · cobrança semanal, <strong>sem fidelidade</strong> · com <strong>todos os recursos liberados</strong></p>
     <ul style="list-style:none;text-align:left;display:inline-block;margin:0 0 28px;padding:0">
       <li style="padding:7px 0 7px 26px;position:relative;font-size:15px"><span style="position:absolute;left:0;color:var(--purple);font-weight:800">✓</span>Delivery, loja online e app do cliente</li>
       <li style="padding:7px 0 7px 26px;position:relative;font-size:15px"><span style="position:absolute;left:0;color:var(--purple);font-weight:800">✓</span>Integração com o iFood</li>
