@@ -122,7 +122,7 @@ export default function MensalidadeGate() {
         {/* Sem "Já paguei": o Wilde tirou (13/09) — o PIX libera sozinho, e o botão
             dava 1 hora livre por dia pra quem não pagou. */}
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
-          <a href="https://wa.me/5584998214212" target="_blank" rel="noreferrer" style={linkBotao}>Falar com a FWC</a>
+          <a href="https://wa.me/5584999120349" target="_blank" rel="noreferrer" style={linkBotao}>Falar com a FWC</a>
           {impersonando && (
             <button type="button" style={linkBotao} onClick={async () => { await voltarSuperAdmin(); navigate('/super-admin') }}>← Voltar ao Super Admin</button>
           )}

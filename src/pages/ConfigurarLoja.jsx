@@ -18,7 +18,7 @@ import { formatCnpj, cnpjValido } from '../lib/cnpj'
 import { fwcFetch } from '../lib/appFwc'
 import './ConfigurarLoja.css'
 
-const WHATS_FWC = 'https://wa.me/5584998214212'
+const WHATS_FWC = 'https://wa.me/5584999120349'
 export const MARCA_VOLTAR = 'cfg_loja_voltar'
 
 export default function ConfigurarLoja() {
