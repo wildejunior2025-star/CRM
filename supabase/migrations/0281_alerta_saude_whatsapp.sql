@@ -109,7 +109,9 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  st json; nivel text; ant plataforma_saude_alerta%ROWTYPE;
+  -- `v_nivel` e não `nivel`: a tabela plataforma_saude_alerta tem coluna com
+  -- esse nome, e no UPDATE lá embaixo os dois viram a mesma coisa pro parser.
+  st json; v_nivel text; ant plataforma_saude_alerta%ROWTYPE;
   ordem int; ordem_ant int; manda boolean := false; texto text;
 BEGIN
   IF coalesce((SELECT valor FROM config_global WHERE chave='saude_alerta_ativo'), 'true') = 'false' THEN
@@ -119,10 +121,10 @@ BEGIN
   st := plataforma_saude_status();
   IF (st->>'ok') <> 'true' THEN RETURN json_build_object('enviar', false, 'motivo', 'sem_dado'); END IF;
 
-  nivel := st->>'nivel';
+  v_nivel := st->>'nivel';
   SELECT * INTO ant FROM plataforma_saude_alerta WHERE id = 1;
 
-  ordem     := CASE nivel     WHEN 'perigo' THEN 2 WHEN 'atencao' THEN 1 ELSE 0 END;
+  ordem     := CASE v_nivel   WHEN 'perigo' THEN 2 WHEN 'atencao' THEN 1 ELSE 0 END;
   ordem_ant := CASE ant.nivel WHEN 'perigo' THEN 2 WHEN 'atencao' THEN 1 ELSE 0 END;
 
   IF ordem > ordem_ant THEN
@@ -135,17 +137,17 @@ BEGIN
   END IF;
 
   IF NOT manda THEN
-    RETURN json_build_object('enviar', false, 'motivo', 'sem_mudanca', 'nivel', nivel);
+    RETURN json_build_object('enviar', false, 'motivo', 'sem_mudanca', 'nivel', v_nivel);
   END IF;
 
   texto := CASE
-    WHEN nivel = 'perigo' THEN
+    WHEN v_nivel = 'perigo' THEN
       '🚨 *Sistema no limite*' || chr(10) || chr(10) ||
       'O banco de dados está no teto. Se nada for feito, as lojas podem parar como em 23/09.' || chr(10) || chr(10) ||
       '*O que está alto:* ' || coalesce(st->>'motivo', 'consumo geral') || chr(10) ||
       'Leitura: ' || (st->>'leitura_por_seg') || '/seg (normal: até 3)' || chr(10) ||
       'Conexões: ' || (st->>'conexoes') || ' de ' || (st->>'conexoes_max')
-    WHEN nivel = 'atencao' THEN
+    WHEN v_nivel = 'atencao' THEN
       '⚠️ *Consumo subindo*' || chr(10) || chr(10) ||
       'Ainda dá tempo de agir com calma.' || chr(10) || chr(10) ||
       '*O que subiu:* ' || coalesce(st->>'motivo', 'consumo geral') || chr(10) ||
@@ -157,11 +159,11 @@ BEGIN
       (st->>'conexoes') || ' de ' || (st->>'conexoes_max')
   END;
 
-  UPDATE plataforma_saude_alerta SET nivel = plataforma_saude_avisar.nivel, avisado_em = now() WHERE id = 1;
+  UPDATE plataforma_saude_alerta SET nivel = v_nivel, avisado_em = now() WHERE id = 1;
 
   RETURN json_build_object(
     'enviar', true,
-    'nivel', nivel,
+    'nivel', v_nivel,
     'texto', texto,
     'telefone', (SELECT valor FROM config_global WHERE chave='saude_alerta_phone')
   );
