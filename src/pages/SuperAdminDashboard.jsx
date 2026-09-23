@@ -32,6 +32,13 @@ const CAP_METRICAS = [
   { key: 'ia_por_minuto',        label: 'IA por minuto',    sub: 'respostas do bot no último minuto', limite: 50, alerta: 35,   unidade: '',     limiteLabel: '50/min' },
   { key: 'lojas_bot_ativo',      label: 'Lojas com bot',    sub: 'lojas com robô ligado (IA ou link)',          limite: 15, alerta: 10,   unidade: '',     limiteLabel: '15' },
   { key: 'banco_mb',             label: 'Banco de dados',   sub: 'espaço usado (8 GB inclusos)',      limite: 8192, alerta: 6000, unidade: ' MB', limiteLabel: '8 GB' },
+  // Mig 0280 — o que derrubou tudo em 23/09 não aparecia em nenhuma barra acima.
+  // A RLS relia `profiles` uma vez por LINHA: 145 leituras/seg com 5 lojas e 31
+  // pedidos. Depois do conserto (migs 0278/0279), menos de 3. Amarelo em 30 é
+  // dez vezes o normal de hoje — sobe assim se a carga crescer de verdade ou se
+  // nascer policy nova sem `(select ...)`.
+  { key: 'leitura_por_seg',      label: 'Leitura do banco', sub: 'checagens de permissão por segundo', limite: 100, alerta: 30, unidade: '/s',  limiteLabel: '100/s' },
+  { key: 'conexoes',             label: 'Conexões',         sub: 'lojas e telas ligadas ao banco',     limite: 90,  alerta: 60, unidade: '',    limiteLabel: '90' },
 ]
 
 function Card({ titulo, valor, sub, cor, onClick }) {
