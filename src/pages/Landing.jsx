@@ -44,7 +44,7 @@ export default function Landing() {
 
   useEffect(() => {
     const anterior = document.title
-    document.title = 'FWC Inter — Sistema de Gestão para Distribuidoras'
+    document.title = 'FWC Inter — Sistema de Gestão para Restaurantes e Delivery'
     return () => { document.title = anterior }
   }, [])
 

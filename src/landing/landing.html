@@ -212,11 +212,14 @@
 
   /* ── SEGMENTOS ── */
   .fwc-landing .segments { padding: 100px 24px; }
+  /* Flex centralizado, mesmo motivo da vitrine de parceiros: a lista de
+     segmentos muda e nem sempre fecha a fila. */
   .fwc-landing .seg-grid {
     max-width: 1100px; margin: 0 auto;
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 16px;
   }
   .fwc-landing .seg-card {
+    flex: 0 1 calc(33.333% - 11px);
     border: 1.5px solid var(--border); border-radius: 14px;
     padding: 28px 20px; text-align: center;
   }
@@ -299,13 +302,13 @@
   @media (max-width: 768px) {
     .fwc-landing .stats-inner   { grid-template-columns: 1fr; gap: 24px; }
     .fwc-landing .features-grid { grid-template-columns: 1fr; }
-    .fwc-landing .seg-grid      { grid-template-columns: repeat(2, 1fr); }
+    .fwc-landing .seg-card      { flex-basis: calc(50% - 8px); }
     .fwc-landing .step          { flex-direction: column; gap: 16px; }
     .fwc-landing .partner-grid  { gap: 14px; }
     .fwc-landing .partner-card  { flex-basis: calc(50% - 7px); }
   }
   @media (max-width: 480px) {
-    .fwc-landing .seg-grid { grid-template-columns: 1fr; }
+    .fwc-landing .seg-card { flex-basis: calc(50% - 8px); padding: 20px 12px; }
     .fwc-landing .partner-card { flex-basis: calc(50% - 7px); padding: 18px 12px; }
     .fwc-landing .partner-logo { width: 58px; height: 58px; }
   }
@@ -374,14 +377,14 @@
 <!-- FEATURES -->
 <section class="features" id="funcionalidades">
   <div class="section-label">Funcionalidades</div>
-  <h2 class="section-title">Tudo que sua distribuidora precisa</h2>
+  <h2 class="section-title">Tudo que a sua loja precisa</h2>
   <p class="section-sub">São três sistemas que conversam entre si: o <strong>Gestor</strong> na loja, o <strong>Portal</strong> para o seu cliente e o <strong>App</strong> para o entregador. Clique em cada um e veja por dentro.</p>
 
   <!-- Vídeo de apresentação. Preenchido pelo React (Landing.jsx) quando houver
        vídeo cadastrado na chave "apresentacao". Sem vídeo, fica invisível. -->
   <div data-video-apresentacao></div>
 
-  <!-- Só 3 blocos (Gestor / Portal / Entregas). "Tudo aquilo" que a distribuidora
+  <!-- Só 3 blocos (Gestor / Portal / Entregas). "Tudo aquilo" que a loja
        precisa vive DENTRO de cada um — o visitante clica e vê a tela real por
        dentro (print interativo). As chaves data-video (gestor-pedidos,
        portal-cliente, entregador) já são as mesmas do gerenciador de vídeos. -->
@@ -415,13 +418,13 @@
       <div class="step-num">1</div>
       <div>
         <div class="step-title">Cliente faz o pedido pelo portal</div>
-        <div class="step-desc">O cliente acessa o portal personalizado da distribuidora, monta o carrinho e escolhe pagar por PIX ou na entrega.</div>
+        <div class="step-desc">O cliente acessa a loja online personalizada, monta o carrinho e escolhe pagar por PIX ou na entrega.</div>
       </div>
     </div>
     <div class="step">
       <div class="step-num">2</div>
       <div>
-        <div class="step-title">Distribuidora recebe e confirma</div>
+        <div class="step-title">A loja recebe e confirma</div>
         <div class="step-desc">A loja vê o pedido em tempo real no painel, confirma ou recusa. O pagamento PIX é processado automaticamente.</div>
       </div>
     </div>
@@ -445,21 +448,34 @@
 <!-- SEGMENTOS -->
 <section class="segments">
   <div class="section-label">Para quem é</div>
-  <h2 class="section-title">Feito para o comércio de bebidas</h2>
-  <p class="section-sub">Atendemos distribuidoras e varejistas do setor de bebidas em todo o Brasil.</p>
+  <!-- Posicionamento corrigido em 23/09/2026. Dizia "Feito para o comércio de
+       bebidas / distribuidoras e atacadistas", mas os parceiros da vitrine logo
+       acima são restaurante, botequim, sorveteria e pizzaria — o dono de
+       lanchonete lia isso e concluía que o sistema não era pra ele. Bebida
+       continua na lista, só deixou de ser o título. -->
+  <h2 class="section-title">Feito para quem vende comida e bebida</h2>
+  <p class="section-sub">Se o seu pedido chega por WhatsApp, iFood, balcão ou mesa, ele cai tudo na mesma tela.</p>
 
   <div class="seg-grid">
     <div class="seg-card">
+      <div class="seg-icon">🍔</div>
+      <div class="seg-name">Restaurantes e Lanchonetes</div>
+    </div>
+    <div class="seg-card">
+      <div class="seg-icon">🍕</div>
+      <div class="seg-name">Pizzarias e Delivery</div>
+    </div>
+    <div class="seg-card">
       <div class="seg-icon">🍺</div>
-      <div class="seg-name">Distribuidoras de Bebidas</div>
+      <div class="seg-name">Bares e Botequins</div>
+    </div>
+    <div class="seg-card">
+      <div class="seg-icon">🍦</div>
+      <div class="seg-name">Sorveterias e Açaí</div>
     </div>
     <div class="seg-card">
       <div class="seg-icon">🥤</div>
-      <div class="seg-name">Depósitos de Bebidas</div>
-    </div>
-    <div class="seg-card">
-      <div class="seg-icon">🍾</div>
-      <div class="seg-name">Atacadistas</div>
+      <div class="seg-name">Depósitos e Distribuidoras</div>
     </div>
     <div class="seg-card">
       <div class="seg-icon">🚚</div>
@@ -564,7 +580,7 @@
 
 <!-- FOOTER -->
 <footer>
-  <strong>FWC Inter</strong> — Sistema de Gestão para Distribuidoras<br />
+  <strong>FWC Inter</strong> — Sistema de Gestão para Restaurantes e Delivery<br />
   <span style="margin-top:10px;display:block">
     FWC INTERMEDIAÇÕES LTDA — CNPJ 66.437.917/0001-66<br />
     <strong>Iris Gabryella Lima da Silva</strong> — CEO<br />
