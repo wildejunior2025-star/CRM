@@ -2648,12 +2648,17 @@ export default function DeliveryCheckout() {
 
                 {erroGlobal && <div className="dco-erro-global">{erroGlobal}</div>}
 
+                {/* "Fazer pedido" dava a entender que o pedido já estava feito:
+                    a pessoa montava a sacola, chegava aqui e ia embora achando
+                    que a loja tinha recebido. O funil flagrou duas num dia só na
+                    CD Bom — uma com R$ 246,20 na sacola. O texto agora diz que
+                    falta um passo e pra onde ele vai. */}
                 <button type="submit" className="dco-btn-submit" disabled={enviando || faltaMinimo || bairroBloqueado || taxaIndefinida}>
                   {enviando ? <><span className="dco-spinner" />Enviando pedido...</>
                     : bairroBloqueado ? 'Não entregamos no seu bairro'
                     : configNaoCarregou ? 'Calculando a entrega...'
                     : taxaPendente ? 'Marque seu endereço no mapa'
-                    : faltaMinimo ? `Faltam R$ ${fmt(faltamParaMinimo)} p/ o mínimo` : 'Fazer pedido'}
+                    : faltaMinimo ? `Faltam R$ ${fmt(faltamParaMinimo)} p/ o mínimo` : 'Fechar e enviar para a loja'}
                 </button>
               </div>
             </div>
@@ -2684,7 +2689,7 @@ export default function DeliveryCheckout() {
                 ? 'Marque seu endereço no mapa'
                 : faltaMinimo
                 ? `Faltam R$ ${fmt(faltamParaMinimo)} p/ o mínimo`
-                : `Fazer pedido · R$ ${fmt(total)}`}
+                : `Fechar e enviar · R$ ${fmt(total)}`}
             </button>
           </div>
         </form>
