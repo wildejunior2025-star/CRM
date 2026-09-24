@@ -3,6 +3,7 @@ import React from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useConfirmar } from '../hooks/useConfirmar'
 import { useAuth } from '../hooks/useAuth'
+import { useIfoodAtivo } from '../hooks/useIfoodAtivo'
 import { useNavigate } from 'react-router-dom'
 import '../components/Page.css'
 
@@ -1464,7 +1465,13 @@ export default function Produtos() {
         {loading ? (
           <div className="empty-state">Carregando...</div>
         ) : produtos.length === 0 ? (
-          <div className="empty-state">Nenhum produto encontrado.</div>
+          // Cardápio vazio de verdade (sem busca nem filtro) é o único momento
+          // em que a pessoa está parada sem saber o que fazer — e é aí que
+          // cabe oferecer o atalho do iFood. Com filtro na tela, "nenhum
+          // produto" significa só "a busca não achou", então segue o texto seco.
+          !search && !categoriaFiltro
+            ? <CardapioVazio />
+            : <div className="empty-state">Nenhum produto encontrado.</div>
         ) : (
           <table>
             <thead>
@@ -2702,6 +2709,57 @@ export default function Produtos() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cardápio vazio — o momento em que a loja nova empaca
+//
+// A tela dizia só "Nenhum produto encontrado" e oferecia "+ Novo produto":
+// cadastrar 200 itens à mão. Quem já vende no iFood tem o cardápio inteiro
+// pronto lá, com foto, e o sistema sabe importar (Catálogo → Cardápio iFood) —
+// mas esse menu SÓ APARECE depois que o iFood está conectado.
+//
+// Ou seja: quem mais ganharia com o atalho era justamente quem não conseguia
+// descobrir que ele existe. O dono do sistema levantou isso montando a loja de
+// uma conveniência (23/09), e vale pra maioria das lojas novas.
+//
+// Aparece só com o cardápio REALMENTE vazio e some sozinho no primeiro produto.
+function CardapioVazio() {
+  const navigate = useNavigate()
+  const { empresa } = useAuth()
+  const ifoodAtivo = useIfoodAtivo(empresa?.id)
+
+  return (
+    <div className="empty-state" style={{ padding: '30px 20px', textAlign: 'center' }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
+        Seu cardápio ainda está vazio
+      </div>
+      <div style={{ fontSize: 13.5, color: 'var(--text-muted)', marginBottom: 20 }}>
+        Cadastre os produtos pra loja online poder vender.
+      </div>
+
+      <div style={{
+        maxWidth: 440, margin: '0 auto', padding: '16px 18px', borderRadius: 12,
+        background: 'rgba(234,88,12,.08)', border: '1px solid rgba(234,88,12,.35)', textAlign: 'left',
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: '#ea580c', marginBottom: 6 }}>
+          🛵 Já vende no iFood?
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 12 }}>
+          {ifoodAtivo
+            ? 'Sua loja já está conectada. Dá pra trazer o cardápio de lá com as fotos, sem digitar nada.'
+            : 'Conecte sua loja e traga o cardápio pronto de lá, com as fotos — em vez de cadastrar produto por produto.'}
+        </div>
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          onClick={() => navigate(ifoodAtivo ? '/cardapio-ifood' : '/loja-integracoes')}
+        >
+          {ifoodAtivo ? 'Trazer cardápio do iFood' : 'Conectar meu iFood'}
+        </button>
+      </div>
     </div>
   )
 }
