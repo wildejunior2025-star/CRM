@@ -14,7 +14,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { useConfigurarLoja, avisarConfigurarLoja } from '../hooks/useConfigurarLoja'
 import { linkDaLoja } from '../lib/configurarLoja'
-import { formatCnpj, cnpjValido } from '../lib/cnpj'
+import { formatDocumento, cnpjValido } from '../lib/documento'
 import { fwcFetch } from '../lib/appFwc'
 import './ConfigurarLoja.css'
 
@@ -314,7 +314,7 @@ const titulo = t => String(t ?? '').toLowerCase().replace(/(^|\s)(\p{L})/gu, (m,
 
 function DadosDoCnpj({ status }) {
   const { empresa } = useAuth()
-  const [cnpj, setCnpj] = useState(formatCnpj(status.cnpj ?? ''))
+  const [cnpj, setCnpj] = useState(formatDocumento(status.cnpj ?? ''))
   const [receita, setReceita] = useState(null)
   const [form, setForm] = useState(null)
   const [atualLoja, setAtualLoja] = useState(null)
@@ -352,6 +352,12 @@ function DadosDoCnpj({ status }) {
   async function buscar(valor = cnpj, loja = atualLoja ?? {}) {
     const n = String(valor).replace(/\D/g, '')
     setMsg(null)
+    // A Receita só responde por CNPJ — não existe consulta pública por CPF.
+    // Quem cadastrou a loja no CPF levava "CNPJ inválido" e não entendia por quê.
+    if (n.length === 11) {
+      setMsg({ tipo: 'erro', texto: 'Sua loja está cadastrada no CPF, e a Receita só responde por CNPJ. Pode pular esta etapa e preencher os dados à mão.' })
+      return
+    }
     if (!cnpjValido(n)) { setMsg({ tipo: 'erro', texto: 'CNPJ inválido. Confere os números.' }); return }
     setBuscando(true)
     try {
@@ -408,7 +414,7 @@ function DadosDoCnpj({ status }) {
       <div className="cfg-cnpj-busca">
         <label>
           CNPJ
-          <input value={cnpj} inputMode="numeric" onChange={e => setCnpj(formatCnpj(e.target.value))} placeholder="00.000.000/0000-00" />
+          <input value={cnpj} inputMode="numeric" onChange={e => setCnpj(formatDocumento(e.target.value))} placeholder="00.000.000/0000-00" />
         </label>
         <button type="button" className="btn btn-secondary" onClick={() => buscar()} disabled={buscando}>
           {buscando ? 'Consultando…' : 'Buscar na Receita'}

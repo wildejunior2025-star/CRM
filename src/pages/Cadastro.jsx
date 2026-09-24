@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
-import { formatCnpj, cnpjValido } from '../lib/cnpj'
+import { formatDocumento, erroDocumento } from '../lib/documento'
 import ThemeToggle from '../components/ThemeToggle'
 import './Login.css'
 
@@ -46,8 +46,9 @@ export default function Cadastro() {
       return
     }
 
-    if (!cnpjValido(cnpj)) {
-      setError('Informe um CNPJ válido — é ele que identifica sua loja nas integrações (iFood, nota fiscal).')
+    const erroDoc = erroDocumento(cnpj)
+    if (erroDoc) {
+      setError(erroDoc)
       return
     }
 
@@ -134,20 +135,26 @@ export default function Cadastro() {
             />
           </div>
 
+          {/* CPF ou CNPJ no mesmo campo: muita loja pequena (bar, espetinho,
+              conveniência) opera no CPF do dono e ficava travada aqui, sem
+              conseguir nem criar a conta. A máscara troca sozinha pela
+              quantidade de dígitos — a pessoa não escolhe nada. */}
           <div className="form-field">
-            <label htmlFor="cnpj">CNPJ <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <label htmlFor="documento">CPF ou CNPJ <span style={{ color: 'var(--danger)' }}>*</span></label>
             <input
-              id="cnpj"
+              id="documento"
               type="text"
-              placeholder="00.000.000/0000-00"
+              placeholder="CPF ou CNPJ da loja"
               value={cnpj}
-              onChange={(e) => setCnpj(formatCnpj(e.target.value))}
+              onChange={(e) => setCnpj(formatDocumento(e.target.value))}
               maxLength={18}
               inputMode="numeric"
               required
             />
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              É o CNPJ da loja. Usamos ele pra ligar sua loja ao iFood e pra emitir nota.
+              {cnpj.replace(/\D/g, '').length > 11
+                ? 'CNPJ — usamos pra ligar sua loja ao iFood e emitir nota.'
+                : 'Não tem CNPJ? Pode usar o seu CPF. É o que identifica a loja nas integrações e na nota.'}
             </span>
           </div>
 

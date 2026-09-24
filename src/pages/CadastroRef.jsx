@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { supabase } from '../lib/supabaseClient'
-import { formatCnpj, cnpjValido } from '../lib/cnpj'
+import { formatDocumento, erroDocumento } from '../lib/documento'
 import ThemeToggle from '../components/ThemeToggle'
 import './Login.css'
 
@@ -126,7 +126,8 @@ export default function CadastroRef() {
 
     if (!nomeLoja.trim()) { setLojaError('Informe o nome da loja.'); return }
     if (!nomeResp.trim()) { setLojaError('Informe o seu nome.'); return }
-    if (!cnpjValido(cnpjLoja)) { setLojaError('Informe um CNPJ válido — é ele que identifica sua loja nas integrações (iFood, nota fiscal).'); return }
+    const erroDoc = erroDocumento(cnpjLoja)
+    if (erroDoc) { setLojaError(erroDoc); return }
     if (passLoja !== passLoja2) { setLojaError('As senhas não conferem.'); return }
     if (passLoja.length < 6) { setLojaError('A senha precisa ter pelo menos 6 caracteres.'); return }
 
@@ -301,15 +302,19 @@ export default function CadastroRef() {
                 value={razaoLoja} onChange={e => setRazaoLoja(e.target.value)} />
             </div>
 
+            {/* CPF ou CNPJ — mesma razão do cadastro comum: loja pequena que
+                opera no CPF do dono ficava travada aqui. */}
             <div className="form-field">
               <label htmlFor="cnpj-loja">
-                CNPJ <span style={{ color: 'var(--danger)' }}>*</span>
+                CPF ou CNPJ <span style={{ color: 'var(--danger)' }}>*</span>
               </label>
-              <input id="cnpj-loja" type="text" placeholder="00.000.000/0000-00"
-                value={cnpjLoja} onChange={e => setCnpjLoja(formatCnpj(e.target.value))}
+              <input id="cnpj-loja" type="text" placeholder="CPF ou CNPJ da loja"
+                value={cnpjLoja} onChange={e => setCnpjLoja(formatDocumento(e.target.value))}
                 maxLength={18} inputMode="numeric" required />
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                É o CNPJ da loja. Usamos ele pra ligar sua loja ao iFood e pra emitir nota.
+                {cnpjLoja.replace(/\D/g, '').length > 11
+                  ? 'CNPJ — usamos pra ligar sua loja ao iFood e emitir nota.'
+                  : 'Não tem CNPJ? Pode usar o seu CPF.'}
               </span>
             </div>
 

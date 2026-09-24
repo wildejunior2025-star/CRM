@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import ThemeToggle from '../components/ThemeToggle'
+import { formatDocumento } from '../lib/documento'
 import './Login.css'
 
 export default function CadastroAdmin() {
@@ -24,15 +25,6 @@ export default function CadastroAdmin() {
   const [loading, setLoading]         = useState(false)
 
   if (session) return <Navigate to="/" replace />
-
-  function formatCnpj(v) {
-    return v.replace(/\D/g, '')
-      .replace(/^(\d{2})(\d)/, '$1.$2')
-      .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
-      .replace(/\.(\d{3})(\d)/, '.$1/$2')
-      .replace(/(\d{4})(\d)/, '$1-$2')
-      .slice(0, 18)
-  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -122,9 +114,9 @@ export default function CadastroAdmin() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="cnpj">CNPJ</label>
-            <input id="cnpj" type="text" placeholder="00.000.000/0000-00" value={cnpj}
-              onChange={e => setCnpj(formatCnpj(e.target.value))} maxLength={18} />
+            <label htmlFor="cnpj">CPF ou CNPJ</label>
+            <input id="cnpj" type="text" placeholder="CPF ou CNPJ da loja" value={cnpj}
+              onChange={e => setCnpj(formatDocumento(e.target.value))} maxLength={18} inputMode="numeric" />
           </div>
 
           <div className="form-field">
