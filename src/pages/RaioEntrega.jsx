@@ -704,11 +704,31 @@ export default function RaioEntrega() {
         {/* ── Configurações de Delivery ── */}
         <div className="card">
 
-          {/* Toggle ativar/desativar */}
+          {/* A chave-mestra do link da loja — e o nome dela enganava.
+              Chamava-se "Ativar delivery", então quem só faz retirada deixava
+              desligado achando que era sobre entregar em casa, e o link da loja
+              não abria pra ninguém: "Loja não encontrada". Aconteceu com o dono
+              do sistema montando uma loja de conveniência (23/09). Se ele
+              travou, o lojista novo desiste.
+              Quem manda em ENTREGAR é o toggle de baixo; este manda em RECEBER
+              PEDIDO. O aviso vermelho aparece desligado porque, sem ele, a loja
+              some do ar sem dizer por quê. */}
           <div className="re-toggle-row">
             <div>
-              <div className="re-toggle-label">Ativar delivery para esta loja</div>
-              <div className="re-toggle-sub">Permite que clientes façam pedidos de delivery</div>
+              <div className="re-toggle-label">Receber pedidos pelo link da loja</div>
+              <div className="re-toggle-sub">
+                Liga a Loja Online. <strong>Deixe ligado mesmo se você só faz retirada</strong> —
+                quem decide se entrega em casa é a opção abaixo.
+              </div>
+              {!aceitaDelivery && (
+                <div style={{
+                  marginTop: 8, padding: '7px 10px', borderRadius: 8, fontSize: 12.5, lineHeight: 1.45,
+                  background: 'rgba(220,38,38,.10)', border: '1px solid rgba(220,38,38,.35)', color: '#dc2626',
+                }}>
+                  Desligado, o link da sua loja mostra <strong>“Loja não encontrada”</strong> e ninguém
+                  consegue pedir — nem pra retirar no balcão.
+                </div>
+              )}
             </div>
             <div className="re-toggle-controls">
               <span className={`re-status-badge ${aceitaDelivery ? 'active' : 'inactive'}`}>
@@ -718,7 +738,8 @@ export default function RaioEntrega() {
                 type="button"
                 className={`re-switch ${aceitaDelivery ? 'on' : 'off'}`}
                 onClick={() => setAceitaDelivery(v => !v)}
-                aria-label="Ativar delivery"
+                aria-label="Receber pedidos pelo link da loja"
+                aria-pressed={aceitaDelivery}
               >
                 <span className="re-switch-thumb" />
               </button>

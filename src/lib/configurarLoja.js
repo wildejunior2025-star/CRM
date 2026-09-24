@@ -38,13 +38,19 @@ export const ETAPAS = [
     detalhe: s => {
       const falta = []
       if (!s.pino) falta.push('marcar o ponto da loja no mapa')
-      if (!s.aceita_delivery) falta.push('ligar o pedido online')
+      // Dizer só "ligar o pedido online" mandava a pessoa procurar um botão com
+      // esse nome, que não existia: o toggle se chamava "Ativar delivery". Quem
+      // só faz retirada passava reto achando que não era com ele. O detalhe
+      // agora nomeia o botão exato.
+      if (!s.aceita_delivery) falta.push('ligar "Receber pedidos pelo link da loja"')
       if (s.aceita_delivery && s.aceita_entrega && !s.tem_taxa) falta.push('definir a taxa de entrega')
       return falta.length ? `Falta ${falta.join(', ')}` : (s.aceita_entrega ? 'Entrega com taxa definida' : 'Só retirada')
     },
     explica: [
       'Primeiro o ponto da loja no mapa: é dele que o sistema mede a distância até o cliente.',
-      'Depois a taxa: por km (ex.: até 2 km R$ 5, até 4 km R$ 7) ou por bairro. E ligue "aceita pedido online". Sem isso o link da loja não abre.',
+      'Depois ligue "Receber pedidos pelo link da loja" — é o que abre a Loja Online. Sem ele o link mostra "Loja não encontrada", mesmo que você só faça retirada.',
+      'Só faz retirada? Deixe "Fazer entrega" desligado: a opção de receber em casa some do cardápio e você não precisa cadastrar taxa.',
+      'Se entrega: a taxa é por km (ex.: até 2 km R$ 5, até 4 km R$ 7) ou por bairro.',
     ],
   },
   {
