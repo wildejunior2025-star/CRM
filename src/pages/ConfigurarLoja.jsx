@@ -23,7 +23,7 @@ export const MARCA_VOLTAR = 'cfg_loja_voltar'
 
 export default function ConfigurarLoja() {
   const navigate = useNavigate()
-  const { profile } = useAuth()
+  const { profile, empresa } = useAuth()
   const { status, carregando, etapas, atual, pendentesObrigatorias, concluido, marcar } = useConfigurarLoja()
   // Etapas abertas na conversa, em ordem. A última é a que tem os botões.
   const [vistos, setVistos] = useState([])
@@ -72,10 +72,22 @@ export default function ConfigurarLoja() {
     navigate('/')
   }
 
+  // Dúvida na CONFIGURAÇÃO vai pra gente, não pra IA.
+  //
+  // Antes abria o assistente. Só que a dúvida de quem está montando a loja não
+  // é "como funciona o sistema" — é "e agora, o que eu faço?". Quem está
+  // perdido nos primeiros minutos não quer aprender a usar: quer alguém do
+  // outro lado. E é aí que se perde cliente: no primeiro problema, desiste.
+  //
+  // A mensagem já vai com o nome da loja e a etapa, pra quem atende saber em
+  // que pé a pessoa está sem precisar perguntar. Depois que a loja estiver
+  // configurada, o assistente continua no botão flutuante, pro dia a dia.
   function duvida(etapa) {
-    window.dispatchEvent(new CustomEvent('assistente-loja:abrir', {
-      detail: { pergunta: etapa ? `Tenho uma dúvida sobre ${etapa.titulo.toLowerCase()}: ` : '' },
-    }))
+    const loja = String(empresa?.nome ?? '').trim()
+    const texto = etapa
+      ? `Oi! Sou da ${loja || 'minha loja'} e estou configurando o sistema. Tenho uma dúvida em "${etapa.titulo}".`
+      : `Oi! Sou da ${loja || 'minha loja'} e estou configurando o sistema. Tenho uma dúvida.`
+    window.open(`${WHATS_FWC}?text=${encodeURIComponent(texto)}`, '_blank', 'noopener')
   }
 
   if (carregando) return <div className="cfg-carregando">Carregando…</div>
@@ -163,7 +175,10 @@ export default function ConfigurarLoja() {
                   {e.curto}
                 </button>
               ))}
-              <button type="button" className="cfg-chip duvida" onClick={() => duvida(null)}>💬 Tenho uma dúvida</button>
+              {/* "Falar com a gente" e não "Tenho uma dúvida": o rótulo antigo
+                  não dizia com QUEM se fala, e abria a IA. Agora abre o
+                  WhatsApp de quem atende — e o nome avisa isso antes do clique. */}
+              <button type="button" className="cfg-chip duvida" onClick={() => duvida(null)}>💬 Falar com a gente</button>
             </div>
           )}
         </section>
@@ -284,7 +299,7 @@ function CartaoEtapa({ etapa, status, completo, onAbrirTela, onPular, onFeito, o
               {etapa.pulada && (
                 <button type="button" className="btn btn-secondary" disabled={ocupado} onClick={rodar(onDesfazer)}>Tirar do "pulado"</button>
               )}
-              <button type="button" className="cfg-link" onClick={onDuvida}>Tenho uma dúvida</button>
+              <button type="button" className="cfg-link" onClick={onDuvida}>Falar com a gente</button>
             </div>
           </>
         )}
