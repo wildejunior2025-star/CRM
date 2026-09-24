@@ -240,9 +240,15 @@
     pointer-events: all;
   }
 
-  /* Conteúdo ocupa tudo, sem padding lateral excessivo */
+  /* Conteúdo ocupa tudo, sem padding lateral excessivo.
+     O vão no pé é pro botão flutuante da IA: no desktop ele pousa sobre a
+     barra lateral (que reserva o espaço dela), mas no celular a lateral vira
+     menu e ele passa a flutuar SOBRE a página — cobrindo o que estiver no fim.
+     Pegou o "Salvar" da tela de Pagamento (24/09) e pegaria o de qualquer
+     tela cujo botão fica no rodapé. */
   .content {
     padding: 16px;
+    padding-bottom: 88px;
     flex: 1;
   }
 
