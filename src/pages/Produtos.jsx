@@ -91,6 +91,7 @@ const emptyForm = {
   preco_custo: 0,
   custo_modo: 'fixo',      // 'fixo' = R$ por unidade | 'pct' = % do valor vendido
   custo_pct_venda: '',
+  codigo_barras: '',
   preco_venda: 0,
   preco_promocional: '',
   destaque: false,
@@ -948,6 +949,7 @@ export default function Produtos() {
       preco_custo: produto.preco_custo ?? 0,
       custo_modo: produto.custo_pct_venda != null ? 'pct' : 'fixo',
       custo_pct_venda: produto.custo_pct_venda ?? '',
+      codigo_barras: produto.codigo_barras ?? '',
       preco_venda: produto.preco_venda ?? 0,
       preco_promocional: produto.preco_promocional ?? '',
       destaque: !!produto.destaque,
@@ -1139,6 +1141,9 @@ export default function Produtos() {
 
     const payload = {
       ...form,
+      // Sem código = campo vazio no banco (null), nunca string vazia: duas
+      // strings vazias bateriam de frente no índice de código único (mig 0283).
+      codigo_barras: String(form.codigo_barras ?? '').trim() || null,
       unidades_por_caixa: Number(form.unidades_por_caixa) || 1,
       // Só um dos dois vale: no modo % o custo em R$ vai a zero pra não somar duas vezes.
       preco_custo: form.custo_modo === 'pct' ? 0 : (Number(form.preco_custo) || 0),
@@ -1887,6 +1892,26 @@ export default function Produtos() {
                     onChange={handleChange}
                     onCriar={criarCategoria}
                   />
+                </div>
+
+                {/* CÓDIGO DE BARRAS (mig 0283). O leitor é um teclado: clicar
+                    aqui e bipar já escreve o número. O Enter que o leitor manda
+                    no fim não pode enviar o formulário — senão o produto salva
+                    pela metade no meio do cadastro. */}
+                <div className="form-field">
+                  <label>Código de barras</label>
+                  <input
+                    name="codigo_barras"
+                    value={form.codigo_barras}
+                    onChange={handleChange}
+                    onKeyDown={e => { if (e.key === 'Enter') e.preventDefault() }}
+                    placeholder="Clique aqui e bipe o produto"
+                    inputMode="numeric"
+                    autoComplete="off"
+                  />
+                  <small style={{ color: 'var(--text-muted, #888)' }}>
+                    Com o código preenchido, basta bipar na Nova venda ou no Salão que o produto cai na sacola.
+                  </small>
                 </div>
 
                 {/* Embalagem escondida por enquanto (sem utilidade ainda) */}

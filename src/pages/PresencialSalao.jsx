@@ -4,6 +4,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { adicionalComplementos, complementosParaGravar } from '../lib/complementos'
 import { rotuloComanda, agruparItensComanda } from '../lib/comanda'
+import { acharPorCodigo, combinaCodigo, ouvirBipada } from '../lib/codigoBarras'
 import { calcularTaxa, itemIsento, MARCA_ISENTO } from '../lib/taxaServico'
 import AvisoPix from '../components/AvisoPix'
 import { useConfirmar } from '../hooks/useConfirmar'
@@ -197,6 +198,7 @@ export default function PresencialSalao() {
   const [moverErro, setMoverErro] = useState('')
   const [moverBusy, setMoverBusy] = useState(false)
   const [busca, setBusca]     = useState('')
+  const [avisoBipe, setAvisoBipe] = useState(null)  // código bipado sem dono
   const [categoriaSel, setCategoriaSel] = useState(null) // categoria aberta no menu de adicionar item
   // Mora AQUI, e não junto do useRef lá em cima: a lista de dependências é lida
   // durante o render, então um efeito que cita `busca` antes do useState dela
@@ -272,6 +274,8 @@ export default function PresencialSalao() {
   // lista deslizando pro lado. O <select> abre a roda nativa nos dois.
   const [invCatNova, setInvCatNova] = useState(false)
   const [ordemCat, setOrdemCat] = useState({}) // { nomeCategoria(minusculo): ordem } — mesma ordem do catálogo
+  // { nomeCategoria(sem acento): 'salao' | 'cozinha' | 'nenhum' } — mig 0184/0185.
+  const [setorCat, setSetorCat] = useState({})
   const [caixaAberto, setCaixaAberto] = useState(false) // só lança na mesa com o caixa aberto
   // Complementos: { produto_id: [{ id, nome, min, max, opcoes:[{id,nome,preco_adicional}] }] }
   // Mesma fonte do cardápio do QR (MesaCardapio) — produto com grupo abre o modal de montagem.
@@ -354,9 +358,11 @@ export default function PresencialSalao() {
       supabase.rpc('mp_conectado_loja'),
       // Deposito tem milhares de itens: sem paginar o cardapio do salao parava nos
       // primeiros 500 nomes em ordem alfabetica e o resto sumia da tela.
-      fetchAll(() => supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria').eq('empresa_id', empresaId).order('nome')),
+      fetchAll(() => supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria, codigo_barras').eq('empresa_id', empresaId).order('nome')),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
-      supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId),
+      // `setor` vem junto: é ele que diz qual categoria NÃO sai no papel — e
+      // essas o garçom pega ele mesmo, sem esperar cozinha nenhuma (mig 0185).
+      supabase.from('categorias').select('nome, ordem, setor').eq('empresa_id', empresaId),
       // Complementos por produto. A tabela de vínculo não tem empresa_id e é lida por
       // todos (policy le_publico_pcg), então o "!inner" é o que garante a separação:
       // vira INNER JOIN com complemento_grupos, que a RLS já filtra por empresa — os
@@ -380,6 +386,9 @@ export default function PresencialSalao() {
     const om = {}
     for (const c of (cat.data ?? [])) if (c?.nome != null) om[String(c.nome).trim().toLowerCase()] = c.ordem == null ? 9999 : c.ordem
     setOrdemCat(om)
+    const sm = {}
+    for (const c of (cat.data ?? [])) if (c?.nome != null) sm[semAcento(c.nome)] = c.setor || 'salao'
+    setSetorCat(sm)
     // Monta { produto_id: [grupos] }, pulando grupo/opção pausados. min/max do vínculo
     // (override) mandam mais que os do grupo, igual no cardápio do QR.
     const cm = {}
@@ -634,7 +643,56 @@ export default function PresencialSalao() {
     enviarCozinha({ imprimir: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [semCozinha, rascunho, comandaSel, enviando])
+
+  // Categoria do produto, pra saber o setor sem ter que carregar nada a mais:
+  // o catálogo já traz a categoria de cada produto.
+  const catPorProduto = useMemo(() => {
+    const m = {}
+    for (const p of produtos) if (p?.produto_id != null) m[String(p.produto_id)] = p.categoria
+    return m
+  }, [produtos])
+
+  // Categoria marcada como "NÃO IMPRIME" (mig 0185): a bebida que o garçom pega
+  // ele mesmo na geladeira. Não tem papel pra sair nem cozinha pra avisar.
+  const naoImprime = useCallback((r) => {
+    const cat = catPorProduto[String(r?.produto_id ?? '')]
+    return !!cat && setorCat[semAcento(cat)] === 'nenhum'
+  }, [catPorProduto, setorCat])
+
+  // ...e por isso ele NÃO espera o botão verde: cai direto na conta do cliente.
+  //
+  // Segurar esse item no rascunho era pedir pro garçom "enviar para a cozinha"
+  // uma cachaça que a loja já disse que não vai pra cozinha nenhuma — e, se ele
+  // esquecesse de apertar, a bebida saía da geladeira sem entrar na conta.
+  //
+  // Só os que não imprimem vão sozinhos: o que é da cozinha (ou sai na
+  // impressora da frente) continua esperando o envio, porque ali o botão é o
+  // que dispara o papel.
+  // Deu erro ao gravar? Para de tentar sozinho. O item continua no rascunho e o
+  // botão verde faz o reenvio na mão — sem isto, cada falha voltaria pelo mesmo
+  // efeito e o garçom ficaria preso num alerta atrás do outro.
+  const diretoTravadoRef = useRef(false)
+  useEffect(() => { diretoTravadoRef.current = false }, [comandaSel?.id])
+  useEffect(() => {
+    if (semCozinha || !comandaSel || enviando || rascunho.length === 0) return
+    if (diretoTravadoRef.current) return
+    const diretos = rascunho.filter(naoImprime)
+    if (diretos.length) {
+      enviarCozinha({ imprimir: false, itens: diretos })
+        .then(ok => { if (!ok) diretoTravadoRef.current = true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [semCozinha, rascunho, comandaSel, enviando, naoImprime])
   const subtotalRascunho = rascunho.reduce((s, r) => s + Number(r.preco_venda) * r.quantidade, 0)
+
+  // O botão verde só fala em COZINHA quando tem comida de verdade esperando.
+  // Bebida que sai na impressora da frente é lançamento, não pedido de preparo
+  // — e prometer "cozinha" numa comanda que nunca vai chegar lá é o jeito mais
+  // rápido de o garçom parar de acreditar no que a tela diz.
+  const rascTemCozinha = rascunho.some(r => {
+    const cat = catPorProduto[String(r?.produto_id ?? '')]
+    return !!cat && setorCat[semAcento(cat)] === 'cozinha'
+  })
 
   const subtotalSel = subtotalDe(comandaSel)
 
@@ -1126,15 +1184,23 @@ export default function PresencialSalao() {
 
   // Envia o pedido montado pra cozinha: insere TODOS os itens de uma vez → sai numa
   // impressão só (o gestor e o app FWC juntam os inserts que chegam juntos).
-  async function enviarCozinha({ imprimir = true } = {}) {
-    if (!comandaSel || !rascunho.length || enviando) return
+  // `itens`: manda só um pedaço do rascunho (é assim que a categoria "não
+  // imprime" vai sozinha, sem levar junto o prato que ainda está sendo montado).
+  // Sem ele, vai o rascunho inteiro — o botão verde de sempre.
+  async function enviarCozinha({ imprimir = true, itens = null } = {}) {
+    const lista = itens ?? rascunho
+    if (!comandaSel || !lista.length || enviando) return false
     setEnviando(true)
     // "PARA VIAGEM" e o recado da remessa vão na observação de cada item: é o único
     // campo que sai impresso na comanda da cozinha (grande e em negrito, dentro do
     // bloco do item). Observação escrita DEPOIS do envio não imprime — por isso ela é
     // montada aqui, na hora de gravar.
-    const recado = obsEnvio.trim()
-    const rows = rascunho.map(r => ({
+    // No envio direto (categoria que não imprime) o recado fica: ele é "recado
+    // PRA COZINHA, sai impresso", e este item não passa por cozinha nem por
+    // papel. Quem escreveu continua com o recado na tela, esperando a remessa
+    // da comida.
+    const recado = itens ? '' : obsEnvio.trim()
+    const rows = lista.map(r => ({
       empresa_id: empresaId, comanda_id: comandaSel.id,
       produto_id: (r.produto_id && !String(r.produto_id).startsWith('avulso:')) ? r.produto_id : null,
       nome: r.nome,
@@ -1154,7 +1220,7 @@ export default function PresencialSalao() {
     }))
     const { data: inseridos, error } = await supabase.from('comanda_itens').insert(rows).select()
     setEnviando(false)
-    if (error) { window.alert('Erro ao lançar o item: ' + error.message); return }
+    if (error) { window.alert('Erro ao lançar o item: ' + error.message); return false }
 
     // LIMPA O RASCUNHO AQUI, antes de imprimir. Estava lá embaixo, depois da
     // impressão — e a impressão demora (Bluetooth, app do celular, papel). Nessa
@@ -1166,10 +1232,26 @@ export default function PresencialSalao() {
     // A impressão não precisa do rascunho: ela imprime `inseridos`, que veio do
     // banco. E se falhar, o aviso de reimpressão também usa `inseridos`.
     const paraImprimir = inseridos ?? []
-    setRascunho([])
-    setObsEnvio('')
-    if (rascunhoKey) {
-      try { localStorage.removeItem(rascunhoKey); localStorage.removeItem(rascunhoKey + '_obs') } catch { /* ignora */ }
+    if (itens) {
+      // Foi só um pedaço: tira da lista o que acabou de entrar na conta e deixa
+      // o resto (e o recado) esperando o botão verde. O localStorage se acerta
+      // sozinho — quem grava é o efeito que olha o rascunho.
+      // Desconta a QUANTIDADE enviada, não a linha inteira: se o garçom apertou
+      // a segunda cerveja enquanto a primeira estava indo, a linha já está em 2
+      // e só 1 entrou — apagar a linha perderia a outra.
+      const idas = new Map(lista.map(r => [r.linha ?? String(r.produto_id), r.quantidade]))
+      setRascunho(prev => prev.flatMap(r => {
+        const k = r.linha ?? String(r.produto_id)
+        if (!idas.has(k)) return [r]
+        const resto = r.quantidade - idas.get(k)
+        return resto > 0 ? [{ ...r, quantidade: resto }] : []
+      }))
+    } else {
+      setRascunho([])
+      setObsEnvio('')
+      if (rascunhoKey) {
+        try { localStorage.removeItem(rascunhoKey); localStorage.removeItem(rascunhoKey + '_obs') } catch { /* ignora */ }
+      }
     }
     // Loja sem cozinha não tem quem leia a comanda de preparo — o papel só
     // gastaria bobina.
@@ -1189,6 +1271,7 @@ export default function PresencialSalao() {
       )
     }
     await loadMesas()
+    return true
   }
 
   // Liga/desliga "para viagem" na comanda inteira. Fica gravado no banco: os outros
@@ -2134,8 +2217,9 @@ export default function PresencialSalao() {
   //  - Sem busca + categoria escolhida → produtos daquela categoria.
   //  - Sem busca + nenhuma categoria → mostra as categorias (não os produtos).
   const buscaNorm = semAcento(busca)
+  // Acha pelo nome OU pelo código bipado (mig 0283).
   const produtosFiltrados = buscaNorm
-    ? produtosComCategoria.filter(p => semAcento(p.nome).includes(buscaNorm)).slice(0, 40)
+    ? produtosComCategoria.filter(p => semAcento(p.nome).includes(buscaNorm) || combinaCodigo(p, busca)).slice(0, 40)
     : categoriaSel
       ? produtosComCategoria.filter(p => p.categoria.trim() === categoriaSel)
       : []
@@ -2167,6 +2251,9 @@ export default function PresencialSalao() {
       })
     } else if (e.key === 'Enter') {
       e.preventDefault()
+      // Bipada: o código aponta pra UM produto, vale mais que a linha marcada.
+      const bipado = acharPorCodigo(produtosComCategoria, busca)
+      if (bipado) { setBusca(''); addItem(bipado); return }
       const p = produtosFiltrados[destaque]
       if (!p) return
       addItem(p)
@@ -2175,6 +2262,18 @@ export default function PresencialSalao() {
       if (!compMap[p.produto_id]?.length) voltarPraBusca()
     }
   }
+
+  // BIPAR COM A MESA ABERTA, sem precisar clicar no campo de busca antes. O
+  // ouvinte entra uma vez só e chama sempre a versão mais nova (a lista de
+  // produtos muda a cada tecla).
+  const aoBipar = useRef(() => {})
+  aoBipar.current = (codigo) => {
+    if (!comandaSel) return          // sem mesa aberta não há onde lançar
+    const p = acharPorCodigo(produtosComCategoria, codigo)
+    if (p) { setAvisoBipe(null); addItem(p); return }
+    setAvisoBipe(codigo)
+  }
+  useEffect(() => ouvirBipada(codigo => aoBipar.current(codigo)), [])
 
   if (loading) return <div className="page"><p>Carregando salão...</p></div>
 
@@ -2791,7 +2890,7 @@ export default function PresencialSalao() {
               {rascunho.length > 0 && (
                 <div style={{ marginTop: 14, padding: 12, borderRadius: 10, border: '1.5px dashed var(--primary)', background: 'rgba(124,58,237,.06)' }}>
                   <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8, color: 'var(--primary)' }}>
-                    🧾 A enviar — ainda não foi pra cozinha
+                    🧾 A enviar — {rascTemCozinha ? 'ainda não foi pra cozinha' : 'ainda não entrou na conta'}
                   </div>
                   {rascunho.map(r => (
                     <div key={r.linha ?? r.produto_id} style={{ padding: '5px 0' }}>
@@ -2943,7 +3042,7 @@ export default function PresencialSalao() {
                 )}
               </div>
               <div className="sal-busca" style={{ position: 'relative', marginBottom: 8 }}>
-                <input ref={buscaRef} value={busca} onChange={e => setBusca(e.target.value)} onKeyDown={teclaBusca} placeholder="Buscar produto... (↑ ↓ e Enter)"
+                <input ref={buscaRef} value={busca} onChange={e => setBusca(e.target.value)} onKeyDown={teclaBusca} placeholder="Buscar produto ou bipar o código..."
                   style={{ width: '100%', padding: '10px 38px 10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box', fontSize: 14.5 }} />
                 {busca && (
                   <button type="button" title="Limpar" aria-label="Limpar busca"
@@ -2955,6 +3054,18 @@ export default function PresencialSalao() {
                     }}>×</button>
                 )}
               </div>
+              {/* Bipou um código que não é de nenhum produto: mostra o número, pra
+                  loja saber o que falta cadastrar. */}
+              {avisoBipe && (
+                <div style={{ marginBottom: 8, fontSize: 12.5, fontWeight: 700, padding: '7px 10px', borderRadius: 8,
+                  background: 'rgba(234,179,8,.12)', color: '#eab308', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ flex: 1 }}>
+                    Bipei <b>{avisoBipe}</b> e nenhum produto tem esse código. Cadastre em Produtos → Código de barras.
+                  </span>
+                  <button type="button" onClick={() => setAvisoBipe(null)}
+                    style={{ border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontWeight: 800 }}>×</button>
+                </div>
+              )}
               {/* Sem busca e sem categoria escolhida: mostra as CATEGORIAS (como no cardápio). */}
               {!busca.trim() && !categoriaSel && (
                 <div className="sal-cats">
@@ -3042,7 +3153,7 @@ export default function PresencialSalao() {
                 <button type="button" onClick={() => enviarCozinha()} disabled={enviando}
                   style={{ width: '100%', marginBottom: 12, padding: '12px 0', borderRadius: 10, border: 'none', cursor: enviando ? 'wait' : 'pointer',
                     background: '#16a34a', color: '#fff', fontWeight: 800, fontSize: 15, opacity: enviando ? 0.6 : 1 }}>
-                  {enviando ? 'Enviando...' : `🍳 Enviar para a cozinha · ${rascunho.reduce((s, r) => s + r.quantidade, 0)} item(ns) · ${fmt(subtotalRascunho)}`}
+                  {enviando ? 'Enviando...' : `${rascTemCozinha ? '🍳 Enviar para a cozinha' : '🧾 Lançar na comanda'} · ${rascunho.reduce((s, r) => s + r.quantidade, 0)} item(ns) · ${fmt(subtotalRascunho)}`}
                 </button>
               )}
               <div className="sal-rodape-subtotal" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15.5, marginBottom: 4 }}>

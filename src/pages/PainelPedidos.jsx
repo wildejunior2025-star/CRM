@@ -9,6 +9,7 @@ import { precoPorQuantidade, faixaAplicada, menorFaixa } from '../lib/precoQuant
 import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
 import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
 import { rotuloComanda, agruparItensComanda } from '../lib/comanda'
+import { acharPorCodigo, combinaCodigo, ouvirBipada } from '../lib/codigoBarras'
 import { useChamados } from '../hooks/useChamados'
 import { calcularTaxa } from '../lib/taxaServico'
 import { fwcFetch, explicaErroFwc } from '../lib/appFwc'
@@ -1075,7 +1076,7 @@ async function carregarCatalogoCompleto(empresaId) {
     // `ativo`/`disponivel_delivery` vêm junto pro cardápio por categoria mostrar
     // o mesmo que a busca por nome mostra (o RPC filtra os dois): item pausado
     // aparecendo na lista e sumindo na busca é bug na cara de quem atende.
-    fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, preco_promocional, faixas_preco, categoria, ativo, disponivel_delivery')
+    fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, preco_promocional, faixas_preco, categoria, ativo, disponivel_delivery, codigo_barras')
       .eq('empresa_id', empresaId).is('arquivado_em', null).order('nome', { ascending: true }).order('id')),
     supabase.from('produto_complemento_grupos')
       .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, regra_preco, modo_quantidade, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)), produtos!inner(empresa_id)')
@@ -1478,6 +1479,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const [produtos, setProdutos] = useState([])
   const [loading, setLoading]   = useState(true)
   const [busca, setBusca]       = useState('')
+  const [avisoBipe, setAvisoBipe] = useState(null) // código bipado que não é de nenhum produto
   const [destaque, setDestaque] = useState(0)   // item marcado pelas setas do teclado
   const listaRef = useRef(null)
   const [cart, setCart]         = useState(() => draft?.cart ?? cartFromPedido(pedidoEdicao))
@@ -2010,7 +2012,10 @@ ${url}
   // Busca ignorando acento: quem digita rápido escreve "camarao", e o produto
   // está cadastrado como "Camarão".
   const buscaNorm = semAcento(busca)
-  const filtrados = produtosComPreco.filter(p => !buscaNorm || semAcento(p.nome).includes(buscaNorm))
+  // A busca acha pelo nome OU pelo código de barras: bipar com o cursor no
+  // campo filtra pro produto do número, e o Enter do leitor já o adiciona.
+  const filtrados = produtosComPreco.filter(p => !buscaNorm
+    || semAcento(p.nome).includes(buscaNorm) || combinaCodigo(p, busca))
 
   // ── Teclado na busca ────────────────────────────────────────────────────
   // Digita, desce com a seta e confirma no Enter, sem tirar a mão do teclado
@@ -2032,10 +2037,32 @@ ${url}
       })
     } else if (e.key === 'Enter') {
       e.preventDefault()
+      // Bipada: o leitor digitou o código e mandou Enter. O código manda mais
+      // que a linha marcada — ele aponta pra UM produto só.
+      const bipado = acharPorCodigo(produtosComPreco, busca)
+      if (bipado) { pedirProduto(bipado); setBusca(''); return }
       const p = filtrados[destaque]
       if (p) pedirProduto(p)
     }
   }
+
+  // BIPAR SEM O CURSOR NO CAMPO.
+  //
+  // Na prática o atendente clica em qualquer lugar da tela e bipa. Sem isto os
+  // números iam pro nada e ele achava que o leitor estava quebrado.
+  //
+  // O ouvinte entra UMA vez (a lista de produtos muda a cada tecla digitada, e
+  // religar a cada mudança perderia a bipada no meio). Ele chama sempre a versão
+  // mais nova da função, guardada na ref.
+  const aoBipar = useRef(() => {})
+  aoBipar.current = (codigo) => {
+    const p = acharPorCodigo(produtosComPreco, codigo)
+    if (p) { setAvisoBipe(null); pedirProduto(p); return }
+    // Código que não é de ninguém: dizer QUAL foi, senão a loja não sabe o que
+    // cadastrar.
+    setAvisoBipe(codigo)
+  }
+  useEffect(() => ouvirBipada(codigo => aoBipar.current(codigo)), [])
 
   async function concluir() {
     if (itens.length === 0) { setErro('Adicione pelo menos um item.'); return }
@@ -2308,8 +2335,20 @@ ${url}
         <input
           type="search" value={busca} onChange={e => setBusca(e.target.value)}
           onKeyDown={teclaBusca}
-          placeholder="Buscar produto... (↑ ↓ e Enter)" style={{ ...inputSt, marginBottom: 8 }}
+          placeholder="Buscar produto ou bipar o código..." style={{ ...inputSt, marginBottom: 8 }}
         />
+        {/* Bipou um código que não está em produto nenhum: mostra o número pra
+            loja saber o que cadastrar, em vez de só não acontecer nada. */}
+        {avisoBipe && (
+          <div style={{ marginBottom: 8, fontSize: 12.5, fontWeight: 700, padding: '7px 10px', borderRadius: 8,
+            background: 'rgba(234,179,8,.12)', color: '#eab308', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ flex: 1 }}>
+              Bipei <b>{avisoBipe}</b> e nenhum produto tem esse código. Cadastre em Produtos → Código de barras.
+            </span>
+            <button type="button" onClick={() => setAvisoBipe(null)}
+              style={{ border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontWeight: 800 }}>×</button>
+          </div>
+        )}
         <div ref={listaRef} className="pp-venda-lista" style={{ overflowY: 'auto', flexShrink: 0, border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 6, marginBottom: 14 }}>
           {loading ? (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>Carregando produtos...</div>
