@@ -1016,7 +1016,13 @@ function tipoEntregaDaConversa(mensagens: any[]): "entrega" | "retirada" | null 
 // Quanto o robô espera por mais mensagens antes de responder. Quem manda o
 // pedido picado leva uns 2-4 s entre uma e outra; mais que isso atrasa quem
 // manda tudo numa mensagem só.
-const ESPERA_RAJADA_MS = 4000
+//
+// 4 s eram somados a TODA resposta, e a conta inteira ficava em 9-14 s — lento
+// na cara de quem está esperando (teste 25/09). Em 2,5 s a proteção continua
+// de pé (quem digita em rajada emenda mais rápido que isso) e some um segundo
+// e meio de cada resposta. Se voltar a sair resposta repetida pro mesmo
+// cliente, este é o número pra subir.
+const ESPERA_RAJADA_MS = 2500
 
 const MENU_INTEIRO_ATE = 300      // itens: abaixo disso, vai tudo
 const MENU_BUSCA_MAX   = 80       // itens que a busca pode mandar
@@ -1323,7 +1329,16 @@ type Exigencias = Record<string, { nome: string; min: number; max: number; opcoe
 // código reconhece que existe um item pendurado esperando a escolha.
 const AVISO_ESCOLHA_PREFIXO = "Falta só isso pra eu anotar"
 
-function conferirEscolhas(itens: any[], exigencias: Exigencias, catalogo: any[]): string | null {
+// "Sem borda", "Não quero recheio": a opção que serve pra RECUSAR a categoria.
+const ehOptOut = (nome: string) => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ""))
+
+function conferirEscolhas(
+  itens: any[], exigencias: Exigencias, catalogo: any[],
+  // O que o cliente escreveu nas últimas mensagens, e se o robô JÁ cobrou a
+  // escolha uma vez (aí não cobra de novo — ver o bloco do opt-out).
+  contexto: { fala?: string; jaPerguntou?: boolean } = {},
+): string | null {
+  const dito = normSabor(contexto.fala ?? "")
   const linhas: string[] = []
   for (const it of itens ?? []) {
     const grupos = exigencias[String(it?.produto_id ?? "")]
@@ -1339,8 +1354,11 @@ function conferirEscolhas(itens: any[], exigencias: Exigencias, catalogo: any[])
     // não reemite o item — a pizza some da sacola (testado 25/09 com meia
     // calabresa/meia carne de sol). Com os sabores escritos, ele relê a própria
     // pendência e monta o item completo. O cliente também confere de graça.
+    // O "Sem borda" fica de fora: dizer "(Calabresa, Sem borda) — falta
+    // escolher a Borda" é uma contradição na cara do cliente.
     const jaEscolhido = (Array.isArray(it?.complementos) ? it.complementos : [])
-      .map((c: any) => String(c?.nome ?? "").trim()).filter(Boolean).join(", ")
+      .map((c: any) => String(c?.nome ?? "").trim())
+      .filter((n: string) => n && !ehOptOut(n)).join(", ")
     const oQueTem = jaEscolhido ? ` (${jaEscolhido})` : ""
     for (const g of grupos) {
       const doGrupo = g.opcoes.filter(o => escolhidos.includes(normSabor(o))).length
@@ -1349,6 +1367,26 @@ function conferirEscolhas(itens: any[], exigencias: Exigencias, catalogo: any[])
         linhas.push(`• *${nomeProduto}*${oQueTem} — falta escolher: *${g.nome}*${quantos}\n${g.opcoes.map(o => `  • ${o}`).join("\n")}`)
       } else if (g.max > 0 && doGrupo > g.max) {
         linhas.push(`• *${nomeProduto}*${oQueTem} — em *${g.nome}* dá pra escolher ${g.max === 1 ? "só 1" : `${g.max}`}, e vieram ${doGrupo}. Quais ficam?`)
+      } else if (g.min > 0 && !contexto.jaPerguntou) {
+        // ELE ESCOLHEU "SEM BORDA" NO LUGAR DO CLIENTE.
+        //
+        // O modelo fecha o item marcando a opção de recusa quando o cliente não
+        // falou nada — e o min/max fica satisfeito, então nada aqui reclamava.
+        // Na prática é a loja perdendo a borda de R$ 8,00 numa pergunta que
+        // nunca foi feita (pizza de calabresa + mussarela, 25/09).
+        //
+        // Só vale quando o cliente REALMENTE não tocou no assunto: se ele falou
+        // "borda" ou citou qualquer opção, a escolha é dele e passa. E cobra
+        // uma vez só — se o robô já perguntou e ele desconversou, segue o jogo.
+        const doGrupoNomes = g.opcoes.filter(o => escolhidos.includes(normSabor(o)))
+        const soRecusa = doGrupoNomes.length > 0 && doGrupoNomes.every(o => ehOptOut(o))
+        const clienteTocouNoAssunto = !!dito && (
+          dito.includes(normSabor(g.nome))
+          || g.opcoes.some(o => !ehOptOut(o) && dito.includes(normSabor(o)))
+        )
+        if (soRecusa && !clienteTocouNoAssunto) {
+          linhas.push(`• *${nomeProduto}*${oQueTem} — falta escolher: *${g.nome}*\n${g.opcoes.map(o => `  • ${o}`).join("\n")}`)
+        }
       }
     }
   }
@@ -4064,7 +4102,12 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           } else {
             // Escolha obrigatória que ficou faltando (a borda da pizza) ou que
             // passou do limite (3 sabores numa de 2).
-            const avisoEscolha = conferirEscolhas(acao.items, exigencias, produtos)
+            // A fala do cliente vai junto: é ela que diz se ele REALMENTE
+            // dispensou a borda ou se o modelo decidiu isso por ele.
+            const falaDoCliente = mensagens.filter((m: any) => m.role === "user")
+              .slice(-3).map((m: any) => String(m.content ?? "")).join(" \n ")
+            const avisoEscolha = conferirEscolhas(acao.items, exigencias, produtos,
+              { fala: falaDoCliente, jaPerguntou: roboPediuEscolha })
             if (avisoEscolha) {
               console.log(`[Escolha] ${acao.tipo} barrado:`, avisoEscolha.slice(0, 160))
               acao.tipo = "escolha_incompleta"
