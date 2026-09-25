@@ -81,6 +81,55 @@ async function comprimirImagem(file, maxLado = 1200, qualidade = 0.82) {
 // gravado em produtos.preco_app — é só voltar pra true quando o app publicar.
 const MOSTRAR_PRECO_APP = false
 
+// CAMPO DE DINHEIRO.
+//
+// O campo de preço era `type="number"` nascendo com 0 dentro: quem digitava 7
+// via "01", "07" — o zero não saía da frente e o valor parecia errado (Branka,
+// 25/09). Aqui o campo começa VAZIO e só mostra número quando tem preço.
+//
+// Digita como se fala: 7 vira 7,00 e 7,5 vira 7,50 quando o dedo sai do campo.
+// Vírgula e ponto valem os dois, porque no teclado do celular quem manda é o
+// hábito de cada um.
+function CampoDinheiro({ name, value, onChange, placeholder = '0,00', style }) {
+  const paraTexto = (v) => (Number(v) > 0 ? Number(v).toFixed(2).replace('.', ',') : '')
+  const [texto, setTexto] = useState(() => paraTexto(value))
+  const [digitando, setDigitando] = useState(false)
+
+  // Valor trocado de fora (abriu outro produto, limpou o formulário): o campo
+  // acompanha — menos enquanto a pessoa está digitando nele.
+  useEffect(() => { if (!digitando) setTexto(paraTexto(value)) }, [value, digitando])
+
+  const numero = (t) => {
+    const limpo = String(t).replace(',', '.').replace(/[^0-9.]/g, '')
+    const n = Number(limpo)
+    return Number.isFinite(n) ? n : 0
+  }
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      name={name}
+      value={texto}
+      placeholder={placeholder}
+      style={style}
+      onFocus={e => { setDigitando(true); e.target.select() }}
+      onChange={e => {
+        // Deixa digitar livre (inclusive "7," no meio do caminho); quem arruma
+        // é o onBlur. Travar aqui faria a vírgula sumir enquanto ela escreve.
+        const t = e.target.value.replace(/[^0-9.,]/g, '')
+        setTexto(t)
+        onChange({ target: { name, value: t.trim() === '' ? 0 : numero(t), type: 'text' } })
+      }}
+      onBlur={e => {
+        setDigitando(false)
+        const n = numero(e.target.value)
+        setTexto(paraTexto(n))
+        onChange({ target: { name, value: n, type: 'text' } })
+      }}
+    />
+  )
+}
+
 const emptyForm = {
   nome: '',
   categoria: '',
@@ -2010,15 +2059,7 @@ export default function Produtos() {
                       o que o cliente paga
                     </span>
                   </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    name="preco_venda"
-                    value={form.preco_venda}
-                    onChange={handleChange}
-                    placeholder="0,00"
-                  />
+                  <CampoDinheiro name="preco_venda" value={form.preco_venda} onChange={handleChange} />
                 </div>
 
                 <div className="form-field">
@@ -2057,14 +2098,7 @@ export default function Produtos() {
                       </p>
                     </>
                   ) : (
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      name="preco_custo"
-                      value={form.preco_custo}
-                      onChange={handleChange}
-                    />
+                    <CampoDinheiro name="preco_custo" value={form.preco_custo} onChange={handleChange} />
                   )}
                 </div>
 
@@ -2075,15 +2109,8 @@ export default function Produtos() {
                       opcional — risca o de cima
                     </span>
                   </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    name="preco_promocional"
-                    value={form.preco_promocional}
-                    placeholder="sem promoção"
-                    onChange={handleChange}
-                  />
+                  <CampoDinheiro name="preco_promocional" value={form.preco_promocional}
+                    onChange={handleChange} placeholder="sem promoção" />
                   {Number(form.preco_promocional) > 0
                     && Number(form.preco_promocional) >= (Number(form.preco_venda) || 0) && (
                     <span style={{ fontSize: 11.5, color: '#f87171' }}>
@@ -2112,14 +2139,7 @@ export default function Produtos() {
                 {MOSTRAR_PRECO_APP && (
                 <div className="form-field">
                   <label>Preço App (R$) <span style={{fontWeight:400, fontSize:'0.8em', color:'var(--text-muted)'}}>FWC Inter app</span></label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    name="preco_app"
-                    value={form.preco_app}
-                    onChange={handleChange}
-                  />
+                  <CampoDinheiro name="preco_app" value={form.preco_app} onChange={handleChange} />
                 </div>
                 )}
 
