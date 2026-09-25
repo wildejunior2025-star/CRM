@@ -1017,12 +1017,14 @@ function tipoEntregaDaConversa(mensagens: any[]): "entrega" | "retirada" | null 
 // pedido picado leva uns 2-4 s entre uma e outra; mais que isso atrasa quem
 // manda tudo numa mensagem só.
 //
-// 4 s eram somados a TODA resposta, e a conta inteira ficava em 9-14 s — lento
-// na cara de quem está esperando (teste 25/09). Em 2,5 s a proteção continua
-// de pé (quem digita em rajada emenda mais rápido que isso) e some um segundo
-// e meio de cada resposta. Se voltar a sair resposta repetida pro mesmo
-// cliente, este é o número pra subir.
-const ESPERA_RAJADA_MS = 2500
+// Medido em 25/09, com cronômetro em cada etapa: desta espera saía o MAIOR
+// pedaço do tempo total (2,5 s de 5 a 6 s). O Claude responde em 1,2-2,4 s.
+//
+// Caiu pra 1,5 s porque a proteção contra resposta repetida deixou de depender
+// só dela: agora existe uma segunda checagem, feita com a resposta já pronta,
+// que descarta a mensagem quando o cliente falou de novo no meio do caminho.
+// Se voltar a sair resposta dobrada, este é o número pra subir.
+const ESPERA_RAJADA_MS = 1500
 
 const MENU_INTEIRO_ATE = 300      // itens: abaixo disso, vai tudo
 const MENU_BUSCA_MAX   = 80       // itens que a busca pode mandar
@@ -2927,6 +2929,10 @@ async function lojaAssumiu(supabase: any, instanceName: string, msg: any) {
 }
 
 serve(async (req) => {
+  // Cronometro das etapas: o cliente reclama da demora, e sem medir a gente
+  // otimiza no escuro.
+  const _t0 = Date.now()
+  let _tRajada = 0, _tClaude = 0
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
 
   const url    = new URL(req.url)
@@ -3241,6 +3247,7 @@ serve(async (req) => {
     // Foto e localização não esperam: o anexo só existe na chamada que o trouxe.
     if (minhaMsgRes?.data?.created_at && !imageBase64 && !coordsMsg) {
       await new Promise(r => setTimeout(r, ESPERA_RAJADA_MS))
+      _tRajada = Date.now() - _t0
       const { data: maisNova } = await supabase.from("whatsapp_conversas")
         .select("created_at")
         .eq("empresa_id", empresaId).eq("phone", phone).eq("role", "user")
@@ -4147,6 +4154,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       // Não confirmou ou quer corrigir dados → cai no Claude com contexto do profile
     }
 
+    const _tAntesClaude = Date.now()
     const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -4176,6 +4184,8 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
         }),
       }),
     })
+
+    _tClaude = Date.now() - _tAntesClaude
 
     if (!claudeRes.ok) {
       const claudeErr = await claudeRes.text()
@@ -5042,6 +5052,8 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
         agendado_para: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
       }, { onConflict: "empresa_id,phone", ignoreDuplicates: true }).then(() => {}, () => {})
     }
+
+    console.log(`[tempo] rajada=${_tRajada}ms claude=${_tClaude}ms ate_aqui=${Date.now() - _t0}ms resposta=${resposta.length}ch`)
 
     // Salva resposta no histórico e desconta crédito sempre; em teste pula envio ao WhatsApp
     await Promise.all([
