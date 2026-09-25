@@ -297,6 +297,7 @@ export default function BannersIA() {
                 <label>Tema (letra cursiva)<input className="bia-input" value={textos.tema ?? ''} onChange={e => mudarTexto('tema', e.target.value)} /></label>
                 <label>Título<input className="bia-input" value={textos.titulo ?? ''} onChange={e => mudarTexto('titulo', e.target.value)} /></label>
                 <label>Etiqueta<input className="bia-input" value={textos.subtitulo ?? ''} onChange={e => mudarTexto('subtitulo', e.target.value)} /></label>
+                <label>Preço antigo, riscado (R$)<input className="bia-input" type="number" step="0.01" min="0" placeholder="vazio = sem preço riscado" value={textos.preco_de || ''} onChange={e => mudarTexto('preco_de', e.target.value)} /></label>
                 <label>Preço (R$)<input className="bia-input" type="number" step="0.01" min="0" value={textos.preco ?? ''} onChange={e => mudarTexto('preco', e.target.value)} /></label>
                 <label>Botão<input className="bia-input" value={textos.cta ?? ''} onChange={e => mudarTexto('cta', e.target.value)} /></label>
               </div>

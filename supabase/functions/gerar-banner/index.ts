@@ -151,7 +151,23 @@ serve(async (req) => {
 
     await sb.from("banner_geracoes").insert({ empresa_id: empresaId, produto_id: produto.id, cena_url: cenaUrl, criado_por: u.user.id })
 
-    const preco = Number(produto.preco_promocional) > 0 ? Number(produto.preco_promocional) : Number(produto.preco_venda)
+    // Promoção com preço ("30% de desconto", "por R$ 3,50"): o banner já sai
+    // com o preço novo e o antigo riscado ("De R$ 4,00").
+    const precoCadastro = Number(produto.preco_promocional) > 0 ? Number(produto.preco_promocional) : Number(produto.preco_venda)
+    let preco = precoCadastro
+    let precoDe = 0
+    if (Number(produto.preco_promocional) > 0 && Number(produto.preco_venda) > Number(produto.preco_promocional)) {
+      precoDe = Number(produto.preco_venda)
+    }
+    const mPor = promocao.match(/por\s*(?:r\$)?\s*(\d+(?:[.,]\d{1,2})?)/i)
+    const mPct = promocao.match(/(\d+(?:[.,]\d+)?)\s*%/)
+    if (mPor) {
+      const novo = Number(mPor[1].replace(",", "."))
+      if (novo > 0 && novo < precoCadastro) { precoDe = precoCadastro; preco = novo }
+    } else if (mPct) {
+      const pct = Number(mPct[1].replace(",", "."))
+      if (pct > 0 && pct < 100) { precoDe = precoCadastro; preco = Math.round(precoCadastro * (100 - pct)) / 100 }
+    }
     return json({
       ok: true,
       cena_url: cenaUrl,
@@ -161,6 +177,7 @@ serve(async (req) => {
         titulo: textos?.titulo ?? produto.nome,
         subtitulo: textos?.subtitulo ?? "",
         preco,
+        preco_de: precoDe,
         selo: Array.isArray(textos?.selo) ? textos.selo : [],
         cta: textos?.cta || "PEÇA AGORA!",
       },

@@ -252,7 +252,7 @@ function botao(ctx, txt) {
 
 /**
  * Desenha o banner inteiro num canvas 1536x1024.
- * textos: { loja, tema, titulo, subtitulo, preco (número), selo: [{texto, estilo}], cta }
+ * textos: { loja, tema, titulo, subtitulo, preco (número), preco_de (antigo, riscado; opcional), selo: [{texto, estilo}], cta }
  */
 export async function desenharBanner(canvas, cena, textos) {
   await carregarFontesBanner()
@@ -319,9 +319,31 @@ export async function desenharBanner(canvas, cena, textos) {
   const valor = Number(textos.preco)
   if (Number.isFinite(valor) && valor > 0) {
     const [inteiro, cents] = valor.toFixed(2).split('.')
-    const py = 632
+    // preço antigo riscado ("DE R$ 4,00") em cima, quando há desconto
+    const valorDe = Number(textos.preco_de)
+    const temDe = Number.isFinite(valorDe) && valorDe > valor
+    if (temDe) {
+      const txtDe = `DE R$ ${valorDe.toFixed(2).replace('.', ',')}`
+      ctx.save()
+      ctx.font = fonte('BannerBold', 46)
+      ctx.textBaseline = 'top'
+      ctx.shadowColor = 'rgba(0,0,0,.7)'
+      ctx.shadowBlur = 6
+      ctx.fillStyle = CREME
+      ctx.fillText(txtDe, x0, 614)
+      const w = ctx.measureText(txtDe).width
+      ctx.shadowColor = 'transparent'
+      ctx.strokeStyle = VERMELHO
+      ctx.lineWidth = 6
+      ctx.beginPath()
+      ctx.moveTo(x0 - 6, 642)
+      ctx.lineTo(x0 + w + 6, 634)
+      ctx.stroke()
+      ctx.restore()
+    }
+    const py = temDe ? 684 : 632
     // o preço não pode invadir o prato: encolhe junto se o número for grande
-    const base = 380
+    const base = temDe ? 330 : 380
     const larguraDisp = 560
     const wInt = medir(ctx, inteiro, 'BannerBlackItalic', base)
     const wCent = medir(ctx, `,${cents}`, 'BannerBlackItalic', base * 0.53)
