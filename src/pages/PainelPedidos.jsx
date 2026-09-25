@@ -44,6 +44,7 @@ import PresencialHistorico from './PresencialHistorico'
 import PresencialCozinha from './PresencialCozinha'
 import './PainelPedidos.css'
 import { recadoDeErro } from '../lib/erroRede'
+import { ehAppNativo } from '../lib/appNativo'
 
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? ''
@@ -2861,7 +2862,9 @@ function ImpressoraCelularPanel({ empresa }) {
         {conectada && <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 800 }}>● conectada</span>}
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-        Pra imprimir só pelo <b>celular</b> numa térmica Bluetooth, sem PC. Abra este gestor no <b>Chrome do Android</b> (não pelo app), ligue a impressora e conecte aqui.
+        {ehAppNativo()
+          ? <>Pra imprimir só pelo <b>celular</b> numa térmica Bluetooth, sem PC. Ligue a impressora e conecte aqui.</>
+          : <>Pra imprimir só pelo <b>celular</b> numa térmica Bluetooth, sem PC. Abra este gestor no <b>Chrome do Android</b> ou no app <b>FWC Gestor</b>, ligue a impressora e conecte aqui.</>}
       </div>
       {semBt && <div style={{ fontSize: 12, color: '#dc2626', fontWeight: 700 }}>⚠️ Este navegador não tem Bluetooth. Abra pelo Chrome no Android.</div>}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -10068,8 +10071,9 @@ export default function PainelPedidos() {
               {/* Atualizar o app (pegar versão nova na hora) */}
               <AtualizarAppCard />
 
-              {/* Impressora FWC — configuração ao vivo dentro do gestor */}
-              <ImpressoraFWCPanel empresaId={empresa?.id} />
+              {/* Impressora FWC — configuração ao vivo dentro do gestor. No app do
+                  celular não tem PC pra procurar: ficava "Procurando…" pra sempre. */}
+              {!ehAppNativo() && <ImpressoraFWCPanel empresaId={empresa?.id} />}
 
               {/* Impressora do celular (Bluetooth) — caminho separado, sem PC */}
               <ImpressoraCelularPanel empresa={empresa} />

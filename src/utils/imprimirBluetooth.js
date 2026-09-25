@@ -164,7 +164,7 @@ async function acharCaracteristica(server) {
 
 // Precisa ser chamada a partir de um clique (gesto do usuário).
 export async function conectarImpressoraCelular() {
-  if (!suporta()) throw new Error('Este navegador não tem Bluetooth. Abra pelo Chrome no Android (não pelo app).')
+  if (!suporta()) throw new Error('Este navegador não tem Bluetooth. Abra pelo Chrome no Android ou pelo app FWC Gestor.')
   _device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: SERVICOS })
   try { localStorage.setItem(LS_DEV, _device.id) } catch { /* ok */ }
   ouvirQueda(_device)
