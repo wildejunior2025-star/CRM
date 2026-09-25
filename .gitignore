@@ -40,3 +40,7 @@ keystore/
 *.keystore
 android/key.properties
 CHAVE-APP-FWC-GUARDAR.txt
+
+# App do gestor: senha da chave e caminho do SDK (NUNCA commitar)
+gestor-app/android/key.properties
+gestor-app/android/local.properties

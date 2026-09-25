@@ -12,6 +12,11 @@ import './index.css'
 // Aqui ele vira global: entra sempre, em qualquer rota, como era antes.
 import './components/Page.css'
 import App from './App.jsx'
+import { instalarPontesDoApp } from './lib/appNativo'
+
+// Dentro do app FWC Gestor: Bluetooth da impressora e tela acesa pelo nativo
+// (a WebView não tem os do Chrome). No navegador não faz nada.
+instalarPontesDoApp()
 
 // ── Tela branca depois de um deploy ─────────────────────────────────────────
 // Cada tela virou um pedaço de arquivo com nome próprio, e o nome muda a cada

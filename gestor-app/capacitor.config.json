@@ -1,0 +1,25 @@
+{
+  "appId": "com.fwcinter.gestor",
+  "appName": "FWC Gestor",
+  "webDir": "www",
+  "server": {
+    "url": "https://gestor.fwcinter.com",
+    "androidScheme": "https",
+    "cleartext": false,
+    "errorPath": "offline.html"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#1e1140"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#1e1140",
+      "showSpinner": false
+    },
+    "LocalNotifications": {
+      "iconColor": "#7c3aed"
+    }
+  }
+}

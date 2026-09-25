@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sem internet</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         background: #1e1140; color: #fff; font-family: system-ui, sans-serif; text-align: center; padding: 24px; box-sizing: border-box; }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  p { opacity: .8; margin: 0 0 24px; line-height: 1.4; }
+  button { background: #7c3aed; color: #fff; border: 0; border-radius: 12px; padding: 14px 28px; font-size: 16px; font-weight: 600; }
+</style>
+</head>
+<body>
+<div>
+  <h1>Sem conexão com a internet</h1>
+  <p>O gestor precisa de internet pra receber os pedidos.<br>Confira o Wi-Fi ou os dados móveis.</p>
+  <button onclick="location.href='https://gestor.fwcinter.com'">Tentar de novo</button>
+</div>
+<script>
+  // Volta sozinho assim que a internet voltar.
+  window.addEventListener('online', () => { location.href = 'https://gestor.fwcinter.com' })
+</script>
+</body>
+</html>
