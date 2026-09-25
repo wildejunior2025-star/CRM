@@ -1404,6 +1404,64 @@ const AVISO_ESCOLHA_PREFIXO = "Falta só isso pra eu anotar"
 // "Sem borda", "Não quero recheio": a opção que serve pra RECUSAR a categoria.
 const ehOptOut = (nome: string) => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ""))
 
+/**
+ * O MODELO ESCOLHEU O PRODUTO NO LUGAR DO CLIENTE.
+ *
+ * Irmã da checagem que existe pros SABORES (conferirSabores), mas pro nome do
+ * PRODUTO — e foi por aí que escapou: "uma pizza de carne de sol e uma de
+ * calabresa" virou "Carne de Sol com Queijo Coalho" e "Calabresa Acebolada"
+ * sem ninguém perguntar nada (25/09). Meio a meio passa por complemento e
+ * estava coberto; pizza inteira é produto e não estava.
+ *
+ * Vale quando o cliente usou um apelido que serve pra MAIS DE UM produto do
+ * cardápio e não escreveu o nome inteiro. Item que já estava na sacola não
+ * entra: aquele já foi combinado, e `atualizar_carrinho` reenvia a sacola toda.
+ */
+function conferirProdutoAmbiguo(
+  itens: any[], catalogo: any[], jaNaSacola: any[],
+  contexto: { fala?: string; jaPerguntou?: boolean } = {},
+): string | null {
+  if (contexto.jaPerguntou) return null
+  const fala = normSabor(contexto.fala ?? "")
+  if (!fala) return null
+  const linhas: string[] = []
+  const vistos = new Set<string>()
+  for (const it of itens ?? []) {
+    const pid = String(it?.produto_id ?? "")
+    if (!pid || vistos.has(pid)) continue
+    if ((jaNaSacola ?? []).some((c: any) => String(c?.produto_id ?? "") === pid)) continue
+    const prod = catalogo.find((p: any) => p.id === pid)
+    if (!prod) continue
+    const norm = normSabor(prod.nome)
+    // Nome inteiro na fala do cliente: a escolha é dele, passa.
+    if (!norm || fala.includes(norm)) continue
+    const apelido = norm.split(" ").find(w => w.length >= 4 && new RegExp(`\\b${w}\\b`).test(fala))
+    if (!apelido) continue
+    const primos = catalogo.filter((p: any) => new RegExp(`\\b${apelido}\\b`).test(normSabor(p.nome)))
+    if (primos.length < 2) continue
+    vistos.add(pid)
+    // O rótulo é o começo que TODOS os candidatos têm em comum, não a palavra
+    // solta que casou: "carne" acha os dois, mas quem lê quer ver "Carne de
+    // Sol". Se não houver começo comum, fica o apelido mesmo.
+    const palavrasDe = (p: any) => String(p?.nome ?? "").trim().split(/\s+/)
+    const base = palavrasDe(primos[0])
+    let comuns = 0
+    while (comuns < base.length
+      && primos.every((p: any) => normSabor(palavrasDe(p)[comuns] ?? "") === normSabor(base[comuns]))) comuns++
+    // "Carne de Sol com Catupiry" e "...com Queijo Coalho" compartilham até o
+    // "com" — e "Carne de Sol com — qual delas?" fica pela metade. Palavrinha
+    // de ligação no fim do rótulo sai fora.
+    while (comuns > 0 && /^(com|de|da|do|e|no|na|ao|em)$/i.test(base[comuns - 1])) comuns--
+    const rotulo = comuns > 0
+      ? base.slice(0, comuns).join(" ")
+      : apelido.charAt(0).toUpperCase() + apelido.slice(1)
+    linhas.push(`• *${rotulo}* — qual delas?\n${primos.map((p: any) =>
+      `  • ${p.nome} — R$ ${Number(p.preco_venda ?? 0).toFixed(2).replace(".", ",")}`).join("\n")}`)
+  }
+  if (!linhas.length) return null
+  return `${AVISO_ESCOLHA_PREFIXO}: 😊\n\n${linhas.join("\n\n")}`
+}
+
 function conferirEscolhas(
   itens: any[], exigencias: Exigencias, catalogo: any[],
   // O que o cliente escreveu nas últimas mensagens, e se o robô JÁ cobrou a
@@ -4175,8 +4233,13 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           // decidiu isso por ele.
           const falaRecente = mensagens.filter((m: any) => m.role === "user")
             .slice(-3).map((m: any) => String(m.content ?? "")).join(" | ")
-          const avisoSabor = conferirSabores(acao.items, saboresPorProduto, produtos,
+          // Antes do sabor vem o PRODUTO: não adianta acertar a borda de uma
+          // pizza que talvez nem seja a que o cliente quis.
+          const avisoProduto = conferirProdutoAmbiguo(acao.items, produtos, carrinho,
             { fala: falaRecente, jaPerguntou: roboPediuEscolha })
+          const avisoSabor = avisoProduto ?? conferirSabores(acao.items, saboresPorProduto, produtos,
+            { fala: falaRecente, jaPerguntou: roboPediuEscolha })
+          if (avisoProduto) console.log("[Produto] ambíguo, perguntando:", avisoProduto.slice(0, 120))
           if (avisoSabor) {
             console.log(`[Sabor] ${acao.tipo} barrado:`, avisoSabor.slice(0, 200))
             acao.tipo = "sabor_invalido"
