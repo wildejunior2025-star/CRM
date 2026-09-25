@@ -1227,7 +1227,7 @@ function conferirSabores(
   contexto: { fala?: string; jaPerguntou?: boolean; grupoDaOpcao?: Record<string, Record<string, { grupo: string }>> } = {},
 ): string | null {
   const falaCliente = normSabor(contexto.fala ?? "")
-  const problemas = new Map<string, { produto: string; faltam: Set<string>; acabaram: Set<string>; duvidas: Set<string>; tem: string[] }>()
+  const problemas = new Map<string, { produto: string; faltam: Set<string>; acabaram: Set<string>; duvidas: { rotulo: string; opcoes: string[] }[]; tem: string[] }>()
   for (const it of itens ?? []) {
     const sp = sabores[String(it?.produto_id ?? "")]
     if (!sp || !Array.isArray(it?.complementos)) continue
@@ -1326,7 +1326,7 @@ function conferirSabores(
       }
       if (achado) { c.nome = achado; continue }
       const nomeProduto = String(catalogo.find((p: any) => p.id === it.produto_id)?.nome ?? it.nome ?? "produto")
-      const p = problemas.get(it.produto_id) ?? { produto: nomeProduto, faltam: new Set(), acabaram: new Set(), duvidas: new Set(), tem: sp.disponiveis }
+      const p = problemas.get(it.produto_id) ?? { produto: nomeProduto, faltam: new Set(), acabaram: new Set(), duvidas: [], tem: sp.disponiveis }
       const pausado = sp.pausadas.find(n => normSabor(n) === alvo || semSufixo(n) === alvo)
       if (emDois.length) {
         // "3 Queijos: Promoção ou Especiais" quando a diferença é o bloco; e
@@ -1354,29 +1354,68 @@ function conferirSabores(
           if (j < palavrasAlvo.length) return cru  // não era prefixo: nome inteiro
           return brutas.slice(i).join(" ").trim() || cru
         })
-        p.duvidas.add(`${rotuloDuvida}: ${blocos.slice(0, -1).join(", ")} ou ${blocos[blocos.length - 1]}`)
+        // Com o preço de cada opção, igual às outras perguntas do robô. O
+        // preço sai daqui porque é aqui que ainda se sabe de qual produto é a
+        // opção — lá embaixo, na hora de escrever, essa informação já se
+        // perdeu.
+        const precoDe = (nome: string) => {
+          const r = contexto.grupoDaOpcao?.[String(it?.produto_id ?? "")]?.[String(nome).trim().toLowerCase()]
+          const v = Number((r as any)?.preco ?? 0)
+          return v > 0 ? ` — R$ ${v.toFixed(2).replace(".", ",")}` : ""
+        }
+        p.duvidas.push({
+          rotulo: rotuloDuvida,
+          opcoes: emDois.map((n, i) => `${blocos[i]}${precoDe(n)}`),
+        })
       }
       else if (pausado) p.acabaram.add(pausado)
+      // "Aguardando escolha de frango", "a definir": o modelo escreveu um
+      // lembrete no lugar do sabor. Não é sabor que a loja não tem — é sabor
+      // que ainda não foi escolhido. Dizer "não temos Aguardando escolha de
+      // frango" e despejar o cardápio inteiro é o pior dos dois mundos; a
+      // opção sai da lista e quem cobra a escolha é conferirEscolhas, que
+      // pergunta direito, só com as opções daquele grupo.
+      else if (/aguardand|a escolher|escolha de|a definir|indefinid|a combinar/i.test(String(c?.nome ?? ""))) {
+        console.log(`[Sabor] o modelo escreveu um lembrete no lugar do sabor: "${String(c?.nome ?? "").slice(0, 40)}"`)
+        c.nome = ""
+        continue
+      }
       else p.faltam.add(String(c?.nome ?? "").trim())
       problemas.set(it.produto_id, p)
     }
+    // Lembrete do modelo que foi zerado ali em cima sai da lista: sem isto ele
+    // chegaria no carrinho como um sabor sem nome.
+    it.complementos = it.complementos.filter((c: any) => String(c?.nome ?? "").trim())
   }
   if (!problemas.size) return null
+  // Uma família por bloco, uma opção por linha, com o preço — do mesmo jeito
+  // que o robô pergunta a borda. Antes saía tudo grudado num parágrafo só,
+  // separado por ponto e vírgula ("Frango: com Catupiry, com Cheddar ou com
+  // Bacon; Calabresa: Acebolada, com Cheddar..."), e no celular isso vira uma
+  // parede de texto que o cliente não lê.
+  const listaDuvida = (d: { rotulo: string; opcoes: string[] }) =>
+    `• *${d.rotulo}* — qual delas?\n${d.opcoes.map(o => ` • ${o}`).join("\n")}`
   const linhas = [...problemas.values()].map(p => {
     // Só dúvida de qual versão do sabor: pergunta sem despejar a lista inteira.
-    if (p.duvidas.size && !p.acabaram.size && !p.faltam.size) {
-      return `• *${p.produto}*: qual você quer — ${[...p.duvidas].join("; ")}?`
+    if (p.duvidas.length && !p.acabaram.size && !p.faltam.size) {
+      return p.duvidas.map(listaDuvida).join("\n\n")
     }
     const partes: string[] = []
-    if (p.duvidas.size) partes.push(`preciso saber qual: ${[...p.duvidas].join("; ")}`)
+    if (p.duvidas.length) partes.push(`preciso saber qual: ${p.duvidas.map(d => `${d.rotulo} (${d.opcoes.join(", ")})`).join("; ")}`)
     if (p.acabaram.size) partes.push(`*${[...p.acabaram].join(", ")}* acabou no momento`)
     if (p.faltam.size) partes.push(`não tem *${[...p.faltam].join(", ")}*`)
-    const tem = p.tem.length ? ` Sabores que tem: ${p.tem.join(", ")}.` : ""
+    // A lista inteira vira parede de texto — 23 nomes, com as bordas no meio,
+    // foi o que saiu na pizzaria (25/09). Mostra as primeiras e diz quantas
+    // faltam; quem quiser a lista toda pede.
+    const TETO = 10
+    const tem = p.tem.length
+      ? ` Sabores que tem: ${p.tem.slice(0, TETO).join(", ")}${p.tem.length > TETO ? ` e mais ${p.tem.length - TETO}` : ""}.`
+      : ""
     return `• *${p.produto}*: ${partes.join(" e ")}.${tem}`
   })
   const soDuvida = [...problemas.values()].every(p => !p.acabaram.size && !p.faltam.size)
   return soDuvida
-    ? `Só pra eu anotar certinho: 😊\n\n${linhas.join("\n")}`
+    ? `Só pra eu anotar certinho: 😊\n\n${linhas.join("\n\n")}`
     : `Antes de anotar, preciso acertar uns sabores: 😊\n\n${linhas.join("\n")}\n\nQual você prefere no lugar? Aí eu anoto o pedido todo.`
 }
 
