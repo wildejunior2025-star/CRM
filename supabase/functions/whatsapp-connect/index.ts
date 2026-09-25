@@ -247,23 +247,35 @@ serve(async (req) => {
               { empresa_id: empresaId, ativo: true, instance_name: instanceName, connected_phone: phone },
               { onConflict: "empresa_id" }
             )
-            // Sempre reaplicar webhook (pode ter sido perdido se servidor reiniciou)
+            // Sempre reaplicar webhook (pode ter sido perdido se servidor reiniciou).
+            //
+            // COM await, DE PROPÓSITO. Sem ele a chamada ficava solta e a função
+            // devolvia a resposta em seguida: a edge é desligada assim que
+            // responde, e o pedido morria antes de sair. Resultado no 25/09: a
+            // loja de demonstração pareou às 15:10, o webhook não existia na
+            // Evolution, e a mensagem do cliente não chegava em lugar nenhum —
+            // WhatsApp "conectado" na tela e robô mudo, sem erro em canto nenhum.
             const supabaseUrl2 = Deno.env.get("SUPABASE_URL") ?? ""
             const projectRef2 = supabaseUrl2.match(/https:\/\/([^.]+)/)?.[1] ?? ""
             if (projectRef2) {
-              fetch(`${apiBase}/webhook/set/${instanceName}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", apikey: apiKey },
-                body: JSON.stringify({
-                  webhook: {
-                    enabled: true,
-                    url: `https://${projectRef2}.supabase.co/functions/v1/whatsapp-webhook?apikey=${Deno.env.get("SUPABASE_ANON_KEY") ?? ""}`,
-                    webhookByEvents: false,
-                    webhookBase64: false,
-                    events: ["MESSAGES_UPSERT"]
-                  }
+              try {
+                const wh = await fetch(`${apiBase}/webhook/set/${instanceName}`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", apikey: apiKey },
+                  body: JSON.stringify({
+                    webhook: {
+                      enabled: true,
+                      url: `https://${projectRef2}.supabase.co/functions/v1/whatsapp-webhook?apikey=${Deno.env.get("SUPABASE_ANON_KEY") ?? ""}`,
+                      webhookByEvents: false,
+                      webhookBase64: false,
+                      events: ["MESSAGES_UPSERT"]
+                    }
+                  })
                 })
-              }).catch(() => {})
+                if (!wh.ok) console.error("[webhook] set falhou", instanceName, wh.status, await wh.text())
+              } catch (e) {
+                console.error("[webhook] set estourou", instanceName, String(e))
+              }
             }
             return new Response(JSON.stringify({ connected: true, phone }), {
               headers: { ...corsHeaders, "Content-Type": "application/json" }
@@ -326,7 +338,7 @@ serve(async (req) => {
       const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
       const projectRef = supabaseUrl.match(/https:\/\/([^.]+)/)?.[1] ?? ""
       if (projectRef) {
-        await fetch(`${apiBase}/webhook/set/${instanceName}`, {
+        const wh = await fetch(`${apiBase}/webhook/set/${instanceName}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", apikey: apiKey },
           body: JSON.stringify({
@@ -339,6 +351,9 @@ serve(async (req) => {
             }
           })
         })
+        // Sem webhook a instância pareia e fica muda. Se falhar aqui, o log é a
+        // única pista — a tela mostra "conectado" do mesmo jeito.
+        if (!wh.ok) console.error("[webhook] set falhou na criação", instanceName, wh.status, await wh.text())
       }
 
       if (qrFromCreate) {
