@@ -6,6 +6,7 @@ import LancarNotaIA from '../components/LancarNotaIA'
 import { useAuth } from '../hooks/useAuth'
 import { semanaDe, rotuloSemana, offsetDaSemana } from '../lib/semana'
 import '../components/Page.css'
+import { recadoDeErro } from '../lib/erroRede'
 
 // Normaliza pra busca: tira acento e deixa minúsculo. Assim "feijao" acha "Feijão".
 const normTxt = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
@@ -375,10 +376,10 @@ export default function FichaTecnica() {
     try {
       if (materiaEdit) {
         const { error } = await supabase.from('materias_primas').update(payload).eq('id', materiaEdit.id)
-        if (error) { alert('Erro ao salvar: ' + error.message); return }
+        if (error) { alert(recadoDeErro(error, 'salvar')); return }
       } else {
         const { data, error } = await supabase.from('materias_primas').insert(payload).select('id').single()
-        if (error) { alert('Erro ao salvar: ' + error.message); return }
+        if (error) { alert(recadoDeErro(error, 'salvar')); return }
         // Cadastrou já com a quantidade → a compra de hoje entra junto, no mesmo
         // clique. É o que evita cadastrar agora e ter que dar entrada depois.
         const qtdIni = Number(String(materiaForm.quantidade ?? '').replace(',', '.'))
@@ -400,7 +401,7 @@ export default function FichaTecnica() {
   async function excluirMateria(m) {
     if (!confirm(`Excluir a matéria-prima "${m.nome}"?`)) return
     const { error } = await supabase.from('materias_primas').delete().eq('id', m.id)
-    if (error) { alert('Erro ao excluir: ' + error.message); return }
+    if (error) { alert(recadoDeErro(error, 'excluir')); return }
     carregar()
   }
 
@@ -445,7 +446,7 @@ export default function FichaTecnica() {
       await supabase.from('materias_primas').update({ custo: movUnit }).eq('id', m.id)
     }
     setSavingMov(false)
-    if (error) { alert('Erro ao movimentar: ' + error.message); return }
+    if (error) { alert(recadoDeErro(error, 'movimentar')); return }
     setShowMov(false); carregar()
   }
   // Total de dinheiro parado em matéria-prima (saldo × custo).
@@ -574,7 +575,7 @@ export default function FichaTecnica() {
       }
     }
     setSalvandoBaixa(false)
-    if (erro) { alert('Erro ao lançar: ' + erro.message); return }
+    if (erro) { alert(recadoDeErro(erro, 'lançar')); return }
     setShowBaixa(false); carregar()
   }
 
@@ -763,7 +764,7 @@ export default function FichaTecnica() {
     }
     if (!confirm(`Excluir a ficha "${f.nome}"?`)) return
     const { error } = await supabase.from('fichas_tecnicas').delete().eq('id', f.id)
-    if (error) { alert('Erro ao excluir: ' + error.message); return }
+    if (error) { alert(recadoDeErro(error, 'excluir')); return }
     carregar()
   }
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import '../components/Page.css'
+import { recadoDeErro } from '../lib/erroRede'
 
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
 const BUCKET = 'plataforma'
@@ -278,7 +279,7 @@ export default function SuperAdminConfig() {
     const ext = file.name.split('.').pop()
     const path = `premios/premio_${Date.now()}.${ext}`
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, { upsert: true, contentType: file.type })
-    if (upErr) { alert('Erro no upload: ' + upErr.message); setUploadandoFoto(false); return }
+    if (upErr) { alert(recadoDeErro(upErr, 'no upload')); setUploadandoFoto(false); return }
     const url = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${path}?t=${Date.now()}`
     setNovoPremio(prev => ({ ...prev, foto_url: url }))
     setUploadandoFoto(false)
@@ -297,7 +298,7 @@ export default function SuperAdminConfig() {
       ativo: novoPremio.ativo,
     })
     setSalvandoPremio(false)
-    if (error) { alert('Erro: ' + error.message); return }
+    if (error) { alert(recadoDeErro(error, 'fazer isso agora')); return }
     setNovoPremio({ nome: '', descricao: '', pontos_necessarios: '', foto_url: '', ativo: true })
     setShowFormPremio(false)
     loadPremios()

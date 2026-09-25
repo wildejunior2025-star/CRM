@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
+import { recadoDeErro } from '../lib/erroRede'
 
 const fmtBRL = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 // Aceita "12,50" e "12.50" (mesma regra do Financeiro): vírgula manda, ponto vira milhar.
@@ -175,7 +176,7 @@ export default function ClientesFiado({ empresaId }) {
     setSalvandoTel(true)
     const { error } = await supabase.from('clientes').update({ telefone: tel }).eq('id', clienteId)
     setSalvandoTel(false)
-    if (error) { window.alert('Erro ao salvar o telefone: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'salvar o telefone')); return }
     setEditTel(null)
     await load()
   }
@@ -190,7 +191,7 @@ export default function ClientesFiado({ empresaId }) {
     if (novaForma === pagamento.forma_pagamento) return
     const { error } = await supabase.from('pagamentos')
       .update({ forma_pagamento: novaForma }).eq('id', pagamento.id)
-    if (error) { window.alert('Erro ao trocar a forma: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'trocar a forma')); return }
     setFormaEdit(null)
     await load()
   }
@@ -303,7 +304,7 @@ export default function ClientesFiado({ empresaId }) {
       observacao: OBS_FIADO,
     })
     setSalvando(false)
-    if (error) { window.alert('Erro ao registrar o pagamento: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'registrar o pagamento')); return }
     setRecebendo(null)
     await load()
   }

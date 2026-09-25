@@ -6,6 +6,7 @@ import { semanaDe, rotuloSemana } from '../lib/semana'
 import BuscaSelect from '../components/BuscaSelect'
 import ConsumoFuncionario from '../components/ConsumoFuncionario'
 import '../components/Page.css'
+import { recadoDeErro } from '../lib/erroRede'
 
 // ── helpers ───────────────────────────────────────────────────────────
 const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -417,7 +418,7 @@ export default function DespesasLucro({ empresaId }) {
     }
     const q = despesaEdit ? supabase.from('despesas_loja').update(payload).eq('id', despesaEdit.id) : supabase.from('despesas_loja').insert(payload)
     const { error } = await q
-    if (error) { alert('Erro: ' + error.message); return }
+    if (error) { alert(recadoDeErro(error, 'fazer isso agora')); return }
     setShowDespesa(false); carregar()
   }
   // Não apaga: marca a data em que o custo deixou de existir, pra não sumir dos dias passados.
@@ -442,7 +443,7 @@ export default function DespesasLucro({ empresaId }) {
     }
     const q = funcEdit ? supabase.from('funcionarios').update(payload).eq('id', funcEdit.id) : supabase.from('funcionarios').insert(payload)
     const { error } = await q
-    if (error) { alert('Erro: ' + error.message); return }
+    if (error) { alert(recadoDeErro(error, 'fazer isso agora')); return }
     setShowFunc(false); carregar()
   }
   // Demissão: sai da folha de hoje em diante, mas continua contando nos dias em que trabalhou.
@@ -508,7 +509,7 @@ export default function DespesasLucro({ empresaId }) {
       }
     }
     const { error } = await supabase.from('producao_diaria').insert(payload)
-    if (error) { alert('Erro: ' + error.message); return }
+    if (error) { alert(recadoDeErro(error, 'fazer isso agora')); return }
     setShowProd(false); carregar()
   }
   async function excluirProd(p) { if (!confirm(`Excluir o lançamento de ${p.nome}?`)) return; await supabase.from('producao_diaria').delete().eq('id', p.id); carregar() }
@@ -539,7 +540,7 @@ export default function DespesasLucro({ empresaId }) {
     e.preventDefault()
     if (!imprevForm.descricao.trim()) { alert('Descreva o imprevisto (ex.: pedido cancelado).'); return }
     const { error } = await supabase.from('custos_imprevistos').insert({ empresa_id: empresaId, data: dia, descricao: imprevForm.descricao.trim(), valor: num(imprevForm.valor) })
-    if (error) { alert('Erro: ' + error.message); return }
+    if (error) { alert(recadoDeErro(error, 'fazer isso agora')); return }
     setShowImprev(false); carregar()
   }
   async function excluirImprev(i) { if (!confirm(`Excluir "${i.descricao}"?`)) return; await supabase.from('custos_imprevistos').delete().eq('id', i.id); carregar() }

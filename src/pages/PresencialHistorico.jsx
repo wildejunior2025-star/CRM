@@ -6,6 +6,7 @@ import ClientePicker from '../components/ClientePicker'
 import { rotuloComanda } from '../lib/comanda'
 import { imprimirHtml, montarContaPresencialHtml, appFwcDisponivel } from '../utils/imprimirCupom'
 import '../components/Page.css'
+import { recadoDeErro } from '../lib/erroRede'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
 // "2026-09-02" vira "02/09". Sem new Date() no meio: a data do banco não tem
@@ -214,7 +215,7 @@ export default function PresencialHistorico() {
       p_comanda_id: comanda.id, p_cliente_id: cliente?.id ?? null,
     })
     setPickerComanda(null)
-    if (error) { window.alert('Erro ao ligar o cliente: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'ligar o cliente')); return }
     setComandas(prev => prev.map(c => c.id === comanda.id
       ? { ...c, cliente: cliente ? { id: cliente.id, nome: cliente.nome, telefone: cliente.telefone } : null }
       : c))

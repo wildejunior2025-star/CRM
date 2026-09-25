@@ -11,6 +11,7 @@ import SubscriptionGate from './SubscriptionGate'
 import InstallPWA from './InstallPWA'
 import NotificationBell from './NotificationBell'
 import AssistenteLoja from './AssistenteLoja'
+import AvisoOffline from './AvisoOffline'
 import IaConsumoMini from './IaConsumoMini'
 import './Layout.css'
 
@@ -202,6 +203,8 @@ export default function Layout() {
 
   return (
     <div className="layout">
+      {/* Internet caiu: avisa ANTES da pessoa clicar e descobrir pelo erro. */}
+      <AvisoOffline />
       {temBackupSuperAdmin && (
         <button className="impersonate-fab" onClick={handleVoltarSuperAdmin} title="Voltar ao Super Admin">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

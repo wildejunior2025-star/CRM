@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { clienteComMesmoNome } from '../lib/clientes'
+import { recadoDeErro } from '../lib/erroRede'
 
 // Tira acento e deixa minúsculo: "jose" acha "José".
 const semAcento = (s) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
@@ -44,7 +45,7 @@ export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', p
     setSalvando(true)
     const { error } = await supabase.from('clientes').update({ telefone: tel }).eq('id', cliente.id)
     setSalvando(false)
-    if (error) { window.alert('Erro ao salvar o telefone: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'salvar o telefone')); return }
     setClientes(prev => prev.map(c => c.id === cliente.id ? { ...c, telefone: tel } : c))
     setTelEdit(null)
   }
@@ -63,7 +64,7 @@ export default function ClientePicker({ empresaId, titulo = 'Cliente da mesa', p
       .insert({ empresa_id: empresaId, nome, telefone: telefone.trim() || null })
       .select('id, nome, telefone').single()
     setSalvando(false)
-    if (error) { window.alert('Erro ao cadastrar o cliente: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'cadastrar o cliente')); return }
     onPick(data)
   }
 

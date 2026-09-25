@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
+import { recadoDeErro } from '../lib/erroRede'
 
 // Consumo de funcionário (alimentação): lança o que o funcionário pega (item do
 // estoque ou refeição avulsa). Item do estoque dá baixa e usa o preço de venda.
@@ -81,13 +82,13 @@ export default function ConsumoFuncionario({ empresaId }) {
       p_funcionario_nome: pessoa?.nome || null,
     })
     setSalvando(false)
-    if (error) { window.alert('Erro ao lançar o consumo: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'lançar o consumo')); return }
     setShowModal(false); load()
   }
   async function excluir(c) {
     if (!window.confirm(`Excluir o consumo "${c.descricao}"${c.baixou_estoque ? ' (o estoque será devolvido)' : ''}?`)) return
     const { error } = await supabase.rpc('excluir_consumo_funcionario', { p_id: c.id })
-    if (error) { window.alert('Erro: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'fazer isso agora')); return }
     load()
   }
 

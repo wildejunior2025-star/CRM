@@ -43,6 +43,7 @@ import PresencialMesas from './PresencialMesas'
 import PresencialHistorico from './PresencialHistorico'
 import PresencialCozinha from './PresencialCozinha'
 import './PainelPedidos.css'
+import { recadoDeErro } from '../lib/erroRede'
 
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? ''
@@ -8424,7 +8425,7 @@ export default function PainelPedidos() {
       ? { ...c, comanda_itens: (c.comanda_itens ?? []).map(it => ids.includes(it.id) ? { ...it, preco_unitario: preco } : it) }
       : c))
     const { error } = await supabase.from('comanda_itens').update({ preco_unitario: preco }).in('id', ids)
-    if (error) alert('Erro ao salvar o preço: ' + error.message)
+    if (error) alert(recadoDeErro(error, 'salvar o preço'))
   }
 
   // Auto-imprime o pedido da mesa (comanda). Junta os itens que chegam quase
@@ -8620,7 +8621,7 @@ export default function PainelPedidos() {
       p_pagamentos: [{ forma, valor: null }],
       p_aplicar_taxa: aplicarTaxa,
     })
-    if (error) { alert('Erro ao fechar a conta: ' + error.message); return }
+    if (error) { alert(recadoDeErro(error, 'fechar a conta')); return }
     comandaEscritaRef.current = Date.now()
     // Imprime a conta automaticamente ao fechar.
     try {
@@ -8670,7 +8671,7 @@ export default function PainelPedidos() {
     }
     const novoPend = { ...pend, pagamentos: novos, aplicar_taxa: aplicar }
     const { error } = await supabase.from('comandas').update({ fechamento_pendente: novoPend }).eq('id', comanda.id)
-    if (error) { alert('Erro ao ajustar a taxa: ' + error.message); return }
+    if (error) { alert(recadoDeErro(error, 'ajustar a taxa')); return }
     setComandas(cs => cs.map(c => c.id === comanda.id ? { ...c, fechamento_pendente: novoPend } : c))
     // reimprime a conta com o novo valor
     const forma = novos.length > 1 ? 'Dividido' : (novos[0]?.forma ?? '')
@@ -8702,7 +8703,7 @@ export default function PainelPedidos() {
       p_aplicar_taxa: pend.aplicar_taxa ?? true,
       p_cliente_id: pend.cliente_id ?? null,
     })
-    if (error) { alert('Erro ao liberar a mesa: ' + error.message); return }
+    if (error) { alert(recadoDeErro(error, 'liberar a mesa')); return }
     comandaEscritaRef.current = Date.now()
     setComandas(cs => cs.filter(c => c.id !== comanda.id))
     setMesasFechadasHoje(prev => [
