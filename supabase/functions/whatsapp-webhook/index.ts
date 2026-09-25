@@ -2663,6 +2663,54 @@ function jsonBalanceado(txt: string, de: number): { texto: string; fim: number }
   return null
 }
 
+/**
+ * JSON QUE VEIO PELA METADE.
+ *
+ * O modelo às vezes para no meio da ação — e aí `jsonBalanceado` não fecha,
+ * `acharAcaoSolta` devolve null e o pedido inteiro se perde: a sacola fica
+ * vazia, a rede abre chamado e o cliente ouve "já chamei alguém da loja".
+ * Foi o que aconteceu com "uma pizza de calabresa e frango" (25/09): o preço
+ * que voltou estava CERTO (R$ 54,90) e mesmo assim nada foi gravado.
+ *
+ * Aqui o pedaço é costurado: corta no último item que ficou completo e fecha
+ * os colchetes e chaves que sobraram abertos. Item que estava pela metade se
+ * perde — mas o cliente vê a sacola no "✅ Anotei! Confere:" e corrige, que é
+ * muito melhor que perder o pedido todo.
+ */
+function remendarJson(bruto: string): string | null {
+  const pilha: string[] = []
+  let aspas = false, escapando = false, seguro = -1
+  for (let i = 0; i < bruto.length; i++) {
+    const ch = bruto[i]
+    if (escapando) { escapando = false; continue }
+    if (ch === "\\") { escapando = true; continue }
+    if (ch === '"') { aspas = !aspas; continue }
+    if (aspas) continue
+    if (ch === "{" || ch === "[") pilha.push(ch === "{" ? "}" : "]")
+    else if (ch === "}" || ch === "]") {
+      pilha.pop()
+      // Fim de um item/objeto completo: daqui dá pra cortar sem quebrar nada.
+      if (pilha.length > 0) seguro = i + 1
+    }
+  }
+  if (!pilha.length) return null          // estava inteiro, não é caso de remendo
+  if (seguro === -1) return null          // nem um item completo veio
+  const corpo = bruto.slice(0, seguro).replace(/,\s*$/, "")
+  // Refaz a pilha até o ponto de corte pra saber o que falta fechar.
+  const resto: string[] = []
+  let a2 = false, e2 = false
+  for (let i = 0; i < corpo.length; i++) {
+    const ch = corpo[i]
+    if (e2) { e2 = false; continue }
+    if (ch === "\\") { e2 = true; continue }
+    if (ch === '"') { a2 = !a2; continue }
+    if (a2) continue
+    if (ch === "{" || ch === "[") resto.push(ch === "{" ? "}" : "]")
+    else if (ch === "}" || ch === "]") resto.pop()
+  }
+  return corpo + resto.reverse().join("")
+}
+
 // Procura uma ação escrita de qualquer jeito e devolve o JSON + onde ele estava.
 function acharAcaoSolta(txt: string): { json: string; ini: number; fim: number } | null {
   // Formato XML de ferramenta: <invoke name="atualizar_carrinho"><parameter
@@ -2694,6 +2742,21 @@ function acharAcaoSolta(txt: string): { json: string; ini: number; fim: number }
       }
     } catch { /* não era JSON: segue procurando */ }
     de = (txt.indexOf("{", de) ?? de) + 1
+  }
+  // Nada fechou: última tentativa, costurando o que veio pela metade.
+  const inicio = txt.indexOf("{")
+  if (inicio !== -1) {
+    const remendado = remendarJson(txt.slice(inicio))
+    if (remendado) {
+      try {
+        const obj = JSON.parse(remendado)
+        const alvo = obj?.tipo ? obj : (obj?.arguments?.tipo ? obj.arguments : null)
+        if (alvo && TIPOS_DE_ACAO.includes(String(alvo.tipo))) {
+          console.log("[Acao] JSON veio cortado e foi remendado:", remendado.slice(0, 160))
+          return { json: JSON.stringify(alvo), ini: inicio, fim: txt.length }
+        }
+      } catch { /* nem remendado deu */ }
+    }
   }
   return null
 }
@@ -3959,6 +4022,7 @@ ACAO: {"tipo": "atualizar_carrinho", "items": [{"produto_id": "ID_REAL", "nome":
   • Cada produto tem a SUA lista de sabores (o pote de 1 litro pode não ter o mesmo sabor do balde). Use a lista daquele produto.
 
 ${temMeioAMeio ? `▸ PIZZA MEIO A MEIO (o grupo que diz "o preço é o do sabor MAIS CARO"):
+  • QUEM MANDA NA QUANTIDADE É O NÚMERO QUE O CLIENTE DISSE, NÃO a quantidade de sabores. "UMA pizza de calabresa e frango" = UMA pizza de 2 sabores (metade de cada) — NUNCA duas pizzas inteiras. Duas pizzas só quando ele disser o número ("duas pizzas", "uma de X e OUTRA de Y", "uma X e uma Y"). Na dúvida entre uma de dois sabores e duas inteiras, PERGUNTE antes de anotar — errar aqui dobra a conta do cliente.
   • "Meia X e meia Y", "metade X metade Y", "2 sabores", "X com Y" = o produto que tem esse grupo, com os DOIS sabores em "complementos" (e a borda, se o produto tiver).
   • Preço = o do sabor MAIS CARO (+ a borda, que soma). NUNCA some os dois sabores. Ex.: meia de R$ 34,99 + meia de R$ 45,00 = R$ 45,00. O sistema calcula sozinho; no texto, cite só o do mais caro.
   • Pizza de UM sabor só (inteira) = o produto daquele sabor na categoria dele, não o de 2 sabores.
@@ -4220,7 +4284,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             acaoMatch = ["", achado] as any
             acaoSoltaFim = 0   // não cortar a resposta por um "ACAO:" que ela não tem
           } else {
-            console.error("[Acao] 2ª chamada não trouxe atualizar_carrinho:", txt.slice(0, 200))
+            console.error("[Acao] 2ª chamada não trouxe atualizar_carrinho:", txt.slice(0, 700))
           }
         }
       } catch (e: any) { console.error("[Acao] 2ª chamada falhou:", e?.message) }
