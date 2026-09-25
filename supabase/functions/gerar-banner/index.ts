@@ -36,7 +36,7 @@ Campos:
 - "tema": frase curtinha pra letra cursiva, 2 a 3 palavras, a partir do tema (ex.: "monte seu cuscuz" → "Monte seu"; "dia dos namorados" → "Dia dos Namorados"). Nunca repita o título.
 - "selo": lista de 3 a 5 linhas curtas da promoção, cada uma {"texto","estilo"}; estilos: "pequeno" (frase de apoio), "faixa" (verbo/chamada, 1 linha só), "grande" (o benefício principal, 1 ou 2 palavras), "destaque" (complemento do benefício). Ex.: "na compra de um cuscuz voce ganha um cafe gratis" → [{"texto":"NA COMPRA DE","estilo":"pequeno"},{"texto":"UM CUSCUZ","estilo":"pequeno"},{"texto":"GANHE UM","estilo":"faixa"},{"texto":"CAFÉ","estilo":"grande"},{"texto":"GRÁTIS","estilo":"destaque"}]. Tudo MAIÚSCULO. Lista vazia se não houver promoção.
 - "cta": "PEÇA AGORA!" (ou algo equivalente curto se a promoção pedir).
-- "cena_en": em inglês, 1 a 2 frases descrevendo adereços e clima da cena que combinam com o produto, o tema e a promoção (ex.: "a small cup of black coffee blurred in the background, cozy Brazilian breakfast diner"). Nunca peça texto na imagem.`
+- "cena_en": em inglês, 1 a 2 frases descrevendo o clima e o cenário que combinam com o PRÓPRIO produto (ex.: cerveja → "ice cubes and cold condensation droplets, cool bar atmosphere"; cuscuz → "rustic Brazilian breakfast table"). O produto é o ÚNICO item à venda na cena: NUNCA acrescente outra comida ou bebida (nada de hambúrguer, batata, lanche) a não ser que a promoção cite esse outro item (ex.: "na compra de um cuscuz ganhe um café" → pode ter o café). Nunca peça texto na imagem.`
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
@@ -57,12 +57,13 @@ Campos:
 
 function promptCena(produto: string, tema: string, extra: string, temFoto: boolean) {
   return [
-    `Professional food advertising photograph for a Brazilian delivery restaurant promotion${tema ? ` with the theme "${tema}"` : ""}.`,
+    `Professional product advertising photograph for a Brazilian delivery store promotion${tema ? ` with the theme "${tema}"` : ""}.`,
     temFoto
-      ? `Use EXACTLY the food from the reference photo (${produto}). Keep the same food, same ingredients and the same kind of plate or packaging; make it look fresh, glossy and appetizing.`
-      : `The product is: ${produto}. Show it beautifully plated or packaged, fresh and appetizing.`,
-    "Place the product on the RIGHT side of the frame, slightly angled, on a rustic dark wooden table.",
-    "Warm cinematic golden lighting, soft steam when it makes sense, shallow depth of field, warm blurred bokeh lights in the background.",
+      ? `Use EXACTLY the product from the reference photo (${produto}). Keep the same product, same brand look and the same kind of plate, can, bottle or packaging; make it look fresh and appealing.`
+      : `The product is: ${produto}. Show it beautifully presented, fresh and appealing.`,
+    `The ${produto} is the ONLY product and the clear hero of the image. Do NOT add any other food, drink or product (no burgers, fries, snacks or side dishes) unless the scene description below explicitly asks for it.`,
+    "Place the product on the RIGHT side of the frame, fully visible and not cut off, slightly angled, on a rustic dark wooden table.",
+    "Cinematic lighting that suits the product (cold and fresh for drinks, warm with soft steam for hot food), shallow depth of field, blurred bokeh lights in the background.",
     extra || "",
     "Keep the LEFT 45% of the image darker and clean (out of focus) so text can be placed there later.",
     "Absolutely NO text, NO letters, NO numbers, NO logos, NO signs with words anywhere in the image.",
