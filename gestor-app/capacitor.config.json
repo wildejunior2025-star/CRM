@@ -10,12 +10,12 @@
   },
   "android": {
     "allowMixedContent": false,
-    "backgroundColor": "#1e1140"
+    "backgroundColor": "#000000"
   },
   "plugins": {
     "SplashScreen": {
       "launchShowDuration": 1500,
-      "backgroundColor": "#1e1140",
+      "backgroundColor": "#000000",
       "showSpinner": false
     },
     "LocalNotifications": {
