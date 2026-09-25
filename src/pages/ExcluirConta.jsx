@@ -27,8 +27,8 @@ export default function ExcluirConta() {
 
       <h1 style={s.h1}>Excluir sua conta e seus dados</h1>
       <p style={s.p}>
-        Esta página explica como solicitar a exclusão da sua conta do aplicativo <strong>FWC Inter</strong> e
-        dos dados associados a ela.
+        Esta página explica como solicitar a exclusão da sua conta dos aplicativos <strong>FWC Inter</strong> (clientes)
+        e <strong>FWC Gestor</strong> (lojas) e dos dados associados a ela.
       </p>
 
       <div style={s.card}>
@@ -46,6 +46,7 @@ export default function ExcluirConta() {
         <li>Seu cadastro (nome, e-mail, telefone, endereço)</li>
         <li>Seu login de acesso ao app</li>
         <li>Seus pontos, cashback e dados de indicação</li>
+        <li>No FWC Gestor (conta de loja): o login do dono e dos funcionários, o cadastro da loja, o cardápio e os clientes cadastrados pela loja</li>
       </ul>
 
       <h2 style={s.h2}>O que pode ser mantido</h2>
