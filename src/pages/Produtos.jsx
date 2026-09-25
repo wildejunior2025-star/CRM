@@ -1136,6 +1136,20 @@ export default function Produtos() {
     // Salvar com a foto ainda subindo gravava o produto sem foto: o upload
     // terminava depois, com o modal já fechado, e a foto se perdia.
     if (uploadingFoto) { setError('A foto ainda está subindo. Espere aparecer no quadro e salve.'); return }
+    // PRODUTO SEM PREÇO DE VENDA.
+    //
+    // Na Branka (24/09) a atendente cadastrou 24 bebidas digitando o valor no
+    // "Preço de custo" — o primeiro campo de dinheiro da tela. Os produtos foram
+    // pro cardápio valendo R$ 0,00 e ninguém viu até a hora de vender. Perguntar
+    // aqui é o único ponto por onde todo cadastro passa.
+    if (!(Number(form.preco_venda) > 0)) {
+      const ok = await confirmar({
+        titulo: 'Este produto vai aparecer por R$ 0,00',
+        texto: 'O "Preço de venda" está vazio — é ele que o cliente paga. O "Preço de custo" é quanto a loja pagou no fornecedor, e não vai pra conta de ninguém. Quer salvar assim mesmo?',
+        textoOk: 'Salvar sem preço',
+      })
+      if (!ok) return
+    }
     setSaving(true)
     setError(null)
 
@@ -1985,8 +1999,30 @@ export default function Produtos() {
                     preço fixo (comida no peso): a atendente digita o valor na mesa,
                     então o custo só pode ser uma fatia desse valor. */}
                 <div className="pf-secao"><span>Preços</span></div>
+                {/* O PREÇO DE VENDA VEM PRIMEIRO. Ele estava embaixo e se chamava
+                    "Preço Público", enquanto o "Preço de custo" abria a seção — e
+                    quem cadastra bebida digitava o valor no custo, deixando o
+                    produto a R$ 0,00 no cardápio (Branka, 24/09). */}
                 <div className="form-field">
-                  <label>Preço de custo</label>
+                  <label style={{ color: 'var(--primary)' }}>
+                    Preço de venda (R$){' '}
+                    <span style={{ fontWeight: 400, fontSize: '0.8em', color: 'var(--text-muted)' }}>
+                      o que o cliente paga
+                    </span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="preco_venda"
+                    value={form.preco_venda}
+                    onChange={handleChange}
+                    placeholder="0,00"
+                  />
+                </div>
+
+                <div className="form-field">
+                  <label>Preço de custo <span style={{ fontWeight: 400, fontSize: '0.8em', color: 'var(--text-muted)' }}>quanto a loja pagou (opcional)</span></label>
                   <div className="pf-toggle">
                     {[['fixo', 'R$ por unidade'], ['pct', '% do valor vendido']].map(([id, lbl]) => (
                       <button key={id} type="button"
@@ -2030,18 +2066,6 @@ export default function Produtos() {
                       onChange={handleChange}
                     />
                   )}
-                </div>
-
-                <div className="form-field">
-                  <label>Preço Público (R$) <span style={{fontWeight:400, fontSize:'0.8em', color:'var(--text-muted)'}}>WhatsApp / link</span></label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    name="preco_venda"
-                    value={form.preco_venda}
-                    onChange={handleChange}
-                  />
                 </div>
 
                 <div className="form-field">
