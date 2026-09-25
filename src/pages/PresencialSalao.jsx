@@ -9,6 +9,7 @@ import { recadoDeErro } from '../lib/erroRede'
 import { calcularTaxa, itemIsento, MARCA_ISENTO } from '../lib/taxaServico'
 import AvisoPix from '../components/AvisoPix'
 import { useConfirmar } from '../hooks/useConfirmar'
+import { useVoltarFecha } from '../hooks/useVoltarFecha'
 import { clienteComMesmoNome } from '../lib/clientes'
 import ClientePicker from '../components/ClientePicker'
 import ClientesFiado from './ClientesFiado'
@@ -291,6 +292,14 @@ export default function PresencialSalao() {
   // PIX de fiado que o cliente pagou sozinho pelo link dele (mig 0149). A baixa já
   // foi dada pelo webhook — isto aqui é só o aviso pra equipe ficar sabendo.
   const [pixRecebidos, setPixRecebidos] = useState([])
+
+  // Voltar do celular fecha o que está aberto (de cima pra baixo) em vez de sair
+  // do sistema: QR ampliado → fechamento/montagem/categoria → a mesa.
+  useVoltarFecha(!!mesaSel, () => sairDaMesa())
+  useVoltarFecha(!!mesaSel && !!categoriaSel, () => setCategoriaSel(null))
+  useVoltarFecha(!!mesaSel && !!montando, () => setMontando(null))
+  useVoltarFecha(!!mesaSel && fechando, () => setFechando(false))
+  useVoltarFecha(!!pixAmpliado, () => setPixAmpliado(null))
   const [pixVistos, setPixVistos] = useState(() => new Set())
 
   // ── Duas cargas, não uma ────────────────────────────────────────────────
