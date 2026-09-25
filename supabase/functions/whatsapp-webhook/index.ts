@@ -1218,7 +1218,11 @@ function distribuirMisturado(itens: any[], sabores: SaboresPorProduto): any[] {
  * Confere (e acerta a grafia de) cada sabor dos itens. Devolve a mensagem pro
  * cliente quando algum não vale, ou null quando está tudo certo.
  */
-function conferirSabores(itens: any[], sabores: SaboresPorProduto, catalogo: any[]): string | null {
+function conferirSabores(
+  itens: any[], sabores: SaboresPorProduto, catalogo: any[],
+  contexto: { fala?: string; jaPerguntou?: boolean } = {},
+): string | null {
+  const falaCliente = normSabor(contexto.fala ?? "")
   const problemas = new Map<string, { produto: string; faltam: Set<string>; acabaram: Set<string>; duvidas: Set<string>; tem: string[] }>()
   for (const it of itens ?? []) {
     const sp = sabores[String(it?.produto_id ?? "")]
@@ -1233,6 +1237,11 @@ function conferirSabores(itens: any[], sabores: SaboresPorProduto, catalogo: any
         c.nome = sp.disponiveis.length === 1 ? sp.disponiveis[0] : "Misturado"
         continue
       }
+      // Por qual palavra a lista de dúvida vai ser cortada, e como ela é
+      // apresentada. Muda quando quem gerou a dúvida foi o apelido que o
+      // cliente usou ("calabresa"), e não o nome que o modelo escreveu.
+      let baseCorte = alvo
+      let rotuloDuvida = String(c?.nome ?? "").trim()
       let achado = sp.disponiveis.find(n => normSabor(n) === alvo)
       // Só aceita parecido quando o cliente escreveu MAIS que o nome ("sabor
       // morango" → Morango) e há um único candidato. O contrário ("uva" →
@@ -1255,14 +1264,77 @@ function conferirSabores(itens: any[], sabores: SaboresPorProduto, catalogo: any
         if (curtos.length === 1) achado = curtos[0]
         else if (curtos.length > 1) emDois = curtos
       }
+      // FAMÍLIA DE SABOR: "calabresa" numa casa que tem Calabresa Acebolada,
+      // Calabresa com Cheddar, Calabresa com Catupiry e Calabresa com Requeijão.
+      //
+      // Nenhum sabor se chama só "Calabresa", então nada acima casava e o
+      // cliente ouvia "não temos esse sabor" — de uma pizzaria com quatro
+      // calabresas no cardápio. É o jeito mais rápido de perder o pedido.
+      // Um candidato só: é ele. Vários: pergunta qual, que é o que o atendente
+      // de balcão faz.
+      if (!achado && emDois.length === 0 && alvo.length >= 3) {
+        const escapado = alvo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+        const daFamilia = sp.disponiveis.filter(n => new RegExp(`\\b${escapado}\\b`).test(normSabor(n)))
+        if (daFamilia.length === 1) achado = daFamilia[0]
+        else if (daFamilia.length > 1) emDois = daFamilia
+      }
+      if (achado) {
+        // O MODELO ESCOLHEU A CALABRESA NO LUGAR DO CLIENTE.
+        //
+        // Ele pediu "meia calabresa" numa casa com quatro calabresas, e o
+        // modelo mandou a Acebolada (a primeira da lista) sem perguntar. Fica
+        // R$ 4,00 mais barato que a de Catupiry e, pior, pode ser a pizza
+        // errada. O atendente de balcão pergunta — aqui também.
+        //
+        // Só vale quando o cliente NÃO escreveu o nome inteiro: se ele disse
+        // "calabresa com catupiry", a escolha é dele e passa direto. E pergunta
+        // uma vez só, senão vira roda-viva.
+        const normAchado = normSabor(achado)
+        if (!contexto.jaPerguntou && falaCliente && !falaCliente.includes(normAchado)) {
+          const apelido = normAchado.split(" ")
+            .find(w => w.length >= 4 && new RegExp(`\\b${w}\\b`).test(falaCliente))
+          if (apelido) {
+            const primos = sp.disponiveis.filter(n => new RegExp(`\\b${apelido}\\b`).test(normSabor(n)))
+            if (primos.length > 1) {
+              emDois = primos
+              achado = undefined
+              baseCorte = apelido
+              rotuloDuvida = apelido.charAt(0).toUpperCase() + apelido.slice(1)
+            }
+          }
+        }
+      }
       if (achado) { c.nome = achado; continue }
       const nomeProduto = String(catalogo.find((p: any) => p.id === it.produto_id)?.nome ?? it.nome ?? "produto")
       const p = problemas.get(it.produto_id) ?? { produto: nomeProduto, faltam: new Set(), acabaram: new Set(), duvidas: new Set(), tem: sp.disponiveis }
       const pausado = sp.pausadas.find(n => normSabor(n) === alvo || semSufixo(n) === alvo)
       if (emDois.length) {
-        // "3 Queijos: Promoção ou Especiais"
-        const blocos = emDois.map(n => (String(n).match(/\(([^()]*)\)\s*$/)?.[1] ?? n).trim())
-        p.duvidas.add(`${String(c?.nome ?? "").trim()}: ${blocos.slice(0, -1).join(", ")} ou ${blocos[blocos.length - 1]}`)
+        // "3 Queijos: Promoção ou Especiais" quando a diferença é o bloco; e
+        // "Calabresa: Acebolada, com Cheddar ou com Catupiry" quando a
+        // diferença é o resto do nome — repetir "Calabresa" em cada item da
+        // lista só faz o cliente ler quatro vezes a mesma palavra.
+        //
+        // O corte do prefixo compara PALAVRA POR PALAVRA já normalizada, e não
+        // por tamanho: normSabor come o "com" e os acentos, então "Calabresa
+        // com Cheddar" tem 21 letras cruas e 19 normalizadas — cortar pelo
+        // número de letras comeria pedaço do nome.
+        const palavrasAlvo = baseCorte.split(" ").filter(Boolean)
+        const blocos = emDois.map(n => {
+          const sufixo = String(n).match(/\(([^()]*)\)\s*$/)?.[1]
+          if (sufixo) return sufixo.trim()
+          const cru = String(n).trim()
+          const brutas = cru.split(/\s+/)
+          let i = 0, j = 0
+          while (i < brutas.length && j < palavrasAlvo.length) {
+            const p = normSabor(brutas[i])
+            if (!p) { i++; continue }              // "com" some no normSabor
+            if (p !== palavrasAlvo[j]) break
+            i++; j++
+          }
+          if (j < palavrasAlvo.length) return cru  // não era prefixo: nome inteiro
+          return brutas.slice(i).join(" ").trim() || cru
+        })
+        p.duvidas.add(`${rotuloDuvida}: ${blocos.slice(0, -1).join(", ")} ou ${blocos[blocos.length - 1]}`)
       }
       else if (pausado) p.acabaram.add(pausado)
       else p.faltam.add(String(c?.nome ?? "").trim())
@@ -3228,8 +3300,12 @@ serve(async (req) => {
       // Pela rede (texto fixo) ou pelo próprio modelo (ele lista as opções com
       // o preço do adicional). Os dois terminam no mesmo lugar: um item pela
       // metade, fora da sacola, esperando uma palavra do cliente.
+      // "Qual voce quer — Calabresa: Acebolada, com Cheddar..." tambem conta:
+      // se o robo ja abriu a familia de sabor, a proxima mensagem do cliente e
+      // a resposta dela, e perguntar de novo vira roda-viva.
       roboPediuEscolha = pendente
         || /falta escolher|\(escolha \d|\(\+R\$|qual (a |sua )?borda/i.test(falaRobo)
+        || /^Só pra eu anotar certinho|^Antes de anotar, preciso acertar uns sabores|qual você (quer|prefere)/i.test(falaRobo)
       if (pendente && ultimaFala?.role === "user") {
         ultimaFala.content = `${ultimaFala.content}\n\n[SISTEMA — não é o cliente] O item que você tentou anotar na mensagem anterior NÃO foi salvo: faltava uma escolha obrigatória, e a lista acima mostra o que ele já tinha. A resposta do cliente completa ESSE item. Emita atualizar_carrinho com ele inteiro (produto + as escolhas que já estavam + a que o cliente acabou de dar), junto com o que já estava no carrinho.`
         console.log("[Escolha] pendência da rede reinjetada no contexto")
@@ -4094,7 +4170,13 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
         }
         if ((acao.tipo === "atualizar_carrinho" || acao.tipo === "fechar_pedido") && Array.isArray(acao.items)) {
           acertarProdutoPelasEscolhas(acao.items, produtos, saboresPorProduto)
-          const avisoSabor = conferirSabores(acao.items, saboresPorProduto, produtos)
+          // A fala do cliente entra nas duas conferências: é ela que diz se ele
+          // escolheu a calabresa (e se dispensou a borda) ou se o modelo
+          // decidiu isso por ele.
+          const falaRecente = mensagens.filter((m: any) => m.role === "user")
+            .slice(-3).map((m: any) => String(m.content ?? "")).join(" | ")
+          const avisoSabor = conferirSabores(acao.items, saboresPorProduto, produtos,
+            { fala: falaRecente, jaPerguntou: roboPediuEscolha })
           if (avisoSabor) {
             console.log(`[Sabor] ${acao.tipo} barrado:`, avisoSabor.slice(0, 200))
             acao.tipo = "sabor_invalido"
@@ -4102,12 +4184,8 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           } else {
             // Escolha obrigatória que ficou faltando (a borda da pizza) ou que
             // passou do limite (3 sabores numa de 2).
-            // A fala do cliente vai junto: é ela que diz se ele REALMENTE
-            // dispensou a borda ou se o modelo decidiu isso por ele.
-            const falaDoCliente = mensagens.filter((m: any) => m.role === "user")
-              .slice(-3).map((m: any) => String(m.content ?? "")).join(" \n ")
             const avisoEscolha = conferirEscolhas(acao.items, exigencias, produtos,
-              { fala: falaDoCliente, jaPerguntou: roboPediuEscolha })
+              { fala: falaRecente, jaPerguntou: roboPediuEscolha })
             if (avisoEscolha) {
               console.log(`[Escolha] ${acao.tipo} barrado:`, avisoEscolha.slice(0, 160))
               acao.tipo = "escolha_incompleta"
