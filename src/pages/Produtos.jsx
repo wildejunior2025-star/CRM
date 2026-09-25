@@ -972,12 +972,19 @@ export default function Produtos() {
     loadEmbalagens()
   }
 
+  // Como o formulário estava quando abriu. Serve pra barra de baixo dizer que
+  // existe alteração esperando o Salvar — a tela é longa e o botão some do campo
+  // de visão enquanto a pessoa rola (Branka, 25/09).
+  const formAoAbrir = useRef('')
+
   function openNew() {
     setEditingId(null)
     setVinculos([]); setVincOriginais([])
     setEstoqueQtd(''); setEstoqueSaldo(0)
     loadCategoriasEmpresa()
-    setForm({ ...emptyForm, categoria: categorias[0]?.nome ?? '' })
+    const inicial = { ...emptyForm, categoria: categorias[0]?.nome ?? '' }
+    setForm(inicial)
+    formAoAbrir.current = JSON.stringify(inicial)
     setShowModal(true)
   }
 
@@ -988,7 +995,7 @@ export default function Produtos() {
     loadCategoriasEmpresa()
     loadComplementos(produto.id)
     loadSaldoProduto(produto.id)
-    setForm({
+    const inicial = {
       nome: produto.nome ?? '',
       categoria: produto.categoria ?? categorias[0]?.nome ?? '',
       embalagem: produto.embalagem ?? 'caixa',
@@ -1008,7 +1015,9 @@ export default function Produtos() {
       ativo: produto.ativo ?? true,
       foto_url: produto.foto_url ?? '',
       descricao: produto.descricao ?? '',
-    })
+    }
+    setForm(inicial)
+    formAoAbrir.current = JSON.stringify(inicial)
     trocarPreview('')
     setShowModal(true)
   }
@@ -2446,6 +2455,13 @@ export default function Produtos() {
               {error && <p className="error-text">{error}</p>}
 
               <div className="modal-actions pf-acoes">
+                {/* O que segura a pessoa é a dúvida "será que salvou?". A barra
+                    fica colada embaixo e diz, na hora, que tem coisa esperando. */}
+                <span className="pf-acoes-aviso">
+                  {JSON.stringify(form) !== formAoAbrir.current
+                    ? '● Alterações não salvas'
+                    : ''}
+                </span>
                 <button
                   type="button"
                   className="btn btn-secondary"

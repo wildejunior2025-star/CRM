@@ -740,6 +740,33 @@ a.dashboard-card-link:hover {
 }
 
 /* Label mais leve que o valor digitado: o que importa ler é o conteúdo. */
+/* BARRA DE SALVAR COLADA NO RODAPÉ.
+   O cadastro de produto é longo: a pessoa mexia no preço lá em cima, rolava
+   procurando o botão e ficava na dúvida se tinha salvado (Branka, 25/09). A
+   barra gruda no fim da área que rola (o próprio modal) e acompanha a rolagem.
+   As margens negativas comem o padding do modal, pra ela encostar nas bordas e
+   o conteúdo não aparecer por baixo. */
+.prod-form .pf-acoes {
+  position: sticky;
+  bottom: -28px;
+  z-index: 3;
+  margin: 24px -32px -28px;
+  padding: 14px 32px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Empurra os botões pra direita e come o espaço sobrando quando não há aviso. */
+.prod-form .pf-acoes-aviso {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #f59e0b;
+}
+
 .prod-form .form-field label {
   font-size: 12.5px;
   font-weight: 600;
@@ -940,6 +967,12 @@ a.dashboard-card-link:hover {
     display: flex;
     gap: 10px;
   }
+
+  /* No celular o aviso vai pra linha de cima: dividir a mesma linha com os
+     botões espremeria o "Salvar", que é o que interessa. */
+  .prod-form .pf-acoes { flex-wrap: wrap; }
+  .prod-form .pf-acoes-aviso { flex: 1 0 100%; }
+  .prod-form .pf-acoes-aviso:empty { display: none; }
 
   /* Salvar é o que a pessoa veio fazer; Cancelar fica do tamanho do texto. */
   .prod-form .pf-acoes .btn-primary { flex: 1; padding: 13px; font-size: 15px; }
