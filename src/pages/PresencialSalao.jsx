@@ -199,6 +199,7 @@ export default function PresencialSalao() {
   const [moverBusy, setMoverBusy] = useState(false)
   const [busca, setBusca]     = useState('')
   const [avisoBipe, setAvisoBipe] = useState(null)  // código bipado sem dono
+  const [bipeSemMesa, setBipeSemMesa] = useState(null)  // bipou sem mesa aberta
   const [categoriaSel, setCategoriaSel] = useState(null) // categoria aberta no menu de adicionar item
   // Mora AQUI, e não junto do useRef lá em cima: a lista de dependências é lida
   // durante o render, então um efeito que cita `busca` antes do useState dela
@@ -2268,12 +2269,21 @@ export default function PresencialSalao() {
   // produtos muda a cada tecla).
   const aoBipar = useRef(() => {})
   aoBipar.current = (codigo) => {
-    if (!comandaSel) return          // sem mesa aberta não há onde lançar
+    // Sem mesa aberta não há onde lançar — e ficar mudo fazia o atendente bipar
+    // três vezes achando que o leitor não pegou.
+    if (!comandaSel) { setBipeSemMesa(Date.now()); return }
     const p = acharPorCodigo(produtosComCategoria, codigo)
     if (p) { setAvisoBipe(null); addItem(p); return }
     setAvisoBipe(codigo)
   }
   useEffect(() => ouvirBipada(codigo => aoBipar.current(codigo)), [])
+
+  // O recado de "abre a mesa primeiro" some sozinho.
+  useEffect(() => {
+    if (!bipeSemMesa) return
+    const t = setTimeout(() => setBipeSemMesa(null), 5000)
+    return () => clearTimeout(t)
+  }, [bipeSemMesa])
 
   if (loading) return <div className="page"><p>Carregando salão...</p></div>
 
@@ -2294,6 +2304,14 @@ export default function PresencialSalao() {
 
   return (
     <div className="page">
+      {/* Bipou com o salão na tela das mesas: não tem comanda pra receber. */}
+      {bipeSemMesa && (
+        <div style={{ position: 'fixed', left: 12, right: 12, bottom: 14, zIndex: 99999, margin: '0 auto', maxWidth: 420,
+          padding: '11px 14px', borderRadius: 12, textAlign: 'center', fontSize: 13.5, fontWeight: 700,
+          background: '#1f1b2e', color: '#fff', border: '1px solid #eab308', boxShadow: '0 8px 30px rgba(0,0,0,.45)' }}>
+          📷 Bipada recebida — abra a mesa ou a comanda antes, pro produto ter onde cair.
+        </div>
+      )}
       {/* PIX de fiado que caiu sozinho — a dívida já foi abatida, é só pra saber. */}
       {pixRecebidos.filter(p => !pixVistos.has(p.id)).map(p => (
         <div key={p.id} style={{

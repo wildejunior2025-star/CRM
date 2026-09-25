@@ -61,7 +61,18 @@ export function ouvirBipada(aoLerCodigo, { minimo = 4 } = {}) {
     if (e.key === 'Enter') {
       const codigo = buffer
       buffer = ''
-      if (codigo.length >= minimo) { e.preventDefault(); aoLerCodigo(codigo) }
+      if (codigo.length >= minimo) {
+        // O Enter do leitor é o FIM DA BIPADA, não um "confirmar" na tela. Sem
+        // parar o evento aqui ele chegava em quem estivesse com o foco: o botão
+        // "+ Nova comanda" do Salão abria uma comanda nova a cada bipada
+        // (Saidera, 25/09). `stopPropagation` no capture segura antes de chegar
+        // no React; `preventDefault` segura o clique que o navegador faria
+        // sozinho em botão e link.
+        e.preventDefault()
+        e.stopPropagation()
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation()
+        aoLerCodigo(codigo)
+      }
       return
     }
     if (e.key.length !== 1) return
