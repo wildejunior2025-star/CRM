@@ -272,6 +272,24 @@ class B {
   // "Fonte grande" do painel: dobra a altura da letra sem dobrar a largura, que
   // em 32 colunas cortaria metade do nome do produto.
   alto(on) { return this.raw([GS, 0x21, on ? (fonteGrande() ? 0x01 : 0x00) : 0x00]) }
+  // QR CODE NA TÉRMICA (GS ( k).
+  //
+  // A impressora desenha o QR sozinha a partir do texto — não precisa mandar
+  // imagem, que pela Bluetooth demoraria e sairia borrado. É o mesmo comando
+  // que as maquininhas usam pro PIX. Tamanho 8 dá um QR que a câmera do banco
+  // lê de longe e ainda cabe em bobina de 58mm.
+  qr(texto, tamanho = 8) {
+    const dados = []
+    for (const ch of String(texto ?? '')) dados.push(ch.charCodeAt(0) & 0xff)
+    if (!dados.length) return this
+    const k = dados.length + 3
+    return this
+      .raw([GS, 0x28, 0x6b, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00])          // modelo 2
+      .raw([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x43, tamanho])             // tamanho do ponto
+      .raw([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x45, 0x31])                // correção de erro M
+      .raw([GS, 0x28, 0x6b, k & 0xff, (k >> 8) & 0xff, 0x31, 0x50, 0x30, ...dados]) // guarda
+      .raw([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x51, 0x30])                // imprime
+  }
   build() { const len = this.parts.reduce((s, p) => s + p.length, 0); const u = new Uint8Array(len); let o = 0; for (const p of this.parts) { u.set(p, o); o += p.length } return u }
 }
 
@@ -407,6 +425,45 @@ export function montarComandaMesaBytes({
   return b.build()
 }
 
+// NOTINHA DO PIX: o QR no papel, pro cliente pagar pelo celular dele.
+//
+// Antes o QR só existia na tela, e a loja tinha que virar o computador pro
+// cliente — ou levar o notebook até a mesa. No papel ele leva pra mesa, paga com
+// calma e a conta fecha sozinha quando o pagamento cai.
+//
+// O copia-e-cola vem impresso embaixo de propósito: é a saída quando a câmera do
+// banco não pega (papel amassado, luz ruim) e a garantia de que o papel serve
+// mesmo se a térmica for antiga e ignorar o comando de QR.
+export function montarPixQrBytes({ valor = 0, copiaCola = '', empresa = {}, rotulo = '' }) {
+  const hora = new Date().toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  })
+  const b = new B().init().center()
+  b.big(true).txt(empresa.nome || 'Pagamento').nl().big(false)
+  b.bold(true).txt('PAGUE NO PIX').nl().bold(false)
+  if (rotulo) b.txt(semAcento(rotulo)).nl()
+  b.txt(hora).nl()
+  b.line()
+  b.big(true).txt(fmt(valor)).nl().big(false)
+  b.txt('Aponte a camera do banco').nl().nl()
+  b.qr(copiaCola)
+  b.nl()
+  if (copiaCola) {
+    b.line()
+    b.txt('Ou copie o codigo:').nl()
+    b.left()
+    // Quebrado na largura da bobina: sem isto a impressora corta o fim do
+    // código e o cliente cola um PIX pela metade.
+    const cols = colunas()
+    for (let i = 0; i < copiaCola.length; i += cols) b.txt(copiaCola.slice(i, i + cols)).nl()
+    b.center()
+  }
+  b.line()
+  b.txt('Este papel nao e comprovante').nl()
+  b.nl(4).cut()
+  return b.build()
+}
+
 // CONTA da mesa: com preços, taxa, total e divisão.
 export function montarContaMesaBytes({
   numeroMesa, rotulo = '', itens = [], subtotal = 0, taxa = 0, total = 0,
@@ -485,6 +542,11 @@ export async function imprimirMesaSeConectada(tipo, dados) {
       const meus = itensDoSetor(dados.itens ?? [])
       if (!meus.length) return 'filtrado'
       await escrever(montarComandaMesaBytes({ ...dados, itens: meus }))
+    } else if (tipo === 'pix') {
+      // Cobrar é papel da frente, igual à conta: na cozinha não tem cliente
+      // pra ler o QR.
+      if (!imprimeConta()) return 'filtrado'
+      await escrever(montarPixQrBytes(dados))
     } else {
       if (!imprimeConta()) return 'filtrado'   // conta é papel da frente
       await escrever(montarContaMesaBytes(dados))

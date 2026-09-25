@@ -12,7 +12,7 @@ import { clienteComMesmoNome } from '../lib/clientes'
 import ClientePicker from '../components/ClientePicker'
 import ClientesFiado from './ClientesFiado'
 import ConsumoFuncionario from '../components/ConsumoFuncionario'
-import { imprimirHtml, montarContaPresencialHtml, appFwcDisponivel } from '../utils/imprimirCupom'
+import { imprimirHtml, montarContaPresencialHtml, montarPixQrHtml, appFwcDisponivel } from '../utils/imprimirCupom'
 import '../components/Page.css'
 import './PresencialSalao.css'
 
@@ -1642,6 +1642,31 @@ export default function PresencialSalao() {
       const mod = await import('../utils/imprimirBluetooth')
       return await mod.imprimirMesaSeConectada(tipo, dados)
     } catch { return false }   // sem Bluetooth neste aparelho
+  }
+
+  // NOTINHA DO PIX NO PAPEL.
+  //
+  // A cobrança PIX aparecia só na tela: pra cobrar, a loja virava o notebook pro
+  // cliente ou levava o aparelho até a mesa (Branka, 25/09). No papel o cliente
+  // leva pra mesa, paga do celular dele e a conta fecha sozinha quando cair.
+  //
+  // Mesmo caminho da conta: térmica deste aparelho primeiro, senão app FWC /
+  // navegador.
+  async function imprimirPixQr(pix) {
+    if (!pix) return
+    setPixMsg('')
+    const dados = {
+      valor: Number(pix.valor ?? 0),
+      qrBase64: pix.qr_base64 ?? '',
+      copiaCola: pix.qr_code ?? '',
+      empresa: { nome: empresaNome },
+      rotulo: mesaSel?.is_comanda ? rotuloMesa(mesaSel) : (mesaSel?.numero ? `Mesa ${mesaSel.numero}` : ''),
+    }
+    const saiu = await viaBluetooth('pix', dados)
+      || await imprimirHtml(montarPixQrHtml(dados), empresaNome, { soApp: ehCelular, origem: 'mesa' })
+    setPixMsg(saiu
+      ? '🖨️ Notinha do PIX enviada pra impressora.'
+      : '⚠️ Não achei impressora neste aparelho. Mostre o QR na tela ou mande no zap.')
   }
 
   // PRÉ-CONTA: sai antes de escolher a forma de pagamento, pra mesa conferir o
@@ -4152,6 +4177,11 @@ export default function PresencialSalao() {
                 📋 Copiar o copia e cola
               </button>
             )}
+            <button type="button" onClick={() => imprimirPixQr(pixAmpliado)}
+              style={{ width: '100%', marginTop: 8, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
+                border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 700, fontSize: 13 }}>
+              🖨️ Imprimir a notinha com o QR
+            </button>
             {pixMsg && <div style={{ fontSize: 12.5, marginTop: 8 }}>{pixMsg}</div>}
 
             <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.45 }}>

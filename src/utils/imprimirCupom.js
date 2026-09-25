@@ -388,3 +388,38 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
   <div style="height:10mm"></div>
 </body></html>`
 }
+
+// NOTINHA DO PIX (papel do PC / app FWC).
+//
+// Mesma ideia da versão Bluetooth: o QR sai no papel e o cliente paga do celular
+// dele, sem a loja precisar virar o computador. O QR vem pronto do Mercado Pago
+// (PNG em base64); se ele faltar, o papel ainda vale pelo copia-e-cola escrito.
+export function montarPixQrHtml({ valor = 0, qrBase64 = '', copiaCola = '', empresa = {}, rotulo = '' }) {
+  const largura = larguraCupom()
+  const hora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const fontePx = (painelConfig().cupom || {}).fonte === 'grande' ? 15 : 12
+  const tracos = '-'.repeat(largura === '58mm' ? 32 : 42)
+  return `<!doctype html><html><head><meta charset="utf-8"><title>PIX ${esc(fmt(valor))}</title>
+<style>
+  @page { size: ${largura} auto; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body { width: ${largura}; padding: 4mm 3mm; font-family: 'Courier New', monospace; font-size: ${fontePx}px; line-height: 1.35; color: #000; text-align: center; }
+  .b { font-weight: 700; } .lg { font-size: ${fontePx + 8}px; }
+  .hr { white-space: nowrap; overflow: hidden; margin: 3px 0; }
+  .qr { width: 46mm; max-width: 100%; margin: 2mm auto; display: block; }
+  .cola { word-break: break-all; text-align: left; font-size: ${fontePx - 1}px; }
+</style></head><body>
+  <div class="b lg">${esc(empresa.nome || 'Pagamento')}</div>
+  <div class="b">PAGUE NO PIX</div>
+  ${rotulo ? `<div>${esc(rotulo)}</div>` : ''}
+  <div>${esc(hora)}</div>
+  <div class="hr">${tracos}</div>
+  <div class="b lg">${fmt(valor)}</div>
+  <div>Aponte a camera do banco</div>
+  ${qrBase64 ? `<img class="qr" src="data:image/png;base64,${qrBase64}" alt="QR do PIX">` : ''}
+  ${copiaCola ? `<div class="hr">${tracos}</div><div>Ou copie o codigo:</div><div class="cola">${esc(copiaCola)}</div>` : ''}
+  <div class="hr">${tracos}</div>
+  <div>Este papel nao e comprovante</div>
+  <div style="height:10mm"></div>
+</body></html>`
+}
