@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 import { adicionalComplementos, complementosParaGravar } from '../lib/complementos'
 import { rotuloComanda, agruparItensComanda } from '../lib/comanda'
 import { acharPorCodigo, combinaCodigo, ouvirBipada } from '../lib/codigoBarras'
+import { recadoDeErro } from '../lib/erroRede'
 import { calcularTaxa, itemIsento, MARCA_ISENTO } from '../lib/taxaServico'
 import AvisoPix from '../components/AvisoPix'
 import { useConfirmar } from '../hooks/useConfirmar'
@@ -867,7 +868,7 @@ export default function PresencialSalao() {
     setAbrindoComanda(true)
     const { data, error } = await supabase.rpc('abrir_comanda_balcao', { p_nome: null, p_cliente_id: null })
     setAbrindoComanda(false)
-    if (error) { window.alert('Erro ao abrir a comanda: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'abrir a comanda')); return }
     // Recarrega e já abre o drawer da comanda nova (o atendente vai lançar agora).
     const { data: nova } = await supabase.from('comandas')
       .select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)').eq('id', data).single()
@@ -896,7 +897,7 @@ export default function PresencialSalao() {
     }
     setLigandoCliente(false)
     setPickerCliente(false)
-    if (error) { window.alert('Erro ao ligar o cliente: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'ligar o cliente')); return }
     await loadMesas()
   }
 
@@ -1050,7 +1051,7 @@ export default function PresencialSalao() {
         .insert({ empresa_id: empresaId, nome, preco_venda: preco, categoria: (invCategoria.trim() || 'outros'), controla_estoque: false })
         .select('id').single()
       setInvSalvando(false)
-      if (error) { window.alert('Erro ao salvar no catálogo: ' + error.message); return }
+      if (error) { window.alert(recadoDeErro(error, 'salvar no catálogo')); return }
       produtoId = data.id
       await loadAll()  // aqui SIM o pesado: o produto novo tem que entrar na busca
     }
@@ -1221,7 +1222,7 @@ export default function PresencialSalao() {
     }))
     const { data: inseridos, error } = await supabase.from('comanda_itens').insert(rows).select()
     setEnviando(false)
-    if (error) { window.alert('Erro ao lançar o item: ' + error.message); return false }
+    if (error) { window.alert(recadoDeErro(error, 'lançar o item')); return false }
 
     // LIMPA O RASCUNHO AQUI, antes de imprimir. Estava lá embaixo, depois da
     // impressão — e a impressão demora (Bluetooth, app do celular, papel). Nessa
@@ -1321,7 +1322,7 @@ export default function PresencialSalao() {
       complementos: base.complementos ?? null, observacao: base.observacao ?? null,
       ...(semCozinha ? { status: 'entregue' } : {}),
     }).select()
-    if (error) { window.alert('Erro ao lançar o item: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'lançar o item')); return }
     if (!semCozinha) {
       const paraImprimir = inseridos ?? []
       const saiu = await imprimirComandaAgora(paraImprimir)
@@ -1373,7 +1374,7 @@ export default function PresencialSalao() {
       .map(it => it.id)
     if (!ids.length) return
     const { error } = await supabase.from('comanda_itens').update({ status: 'pronto' }).in('id', ids)
-    if (error) { window.alert('Erro ao marcar pronto: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'marcar pronto')); return }
     await loadMesas()
   }
 
@@ -1395,7 +1396,7 @@ export default function PresencialSalao() {
     if (!Number.isFinite(preco) || preco === Number(grupo.preco_unitario)) return
     const { error } = await supabase.from('comanda_itens').update({ preco_unitario: preco })
       .in('id', grupo.itens.map(it => it.id))
-    if (error) { window.alert('Erro ao salvar o preço: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'salvar o preço')); return }
     await loadMesas()
   }
 
@@ -1408,7 +1409,7 @@ export default function PresencialSalao() {
       .map(it => it.id)
     if (!ids.length) return
     const { error } = await supabase.from('comanda_itens').update({ status: 'pronto' }).in('id', ids)
-    if (error) { window.alert('Erro ao marcar pronto: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'marcar pronto')); return }
     await loadMesas()
   }
 
@@ -1566,7 +1567,7 @@ export default function PresencialSalao() {
       .insert({ empresa_id: empresaId, nome, telefone: novoTelefone.trim() || null })
       .select('id, nome, telefone').single()
     setSalvandoCliente(false)
-    if (error) { window.alert('Erro ao cadastrar o cliente: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'cadastrar o cliente')); return }
     setClientes(prev => [...prev, data].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')))
     setClienteSel(data); setNovoCliente(false); setBuscaCliente(''); setNovoTelefone('')
   }
@@ -1930,7 +1931,7 @@ export default function PresencialSalao() {
         p_cliente_id: (modoPag === 'unico' ? clienteSel?.id : null) ?? comandaSel.cliente_id ?? null,
       })
       setSalvando(false)
-      if (error) { window.alert('Erro ao fechar a conta: ' + error.message); return }
+      if (error) { window.alert(recadoDeErro(error, 'fechar a conta')); return }
       escritaEm.current = Date.now()
       imprimirConta().catch(() => { /* best-effort */ })
     } else {
@@ -1971,7 +1972,7 @@ export default function PresencialSalao() {
       // dessa vez de verdade, no banco.
       }).eq('id', comandaSel.id).eq('status', 'aberta').select('id')
       setSalvando(false)
-      if (error) { window.alert('Erro ao enviar pro caixa: ' + error.message); return }
+      if (error) { window.alert(recadoDeErro(error, 'enviar pro caixa')); return }
       if (!mudou || mudou.length === 0) {
         window.alert('Esta conta já tinha sido fechada por outro aparelho. Nada foi alterado.')
         setFechando(false); setMesaSel(null); await loadMesas(); return
@@ -2210,7 +2211,7 @@ export default function PresencialSalao() {
       p_cliente_id: pend.cliente_id ?? null,
     })
     setSalvando(false)
-    if (error) { window.alert('Erro ao liberar a mesa: ' + error.message); return }
+    if (error) { window.alert(recadoDeErro(error, 'liberar a mesa')); return }
     escritaEm.current = Date.now()
     setMesaSel(null)
     await loadMesas()
