@@ -1319,6 +1319,10 @@ function adicionalDoItem(it: any, precoOpcaoMap: Record<string, number>, regras:
 // não escolhe — exigir ali quebraria o fluxo dela (roteiro de 15/09/2026).
 type Exigencias = Record<string, { nome: string; min: number; max: number; opcoes: string[] }[]>
 
+// Começo da fala da rede. Serve de marca: no turno seguinte é por ele que o
+// código reconhece que existe um item pendurado esperando a escolha.
+const AVISO_ESCOLHA_PREFIXO = "Falta só isso pra eu anotar"
+
 function conferirEscolhas(itens: any[], exigencias: Exigencias, catalogo: any[]): string | null {
   const linhas: string[] = []
   for (const it of itens ?? []) {
@@ -1327,18 +1331,29 @@ function conferirEscolhas(itens: any[], exigencias: Exigencias, catalogo: any[])
     const escolhidos = (Array.isArray(it?.complementos) ? it.complementos : [])
       .map((c: any) => normSabor(c?.nome))
     const nomeProduto = String(catalogo.find((p: any) => p.id === it.produto_id)?.nome ?? it.nome ?? "produto")
+    // O QUE JÁ FOI ESCOLHIDO VAI NA MENSAGEM.
+    //
+    // Esta fala SUBSTITUI a do modelo, e o que fica gravado na conversa é ela.
+    // Sem os sabores aqui, no turno seguinte o modelo lê só "Pizza 2 Sabores —
+    // falta a borda": ele não sabe mais QUAL pizza era, responde "Perfeito!" e
+    // não reemite o item — a pizza some da sacola (testado 25/09 com meia
+    // calabresa/meia carne de sol). Com os sabores escritos, ele relê a própria
+    // pendência e monta o item completo. O cliente também confere de graça.
+    const jaEscolhido = (Array.isArray(it?.complementos) ? it.complementos : [])
+      .map((c: any) => String(c?.nome ?? "").trim()).filter(Boolean).join(", ")
+    const oQueTem = jaEscolhido ? ` (${jaEscolhido})` : ""
     for (const g of grupos) {
       const doGrupo = g.opcoes.filter(o => escolhidos.includes(normSabor(o))).length
       if (g.min > 0 && doGrupo < g.min) {
         const quantos = g.min === 1 ? "" : ` (são ${g.min})`
-        linhas.push(`• *${nomeProduto}* — falta escolher: *${g.nome}*${quantos}\n${g.opcoes.map(o => `  • ${o}`).join("\n")}`)
+        linhas.push(`• *${nomeProduto}*${oQueTem} — falta escolher: *${g.nome}*${quantos}\n${g.opcoes.map(o => `  • ${o}`).join("\n")}`)
       } else if (g.max > 0 && doGrupo > g.max) {
-        linhas.push(`• *${nomeProduto}* — em *${g.nome}* dá pra escolher ${g.max === 1 ? "só 1" : `${g.max}`}, e vieram ${doGrupo}. Quais ficam?`)
+        linhas.push(`• *${nomeProduto}*${oQueTem} — em *${g.nome}* dá pra escolher ${g.max === 1 ? "só 1" : `${g.max}`}, e vieram ${doGrupo}. Quais ficam?`)
       }
     }
   }
   if (!linhas.length) return null
-  return `Falta só isso pra eu anotar: 😊\n\n${linhas.join("\n\n")}`
+  return `${AVISO_ESCOLHA_PREFIXO}: 😊\n\n${linhas.join("\n\n")}`
 }
 
 /**
@@ -3157,6 +3172,31 @@ serve(async (req) => {
       acc.push({ role: m.role, content: m.content })
       return acc
     }, [])
+    // ── Escolha que ficou pendurada ────────────────────────────────────────
+    // A última fala do robô foi da REDE (conferirEscolhas), que SUBSTITUIU a do
+    // modelo. Ele não tem memória da ação que tentou emitir — só lê a cobrança
+    // da borda. Aí o cliente responde "borda de catupiry", o modelo acha que
+    // não tem nada a fazer, diz "Perfeito!" e a pizza nunca entra na sacola
+    // (testado 25/09). Aqui a pendência é dita com todas as letras, no único
+    // turno em que ela importa.
+    // A última fala do robô, pra saber depois se ele estava cobrando uma escolha
+    // obrigatória quando o cliente respondeu.
+    let roboPediuEscolha = false
+    {
+      const ultimaFala = mensagens[mensagens.length - 1]
+      const ultimoRobo = [...mensagens].reverse().find((m: any) => m.role === "assistant")
+      const falaRobo = String(ultimoRobo?.content ?? "")
+      const pendente = falaRobo.startsWith(AVISO_ESCOLHA_PREFIXO)
+      // Pela rede (texto fixo) ou pelo próprio modelo (ele lista as opções com
+      // o preço do adicional). Os dois terminam no mesmo lugar: um item pela
+      // metade, fora da sacola, esperando uma palavra do cliente.
+      roboPediuEscolha = pendente
+        || /falta escolher|\(escolha \d|\(\+R\$|qual (a |sua )?borda/i.test(falaRobo)
+      if (pendente && ultimaFala?.role === "user") {
+        ultimaFala.content = `${ultimaFala.content}\n\n[SISTEMA — não é o cliente] O item que você tentou anotar na mensagem anterior NÃO foi salvo: faltava uma escolha obrigatória, e a lista acima mostra o que ele já tinha. A resposta do cliente completa ESSE item. Emita atualizar_carrinho com ele inteiro (produto + as escolhas que já estavam + a que o cliente acabou de dar), junto com o que já estava no carrinho.`
+        console.log("[Escolha] pendência da rede reinjetada no contexto")
+      }
+    }
     // Remove da listagem os produtos cuja categoria está FORA do horário de venda
     // agora (horário de Brasília). Categoria sem horário = sempre disponível.
     // Só filtra o cardápio — não muda mais nada do fluxo do bot. Como toda a
@@ -3914,7 +3954,16 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     // sacola estava vazia.
     const falaDeSacola = /\b(anotei|anotado|(deixa eu|deixe-me|vou|j[aá] vou) anotar|anotando|adicionei|adicionad[oa]s?|vou adicionar|coloquei|inclu[ií]|troquei|tirei|removi|entao fica|então fica|fica assim|vai ficar|deixa eu confirmar|s[oó] pra confirmar|sua sacola|seu carrinho)\b/i.test(resposta)
     const listaItemComPreco = /(\b\d+\s*x\s+\S|\bx\s*\d+\b)[^\n]*R\$/i.test(resposta)
-    if (!acaoMatch && !/resumo do pedido/i.test(resposta) && (falaDeSacola || listaItemComPreco)) {
+    // RESPONDEU A ESCOLHA E SEGUIU EM FRENTE COM A SACOLA VAZIA.
+    //
+    // O robô cobrou a borda, o cliente respondeu "sem borda mesmo", e o modelo
+    // achou que o assunto tinha acabado: disse "Perfeito!" e foi perguntar se é
+    // entrega ou retirada — sem nunca ter gravado a pizza (testado 25/09 na
+    // pizzaria de demonstração). Não casa "anotei" nem lista preço, então as
+    // duas peneiras de cima deixam passar. O sinal certo aqui é outro: a fala
+    // ANTERIOR do robô cobrava uma escolha e a sacola continua vazia.
+    const escolhaPerdida = roboPediuEscolha && !(carrinho ?? []).length
+    if (!acaoMatch && !/resumo do pedido/i.test(resposta) && (falaDeSacola || listaItemComPreco || escolhaPerdida)) {
       try {
         const retry = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -3929,7 +3978,9 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             messages: [
               ...mensagens.map((m: any) => ({ role: m.role, content: m.content })),
               { role: "assistant", content: resposta },
-              { role: "user", content: "[SISTEMA — não é o cliente] Você disse ao cliente que anotou, mas não emitiu a ação, e o carrinho NÃO foi salvo. Responda SOMENTE com a linha ACAO: atualizar_carrinho com TODOS os itens do carrinho (os que já estavam no CARRINHO ATUAL + os novos), com o produto_id real da lista. Nenhum texto além da ACAO." },
+              { role: "user", content: escolhaPerdida && !falaDeSacola && !listaItemComPreco
+                ? "[SISTEMA — não é o cliente] O cliente acabou de responder a escolha que faltava (borda, sabor, tamanho), mas você não emitiu a ação e a sacola está VAZIA — o item que vocês montaram na conversa não existe no banco. Responda SOMENTE com a linha ACAO: atualizar_carrinho com esse item inteiro (produto + todas as escolhas combinadas na conversa), com o produto_id real da lista. Nenhum texto além da ACAO."
+                : "[SISTEMA — não é o cliente] Você disse ao cliente que anotou, mas não emitiu a ação, e o carrinho NÃO foi salvo. Responda SOMENTE com a linha ACAO: atualizar_carrinho com TODOS os itens do carrinho (os que já estavam no CARRINHO ATUAL + os novos), com o produto_id real da lista. Nenhum texto além da ACAO." },
             ],
           }),
         })
