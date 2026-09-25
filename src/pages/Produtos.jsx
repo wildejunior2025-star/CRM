@@ -2643,13 +2643,14 @@ export default function Produtos() {
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
                           <select
-                            value={['cozinha', 'nenhum'].includes(c.setor) ? c.setor : 'salao'}
+                            value={['cozinha', 'nenhum', 'churrasqueira'].includes(c.setor) ? c.setor : 'salao'}
                             onChange={(e) => salvarSetorCategoria(c.id, e.target.value)}
                             title="Em que impressora sai o pedido desta categoria"
                             className="cat-setor"
                           >
                             <option value="salao">🧾 Salão</option>
                             <option value="cozinha">🍳 Cozinha</option>
+                            <option value="churrasqueira">🔥 Churrasqueira</option>
                             <option value="nenhum">🚫 Não imprime</option>
                           </select>
                         </td>

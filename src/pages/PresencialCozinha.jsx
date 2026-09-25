@@ -219,15 +219,28 @@ export default function PresencialCozinha({ embutido = false }) {
   // Setor (mig 0184): a impressora já separa o que é da cozinha do que é do salão,
   // mas esta tela nasceu antes disso e mostrava TUDO — o cozinheiro do Saidera via
   // cerveja na fila dele (26/08/2026). Agora ela segue a mesma marcação.
-  const [soCozinha, setSoCozinha] = useState(() => {
-    try { return localStorage.getItem('kds_so_cozinha') !== 'nao' } catch { return true }
+  // QUAL PRAÇA ESTE APARELHO MOSTRA (mig 0285).
+  //
+  // Antes era só um liga/desliga "só cozinha". Não servia pro churrasqueiro da
+  // Saidera: o churrasco é marcado como salão (sai na impressora da frente),
+  // então ele não aparecia na tela da cozinha — e também não havia tela só dele.
+  // Agora cada aparelho escolhe a praça: a tela da cozinha mostra a cozinha, a
+  // da churrasqueira mostra o churrasco, e quem quiser vê tudo.
+  //
+  // Lê a escolha antiga ('kds_so_cozinha') pra quem já usava não perder nada.
+  const [setorTela, setSetorTela] = useState(() => {
+    try {
+      const novo = localStorage.getItem('kds_setor')
+      if (novo === 'tudo' || novo === 'cozinha' || novo === 'churrasqueira') return novo
+      return localStorage.getItem('kds_so_cozinha') === 'nao' ? 'tudo' : 'cozinha'
+    } catch { return 'cozinha' }
   })
   // Só esconde se a loja REALMENTE marcou alguma categoria como cozinha. Loja que
   // nunca configurou nada continua vendo tudo — senão a tela nasceria vazia.
   const [lojaMarcouSetor, setLojaMarcouSetor] = useState(false)
   useEffect(() => {
-    try { localStorage.setItem('kds_so_cozinha', soCozinha ? 'sim' : 'nao') } catch { /* ignora */ }
-  }, [soCozinha])
+    try { localStorage.setItem('kds_setor', setorTela) } catch { /* ignora */ }
+  }, [setorTela])
 
   async function load() {
     if (!empresaId) return
@@ -250,7 +263,7 @@ export default function PresencialCozinha({ embutido = false }) {
         .in('status', ['confirmado', 'em_preparo', 'pronto', 'saiu_entrega', 'entregue'])
         .gte('created_at', hojeISO)
         .order('created_at'),
-      supabase.from('categorias').select('id').eq('empresa_id', empresaId).eq('setor', 'cozinha').limit(1),
+      supabase.from('categorias').select('id').eq('empresa_id', empresaId).in('setor', ['cozinha', 'churrasqueira']).limit(1),
     ])
     // Descarta este reload se um mais novo já começou — evita que uma leitura
     // atrasada reverta um "aceitar" recém-feito (o pedido sumia do "Preparando").
@@ -351,8 +364,12 @@ export default function PresencialCozinha({ embutido = false }) {
   // tendo marcado o que é da cozinha — mesma regra da impressora.
   const itensDaTela = itens.filter(i => {
     if (i.setor === 'nenhum') return false
-    if (!soCozinha || !lojaMarcouSetor) return true
-    return i.setor === 'cozinha'
+    if (setorTela === 'tudo') return true
+    // Churrasqueira é escolha explícita: mostra só o churrasco, sempre.
+    if (setorTela === 'churrasqueira') return i.setor === 'churrasqueira'
+    // Cozinha: loja que nunca marcou setor nenhum continua vendo tudo, senão a
+    // tela nasceria vazia.
+    return lojaMarcouSetor ? i.setor === 'cozinha' : true
   })
   const escondidos = itens.length - itensDaTela.length
   const mesa = {
@@ -403,7 +420,7 @@ export default function PresencialCozinha({ embutido = false }) {
       // A busca acha tanto por "mesa 4" quanto por "comanda 07" / nome escrito nela.
       return agruparPorMesa(base.filter(i => casaBusca([i.comandas?.numero_mesa, rotuloComanda(i.comandas), i.comandas?.nome_cliente, i.nome, i.preparando_nome])))
     },
-    [itens, aba, meuId, buscaLimpa, soCozinha, lojaMarcouSetor] // eslint-disable-line react-hooks/exhaustive-deps
+    [itens, aba, meuId, buscaLimpa, setorTela, lojaMarcouSetor] // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   if (loading) return <div className="page"><p>Carregando cozinha...</p></div>
@@ -445,16 +462,20 @@ export default function PresencialCozinha({ embutido = false }) {
         {/* A loja separou o que é da cozinha? Então o cozinheiro pode escolher ver
             só o dele. Sem essa marcação o botão nem aparece (não teria o que filtrar). */}
         {lojaMarcouSetor && (
-          <button type="button" onClick={() => setSoCozinha(v => !v)}
-            title={soCozinha ? 'Mostrando só o que a cozinha prepara. Clique pra ver tudo.' : 'Mostrando tudo, inclusive bebida. Clique pra ver só a cozinha.'}
+          <select value={setorTela} onChange={e => setSetorTela(e.target.value)}
+            title="O que esta tela mostra. Cada aparelho guarda a sua escolha."
             style={{
-              marginLeft: 'auto', padding: '9px 16px', borderRadius: 10, cursor: 'pointer', fontWeight: 800, fontSize: 13.5,
-              border: `1.5px solid ${soCozinha ? '#d97706' : 'var(--border)'}`,
-              background: soCozinha ? 'rgba(217,119,6,.14)' : 'transparent',
-              color: soCozinha ? '#d97706' : 'var(--text)',
+              marginLeft: 'auto', padding: '9px 14px', borderRadius: 10, cursor: 'pointer', fontWeight: 800, fontSize: 13.5,
+              border: `1.5px solid ${setorTela === 'tudo' ? 'var(--border)' : '#d97706'}`,
+              background: setorTela === 'tudo' ? 'transparent' : 'rgba(217,119,6,.14)',
+              color: setorTela === 'tudo' ? 'var(--text)' : '#d97706',
             }}>
-            {soCozinha ? `🍳 Só cozinha${escondidos > 0 ? ` (${escondidos} escondido${escondidos > 1 ? 's' : ''})` : ''}` : '👁 Vendo tudo'}
-          </button>
+            <option value="cozinha">
+              {`🍳 Cozinha${setorTela === 'cozinha' && escondidos > 0 ? ` (${escondidos} escondido${escondidos > 1 ? 's' : ''})` : ''}`}
+            </option>
+            <option value="churrasqueira">🔥 Churrasqueira</option>
+            <option value="tudo">👁 Ver tudo</option>
+          </select>
         )}
       </div>
 

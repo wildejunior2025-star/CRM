@@ -155,6 +155,12 @@ export default function PresencialSalao() {
   // balcão e leva. O ADM pode tudo, porque é ele quem desatola a mesa quando a
   // cozinha esquece de marcar.
   const podeProntoDaCozinha = ehAdmin || profile?.perfil === 'cozinheiro'
+  // A CHURRASQUEIRA FICA DE FORA DESTA TRAVA, de propósito (mig 0285).
+  //
+  // Ela é praça de preparo como a cozinha, mas na Saidera o churrasqueiro está
+  // na brasa, não no celular: se só ele pudesse marcar, o espetinho ficaria
+  // "preparando" a noite toda esperando um toque que ninguém dá. O garçom
+  // continua marcando o churrasco — quem serve vê o espeto na mão.
   const ehDaCozinha = (it) => it?.setor === 'cozinha'
 
   // Começa em 0, NUNCA em 10: chutar 10% enquanto a config da loja não chegou já
