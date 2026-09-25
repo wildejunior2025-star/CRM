@@ -38,8 +38,42 @@ async function geocodificar({ rua, numero, bairro, cidade, estado, cep }) {
     const c = await pega(`https://nominatim.openstreetmap.org/search?${p}`)
     if (c) return c
   }
-  const q = [rua, numero, bairro, cidade, uf].filter(Boolean).join(', ')
-  return pega(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Brasil')}&format=json&limit=1`)
+  // A CIDADE É O CAMPO QUE MAIS ATRAPALHA.
+  //
+  // Quando o cliente não diz a cidade, o sistema completa com a da LOJA. Aí o
+  // bairro é de um município e a cidade é de outro, e o buscador não acha nada:
+  // "rua eliane barros, novo amarante, Natal" → vazio; a mesma rua SEM a
+  // cidade → achada de primeira, em São Gonçalo do Amarante (25/09). Sem essas
+  // tentativas o pino caía lá na loja, quilômetros longe da casa do cliente.
+  //
+  // Do mais específico pro menos: com tudo, sem a cidade, e por fim só o
+  // bairro — que já bota o cliente na vizinhança dele.
+  const tentativas = [
+    [rua, numero, bairro, cidade, uf],
+    [rua, bairro, uf],
+    [bairro, uf],
+  ]
+  for (const partes of tentativas) {
+    const q = partes.filter(Boolean).join(', ')
+    if (!q) continue
+    const c = await pega(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Brasil')}&format=json&limit=1`)
+    if (c) return c
+    // Nominatim atende 1 por segundo; sem respiro ele devolve vazio e a
+    // tentativa seguinte "falha" sem nem ter sido feita.
+    await new Promise(r => setTimeout(r, 1100))
+  }
+  return null
+}
+
+// Distância em km — pra não aceitar um ponto absurdo que o buscador devolveu
+// (rua de mesmo nome em outro estado).
+function distanciaKm(a, b) {
+  const R = 6371
+  const dLat = (b.lat - a.lat) * Math.PI / 180
+  const dLng = (b.lng - a.lng) * Math.PI / 180
+  const x = Math.sin(dLat / 2) ** 2
+    + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))
 }
 
 const cores = {
@@ -69,6 +103,10 @@ export default function ConfirmarLocal() {
   const [pronto, setPronto]   = useState(false)   // salvou
   const [aviso, setAviso]     = useState(null)
   const [gps, setGps]         = useState(false)
+  // De onde veio o ponto onde o pino nasceu. Só o 'gps' é a casa do cliente de
+  // verdade; o resto é palpite em cima de texto, e é o que decide se a tela
+  // empurra o botão de localização ou o de confirmar.
+  const [precisao, setPrecisao] = useState('nenhum')
 
   // ── 1. Abre o link e descobre onde o pino começa ───────────────────────────
   useEffect(() => {
@@ -84,21 +122,31 @@ export default function ConfirmarLocal() {
       setInfo(data)
       if (data.lat != null && data.lng != null) {
         setCentro({ lat: Number(data.lat), lng: Number(data.lng) })
+        setPrecisao('aproximado')
         setCarregando(false)
         return
       }
       // O gestor não mandou ponto: procura aqui mesmo, pelo endereço.
       const c = await geocodificar(data)
       if (!vivo) return
-      if (c) {
+      // Ponto longe demais não é o endereço do cliente — é outra rua de mesmo
+      // nome. Três vezes o raio de entrega já é folga de sobra pra loja que
+      // atende cidade vizinha.
+      const longe = c && data.loja_lat != null
+        && distanciaKm(c, { lat: Number(data.loja_lat), lng: Number(data.loja_lng) })
+           > Math.max(15, Number(data.raio_km || 10) * 3)
+      if (c && !longe) {
         setCentro(c)
+        setPrecisao('aproximado')
       } else if (data.loja_lat != null) {
+        setPrecisao('loja')
         // Sem achar o endereço, começa na loja — perto o bastante pro cliente
-        // se reconhecer no mapa e arrastar até em casa.
-        setAviso('Não achamos o endereço no mapa. Arraste o pino até a sua casa.')
+        // se reconhecer no mapa e arrastar até em casa. O aviso não dá tarefa
+        // ("arraste"): manda no botão que resolve em um toque.
+        setAviso('O mapa não achou esse endereço. O pino começou na loja — toque no botão verde se estiver em casa.')
         setCentro({ lat: Number(data.loja_lat), lng: Number(data.loja_lng) })
       } else {
-        setAviso('Não achamos o endereço no mapa. Aproxime e marque a sua casa.')
+        setAviso('O mapa não achou esse endereço. Toque no botão verde se estiver em casa.')
         setCentro(CENTRO_BR)
       }
       setCarregando(false)
@@ -154,6 +202,8 @@ export default function ConfirmarLocal() {
         setGps(false)
         const c = { lat: pos.coords.latitude, lng: pos.coords.longitude }
         mexeu.current = true
+        setPrecisao('gps')
+        setAviso(null)
         coordRef.current = c
         if (pinRef.current) pinRef.current.setLatLng([c.lat, c.lng])
         if (mapObj.current) mapObj.current.setView([c.lat, c.lng], 18)
@@ -214,9 +264,18 @@ export default function ConfirmarLocal() {
     <div style={tela}>
       <div style={{ padding: '18px 18px 12px' }}>
         <h1 style={{ fontSize: 19, margin: '0 0 4px' }}>Onde fica a sua casa?</h1>
+        {/* O JEITO CERTO VEM PRIMEIRO.
+            O pino nasce de um palpite do buscador em cima do endereço escrito, e
+            palpite erra: rua nova, bairro de outro município, nome repetido.
+            Quem está em casa com o celular na mão resolve isso num toque — e é
+            a única fonte que acerta a porta. Arrastar o pino continua valendo,
+            mas vira o plano B. */}
         <p style={{ color: cores.fraco, fontSize: 14, margin: 0, lineHeight: 1.5 }}>
-          Arraste o pino (ou toque no mapa) até a porta da sua casa. É esse ponto
-          que o entregador vai seguir.
+          {precisao === 'gps'
+            ? 'Peguei sua localização. Confere se o pino está na porta e toque em "É aqui".'
+            : <>Se você <strong style={{ color: cores.texto }}>está em casa agora</strong>, toque no
+              botão verde aqui embaixo — é o jeito mais certeiro. Se não estiver,
+              arraste o pino até a porta da sua casa.</>}
         </p>
         {enderecoLinha && (
           <div style={{
@@ -244,27 +303,57 @@ export default function ConfirmarLocal() {
         )}
       </div>
 
+      {/* Enquanto o ponto não veio do GPS, o verde (o que a mão procura) é o de
+          pegar a localização. Depois que ele pega, o verde passa pro confirmar:
+          a tela só empurra o atalho certo enquanto ele ainda ajuda. */}
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <button
-          type="button" onClick={usarMinhaLocalizacao} disabled={carregando || gps}
-          style={{
-            padding: '12px 14px', borderRadius: 10, border: `1px solid ${cores.borda}`,
-            background: 'transparent', color: cores.texto, fontSize: 14.5,
-            cursor: 'pointer', fontWeight: 500,
-          }}
-        >
-          {gps ? 'Buscando…' : '🎯 Estou em casa agora — usar minha localização'}
-        </button>
-        <button
-          type="button" onClick={confirmar} disabled={carregando || salvando}
-          style={{
-            padding: '15px 14px', borderRadius: 10, border: 'none',
-            background: cores.verde, color: '#fff', fontSize: 16, fontWeight: 700,
-            cursor: 'pointer', opacity: carregando || salvando ? 0.6 : 1,
-          }}
-        >
-          {salvando ? 'Salvando…' : 'É aqui — confirmar'}
-        </button>
+        {precisao !== 'gps' ? (
+          <>
+            <button
+              type="button" onClick={usarMinhaLocalizacao} disabled={carregando || gps}
+              style={{
+                padding: '15px 14px', borderRadius: 10, border: 'none',
+                background: cores.verde, color: '#fff', fontSize: 16, fontWeight: 700,
+                cursor: 'pointer', opacity: carregando || gps ? 0.6 : 1,
+              }}
+            >
+              {gps ? 'Buscando…' : '🎯 Estou em casa agora — usar minha localização'}
+            </button>
+            <button
+              type="button" onClick={confirmar} disabled={carregando || salvando}
+              style={{
+                padding: '12px 14px', borderRadius: 10, border: `1px solid ${cores.borda}`,
+                background: 'transparent', color: cores.texto, fontSize: 14.5,
+                cursor: 'pointer', fontWeight: 500, opacity: carregando || salvando ? 0.6 : 1,
+              }}
+            >
+              {salvando ? 'Salvando…' : 'Marquei no mapa — confirmar'}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button" onClick={confirmar} disabled={carregando || salvando}
+              style={{
+                padding: '15px 14px', borderRadius: 10, border: 'none',
+                background: cores.verde, color: '#fff', fontSize: 16, fontWeight: 700,
+                cursor: 'pointer', opacity: carregando || salvando ? 0.6 : 1,
+              }}
+            >
+              {salvando ? 'Salvando…' : 'É aqui — confirmar'}
+            </button>
+            <button
+              type="button" onClick={usarMinhaLocalizacao} disabled={carregando || gps}
+              style={{
+                padding: '12px 14px', borderRadius: 10, border: `1px solid ${cores.borda}`,
+                background: 'transparent', color: cores.fraco, fontSize: 14,
+                cursor: 'pointer', fontWeight: 500,
+              }}
+            >
+              {gps ? 'Buscando…' : 'Pegar minha localização de novo'}
+            </button>
+          </>
+        )}
       </div>
     </div>
   )

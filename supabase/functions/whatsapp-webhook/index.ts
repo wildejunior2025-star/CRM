@@ -828,7 +828,7 @@ async function handleLinkDoMapa(
     linkPino
       ? "Confere o ponto exato aqui, que aí o entregador vai direto na porta:\n\n"
         + `\u{1F449} ${linkPino}\n\n`
-        + 'É só arrastar o pino e tocar em "É aqui". \u{1F642}'
+        + 'Se estiver em casa agora, é só tocar em *usar minha localização*. \u{1F642}'
       : null,
     "",
     endFinal?.numero ? "Esse é o endereço da entrega?" : "Qual o *número* da casa?",
@@ -974,7 +974,7 @@ async function handleSalvarNumero(
       })
       if (pinErr) console.error("[Mapa] criar_pin_link_para erro:", pinErr.message)
       else if (pin?.ok) {
-        blocoPino = `\n\n📌 Pra entrega cair certinho na sua porta, confere o ponto no mapa:\n👉 https://lojaonline.fwcinter.com/local/${pin.token}\n_É só arrastar o pino até a sua casa e tocar em "É aqui"._`
+        blocoPino = `\n\n📌 Pra entrega cair certinho na sua porta, confere o ponto no mapa:\n👉 https://lojaonline.fwcinter.com/local/${pin.token}\n_Se estiver em casa agora, toque em *usar minha localização* — fica exato. Se não estiver, arraste o pino._`
       }
     }
     return {
@@ -2150,7 +2150,7 @@ async function handleFecharPedido(
       })
       if (pinErr) console.error("[Mapa] link no fechamento:", pinErr.message)
       else if (pin?.ok) {
-        linhaPino = `\n\n📌 *Confere o ponto da entrega* pro entregador ir direto na sua porta:\n👉 https://lojaonline.fwcinter.com/local/${pin.token}\n_Arraste o pino até a sua casa e toque em "É aqui"._`
+        linhaPino = `\n\n📌 *Confere o ponto da entrega* pro entregador ir direto na sua porta:\n👉 https://lojaonline.fwcinter.com/local/${pin.token}\n_Se estiver em casa agora, toque em *usar minha localização* — fica exato. Se não estiver, arraste o pino._`
       }
     }
 
