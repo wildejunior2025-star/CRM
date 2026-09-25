@@ -1220,7 +1220,9 @@ function distribuirMisturado(itens: any[], sabores: SaboresPorProduto): any[] {
  */
 function conferirSabores(
   itens: any[], sabores: SaboresPorProduto, catalogo: any[],
-  contexto: { fala?: string; jaPerguntou?: boolean } = {},
+  // grupoDaOpcao: produto -> opcao(minuscula) -> id do grupo. E ele que impede
+  // "Borda de Chocolate" de disputar com "Chocolate ao Leite".
+  contexto: { fala?: string; jaPerguntou?: boolean; grupoDaOpcao?: Record<string, Record<string, { grupo: string }>> } = {},
 ): string | null {
   const falaCliente = normSabor(contexto.fala ?? "")
   const problemas = new Map<string, { produto: string; faltam: Set<string>; acabaram: Set<string>; duvidas: Set<string>; tem: string[] }>()
@@ -1294,8 +1296,24 @@ function conferirSabores(
           const apelido = normAchado.split(" ")
             .find(w => w.length >= 4 && new RegExp(`\\b${w}\\b`).test(falaCliente))
           if (apelido) {
-            const primos = sp.disponiveis.filter(n => new RegExp(`\\b${apelido}\\b`).test(normSabor(n)))
-            if (primos.length > 1) {
+            // SÓ CONCORRE QUEM É DO MESMO GRUPO.
+            //
+            // "Borda de Chocolate" disputava com "Chocolate ao Leite",
+            // "Chocolate com Morango" e "Chocolate com Paçoca" — sabor de pizza
+            // contra recheio de borda. O cliente tinha acabado de escolher a
+            // borda e o robô perguntou tudo de novo (25/09). Grupos diferentes
+            // não são a mesma pergunta.
+            const grupoDe = (nome: string) =>
+              contexto.grupoDaOpcao?.[String(it?.produto_id ?? "")]?.[String(nome).trim().toLowerCase()]?.grupo ?? ""
+            const grupoAchado = grupoDe(achado)
+            const mesmoGrupo = (n: string) => !grupoAchado || grupoDe(n) === grupoAchado
+            const primos = sp.disponiveis.filter(n =>
+              mesmoGrupo(n) && new RegExp(`\\b${apelido}\\b`).test(normSabor(n)))
+            // O cliente escreveu o que distingue um deles ("cebolada")? Então
+            // ele escolheu — mesmo tendo comido uma letra.
+            const apoiados = candidatosApoiados(primos, apelido, falaCliente)
+            const jaEscolheu = apoiados.length === 1 && normSabor(apoiados[0]) === normAchado
+            if (primos.length > 1 && !jaEscolheu) {
               emDois = primos
               achado = undefined
               baseCorte = apelido
@@ -1404,6 +1422,32 @@ const AVISO_ESCOLHA_PREFIXO = "Falta só isso pra eu anotar"
 // "Sem borda", "Não quero recheio": a opção que serve pra RECUSAR a categoria.
 const ehOptOut = (nome: string) => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ""))
 
+// Palavra do cardápio e palavra do cliente são a mesma coisa mesmo com dedo
+// torto: "cebolada" por "acebolada", "catupiri" por "catupiry". Uma contém a
+// outra, com 4 letras no mínimo — senão "com" casaria com "comum".
+function palavraCasa(a: string, b: string): boolean {
+  if (!a || !b) return false
+  if (a === b) return true
+  const [curta, longa] = a.length <= b.length ? [a, b] : [b, a]
+  return curta.length >= 4 && longa.includes(curta)
+}
+
+/**
+ * Dos candidatos que o apelido pescou, quais o cliente sustentou com alguma
+ * palavra ALÉM do apelido (que serve pra todos eles).
+ *
+ * "metade calabresa cebolada": o apelido "calabresa" pesca as quatro, mas só a
+ * Acebolada tem uma palavra que o cliente escreveu. Um candidato sustentado =
+ * ele escolheu, não é dúvida — foi isso que fez o robô perguntar de novo uma
+ * coisa já respondida, na gravação de 25/09.
+ */
+function candidatosApoiados(primos: string[], apelido: string, fala: string): string[] {
+  const palavrasFala = fala.split(" ").filter(w => w.length >= 4)
+  return primos.filter(n => normSabor(n).split(" ")
+    .filter(w => w.length >= 4 && w !== apelido)
+    .some(w => palavrasFala.some(f => palavraCasa(w, f))))
+}
+
 /**
  * O MODELO ESCOLHEU O PRODUTO NO LUGAR DO CLIENTE.
  *
@@ -1439,6 +1483,10 @@ function conferirProdutoAmbiguo(
     if (!apelido) continue
     const primos = catalogo.filter((p: any) => new RegExp(`\\b${apelido}\\b`).test(normSabor(p.nome)))
     if (primos.length < 2) continue
+    // Escreveu o que distingue um deles (nem que seja com a letra trocada):
+    // escolheu. Perguntar de novo é fazer o cliente se repetir.
+    const apoiados = candidatosApoiados(primos.map((p: any) => String(p.nome)), apelido, fala)
+    if (apoiados.length === 1 && normSabor(apoiados[0]) === norm) continue
     vistos.add(pid)
     // O rótulo é o começo que TODOS os candidatos têm em comum, não a palavra
     // solta que casou: "carne" acha os dois, mas quem lê quer ver "Carne de
@@ -4246,7 +4294,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           const avisoProduto = conferirProdutoAmbiguo(acao.items, produtos, carrinho,
             { fala: falaRecente, jaPerguntou: roboPediuEscolha })
           const avisoSabor = avisoProduto ?? conferirSabores(acao.items, saboresPorProduto, produtos,
-            { fala: falaRecente, jaPerguntou: roboPediuEscolha })
+            { fala: falaRecente, jaPerguntou: roboPediuEscolha, grupoDaOpcao: regrasOpcao })
           if (avisoProduto) console.log("[Produto] ambíguo, perguntando:", avisoProduto.slice(0, 120))
           if (avisoSabor) {
             console.log(`[Sabor] ${acao.tipo} barrado:`, avisoSabor.slice(0, 200))
