@@ -4179,6 +4179,13 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     }
 
     let acaoPromise: Promise<any> = Promise.resolve()
+    // A ação veio, mas uma rede barrou (sabor que não existe, escolha faltando,
+    // produto ambíguo): nada foi gravado. Pro descarte de resposta repetida lá
+    // embaixo, um turno assim vale o mesmo que um turno de conversa pura.
+    let acaoBarrada               = false
+    // Tipo da acao que o modelo emitiu neste turno (o texto pode ser descartado
+    // quando ela so mexeu na sacola; fechar pedido e PIX, nunca).
+    let acaoTipoDoTurno           = ""
     let mensagemExtra             = ""
     const extraMsgs: string[]     = []
     // QR do PIX quando a loja é da Meta: quem envia é o whatsapp-cloud, então
@@ -4192,6 +4199,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       if (acaoStart !== -1 && acaoSoltaFim === -1) resposta = resposta.slice(0, acaoStart).trim()
       try {
         const acao = JSON.parse(acaoMatch[1])
+        acaoTipoDoTurno = String(acao?.tipo ?? "")
 
         // Sabor que o produto não tem ou que está pausado: nada é gravado nem
         // fechado, e o cliente escolhe de novo (ver conferirSabores).
@@ -4243,6 +4251,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           if (avisoSabor) {
             console.log(`[Sabor] ${acao.tipo} barrado:`, avisoSabor.slice(0, 200))
             acao.tipo = "sabor_invalido"
+            acaoBarrada = true
             resposta = avisoSabor
           } else {
             // Escolha obrigatória que ficou faltando (a borda da pizza) ou que
@@ -4252,6 +4261,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             if (avisoEscolha) {
               console.log(`[Escolha] ${acao.tipo} barrado:`, avisoEscolha.slice(0, 160))
               acao.tipo = "escolha_incompleta"
+              acaoBarrada = true
               resposta = avisoEscolha
             }
           }
@@ -4878,6 +4888,36 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
 
     if (!resposta) {
       resposta = "Desculpe, não entendi bem. Pode repetir? 😊"
+    }
+
+    // ── O CLIENTE FALOU DE NOVO ENQUANTO EU PENSAVA ────────────────────────
+    //
+    // A espera lá em cima (ESPERA_RAJADA_MS) só cobre o intervalo ANTES de
+    // começar a pensar. Mensagem que chega DEPOIS — e a resposta leva uns 6 s
+    // — passava batido: "Quero calabresa acebolada" (17:26:35) e "Frango
+    // catupiry" (17:26:42) renderam duas respostas, e a primeira ainda
+    // perguntava o frango que o cliente já tinha mandado (25/09).
+    //
+    // Esta segunda olhada não custa tempo nenhum: é feita com a resposta já
+    // pronta na mão. Se chegou coisa nova, esta resposta morre aqui — a
+    // chamada da mensagem nova lê as duas juntas no histórico e responde
+    // melhor do que esta responderia.
+    //
+    // Só vale pra resposta de CONVERSA. Se este turno executou ação (gravou a
+    // sacola, fechou o pedido, gerou PIX), o texto é o comprovante disso e
+    // engolir ele deixaria o cliente sem saber que o pedido existe.
+    const soMexeuNaSacola = !acaoMatch || acaoBarrada || acaoTipoDoTurno === "atualizar_carrinho"
+    if (soMexeuNaSacola && !extraMsgs.length && !pixQrParaCloud && minhaMsgRes?.data?.created_at) {
+      const { data: maisNova } = await supabase.from("whatsapp_conversas")
+        .select("created_at")
+        .eq("empresa_id", empresaId).eq("phone", phone).eq("role", "user")
+        .gt("created_at", minhaMsgRes.data.created_at)
+        .limit(1)
+      if (maisNova?.length) {
+        console.log(`[rajada] resposta pronta, mas o cliente já falou de novo — descartada: "${resposta.slice(0, 50)}"`)
+        return new Response(JSON.stringify({ ok: true, agrupada: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+      }
     }
 
     // PRIMEIRO CONTATO: ninguém (robô ou loja) tinha falado com este número
