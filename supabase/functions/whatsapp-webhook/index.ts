@@ -3874,17 +3874,17 @@ DADOS DA LOJA:
 - Nome: ${empresaNome}
 ${empresaDescricao ? `- Descrição: ${empresaDescricao}` : ""}
 ${empresaEndereco   ? `- Endereço: ${empresaEndereco}` : ""}
-${agoraTexto        ? `- Agora são ${agoraTexto} (horário de Brasília)` : ""}
+⟦VAR⟧${agoraTexto ? `- Agora são ${agoraTexto} (horário de Brasília)` : ""}⟦/VAR⟧
 ${horarioLojaTexto  ? `- ${horarioLojaTexto.replace(/\*/g, "")}` : (empresaHorario ? `- Horário: ${empresaHorario}` : "")}
 🟢 A LOJA ESTÁ ABERTA NESTE MOMENTO — o sistema já conferiu a grade de horários antes de te chamar. NUNCA diga que a loja está fechada, nem repita um aviso de "estamos fechados" que apareça no histórico da conversa: aquilo era de antes. Se o cliente perguntar o horário, informe o da linha acima e nenhum outro.
 ${empresa.chave_pix ? `- PIX: ${empresa.chave_pix} (${empresa.pix_nome ?? ""})` : ""}
 CATÁLOGO: ${catalogoUrl}
 🚚 TAXA, DISTÂNCIA E CIDADE VIZINHA NUNCA SÃO MOTIVO PRA CHAMAR ATENDENTE. Quem calcula a taxa é o SISTEMA, pela distância do endereço. Cliente mandou a cidade/bairro que faltava → emita salvar_rua com rua + bairro + cidade na hora (mesmo que seja outra cidade, ex.: Natal) e o valor sai certo. Só diga que não entrega quando aparecer "ENTREGA BLOQUEADA" aqui.
 📍 "Vocês entregam em [cidade/bairro]?": NUNCA responda "sim" nem "não" de cabeça — a entrega vai até uma distância da loja e só o endereço diz. Responda que a loja fica em ${empresaEndereco || "—"}, e peça a localização ou rua, número e bairro pra conferir na hora.
-${aceitaDelivery ? (bairroBloqueado ? `⛔ ENTREGA BLOQUEADA NESTE BAIRRO: a loja NÃO entrega no bairro do cliente (${bairroCliente}). Avise educadamente que ainda não entregam nesse bairro e ofereça RETIRADA no local. NUNCA feche um pedido de ENTREGA para este cliente — só retirada.`
+⟦VAR⟧${aceitaDelivery ? (bairroBloqueado ? `⛔ ENTREGA BLOQUEADA NESTE BAIRRO: a loja NÃO entrega no bairro do cliente (${bairroCliente}). Avise educadamente que ainda não entregam nesse bairro e ofereça RETIRADA no local. NUNCA feche um pedido de ENTREGA para este cliente — só retirada.`
   : enderecoCliente ? `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (já calculada pela distância do endereço do cliente)`
   : taxaMin != null ? `ENTREGA: a taxa depende do endereço — vai de R$ ${taxaMin.toFixed(2)} a R$ ${taxaMax!.toFixed(2)}. ⛔ NUNCA diga um valor exato, e MUITO MENOS "R$ 0,00" ou frete grátis, enquanto não souber o endereço: diga a faixa e peça a rua, o número e o bairro — o sistema calcula a taxa certa na hora de fechar.`
-  : `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (taxa base — pode mudar conforme a distância do endereço)`) : "ENTREGA: somente retirada no local"}
+  : `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (taxa base — pode mudar conforme a distância do endereço)`) : "ENTREGA: somente retirada no local"}⟦/VAR⟧
 FORMAS DE PAGAMENTO (SÓ estas — nunca ofereça outra): ${opcoesDePagamento(pagamentos).replace(/\*/g, "")}
 ${pagamentos.pixOnline ? `• PIX (online): o sistema gera o QR Code e o copia-e-cola ao fechar o pedido — o pedido só vai para a loja depois que o pagamento for confirmado. Você NÃO envia chave PIX nesse caso.\n` : ""}${pagamentos.pixEntrega ? `• PIX${pagamentos.pixOnline ? " na entrega" : ""}: o cliente faz o PIX pelo app do banco dele, para a chave PIX da loja${pagamentos.chavePix ? ` (${pagamentos.chavePix})` : ""}, e manda o COMPROVANTE aqui na conversa pra concluir o pedido — igual à Loja Online. NÃO usa maquininha e não tem QR. NUNCA diga pra pagar só quando o pedido chegar. O sistema manda a chave junto da confirmação do pedido; você nunca confirma que o pagamento caiu (quem confere é a loja).${pagamentos.pixOnline ? "" : " Quando o cliente disser \"PIX\", é este."}\n` : ""}${!pagamentos.pixOnline && !pagamentos.pixEntrega ? `• PIX NÃO é aceito nesta loja pelo WhatsApp — se pedirem, ofereça as formas acima.\n` : ""}${aceitaCartao(pagamentos) ? `• Cartão: se for ENTREGA, o entregador leva a maquininha. Se for RETIRADA, paga no balcão da loja (aí não tem entregador — nunca fale dele).${pagamentos.credito && pagamentos.debito ? " Pergunte se é *crédito* ou *débito*." : ""}\n` : ""}
 
@@ -3895,10 +3895,10 @@ ${totalProdutos > MENU_INTEIRO_ATE ? `⚠️ CATÁLOGO GRANDE: esta loja tem ${t
 ` : ""}PRODUTOS DISPONÍVEIS${totalProdutos > MENU_INTEIRO_ATE ? " (o que casou com o que ele pediu)" : ""}:
 ${cardapioPorCategoria(produtos) || (totalProdutos > MENU_INTEIRO_ATE ? "Nada casou com o que ele falou — peça a marca e o tamanho, ou ofereça o link do catálogo." : "Nenhum produto cadastrado")}
 ${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n${Object.keys(exigencias).length ? `⚠️ ESCOLHA OBRIGATÓRIA: nesses produtos, a categoria que tem PREÇO nas opções (borda, sabores da pizza) é obrigatória — pergunte junto com o resto e NÃO anote sem ela. "Sem borda" também é uma escolha: se o cliente disser que não quer, anote "Sem borda".\n` : ""}${familiasTamanho.length ? `📏 SABORES QUE MUDAM CONFORME O TAMANHO — nunca liste sabores desses produtos sem saber o tamanho. Se o cliente não disse o tamanho (nem antes na conversa), PERGUNTE primeiro qual tamanho, mostrando tamanhos e preços; depois mostre só os sabores DAQUELE tamanho:\n${familiasTamanho.map(f => `▸ ${f.nome}: ` + f.tamanhos.map(t => `${t.rotulo} (${t.sabores.length} sabores)`).join("; ")).join("\n")}\n` : ""}⚠️ Confira pelo [id:] qual produto o cliente pediu antes de mostrar opções. Produto cujo id NÃO aparece neste bloco não tem sabor/complemento pra escolher: adicione direto com atualizar_carrinho, sem perguntar sabor (ex.: açaí em caixa ou balde não é o mesmo produto que o sorvete de mesmo tamanho).\n🍦 SABOR NÃO ESCOLHIDO NÃO SE PERGUNTA: nos produtos em que só se escolhe o SABOR (picolé, sorvete, moreninha, pote), se o cliente disse produto + quantidade sem sabor, emita atualizar_carrinho NA HORA com a linha SEM "complementos" (nem "Misturado" — Misturado é só quando ele FALA misturado/sortido/menos X) — a loja manda sortido. Não liste sabores, não pergunte "qual sabor?" nem "prefere misturado?". Só use sabor quando ELE disser um.\n` : ""}
-CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) => {
+⟦VAR⟧CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) => {
   const comps = Array.isArray(i.complementos) && i.complementos.length ? ` (${i.complementos.map((c: any) => c.nome).join(", ")})` : ""
   return `• ${i.nome}${comps} x${i.qtd} = R$ ${(i.qtd * Number(i.preco)).toFixed(2)}`
-}).join("\n")}\nSUBTOTAL: R$ ${totalCarrinho.toFixed(2)}`}
+}).join("\n")}\nSUBTOTAL: R$ ${totalCarrinho.toFixed(2)}`}⟦/VAR⟧
 ⚠️ No resumo (PASSO 6) use EXATAMENTE estes preços e este SUBTOTAL do CARRINHO ATUAL. Itens montados (quentinha) já têm os adicionais embutidos no preço — NUNCA use o preço base da lista de produtos nem recalcule.
 💰 PREÇO POR QUANTIDADE (ATACADO) E PROMOÇÃO:
 • Na lista, "a partir de 10 un: R$ 2.50 cada" quer dizer que levando 10 ou mais daquele produto CADA UM sai por esse valor. Abaixo disso vale o preço normal. A quantidade conta a SOMA do produto no carrinho, mesmo com sabores diferentes (5 de morango + 5 de chocolate = 10).
@@ -3908,10 +3908,10 @@ CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) =
 • No atualizar_carrinho mande o preço que quiser: o SISTEMA aplica atacado e promoção sozinho, e o CARRINHO ATUAL já mostra o valor certo.
 • A descrição depois do produto (tamanho, avisos, "só na quarta") vale como informação da loja — use pra responder o cliente.
 
-CLIENTE: ${cliente?.nome ? `✅ JÁ CADASTRADO — ${cliente.nome}${enderecoCliente ? ` (Endereço: ${enderecoCliente})` : ""}
+⟦VAR⟧CLIENTE: ${cliente?.nome ? `✅ JÁ CADASTRADO — ${cliente.nome}${enderecoCliente ? ` (Endereço: ${enderecoCliente})` : ""}
 ⛔ PROIBIDO pedir nome ou e-mail deste cliente — ele JÁ é cadastrado. Cumprimente-o pelo nome. Quando ele fechar a sacola, vá DIRETO para entrega/retirada (PASSO 4), NUNCA para o cadastro (PASSO 3).` : "Não cadastrado nesta loja"}
 TELEFONE: ${phoneLocal}
-${profileGlobal ? `NOME_NO_SISTEMA: ${profileGlobal.nome}` : ""}
+${profileGlobal ? `NOME_NO_SISTEMA: ${profileGlobal.nome}` : ""}⟦/VAR⟧
 
 ══════════════════════════════════════
 IDENTIDADE E ACESSO
@@ -3928,7 +3928,7 @@ FLUXO DE VENDA — SIGA EXATAMENTE ESTA ORDEM
 ══════════════════════════════════════
 
 ▶ PASSO 1 — SAUDAÇÃO
-Já verificamos pelo telefone se o cliente tem conta nesta loja (ver CLIENTE acima).
+Já verificamos pelo telefone se o cliente tem conta nesta loja (ver o bloco CLIENTE).
 • SE CLIENTE tem nome real (já é cliente desta loja) → cumprimente pelo nome, de forma calorosa. Diga que ele pode pedir pelo link OU por aqui mesmo, e ajude a montar a sacola. Inclua ao final: "\n👉 ${catalogoUrl}"
 • SE CLIENTE = "Não cadastrado nesta loja" → saudação calorosa oferecendo o LINK como a forma mais fácil e rápida de pedir, mas deixando claro que dá pra pedir por aqui também. NÃO peça nome, e-mail nem endereço agora. Exemplo:
   "Oi! 😊 Seja bem-vindo(a) à ${empresaNome}! A forma mais rápida de pedir é pelo nosso cardápio online, é só clicar:\n👉 ${catalogoUrl}\n\nMas se preferir, é só me dizer o que deseja que eu monto seu pedido por aqui mesmo! O que vai querer hoje?"
@@ -3960,7 +3960,7 @@ O telefone já temos (${phoneLocal}) — NUNCA peça.
 
 ▶ PASSO 4 — ENTREGA OU RETIRADA
 ${aceitaDelivery
-  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE já temos o endereço (ver CLIENTE, ou acabou de coletar no cadastro) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → PASSO 5\n  - Quer trocar → peça o endereço novo: se vier CEP emita buscar_cep, se vier escrito emita salvar_rua (rua+bairro+cidade); depois o número (emita salvar_numero)\n• SE ainda não temos endereço → peça numa frase curta: "📍 Me manda sua *localização* ou o endereço (rua, número e bairro)." NÃO ensine como mandar a localização (clipe, menu etc.). Se ele mandar o CEP por conta própria, aceite numa boa. Escrito → salvar_rua; CEP → buscar_cep. Depois o número (emita salvar_numero), aí siga ao PASSO 5\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá ao PASSO 5`
+  ? `Pergunte: "Prefere *entrega* 🚚 ou vai *retirar* na loja? 🏪"\n\nSE ENTREGA:\n• SE já temos o endereço (ver o bloco CLIENTE, ou acabou de coletar no cadastro) → confirme: "Vou entregar em *[endereço]*. Está correto? 😊"\n  - Confirma → PASSO 5\n  - Quer trocar → peça o endereço novo: se vier CEP emita buscar_cep, se vier escrito emita salvar_rua (rua+bairro+cidade); depois o número (emita salvar_numero)\n• SE ainda não temos endereço → peça numa frase curta: "📍 Me manda sua *localização* ou o endereço (rua, número e bairro)." NÃO ensine como mandar a localização (clipe, menu etc.). Se ele mandar o CEP por conta própria, aceite numa boa. Escrito → salvar_rua; CEP → buscar_cep. Depois o número (emita salvar_numero), aí siga ao PASSO 5\n\nSE RETIRADA:\n• Informe: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\n• Vá ao PASSO 5`
   : `Somente retirada no local.\nInforme: "Pode retirar em: *${empresaEndereco || empresaNome}*. ✅"\nVá ao PASSO 5`}
 
 ▶ PASSO 5 — FORMA DE PAGAMENTO
@@ -3993,7 +3993,7 @@ REGRAS IMPORTANTES
 ══════════════════════════════════════
 1. NUNCA invente produtos ou preços — use APENAS a lista acima
 2. NUNCA peça o telefone — já temos: ${phoneLocal}
-3. NUNCA peça CEP nem endereço se já temos o endereço do cliente (ver CLIENTE acima)
+3. NUNCA peça CEP nem endereço se já temos o endereço do cliente (ver o bloco CLIENTE)
 4. O resumo (PASSO 6) é OBRIGATÓRIO antes de fechar. NUNCA emita fechar_pedido sem antes mostrar o resumo e receber confirmação. E NUNCA mostre resumo/total ANTES de ter entrega/retirada E pagamento definidos — ao fechar a sacola, se o cliente não é cadastrado, a próxima coisa é pedir o NOME (PASSO 3), sem resumo ainda.
 5. Para cliente novo colete SÓ o nome — e SÓ depois que a sacola estiver fechada (nunca durante a montagem). ⛔ NUNCA peça e-mail.
 6. CEP (8 dígitos): emita buscar_cep IMEDIATAMENTE, sem texto antes. Endereço escrito (ex.: "Rua das Flores, 42, Centro, Assu"): emita salvar_rua IMEDIATAMENTE com rua+bairro+cidade, sem texto antes — e se ele mandar o número junto, emita salvar_numero na sequência
@@ -4062,7 +4062,7 @@ Salvar número da casa:
 ACAO: {"tipo": "salvar_numero", "numero": "42"}
 ⚠️ Após salvar, o sistema pergunta entrega/retirada automaticamente.
 
-Fechar pedido — CLIENTE IDENTIFICADO (tem nome em CLIENTE acima, ou cadastrar_cliente foi emitido nesta sessão):
+Fechar pedido — CLIENTE IDENTIFICADO (tem nome no bloco CLIENTE, ou cadastrar_cliente foi emitido nesta sessão):
 ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "entrega", "forma_pagamento": "dinheiro", "cliente_rua": "[rua confirmada na conversa]", "cliente_numero": "[número confirmado]", "cliente_bairro": "[bairro]", "cliente_cidade": "[cidade]", "cliente_estado": "[estado]", "items": [{"produto_id": "ID_REAL", "nome": "Nome", "qtd": 1, "preco": 0.00}]}
 [tipo_entrega: "entrega" ou "retirada" | forma_pagamento: ${[pagamentos.dinheiro && `"dinheiro"`, pagamentos.pixOnline && `"pix"`, pagamentos.pixEntrega && `"pix_entrega"`, pagamentos.credito && `"credito"`, pagamentos.debito && `"debito"`, (pagamentos.cartao || (aceitaCartao(pagamentos) && !(pagamentos.credito && pagamentos.debito))) && `"cartao"`].filter(Boolean).join(", ")} | dinheiro com troco: acrescente "troco_para": 100 (o valor da nota que ele vai dar; sem troco, não mande o campo)]
 ⚠️ SEMPRE inclua os "items" do carrinho atual E o endereço confirmado na conversa no ACAO fechar_pedido
@@ -4154,6 +4154,44 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       // Não confirmou ou quer corrigir dados → cai no Claude com contexto do profile
     }
 
+    // ── CACHE DO PROMPT ────────────────────────────────────────────────────
+    //
+    // 74% do que era enviado a cada mensagem é o MESMO texto: o roteiro do
+    // robô, as regras, o cardápio da loja. Isso é reenviado e recobrado do
+    // zero em todo "oi" — foi o que levou o custo de R$ 0,03 pra R$ 0,086 por
+    // resposta, acima dos R$ 0,07 que a loja paga de crédito (25/09).
+    //
+    // A Anthropic cobra 10% por um trecho que já viu antes, desde que ele
+    // venha no COMEÇO e chegue igualzinho. Por isso o que muda a cada
+    // mensagem (hora, sacola, cliente) foi marcado com ⟦VAR⟧ lá em cima e sai
+    // daqui pro fim, num segundo bloco sem cache. O modelo lê tudo do mesmo
+    // jeito — só a ordem muda.
+    const blocosVar: string[] = []
+    const promptFixo = systemPrompt.replace(/⟦VAR⟧([\s\S]*?)⟦\/VAR⟧/g, (_m, dentro) => {
+      const t = String(dentro).trim()
+      if (t) blocosVar.push(t)
+      return ""
+    }).replace(/\n{3,}/g, "\n\n")
+    const promptAgora = blocosVar.length
+      ? `══════════════════════════════════════\nDADOS DESTE MOMENTO (mudam a cada mensagem)\n══════════════════════════════════════\n${blocosVar.join("\n")}`
+      : ""
+    // O bloco fixo tem que ser o MESMO byte a byte entre uma mensagem e outra,
+    // senão o cache não casa e a economia não acontece.
+    const systemBlocos: any[] = [
+      { type: "text", text: promptFixo, cache_control: { type: "ephemeral" } },
+    ]
+    if (promptAgora) systemBlocos.push({ type: "text", text: promptAgora })
+
+    // Onde o prompt engorda. Cada mensagem paga o prompt INTEIRO, entao saber o
+    // peso de cada pedaco e o que decide o que vale cachear.
+    {
+      const cardapio = cardapioPorCategoria(produtos) ?? ""
+      const hist = mensagens.reduce((n: number, m: any) => n + String(m.content ?? "").length, 0)
+      console.log(`[prompt] fixo=${promptFixo.length}ch agora=${promptAgora.length}ch cardapio=${cardapio.length}ch `
+        + `complementos=${complementosTexto.length}ch instrucoes=${(iaInstrucoes ?? "").length}ch `
+        + `historico=${hist}ch (${mensagens.length} msgs)`)
+    }
+
     const _tAntesClaude = Date.now()
     const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -4169,7 +4207,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
         // pro cliente e a ACAO com os produto_id ficava de fora. Só custa mais
         // quando a resposta é grande de verdade.
         max_tokens: 2000,
-        system:     systemPrompt,
+        system:     systemBlocos,
         messages:   mensagens.map((m: any, idx: number) => {
           if (imageBase64 && idx === mensagens.length - 1 && m.role === "user") {
             return {
@@ -4202,8 +4240,12 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       const u = claudeData.usage ?? {}
       const entrada = Number(u.input_tokens ?? 0)
       const saida = Number(u.output_tokens ?? 0)
-      const usd = (entrada / 1e6) * 1 + (saida / 1e6) * 5   // Haiku 4.5: $1/$5 por M
-      console.log(`[custo] in=${entrada} out=${saida} ≈ US$ ${usd.toFixed(5)} (~R$ ${(usd * 5.4).toFixed(3)}) | crédito da loja: R$ 0,07`)
+      // Cache: gravar custa 1,25x; reler custa 0,10x. O grosso do prompt cai
+      // pro preco de leitura a partir da segunda mensagem.
+      const gravou = Number(u.cache_creation_input_tokens ?? 0)
+      const leu = Number(u.cache_read_input_tokens ?? 0)
+      const usd = (entrada / 1e6) * 1 + (gravou / 1e6) * 1.25 + (leu / 1e6) * 0.10 + (saida / 1e6) * 5
+      console.log(`[custo] in=${entrada} cache_gravou=${gravou} cache_leu=${leu} out=${saida} ≈ US$ ${usd.toFixed(5)} (~R$ ${(usd * 5.4).toFixed(3)}) | crédito da loja: R$ 0,07`)
     }
     let resposta: string = claudeData.content?.[0]?.text ?? ""
 
@@ -4268,7 +4310,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             // Com 600 a ACAO de um pedido de 16 linhas saía cortada, o JSON não
             // fechava e a sacola ficava vazia (CDBom, 14/09/2026).
             max_tokens: 3000,
-            system: systemPrompt,
+            system: systemBlocos,
             messages: [
               ...mensagens.map((m: any) => ({ role: m.role, content: m.content })),
               { role: "assistant", content: resposta },
