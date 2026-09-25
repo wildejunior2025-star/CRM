@@ -68,7 +68,7 @@ export default function CadastroAdmin() {
             </svg>
           </span>
           <div>
-            <h1>Depósito CRM</h1>
+            <h1>FWC Inter</h1>
             <p className="login-subtitle">Criar conta de administrador</p>
           </div>
         </div>
@@ -156,7 +156,7 @@ export default function CadastroAdmin() {
         </p>
       </div>
 
-      <p className="login-footer">Depósito CRM &middot; Acesso de administrador</p>
+      <p className="login-footer">FWC Inter &middot; Acesso de administrador</p>
     </div>
   )
 }

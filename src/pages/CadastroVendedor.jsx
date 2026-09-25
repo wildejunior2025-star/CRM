@@ -80,7 +80,7 @@ export default function CadastroVendedor() {
             </svg>
           </span>
           <div>
-            <h1>Depósito CRM</h1>
+            <h1>FWC Inter</h1>
             <p className="login-subtitle">Criar conta de vendedor</p>
           </div>
         </div>
@@ -172,7 +172,7 @@ export default function CadastroVendedor() {
         </p>
       </div>
 
-      <p className="login-footer">Depósito CRM &middot; Acesso de vendedor</p>
+      <p className="login-footer">FWC Inter &middot; Acesso de vendedor</p>
     </div>
   )
 }

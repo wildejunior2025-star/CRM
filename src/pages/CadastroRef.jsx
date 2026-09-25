@@ -190,7 +190,7 @@ export default function CadastroRef() {
             </svg>
           </span>
           <div>
-            <h1>Depósito CRM</h1>
+            <h1>FWC Inter</h1>
             <p className="login-subtitle">
               {indicadorNome ? `Convite de ${indicadorNome}` : 'Bem-vindo!'}
             </p>

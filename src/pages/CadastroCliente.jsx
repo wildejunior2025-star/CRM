@@ -401,7 +401,7 @@ export default function CadastroCliente() {
             </svg>
           </span>
           <div>
-            <h1>Depósito CRM</h1>
+            <h1>FWC Inter</h1>
             <p className="login-subtitle">Passo {step} de 3 · {PASSOS[step - 1]}</p>
           </div>
         </div>
