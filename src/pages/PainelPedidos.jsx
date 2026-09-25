@@ -8189,6 +8189,9 @@ export default function PainelPedidos() {
 
   // ── Ref para o intervalo do loop de som ───────────────────
   const somLoopRef = useRef(null)
+  // Ids dos pedidos "aguardando" que esta tela já viu. Começa null pra primeira
+  // carga entrar calada (ver carregarPedidos).
+  const vistosRef = useRef(null)
 
   function iniciarLoopSom() {
     if (!somAtivoConfig()) return
@@ -8309,7 +8312,32 @@ export default function PainelPedidos() {
       .eq('empresa_id', empresa.id)
       .not('status', 'in', '("entregue","cancelado","aguardando_pagamento")')
       .order('created_at', { ascending: true }) // mais antigos primeiro — urgência visual natural
-    setPedidos(data || [])
+    const lista = data || []
+
+    // PEDIDO QUE APARECEU SEM O AVISO EM TEMPO REAL TAMBÉM TOCA.
+    //
+    // Até aqui a campainha dependia SÓ do evento do websocket chegar com a tela
+    // aberta. Websocket no celular cai sozinho (tela bloqueada, wifi trocando,
+    // 4G oscilando): o pedido entrava na recarga seguinte, calado, e a loja só
+    // descobria olhando. Foi o que aconteceu no pedido #1006 (25/09).
+    //
+    // A primeira carga não toca — senão abrir o painel com pedido na fila
+    // viraria escândalo. Daí em diante, "aguardando" que não estava na lista
+    // anterior toca igual.
+    {
+      const aguardando = lista.filter(p => p.status === 'aguardando').map(p => p.id)
+      const conhecidos = vistosRef.current
+      if (conhecidos) {
+        const novos = aguardando.filter(id => !conhecidos.has(id))
+        if (novos.length) {
+          console.log('[som] pedido novo apareceu na recarga, sem evento do tempo real:', novos)
+          iniciarLoopSom()
+        }
+      }
+      vistosRef.current = new Set(aguardando)
+    }
+
+    setPedidos(lista)
     carregadoDe.current = empresa.id
     setCarregando(false)
   }, [empresa])
