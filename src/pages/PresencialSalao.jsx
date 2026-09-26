@@ -264,6 +264,16 @@ export default function PresencialSalao() {
   // Rascunho: itens que o garçom monta mas que só vão pra cozinha (e pra impressora)
   // quando ele clica "Enviar" — assim o pedido inteiro sai numa impressão só.
   const [rascunho, setRascunho] = useState([]) // [{ produto_id, nome, preco_venda, quantidade }]
+  // LANÇADOS AGORA (25/09).
+  //
+  // A bebida de categoria "não imprime" cai direto na conta, sem passar pelo
+  // botão verde. No celular isso ficou cego: o garçom tocava no produto e nada
+  // mudava na tela — a comanda está atrás do painel de busca. Ele não sabia se
+  // o toque pegou, nem se tinha lançado duas vezes (Estação, 26/09).
+  //
+  // Aqui fica o que acabou de entrar na conta, com o botão de tirar do lado.
+  // Some quando ele troca de mesa: é um recibo do momento, não histórico.
+  const [lancadosAgora, setLancadosAgora] = useState([]) // [{ nome, qtd, ids: [] }]
   const [enviando, setEnviando] = useState(false)
   // Recado desta remessa (ex.: "sem cebola em tudo"). Vai colado na observação de CADA
   // item enviado: a observação do item é o único campo que a impressora da cozinha
@@ -690,6 +700,8 @@ export default function PresencialSalao() {
   // efeito e o garçom ficaria preso num alerta atrás do outro.
   const diretoTravadoRef = useRef(false)
   useEffect(() => { diretoTravadoRef.current = false }, [comandaSel?.id])
+  // Mesa nova, faixa limpa: o "lançados agora" é desta mesa, deste momento.
+  useEffect(() => { setLancadosAgora([]) }, [comandaSel?.id])
   useEffect(() => {
     if (semCozinha || !comandaSel || enviando || rascunho.length === 0) return
     if (diretoTravadoRef.current) return
@@ -947,10 +959,31 @@ export default function PresencialSalao() {
     })
   }
 
+  // Tira uma unidade do que acabou de ser lançado. Mexe no lançamento MAIS NOVO
+  // do produto: é o que o garçom está corrigindo.
+  async function tirarLancado(linha) {
+    const id = linha.ids[linha.ids.length - 1]
+    if (!id) return
+    const { data: atual } = await supabase.from('comanda_itens').select('quantidade').eq('id', id).single()
+    const q = Number(atual?.quantidade ?? 1)
+    if (q > 1) await supabase.from('comanda_itens').update({ quantidade: q - 1 }).eq('id', id)
+    else await supabase.from('comanda_itens').delete().eq('id', id)
+    setLancadosAgora(prev => prev.flatMap(l => {
+      if (l.nome !== linha.nome) return [l]
+      const resta = l.qtd - 1
+      const ids = q > 1 ? l.ids : l.ids.slice(0, -1)
+      return resta > 0 ? [{ ...l, qtd: resta, ids }] : []
+    }))
+    await loadMesas()
+  }
+
   // Soma na linha igual se já existir; senão cria uma nova. Duas montagens diferentes do
   // mesmo produto têm `linha` diferente, então ficam em linhas separadas (cada uma com
   // seu preço) — é o que permite lançar marmitex de valores diferentes na mesma comanda.
   function empilhar(novo) {
+    // Tremidinha curta: no meio do salão, com o celular na mão, é o sinal mais
+    // rápido de que o toque pegou. Quem não tem o recurso (iPhone) ignora.
+    try { navigator.vibrate?.(25) } catch { /* sem vibração neste aparelho */ }
     setRascunho(prev => {
       const i = prev.findIndex(r => (r.linha ?? String(r.produto_id)) === novo.linha)
       if (i >= 0) {
@@ -1249,6 +1282,20 @@ export default function PresencialSalao() {
     // A impressão não precisa do rascunho: ela imprime `inseridos`, que veio do
     // banco. E se falhar, o aviso de reimpressão também usa `inseridos`.
     const paraImprimir = inseridos ?? []
+    // Entrou direto na conta (sem botão verde): mostra na faixa "lançados agora"
+    // pra ele ver que pegou e poder tirar se lançou a mais.
+    if (itens && (inseridos ?? []).length) {
+      setLancadosAgora(prev => {
+        const novo = prev.map(l => ({ ...l, ids: [...l.ids] }))
+        for (const it of inseridos) {
+          const achou = novo.find(l => l.nome === it.nome)
+          const q = Number(it.quantidade) || 1
+          if (achou) { achou.qtd += q; achou.ids.push(it.id) }
+          else novo.push({ nome: it.nome, qtd: q, ids: [it.id] })
+        }
+        return novo
+      })
+    }
     if (itens) {
       // Foi só um pedaço: tira da lista o que acabou de entrar na conta e deixa
       // o resto (e o recado) esperando o botão verde. O localStorage se acerta
@@ -3123,6 +3170,30 @@ export default function PresencialSalao() {
                   </span>
                   <button type="button" onClick={() => setAvisoBipe(null)}
                     style={{ border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontWeight: 800 }}>×</button>
+                </div>
+              )}
+              {/* JÁ ENTROU NA CONTA (26/09). A bebida que não imprime não espera o
+                  botão verde — e sem este recibo o garçom não via nada acontecer
+                  quando tocava no produto. Aqui ele confere e tira o que lançou
+                  a mais, sem sair da tela de lançar. */}
+              {lancadosAgora.length > 0 && (
+                <div style={{ marginBottom: 8, padding: '8px 10px', borderRadius: 10,
+                  border: '1.5px solid #16a34a', background: 'rgba(34,197,94,.10)' }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: '#16a34a', marginBottom: 6 }}>
+                    ✓ Já na conta da mesa
+                  </div>
+                  {lancadosAgora.map(l => (
+                    <div key={l.nome} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
+                      <span style={{ flex: 1, fontSize: 14.5, fontWeight: 700 }}>
+                        {l.qtd}× {l.nome}
+                      </span>
+                      <button type="button" onClick={() => tirarLancado(l)}
+                        style={{ flexShrink: 0, padding: '5px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 800,
+                          border: '1.5px solid #ef4444', background: 'transparent', color: '#ef4444' }}>
+                        Tirar 1
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
               {/* Sem busca e sem categoria escolhida: mostra as CATEGORIAS (como no cardápio). */}
