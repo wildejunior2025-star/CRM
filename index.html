@@ -38,6 +38,14 @@
         };
         _trocaManifestoGestor();
         document.addEventListener('DOMContentLoaded', _trocaManifestoGestor);
+        // Sem "viewport-fit=cover" no gestor. Com ele, o app FWC Gestor (Android
+        // novo) desenhava a tela POR BAIXO da barra do relógio/câmera: os botões
+        // Mesas e Cozinha ficavam ali em cima e não pegavam o toque. O gestor não
+        // tem os recuos de área segura que o portal do cliente tem; sem o cover,
+        // o próprio app encaixa a página abaixo da barra (o Capacitor lê esta tag
+        // quando a página aparece, por isso ela precisa mudar aqui no começo).
+        var _vp = document.querySelector('meta[name="viewport"]');
+        if (_vp) _vp.setAttribute('content', 'width=device-width, initial-scale=1.0');
       }
     </script>
     <title>FWC Inter</title>
