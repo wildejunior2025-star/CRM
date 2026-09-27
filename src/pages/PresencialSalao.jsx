@@ -78,6 +78,11 @@ const soDigitos = (s) => String(s ?? '').replace(/\D/g, '')
 const maskMoeda = (s) => (Number(soDigitos(s)) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const valorMoeda = (s) => Number(soDigitos(s)) / 100                 // string mascarada -> número
 const numeroParaMoeda = (n) => maskMoeda(String(Math.round(Number(n || 0) * 100))) // número -> "12,50"
+// Nome curto da forma de pagamento, pro recibo do que a mesa já pagou.
+const formaLabelCurta = (f) => ({
+  dinheiro: 'dinheiro', pix: 'PIX', credito: 'crédito', debito: 'débito',
+  cartao: 'cartão', transferencia: 'transferência',
+}[String(f || '').toLowerCase()] || f || '')
 
 // Logo do WhatsApp. É SVG e não emoji porque emoji de zap não existe — o 📲 que
 // estava ali antes é "celular com seta" e ninguém lia como WhatsApp. Herda a cor
@@ -274,6 +279,15 @@ export default function PresencialSalao() {
   // Aqui fica o que acabou de entrar na conta, com o botão de tirar do lado.
   // Some quando ele troca de mesa: é um recibo do momento, não histórico.
   const [lancadosAgora, setLancadosAgora] = useState([]) // [{ nome, qtd, ids: [] }]
+  // ADIANTAMENTO (mig 0286): "vou pagar 50 e o resto fica com eles". O valor
+  // fica guardado na mesa e abate o que falta; o dinheiro só entra no caixa no
+  // fechamento, junto com o resto — assim a venda sai cheia e o caixa bate.
+  const [adiantamentos, setAdiantamentos] = useState({}) // { comanda_id: [{id, valor, forma, quem}] }
+  const [recebendoValor, setRecebendoValor] = useState(false) // modal aberto
+  const [valorRecebido, setValorRecebido] = useState('')
+  const [formaRecebida, setFormaRecebida] = useState('dinheiro')
+  const [quemPagou, setQuemPagou] = useState('')
+  const [salvandoAdiant, setSalvandoAdiant] = useState(false)
   const [enviando, setEnviando] = useState(false)
   // Recado desta remessa (ex.: "sem cebola em tudo"). Vai colado na observação de CADA
   // item enviado: a observação do item é o único campo que a impressora da cozinha
@@ -341,6 +355,17 @@ export default function PresencialSalao() {
   const escritaEm = useRef(0)
 
   // Muda o tempo todo: mesas, comandas e o caixa deste usuário.
+  // O que cada comanda aberta já recebeu adiantado. Consulta à parte porque a
+  // tabela é nova e não pendura na consulta das comandas.
+  const loadAdiantamentos = useCallback(async (ids) => {
+    if (!ids?.length) { setAdiantamentos({}); return }
+    const { data } = await supabase.from('comanda_adiantamentos')
+      .select('id, comanda_id, valor, forma, quem').in('comanda_id', ids).order('created_at')
+    const m = {}
+    for (const a of (data ?? [])) (m[a.comanda_id] ??= []).push(a)
+    setAdiantamentos(m)
+  }, [])
+
   const loadMesas = useCallback(async () => {
     if (!empresaId) return
     const minhaVez = ++cargaSeq.current
@@ -364,6 +389,7 @@ export default function PresencialSalao() {
     if (minhaVez !== cargaSeq.current || escritaEm.current > comecouEm) return
     setMesas(ms.data ?? [])
     setComandas(cs.data ?? [])
+    loadAdiantamentos((cs.data ?? []).map(c => c.id))
     setCaixaAberto(!!(cx.data && cx.data.length))
     // Só o que é de mesa AINDA ABERTA. Sem este filtro, a cobrança paga de uma
     // mesa já fechada ficava na lista pra sempre e o Salão anunciava "PIX
@@ -371,7 +397,7 @@ export default function PresencialSalao() {
     const abertas = new Set((cs.data ?? []).map(c => c.id))
     setPixPendentes((px.data ?? []).filter(x => abertas.has(x.comanda_id)))
     setLoading(false)
-  }, [empresaId, user?.id])
+  }, [empresaId, user?.id, loadAdiantamentos])
 
   // Quase nunca muda: cardápio, complementos, categorias, funcionários, clientes.
   const loadCatalogo = useCallback(async () => {
@@ -704,6 +730,12 @@ export default function PresencialSalao() {
   // mostrar o mesmo número que vai ser cobrado.
   const taxaSel = calcularTaxa(comandaSel?.comanda_itens ?? [], taxaPct, aplicarTaxa)
   const totalSel = subtotalSel + taxaSel
+  // Já recebido adiantado nesta mesa, e o que sobrou pra cobrar. Todas as contas
+  // de pagamento (troco, divisão, PIX, crédito) olham pro que FALTA, não pro
+  // total: senão a mesa cobraria de novo o que o amigo já pagou.
+  const adiantadoSel = (adiantamentos[comandaSel?.id] ?? [])
+    .reduce((s, a) => s + Number(a.valor || 0), 0)
+  const faltaSel = Math.max(0, Math.round((totalSel - adiantadoSel) * 100) / 100)
 
   // Mesa que o garçom já fechou: o interruptor da taxa começa como ELE deixou,
   // não no padrão ligado. Senão o ADM confere uma conta com serviço que não foi
@@ -733,9 +765,9 @@ export default function PresencialSalao() {
   // receber alguma coisa, e o servidor recusa — melhor a tela já oferecer só o
   // que vai passar. Um centavo é o bastante pra conta não fechar em zero.
   const cashbackAplicado = usarCashbackConta
-    ? Math.max(0, Math.min(cashbackSaldo, Math.round((totalSel - 0.01) * 100) / 100))
+    ? Math.max(0, Math.min(cashbackSaldo, Math.round((faltaSel - 0.01) * 100) / 100))
     : 0
-  const totalAPagar = Math.max(0, Math.round((totalSel - cashbackAplicado) * 100) / 100)
+  const totalAPagar = Math.max(0, Math.round((faltaSel - cashbackAplicado) * 100) / 100)
 
   // Os PIX DESTA mesa (mig 0193/0195) — a cobrança mora na mesa, não numa tela.
   // Conta rachada tem um QR por pessoa, por isso é lista e não um só.
@@ -747,10 +779,10 @@ export default function PresencialSalao() {
 
   // Divisão da conta
   const somaPag = pagamentos.reduce((s, p) => s + (Number(p.valor) || 0), 0)
-  const restante = Math.round((totalSel - somaPag) * 100) / 100
+  const restante = Math.round((faltaSel - somaPag) * 100) / 100
   // Fiado: no modo único é a forma escolhida; no dividir, as linhas marcadas como fiado.
   const valorFiado = modoPag === 'unico'
-    ? (forma === 'fiado' ? totalSel : 0)
+    ? (forma === 'fiado' ? faltaSel : 0)
     : pagamentos.filter(p => p.forma === 'fiado').reduce((s, p) => s + (Number(p.valor) || 0), 0)
   const temFiadoNaTela = valorFiado > 0
   const clientesFiltrados = buscaCliente.trim()
@@ -915,6 +947,39 @@ export default function PresencialSalao() {
       nome: produto.nome, preco_venda: Number(produto.preco_venda),
       complementos: [], quantidade: 1, observacao: '',
     })
+  }
+
+  // RECEBER UM VALOR DA MESA (mig 0286).
+  //
+  // Não mexe em item nenhum: guarda o valor na comanda e ele abate o que falta.
+  // Na hora de fechar, o banco junta este valor às formas de pagamento, então a
+  // venda sai cheia e o caixa do dia bate sem ninguém lançar nada à mão.
+  async function receberValor() {
+    const valor = valorMoeda(valorRecebido)
+    if (!comandaSel || !(valor > 0) || salvandoAdiant) return
+    // Receber mais do que falta viraria troco que o sistema não controla — e
+    // no fechamento o banco recusaria a conta inteira.
+    if (valor > faltaSel + 0.005) {
+      window.alert(`Falta receber ${fmt(faltaSel)} nesta mesa. Não dá pra lançar ${fmt(valor)}.`)
+      return
+    }
+    setSalvandoAdiant(true)
+    const { error } = await supabase.from('comanda_adiantamentos').insert({
+      empresa_id: empresaId, comanda_id: comandaSel.id,
+      valor, forma: formaRecebida,
+      quem: quemPagou.trim() || null,
+      criado_por: user?.id ?? null,
+    })
+    setSalvandoAdiant(false)
+    if (error) { window.alert(recadoDeErro(error, 'receber o valor')); return }
+    setValorRecebido(''); setQuemPagou('')
+    await loadMesas()
+  }
+
+  async function apagarAdiantamento(a) {
+    const { error } = await supabase.from('comanda_adiantamentos').delete().eq('id', a.id)
+    if (error) { window.alert(recadoDeErro(error, 'desfazer o recebimento')); return }
+    await loadMesas()
   }
 
   // Tira uma unidade do que acabou de ser lançado. Mexe no lançamento MAIS NOVO
@@ -1594,14 +1659,14 @@ export default function PresencialSalao() {
 
   // Rachar igual entre n pessoas (ajusta a última linha p/ fechar o total)
   function dividirIgual(n) {
-    const cada = Math.floor((totalSel / n) * 100) / 100
+    const cada = Math.floor((faltaSel / n) * 100) / 100
     const arr = Array.from({ length: n }, () => ({ forma: 'dinheiro', valor: cada.toFixed(2), cliente: null }))
-    const resto = Math.round((totalSel - cada * n) * 100) / 100
+    const resto = Math.round((faltaSel - cada * n) * 100) / 100
     if (arr.length) arr[arr.length - 1].valor = (cada + resto).toFixed(2)
     setPagamentos(arr)
   }
   function addPagamento() {
-    const falta = Math.max(0, Math.round((totalSel - somaPag) * 100) / 100)
+    const falta = Math.max(0, Math.round((faltaSel - somaPag) * 100) / 100)
     setPagamentos(prev => [...prev, { forma: 'dinheiro', valor: falta > 0 ? falta.toFixed(2) : '', cliente: null }])
   }
   function updatePagamento(i, campo, val) {
@@ -1626,7 +1691,7 @@ export default function PresencialSalao() {
     const ajustar = lista.map((_, idx) => idx).filter(idx => idx > i && !travada(idx))
     if (!ajustar.length) return lista
     const fixo = lista.reduce((s, p, idx) => ajustar.includes(idx) ? s : s + (Number(String(p.valor ?? '').replace(',', '.')) || 0), 0)
-    const sobra = Math.max(0, Math.round((totalSel - fixo) * 100) / 100)
+    const sobra = Math.max(0, Math.round((faltaSel - fixo) * 100) / 100)
     const cada = Math.floor((sobra / ajustar.length) * 100) / 100
     const ultimo = Math.round((sobra - cada * (ajustar.length - 1)) * 100) / 100
     return lista.map((p, idx) => {
@@ -3261,6 +3326,16 @@ export default function PresencialSalao() {
                   </div>
                 </>
               )}
+              {/* Alguém já pagou uma parte: o garçom precisa ver isso na mesa,
+                  não só quando abrir o fechamento (mig 0286). */}
+              {adiantadoSel > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+                  fontSize: 14.5, marginBottom: 6, padding: '6px 10px', borderRadius: 8,
+                  border: '1px solid #16a34a', background: 'rgba(34,197,94,.10)' }}>
+                  <span style={{ color: '#16a34a', fontWeight: 800 }}>✓ Já pago {fmt(adiantadoSel)}</span>
+                  <strong>Falta {fmt(faltaSel)}</strong>
+                </div>
+              )}
               {comandaSel.status === 'aguardando_conferencia' ? (
                 <div>
                   <div style={{ padding: '8px 10px', borderRadius: 8, background: 'rgba(59,130,246,.16)', color: '#2563eb', fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
@@ -3349,6 +3424,18 @@ export default function PresencialSalao() {
                         background: 'rgba(22,163,74,.12)', color: '#16a34a', cursor: 'pointer' }}>
                       {enviandoZap ? '…' : <IconeZap />}
                       <span className="sal-acao-txt">{enviandoZap ? 'Enviando…' : 'Mandar no zap'}</span>
+                    </button>
+                    {/* "Vou pagar 50": recebe um VALOR sem escolher item nenhum.
+                        A mesa continua aberta com tudo, devendo o resto. */}
+                    <button type="button"
+                      onClick={() => { setValorRecebido(''); setFormaRecebida('dinheiro'); setQuemPagou(''); setRecebendoValor(true) }}
+                      disabled={subtotalSel <= 0}
+                      className="sal-acao-icone"
+                      title="Receber uma parte da conta agora (o resto fica na mesa)"
+                      aria-label="Receber um valor"
+                      style={{ borderRadius: 10, border: '1px solid #16a34a',
+                        background: 'rgba(22,163,74,.12)', color: '#16a34a', cursor: 'pointer' }}>
+                      💵<span className="sal-acao-txt">Receber valor</span>
                     </button>
                     <button type="button" onClick={abrirFechamento} disabled={subtotalSel <= 0}
                       className="btn btn-primary sal-acao-principal" style={{ marginTop: 0, opacity: subtotalSel <= 0 ? 0.5 : 1 }}>
@@ -3862,6 +3949,12 @@ export default function PresencialSalao() {
             <div className="sal-fechar-total" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, fontWeight: 800, padding: '10px 0', borderTop: '1px dashed var(--border)', marginTop: 6 }}>
               <span>Total</span><span style={{ color: 'var(--primary)' }}>{fmt(totalSel)}</span>
             </div>
+            {/* Alguém da mesa já adiantou um valor: sai do que falta receber. */}
+            {adiantadoSel > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, color: '#16a34a', fontWeight: 700, padding: '2px 0' }}>
+                <span>✓ Já pago na mesa</span><span>− {fmt(adiantadoSel)}</span>
+              </div>
+            )}
             {cashbackAplicado > 0 && (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5, color: '#16a34a', marginTop: 4 }}>
@@ -3952,7 +4045,7 @@ export default function PresencialSalao() {
                     rachado funcionava porque ali o valor vai explícito. */}
                 {mpConectado && !pixDaMesa && (
                   <button type="button" onClick={() => cobrarPixOnline()}
-                    disabled={pixGerando || cashbackAplicado > 0 || totalSel <= 0}
+                    disabled={pixGerando || cashbackAplicado > 0 || faltaSel <= 0}
                     style={{ flex: '1 1 100%', padding: '11px 0', borderRadius: 10, fontWeight: 800, fontSize: 13,
                       cursor: (pixGerando || cashbackAplicado > 0) ? 'not-allowed' : 'pointer',
                       // Escolhido = marcado, igual às outras formas. Antes ficava
@@ -3961,10 +4054,10 @@ export default function PresencialSalao() {
                       background: forma === 'pix_online' ? 'rgba(34,197,94,.30)' : 'rgba(34,197,94,.12)',
                       boxShadow: forma === 'pix_online' ? '0 0 0 2px rgba(34,197,94,.35)' : 'none',
                       color: 'var(--text)',
-                      opacity: (pixGerando || cashbackAplicado > 0 || totalSel <= 0) ? .5 : 1 }}>
+                      opacity: (pixGerando || cashbackAplicado > 0 || faltaSel <= 0) ? .5 : 1 }}>
                     {pixGerando ? '⚡ Gerando o QR...'
-                      : forma === 'pix_online' ? `✓ PIX online · ${fmt(totalSel)}`
-                      : `⚡ PIX online · cobrar ${fmt(totalSel)} no QR`}
+                      : forma === 'pix_online' ? `✓ PIX online · ${fmt(faltaSel)}`
+                      : `⚡ PIX online · cobrar ${fmt(faltaSel)} no QR`}
                   </button>
                 )}
                 {mpConectado && !pixDaMesa && cashbackAplicado > 0 && (
@@ -4162,11 +4255,11 @@ export default function PresencialSalao() {
                 className="btn btn-primary" style={{ width: '100%', marginTop: 0, opacity: (salvando || !podeReceber) ? 0.5 : 1 }}>
                 {salvando ? 'Fechando...'
                   : esperandoPix ? '⚡ Esperando o PIX cair — a conta fecha sozinha'
-                  : !ehAdmin ? `Fechar e enviar pro caixa · ${fmt(totalSel)}`
+                  : !ehAdmin ? `Fechar e enviar pro caixa · ${fmt(faltaSel)}`
                   // No fiado não entra dinheiro agora: "Receber" mentiria no valor.
-                  : valorFiado >= totalSel - 0.05 ? `Fechar no fiado · ${fmt(totalSel)}`
-                  : temFiadoNaTela ? `Receber ${fmt(totalSel - valorFiado)} · fiado ${fmt(valorFiado)}`
-                  : `Receber ${fmt(totalSel)}`}
+                  : valorFiado >= faltaSel - 0.05 ? `Fechar no fiado · ${fmt(faltaSel)}`
+                  : temFiadoNaTela ? `Receber ${fmt(faltaSel - valorFiado)} · fiado ${fmt(valorFiado)}`
+                  : `Receber ${fmt(faltaSel)}`}
               </button>
             </div>
           </div>
@@ -4190,6 +4283,83 @@ export default function PresencialSalao() {
           saída da tela era cancelar o PIX. */}
       {/* Mesmo caso da gaveta, e este ainda abre por cima da tela de fechamento
           (1100): o QR que o cliente vai ler tem que estar na frente de tudo. */}
+      {/* RECEBER UM VALOR (mig 0286). Quem paga por valor não quer escolher
+          item: digita quanto vai deixar, escolhe a forma e pronto. O dinheiro
+          só entra no caixa no fechamento, junto com o resto da conta. */}
+      {recebendoValor && comandaSel && (
+        <div className="sal-modal-overlay" onClick={() => setRecebendoValor(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', zIndex: 1150,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 360, background: 'var(--bg)', borderRadius: 16,
+              border: '1px solid var(--border)', padding: 18, maxHeight: '92dvh', overflowY: 'auto' }}>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 2 }}>💵 Receber um valor</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 12 }}>
+              A mesa continua aberta com todos os itens. Falta receber {fmt(faltaSel)}.
+            </div>
+
+            <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-muted)' }}>Quanto ele vai pagar</label>
+            <input autoFocus type="text" inputMode="decimal" value={valorRecebido}
+              onChange={e => setValorRecebido(maskMoeda(e.target.value))}
+              placeholder="0,00"
+              style={{ width: '100%', marginTop: 4, marginBottom: 12, padding: '12px 12px', borderRadius: 10, fontSize: 20, fontWeight: 800,
+                border: '1.5px solid var(--primary)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box' }} />
+
+            <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-muted)' }}>Como pagou</label>
+            <div style={{ display: 'flex', gap: 6, margin: '6px 0 12px', flexWrap: 'wrap' }}>
+              {[['dinheiro', '💵 Dinheiro'], ['pix', '⚡ PIX'], ['credito', '💳 Crédito'], ['debito', '💳 Débito']].map(([v, txt]) => (
+                <button key={v} type="button" onClick={() => setFormaRecebida(v)}
+                  style={{ flex: '1 0 45%', padding: '10px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                    border: `1.5px solid ${formaRecebida === v ? '#16a34a' : 'var(--border)'}`,
+                    background: formaRecebida === v ? 'rgba(34,197,94,.14)' : 'transparent',
+                    color: formaRecebida === v ? '#16a34a' : 'var(--text)' }}>{txt}</button>
+              ))}
+            </div>
+
+            <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-muted)' }}>De quem foi (opcional)</label>
+            <input type="text" value={quemPagou} onChange={e => setQuemPagou(e.target.value)}
+              placeholder="Ex.: João"
+              style={{ width: '100%', marginTop: 4, marginBottom: 14, padding: '10px 12px', borderRadius: 10, fontSize: 15,
+                border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box' }} />
+
+            {/* O que a mesa já recebeu, com o botão de desfazer — dedo errado no
+                valor não pode virar conta travada. */}
+            {(adiantamentos[comandaSel.id] ?? []).length > 0 && (
+              <div style={{ marginBottom: 14, padding: 10, borderRadius: 10, border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 6 }}>Já recebido nesta mesa</div>
+                {(adiantamentos[comandaSel.id] ?? []).map(a => (
+                  <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 14 }}>
+                    <span style={{ flex: 1, fontWeight: 700 }}>
+                      {fmt(a.valor)} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>
+                        · {formaLabelCurta(a.forma)}{a.quem ? ` · ${a.quem}` : ''}
+                      </span>
+                    </span>
+                    <button type="button" onClick={() => apagarAdiantamento(a)}
+                      style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontWeight: 800, fontSize: 12.5 }}>
+                      Desfazer
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" onClick={() => setRecebendoValor(false)}
+                style={{ flex: '0 0 auto', padding: '0 16px', height: 46, borderRadius: 10, cursor: 'pointer',
+                  border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 700 }}>
+                Fechar
+              </button>
+              <button type="button" onClick={receberValor} disabled={salvandoAdiant || valorMoeda(valorRecebido) <= 0}
+                style={{ flex: 1, height: 46, borderRadius: 10, cursor: 'pointer', border: 'none',
+                  background: '#16a34a', color: '#fff', fontWeight: 800, fontSize: 15,
+                  opacity: (salvandoAdiant || valorMoeda(valorRecebido) <= 0) ? .5 : 1 }}>
+                {salvandoAdiant ? 'Salvando...' : `Receber ${fmt(valorMoeda(valorRecebido))}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {pixAmpliado && (
         <div onClick={() => setPixAmpliado(null)}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', zIndex: 1200,
