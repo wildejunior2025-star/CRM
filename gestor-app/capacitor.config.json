@@ -8,6 +8,10 @@
     "cleartext": false,
     "errorPath": "offline.html"
   },
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#000000"
+  },
   "android": {
     "allowMixedContent": false,
     "backgroundColor": "#000000"
