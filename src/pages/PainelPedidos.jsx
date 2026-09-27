@@ -8376,7 +8376,7 @@ export default function PainelPedidos() {
       const comecouEm = Date.now()
       const { data } = await supabase
         .from('comandas')
-        .select('id, numero_mesa, tipo, nome_cliente, created_at, status, fechamento_pendente, preconta_pedida_em, fechada_por, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao, setor, isento_taxa)')
+        .select('id, numero_mesa, tipo, nome_cliente, created_at, status, fechamento_pendente, preconta_pedida_em, fechada_por, comanda_itens(id, nome, quantidade, preco_unitario, status, observacao, setor, isento_taxa), comanda_adiantamentos(id, valor, forma, quem)')
         .eq('empresa_id', empresa.id)
         .in('status', ['aberta', 'aguardando_conferencia'])
         .order('numero_mesa')
@@ -8546,9 +8546,14 @@ export default function PainelPedidos() {
     const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
     const pct = Number(empresa?.taxa_servico_pct ?? 0)
     const taxa = calcularTaxa(itens, pct, true)
+    // O que a mesa já pagou adiantado (mig 0286): sai no papel como "FALTA",
+    // senão o cliente lê o total e acha que está sendo cobrado de novo.
+    const adiants = Array.isArray(c.comanda_adiantamentos) ? c.comanda_adiantamentos : []
+    const adiantado = adiants.reduce((s2, a) => s2 + Number(a.valor || 0), 0)
     const dados = {
       numeroMesa: c.numero_mesa, rotulo: rotuloComanda(c),
       itens, subtotal, taxa, total: subtotal + taxa,
+      adiantado, adiantamentos: adiants,
       // Pré-conta não fala em pagamento: a mesa ainda vai escolher.
       formaPagamento: '', pagamentos: [], empresa, preConta: true,
     }

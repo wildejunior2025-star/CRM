@@ -1776,6 +1776,7 @@ export default function PresencialSalao() {
         : null,
       itens: comandaSel?.comanda_itens ?? [],
       subtotal: subtotalSel, taxa: taxaSel, total: totalSel,
+      adiantado: adiantadoSel, adiantamentos: adiantamentos[comandaSel?.id] ?? [],
       empresa: { nome: empresaNome },
       preConta: true,
       // A pré-conta não fala em pagamento: ele ainda vai ser escolhido.
@@ -1873,6 +1874,9 @@ export default function PresencialSalao() {
       `Subtotal: ${fmt(subtotalSel)}`,
       ...(taxaSel > 0 ? [`Serviço (${taxaPct}%): ${fmt(taxaSel)}`] : []),
       `*Total: ${fmt(totalSel)}*`,
+      ...(adiantadoSel > 0
+        ? [`Já pago na mesa: -${fmt(adiantadoSel)}`, `*Falta: ${fmt(faltaSel)}*`]
+        : []),
       '',
       'Confere pra mim? Qualquer coisa é só falar com a gente.',
     ].join('\n')
@@ -1914,6 +1918,7 @@ export default function PresencialSalao() {
         : null,
       itens: comandaSel?.comanda_itens ?? [],
       subtotal: subtotalSel, taxa: taxaSel, total: totalSel,
+      adiantado: adiantadoSel, adiantamentos: adiantamentos[comandaSel?.id] ?? [],
       formaPagamento: formaPagamento ?? (modoPag === 'unico' ? forma : 'Dividido'),
       pagamentos: pags,
       empresa: { nome: empresaNome },

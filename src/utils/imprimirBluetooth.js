@@ -468,6 +468,7 @@ export function montarPixQrBytes({ valor = 0, copiaCola = '', empresa = {}, rotu
 export function montarContaMesaBytes({
   numeroMesa, rotulo = '', itens = [], subtotal = 0, taxa = 0, total = 0,
   formaPagamento = '', pagamentos = [], empresa = {}, preConta = false,
+  adiantado = 0, adiantamentos = [],
 }) {
   const titulo = (rotulo || `MESA ${numeroMesa}`).toUpperCase()
   const hora = new Date().toLocaleString('pt-BR', {
@@ -492,6 +493,16 @@ export function montarContaMesaBytes({
   b.row('Subtotal', fmt(subtotal))
   if (Number(taxa) > 0) b.row('Taxa de servico', fmt(taxa))
   b.big(true).row('TOTAL', fmt(total)).big(false)
+  // Alguem da mesa ja pagou uma parte (mig 0286): o papel tem que dizer quanto
+  // falta, senao o cliente confere o total e acha que esta sendo cobrado de novo.
+  if (Number(adiantado) > 0) {
+    b.line()
+    for (const a of (adiantamentos ?? [])) {
+      b.row('Ja pago' + (a?.quem ? ' - ' + semAcento(a.quem) : '')
+            + (a?.forma ? ' (' + semAcento(a.forma) + ')' : ''), '- ' + fmt(a?.valor))
+    }
+    b.big(true).row('FALTA', fmt(Math.max(0, Number(total) - Number(adiantado)))).big(false)
+  }
   if (Array.isArray(pagamentos) && pagamentos.length > 1) {
     b.line().bold(true).txt('DIVISAO DA CONTA').nl().bold(false)
     pagamentos.forEach((p, i) => {

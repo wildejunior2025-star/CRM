@@ -335,7 +335,7 @@ const formaContaLabel = (f) => ({ dinheiro: 'Dinheiro', pix: 'PIX', credito: 'Cr
 // consumiu e quanto deu, e só depois escolhe como paga. Sai sem forma de
 // pagamento e avisando que não é comprovante — senão vira recibo de algo que
 // ainda não foi pago.
-export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0, taxa = 0, total = 0, formaPagamento = '', pagamentos = [], empresa = {}, rotulo = '', preConta = false }) {
+export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0, taxa = 0, total = 0, formaPagamento = '', pagamentos = [], empresa = {}, rotulo = '', preConta = false, adiantado = 0, adiantamentos = [] }) {
   const largura = larguraCupom()
   // Igual à comanda da cozinha: `rotulo` troca o "MESA X" (comanda de balcão).
   const titulo = (rotulo || `MESA ${numeroMesa}`).toUpperCase()
@@ -374,6 +374,10 @@ export function montarContaPresencialHtml({ numeroMesa, itens = [], subtotal = 0
   <div class="row"><span>Subtotal</span> <span>${fmt(subtotal)}</span></div>
   ${Number(taxa) > 0 ? `<div class="row"><span>Taxa de serviço</span> <span>${fmt(taxa)}</span></div>` : ''}
   <div class="row b lg"><span>TOTAL</span> <span>${fmt(total)}</span></div>
+  ${Number(adiantado) > 0 ? `
+    <div class="hr">${tracos}</div>
+    ${(adiantamentos ?? []).map(a => `<div class="row"><span>Ja pago${a?.quem ? ' - ' + esc(a.quem) : ''}${a?.forma ? ' (' + esc(a.forma) + ')' : ''}</span> <span>- ${fmt(a?.valor)}</span></div>`).join('')}
+    <div class="row b lg"><span>FALTA</span> <span>${fmt(Math.max(0, Number(total) - Number(adiantado)))}</span></div>` : ''}
   ${Array.isArray(pagamentos) && pagamentos.length > 1
     ? `<div class="hr">${tracos}</div><div class="b">DIVISAO DA CONTA</div>` +
       // No fiado sai o NOME de quem ficou devendo (a conta dividida pode ter um
