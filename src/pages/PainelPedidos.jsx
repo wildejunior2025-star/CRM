@@ -8574,13 +8574,18 @@ export default function PainelPedidos() {
   function imprimirContaMesa(c) {
     const itens = Array.isArray(c.comanda_itens) ? c.comanda_itens : []
     const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
+    const pct = Number(empresa?.taxa_servico_pct ?? 0)
+    const taxa = calcularTaxa(itens, pct, true)
+    const total = subtotal + taxa
+    const adiants = Array.isArray(c.comanda_adiantamentos) ? c.comanda_adiantamentos : []
+    const adiantado = adiants.reduce((s2, a) => s2 + Number(a.valor || 0), 0)
     const pend = c.fechamento_pendente || {}
     const pagamentos = Array.isArray(pend.pagamentos) ? pend.pagamentos : []
-    const total = pagamentos.length ? pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0) : subtotal
-    const taxa = Math.max(0, Math.round((total - subtotal) * 100) / 100)
     const forma = pagamentos.length > 1 ? 'Dividido' : (pagamentos[0]?.forma ?? '')
     imprimirContaSeMesa({
-      numeroMesa: c.numero_mesa, rotulo: rotuloComanda(c), itens, subtotal, taxa, total, formaPagamento: forma, pagamentos, empresa,
+      numeroMesa: c.numero_mesa, rotulo: rotuloComanda(c), itens, subtotal, taxa, total,
+      adiantado, adiantamentos: adiants,
+      formaPagamento: forma, pagamentos, empresa,
     }, empresa?.nome)
   }
 
@@ -8591,13 +8596,17 @@ export default function PainelPedidos() {
   async function handleImprimirContaMesa(c) {
     const itens = Array.isArray(c.comanda_itens) ? c.comanda_itens : []
     const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
+    const pct = Number(empresa?.taxa_servico_pct ?? 0)
+    const taxa = calcularTaxa(itens, pct, true)
+    const total = subtotal + taxa
+    const adiants = Array.isArray(c.comanda_adiantamentos) ? c.comanda_adiantamentos : []
+    const adiantado = adiants.reduce((s2, a) => s2 + Number(a.valor || 0), 0)
     const pend = c.fechamento_pendente || {}
     const pagamentos = Array.isArray(pend.pagamentos) ? pend.pagamentos : []
-    const total = pagamentos.length ? pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0) : subtotal
-    const taxa = Math.max(0, Math.round((total - subtotal) * 100) / 100)
     const forma = pagamentos.length > 1 ? 'Dividido' : (pagamentos[0]?.forma ?? '')
     const dados = {
       numeroMesa: c.numero_mesa, rotulo: rotuloComanda(c), itens, subtotal, taxa, total,
+      adiantado, adiantamentos: adiants,
       formaPagamento: forma, pagamentos, empresa,
     }
     if (await viaBluetooth('conta', dados)) return
