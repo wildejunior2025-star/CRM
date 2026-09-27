@@ -507,6 +507,7 @@ export default function PresencialSalao() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_pix_cobrancas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_adiantamentos', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
