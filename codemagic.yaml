@@ -1,0 +1,39 @@
+# Codemagic — gera o app FWC Gestor do iPhone num Mac na nuvem e manda pro
+# TestFlight. Não temos Mac: o Xcode só roda lá. O Android continua sendo
+# gerado aqui no PC (gestor-app/android).
+#
+# Antes do primeiro build, no Codemagic:
+#   Teams → Integrations → Developer Portal: ligar a chave da App Store Connect
+#   API com o nome "FWC ASC" (Issuer ID + Key ID + arquivo .p8).
+workflows:
+  gestor-ios:
+    name: FWC Gestor (iPhone)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: FWC ASC
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.fwcinter.gestor
+      node: 20
+      xcode: latest
+    scripts:
+      - name: Instalar dependencias
+        script: cd gestor-app && npm ci
+      - name: Sincronizar Capacitor
+        script: cd gestor-app && npx cap sync ios
+      - name: Assinatura
+        script: xcode-project use-profiles --project gestor-app/ios/App/App.xcodeproj
+      - name: Gerar IPA
+        script: |
+          xcode-project build-ipa \
+            --project gestor-app/ios/App/App.xcodeproj \
+            --scheme App \
+            --archive-xcargs "CURRENT_PROJECT_VERSION=$BUILD_NUMBER"
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
