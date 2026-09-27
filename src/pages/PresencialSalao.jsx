@@ -293,8 +293,6 @@ export default function PresencialSalao() {
   // lista deslizando pro lado. O <select> abre a roda nativa nos dois.
   const [invCatNova, setInvCatNova] = useState(false)
   const [ordemCat, setOrdemCat] = useState({}) // { nomeCategoria(minusculo): ordem } — mesma ordem do catálogo
-  // { nomeCategoria(sem acento): 'salao' | 'cozinha' | 'nenhum' } — mig 0184/0185.
-  const [setorCat, setSetorCat] = useState({})
   const [caixaAberto, setCaixaAberto] = useState(false) // só lança na mesa com o caixa aberto
   // Complementos: { produto_id: [{ id, nome, min, max, opcoes:[{id,nome,preco_adicional}] }] }
   // Mesma fonte do cardápio do QR (MesaCardapio) — produto com grupo abre o modal de montagem.
@@ -413,9 +411,6 @@ export default function PresencialSalao() {
     const om = {}
     for (const c of (cat.data ?? [])) if (c?.nome != null) om[String(c.nome).trim().toLowerCase()] = c.ordem == null ? 9999 : c.ordem
     setOrdemCat(om)
-    const sm = {}
-    for (const c of (cat.data ?? [])) if (c?.nome != null) sm[semAcento(c.nome)] = c.setor || 'salao'
-    setSetorCat(sm)
     // Monta { produto_id: [grupos] }, pulando grupo/opção pausados. min/max do vínculo
     // (override) mandam mais que os do grupo, igual no cardápio do QR.
     const cm = {}
@@ -667,61 +662,24 @@ export default function PresencialSalao() {
   // rascunho continua sendo o lugar onde a quantidade é somada antes de gravar.
   useEffect(() => {
     if (!semCozinha || !comandaSel || enviando || rascunho.length === 0) return
-    enviarCozinha({ imprimir: false })
+    enviarCozinha({ imprimir: false, auto: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [semCozinha, rascunho, comandaSel, enviando])
 
-  // Categoria do produto, pra saber o setor sem ter que carregar nada a mais:
-  // o catálogo já traz a categoria de cada produto.
-  const catPorProduto = useMemo(() => {
-    const m = {}
-    for (const p of produtos) if (p?.produto_id != null) m[String(p.produto_id)] = p.categoria
-    return m
-  }, [produtos])
-
-  // Categoria marcada como "NÃO IMPRIME" (mig 0185): a bebida que o garçom pega
-  // ele mesmo na geladeira. Não tem papel pra sair nem cozinha pra avisar.
-  const naoImprime = useCallback((r) => {
-    const cat = catPorProduto[String(r?.produto_id ?? '')]
-    return !!cat && setorCat[semAcento(cat)] === 'nenhum'
-  }, [catPorProduto, setorCat])
-
-  // ...e por isso ele NÃO espera o botão verde: cai direto na conta do cliente.
+  // TUDO ESPERA O BOTÃO VERDE (voltou assim em 26/09, a pedido da Estação).
   //
-  // Segurar esse item no rascunho era pedir pro garçom "enviar para a cozinha"
-  // uma cachaça que a loja já disse que não vai pra cozinha nenhuma — e, se ele
-  // esquecesse de apertar, a bebida saía da geladeira sem entrar na conta.
+  // Por um dia a bebida de categoria "não imprime" caiu direto na conta, sem
+  // passar pelo botão. A ideia era não deixar cerveja sair da geladeira sem ser
+  // lançada — mas no celular o garçom perdeu o pé: o item sumia da lista "a
+  // enviar" e ele não sabia se o toque tinha pegado nem se lançou duas vezes.
+  // A faixa verde de recibo não resolveu a sensação, e a equipe preferiu o jeito
+  // antigo: o garçom monta a remessa, confere a lista inteira e manda.
   //
-  // Só os que não imprimem vão sozinhos: o que é da cozinha (ou sai na
-  // impressora da frente) continua esperando o envio, porque ali o botão é o
-  // que dispara o papel.
-  // Deu erro ao gravar? Para de tentar sozinho. O item continua no rascunho e o
-  // botão verde faz o reenvio na mão — sem isto, cada falha voltaria pelo mesmo
-  // efeito e o garçom ficaria preso num alerta atrás do outro.
-  const diretoTravadoRef = useRef(false)
-  useEffect(() => { diretoTravadoRef.current = false }, [comandaSel?.id])
+  // Se um dia voltar, o problema a resolver é o mesmo: como ele confere no
+  // celular o que já entrou na conta.
   // Mesa nova, faixa limpa: o "lançados agora" é desta mesa, deste momento.
   useEffect(() => { setLancadosAgora([]) }, [comandaSel?.id])
-  useEffect(() => {
-    if (semCozinha || !comandaSel || enviando || rascunho.length === 0) return
-    if (diretoTravadoRef.current) return
-    const diretos = rascunho.filter(naoImprime)
-    if (diretos.length) {
-      enviarCozinha({ imprimir: false, itens: diretos })
-        .then(ok => { if (!ok) diretoTravadoRef.current = true })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [semCozinha, rascunho, comandaSel, enviando, naoImprime])
   const subtotalRascunho = rascunho.reduce((s, r) => s + Number(r.preco_venda) * r.quantidade, 0)
-
-  // O botão verde só fala em COZINHA quando tem comida de verdade esperando.
-  // Bebida que sai na impressora da frente é lançamento, não pedido de preparo
-  // — e prometer "cozinha" numa comanda que nunca vai chegar lá é o jeito mais
-  // rápido de o garçom parar de acreditar no que a tela diz.
-  const rascTemCozinha = rascunho.some(r => {
-    const cat = catPorProduto[String(r?.produto_id ?? '')]
-    return !!cat && setorCat[semAcento(cat)] === 'cozinha'
-  })
 
   const subtotalSel = subtotalDe(comandaSel)
 
@@ -1237,7 +1195,7 @@ export default function PresencialSalao() {
   // `itens`: manda só um pedaço do rascunho (é assim que a categoria "não
   // imprime" vai sozinha, sem levar junto o prato que ainda está sendo montado).
   // Sem ele, vai o rascunho inteiro — o botão verde de sempre.
-  async function enviarCozinha({ imprimir = true, itens = null } = {}) {
+  async function enviarCozinha({ imprimir = true, itens = null, auto = false } = {}) {
     const lista = itens ?? rascunho
     if (!comandaSel || !lista.length || enviando) return false
     setEnviando(true)
@@ -1284,7 +1242,7 @@ export default function PresencialSalao() {
     const paraImprimir = inseridos ?? []
     // Entrou direto na conta (sem botão verde): mostra na faixa "lançados agora"
     // pra ele ver que pegou e poder tirar se lançou a mais.
-    if (itens && (inseridos ?? []).length) {
+    if (auto && (inseridos ?? []).length) {
       setLancadosAgora(prev => {
         const novo = prev.map(l => ({ ...l, ids: [...l.ids] }))
         for (const it of inseridos) {
@@ -2996,7 +2954,7 @@ export default function PresencialSalao() {
               {rascunho.length > 0 && (
                 <div style={{ marginTop: 14, padding: 12, borderRadius: 10, border: '1.5px dashed var(--primary)', background: 'rgba(124,58,237,.06)' }}>
                   <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8, color: 'var(--primary)' }}>
-                    🧾 A enviar — {rascTemCozinha ? 'ainda não foi pra cozinha' : 'ainda não entrou na conta'}
+                    🧾 A enviar — ainda não foi pra cozinha
                   </div>
                   {rascunho.map(r => (
                     <div key={r.linha ?? r.produto_id} style={{ padding: '5px 0' }}>
@@ -3283,7 +3241,7 @@ export default function PresencialSalao() {
                 <button type="button" onClick={() => enviarCozinha()} disabled={enviando}
                   style={{ width: '100%', marginBottom: 12, padding: '12px 0', borderRadius: 10, border: 'none', cursor: enviando ? 'wait' : 'pointer',
                     background: '#16a34a', color: '#fff', fontWeight: 800, fontSize: 15, opacity: enviando ? 0.6 : 1 }}>
-                  {enviando ? 'Enviando...' : `${rascTemCozinha ? '🍳 Enviar para a cozinha' : '🧾 Lançar na comanda'} · ${rascunho.reduce((s, r) => s + r.quantidade, 0)} item(ns) · ${fmt(subtotalRascunho)}`}
+                  {enviando ? 'Enviando...' : `🍳 Enviar para a cozinha · ${rascunho.reduce((s, r) => s + r.quantidade, 0)} item(ns) · ${fmt(subtotalRascunho)}`}
                 </button>
               )}
               <div className="sal-rodape-subtotal" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15.5, marginBottom: 4 }}>
