@@ -297,7 +297,7 @@ export default function PresencialHistorico() {
         .select('id, garcom_id, ate_dia, valor, pontos, pago_em')
         .order('pago_em', { ascending: false })
         .limit(60)
-        .then(({ data }) => setAcertosPagos(data ?? []))
+        .then(({ data }) => setAcertosPagos((data ?? []).filter(a => Number(a.valor || 0) > 0)))
     }
     if (!ehAdmin && meuId) {
       // A coluna do pagamento é `pago_em` (mig 0230) — pedindo `created_at`,
@@ -309,7 +309,7 @@ export default function PresencialHistorico() {
         .eq('garcom_id', meuId)
         .order('pago_em', { ascending: false })
         .limit(20)
-        .then(({ data }) => setAcertosRecebidos(data ?? []))
+        .then(({ data }) => setAcertosRecebidos((data ?? []).filter(a => Number(a.valor || 0) > 0)))
     }
   }, [empresaId, ehAdmin, meuId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -319,7 +319,12 @@ export default function PresencialHistorico() {
   async function carregarAcumulado() {
     const { data, error } = await supabase.rpc('acumulado_garcons')
     if (error) return
-    const lista = (data ?? []).filter(a => ehAdmin || a.garcom_id === meuId)
+    // Quem está zerado não entra: garçom que nunca trabalhou (ou que já
+    // recebeu tudo) só enchia a lista de linhas em R$ 0,00, e o dono lia isso
+    // como "tem gente esperando pagamento" (Saidera, 27/09).
+    const lista = (data ?? [])
+      .filter(a => ehAdmin || a.garcom_id === meuId)
+      .filter(a => Number(a.valor || 0) > 0 || Number(a.pontos || 0) > 0)
     setAcumulado(lista)
   }
 
@@ -407,7 +412,7 @@ export default function PresencialHistorico() {
     return Object.values(map).map(r => ({
       ...r,
       pontos: r.lancou * pontosCfg.lancar + r.entregou * pontosCfg.entregar + r.fechou * pontosCfg.fechar,
-    })).sort((a, b) => b.pontos - a.pontos)
+    })).filter(r => r.pontos > 0).sort((a, b) => b.pontos - a.pontos)
   }, [lancados, entregas, fechadas, pontosCfg])
 
   // O bolo do dia e quanto vale cada ponto. O total de pontos é o de TODOS os
