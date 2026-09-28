@@ -360,7 +360,7 @@ export default function PresencialSalao() {
   const loadAdiantamentos = useCallback(async (ids) => {
     if (!ids?.length) { setAdiantamentos({}); return }
     const { data } = await supabase.from('comanda_adiantamentos')
-      .select('id, comanda_id, valor, forma, quem').in('comanda_id', ids).order('created_at')
+      .select('id, comanda_id, valor, forma, quem, created_at').in('comanda_id', ids).order('created_at')
     const m = {}
     for (const a of (data ?? [])) (m[a.comanda_id] ??= []).push(a)
     setAdiantamentos(m)
@@ -3335,11 +3335,19 @@ export default function PresencialSalao() {
               {/* Alguém já pagou uma parte: o garçom precisa ver isso na mesa,
                   não só quando abrir o fechamento (mig 0286). */}
               {adiantadoSel > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
-                  fontSize: 14.5, marginBottom: 6, padding: '6px 10px', borderRadius: 8,
+                <div style={{ marginBottom: 6, padding: '8px 10px', borderRadius: 8,
                   border: '1px solid #16a34a', background: 'rgba(34,197,94,.10)' }}>
-                  <span style={{ color: '#16a34a', fontWeight: 800 }}>✓ Já pago {fmt(adiantadoSel)}</span>
-                  <strong>Falta {fmt(faltaSel)}</strong>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+                    fontSize: 14.5, marginBottom: (adiantamentos[comandaSel.id] ?? []).length > 0 ? 6 : 0 }}>
+                    <span style={{ color: '#16a34a', fontWeight: 800 }}>✓ Já pago {fmt(adiantadoSel)}</span>
+                    <strong>Falta {fmt(faltaSel)}</strong>
+                  </div>
+                  {(adiantamentos[comandaSel.id] ?? []).map(a => (
+                    <div key={a.id} style={{ fontSize: 12.5, color: '#166534', display: 'flex', justifyContent: 'space-between', gap: 6, paddingTop: 2 }}>
+                      <span>{a.created_at ? new Date(a.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                      <span style={{ fontWeight: 700 }}>{fmt(a.valor)}</span>
+                    </div>
+                  ))}
                 </div>
               )}
               {comandaSel.status === 'aguardando_conferencia' ? (
