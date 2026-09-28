@@ -973,6 +973,24 @@ export default function PresencialSalao() {
     })
     setSalvandoAdiant(false)
     if (error) { window.alert(recadoDeErro(error, 'receber o valor')); return }
+    // Busca lista atualizada de adiantamentos pra imprimir o comprovante com o FALTA correto.
+    const { data: adiants } = await supabase.from('comanda_adiantamentos')
+      .select('id, valor, forma, quem').eq('comanda_id', comandaSel.id).order('created_at')
+    const adiantados = adiants ?? []
+    const totalAdiantado = adiantados.reduce((s, a) => s + Number(a.valor || 0), 0)
+    const dadosComprovante = {
+      numeroMesa: mesaSel?.numero,
+      rotulo: mesaSel?.is_comanda
+        ? `${rotuloMesa(mesaSel)}${comandaSel?.nome_cliente ? ' · ' + comandaSel.nome_cliente : ''}`
+        : null,
+      itens: comandaSel?.comanda_itens ?? [],
+      subtotal: subtotalSel, taxa: taxaSel, total: totalSel,
+      adiantado: totalAdiantado, adiantamentos: adiantados,
+      formaPagamento: '', pagamentos: [], preConta: true,
+      empresa: { nome: empresaNome },
+    }
+    viaBluetooth('conta', dadosComprovante)
+      || imprimirHtml(montarContaPresencialHtml(dadosComprovante), empresaNome, { soApp: ehCelular, origem: 'mesa' })
     setValorRecebido(''); setQuemPagou('')
     await loadMesas()
   }
