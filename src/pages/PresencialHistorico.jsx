@@ -289,10 +289,14 @@ export default function PresencialHistorico() {
     })
     carregarAcumulado()
     if (!ehAdmin && meuId) {
+      // A coluna do pagamento é `pago_em` (mig 0230) — pedindo `created_at`,
+      // que não existe, a consulta voltava com erro e a lista chegava vazia: o
+      // garçom via o que fez e o que tem a receber, e NUNCA o que já recebeu
+      // (Saidera, 27/09).
       supabase.from('garcom_acertos')
-        .select('id, ate_dia, valor, pontos, created_at')
+        .select('id, ate_dia, valor, pontos, pago_em')
         .eq('garcom_id', meuId)
-        .order('created_at', { ascending: false })
+        .order('pago_em', { ascending: false })
         .limit(20)
         .then(({ data }) => setAcertosRecebidos(data ?? []))
     }
@@ -806,7 +810,12 @@ export default function PresencialHistorico() {
             {/* ── Garçom: histórico de comissões já recebidas ── */}
             {!ehAdmin && acertosRecebidos.length > 0 && (
               <div className="card">
-                <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 12 }}>✅ Comissões já recebidas</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: 14, fontWeight: 800 }}>✅ Comissões já recebidas</span>
+                  <span style={{ fontSize: 13, fontWeight: 900, color: 'var(--success)' }}>
+                    {fmt(acertosRecebidos.reduce((s2, a) => s2 + Number(a.valor || 0), 0))} no total
+                  </span>
+                </div>
                 {acertosRecebidos.map(a => (
                   <div key={a.id} style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
@@ -814,8 +823,12 @@ export default function PresencialHistorico() {
                     fontSize: 13,
                   }}>
                     <div>
-                      <div style={{ fontWeight: 700 }}>{dataCurta(a.ate_dia)}</div>
-                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{a.pontos} pontos</div>
+                      {/* Duas datas dizem coisas diferentes: até quando o acerto
+                          cobre, e o dia em que o dinheiro foi para a mão dele. */}
+                      <div style={{ fontWeight: 700 }}>Até {dataCurta(a.ate_dia)}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                        {a.pontos} pontos{a.pago_em ? ` · pago em ${dataCurta(String(a.pago_em).slice(0, 10))}` : ''}
+                      </div>
                     </div>
                     <div style={{ fontWeight: 900, color: 'var(--success)', whiteSpace: 'nowrap' }}>{fmt(a.valor)}</div>
                   </div>
