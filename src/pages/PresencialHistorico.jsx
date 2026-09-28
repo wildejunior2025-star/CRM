@@ -101,6 +101,8 @@ export default function PresencialHistorico() {
   const [taxaDias, setTaxaDias] = useState([])
   const [pagando, setPagando]     = useState(null)
   const [acertosRecebidos, setAcertosRecebidos] = useState([])
+  const [acertosPagos, setAcertosPagos] = useState([])   // ADM: o que já foi pago pra equipe
+  const [pagosAberto, setPagosAberto] = useState(null)   // garçom com o histórico aberto
   const [loading, setLoading]   = useState(true)
   const [aberta, setAberta]     = useState(null) // id da comanda expandida
   const [pickerComanda, setPickerComanda] = useState(null) // comanda em que se está ligando o cliente
@@ -288,6 +290,15 @@ export default function PresencialHistorico() {
       setLoading(false)
     })
     carregarAcumulado()
+    if (ehAdmin) {
+      // O dono via só o que FALTA pagar. Pra conferir quanto já saiu ele tinha
+      // que entrar na conta de cada garçom (Saidera, 27/09).
+      supabase.from('garcom_acertos')
+        .select('id, garcom_id, ate_dia, valor, pontos, pago_em')
+        .order('pago_em', { ascending: false })
+        .limit(60)
+        .then(({ data }) => setAcertosPagos(data ?? []))
+    }
     if (!ehAdmin && meuId) {
       // A coluna do pagamento é `pago_em` (mig 0230) — pedindo `created_at`,
       // que não existe, a consulta voltava com erro e a lista chegava vazia: o
@@ -804,6 +815,58 @@ export default function PresencialHistorico() {
                     dia seguinte a conta dele recomeça do zero.
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ── Dono: o que JÁ foi pago pra equipe ──
+                O "A receber" mostra a dívida; este mostra o que saiu. Agrupado
+                por garçom porque a pergunta do dono é "quanto já paguei pro
+                Romário", não "o que aconteceu no dia 16". */}
+            {ehAdmin && acertosPagos.length > 0 && (
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
+                  <span style={{ fontSize: 14, fontWeight: 800 }}>✅ Já pago pra equipe</span>
+                  <span style={{ fontSize: 13.5, fontWeight: 900, color: 'var(--success)' }}>
+                    {fmt(acertosPagos.reduce((s2, a) => s2 + Number(a.valor || 0), 0))}
+                  </span>
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 10 }}>
+                  Cada "Paguei" que você marcou. Toque no nome pra ver as datas.
+                </div>
+                {Object.entries(acertosPagos.reduce((m, a) => {
+                  (m[a.garcom_id] ??= []).push(a); return m
+                }, {})).map(([gid, lista]) => {
+                  const total = lista.reduce((s2, a) => s2 + Number(a.valor || 0), 0)
+                  const aberto = pagosAberto === gid
+                  return (
+                    <Fragment key={gid}>
+                      <button type="button" onClick={() => setPagosAberto(aberto ? null : gid)}
+                        style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                          gap: 8, padding: '9px 0', borderTop: '1px solid var(--border)', background: 'none',
+                          border: 'none', borderTopStyle: 'solid', cursor: 'pointer', color: 'var(--text)', textAlign: 'left' }}>
+                        <span>
+                          <span style={{ fontWeight: 700, fontSize: 13.5 }}>{garcons[gid] ?? 'Garçom'}</span>
+                          <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)' }}>
+                            {lista.length} acerto(s) · último em {dataCurta(String(lista[0]?.pago_em ?? '').slice(0, 10))}
+                          </span>
+                        </span>
+                        <span style={{ fontWeight: 900, color: 'var(--success)', whiteSpace: 'nowrap' }}>{fmt(total)}</span>
+                      </button>
+                      {aberto && (
+                        <div style={{ padding: '4px 0 10px 10px' }}>
+                          {lista.map(a => (
+                            <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12.5, padding: '4px 0' }}>
+                              <span style={{ color: 'var(--text-muted)' }}>
+                                até {dataCurta(a.ate_dia)} · {a.pontos} pontos · pago em {dataCurta(String(a.pago_em ?? '').slice(0, 10))}
+                              </span>
+                              <strong>{fmt(a.valor)}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </Fragment>
+                  )
+                })}
               </div>
             )}
 
