@@ -100,6 +100,7 @@ export default function PresencialHistorico() {
   const [taxaDiasAberto, setTaxaDiasAberto] = useState(false)
   const [taxaDias, setTaxaDias] = useState([])
   const [pagando, setPagando]     = useState(null)
+  const [acertosRecebidos, setAcertosRecebidos] = useState([])
   const [loading, setLoading]   = useState(true)
   const [aberta, setAberta]     = useState(null) // id da comanda expandida
   const [pickerComanda, setPickerComanda] = useState(null) // comanda em que se está ligando o cliente
@@ -287,6 +288,14 @@ export default function PresencialHistorico() {
       setLoading(false)
     })
     carregarAcumulado()
+    if (!ehAdmin && meuId) {
+      supabase.from('garcom_acertos')
+        .select('id, ate_dia, valor, pontos, created_at')
+        .eq('garcom_id', meuId)
+        .order('created_at', { ascending: false })
+        .limit(20)
+        .then(({ data }) => setAcertosRecebidos(data ?? []))
+    }
   }, [empresaId, ehAdmin, meuId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // O acumulado é conta de vários dias, cada um com o bolo dele — quem faz é o
@@ -791,6 +800,26 @@ export default function PresencialHistorico() {
                     dia seguinte a conta dele recomeça do zero.
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ── Garçom: histórico de comissões já recebidas ── */}
+            {!ehAdmin && acertosRecebidos.length > 0 && (
+              <div className="card">
+                <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 12 }}>✅ Comissões já recebidas</div>
+                {acertosRecebidos.map(a => (
+                  <div key={a.id} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                    gap: 8, padding: '9px 0', borderTop: '1px solid var(--border)',
+                    fontSize: 13,
+                  }}>
+                    <div>
+                      <div style={{ fontWeight: 700 }}>{dataCurta(a.ate_dia)}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{a.pontos} pontos</div>
+                    </div>
+                    <div style={{ fontWeight: 900, color: 'var(--success)', whiteSpace: 'nowrap' }}>{fmt(a.valor)}</div>
+                  </div>
+                ))}
               </div>
             )}
 
