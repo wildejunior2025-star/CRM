@@ -1028,3 +1028,34 @@ a.dashboard-card-link:hover {
     word-break: break-word;
   }
 }
+
+/* BLOCOS QUE ABREM E FECHAM no histórico do salão (27/09).
+   A tela junta o dia, a comissão da equipe e a lista de contas. Cada bloco
+   pesado virou uma barra com o número que importa do lado: fechada ela ocupa
+   uma linha, aberta é o card de sempre. */
+.hist-dobravel { padding: 0; }
+.hist-dobravel > .hist-sec {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+/* Some com a setinha padrão do navegador (no Safari é ::-webkit-details-marker). */
+.hist-dobravel > .hist-sec::-webkit-details-marker { display: none; }
+.hist-sec-titulo { font-size: 14px; font-weight: 800; }
+.hist-sec-resumo { font-size: 13px; font-weight: 800; color: var(--success); white-space: nowrap; }
+/* A seta vira indicador de aberto/fechado. */
+.hist-sec-titulo::before {
+  content: '▸ ';
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.hist-dobravel[open] > .hist-sec > .hist-sec-titulo::before { content: '▾ '; }
+.hist-dobravel[open] > .hist-sec { border-bottom: 1px solid var(--border); }
+/* O conteúdo do bloco continua com o respiro do card. */
+.hist-dobravel > :not(.hist-sec) { padding: 0 16px; }
+.hist-dobravel > :last-child { padding-bottom: 14px; }

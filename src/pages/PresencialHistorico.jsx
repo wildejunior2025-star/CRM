@@ -102,6 +102,11 @@ export default function PresencialHistorico() {
   const [pagando, setPagando]     = useState(null)
   const [acertosRecebidos, setAcertosRecebidos] = useState([])
   const [acertosPagos, setAcertosPagos] = useState([])   // ADM: o que já foi pago pra equipe
+  // Quais blocos estão abertos. Nasce do que o aparelho lembra da última vez.
+  const [secoes, setSecoes] = useState(() => {
+    const ler = (id) => { try { return localStorage.getItem('hist_sec_' + id) === '1' } catch { return false } }
+    return { ranking: ler('ranking'), receber: ler('receber'), pagos: ler('pagos'), gestos: ler('gestos') }
+  })
   const [pagosAberto, setPagosAberto] = useState(null)   // garçom com o histórico aberto
   const [loading, setLoading]   = useState(true)
   const [aberta, setAberta]     = useState(null) // id da comanda expandida
@@ -316,6 +321,20 @@ export default function PresencialHistorico() {
   // O acumulado é conta de vários dias, cada um com o bolo dele — quem faz é o
   // banco (mig 0230), não a tela. O garçom só enxerga a linha dele: a RLS de
   // profiles não é o assunto aqui, mas o ranking de dinheiro do colega é dele.
+  // BLOCOS QUE ABREM E FECHAM.
+  //
+  // A tela junta três assuntos — o dia, a comissão da equipe e a lista de contas
+  // — e virou uma rolagem sem fim (pedido do Wilde, 27/09). Cada bloco pesado
+  // agora é uma barra: começa fechada, mostra o número que importa do lado e
+  // abre no toque. O aparelho lembra o que ficou aberto, porque quem paga
+  // garçom toda semana quer aquele bloco já aberto na próxima vez.
+  function lembrarSecao(e) {
+    const el = e.currentTarget
+    const id = el.dataset.sec
+    setSecoes(prev => (prev[id] === el.open ? prev : { ...prev, [id]: el.open }))
+    try { localStorage.setItem('hist_sec_' + id, el.open ? '1' : '0') } catch { /* ignora */ }
+  }
+
   async function carregarAcumulado() {
     const { data, error } = await supabase.rpc('acumulado_garcons')
     if (error) return
@@ -671,8 +690,11 @@ export default function PresencialHistorico() {
 
             {/* ── Dono: lista, uma linha por garçom ── */}
             {ehAdmin && (
-              <div className="card">
-                <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 2 }}>🏆 Pontos por garçom (hoje)</div>
+              <details className="card hist-dobravel" data-sec="ranking" onToggle={lembrarSecao} open={secoes.ranking}>
+                <summary className="hist-sec">
+                  <span className="hist-sec-titulo">🏆 Pontos por garçom (hoje)</span>
+                  <span className="hist-sec-resumo">{`${pontosDaLoja} pontos da equipe`}</span>
+                </summary>
                 <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '0 0 12px', lineHeight: 1.45 }}>
                   Conta gesto por gesto, não mesa por mesa — assim qualquer um atende qualquer mesa
                   sem perder o crédito do que fez.
@@ -721,7 +743,7 @@ export default function PresencialHistorico() {
                     Ainda não há taxa arrecadada hoje — o bolo aparece quando a primeira conta fechar.
                   </div>
                 )}
-              </div>
+              </details>
             )}
 
             {/* ── A receber: acumula até o dono pagar (mig 0230) ──
@@ -729,8 +751,11 @@ export default function PresencialHistorico() {
                 soma dia a dia desde o último acerto de cada um, porque o dono
                 não paga toda noite. */}
             {acumulado.length > 0 && (
-              <div className="card">
-                <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 2 }}>💰 A receber (acumulado)</div>
+              <details className="card hist-dobravel" data-sec="receber" onToggle={lembrarSecao} open={secoes.receber}>
+                <summary className="hist-sec">
+                  <span className="hist-sec-titulo">💰 A receber (acumulado)</span>
+                  <span className="hist-sec-resumo">{fmt(acumulado.reduce((s2, a) => s2 + Number(a.valor || 0), 0))}</span>
+                </summary>
                 <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '0 0 12px', lineHeight: 1.45 }}>
                   Vai somando todo dia e só zera quando você paga. Cada dia entra com o bolo daquele
                   dia — dia parado rende pouco, dia cheio rende mais.
@@ -820,7 +845,7 @@ export default function PresencialHistorico() {
                     dia seguinte a conta dele recomeça do zero.
                   </div>
                 )}
-              </div>
+              </details>
             )}
 
             {/* ── Dono: o que JÁ foi pago pra equipe ──
@@ -828,13 +853,11 @@ export default function PresencialHistorico() {
                 por garçom porque a pergunta do dono é "quanto já paguei pro
                 Romário", não "o que aconteceu no dia 16". */}
             {ehAdmin && acertosPagos.length > 0 && (
-              <div className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
-                  <span style={{ fontSize: 14, fontWeight: 800 }}>✅ Já pago pra equipe</span>
-                  <span style={{ fontSize: 13.5, fontWeight: 900, color: 'var(--success)' }}>
-                    {fmt(acertosPagos.reduce((s2, a) => s2 + Number(a.valor || 0), 0))}
-                  </span>
-                </div>
+              <details className="card hist-dobravel" data-sec="pagos" onToggle={lembrarSecao} open={secoes.pagos}>
+                <summary className="hist-sec">
+                  <span className="hist-sec-titulo">✅ Já pago pra equipe</span>
+                  <span className="hist-sec-resumo">{fmt(acertosPagos.reduce((s2, a) => s2 + Number(a.valor || 0), 0))}</span>
+                </summary>
                 <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 10 }}>
                   Cada "Paguei" que você marcou. Toque no nome pra ver as datas.
                 </div>
@@ -872,7 +895,7 @@ export default function PresencialHistorico() {
                     </Fragment>
                   )
                 })}
-              </div>
+              </details>
             )}
 
             {/* ── Garçom: histórico de comissões já recebidas ── */}
@@ -906,8 +929,11 @@ export default function PresencialHistorico() {
 
             {/* ── Dono: quanto vale cada gesto ── */}
             {ehAdmin && (
-              <div className="card">
-                <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Quanto vale cada gesto</div>
+              <details className="card hist-dobravel" data-sec="gestos" onToggle={lembrarSecao} open={secoes.gestos}>
+                <summary className="hist-sec">
+                  <span className="hist-sec-titulo">⚙️ Quanto vale cada gesto</span>
+                  <span className="hist-sec-resumo">{''}</span>
+                </summary>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {[['lancar', '✍️ Lançar item'], ['entregar', '🍽️ Entregar item'], ['fechar', '🧾 Fechar conta']].map(([k, lbl]) => (
                     <label key={k} style={{
@@ -940,7 +966,7 @@ export default function PresencialHistorico() {
                     <strong style={{ color: 'var(--success)' }}> {fmt(bolo)}</strong> pra dividir.</>
                   )}
                 </div>
-              </div>
+              </details>
             )}
           </div>
         )
