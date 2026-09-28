@@ -64,6 +64,20 @@ serve(async (req) => {
 
     const token = new URL(req.url).searchParams.get("token") ?? ""
     if (!cfg.aviso_fwc_token || token !== cfg.aviso_fwc_token) return ok({ error: "token" }, 401)
+
+    // Aviso pronto vindo do banco (gatilho de pagamento, mig 0288): só entrega.
+    if (typeof body?.aviso === "string" && body.aviso.trim()) {
+      let para = (cfg.aviso_fwc_destino ?? "").replace(/[^0-9]/g, "")
+      if (!para) return ok()
+      if (!para.startsWith("55")) para = "55" + para
+      const r = await fetch(`${EVOLUTION_API_URL}/message/sendText/${instancia}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+        body: JSON.stringify({ number: para, text: body.aviso.slice(0, 1500) }),
+      })
+      if (!r.ok) console.error("[aviso-fwc] aviso pronto falhou:", r.status, (await r.text()).slice(0, 200))
+      return ok({ ok: r.ok })
+    }
     if (body?.event !== "messages.upsert" || body?.instance !== instancia) return ok()
 
     const msg = body.data
