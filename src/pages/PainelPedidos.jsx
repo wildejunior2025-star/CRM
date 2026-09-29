@@ -8163,13 +8163,16 @@ export default function PainelPedidos() {
   }
 
   // Pausa/reativa um item — pausado some da loja online na hora.
+  // Pausar aqui pausa TAMBÉM na tela Produtos (`ativo`), e vice-versa: eram dois
+  // interruptores e o produto sumia da vitrine parecendo ativo no cadastro
+  // (baldes da CDBom, 29/09).
   async function togglePausarProduto(prod) {
     const novo = !prod.disponivel_delivery
     setPausandoId(prod.id)
     setCatalogo(prev => prev.map(p => p.id === prod.id ? { ...p, disponivel_delivery: novo } : p))
     const { error } = await supabase
       .from('produtos')
-      .update({ disponivel_delivery: novo })
+      .update({ disponivel_delivery: novo, ativo: novo })
       .eq('id', prod.id)
     setPausandoId(null)
     if (error) {

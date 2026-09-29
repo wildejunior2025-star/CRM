@@ -791,14 +791,23 @@ export default function Produtos() {
     setLoading(false)
   }, [])
 
-  // Pausar/ativar disponibilidade do produto (1 clique na lista). Não é estoque —
-  // é só ligar/desligar o item pra vender (loja online, bot, balcão).
+  // PAUSAR É UM ESTADO SÓ (29/09).
+  //
+  // Eram dois interruptores diferentes: o `ativo` (esta tela) e o
+  // `disponivel_delivery` (tela Catálogo). Pausar num não pausava no outro, e o
+  // produto sumia da vitrine continuando "ativo" aqui — ninguém achava o porquê.
+  // Foi o caso dos baldes de açaí da CDBom: 3 pausados no Catálogo havia dias,
+  // ativos nesta tela, fora da loja online. No sistema inteiro havia 40 itens
+  // assim, em 6 lojas.
+  //
+  // Agora os dois botões escrevem nos DOIS campos: pausou aqui, pausou lá.
   async function togglePausar(p) {
     const novo = !p.ativo
-    setProdutos(prev => prev.map(x => x.id === p.id ? { ...x, ativo: novo } : x))
-    const { error } = await supabase.from('produtos').update({ ativo: novo }).eq('id', p.id)
+    setProdutos(prev => prev.map(x => x.id === p.id ? { ...x, ativo: novo, disponivel_delivery: novo } : x))
+    const { error } = await supabase.from('produtos')
+      .update({ ativo: novo, disponivel_delivery: novo }).eq('id', p.id)
     if (error) {
-      setProdutos(prev => prev.map(x => x.id === p.id ? { ...x, ativo: !novo } : x))
+      setProdutos(prev => prev.map(x => x.id === p.id ? { ...x, ativo: !novo, disponivel_delivery: !novo } : x))
       setError(error.message)
     }
   }
@@ -1213,6 +1222,10 @@ export default function Produtos() {
 
     const payload = {
       ...form,
+      // "Pausado" é um estado só: salvar o cadastro escreve o mesmo valor nos
+      // dois campos, senão o produto voltaria a ficar ativo aqui e fora da
+      // vitrine (ver togglePausar).
+      disponivel_delivery: form.ativo !== false,
       // Sem código = campo vazio no banco (null), nunca string vazia: duas
       // strings vazias bateriam de frente no índice de código único (mig 0283).
       codigo_barras: String(form.codigo_barras ?? '').trim() || null,
