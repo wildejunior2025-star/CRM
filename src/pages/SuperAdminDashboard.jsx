@@ -28,7 +28,11 @@ function fmt(val) {
 // Medidor de capacidade — limite/alerta de cada gargalo conhecido.
 // Ajuste os números conforme for aumentando a infraestrutura (Railway, IA, Supabase).
 const CAP_METRICAS = [
-  { key: 'bot_conversas_ativas', label: 'Conversas no bot', sub: 'atendimentos nos últimos 10 min', limite: 10,   alerta: 6,    unidade: '',     limiteLabel: '10' },
+  // Mig 0289 — só conta conversa do ROBÔ: aviso que a loja dispara do celular
+  // dela (origem='loja') não entra mais. Teto medido em 7 dias: pico real 12
+  // conversas por janela de 10 min, média 3,5. O 10 de antes estourava no
+  // movimento normal; 40 é três vezes o pico.
+  { key: 'bot_conversas_ativas', label: 'Conversas no bot', sub: 'atendimentos nos últimos 10 min', limite: 40,   alerta: 25,   unidade: '',     limiteLabel: '40' },
   { key: 'ia_por_minuto',        label: 'IA por minuto',    sub: 'respostas do bot no último minuto', limite: 50, alerta: 35,   unidade: '',     limiteLabel: '50/min' },
   { key: 'lojas_bot_ativo',      label: 'Lojas com bot',    sub: 'lojas com robô ligado (IA ou link)',          limite: 15, alerta: 10,   unidade: '',     limiteLabel: '15' },
   { key: 'banco_mb',             label: 'Banco de dados',   sub: 'espaço usado (8 GB inclusos)',      limite: 8192, alerta: 6000, unidade: ' MB', limiteLabel: '8 GB' },
