@@ -62,6 +62,7 @@ export default function Caixa() {
   const [error, setError] = useState(null)
 
   const [caixaAtual, setCaixaAtual] = useState(null)
+  const [caixasAbertos, setCaixasAbertos] = useState([])  // pra avisar quando ficou mais de um
   const [resumo, setResumo] = useState(null)
   const [movimentos, setMovimentos] = useState([])
   const [historico, setHistorico] = useState([])
@@ -189,13 +190,18 @@ export default function Caixa() {
     setLoading(true)
     setError(null)
 
-    // Caixa aberto é SEMPRE o do usuário logado — inclusive pro admin. Antes o admin
-    // via o caixa aberto por qualquer um da loja, e aí esta tela dizia "aberto"
-    // enquanto o Salão dizia "abra o caixa" (a venda usa current_caixa_id(), que é o
-    // caixa de quem está logado). O histórico abaixo continua mostrando todos pro admin.
+    // O CAIXA É DA LOJA (mig 0287).
+    //
+    // Era um por login: na Branka a mesma pessoa tem dois acessos e as vendas do
+    // dia caíam metade num caixa, metade no outro — o caixa mostrava R$ 331 de
+    // fiado enquanto o Fiado da loja somava R$ 411 (30/09). Agora a tela mostra
+    // o caixa aberto DA LOJA (o mais recente), que é o mesmo que a venda usa.
+    //
+    // Traz os abertos (não só 1) pra poder avisar quando ficou mais de um aberto
+    // do jeito antigo — é o que mistura dia com dia.
     const caixaAtivaQuery = supabase
       .from('caixas').select('*')
-      .eq('aberto_por', user.id).eq('status', 'aberto').limit(1)
+      .eq('status', 'aberto').order('aberto_em', { ascending: false })
 
     // O histórico não vem mais aqui: ele tem carregamento próprio, por semana
     // (ver carregarHistorico), pra andar entre as semanas sem recarregar a tela
@@ -222,6 +228,7 @@ export default function Caixa() {
     if (firstError) setError(firstError.message)
 
     setCaixaAtual(caixaRes.data?.[0] ?? null)
+    setCaixasAbertos(caixaRes.data ?? [])
     setUsuarios(usuariosRes.data ?? [])
 
     if (caixaRes.data?.[0]) {
@@ -525,9 +532,27 @@ export default function Caixa() {
       {loading ? (
         <div className="empty-state">Carregando...</div>
       ) : !caixaAtual ? (
-        <div className="card empty-state">Você não tem nenhum caixa aberto no momento.</div>
+        <div className="card empty-state">A loja não tem nenhum caixa aberto no momento.</div>
       ) : (
         <>
+          {/* Sobrou caixa aberto do jeito antigo (um por login): as vendas vão
+              todas pro mais novo, e o atrasado fica preso com o movimento do dia
+              em que foi aberto. Avisa pra fechar. */}
+          {caixasAbertos.length > 1 && (
+            <div className="card" style={{ marginBottom: 12, border: '1.5px solid #f59e0b', background: 'rgba(245,158,11,.10)' }}>
+              <div style={{ fontWeight: 800, color: '#d97706', marginBottom: 4 }}>
+                ⚠️ {caixasAbertos.length} caixas abertos ao mesmo tempo
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                As vendas entram no mais novo. Os outros ficaram abertos de antes e seguram o movimento
+                do dia em que foram abertos — feche-os pelo histórico abaixo:
+                {' '}
+                {caixasAbertos.slice(1).map(c => (
+                  <b key={c.id}>{new Date(c.aberto_em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{' '}</b>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="card caixa-info-card" style={{ marginBottom: 20 }}>
             <div>
               <div className="label">Caixa aberto em</div>

@@ -8643,9 +8643,9 @@ export default function PainelPedidos() {
   async function caixaAbertoAgora() {
     const { data: s } = await supabase.auth.getUser()
     if (!s?.user?.id) return true   // sem sessão, deixa o servidor decidir
-    const { data } = await supabase.from('caixas').select('id')
-      .eq('empresa_id', empresa?.id).eq('aberto_por', s.user.id).eq('status', 'aberto').limit(1)
-    return !!(data && data.length)
+    // Caixa é da LOJA, não de quem está logado (mig 0287).
+    const { data } = await supabase.rpc('caixa_aberto_da_loja')
+    return !!data
   }
 
   async function handleFecharConta({ comanda, forma, aplicarTaxa, total }) {

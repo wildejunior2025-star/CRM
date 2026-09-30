@@ -373,7 +373,7 @@ export default function PresencialSalao() {
     const [ms, cs, cx, px] = await Promise.all([
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('comandas').select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
-      supabase.from('caixas').select('id').eq('empresa_id', empresaId).eq('aberto_por', user?.id).eq('status', 'aberto').limit(1),
+      supabase.rpc('caixa_aberto_da_loja'),
       // Pagos entram junto: numa conta rachada, a parte que ja caiu tem que
       // aparecer pro atendente ("PIX 1 pago, falta o outro") -- senao ele nao
       // sabe o que ainda tem pra receber.
@@ -390,7 +390,7 @@ export default function PresencialSalao() {
     setMesas(ms.data ?? [])
     setComandas(cs.data ?? [])
     loadAdiantamentos((cs.data ?? []).map(c => c.id))
-    setCaixaAberto(!!(cx.data && cx.data.length))
+    setCaixaAberto(!!cx.data)
     // Só o que é de mesa AINDA ABERTA. Sem este filtro, a cobrança paga de uma
     // mesa já fechada ficava na lista pra sempre e o Salão anunciava "PIX
     // recebido!" de 15 em 15 segundos, pra um pagamento de uma hora atrás.
@@ -519,9 +519,11 @@ export default function PresencialSalao() {
     if (!empresaId || !user?.id) return
     let vivo = true
     async function checarCaixa() {
-      const { data } = await supabase.from('caixas').select('id')
-        .eq('empresa_id', empresaId).eq('aberto_por', user.id).eq('status', 'aberto').limit(1)
-      if (vivo) setCaixaAberto(!!(data && data.length))
+      // O caixa é DA LOJA (mig 0287): pergunta pela função, porque a RLS só
+      // deixa o não-admin enxergar os caixas que ele mesmo abriu — e quem vende
+      // precisa saber que a loja está aberta mesmo quando quem abriu foi outro.
+      const { data } = await supabase.rpc('caixa_aberto_da_loja')
+      if (vivo) setCaixaAberto(!!data)
     }
     checarCaixa()
     const aoVoltar = () => { if (document.visibilityState === 'visible') checarCaixa() }
