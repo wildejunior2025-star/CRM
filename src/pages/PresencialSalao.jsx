@@ -1133,14 +1133,19 @@ export default function PresencialSalao() {
     if (comandaSel.status === 'aguardando_conferencia') { window.alert('Conta já fechada, aguardando o ADM liberar a mesa.'); return }
     const nome = invNome.trim()
     const preco = valorMoeda(invPreco)
+    const categoria = invCategoria.trim()
     if (!nome) { window.alert('Digite o nome do produto.'); return }
-    if (preco <= 0) { window.alert('Digite um preço válido.'); return }
+    if (preco <= 0) { window.alert('Digite o preço do produto.'); return }
+    // Salvar no catálogo SEM categoria caía em "outros" caladamente, e o produto
+    // ia parar numa gaveta que ninguém abre — some da vitrine por categoria e o
+    // dono só descobre depois (pedido do Wilde, 30/09). Agora é escolha dela.
+    if (invCatalogo && !categoria) { window.alert('Escolha a categoria do produto.'); return }
 
     let produtoId = 'avulso:' + Date.now() + '-' + Math.floor(Math.random() * 1000)
     if (invCatalogo) {
       setInvSalvando(true)
       const { data, error } = await supabase.from('produtos')
-        .insert({ empresa_id: empresaId, nome, preco_venda: preco, categoria: (invCategoria.trim() || 'outros'), controla_estoque: false })
+        .insert({ empresa_id: empresaId, nome, preco_venda: preco, categoria, controla_estoque: false })
         .select('id').single()
       setInvSalvando(false)
       if (error) { window.alert(recadoDeErro(error, 'salvar no catálogo')); return }
@@ -1150,6 +1155,15 @@ export default function PresencialSalao() {
     setRascunho(prev => [...prev, { produto_id: produtoId, linha: String(produtoId), nome, preco_venda: preco, complementos: [], quantidade: 1, observacao: '' }])
     setInvNome(''); setInvPreco(''); setInvCatalogo(false); setInvCategoria(''); setInvCatNova(false); setInvAberto(false)
   }
+  // O que ainda falta preencher no "Inventar produto". Nome e preço sempre;
+  // a categoria só quando ela marcou pra salvar no catálogo — aí o produto vai
+  // viver no cardápio e precisa saber onde fica.
+  const invFalta = !invNome.trim() ? 'Falta o nome'
+    : valorMoeda(invPreco) <= 0 ? 'Falta o preço'
+    : (invCatalogo && !invCategoria.trim()) ? 'Falta a categoria'
+    : ''
+  const invCompleto = !invFalta
+
   // Nome já existe no catálogo? (ignora acento/maiúsculas) — pra avisar sem bloquear.
   const invNomeExiste = invNome.trim() && produtos.some(p => semAcento(p.nome) === semAcento(invNome))
   // A comanda da cozinha sai AQUI, na hora do envio, quando a térmica está NESTE
@@ -3173,10 +3187,16 @@ export default function PresencialSalao() {
                     </>
                   )}
 
-                  <button type="button" onClick={adicionarInventado} disabled={invSalvando}
-                    style={{ width: '100%', marginTop: 12, padding: '10px 0', borderRadius: 8, cursor: invSalvando ? 'wait' : 'pointer',
-                      border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 800, opacity: invSalvando ? .6 : 1 }}>
-                    {invSalvando ? 'Salvando...' : (invCatalogo ? 'Salvar no catálogo e adicionar' : 'Adicionar só nesta venda')}
+                  {/* Botão apagado enquanto falta coisa, dizendo O QUE falta: é mais
+                      rápido que apertar e levar um aviso na cara. */}
+                  <button type="button" onClick={adicionarInventado} disabled={invSalvando || !invCompleto}
+                    style={{ width: '100%', marginTop: 12, padding: '10px 0', borderRadius: 8,
+                      cursor: invSalvando ? 'wait' : (invCompleto ? 'pointer' : 'not-allowed'),
+                      border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 800,
+                      opacity: (invSalvando || !invCompleto) ? .5 : 1 }}>
+                    {invSalvando ? 'Salvando...'
+                      : invFalta ? invFalta
+                      : (invCatalogo ? 'Salvar no catálogo e adicionar' : 'Adicionar só nesta venda')}
                   </button>
                 </div>
               )}
