@@ -61,6 +61,7 @@ const contaNoMes = d =>
 // de verdade é em dólar e sai no cartão convertido pelo câmbio do dia.
 const USD_BRL = 5.4
 const nomeEhCloudflare = n => /cloudflare/i.test(n || '')
+const nomeEhRailway    = n => /railway/i.test(n || '')
 
 // vencida primeiro, depois a que vence antes, sem data no fim
 const porVencimento = (a, b) => {
@@ -325,6 +326,66 @@ function UsoCloudflare() {
   )
 }
 
+/* ── Gasto do mês no Railway ──────────────────────────────────────────────────
+   É o servidor do WhatsApp (Evolution). Em 01/10/2026 o teste grátis venceu com
+   fatura atrasada, o Railway pausou tudo e as lojas passaram ~19 horas mudas —
+   os avisos de consumo existiam, mas só no e-mail deles. Aqui o número fica
+   onde o dono já olha as contas.                                             */
+function UsoRailway() {
+  const [uso, setUso] = useState(null)
+
+  useEffect(() => {
+    let vivo = true
+    supabase.functions.invoke('railway-uso')
+      .then(({ data, error }) => { if (vivo) setUso(error ? { ok: false } : (data ?? { ok: false })) })
+      .catch(() => { if (vivo) setUso({ ok: false }) })
+    return () => { vivo = false }
+  }, [])
+
+  if (!uso) return <div className="desp-uso"><span className="desp-uso-titulo">lendo o consumo…</span></div>
+  if (!uso.ok) {
+    return (
+      <div className="desp-uso">
+        <span className="desp-uso-titulo">
+          {uso.motivo === 'sem_token'
+            ? '⚙️ Falta cadastrar o token do Railway (RAILWAY_TOKEN) pra mostrar o consumo aqui.'
+            : uso.motivo === 'token_invalido'
+              ? '⚠️ O token do Railway não foi aceito — gere outro em railway.com/account/tokens.'
+              : '⚠️ Não consegui ler o consumo do Railway agora.'}
+        </span>
+      </div>
+    )
+  }
+
+  const pct   = uso.pct ?? 0
+  const nivel = pct >= 150 ? 'perigo' : pct >= 100 ? 'atencao' : 'ok'
+  const usd   = v => `US$ ${Number(v || 0).toFixed(2)}`
+
+  return (
+    <div className="desp-uso">
+      <div className="desp-uso-topo">
+        <span className="desp-uso-titulo">Consumo do mês</span>
+        <span className={`desp-uso-pct ${nivel}`}>{pct}%</span>
+      </div>
+
+      <div className="desp-uso-bar">
+        <div className={`desp-uso-fill ${nivel}`} style={{ width: `${Math.min(100, Math.max(1.5, pct))}%` }} />
+      </div>
+
+      <div className="desp-uso-legenda">
+        <b>{usd(uso.usado_usd)}</b> usados de {usd(uso.incluso_usd)} inclusos no plano
+        {' · '}conta estimada: <b>{usd(uso.estimado_usd)}</b> (≈ {fmt(uso.estimado_usd * USD_BRL)})
+      </div>
+
+      <div className={`desp-uso-aviso ${nivel}`}>
+        {pct >= 100
+          ? 'Passou do crédito incluso — o que exceder entra na fatura do fim do ciclo.'
+          : 'Dentro do crédito do plano. Se a fatura não for paga, o Railway PAUSA os serviços e o WhatsApp das lojas cai.'}
+      </div>
+    </div>
+  )
+}
+
 /* ── Um cartão de despesa: leitura limpa, edição só ao clicar no lápis ─────── */
 function Despesa({ d, salvar, excluir, editId, setEditId, savingId, setLista }) {
   const cat     = catInfo(d.categoria)
@@ -377,6 +438,7 @@ function Despesa({ d, salvar, excluir, editId, setEditId, savingId, setLista }) 
           </div>
           {d.observacoes && <div className="desp-obs" title={d.observacoes}>{d.observacoes}</div>}
           {nomeEhCloudflare(d.nome) && d.ativo && <UsoCloudflare />}
+          {nomeEhRailway(d.nome) && d.ativo && <UsoRailway />}
         </div>
 
         <div>

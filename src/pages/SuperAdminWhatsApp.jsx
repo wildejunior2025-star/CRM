@@ -48,6 +48,34 @@ function formatPhone(phone) {
 // Visualizador SOMENTE LEITURA das conversas do robô de uma loja.
 // Lista os clientes (por telefone, mais recente primeiro) e mostra a conversa
 // completa ao clicar. Não envia nem altera nada — só pra acompanhar a IA.
+/**
+ * Conexão da loja do jeito que ela ESTÁ, não do jeito que o cadastro diz.
+ *
+ * O verde aqui vem do vigia (mig 0291), que pergunta ao Evolution de 5 em 5
+ * min. Três estados, três decisões diferentes pra quem olha:
+ *   servidor_fora → o Evolution caiu: TODAS as lojas estão mudas, é o Railway
+ *   desconectado  → o número daquela loja caiu: ler o QR de novo
+ *   aberto        → funcionando
+ * Sem vigia (conferida velha ou nenhuma), a tela diz isso em vez de inventar
+ * um verde — foi o verde mentiroso de 01/10 que escondeu 19 horas de queda.
+ */
+function ConexaoWA({ ativo, m }) {
+  const pill = (bg, cor, txt, title) => (
+    <span title={title} style={{ background: bg, color: cor, padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>{txt}</span>
+  )
+  if (!ativo) return pill('#64748b22', '#94a3b8', 'Desligado', 'WhatsApp não está ligado para esta loja')
+  if (!m) return pill('#64748b22', '#94a3b8', 'Sem leitura', 'O vigia ainda não conferiu esta instância')
+
+  const min = Math.round((Date.now() - new Date(m.checado_em).getTime()) / 60000)
+  const quando = min < 1 ? 'agora' : min < 60 ? `há ${min} min` : min < 2880 ? `há ${Math.round(min / 60)}h` : `há ${Math.round(min / 1440)} dias`
+  // Vigia roda de 5 em 5 min: passou de 20, ele é que está parado.
+  if (min > 20) return pill('#f9731622', '#f97316', `Sem conferir (${quando})`, 'O vigia não está rodando — o estado abaixo pode estar velho')
+
+  if (m.estado === 'servidor_fora') return pill('#ef444422', '#ef4444', '🚨 Servidor fora', `Evolution não responde — todas as lojas mudas. Visto ${quando}`)
+  if (m.estado === 'aberto') return pill('#16a34a22', '#22c55e', 'Conectado', `Conferido ${quando}`)
+  return pill('#f9731622', '#f97316', 'Desconectado', `Precisa ler o QR Code. Conferido ${quando}`)
+}
+
 function ConversasModal({ empresa, onClose }) {
   const [threads, setThreads] = useState([])
   const [loadingThreads, setLoadingThreads] = useState(true)
@@ -178,6 +206,7 @@ export default function SuperAdminWhatsApp() {
 
   // Remetente atual
   const [remetente, setRemetente] = useState(null) // { instanceName, state, phone }
+  const [monitor, setMonitor] = useState({})       // instância → estado real (mig 0291)
   const [loadingRemetente, setLoadingRemetente] = useState(true)
 
   // Fluxo novo QR
@@ -245,12 +274,17 @@ export default function SuperAdminWhatsApp() {
 
   async function loadData() {
     setLoading(true)
-    const [cfgRes, empresasRes] = await Promise.all([
+    const [cfgRes, empresasRes, monitorRes] = await Promise.all([
       supabase.from('config_global').select('chave, valor')
         .in('chave', ['ia_prompt_padrao', 'super_admin_phone', 'alertas_mensalidade_ativo']),
       supabase.from('empresas')
         .select('id, nome, whatsapp_creditos, status, vencimento, whatsapp_config(ativo, ia_ativo, instance_name)')
         .order('nome'),
+      // O estado REAL, que o vigia lê no Evolution de 5 em 5 min (mig 0291).
+      // Antes esta tela mostrava "Conectado" só porque o campo `ativo` da
+      // tabela estava marcado: no dia 01/10 o servidor inteiro estava fora e a
+      // tela dizia que estava tudo bem.
+      supabase.from('monitor_whatsapp').select('instancia, estado, checado_em, mudou_em'),
     ])
     const map = {}
     for (const row of cfgRes.data ?? []) map[row.chave] = row.valor
@@ -258,6 +292,9 @@ export default function SuperAdminWhatsApp() {
     setAdminPhone(map['super_admin_phone'] ?? '')
     setAlertasAtivo(map['alertas_mensalidade_ativo'] !== 'false')
     setEmpresas(empresasRes.data ?? [])
+    const porInstancia = {}
+    for (const m of monitorRes.data ?? []) porInstancia[m.instancia] = m
+    setMonitor(porInstancia)
     setLoading(false)
   }
 
@@ -452,6 +489,26 @@ export default function SuperAdminWhatsApp() {
         </div>
       </div>
 
+      {/* Servidor fora derruba TODAS as lojas de uma vez: isso merece uma faixa,
+          não uma bolinha dentro da tabela. */}
+      {Object.values(monitor).some(m => m.estado === 'servidor_fora') && (
+        <div style={{
+          ...card, border: '1px solid #ef4444', background: '#ef444415',
+          display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: 22 }}>🚨</span>
+          <div style={{ flex: '1 1 300px' }}>
+            <div style={{ fontWeight: 800, color: '#ef4444' }}>Servidor do WhatsApp fora do ar</div>
+            <div style={{ fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+              Nenhuma loja está recebendo nem respondendo mensagem. Costuma ser o Railway:
+              plano, fatura em aberto ou serviço pausado.
+            </div>
+          </div>
+          <a href="https://railway.com/dashboard" target="_blank" rel="noreferrer"
+            className="btn btn-primary" style={{ textDecoration: 'none' }}>Abrir o Railway</a>
+        </div>
+      )}
+
       {/* Status das empresas */}
       <div style={card}>
         <h3 style={{ margin: '0 0 16px' }}>Status WhatsApp por Empresa</h3>
@@ -487,9 +544,7 @@ export default function SuperAdminWhatsApp() {
                       </td>
                       <td style={{ padding: '10px 12px', color: 'var(--text-muted)', fontSize: 12, fontFamily: 'monospace' }}>{wc?.instance_name || '—'}</td>
                       <td style={{ padding: '10px 12px' }}>
-                        {wc?.ativo
-                          ? <span style={{ background: '#16a34a22', color: '#22c55e', padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>Conectado</span>
-                          : <span style={{ background: '#64748b22', color: '#94a3b8', padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>Desconectado</span>}
+                        <ConexaoWA ativo={wc?.ativo} m={monitor[wc?.instance_name]} />
                       </td>
                       <td style={{ padding: '10px 12px' }}>
                         {wc?.ia_ativo
