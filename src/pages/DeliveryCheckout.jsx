@@ -371,7 +371,7 @@ async function reverseGeocode(lat, lng) {
 //     que o buscador chutou. Aberto na cara, o cliente vê o erro sozinho.
 //   * modal — tela cheia, pro ajuste fino (arrastar num mapa pequeno, dentro de
 //     uma página que rola, é briga de dedo).
-function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco, exigeManual, embutido, onChange, onAmpliar, onConfirm, onClose }) {
+function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, taxaBairro, bairroBloqueado, initial, endereco, exigeManual, embutido, onChange, onAmpliar, onConfirm, onClose }) {
   const mapRef = useRef(null)
   const mapObj = useRef(null)
   const pinRef = useRef(null)
@@ -544,7 +544,15 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
   }
 
   const dist = coord && storeLat ? haversineKm(coord.lat, coord.lng, Number(storeLat), Number(storeLng)) : null
-  const taxa = dist != null ? calcTaxaKm(taxas, dist) : null
+  // O BAIRRO MANDA, igual ao resumo do pedido.
+  //
+  // Aqui só se calculava pelo km. Mas quando o bairro do cliente tem taxa fixa
+  // cadastrada é ELA que o checkout cobra — e o mapa anunciava a faixa de km.
+  // CDBom, 02/10: pino a 2,3 km (faixa = R$ 7,00) em Nossa Senhora da
+  // Apresentação (bairro = R$ 6,00); o mapa dizia 7 e o resumo cobrava 6, na
+  // mesma tela. Bairro bloqueado não mostra taxa nenhuma: ali não tem entrega.
+  const taxaKm = dist != null ? calcTaxaKm(taxas, dist) : null
+  const taxa = bairroBloqueado ? null : (taxaBairro != null ? Number(taxaBairro) : taxaKm)
   const foraRaio = dist != null && raioKm && dist > Number(raioKm)
   // Pino caiu longe do bairro digitado? (protege contra geocode/GPS errado que
   // infla a taxa). 3,5 km é folgado pra não reclamar de bairro grande.
@@ -556,7 +564,7 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, initial, endereco,
 
   const linhaDistancia = geoLoading ? 'Procurando o endereço…'
     : !definido ? '👆 Arraste o pino até sua casa'
-    : dist != null ? <>📏 {dist.toFixed(1)} km · <strong style={{ color: '#34d399' }}>Taxa {taxa != null ? `R$ ${fmt(taxa)}` : '—'}</strong>{foraRaio ? ' · ⚠️ fora do raio' : ''}</>
+    : dist != null ? <>📏 {dist.toFixed(1)} km{bairroBloqueado ? '' : <> · <strong style={{ color: '#34d399' }}>Taxa {taxa != null ? `R$ ${fmt(taxa)}` : '—'}</strong></>}{foraRaio ? ' · ⚠️ fora do raio' : ''}</>
     : 'Arraste o pino até sua casa'
 
   const avisoBairro = pinLongeDoBairro && (
@@ -2330,6 +2338,8 @@ export default function DeliveryCheckout() {
                         storeLng={lojaEndereco.longitude}
                         raioKm={lojaEndereco.raio_entrega_km}
                         taxas={lojaEndereco.taxas_entrega_km}
+                        taxaBairro={bairroTaxaFixa ? (Number(cfgBairro.taxa) || 0) : null}
+                        bairroBloqueado={bairroBloqueado}
                         initial={coordCliente}
                         endereco={{ rua: form.rua, numero: form.numero, bairro: form.bairro, cidade: form.cidade, estado: form.estado, cep: form.cep }}
                         exigeManual={reconfirmar}
@@ -2701,6 +2711,8 @@ export default function DeliveryCheckout() {
           storeLng={lojaEndereco?.longitude}
           raioKm={lojaEndereco?.raio_entrega_km}
           taxas={lojaEndereco?.taxas_entrega_km}
+          taxaBairro={bairroTaxaFixa ? (Number(cfgBairro.taxa) || 0) : null}
+          bairroBloqueado={bairroBloqueado}
           initial={coordCliente}
           endereco={{ rua: form.rua, numero: form.numero, bairro: form.bairro, cidade: form.cidade, estado: form.estado, cep: form.cep }}
           exigeManual={reconfirmar}
