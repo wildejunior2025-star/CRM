@@ -256,7 +256,23 @@ serve(async (req) => {
       const corpo = await res.json().catch(() => ({} as any))
       if (!res.ok) erro = `cloud ${res.status}: ${JSON.stringify(corpo).slice(0, 250)}`
       else messageId = corpo?.messages?.[0]?.id ?? null
-    } else {
+    }
+
+    // SE A META RECUSOU, TENTA PELO ZAP DA LOJA (02/10).
+    //
+    // A Estação ficou 4 dias sem avisar ninguém e ninguém percebeu: a conta dela
+    // sumiu da Meta ("Object with ID ... does not exist") e todo aviso de fiado
+    // morria no erro, mesmo com o WhatsApp comum conectado ali do lado. Enquanto
+    // a configuração tiver a Cloud preenchida, o código ia direto pra ela e
+    // parava no primeiro tropeço.
+    //
+    // Agora a Cloud é a primeira tentativa, não a única: falhou e existe
+    // instância conectada, a mensagem sai pelo QR. O cliente é avisado, que é o
+    // que importa; o erro da Meta continua gravado pra loja ver e arrumar.
+    const tentouCloud = !!(cfg.cloud_phone_number_id && cfg.cloud_waba_id)
+    if ((!tentouCloud || erro) && String(cfg.instance_name ?? "").trim()) {
+      const erroCloud = erro
+      erro = null
       try {
         const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${cfg.instance_name}`, {
           method: "POST",
@@ -267,21 +283,29 @@ serve(async (req) => {
       } catch (e) {
         erro = `evolution inacessivel: ${String(e).slice(0, 200)}`
       }
+      // Guarda os dois lados da história: deu certo pelo zap depois da Meta
+      // recusar (a loja precisa saber que a Cloud está quebrada), ou falhou nos
+      // dois caminhos.
+      if (erroCloud) {
+        erro = erro ? `${erroCloud} | depois ${erro}` : `enviado pelo zap · a Meta recusou: ${erroCloud}`
+      }
     }
+    // A Cloud recusou, saiu pelo zap: não é falha de entrega.
+    const soAvisoDaCloud = !!erro && erro.startsWith("enviado pelo zap")
 
-    if (erro) console.error("[fiado] comanda NAO enviada", venda.id, phoneFull, erro)
+    if (erro && !soAvisoDaCloud) console.error("[fiado] comanda NAO enviada", venda.id, phoneFull, erro)
 
     // Entra no histórico do WhatsApp mesmo quando falha: é assim que a loja
     // descobre que o cliente NÃO foi avisado, em vez de descobrir na discussão.
     await supabase.from("whatsapp_conversas").insert({
       empresa_id: venda.empresa_id, phone: phoneFull,
-      role: "assistant", content: mensagem, falhou: !!erro, erro,
+      role: "assistant", content: mensagem, falhou: !!erro && !soAvisoDaCloud, erro,
       message_id: messageId,
     })
 
     console.log("[fiado] comanda", venda.id, janelaAberta ? "texto livre" : "template", erro ? "FALHOU" : "ok")
 
-    return new Response(JSON.stringify({ ok: !erro, erro }), {
+    return new Response(JSON.stringify({ ok: !erro || soAvisoDaCloud, erro }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     })
   } catch (err) {
