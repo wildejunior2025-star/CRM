@@ -760,13 +760,20 @@ export default function DeliveryLoja() {
   const subtotal = itens.reduce((s, i) => s + i.quantidade * Number(i.preco), 0)
   const taxaEntrega = loja ? Number(loja.taxa_entrega ?? 0) : 0
   // Loja que cobra por bairro ou por km só sabe a taxa depois do endereço (isso
-  // é feito no checkout). Aqui no carrinho a taxa fixa dessas lojas é 0 — e
-  // mostrar "Grátis" fazia o cliente achar que a entrega não custava nada.
+  // é feito no checkout). Aqui no carrinho ela não tem número pra mostrar.
   const taxaPorEndereco =
     (Array.isArray(loja?.taxas_entrega_km) && loja.taxas_entrega_km.length > 0) ||
     (Array.isArray(loja?.taxas_entrega_bairro) && loja.taxas_entrega_bairro.length > 0)
-  const taxaIndefinida = taxaPorEndereco && taxaEntrega === 0
-  const total = subtotal + taxaEntrega
+  // Isto exigia `taxaEntrega === 0`. Só que loja com faixas PODE ter uma taxa
+  // fixa guardada — o checkout a usa só de reserva, quando o cálculo por km não
+  // fecha — e o carrinho mostrava essa reserva como se fosse o preço. Como ela é
+  // sempre a mais baixa, o cliente ancorava barato e via a taxa subir ao digitar
+  // o endereço (reclamado em 02/10: "aumenta e ele fica frustrado"). Tendo
+  // faixa, a taxa é indefinida até o endereço, tenha ou não reserva cadastrada.
+  const taxaIndefinida = taxaPorEndereco
+  // Sem taxa conhecida o total é só o subtotal — o rodapé escreve "+ entrega"
+  // ao lado. Somar a reserva aqui seria mostrar de novo o número errado.
+  const total = subtotal + (taxaIndefinida ? 0 : taxaEntrega)
 
   const produtosFiltrados = useMemo(() => (filtroEstoqueBaixo
     ? produtos.filter(p => p.estoque != null && p.estoque_minimo != null && p.estoque <= p.estoque_minimo)

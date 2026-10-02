@@ -55,6 +55,34 @@ function CardSkeleton() {
   )
 }
 
+// O que escrever na etiqueta da moto.
+//
+// `taxa_entrega` é a taxa fixa da loja — mas quem cobra por km ou por bairro
+// guarda ali só uma reserva, que o checkout usa quando o cálculo não fecha.
+// Mostrar essa reserva como preço fazia a lista prometer barato (e, quando a
+// reserva era 0, prometer "Entrega grátis" numa loja que cobra frete).
+// Para quem tem faixa, a honesta é a MENOR faixa com um "A partir de" na frente:
+// é verdade, continua atraente, e ninguém se sente enganado no checkout.
+function rotuloTaxa(loja) {
+  const faixas = []
+  if (Array.isArray(loja.taxas_entrega_km)) {
+    for (const f of loja.taxas_entrega_km) faixas.push(Number(f?.taxa) || 0)
+  }
+  if (Array.isArray(loja.taxas_entrega_bairro)) {
+    // bairro com `entrega: false` é bairro bloqueado, não é taxa.
+    for (const b of loja.taxas_entrega_bairro) {
+      if (b?.entrega !== false) faixas.push(Number(b?.taxa) || 0)
+    }
+  }
+  const brl = v => `R$ ${v.toFixed(2).replace('.', ',')}`
+  if (faixas.length) {
+    const menor = Math.min(...faixas)
+    return menor === 0 ? 'Grátis perto da loja' : `A partir de ${brl(menor)}`
+  }
+  if (loja.taxa_entrega == null) return 'Taxa a consultar'
+  return Number(loja.taxa_entrega) === 0 ? 'Entrega grátis' : brl(Number(loja.taxa_entrega))
+}
+
 export default function DeliveryLojas() {
   const [lojas, setLojas] = useState([])
   const [loading, setLoading] = useState(true)
@@ -65,7 +93,7 @@ export default function DeliveryLojas() {
     async function load() {
       const { data } = await supabase
         .from('empresas')
-        .select('id, nome, categoria_delivery, taxa_entrega, tempo_entrega_min, tempo_entrega_max, delivery_ativo, banner_url, cidade, estado')
+        .select('id, nome, categoria_delivery, taxa_entrega, taxas_entrega_km, taxas_entrega_bairro, tempo_entrega_min, tempo_entrega_max, delivery_ativo, banner_url, cidade, estado')
         .eq('aceita_delivery', true)
         .in('status', ['trial', 'ativo', 'atrasado'])
         .order('nome')
@@ -162,12 +190,7 @@ export default function DeliveryLojas() {
                     )}
                     <span className="dl-meta-item">
                       <IconMoto />
-                      {loja.taxa_entrega != null && Number(loja.taxa_entrega) === 0
-                        ? 'Entrega grátis'
-                        : loja.taxa_entrega != null
-                          ? `R$ ${Number(loja.taxa_entrega).toFixed(2).replace('.', ',')}`
-                          : 'Taxa a consultar'
-                      }
+                      {rotuloTaxa(loja)}
                     </span>
                   </div>
                 </div>
