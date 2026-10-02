@@ -151,26 +151,29 @@ serve(async (req) => {
     ).join("\n")
 
     const saldo = Number(saldoRow?.saldo_fiado ?? 0)
+    // MENSAGEM CURTA (02/10).
+    //
+    // A primeira versão tinha 12 linhas: saudação, explicação, itens, total,
+    // "Forma de pagamento: FIADO", saldo, pedido de conferência e duas linhas de
+    // link. No celular virava um textão que o cliente rola sem ler — e ele só
+    // precisa de três coisas: o que levou, quanto deu, e que dá pra reclamar
+    // hoje. "Forma de pagamento: FIADO" saiu porque a primeira linha já diz
+    // fiado; o saldo em aberto passou pra mesma linha do total.
     const mensagem = [
-      `${saudacao} Aqui é da *${empresa?.nome ?? "loja"}*.`,
-      "",
-      `Sua compra de agora${local ? ` (${local})` : ""} ficou anotada no *fiado*, ${quando}:`,
+      `${saudacao} Lembrete da sua compra no fiado — *${empresa?.nome ?? "loja"}*${local ? ` (${local})` : ""}, ${quando}:`,
       "",
       linhas,
       "",
-      `Total desta conta: *${brl(venda.total)}*`,
-      `Forma de pagamento: *FIADO*`,
-      // O saldo só entra se for maior que esta conta — repetir o mesmo número
-      // duas vezes seguidas confunde mais do que informa.
-      saldo > Number(venda.total) + 0.005 ? `\nSeu total em aberto: *${brl(saldo)}*` : null,
-      "",
-      // É esta linha que faz o aviso valer a pena: confere hoje, enquanto todo
-      // mundo lembra. Depois de duas semanas ninguém resolve mais.
-      "Se tiver algo errado aqui, me avisa *hoje mesmo* que a gente confere. 🙏",
-      // O link é pras contas ANTERIORES (e as já pagas). O que ele precisa
-      // conferir é a conta de hoje, que está aí em cima — mandar ele "ver o que
-      // está em aberto" no link só empurra pra depois a conferência do dia.
-      cliente?.token ? `\nAs contas anteriores e o histórico completo estão no seu link:\nhttps://lojaonline.fwcinter.com/c/${cliente.token}` : null,
+      saldo > Number(venda.total) + 0.005
+        ? `Total: *${brl(venda.total)}* · Em aberto: *${brl(saldo)}*`
+        : `Total: *${brl(venda.total)}*`,
+      // "Não é cobrança" escrito com todas as letras (02/10): o cliente recebe
+    // isso no meio do dia, com valor e saldo em aberto na tela, e a leitura
+    // natural é de cobrança — alguns se incomodam. A mensagem existe pra ele
+    // conferir enquanto lembra do almoço, não pra pedir dinheiro.
+      "Não é cobrança, é só pra você conferir. Algo errado? Me avisa hoje 🙏",
+      // O link é das contas anteriores; a de hoje está logo acima.
+      cliente?.token ? `https://lojaonline.fwcinter.com/c/${cliente.token}` : null,
     ].filter(l => l !== null).join("\n")
 
     // A JANELA DE 24 HORAS
