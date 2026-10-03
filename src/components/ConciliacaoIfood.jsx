@@ -121,7 +121,7 @@ export default function ConciliacaoIfood({ empresaId }) {
   const carregarLojas = useCallback(async () => {
     if (!empresaId) return
     const { data } = await supabase.from('ifood_config')
-      .select('merchant_id, apelido, financeiro_status, financeiro_sync_em, financeiro_erro')
+      .select('merchant_id, apelido, ambiente, client_id, financeiro_status, financeiro_sync_em, financeiro_erro')
       .eq('empresa_id', empresaId).not('merchant_id', 'is', null)
     setLojas(data ?? [])
   }, [empresaId])
@@ -133,6 +133,17 @@ export default function ConciliacaoIfood({ empresaId }) {
     return m
   }, [lojas])
   const variasLojas = (lojas ?? []).length > 1
+
+  // Loja no ambiente de homologação do iFood: a faixa técnica abaixo mostra, no
+  // próprio sistema, o client_id do app de teste e a data/hora da execução —
+  // exigência do iFood pra validar o vídeo da homologação.
+  const teste = (lojas ?? []).find(l => l.ambiente === 'teste')
+  const [agora, setAgora] = useState(new Date())
+  useEffect(() => {
+    if (!teste) return
+    const t = setInterval(() => setAgora(new Date()), 1000)
+    return () => clearInterval(t)
+  }, [teste])
 
   async function atualizarAgora() {
     setAtualizando(true); setMsg(null)
@@ -179,6 +190,14 @@ export default function ConciliacaoIfood({ empresaId }) {
           {atualizando ? <><span className="ci-giro" />Buscando no iFood…</> : '🔄 Atualizar agora'}
         </button>
       </div>
+      {teste && (
+        <div className="ci-homolog">
+          <b>🧪 Ambiente de homologação do iFood</b>
+          <span>client_id do app de teste: <code>{teste.client_id || '—'}</code></span>
+          <span>loja de teste (merchant): <code>{teste.merchant_id}</code></span>
+          <span>data e hora da execução: <b>{agora.toLocaleString('pt-BR')}</b></span>
+        </div>
+      )}
       {msg && <div className={`ci-msg ${msg.tipo}`}>{msg.txt}</div>}
 
       <div className="ci-abas">
