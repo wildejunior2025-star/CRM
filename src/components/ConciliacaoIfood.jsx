@@ -111,6 +111,17 @@ function Conferencia({ bate, diferenca, semDados, textoSemDados = 'aguardando la
   return <span className="ci-selo aviso" title="Não bate com a soma dos lançamentos — confira no iFood">⚠ diferença {diferenca != null ? fmt(Math.abs(diferenca)) : ''}</span>
 }
 
+// O relógio vive sozinho: se o tempo fosse estado do componente de cima, a tela
+// inteira re-renderizava a cada segundo e fechava o que estivesse aberto.
+function Relogio() {
+  const [agora, setAgora] = useState(new Date())
+  useEffect(() => {
+    const t = setInterval(() => setAgora(new Date()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  return <b>{agora.toLocaleString('pt-BR')}</b>
+}
+
 export default function ConciliacaoIfood({ empresaId }) {
   const [aba, setAba] = useState('repasses')
   const [lojas, setLojas] = useState(null)          // linhas de ifood_config
@@ -138,12 +149,6 @@ export default function ConciliacaoIfood({ empresaId }) {
   // próprio sistema, o client_id do app de teste e a data/hora da execução —
   // exigência do iFood pra validar o vídeo da homologação.
   const teste = (lojas ?? []).find(l => l.ambiente === 'teste')
-  const [agora, setAgora] = useState(new Date())
-  useEffect(() => {
-    if (!teste) return
-    const t = setInterval(() => setAgora(new Date()), 1000)
-    return () => clearInterval(t)
-  }, [teste])
 
   async function atualizarAgora() {
     setAtualizando(true); setMsg(null)
@@ -195,7 +200,7 @@ export default function ConciliacaoIfood({ empresaId }) {
           <b>🧪 Ambiente de homologação do iFood</b>
           <span>client_id do app de teste: <code>{teste.client_id || '—'}</code></span>
           <span>loja de teste (merchant): <code>{teste.merchant_id}</code></span>
-          <span>data e hora da execução: <b>{agora.toLocaleString('pt-BR')}</b></span>
+          <span>data e hora da execução: <Relogio /></span>
         </div>
       )}
       {msg && <div className={`ci-msg ${msg.tipo}`}>{msg.txt}</div>}
