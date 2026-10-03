@@ -342,9 +342,15 @@ html[data-teclado='aberto'] .sal-overlay {
    * ~415 que sobram. Sozinha na tela, a busca fica com tudo — o campo em
    * cima, a lista rolando por conta própria embaixo.
    *
-   * O gatilho é o TEXTO digitado, não o foco. Com foco, tocar num resultado
-   * tiraria o foco, o painel fecharia e a lista sumiria debaixo do dedo no
-   * meio do toque — lançando o produto errado. */
+   * O gatilho é o TOQUE no campo (estado `buscaAberta` no JSX), não o foco e
+   * não o texto. Já foi o texto: o garçom tocava em "Buscar produto", o
+   * teclado cobria o campo e só depois da primeira letra a tela se organizava
+   * — quem usava pela primeira vez achava que tinha travado.
+   *
+   * E não pode ser o foco direto: tocar num resultado tira o foco do campo, o
+   * painel fecharia no meio do toque e a lista sumiria debaixo do dedo —
+   * lançando o produto errado. Por isso o estado só volta a falso em quem
+   * pede: o "← Voltar", o botão do celular ou sair da mesa. */
   .sal-busca-painel[data-buscando] {
     position: fixed;
     inset: 0;

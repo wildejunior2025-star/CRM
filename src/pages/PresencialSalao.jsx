@@ -211,6 +211,17 @@ export default function PresencialSalao() {
   const [moverErro, setMoverErro] = useState('')
   const [moverBusy, setMoverBusy] = useState(false)
   const [busca, setBusca]     = useState('')
+  // Painel de busca em tela cheia: abre no TOQUE do campo, não só quando tem
+  // texto. Antes o garçom tocava em "Buscar produto", o teclado subia e cobria
+  // o campo — ele só via a tela organizar depois de digitar a primeira letra, e
+  // quem usava pela primeira vez achava que tinha travado.
+  //
+  // É estado próprio, e não `foco`, de propósito: tocar num resultado tira o
+  // foco do campo, e se o painel dependesse do foco ele fecharia no meio do
+  // toque e a lista sumiria debaixo do dedo — lançando o produto errado. Aqui
+  // o painel só fecha em quem pede pra fechar: o "← Voltar", o botão do
+  // celular ou sair da mesa.
+  const [buscaAberta, setBuscaAberta] = useState(false)
   const [avisoBipe, setAvisoBipe] = useState(null)  // código bipado sem dono
   const [bipeSemMesa, setBipeSemMesa] = useState(null)  // bipou sem mesa aberta
   const [categoriaSel, setCategoriaSel] = useState(null) // categoria aberta no menu de adicionar item
@@ -326,6 +337,7 @@ export default function PresencialSalao() {
   useVoltarFecha(!!mesaSel, () => sairDaMesa())
   useVoltarFecha(!!mesaSel && !!categoriaSel, () => setCategoriaSel(null))
   useVoltarFecha(!!mesaSel && !!montando, () => setMontando(null))
+  useVoltarFecha(!!mesaSel && buscaAberta, () => { setBusca(''); setBuscaAberta(false) })
   useVoltarFecha(!!mesaSel && fechando, () => setFechando(false))
   useVoltarFecha(!!pixAmpliado, () => setPixAmpliado(null))
   const [pixVistos, setPixVistos] = useState(() => new Set())
@@ -866,7 +878,7 @@ export default function PresencialSalao() {
     }
 
     setMesaSel(mesa)
-    setBusca(''); setCategoriaSel(null); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true)
+    setBusca(''); setBuscaAberta(false); setCategoriaSel(null); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true)
     // Mesa sem nada lançado cai direto no cardápio: foi pra isso que o
     // atendente abriu ela. Mesa com conta abre na conta.
     setAbaMesa((alvo?.comanda_itens ?? []).length > 0 ? 'comanda' : 'add')
@@ -895,7 +907,7 @@ export default function PresencialSalao() {
     await loadMesas()
     if (nova) {
       setMesaSel(mesaDaComanda(nova))
-      setBusca(''); setCategoriaSel(null); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true); setAbaMesa('add')
+      setBusca(''); setBuscaAberta(false); setCategoriaSel(null); setFechando(false); setForma('dinheiro'); setAplicarTaxa(true); setAbaMesa('add')
       setModoPag('unico'); setPagamentos([]); setPickerFiadoIdx(null); setClienteSel(null); setBuscaCliente('')
     }
   }
@@ -3204,12 +3216,12 @@ export default function PresencialSalao() {
               {/* Busca + resultados moram juntos porque no celular os dois viram
                   TELA CHEIA quando há texto digitado — mesma receita do
                   "Inventar produto" (ver .sal-busca-painel no CSS). */}
-              <div className="sal-busca-painel" data-buscando={busca.trim() ? '1' : undefined}>
+              <div className="sal-busca-painel" data-buscando={(buscaAberta || busca.trim()) ? '1' : undefined}>
               {/* Barra de volta: só existe no modo tela cheia. Sem ela o garçom
                   fica sem saída — o "← Ver a comanda" está atrás do painel. E o
                   contador é o único sinal de que o toque no produto pegou. */}
               <div className="sal-busca-topo">
-                <button type="button" onClick={() => { setBusca(''); if (buscaRef.current) buscaRef.current.blur() }}>
+                <button type="button" onClick={() => { setBusca(''); setBuscaAberta(false); if (buscaRef.current) buscaRef.current.blur() }}>
                   ← Voltar
                 </button>
                 {rascunho.length > 0 && (
@@ -3217,7 +3229,7 @@ export default function PresencialSalao() {
                 )}
               </div>
               <div className="sal-busca" style={{ position: 'relative', marginBottom: 8 }}>
-                <input ref={buscaRef} value={busca} onChange={e => setBusca(e.target.value)} onKeyDown={teclaBusca} placeholder="Buscar produto ou bipar o código..."
+                <input ref={buscaRef} value={busca} onChange={e => setBusca(e.target.value)} onKeyDown={teclaBusca} onFocus={() => setBuscaAberta(true)} placeholder="Buscar produto ou bipar o código..."
                   style={{ width: '100%', padding: '10px 38px 10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', boxSizing: 'border-box', fontSize: 14.5 }} />
                 {busca && (
                   <button type="button" title="Limpar" aria-label="Limpar busca"
