@@ -133,9 +133,14 @@
 }
 
 /* ── Content ── */
+/* A margem lateral ACOMPANHA a largura, em vez de pular de 16px pra 32px no
+   corte de 768px. Era esse degrau que deixava a janela do app do gestor
+   (~760px) com o conteúdo colado na borda esquerda: larga demais pra parecer
+   celular, estreita demais pra entrar no desktop. Com clamp, celular continua
+   com 16px e qualquer coisa maior ganha ar na proporção certa. */
 .content {
   flex: 1;
-  padding: 24px 32px;
+  padding: 24px clamp(16px, 3.5vw, 32px);
   max-width: 100%;
   overflow-x: auto;
   min-width: 0;
@@ -247,7 +252,9 @@
      Pegou o "Salvar" da tela de Pagamento (24/09) e pegaria o de qualquer
      tela cujo botão fica no rodapé. */
   .content {
-    padding: 16px;
+    /* Só a sobra de cima/baixo muda no celular; a lateral segue o clamp da
+       regra de cima (16px no telefone, mais que isso em tela maior). */
+    padding: 16px clamp(16px, 3.5vw, 32px);
     padding-bottom: 88px;
     flex: 1;
   }
