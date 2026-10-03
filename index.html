@@ -55,16 +55,29 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <!-- Tema, decidido ANTES do React desenhar (senão a tela pisca de branco
+         pra preto na frente da pessoa).
+
+         O sistema abre CLARO pra todo mundo. Antes ele copiava o tema do
+         celular, e o resultado era que o mesmo sistema tinha duas caras: o
+         lojista via escuro, a gente via claro, e explicar qualquer coisa por
+         telefone virava adivinhação. Claro é o padrão da casa; escuro é
+         escolha, e escolha feita FICA — vale até a pessoa clicar de volta. -->
     <script>
       (function () {
-        var stored = localStorage.getItem('crm-theme')
-        var theme =
-          stored === 'light' || stored === 'dark'
-            ? stored
-            : window.matchMedia('(prefers-color-scheme: dark)').matches
-              ? 'dark'
-              : 'light'
-        document.documentElement.setAttribute('data-theme', theme)
+        try {
+          // Limpeza de uma vez só. O que estava guardado antes desta mudança não
+          // dizia se a pessoa ESCOLHEU o escuro ou se ele veio do tema do
+          // aparelho — os dois eram salvos igual. Sem jogar fora, metade da
+          // base continuaria escura sem nunca ter pedido.
+          if (!localStorage.getItem('crm-theme-v2')) {
+            localStorage.removeItem('crm-theme')
+            localStorage.setItem('crm-theme-v2', '1')
+          }
+        } catch (e) { /* navegador sem localStorage: segue no claro */ }
+        var stored
+        try { stored = localStorage.getItem('crm-theme') } catch (e) { stored = null }
+        document.documentElement.setAttribute('data-theme', stored === 'dark' ? 'dark' : 'light')
       })()
     </script>
   </head>
