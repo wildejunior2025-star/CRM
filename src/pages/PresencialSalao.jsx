@@ -511,20 +511,24 @@ export default function PresencialSalao() {
     return () => { vivo = false; clearInterval(t) }
   }, [empresaId])
 
+  // O garçom está COM A MÃO NA MASSA? Então a conferida de segurança espera.
+  //
+  // Recarregar a lista no meio de um lançamento é pior que a lista velha: a
+  // tela se remonta debaixo do dedo e o toque cai noutro lugar. Vale enquanto
+  // ele está dentro de uma comanda, montando um produto, fechando a conta ou
+  // com itens ainda não enviados.
+  //
+  // É ref, e não estado, porque quem lê isto é o temporizador lá de baixo: se
+  // dependesse do valor capturado no efeito, ele leria o de quando a tela
+  // montou — sempre "livre" — e o freio nunca pegaria.
+  const ocupadoRef = useRef(false)
+  useEffect(() => {
+    ocupadoRef.current = !!mesaSel || !!montando || fechando || rascunho.length > 0
+  }, [mesaSel, montando, fechando, rascunho])
+
   // Realtime: atualiza quando outro garçom mexe nas comandas
   useEffect(() => {
     if (!empresaId) return
-    const ch = supabase.channel(`salao_${empresaId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_pix_cobrancas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_adiantamentos', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
-      .subscribe(status => {
-        // Reconectou: o que mudou enquanto o canal esteve fora não chegou por
-        // evento nenhum. Recarrega pra alinhar com o banco.
-        if (status === 'SUBSCRIBED') loadMesasEmBreve()
-      })
 
     // REDE DE SEGURANÇA — o websocket cai CALADO.
     //
@@ -533,7 +537,28 @@ export default function PresencialSalao() {
     // mesa que já mudou, e só um F5 resolve — o garçom lança e a cozinha não vê.
     // Visto em 03/10: o tablet do balcão estava sem a Comanda 04 que o celular
     // ao lado já mostrava, e com status velho na Mesa 01.
-    const recarregar = () => { if (document.visibilityState === 'visible') loadMesasEmBreve() }
+    //
+    // Com dois freios: tela escondida não gasta consulta, e garçom com a mão na
+    // massa não tem a tela remontada embaixo do dedo.
+    const recarregar = () => {
+      if (document.visibilityState !== 'visible') return
+      if (ocupadoRef.current) return
+      loadMesasEmBreve()
+    }
+
+    const ch = supabase.channel(`salao_${empresaId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_pix_cobrancas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_adiantamentos', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
+      .subscribe(status => {
+        // Reconectou: o que mudou enquanto o canal esteve fora não chegou por
+        // evento nenhum. Recarrega pra alinhar com o banco — mas pelo mesmo
+        // caminho das outras, que respeita o garçom no meio do lançamento.
+        if (status === 'SUBSCRIBED') recarregar()
+      })
+
     document.addEventListener('visibilitychange', recarregar)
     window.addEventListener('focus', recarregar)
     window.addEventListener('online', recarregar)
