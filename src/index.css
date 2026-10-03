@@ -75,6 +75,24 @@ input, select, textarea, button {
   font-size: 14px;
 }
 
+/* iPhone: CAMPO COM MENOS DE 16px FAZ O SAFARI DAR ZOOM SOZINHO.
+   É regra do iOS, não tem como desligar pelo viewport (o `user-scalable=no`
+   é ignorado desde o iOS 10). Ao tocar num campo de 14px a página inteira
+   aproxima e fica torta; pra voltar, o garçom tem que pinçar a tela. No meio
+   de uma comanda isso é um inferno.
+   `!important` porque vários campos trazem o tamanho no `style=` da própria
+   tag, e inline só perde pra important. Vale só no iOS: o `-webkit-touch-callout`
+   não existe em Android nem no desktop, que não têm esse comportamento e
+   continuam com os 14px de sempre. Checkbox e radio ficam fora — não recebem
+   digitação e esticariam à toa. */
+@supports (-webkit-touch-callout: none) {
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
 /* Inputs de data/hora respeitam color-scheme para dark mode */
 input[type='date'],
 input[type='datetime-local'],
