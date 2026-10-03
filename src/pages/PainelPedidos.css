@@ -1176,6 +1176,16 @@
   }
 }
 
+/* Respiro lateral do conteúdo do Salão (Salão/Mesas, Cozinha, Caixa,
+   Histórico, Reservas — todos moram no .pp-salao-body).
+   Só existia regra pra celular (4px, logo abaixo). De 641px pra cima não havia
+   NENHUMA, então título, botões e os cartões das mesas nasciam colados na
+   borda esquerda — o que se vê na janela do app do gestor, que abre por volta
+   de 760px. O clamp acompanha a largura em vez de criar outro degrau. */
+.pp-salao-body {
+  padding: 0 clamp(14px, 2.2vw, 28px) 24px;
+}
+
 /* ══════════════════════════════════════════════════════════════════════
    CELULAR — o gestor com cara de aplicativo
    A barra de ações vivia grudada na lateral direita: comia 56px de uma tela
