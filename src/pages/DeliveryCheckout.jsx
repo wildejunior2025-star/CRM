@@ -371,7 +371,7 @@ async function reverseGeocode(lat, lng) {
 //     que o buscador chutou. Aberto na cara, o cliente vê o erro sozinho.
 //   * modal — tela cheia, pro ajuste fino (arrastar num mapa pequeno, dentro de
 //     uma página que rola, é briga de dedo).
-function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, taxaBairro, bairroBloqueado, initial, endereco, exigeManual, embutido, onChange, onAmpliar, onConfirm, onClose }) {
+function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, taxaBairro, bairroBloqueado, initial, endereco, exigeManual, embutido, autoLocalizar, forcado, onChange, onAmpliar, onConfirm, onClose }) {
   const mapRef = useRef(null)
   const mapObj = useRef(null)
   const pinRef = useRef(null)
@@ -379,7 +379,20 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, taxaBairro, bairro
   // Mesma informação do ref, mas em estado: o botão de confirmar precisa
   // re-renderizar quando o cliente finalmente mexe no pino.
   const [mexeu, setMexeu] = useState(false)
-  const marcarMexeu = () => { interagiu.current = true; setMexeu(true) }
+  // De ONDE veio o ponto quando o cliente nao arrastou: o GPS automatico conta
+  // como ponto do cliente (vale pra taxa e pra travar no cadastro), mas nao pode
+  // reescrever a rua que ele digitou — ele pode estar no trabalho pedindo pra
+  // casa. Arrasto e clique continuam mandando no endereco, como antes.
+  const origemGps = useRef(false)
+  const marcarMexeu = (porGps = false) => { interagiu.current = true; origemGps.current = porGps; setMexeu(true) }
+  const jaPediuLocal = useRef(false)
+  // Conta o tempo só no modo forçado, pra liberar a saída de emergência.
+  const [demorou, setDemorou] = useState(false)
+  useEffect(() => {
+    if (!forcado) return
+    const t = setTimeout(() => setDemorou(true), 12000)
+    return () => clearTimeout(t)
+  }, [forcado])
   // Enquanto o Leaflet não chega, mapObj guarda a string 'montando' pra segurar
   // o lugar (ver o init). Quem for MEXER no mapa passa por aqui.
   const mapaPronto = () => (mapObj.current && mapObj.current !== 'montando' ? mapObj.current : null)
@@ -524,15 +537,17 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, taxaBairro, bairro
   // Embutido não tem botão "confirmar": cada arrasto já vale como escolha.
   useEffect(() => {
     if (!embutido || !coord || !definido) return
-    onChange?.({ lat: coord.lat, lng: coord.lng, manual: interagiu.current })
+    onChange?.({ lat: coord.lat, lng: coord.lng, manual: interagiu.current, origem: origemGps.current ? 'gps' : 'dedo' })
   }, [embutido, coord, definido]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  function usarMinhaLocalizacao() {
+  // `auto` = foi o sistema que pediu ao abrir a tela, nao o dedo do cliente no
+  // botao. A diferenca e so uma: o automatico nao reescreve o endereco digitado.
+  function usarMinhaLocalizacao(auto = false) {
     if (!navigator.geolocation) return
     setLocLoading(true)
     navigator.geolocation.getCurrentPosition(
       pos => {
-        marcarMexeu()
+        marcarMexeu(auto)
         const c = { lat: pos.coords.latitude, lng: pos.coords.longitude }
         setCoord(c); setLocLoading(false); setDefinido(true)
         if (pinRef.current) pinRef.current.setLatLng([c.lat, c.lng])
@@ -542,6 +557,23 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, taxaBairro, bairro
       { enableHighAccuracy: true, timeout: 10000 }
     )
   }
+
+  // PEDE A LOCALIZACAO SOZINHO, uma vez, quando o mapa aparece no celular.
+  //
+  // Quem nao toca no mapa fica com o chute do buscador de endereco — e esse
+  // chute muda de um pedido pro outro (Marajo, 02/10: mesma rua, mesmo numero,
+  // pino 2 km longe do pedido anterior). O GPS resolve com um toque em
+  // "permitir", sem obrigar ninguem a arrastar nada.
+  //
+  // So no mapa embutido, so em tela de toque, so quando o cliente ainda nao tem
+  // ponto salvo e so uma vez por sessao. Negou ou ignorou: segue como antes.
+  useEffect(() => {
+    if (!embutido || !autoLocalizar || initial || jaPediuLocal.current) return
+    if (typeof window === 'undefined' || !navigator.geolocation) return
+    if (!window.matchMedia?.('(pointer: coarse)')?.matches) return
+    jaPediuLocal.current = true
+    usarMinhaLocalizacao(true)
+  }, [embutido, autoLocalizar, initial]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const dist = coord && storeLat ? haversineKm(coord.lat, coord.lng, Number(storeLat), Number(storeLng)) : null
   // O BAIRRO MANDA, igual ao resumo do pedido.
@@ -611,12 +643,22 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, taxaBairro, bairro
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }} onClick={onClose}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }} onClick={forcado ? undefined : onClose}>
       <div style={{ width: '100%', maxWidth: 560, background: 'var(--surface,#16161f)', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '92vh' }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', borderBottom: '1px solid var(--border,#2a2a3a)' }}>
           <strong style={{ fontSize: 15, color: 'var(--text,#fff)' }}>📍 Marque o ponto exato da entrega</strong>
-          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted,#9aa)', fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+          {/* Aberto na marra: sem ✕ e sem fechar clicando fora — a saída é o
+              botão de salvar lá embaixo. Quem fechava sem olhar era justamente
+              quem deixava o pino no chute do buscador. */}
+          {!forcado && (
+            <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted,#9aa)', fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+          )}
         </div>
+        {forcado && (
+          <div style={{ padding: '11px 16px', background: 'rgba(234,179,8,.14)', borderBottom: '1px solid rgba(234,179,8,.35)', fontSize: 13.5, lineHeight: 1.5, color: '#fde68a' }}>
+            👉 <strong>Confira se o pino está no lugar certo</strong> — é por ele que o motoboy vai. Arraste até a porta da sua casa e toque em <strong>Salvar o pino</strong>.
+          </div>
+        )}
         {/* `flex` + `minHeight` pequenos: o modal tem teto de 92vh e embaixo do
             mapa ainda vêm botão, distância e avisos. Com altura fixa de 58vh a
             soma passava do teto, o `overflow: hidden` do modal cortava o mapa
@@ -643,8 +685,17 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, taxaBairro, bairro
             style={{ width: '100%', padding: '13px', borderRadius: 12, border: 'none', background: liberado ? '#7c3aed' : '#4b3a7a', color: '#fff', fontWeight: 800, fontSize: 15, cursor: liberado ? 'pointer' : 'not-allowed' }}>
             {!definido ? 'Arraste o pino até sua casa'
               : (exigeManual && !mexeu) ? 'Arraste o pino até sua casa'
+              : forcado ? 'Salvar o pino'
               : 'Confirmar este local'}
           </button>
+          {/* Saída de emergência. Mapa que não carrega (Leaflet travado, internet
+              ruim) deixaria o cliente preso numa tela sem botão válido — e
+              pedido perdido é pior que pino torto. Só aparece depois de 12s. */}
+          {forcado && demorou && !liberado && (
+            <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted,#9aa)', fontSize: 12.5, textDecoration: 'underline', cursor: 'pointer', padding: 0 }}>
+              O mapa não carregou — continuar sem marcar
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1443,7 +1494,7 @@ export default function DeliveryCheckout() {
     }, 900)
   }
 
-  function pontoDoMapa({ lat, lng, manual }) {
+  function pontoDoMapa({ lat, lng, manual, origem }) {
     if (manual) pinManualRef.current = true
     setCoordCliente(prev =>
       prev && Math.abs(prev.lat - lat) < 1e-7 && Math.abs(prev.lng - lng) < 1e-7
@@ -1452,12 +1503,48 @@ export default function DeliveryCheckout() {
     // Só quando foi a PESSOA que mexeu. O pino que o buscador põe sozinho já
     // veio do endereço digitado — reescrever ali seria o mapa discutindo com
     // ele mesmo.
-    if (manual) enderecoPeloPino(lat, lng)
+    //
+    // O GPS automático também não reescreve: ele diz onde o CELULAR está, que
+    // não é necessariamente onde a entrega é. Quem pede do trabalho pra casa
+    // teria o endereço trocado sem perceber. O ponto entra (é ele que vale pra
+    // taxa e pro entregador), a rua digitada fica — e, se os dois estiverem
+    // longe, o aviso amarelo do mapa manda conferir.
+    if (manual && origem !== 'gps') enderecoPeloPino(lat, lng)
   }
+
+  // O MAPA ABRE NA CARA assim que o endereço fica completo.
+  //
+  // O mapa embutido já ficava aberto na página, e mesmo assim 3 de cada 4
+  // clientes nunca encostavam nele: fechavam o pedido com o chute do buscador,
+  // que muda de um pedido pro outro e manda o motoboy pra rua errada.
+  //
+  // Agora, quando ele termina de digitar o número, o mapa sobe por cima de tudo
+  // com o pino já no lugar que o buscador achou (ou no GPS, se ele permitiu) e
+  // a única saída é o botão de salvar. Ninguém mais fecha o pedido sem ter
+  // olhado onde o entregador vai parar.
+  //
+  // Uma vez por sessão, e nunca pra quem já tem ponto travado no cadastro —
+  // esse já apontou a casa um dia e não precisa apontar de novo.
+  const jaForcouMapa = useRef(false)
+  const [mapaForcado, setMapaForcado] = useState(false)
+  useEffect(() => {
+    if (tipo !== 'entrega' || pinSalvo || jaForcouMapa.current) return
+    if (!lojaEndereco?.latitude || !lojaEndereco?.longitude) return
+    if (!form.rua.trim() || !form.numero.trim() || !form.bairro.trim()) return
+    // Espera parar de digitar: sem isso o mapa pulava no "1" de "151".
+    const t = setTimeout(() => {
+      if (jaForcouMapa.current) return
+      jaForcouMapa.current = true
+      setMapaForcado(true)
+      setMapaAberto(true)
+    }, 1200)
+    return () => clearTimeout(t)
+  }, [tipo, pinSalvo, lojaEndereco, form.rua, form.numero, form.bairro])
 
   function confirmarMapa({ lat, lng, manual }) {
     pinManualRef.current = !!manual
     setCoordCliente({ lat, lng })
+    setMapaForcado(false)
     setMapaAberto(false)
     reverseGeocode(lat, lng).then(a => {
       if (!a) return
@@ -2340,6 +2427,7 @@ export default function DeliveryCheckout() {
                         taxas={lojaEndereco.taxas_entrega_km}
                         taxaBairro={bairroTaxaFixa ? (Number(cfgBairro.taxa) || 0) : null}
                         bairroBloqueado={bairroBloqueado}
+                        autoLocalizar={tipo === 'entrega' && !pinSalvo}
                         initial={coordCliente}
                         endereco={{ rua: form.rua, numero: form.numero, bairro: form.bairro, cidade: form.cidade, estado: form.estado, cep: form.cep }}
                         exigeManual={reconfirmar}
@@ -2713,11 +2801,12 @@ export default function DeliveryCheckout() {
           taxas={lojaEndereco?.taxas_entrega_km}
           taxaBairro={bairroTaxaFixa ? (Number(cfgBairro.taxa) || 0) : null}
           bairroBloqueado={bairroBloqueado}
+          forcado={mapaForcado}
           initial={coordCliente}
           endereco={{ rua: form.rua, numero: form.numero, bairro: form.bairro, cidade: form.cidade, estado: form.estado, cep: form.cep }}
           exigeManual={reconfirmar}
           onConfirm={confirmarMapa}
-          onClose={() => setMapaAberto(false)}
+          onClose={() => { setMapaForcado(false); setMapaAberto(false) }}
         />
       )}
     </div>
