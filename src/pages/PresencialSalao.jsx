@@ -520,8 +520,36 @@ export default function PresencialSalao() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_pix_cobrancas', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_adiantamentos', filter: `empresa_id=eq.${empresaId}` }, loadMesasEmBreve)
-      .subscribe()
-    return () => { supabase.removeChannel(ch) }
+      .subscribe(status => {
+        // Reconectou: o que mudou enquanto o canal esteve fora não chegou por
+        // evento nenhum. Recarrega pra alinhar com o banco.
+        if (status === 'SUBSCRIBED') loadMesasEmBreve()
+      })
+
+    // REDE DE SEGURANÇA — o websocket cai CALADO.
+    //
+    // Wi-fi trocando, Android congelando o app em segundo plano, tablet
+    // dormindo: o canal morre e ninguém avisa. A tela fica parada mostrando
+    // mesa que já mudou, e só um F5 resolve — o garçom lança e a cozinha não vê.
+    // Visto em 03/10: o tablet do balcão estava sem a Comanda 04 que o celular
+    // ao lado já mostrava, e com status velho na Mesa 01.
+    const recarregar = () => { if (document.visibilityState === 'visible') loadMesasEmBreve() }
+    document.addEventListener('visibilitychange', recarregar)
+    window.addEventListener('focus', recarregar)
+    window.addEventListener('online', recarregar)
+    // Os eventos acima cobrem quem sai e volta. Não cobrem o aparelho do balcão,
+    // que fica com a tela acesa na mesma aba o dia inteiro: nele o canal pode
+    // morrer sem nunca mais haver um `focus`. Daí a conferida lenta — só com a
+    // tela à frente, pra não ficar consultando banco com o aparelho guardado.
+    const conferir = setInterval(recarregar, 40000)
+
+    return () => {
+      supabase.removeChannel(ch)
+      document.removeEventListener('visibilitychange', recarregar)
+      window.removeEventListener('focus', recarregar)
+      window.removeEventListener('online', recarregar)
+      clearInterval(conferir)
+    }
   }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // O caixa costuma ser aberto em OUTRA aba (ou noutra janela do /caixa). Como o
