@@ -194,7 +194,8 @@ serve(async (req) => {
 
     const agora = new Date().toISOString()
     const resultado: Record<string, unknown>[] = []
-    const caiu: string[] = []
+    const caiu: string[] = []        // como aparece na mensagem (com o tempo parado)
+    const caiuLojas: string[] = []   // só o nome, pra marcar o avisado_em
     const voltou: string[] = []
     let servidorFora = 0
 
@@ -203,7 +204,7 @@ serve(async (req) => {
       if (estado === "servidor_fora") servidorFora++
 
       const { data: antes } = await supabase.from("monitor_whatsapp")
-        .select("estado, avisado_em").eq("instancia", alvo.instancia).maybeSingle()
+        .select("estado, avisado_em, mudou_em").eq("instancia", alvo.instancia).maybeSingle()
       const mudou = (antes?.estado ?? "desconhecido") !== estado
 
       await supabase.from("monitor_whatsapp").upsert({
@@ -212,7 +213,22 @@ serve(async (req) => {
         ...(mudou ? { mudou_em: agora } : {}),
       }, { onConflict: "instancia" })
 
-      if (mudou && estado !== "aberto") caiu.push(alvo.loja)
+      // Avisa de novo de 6 em 6 horas enquanto continuar caída. Avisar só na
+      // mudança deixou a CDBom 3 dias muda: o aviso saiu às 19:50 de uma
+      // quinta, passou batido, e ninguém mais foi lembrado (05/10/2026).
+      const SEIS_HORAS = 6 * 60 * 60 * 1000
+      const insistir = estado !== "aberto" && !mudou
+        && (!antes?.avisado_em || Date.now() - new Date(antes.avisado_em).getTime() > SEIS_HORAS)
+
+      if ((mudou || insistir) && estado !== "aberto") {
+        // Há quanto tempo está assim: "caiu agora" e "caiu anteontem" pedem
+        // reações diferentes de quem lê.
+        const desde = new Date(mudou ? agora : (antes?.mudou_em ?? agora)).getTime()
+        const h = Math.floor((Date.now() - desde) / 3600000)
+        const quanto = h < 1 ? "agora" : h < 24 ? `há ${h}h` : `há ${Math.floor(h / 24)} dia(s)`
+        caiu.push(`${alvo.loja} (${quanto})`)
+        caiuLojas.push(alvo.loja)
+      }
       if (mudou && estado === "aberto" && antes?.estado && antes.estado !== "desconhecido") voltou.push(alvo.loja)
       resultado.push({ loja: alvo.loja, instancia: alvo.instancia, estado, mudou })
     }
@@ -242,7 +258,7 @@ serve(async (req) => {
       const r = await avisar(supabase, texto)
       envio = { via: r.via, ok: r.ok, erro: r.erro }
       if (r.ok) {
-        const nomes = caiu.length ? caiu : voltou
+        const nomes = caiuLojas.length ? caiuLojas : voltou
         await supabase.from("monitor_whatsapp").update({ avisado_em: agora })
           .in("loja", nomes)
       } else {
