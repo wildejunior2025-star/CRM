@@ -112,6 +112,9 @@ export default function PresencialHistorico() {
   const [aberta, setAberta]     = useState(null) // id da comanda expandida
   const [pickerComanda, setPickerComanda] = useState(null) // comanda em que se está ligando o cliente
   const [editandoForma, setEditandoForma] = useState(null) // id da comanda com o seletor de forma aberto
+  // Comanda que está virando fiado e abriu o seletor de cliente só por causa
+  // disso: ao escolher alguém, a troca de forma vai junto.
+  const [fiadoPendente, setFiadoPendente] = useState(null)
   const [salvandoForma, setSalvandoForma] = useState(false)
 
   // ── Segunda via de uma conta já fechada ──────────────────────────────────
@@ -205,8 +208,19 @@ export default function PresencialHistorico() {
   }
 
   // Corrige a forma de pagamento de uma conta já fechada (lançou errado e fechou).
+  //
+  // FIADO SEM CLIENTE NÃO EXISTE: é dívida de alguém, tem que ter dono. Antes a
+  // tela só avisava isso num textinho embaixo e deixava trocar assim mesmo — a
+  // conta virava fiado de ninguém e sumia do "quem está devendo". Agora, se a
+  // conta ainda não tem cliente, o seletor abre ANTES e a troca só acontece
+  // depois que alguém for escolhido (ver `ligarCliente`).
   async function trocarForma(comanda, forma) {
     if (forma === comanda.forma_pagamento) { setEditandoForma(null); return }
+    if (forma === 'fiado' && !comanda.cliente) {
+      setFiadoPendente(comanda.id)
+      setPickerComanda(comanda)
+      return
+    }
     setSalvandoForma(true)
     const { error } = await supabase.rpc('alterar_forma_pagamento_comanda', {
       p_comanda_id: comanda.id, p_forma: forma,
@@ -219,14 +233,31 @@ export default function PresencialHistorico() {
 
   // Liga (ou tira) um cliente a uma conta já fechada. Propaga pra venda no banco.
   async function ligarCliente(comanda, cliente) {
+    const viraFiado = fiadoPendente === comanda.id && !!cliente
     const { error } = await supabase.rpc('vincular_cliente_comanda', {
       p_comanda_id: comanda.id, p_cliente_id: cliente?.id ?? null,
     })
     setPickerComanda(null)
+    setFiadoPendente(null)
     if (error) { window.alert(recadoDeErro(error, 'ligar o cliente')); return }
     setComandas(prev => prev.map(c => c.id === comanda.id
       ? { ...c, cliente: cliente ? { id: cliente.id, nome: cliente.nome, telefone: cliente.telefone } : null }
       : c))
+
+    // Veio da troca pra fiado: agora que a conta tem dono, completa a mudança.
+    // Só aqui, e não antes, pra não existir nem por um instante um fiado órfão.
+    if (!viraFiado) return
+    setSalvandoForma(true)
+    const r = await supabase.rpc('alterar_forma_pagamento_comanda', {
+      p_comanda_id: comanda.id, p_forma: 'fiado',
+    })
+    setSalvandoForma(false)
+    setEditandoForma(null)
+    if (r.error) {
+      window.alert('O cliente foi ligado, mas não deu pra marcar como fiado: ' + r.error.message)
+      return
+    }
+    setComandas(prev => prev.map(c => c.id === comanda.id ? { ...c, forma_pagamento: 'fiado' } : c))
   }
 
   useEffect(() => {
@@ -1146,10 +1177,14 @@ export default function PresencialHistorico() {
       {pickerComanda && (
         <ClientePicker
           empresaId={empresaId}
-          titulo={pickerComanda.numero_mesa ? `Cliente da ${rotuloComanda(pickerComanda, { comNome: false })}` : 'Cliente do pedido'}
-          permitirTirar={!!pickerComanda.cliente}
+          titulo={fiadoPendente === pickerComanda.id
+            ? 'Quem vai ficar devendo?'
+            : pickerComanda.numero_mesa ? `Cliente da ${rotuloComanda(pickerComanda, { comNome: false })}` : 'Cliente do pedido'}
+          /* Virando fiado, "tirar o cliente" não faz sentido: sem dono não há
+             dívida. Nos outros casos continua liberado. */
+          permitirTirar={!!pickerComanda.cliente && fiadoPendente !== pickerComanda.id}
           onPick={(cli) => ligarCliente(pickerComanda, cli)}
-          onFechar={() => setPickerComanda(null)}
+          onFechar={() => { setPickerComanda(null); setFiadoPendente(null) }}
         />
       )}
     </div>
