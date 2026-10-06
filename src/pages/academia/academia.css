@@ -125,3 +125,8 @@
 .ac-rec-catraca .erro { color: #f87171; font-size: 13px; }
 .ac-rec-catraca + .ac-rec-voltar { margin-top: 0; }
 .ac-rec-diag { font: 12px/1.4 ui-monospace, Consolas, monospace; color: #6b7280; }
+/* Tela /porta: o computador só abre a catraca quando o celular avisa */
+.ac-porta { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-radius: 10px; font-size: 16px; }
+.ac-porta.ok { background: var(--success-bg); color: var(--success); }
+.ac-porta.erro { background: var(--danger-bg); color: var(--danger); }
+.ac-porta strong { font-size: 18px; }

@@ -55,7 +55,10 @@ export default function AcademiaRecepcao() {
   const catracaRef = useRef(null)
   const setCatraca = v => { catracaRef.current = v; setCatracaEstado(v) }
 
-  async function abrirCatraca() {
+  async function abrirCatraca(aluno) {
+    // Celular/tablet não fala com a catraca: avisa o computador que está com a
+    // tela /porta aberta, e ele solta o sinal (a câmera do celular é melhor).
+    if (!serialSuportado()) return avisarPorta(aluno)
     setCatraca('abrindo')
     try {
       await liberarCatraca()
@@ -70,6 +73,16 @@ export default function AcademiaRecepcao() {
         setCatraca(e2.message)
       }
     }
+  }
+
+  // Aviso pro computador da catraca (tela /porta).
+  const canalPorta = useRef(null)
+  function avisarPorta(aluno) {
+    const canal = canalPorta.current
+    if (!canal) return setCatraca('Sem ligação com o computador da catraca.')
+    setCatraca('abrindo')
+    canal.send({ type: 'broadcast', event: 'liberar', payload: { nome: aluno?.nome, aluno_id: aluno?.id } })
+      .then(() => setCatraca('ok'), e => setCatraca('Não avisei o computador: ' + e.message))
   }
 
   function trocarPiscar(v) {
@@ -118,7 +131,7 @@ export default function AcademiaRecepcao() {
       mostrar({ aluno: achado.aluno, situacao })
       bipe(situacao.status === 'liberado')
       // PC com a catraca ligada (configurada em /catraca): abre sozinha.
-      if (situacao.status === 'liberado') abrirCatraca()
+      if (situacao.status === 'liberado') abrirCatraca(achado.aluno)
       registrar(achado.aluno, situacao, achado.distancia)
       aprender(achado)
     }
@@ -242,6 +255,13 @@ export default function AcademiaRecepcao() {
         // mostra na tela se deu certo — ou o motivo, inclusive "não configurada".
         if (serialSuportado()) {
           conectarCatraca().then(() => setCatraca('ok'), e => setCatraca(e.message))
+        } else {
+          // Celular: liga no canal do computador que abre a catraca (tela /porta).
+          const canal = supabase.channel(`catraca-${empresa.id}`)
+          canal.subscribe(st => {
+            if (st === 'SUBSCRIBED') { canalPorta.current = canal; setCatraca('ok') }
+            else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') setCatraca('Sem ligação com o computador da catraca.')
+          })
         }
         laco()
       } catch (e) {
@@ -264,6 +284,7 @@ export default function AcademiaRecepcao() {
       clearTimeout(timerCartao)
       desligarCamera(stream)
       wakeLock?.release?.().catch(() => {})
+      if (canalPorta.current) { supabase.removeChannel(canalPorta.current); canalPorta.current = null }
       sairTelaCheia()
     }
   }, [iniciado, empresa.id, exigirPiscar]) // eslint-disable-line react-hooks/exhaustive-deps
