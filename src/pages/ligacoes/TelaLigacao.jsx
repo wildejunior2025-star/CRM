@@ -74,11 +74,16 @@ export default function TelaLigacao({ nome, onSair }) {
     window.scrollTo({ top: 0 })
   }, [])
 
-  // Ao abrir: se ela já está com uma loja na mão (atualizou a página), volta pra ela.
+  // Ao abrir: só RETOMA a loja que ela já tem na mão (atualizou a página). Loja
+  // nova é só no botão "Próxima loja" — abrir o app não pode travar loja sozinho.
   useEffect(() => {
     carregarResumo()
-    pegarProxima()
-  }, [carregarResumo, pegarProxima])
+    supabase.rpc('tm_minha_loja').then(({ data }) => {
+      const l = Array.isArray(data) ? data[0] : data
+      if (l?.id) { setLead(l); setF({ ...VAZIO, nomeDono: l.nome_dono || '' }) }
+      setCarregando(false)
+    })
+  }, [carregarResumo])
 
   async function devolver() {
     if (!lead) return

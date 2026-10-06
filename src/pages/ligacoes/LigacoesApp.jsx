@@ -53,27 +53,35 @@ function Entrar() {
 
 export default function LigacoesApp() {
   const { session, profile, loading, profileLoading, logout } = useAuth()
-  const [atendente, setAtendente] = useState(undefined) // undefined = ainda procurando
+  // Guarda de QUEM é a resposta: se outra conta entrar no mesmo aparelho, a
+  // resposta da anterior não vale.
+  const [achado, setAchado] = useState(null) // { id, dados } — dados null = não é atendente
 
   const userId = session?.user?.id
   const souAdmin = profile?.perfil === 'super_admin'
+  const atendente = achado && achado.id === userId ? achado.dados : undefined // undefined = procurando
 
   useEffect(() => {
     if (!userId || souAdmin) return
     let ativo = true
     supabase.from('tm_atendentes').select('nome, ativo').eq('user_id', userId).maybeSingle()
-      .then(({ data }) => { if (ativo) setAtendente(data?.ativo ? data : null) })
+      .then(({ data }) => { if (ativo) setAchado({ id: userId, dados: data?.ativo ? data : null }) })
     return () => { ativo = false }
   }, [userId, souAdmin])
 
-  if (loading || (session && profileLoading && !profile)) return <Carregando />
+  // Atendente não tem profile: o AuthContext religa o profileLoading a cada
+  // evento de sessão (o aparelho voltando de outro app, por exemplo). Se a tela
+  // desmontasse a cada vez, ela piscaria e perderia o que foi preenchido. Depois
+  // que a conta já foi reconhecida, esses eventos não derrubam mais a tela.
+  const emAtualizacao = session && profileLoading && !profile && atendente === undefined
+  if (loading || emAtualizacao) return <Carregando />
   if (!session) return <Entrar />
 
   if (souAdmin) {
     return <Suspense fallback={<Carregando />}><AdminLigacoes onSair={logout} /></Suspense>
   }
   if (atendente === undefined) return <Carregando />
-  if (!atendente) {
+  if (atendente === null) {
     return (
       <div className="lg-centro-tela">
         <div className="lg-card lg-login">
