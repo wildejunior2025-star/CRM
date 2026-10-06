@@ -115,6 +115,9 @@ export default function PresencialHistorico() {
   // Comanda que está virando fiado e abriu o seletor de cliente só por causa
   // disso: ao escolher alguém, a troca de forma vai junto.
   const [fiadoPendente, setFiadoPendente] = useState(null)
+  // Último acerto de cada garçom: { garcom_id: 'YYYY-MM-DD' }. Quem foi acertado
+  // HOJE (ou depois) está zerado e não pontua no dia — ver `rankingTodos`.
+  const [cortes, setCortes] = useState({})
   const [salvandoForma, setSalvandoForma] = useState(false)
 
   // ── Segunda via de uma conta já fechada ──────────────────────────────────
@@ -326,6 +329,17 @@ export default function PresencialHistorico() {
       setLoading(false)
     })
     carregarAcumulado()
+    // Corte de cada garçom. A RLS já limita à loja. Guardo só o maior `ate_dia`
+    // de cada um — é ele que diz a partir de quando os gestos voltam a valer.
+    supabase.from('garcom_acertos')
+      .select('garcom_id, ate_dia')
+      .then(({ data }) => {
+        const m = {}
+        for (const a of data ?? []) {
+          if (!m[a.garcom_id] || a.ate_dia > m[a.garcom_id]) m[a.garcom_id] = a.ate_dia
+        }
+        setCortes(m)
+      })
     if (ehAdmin) {
       // O dono via só o que FALTA pagar. Pra conferir quanto já saiu ele tinha
       // que entrar na conta de cada garçom (Saidera, 27/09).
@@ -459,11 +473,21 @@ export default function PresencialHistorico() {
       l.valor += Number(it.preco_unitario) * it.quantidade   // base da comissão em R$
     }
     for (const c of fechadas) linha(c.fechada_por).fechou += 1
+    // QUEM FOI ACERTADO HOJE NÃO PONTUA HOJE.
+    //
+    // O acerto fecha o período: do `ate_dia` pra trás está tudo quitado (ou
+    // zerado, como no caso de garçom novo que treinou na tela). O acumulado do
+    // dono já respeitava isso; este placar do dia não, e aí o garçom zerado
+    // continuava vendo "seus pontos hoje: 30" e o dono via zero — duas verdades
+    // na mesma loja. Também é certo tirar do bolo: quem não recebe pelo dia não
+    // pode diluir o rateio de quem recebe.
+    const hojeStr = new Date().toLocaleDateString('en-CA')  // YYYY-MM-DD local
     return Object.values(map).map(r => ({
       ...r,
       pontos: r.lancou * pontosCfg.lancar + r.entregou * pontosCfg.entregar + r.fechou * pontosCfg.fechar,
-    })).filter(r => r.pontos > 0).sort((a, b) => b.pontos - a.pontos)
-  }, [lancados, entregas, fechadas, pontosCfg])
+    })).filter(r => r.pontos > 0 && !(cortes[r.id] && cortes[r.id] >= hojeStr))
+      .sort((a, b) => b.pontos - a.pontos)
+  }, [lancados, entregas, fechadas, pontosCfg, cortes])
 
   // O bolo do dia e quanto vale cada ponto. O total de pontos é o de TODOS os
   // garçons, inclusive quando a tela mostra só um: o ponto do garçom vale menos
