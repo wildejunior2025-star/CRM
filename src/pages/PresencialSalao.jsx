@@ -491,6 +491,22 @@ export default function PresencialSalao() {
     recargaTimer.current = setTimeout(loadMesas, 350)
   }, [loadMesas])
 
+  // ATUALIZAR NA MÃO.
+  //
+  // A tela já se vira sozinha (tempo real + a conferida de 40s), mas entre o
+  // garçom lançar no celular dele e o balcão enxergar passam alguns segundos —
+  // e nesse intervalo ninguém sabe se o pedido entrou ou se travou. No app do
+  // iPhone era pior: puxar a tela pra baixo não recarrega nada, então a saída
+  // virava fechar e abrir o aplicativo no meio do movimento.
+  //
+  // Aqui não vale o freio do `ocupadoRef`: quem apertou foi a pessoa, e ela
+  // está pedindo exatamente que a tela mude.
+  const [atualizando, setAtualizando] = useState(false)
+  const atualizarAgora = useCallback(async () => {
+    setAtualizando(true)
+    try { await loadMesas() } finally { setAtualizando(false) }
+  }, [loadMesas])
+
   useEffect(() => { loadCatalogo() }, [loadCatalogo])
   useEffect(() => { loadMesas() }, [loadMesas])
 
@@ -2562,6 +2578,26 @@ export default function PresencialSalao() {
           <p className="page-subtitle">Toque numa mesa para abrir/gerenciar a comanda.</p>
           {/* Atalhos rápidos sem sair do salão: fiado (quem deve) e consumo de funcionários. */}
           <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            {/* Primeiro da fila de propósito: é o que mais se aperta no meio do
+                movimento, e no celular a primeira posição é a que o polegar
+                acha sem procurar. */}
+            <button
+              type="button"
+              onClick={atualizarAgora}
+              disabled={atualizando}
+              aria-label="Atualizar as mesas agora"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '7px 14px', borderRadius: 10,
+                cursor: atualizando ? 'wait' : 'pointer',
+                border: '1.5px solid var(--primary)',
+                background: atualizando ? 'transparent' : 'rgba(124,58,237,.1)',
+                color: 'var(--primary)', fontSize: 13.5, fontWeight: 700,
+                opacity: atualizando ? 0.65 : 1,
+              }}
+            >
+              {atualizando ? '⏳ Atualizando…' : '🔄 Atualizar'}
+            </button>
             <button
               type="button"
               onClick={() => setShowFiado(true)}
