@@ -31,7 +31,7 @@ function TelaCarregando() {
   )
 }
 
-const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/excluir-conta', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor', '/mesa/', '/c/']
+const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/excluir-conta', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor', '/mesa/', '/c/', '/ligacoes']
 
 // Domínios em que a raiz "/" mostra a landing de marketing (visitante deslogado).
 // Nos subdomínios (app./admin./gestor./lojaonline.) a raiz mantém o fluxo antigo.
@@ -221,6 +221,7 @@ const Landing = lazy(() => import('./pages/Landing'))
 const TourSistema = lazy(() => import('./pages/TourSistema'))
 const ConfigurarLoja = lazy(() => import('./pages/ConfigurarLoja'))
 const AcademiaApp = lazy(() => import('./pages/academia/AcademiaApp'))
+const LigacoesApp = lazy(() => import('./pages/ligacoes/LigacoesApp'))
 
 export default function App() {
   // lojaonline.fwcinter.com — vitrine pública da loja (sem login).
@@ -307,6 +308,8 @@ export default function App() {
           <Route path="/cadastro-cliente/:empresaId" element={<CadastroCliente />} />
           <Route path="/cadastro-admin/:empresaId" element={<CadastroAdmin />} />
           <Route path="/cadastro-vendedor/:empresaId" element={<CadastroVendedor />} />
+          {/* Telemarketing da FWC (mig 0292) — bloco isolado, login próprio */}
+          <Route path="/ligacoes" element={<LigacoesApp />} />
           {/* Rota que não existe NUNCA pode virar tela preta. Ela cai aqui e
               diz o que houve — com um botão que recarrega de verdade, que é o
               que resolve quando o aparelho está com uma versão velha guardada. */}

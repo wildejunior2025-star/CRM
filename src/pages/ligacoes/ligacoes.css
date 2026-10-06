@@ -1,0 +1,77 @@
+/* /ligacoes — telemarketing da FWC (mig 0292). Pensado pro celular. */
+
+.lg-tela { max-width: 560px; margin: 0 auto; padding: 12px 12px 40px; color: var(--text); background: var(--bg); min-height: 100vh; }
+.lg-tela.lg-larga { max-width: 860px; }
+.lg-centro-tela { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; background: var(--bg); }
+.lg-muted { color: var(--text-muted); }
+.lg-peq { font-size: 13px; }
+.lg-mb { margin-bottom: 12px; }
+.lg-cap { text-transform: capitalize; }
+
+.lg-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-bottom: 12px; box-shadow: var(--shadow-sm); }
+.lg-centro { text-align: center; padding: 28px 16px; }
+.lg-off { opacity: 0.6; }
+
+.lg-login { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 12px; text-align: center; }
+.lg-login h1 { margin: 0; font-size: 22px; }
+.lg-logo { font-size: 44px; line-height: 1; }
+
+.lg-topo { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 2px 12px; }
+.lg-resumo { color: var(--text-muted); font-size: 13px; margin-top: 2px; }
+
+.lg-ok { color: var(--success); background: var(--success-bg); padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; font-size: 14px; }
+.lg-erro { color: var(--danger); background: var(--danger-bg); padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; font-size: 14px; }
+.lg-dica { color: var(--warning); background: var(--warning-bg); padding: 8px 12px; border-radius: 10px; margin-top: 10px; font-size: 14px; }
+
+.lg-grande { width: 100%; padding: 22px 16px; font-size: 20px; font-weight: 700; border: 0; border-radius: 16px; background: var(--primary); color: var(--primary-contrast); cursor: pointer; margin-bottom: 10px; }
+.lg-grande:active { background: var(--primary-hover); }
+
+.lg-loja { margin: 0 0 4px; font-size: 20px; line-height: 1.2; }
+.lg-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.lg-chip { background: var(--surface-hover); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; font-size: 13px; }
+.lg-chip-dono { background: var(--primary-bg); border-color: transparent; color: var(--primary); font-weight: 600; }
+.lg-tag { background: var(--primary-bg); color: var(--primary); border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.lg-tag-warn { background: var(--warning-bg); color: var(--warning); }
+
+.lg-ligar { display: block; text-align: center; margin: 12px 0; padding: 16px; border-radius: 14px; background: var(--success); color: #fff; font-size: 18px; font-weight: 700; text-decoration: none; }
+.lg-roteiro { background: var(--info-bg); border-radius: 10px; padding: 10px 12px; font-size: 15px; line-height: 1.45; font-style: italic; }
+.lg-rot-t { font-style: normal; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--info); margin-bottom: 4px; }
+
+.lg-h { margin: 0 0 10px; font-size: 16px; }
+.lg-form { display: flex; flex-direction: column; gap: 12px; }
+.lg-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); }
+.lg-form input:not([type=checkbox]):not([type=file]), .lg-form select, .lg-form textarea, .lg-in {
+  padding: 11px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 16px; font-family: inherit; width: 100%;
+}
+.lg-in { margin-top: 8px; }
+
+.lg-perg { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; border-bottom: 1px dashed var(--border); }
+.lg-perg:last-of-type { border-bottom: 0; }
+.lg-q { font-size: 15px; line-height: 1.4; color: var(--text); }
+
+.lg-opcoes { display: flex; flex-wrap: wrap; gap: 8px; }
+.lg-op { flex: 1 1 0; min-width: 84px; padding: 13px 10px; border-radius: 12px; border: 2px solid var(--border); background: var(--surface); color: var(--text); font-size: 16px; font-weight: 600; cursor: pointer; }
+.lg-op-on { border-color: var(--primary); background: var(--primary-bg); color: var(--primary); }
+.lg-opcoes-grande .lg-op { flex: 1 1 calc(50% - 8px); padding: 16px 10px; }
+
+.lg-acoes { display: flex; gap: 10px; margin-top: 4px; }
+.lg-acoes .btn { padding: 14px 12px; font-size: 16px; }
+.lg-salvar { flex: 1; }
+
+/* painel do dono */
+.lg-abas { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 14px; padding-bottom: 2px; }
+.lg-aba { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); font-weight: 600; white-space: nowrap; cursor: pointer; }
+.lg-aba-on { background: var(--primary-bg); color: var(--primary); border-color: transparent; }
+.lg-linha { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lg-botoes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.lg-grupo { margin-bottom: 8px; }
+.lg-visita { margin-bottom: 8px; }
+.lg-atrasada { border-color: var(--warning); }
+.lg-filtros { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; }
+.lg-filtros .lg-in { margin-top: 0; }
+.lg-lead { padding: 0; overflow: hidden; margin-bottom: 8px; }
+.lg-lead-cab { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; background: transparent; border: 0; text-align: left; color: inherit; font: inherit; cursor: pointer; }
+.lg-lead-dir { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.lg-lead-det { padding: 0 14px 14px; border-top: 1px solid var(--border); }
+.lg-hist { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+@media (max-width: 640px) { .lg-filtros { grid-template-columns: 1fr; } }
