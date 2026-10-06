@@ -139,7 +139,7 @@ export default function TelaLigacao({ nome, onSair }) {
   const tel = lead ? digitos(lead.telefone) : ''
   const nomeDono = primeiroNome(lead?.nome_dono)
   const abertura = nomeDono
-    ? `"Oi, boa tarde! Eu queria falar com o ${nomeDono}, por favor. É da FWC Inter."`
+    ? `"Oi, boa tarde! Eu queria falar com ${nomeDono}, por favor. É da FWC Inter."`
     : '"Oi, boa tarde! Aqui é a ' + (primeiroNome(nome) || '[seu nome]') + ', da FWC Inter. Eu falo com o responsável pela ' + (lead?.loja || '[loja]') + '?"'
 
   return (
