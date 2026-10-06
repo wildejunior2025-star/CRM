@@ -28,8 +28,11 @@ const RECARREGAR_ALUNOS_MS = 60 * 1000
 const PISCAR_PRAZO_MS = 8000
 const CHAVE_PISCAR = 'academia_exigir_piscar'
 
+// Desligado por padrão (06/10): virar o rosto só serve contra foto de outra
+// pessoa na tela do celular — risco que a academia não tem, e atrasava a
+// entrada de todo mundo. Quem quiser liga de novo na tela de início.
 function lerExigirPiscar() {
-  try { return localStorage.getItem(CHAVE_PISCAR) !== 'nao' } catch { return true }
+  try { return localStorage.getItem(CHAVE_PISCAR) === 'sim' } catch { return false }
 }
 
 export default function AcademiaRecepcao() {
@@ -279,7 +282,7 @@ export default function AcademiaRecepcao() {
         <p>Tela da recepção. Deixe o tablet de pé, com a câmera na altura do rosto.</p>
         <label className="ac-rec-opcao">
           <input type="checkbox" checked={exigirPiscar} onChange={e => trocarPiscar(e.target.checked)} />
-          Pedir pra virar o rosto (não deixa passar com foto do aluno no celular)
+          Pedir pra virar o rosto antes de liberar (impede entrar mostrando a foto de alguém no celular)
         </label>
         <button className="btn btn-primary ac-rec-comecar" onClick={comecar}>Começar</button>
         <Link to="/" className="ac-rec-voltar">← Voltar pros alunos</Link>
