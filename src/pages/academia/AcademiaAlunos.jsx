@@ -4,6 +4,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { situacaoAluno, entrarTelaCheia } from '../../lib/reconhecimentoFacial'
 import { FORMAS, hojeIso, somarMeses, registrarPagamento, dinheiro, dataBr } from '../../lib/academiaPagamento'
 import CapturaRosto from './CapturaRosto'
+import AcademiaFicha from './AcademiaFicha'
 
 
 function hojeMais(dias) {
@@ -21,6 +22,7 @@ export default function AcademiaAlunos() {
   const [busca, setBusca] = useState('')
   const [editando, setEditando] = useState(null) // null | 'novo' | aluno
   const [recebendo, setRecebendo] = useState(null) // aluno a quem registrar a mensalidade
+  const [ficha, setFicha] = useState(null) // aluno cuja ficha (saúde + medidas) está aberta
   const [filtro, setFiltro] = useState('todos') // todos | emdia | vencidos | semrosto
 
   async function carregar() {
@@ -52,6 +54,10 @@ export default function AcademiaAlunos() {
       || (filtro === 'vencidos' && !emDia(a))
       || (filtro === 'semrosto' && !a.descritores?.length))
   const semRosto = contas.semrosto
+
+  if (ficha) {
+    return <AcademiaFicha aluno={ficha} onVoltar={() => { setFicha(null); carregar() }} />
+  }
 
   if (editando) {
     return (
@@ -136,6 +142,7 @@ export default function AcademiaAlunos() {
                     </td>
                     <td className="ac-col-acoes">
                       <button className="btn btn-secondary btn-sm" onClick={() => setRecebendo(a)} title="Registrar mensalidade paga">Renovar</button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => setFicha(a)}>Ficha</button>
                       <button className="btn btn-secondary btn-sm" onClick={() => setEditando(a)}>Editar</button>
                     </td>
                   </tr>

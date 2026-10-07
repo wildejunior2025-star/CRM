@@ -256,3 +256,11 @@ body { overflow-x: hidden; }
 .ac-check { flex-wrap: wrap; }
 .ac-check > input { margin-right: 2px; }
 .ac-form-grade .ac-check { max-width: 100%; }
+
+/* Ficha do aluno (saúde + avaliação física) */
+.ac-sub-titulo { margin: 0 0 10px; font-size: 16px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.ac-ficha-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.ac-marcacoes { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+.ac-outra { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); min-width: 220px; flex: 1; }
+.ac-subiu { color: var(--success); font-weight: 700; }
+.ac-desceu { color: var(--danger); font-weight: 700; }
