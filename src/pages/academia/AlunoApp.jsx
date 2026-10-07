@@ -15,10 +15,12 @@ import './aluno.css'
 const AlunoRosto = lazy(() => import('./AlunoRosto'))
 const AlunoPerfil = lazy(() => import('./AlunoPerfil'))
 const AlunoTermos = lazy(() => import('./AlunoTermos'))
+const AlunoFicha = lazy(() => import('./AlunoFicha'))
 
 const MENU = [
   { id: 'perfil', nome: 'Perfil', icone: '👤', detalhe: 'Foto, dados e senha' },
   { id: 'entradas', nome: 'Minhas entradas', icone: '🚪', detalhe: 'Quando você treinou' },
+  { id: 'ficha', nome: 'Minha ficha', icone: '📏', detalhe: 'Medidas e evolução' },
   { id: 'treinos', nome: 'Meus treinos', icone: '🏋️', detalhe: 'Em breve' },
 ]
 
@@ -186,6 +188,12 @@ export default function AlunoApp() {
       )}
 
       {tela === 'entradas' && <Entradas entradas={entradas} />}
+
+      {tela === 'ficha' && (
+        <Suspense fallback={<p className="al-vazio">Carregando...</p>}>
+          <AlunoFicha aluno={aluno} />
+        </Suspense>
+      )}
 
       {tela === 'treinos' && (
         <section className="al-bloco">

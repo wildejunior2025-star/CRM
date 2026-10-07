@@ -183,3 +183,16 @@
 .pin-teclado .pin-vazio { visibility: hidden; }
 .pin-teclado .pin-apagar { font-size: clamp(18px, 2.6vh, 22px); background: none; border-color: transparent; }
 .pin-tela .al-botao.texto { padding: 6px; }
+
+/* Minha ficha: medidas e o quanto mudou desde a avaliação anterior */
+.al-medida-topo { display: flex; flex-direction: column; gap: 2px; color: var(--al-apagado); font-size: 15px; }
+.al-medida-topo b { color: var(--al-texto); }
+.al-medidas { list-style: none; margin: 0; padding: 0; }
+.al-medidas li { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: baseline; padding: 12px 0; border-bottom: 1px solid var(--al-linha); }
+.al-medidas li:last-child { border-bottom: 0; }
+.al-medida-nome { color: var(--al-apagado); }
+.al-medida-valor { font-variant-numeric: tabular-nums; }
+.al-medida-valor strong { font-size: 20px; }
+.al-medida-dif { font-variant-numeric: tabular-nums; font-weight: 700; min-width: 68px; text-align: right; color: var(--al-apagado); }
+.al-medida-dif.subiu { color: var(--al-verde); }
+.al-medida-dif.desceu { color: var(--al-vermelho); }
