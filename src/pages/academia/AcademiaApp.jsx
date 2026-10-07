@@ -25,6 +25,7 @@ const AcademiaPorta = lazy(() => import('./AcademiaPorta'))
 const AcademiaImportar = lazy(() => import('./AcademiaImportar'))
 const AcademiaPagamentos = lazy(() => import('./AcademiaPagamentos'))
 const AlunoApp = lazy(() => import('./AlunoApp'))
+const ProfessorApp = lazy(() => import('./ProfessorApp'))
 
 function Carregando() {
   return <div className="ac-centro ac-muted">Carregando...</div>
@@ -159,6 +160,15 @@ function Portaria() {
   const { session, profile, empresa, loading, profileLoading } = useAuth()
   if (loading || (session && profileLoading && !profile)) return <Carregando />
   if (!session) return <EntrarAcademia />
+  // Professor: a área dele (todos os alunos, montar treino), no celular.
+  if (profile?.perfil === 'professor') {
+    return (
+      <Suspense fallback={<Carregando />}>
+        <ProfessorApp />
+      </Suspense>
+    )
+  }
+
   // Aluno: só a área dele, no mesmo endereço.
   if (profile?.perfil === 'aluno') {
     return (

@@ -196,3 +196,57 @@
 .al-medida-dif { font-variant-numeric: tabular-nums; font-weight: 700; min-width: 68px; text-align: right; color: var(--al-apagado); }
 .al-medida-dif.subiu { color: var(--al-verde); }
 .al-medida-dif.desceu { color: var(--al-vermelho); }
+
+/* ── Área do professor ────────────────────────────────────────────────── */
+.al-busca {
+  width: 100%; box-sizing: border-box; font-size: 17px; padding: 14px;
+  border-radius: 14px; border: 1px solid var(--al-linha); background: var(--al-carta); color: var(--al-texto);
+}
+.al-alunos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.al-alunos button {
+  display: flex; align-items: center; gap: 12px; width: 100%; cursor: pointer; text-align: left;
+  background: var(--al-carta); border: 1px solid var(--al-linha); border-radius: 14px; padding: 10px 12px;
+  color: inherit; font: inherit;
+}
+.al-alunos .al-foto { width: 44px; height: 44px; border-width: 1px; }
+.al-aluno-nome { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.al-aluno-nome strong { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.al-aluno-nome small { color: var(--al-apagado); }
+
+.al-alerta-saude { background: #fff5e6; color: #9a3412; border-radius: 12px; padding: 10px 14px; font-weight: 600; }
+
+.al-letras { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.al-letra {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer;
+  background: var(--al-carta); border: 1px solid var(--al-linha); border-radius: 14px; padding: 12px 4px;
+  font: 700 20px inherit; color: var(--al-apagado);
+}
+.al-letra small { font-size: 11px; font-weight: 600; }
+.al-letra.tem { color: var(--al-texto); }
+.al-letra.ativa { background: var(--al-roxo); border-color: var(--al-roxo); color: #fff; }
+
+.al-dias { display: flex; gap: 6px; flex-wrap: wrap; }
+.al-dia {
+  cursor: pointer; border-radius: 999px; padding: 8px 14px; font: 600 14px inherit;
+  background: var(--al-carta); border: 1px solid var(--al-linha); color: var(--al-apagado);
+}
+.al-dia.ativo { background: var(--al-roxo-claro); border-color: var(--al-roxo); color: var(--al-roxo); }
+
+.al-itens { list-style: none; margin: 0; padding: 0; }
+.al-itens li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--al-linha); }
+.al-itens li:last-child { border-bottom: 0; }
+.al-item-num { width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; background: var(--al-roxo-claro); color: var(--al-roxo); font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+.al-item-nome { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.al-item-nome small { color: var(--al-apagado); }
+.al-itens select { border-radius: 10px; border: 1px solid var(--al-linha); background: var(--al-fundo); color: var(--al-texto); padding: 8px; font-size: 14px; }
+.al-item-x { background: none; border: 0; color: var(--al-apagado); font-size: 18px; cursor: pointer; padding: 4px 6px; }
+
+.al-exercicios { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.al-exercicio {
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-start; cursor: pointer; text-align: left;
+  background: var(--al-fundo); border: 1px solid var(--al-linha); border-radius: 12px; padding: 10px 12px;
+  color: inherit; font: inherit;
+}
+.al-exercicio small { color: var(--al-apagado); font-size: 12px; }
+.al-exercicio.marcado { background: var(--al-roxo-claro); border-color: var(--al-roxo); color: var(--al-roxo); }
+.al-exercicio:active { background: var(--al-roxo-claro); }
