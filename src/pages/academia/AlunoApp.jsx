@@ -79,8 +79,6 @@ export default function AlunoApp() {
 
   const s = situacaoAluno(aluno)
   const emDia = s.status === 'liberado'
-  const mesAtual = new Date().toISOString().slice(0, 7)
-  const esteMes = entradas.filter(e => e.criado_em.slice(0, 7) === mesAtual).length
   const titulo = MENU.find(m => m.id === tela)?.nome
 
   return (
@@ -164,11 +162,6 @@ export default function AlunoApp() {
               <span>É assim que a catraca abre pra você.</span>
             </button>
           )}
-
-          <section className="al-treinos">
-            <strong>{esteMes}</strong>
-            <span>{esteMes === 1 ? 'treino este mês' : 'treinos este mês'}</span>
-          </section>
         </>
       )}
 
