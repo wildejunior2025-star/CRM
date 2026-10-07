@@ -20,6 +20,10 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
   // Criar exercício na hora: no cartão de papel ele escrevia à mão os que não
   // estavam na lista (Sumô, Búlgaro, Afundo/Step).
   const [novo, setNovo] = useState(null) // { nome, grupo, maquina }
+  // IA: ela faz o RASCUNHO; quem assina e o professor (prescricao e dele).
+  const [ia, setIa] = useState(null)       // { objetivo, nivel, dias, restricoes }
+  const [plano, setPlano] = useState(null) // resposta da IA, esperando o "usar"
+  const [pensando, setPensando] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
 
@@ -125,8 +129,184 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
     carregar()
   }
 
+  async function pedirIa(e) {
+    e.preventDefault()
+    setPensando(true)
+    setErro(null)
+    const { data, error } = await supabase.functions.invoke('montar-treino', {
+      body: {
+        exercicios: exercicios.map(x => ({ id: x.id, nome: x.nome, grupo: x.grupo, maquina: x.maquina })),
+        aluno: {
+          nome: aluno.nome, objetivo: aluno.objetivo, sexo: aluno.sexo,
+          diabetes: aluno.diabetes, hipertensao: aluno.hipertensao,
+          cardiopata: aluno.cardiopata, saude_outra: aluno.saude_outra,
+        },
+        pedido: ia,
+      },
+    })
+    setPensando(false)
+    if (error || data?.erro) return setErro(data?.erro || 'A IA nao respondeu. Tente de novo.')
+    setPlano(data)
+    setIa(null)
+  }
+
+  // Grava o rascunho da IA: apaga os treinos de antes e poe os novos.
+  async function usarPlano() {
+    setSalvando(true)
+    setErro(null)
+    try {
+      if (treinos.length) {
+        await supabase.from('academia_treinos').delete().eq('aluno_id', aluno.id)
+      }
+      for (const t of plano.treinos) {
+        const { data: criado, error } = await supabase
+          .from('academia_treinos')
+          .insert({
+            empresa_id: profile.empresa_id, aluno_id: aluno.id,
+            letra: t.letra, dia_semana: t.dia_semana || null, nome: t.foco || null,
+            criado_por: profile.id,
+          })
+          .select().single()
+        if (error) throw error
+        const novos = t.itens.map((i, n) => ({
+          treino_id: criado.id, exercicio_id: i.id, nome: i.nome,
+          maquina: i.maquina, variacao: i.variacao || null, observacao: i.obs || null, ordem: n + 1,
+        }))
+        if (novos.length) {
+          const { error: e2 } = await supabase.from('academia_treino_itens').insert(novos)
+          if (e2) throw e2
+        }
+      }
+      if (plano.semanas?.length) {
+        await supabase.from('academia_semanas').delete().eq('aluno_id', aluno.id)
+        const { error: e3 } = await supabase.from('academia_semanas').insert(
+          plano.semanas.map(w => ({
+            aluno_id: aluno.id, numero: w.numero, series: w.series,
+            rep_min: w.rep_min, rep_max: w.rep_max, sistema: w.sistema || null,
+            aumentar_peso: !!w.aumentar_peso,
+          })),
+        )
+        if (e3) throw e3
+      }
+      setPlano(null)
+      await carregar()
+    } catch (err) {
+      setErro('Nao deu pra salvar: ' + err.message)
+    }
+    setSalvando(false)
+  }
+
   const porGrupo = exercicios.reduce((acc, e) => { (acc[e.grupo] ||= []).push(e); return acc }, {})
   const jaTem = new Set(lista.map(i => i.exercicio_id))
+
+  if (ia) {
+    return (
+      <form className="al-tela" onSubmit={pedirIa}>
+        <header className="al-topo">
+          <div className="al-titulo">
+            <span className="al-ola">{aluno.nome.split(' ')[0]}</span>
+            <h1>Montar com IA</h1>
+          </div>
+        </header>
+
+        <section className="al-bloco">
+          <label className="al-campo">Objetivo
+            <select value={ia.objetivo} onChange={e => setIa({ ...ia, objetivo: e.target.value })}>
+              <option>Emagrecer</option>
+              <option>Ganhar massa</option>
+              <option>Condicionamento geral</option>
+              <option>Forca</option>
+              <option>Voltar a treinar</option>
+            </select>
+          </label>
+          <label className="al-campo">Nivel
+            <select value={ia.nivel} onChange={e => setIa({ ...ia, nivel: e.target.value })}>
+              <option>Iniciante</option>
+              <option>Ja treina</option>
+              <option>Avancado</option>
+            </select>
+          </label>
+          <label className="al-campo">Dias por semana
+            <select value={ia.dias} onChange={e => setIa({ ...ia, dias: Number(e.target.value) })}>
+              {[2, 3, 4, 5].map(d => <option key={d} value={d}>{d} dias</option>)}
+            </select>
+          </label>
+          <label className="al-campo">Alguma restricao?
+            <input value={ia.restricoes} onChange={e => setIa({ ...ia, restricoes: e.target.value })} placeholder="joelho, ombro, coluna..." />
+          </label>
+        </section>
+
+        {(aluno.diabetes || aluno.hipertensao || aluno.cardiopata || aluno.saude_outra) && (
+          <div className="al-alerta-saude">
+            A IA vai respeitar: {[aluno.diabetes && 'diabetes', aluno.hipertensao && 'hipertensao',
+              aluno.cardiopata && 'cardiopata', aluno.saude_outra].filter(Boolean).join(' - ')}
+          </div>
+        )}
+
+        {erro && <div className="al-erro">{erro}</div>}
+
+        <footer className="al-rodape">
+          <button className="al-botao" disabled={pensando}>{pensando ? 'Montando...' : 'Montar treino'}</button>
+          <button type="button" className="al-botao texto" onClick={() => { setIa(null); setErro(null) }}>Cancelar</button>
+        </footer>
+      </form>
+    )
+  }
+
+  if (plano) {
+    return (
+      <div className="al-tela">
+        <header className="al-topo">
+          <div className="al-titulo">
+            <span className="al-ola">Rascunho da IA</span>
+            <h1>{aluno.nome.split(' ')[0]}</h1>
+          </div>
+        </header>
+
+        {plano.observacao && <div className="al-alerta-saude">{plano.observacao}</div>}
+
+        {plano.treinos.map(t => (
+          <section key={t.letra} className="al-bloco">
+            <h2>Treino {t.letra}{t.dia_semana ? ` - ${t.dia_semana}` : ''}{t.foco ? ` - ${t.foco}` : ''}</h2>
+            <ul className="al-itens-aluno">
+              {t.itens.map((i, n) => (
+                <li key={n}>
+                  <span className="al-item-num">{n + 1}</span>
+                  <span className="al-item-nome">
+                    <strong>{i.nome}{i.variacao ? ` (${i.variacao})` : ''}</strong>
+                    <small>{i.maquina ? `máquina ${i.maquina}` : 'peso livre'}{i.obs ? ` · ${i.obs}` : ''}</small>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+
+        {plano.semanas?.length > 0 && (
+          <section className="al-bloco">
+            <h2>As 8 semanas</h2>
+            <ul className="al-entradas">
+              {plano.semanas.map(w => (
+                <li key={w.numero}>
+                  <span>Semana {w.numero}{w.aumentar_peso ? ' - subir peso' : ''}</span>
+                  <strong>{w.series}x {w.rep_min}-{w.rep_max}</strong>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {erro && <div className="al-erro">{erro}</div>}
+
+        <footer className="al-rodape">
+          <button className="al-botao" disabled={salvando} onClick={usarPlano}>
+            {salvando ? 'Salvando...' : 'Usar este treino'}
+          </button>
+          <button className="al-botao texto" onClick={() => setPlano(null)}>Descartar</button>
+        </footer>
+      </div>
+    )
+  }
 
   if (escolhendo) {
     return (
@@ -257,6 +437,12 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
 
       <footer className="al-rodape">
         <button className="al-botao" onClick={() => setEscolhendo(true)}>+ Adicionar exercício</button>
+        <button
+          className="al-botao secundario"
+          onClick={() => setIa({ objetivo: aluno.objetivo || 'Condicionamento geral', nivel: 'Iniciante', dias: 3, restricoes: '' })}
+        >
+          ✨ Montar tudo com IA
+        </button>
         {treino && <button className="al-botao texto" onClick={apagarTreino}>Apagar treino {letra}</button>}
       </footer>
     </div>
