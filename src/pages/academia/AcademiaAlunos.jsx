@@ -5,6 +5,7 @@ import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, miniaturaDoRosto, situacaoAluno, acharAluno,
   entrarTelaCheia, sairTelaCheia, GIRO_LADO,
 } from '../../lib/reconhecimentoFacial'
+import { FORMAS, hojeIso, somarMeses, registrarPagamento, dinheiro, dataBr } from '../../lib/academiaPagamento'
 
 // Quantas "digitais do rosto" o cadastro guarda. Mais de uma deixa o
 // reconhecimento firme com o aluno de lado, de óculos, com luz diferente.
@@ -17,15 +18,6 @@ function hojeMais(dias) {
   return d.toISOString().slice(0, 10)
 }
 
-function somaMes(dataIso) {
-  // Renovar: conta do vencimento atual se ainda está em dia, senão de hoje.
-  const hoje = hojeMais(0)
-  const base = dataIso && dataIso >= hoje ? dataIso : hoje
-  const d = new Date(base + 'T00:00:00')
-  d.setMonth(d.getMonth() + 1)
-  return d.toISOString().slice(0, 10)
-}
-
 const VAZIO = { nome: '', telefone: '', plano: 'Mensal', valor: '', vencimento: '', ativo: true }
 
 export default function AcademiaAlunos() {
@@ -34,6 +26,7 @@ export default function AcademiaAlunos() {
   const [carregando, setCarregando] = useState(true)
   const [busca, setBusca] = useState('')
   const [editando, setEditando] = useState(null) // null | 'novo' | aluno
+  const [recebendo, setRecebendo] = useState(null) // aluno a quem registrar a mensalidade
 
   async function carregar() {
     const { data, error } = await supabase
@@ -47,13 +40,10 @@ export default function AcademiaAlunos() {
 
   useEffect(() => { carregar() }, [empresa.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function renovar(aluno) {
-    const novo = somaMes(aluno.vencimento)
-    await supabase.from('academia_alunos').update({ vencimento: novo }).eq('id', aluno.id)
-    carregar()
-  }
-
-  const filtrados = alunos.filter(a => a.nome.toLowerCase().includes(busca.toLowerCase()))
+  // Busca por nome OU matrícula: na recepção eles chamam o aluno pelo número.
+  const termo = busca.trim().toLowerCase()
+  const filtrados = alunos.filter(a =>
+    a.nome.toLowerCase().includes(termo) || String(a.matricula || '').toLowerCase().includes(termo))
   const semRosto = alunos.filter(a => !a.descritores?.length).length
 
   if (editando) {
@@ -69,6 +59,13 @@ export default function AcademiaAlunos() {
 
   return (
     <div>
+      {recebendo && (
+        <ReceberMensalidade
+          aluno={recebendo}
+          empresaId={empresa.id}
+          onFechar={pago => { setRecebendo(null); if (pago) carregar() }}
+        />
+      )}
       <div className="ac-linha-titulo">
         <h2>Alunos <span className="ac-muted">({alunos.length})</span></h2>
         <button className="btn btn-primary" onClick={() => setEditando('novo')}>+ Novo aluno</button>
@@ -76,7 +73,7 @@ export default function AcademiaAlunos() {
       {semRosto > 0 && (
         <div className="ac-aviso">{semRosto} aluno{semRosto > 1 ? 's' : ''} sem rosto cadastrado — a recepção não vai reconhecer.</div>
       )}
-      <input className="ac-busca" placeholder="Buscar pelo nome" value={busca} onChange={e => setBusca(e.target.value)} />
+      <input className="ac-busca" placeholder="Buscar pelo nome ou matrícula" value={busca} onChange={e => setBusca(e.target.value)} />
       {carregando ? <p className="ac-muted">Carregando...</p> : filtrados.length === 0 ? (
         <p className="ac-muted">{alunos.length ? 'Ninguém com esse nome.' : 'Nenhum aluno ainda. Cadastre o primeiro.'}</p>
       ) : (
@@ -87,13 +84,13 @@ export default function AcademiaAlunos() {
               <div key={a.id} className="ac-aluno">
                 {a.foto ? <img src={a.foto} alt="" className="ac-foto" /> : <div className="ac-foto ac-foto-vazia">?</div>}
                 <div className="ac-aluno-info">
-                  <strong>{a.nome}</strong>
-                  <span className="ac-muted">{[a.plano, a.valor ? `R$ ${Number(a.valor).toFixed(2).replace('.', ',')}` : null].filter(Boolean).join(' · ')}</span>
+                  <strong>{a.matricula ? `${a.matricula} · ` : ''}{a.nome}</strong>
+                  <span className="ac-muted">{[a.plano, a.valor ? dinheiro(a.valor) : null].filter(Boolean).join(' · ')}</span>
                   <span className={`ac-status ac-${s.status}${s.aviso ? ' ac-quase' : ''}`}>{s.texto}</span>
                   {!a.descritores?.length && <span className="ac-status ac-vencido">Sem rosto</span>}
                 </div>
                 <div className="ac-aluno-acoes">
-                  <button className="btn btn-secondary btn-sm" onClick={() => renovar(a)} title="Soma 1 mês no vencimento">Renovar</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setRecebendo(a)} title="Registrar mensalidade paga">Renovar</button>
                   <button className="btn btn-secondary btn-sm" onClick={() => setEditando(a)}>Editar</button>
                 </div>
               </div>
@@ -366,3 +363,69 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
 }
 
 function esperar(ms) { return new Promise(r => setTimeout(r, ms)) }
+
+// Telinha do "Renovar": registra a mensalidade paga e empurra o vencimento.
+function ReceberMensalidade({ aluno, empresaId, onFechar }) {
+  const [valor, setValor] = useState(String(aluno.valor ?? '').replace('.', ','))
+  const [forma, setForma] = useState('dinheiro')
+  const [meses, setMeses] = useState(1)
+  const [data, setData] = useState(hojeIso())
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState(null)
+
+  const novoVencimento = somarMeses(aluno.vencimento, meses, data)
+
+  async function confirmar(e) {
+    e.preventDefault()
+    const v = Number(String(valor).replace(',', '.'))
+    if (!v || v <= 0) return setErro('Coloque o valor que o aluno pagou.')
+    setSalvando(true)
+    setErro(null)
+    try {
+      await registrarPagamento({ empresaId, aluno, valor: v, forma, meses, data })
+      onFechar(true)
+    } catch (err) {
+      setErro('Não deu pra registrar: ' + err.message)
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <div className="ac-modal" role="dialog" aria-modal="true">
+      <form className="ac-card ac-form ac-modal-caixa" onSubmit={confirmar}>
+        <h2>Mensalidade de {aluno.nome.split(' ')[0]}</h2>
+        <p className="ac-muted">
+          Vence {aluno.vencimento ? dataBr(aluno.vencimento) : 'sem data'} → passa a vencer <b>{dataBr(novoVencimento)}</b>
+        </p>
+
+        <div className="ac-dupla">
+          <label>Valor pago
+            <input inputMode="decimal" value={valor} onChange={e => setValor(e.target.value)} autoFocus />
+          </label>
+          <label>Meses
+            <select value={meses} onChange={e => setMeses(Number(e.target.value))}>
+              {[1, 2, 3, 6, 12].map(m => <option key={m} value={m}>{m} {m === 1 ? 'mês' : 'meses'}</option>)}
+            </select>
+          </label>
+        </div>
+
+        <label>Forma de pagamento
+          <select value={forma} onChange={e => setForma(e.target.value)}>
+            {FORMAS.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+          </select>
+        </label>
+
+        <label>Data do pagamento
+          <input type="date" value={data} onChange={e => setData(e.target.value)} />
+        </label>
+
+        {erro && <div className="ac-erro">{erro}</div>}
+
+        <div className="ac-form-botoes">
+          <button type="button" className="btn btn-secondary" onClick={() => onFechar(false)} disabled={salvando}>Cancelar</button>
+          <button className="btn btn-primary" disabled={salvando}>{salvando ? 'Salvando...' : 'Confirmar pagamento'}</button>
+        </div>
+      </form>
+    </div>
+  )
+}

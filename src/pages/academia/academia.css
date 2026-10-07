@@ -130,3 +130,19 @@
 .ac-porta.ok { background: var(--success-bg); color: var(--success); }
 .ac-porta.erro { background: var(--danger-bg); color: var(--danger); }
 .ac-porta strong { font-size: 18px; }
+
+/* Telinha do "Renovar" e tela de Pagamentos */
+.ac-modal { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.ac-modal-caixa { width: 100%; max-width: 420px; max-height: 90vh; overflow-y: auto; }
+.ac-modal-caixa h2 { margin: 0; font-size: 20px; }
+.ac-campo-data { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); }
+.ac-campo-data input { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 16px; }
+.ac-resumo { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.ac-resumo-item { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 120px; }
+.ac-resumo-item span { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+.ac-resumo-item strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.ac-resumo-item small { color: var(--text-muted); }
+.ac-resumo-item.destaque { background: var(--success-bg); border-color: transparent; }
+.ac-resumo-item.destaque strong { color: var(--success); }
+.ac-cancelado { opacity: .6; }
+.ac-cancelado strong { text-decoration: line-through; }
