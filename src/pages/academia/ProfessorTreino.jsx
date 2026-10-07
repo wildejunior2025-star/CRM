@@ -105,6 +105,20 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
     await adicionar(data)
   }
 
+  // Vídeo de execução: o professor cola o link (YouTube etc.) e o aluno abre
+  // no treino. É o que os apps concorrentes mostram com foto e vídeo.
+  async function mudarVideo(ex) {
+    const atual = ex.video_url || ''
+    const link = window.prompt(`Link do vídeo de ${ex.nome} (deixe vazio para tirar):`, atual)
+    if (link === null) return
+    const { error } = await supabase
+      .from('academia_exercicios')
+      .update({ video_url: link.trim() || null })
+      .eq('id', ex.id)
+    if (error) return setErro(error.message)
+    setExercicios(l => l.map(x => (x.id === ex.id ? { ...x, video_url: link.trim() || null } : x)))
+  }
+
   async function remover(item) {
     await supabase.from('academia_treino_itens').delete().eq('id', item.id)
     carregar()
@@ -348,15 +362,17 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
             <h2>{grupo}</h2>
             <div className="al-exercicios">
               {exs.map(ex => (
-                <button
-                  key={ex.id}
-                  className={`al-exercicio${jaTem.has(ex.id) ? ' marcado' : ''}`}
-                  disabled={salvando}
-                  onClick={() => adicionar(ex)}
-                >
-                  <span>{ex.nome}</span>
-                  <small>{ex.maquina ? `máq. ${ex.maquina}` : 'peso livre'}</small>
-                </button>
+                <div key={ex.id} className={`al-exercicio${jaTem.has(ex.id) ? ' marcado' : ''}`}>
+                  <button className="al-exercicio-add" disabled={salvando} onClick={() => adicionar(ex)}>
+                    <span>{ex.nome}</span>
+                    <small>{ex.maquina ? `máq. ${ex.maquina}` : 'peso livre'}</small>
+                  </button>
+                  <button
+                    className={`al-exercicio-video${ex.video_url ? ' tem' : ''}`}
+                    title={ex.video_url ? 'Trocar o vídeo' : 'Colar link do vídeo'}
+                    onClick={() => mudarVideo(ex)}
+                  >🎥</button>
+                </div>
               ))}
             </div>
           </section>

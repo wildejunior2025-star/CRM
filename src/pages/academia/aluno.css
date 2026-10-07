@@ -265,3 +265,35 @@
   background: var(--al-roxo-claro); color: var(--al-roxo); font-weight: 800; font-size: 18px;
   display: flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums;
 }
+
+/* Carga, "feito" e descanso (o que os apps concorrentes já tinham) */
+.al-itens-aluno li.feito { opacity: .65; }
+.al-item-check {
+  width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%; cursor: pointer;
+  background: var(--al-roxo-claro); color: var(--al-roxo); border: 0;
+  font-weight: 700; font-size: 15px; display: flex; align-items: center; justify-content: center;
+}
+.al-itens-aluno li.feito .al-item-check { background: var(--al-verde-fundo); color: var(--al-verde); }
+.al-carga { color: var(--al-roxo); font-weight: 600; }
+.al-carga-ok { color: var(--al-verde); font-weight: 600; }
+.al-carga-campo { display: flex; gap: 8px; margin-top: 8px; }
+.al-carga-campo input {
+  flex: 1; min-width: 0; font-size: 16px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--al-linha); background: var(--al-fundo); color: var(--al-texto);
+}
+.al-carga-campo button {
+  cursor: pointer; border: 0; border-radius: 10px; padding: 10px 18px;
+  background: var(--al-roxo); color: #fff; font: 700 15px inherit;
+}
+.al-descanso {
+  position: sticky; top: 8px; z-index: 5; cursor: pointer; text-align: center;
+  background: var(--al-roxo); color: #fff; border-radius: 14px; padding: 12px 16px; font-size: 17px;
+}
+.al-descanso strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+.al-descanso span { opacity: .8; font-size: 14px; }
+/* Vídeo de execução do exercício */
+.al-exercicio { flex-direction: row !important; align-items: stretch !important; padding: 0 !important; overflow: hidden; }
+.al-exercicio-add { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; cursor: pointer; background: none; border: 0; padding: 10px 12px; color: inherit; font: inherit; text-align: left; }
+.al-exercicio-video { cursor: pointer; background: none; border: 0; border-left: 1px solid var(--al-linha); padding: 0 12px; font-size: 16px; filter: grayscale(1); opacity: .5; }
+.al-exercicio-video.tem { filter: none; opacity: 1; }
+.al-video { display: inline-block; margin-top: 4px; color: var(--al-roxo); font-weight: 700; font-size: 14px; text-decoration: none; }

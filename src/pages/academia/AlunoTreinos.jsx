@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 
 // "Meus treinos" do aluno: o treino do dia primeiro, com o número da máquina
@@ -14,6 +14,14 @@ export default function AlunoTreinos({ aluno }) {
   const [itens, setItens] = useState({})
   const [semana, setSemana] = useState(null)
   const [aberto, setAberto] = useState(null)
+  // Carga e "feito": é o que os apps concorrentes têm e o nosso não tinha.
+  const [ultimas, setUltimas] = useState({})   // item_id → { carga, data }
+  const [feitosHoje, setFeitosHoje] = useState({}) // item_id → carga de hoje
+  const [editando, setEditando] = useState(null)   // item_id com o campo aberto
+  const [carga, setCarga] = useState('')
+  const [descanso, setDescanso] = useState(null)   // segundos restantes
+  const [videos, setVideos] = useState({})         // exercicio_id → link
+  const relogio = useRef(null)
 
   useEffect(() => {
     (async () => {
@@ -36,6 +44,32 @@ export default function AlunoTreinos({ aluno }) {
         const hoje = DIAS[new Date().getDay()]
         setAberto(trs.find(t => t.dia_semana === hoje)?.id || trs[0].id)
       }
+      // Última carga de cada exercício e o que já foi feito hoje.
+      const hojeIso = new Date().toISOString().slice(0, 10)
+      const { data: execs } = await supabase
+        .from('academia_execucoes')
+        .select('item_id, carga, data')
+        .eq('aluno_id', aluno.id)
+        .order('data', { ascending: false })
+        .limit(400)
+      const ult = {}
+      const hojeFeitos = {}
+      ;(execs || []).forEach(e => {
+        if (!e.item_id) return
+        if (!ult[e.item_id]) ult[e.item_id] = e
+        if (e.data === hojeIso) hojeFeitos[e.item_id] = e.carga
+      })
+      setUltimas(ult)
+      setFeitosHoje(hojeFeitos)
+
+      // Vídeos de execução cadastrados pelo professor.
+      const { data: exs } = await supabase
+        .from('academia_exercicios')
+        .select('id, video_url')
+        .eq('empresa_id', aluno.empresa_id)
+        .not('video_url', 'is', null)
+      setVideos(Object.fromEntries((exs || []).map(e => [e.id, e.video_url])))
+
       const { data: semanas } = await supabase
         .from('academia_semanas')
         .select('*')
@@ -45,7 +79,35 @@ export default function AlunoTreinos({ aluno }) {
       // controle de data ainda, mostramos a primeira preenchida.
       setSemana((semanas || [])[0] || null)
     })()
-  }, [aluno.id])
+  }, [aluno.id, aluno.empresa_id])
+
+  // Cronômetro de descanso entre as séries.
+  function comecarDescanso(segundos) {
+    clearInterval(relogio.current)
+    setDescanso(segundos)
+    relogio.current = setInterval(() => {
+      setDescanso(s => {
+        if (s <= 1) { clearInterval(relogio.current); return null }
+        return s - 1
+      })
+    }, 1000)
+  }
+
+  async function marcarFeito(item, valor) {
+    const limpo = valor === '' || valor === null ? null : Number(String(valor).replace(',', '.'))
+    await supabase.from('academia_execucoes').insert({
+      empresa_id: aluno.empresa_id,
+      aluno_id: aluno.id,
+      treino_id: item.treino_id,
+      item_id: item.id,
+      carga: limpo,
+    })
+    setFeitosHoje(f => ({ ...f, [item.id]: limpo }))
+    setUltimas(u => ({ ...u, [item.id]: { carga: limpo, data: new Date().toISOString().slice(0, 10) } }))
+    setEditando(null)
+    setCarga('')
+    comecarDescanso(60)
+  }
 
   if (treinos === null) return <p className="al-vazio">Carregando...</p>
 
@@ -62,6 +124,11 @@ export default function AlunoTreinos({ aluno }) {
 
   return (
     <>
+      {descanso !== null && (
+        <div className="al-descanso" onClick={() => { clearInterval(relogio.current); setDescanso(null) }}>
+          Descanso: <strong>{descanso}s</strong> <span>(toque para parar)</span>
+        </div>
+      )}
       {doDia ? (
         <section className="al-hoje">
           <span className="al-rotulo">Hoje é {hoje.toLowerCase()}</span>
@@ -98,16 +165,44 @@ export default function AlunoTreinos({ aluno }) {
             </p>
           )}
           <ul className="al-itens-aluno">
-            {(itens[t.id] || []).map((i, n) => (
-              <li key={i.id}>
-                <span className="al-item-num">{n + 1}</span>
-                <span className="al-item-nome">
-                  <strong>{i.nome}{i.variacao ? ` (${i.variacao})` : ''}</strong>
-                  <small>{i.maquina ? `máquina ${i.maquina}` : 'peso livre'}</small>
-                </span>
-                {i.maquina && <span className="al-maquina">{i.maquina}</span>}
-              </li>
-            ))}
+            {(itens[t.id] || []).map((i, n) => {
+              const feito = i.id in feitosHoje
+              const ultima = ultimas[i.id]
+              return (
+                <li key={i.id} className={feito ? 'feito' : ''}>
+                  <button className="al-item-check" onClick={() => (feito ? null : setEditando(editando === i.id ? null : i.id))}>
+                    {feito ? '✓' : n + 1}
+                  </button>
+                  <span className="al-item-nome">
+                    <strong>{i.nome}{i.variacao ? ` (${i.variacao})` : ''}</strong>
+                    <small>
+                      {i.maquina ? `máquina ${i.maquina}` : 'peso livre'}
+                      {i.observacao ? ` · ${i.observacao}` : ''}
+                    </small>
+                    {videos[i.exercicio_id] && (
+                      <a className="al-video" href={videos[i.exercicio_id]} target="_blank" rel="noreferrer">
+                        ▶ ver como faz
+                      </a>
+                    )}
+                    {feito
+                      ? <small className="al-carga-ok">feito hoje{feitosHoje[i.id] ? ` · ${feitosHoje[i.id]} kg` : ''}</small>
+                      : ultima?.carga
+                        ? <small className="al-carga">última vez: {ultima.carga} kg</small>
+                        : null}
+                    {editando === i.id && (
+                      <span className="al-carga-campo">
+                        <input
+                          inputMode="decimal" autoFocus placeholder="carga (kg)"
+                          value={carga} onChange={e => setCarga(e.target.value)}
+                        />
+                        <button onClick={() => marcarFeito(i, carga)}>Feito</button>
+                      </span>
+                    )}
+                  </span>
+                  {i.maquina && <span className="al-maquina">{i.maquina}</span>}
+                </li>
+              )
+            })}
             {(itens[t.id] || []).length === 0 && <li className="al-vazio">Sem exercícios ainda.</li>}
           </ul>
         </section>
