@@ -94,3 +94,42 @@
   width: 100%; box-sizing: border-box; font-size: 18px; padding: 14px;
   border-radius: 12px; border: 1px solid var(--al-linha); background: var(--al-fundo); color: var(--al-texto);
 }
+
+/* Teclado de 4 números (login do aluno e troca de senha) */
+.pin-tela {
+  min-height: 100vh; background: var(--al-fundo, #0e1116); color: var(--al-texto, #f2f5f8);
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+  padding: 36px 20px max(24px, env(safe-area-inset-bottom)); box-sizing: border-box;
+  max-width: 420px; margin: 0 auto;
+}
+.pin-topo { text-align: center; }
+.pin-topo h1 { margin: 0; font-size: 26px; }
+.pin-topo p { margin: 6px 0 0; color: var(--al-apagado, #98a2b3); }
+.pin-bolinhas { display: flex; gap: 16px; margin: 6px 0 2px; }
+.pin-bolinhas span {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid #3a4454; background: transparent; transition: background .15s, border-color .15s;
+}
+.pin-bolinhas span.cheia { background: #7c3aed; border-color: #7c3aed; }
+.pin-erro { color: #f87171; background: #3a1a1a; border-radius: 12px; padding: 10px 14px; text-align: center; }
+.pin-aviso { color: var(--al-apagado, #98a2b3); }
+.pin-teclado { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; width: 100%; max-width: 320px; margin-top: auto; }
+.pin-teclado button {
+  height: 72px; font-size: 28px; font-weight: 600; cursor: pointer;
+  border-radius: 50%; border: 1px solid #262d38; background: #171c24; color: inherit;
+}
+.pin-teclado button:active { background: #232c38; }
+.pin-teclado button:disabled { opacity: .4; }
+.pin-teclado .pin-vazio { visibility: hidden; }
+.pin-teclado .pin-apagar { font-size: 22px; background: none; border-color: transparent; }
+
+.al-foto-botao { background: none; border: 0; padding: 0; cursor: pointer; }
+.al-linha {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; cursor: pointer;
+  background: var(--al-carta); border: 0; border-radius: 16px; padding: 16px 18px; color: inherit; font: inherit; text-align: left;
+}
+.al-linha span { font-size: 17px; font-weight: 600; }
+.al-linha small { color: var(--al-apagado); }
+.al-treinos { background: var(--al-carta); border-radius: 16px; padding: 18px; display: flex; align-items: baseline; gap: 10px; }
+.al-treinos strong { font-size: 34px; }
+.al-treinos span { color: var(--al-apagado); }

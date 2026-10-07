@@ -2,6 +2,7 @@ import { useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { supabase } from '../../lib/supabaseClient'
+import TecladoPin from './TecladoPin'
 import './academia.css'
 import BotaoAbrirCatraca from './BotaoAbrirCatraca'
 
@@ -29,44 +30,107 @@ function Carregando() {
   return <div className="ac-centro ac-muted">Carregando...</div>
 }
 
+// Entrada da academia. O ALUNO digita só o telefone e depois os 4 números
+// no teclado — as bolinhas lembram sozinhas que a senha tem 4 dígitos. Quem é
+// da academia (dono, recepção) entra pelo e-mail, no "Sou da academia".
 function EntrarAcademia() {
   const { login } = useAuth()
+  const [modo, setModo] = useState('telefone') // telefone | senha | academia
+  const [telefone, setTelefone] = useState('')
+  const [contaEmail, setContaEmail] = useState('')
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
   const [erro, setErro] = useState(null)
   const [enviando, setEnviando] = useState(false)
 
-  async function entrar(e) {
+  // Passo 1: telefone → acha a conta do aluno.
+  async function procurar(e) {
+    e.preventDefault()
+    const digitos = telefone.replace(/\D/g, '')
+    if (digitos.length < 8) return setErro('Digite o telefone com DDD.')
+    setEnviando(true)
+    setErro(null)
+    const { data } = await supabase.rpc('academia_email_do_aluno', { p_busca: digitos })
+    setEnviando(false)
+    if (!data) {
+      setErro('Não achei esse telefone. Confira com a recepção.')
+      return
+    }
+    setContaEmail(data)
+    setModo('senha')
+  }
+
+  // Passo 2: os 4 números.
+  async function entrarComPin(pin) {
+    setEnviando(true)
+    setErro(null)
+    const { error } = await login(contaEmail, pin)
+    setEnviando(false)
+    if (error) setErro('Senha errada. São os 4 últimos números do seu celular.')
+  }
+
+  async function entrarAcademia(e) {
     e.preventDefault()
     setEnviando(true)
     setErro(null)
-    // O aluno digita o TELEFONE (matrícula ninguém decora); o e-mail da conta
-    // dele é interno e vem daqui. Quem tem e-mail de verdade entra direto.
-    const digitado = email.trim()
-    let usuario = digitado
-    if (!digitado.includes('@')) {
-      const { data } = await supabase.rpc('academia_email_do_aluno', { p_busca: digitado })
-      usuario = data || `${digitado.replace(/\D/g, '')}@aluno.fwcinter.com`
-    }
-    const { error } = await login(usuario, senha)
+    const { error } = await login(email.trim(), senha)
     setEnviando(false)
-    if (error) setErro('Telefone ou senha errados. Se não funcionar, procure a recepção.')
+    if (error) setErro('E-mail ou senha errados.')
+  }
+
+  if (modo === 'senha') {
+    return (
+      <TecladoPin
+        titulo="Sua senha"
+        subtitulo="4 números"
+        erro={erro}
+        carregando={enviando}
+        onCompleto={entrarComPin}
+        onVoltar={() => { setModo('telefone'); setErro(null) }}
+      />
+    )
+  }
+
+  if (modo === 'academia') {
+    return (
+      <div className="ac-centro">
+        <form className="ac-card ac-login" onSubmit={entrarAcademia}>
+          <div className="ac-logo">🏋️</div>
+          <h1>Academia</h1>
+          <p className="ac-muted">Entre com a conta da academia.</p>
+          <label>E-mail
+            <input type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required />
+          </label>
+          <label>Senha
+            <input type="password" autoComplete="current-password" value={senha} onChange={e => setSenha(e.target.value)} required />
+          </label>
+          {erro && <div className="ac-erro">{erro}</div>}
+          <button className="btn btn-primary" disabled={enviando}>{enviando ? 'Entrando...' : 'Entrar'}</button>
+          <button type="button" className="ac-link" onClick={() => { setModo('telefone'); setErro(null) }}>
+            Sou aluno
+          </button>
+        </form>
+      </div>
+    )
   }
 
   return (
     <div className="ac-centro">
-      <form className="ac-card ac-login" onSubmit={entrar}>
+      <form className="ac-card ac-login" onSubmit={procurar}>
         <div className="ac-logo">🏋️</div>
         <h1>Academia</h1>
-        <p className="ac-muted">Aluno: entre com o seu telefone.</p>
-        <label>Telefone ou e-mail
-          <input autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required />
-        </label>
-        <label>Senha
-          <input type="password" autoComplete="current-password" value={senha} onChange={e => setSenha(e.target.value)} required />
+        <p className="ac-muted">Digite o seu telefone pra entrar.</p>
+        <label>Telefone
+          <input
+            inputMode="tel" autoComplete="tel" autoFocus placeholder="(84) 99999-9999"
+            value={telefone} onChange={e => setTelefone(e.target.value)} required
+          />
         </label>
         {erro && <div className="ac-erro">{erro}</div>}
-        <button className="btn btn-primary" disabled={enviando}>{enviando ? 'Entrando...' : 'Entrar'}</button>
+        <button className="btn btn-primary" disabled={enviando}>{enviando ? 'Procurando...' : 'Entrar'}</button>
+        <button type="button" className="ac-link" onClick={() => { setModo('academia'); setErro(null) }}>
+          Sou da academia
+        </button>
       </form>
     </div>
   )
