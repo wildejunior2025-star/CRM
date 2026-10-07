@@ -23,10 +23,11 @@ const MENU = [
   { id: 'entradas', nome: 'Minhas entradas', icone: '🚪', detalhe: 'Quando você treinou' },
   { id: 'ficha', nome: 'Minha ficha', icone: '📏', detalhe: 'Medidas e evolução' },
   { id: 'treinos', nome: 'Meus treinos', icone: '🏋️', detalhe: 'O treino do dia' },
+  { id: 'falar', nome: 'Falar com a academia', icone: '💬', detalhe: 'Pelo WhatsApp' },
 ]
 
 export default function AlunoApp() {
-  const { profile, logout } = useAuth()
+  const { profile, empresa, logout } = useAuth()
   const [aluno, setAluno] = useState(null)
   const [entradas, setEntradas] = useState([])
   const [carregando, setCarregando] = useState(true)
@@ -56,6 +57,14 @@ export default function AlunoApp() {
 
   function abrir(id) {
     setGaveta(false)
+    // Falar com a academia abre o WhatsApp dela, com a mensagem começada.
+    if (id === 'falar') {
+      const fone = String(empresa?.telefone_contato || '').replace(/\D/g, '')
+      if (!fone) { setTela('semWhats'); return }
+      const texto = encodeURIComponent(`Oi! Aqui é ${aluno?.nome?.split(' ')[0] || 'um aluno'}, da academia.`)
+      window.open(`https://wa.me/55${fone.replace(/^55/, '')}?text=${texto}`, '_blank')
+      return
+    }
     setTela(id)
   }
 
@@ -189,6 +198,12 @@ export default function AlunoApp() {
       )}
 
       {tela === 'entradas' && <Entradas entradas={entradas} />}
+
+      {tela === 'semWhats' && (
+        <section className="al-bloco">
+          <p className="al-texto">A academia ainda não cadastrou o WhatsApp dela. Fale na recepção.</p>
+        </section>
+      )}
 
       {tela === 'ficha' && (
         <Suspense fallback={<p className="al-vazio">Carregando...</p>}>

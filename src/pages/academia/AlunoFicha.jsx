@@ -28,6 +28,46 @@ const MEDIDAS = [
 
 const mostra = v => (v === null || v === undefined ? '—' : String(Number(v)).replace('.', ','))
 
+// Gráfico simples da evolução de uma medida. Desenhado à mão em SVG: é uma
+// linha com pontos, não precisa de biblioteca nenhuma.
+function Linha({ titulo, unidade, pontos, cor }) {
+  if (pontos.length < 2) return null
+  const largura = 300
+  const altura = 90
+  const valores = pontos.map(p => p.valor)
+  const min = Math.min(...valores)
+  const max = Math.max(...valores)
+  const vao = max - min || 1
+  const x = i => (i / (pontos.length - 1)) * (largura - 24) + 12
+  const y = v => altura - 16 - ((v - min) / vao) * (altura - 36)
+  const caminho = pontos.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.valor).toFixed(1)}`).join(' ')
+  const primeiro = pontos[0].valor
+  const ultimo = pontos[pontos.length - 1].valor
+  const dif = Number((ultimo - primeiro).toFixed(1))
+
+  return (
+    <div className="al-grafico">
+      <div className="al-grafico-topo">
+        <span>{titulo}</span>
+        <strong className={dif > 0 ? 'subiu' : dif < 0 ? 'desceu' : ''}>
+          {dif > 0 ? '+' : ''}{String(dif).replace('.', ',')} {unidade}
+        </strong>
+      </div>
+      <svg viewBox={`0 0 ${largura} ${altura}`} width="100%" height={altura} role="img"
+        aria-label={`${titulo}: de ${primeiro} a ${ultimo} ${unidade}`}>
+        <path d={caminho} fill="none" stroke={cor} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        {pontos.map((p, i) => (
+          <circle key={i} cx={x(i)} cy={y(p.valor)} r="4" fill={cor} />
+        ))}
+        <text x="12" y={altura - 2} fontSize="11" fill="#6b6880">{pontos[0].quando}</text>
+        <text x={largura - 12} y={altura - 2} fontSize="11" fill="#6b6880" textAnchor="end">
+          {pontos[pontos.length - 1].quando}
+        </text>
+      </svg>
+    </div>
+  )
+}
+
 export default function AlunoFicha({ aluno }) {
   const [avaliacoes, setAvaliacoes] = useState(null)
 
@@ -81,6 +121,27 @@ export default function AlunoFicha({ aluno }) {
           })}
         </ul>
       </section>
+
+      {avaliacoes.length > 1 && (
+        <section className="al-bloco">
+          <h2>Sua evolução</h2>
+          {[
+            { id: 'peso', titulo: 'Peso', unidade: 'kg', cor: '#7c3aed' },
+            { id: 'cintura', titulo: 'Cintura', unidade: 'cm', cor: '#15803d' },
+            { id: 'braco_dir', titulo: 'Braço', unidade: 'cm', cor: '#b45309' },
+          ].map(m => (
+            <Linha
+              key={m.id}
+              titulo={m.titulo}
+              unidade={m.unidade}
+              cor={m.cor}
+              pontos={[...avaliacoes].reverse()
+                .filter(a => a[m.id] != null)
+                .map(a => ({ valor: Number(a[m.id]), quando: dataBr(a.data).slice(0, 5) }))}
+            />
+          ))}
+        </section>
+      )}
 
       {avaliacoes.length > 1 && (
         <section className="al-bloco">

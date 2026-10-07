@@ -24,6 +24,9 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
   const [ia, setIa] = useState(null)       // { objetivo, nivel, dias, restricoes }
   const [plano, setPlano] = useState(null) // resposta da IA, esperando o "usar"
   const [pensando, setPensando] = useState(false)
+  const [semanas, setSemanas] = useState([])   // microciclo (o quadro do cartão)
+  const [cargas, setCargas] = useState({})     // item_id → { carga, data } da última vez
+  const [verSemanas, setVerSemanas] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
 
@@ -35,6 +38,16 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
     ])
     setExercicios(exs || [])
     setTreinos(trs || [])
+
+    const [{ data: sem }, { data: execs }] = await Promise.all([
+      supabase.from('academia_semanas').select('*').eq('aluno_id', aluno.id).order('numero'),
+      supabase.from('academia_execucoes').select('item_id, carga, data')
+        .eq('aluno_id', aluno.id).order('data', { ascending: false }).limit(400),
+    ])
+    setSemanas(sem || [])
+    const ult = {}
+    ;(execs || []).forEach(e => { if (e.item_id && !ult[e.item_id]) ult[e.item_id] = e })
+    setCargas(ult)
     if (trs?.length) {
       const { data: its } = await supabase
         .from('academia_treino_itens').select('*')
@@ -210,6 +223,27 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
     setSalvando(false)
   }
 
+  // Microciclo: as 8 semanas do verso do cartão. Sem a IA, o professor
+  // preenche aqui na mão.
+  async function salvarSemana(numero, campo, valor) {
+    const atual = semanas.find(w => w.numero === numero) || { aluno_id: aluno.id, numero }
+    const linha = { ...atual, [campo]: valor === '' ? null : valor }
+    setSemanas(l => {
+      const fora = l.filter(w => w.numero !== numero)
+      return [...fora, linha].sort((a, b) => a.numero - b.numero)
+    })
+    const { error } = await supabase.from('academia_semanas').upsert({
+      aluno_id: aluno.id,
+      numero,
+      series: linha.series ?? null,
+      rep_min: linha.rep_min ?? null,
+      rep_max: linha.rep_max ?? null,
+      sistema: linha.sistema ?? null,
+      aumentar_peso: !!linha.aumentar_peso,
+    }, { onConflict: 'aluno_id,numero' })
+    if (error) setErro(error.message)
+  }
+
   const porGrupo = exercicios.reduce((acc, e) => { (acc[e.grupo] ||= []).push(e); return acc }, {})
   const jaTem = new Set(lista.map(i => i.exercicio_id))
 
@@ -317,6 +351,63 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
             {salvando ? 'Salvando...' : 'Usar este treino'}
           </button>
           <button className="al-botao texto" onClick={() => setPlano(null)}>Descartar</button>
+        </footer>
+      </div>
+    )
+  }
+
+  if (verSemanas) {
+    return (
+      <div className="al-tela">
+        <header className="al-topo">
+          <button className="al-menu-botao" onClick={() => setVerSemanas(false)}>←</button>
+          <div className="al-titulo">
+            <span className="al-ola">{aluno.nome.split(' ')[0]}</span>
+            <h1>As 8 semanas</h1>
+          </div>
+        </header>
+
+        <p className="al-vazio">
+          É o quadro do cartão: o que muda a cada semana. O aluno vê isso no treino dele.
+        </p>
+
+        {[1, 2, 3, 4, 5, 6, 7, 8].map(n => {
+          const w = semanas.find(x => x.numero === n) || {}
+          return (
+            <section key={n} className="al-bloco">
+              <h2>Semana {n}</h2>
+              <div className="al-semana-grade">
+                <label className="al-campo">Séries
+                  <input inputMode="numeric" value={w.series ?? ''}
+                    onChange={e => salvarSemana(n, 'series', e.target.value ? Number(e.target.value) : '')} />
+                </label>
+                <label className="al-campo">De
+                  <input inputMode="numeric" value={w.rep_min ?? ''}
+                    onChange={e => salvarSemana(n, 'rep_min', e.target.value ? Number(e.target.value) : '')} />
+                </label>
+                <label className="al-campo">Até
+                  <input inputMode="numeric" value={w.rep_max ?? ''}
+                    onChange={e => salvarSemana(n, 'rep_max', e.target.value ? Number(e.target.value) : '')} />
+                </label>
+              </div>
+              <label className="al-campo">Sistema
+                <select value={w.sistema ?? ''} onChange={e => salvarSemana(n, 'sistema', e.target.value)}>
+                  <option value="">—</option>
+                  <option>Série única</option>
+                  <option>Bissérie</option>
+                </select>
+              </label>
+              <label className="al-consentimento" style={{ padding: 12 }}>
+                <input type="checkbox" checked={!!w.aumentar_peso}
+                  onChange={e => salvarSemana(n, 'aumentar_peso', e.target.checked)} />
+                <span>Subir o peso nesta semana</span>
+              </label>
+            </section>
+          )
+        })}
+
+        <footer className="al-rodape">
+          <button className="al-botao" onClick={() => setVerSemanas(false)}>Pronto</button>
         </footer>
       </div>
     )
@@ -439,7 +530,10 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
                 <span className="al-item-num">{n + 1}</span>
                 <span className="al-item-nome">
                   <strong>{i.nome}</strong>
-                  <small>{i.maquina ? `máquina ${i.maquina}` : 'peso livre'}</small>
+                  <small>
+                    {i.maquina ? `máquina ${i.maquina}` : 'peso livre'}
+                    {cargas[i.id]?.carga ? ` · última carga ${cargas[i.id].carga} kg` : ''}
+                  </small>
                 </span>
                 <select value={i.variacao || ''} onChange={e => mudarVariacao(i, e.target.value)}>
                   {VARIACOES.map(v => <option key={v} value={v}>{v || '—'}</option>)}
@@ -453,6 +547,9 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
 
       <footer className="al-rodape">
         <button className="al-botao" onClick={() => setEscolhendo(true)}>+ Adicionar exercício</button>
+        <button className="al-botao secundario" onClick={() => setVerSemanas(true)}>
+          📅 As 8 semanas{semanas.length ? ` (${semanas.length} montadas)` : ''}
+        </button>
         <button
           className="al-botao secundario"
           onClick={() => setIa({ objetivo: aluno.objetivo || 'Condicionamento geral', nivel: 'Iniciante', dias: 3, restricoes: '' })}
