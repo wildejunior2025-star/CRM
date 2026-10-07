@@ -27,6 +27,7 @@ export default function AcademiaAlunos() {
   const [busca, setBusca] = useState('')
   const [editando, setEditando] = useState(null) // null | 'novo' | aluno
   const [recebendo, setRecebendo] = useState(null) // aluno a quem registrar a mensalidade
+  const [filtro, setFiltro] = useState('todos') // todos | emdia | vencidos | semrosto
 
   async function carregar() {
     const { data, error } = await supabase
@@ -42,9 +43,21 @@ export default function AcademiaAlunos() {
 
   // Busca por nome OU matrícula: na recepção eles chamam o aluno pelo número.
   const termo = busca.trim().toLowerCase()
-  const filtrados = alunos.filter(a =>
-    a.nome.toLowerCase().includes(termo) || String(a.matricula || '').toLowerCase().includes(termo))
-  const semRosto = alunos.filter(a => !a.descritores?.length).length
+  const hoje = hojeMais(0)
+  const emDia = a => a.ativo && (!a.vencimento || a.vencimento >= hoje)
+  const contas = {
+    todos: alunos.length,
+    emdia: alunos.filter(emDia).length,
+    vencidos: alunos.filter(a => !emDia(a)).length,
+    semrosto: alunos.filter(a => !a.descritores?.length).length,
+  }
+  const filtrados = alunos
+    .filter(a => a.nome.toLowerCase().includes(termo) || String(a.matricula || '').toLowerCase().includes(termo))
+    .filter(a => filtro === 'todos'
+      || (filtro === 'emdia' && emDia(a))
+      || (filtro === 'vencidos' && !emDia(a))
+      || (filtro === 'semrosto' && !a.descritores?.length))
+  const semRosto = contas.semrosto
 
   if (editando) {
     return (
@@ -67,36 +80,80 @@ export default function AcademiaAlunos() {
         />
       )}
       <div className="ac-linha-titulo">
-        <h2>Alunos <span className="ac-muted">({alunos.length})</span></h2>
+        <h2>Alunos</h2>
         <button className="btn btn-primary" onClick={() => setEditando('novo')}>+ Novo aluno</button>
       </div>
-      {semRosto > 0 && (
-        <div className="ac-aviso">{semRosto} aluno{semRosto > 1 ? 's' : ''} sem rosto cadastrado — a recepção não vai reconhecer.</div>
-      )}
-      <input className="ac-busca" placeholder="Buscar pelo nome ou matrícula" value={busca} onChange={e => setBusca(e.target.value)} />
+
+      <div className="ac-barra">
+        <input className="ac-busca" placeholder="Buscar pelo nome ou matrícula"
+          value={busca} onChange={e => setBusca(e.target.value)} />
+        <div className="ac-filtros">
+          {[
+            { id: 'todos', nome: 'Todos' },
+            { id: 'emdia', nome: 'Em dia' },
+            { id: 'vencidos', nome: 'Vencidos' },
+            { id: 'semrosto', nome: 'Sem rosto' },
+          ].map(f => (
+            <button key={f.id} type="button"
+              className={`ac-filtro${filtro === f.id ? ' ativo' : ''}${f.id === 'vencidos' && contas.vencidos ? ' alerta' : ''}`}
+              onClick={() => setFiltro(f.id)}>
+              {f.nome} <b>{contas[f.id]}</b>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {carregando ? <p className="ac-muted">Carregando...</p> : filtrados.length === 0 ? (
         <p className="ac-muted">{alunos.length ? 'Ninguém com esse nome.' : 'Nenhum aluno ainda. Cadastre o primeiro.'}</p>
       ) : (
-        <div className="ac-lista">
-          {filtrados.map(a => {
-            const s = situacaoAluno(a)
-            return (
-              <div key={a.id} className="ac-aluno">
-                {a.foto ? <img src={a.foto} alt="" className="ac-foto" /> : <div className="ac-foto ac-foto-vazia">?</div>}
-                <div className="ac-aluno-info">
-                  <strong>{a.matricula ? `${a.matricula} · ` : ''}{a.nome}</strong>
-                  <span className="ac-muted">{[a.plano, a.valor ? dinheiro(a.valor) : null].filter(Boolean).join(' · ')}</span>
-                  <span className={`ac-status ac-${s.status}${s.aviso ? ' ac-quase' : ''}`}>{s.texto}</span>
-                  {!a.descritores?.length && <span className="ac-status ac-vencido">Sem rosto</span>}
-                </div>
-                <div className="ac-aluno-acoes">
-                  <button className="btn btn-secondary btn-sm" onClick={() => setRecebendo(a)} title="Registrar mensalidade paga">Renovar</button>
-                  <button className="btn btn-secondary btn-sm" onClick={() => setEditando(a)}>Editar</button>
-                </div>
-              </div>
-            )
-          })}
+        <div className="ac-tabela-caixa">
+          <table className="ac-tabela">
+            <thead>
+              <tr>
+                <th className="ac-col-foto"></th>
+                <th>Matrícula</th>
+                <th>Nome</th>
+                <th>Plano</th>
+                <th className="ac-num">Valor</th>
+                <th>Vence em</th>
+                <th>Situação</th>
+                <th className="ac-col-acoes"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtrados.map(a => {
+                const s = situacaoAluno(a)
+                return (
+                  <tr key={a.id}>
+                    <td className="ac-col-foto" data-rotulo="">
+                      {a.foto
+                        ? <img src={a.foto} alt="" className="ac-foto" />
+                        : <div className="ac-foto ac-foto-vazia" title="Sem rosto cadastrado">?</div>}
+                    </td>
+                    <td data-rotulo="Matrícula" className="ac-num">{a.matricula || '—'}</td>
+                    <td data-rotulo="Nome"><strong>{a.nome}</strong></td>
+                    <td data-rotulo="Plano" className="ac-muted">{a.plano || '—'}</td>
+                    <td data-rotulo="Valor" className="ac-num">{a.valor ? dinheiro(a.valor) : '—'}</td>
+                    <td data-rotulo="Vence em" className="ac-num">{a.vencimento ? dataBr(a.vencimento) : '—'}</td>
+                    <td data-rotulo="Situação">
+                      <span className={`ac-status ac-${s.status}${s.aviso ? ' ac-quase' : ''}`}>{s.texto}</span>
+                      {!a.descritores?.length && <span className="ac-status ac-vencido">Sem rosto</span>}
+                    </td>
+                    <td className="ac-col-acoes">
+                      <button className="btn btn-secondary btn-sm" onClick={() => setRecebendo(a)} title="Registrar mensalidade paga">Renovar</button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => setEditando(a)}>Editar</button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
+      )}
+      {semRosto > 0 && filtro !== 'semrosto' && (
+        <p className="ac-muted" style={{ marginTop: 10 }}>
+          {semRosto} aluno{semRosto > 1 ? 's' : ''} sem rosto cadastrado — a recepção não reconhece esse pessoal ainda.
+        </p>
       )}
     </div>
   )
