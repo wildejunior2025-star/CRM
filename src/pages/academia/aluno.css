@@ -215,7 +215,7 @@
 
 .al-alerta-saude { background: #fff5e6; color: #9a3412; border-radius: 12px; padding: 10px 14px; font-weight: 600; }
 
-.al-letras { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.al-letras { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
 .al-letra {
   display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer;
   background: var(--al-carta); border: 1px solid var(--al-linha); border-radius: 14px; padding: 12px 4px;

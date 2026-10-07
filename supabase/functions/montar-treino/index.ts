@@ -67,7 +67,7 @@ EXERCÍCIOS QUE ESTA ACADEMIA TEM (use SOMENTE estes, pelo id):
 ${lista}
 
 REGRAS
-1. Monte exatamente ${pedido.dias ?? 3} treinos, nomeados A, B, C, D, E nessa ordem.
+1. Monte exatamente ${pedido.dias ?? 3} treinos, nomeados A, B, C, D, E, F nessa ordem.
 2. Cada treino tem de 5 a 8 exercícios, na ordem de execução (dos maiores grupos para os menores).
 3. Use SOMENTE os ids da lista. Nunca invente exercício.
 4. Distribua os grupos musculares ao longo da semana sem repetir o mesmo grupo em dias seguidos.

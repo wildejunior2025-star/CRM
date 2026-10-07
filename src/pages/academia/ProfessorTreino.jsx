@@ -6,7 +6,7 @@ import { useAuth } from '../../hooks/useAuth'
 // no cartão: escolhe os treinos A a E, marca o dia e vai marcando os
 // exercícios de cada grupo. O número da máquina vem junto.
 
-const LETRAS = ['A', 'B', 'C', 'D', 'E']
+const LETRAS = ['A', 'B', 'C', 'D', 'E', 'F']
 const DIAS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 const VARIACOES = ['', 'H', 'UNI', 'ABERTO', 'CROSS']
 
@@ -228,7 +228,7 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
           </label>
           <label className="al-campo">Dias por semana
             <select value={ia.dias} onChange={e => setIa({ ...ia, dias: Number(e.target.value) })}>
-              {[2, 3, 4, 5].map(d => <option key={d} value={d}>{d} dias</option>)}
+              {[2, 3, 4, 5, 6].map(d => <option key={d} value={d}>{d} dias</option>)}
             </select>
           </label>
           <label className="al-campo">Alguma restricao?
