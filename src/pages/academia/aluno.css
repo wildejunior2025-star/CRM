@@ -88,3 +88,9 @@
 .al-cartao { background: var(--al-carta); border-radius: 18px; padding: 24px; display: grid; gap: 12px; max-width: 360px; }
 .al-cartao h1 { margin: 0; font-size: 24px; }
 .al-cartao p { margin: 0; color: var(--al-apagado); }
+.al-campo { display: flex; flex-direction: column; gap: 6px; color: var(--al-apagado); font-size: 15px; margin-bottom: 14px; }
+.al-campo:last-child { margin-bottom: 0; }
+.al-campo input {
+  width: 100%; box-sizing: border-box; font-size: 18px; padding: 14px;
+  border-radius: 12px; border: 1px solid var(--al-linha); background: var(--al-fundo); color: var(--al-texto);
+}

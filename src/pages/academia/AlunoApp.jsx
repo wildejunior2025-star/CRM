@@ -18,7 +18,7 @@ export default function AlunoApp() {
   const [aluno, setAluno] = useState(null)
   const [entradas, setEntradas] = useState([])
   const [carregando, setCarregando] = useState(true)
-  const [tela, setTela] = useState('inicio') // inicio | rosto
+  const [tela, setTela] = useState('inicio') // inicio | rosto | senha
 
   async function carregar() {
     const { data } = await supabase
@@ -54,6 +54,8 @@ export default function AlunoApp() {
       </div>
     )
   }
+
+  if (tela === 'senha') return <TrocarSenha onPronto={() => setTela('inicio')} />
 
   if (tela === 'rosto') {
     return (
@@ -135,8 +137,62 @@ export default function AlunoApp() {
         <button className="al-botao secundario" onClick={() => setTela('rosto')}>
           {aluno.descritores?.length ? 'Atualizar meu rosto' : 'Cadastrar meu rosto'}
         </button>
+        <button className="al-botao texto" onClick={() => setTela('senha')}>Trocar minha senha</button>
         <button className="al-botao texto" onClick={logout}>Sair</button>
       </footer>
     </div>
+  )
+}
+
+// O aluno escolhe a senha dele. A inicial são os 4 últimos dígitos do celular,
+// então trocar é o primeiro conselho que a tela dá.
+function TrocarSenha({ onPronto }) {
+  const [nova, setNova] = useState('')
+  const [repetida, setRepetida] = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState(null)
+  const [pronta, setPronta] = useState(false)
+
+  async function salvar(e) {
+    e.preventDefault()
+    if (nova.length < 4) return setErro('A senha precisa ter pelo menos 4 números ou letras.')
+    if (nova !== repetida) return setErro('As duas senhas estão diferentes.')
+    setSalvando(true)
+    setErro(null)
+    const { error } = await supabase.auth.updateUser({ password: nova })
+    setSalvando(false)
+    if (error) return setErro('Não deu pra trocar: ' + error.message)
+    setPronta(true)
+  }
+
+  if (pronta) {
+    return (
+      <div className="al-tela">
+        <header className="al-topo"><div><span className="al-ola">Tudo certo</span><h1>Senha trocada</h1></div></header>
+        <section className="al-bloco"><p className="al-texto">Da próxima vez, entre com o seu telefone e a senha nova.</p></section>
+        <footer className="al-rodape">
+          <button className="al-botao" onClick={onPronto}>Voltar</button>
+        </footer>
+      </div>
+    )
+  }
+
+  return (
+    <form className="al-tela" onSubmit={salvar}>
+      <header className="al-topo"><div><span className="al-ola">Sua conta</span><h1>Trocar senha</h1></div></header>
+      <section className="al-bloco">
+        <label className="al-campo">Nova senha
+          <input type="password" autoComplete="new-password" value={nova} onChange={e => setNova(e.target.value)} />
+        </label>
+        <label className="al-campo">Repita a nova senha
+          <input type="password" autoComplete="new-password" value={repetida} onChange={e => setRepetida(e.target.value)} />
+        </label>
+      </section>
+      {erro && <div className="al-erro">{erro}</div>}
+      <footer className="al-rodape">
+        <button className="al-botao" disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar senha'}</button>
+        <button type="button" className="al-botao texto" onClick={onPronto}>Voltar</button>
+      </footer>
+    </form>
   )
 }

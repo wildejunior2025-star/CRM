@@ -196,6 +196,14 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
     onFechar(true)
   }
 
+  // Aluno esqueceu a senha: volta a ser os 4 últimos dígitos do celular dele.
+  async function redefinirSenha() {
+    setErro(null)
+    const { data, error } = await supabase.rpc('academia_resetar_senha', { p_aluno_id: aluno.id })
+    if (error) return setErro(error.message)
+    window.alert(`Senha redefinida. A nova senha de ${aluno.nome} é ${data} (os 4 últimos dígitos do celular dele).`)
+  }
+
   async function apagar() {
     if (!window.confirm(`Apagar ${aluno.nome}? Some o cadastro, o rosto e o histórico de entradas.`)) return
     await supabase.from('academia_alunos').delete().eq('id', aluno.id)
@@ -263,6 +271,7 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
       {erro && <div className="ac-erro">{erro}</div>}
       <div className="ac-form-botoes">
         {aluno && <button type="button" className="btn btn-danger" onClick={apagar}>Apagar</button>}
+        {aluno && <button type="button" className="btn btn-secondary" onClick={redefinirSenha}>Redefinir senha do app</button>}
         <button className="btn btn-primary" disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar'}</button>
       </div>
     </form>
