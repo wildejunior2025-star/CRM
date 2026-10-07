@@ -217,7 +217,10 @@ body { overflow-x: hidden; }
   .ac-tabela td.ac-col-foto { justify-content: flex-start; padding-bottom: 6px; }
   .ac-tabela td.ac-col-foto .ac-foto { width: 48px; height: 48px; }
   .ac-tabela td[data-rotulo="Situação"] { flex-wrap: wrap; justify-content: flex-end; }
-  .ac-tabela td.ac-col-acoes { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+  .ac-tabela td.ac-col-acoes {
+    display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px;
+    width: auto; white-space: normal; /* a largura de 1% do PC fazia os botões saírem do cartão */
+  }
   .ac-tabela td.ac-col-acoes .btn { flex: 1 1 auto; }
   .ac-tabela td.ac-col-acoes .btn + .btn { margin-left: 0; }
 }
