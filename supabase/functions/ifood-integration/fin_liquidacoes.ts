@@ -31,6 +31,23 @@ export async function buscarLiquidacaoDaSemana(ctx: CtxIfood, ini: string, fim: 
     `/financial/v3.0/merchants/${ctx.cfg.merchant_id}/settlements?beginCalculationDate=${ini}&endCalculationDate=${fim}`)
 }
 
+// API Anticipations — a loja que antecipa recebe antes e paga uma taxa; o que
+// cai na conta é o valor já descontado. Sem antecipação a resposta vem vazia.
+export async function buscarAntecipacaoDaSemana(ctx: CtxIfood, ini: string, fim: string) {
+  return await getJson(ctx,
+    `/financial/v3.0/merchants/${ctx.cfg.merchant_id}/anticipations?beginCalculationDate=${ini}&endCalculationDate=${fim}`)
+}
+
+export function resumoDaAntecipacao(j: any) {
+  const itens = (Array.isArray(j?.settlements) ? j.settlements : [])
+    .flatMap((s: any) => Array.isArray(s?.closingItems) ? s.closingItems : [])
+  if (!itens.length) return { antecipado: null, taxa: null }
+  const taxa = itens.reduce((soma: number, it: any) => soma + (numOuNull(it?.feeAmount) ?? 0), 0)
+  const liquido = numOuNull(j?.balance)
+    ?? itens.reduce((soma: number, it: any) => soma + (numOuNull(it?.anticipatedPaymentAmount) ?? 0), 0)
+  return { antecipado: Math.round(liquido * 100) / 100, taxa: Math.round(taxa * 100) / 100 }
+}
+
 export async function linhasDeLiquidacao(cfg: any, semanaIni: string, semanaFim: string, j: any) {
   const settlements = Array.isArray(j?.settlements) ? j.settlements : []
   const titulos: any[] = []

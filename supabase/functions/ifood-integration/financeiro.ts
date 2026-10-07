@@ -17,7 +17,7 @@
 import { type CtxIfood, ErroIfood } from "./fin_http.ts"
 import { buscarEventosDaSemana, linhasDeEventos } from "./fin_eventos.ts"
 import { buscarVendasDaSemana, linhasDeVendas } from "./fin_vendas.ts"
-import { buscarLiquidacaoDaSemana, linhasDeLiquidacao } from "./fin_liquidacoes.ts"
+import { buscarAntecipacaoDaSemana, buscarLiquidacaoDaSemana, linhasDeLiquidacao, resumoDaAntecipacao } from "./fin_liquidacoes.ts"
 import { baixarRelatorioMensal, consultarRelatorio, solicitarRelatorio } from "./fin_conciliacao.ts"
 import { gravarEmLotes, semanasDeLiquidacao } from "./fin_util.ts"
 
@@ -131,7 +131,8 @@ async function sincronizarLoja(sb: any, getToken: GetToken, cfg: any, dias: numb
       res.descartados += vd.descartadas
 
       const lq = await linhasDeLiquidacao(cfg, s.ini, s.fim, await buscarLiquidacaoDaSemana(ctx, s.ini, s.fim))
-      semanasLiq.push(lq.semana)
+      const ant = resumoDaAntecipacao(await buscarAntecipacaoDaSemana(ctx, s.ini, s.fim))
+      semanasLiq.push({ ...lq.semana, antecipado: ant.antecipado, antecipacao_taxa: ant.taxa })
       titulos.push(...lq.titulos)
     }
 

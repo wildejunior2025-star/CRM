@@ -244,6 +244,9 @@ function Repasses({ empresaId, versao, nomeLoja, variasLojas }) {
     return () => { vivo = false }
   }, [empresaId, versao])
 
+  // Loja sem antecipação não precisa ver colunas vazias.
+  const temAntecipacao = (semanas ?? []).some(s => Number(s.antecipacao_taxa) > 0)
+
   if (semanas === null) return <div className="ci-card ci-vazio">Carregando os repasses…</div>
 
   return (
@@ -252,6 +255,7 @@ function Repasses({ empresaId, versao, nomeLoja, variasLojas }) {
       <p className="ci-sub">
         O que o iFood consolida de segunda a domingo e transfere pra você. A coluna <b>Confere</b> compara
         o valor da liquidação com a soma dos lançamentos que impactam o repasse — se não bater, aparece a diferença.
+        A semana que ainda não fechou fica em aberto: o iFood só gera os títulos na segunda seguinte.
       </p>
       {!semanas.length ? <p className="ci-vazio">Nenhuma liquidação buscada ainda. Clique em “Atualizar agora”.</p> : (
         <div className="ci-tabela-wrap">
@@ -262,6 +266,8 @@ function Repasses({ empresaId, versao, nomeLoja, variasLojas }) {
                 {variasLojas && <th className="esq">Loja</th>}
                 <th>Liquidação (iFood)</th>
                 <th>Soma dos lançamentos</th>
+                {temAntecipacao && <th title="Taxa cobrada pra receber antes do prazo">Antecipação</th>}
+                {temAntecipacao && <th title="O que de fato cai na conta, já sem a taxa">Você recebe</th>}
                 <th>Títulos</th>
                 <th>Confere</th>
               </tr>
@@ -277,12 +283,14 @@ function Repasses({ empresaId, versao, nomeLoja, variasLojas }) {
                     {variasLojas && <td className="esq">{nomeLoja[s.merchant_id] ?? '—'}</td>}
                     <td><b>{fmt(s.saldo)}</b></td>
                     <td>{s.soma_lancamentos != null ? fmt(s.soma_lancamentos) : '—'}</td>
+                    {temAntecipacao && <td className={Number(s.antecipacao_taxa) > 0 ? 'ci-neg' : 'ci-muted'}>{Number(s.antecipacao_taxa) > 0 ? `− ${fmt(s.antecipacao_taxa)}` : '—'}</td>}
+                    {temAntecipacao && <td><b>{s.antecipado != null ? fmt(s.antecipado) : '—'}</b></td>}
                     <td>{ts.length}</td>
                     <td>{vazia ? <span className="ci-selo">sem movimento</span> : <Conferencia bate={s.conferido} diferenca={s.diferenca} />}</td>
                   </tr>,
                   aberta === k && (
                     <tr key={`${k}-d`}>
-                      <td className="ci-detalhe" colSpan={variasLojas ? 6 : 5}>
+                      <td className="ci-detalhe" colSpan={(variasLojas ? 6 : 5) + (temAntecipacao ? 2 : 0)}>
                         {!ts.length ? <span className="ci-muted">Nenhum título gerado nessa semana.</span> : (
                           <table className="ci-tabela">
                             <thead><tr><th className="esq">Título</th><th className="esq">Status</th><th>Pagamento</th><th>Valor</th><th className="esq">Conta de destino</th></tr></thead>
