@@ -13,7 +13,8 @@ import BotaoAbrirCatraca from './BotaoAbrirCatraca'
 //   /porta      → PC só abre a catraca quando o celular reconhece (câmera melhor)
 //   /importar   → traz os alunos do sistema antigo (.json do backup). FORA do
 //                 menu: é ferramenta nossa, de uma vez só; chega pelo endereço.
-// Por enquanto só o dono (admin da empresa) entra. Instrutor e aluno vêm depois.
+// Quem entra como ALUNO não vê nada disso: cai na área dele (AlunoApp), do
+// mesmo jeito que o garçom cai no salão.
 
 const AcademiaAlunos = lazy(() => import('./AcademiaAlunos'))
 const AcademiaRecepcao = lazy(() => import('./AcademiaRecepcao'))
@@ -21,6 +22,7 @@ const AcademiaCatraca = lazy(() => import('./AcademiaCatraca'))
 const AcademiaPorta = lazy(() => import('./AcademiaPorta'))
 const AcademiaImportar = lazy(() => import('./AcademiaImportar'))
 const AcademiaPagamentos = lazy(() => import('./AcademiaPagamentos'))
+const AlunoApp = lazy(() => import('./AlunoApp'))
 
 function Carregando() {
   return <div className="ac-centro ac-muted">Carregando...</div>
@@ -37,9 +39,12 @@ function EntrarAcademia() {
     e.preventDefault()
     setEnviando(true)
     setErro(null)
-    const { error } = await login(email.trim(), senha)
+    // Aluno digita só a matrícula; o e-mail dele é interno.
+    const digitado = email.trim()
+    const usuario = digitado.includes('@') ? digitado : `${digitado}@aluno.fwcinter.com`
+    const { error } = await login(usuario, senha)
     setEnviando(false)
-    if (error) setErro('E-mail ou senha errados.')
+    if (error) setErro('Matrícula/e-mail ou senha errados.')
   }
 
   return (
@@ -47,9 +52,9 @@ function EntrarAcademia() {
       <form className="ac-card ac-login" onSubmit={entrar}>
         <div className="ac-logo">🏋️</div>
         <h1>Academia</h1>
-        <p className="ac-muted">Entre com a conta do dono da academia.</p>
-        <label>E-mail
-          <input type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required />
+        <p className="ac-muted">Aluno: entre com a sua matrícula.</p>
+        <label>E-mail ou matrícula
+          <input autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required />
         </label>
         <label>Senha
           <input type="password" autoComplete="current-password" value={senha} onChange={e => setSenha(e.target.value)} required />
@@ -82,6 +87,14 @@ function Portaria() {
   const { session, profile, empresa, loading, profileLoading } = useAuth()
   if (loading || (session && profileLoading && !profile)) return <Carregando />
   if (!session) return <EntrarAcademia />
+  // Aluno: só a área dele, no mesmo endereço.
+  if (profile?.perfil === 'aluno') {
+    return (
+      <Suspense fallback={<Carregando />}>
+        <AlunoApp />
+      </Suspense>
+    )
+  }
   const podeEntrar = profile && ['admin', 'super_admin'].includes(profile.perfil) && empresa
   if (!podeEntrar) {
     return (
