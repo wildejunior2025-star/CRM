@@ -86,10 +86,10 @@ Deno.serve(async (req) => {
     if (acao === "catalogo_pausar_complemento") return json(await runPausarComplemento(sb, body?.empresa_id, body?.option_id, body?.pausar))
     if (acao === "detectar_merchant") return json(await runDetectarMerchant(sb, body?.empresa_id, body?.merchant_id, body?.apelido))
     // Conciliação iFood — módulo Financial (migs 0260/0261). Sem empresa_id = todas as lojas (cron).
-    if (acao === "financeiro_sync") return json(await runFinanceiroSync(req, sb, getToken, { empresaId: body?.empresa_id, dias: body?.dias }))
-    if (acao === "conciliacao_mensal") return json(await runConciliacaoMensal(req, sb, getToken, body?.empresa_id, body?.competencia))
-    if (acao === "conciliacao_solicitar") return json(await runConciliacaoSolicitar(req, sb, getToken, body?.empresa_id, body?.competencia))
-    if (acao === "conciliacao_status") return json(await runConciliacaoStatus(req, sb, getToken, body?.empresa_id, body?.competencia))
+    if (acao === "financeiro_sync") return json(await runFinanceiroSync(req, sb, getTokenFinanceiro, { empresaId: body?.empresa_id, dias: body?.dias }))
+    if (acao === "conciliacao_mensal") return json(await runConciliacaoMensal(req, sb, getTokenFinanceiro, body?.empresa_id, body?.competencia))
+    if (acao === "conciliacao_solicitar") return json(await runConciliacaoSolicitar(req, sb, getTokenFinanceiro, body?.empresa_id, body?.competencia))
+    if (acao === "conciliacao_status") return json(await runConciliacaoStatus(req, sb, getTokenFinanceiro, body?.empresa_id, body?.competencia))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
   } catch (e) {
     return json({ ok: false, error: String(e?.message ?? e) }, 500)
@@ -111,6 +111,43 @@ async function resolverCreds(sb: any, cfg: Config): Promise<{ clientId: string |
     clientSecret = clientSecret || app?.client_secret || null
   }
   return { clientId, clientSecret }
+}
+
+// Token do app FINANCEIRO. O iFood só libera o módulo Financial pra app da
+// categoria Financial, então as chamadas /financial/* usam um app separado
+// (ifood_app id=2) — o de pedidos/cardápio segue sendo o id=1. A loja de teste
+// guarda as próprias credenciais no ifood_config e continua pelo caminho normal.
+// O token fica só na memória desta execução: gravá-lo no ifood_config
+// atropelaria o token do app de pedidos, que mora na mesma coluna.
+const tokensFinanceiro = new Map<string, { token: string; expiraEm: number }>()
+
+async function getTokenFinanceiro(sb: any, cfg: Config): Promise<string> {
+  if (cfg.client_id && cfg.client_secret) return getToken(sb, cfg)
+
+  const { data: app } = await sb.from("ifood_app").select("client_id, client_secret").eq("id", 2).maybeSingle()
+  if (!app?.client_id || !app?.client_secret) return getToken(sb, cfg)
+
+  const cache = tokensFinanceiro.get(app.client_id)
+  if (cache && cache.expiraEm - Date.now() > 60_000) return cache.token
+
+  const form = new URLSearchParams()
+  form.set("grantType", "client_credentials")
+  form.set("clientId", app.client_id)
+  form.set("clientSecret", app.client_secret)
+  const res = await fetch(`${IFOOD}/authentication/v1.0/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  })
+  if (!res.ok) {
+    const txt = await res.text()
+    throw new Error(`auth iFood (app financeiro) falhou (${res.status}): ${txt.slice(0, 300)}`)
+  }
+  const data = await res.json()
+  const token: string = data.accessToken ?? data.access_token
+  const expiresIn: number = data.expiresIn ?? data.expires_in ?? 10800
+  tokensFinanceiro.set(app.client_id, { token, expiraEm: Date.now() + expiresIn * 1000 })
+  return token
 }
 
 async function getToken(sb: any, cfg: Config): Promise<string> {
