@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, miniaturaDoRosto, situacaoAluno, acharAluno,
-  entrarTelaCheia, sairTelaCheia, GIRO_LADO,
+  entrarTelaCheia, sairTelaCheia, GIRO_LADO, cameraPadrao, guardarCamera,
 } from '../../lib/reconhecimentoFacial'
 import { FORMAS, hojeIso, somarMeses, registrarPagamento, dinheiro, dataBr } from '../../lib/academiaPagamento'
 
@@ -225,6 +225,9 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
   const [msg, setMsg] = useState('Preparando a câmera...')
   const [feitas, setFeitas] = useState(0)
   const [resultado, setResultado] = useState(null) // { descritores, foto } esperando o "ficou boa?"
+  // Câmera de TRÁS por padrão no celular: resolução melhor e quem tira a foto
+  // é a recepção, não o aluno.
+  const [camera, setCamera] = useState(cameraPadrao)
   const capturaRef = useRef(0) // muda a cada captura; captura antiga que ainda estiver rodando para sozinha
 
   useEffect(() => {
@@ -235,7 +238,7 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
         setMsg('Baixando o reconhecimento (só na primeira vez)...')
         await carregarFaceApi()
         if (!vivo) return
-        stream = await ligarCamera(videoRef.current)
+        stream = await ligarCamera(videoRef.current, { camera })
         if (!vivo) return desligarCamera(stream)
         setFase('pronto')
         setMsg('Rosto de frente, bem iluminado. Aperte Capturar.')
@@ -246,7 +249,7 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- é um contador, não um nó
     return () => { vivo = false; capturaRef.current++; desligarCamera(stream); sairTelaCheia() }
-  }, [])
+  }, [camera])
 
   // Cada etapa só passa quando a pessoa FEZ o que a tela pediu — conferido
   // pela posição do nariz em relação aos olhos. Sem pular por tempo;
@@ -352,6 +355,13 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
               // No meio da captura, Cancelar só para e volta pro começo.
               if (fase === 'capturando') { capturaRef.current++; tirarDeNovo() } else onCancelar()
             }}>{fase === 'capturando' ? 'Parar' : 'Cancelar'}</button>
+            <button type="button" className="btn btn-secondary ac-botao-camera" title="Trocar entre a câmera da frente e a de trás"
+              disabled={fase === 'capturando'}
+              onClick={() => {
+                const nova = camera === 'environment' ? 'user' : 'environment'
+                guardarCamera(nova)
+                setCamera(nova)
+              }}>🔄 {camera === 'environment' ? 'Trás' : 'Frente'}</button>
             <button type="button" className="btn btn-primary" onClick={capturar} disabled={fase !== 'pronto'}>
               {fase === 'capturando' ? 'Capturando...' : '📷 Capturar rosto'}
             </button>

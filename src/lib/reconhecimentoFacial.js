@@ -192,16 +192,33 @@ export function acharAluno(descritor, alunos) {
   return melhor
 }
 
+// Qual câmera o cadastro usa neste aparelho. A de TRÁS do celular tem bem mais
+// resolução, e quem tira a foto é a recepção, não o próprio aluno (07/10).
+const CHAVE_CAMERA = 'academia_camera'
+export function cameraPadrao() {
+  try {
+    const salva = localStorage.getItem(CHAVE_CAMERA)
+    if (salva) return salva
+  } catch { /* sem memória do navegador */ }
+  // Aparelho de toque (celular/tablet) começa na de trás; PC só tem uma.
+  const toque = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
+  return toque ? 'environment' : 'user'
+}
+export function guardarCamera(camera) {
+  try { localStorage.setItem(CHAVE_CAMERA, camera) } catch { /* só não lembra */ }
+}
+
 // `leve`: resolução menor (640x480). A recepção usa — o reconhecimento reduz a
 // imagem de qualquer jeito, e em PC antigo a imagem grande só deixa lento.
-export async function ligarCamera(video, { leve = false } = {}) {
+// `camera`: 'user' (frente) ou 'environment' (trás).
+export async function ligarCamera(video, { leve = false, camera = 'user' } = {}) {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Este navegador não libera a câmera. No iPad, use o Safari.')
   }
   let stream
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: leve ? 640 : 1280 }, height: { ideal: leve ? 480 : 960 } },
+      video: { facingMode: { ideal: camera }, width: { ideal: leve ? 640 : 1280 }, height: { ideal: leve ? 480 : 960 } },
       audio: false,
     })
   } catch {
@@ -220,8 +237,9 @@ export async function ligarCamera(video, { leve = false } = {}) {
   await video.play()
 
   // Sem zoom (tirado a pedido em 19/09): a tela mostra exatamente o que a
-  // câmera lê — nada de reconhecer quem aparece cortado.
-  video.style.transform = 'scaleX(-1)'
+  // câmera lê — nada de reconhecer quem aparece cortado. Só a câmera da FRENTE
+  // é espelhada; a de trás mostra a cena como ela é.
+  video.style.transform = camera === 'environment' ? 'none' : 'scaleX(-1)'
   video.dataset.zoom = '1'
   return stream
 }

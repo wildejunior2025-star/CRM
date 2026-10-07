@@ -158,3 +158,4 @@
 .ac-topo nav { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .ac-main, .ac-card { max-width: 100%; box-sizing: border-box; }
 body { overflow-x: hidden; }
+.ac-captura-botoes .ac-botao-camera { flex: 0 0 auto; }
