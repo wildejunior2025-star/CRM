@@ -66,7 +66,9 @@ function EntrarAcademia() {
     setErro(null)
     const { error } = await login(contaEmail, pin)
     setEnviando(false)
-    if (error) setErro('Senha errada. São os 4 últimos números do seu celular.')
+    // Nada de afirmar "são os 4 últimos do celular": quem já trocou a senha
+    // acha que o sistema perdeu a dele (visto com o usuário em 08/10).
+    if (error) setErro('Senha errada. Se você esqueceu, a recepção redefine pra você.')
   }
 
   async function entrarAcademia(e) {
