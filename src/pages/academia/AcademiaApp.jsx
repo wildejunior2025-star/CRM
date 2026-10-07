@@ -2,6 +2,7 @@ import { useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import './academia.css'
+import BotaoAbrirCatraca from './BotaoAbrirCatraca'
 
 // academia.fwcinter.com — sistema da academia (mig 0276).
 //   /           → alunos (cadastro com foto do rosto)
@@ -71,6 +72,7 @@ function Topo() {
         <NavLink to="/recepcao">Recepção</NavLink>
         <NavLink to="/porta">Porta</NavLink>
       </nav>
+      <BotaoAbrirCatraca />
       <button className="btn btn-secondary btn-sm" onClick={logout}>Sair</button>
     </header>
   )

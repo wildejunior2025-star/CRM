@@ -230,3 +230,20 @@ body { overflow-x: hidden; }
 .ac-status { white-space: nowrap; }
 .ac-tabela td[data-rotulo="Situação"] { display: table-cell; }
 @media (max-width: 820px) { .ac-tabela td[data-rotulo="Situação"] { display: flex; } }
+
+/* Botão de abrir a catraca na mão, na barra de cima */
+.ac-abrir-caixa { display: flex; align-items: center; gap: 8px; }
+.ac-abrir {
+  cursor: pointer; white-space: nowrap; font: 700 14px/1 var(--sans, inherit);
+  padding: 10px 16px; border-radius: 999px; border: 0;
+  background: var(--primary); color: var(--primary-contrast);
+}
+.ac-abrir:hover { background: var(--primary-hover); }
+.ac-abrir:disabled { opacity: .7; cursor: default; }
+.ac-abrir.ok { background: var(--success); }
+.ac-abrir.erro { background: var(--danger); }
+.ac-abrir-erro { font-size: 12px; color: var(--danger); max-width: 220px; }
+@media (max-width: 640px) {
+  .ac-abrir { padding: 9px 12px; font-size: 13px; }
+  .ac-abrir-erro { display: none; }
+}
