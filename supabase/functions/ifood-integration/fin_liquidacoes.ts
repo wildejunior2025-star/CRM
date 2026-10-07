@@ -65,12 +65,21 @@ export async function linhasDeLiquidacao(cfg: any, semanaIni: string, semanaFim:
     }
   }
 
+  // Na prática o `balance` vem 0 mesmo quando houve repasse: quem carrega o
+  // valor são os títulos de SALDO POSITIVO. Os de REGISTRO_RECEBIVEIS e
+  // RENEGOCIADA repetem o mesmo dinheiro (parte do repasse vai pro banco por
+  // acordo de recebíveis) — somar todos contaria em dobro.
+  const saldoDosTitulos = titulos
+    .filter((t) => /SALDO POSITIVO|REPASSE/i.test(String(t.tipo ?? "")))
+    .reduce((soma, t) => soma + (t.valor ?? 0), 0)
+  const balance = numOuNull(j?.balance) ?? 0
+
   const semana = {
     empresa_id: cfg.empresa_id,
     merchant_id: cfg.merchant_id,
     semana_ini: semanaIni,
     semana_fim: semanaFim,
-    saldo: numOuNull(j?.balance) ?? 0,
+    saldo: balance !== 0 ? balance : Math.round(saldoDosTitulos * 100) / 100,
     qtd_titulos: titulos.length,
     consultado_em: new Date().toISOString(),
   }

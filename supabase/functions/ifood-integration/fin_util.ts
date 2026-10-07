@@ -22,10 +22,15 @@ export function segunda(d: Date): Date {
 // Semanas de liquidação (seg-dom) que cobrem os últimos `dias`, da mais antiga
 // pra mais nova. O guia do iFood manda consultar nesses limites: "não consulte
 // intervalos de datas arbitrários; use limites de semana de liquidação".
+// A semana corrente ainda não terminou: o iFood recusa a consulta se a data
+// final for depois de hoje ("End sales date cannot be after current date"),
+// então o fim da última semana é cortado no dia de hoje.
 export function semanasDeLiquidacao(dias: number, hoje = new Date()): { ini: string; fim: string }[] {
   const out: { ini: string; fim: string }[] = []
+  const hojeYmd = ymd(hoje)
   for (let s = segunda(addDias(hoje, -dias)); s <= hoje; s = addDias(s, 7)) {
-    out.push({ ini: ymd(s), fim: ymd(addDias(s, 6)) })
+    const fim = ymd(addDias(s, 6))
+    out.push({ ini: ymd(s), fim: fim > hojeYmd ? hojeYmd : fim })
   }
   return out
 }
