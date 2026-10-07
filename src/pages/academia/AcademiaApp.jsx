@@ -8,12 +8,14 @@ import './academia.css'
 //   /recepcao   → tablet da recepção: câmera reconhece e mostra se está em dia
 //   /catraca    → descobrir no PC da catraca qual sinal destrava ela
 //   /porta      → PC só abre a catraca quando o celular reconhece (câmera melhor)
+//   /importar   → traz os alunos do sistema antigo (arquivo .json do backup)
 // Por enquanto só o dono (admin da empresa) entra. Instrutor e aluno vêm depois.
 
 const AcademiaAlunos = lazy(() => import('./AcademiaAlunos'))
 const AcademiaRecepcao = lazy(() => import('./AcademiaRecepcao'))
 const AcademiaCatraca = lazy(() => import('./AcademiaCatraca'))
 const AcademiaPorta = lazy(() => import('./AcademiaPorta'))
+const AcademiaImportar = lazy(() => import('./AcademiaImportar'))
 
 function Carregando() {
   return <div className="ac-centro ac-muted">Carregando...</div>
@@ -64,6 +66,7 @@ function Topo() {
         <NavLink to="/recepcao">Recepção</NavLink>
         <NavLink to="/catraca">Catraca</NavLink>
         <NavLink to="/porta">Porta</NavLink>
+        <NavLink to="/importar">Importar</NavLink>
       </nav>
       <button className="btn btn-secondary btn-sm" onClick={logout}>Sair</button>
     </header>
@@ -95,6 +98,7 @@ function Portaria() {
             <Route path="/" element={<AcademiaAlunos />} />
             <Route path="/catraca" element={<AcademiaCatraca />} />
             <Route path="/porta" element={<AcademiaPorta />} />
+            <Route path="/importar" element={<AcademiaImportar />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main></>} />
