@@ -149,28 +149,37 @@
 .al-linha span { font-size: 17px; font-weight: 600; }
 .al-linha small { color: var(--al-apagado); text-align: right; }
 
-/* ── Teclado de 4 números (login e troca de senha) ────────────────────── */
+/* ── Teclado de 4 números (login e troca de senha) ──────────────────────
+   Tela cheia de verdade: no celular, nada de rolar pra achar o teclado — o
+   que não cabe encolhe (pedido do usuário em 07/10). */
 .pin-tela {
-  display: flex; flex-direction: column; align-items: center; gap: 18px;
-  padding: 40px 20px max(24px, env(safe-area-inset-bottom)); max-width: 420px;
+  position: fixed; inset: 0; z-index: 50; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+  gap: 10px; padding: max(20px, env(safe-area-inset-top)) 20px max(16px, env(safe-area-inset-bottom));
+  max-width: none; min-height: 0;
 }
-.pin-topo { text-align: center; }
-.pin-topo h1 { margin: 0; font-size: 26px; }
-.pin-topo p { margin: 6px 0 0; color: var(--al-apagado); }
-.pin-bolinhas { display: flex; gap: 16px; margin: 6px 0 2px; }
+.pin-topo { text-align: center; padding-top: 2vh; }
+.pin-topo h1 { margin: 0; font-size: clamp(20px, 3.4vh, 26px); }
+.pin-topo p { margin: 6px 0 0; color: var(--al-apagado); font-size: clamp(14px, 2vh, 17px); }
+.pin-bolinhas { display: flex; gap: 16px; }
 .pin-bolinhas span {
   width: 18px; height: 18px; border-radius: 50%;
   border: 2px solid #cdc7e6; background: transparent; transition: background .15s, border-color .15s;
 }
 .pin-bolinhas span.cheia { background: var(--al-roxo); border-color: var(--al-roxo); }
-.pin-erro { color: var(--al-vermelho); background: var(--al-vermelho-fundo); border-radius: 12px; padding: 10px 14px; text-align: center; }
+.pin-erro { color: var(--al-vermelho); background: var(--al-vermelho-fundo); border-radius: 12px; padding: 8px 14px; text-align: center; font-size: 15px; }
 .pin-aviso { color: var(--al-apagado); }
-.pin-teclado { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; width: 100%; max-width: 320px; margin-top: auto; }
+.pin-teclado {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(8px, 1.6vh, 14px);
+  width: 100%; max-width: 320px;
+}
 .pin-teclado button {
-  height: 72px; font-size: 28px; font-weight: 600; cursor: pointer; color: var(--al-texto);
+  height: clamp(48px, 9vh, 72px); font-size: clamp(20px, 3.4vh, 28px); font-weight: 600;
+  cursor: pointer; color: var(--al-texto);
   border-radius: 50%; border: 1px solid var(--al-linha); background: var(--al-carta);
 }
 .pin-teclado button:active { background: var(--al-roxo-claro); }
 .pin-teclado button:disabled { opacity: .4; }
 .pin-teclado .pin-vazio { visibility: hidden; }
-.pin-teclado .pin-apagar { font-size: 22px; background: none; border-color: transparent; }
+.pin-teclado .pin-apagar { font-size: clamp(18px, 2.6vh, 22px); background: none; border-color: transparent; }
+.pin-tela .al-botao.texto { padding: 6px; }

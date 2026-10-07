@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react'
+// O estilo vem junto: o teclado aparece no login, antes de a área do aluno
+// (que é quem carregava este css) existir na tela.
+import './aluno.css'
 
 // Teclado de 4 números, do jeito que a pessoa já conhece do celular.
 //
@@ -8,7 +11,10 @@ import { useEffect, useState } from 'react'
 export default function TecladoPin({ titulo, subtitulo, erro, carregando, onCompleto, onVoltar, rodape }) {
   const [pin, setPin] = useState('')
 
-  useEffect(() => { if (erro) setPin('') }, [erro])
+  // Limpa as bolinhas quando o erro aparece E quando a pergunta muda (de
+  // "nova senha" pra "repita a senha"): elas ficavam cheias da etapa anterior
+  // e o teclado parava de responder.
+  useEffect(() => { setPin('') }, [titulo, erro])
 
   function digitar(n) {
     if (carregando || pin.length >= 4) return

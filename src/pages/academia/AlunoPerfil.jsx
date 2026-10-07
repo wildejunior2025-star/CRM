@@ -89,7 +89,9 @@ function TrocarSenha({ onPronto }) {
       return
     }
     setSalvando(true)
-    const { error } = await supabase.auth.updateUser({ password: pin })
+    // Caminho próprio da academia: o Supabase exige 6 caracteres e a nossa
+    // senha é um PIN de 4 números (mig 0301).
+    const { error } = await supabase.rpc('academia_trocar_minha_senha', { p_senha: pin })
     setSalvando(false)
     if (error) {
       setErro('Não deu pra trocar: ' + error.message)
