@@ -55,10 +55,13 @@ export default function AcademiaRecepcao() {
   const catracaRef = useRef(null)
   const setCatraca = v => { catracaRef.current = v; setCatracaEstado(v) }
 
+  // Este aparelho fala direto com a catraca? Só o computador ligado nela fala.
+  // Celular e tablet avisam o computador que está com a tela /porta aberta.
+  const localRef = useRef(false)
+  const canalPorta = useRef(null)
+
   async function abrirCatraca(aluno) {
-    // Celular/tablet não fala com a catraca: avisa o computador que está com a
-    // tela /porta aberta, e ele solta o sinal (a câmera do celular é melhor).
-    if (!serialSuportado()) return avisarPorta(aluno)
+    if (!localRef.current) return avisarPorta(aluno)
     setCatraca('abrindo')
     try {
       await liberarCatraca()
@@ -69,20 +72,21 @@ export default function AcademiaRecepcao() {
         await fecharPorta()
         await liberarCatraca()
         setCatraca('ok')
-      } catch (e2) {
-        setCatraca(e2.message)
+      } catch {
+        // Nem assim: tenta pelo computador da catraca.
+        localRef.current = false
+        avisarPorta(aluno)
       }
     }
   }
 
   // Aviso pro computador da catraca (tela /porta).
-  const canalPorta = useRef(null)
   function avisarPorta(aluno) {
     const canal = canalPorta.current
-    if (!canal) return setCatraca('Sem ligação com o computador da catraca.')
+    if (!canal) return setCatraca('Sem ligação com o computador da catraca. Abra a tela "Porta" no computador.')
     setCatraca('abrindo')
     canal.send({ type: 'broadcast', event: 'liberar', payload: { nome: aluno?.nome, aluno_id: aluno?.id } })
-      .then(() => setCatraca('ok'), e => setCatraca('Não avisei o computador: ' + e.message))
+      .then(() => setCatraca('pc'), e => setCatraca('Não avisei o computador: ' + e.message))
   }
 
   function trocarPiscar(v) {
@@ -251,17 +255,23 @@ export default function AcademiaRecepcao() {
         if (!vivo) return desligarCamera(stream)
         try { wakeLock = await navigator.wakeLock?.request('screen') } catch { /* sem wake lock, segue */ }
         setEstado({ fase: 'rodando', msg: '' })
-        // Computador (Chrome com porta serial): já deixa a porta da catraca aberta e
-        // mostra na tela se deu certo — ou o motivo, inclusive "não configurada".
+        // Liga SEMPRE no canal do computador da catraca (tela /porta): é por ele
+        // que o celular manda abrir. O canal também é a reserva do próprio PC.
+        const canal = supabase.channel(`catraca-${empresa.id}`)
+        canal.subscribe(st => {
+          if (st === 'SUBSCRIBED') {
+            canalPorta.current = canal
+            if (!localRef.current) setCatraca('pc')
+          } else if ((st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') && !localRef.current) {
+            setCatraca('Sem ligação com o computador da catraca.')
+          }
+        })
+        // Este aparelho é o computador ligado na catraca? Então abre direto.
         if (serialSuportado()) {
-          conectarCatraca().then(() => setCatraca('ok'), e => setCatraca(e.message))
-        } else {
-          // Celular: liga no canal do computador que abre a catraca (tela /porta).
-          const canal = supabase.channel(`catraca-${empresa.id}`)
-          canal.subscribe(st => {
-            if (st === 'SUBSCRIBED') { canalPorta.current = canal; setCatraca('ok') }
-            else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') setCatraca('Sem ligação com o computador da catraca.')
-          })
+          conectarCatraca().then(
+            () => { localRef.current = true; setCatraca('ok') },
+            () => { localRef.current = false },
+          )
         }
         laco()
       } catch (e) {
@@ -273,7 +283,7 @@ export default function AcademiaRecepcao() {
     // Sem ninguém na recepção: se a catraca desconectou, tenta de novo sozinha.
     const reconecta = serialSuportado() ? setInterval(() => {
       const atual = catracaRef.current
-      if (atual && atual !== 'ok' && atual !== 'abrindo') {
+      if (atual && !['ok', 'pc', 'abrindo'].includes(atual) && localRef.current) {
         fecharPorta().then(conectarCatraca).then(() => setCatraca('ok'), e => setCatraca(e.message))
       }
     }, 20000) : null
@@ -350,8 +360,10 @@ export default function AcademiaRecepcao() {
         ))}
         {catraca && (
           <div className="ac-rec-catraca">
-            <div className={catraca === 'ok' || catraca === 'abrindo' ? 'ok' : 'erro'}>
-              {catraca === 'ok' ? '● Catraca conectada' : catraca === 'abrindo' ? '● Abrindo a catraca...' : `● ${catraca}`}
+            <div className={['ok', 'pc', 'abrindo'].includes(catraca) ? 'ok' : 'erro'}>
+              {catraca === 'ok' ? '● Catraca conectada'
+                : catraca === 'pc' ? '● Catraca pelo computador'
+                : catraca === 'abrindo' ? '● Abrindo a catraca...' : `● ${catraca}`}
             </div>
           </div>
         )}
