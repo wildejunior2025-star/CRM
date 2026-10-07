@@ -14,6 +14,7 @@ import './aluno.css'
 
 const AlunoRosto = lazy(() => import('./AlunoRosto'))
 const AlunoPerfil = lazy(() => import('./AlunoPerfil'))
+const AlunoTermos = lazy(() => import('./AlunoTermos'))
 
 const MENU = [
   { id: 'perfil', nome: 'Perfil', icone: '👤', detalhe: 'Foto, dados e senha' },
@@ -66,6 +67,15 @@ export default function AlunoApp() {
           <button className="al-botao secundario" onClick={logout}>Sair</button>
         </div>
       </div>
+    )
+  }
+
+  // Primeiro acesso: o próprio aluno aceita o uso do rosto (LGPD).
+  if (!aluno.consentimento_em) {
+    return (
+      <Suspense fallback={<div className="al-centro">Carregando...</div>}>
+        <AlunoTermos aluno={aluno} onAceitou={carregar} />
+      </Suspense>
     )
   }
 

@@ -160,7 +160,6 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
     valor: aluno.valor ?? '', vencimento: aluno.vencimento || '', ativo: aluno.ativo,
   } : { ...VAZIO, vencimento: hojeMais(30) })
   const [rosto, setRosto] = useState(null) // { descritores, foto } capturado agora
-  const [consentiu, setConsentiu] = useState(!!aluno?.consentimento_em)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
   const [cameraAberta, setCameraAberta] = useState(false)
@@ -172,7 +171,6 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
     e.preventDefault()
     setErro(null)
     if (!dados.nome.trim()) return setErro('Coloque o nome.')
-    if (rosto && !consentiu) return setErro('Marque que o aluno autorizou o uso do rosto.')
     setSalvando(true)
     const linha = {
       empresa_id: empresaId,
@@ -186,7 +184,8 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
     if (rosto) {
       linha.descritores = rosto.descritores
       linha.foto = rosto.foto
-      linha.consentimento_em = aluno?.consentimento_em || new Date().toISOString()
+      // O aceite da LGPD é do ALUNO, na primeira vez que ele entra no app
+      // (o dono marcando uma caixinha aqui não valia nada).
     }
     const { error } = aluno
       ? await supabase.from('academia_alunos').update(linha).eq('id', aluno.id)
@@ -257,12 +256,6 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
             <label className="ac-check">
               <input type="checkbox" checked={dados.ativo} onChange={e => set('ativo', e.target.checked)} />
               Matrícula ativa
-            </label>
-          )}
-          {rosto && !aluno?.consentimento_em && (
-            <label className="ac-check">
-              <input type="checkbox" checked={consentiu} onChange={e => setConsentiu(e.target.checked)} />
-              O aluno autorizou usar o rosto dele só pra liberar a entrada (LGPD).
             </label>
           )}
         </div>

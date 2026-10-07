@@ -3,11 +3,10 @@ import { supabase } from '../../lib/supabaseClient'
 import CapturaRosto from './CapturaRosto'
 
 // O aluno cadastra o próprio rosto pelo celular. É o mesmo passo a passo da
-// recepção; muda só o que acontece no fim e o aceite da LGPD, que aqui é ele
-// mesmo quem dá.
+// recepção; muda só o que acontece no fim. O aceite da LGPD ele já deu na
+// primeira vez que entrou (AlunoTermos).
 
 export default function AlunoRosto({ aluno, onPronto }) {
-  const [consentiu, setConsentiu] = useState(!!aluno.consentimento_em)
   const [capturando, setCapturando] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
@@ -21,7 +20,6 @@ export default function AlunoRosto({ aluno, onPronto }) {
       .update({
         descritores: rosto.descritores,
         foto: rosto.foto,
-        consentimento_em: aluno.consentimento_em || new Date().toISOString(),
       })
       .eq('id', aluno.id)
     setSalvando(false)
@@ -55,18 +53,10 @@ export default function AlunoRosto({ aluno, onPronto }) {
         </ul>
       </section>
 
-      <label className="al-consentimento">
-        <input type="checkbox" checked={consentiu} onChange={e => setConsentiu(e.target.checked)} />
-        <span>
-          Autorizo a academia a usar meu rosto <b>só para liberar minha entrada</b>. Posso pedir pra apagar
-          quando quiser.
-        </span>
-      </label>
-
       {erro && <div className="al-erro">{erro}</div>}
 
       <footer className="al-rodape">
-        <button className="al-botao" disabled={!consentiu || salvando} onClick={() => setCapturando(true)}>
+        <button className="al-botao" disabled={salvando} onClick={() => setCapturando(true)}>
           {salvando ? 'Salvando...' : 'Começar'}
         </button>
         <button className="al-botao texto" onClick={onPronto}>Agora não</button>

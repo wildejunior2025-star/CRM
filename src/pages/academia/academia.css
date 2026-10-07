@@ -252,3 +252,7 @@ body { overflow-x: hidden; }
 .ac-nome-com-foto .ac-foto { width: 38px; height: 38px; flex-shrink: 0; }
 @media (max-width: 820px) { .ac-nome-com-foto { justify-content: flex-end; } }
 .ac-link { background: none; border: 0; color: var(--text-muted); font: 600 14px inherit; cursor: pointer; padding: 6px; text-decoration: underline; }
+/* A caixinha e o texto dela precisam caber no celular (o texto saía da tela) */
+.ac-check { flex-wrap: wrap; }
+.ac-check > input { margin-right: 2px; }
+.ac-form-grade .ac-check { max-width: 100%; }
