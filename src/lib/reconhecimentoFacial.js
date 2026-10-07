@@ -277,9 +277,9 @@ export function situacaoAluno(aluno) {
   const venc = new Date(aluno.vencimento + 'T00:00:00')
   const dias = Math.round((venc - hoje) / 86400000)
   if (dias < 0) {
-    return { status: 'vencido', texto: `Mensalidade vencida há ${-dias} dia${dias === -1 ? '' : 's'}` }
+    return { status: 'vencido', texto: `Vencida há ${-dias} dia${dias === -1 ? '' : 's'}` }
   }
-  if (dias === 0) return { status: 'liberado', texto: 'Mensalidade vence HOJE', aviso: true }
-  if (dias <= 3) return { status: 'liberado', texto: `Mensalidade vence em ${dias} dia${dias === 1 ? '' : 's'}`, aviso: true }
-  return { status: 'liberado', texto: `Em dia até ${venc.toLocaleDateString('pt-BR')}` }
+  if (dias === 0) return { status: 'liberado', texto: 'Vence hoje', aviso: true }
+  if (dias <= 3) return { status: 'liberado', texto: `Vence em ${dias} dia${dias === 1 ? '' : 's'}`, aviso: true }
+  return { status: 'liberado', texto: `Em dia até ${venc.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}` }
 }

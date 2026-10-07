@@ -204,16 +204,26 @@ body { overflow-x: hidden; }
 @media (max-width: 820px) {
   .ac-tabela, .ac-tabela tbody, .ac-tabela tr, .ac-tabela td { display: block; width: 100%; }
   .ac-tabela thead { display: none; }
-  .ac-tabela-caixa { background: none; border: 0; border-radius: 0; }
+  .ac-tabela-caixa { background: none; border: 0; border-radius: 0; overflow: visible; }
   .ac-tabela tr {
     background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-    padding: 10px 12px; margin-bottom: 8px; position: relative;
+    padding: 10px 12px; margin-bottom: 8px;
   }
-  .ac-tabela td { border: 0; padding: 3px 0; display: flex; gap: 10px; justify-content: space-between; align-items: center; }
-  .ac-tabela td::before { content: attr(data-rotulo); color: var(--text-muted); font-size: 13px; }
-  .ac-tabela td.ac-col-foto { position: absolute; right: 12px; top: 10px; padding: 0; }
-  .ac-tabela td.ac-col-acoes { justify-content: flex-end; margin-top: 8px; text-align: right; }
-  .ac-tabela td.ac-num, .ac-tabela td { text-align: right; }
+  .ac-tabela td {
+    border: 0; padding: 4px 0; display: flex; gap: 10px; align-items: center;
+    justify-content: space-between; text-align: right; width: auto; white-space: normal;
+  }
+  .ac-tabela td::before { content: attr(data-rotulo); color: var(--text-muted); font-size: 13px; flex: 0 0 auto; }
+  .ac-tabela td.ac-col-foto { justify-content: flex-start; padding-bottom: 6px; }
+  .ac-tabela td.ac-col-foto .ac-foto { width: 48px; height: 48px; }
+  .ac-tabela td[data-rotulo="Situação"] { flex-wrap: wrap; justify-content: flex-end; }
+  .ac-tabela td.ac-col-acoes { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+  .ac-tabela td.ac-col-acoes .btn { flex: 1 1 auto; }
+  .ac-tabela td.ac-col-acoes .btn + .btn { margin-left: 0; }
 }
 .ac-tabela tr.ac-cancelado { opacity: .55; }
 .ac-tabela tr.ac-cancelado strong { text-decoration: line-through; }
+
+.ac-status { white-space: nowrap; }
+.ac-tabela td[data-rotulo="Situação"] { display: table-cell; }
+@media (max-width: 820px) { .ac-tabela td[data-rotulo="Situação"] { display: flex; } }
