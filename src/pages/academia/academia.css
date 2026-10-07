@@ -215,3 +215,5 @@ body { overflow-x: hidden; }
   .ac-tabela td.ac-col-acoes { justify-content: flex-end; margin-top: 8px; text-align: right; }
   .ac-tabela td.ac-num, .ac-tabela td { text-align: right; }
 }
+.ac-tabela tr.ac-cancelado { opacity: .55; }
+.ac-tabela tr.ac-cancelado strong { text-decoration: line-through; }

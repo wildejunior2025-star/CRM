@@ -64,7 +64,7 @@ export default function AcademiaPagamentos() {
         <button className="btn btn-secondary btn-sm" onClick={() => { setDe(hojeIso()); setAte(hojeIso()) }}>Hoje</button>
       </div>
 
-      <div className="ac-dupla" style={{ marginBottom: 12 }}>
+      <div className="ac-barra">
         <label className="ac-campo-data">De<input type="date" value={de} onChange={e => setDe(e.target.value)} /></label>
         <label className="ac-campo-data">Até<input type="date" value={ate} onChange={e => setAte(e.target.value)} /></label>
       </div>
@@ -91,26 +91,43 @@ export default function AcademiaPagamentos() {
       {carregando ? <p className="ac-muted">Carregando...</p> : pagamentos.length === 0 ? (
         <p className="ac-muted">Nenhuma mensalidade recebida nesse período.</p>
       ) : (
-        <div className="ac-lista">
-          {pagamentos.map(p => (
-            <div key={p.id} className={`ac-aluno${p.cancelado ? ' ac-cancelado' : ''}`}>
-              <div className="ac-aluno-info">
-                <strong>{p.academia_alunos?.matricula ? `${p.academia_alunos.matricula} · ` : ''}{p.academia_alunos?.nome}</strong>
-                <span className="ac-muted">
-                  {dataBr(p.data)} · {nomeForma(p.forma)}
-                  {p.meses > 1 ? ` · ${p.meses} meses` : ''}
-                  {p.vencimento_depois ? ` · vence ${dataBr(p.vencimento_depois)}` : ''}
-                </span>
-                {p.cancelado && <span className="ac-status ac-vencido">Cancelado</span>}
-              </div>
-              <div className="ac-aluno-acoes">
-                <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{dinheiro(p.valor)}</strong>
-                {!p.cancelado && (
-                  <button className="btn btn-secondary btn-sm" onClick={() => cancelar(p)}>Cancelar</button>
-                )}
-              </div>
-            </div>
-          ))}
+        <div className="ac-tabela-caixa">
+          <table className="ac-tabela">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Matrícula</th>
+                <th>Aluno</th>
+                <th>Forma</th>
+                <th>Passou a vencer</th>
+                <th className="ac-num">Valor</th>
+                <th className="ac-col-acoes"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pagamentos.map(p => (
+                <tr key={p.id} className={p.cancelado ? 'ac-cancelado' : ''}>
+                  <td data-rotulo="Data" className="ac-num">
+                    {dataBr(p.data)}
+                    <small className="ac-muted"> {new Date(p.criado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</small>
+                  </td>
+                  <td data-rotulo="Matrícula" className="ac-num">{p.academia_alunos?.matricula || '—'}</td>
+                  <td data-rotulo="Aluno"><strong>{p.academia_alunos?.nome}</strong></td>
+                  <td data-rotulo="Forma">
+                    {nomeForma(p.forma)}{p.meses > 1 ? ` · ${p.meses} meses` : ''}
+                    {p.cancelado && <span className="ac-status ac-vencido" style={{ marginLeft: 6 }}>Cancelado</span>}
+                  </td>
+                  <td data-rotulo="Passou a vencer" className="ac-num">{dataBr(p.vencimento_depois)}</td>
+                  <td data-rotulo="Valor" className="ac-num"><strong>{dinheiro(p.valor)}</strong></td>
+                  <td className="ac-col-acoes">
+                    {!p.cancelado && (
+                      <button className="btn btn-secondary btn-sm" onClick={() => cancelar(p)}>Cancelar</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
