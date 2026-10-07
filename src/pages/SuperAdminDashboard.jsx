@@ -165,42 +165,11 @@ export default function SuperAdminDashboard() {
   const gmvCar     = pedidosCar.reduce((s, p) => s + Number(p.total ?? 0), 0)
   const comissaoMes = comissaoAtiva ? gmvApp * comissaoPct / 100 : 0
 
-  const semCreditoWA = empresas.filter(
-    e => ['ativo', 'trial'].includes(e.status) && (e.whatsapp_creditos ?? 0) === 0
-  )
-
   return (
     <div>
       <div className="page-header">
         <h1>Dashboard</h1>
       </div>
-
-      {/* Alerta WA zerado */}
-      {semCreditoWA.length > 0 && (
-        <div style={{
-          marginBottom: 20,
-          padding: '12px 16px',
-          borderRadius: 10,
-          background: 'rgba(239,68,68,.1)',
-          border: '1px solid rgba(239,68,68,.35)',
-          color: 'var(--danger)',
-          fontSize: 14,
-          lineHeight: 1.5,
-        }}>
-          <strong>⚠️ {semCreditoWA.length} loja{semCreditoWA.length !== 1 ? 's' : ''} com créditos WhatsApp zerados</strong>
-          <br />
-          <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-            {semCreditoWA.map(e => e.nome).join(' · ')}
-          </span>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => navigate('/super-admin/empresas')}
-            style={{ marginLeft: 12, verticalAlign: 'middle' }}
-          >
-            Gerenciar →
-          </button>
-        </div>
-      )}
 
       {/* Cards principais — mensalidade semanal (mig 0263) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, marginBottom: 24 }}>
