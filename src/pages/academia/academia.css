@@ -146,3 +146,15 @@
 .ac-resumo-item.destaque strong { color: var(--success); }
 .ac-cancelado { opacity: .6; }
 .ac-cancelado strong { text-decoration: line-through; }
+
+/* Celular: campo de formulário tem largura mínima própria e empurrava o cartão
+   pra fora da tela (o conteúdo ficava cortado à direita). Grade e campos
+   precisam poder encolher. */
+.ac-form-grade > *, .ac-dupla > *, .ac-form label, .ac-login label { min-width: 0; }
+.ac-form input, .ac-form select, .ac-login input, .ac-modal-caixa input, .ac-modal-caixa select {
+  width: 100%; max-width: 100%; box-sizing: border-box;
+}
+.ac-topo { flex-wrap: wrap; }
+.ac-topo nav { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.ac-main, .ac-card { max-width: 100%; box-sizing: border-box; }
+body { overflow-x: hidden; }
