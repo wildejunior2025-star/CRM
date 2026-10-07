@@ -96,24 +96,32 @@ async function marcarStatus(sb: any, cfg: any, status: string, erro: string | nu
 }
 
 // ── Rotina completa de uma loja do iFood ──────────────────────────────────────
-async function sincronizarLoja(sb: any, getToken: GetToken, cfg: any, dias: number) {
+// Loja grande (centenas de pedidos por semana) estoura o tempo da função: a
+// Zebu sozinha dá ~4 mil lançamentos em 14 dias. Então a varredura anda da
+// semana mais nova pra mais velha e para quando o tempo acaba — o que ficou
+// para trás entra na próxima rodada, que roda todo dia.
+const ORCAMENTO_MS = 110_000
+
+async function sincronizarLoja(sb: any, getToken: GetToken, cfg: any, dias: number, ate = Date.now() + ORCAMENTO_MS) {
   const ctx: CtxIfood = { sb, cfg, getToken }
   const res = {
     status: "ok" as "ok" | "sem_permissao" | "erro",
     lancamentos: 0, vendas: 0, semanas_liquidacao: 0, titulos: 0,
     relatorios: [] as { competencia: string; status: string; erro?: string }[],
     descartados: 0,
+    semanas_pendentes: 0,
     erro: null as string | null,
   }
 
   try {
-    const semanas = semanasDeLiquidacao(dias)
+    const semanas = semanasDeLiquidacao(dias).reverse()  // da mais nova pra mais velha
     const eventos = new Map<string, any>()
     const vendas = new Map<string, any>()
     const semanasLiq: any[] = []
     const titulos: any[] = []
 
     for (const s of semanas) {
+      if (Date.now() > ate) { res.semanas_pendentes++; continue }
       const ev = await linhasDeEventos(cfg, await buscarEventosDaSemana(ctx, s.ini, s.fim))
       for (const l of ev.linhas) eventos.set(l.chave, l)
       res.descartados += ev.descartados
@@ -136,7 +144,7 @@ async function sincronizarLoja(sb: any, getToken: GetToken, cfg: any, dias: numb
     res.semanas_liquidacao = semanasLiq.length
     res.titulos = titulos.length
 
-    for (const comp of await competenciasPendentes(sb, cfg)) {
+    for (const comp of (Date.now() > ate ? [] : await competenciasPendentes(sb, cfg))) {
       const r = await baixarRelatorioMensal(ctx, comp)
       res.relatorios.push({ competencia: comp, status: r.status, ...(r.erro ? { erro: r.erro } : {}) })
     }
@@ -151,6 +159,8 @@ async function sincronizarLoja(sb: any, getToken: GetToken, cfg: any, dias: numb
 
   const aviso = res.status === "ok" && res.descartados
     ? `${res.descartados} registro(s) do iFood vieram incompletos e ficaram de fora.`
+    : res.status === "ok" && res.semanas_pendentes
+    ? `${res.semanas_pendentes} semana(s) mais antigas ficaram pra próxima busca.`
     : null
   await marcarStatus(sb, cfg, res.status, res.erro ?? aviso)
   return res
@@ -172,10 +182,13 @@ export async function runFinanceiroSync(
     lojas = lojas.filter((c: any) => !c.financeiro_sync_em || new Date(c.financeiro_sync_em).getTime() < limite)
   }
 
+  // Orçamento de tempo compartilhado: com várias lojas, o que não couber nesta
+  // rodada entra na próxima (a rotina roda todo dia).
+  const ate = Date.now() + ORCAMENTO_MS
   const resultados = []
   const empresas = new Set<string>()
   for (const cfg of lojas) {
-    const r = await sincronizarLoja(sb, getToken, cfg, dias)
+    const r = await sincronizarLoja(sb, getToken, cfg, dias, ate)
     resultados.push(r)
     if (r.status === "ok") empresas.add(cfg.empresa_id)
   }
