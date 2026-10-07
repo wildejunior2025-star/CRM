@@ -1,6 +1,7 @@
 import { useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
+import { supabase } from '../../lib/supabaseClient'
 import './academia.css'
 import BotaoAbrirCatraca from './BotaoAbrirCatraca'
 
@@ -39,12 +40,17 @@ function EntrarAcademia() {
     e.preventDefault()
     setEnviando(true)
     setErro(null)
-    // Aluno digita só a matrícula; o e-mail dele é interno.
+    // O aluno digita o TELEFONE (matrícula ninguém decora); o e-mail da conta
+    // dele é interno e vem daqui. Quem tem e-mail de verdade entra direto.
     const digitado = email.trim()
-    const usuario = digitado.includes('@') ? digitado : `${digitado}@aluno.fwcinter.com`
+    let usuario = digitado
+    if (!digitado.includes('@')) {
+      const { data } = await supabase.rpc('academia_email_do_aluno', { p_busca: digitado })
+      usuario = data || `${digitado.replace(/\D/g, '')}@aluno.fwcinter.com`
+    }
     const { error } = await login(usuario, senha)
     setEnviando(false)
-    if (error) setErro('Matrícula/e-mail ou senha errados.')
+    if (error) setErro('Telefone ou senha errados. Se não funcionar, procure a recepção.')
   }
 
   return (
@@ -52,8 +58,8 @@ function EntrarAcademia() {
       <form className="ac-card ac-login" onSubmit={entrar}>
         <div className="ac-logo">🏋️</div>
         <h1>Academia</h1>
-        <p className="ac-muted">Aluno: entre com a sua matrícula.</p>
-        <label>E-mail ou matrícula
+        <p className="ac-muted">Aluno: entre com o seu telefone.</p>
+        <label>Telefone ou e-mail
           <input autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required />
         </label>
         <label>Senha
