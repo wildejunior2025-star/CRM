@@ -77,6 +77,9 @@ export default function Financeiro() {
   const [semanasMes, setSemanasMes] = useState(null)  // semanas do mês filtrado (null = sem filtro)
   const [ads, setAds]         = useState({})      // { [periodo_ini]: valor } (anúncio digitado)
   const [repImp, setRepImp]   = useState({})      // { [periodo_ini]: {valor_repasse, situacao, ...} } (PDF importado)
+  // Quem antecipa recebe antes e paga taxa: o que CAI na conta é menor que o
+  // repasse apurado. { [periodo_ini]: { taxa, liquido, pagamento } }
+  const [antec, setAntec]     = useState({})
   const [abertoAtual, setAbertoAtual] = useState(false)
   const [entregaPropria, setEntregaPropria] = useState(true)  // no iFood: motoboy da loja x entrega parceira
   const [abertoAnt, setAbertoAnt] = useState({})   // { [iniYMD]: bool } semanas anteriores expandidas
@@ -170,7 +173,9 @@ export default function Financeiro() {
   async function fetchSemanas(desde, ateh) {
     const anuQ = supabase.from('ifood_anuncio').select('semana_ini, valor').eq('empresa_id', empresaId).gte('semana_ini', ymd(desde))
     const impQ = supabase.from('ifood_repasse_semanal').select('*').eq('empresa_id', empresaId).gte('periodo_ini', ymd(desde))
-    const [empRes, adsRes, impRes, pedRes] = await Promise.all([
+    const antQ = supabase.from('ifood_liquidacao_semanas').select('antecipacao_itens').eq('empresa_id', empresaId)
+      .gte('semana_ini', ymd(addDias(desde, -7)))
+    const [empRes, adsRes, impRes, pedRes, antRes] = await Promise.all([
       supabase.from('empresas').select('ifood_comissao_pct, ifood_transacao_pct, ifood_entrega_propria').eq('id', empresaId).maybeSingle(),
       ateh ? anuQ.lt('semana_ini', ymd(ateh)) : anuQ,
       ateh ? impQ.lt('periodo_ini', ymd(ateh)) : impQ,
@@ -182,12 +187,22 @@ export default function Financeiro() {
         if (ateh) q = q.lt('created_at', ateh.toISOString())
         return q
       }),
+      antQ,
     ])
     const entregaPropria = empRes.data?.ifood_entrega_propria !== false
     setEntregaPropria(entregaPropria)
     const rates = { comissao: empRes.data?.ifood_comissao_pct, transacao: empRes.data?.ifood_transacao_pct, entregaPropria }
     const adMap = {}; for (const a of (adsRes.data ?? [])) adMap[a.semana_ini] = Number(a.valor || 0)
     const impMap = {}; for (const r of (impRes.data ?? [])) impMap[r.periodo_ini] = r
+    // A API de antecipação traz um item por período: a taxa, o que de fato caiu
+    // e a data real do crédito (a de liquidação é o prazo normal, D+30).
+    const antMap = {}
+    for (const l of (antRes.data ?? [])) for (const it of (l.antecipacao_itens ?? [])) {
+      const a = (antMap[it.periodo_ini] ??= { taxa: 0, liquido: 0, pagamento: null })
+      a.taxa += Number(it.taxa || 0)
+      a.liquido += Number(it.liquido || 0)
+      a.pagamento ??= it.pagamento
+    }
 
     const grupos = {}
     for (const p of (pedRes.data ?? [])) {
@@ -213,14 +228,14 @@ export default function Financeiro() {
       arr.push({ iniYMD: k, inicio: ini, fim, pagamento, situacao: r.situacao || 'pago', liq: calcIfoodLiquido([], rates), nped: 0 })
     }
     arr.sort((a, b) => b.inicio - a.inicio)
-    return { arr, adMap, impMap }
+    return { arr, adMap, impMap, antMap }
   }
 
   async function loadSemanas() {
     if (!empresaId) return
     const desde = addDias(inicioSemana(), -7 * (NUM_SEMANAS - 1))
-    const { arr, adMap, impMap } = await fetchSemanas(desde, null)
-    setSemanas(arr); setAds(adMap); setRepImp(impMap)
+    const { arr, adMap, impMap, antMap } = await fetchSemanas(desde, null)
+    setSemanas(arr); setAds(adMap); setRepImp(impMap); setAntec(antMap)
   }
   useEffect(() => { loadSemanas() }, [empresaId])
 
@@ -230,8 +245,9 @@ export default function Financeiro() {
     const [y, m] = mes.split('-').map(Number)
     const desde = new Date(y, m - 1, 1); desde.setHours(0, 0, 0, 0)
     const ateh  = new Date(y, m, 1);     ateh.setHours(0, 0, 0, 0)   // início do mês seguinte (exclusivo)
-    const { arr, adMap, impMap } = await fetchSemanas(desde, ateh)
+    const { arr, adMap, impMap, antMap } = await fetchSemanas(desde, ateh)
     setSemanasMes(arr)
+    setAntec(prev => ({ ...prev, ...antMap }))
     setAds(prev => ({ ...prev, ...adMap }))       // mescla p/ o anúncio/exato bater nas semanas do mês
     setRepImp(prev => ({ ...prev, ...impMap }))
   }
@@ -283,8 +299,12 @@ export default function Financeiro() {
     setImporting(false)
   }
 
-  // a receber: se tem PDF importado da semana → valor EXATO; senão estimativa − anúncio
-  const aReceberDe = s => repImp[s.iniYMD] ? Number(repImp[s.iniYMD].valor_repasse) : s.liq.repasse - (ads[s.iniYMD] || 0)
+  // Taxa de antecipação da semana (0 quando a loja não antecipa).
+  const taxaAntDe = s => Number(antec[s.iniYMD]?.taxa || 0)
+  // O que o iFood apurou na semana: PDF/API quando existe, senão estimativa − anúncio.
+  const apuradoDe = s => repImp[s.iniYMD] ? Number(repImp[s.iniYMD].valor_repasse) : s.liq.repasse - (ads[s.iniYMD] || 0)
+  // a receber = o que CAI na conta. Antecipou, cai menos: desconta a taxa.
+  const aReceberDe = s => apuradoDe(s) - taxaAntDe(s)
   const ehExato = s => !!repImp[s.iniYMD]
   // De onde veio o número exato: a API do iFood (automático) ou o PDF importado.
   // A diferença importa pro dono: "do iFood" ele não precisa fazer nada; "PDF"
@@ -336,8 +356,9 @@ export default function Financeiro() {
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, marginLeft: 14 }}>
               {s.situacao === 'pago'
-                ? <>✅ pago em {ddmm(s.pagamento)}</>
+                ? <>✅ pago em {ddmm(antec[s.iniYMD]?.pagamento ? new Date(antec[s.iniYMD].pagamento + 'T00:00:00') : s.pagamento)}</>
                 : <>🕒 cai {ddmm(s.pagamento)}</>} · {s.nped} pedidos
+              {taxaAntDe(s) > 0 && <> · antecipação − {fmtBRL(taxaAntDe(s))}</>}
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, visibility: ehExato(s) ? 'hidden' : 'visible' }}>
@@ -351,7 +372,7 @@ export default function Financeiro() {
         </div>
         {aberta && (
           <div style={{ marginLeft: 14, paddingBottom: 6 }}>
-            <QuebraRepasse s={s} rep={repImp[s.iniYMD]} anuncio={ads[s.iniYMD] || 0} aReceber={aReceberDe(s)} />
+            <QuebraRepasse s={s} rep={repImp[s.iniYMD]} anuncio={ads[s.iniYMD] || 0} aReceber={aReceberDe(s)} antecipacao={taxaAntDe(s)} />
             {repImp[s.iniYMD]?.fonte === 'api' && <PedidosDaSemanaIfood empresaId={empresaId} periodoIni={s.iniYMD} />}
           </div>
         )}
@@ -502,7 +523,7 @@ export default function Financeiro() {
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: 2 }}>
                 {ehExato(atual) ? (
                   <>
-                    <QuebraRepasse rep={repImp[atual.iniYMD]} aReceber={aReceberDe(atual)} semTotal />
+                    <QuebraRepasse rep={repImp[atual.iniYMD]} aReceber={aReceberDe(atual)} antecipacao={taxaAntDe(atual)} semTotal />
                     {repImp[atual.iniYMD]?.fonte === 'api' && <PedidosDaSemanaIfood empresaId={empresaId} periodoIni={atual.iniYMD} />}
                   </>
                 ) : (
@@ -664,7 +685,7 @@ function Linha({ label, valor, cor }) {
 // Quebra do repasse iFood de uma semana.
 // - PDF importado (rep) → valores EXATOS do repasse (batem centavo com o iFood)
 // - sem PDF → estimativa dos pedidos (s.liq) + anúncio digitado
-function QuebraRepasse({ s, rep, anuncio = 0, aReceber, semTotal }) {
+function QuebraRepasse({ s, rep, anuncio = 0, aReceber, semTotal, antecipacao = 0 }) {
   const exato = !!rep
   let vendas, comissoes, promocoes, anuncios, recebidoDireto = 0, ajuste = 0
   if (exato) {
@@ -674,7 +695,8 @@ function QuebraRepasse({ s, rep, anuncio = 0, aReceber, semTotal }) {
     anuncios       = Number(rep.anuncio || 0)
     recebidoDireto = Number(rep.recebido_direto || 0)
     // resíduo pra fechar EXATO no repasse (cancelamentos, ajustes, arredondamentos)
-    ajuste = aReceber - (vendas - comissoes - promocoes - anuncios - recebidoDireto)
+    // o ajuste fecha contra o APURADO; a antecipação entra depois, na própria linha
+    ajuste = (aReceber + antecipacao) - (vendas - comissoes - promocoes - anuncios - recebidoDireto)
   } else {
     vendas    = s.liq.vendasOnline
     comissoes = s.liq.comissaoOnline
@@ -694,6 +716,9 @@ function QuebraRepasse({ s, rep, anuncio = 0, aReceber, semTotal }) {
         <Linha label={ajuste >= 0 ? '+ Ajustes' : '− Ajustes / débitos'}
           valor={`${ajuste >= 0 ? '+' : '−'} ${fmtBRL(Math.abs(ajuste))}`}
           cor={ajuste >= 0 ? 'var(--success)' : 'var(--danger)'} />
+      )}
+      {antecipacao > 0 && (
+        <Linha label="− Taxa de antecipação (receber antes)" valor={`− ${fmtBRL(antecipacao)}`} cor="var(--danger)" />
       )}
       {!semTotal && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0 4px' }}>
