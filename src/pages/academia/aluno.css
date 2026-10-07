@@ -250,3 +250,18 @@
 .al-exercicio small { color: var(--al-apagado); font-size: 12px; }
 .al-exercicio.marcado { background: var(--al-roxo-claro); border-color: var(--al-roxo); color: var(--al-roxo); }
 .al-exercicio:active { background: var(--al-roxo-claro); }
+
+/* Meus treinos (aluno) */
+.al-hoje { background: var(--al-roxo); color: #fff; border-radius: 18px; padding: 18px 20px; display: flex; flex-direction: column; gap: 2px; }
+.al-hoje .al-rotulo { color: #e9ddff; }
+.al-hoje strong { font-size: 30px; }
+.al-hoje .al-sub { color: #e9ddff; }
+.al-semana { margin: 0 0 12px; color: var(--al-roxo); font-weight: 700; }
+.al-itens-aluno { list-style: none; margin: 0; padding: 0; }
+.al-itens-aluno li { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--al-linha); }
+.al-itens-aluno li:last-child { border-bottom: 0; }
+.al-maquina {
+  margin-left: auto; min-width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0;
+  background: var(--al-roxo-claro); color: var(--al-roxo); font-weight: 800; font-size: 18px;
+  display: flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums;
+}

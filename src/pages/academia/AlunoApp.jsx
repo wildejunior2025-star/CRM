@@ -16,12 +16,13 @@ const AlunoRosto = lazy(() => import('./AlunoRosto'))
 const AlunoPerfil = lazy(() => import('./AlunoPerfil'))
 const AlunoTermos = lazy(() => import('./AlunoTermos'))
 const AlunoFicha = lazy(() => import('./AlunoFicha'))
+const AlunoTreinos = lazy(() => import('./AlunoTreinos'))
 
 const MENU = [
   { id: 'perfil', nome: 'Perfil', icone: '👤', detalhe: 'Foto, dados e senha' },
   { id: 'entradas', nome: 'Minhas entradas', icone: '🚪', detalhe: 'Quando você treinou' },
   { id: 'ficha', nome: 'Minha ficha', icone: '📏', detalhe: 'Medidas e evolução' },
-  { id: 'treinos', nome: 'Meus treinos', icone: '🏋️', detalhe: 'Em breve' },
+  { id: 'treinos', nome: 'Meus treinos', icone: '🏋️', detalhe: 'O treino do dia' },
 ]
 
 export default function AlunoApp() {
@@ -196,12 +197,9 @@ export default function AlunoApp() {
       )}
 
       {tela === 'treinos' && (
-        <section className="al-bloco">
-          <p className="al-texto">
-            Seu treino vai aparecer aqui, do jeito que o professor montar: exercício, número da máquina,
-            séries e repetições da semana.
-          </p>
-        </section>
+        <Suspense fallback={<p className="al-vazio">Carregando...</p>}>
+          <AlunoTreinos aluno={aluno} />
+        </Suspense>
       )}
     </div>
   )
