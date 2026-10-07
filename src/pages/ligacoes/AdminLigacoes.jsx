@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../../lib/supabaseClient'
 import { dataHora, digitos } from './util'
+import './ligacoes.css'
 
 // Painel do dono (super admin) — mig 0292. Quatro abas:
 //   Visitas   → o que foi marcado, pra montar a rota e dar baixa (fechou / não fechou)
