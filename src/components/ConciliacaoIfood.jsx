@@ -219,100 +219,212 @@ export default function ConciliacaoIfood({ empresaId }) {
   )
 }
 
-// ── Repasses (Settlements) ────────────────────────────────────────────────────
+// ── Repasses (Settlements) ────────────────────────────────────────
+// A tela segue o portal do iFood: uma linha por pagamento, com o período que
+// ele apurou. Por dentro o iFood é bem mais confuso — repete o mesmo dinheiro
+// em dois títulos (REPASSE e SALDO POSITIVO), corta a semana na virada do mês e
+// na API de liquidação manda a data de pagamento SEM antecipação (D+30). Quem
+// antecipa recebe antes, e essa data só vem na API de antecipação. Tudo isso
+// é resolvido aqui pra tela mostrar só: quando cai, de quando é e quanto é.
+const HOJE_YMD = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' })
+
+function linhasDeRepasse(semana, titulos) {
+  const grupos = new Map()
+  const pega = (ini, fim) => {
+    const k = `${ini}|${fim}`
+    if (!grupos.has(k)) grupos.set(k, { k, ini, fim, subtotal: 0, outros: 0, titulos: [], taxa: null, liquido: null })
+    return grupos.get(k)
+  }
+  // SALDO POSITIVO e REPASSE são o mesmo valor: conta um só.
+  const usaSaldo = titulos.some(t => /SALDO POSITIVO/i.test(String(t.tipo || '')))
+  for (const t of titulos) {
+    const tipo = String(t.tipo || '').toUpperCase()
+    const g = pega(t.periodo_ini, t.periodo_fim)
+    g.titulos.push(t)
+    if (usaSaldo ? tipo === 'SALDO POSITIVO' : tipo === 'REPASSE') {
+      g.subtotal += Number(t.valor || 0)
+      g.pagamento ??= t.data_pagamento
+      if (String(t.status).toUpperCase() === 'SUCCEED') g.pago = true
+      if (t.dados_bancarios) g.conta ??= t.dados_bancarios
+    } else if (!/REPASSE|SALDO POSITIVO/i.test(tipo)) {
+      g.outros += Number(t.valor || 0)
+    }
+  }
+  for (const it of (semana.antecipacao_itens ?? [])) {
+    const g = pega(it.periodo_ini, it.periodo_fim)
+    g.taxa = (g.taxa ?? 0) + Number(it.taxa || 0)
+    g.liquido = (g.liquido ?? 0) + Number(it.liquido || 0)
+    g.subtotalAnt = (g.subtotalAnt ?? 0) + Number(it.subtotal || 0)
+    g.pagamentoAnt = it.pagamento ?? g.pagamentoAnt
+    g.pagamentoNormal = it.pagamento_normal ?? g.pagamento ?? g.pagamentoNormal
+    g.taxaPct = it.taxa_pct ?? g.taxaPct
+    g.conta = it.conta ?? g.conta
+    if (String(it.status).toUpperCase() === 'SUCCEED') g.pago = true
+  }
+  const hoje = HOJE_YMD()
+  return [...grupos.values()].map(g => {
+    const subtotal = g.subtotal || g.subtotalAnt || 0
+    const quando = g.pagamentoAnt ?? g.pagamento ?? null
+    return {
+      ...g,
+      semana_ini: semana.semana_ini,
+      merchant_id: semana.merchant_id,
+      subtotal,
+      quando,
+      valor: g.liquido ?? (subtotal ? subtotal - (g.taxa ?? 0) : null),
+      pago: g.pago || (quando ? quando <= hoje : false),
+    }
+  })
+}
+
 function Repasses({ empresaId, versao, nomeLoja, variasLojas }) {
   const [semanas, setSemanas] = useState(null)
   const [titulos, setTitulos] = useState({})
+  const [lancado, setLancado] = useState({})
   const [aberta, setAberta] = useState(null)
 
   useEffect(() => {
     if (!empresaId) return
     let vivo = true
     ;(async () => {
-      const [sem, tit] = await Promise.all([
+      const [sem, tit, rep] = await Promise.all([
         supabase.from('ifood_liquidacao_semanas').select('*').eq('empresa_id', empresaId)
           .order('semana_ini', { ascending: false }).limit(26),
         fetchAll(() => supabase.from('ifood_liquidacoes').select('*').eq('empresa_id', empresaId)
           .order('semana_ini', { ascending: false }).order('id')),
+        supabase.from('ifood_repasse_semanal').select('periodo_ini, valor_repasse').eq('empresa_id', empresaId)
+          .order('periodo_ini', { ascending: false }).limit(60),
       ])
       if (!vivo) return
       const porSemana = {}
       for (const t of (tit.data ?? [])) (porSemana[`${t.merchant_id}|${t.semana_ini}`] ??= []).push(t)
+      const porPeriodo = {}
+      for (const r of (rep.data ?? [])) porPeriodo[r.periodo_ini] = Number(r.valor_repasse)
       setSemanas(sem.data ?? [])
       setTitulos(porSemana)
+      setLancado(porPeriodo)
     })()
     return () => { vivo = false }
   }, [empresaId, versao])
 
-  // Loja sem antecipação não precisa ver colunas vazias.
-  const temAntecipacao = (semanas ?? []).some(s => Number(s.antecipacao_taxa) > 0)
-
   if (semanas === null) return <div className="ci-card ci-vazio">Carregando os repasses…</div>
+
+  // Uma linha por pagamento; a semana que ainda não fechou entra como "em aberto".
+  const linhas = []
+  for (const s of semanas) {
+    const ts = titulos[`${s.merchant_id}|${s.semana_ini}`] ?? []
+    const feitas = linhasDeRepasse(s, ts)
+    if (feitas.length) linhas.push(...feitas)
+    else linhas.push({
+      k: `aberta|${s.merchant_id}|${s.semana_ini}`, ini: s.semana_ini, fim: s.semana_fim,
+      semana_ini: s.semana_ini, merchant_id: s.merchant_id, titulos: [],
+      subtotal: Number(s.soma_lancamentos || 0), valor: null, taxa: null, quando: null, emAberto: true,
+    })
+  }
+  linhas.sort((a, b) => String(b.quando ?? b.fim).localeCompare(String(a.quando ?? a.fim)) || String(b.ini).localeCompare(String(a.ini)))
+
+  const temAntecipacao = linhas.some(l => Number(l.taxa) > 0)
+  const totSub = linhas.reduce((n, l) => n + (l.emAberto ? 0 : Number(l.subtotal || 0)), 0)
+  const totTaxa = linhas.reduce((n, l) => n + Number(l.taxa || 0), 0)
+  const totValor = linhas.reduce((n, l) => n + (l.emAberto ? 0 : Number(l.valor || 0)), 0)
+  const colunas = 5 + (variasLojas ? 1 : 0) + (temAntecipacao ? 2 : 0)
 
   return (
     <div className="ci-card">
-      <h3>Repasses por semana</h3>
+      <h3>Repasses do iFood</h3>
       <p className="ci-sub">
-        O que o iFood consolida de segunda a domingo e transfere pra você. A coluna <b>Confere</b> compara
-        o valor da liquidação com a soma dos lançamentos que impactam o repasse — se não bater, aparece a diferença.
-        A semana que ainda não fechou fica em aberto: o iFood só gera os títulos na segunda seguinte.
+        Uma linha por pagamento, do jeito que aparece no portal do iFood. <b>Subtotal</b> é o que sobrou das suas
+        vendas depois das taxas dele no período{temAntecipacao ? ', ' : ' e '}
+        {temAntecipacao && <><b>Valor</b> é o que cai de fato na conta, já sem a taxa de antecipação, e </>}
+        <b>Confere</b> compara o subtotal com a soma dos lançamentos daquele período. Clique na linha pra ver o
+        detalhe. A semana que ainda não fechou fica em aberto: o iFood só gera o pagamento na segunda seguinte.
       </p>
-      {!semanas.length ? <p className="ci-vazio">Nenhuma liquidação buscada ainda. Clique em “Atualizar agora”.</p> : (
+      {!linhas.length ? <p className="ci-vazio">Nenhuma liquidação buscada ainda. Clique em “Atualizar agora”.</p> : (
         <div className="ci-tabela-wrap">
           <table className="ci-tabela">
             <thead>
               <tr>
-                <th className="esq">Semana</th>
+                <th className="esq">Previsão de pagamento</th>
+                <th className="esq">Período de apuração</th>
                 {variasLojas && <th className="esq">Loja</th>}
-                <th>Liquidação (iFood)</th>
-                <th>Soma dos lançamentos</th>
-                {temAntecipacao && <th title="Taxa cobrada pra receber antes do prazo">Antecipação</th>}
-                {temAntecipacao && <th title="O que de fato cai na conta, já sem a taxa">Você recebe</th>}
-                <th>Títulos</th>
+                <th className="esq">Situação</th>
+                <th>Subtotal</th>
+                {temAntecipacao && <th title="O iFood cobra pra adiantar o dinheiro">Taxa de antecipação</th>}
+                {temAntecipacao && <th title="O que de fato cai na conta">Valor</th>}
                 <th>Confere</th>
               </tr>
             </thead>
             <tbody>
-              {semanas.map(s => {
-                const k = `${s.merchant_id}|${s.semana_ini}`
-                const ts = titulos[k] ?? []
-                const vazia = Number(s.saldo) === 0 && ts.length === 0 && Number(s.soma_lancamentos || 0) === 0
+              {linhas.map(l => {
+                const lanc = lancado[l.ini]
+                const bate = l.emAberto || lanc == null ? null
+                  : Math.abs(Number(l.subtotal) - lanc) <= Math.max(0.01, Math.abs(Number(l.subtotal)) * 0.0001)
                 return [
-                  <tr key={k} className="clicavel" onClick={() => setAberta(aberta === k ? null : k)}>
-                    <td className="esq"><b>{aberta === k ? '▾' : '▸'} {ddmm(s.semana_ini)} a {ddmmaa(s.semana_fim)}</b></td>
-                    {variasLojas && <td className="esq">{nomeLoja[s.merchant_id] ?? '—'}</td>}
-                    <td><b>{fmt(s.saldo)}</b></td>
-                    <td>{s.soma_lancamentos != null ? fmt(s.soma_lancamentos) : '—'}</td>
-                    {temAntecipacao && <td className={Number(s.antecipacao_taxa) > 0 ? 'ci-neg' : 'ci-muted'}>{Number(s.antecipacao_taxa) > 0 ? `− ${fmt(s.antecipacao_taxa)}` : '—'}</td>}
-                    {temAntecipacao && <td><b>{s.antecipado != null ? fmt(s.antecipado) : '—'}</b></td>}
-                    <td>{ts.length}</td>
-                    <td>{vazia ? <span className="ci-selo">sem movimento</span> : <Conferencia bate={s.conferido} diferenca={s.diferenca} />}</td>
+                  <tr key={l.k} className="clicavel" onClick={() => setAberta(aberta === l.k ? null : l.k)} title="Clique pra ver os títulos do iFood">
+                    <td className="esq"><b>{aberta === l.k ? '▾' : '▸'} {l.quando ? ddmmaa(l.quando) : '—'}</b></td>
+                    <td className="esq">{ddmm(l.ini)} a {ddmmaa(l.fim)}</td>
+                    {variasLojas && <td className="esq">{nomeLoja[l.merchant_id] ?? '—'}</td>}
+                    <td className="esq">
+                      <span className={`ci-selo ${l.emAberto ? '' : l.pago ? 'ok' : 'aviso'}`}>
+                        {l.emAberto ? 'em aberto' : l.pago ? 'Pago' : 'Programado'}
+                      </span>
+                    </td>
+                    <td><b>{fmt(l.subtotal)}</b></td>
+                    {temAntecipacao && <td className={Number(l.taxa) > 0 ? 'ci-neg' : 'ci-muted'}>
+                      {Number(l.taxa) > 0 ? <>− {fmt(l.taxa)}{l.taxaPct ? <span className="pequeno">{String(l.taxaPct).replace('.', ',')}%</span> : null}</> : '—'}
+                    </td>}
+                    {temAntecipacao && <td><b>{l.valor != null ? fmt(l.valor) : '—'}</b></td>}
+                    <td>{l.emAberto
+                      ? <span className="ci-selo">ainda somando</span>
+                      : <Conferencia bate={bate} diferenca={bate === false ? Number(l.subtotal) - lanc : null} textoSemDados="sem lançamentos" />}</td>
                   </tr>,
-                  aberta === k && (
-                    <tr key={`${k}-d`}>
-                      <td className="ci-detalhe" colSpan={(variasLojas ? 6 : 5) + (temAntecipacao ? 2 : 0)}>
-                        {!ts.length ? <span className="ci-muted">Nenhum título gerado nessa semana.</span> : (
-                          <table className="ci-tabela">
-                            <thead><tr><th className="esq">Título</th><th className="esq">Status</th><th>Pagamento</th><th>Valor</th><th className="esq">Conta de destino</th></tr></thead>
-                            <tbody>
-                              {ts.map(t => {
-                                const st = STATUS_TITULO(t.status)
-                                return (
-                                  <tr key={t.id}>
-                                    <td className="esq">{t.tipo || '—'}<span className="pequeno">{ddmm(t.periodo_ini)} a {ddmm(t.periodo_fim)}</span></td>
-                                    <td className="esq"><span className={`ci-selo ${st.cls}`}>{st.txt}</span></td>
-                                    <td>{ddmmaa(t.data_pagamento)}</td>
-                                    <td><b>{fmt(t.valor)}</b></td>
-                                    <td className="esq" style={{ whiteSpace: 'normal' }}>
-                                      {t.dados_bancarios
-                                        ? Object.entries(t.dados_bancarios).map(([c, v]) => <span key={c} className="pequeno">{c}: {String(v)}</span>)
-                                        : <span className="ci-muted">{st.cls === 'ok' ? 'não informado pelo iFood' : 'aparece quando for pago'}</span>}
-                                    </td>
-                                  </tr>
-                                )
-                              })}
-                            </tbody>
-                          </table>
+                  aberta === l.k && (
+                    <tr key={`${l.k}-d`}>
+                      <td className="ci-detalhe" colSpan={colunas}>
+                        {l.emAberto ? (
+                          <span className="ci-muted">
+                            Semana em andamento. Até agora os lançamentos do iFood somam {fmt(l.subtotal)}; o pagamento
+                            só é fechado na segunda-feira seguinte.
+                          </span>
+                        ) : (
+                          <>
+                            <ul className="ci-explica">
+                              {lanc != null && <li>Soma dos lançamentos desse período: <b>{fmt(lanc)}</b>.</li>}
+                              {Number(l.taxa) > 0 && l.pagamentoNormal && (
+                                <li>Sem antecipação o iFood pagaria em <b>{ddmmaa(l.pagamentoNormal)}</b>; antecipado, cai
+                                  em <b>{ddmmaa(l.quando)}</b> e por isso a taxa de {fmt(l.taxa)}.</li>
+                              )}
+                              {Number(l.outros) !== 0 && (
+                                <li>Esse período tem ainda {fmt(Math.abs(l.outros))} em títulos de outro tipo (acordo com banco,
+                                  boleto ou saldo negativo) — veja na lista abaixo.</li>
+                              )}
+                              {l.conta && (
+                                <li>Conta de destino: {Object.entries(l.conta).map(([c, v]) => `${c}: ${v}`).join(' · ')}</li>
+                              )}
+                            </ul>
+                            {!l.titulos.length ? <span className="ci-muted">O iFood não detalhou os títulos desse pagamento.</span> : (
+                              <table className="ci-tabela">
+                                <thead><tr><th className="esq">Título do iFood</th><th className="esq">Status</th><th>Pagamento</th><th>Valor</th></tr></thead>
+                                <tbody>
+                                  {l.titulos.map(t => {
+                                    const st = STATUS_TITULO(t.status)
+                                    return (
+                                      <tr key={t.id}>
+                                        <td className="esq">{t.tipo || '—'}</td>
+                                        <td className="esq"><span className={`ci-selo ${st.cls}`}>{st.txt}</span></td>
+                                        <td>{ddmmaa(t.data_pagamento)}</td>
+                                        <td><b>{fmt(t.valor)}</b></td>
+                                      </tr>
+                                    )
+                                  })}
+                                </tbody>
+                              </table>
+                            )}
+                            <p className="ci-sub" style={{ margin: '6px 0 0' }}>
+                              O iFood lança o mesmo dinheiro em dois títulos (REPASSE e SALDO POSITIVO). Em cima a gente
+                              conta uma vez só.
+                            </p>
+                          </>
                         )}
                       </td>
                     </tr>
@@ -320,6 +432,15 @@ function Repasses({ empresaId, versao, nomeLoja, variasLojas }) {
                 ]
               })}
             </tbody>
+            <tfoot>
+              <tr>
+                <td className="esq" colSpan={(variasLojas ? 4 : 3)}><b>Total do que já fechou</b></td>
+                <td><b>{fmt(totSub)}</b></td>
+                {temAntecipacao && <td className="ci-neg"><b>− {fmt(totTaxa)}</b></td>}
+                {temAntecipacao && <td><b>{fmt(totValor)}</b></td>}
+                <td></td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}

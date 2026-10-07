@@ -39,13 +39,36 @@ export async function buscarAntecipacaoDaSemana(ctx: CtxIfood, ini: string, fim:
 }
 
 export function resumoDaAntecipacao(j: any) {
-  const itens = (Array.isArray(j?.settlements) ? j.settlements : [])
-    .flatMap((s: any) => Array.isArray(s?.closingItems) ? s.closingItems : [])
-  if (!itens.length) return { antecipado: null, taxa: null }
-  const taxa = itens.reduce((soma: number, it: any) => soma + (numOuNull(it?.feeAmount) ?? 0), 0)
+  const settlements = Array.isArray(j?.settlements) ? j.settlements : []
+  // Um item por periodo de apuracao: o portal do iFood mostra exatamente isso
+  // (previsao de pagamento ANTECIPADA, subtotal, taxa e o que cai na conta).
+  // A API Settlements devolve a data sem antecipacao (D+30), por isso a data boa
+  // pro lojista so existe aqui.
+  const itens = settlements.flatMap((s: any) => {
+    const ini = dataValida(s?.period?.beginDate ?? s?.startDateCalculation ?? s?.beginDate)
+    const fim = dataValida(s?.period?.endDate ?? s?.endDateCalculation ?? s?.endDate)
+    const lista = Array.isArray(s?.closingItems) && s.closingItems.length ? s.closingItems : [s]
+    return lista.map((it: any) => ({
+      periodo_ini: dataValida(it?.period?.beginDate ?? it?.beginDate) ?? ini,
+      periodo_fim: dataValida(it?.period?.endDate ?? it?.endDate) ?? fim,
+      pagamento: dataValida(
+        it?.anticipatedPaymentDate ?? it?.anticipationPaymentDate ?? it?.paymentDate ??
+        it?.expectedPaymentDate ?? s?.anticipatedPaymentDate ?? s?.paymentDate ?? s?.expectedPaymentDate),
+      pagamento_normal: dataValida(it?.originalPaymentDate ?? s?.originalPaymentDate),
+      taxa: numOuNull(it?.feeAmount ?? it?.anticipationFee),
+      taxa_pct: numOuNull(it?.feePercentage),
+      liquido: numOuNull(it?.anticipatedPaymentAmount ?? it?.netAmount),
+      subtotal: numOuNull(it?.originalPaymentAmount ?? it?.amount ?? it?.originalAmount ?? it?.grossAmount),
+      status: it?.status ?? s?.status ?? null,
+      conta: it?.accountDetails ?? dadosBancarios(it),
+      bruto: it,
+    }))
+  })
+  if (!itens.length) return { antecipado: null, taxa: null, itens: null }
+  const taxa = itens.reduce((soma: number, it: any) => soma + (it.taxa ?? 0), 0)
   const liquido = numOuNull(j?.balance)
-    ?? itens.reduce((soma: number, it: any) => soma + (numOuNull(it?.anticipatedPaymentAmount) ?? 0), 0)
-  return { antecipado: Math.round(liquido * 100) / 100, taxa: Math.round(taxa * 100) / 100 }
+    ?? itens.reduce((soma: number, it: any) => soma + (it.liquido ?? 0), 0)
+  return { antecipado: Math.round(liquido * 100) / 100, taxa: Math.round(taxa * 100) / 100, itens }
 }
 
 export async function linhasDeLiquidacao(cfg: any, semanaIni: string, semanaFim: string, j: any) {

@@ -132,7 +132,7 @@ async function sincronizarLoja(sb: any, getToken: GetToken, cfg: any, dias: numb
 
       const lq = await linhasDeLiquidacao(cfg, s.ini, s.fim, await buscarLiquidacaoDaSemana(ctx, s.ini, s.fim))
       const ant = resumoDaAntecipacao(await buscarAntecipacaoDaSemana(ctx, s.ini, s.fim))
-      semanasLiq.push({ ...lq.semana, antecipado: ant.antecipado, antecipacao_taxa: ant.taxa })
+      semanasLiq.push({ ...lq.semana, antecipado: ant.antecipado, antecipacao_taxa: ant.taxa, antecipacao_itens: ant.itens })
       titulos.push(...lq.titulos)
     }
 

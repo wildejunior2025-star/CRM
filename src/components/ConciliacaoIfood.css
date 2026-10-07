@@ -118,3 +118,7 @@
   position: sticky; top: 0; z-index: 5;
 }
 .ci-homolog code { font-size: 12px; color: var(--primary); }
+
+/* Detalhe do repasse: a explicacao em linguagem de gente antes dos titulos crus. */
+.ci-explica { margin: 0 0 8px; padding-left: 18px; font-size: 12px; line-height: 1.55; color: var(--text-muted); }
+.ci-explica b { color: var(--text); }
