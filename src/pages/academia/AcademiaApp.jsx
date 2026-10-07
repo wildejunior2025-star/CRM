@@ -9,7 +9,8 @@ import './academia.css'
 //   /recepcao   → tablet da recepção: câmera reconhece e mostra se está em dia
 //   /catraca    → descobrir no PC da catraca qual sinal destrava ela
 //   /porta      → PC só abre a catraca quando o celular reconhece (câmera melhor)
-//   /importar   → traz os alunos do sistema antigo (arquivo .json do backup)
+//   /importar   → traz os alunos do sistema antigo (.json do backup). FORA do
+//                 menu: é ferramenta nossa, de uma vez só; chega pelo endereço.
 // Por enquanto só o dono (admin da empresa) entra. Instrutor e aluno vêm depois.
 
 const AcademiaAlunos = lazy(() => import('./AcademiaAlunos'))
@@ -69,7 +70,6 @@ function Topo() {
         <NavLink to="/recepcao">Recepção</NavLink>
         <NavLink to="/catraca">Catraca</NavLink>
         <NavLink to="/porta">Porta</NavLink>
-        <NavLink to="/importar">Importar</NavLink>
       </nav>
       <button className="btn btn-secondary btn-sm" onClick={logout}>Sair</button>
     </header>
