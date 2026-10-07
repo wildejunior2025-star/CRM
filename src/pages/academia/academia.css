@@ -159,3 +159,5 @@
 .ac-main, .ac-card { max-width: 100%; box-sizing: border-box; }
 body { overflow-x: hidden; }
 .ac-captura-botoes .ac-botao-camera { flex: 0 0 auto; }
+/* Espaço embaixo pros botões não ficarem debaixo da barra do navegador/sistema */
+.ac-captura-botoes { padding-bottom: max(24px, env(safe-area-inset-bottom)); }

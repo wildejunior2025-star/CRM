@@ -121,7 +121,13 @@ function aberturaDosOlhos(p) {
 
 // Tela cheia de verdade (some a barra do navegador). No iPad é o webkit*.
 // Tem que ser chamado direto no toque do botão.
+//
+// No CELULAR não pedimos: o Android joga um aviso grande ("arraste de cima pra
+// sair da tela cheia") bem em cima dos botões de capturar (visto 07/10), e a
+// tela já ocupa tudo de qualquer jeito.
 export function entrarTelaCheia() {
+  const toque = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
+  if (toque) return
   const el = document.documentElement
   try {
     const p = (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)
