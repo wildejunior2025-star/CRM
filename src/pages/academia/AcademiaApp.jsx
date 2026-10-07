@@ -7,7 +7,8 @@ import './academia.css'
 //   /           → alunos (cadastro com foto do rosto)
 //   /pagamentos → mensalidades recebidas, fechamento do dia e do mês
 //   /recepcao   → tablet da recepção: câmera reconhece e mostra se está em dia
-//   /catraca    → descobrir no PC da catraca qual sinal destrava ela
+//   /catraca    → descobre qual sinal destrava a catraca. FORA do menu: é de
+//                 instalação, uma vez só; reconectar é na tela Porta.
 //   /porta      → PC só abre a catraca quando o celular reconhece (câmera melhor)
 //   /importar   → traz os alunos do sistema antigo (.json do backup). FORA do
 //                 menu: é ferramenta nossa, de uma vez só; chega pelo endereço.
@@ -68,7 +69,6 @@ function Topo() {
         <NavLink to="/" end>Alunos</NavLink>
         <NavLink to="/pagamentos">Pagamentos</NavLink>
         <NavLink to="/recepcao">Recepção</NavLink>
-        <NavLink to="/catraca">Catraca</NavLink>
         <NavLink to="/porta">Porta</NavLink>
       </nav>
       <button className="btn btn-secondary btn-sm" onClick={logout}>Sair</button>
