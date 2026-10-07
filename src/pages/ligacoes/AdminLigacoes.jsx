@@ -394,9 +394,114 @@ function AbaImportar({ recarregar }) {
   )
 }
 
+// ── Hoje ──────────────────────────────────────────────────────────────────────
+// O dia de trabalho num lugar só: quantas ligações, como terminaram e o que as
+// atendentes anotaram. Dá pra voltar a qualquer dia.
+function AbaHoje({ atendentes }) {
+  const nomeAt = useMemo(() => Object.fromEntries(atendentes.map((a) => [a.user_id, a.nome])), [atendentes])
+  const [dia, setDia] = useState(() => new Date().toLocaleDateString('sv-SE')) // aaaa-mm-dd, hora do aparelho
+  const [linhas, setLinhas] = useState(null)
+
+  useEffect(() => {
+    let ativo = true
+    const ini = new Date(dia + 'T00:00:00')
+    const fim = new Date(ini)
+    fim.setDate(fim.getDate() + 1)
+    supabase.from('tm_ligacoes')
+      .select('*, tm_leads(loja, bairro, telefone, nome_dono)')
+      .gte('criado_em', ini.toISOString()).lt('criado_em', fim.toISOString())
+      .order('criado_em', { ascending: false }).limit(1000)
+      .then(({ data }) => { if (ativo) setLinhas(data || []) })
+    return () => { ativo = false }
+  }, [dia])
+
+  const hora = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const total = linhas?.length || 0
+  const por = (r) => (linhas || []).filter((x) => x.resultado === r).length
+  const comObs = (linhas || []).filter((x) => (x.observacao || '').trim())
+  const atenderam = (linhas || []).filter((x) => x.resultado === 'atendeu')
+  const visitas = (linhas || []).filter((x) => x.desfecho === 'visita').length
+  const obsOutras = comObs.filter((x) => x.resultado !== 'atendeu')
+
+  return (
+    <div>
+      <label className="lg-dia">Dia
+        <input type="date" value={dia} onChange={(e) => e.target.value && setDia(e.target.value)} />
+      </label>
+      {!linhas ? <p className="lg-muted">Carregando...</p> : (
+        <>
+          <div className="lg-numeros">
+            <div className="lg-num"><b>{total}</b><span>ligações</span></div>
+            <div className="lg-num"><b>{atenderam.length}</b><span>atenderam</span></div>
+            <div className="lg-num"><b>{visitas}</b><span>visitas</span></div>
+            <div className="lg-num"><b>{comObs.length}</b><span>com observação</span></div>
+          </div>
+          <div className="lg-chips lg-mb">
+            <span className="lg-chip">📭 {por('caixa_postal')} caixa postal</span>
+            <span className="lg-chip">🔕 {por('nao_atendeu')} não atendeu</span>
+            <span className="lg-chip">🚪 {por('dono_ausente')} dono ausente</span>
+            <span className="lg-chip">❌ {por('numero_errado')} número errado</span>
+          </div>
+          {!total && <p className="lg-muted">Nenhuma ligação nesse dia.</p>}
+
+          {atenderam.length > 0 && (
+            <section className="lg-grupo">
+              <h3 className="lg-h">Quem atendeu</h3>
+              {atenderam.map((x) => (
+                <article key={x.id} className="lg-card lg-visita">
+                  <div className="lg-linha">
+                    <strong>{hora(x.criado_em)} — {x.tm_leads?.loja}</strong>
+                    <span className="lg-tag">{x.desfecho ? DESFECHO[x.desfecho] : 'sem desfecho'}</span>
+                  </div>
+                  <div className="lg-muted lg-peq">
+                    Sistema: {x.usa_sistema === true ? (x.qual_sistema || 'sim') : simNao(x.usa_sistema)} · iFood: {simNao(x.vende_ifood)}
+                    {x.quem_atende ? ` · WhatsApp: ${x.quem_atende}` : ''} · {nomeAt[x.atendente_id] || '—'}
+                  </div>
+                  {x.motivo_nao && <div className="lg-peq lg-muted">Motivo: {x.motivo_nao}</div>}
+                  {x.observacao && <div className="lg-peq">📝 {x.observacao}</div>}
+                </article>
+              ))}
+            </section>
+          )}
+
+          {obsOutras.length > 0 && (
+            <section className="lg-grupo">
+              <h3 className="lg-h">Observações das outras ligações</h3>
+              {obsOutras.map((x) => (
+                <article key={x.id} className="lg-card lg-visita">
+                  <div className="lg-linha">
+                    <strong>{hora(x.criado_em)} — {x.tm_leads?.loja}</strong>
+                    <span className="lg-tag">{RESULTADO[x.resultado]}</span>
+                  </div>
+                  <div className="lg-peq">📝 {x.observacao}</div>
+                  {x.melhor_horario && <div className="lg-peq lg-muted">Melhor horário: {x.melhor_horario}</div>}
+                </article>
+              ))}
+            </section>
+          )}
+
+          {total > 0 && (
+            <details className="lg-card">
+              <summary><b>Todas as ligações do dia ({total})</b></summary>
+              <ul className="lg-hist">
+                {linhas.map((x) => (
+                  <li key={x.id}>
+                    <b>{hora(x.criado_em)}</b> · {x.tm_leads?.loja} · {RESULTADO[x.resultado]}
+                    {x.desfecho ? ` → ${DESFECHO[x.desfecho]}` : ''} · {nomeAt[x.atendente_id] || '—'}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Casca ─────────────────────────────────────────────────────────────────────
-export default function AdminLigacoes({ onSair }) {
-  const [aba, setAba] = useState('visitas')
+export default function AdminLigacoes({ onSair, embutido = false }) {
+  const [aba, setAba] = useState('hoje')
   const [leads, setLeads] = useState([])
   const [atendentes, setAtendentes] = useState([])
   const [ligacoes, setLigacoes] = useState([])
@@ -419,17 +524,24 @@ export default function AdminLigacoes({ onSair }) {
   const naFila = leads.filter((l) => ['novo', 'retornar'].includes(l.status) && l.telefone && l.tentativas < 3).length
   const quentes = leads.filter((l) => l.status === 'visita').length
 
-  const abas = [['visitas', `Visitas (${quentes})`], ['leads', 'Leads'], ['atendentes', 'Atendentes'], ['importar', 'Importar']]
+  const abas = [['hoje', 'Hoje'], ['visitas', `Visitas (${quentes})`], ['leads', 'Leads'], ['atendentes', 'Atendentes'], ['importar', 'Importar']]
 
   return (
-    <div className="lg-tela lg-larga">
-      <header className="lg-topo">
-        <div>
-          <strong>Ligações — painel</strong>
-          <div className="lg-resumo">{leads.length} lojas · {naFila} na fila · {quentes} visitas marcadas</div>
-        </div>
-        <button className="btn btn-secondary btn-sm" onClick={onSair}>Sair</button>
-      </header>
+    <div className={'lg-tela lg-larga' + (embutido ? ' lg-embutido' : '')}>
+      {embutido ? (
+        <>
+          <h1 className="page-title">Ligações</h1>
+          <p className="lg-resumo lg-mb">{leads.length} lojas · {naFila} na fila · {quentes} visitas marcadas</p>
+        </>
+      ) : (
+        <header className="lg-topo">
+          <div>
+            <strong>Ligações — painel</strong>
+            <div className="lg-resumo">{leads.length} lojas · {naFila} na fila · {quentes} visitas marcadas</div>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={onSair}>Sair</button>
+        </header>
+      )}
       <nav className="lg-abas">
         {abas.map(([k, t]) => (
           <button key={k} className={'lg-aba' + (aba === k ? ' lg-aba-on' : '')} onClick={() => setAba(k)}>{t}</button>
@@ -437,6 +549,7 @@ export default function AdminLigacoes({ onSair }) {
       </nav>
       {carregando ? <p className="lg-muted">Carregando...</p> : (
         <>
+          {aba === 'hoje' && <AbaHoje atendentes={atendentes} />}
           {aba === 'visitas' && <AbaVisitas leads={leads} atendentes={atendentes} recarregar={carregar} />}
           {aba === 'leads' && <AbaLeads leads={leads} atendentes={atendentes} recarregar={carregar} />}
           {aba === 'atendentes' && <AbaAtendentes atendentes={atendentes} ligacoes={ligacoes} recarregar={carregar} />}

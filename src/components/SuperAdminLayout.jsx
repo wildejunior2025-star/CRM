@@ -80,6 +80,13 @@ export default function SuperAdminLayout() {
             Clientes
           </NavLink>
           <NavLink
+            to="/super-admin/ligacoes"
+            className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
+            onClick={closeMenu}
+          >
+            Ligações
+          </NavLink>
+          <NavLink
             to="/super-admin/comissoes"
             className={({ isActive }) => isActive ? 'sidebar-link active' : 'sidebar-link'}
             onClick={closeMenu}

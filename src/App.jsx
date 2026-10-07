@@ -222,6 +222,7 @@ const TourSistema = lazy(() => import('./pages/TourSistema'))
 const ConfigurarLoja = lazy(() => import('./pages/ConfigurarLoja'))
 const AcademiaApp = lazy(() => import('./pages/academia/AcademiaApp'))
 const LigacoesApp = lazy(() => import('./pages/ligacoes/LigacoesApp'))
+const AdminLigacoes = lazy(() => import('./pages/ligacoes/AdminLigacoes'))
 
 export default function App() {
   // lojaonline.fwcinter.com — vitrine pública da loja (sem login).
@@ -337,6 +338,7 @@ export default function App() {
             <Route path="/super-admin/mensalidades" element={<SuperAdminMensalidades />} />
             <Route path="/super-admin/videos" element={<SuperAdminVideos />} />
             <Route path="/super-admin/assistente" element={<SuperAdminAssistente />} />
+            <Route path="/super-admin/ligacoes" element={<AdminLigacoes embutido />} />
           </Route>
 
           <Route element={<LayoutOrLanding />}>
