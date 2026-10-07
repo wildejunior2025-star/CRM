@@ -104,7 +104,6 @@ export default function AcademiaAlunos() {
           <table className="ac-tabela">
             <thead>
               <tr>
-                <th className="ac-col-foto"></th>
                 <th>Matrícula</th>
                 <th>Nome</th>
                 <th>Plano</th>
@@ -119,13 +118,15 @@ export default function AcademiaAlunos() {
                 const s = situacaoAluno(a)
                 return (
                   <tr key={a.id}>
-                    <td className="ac-col-foto" data-rotulo="">
-                      {a.foto
-                        ? <img src={a.foto} alt="" className="ac-foto" />
-                        : <div className="ac-foto ac-foto-vazia" title="Sem rosto cadastrado">?</div>}
-                    </td>
                     <td data-rotulo="Matrícula" className="ac-num">{a.matricula || '—'}</td>
-                    <td data-rotulo="Nome"><strong>{a.nome}</strong></td>
+                    <td data-rotulo="Nome">
+                      <span className="ac-nome-com-foto">
+                        {a.foto
+                          ? <img src={a.foto} alt="" className="ac-foto" />
+                          : <span className="ac-foto ac-foto-vazia" title="Sem rosto cadastrado">?</span>}
+                        <strong>{a.nome}</strong>
+                      </span>
+                    </td>
                     <td data-rotulo="Plano" className="ac-muted">{a.plano || '—'}</td>
                     <td data-rotulo="Valor" className="ac-num">{a.valor ? dinheiro(a.valor) : '—'}</td>
                     <td data-rotulo="Vence em" className="ac-num">{a.vencimento ? dataBr(a.vencimento) : '—'}</td>
