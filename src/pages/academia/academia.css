@@ -156,6 +156,19 @@
 }
 .ac-topo { flex-wrap: wrap; }
 .ac-topo nav { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.ac-topo nav a { white-space: nowrap; }
+
+/* Celular: as abas ficavam espremidas entre o nome da academia e o "Abrir
+   catraca" — aparecia só a primeira letra de "Alunos". Aqui elas descem pra
+   uma linha só delas, que rola pro lado se não couber. */
+@media (max-width: 820px) {
+  .ac-topo { gap: 8px 10px; padding: 8px 12px; }
+  .ac-nome-empresa { order: 1; flex: 1 1 auto; font-size: 16px; }
+  .ac-topo .ac-abrir-caixa { order: 2; }
+  .ac-topo > .btn { order: 3; }
+  .ac-topo nav { order: 4; flex: 1 0 100%; gap: 6px; padding-bottom: 2px; }
+  .ac-topo nav a { flex: 0 0 auto; padding: 7px 12px; font-size: 14px; }
+}
 .ac-main, .ac-card { max-width: 100%; box-sizing: border-box; }
 body { overflow-x: hidden; }
 .ac-captura-botoes .ac-botao-camera { flex: 0 0 auto; }
