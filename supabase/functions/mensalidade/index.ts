@@ -400,7 +400,7 @@ Deno.serve(async (req) => {
         detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Link enviado pro ${tel} (${valorBr(total)})`,
       }).then(() => {}, () => {})
       if (envio.erro) return json({ error: `Não consegui enviar: ${envio.erro}` }, 502)
-      return json({ ok: true, telefone: envio.telefone, link })
+      return json({ ok: true, telefone: envio.telefone })
     }
 
     // ── Daqui pra baixo: só o ADMIN logado da loja ───────────────────────────
