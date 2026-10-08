@@ -62,7 +62,6 @@ export async function lerRosto(video) {
     descritor: maior.descriptor,
     caixa: maior.detection.box,
     quantos: achados.length,
-    olhos: aberturaDosOlhos(maior.landmarks.positions),
     giro: giroDaCabeca(maior.landmarks.positions),
   }
 }
@@ -76,48 +75,12 @@ function giroDaCabeca(p) {
   return (p[30].x - meio) / largura
 }
 
-// Leitura rápida dos pontos do rosto (sem a digital, que é o que pesa):
-// olhos e giro da cabeça, pra prova de vida com muitas leituras por segundo.
+// Daqui pra cima conta como "de lado": o cadastro recusa a amostra.
 //
-// Prova de vida: VIRAR O ROSTO é o que funciona. Foto no celular, mesmo
-// girando o aparelho, não muda o nariz em relação aos olhos. Piscar ficou
-// como extra — o modelo de 68 pontos desenha o olho meio aberto mesmo
-// fechado, e no iPad a piscada não era vista (teste de 19/09/2026).
+// A prova de vida (piscar ou virar o rosto antes de liberar) foi tirada em
+// 08/10/2026 — a academia não tem o risco de alguém entrar mostrando a foto
+// de outra pessoa no celular, e ela atrasava a entrada de todo mundo.
 export const GIRO_LADO = 0.15
-export async function lerOlhos(video) {
-  const r = await window.faceapi
-    .detectSingleFace(video, new window.faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.4 }))
-    .withFaceLandmarks()
-  if (!r) return null
-  const p = r.landmarks.positions
-  return { olhos: aberturaDosOlhos(p), giro: giroDaCabeca(p), caixa: r.detection.box }
-}
-
-// Detector de piscada: compara cada leitura com o olho mais aberto das
-// últimas leituras (cada pessoa tem um tamanho de olho). Caiu pra menos de
-// 80% = fechou; voltou pra mais de 90% depois de fechar = piscou.
-export function criarDetectorPiscada() {
-  const hist = []
-  let fechou = false
-  return olhos => {
-    hist.push(olhos)
-    if (hist.length > 20) hist.shift()
-    const aberto = Math.max(...hist)
-    if (hist.length < 3) return false
-    if (olhos < aberto * 0.8) fechou = true
-    else if (fechou && olhos > aberto * 0.9) return true
-    return false
-  }
-}
-
-// Quanto os olhos estão abertos (média dos dois). Olho aberto fica por volta
-// de 0,25–0,35; piscando cai pra perto de 0,1. Serve pra prova de vida:
-// foto no celular não pisca. Pontos 36–41 e 42–47 do modelo de 68 pontos.
-function aberturaDosOlhos(p) {
-  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y)
-  const olho = i => (d(p[i + 1], p[i + 5]) + d(p[i + 2], p[i + 4])) / (2 * d(p[i], p[i + 3]))
-  return (olho(36) + olho(42)) / 2
-}
 
 // Tela cheia de verdade (some a barra do navegador). No iPad é o webkit*.
 // Tem que ser chamado direto no toque do botão.

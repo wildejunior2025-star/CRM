@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, acharAluno, situacaoAluno,
-  entrarTelaCheia, sairTelaCheia, lerOlhos, criarDetectorPiscada, GIRO_LADO, juntarLeitura, rostoInteiroNaTela,
+  entrarTelaCheia, sairTelaCheia, juntarLeitura, rostoInteiroNaTela,
 } from '../../lib/reconhecimentoFacial'
 import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '../../lib/catracaSerial'
 
@@ -22,18 +22,11 @@ const DESCONHECIDO_LEITURAS = 4  // rosto sem cadastro por 4 leituras → "não 
 const MOSTRAR_MS = 5000          // quanto tempo o cartão fica na tela
 const NAO_REGISTRAR_DE_NOVO_MS = 3 * 60 * 1000 // mesma pessoa não conta 2 entradas em 3 min
 const RECARREGAR_ALUNOS_MS = 60 * 1000
-// Prova de vida: depois de reconhecer, pede pra virar o rosto. Vale se o
-// giro MUDAR (foto parada não muda, nem uma foto já de lado). Piscar também
-// conta quando o modelo consegue ver (criarDetectorPiscada).
-const PISCAR_PRAZO_MS = 8000
-const CHAVE_PISCAR = 'academia_exigir_piscar'
 
-// Desligado por padrão (06/10): virar o rosto só serve contra foto de outra
-// pessoa na tela do celular — risco que a academia não tem, e atrasava a
-// entrada de todo mundo. Quem quiser liga de novo na tela de início.
-function lerExigirPiscar() {
-  try { return localStorage.getItem(CHAVE_PISCAR) === 'sim' } catch { return false }
-}
+// Prova de vida (pedir pra virar o rosto antes de liberar) FOI TIRADA em
+// 08/10, a pedido do dono: lá ninguém vai tentar entrar mostrando a foto de
+// outra pessoa no celular, e o pedido atrasava a entrada de todo mundo.
+// Reconheceu, libera.
 
 export default function AcademiaRecepcao() {
   const { empresa } = useAuth()
@@ -47,8 +40,6 @@ export default function AcademiaRecepcao() {
   // Diagnóstico: quanto leva cada leitura neste aparelho e a última semelhança.
   const [diag, setDiag] = useState({})
   const [ajuste, setAjuste] = useState(null) // pedido pra centralizar o rosto
-  const [exigirPiscar, setExigirPiscar] = useState(lerExigirPiscar)
-  const [pedindoPiscar, setPedindoPiscar] = useState(null) // { nome, demorou }
   // Catraca ligada neste PC: null = não usa (tablet), 'ok', 'abrindo' ou o texto do erro.
   // Tudo automático — a academia funciona sem ninguém na recepção.
   const [catraca, setCatracaEstado] = useState(null)
@@ -89,11 +80,6 @@ export default function AcademiaRecepcao() {
       .then(() => setCatraca('pc'), e => setCatraca('Não avisei o computador: ' + e.message))
   }
 
-  function trocarPiscar(v) {
-    setExigirPiscar(v)
-    try { localStorage.setItem(CHAVE_PISCAR, v ? 'sim' : 'nao') } catch { /* só não lembra */ }
-  }
-
   async function carregarAlunos() {
     const { data } = await supabase
       .from('academia_alunos')
@@ -115,21 +101,9 @@ export default function AcademiaRecepcao() {
     let desconhecidas = 0
     let cartaoAte = 0
     let cartaoAtualId = null
-    let semRosto = 0
     let tempos = []
-    // Enquanto espera a prova de vida: { achado, inicio, piscou, giro0 }.
-    // Nessa fase o laço só lê os pontos do rosto (rápido); a pessoa já foi
-    // reconhecida antes de entrar aqui.
-    let piscar = null
-
-    function pedirPiscar(achado, demorou = false) {
-      piscar = { achado, inicio: Date.now(), piscou: criarDetectorPiscada(), giro0: null }
-      setPedindoPiscar({ nome: achado.aluno.nome.split(' ')[0], demorou })
-    }
 
     function liberarResultado(achado) {
-      piscar = null
-      setPedindoPiscar(null)
       const situacao = situacaoAluno(achado.aluno)
       cartaoAtualId = achado.aluno.id
       mostrar({ aluno: achado.aluno, situacao })
@@ -175,25 +149,6 @@ export default function AcademiaRecepcao() {
         const video = videoRef.current
         if (!video || video.readyState < 2) { await esperar(200); continue }
 
-        // Fase da prova de vida: leitura rápida, sem pausa.
-        if (piscar) {
-          const o = await lerOlhos(video).catch(() => null)
-          if (!vivo) break
-          if (!o) {
-            // Saiu da frente da câmera: cancela o pedido.
-            if (++semRosto >= 15) { piscar = null; setPedindoPiscar(null) }
-          } else {
-            semRosto = 0
-            if (piscar.giro0 === null) piscar.giro0 = o.giro
-            // Virou o rosto de verdade (mexeu desde o pedido) ou piscou.
-            const virou = Math.abs(o.giro) > GIRO_LADO && Math.abs(o.giro - piscar.giro0) > GIRO_LADO
-            if (virou || piscar.piscou(o.olhos)) liberarResultado(piscar.achado)
-            else if (Date.now() - piscar.inicio > PISCAR_PRAZO_MS) pedirPiscar(piscar.achado, true)
-          }
-          await esperar(0)
-          continue
-        }
-
         const t0 = performance.now()
         const r = await lerRosto(video).catch(() => null)
         if (!vivo) break
@@ -209,7 +164,6 @@ export default function AcademiaRecepcao() {
           await esperar(250)
           continue
         }
-        semRosto = 0
         // Meio rosto fora da tela, ou longe demais: não lê, pede pra ajeitar.
         if (!rostoInteiroNaTela(r.caixa, video)) {
           candidato = null; seguidas = 0
@@ -227,11 +181,7 @@ export default function AcademiaRecepcao() {
           else { candidato = achado.aluno.id; seguidas = 1 }
           const jaNaTela = cartaoAtualId === achado.aluno.id && Date.now() < cartaoAte - 1000
           const confirmado = seguidas >= CONFIRMAR_LEITURAS || achado.distancia < CERTEZA_ALTA
-          if (confirmado && !jaNaTela) {
-            // Prova de vida: antes de mostrar o resultado, a pessoa vira o rosto.
-            if (exigirPiscar) pedirPiscar(achado)
-            else liberarResultado(achado)
-          }
+          if (confirmado && !jaNaTela) liberarResultado(achado)
         } else {
           candidato = null; seguidas = 0
           desconhecidas++
@@ -297,7 +247,7 @@ export default function AcademiaRecepcao() {
       if (canalPorta.current) { supabase.removeChannel(canalPorta.current); canalPorta.current = null }
       sairTelaCheia()
     }
-  }, [iniciado, empresa.id, exigirPiscar]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [iniciado, empresa.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function comecar() {
     destravarSom()
@@ -311,10 +261,6 @@ export default function AcademiaRecepcao() {
         <div className="ac-logo">🏋️</div>
         <h1>{empresa?.nome}</h1>
         <p>Tela da recepção. Deixe o tablet de pé, com a câmera na altura do rosto.</p>
-        <label className="ac-rec-opcao">
-          <input type="checkbox" checked={exigirPiscar} onChange={e => trocarPiscar(e.target.checked)} />
-          Pedir pra virar o rosto antes de liberar (impede entrar mostrando a foto de alguém no celular)
-        </label>
         <button className="btn btn-primary ac-rec-comecar" onClick={comecar}>Começar</button>
         <Link to="/" className="ac-rec-voltar">← Voltar pros alunos</Link>
       </div>
@@ -328,15 +274,8 @@ export default function AcademiaRecepcao() {
         {estado.fase !== 'rodando' && (
           <div className="ac-rec-overlay"><p className={estado.fase === 'erro' ? 'ac-erro' : ''}>{estado.msg}</p></div>
         )}
-        {estado.fase === 'rodando' && !cartao && !pedindoPiscar && (
+        {estado.fase === 'rodando' && !cartao && (
           <div className="ac-rec-dica">{ajuste || 'Olhe para a câmera'}</div>
-        )}
-        {estado.fase === 'rodando' && !cartao && pedindoPiscar && (
-          <div className="ac-rec-piscar">
-            <div className="ac-rec-piscar-olho">↔️</div>
-            <strong>Olá, {pedindoPiscar.nome}!</strong>
-            <span>{pedindoPiscar.demorou ? 'Vire o rosto devagar pro lado' : 'Vire o rosto pro lado'}</span>
-          </div>
         )}
         {cartao && <CartaoAcesso cartao={cartao} />}
       </div>
