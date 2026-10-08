@@ -9,6 +9,15 @@ import { supabase } from '../../lib/supabaseClient'
 
 const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 
+// Vídeo de execução: o professor pode prender um vídeo certo no exercício
+// (botão 🎥 na área dele). Quando não prendeu — que é o caso de quase todos
+// —, o aluno cai numa busca pronta no YouTube em vez de ficar sem nada.
+// Link de busca não quebra com o tempo, que é o problema de guardar vídeo.
+function buscaNoYoutube(nome) {
+  const busca = encodeURIComponent(`como fazer ${nome} academia execução correta`)
+  return `https://www.youtube.com/results?search_query=${busca}`
+}
+
 export default function AlunoTreinos({ aluno }) {
   const [treinos, setTreinos] = useState(null)
   const [itens, setItens] = useState({})
@@ -179,9 +188,13 @@ export default function AlunoTreinos({ aluno }) {
                       {i.maquina ? `máquina ${i.maquina}` : 'peso livre'}
                       {i.observacao ? ` · ${i.observacao}` : ''}
                     </small>
-                    {videos[i.exercicio_id] && (
+                    {videos[i.exercicio_id] ? (
                       <a className="al-video" href={videos[i.exercicio_id]} target="_blank" rel="noreferrer">
                         ▶ ver como faz
+                      </a>
+                    ) : (
+                      <a className="al-video" href={buscaNoYoutube(i.nome)} target="_blank" rel="noreferrer">
+                        ▶ ver como faz no YouTube
                       </a>
                     )}
                     {feito
