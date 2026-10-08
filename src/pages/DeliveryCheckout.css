@@ -632,3 +632,13 @@
 @media (max-width: 899px) {
   .dco-mapa-embutido { display: none; }
 }
+
+/* Celular: espaçamentos menores pra cada passo caber na tela sem rolar. */
+@media (max-width: 899px) {
+  .dco-main { padding: 12px 16px 90px; }
+  .dco-section { padding: 14px; margin-bottom: 10px; }
+  .dco-section-title { margin: 0 0 10px; }
+  .dco-field-group { gap: 8px; }
+  .dco-field { gap: 4px; }
+  .dco-input { padding: 8px 10px; }
+}

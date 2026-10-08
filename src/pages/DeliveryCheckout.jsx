@@ -1529,6 +1529,7 @@ export default function DeliveryCheckout() {
   // Uma vez por sessão, e nunca pra quem já tem ponto travado no cadastro —
   // esse já apontou a casa um dia e não precisa apontar de novo.
   const jaForcouMapa = useRef(false)
+  const pinAssinaturaRef = useRef('')
   const [mapaForcado, setMapaForcado] = useState(false)
   useEffect(() => {
     if (tipo !== 'entrega' || pinSalvo || jaForcouMapa.current) return
@@ -1548,6 +1549,7 @@ export default function DeliveryCheckout() {
   }, [tipo, pinSalvo, lojaEndereco, form.rua, form.numero, form.bairro])
 
   function confirmarMapa({ lat, lng, manual }) {
+    pinAssinaturaRef.current = [form.rua, form.numero, form.bairro, form.cidade].join('|').toLowerCase()
     pinManualRef.current = !!manual
     setCoordCliente({ lat, lng })
     setMapaForcado(false)
@@ -1736,7 +1738,10 @@ export default function DeliveryCheckout() {
       return
     }
     setErroGlobal(null)
-    if (passo === 1 && tipo === 'entrega' && !pinSalvo && !jaForcouMapa.current
+    // Abre o mapa sempre que o endereço mudou desde o último pino confirmado
+    // (voltou e trocou de rua = precisa confirmar de novo).
+    const assinatura = [form.rua, form.numero, form.bairro, form.cidade].join('|').toLowerCase()
+    if (passo === 1 && tipo === 'entrega' && !pinSalvo && pinAssinaturaRef.current !== assinatura
         && lojaEndereco?.latitude && lojaEndereco?.longitude) {
       jaForcouMapa.current = true
       setMapaForcado(true)
