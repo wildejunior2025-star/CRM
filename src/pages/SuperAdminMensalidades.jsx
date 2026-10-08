@@ -403,7 +403,7 @@ function Detalhe({ l, hoje, recarregar }) {
   )
 }
 
-// Cobrança automática pelo WhatsApp da FWC: com a chave ligada, todo dia às 9h o
+// Cobrança automática pelo WhatsApp da FWC: com a chave ligada, todo dia às 8h o
 // sistema manda o link de pagamento (/pagar/:token) pro número guardado, uma vez
 // por cobrança vencida. Só as lojas que o Super ADM ligar.
 function CobrarWhatsApp({ loja, cfg, temAberta, recarregar, telInicial }) {
@@ -425,7 +425,7 @@ function CobrarWhatsApp({ loja, cfg, temAberta, recarregar, telInicial }) {
       .update({ zap_auto: ligado, zap_telefone: digitos || null, atualizado_em: new Date().toISOString() }).eq('empresa_id', loja.id)
     setSalvando(false)
     if (error) { setRes({ ok: false, texto: error.message }); return }
-    setRes({ ok: true, texto: ligado ? 'Ligado: o link sai sozinho às 9h quando a cobrança vencer.' : 'Desligado.' })
+    setRes({ ok: true, texto: ligado ? 'Ligado: o link sai sozinho às 8h quando a cobrança vencer.' : 'Desligado.' })
     recarregar()
   }
 
@@ -458,7 +458,7 @@ function CobrarWhatsApp({ loja, cfg, temAberta, recarregar, telInicial }) {
         <input style={campo} inputMode="tel" placeholder="(84) 99999-9999" value={numero} onChange={ev => setNumero(mascara(ev.target.value))} />
       </label>
       <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 8 }}>
-        Sai pelo WhatsApp da FWC, às 9h, uma vez por cobrança vencida. Quando a loja paga, para sozinho.
+        Sai pelo WhatsApp da FWC, às 8h, uma vez por cobrança vencida. Quando a loja paga, para sozinho.
       </div>
       <button type="button" disabled={salvando || (ligado && !numeroOk)} onClick={salvar}
         style={{ ...botao, background: '#16a34a', opacity: salvando || (ligado && !numeroOk) ? 0.5 : 1 }}>

@@ -211,7 +211,7 @@ function textoLink(nome: string | undefined, token: string, lista: any[], vencid
 }
 
 // ── Envio automático do link (só lojas com zap_auto ligado no Super ADM) ─────
-// Roda às 9h (Fortaleza). Uma mensagem por cobrança vencida nova: a chave é a
+// Roda às 8h (Fortaleza). Uma mensagem por cobrança vencida nova: a chave é a
 // vencida mais recente, então cada semana que vence manda a sua. Falha não
 // trava: grava outro tipo de aviso e tenta de novo no dia seguinte.
 async function cronLinkWhatsApp(sb: any) {
