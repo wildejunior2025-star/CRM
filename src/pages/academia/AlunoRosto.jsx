@@ -43,8 +43,8 @@ export default function AlunoRosto({ aluno, onPronto }) {
 
       <section className="al-bloco">
         <p className="al-texto">
-          Com seu rosto cadastrado, a catraca abre sozinha quando você chega. São 4 passos rápidos:
-          olhar de frente, virar pra um lado, pro outro e olhar de frente de novo.
+          Com seu rosto cadastrado, a catraca abre sozinha quando você chega. É rápido:
+          olhe de frente pra câmera e segure um instante.
         </p>
         <ul className="al-dicas">
           <li>Fique num lugar claro, de preferência com a luz na sua frente.</li>

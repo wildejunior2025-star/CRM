@@ -4,16 +4,18 @@ import {
   sairTelaCheia, GIRO_LADO, cameraPadrao, guardarCamera,
 } from '../../lib/reconhecimentoFacial'
 
-// Captura do rosto em 4 etapas (frente, um lado, o outro, frente de novo).
-// Usada tanto pela recepção cadastrando o aluno quanto pelo próprio aluno no
-// celular dele. Só avança quando a pessoa FAZ o que a tela pede.
+// Captura do rosto numa tacada: enquadra de frente e aperta Capturar.
+//
+// Antes a tela pedia pra virar o rosto pra um lado e pro outro. Isso existia
+// pra o aluno se cadastrar sozinho no celular dele. Quem cadastra é a
+// recepção, com a câmera de trás apontada pro aluno — pedir pra virar só
+// atrasava a fila. Agora pega as amostras de frente mesmo, uma atrás da
+// outra, e o aluno nem percebe.
 
 const AMOSTRAS = 4
-const GIRO_FRENTE = 0.08 // até aqui conta como "de frente"
+const PAUSA = 150 // ms entre uma amostra e a outra, pra não pegar o mesmo quadro
 
-export default // Liga a câmera e guia a pessoa em 4 etapas (frente, um lado, outro lado,
-// frente de novo), guardando uma "digital do rosto" em cada.
-function CapturaRosto({ alunos, onPronto, onCancelar }) {
+export default function CapturaRosto({ alunos, onPronto, onCancelar }) {
   const videoRef = useRef(null)
   const [fase, setFase] = useState('carregando') // carregando | pronto | capturando | revisar | erro
   const [msg, setMsg] = useState('Preparando a câmera...')
@@ -35,7 +37,7 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
         stream = await ligarCamera(videoRef.current, { camera })
         if (!vivo) return desligarCamera(stream)
         setFase('pronto')
-        setMsg('Rosto de frente, bem iluminado. Aperte Capturar.')
+        setMsg('Enquadre o rosto do aluno de frente e aperte Capturar.')
       } catch (e) {
         setFase('erro')
         setMsg(e.name === 'NotAllowedError' ? 'A câmera foi bloqueada. Libere nas permissões do navegador.' : e.message)
@@ -45,65 +47,36 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
     return () => { vivo = false; capturaRef.current++; desligarCamera(stream); sairTelaCheia() }
   }, [camera])
 
-  // Cada etapa só passa quando a pessoa FEZ o que a tela pediu — conferido
-  // pela posição do nariz em relação aos olhos. Sem pular por tempo;
-  // quem desistir aperta Cancelar.
+  // Pega AMOSTRAS leituras boas de frente. Não pula por tempo: se o rosto
+  // sair do enquadramento ela espera ali, e quem desistir aperta Parar.
   async function capturar() {
     setFase('capturando')
+    setFeitas(0)
     const minha = ++capturaRef.current
     const cancelou = () => capturaRef.current !== minha
     const descritores = []
     let foto
-    let ladoVirado = 0
-    const ok = async texto => { setMsg(`✓ ${texto}`); setFeitas(descritores.length); await esperar(900) }
 
-    // Espera uma leitura que cumpra `condicao` por `seguidas` vezes seguidas.
-    async function esperarQue(dica, condicao, seguidas = 2) {
-      let n = 0
-      setMsg(dica)
-      while (!cancelou()) {
-        const r = await lerRosto(videoRef.current).catch(() => null)
-        if (cancelou()) return null
-        if (!r) { setMsg(`${dica} — não estou vendo o rosto`); n = 0; await esperar(120); continue }
-        if (r.quantos > 1) { setMsg('Tem mais de uma pessoa na câmera.'); n = 0; await esperar(300); continue }
-        setMsg(dica)
-        if (condicao(r)) { if (++n >= seguidas) return r } else n = 0
-        await esperar(80)
-      }
-      return null
+    while (descritores.length < AMOSTRAS && !cancelou()) {
+      const r = await lerRosto(videoRef.current).catch(() => null)
+      if (cancelou()) return
+      if (!r) { setMsg('Não estou vendo o rosto — aproxime a câmera'); await esperar(120); continue }
+      if (r.quantos > 1) { setMsg('Tem mais de uma pessoa na câmera'); await esperar(300); continue }
+      // Rosto muito de lado não serve de digital: pede pra endireitar.
+      if (Math.abs(r.giro) >= GIRO_LADO) { setMsg('Rosto de frente pra câmera'); await esperar(120); continue }
+
+      if (!foto) foto = miniaturaDoRosto(videoRef.current, r.caixa, 280)
+      descritores.push(Array.from(r.descritor))
+      setFeitas(descritores.length)
+      setMsg('Segure assim...')
+      await esperar(PAUSA)
     }
+    if (cancelou()) return
 
-    // 1. De frente
-    let r = await esperarQue('Olhe de frente pra câmera', x => Math.abs(x.giro) < GIRO_FRENTE, 3)
-    if (!r) return
-    foto = miniaturaDoRosto(videoRef.current, r.caixa, 280)
-    descritores.push(Array.from(r.descritor))
-    await ok('Muito bem!')
-
-    // 2. Vira pra um lado
-    r = await esperarQue('Vire o rosto devagar pra um lado', x => Math.abs(x.giro) > GIRO_LADO)
-    if (!r) return
-    ladoVirado = Math.sign(r.giro)
-    descritores.push(Array.from(r.descritor))
-    await ok('Isso!')
-
-    // 3. Vira pro outro lado
-    r = await esperarQue('Agora vire pro outro lado', x => Math.sign(x.giro) === -ladoVirado && Math.abs(x.giro) > GIRO_LADO)
-    if (!r) return
-    descritores.push(Array.from(r.descritor))
-    await ok('Perfeito!')
-
-    // 4. De frente de novo
-    r = await esperarQue('Olhe de frente de novo', x => Math.abs(x.giro) < GIRO_FRENTE, 3)
-    if (!r) return
-    descritores.push(Array.from(r.descritor))
-    await ok('Pronto!')
     // Já é outro aluno? Evita cadastrar a mesma pessoa duas vezes.
     const repetido = acharAluno(descritores[0], alunos)
     if (repetido && !window.confirm(`Esse rosto parece com ${repetido.aluno.nome}, que já está cadastrado. Salvar assim mesmo?`)) {
-      setFase('pronto')
-      setFeitas(0)
-      setMsg('Capture de novo ou volte.')
+      tirarDeNovo()
       return
     }
     // Antes de usar, mostra a foto grande e pergunta se ficou boa.
@@ -115,7 +88,7 @@ function CapturaRosto({ alunos, onPronto, onCancelar }) {
     setResultado(null)
     setFeitas(0)
     setFase('pronto')
-    setMsg('Rosto de frente, bem iluminado. Aperte Capturar.')
+    setMsg('Enquadre o rosto do aluno de frente e aperte Capturar.')
   }
 
   // Tela cheia por cima de tudo: no tablet a câmera pequena no canto do
