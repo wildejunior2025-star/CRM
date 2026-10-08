@@ -103,6 +103,7 @@ export default function AcademiaRecepcao() {
     let cartaoAte = 0
     let cartaoAtualId = null
     let tempos = []
+    let resMostrada = false
 
     function liberarResultado(achado) {
       const situacao = situacaoAluno(achado.aluno)
@@ -135,6 +136,9 @@ export default function AcademiaRecepcao() {
       while (vivo) {
         const video = videoRef.current
         if (!video || video.readyState < 2) { await esperar(200); continue }
+        // Quanto a webcam REALMENTE entrega. Pedimos 1280x960, mas câmera
+        // velha costuma dar menos — e é esse número que limita tudo.
+        if (!resMostrada) { resMostrada = true; setDiag(d => ({ ...d, res: `${video.videoWidth}x${video.videoHeight}` })) }
 
         const t0 = performance.now()
         const r = await lerRosto(video).catch(() => null)
@@ -187,7 +191,7 @@ export default function AcademiaRecepcao() {
         await Promise.all([carregarFaceApi(), carregarAlunos()])
         if (!vivo) return
         setEstado({ fase: 'carregando', msg: 'Ligando a câmera...' })
-        stream = await ligarCamera(videoRef.current, { leve: true })
+        stream = await ligarCamera(videoRef.current)
         if (!vivo) return desligarCamera(stream)
         try { wakeLock = await navigator.wakeLock?.request('screen') } catch { /* sem wake lock, segue */ }
         setEstado({ fase: 'rodando', msg: '' })
@@ -294,7 +298,7 @@ export default function AcademiaRecepcao() {
         )}
         {diag.ms && (
           <div className="ac-rec-diag">
-            leitura {diag.ms} ms · {diag.backend}
+            leitura {diag.ms} ms · {diag.backend}{diag.res ? ` · câmera ${diag.res}` : ''}
             {diag.dist != null ? ` · distância ${diag.dist.toFixed(3)}` : ''}
             {diag.margem != null && diag.margem !== Infinity ? ` · margem ${diag.margem.toFixed(3)}` : ''}
           </div>

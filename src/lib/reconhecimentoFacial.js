@@ -54,7 +54,11 @@ export function carregarFaceApi() {
   return carregando
 }
 
-const opcoesDetector = () => new window.faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })
+// 416 em vez de 320 (08/10): acha a caixa do rosto com mais precisão, e caixa
+// melhor = pontos do rosto melhores = digital melhor. Pesa mais no aparelho,
+// mas o PC da academia aguenta. Se ficar lento, o número volta pra 320 —
+// o tempo de cada leitura aparece no canto da tela da recepção.
+const opcoesDetector = () => new window.faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 })
 
 // Acha o maior rosto no vídeo e devolve { descritor, caixa } ou null.
 export async function lerRosto(video) {
@@ -193,8 +197,10 @@ export function guardarCamera(camera) {
   try { localStorage.setItem(CHAVE_CAMERA, camera) } catch { /* só não lembra */ }
 }
 
-// `leve`: resolução menor (640x480). A recepção usa — o reconhecimento reduz a
-// imagem de qualquer jeito, e em PC antigo a imagem grande só deixa lento.
+// `leve`: resolução menor (640x480), pra aparelho fraco. A recepção NÃO usa
+// mais (08/10): a digital do rosto é recortada da imagem de verdade, então
+// imagem pequena = digital pobre = mais chance de confundir uma pessoa com
+// outra. Com uma webcam ruim isso já é o gargalo; não dá pra piorar de graça.
 // `camera`: 'user' (frente) ou 'environment' (trás).
 export async function ligarCamera(video, { leve = false, camera = 'user' } = {}) {
   if (!navigator.mediaDevices?.getUserMedia) {
