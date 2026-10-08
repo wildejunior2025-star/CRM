@@ -14,7 +14,7 @@ import MensalidadePagamento from './MensalidadePagamento'
 //   - pedido, iFood, Loja Online e robô continuam funcionando por trás
 
 const PUBLICAS = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/excluir-conta',
-  '/lojas', '/loja/', '/checkout', '/pedido/', '/mesa/', '/c/', '/ver/', '/meus-pedidos', '/super-admin']
+  '/lojas', '/loja/', '/checkout', '/pedido/', '/mesa/', '/c/', '/ver/', '/meus-pedidos', '/super-admin', '/pagar/']
 const FUNCIONARIOS = ['garcom', 'cozinheiro', 'entregador', 'vendedor']
 
 export default function MensalidadeGate() {

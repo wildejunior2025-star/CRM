@@ -124,6 +124,83 @@ async function enviarTemplate(phoneNumberId: string, to: string, params: string[
   return { erro: null, id: out?.messages?.[0]?.id ?? null, telefone: d }
 }
 
+// ── PIX da mensalidade de uma loja ───────────────────────────────────────────
+// Reaproveita o PIX pendente que ainda vale mais de 5 min; senão gera um novo
+// (1h de validade). Usada pelo admin logado e pela página pública do link.
+async function gerarPixLoja(sb: any, empresaId: string, o: { email?: string | null, profId?: string | null, quem: string, antecipar: boolean }) {
+  await sb.rpc("mensalidade_gerar", { p_empresa: empresaId })
+  const hoje = hojeBR()
+  const { data: cfg } = await sb.from("mensalidade_config").select("desconto_antecipado").eq("empresa_id", empresaId).maybeSingle()
+  const { data: abertas } = await sb.from("mensalidade_cobrancas")
+    .select("id, vencimento, referencia, valor").eq("empresa_id", empresaId).eq("status", "aberta").order("vencimento")
+  const vencidas = (abertas ?? []).filter((c: any) => c.vencimento <= hoje)
+  // Nada vencido: dá pra pagar a próxima antes, com o desconto.
+  const alvo = vencidas.length ? vencidas : (o.antecipar ? (abertas ?? []).slice(0, 1) : [])
+  if (!alvo.length) return { status: 400, body: { error: "Não há mensalidade em aberto." } }
+  const desconto = vencidas.length ? 0 : Number(cfg?.desconto_antecipado ?? 0)
+  const valor = Math.max(0.01, Math.round((alvo.reduce((s: number, c: any) => s + Number(c.valor), 0) - desconto) * 100) / 100)
+
+  // Já tem PIX valendo pro mesmo valor? Devolve o mesmo (não gera dois).
+  const { data: aberto } = await sb.from("mensalidade_pagamentos")
+    .select("id, valor, pix_copia_cola, pix_qr_base64, expira_em, cobranca_ids")
+    .eq("empresa_id", empresaId).eq("status", "pendente").eq("forma", "pix")
+    .gt("expira_em", new Date(Date.now() + 5 * 60000).toISOString())
+    .order("created_at", { ascending: false }).limit(1).maybeSingle()
+  if (aberto && Number(aberto.valor) === valor && (aberto.cobranca_ids ?? []).length === alvo.length) return { status: 200, body: { ok: true, ...aberto } }
+
+  const { data: emp } = await sb.from("empresas").select("nome").eq("id", empresaId).single()
+  const expira = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+  const descricao = `FWC Inter — ${emp?.nome ?? "Loja"} — ${alvo.map((c: any) => c.referencia).join(", ")}`.slice(0, 250)
+  const r = await mp("/v1/payments", "POST", {
+    transaction_amount: valor,
+    description: descricao,
+    payment_method_id: "pix",
+    date_of_expiration: expira,
+    payer: { email: o.email ?? "loja@fwcinter.com" },
+    external_reference: `mensalidade:${empresaId}`,
+    notification_url: `${SUPABASE_URL}/functions/v1/mensalidade`,
+    metadata: { tipo: "mensalidade", empresa_id: empresaId },
+  })
+  if (!r.data?.id) return { status: 502, body: { error: "Não consegui gerar o PIX agora. Tente de novo em instantes.", detalhe: r.data?.message } }
+
+  const td = r.data.point_of_interaction?.transaction_data ?? {}
+  const { data: pg } = await sb.from("mensalidade_pagamentos").insert({
+    empresa_id: empresaId, cobranca_ids: alvo.map((c: any) => c.id), valor, forma: "pix",
+    mp_payment_id: String(r.data.id), pix_copia_cola: td.qr_code ?? null, pix_qr_base64: td.qr_code_base64 ?? null,
+    expira_em: expira, criado_por: o.profId ?? null,
+  }).select("id, valor, pix_copia_cola, pix_qr_base64, expira_em").single()
+  await sb.from("mensalidade_avisos").insert({
+    empresa_id: empresaId, cobranca_id: alvo[0].id, tipo: "pix_gerado", profile_id: o.profId ?? null,
+    quem: o.quem, detalhe: `PIX de ${valorBr(valor)}`,
+  }).then(() => {}, () => {})
+  return { status: 200, body: { ok: true, ...pg } }
+}
+
+// ── Link de pagamento (página pública /pagar/:token) ─────────────────────────
+async function lojaDoLink(sb: any, token: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(token ?? "")) return null
+  const { data } = await sb.from("mensalidade_config").select("empresa_id, desconto_antecipado, empresas(nome)")
+    .eq("link_token", token).maybeSingle()
+  return data ?? null
+}
+
+// ── WhatsApp da FWC (Evolution) ──────────────────────────────────────────────
+async function enviarEvolution(sb: any, telefone: string, texto: string) {
+  const url = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$/, "")
+  const key = Deno.env.get("EVOLUTION_API_KEY") ?? ""
+  if (!url || !key) return { erro: "Evolution não configurada" }
+  const { data: cg } = await sb.from("config_global").select("valor").eq("chave", "admin_sender_instance").maybeSingle()
+  const instancia = String(cg?.valor ?? "").trim() || "crmadmin"
+  let d = String(telefone).replace(/\D/g, "")
+  if (!d.startsWith("55")) d = "55" + d
+  const res = await fetch(`${url}/message/sendText/${instancia}`, {
+    method: "POST", headers: { "Content-Type": "application/json", apikey: key },
+    body: JSON.stringify({ number: d, text: texto }),
+  })
+  if (!res.ok) return { erro: `Evolution ${res.status}: ${(await res.text()).slice(0, 200)}` }
+  return { erro: null, telefone: d }
+}
+
 // ── Cron diário ──────────────────────────────────────────────────────────────
 async function cronDiario(sb: any) {
   await sb.rpc("mensalidade_gerar_todas")
@@ -198,7 +275,7 @@ Deno.serve(async (req) => {
     const idMp = url.searchParams.get("data.id") ?? url.searchParams.get("id") ?? body?.data?.id
     // O aviso do MP também traz "action" ("payment.created") — por isso a
     // conferência é contra as ações desta função, e não pela presença do campo.
-    const ACOES = ["cron", "status", "pix", "cartao_chave", "assinar", "cancelar_cartao"]
+    const ACOES = ["cron", "status", "pix", "cartao_chave", "assinar", "cancelar_cartao", "link_info", "link_pix", "link_status", "enviar_link"]
     if (tipoMp && idMp && !ACOES.includes(body?.action)) {
       if (!MP_TOKEN) return json({ ok: true })
       if (tipoMp === "payment") {
@@ -224,6 +301,64 @@ Deno.serve(async (req) => {
     const action = body?.action
     if (action === "cron") return json({ ok: true, avisos: await cronDiario(sb) })
 
+    // ── Página pública do link de pagamento (sem login; o token é a chave) ───
+    if (action === "link_info" || action === "link_pix" || action === "link_status") {
+      const loja = await lojaDoLink(sb, String(body?.token ?? ""))
+      if (!loja) return json({ error: "Link inválido." }, 404)
+      if (!MP_TOKEN) return json({ error: "O pagamento online ainda não foi ligado pela FWC." }, 503)
+      if (action === "link_status" || action === "link_info") await conferirPendentes(sb, loja.empresa_id)
+      const hoje = hojeBR()
+      const { data: abertas } = await sb.from("mensalidade_cobrancas")
+        .select("id, vencimento, referencia, valor").eq("empresa_id", loja.empresa_id).eq("status", "aberta").order("vencimento")
+      const vencidas = (abertas ?? []).filter((c: any) => c.vencimento <= hoje)
+      if (action === "link_status") return json({ ok: true, em_aberto: vencidas.length })
+      if (action === "link_info") {
+        return json({
+          ok: true, loja: loja.empresas?.nome ?? "Loja", hoje, vencidas,
+          proxima: vencidas.length ? null : ((abertas ?? [])[0] ?? null),
+          desconto_antecipado: Number(loja.desconto_antecipado ?? 0),
+        })
+      }
+      const r = await gerarPixLoja(sb, loja.empresa_id, { quem: "Link de pagamento (WhatsApp)", antecipar: !vencidas.length })
+      return json(r.body, r.status)
+    }
+
+
+    // ── Super ADM: manda o link de pagamento pelo WhatsApp da FWC ────────────
+    if (action === "enviar_link") {
+      const tk = (req.headers.get("Authorization") ?? "").replace("Bearer ", "")
+      const { data: { user: su } } = await sb.auth.getUser(tk)
+      if (!su) return json({ error: "Faça login de novo." }, 401)
+      const { data: sp } = await sb.from("profiles").select("id, nome, perfil").eq("id", su.id).maybeSingle()
+      if (sp?.perfil !== "super_admin") return json({ error: "Só o Super ADM." }, 403)
+      const empId = String(body?.empresa_id ?? "")
+      const tel = String(body?.telefone ?? "").replace(/\D/g, "")
+      if (tel.length < 10) return json({ error: "Digite o número com DDD." }, 400)
+      const { data: cfg } = await sb.from("mensalidade_config").select("link_token, empresas(nome)").eq("empresa_id", empId).maybeSingle()
+      if (!cfg) return json({ error: "Essa loja não tem cobrança configurada." }, 400)
+      const hoje = hojeBR()
+      const { data: abertas } = await sb.from("mensalidade_cobrancas")
+        .select("id, vencimento, referencia, valor").eq("empresa_id", empId).eq("status", "aberta").order("vencimento")
+      const vencidas = (abertas ?? []).filter((c: any) => c.vencimento <= hoje)
+      const lista = vencidas.length ? vencidas : (abertas ?? []).slice(0, 1)
+      if (!lista.length) return json({ error: "Não há mensalidade em aberto." }, 400)
+      const total = lista.reduce((s: number, c: any) => s + Number(c.valor), 0)
+      const link = `${APP_URL}/pagar/${cfg.link_token}`
+      const texto = `Olá, ${cfg.empresas?.nome ?? "tudo bem"}! Aqui é a FWC Inter. 👋\n\n` +
+        (vencidas.length
+          ? `A mensalidade do sistema está em aberto: ${lista.map((c: any) => `${c.referencia} (${valorBr(c.valor)})`).join(", ")}. Total: *${valorBr(total)}*.`
+          : `Sua próxima mensalidade do sistema: ${lista[0].referencia} (${valorBr(lista[0].valor)}), vence em ${dataBr(lista[0].vencimento)}.`) +
+        `\n\nPague pelo PIX neste link (abre o QR Code e o copia e cola):\n${link}\n\nQualquer dúvida é só chamar!`
+      const envio: any = await enviarEvolution(sb, tel, texto)
+      await sb.from("mensalidade_avisos").insert({
+        empresa_id: empId, cobranca_id: lista[0].id, tipo: "whatsapp_link", profile_id: sp.id,
+        quem: `${sp.nome ?? "Super ADM"} (Super ADM)`,
+        detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Link enviado pro ${tel} (${valorBr(total)})`,
+      }).then(() => {}, () => {})
+      if (envio.erro) return json({ error: `Não consegui enviar: ${envio.erro}` }, 502)
+      return json({ ok: true, telefone: envio.telefone, link })
+    }
+
     // ── Daqui pra baixo: só o ADMIN logado da loja ───────────────────────────
     const token = (req.headers.get("Authorization") ?? "").replace("Bearer ", "")
     const { data: { user } } = await sb.auth.getUser(token)
@@ -248,52 +383,8 @@ Deno.serve(async (req) => {
     }
 
     if (action === "pix") {
-      await sb.rpc("mensalidade_gerar", { p_empresa: empresaId })
-      const hoje = hojeBR()
-      const { data: cfg } = await sb.from("mensalidade_config").select("desconto_antecipado").eq("empresa_id", empresaId).maybeSingle()
-      const { data: abertas } = await sb.from("mensalidade_cobrancas")
-        .select("id, vencimento, referencia, valor").eq("empresa_id", empresaId).eq("status", "aberta").order("vencimento")
-      const vencidas = (abertas ?? []).filter((c: any) => c.vencimento <= hoje)
-      // Nada vencido: dá pra pagar a próxima antes, com o desconto.
-      const alvo = vencidas.length ? vencidas : (body?.antecipar ? (abertas ?? []).slice(0, 1) : [])
-      if (!alvo.length) return json({ error: "Não há mensalidade em aberto." }, 400)
-      const desconto = vencidas.length ? 0 : Number(cfg?.desconto_antecipado ?? 0)
-      const valor = Math.max(0.01, Math.round((alvo.reduce((s: number, c: any) => s + Number(c.valor), 0) - desconto) * 100) / 100)
-
-      // Já tem PIX valendo pro mesmo valor? Devolve o mesmo (não gera dois).
-      const { data: aberto } = await sb.from("mensalidade_pagamentos")
-        .select("id, valor, pix_copia_cola, pix_qr_base64, expira_em, cobranca_ids")
-        .eq("empresa_id", empresaId).eq("status", "pendente").eq("forma", "pix")
-        .gt("expira_em", new Date(Date.now() + 5 * 60000).toISOString())
-        .order("created_at", { ascending: false }).limit(1).maybeSingle()
-      if (aberto && Number(aberto.valor) === valor && (aberto.cobranca_ids ?? []).length === alvo.length) return json({ ok: true, ...aberto })
-
-      const { data: emp } = await sb.from("empresas").select("nome").eq("id", empresaId).single()
-      const expira = new Date(Date.now() + 60 * 60 * 1000).toISOString()
-      const descricao = `FWC Inter — ${emp?.nome ?? "Loja"} — ${alvo.map((c: any) => c.referencia).join(", ")}`.slice(0, 250)
-      const r = await mp("/v1/payments", "POST", {
-        transaction_amount: valor,
-        description: descricao,
-        payment_method_id: "pix",
-        date_of_expiration: expira,
-        payer: { email: user.email ?? "loja@fwcinter.com" },
-        external_reference: `mensalidade:${empresaId}`,
-        notification_url: `${SUPABASE_URL}/functions/v1/mensalidade`,
-        metadata: { tipo: "mensalidade", empresa_id: empresaId },
-      })
-      if (!r.data?.id) return json({ error: "Não consegui gerar o PIX agora. Tente de novo em instantes.", detalhe: r.data?.message }, 502)
-
-      const td = r.data.point_of_interaction?.transaction_data ?? {}
-      const { data: pg } = await sb.from("mensalidade_pagamentos").insert({
-        empresa_id: empresaId, cobranca_ids: alvo.map((c: any) => c.id), valor, forma: "pix",
-        mp_payment_id: String(r.data.id), pix_copia_cola: td.qr_code ?? null, pix_qr_base64: td.qr_code_base64 ?? null,
-        expira_em: expira, criado_por: prof.id,
-      }).select("id, valor, pix_copia_cola, pix_qr_base64, expira_em").single()
-      await sb.from("mensalidade_avisos").insert({
-        empresa_id: empresaId, cobranca_id: alvo[0].id, tipo: "pix_gerado", profile_id: prof.id,
-        quem: `${prof.nome} (admin)`, detalhe: `PIX de ${valorBr(valor)}`,
-      }).then(() => {}, () => {})
-      return json({ ok: true, ...pg })
+      const r = await gerarPixLoja(sb, empresaId, { email: user.email, profId: prof.id, quem: `${prof.nome} (admin)`, antecipar: !!body?.antecipar })
+      return json(r.body, r.status)
     }
 
     if (action === "assinar") {

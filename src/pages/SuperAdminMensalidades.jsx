@@ -21,7 +21,7 @@ const FASE = {
 }
 const AVISO = {
   faixa_vence_hoje: 'Viu o aviso de vencimento', faixa_carencia: 'Viu o aviso de atraso', popup: 'Viu o pop-up de bloqueio',
-  bloqueio_funcionario: 'Funcionário bloqueado', whatsapp_atraso: 'WhatsApp: atraso', whatsapp_bloqueio: 'WhatsApp: bloqueio',
+  bloqueio_funcionario: 'Funcionário bloqueado', whatsapp_atraso: 'WhatsApp: atraso', whatsapp_bloqueio: 'WhatsApp: bloqueio', whatsapp_link: 'WhatsApp: link de pagamento',
   termo_aceito: 'Aceitou o termo', ja_paguei: 'Clicou "já paguei"', pix_gerado: 'Gerou PIX', pagou: 'Pagou',
   cartao_cadastrado: 'Cadastrou cartão', prazo: 'Prazo dado',
 }
@@ -340,6 +340,7 @@ function Detalhe({ l, hoje, recarregar }) {
             Cobrar no WhatsApp
           </a>
         )}
+        {l.abertas.length > 0 && cfg?.link_token && <CobrarWhatsApp loja={e} recarregar={recarregar} telInicial={tel} />}
         <div style={{ ...subtitulo, marginTop: 14 }}>Dar prazo</div>
         <div style={duas}>
           <input style={campo} type="date" value={prazo} onChange={ev => setPrazo(ev.target.value)} />
@@ -398,6 +399,65 @@ function Detalhe({ l, hoje, recarregar }) {
           ))}
         </div>
       </div>
+    </div>
+  )
+}
+
+// Cobrança pelo WhatsApp da FWC: o Super ADM digita o número e a função manda a
+// mensagem com o link de pagamento (/pagar/:token) pelo Evolution.
+function CobrarWhatsApp({ loja, recarregar, telInicial }) {
+  const [aberto, setAberto] = useState(false)
+  const [numero, setNumero] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [res, setRes] = useState(null)   // { ok, texto }
+
+  const mascara = t => {
+    const d = String(t).replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '').slice(0, 11)
+    return d.length > 6 ? `(${d.slice(0, 2)}) ${d.slice(2, d.length - 4)}-${d.slice(-4)}` : d.length > 2 ? `(${d.slice(0, 2)}) ${d.slice(2)}` : d
+  }
+
+  function abrir() {
+    setNumero(mascara(telInicial)); setRes(null); setAberto(true)
+  }
+
+  async function enviar() {
+    setEnviando(true); setRes(null)
+    const { data: { session } } = await supabase.auth.getSession()
+    try {
+      const r = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mensalidade`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+        body: JSON.stringify({ action: 'enviar_link', empresa_id: loja.id, telefone: numero }),
+      }).then(x => x.json())
+      if (r?.error) setRes({ ok: false, texto: r.error })
+      else { setRes({ ok: true, texto: `Enviado pro ${mascara(r.telefone)} ✓` }); recarregar() }
+    } catch {
+      setRes({ ok: false, texto: 'Sem resposta do servidor.' })
+    }
+    setEnviando(false)
+  }
+
+  if (!aberto) {
+    return (
+      <button type="button" onClick={abrir} style={{ ...botao, marginTop: 8, background: '#16a34a' }}>
+        💬 Cobrança pelo WhatsApp (link PIX)
+      </button>
+    )
+  }
+  return (
+    <div style={{ marginTop: 10, padding: 12, borderRadius: 10, border: '1px solid var(--border)' }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>Mandar o link de pagamento pro número:</div>
+      <input style={campo} inputMode="tel" placeholder="(84) 99999-9999" autoFocus value={numero}
+        onChange={ev => setNumero(mascara(ev.target.value))} />
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <button type="button" onClick={() => setAberto(false)}
+          style={{ ...botao, background: 'transparent', color: 'var(--text)', border: '1px solid var(--border)' }}>Fechar</button>
+        <button type="button" disabled={enviando || numero.replace(/\D/g, '').length < 10} onClick={enviar}
+          style={{ ...botao, background: '#16a34a', opacity: enviando || numero.replace(/\D/g, '').length < 10 ? 0.5 : 1 }}>
+          {enviando ? 'Enviando…' : 'Enviar'}
+        </button>
+      </div>
+      {res && <div style={{ marginTop: 8, fontSize: 12.5, fontWeight: 700, color: res.ok ? '#16a34a' : '#dc2626' }}>{res.texto}</div>}
     </div>
   )
 }

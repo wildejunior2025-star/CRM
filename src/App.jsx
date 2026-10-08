@@ -31,7 +31,7 @@ function TelaCarregando() {
   )
 }
 
-const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/excluir-conta', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor', '/mesa/', '/c/', '/ligacoes']
+const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/excluir-conta', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor', '/mesa/', '/c/', '/ligacoes', '/pagar/']
 
 // Domínios em que a raiz "/" mostra a landing de marketing (visitante deslogado).
 // Nos subdomínios (app./admin./gestor./lojaonline.) a raiz mantém o fluxo antigo.
@@ -206,6 +206,7 @@ const SuperAdminMensalidades = lazy(() => import('./pages/SuperAdminMensalidades
 const AssistenteIA = lazy(() => import('./pages/AssistenteIA'))
 const Termos = lazy(() => import('./pages/Termos'))
 const Privacidade = lazy(() => import('./pages/Privacidade'))
+const PagarMensalidade = lazy(() => import('./pages/PagarMensalidade'))
 const ExcluirConta = lazy(() => import('./pages/ExcluirConta'))
 const ServicoPresencial = lazy(() => import('./pages/ServicoPresencial'))
 const PresencialMesas = lazy(() => import('./pages/PresencialMesas'))
@@ -289,6 +290,7 @@ export default function App() {
           <Route path="/termos" element={<Termos />} />
           <Route path="/ver/:sistema" element={<TourSistema />} />
           <Route path="/privacidade" element={<Privacidade />} />
+          <Route path="/pagar/:token" element={<PagarMensalidade />} />
           <Route path="/excluir-conta" element={<ExcluirConta />} />
           <Route path="/lojas" element={<DeliveryLojas />} />
           <Route path="/loja/:id" element={<DeliveryLoja />} />
