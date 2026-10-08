@@ -13,8 +13,10 @@ const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 // (botão 🎥 na área dele). Quando não prendeu — que é o caso de quase todos
 // —, o aluno cai numa busca pronta no YouTube em vez de ficar sem nada.
 // Link de busca não quebra com o tempo, que é o problema de guardar vídeo.
+// Pede SHORTS na busca: o aluno está no celular, e short é vertical — enche
+// a tela, sem aquela tarja preta em cima e embaixo do vídeo deitado.
 function buscaNoYoutube(nome) {
-  const busca = encodeURIComponent(`como fazer ${nome} academia execução correta`)
+  const busca = encodeURIComponent(`${nome} execução correta academia #shorts`)
   return `https://www.youtube.com/results?search_query=${busca}`
 }
 
