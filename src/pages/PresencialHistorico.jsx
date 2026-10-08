@@ -284,7 +284,7 @@ export default function PresencialHistorico() {
       qComandas.order('fechada_at', { ascending: false }).limit(100),
       supabase.from('profiles').select('id, nome, perfil').eq('empresa_id', empresaId),
       supabase.from('comanda_itens')
-        .select('entregue_por, preco_unitario, quantidade')
+        .select('entregue_por, preco_unitario, quantidade, entregue_at')
         .eq('empresa_id', empresaId)
         .eq('status', 'entregue')
         .not('entregue_por', 'is', null)
@@ -292,13 +292,13 @@ export default function PresencialHistorico() {
       supabase.from('empresas').select('rateio_taxa_pct, pontos_garcom').eq('id', empresaId).single(),
       // Quem LANÇOU cada item hoje (mig 0187)
       supabase.from('comanda_itens')
-        .select('lancado_por, preco_unitario, quantidade')
+        .select('lancado_por, preco_unitario, quantidade, created_at')
         .eq('empresa_id', empresaId)
         .not('lancado_por', 'is', null)
         .gte('created_at', inicioHoje.toISOString()),
       // Quem FECHOU cada conta hoje (mig 0187)
       supabase.from('comandas')
-        .select('fechada_por')
+        .select('fechada_por, fechada_por_em')
         .eq('empresa_id', empresaId)
         .not('fechada_por', 'is', null)
         .gte('fechada_por_em', inicioHoje.toISOString()),
@@ -332,11 +332,12 @@ export default function PresencialHistorico() {
     // Corte de cada garçom. A RLS já limita à loja. Guardo só o maior `ate_dia`
     // de cada um — é ele que diz a partir de quando os gestos voltam a valer.
     supabase.from('garcom_acertos')
-      .select('garcom_id, ate_dia')
+      .select('garcom_id, ate_dia, pago_em')
       .then(({ data }) => {
         const m = {}
         for (const a of data ?? []) {
-          if (!m[a.garcom_id] || a.ate_dia > m[a.garcom_id]) m[a.garcom_id] = a.ate_dia
+          const at = m[a.garcom_id]
+          if (!at || a.ate_dia > at.ate_dia || (a.ate_dia === at.ate_dia && a.pago_em > at.pago_em)) m[a.garcom_id] = a
         }
         setCortes(m)
       })
@@ -464,15 +465,6 @@ export default function PresencialHistorico() {
   // fim pra levar o crédito, e cria o "não mexe na minha mesa" que trava o
   // salão. Contando gesto por gesto, qualquer um atende qualquer mesa.
   const rankingTodos = useMemo(() => {
-    const map = {}
-    const linha = (k) => (map[k] ??= { id: k, lancou: 0, entregou: 0, fechou: 0, valor: 0 })
-    for (const it of lancados) linha(it.lancado_por).lancou += it.quantidade
-    for (const it of entregas) {
-      const l = linha(it.entregue_por)
-      l.entregou += it.quantidade
-      l.valor += Number(it.preco_unitario) * it.quantidade   // base da comissão em R$
-    }
-    for (const c of fechadas) linha(c.fechada_por).fechou += 1
     // QUEM FOI ACERTADO HOJE NÃO PONTUA HOJE.
     //
     // O acerto fecha o período: do `ate_dia` pra trás está tudo quitado (ou
@@ -481,11 +473,31 @@ export default function PresencialHistorico() {
     // continuava vendo "seus pontos hoje: 30" e o dono via zero — duas verdades
     // na mesma loja. Também é certo tirar do bolo: quem não recebe pelo dia não
     // pode diluir o rateio de quem recebe.
+    //
+    // Mas só vale até o HORÁRIO do acerto: turno que vira a madrugada é acertado
+    // às 00:27 com o salão ainda rolando, e o que vem depois ainda não foi pago
+    // (Saidera, 08/10: o placar inteiro sumiu e 288 pontos ficaram sem aparecer).
     const hojeStr = new Date().toLocaleDateString('en-CA')  // YYYY-MM-DD local
+    const vale = (id, ts) => {
+      const c = cortes[id]
+      if (!c || c.ate_dia < hojeStr) return true
+      if (c.ate_dia > hojeStr) return false
+      return !!ts && new Date(ts) > new Date(c.pago_em)
+    }
+    const map = {}
+    const linha = (k) => (map[k] ??= { id: k, lancou: 0, entregou: 0, fechou: 0, valor: 0 })
+    for (const it of lancados) if (vale(it.lancado_por, it.created_at)) linha(it.lancado_por).lancou += it.quantidade
+    for (const it of entregas) {
+      if (!vale(it.entregue_por, it.entregue_at)) continue
+      const l = linha(it.entregue_por)
+      l.entregou += it.quantidade
+      l.valor += Number(it.preco_unitario) * it.quantidade   // base da comissão em R$
+    }
+    for (const c of fechadas) if (vale(c.fechada_por, c.fechada_por_em)) linha(c.fechada_por).fechou += 1
     return Object.values(map).map(r => ({
       ...r,
       pontos: r.lancou * pontosCfg.lancar + r.entregou * pontosCfg.entregar + r.fechou * pontosCfg.fechar,
-    })).filter(r => r.pontos > 0 && !(cortes[r.id] && cortes[r.id] >= hojeStr))
+    })).filter(r => r.pontos > 0)
       .sort((a, b) => b.pontos - a.pontos)
   }, [lancados, entregas, fechadas, pontosCfg, cortes])
 
