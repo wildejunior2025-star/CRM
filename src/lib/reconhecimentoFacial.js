@@ -11,9 +11,16 @@
 const VERSAO = '1.7.15'
 const BASE = `https://cdn.jsdelivr.net/npm/@vladmandic/face-api@${VERSAO}`
 
-// 0,6 é o padrão do modelo; 0,5 erra menos por outra pessoa, que é o erro
-// que custa caro aqui (liberar quem está devendo).
-export const LIMITE_MESMA_PESSOA = 0.5
+// 0,6 é o padrão do modelo. Começamos em 0,5 e em 08/10/2026 o sistema
+// LIBEROU A PESSOA ERRADA: uma visitante bateu 0,481 com uma aluna. Os
+// acertos de verdade medidos aqui ficaram entre 0,31 e 0,42. Daí 0,44:
+// não reconhecer quem é aluno atrapalha; liberar quem não é, não pode.
+export const LIMITE_MESMA_PESSOA = 0.44
+
+// E não basta estar abaixo do limite: o segundo colocado (outro aluno) tem
+// que ficar bem atrás. Quando dois alunos disputam de perto a leitura está
+// ruim demais pra decidir, e aí é melhor não reconhecer ninguém.
+export const MARGEM_MINIMA = 0.05
 
 let carregando = null
 
@@ -115,17 +122,12 @@ function distancia(a, b) {
   return Math.sqrt(soma)
 }
 
-// Compara com todos os alunos e devolve o mais parecido abaixo do limite.
-// Cada aluno pode ter vários descritores (fotos do cadastro); vale o melhor.
-// Aprender com a câmera da catraca: junta a leitura de agora às do cadastro.
-// Guarda as 4 do cadastro + as 8 mais recentes aprendidas (a mais velha sai).
+// As leituras que ficam guardadas no aluno são SÓ as do cadastro. Até
+// 08/10/2026 a recepção também "aprendia" sozinha: toda leitura reconhecida
+// entre 0,30 e 0,48 era gravada na ficha. Isso envenenou um cadastro — a
+// visitante que foi confundida com uma aluna teve o rosto dela gravado na
+// ficha da aluna, e o erro se repetiria cada vez mais fácil. Foi tirado.
 export const LEITURAS_CADASTRO = 4
-export const LEITURAS_APRENDIDAS = 8
-export function juntarLeitura(descritores, nova) {
-  const cadastro = descritores.slice(0, LEITURAS_CADASTRO)
-  const aprendidas = [...descritores.slice(LEITURAS_CADASTRO), Array.from(nova)].slice(-LEITURAS_APRENDIDAS)
-  return [...cadastro, ...aprendidas]
-}
 
 // O rosto está INTEIRO na parte da imagem que aparece na tela? A tela recorta
 // o vídeo pra preencher o espaço (object-fit: cover), então a câmera enxerga
@@ -148,17 +150,31 @@ export function rostoInteiroNaTela(caixa, video) {
   return dentro && grande
 }
 
+// Quem é? Mede a leitura contra todos os descritores de todos os alunos.
+// Só devolve alguém quando as duas coisas valem: a distância está abaixo do
+// limite E o aluno seguinte está pelo menos MARGEM_MINIMA atrás. Devolve
+// também a margem, que a recepção mostra no diagnóstico.
 export function acharAluno(descritor, alunos) {
-  let melhor = null
+  let melhor = null      // { aluno, distancia }
+  let segundo = Infinity // melhor distância de um aluno DIFERENTE do melhor
   for (const aluno of alunos) {
+    let desta = Infinity
     for (const d of aluno.descritores || []) {
       const dist = distancia(descritor, d)
-      if (dist < LIMITE_MESMA_PESSOA && (!melhor || dist < melhor.distancia)) {
-        melhor = { aluno, distancia: dist }
-      }
+      if (dist < desta) desta = dist
+    }
+    if (desta === Infinity) continue
+    if (!melhor || desta < melhor.distancia) {
+      if (melhor) segundo = Math.min(segundo, melhor.distancia)
+      melhor = { aluno, distancia: desta }
+    } else {
+      segundo = Math.min(segundo, desta)
     }
   }
-  return melhor
+  if (!melhor || melhor.distancia >= LIMITE_MESMA_PESSOA) return null
+  const margem = segundo - melhor.distancia
+  if (margem < MARGEM_MINIMA) return null
+  return { ...melhor, margem }
 }
 
 // Qual câmera o cadastro usa neste aparelho. A de TRÁS do celular tem bem mais

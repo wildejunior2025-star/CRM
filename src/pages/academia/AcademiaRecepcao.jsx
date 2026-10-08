@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, acharAluno, situacaoAluno,
-  entrarTelaCheia, sairTelaCheia, juntarLeitura, rostoInteiroNaTela,
+  entrarTelaCheia, sairTelaCheia, rostoInteiroNaTela,
 } from '../../lib/reconhecimentoFacial'
 import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '../../lib/catracaSerial'
 
@@ -13,11 +13,12 @@ import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '.
 // em dia, e anota a entrada. A catraca por enquanto abre no botão manual —
 // quem está na recepção olha a tela e libera.
 
-const CONFIRMAR_LEITURAS = 2     // mesma pessoa em 2 leituras seguidas antes de mostrar
-const CERTEZA_ALTA = 0.42        // abaixo disso uma leitura só basta (quase igual ao cadastro)
-// Aprender: leitura reconhecida com segurança, mas não idêntica ao que já
-// tem guardado, entra no cadastro do aluno (uma vez por aluno por visita).
-const APRENDER_ENTRE = [0.3, 0.48]
+// 08/10/2026: o sistema liberou a pessoa errada (uma visitante bateu 0,481
+// com uma aluna, com o limite em 0,5 e 2 leituras). Daí os números abaixo
+// ficarem apertados — e o aprendizado automático, que gravava a leitura da
+// catraca na ficha do aluno, foi tirado: era ele que gravava o rosto errado.
+const CONFIRMAR_LEITURAS = 3     // mesma pessoa em 3 leituras seguidas antes de liberar
+const CERTEZA_ALTA = 0.33        // abaixo disso uma leitura só basta (quase igual ao cadastro)
 const DESCONHECIDO_LEITURAS = 4  // rosto sem cadastro por 4 leituras → "não reconhecido"
 const MOSTRAR_MS = 5000          // quanto tempo o cartão fica na tela
 const NAO_REGISTRAR_DE_NOVO_MS = 3 * 60 * 1000 // mesma pessoa não conta 2 entradas em 3 min
@@ -111,20 +112,6 @@ export default function AcademiaRecepcao() {
       // PC com a catraca ligada (configurada em /catraca): abre sozinha.
       if (situacao.status === 'liberado') abrirCatraca(achado.aluno)
       registrar(achado.aluno, situacao, achado.distancia)
-      aprender(achado)
-    }
-
-    // Guarda a leitura desta câmera no aluno — com o tempo, cada aluno tem
-    // leituras da própria câmera da catraca e o reconhecimento fica mais rápido.
-    const aprendidoHoje = new Set()
-    async function aprender(achado) {
-      const { aluno, distancia, descritor } = achado
-      if (!descritor || aprendidoHoje.has(aluno.id)) return
-      if (distancia < APRENDER_ENTRE[0] || distancia > APRENDER_ENTRE[1]) return
-      aprendidoHoje.add(aluno.id)
-      const novos = juntarLeitura(aluno.descritores || [], descritor)
-      aluno.descritores = novos // já vale na próxima leitura, sem esperar recarregar
-      await supabase.from('academia_alunos').update({ descritores: novos }).eq('id', aluno.id)
     }
 
     function mostrar(c) {
@@ -174,8 +161,7 @@ export default function AcademiaRecepcao() {
         setAjuste(null)
         const achado = acharAluno(r.descritor, alunosRef.current)
         if (achado) {
-          achado.descritor = r.descritor
-          setDiag(d => ({ ...d, dist: achado.distancia }))
+          setDiag(d => ({ ...d, dist: achado.distancia, margem: achado.margem }))
           desconhecidas = 0
           if (candidato === achado.aluno.id) seguidas++
           else { candidato = achado.aluno.id; seguidas = 1 }
@@ -308,7 +294,9 @@ export default function AcademiaRecepcao() {
         )}
         {diag.ms && (
           <div className="ac-rec-diag">
-            leitura {diag.ms} ms · {diag.backend}{diag.dist != null ? ` · semelhança ${(1 - diag.dist).toFixed(2)}` : ''}
+            leitura {diag.ms} ms · {diag.backend}
+            {diag.dist != null ? ` · distância ${diag.dist.toFixed(3)}` : ''}
+            {diag.margem != null && diag.margem !== Infinity ? ` · margem ${diag.margem.toFixed(3)}` : ''}
           </div>
         )}
         <Link to="/" className="ac-rec-voltar">← Alunos</Link>
