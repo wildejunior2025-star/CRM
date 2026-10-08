@@ -2341,6 +2341,35 @@ export default function DeliveryCheckout() {
                     )}
                   </Field>
 
+                  {/* CEP — atalho pra quem sabe, não porta de entrada. */}
+                  <Field label="CEP" hint="opcional — se souber, preenche tudo de uma vez">
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        className="dco-input"
+                        placeholder="00000-000"
+                        value={form.cep}
+                        onChange={handleCepChange}
+                        inputMode="numeric"
+                        maxLength={9}
+                      />
+                      {buscandoCep && (
+                        <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: 'var(--text-muted, #888)' }}>
+                          Buscando...
+                        </span>
+                      )}
+                    </div>
+                    {erroCep && <span className="dco-field-error">{erroCep}</span>}
+                  </Field>
+
+                  {/* Aviso quando a rua/bairro não batem com o CEP digitado */}
+                  {cepDivergente && (
+                    <div style={{ marginTop: -4, marginBottom: 4, padding: '9px 11px', borderRadius: 10,
+                      border: '1px solid #eab308', background: 'rgba(234,179,8,.1)', fontSize: 12.5, color: '#a16207', lineHeight: 1.4 }}>
+                      ⚠️ Esse CEP é de{cepDivergente.rua ? ` ${cepDivergente.rua},` : ''}
+                      {cepDivergente.bairro ? ` bairro ${cepDivergente.bairro}` : ''}. Confere se o endereço está certo.
+                    </div>
+                  )}
+
                   {/* Número + Complemento */}
                   <div className="dco-row">
                     <Field label="Número" required error={errors.numero}>
@@ -2433,35 +2462,6 @@ export default function DeliveryCheckout() {
                       data-field-error={errors.bairro ? true : undefined}
                     />
                   </Field>
-
-                  {/* CEP — atalho pra quem sabe, não porta de entrada. */}
-                  <Field label="CEP" hint="opcional — se souber, preenche tudo de uma vez">
-                    <div style={{ position: 'relative' }}>
-                      <input
-                        className="dco-input"
-                        placeholder="00000-000"
-                        value={form.cep}
-                        onChange={handleCepChange}
-                        inputMode="numeric"
-                        maxLength={9}
-                      />
-                      {buscandoCep && (
-                        <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: 'var(--text-muted, #888)' }}>
-                          Buscando...
-                        </span>
-                      )}
-                    </div>
-                    {erroCep && <span className="dco-field-error">{erroCep}</span>}
-                  </Field>
-
-                  {/* Aviso quando a rua/bairro não batem com o CEP digitado */}
-                  {cepDivergente && (
-                    <div style={{ marginTop: -4, marginBottom: 4, padding: '9px 11px', borderRadius: 10,
-                      border: '1px solid #eab308', background: 'rgba(234,179,8,.1)', fontSize: 12.5, color: '#a16207', lineHeight: 1.4 }}>
-                      ⚠️ Esse CEP é de{cepDivergente.rua ? ` ${cepDivergente.rua},` : ''}
-                      {cepDivergente.bairro ? ` bairro ${cepDivergente.bairro}` : ''}. Confere se o endereço está certo.
-                    </div>
-                  )}
 
                   {/* Localizador no mapa — ponto exato pra taxa certinha.
                       Fica ABERTO, não atrás de botão: mapa que precisa de clique
