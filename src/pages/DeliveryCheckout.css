@@ -608,3 +608,21 @@
   font-size: 12px;
   color: var(--dco-muted);
 }
+
+/* ── Celular: formulário em passos (Próximo / Voltar). No PC tudo aparece junto. ── */
+.dco-passos-nav { display: flex; gap: 10px; }
+.dco-passos-nav .dco-btn-submit { flex: 1; }
+.dco-btn-voltar {
+  flex: 0 0 auto; padding: 0 18px; border-radius: 12px; font-weight: 700; font-size: 15px;
+  background: transparent; color: inherit; border: 1px solid var(--dco-surface, #334155); cursor: pointer;
+}
+@media (max-width: 899px) {
+  .dco-form[data-passo="0"] [data-p]:not([data-p="0"]),
+  .dco-form[data-passo="1"] [data-p]:not([data-p="1"]),
+  .dco-form[data-passo="2"] [data-p]:not([data-p="2"]),
+  .dco-form[data-passo="3"] [data-p]:not([data-p="3"]) { display: none; }
+  .dco-form { padding-bottom: 90px; }
+}
+@media (min-width: 900px) {
+  .dco-passos-nav { display: none; }
+}

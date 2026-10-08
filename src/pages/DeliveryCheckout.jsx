@@ -746,6 +746,9 @@ export default function DeliveryCheckout() {
   const [forma2, setForma2]   = useState('')
   const [valor1, setValor1]   = useState('')
   const [erroGlobal, setErroGlobal] = useState(null)
+  // Celular: o formulário é fatiado em passos (0 dados, 1 entrega, 2 pagamento, 3 resumo).
+  // No PC os passos não existem — o CSS só esconde no mobile.
+  const [passo, setPasso]           = useState(0)
   const [cidades, setCidades]       = useState([])
   // A lista do IBGE não veio: o campo vira texto livre em vez de virar parede.
   const [cidadeLivre, setCidadeLivre] = useState(false)
@@ -1709,6 +1712,36 @@ export default function DeliveryCheckout() {
     return e
   }
 
+  const CAMPOS_PASSO = [
+    ['telefone', 'nome'],
+    ['rua', 'numero', 'estado', 'cidade', 'bairro'],
+    ['troco', 'divisao'],
+  ]
+  function passoDoErro(errs) {
+    const i = CAMPOS_PASSO.findIndex(c => c.some(k => errs[k]))
+    return i < 0 ? 0 : i
+  }
+
+  function proximoPasso() {
+    const errs = validate()
+    const meus = CAMPOS_PASSO[passo]?.filter(k => errs[k]) ?? []
+    if (meus.length > 0) {
+      setErrors(prev => ({ ...prev, ...Object.fromEntries(meus.map(k => [k, errs[k]])) }))
+      setTimeout(() => {
+        document.querySelector('[data-field-error]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 50)
+      return
+    }
+    setErroGlobal(null)
+    setPasso(p => Math.min(p + 1, 3))
+    window.scrollTo({ top: 0 })
+  }
+
+  function voltarPasso() {
+    setPasso(p => Math.max(p - 1, 0))
+    window.scrollTo({ top: 0 })
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setErroGlobal(null)
@@ -1716,6 +1749,7 @@ export default function DeliveryCheckout() {
     const errs = validate()
     if (Object.keys(errs).length > 0) {
       setErrors(errs)
+      setPasso(passoDoErro(errs))
       setTimeout(() => {
         document.querySelector('[data-field-error]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       }, 50)
@@ -1745,6 +1779,7 @@ export default function DeliveryCheckout() {
     // um pedido pra uma cozinha que só abre daqui a quatro horas.
     if (agendaLigada && quando === 'agendado' && !agendadoPara) {
       setErroGlobal('Escolha o dia e o horário do seu pedido.')
+      setPasso(1)
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
@@ -1796,6 +1831,7 @@ export default function DeliveryCheckout() {
     if (nomeCadastro && !telConfirmadoRef.current
         && primeiroNome(form.nome) && primeiroNome(form.nome) !== primeiroNome(nomeCadastro)) {
       setTelDuvida(true)
+      setPasso(0)
       setTimeout(() => {
         document.querySelector('[data-tel-duvida]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       }, 50)
@@ -1990,12 +2026,12 @@ export default function DeliveryCheckout() {
       </header>
 
       <main className="dco-main">
-        <form className="dco-form" onSubmit={handleSubmit} noValidate>
+        <form className="dco-form" onSubmit={handleSubmit} noValidate data-passo={passo}>
           <div className="dco-layout">
             <div className="dco-col-form">
 
               {/* Seus dados */}
-              <section className="dco-section">
+              <section className="dco-section" data-p="0">
                 <h2 className="dco-section-title">Seus dados</h2>
                 <div className="dco-field-group">
                   {/* Telefone primeiro: se já é cliente, preenche o resto sozinho */}
@@ -2094,7 +2130,7 @@ export default function DeliveryCheckout() {
                   com os dois botões — não há o que escolher — mas a seção fica,
                   porque é dentro dela que aparece o endereço pra retirar. */}
               {(permiteRetirada || permiteEntrega) && (
-              <section className="dco-section">
+              <section className="dco-section" data-p="1">
                 <h2 className="dco-section-title">
                   {permiteEntrega ? 'Como você quer receber?' : 'Retirada na loja'}
                 </h2>
@@ -2141,7 +2177,7 @@ export default function DeliveryCheckout() {
                   agendamento. Fechada, "pra agora" nem existe: o único caminho
                   é escolher dia e hora dentro da grade da loja. */}
               {agendaLigada && (
-              <section className="dco-section">
+              <section className="dco-section" data-p="1">
                 <h2 className="dco-section-title">Quando você quer?</h2>
                 {lojaEstavaAberta && (
                   <div className="dco-payment-row">
@@ -2213,7 +2249,7 @@ export default function DeliveryCheckout() {
 
               {/* Endereço (só na entrega) */}
               {tipo === 'entrega' && (
-              <section className="dco-section">
+              <section className="dco-section" data-p="1">
                 <h2 className="dco-section-title">Endereço de entrega</h2>
                 <div className="dco-field-group">
 
@@ -2464,7 +2500,7 @@ export default function DeliveryCheckout() {
               )}
 
               {/* Pagamento */}
-              <section className="dco-section">
+              <section className="dco-section" data-p="2">
                 <h2 className="dco-section-title">Pagamento</h2>
                 {/* Só as formas que a loja aceita (Minha Loja → Pagamento) */}
                 <div className="dco-payment-row">
@@ -2629,7 +2665,7 @@ export default function DeliveryCheckout() {
               </section>
 
               {/* Observações */}
-              <section className="dco-section">
+              <section className="dco-section" data-p="2">
                 <h2 className="dco-section-title">Observações <span className="dco-optional">(opcional)</span></h2>
                 <textarea
                   className="dco-textarea"
@@ -2641,7 +2677,7 @@ export default function DeliveryCheckout() {
               </section>
             </div>
 
-            <div className="dco-col-aside">
+            <div className="dco-col-aside" data-p="3">
               <div className="dco-resumo">
                 <h2 className="dco-section-title">Resumo do pedido</h2>
                 <div className="dco-resumo-itens">
@@ -2768,27 +2804,43 @@ export default function DeliveryCheckout() {
               pelos MESMOS motivos do botão do desktop; antes ele nem olhava o
               bairro bloqueado. */}
           <div className="dco-submit-mobile">
-            {taxaIndefinida && (
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: '#eab308', textAlign: 'center', marginBottom: 8 }}>
-                {configNaoCarregou
-                  ? '⏳ Carregando a taxa de entrega...'
-                  : '📍 Marque seu endereço no mapa pra calcular a entrega'}
+            {passo < 3 ? (
+              <div className="dco-passos-nav">
+                {passo > 0 && (
+                  <button type="button" className="dco-btn-voltar" onClick={voltarPasso}>Voltar</button>
+                )}
+                <button type="button" className="dco-btn-submit" onClick={proximoPasso}>
+                  Próximo · {passo + 1}/4
+                </button>
               </div>
+            ) : (
+              <>
+                {taxaIndefinida && (
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: '#eab308', textAlign: 'center', marginBottom: 8 }}>
+                    {configNaoCarregou
+                      ? '⏳ Carregando a taxa de entrega...'
+                      : '📍 Marque seu endereço no mapa pra calcular a entrega'}
+                  </div>
+                )}
+                <div className="dco-passos-nav">
+                  <button type="button" className="dco-btn-voltar" onClick={voltarPasso}>Voltar</button>
+                  <button type="submit" className="dco-btn-submit"
+                    disabled={enviando || faltaMinimo || bairroBloqueado || taxaIndefinida}>
+                    {enviando
+                      ? <><span className="dco-spinner" />Enviando pedido...</>
+                      : bairroBloqueado
+                      ? 'Não entregamos no seu bairro'
+                      : configNaoCarregou
+                      ? 'Calculando a entrega...'
+                      : taxaPendente
+                      ? 'Marque seu endereço no mapa'
+                      : faltaMinimo
+                      ? `Faltam R$ ${fmt(faltamParaMinimo)} p/ o mínimo`
+                      : `Fechar e enviar · R$ ${fmt(total)}`}
+                  </button>
+                </div>
+              </>
             )}
-            <button type="submit" className="dco-btn-submit"
-              disabled={enviando || faltaMinimo || bairroBloqueado || taxaIndefinida}>
-              {enviando
-                ? <><span className="dco-spinner" />Enviando pedido...</>
-                : bairroBloqueado
-                ? 'Não entregamos no seu bairro'
-                : configNaoCarregou
-                ? 'Calculando a entrega...'
-                : taxaPendente
-                ? 'Marque seu endereço no mapa'
-                : faltaMinimo
-                ? `Faltam R$ ${fmt(faltamParaMinimo)} p/ o mínimo`
-                : `Fechar e enviar · R$ ${fmt(total)}`}
-            </button>
           </div>
         </form>
       </main>
