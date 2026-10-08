@@ -8,13 +8,13 @@ import { useParams } from 'react-router-dom'
 const fmt = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const dataBR = ymd => ymd ? ymd.split('-').reverse().join('/') : ''
 
-async function chamar(action, token) {
+async function chamar(action, token, extra = {}) {
   const key = import.meta.env.VITE_SUPABASE_ANON_KEY
   try {
     const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mensalidade`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: key, Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ action, token }),
+      body: JSON.stringify({ action, token, ...extra }),
     })
     return await res.json()
   } catch {
@@ -40,8 +40,8 @@ export default function PagarMensalidade() {
   useEffect(() => {
     if (!pix?.id || pago) return
     pollRef.current = setInterval(async () => {
-      const r = await chamar('link_status', token)
-      if (r?.ok && r.em_aberto === 0) { clearInterval(pollRef.current); setPago(true) }
+      const r = await chamar('link_status', token, { pagamento_id: pix.id })
+      if (r?.ok && r.pago) { clearInterval(pollRef.current); setPago(true) }
     }, 5000)
     return () => clearInterval(pollRef.current)
   }, [pix?.id, pago, token])

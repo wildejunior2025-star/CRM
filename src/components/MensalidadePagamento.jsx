@@ -49,8 +49,8 @@ export default function MensalidadePagamento({ situacao, onPago, empresaId, most
   useEffect(() => {
     if (!pix?.id || pago) return
     pollRef.current = setInterval(async () => {
-      const r = await chamar('status')
-      if (r?.ok && r.em_aberto === 0) {
+      const r = await chamar('status', { pagamento_id: pix.id })
+      if (r?.ok && (r.pago ?? r.em_aberto === 0)) {
         clearInterval(pollRef.current)
         setPago(true)
         setTimeout(() => onPago?.(), 2500)

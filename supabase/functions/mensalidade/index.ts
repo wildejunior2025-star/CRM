@@ -354,7 +354,13 @@ Deno.serve(async (req) => {
       const { data: abertas } = await sb.from("mensalidade_cobrancas")
         .select("id, vencimento, referencia, valor").eq("empresa_id", loja.empresa_id).eq("status", "aberta").order("vencimento")
       const vencidas = (abertas ?? []).filter((c: any) => c.vencimento <= hoje)
-      if (action === "link_status") return json({ ok: true, em_aberto: vencidas.length })
+      if (action === "link_status") {
+        // Pago = ESTE PIX foi aprovado (não "não sobrou vencida": quem paga
+        // adiantado não tem vencida e a tela confirmaria sem ninguém pagar).
+        const { data: pg } = await sb.from("mensalidade_pagamentos").select("status")
+          .eq("id", String(body?.pagamento_id ?? "")).eq("empresa_id", loja.empresa_id).maybeSingle()
+        return json({ ok: true, pago: pg?.status === "aprovado" })
+      }
       if (action === "link_info") {
         return json({
           ok: true, loja: loja.empresas?.nome ?? "Loja", hoje, vencidas,
@@ -417,7 +423,14 @@ Deno.serve(async (req) => {
       const hoje = hojeBR()
       const { count } = await sb.from("mensalidade_cobrancas").select("id", { count: "exact", head: true })
         .eq("empresa_id", empresaId).eq("status", "aberta").lte("vencimento", hoje)
-      return json({ ok: true, em_aberto: count ?? 0 })
+      // Com o id do PIX na tela: pago = esse PIX foi aprovado (adiantado não tem vencida).
+      let pago: boolean | undefined
+      if (body?.pagamento_id) {
+        const { data: pg } = await sb.from("mensalidade_pagamentos").select("status")
+          .eq("id", String(body.pagamento_id)).eq("empresa_id", empresaId).maybeSingle()
+        pago = pg?.status === "aprovado"
+      }
+      return json({ ok: true, em_aberto: count ?? 0, pago })
     }
 
     if (action === "pix") {
