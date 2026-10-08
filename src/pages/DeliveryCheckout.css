@@ -626,3 +626,9 @@
 @media (min-width: 900px) {
   .dco-passos-nav { display: none; }
 }
+
+/* Celular: o mapa embutido some da tela de endereço — o pino é confirmado no
+   mapa grande que abre ao tocar em Próximo. No PC continua na página. */
+@media (max-width: 899px) {
+  .dco-mapa-embutido { display: none; }
+}

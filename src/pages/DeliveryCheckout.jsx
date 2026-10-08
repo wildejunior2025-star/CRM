@@ -2463,7 +2463,7 @@ export default function DeliveryCheckout() {
                       pra aparecer ninguém abre, e o entregador acaba indo pro
                       ponto que o buscador chutou. */}
                   {lojaEndereco?.latitude && lojaEndereco?.longitude && (
-                    <div style={{ marginTop: 4 }}>
+                    <div className="dco-mapa-embutido" style={{ marginTop: 4 }}>
                       <MapaLocalizador
                         embutido
                         storeLat={lojaEndereco.latitude}
