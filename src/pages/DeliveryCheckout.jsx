@@ -1532,6 +1532,9 @@ export default function DeliveryCheckout() {
   const [mapaForcado, setMapaForcado] = useState(false)
   useEffect(() => {
     if (tipo !== 'entrega' || pinSalvo || jaForcouMapa.current) return
+    // Celular: o mapa só sobe quando a pessoa toca em "Próximo" na tela de entrega
+    // (proximoPasso) — antes disso ela ainda está preenchendo o endereço.
+    if (window.matchMedia('(max-width: 899px)').matches) return
     if (!lojaEndereco?.latitude || !lojaEndereco?.longitude) return
     if (!form.rua.trim() || !form.numero.trim() || !form.bairro.trim()) return
     // Espera parar de digitar: sem isso o mapa pulava no "1" de "151".
@@ -1733,6 +1736,12 @@ export default function DeliveryCheckout() {
       return
     }
     setErroGlobal(null)
+    if (passo === 1 && tipo === 'entrega' && !pinSalvo && !jaForcouMapa.current
+        && lojaEndereco?.latitude && lojaEndereco?.longitude) {
+      jaForcouMapa.current = true
+      setMapaForcado(true)
+      setMapaAberto(true)
+    }
     setPasso(p => Math.min(p + 1, 3))
     window.scrollTo({ top: 0 })
   }
