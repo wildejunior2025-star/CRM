@@ -21,7 +21,7 @@ const FASE = {
 }
 const AVISO = {
   faixa_vence_hoje: 'Viu o aviso de vencimento', faixa_carencia: 'Viu o aviso de atraso', popup: 'Viu o pop-up de bloqueio',
-  bloqueio_funcionario: 'Funcionário bloqueado', whatsapp_atraso: 'WhatsApp: atraso', whatsapp_bloqueio: 'WhatsApp: bloqueio', whatsapp_link: 'WhatsApp: link de pagamento',
+  bloqueio_funcionario: 'Funcionário bloqueado', whatsapp_atraso: 'WhatsApp: atraso', whatsapp_bloqueio: 'WhatsApp: bloqueio', whatsapp_link: 'WhatsApp: link de pagamento', whatsapp_link_auto: 'WhatsApp: link automático', whatsapp_link_falha: 'WhatsApp: link NÃO saiu',
   termo_aceito: 'Aceitou o termo', ja_paguei: 'Clicou "já paguei"', pix_gerado: 'Gerou PIX', pagou: 'Pagou',
   cartao_cadastrado: 'Cadastrou cartão', prazo: 'Prazo dado',
 }
@@ -340,7 +340,7 @@ function Detalhe({ l, hoje, recarregar }) {
             Cobrar no WhatsApp
           </a>
         )}
-        {l.abertas.length > 0 && cfg?.link_token && <CobrarWhatsApp loja={e} recarregar={recarregar} telInicial={tel} />}
+        {cfg?.link_token && <CobrarWhatsApp key={`${e.id}-${cfg.zap_auto}-${cfg.zap_telefone}`} loja={e} cfg={cfg} temAberta={l.abertas.length > 0} recarregar={recarregar} telInicial={tel} />}
         <div style={{ ...subtitulo, marginTop: 14 }}>Dar prazo</div>
         <div style={duas}>
           <input style={campo} type="date" value={prazo} onChange={ev => setPrazo(ev.target.value)} />
@@ -403,24 +403,34 @@ function Detalhe({ l, hoje, recarregar }) {
   )
 }
 
-// Cobrança pelo WhatsApp da FWC: o Super ADM digita o número e a função manda a
-// mensagem com o link de pagamento (/pagar/:token) pelo Evolution.
-function CobrarWhatsApp({ loja, recarregar, telInicial }) {
-  const [aberto, setAberto] = useState(false)
-  const [numero, setNumero] = useState('')
-  const [enviando, setEnviando] = useState(false)
-  const [res, setRes] = useState(null)   // { ok, texto }
-
+// Cobrança automática pelo WhatsApp da FWC: com a chave ligada, todo dia às 9h o
+// sistema manda o link de pagamento (/pagar/:token) pro número guardado, uma vez
+// por cobrança vencida. Só as lojas que o Super ADM ligar.
+function CobrarWhatsApp({ loja, cfg, temAberta, recarregar, telInicial }) {
   const mascara = t => {
-    const d = String(t).replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '').slice(0, 11)
+    const d = String(t ?? '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '').slice(0, 11)
     return d.length > 6 ? `(${d.slice(0, 2)}) ${d.slice(2, d.length - 4)}-${d.slice(-4)}` : d.length > 2 ? `(${d.slice(0, 2)}) ${d.slice(2)}` : d
   }
+  const [ligado, setLigado] = useState(!!cfg.zap_auto)
+  const [numero, setNumero] = useState(mascara(cfg.zap_telefone || telInicial))
+  const [salvando, setSalvando] = useState(false)
+  const [enviando, setEnviando] = useState(false)
+  const [res, setRes] = useState(null)   // { ok, texto }
+  const digitos = numero.replace(/\D/g, '')
+  const numeroOk = digitos.length >= 10
 
-  function abrir() {
-    setNumero(mascara(telInicial)); setRes(null); setAberto(true)
+  async function salvar() {
+    setSalvando(true); setRes(null)
+    const { error } = await supabase.from('mensalidade_config')
+      .update({ zap_auto: ligado, zap_telefone: digitos || null, atualizado_em: new Date().toISOString() }).eq('empresa_id', loja.id)
+    setSalvando(false)
+    if (error) { setRes({ ok: false, texto: error.message }); return }
+    setRes({ ok: true, texto: ligado ? 'Ligado: o link sai sozinho às 9h quando a cobrança vencer.' : 'Desligado.' })
+    recarregar()
   }
 
-  async function enviar() {
+  async function enviarAgora() {
+    if (!window.confirm(`Mandar o link de pagamento agora pro ${numero}?`)) return
     setEnviando(true); setRes(null)
     const { data: { session } } = await supabase.auth.getSession()
     try {
@@ -437,26 +447,29 @@ function CobrarWhatsApp({ loja, recarregar, telInicial }) {
     setEnviando(false)
   }
 
-  if (!aberto) {
-    return (
-      <button type="button" onClick={abrir} style={{ ...botao, marginTop: 8, background: '#16a34a' }}>
-        💬 Cobrança pelo WhatsApp (link PIX)
-      </button>
-    )
-  }
   return (
-    <div style={{ marginTop: 10, padding: 12, borderRadius: 10, border: '1px solid var(--border)' }}>
-      <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>Mandar o link de pagamento pro número:</div>
-      <input style={campo} inputMode="tel" placeholder="(84) 99999-9999" autoFocus value={numero}
-        onChange={ev => setNumero(mascara(ev.target.value))} />
-      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-        <button type="button" onClick={() => setAberto(false)}
-          style={{ ...botao, background: 'transparent', color: 'var(--text)', border: '1px solid var(--border)' }}>Fechar</button>
-        <button type="button" disabled={enviando || numero.replace(/\D/g, '').length < 10} onClick={enviar}
-          style={{ ...botao, background: '#16a34a', opacity: enviando || numero.replace(/\D/g, '').length < 10 ? 0.5 : 1 }}>
-          {enviando ? 'Enviando…' : 'Enviar'}
-        </button>
+    <div style={{ marginTop: 12, padding: 12, borderRadius: 10, border: '1px solid var(--border)' }}>
+      <div style={subtitulo}>Cobrança automática no WhatsApp</div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 700, marginBottom: 8, cursor: 'pointer' }}>
+        <input type="checkbox" checked={ligado} onChange={ev => setLigado(ev.target.checked)} style={{ width: 18, height: 18 }} />
+        Mandar o link do PIX sozinho
+      </label>
+      <label style={rotulo}>Número que recebe
+        <input style={campo} inputMode="tel" placeholder="(84) 99999-9999" value={numero} onChange={ev => setNumero(mascara(ev.target.value))} />
+      </label>
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+        Sai pelo WhatsApp da FWC, às 9h, uma vez por cobrança vencida. Quando a loja paga, para sozinho.
       </div>
+      <button type="button" disabled={salvando || (ligado && !numeroOk)} onClick={salvar}
+        style={{ ...botao, background: '#16a34a', opacity: salvando || (ligado && !numeroOk) ? 0.5 : 1 }}>
+        {salvando ? 'Salvando…' : 'Salvar'}
+      </button>
+      {temAberta && numeroOk && (
+        <button type="button" disabled={enviando} onClick={enviarAgora}
+          style={{ ...botaoPequeno, width: '100%', marginTop: 6, padding: '7px 0' }}>
+          {enviando ? 'Enviando…' : 'Mandar o link agora (teste)'}
+        </button>
+      )}
       {res && <div style={{ marginTop: 8, fontSize: 12.5, fontWeight: 700, color: res.ok ? '#16a34a' : '#dc2626' }}>{res.texto}</div>}
     </div>
   )

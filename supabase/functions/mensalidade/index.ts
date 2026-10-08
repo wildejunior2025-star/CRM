@@ -201,6 +201,48 @@ async function enviarEvolution(sb: any, telefone: string, texto: string) {
   return { erro: null, telefone: d }
 }
 
+function textoLink(nome: string | undefined, token: string, lista: any[], vencida: boolean) {
+  const total = lista.reduce((s: number, c: any) => s + Number(c.valor), 0)
+  return `Olá, ${nome ?? "tudo bem"}! Aqui é a FWC Inter. 👋\n\n` +
+    (vencida
+      ? `A mensalidade do sistema está em aberto: ${lista.map((c: any) => `${c.referencia} (${valorBr(c.valor)})`).join(", ")}. Total: *${valorBr(total)}*.`
+      : `Sua próxima mensalidade do sistema: ${lista[0].referencia} (${valorBr(lista[0].valor)}), vence em ${dataBr(lista[0].vencimento)}.`) +
+    `\n\nPague pelo PIX neste link (abre o QR Code e o copia e cola):\n${APP_URL}/pagar/${token}\n\nQualquer dúvida é só chamar!`
+}
+
+// ── Envio automático do link (só lojas com zap_auto ligado no Super ADM) ─────
+// Roda às 9h (Fortaleza). Uma mensagem por cobrança vencida nova: a chave é a
+// vencida mais recente, então cada semana que vence manda a sua. Falha não
+// trava: grava outro tipo de aviso e tenta de novo no dia seguinte.
+async function cronLinkWhatsApp(sb: any) {
+  const hoje = hojeBR()
+  const { data: cfgs } = await sb.from("mensalidade_config")
+    .select("empresa_id, link_token, zap_telefone, empresas(nome)").eq("ativa", true).eq("zap_auto", true)
+  const resumo: unknown[] = []
+  for (const c of cfgs ?? []) {
+    if (!c.zap_telefone) continue
+    await conferirPendentes(sb, c.empresa_id)
+    const { data: abertas } = await sb.from("mensalidade_cobrancas")
+      .select("id, vencimento, referencia, valor").eq("empresa_id", c.empresa_id).eq("status", "aberta").lte("vencimento", hoje).order("vencimento")
+    if (!abertas?.length) continue
+    const chave = abertas[abertas.length - 1]
+    const { data: jaFoi } = await sb.from("mensalidade_avisos").select("id")
+      .eq("empresa_id", c.empresa_id).eq("cobranca_id", chave.id).eq("tipo", "whatsapp_link_auto").limit(1).maybeSingle()
+    if (jaFoi) continue
+    const total = abertas.reduce((s: number, x: any) => s + Number(x.valor), 0)
+    const envio: any = await enviarEvolution(sb, c.zap_telefone, textoLink(c.empresas?.nome, c.link_token, abertas, true))
+    await sb.from("mensalidade_avisos").insert({
+      empresa_id: c.empresa_id, cobranca_id: chave.id, tipo: envio.erro ? "whatsapp_link_falha" : "whatsapp_link_auto",
+      quem: "WhatsApp da FWC (automático)",
+      detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Link enviado pro ${c.zap_telefone} (${valorBr(total)})`,
+    }).then(() => {}, () => {})
+    resumo.push({ loja: c.empresas?.nome, erro: envio.erro })
+    // Espaça os envios: número da FWC não é Cloud API, sem pressa.
+    await new Promise(r => setTimeout(r, 4000))
+  }
+  return resumo
+}
+
 // ── Cron diário ──────────────────────────────────────────────────────────────
 async function cronDiario(sb: any) {
   await sb.rpc("mensalidade_gerar_todas")
@@ -275,7 +317,7 @@ Deno.serve(async (req) => {
     const idMp = url.searchParams.get("data.id") ?? url.searchParams.get("id") ?? body?.data?.id
     // O aviso do MP também traz "action" ("payment.created") — por isso a
     // conferência é contra as ações desta função, e não pela presença do campo.
-    const ACOES = ["cron", "status", "pix", "cartao_chave", "assinar", "cancelar_cartao", "link_info", "link_pix", "link_status", "enviar_link"]
+    const ACOES = ["cron", "cron_link", "status", "pix", "cartao_chave", "assinar", "cancelar_cartao", "link_info", "link_pix", "link_status", "enviar_link"]
     if (tipoMp && idMp && !ACOES.includes(body?.action)) {
       if (!MP_TOKEN) return json({ ok: true })
       if (tipoMp === "payment") {
@@ -300,6 +342,7 @@ Deno.serve(async (req) => {
 
     const action = body?.action
     if (action === "cron") return json({ ok: true, avisos: await cronDiario(sb) })
+    if (action === "cron_link") return json({ ok: true, envios: await cronLinkWhatsApp(sb) })
 
     // ── Página pública do link de pagamento (sem login; o token é a chave) ───
     if (action === "link_info" || action === "link_pix" || action === "link_status") {
@@ -343,12 +386,7 @@ Deno.serve(async (req) => {
       const lista = vencidas.length ? vencidas : (abertas ?? []).slice(0, 1)
       if (!lista.length) return json({ error: "Não há mensalidade em aberto." }, 400)
       const total = lista.reduce((s: number, c: any) => s + Number(c.valor), 0)
-      const link = `${APP_URL}/pagar/${cfg.link_token}`
-      const texto = `Olá, ${cfg.empresas?.nome ?? "tudo bem"}! Aqui é a FWC Inter. 👋\n\n` +
-        (vencidas.length
-          ? `A mensalidade do sistema está em aberto: ${lista.map((c: any) => `${c.referencia} (${valorBr(c.valor)})`).join(", ")}. Total: *${valorBr(total)}*.`
-          : `Sua próxima mensalidade do sistema: ${lista[0].referencia} (${valorBr(lista[0].valor)}), vence em ${dataBr(lista[0].vencimento)}.`) +
-        `\n\nPague pelo PIX neste link (abre o QR Code e o copia e cola):\n${link}\n\nQualquer dúvida é só chamar!`
+      const texto = textoLink(cfg.empresas?.nome, cfg.link_token, lista, vencidas.length > 0)
       const envio: any = await enviarEvolution(sb, tel, texto)
       await sb.from("mensalidade_avisos").insert({
         empresa_id: empId, cobranca_id: lista[0].id, tipo: "whatsapp_link", profile_id: sp.id,
