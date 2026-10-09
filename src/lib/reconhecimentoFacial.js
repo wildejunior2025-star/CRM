@@ -76,9 +76,26 @@ export function carregarFaceApi(aviso = () => {}) {
       ]
       // Um de cada vez: em internet fraca, três downloads juntos brigam
       // entre si e nenhum termina.
+      //
+      // E se um modelo empacar: os arquivos são pequenos (o maior tem
+      // 356 KB) e o CDN responde em menos de um segundo, então travar aí não
+      // é download — é o aparelho não dando conta de montar o modelo na
+      // placa de vídeo. Aconteceu num iPhone antigo, que parava no 3 de 4.
+      // Nesse caso trocamos pro modo lento (processador) e tentamos de novo:
+      // fica mais devagar, mas funciona.
+      let jaCaiuPraCpu = false
       for (const [texto, net, oQue] of modelos) {
         aviso(texto)
-        await comPrazo(net.loadFromUri(`${BASE}/model`), 60, oQue)
+        try {
+          await comPrazo(net.loadFromUri(`${BASE}/model`), 25, oQue)
+        } catch (e) {
+          if (jaCaiuPraCpu) throw e
+          jaCaiuPraCpu = true
+          aviso('Esse aparelho é mais lento. Mudando o jeito de carregar...')
+          try { await faceapi.tf.setBackend('cpu'); await faceapi.tf.ready() } catch { throw e }
+          aviso(texto)
+          await comPrazo(net.loadFromUri(`${BASE}/model`), 60, oQue)
+        }
       }
       return faceapi
     })().catch(e => { carregando = null; throw e })
