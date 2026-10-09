@@ -403,11 +403,18 @@ function CartaoAcesso({ cartao }) {
   }
   const { aluno, situacao } = cartao
   const ok = situacao.status === 'liberado'
+  // Na carência a catraca abre, mas o cartão fica laranja: o aluno vê que
+  // está no fim do prazo sem precisar de ninguém avisando.
+  const cor = situacao.carencia ? 'ac-rec-carencia' : ok ? 'ac-rec-ok' : 'ac-rec-bloqueado'
   return (
-    <div className={`ac-rec-cartao ${ok ? 'ac-rec-ok' : 'ac-rec-bloqueado'}`}>
+    <div className={`ac-rec-cartao ${cor}`}>
       {aluno.foto && <img src={aluno.foto} alt="" />}
       <h2>{aluno.nome.split(' ')[0]}</h2>
-      <div className="ac-rec-resultado">{ok ? '✅ LIBERADO' : '❌ ' + (situacao.status === 'inativo' ? 'INATIVO' : 'VENCIDO')}</div>
+      <div className="ac-rec-resultado">
+        {situacao.carencia ? '⚠️ PAGUE A MENSALIDADE'
+          : ok ? '✅ LIBERADO'
+            : '❌ ' + (situacao.status === 'inativo' ? 'INATIVO' : 'VENCIDO')}
+      </div>
       <p>{situacao.texto}</p>
     </div>
   )

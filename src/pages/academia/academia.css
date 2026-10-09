@@ -101,6 +101,9 @@
 .ac-rec-resultado { font-size: clamp(26px, 6vh, 48px); font-weight: 800; letter-spacing: 1px; }
 .ac-rec-ok { background: rgba(22, 163, 74, .93); }
 .ac-rec-bloqueado { background: rgba(220, 38, 38, .93); }
+/* Carencia: entrou, mas esta devendo. Laranja porque nao e nem o verde
+   de quem esta em dia nem o vermelho de quem levou barrada. */
+.ac-rec-carencia { background: rgba(217, 119, 6, .95); }
 .ac-rec-desconhecido { background: rgba(71, 85, 105, .93); }
 .ac-rec-icone { font-size: 90px; font-weight: 800; line-height: 1; }
 @keyframes ac-entra { from { transform: scale(.94); opacity: 0; } to { transform: none; opacity: 1; } }

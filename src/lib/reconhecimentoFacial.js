@@ -333,6 +333,11 @@ export function miniaturaDoRosto(video, caixa, lado = 160) {
 }
 
 // Situação da mensalidade pelo vencimento (data 'AAAA-MM-DD').
+// Quantos dias o aluno ainda entra depois de vencer. Venceu hoje: laranja.
+// Primeiro e segundo dia de atraso: laranja, ainda passa. Do terceiro em
+// diante: vermelho e a catraca não abre.
+export const CARENCIA_DIAS = 2
+
 export function situacaoAluno(aluno) {
   if (!aluno.ativo) return { status: 'inativo', texto: 'Matrícula inativa' }
   // Cortesia não vence: dono, família, funcionário, parceria. Antes isso era
@@ -344,7 +349,19 @@ export function situacaoAluno(aluno) {
   const venc = new Date(aluno.vencimento + 'T00:00:00')
   const dias = Math.round((venc - hoje) / 86400000)
   if (dias < 0) {
-    return { status: 'vencido', texto: `Vencida há ${-dias} dia${dias === -1 ? '' : 's'}` }
+    const atraso = -dias
+    // Carência: venceu, mas ainda entra por CARENCIA_DIAS. Ninguém leva
+    // barrada na catraca por um dia de atraso — a cobrança é da recepção,
+    // não da roleta. Fica laranja esse tempo todo; depois trava.
+    if (atraso <= CARENCIA_DIAS) {
+      return {
+        status: 'liberado',
+        aviso: true,
+        carencia: true,
+        texto: `Vencida há ${atraso} dia${atraso === 1 ? '' : 's'} — carência`,
+      }
+    }
+    return { status: 'vencido', texto: `Vencida há ${atraso} dias` }
   }
   if (dias === 0) return { status: 'liberado', texto: 'Vence hoje', aviso: true }
   if (dias <= 3) return { status: 'liberado', texto: `Vence em ${dias} dia${dias === 1 ? '' : 's'}`, aviso: true }
