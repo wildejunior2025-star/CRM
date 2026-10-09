@@ -26,6 +26,7 @@ export default function AcademiaAlunos() {
   const [filtro, setFiltro] = useState('todos') // todos | emdia | vencidos | semrosto | inativos
   const [antigos, setAntigos] = useState(null) // ex-alunos, só quando pedidos
   const [achados, setAchados] = useState(null) // resultado da busca no banco
+  const [versao, setVersao] = useState(0)      // sobe a cada salvamento
 
   // A tela carrega SÓ os alunos ativos. O sistema antigo tem milhares de
   // ex-alunos e o Supabase corta qualquer consulta em 1000 linhas — trazendo
@@ -45,6 +46,16 @@ export default function AcademiaAlunos() {
 
   useEffect(() => { carregar() }, [empresa.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Depois de salvar, renovar ou reativar: refaz TUDO que está na tela. A
+  // lista de busca e a de antigos vêm de consultas próprias, então atualizar
+  // só a dos ativos deixava o resultado velho na frente do usuário até ele
+  // apertar F5.
+  function recarregarTudo() {
+    carregar()
+    setAntigos(null)
+    setVersao(v => v + 1)
+  }
+
   // Religa a matrícula de quem voltou, num toque só. É o caminho que faltava:
   // antes era preciso abrir Editar e achar a caixinha "Matrícula ativa", e
   // quem não achava ficava com o aluno travado na catraca sem entender.
@@ -56,8 +67,7 @@ export default function AcademiaAlunos() {
       .eq('id', aluno.id)
     if (error) return alert('Não deu pra reativar: ' + error.message)
     setAchados(l => l && l.map(x => (x.id === aluno.id ? { ...x, ativo: true } : x)))
-    setAntigos(l => l && l.filter(x => x.id !== aluno.id))
-    carregar()
+    recarregarTudo()
   }
 
   // Busca por nome OU matrícula: na recepção eles chamam o aluno pelo número.
@@ -81,7 +91,7 @@ export default function AcademiaAlunos() {
       if (valeu) setAchados(data || [])
     }, 300)
     return () => { valeu = false; clearTimeout(timer) }
-  }, [busca, empresa.id])
+  }, [busca, empresa.id, versao])
 
   // Ex-alunos: só carrega quando o filtro é aberto, e os mais recentes
   // primeiro — quem parou mês passado volta; quem parou em 2019, não.
@@ -119,7 +129,7 @@ export default function AcademiaAlunos() {
   const semRosto = contas.semrosto
 
   if (ficha) {
-    return <AcademiaFicha aluno={ficha} onVoltar={() => { setFicha(null); carregar() }} />
+    return <AcademiaFicha aluno={ficha} onVoltar={() => { setFicha(null); recarregarTudo() }} />
   }
 
   if (editando) {
@@ -128,7 +138,7 @@ export default function AcademiaAlunos() {
         aluno={editando === 'novo' ? null : editando}
         alunos={alunos}
         empresaId={empresa.id}
-        onFechar={salvou => { setEditando(null); if (salvou) carregar() }}
+        onFechar={salvou => { setEditando(null); if (salvou) recarregarTudo() }}
       />
     )
   }
@@ -139,7 +149,7 @@ export default function AcademiaAlunos() {
         <ReceberMensalidade
           aluno={recebendo}
           empresaId={empresa.id}
-          onFechar={pago => { setRecebendo(null); if (pago) carregar() }}
+          onFechar={pago => { setRecebendo(null); if (pago) recarregarTudo() }}
         />
       )}
       <div className="ac-linha-titulo">
