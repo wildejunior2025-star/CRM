@@ -474,27 +474,49 @@ async function produtosQueCasam(supabase: Sb, empresaId: string, mensagem: strin
   if (!termos.length) return []
   const achados: ProdutoAchado[] = []
   const ids = new Set<string>()
-  for (const termo of termos) {
-    const { data, error } = await supabase.rpc("buscar_produto_cardapio", {
-      p_empresa: empresaId, p_termo: termo, p_limite: 3,
-    })
-    if (error) { console.error("[produto] busca falhou:", error.message); continue }
-    for (const p of (Array.isArray(data) ? data : [])) {
-      if (ids.has(p.id) || achados.length >= 3) continue
-      ids.add(p.id)
-      achados.push({
-        id: p.id, nome: String(p.nome), preco: Number(p.preco) || 0,
-        promo: p.promo != null ? Number(p.promo) : null,
-        faixas: (Array.isArray(p.faixas) ? p.faixas : [])
-          .map((f: Record<string, unknown>) => ({ qtd_min: Number(f?.qtd_min) || 0, preco: Number(f?.preco) || 0 }))
-          .filter((f: { qtd_min: number; preco: number }) => f.qtd_min > 1 && f.preco > 0)
-          .sort((a: { qtd_min: number }, b: { qtd_min: number }) => a.qtd_min - b.qtd_min),
-        embalagem: p.embalagem ?? null,
+  // Duas passadas: a primeira exige começo de palavra (é ela que impede "coca"
+  // de achar "paçoca"); a segunda, só se a primeira não achou nada, aceita o
+  // termo no meio — é o "burguer" dentro de "hambúrguer", que deixou o robô
+  // mudo num áudio real do Braseiro (09/10/2026).
+  for (const solto of [false, true]) {
+    if (solto && achados.length) break
+    for (const termo of termos) {
+      const { data, error } = await supabase.rpc("buscar_produto_cardapio", {
+        p_empresa: empresaId, p_termo: termo, p_limite: 3, p_solto: solto,
       })
+      if (error) { console.error("[produto] busca falhou:", error.message); continue }
+      for (const p of (Array.isArray(data) ? data : [])) {
+        if (ids.has(p.id) || achados.length >= 3) continue
+        ids.add(p.id)
+        achados.push({
+          id: p.id, nome: String(p.nome), preco: Number(p.preco) || 0,
+          promo: p.promo != null ? Number(p.promo) : null,
+          faixas: (Array.isArray(p.faixas) ? p.faixas : [])
+            .map((f: Record<string, unknown>) => ({ qtd_min: Number(f?.qtd_min) || 0, preco: Number(f?.preco) || 0 }))
+            .filter((f: { qtd_min: number; preco: number }) => f.qtd_min > 1 && f.preco > 0)
+            .sort((a: { qtd_min: number }, b: { qtd_min: number }) => a.qtd_min - b.qtd_min),
+          embalagem: p.embalagem ?? null,
+        })
+      }
+      if (achados.length >= 3) break
     }
-    if (achados.length >= 3) break
   }
   return achados
+}
+
+/**
+ * Perguntou por um item que a loja não tem (ou que tem outro nome no cadastro).
+ * Ficar mudo é o pior: o cliente fica esperando. Uma vez por hora ele diz que
+ * não achou e põe o cardápio na mão — foi o "tem coca?" numa loja que cadastrou
+ * "Refrigerante (lata ou KS)" (Braseiro, 09/10/2026).
+ */
+async function naoAcheiOItem(
+  supabase: Sb, empresaId: string, phone: string, mensagem: string, link: string,
+): Promise<string | null> {
+  if (!termosDeProduto(mensagem).length) return null
+  if (!(await reservarAviso(supabase, empresaId, phone, "sem-produto", 60))) return null
+  return `Esse eu não achei aqui no cardápio 😕${NL}` +
+    `Dá uma olhada no que tem hoje — se precisar, é só me chamar:${NL}${link}`
 }
 
 /** O preço do jeito que o cliente precisa ouvir: promoção e atacado inclusos. */
@@ -943,6 +965,10 @@ export async function responderSemIA({
           const volta = quandoVolta(empresa, excecoes)
           produtoFechada = textoDosProdutos(achados, link) +
             (volta ? `${NL}${NL}_A entrega está fechada agora — a gente volta ${volta}._` : "")
+        } else {
+          // Nada achado com a loja fechada era SILÊNCIO: o aviso de fechado já
+          // tinha saído e o resto não casava. O cliente ficava falando sozinho.
+          produtoFechada = await naoAcheiOItem(supabase, empresaId, phone, mensagem, link)
         }
       }
       const daInfoFechada = recadoFechada ?? produtoFechada
@@ -1049,6 +1075,10 @@ export async function responderSemIA({
     if (cfg.resposta_produto_ativo === true) {
       const achados = await produtosQueCasam(supabase, empresaId, mensagem)
       if (achados.length) return await responder(textoDosProdutos(achados, link))
+      // Não achou: diz isso em vez de empurrar o link genérico como se fosse
+      // resposta. Uma vez por hora; depois disso vale a escada de sempre.
+      const semItem = await naoAcheiOItem(supabase, empresaId, phone, mensagem, link)
+      if (semItem) return await responder(semItem)
     }
 
     // O cliente falando que não quer o link. Não é dúvida, é recado: ele quer
