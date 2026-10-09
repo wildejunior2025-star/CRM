@@ -152,7 +152,9 @@ export default function AcademiaAlunos() {
           // Cadastrou alguém agora: a matrícula dele é dinheiro entrando
           // hoje. Abre o caixa na hora em vez de contar que alguém lembre —
           // é só apertar "Não pagou ainda" se for o caso.
-          if (novo) setRecebendo({ ...novo, primeira: true })
+          // Cortesia não: quem treina de graça não tem o que pagar, e pedir
+          // valor pra ele ainda fazia a matrícula virar dinheiro no caixa.
+          if (novo && !novo.cortesia) setRecebendo({ ...novo, primeira: true })
         }}
       />
     )
