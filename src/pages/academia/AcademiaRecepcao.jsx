@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, acharAluno, situacaoAluno,
-  entrarTelaCheia, sairTelaCheia, rostoInteiroNaTela, aliviarDetector, detectorAtual,
+  entrarTelaCheia, sairTelaCheia, rostoInteiroNaTela, aliviarDetector, detectorAtual, acharRostos,
 } from '../../lib/reconhecimentoFacial'
 import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '../../lib/catracaSerial'
 
@@ -160,6 +160,26 @@ export default function AcademiaRecepcao() {
         // velha costuma dar menos — e é esse número que limita tudo.
         if (!resMostrada) { resMostrada = true; setDiag(d => ({ ...d, res: `${video.videoWidth}x${video.videoHeight}` })) }
 
+        // ETAPA BARATA: só procura a caixa do rosto. Enquanto o aluno está
+        // chegando — longe, de lado, meio fora do quadro — para por aqui.
+        // Antes a conta pesada rodava em TODO quadro e pra TODA pessoa que
+        // aparecia atrás, e 90% disso ia pro lixo.
+        const vistos = await acharRostos(video).catch(() => null)
+        if (!vivo) break
+        if (!vistos || !vistos.maior) {
+          candidato = null; seguidas = 0; desconhecidas = 0
+          setAjuste(null)
+          await esperar(250)
+          continue
+        }
+        if (!rostoInteiroNaTela(vistos.maior, video)) {
+          candidato = null; seguidas = 0
+          setAjuste('Chegue mais perto, com o rosto no meio da tela')
+          await esperar(60)
+          continue
+        }
+
+        // ETAPA CARA: agora sim vale a pena tirar a digital deste rosto.
         const t0 = performance.now()
         const r = await lerRosto(video).catch(() => null)
         if (!vivo) break
@@ -175,17 +195,9 @@ export default function AcademiaRecepcao() {
           }))
           tempos = []
         }
-        if (!r) {
-          candidato = null; seguidas = 0; desconhecidas = 0
-          setAjuste(null)
-          await esperar(250)
-          continue
-        }
-        // Meio rosto fora da tela, ou longe demais: não lê, pede pra ajeitar.
-        if (!rostoInteiroNaTela(r.caixa, video)) {
-          candidato = null; seguidas = 0
-          setAjuste('Chegue mais perto, com o rosto no meio da tela')
-          await esperar(60)
+        // Mexeu entre uma etapa e outra: tenta no próximo quadro.
+        if (!r || !rostoInteiroNaTela(r.caixa, video)) {
+          await esperar(30)
           continue
         }
         setAjuste(null)
@@ -207,7 +219,9 @@ export default function AcademiaRecepcao() {
             bipe(false)
           }
         }
-        await esperar(60)
+        // Já reconheceu alguém e está só confirmando? Emenda a próxima
+        // leitura sem pausa — é esse pedaço que o aluno sente como demora.
+        await esperar(candidato ? 0 : 60)
       }
     }
 

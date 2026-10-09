@@ -70,6 +70,16 @@ export function aliviarDetector() {
 }
 const opcoesDetector = () => new window.faceapi.TinyFaceDetectorOptions({ inputSize: tamanhoDetector, scoreThreshold: 0.5 })
 
+// Só ACHA os rostos: caixas, sem pontos e sem digital. É a parte barata.
+// Serve pra decidir se vale a pena pagar a parte cara — o descritor é uma
+// rede neural rodando em cima do recorte do rosto, e é o que pesa.
+export async function acharRostos(video) {
+  const achados = await window.faceapi.detectAllFaces(video, opcoesDetector())
+  if (!achados.length) return { quantos: 0, maior: null }
+  const maior = achados.reduce((a, b) => (b.box.area > a.box.area ? b : a))
+  return { quantos: achados.length, maior: maior.box }
+}
+
 // Acha o maior rosto no vídeo e devolve { descritor, caixa } ou null.
 export async function lerRosto(video) {
   const faceapi = window.faceapi
