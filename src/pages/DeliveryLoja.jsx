@@ -618,7 +618,7 @@ export default function DeliveryLoja() {
   }
 
   // Produto com complementos — chave = id + opções escolhidas (combos distintos = linhas distintas)
-  function addCombo(prod, selecoes, precoUnit, qtdItem = 1) {
+  function addCombo(prod, selecoes, precoUnit, qtdItem = 1, observacao = '') {
     // A chave leva a QUANTIDADE junto: sem isso "500 uva" e "100 uva" cairiam na
     // mesma linha do carrinho e uma apagaria a outra.
     const key = selecoes.length
@@ -647,6 +647,10 @@ export default function DeliveryLoja() {
         // Combo já sai com o preço fechado da montagem (o unitário veio da faixa
         // certa lá dentro), então o +/- do carrinho repete a montagem inteira.
         quantidade: jaTinha + (Number(qtdItem) || 1),
+        // "Sem cebola" dito na hora de escolher. O que ele escreveu agora vale;
+        // se não escreveu nada, fica o que já tinha na linha (ele pode ter
+        // digitado antes, lá na sacola).
+        observacao: String(observacao ?? '').trim() || base[key]?.observacao || '',
       },
       }
     })
@@ -1712,7 +1716,7 @@ export default function DeliveryLoja() {
           draftKey={draftKey}
           rascunho={preMarcado ?? (rascunho?.produtoId === optProduto.id ? rascunho.sel : null)}
           onClose={() => { limparRascunho(); setPreMarcado(null); setRefazendo(null); setOptProduto(null) }}
-          onConfirm={(selecoes, precoUnit, qtdItem) => { limparRascunho(); setPreMarcado(null); addCombo(optProduto, selecoes, precoUnit, qtdItem) }}
+          onConfirm={(selecoes, precoUnit, qtdItem, obs) => { limparRascunho(); setPreMarcado(null); addCombo(optProduto, selecoes, precoUnit, qtdItem, obs) }}
         />
       )}
 
@@ -1796,7 +1800,8 @@ function FaixaDestaques({ produtos, qtdProduto, lojaAberta, abrirProduto, addOne
             produto={p}
             quantidade={qtdProduto(p.id)}
             lojaAberta={lojaAberta}
-            onAdd={() => (p.complementos?.length ? abrirProduto(p) : addOne(p))}
+            onAdd={() => abrirProduto(p)}
+            onMais={() => (p.complementos?.length ? abrirProduto(p) : addOne(p))}
             onRemove={() => removeOne(String(p.id))}
             onQtd={p.complementos?.length ? null : (n => definirQtdProduto(p, n))}
           />
@@ -1846,7 +1851,8 @@ function SecaoProdutos({
             produto={p}
             quantidade={qtdProduto(p.id)}
             lojaAberta={lojaAberta}
-            onAdd={() => (p.complementos?.length ? abrirProduto(p) : addOne(p))}
+            onAdd={() => abrirProduto(p)}
+            onMais={() => (p.complementos?.length ? abrirProduto(p) : addOne(p))}
             onRemove={() => removeOne(String(p.id))}
             onQtd={p.complementos?.length ? null : (n => definirQtdProduto(p, n))}
           />
@@ -1889,7 +1895,7 @@ function FotoAmpliada({ src, alt, onFechar }) {
   )
 }
 
-function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove, onQtd }) {
+function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onMais, onRemove, onQtd }) {
   const [zoom, setZoom] = useState(false)
   const temComplementos = produto.complementos?.length > 0
   // Preço "a partir de" = base + as opções obrigatórias mais baratas (o `min` de
@@ -2003,7 +2009,10 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onRemove, onQtd }
             {onQtd
               ? <QtdCampo valor={quantidade} onMudar={onQtd} />
               : <span className="dloja-qty-val">{quantidade}</span>}
-            <button className="dloja-qty-btn dloja-qty-btn--primary" onClick={onAdd} disabled={!lojaAberta} aria-label="Adicionar um">
+            {/* O "+" de quem JÁ tem o item na sacola soma direto, sem pop-up:
+                o pop-up é da PRIMEIRA vez, pra ver foto, preço e escrever a
+                observação. Quem está repetindo não quer tela nenhuma. */}
+            <button className="dloja-qty-btn dloja-qty-btn--primary" onClick={onMais ?? onAdd} disabled={!lojaAberta} aria-label="Adicionar um">
               <IconPlus size={14} />
             </button>
           </div>
@@ -2073,6 +2082,10 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
   const corpoRef = useRef(null)
   const gruposRef = useRef({})
   const [destaque, setDestaque] = useState(null)
+  // "Sem cebola", "ponto da carne": o recado desta linha do pedido. Vai pra
+  // sacola, pro pedido e pra cozinha — é o mesmo campo que já existia lá
+  // dentro da sacola, agora também aqui, com o produto na frente.
+  const [obs, setObs] = useState('')
 
   // Fechou um grupo (escolheu o tanto que podia)? Leva o cliente pro próximo
   // que ainda aceita escolha. Nasceu da pizzaria: o cliente marcava o sabor,
@@ -2193,6 +2206,22 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
               <span style={{ color: '#22c55e', marginLeft: 8 }}>
                 R$ {fmt(Number(produto.preco_promocional))} · promoção
               </span>
+            </p>
+          )}
+          {/* O preço no TOPO, não só no botão: agora o pop-up abre pra todo
+              produto (até o que não tem opção), e ele é a vitrine do item —
+              foto, descrição e quanto custa, antes de qualquer escolha. */}
+          {/* Produto "monte a sua" tem base 0 — o preço vem dos sabores. Mostrar
+              "R$ 0,00" no topo seria mentira; nesse caso o valor aparece só no
+              botão, que já soma a montagem. */}
+          {!riscado && precoBase > 0 && (
+            <p style={{ fontSize: 16, fontWeight: 800, margin: '0 0 12px' }}>
+              R$ {fmt(precoBase)}
+              {faixa && (
+                <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#22c55e', marginTop: 2 }}>
+                  a partir de {faixa.qtd_min} un: R$ {fmt(faixa.preco)} cada
+                </span>
+              )}
             </p>
           )}
           {grupos.map(grupo => {
@@ -2334,6 +2363,31 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
               </div>
             )
           })}
+
+          {/* OBSERVAÇÃO DO ITEM, na hora de escolher (09/10/2026). Ela já
+              existia, mas só depois, lá dentro da sacola — e quem queria "sem
+              cebola" só descobria no fim, se descobrisse. O lugar de dizer é
+              aqui, com o produto na frente. */}
+          <div style={{ marginTop: 4, marginBottom: 10 }}>
+            <label htmlFor="dloja-obs-item" style={{ display: 'block', fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+              Alguma observação?
+            </label>
+            <textarea
+              id="dloja-obs-item"
+              value={obs}
+              onChange={e => setObs(e.target.value.slice(0, 140))}
+              rows={2}
+              placeholder="Ex.: sem cebola, sem tomate, ponto da carne…"
+              style={{
+                width: '100%', resize: 'vertical', padding: '10px 12px', borderRadius: 10,
+                border: '1px solid var(--dl-border)', background: 'var(--dl-bg)',
+                color: 'var(--dl-text)', fontSize: 14, fontFamily: 'inherit', lineHeight: 1.4,
+              }}
+            />
+            <p style={{ fontSize: 11.5, color: 'var(--dl-text-muted)', margin: '4px 0 0' }}>
+              Vai junto com este item na cozinha. {140 - obs.length} caracteres.
+            </p>
+          </div>
         </div>
 
         <div className="dloja-drawer-footer">
@@ -2358,7 +2412,7 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
               </span>
             </div>
           )}
-          <button className="dloja-btn-finalizar" onClick={() => onConfirm(selecoes, precoUnit, qtdItem)} disabled={!podeAdd}>
+          <button className="dloja-btn-finalizar" onClick={() => onConfirm(selecoes, precoUnit, qtdItem, obs)} disabled={!podeAdd}>
             {podeAdd
               ? `Adicionar · R$ ${fmt(totalItem)}`
               : faltando.length
