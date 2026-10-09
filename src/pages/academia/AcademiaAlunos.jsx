@@ -41,18 +41,30 @@ export default function AcademiaAlunos() {
   const termo = busca.trim().toLowerCase()
   const hoje = hojeMais(0)
   const emDia = a => a.ativo && (!a.vencimento || a.vencimento >= hoje)
+  // Quem não treina mais fica FORA das contas do dia a dia. São os 579 que
+  // vieram do sistema antigo (pararam de pagar de 2 a 12 meses atrás): ficam
+  // guardados pra quando um deles voltar — a recepção acha pela busca e só
+  // aperta Renovar —, mas não podem inchar "Todos" nem "Vencidos".
+  const daCasa = alunos.filter(a => a.ativo)
   const contas = {
-    todos: alunos.length,
-    emdia: alunos.filter(emDia).length,
-    vencidos: alunos.filter(a => !emDia(a)).length,
-    semrosto: alunos.filter(a => !a.descritores?.length).length,
+    todos: daCasa.length,
+    emdia: daCasa.filter(emDia).length,
+    vencidos: daCasa.filter(a => !emDia(a)).length,
+    semrosto: daCasa.filter(a => !a.descritores?.length).length,
+    inativos: alunos.length - daCasa.length,
   }
-  const filtrados = alunos
+  // Procurando pelo nome, procura em TODO MUNDO: a pessoa está no balcão e
+  // ninguém sabe de cabeça se ela consta como ativa.
+  const procurando = termo.length > 0
+  const base = procurando || filtro === 'inativos' ? alunos : daCasa
+  const filtrados = base
     .filter(a => a.nome.toLowerCase().includes(termo) || String(a.matricula || '').toLowerCase().includes(termo))
-    .filter(a => filtro === 'todos'
+    .filter(a => procurando
+      || filtro === 'todos'
       || (filtro === 'emdia' && emDia(a))
       || (filtro === 'vencidos' && !emDia(a))
-      || (filtro === 'semrosto' && !a.descritores?.length))
+      || (filtro === 'semrosto' && !a.descritores?.length)
+      || (filtro === 'inativos' && !a.ativo))
   const semRosto = contas.semrosto
 
   if (ficha) {
@@ -93,6 +105,7 @@ export default function AcademiaAlunos() {
             { id: 'emdia', nome: 'Em dia' },
             { id: 'vencidos', nome: 'Vencidos' },
             { id: 'semrosto', nome: 'Sem rosto' },
+            { id: 'inativos', nome: 'Sumidos' },
           ].map(f => (
             <button key={f.id} type="button"
               className={`ac-filtro${filtro === f.id ? ' ativo' : ''}${f.id === 'vencidos' && contas.vencidos ? ' alerta' : ''}`}
