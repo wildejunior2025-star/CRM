@@ -173,8 +173,14 @@ export default function AcademiaAlunos() {
       </div>
 
       <div className="ac-barra">
+        {/* Clicou no campo, marca o que já está escrito. O trabalho da
+            recepção é em série — procura um, renova, procura o próximo — e
+            apagar o nome anterior letra por letra custava mais que digitar
+            o novo. Agora a primeira tecla já limpa. */}
         <input className="ac-busca" placeholder="Buscar pelo nome ou matrícula"
-          value={busca} onChange={e => setBusca(e.target.value)} />
+          value={busca} onChange={e => setBusca(e.target.value)}
+          onFocus={e => e.target.select()}
+          onClick={e => { if (e.target.selectionStart === e.target.selectionEnd) e.target.select() }} />
         <div className="ac-filtros">
           {[
             { id: 'todos', nome: 'Todos' },
