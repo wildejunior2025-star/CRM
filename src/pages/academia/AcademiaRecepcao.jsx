@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, acharAluno, situacaoAluno,
-  entrarTelaCheia, sairTelaCheia, rostoInteiroNaTela,
+  entrarTelaCheia, sairTelaCheia, rostoInteiroNaTela, aliviarDetector, detectorAtual,
 } from '../../lib/reconhecimentoFacial'
 import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '../../lib/catracaSerial'
 
@@ -19,6 +19,7 @@ import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '.
 // catraca na ficha do aluno, foi tirado: era ele que gravava o rosto errado.
 const CONFIRMAR_LEITURAS = 3     // mesma pessoa em 3 leituras seguidas antes de liberar
 const CERTEZA_ALTA = 0.33        // abaixo disso uma leitura só basta (quase igual ao cadastro)
+const LEITURA_LENTA_MS = 330      // acima disso o detector baixa pra nao deixar o aluno esperando
 const DESCONHECIDO_LEITURAS = 4  // rosto sem cadastro por 4 leituras → "não reconhecido"
 const MOSTRAR_MS = 5000          // quanto tempo o cartão fica na tela
 const NAO_REGISTRAR_DE_NOVO_MS = 3 * 60 * 1000 // mesma pessoa não conta 2 entradas em 3 min
@@ -50,10 +51,18 @@ export default function AcademiaRecepcao() {
   // Este aparelho fala direto com a catraca? Só o computador ligado nela fala.
   // Celular e tablet avisam o computador que está com a tela /porta aberta.
   const localRef = useRef(false)
+  // Este computador JÁ conseguiu abrir a catraca alguma vez? Então ele é o da
+  // catraca, e uma falha solta não muda isso — tem que insistir nele.
+  const ehOComputadorDaCatraca = useRef(false)
+  const abrindoRef = useRef(false)
   const canalPorta = useRef(null)
 
   async function abrirCatraca(aluno) {
+    // Pulso dura 3 s. Dois pedidos em cima do outro atrapalhavam o sinal e
+    // derrubavam a porta — o segundo espera a próxima vez.
+    if (abrindoRef.current) return
     if (!localRef.current) return avisarPorta(aluno)
+    abrindoRef.current = true
     setCatraca('abrindo')
     try {
       await liberarCatraca()
@@ -64,11 +73,22 @@ export default function AcademiaRecepcao() {
         await fecharPorta()
         await liberarCatraca()
         setCatraca('ok')
-      } catch {
-        // Nem assim: tenta pelo computador da catraca.
+      } catch (e) {
+        // Nem assim. Mostra o erro de VERDADE na tela e avisa o canal como
+        // reserva. `localRef` cai só até o laço de reconexão consertar — antes
+        // isso era definitivo e a catraca nunca mais abria neste computador,
+        // enquanto a tela dizia "catraca pelo computador" como se tudo bem.
         localRef.current = false
-        avisarPorta(aluno)
+        setCatraca(e.message || 'Não consegui abrir a catraca.')
+        if (canalPorta.current) {
+          canalPorta.current.send({
+            type: 'broadcast', event: 'liberar',
+            payload: { nome: aluno?.nome, aluno_id: aluno?.id },
+          })
+        }
       }
+    } finally {
+      abrindoRef.current = false
     }
   }
 
@@ -146,7 +166,13 @@ export default function AcademiaRecepcao() {
         tempos.push(performance.now() - t0)
         if (tempos.length >= 10) {
           const media = tempos.reduce((a, b) => a + b, 0) / tempos.length
-          setDiag(d => ({ ...d, ms: Math.round(media), backend: window.faceapi?.tf?.getBackend?.() }))
+          // Leitura passando de 1/3 de segundo é lenta pra quem está na porta:
+          // o aluno fica esperando. Alivia o detector uma vez e segue.
+          if (media > LEITURA_LENTA_MS) aliviarDetector()
+          setDiag(d => ({
+            ...d, ms: Math.round(media), detector: detectorAtual(),
+            backend: window.faceapi?.tf?.getBackend?.(),
+          }))
           tempos = []
         }
         if (!r) {
@@ -209,7 +235,7 @@ export default function AcademiaRecepcao() {
         // Este aparelho é o computador ligado na catraca? Então abre direto.
         if (serialSuportado()) {
           conectarCatraca().then(
-            () => { localRef.current = true; setCatraca('ok') },
+            () => { localRef.current = true; ehOComputadorDaCatraca.current = true; setCatraca('ok') },
             () => { localRef.current = false },
           )
         }
@@ -221,11 +247,18 @@ export default function AcademiaRecepcao() {
 
     const recarga = setInterval(carregarAlunos, RECARREGAR_ALUNOS_MS)
     // Sem ninguém na recepção: se a catraca desconectou, tenta de novo sozinha.
+    // Sem ninguém na recepção: se a catraca desconectou, tenta de novo sozinha.
+    // Num computador que já abriu a catraca uma vez, QUALQUER estado diferente
+    // de "ok" vale uma tentativa — inclusive o "pc", que parecia saudável mas
+    // era a conversa com um computador que não existe (é este aqui).
     const reconecta = serialSuportado() ? setInterval(() => {
+      if (abrindoRef.current) return
       const atual = catracaRef.current
-      if (atual && !['ok', 'pc', 'abrindo'].includes(atual) && localRef.current) {
-        fecharPorta().then(conectarCatraca).then(() => setCatraca('ok'), e => setCatraca(e.message))
-      }
+      if (atual === 'ok' || atual === 'abrindo') return
+      if (!ehOComputadorDaCatraca.current) return
+      fecharPorta()
+        .then(conectarCatraca)
+        .then(() => { localRef.current = true; setCatraca('ok') }, e => setCatraca(e.message))
     }, 20000) : null
     return () => {
       vivo = false
@@ -298,7 +331,7 @@ export default function AcademiaRecepcao() {
         )}
         {diag.ms && (
           <div className="ac-rec-diag">
-            leitura {diag.ms} ms · {diag.backend}{diag.res ? ` · câmera ${diag.res}` : ''}
+            leitura {diag.ms} ms · {diag.backend}{diag.detector ? ` · detector ${diag.detector}` : ''}{diag.res ? ` · câmera ${diag.res}` : ''}
             {diag.dist != null ? ` · distância ${diag.dist.toFixed(3)}` : ''}
             {diag.margem != null && diag.margem !== Infinity ? ` · margem ${diag.margem.toFixed(3)}` : ''}
           </div>

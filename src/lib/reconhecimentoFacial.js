@@ -54,11 +54,21 @@ export function carregarFaceApi() {
   return carregando
 }
 
-// 416 em vez de 320 (08/10): acha a caixa do rosto com mais precisão, e caixa
-// melhor = pontos do rosto melhores = digital melhor. Pesa mais no aparelho,
-// mas o PC da academia aguenta. Se ficar lento, o número volta pra 320 —
-// o tempo de cada leitura aparece no canto da tela da recepção.
-const opcoesDetector = () => new window.faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 })
+// Tamanho da imagem que o detector analisa. 416 acha a caixa do rosto com
+// mais precisão que 320 (caixa melhor = pontos melhores = digital melhor),
+// mas pesa. Em 08/10 subimos pra 416 e no computador da academia a leitura
+// ficou lenta — então agora o próprio sistema desce pra 320 quando vê que o
+// aparelho não dá conta. O tempo de cada leitura aparece no canto da tela.
+const DETECTOR_LEVE = 320
+const DETECTOR_BOM = 416
+let tamanhoDetector = DETECTOR_BOM
+export const detectorAtual = () => tamanhoDetector
+export function aliviarDetector() {
+  if (tamanhoDetector === DETECTOR_LEVE) return false
+  tamanhoDetector = DETECTOR_LEVE
+  return true
+}
+const opcoesDetector = () => new window.faceapi.TinyFaceDetectorOptions({ inputSize: tamanhoDetector, scoreThreshold: 0.5 })
 
 // Acha o maior rosto no vídeo e devolve { descritor, caixa } ou null.
 export async function lerRosto(video) {
