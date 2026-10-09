@@ -31,7 +31,7 @@ function TelaCarregando() {
   )
 }
 
-const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/excluir-conta', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor', '/mesa/', '/c/', '/ligacoes', '/pagar/']
+const PUBLIC_PREFIXES = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos', '/privacidade', '/excluir-conta', '/lojas', '/loja/', '/checkout', '/pedido/', '/cadastro-cliente', '/cadastro-admin', '/cadastro-vendedor', '/mesa/', '/c/', '/ligacoes', '/pagar/', '/baixar-impressora']
 
 // Domínios em que a raiz "/" mostra a landing de marketing (visitante deslogado).
 // Nos subdomínios (app./admin./gestor./lojaonline.) a raiz mantém o fluxo antigo.
@@ -223,6 +223,7 @@ const TourSistema = lazy(() => import('./pages/TourSistema'))
 const ConfigurarLoja = lazy(() => import('./pages/ConfigurarLoja'))
 const AcademiaApp = lazy(() => import('./pages/academia/AcademiaApp'))
 const LigacoesApp = lazy(() => import('./pages/ligacoes/LigacoesApp'))
+const BaixarImpressora = lazy(() => import('./pages/BaixarImpressora'))
 const AdminLigacoes = lazy(() => import('./pages/ligacoes/AdminLigacoes'))
 
 export default function App() {
@@ -313,6 +314,8 @@ export default function App() {
           <Route path="/cadastro-vendedor/:empresaId" element={<CadastroVendedor />} />
           {/* Telemarketing da FWC (mig 0292) — bloco isolado, login próprio */}
           <Route path="/ligacoes" element={<LigacoesApp />} />
+          {/* Endereço curto pra baixar o app Impressora FWC no PC do cliente */}
+          <Route path="/baixar-impressora" element={<BaixarImpressora />} />
           {/* Rota que não existe NUNCA pode virar tela preta. Ela cai aqui e
               diz o que houve — com um botão que recarrega de verdade, que é o
               que resolve quando o aparelho está com uma versão velha guardada. */}
