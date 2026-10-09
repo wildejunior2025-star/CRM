@@ -7,6 +7,7 @@ import { rotuloComanda, agruparItensComanda } from '../lib/comanda'
 import { acharPorCodigo, combinaCodigo, ouvirBipada } from '../lib/codigoBarras'
 import { recadoDeErro } from '../lib/erroRede'
 import { calcularTaxa, itemIsento, MARCA_ISENTO } from '../lib/taxaServico'
+import { useProdutosNoHorario } from '../lib/horarioCategoria'
 import AvisoPix from '../components/AvisoPix'
 import { useConfirmar } from '../hooks/useConfirmar'
 import { useVoltarFecha } from '../hooks/useVoltarFecha'
@@ -190,7 +191,12 @@ export default function PresencialSalao() {
   // pro cliente que pede em pé no balcão. Número zera todo dia. Ligado por loja.
   const [comandaBalcaoAtiva, setComandaBalcaoAtiva] = useState(false)
   const [abrindoComanda, setAbrindoComanda] = useState(false)
-  const [produtos, setProdutos] = useState([])
+  const [produtosTodos, setProdutosTodos] = useState([])
+  const [catInfo, setCatInfo] = useState({})  // { categoria: {hora_inicio, hora_fim, dias_semana} }
+  // Categoria com horário (Happy Hour) some da tela do atendente quando a
+  // janela fecha. Ele não fecha essa tela o turno inteiro: sem o relógio aqui,
+  // às 21h ele ainda lançaria o item pelo preço da promoção.
+  const produtos = useProdutosNoHorario(produtosTodos, catInfo)
   const [garcons, setGarcons] = useState({})   // { profile_id: nome }
   const [loading, setLoading] = useState(true)
 
@@ -425,7 +431,7 @@ export default function PresencialSalao() {
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
       // `setor` vem junto: é ele que diz qual categoria NÃO sai no papel — e
       // essas o garçom pega ele mesmo, sem esperar cozinha nenhuma (mig 0185).
-      supabase.from('categorias').select('nome, ordem, setor').eq('empresa_id', empresaId),
+      supabase.from('categorias').select('nome, ordem, setor, hora_inicio, hora_fim, dias_semana').eq('empresa_id', empresaId),
       // Complementos por produto. A tabela de vínculo não tem empresa_id e é lida por
       // todos (policy le_publico_pcg), então o "!inner" é o que garante a separação:
       // vira INNER JOIN com complemento_grupos, que a RLS já filtra por empresa — os
@@ -444,11 +450,12 @@ export default function PresencialSalao() {
     }
     // Só quem conectou o Mercado Pago vê o botão de PIX online (mig 0193).
     setMpConectado(mp.data === true)
-    setProdutos(ps.data ?? [])
+    setProdutosTodos(ps.data ?? [])
     setGarcons(Object.fromEntries((gs.data ?? []).map(p => [p.id, p.nome])))
     const om = {}
     for (const c of (cat.data ?? [])) if (c?.nome != null) om[String(c.nome).trim().toLowerCase()] = c.ordem == null ? 9999 : c.ordem
     setOrdemCat(om)
+    setCatInfo(Object.fromEntries((cat.data ?? []).map(c => [c.nome, c])))
     // Monta { produto_id: [grupos] }, pulando grupo/opção pausados. min/max do vínculo
     // (override) mandam mais que os do grupo, igual no cardápio do QR.
     const cm = {}

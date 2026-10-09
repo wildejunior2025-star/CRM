@@ -6,6 +6,7 @@ import { iniciarTags, adicionarAoCarrinho, verProduto } from '../lib/tracking'
 import { marcarEtapa } from '../lib/funil'
 import AvisoCookies from '../components/AvisoCookies'
 import { adicionalComplementos, blocosDeOpcoes, cobraPeloMaior, rotuloPrecoOpcao } from '../lib/complementos'
+import { categoriaAbertaAgora } from '../lib/horarioCategoria'
 import { semAcento } from '../lib/texto'
 import { precoPorQuantidade, faixaAplicada, menorFaixa, precoRiscado } from '../lib/precoQuantidade'
 import { criarBuscadorDescricao, comDescricaoNasOpcoes } from '../lib/descricaoSabor'
@@ -841,23 +842,15 @@ export default function DeliveryLoja() {
   // Categoria dentro do horário de venda? (sem horário = sempre). Usa horário de Brasília
   // (America/Fortaleza) pra não depender do fuso do aparelho do cliente. Trata janela
   // que vira a noite (fim < inicio, ex.: 22:00-02:00).
-  const catDisponivelAgora = (nome) => {
-    // Dia da semana (mig 0220): "Quarta do Picolé" não pode aparecer na terça.
-    // Usa o dia em Fortaleza, não o do aparelho do cliente — quem está viajando
-    // continua vendo a promoção no dia certo da loja.
-    const dias = catDias[nome]
-    if (dias && dias.length > 0) {
-      const hojeBrasilia = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' })
-      const diaSemana = new Date(`${hojeBrasilia}T12:00:00`).getDay()
-      if (!dias.includes(diaSemana)) return false
-    }
-    const h = catHorario[nome]
-    if (!h) return true
-    const agora = new Date().toLocaleTimeString('en-GB', { hour12: false, timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit' })
-    const toMin = (t) => { const [hh, mm] = String(t).slice(0, 5).split(':').map(Number); return hh * 60 + mm }
-    const n = toMin(agora), a = toMin(h.inicio), b = toMin(h.fim)
-    return a <= b ? (n >= a && n < b) : (n >= a || n < b)
-  }
+  // A regra (dia da semana da mig 0220 + janela que pode virar a noite) mora em
+  // lib/horarioCategoria. Aqui só traduz os mapas desta tela pro formato dela —
+  // Mesa e Salão chamam a MESMA função, e preço diferente entre a mesa e o
+  // cardápio é briga no balcão.
+  const catDisponivelAgora = (nome) => categoriaAbertaAgora({
+    dias_semana: catDias[nome],
+    hora_inicio: catHorario[nome]?.inicio,
+    hora_fim: catHorario[nome]?.fim,
+  })
 
   const categorias = [...porCategoria.keys()].filter(c => c !== '__sem__')
     .filter(cat => catDisponivelAgora(cat))

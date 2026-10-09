@@ -3,13 +3,18 @@ import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import ModalComplementos, { btnQtd as btnQ } from '../components/ModalComplementos'
 import { carregarCardapio, itensParaPedido } from '../lib/cardapioPublico'
+import { useProdutosNoHorario } from '../lib/horarioCategoria'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
 
 export default function MesaCardapio() {
   const { token } = useParams()
   const [info, setInfo]       = useState(null)
-  const [produtos, setProdutos] = useState([])
+  const [produtosTodos, setProdutosTodos] = useState([])
+  const [catInfo, setCatInfo] = useState({})  // { categoria: {hora_inicio, hora_fim, dias_semana} }
+  // Categoria com horário (Happy Hour) sai da tela sozinha quando a janela
+  // fecha — inclusive pra mesa que está com o cardápio aberto desde antes.
+  const produtos = useProdutosNoHorario(produtosTodos, catInfo)
   const [catOrdem, setCatOrdem] = useState({}) // { nomeCategoria: ordem } — ordem do cardápio
   const [loading, setLoading] = useState(true)
   const [erro, setErro]       = useState(null)
@@ -58,10 +63,11 @@ export default function MesaCardapio() {
       if (!data.ativa) { setErro('Esta mesa está indisponível.'); setLoading(false); return }
       if (!data.presencial_ativo) { setErro('O pedido pela mesa não está disponível agora.'); setLoading(false); return }
       setInfo(data)
-      const { produtos: ps, catOrdem: ordemMap, compMap: cm } = await carregarCardapio(supabase, data.empresa_id)
+      const { produtos: ps, catOrdem: ordemMap, catInfo: ci, compMap: cm } = await carregarCardapio(supabase, data.empresa_id)
       setCatOrdem(ordemMap)
       setCompMap(cm)
-      setProdutos(ps ?? [])
+      setProdutosTodos(ps ?? [])
+      setCatInfo(ci ?? {})
       setLoading(false)
     })()
   }, [token])

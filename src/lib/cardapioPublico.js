@@ -1,6 +1,7 @@
 import { criarBuscadorDescricao, comDescricaoNasOpcoes } from './descricaoSabor'
 import { complementosParaGravar } from './complementos'
 import { fetchAll } from './supabaseClient'
+import { porNomeDeCategoria } from './horarioCategoria'
 
 // Cardápio que o cliente vê SEM login: usado no QR da mesa e no link do cliente.
 //
@@ -23,11 +24,17 @@ export async function carregarCardapio(supabase, empresaId) {
     // cardapio da mesa sairia alfabetico e o do celular na ordem escolhida.
     .order('categoria').order('ordem', { nullsFirst: false }).order('nome').order('produto_id'))
 
-  // Ordem personalizada das categorias (a mesma da loja online)
+  // Ordem personalizada das categorias (a mesma da loja online) + o horário em
+  // que cada uma vende.
   const { data: cats } = await supabase
-    .from('categorias').select('nome, ordem').eq('empresa_id', empresaId)
+    .from('categorias').select('nome, ordem, hora_inicio, hora_fim, dias_semana').eq('empresa_id', empresaId)
   const catOrdem = {}
   for (const c of (cats ?? [])) catOrdem[c.nome] = c.ordem ?? 999
+
+  // O horário de cada categoria vai junto, mas quem PENEIRA é a tela: ela tem
+  // relógio rodando. Peneirar aqui, uma vez, deixaria o Happy Hour na tela do
+  // atendente que abriu às 19h e não fechou mais — que é o caso normal dele.
+  const catInfo = porNomeDeCategoria(cats)
 
   const ids = (produtos ?? []).map(p => p.produto_id)
   const compMap = {}
@@ -69,7 +76,7 @@ export async function carregarCardapio(supabase, empresaId) {
     }
   }
 
-  return { produtos: produtos ?? [], catOrdem, compMap }
+  return { produtos: produtos ?? [], catOrdem, catInfo, compMap }
 }
 
 // Itens do carrinho -> payload das RPCs mesa_pedir / cliente_pedir. O nome já vai
