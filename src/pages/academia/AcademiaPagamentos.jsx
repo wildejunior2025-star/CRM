@@ -53,8 +53,14 @@ export default function AcademiaPagamentos() {
 
   const validos = pagamentos.filter(p => !p.cancelado)
   const total = validos.reduce((s, p) => s + Number(p.valor), 0)
+  // Pagamento dividido entra em cada forma com a parte dela: quem paga
+  // metade no dinheiro e metade no cartao soma R$ 30 em cada, nao R$ 60
+  // num so.
+  const quanto = (p, id) => (p.partes
+    ? p.partes.filter(x => x.forma === id).reduce((s, x) => s + Number(x.valor || 0), 0)
+    : (p.forma === id ? Number(p.valor) : 0))
   const porForma = FORMAS
-    .map(f => ({ ...f, total: validos.filter(p => p.forma === f.id).reduce((s, p) => s + Number(p.valor), 0) }))
+    .map(f => ({ ...f, total: validos.reduce((s, p) => s + quanto(p, f.id), 0) }))
     .filter(f => f.total > 0)
 
   return (
@@ -114,7 +120,9 @@ export default function AcademiaPagamentos() {
                   <td data-rotulo="Matrícula" className="ac-num">{p.academia_alunos?.matricula || '—'}</td>
                   <td data-rotulo="Aluno"><strong>{p.academia_alunos?.nome}</strong></td>
                   <td data-rotulo="Forma">
-                    {nomeForma(p.forma)}{p.meses > 1 ? ` · ${p.meses} meses` : ''}
+                    {p.partes
+                      ? p.partes.map(x => `${nomeForma(x.forma)} ${dinheiro(x.valor)}`).join(' + ')
+                      : nomeForma(p.forma)}{p.meses > 1 ? ` · ${p.meses} meses` : ''}
                     {p.cancelado && <span className="ac-status ac-vencido" style={{ marginLeft: 6 }}>Cancelado</span>}
                   </td>
                   <td data-rotulo="Passou a vencer" className="ac-num">{dataBr(p.vencimento_depois)}</td>

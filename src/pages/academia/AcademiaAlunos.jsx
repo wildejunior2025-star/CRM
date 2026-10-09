@@ -434,6 +434,13 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
   const [data, setData] = useState(hojeIso())
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
+  // Pagou metade no dinheiro e metade no cartão: duas formas, um pagamento só.
+  const [dividido, setDividido] = useState(false)
+  const [forma2, setForma2] = useState('cartao')
+  const [valor2, setValor2] = useState('')
+
+  const num = t => Number(String(t).replace(',', '.')) || 0
+  const totalDividido = num(valor) + num(valor2)
 
   // Na PRIMEIRA mensalidade o prazo conta de hoje. O cadastro já deixa o
   // "Vence em" lá na frente; contar a partir dele daria o dobro de prazo.
@@ -442,15 +449,22 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
 
   async function confirmar(e) {
     e.preventDefault()
-    const v = Number(String(valor).replace(',', '.'))
-    if (!v || v <= 0) return setErro('Coloque o valor que o aluno pagou.')
+    const v1 = num(valor)
+    const v2 = num(valor2)
+    if (!v1 || v1 <= 0) return setErro('Coloque o valor que o aluno pagou.')
+    if (dividido) {
+      if (!v2 || v2 <= 0) return setErro('Coloque o valor da segunda forma de pagamento.')
+      if (forma === forma2) return setErro('As duas partes estão na mesma forma. Escolha formas diferentes ou tire a divisão.')
+    }
     setSalvando(true)
     setErro(null)
     try {
       await registrarPagamento({
         empresaId,
         aluno: primeira ? { ...aluno, vencimento: null } : aluno,
-        valor: v, forma, meses, data,
+        valor: dividido ? v1 + v2 : v1,
+        forma, meses, data,
+        partes: dividido ? [{ forma, valor: v1 }, { forma: forma2, valor: v2 }] : null,
         observacao: primeira ? 'Matrícula' : null,
       })
       onFechar(true)
@@ -471,7 +485,7 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
         </p>
 
         <div className="ac-dupla">
-          <label>Valor pago
+          <label>{dividido ? 'Valor da 1ª forma' : 'Valor pago'}
             <input inputMode="decimal" value={valor} onChange={e => setValor(e.target.value)} autoFocus />
           </label>
           <label>Meses
@@ -481,11 +495,35 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
           </label>
         </div>
 
-        <label>Forma de pagamento
+        <label>{dividido ? 'Forma da 1ª parte' : 'Forma de pagamento'}
           <select value={forma} onChange={e => setForma(e.target.value)}>
             {FORMAS.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
           </select>
         </label>
+
+        {/* Metade no dinheiro, metade no cartão. Fica um pagamento só —
+            uma mensalidade —, com as duas partes guardadas dentro dele, pra
+            o total de cada forma no caixa sair certo. */}
+        <label className="ac-check">
+          <input type="checkbox" checked={dividido} onChange={e => setDividido(e.target.checked)} />
+          Pagou em duas formas
+        </label>
+
+        {dividido && (
+          <>
+            <div className="ac-dupla">
+              <label>Valor da 2ª forma
+                <input inputMode="decimal" value={valor2} onChange={e => setValor2(e.target.value)} />
+              </label>
+              <label>Forma da 2ª parte
+                <select value={forma2} onChange={e => setForma2(e.target.value)}>
+                  {FORMAS.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                </select>
+              </label>
+            </div>
+            <p className="ac-muted">Total recebido: <b>{dinheiro(totalDividido)}</b></p>
+          </>
+        )}
 
         <label>Data do pagamento
           <input type="date" value={data} onChange={e => setData(e.target.value)} />

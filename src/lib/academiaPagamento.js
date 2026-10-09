@@ -26,14 +26,18 @@ export function somarMeses(vencimento, meses = 1, apartirDe = hojeIso()) {
   return d.toISOString().slice(0, 10)
 }
 
-export async function registrarPagamento({ empresaId, aluno, valor, forma, meses = 1, data = hojeIso(), observacao = null }) {
+// `partes`: pagamento em duas formas, ex. metade dinheiro e metade cartao.
+// Fica UM pagamento so (uma mensalidade), com as partes guardadas dentro;
+// assim a conta por forma sai certa sem contar a mensalidade duas vezes.
+export async function registrarPagamento({ empresaId, aluno, valor, forma, meses = 1, data = hojeIso(), observacao = null, partes = null }) {
   const vencimentoDepois = somarMeses(aluno.vencimento, meses, data)
   const { data: user } = await supabase.auth.getUser()
   const { error: e1 } = await supabase.from('academia_pagamentos').insert({
     empresa_id: empresaId,
     aluno_id: aluno.id,
     valor,
-    forma,
+    forma: partes ? 'dividido' : forma,
+    partes,
     meses,
     data,
     vencimento_antes: aluno.vencimento,
