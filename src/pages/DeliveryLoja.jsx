@@ -887,13 +887,24 @@ export default function DeliveryLoja() {
   // Leva o cliente ATÉ o produto: tela de montar quando tem sabor/complemento,
   // senão rola até o card e pisca. Serve pro banner e pro link que o robô
   // manda ("…?p=<id>") quando responde "tem sim, custa tanto" (mig 0312).
-  function irParaProduto(p) {
+  //
+  // `abrirSempre` é o caminho do link do robô: ele perguntou por UM item e
+  // clicou no link DAQUELE item, então a tela do produto já vem aberta — rolar
+  // até o card e deixar ele clicar de novo é um passo a mais à toa.
+  function irParaProduto(p, abrirSempre = false) {
     if (!p) return
+    // Rola até o card antes de abrir: quando o cliente fechar a tela, ele cai
+    // no produto dentro do cardápio e não lá no topo.
+    const cards = document.querySelectorAll(`[data-prod-id="${p.id}"]`)
+    const alvo = cards[cards.length - 1]
+    if (abrirSempre) {
+      alvo?.scrollIntoView({ block: 'center' })
+      abrirProduto(p)
+      return
+    }
     if (p.complementos?.length) { abrirProduto(p); return }
     // Sem complementos não tem tela de escolha: leva até o card do produto
     // (o da categoria, que é o último na página) e pisca ele.
-    const cards = document.querySelectorAll(`[data-prod-id="${p.id}"]`)
-    const alvo = cards[cards.length - 1]
     if (!alvo) return
     alvo.scrollIntoView({ behavior: 'smooth', block: 'center' })
     alvo.classList.add('dloja-prod-card--piscar')
@@ -913,7 +924,7 @@ export default function DeliveryLoja() {
     const p = produtos.find(x => String(x.id) === String(produtoDoLink))
     // Produto que saiu do ar entre a pergunta e o clique: o cliente cai no
     // catálogo normal em vez de numa tela vazia.
-    if (p) setTimeout(() => irParaProduto(p), 300)
+    if (p) setTimeout(() => irParaProduto(p, true), 300)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [produtos, produtoDoLink])
 
@@ -1715,6 +1726,7 @@ export default function DeliveryLoja() {
           produto={optProduto}
           draftKey={draftKey}
           rascunho={preMarcado ?? (rascunho?.produtoId === optProduto.id ? rascunho.sel : null)}
+          lojaAberta={podePedir}
           onClose={() => { limparRascunho(); setPreMarcado(null); setRefazendo(null); setOptProduto(null) }}
           onConfirm={(selecoes, precoUnit, qtdItem, obs) => { limparRascunho(); setPreMarcado(null); addCombo(optProduto, selecoes, precoUnit, qtdItem, obs) }}
         />
@@ -2036,7 +2048,7 @@ function somaQtd(sel, grupoId) {
   return escolhidasDe(sel, grupoId).reduce((t, [, q]) => t + (Number(q) || 0), 0)
 }
 
-function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
+function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm, lojaAberta = true }) {
   const grupos = produto.complementos ?? []
   // seleção: { [grupoId]: { [opcaoId]: quantidade } } — começa do rascunho, se
   // voltou de um recarregamento no meio da montagem.
@@ -2172,7 +2184,10 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
   const faltando = grupos.filter(g => g.modo_quantidade
     ? somaQtd(sel, g.id) < (g.min ?? 0)
     : nEscolhidas(sel, g.id) < (g.min ?? 0))
-  const podeAdd = faltando.length === 0 && qtdItem > 0
+  // Com a loja fechada esta tela ainda ABRE (o link do robô e o banner levam
+  // direto nela, e ver foto e preço é o que o cliente veio fazer) — só não
+  // deixa pôr na sacola, igual ao "+" do card, que fica apagado.
+  const podeAdd = lojaAberta && faltando.length === 0 && qtdItem > 0
 
   return (
     <div className="dloja-overlay" onClick={onClose}>
@@ -2415,9 +2430,11 @@ function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm }) {
           <button className="dloja-btn-finalizar" onClick={() => onConfirm(selecoes, precoUnit, qtdItem, obs)} disabled={!podeAdd}>
             {podeAdd
               ? `Adicionar · R$ ${fmt(totalItem)}`
-              : faltando.length
-                ? `Escolha: ${faltando.map(g => g.nome).join(', ')}`
-                : 'Escolha a quantidade'}
+              : !lojaAberta
+                ? 'Loja fechada'
+                : faltando.length
+                  ? `Escolha: ${faltando.map(g => g.nome).join(', ')}`
+                  : 'Escolha a quantidade'}
           </button>
         </div>
       </aside>
