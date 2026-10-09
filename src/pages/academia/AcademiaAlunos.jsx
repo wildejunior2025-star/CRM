@@ -201,6 +201,15 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
       vencimento: dados.vencimento || null,
       ativo: dados.ativo,
     }
+    // Empurrou o vencimento pra frente num aluno inativo? Ele voltou. Quem
+    // mexe na data de um sumido está reativando, não anotando curiosidade —
+    // e ninguém lembra de procurar a caixinha "Matrícula ativa" lá embaixo.
+    // Só vale quando a data MUDOU: desmarcar a caixa sem tocar na data
+    // continua desativando quem está em dia (aluno suspenso, por exemplo).
+    const mudouData = !!dados.vencimento && dados.vencimento !== (aluno?.vencimento || '')
+    if (aluno && !dados.ativo && mudouData && dados.vencimento >= hojeIso()) {
+      linha.ativo = true
+    }
     if (rosto) {
       linha.descritores = rosto.descritores
       linha.foto = rosto.foto
@@ -277,6 +286,13 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
               <input type="checkbox" checked={dados.ativo} onChange={e => set('ativo', e.target.checked)} />
               Matrícula ativa
             </label>
+          )}
+          {aluno && !dados.ativo && (
+            <p className="ac-aviso">
+              Desligada, a catraca não abre pra ela nem com a mensalidade em dia.
+              Se ela voltou, marque a caixa acima — ou aperte <b>Renovar</b> na lista,
+              que recebe a mensalidade e religa de uma vez.
+            </p>
           )}
         </div>
       </div>
