@@ -1187,6 +1187,19 @@ export default function PresencialSalao() {
     setRascunho(prev => prev.map(r => (r.linha ?? String(r.produto_id)) === linha ? { ...r, observacao: texto } : r))
   }
 
+  // "2 hambúrgueres iguais" ficam numa linha só, então dividem o mesmo recado. Pra
+  // cada um ter o seu ("1 sem salada"), tira UMA unidade da linha e faz dela uma
+  // linha própria (chave única, igual ao preço digitado na mão logo abaixo).
+  function separarUmRascunho(linha) {
+    setRascunho(prev => prev.flatMap(r => {
+      if ((r.linha ?? String(r.produto_id)) !== linha || r.quantidade < 2) return [r]
+      return [
+        { ...r, quantidade: r.quantidade - 1 },
+        { ...r, quantidade: 1, observacao: '', linha: `${linha}::s${Date.now()}${Math.floor(Math.random() * 1000)}` },
+      ]
+    }))
+  }
+
   // Preço do item ainda no rascunho. É assim que a loja que vende no peso trabalha:
   // pesa o prato, digita o valor que deu e SÓ ENTÃO manda pra cozinha.
   function salvarPrecoRascunho(linha) {
@@ -3217,6 +3230,16 @@ export default function PresencialSalao() {
                           background: 'var(--input-bg, var(--bg))', color: 'var(--text)',
                         }}
                       />
+                      {r.quantidade > 1 && (
+                        <button type="button" onClick={() => separarUmRascunho(r.linha ?? String(r.produto_id))}
+                          title="Tira 1 unidade desta linha pra você escrever um recado só pra ela"
+                          style={{
+                            marginTop: 6, padding: '6px 10px', fontSize: 13, fontWeight: 700, borderRadius: 8, cursor: 'pointer',
+                            border: '1px dashed var(--border)', background: 'transparent', color: 'var(--text-muted)',
+                          }}>
+                          ✂️ Separar 1 (recado só pra ele)
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -3432,7 +3455,7 @@ export default function PresencialSalao() {
                   {!semCozinha && <input
                     value={obsEnvio}
                     onChange={e => setObsEnvio(e.target.value)}
-                    placeholder="📝 Recado pra cozinha (sai impresso)"
+                    placeholder="📝 Recado pra cozinha (vai em TODOS os itens)"
                     style={{
                       flex: 1, minWidth: 130, padding: '10px 10px', fontSize: 14.5, fontWeight: 600, boxSizing: 'border-box',
                       borderRadius: 8, border: '1px solid var(--border)',
