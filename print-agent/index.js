@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 28
+const APP_VERSION = 29
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -48,6 +48,10 @@ function log(...a) {
   console.log(s)
   logs.push(s); if (logs.length > 200) logs.shift()
 }
+// Erro inesperado nao pode derrubar o app: loja sem impressao no meio do servico
+// e pior que um erro registrado no log.
+process.on('uncaughtException', e => { try { log('ERRO inesperado: ' + ((e && e.stack) || e)) } catch (_) {} })
+process.on('unhandledRejection', e => { try { log('ERRO inesperado (promessa): ' + ((e && e.stack) || e)) } catch (_) {} })
 let empresa = null, empresaId = null, canal = null
 let sessionAtiva = false, empresasDisponiveis = []
 
@@ -198,26 +202,47 @@ $b=[System.IO.File]::ReadAllBytes($File)
 if([RawPrinter]::SendBytes($Printer,$b)){Write-Output "OK"}else{Write-Output "FAIL";exit 1}`
 try { fs.writeFileSync(PS1_FILE, PS1) } catch (e) {}
 
-function listarImpressoras() {
-  const ps = (cmd) => {
-    try {
-      const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', cmd], { encoding: 'utf8', windowsHide: true })
-      return (r.stdout || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
-    } catch (e) { return [] }
-  }
-  // Tenta várias formas — Windows novo/antigo, política restrita, impressora USB.
-  let l = ps('Get-Printer | Select-Object -ExpandProperty Name')
-  if (l.length) return l
-  l = ps('Get-CimInstance Win32_Printer | Select-Object -ExpandProperty Name')
-  if (l.length) return l
-  l = ps('Get-WmiObject Win32_Printer | Select-Object -ExpandProperty Name')
-  if (l.length) return l
-  try {
-    const r = spawnSync('wmic', ['printer', 'get', 'name'], { encoding: 'utf8', windowsHide: true })
-    l = (r.stdout || '').split(/\r?\n/).map(s => s.trim()).filter(s => s && s.toLowerCase() !== 'name')
-  } catch (e) { l = [] }
-  return l
+// ---- lista de impressoras do Windows: em CACHE, nunca trava o app ----
+// Antes era spawnSync sem limite de tempo, chamado a CADA /api/status. Num PC
+// antigo o PowerShell demora (10-30s) e o app inteiro ficava parado: o gestor, que
+// pergunta o status toda hora, achava que o app tinha fechado ("desconectada") e
+// mandava a impressao pro navegador. Agora a busca roda em segundo plano, com
+// limite de tempo, e o status responde na hora com a ultima lista conhecida.
+var _impLista = [], _impEm = 0, _impBuscando = false
+function _rodar(cmd, args, ms) {
+  return new Promise(resolve => {
+    let out = '', fim = false, ch, t
+    const acabar = () => {
+      if (fim) return
+      fim = true; clearTimeout(t)
+      resolve(out.split(/\r?\n/).map(x => x.trim()).filter(Boolean))
+    }
+    try { ch = spawn(cmd, args, { windowsHide: true }) } catch (e) { return resolve([]) }
+    t = setTimeout(() => { try { ch.kill() } catch (e) {} acabar() }, ms)
+    try { ch.stdout.setEncoding('utf8'); ch.stdout.on('data', d => { out += d }) } catch (e) {}
+    ch.on('error', acabar); ch.on('close', acabar)
+  })
 }
+async function _buscarImpressoras() {
+  const ps = (c) => _rodar('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', c], 25000)
+  // Tenta varias formas — Windows novo/antigo, politica restrita, impressora USB.
+  let l = await ps('Get-Printer | Select-Object -ExpandProperty Name')
+  if (!l.length) l = await ps('Get-CimInstance Win32_Printer | Select-Object -ExpandProperty Name')
+  if (!l.length) l = await ps('Get-WmiObject Win32_Printer | Select-Object -ExpandProperty Name')
+  if (!l.length) l = (await _rodar('wmic', ['printer', 'get', 'name'], 15000)).filter(x => x.toLowerCase() !== 'name')
+  if (l.length) _impLista = l
+  _impEm = Date.now()
+}
+function listarImpressoras() {
+  if (!_impBuscando && Date.now() - _impEm > 30000) {
+    _impBuscando = true
+    _buscarImpressoras().catch(() => {}).then(() => { _impBuscando = false })
+  }
+  // As ja escolhidas entram sempre na lista, mesmo antes da primeira busca terminar.
+  const salvas = [config().printer, config().printerBar].filter(Boolean)
+  return [...new Set([..._impLista, ...salvas])]
+}
+listarImpressoras() // aquece o cache ao abrir, pra primeira tela ja ter a lista
 
 // Caminho real da Área de Trabalho (respeita redirecionamento do OneDrive).
 function caminhoDesktop() {
