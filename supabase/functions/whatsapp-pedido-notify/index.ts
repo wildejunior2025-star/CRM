@@ -58,20 +58,33 @@ async function sendViaCloud(phoneNumberId: string, to: string, text: string): Pr
   }
 }
 
+// Pedido de RETIRADA chega em "pode vir buscar" por dois status diferentes,
+// porque o gestor tem dois botões pro mesmo ato: abrir o pedido e clicar
+// "Pronto para retirada" grava `saiu_entrega`, e o botão rápido do card grava
+// `pronto`. Só o primeiro avisava — quem usava o botão rápido deixava o cliente
+// esperando sem notícia nenhuma (pedido #1002 do Braseiro, 09/10/2026, marcado
+// pronto às 20:11 e o cliente nunca soube).
+export function ehProntoParaRetirar(status: string, tipoEntrega: string): boolean {
+  return tipoEntrega === "retirada" && (status === "pronto" || status === "saiu_entrega")
+}
+
 function getMensagem(status: string, tipoEntrega: string, num: string, codigo: string, motivo: string): string | null {
+  // Sem código o pedido segue normal — a loja pode ter desligado o código de
+  // entrega no Super Admin. Sem esse cuidado o cliente receberia a frase pela
+  // metade: "Seu código de entrega: **".
+  if (ehProntoParaRetirar(status, tipoEntrega)) {
+    return `🏪 *Pedido #${num} pronto para retirada!*\nPode vir buscar na loja! 🎉` +
+      (codigo ? `\nSeu código de confirmação: *${codigo}*` : "")
+  }
+
   switch (status) {
     case "confirmado":
       return `✅ *Pedido #${num} confirmado pela loja!*\nSeu pedido está sendo preparado. Em breve você recebe uma atualização! 🎉`
     case "em_preparo":
       return `👨‍🍳 *Pedido #${num} em preparo!*\nFique de olho, logo logo fica pronto!`
-    // Sem código o pedido segue normal — a loja pode ter desligado o código de
-    // entrega no Super Admin. Sem esse cuidado o cliente receberia a frase pela
-    // metade: "Seu código de entrega: **".
+    // Entrega continua avisando só no despacho: "ficou pronto" e logo em
+    // seguida "saiu para entrega" seriam duas mensagens pro mesmo minuto.
     case "saiu_entrega":
-      if (tipoEntrega === "retirada") {
-        return `🏪 *Pedido #${num} pronto para retirada!*\nPode vir buscar na loja! 🎉` +
-          (codigo ? `\nSeu código de confirmação: *${codigo}*` : "")
-      }
       return `🛵 *Pedido #${num} saiu para entrega!*\nEstá a caminho!` +
         (codigo ? `\nSeu código de entrega: *${codigo}*` : "")
     case "entregue":
@@ -93,21 +106,6 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
-    // Trava de duplicata: o mesmo pedido+status só avisa UMA vez. Duas gravações
-    // quase simultâneas (painel + sincronismo do iFood, por exemplo) disparavam o
-    // trigger duas vezes e o cliente recebia a mesma mensagem repetida — agora
-    // que o aviso custa crédito, repetir cobraria em dobro. A chave é PK, então
-    // quem chegar em segundo lugar leva erro de duplicidade e sai fora.
-    {
-      const { error: errDedup } = await supabase
-        .from("whatsapp_notify_dedup")
-        .insert({ id: `${pedido_id}:${novo_status}` })
-      if (errDedup) {
-        console.log("[notify] duplicata ignorada", pedido_id, novo_status)
-        return new Response("ok")
-      }
-    }
-
     const { data: pedido } = await supabase
       .from("pedidos_delivery")
       .select("numero_pedido, cliente_telefone, empresa_id, codigo_entrega, tipo_entrega, motivo_cancelamento, agendado_para, agendado_ate")
@@ -115,6 +113,28 @@ serve(async (req) => {
       .single()
 
     if (!pedido?.cliente_telefone) return new Response("ok")
+
+    // Trava de duplicata: o mesmo pedido+status só avisa UMA vez. Duas gravações
+    // quase simultâneas (painel + sincronismo do iFood, por exemplo) disparavam o
+    // trigger duas vezes e o cliente recebia a mesma mensagem repetida — agora
+    // que o aviso custa crédito, repetir cobraria em dobro. A chave é PK, então
+    // quem chegar em segundo lugar leva erro de duplicidade e sai fora.
+    //
+    // Na retirada a chave é do RECADO, não do status: `pronto` e `saiu_entrega`
+    // mandam a mesma frase, e sem isso "↩ voltar pra cozinha" e marcar pronto
+    // de novo pelo outro botão mandaria "pode vir buscar" duas vezes.
+    {
+      const chave = ehProntoParaRetirar(novo_status, pedido.tipo_entrega ?? "entrega")
+        ? `${pedido_id}:pronto-retirada`
+        : `${pedido_id}:${novo_status}`
+      const { error: errDedup } = await supabase
+        .from("whatsapp_notify_dedup")
+        .insert({ id: chave })
+      if (errDedup) {
+        console.log("[notify] duplicata ignorada", chave)
+        return new Response("ok")
+      }
+    }
 
     const { data: waCfg } = await supabase
       .from("whatsapp_config")
