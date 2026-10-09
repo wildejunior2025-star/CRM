@@ -138,7 +138,14 @@ export default function AcademiaAlunos() {
         aluno={editando === 'novo' ? null : editando}
         alunos={alunos}
         empresaId={empresa.id}
-        onFechar={salvou => { setEditando(null); if (salvou) recarregarTudo() }}
+        onFechar={(salvou, novo) => {
+          setEditando(null)
+          if (salvou) recarregarTudo()
+          // Cadastrou alguém agora: a matrícula dele é dinheiro entrando
+          // hoje. Abre o caixa na hora em vez de contar que alguém lembre —
+          // é só apertar "Não pagou ainda" se for o caso.
+          if (novo) setRecebendo({ ...novo, primeira: true })
+        }}
       />
     )
   }
@@ -294,12 +301,14 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
       // O aceite da LGPD é do ALUNO, na primeira vez que ele entra no app
       // (o dono marcando uma caixinha aqui não valia nada).
     }
-    const { error } = aluno
-      ? await supabase.from('academia_alunos').update(linha).eq('id', aluno.id)
-      : await supabase.from('academia_alunos').insert(linha)
+    // Aluno novo volta com a linha criada: quem cadastrou acabou de receber
+    // a primeira mensalidade, e ela precisa cair no caixa do dia.
+    const { data: criado, error } = aluno
+      ? await supabase.from('academia_alunos').update(linha).eq('id', aluno.id).select().single()
+      : await supabase.from('academia_alunos').insert(linha).select().single()
     setSalvando(false)
     if (error) return setErro('Não salvou: ' + error.message)
-    onFechar(true)
+    onFechar(true, aluno ? null : criado)
   }
 
   // Aluno esqueceu a senha: volta a ser os 4 últimos dígitos do celular dele.
@@ -395,7 +404,10 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
 
-  const novoVencimento = somarMeses(aluno.vencimento, meses, data)
+  // Na PRIMEIRA mensalidade o prazo conta de hoje. O cadastro já deixa o
+  // "Vence em" lá na frente; contar a partir dele daria o dobro de prazo.
+  const primeira = !!aluno.primeira
+  const novoVencimento = somarMeses(primeira ? null : aluno.vencimento, meses, data)
 
   async function confirmar(e) {
     e.preventDefault()
@@ -404,7 +416,12 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
     setSalvando(true)
     setErro(null)
     try {
-      await registrarPagamento({ empresaId, aluno, valor: v, forma, meses, data })
+      await registrarPagamento({
+        empresaId,
+        aluno: primeira ? { ...aluno, vencimento: null } : aluno,
+        valor: v, forma, meses, data,
+        observacao: primeira ? 'Matrícula' : null,
+      })
       onFechar(true)
     } catch (err) {
       setErro('Não deu pra registrar: ' + err.message)
@@ -415,9 +432,11 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
   return (
     <div className="ac-modal" role="dialog" aria-modal="true">
       <form className="ac-card ac-form ac-modal-caixa" onSubmit={confirmar}>
-        <h2>Mensalidade de {aluno.nome.split(' ')[0]}</h2>
+        <h2>{primeira ? 'Primeira mensalidade' : 'Mensalidade'} de {aluno.nome.split(' ')[0]}</h2>
         <p className="ac-muted">
-          Vence {aluno.vencimento ? dataBr(aluno.vencimento) : 'sem data'} → passa a vencer <b>{dataBr(novoVencimento)}</b>
+          {primeira
+            ? <>Cadastro feito. Recebeu agora? Então <b>vence {dataBr(novoVencimento)}</b> e o valor entra no caixa de hoje.</>
+            : <>Vence {aluno.vencimento ? dataBr(aluno.vencimento) : 'sem data'} → passa a vencer <b>{dataBr(novoVencimento)}</b></>}
         </p>
 
         <div className="ac-dupla">
@@ -444,7 +463,9 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
         {erro && <div className="ac-erro">{erro}</div>}
 
         <div className="ac-form-botoes">
-          <button type="button" className="btn btn-secondary" onClick={() => onFechar(false)} disabled={salvando}>Cancelar</button>
+          <button type="button" className="btn btn-secondary" onClick={() => onFechar(false)} disabled={salvando}>
+            {primeira ? 'Não pagou ainda' : 'Cancelar'}
+          </button>
           <button className="btn btn-primary" disabled={salvando}>{salvando ? 'Salvando...' : 'Confirmar pagamento'}</button>
         </div>
       </form>
