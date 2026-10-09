@@ -272,3 +272,6 @@ body { overflow-x: hidden; }
 
 /* Cortesia: treina de graca. Nao e "em dia" nem "vencido" — e outra coisa. */
 .ac-status.ac-cortesia { color: #6b21a8; background: #f3e8ff; }
+
+/* Diagnostico da captura: fica discreto embaixo, so enquanto captura. */
+.ac-captura-diag { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: 12px; color: #cfc8e8; background: rgba(0,0,0,.55); padding: 4px 8px; }

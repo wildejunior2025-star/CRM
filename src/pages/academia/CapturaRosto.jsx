@@ -24,6 +24,7 @@ export default function CapturaRosto({ alunos, onPronto, onCancelar }) {
   // Câmera de TRÁS por padrão no celular: resolução melhor e quem tira a foto
   // é a recepção, não o aluno.
   const [camera, setCamera] = useState(cameraPadrao)
+  const [diag, setDiag] = useState('')   // por que a captura nao anda
   const [tentativa, setTentativa] = useState(0) // "Tentar de novo" sem recarregar a pagina
   const capturaRef = useRef(0) // muda a cada captura; captura antiga que ainda estiver rodando para sozinha
 
@@ -58,10 +59,23 @@ export default function CapturaRosto({ alunos, onPronto, onCancelar }) {
     const cancelou = () => capturaRef.current !== minha
     const descritores = []
     let foto
+    let voltas = 0   // so pra saber se empacou
 
     while (descritores.length < AMOSTRAS && !cancelou()) {
-      const r = await lerRosto(videoRef.current).catch(() => null)
+      voltas++
+      const t0 = performance.now()
+      let falha = null
+      const r = await lerRosto(videoRef.current).catch(e => { falha = e; return null })
       if (cancelou()) return
+      // Linha de diagnóstico: quando a captura não anda, é ela que diz por quê.
+      const v = videoRef.current
+      if (descritores.length === 0 && voltas > 25) setDiag([
+        `${Math.round(performance.now() - t0)} ms`,
+        window.faceapi?.tf?.getBackend?.() || '?',
+        v ? `${v.videoWidth}x${v.videoHeight}` : 'sem vídeo',
+        r ? `rosto ${Math.round(r.caixa.width)}px · giro ${r.giro.toFixed(2)}` : 'sem rosto',
+        falha ? `ERRO: ${falha.message}` : '',
+      ].filter(Boolean).join(' · '))
       if (!r) { setMsg('Não estou vendo o rosto — aproxime a câmera'); await esperar(120); continue }
       if (r.quantos > 1) { setMsg('Tem mais de uma pessoa na câmera'); await esperar(300); continue }
       // Rosto muito de lado não serve de digital: pede pra endireitar.
@@ -104,6 +118,7 @@ export default function CapturaRosto({ alunos, onPronto, onCancelar }) {
         {fase === 'capturando' && (
           <div className="ac-captura-progresso"><div style={{ width: `${(feitas / AMOSTRAS) * 100}%` }} /></div>
         )}
+        {fase === 'capturando' && diag && <div className="ac-captura-diag">{diag}</div>}
         {fase === 'revisar' && resultado && (
           <div className="ac-captura-revisar">
             <img src={resultado.foto} alt="" />

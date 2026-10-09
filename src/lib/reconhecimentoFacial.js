@@ -296,6 +296,16 @@ export async function ligarCamera(video, { leve = false, camera = 'user' } = {})
   video.muted = true
   await video.play()
 
+  // No iPhone o play() volta antes de existir imagem: por um tempo o vídeo
+  // tem tamanho 0x0, e ler rosto aí não acha nada — a captura parecia "não
+  // funcionar", sem erro nenhum. Espera o primeiro quadro de verdade.
+  for (let i = 0; i < 100 && !video.videoWidth; i++) {
+    await new Promise(r => setTimeout(r, 50))
+  }
+  if (!video.videoWidth) {
+    throw new Error('A câmera abriu mas não veio imagem. Feche outros apps que usam a câmera e tente de novo.')
+  }
+
   // Sem zoom (tirado a pedido em 19/09): a tela mostra exatamente o que a
   // câmera lê — nada de reconhecer quem aparece cortado. Só a câmera da FRENTE
   // é espelhada; a de trás mostra a cena como ela é.
