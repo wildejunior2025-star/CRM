@@ -864,7 +864,8 @@ export async function responderSemIA({
     // cima do pedido do cliente (Zebu, 12-14/09). Quem atende abre e ouve.
     // Foto COM legenda ("📷 Foto — quanto custa?") segue: a legenda é texto.
     const marca = mensagem.trim()
-    if (marca === "📷 Foto" || /^(🎤 Áudio|🙂 Figurinha|🎬 Vídeo|📄 |📍 Localização)/u.test(marca)) {
+    const ehAudio = /^🎤 Áudio/u.test(marca)
+    if (!ehAudio && (marca === "📷 Foto" || /^(🙂 Figurinha|🎬 Vídeo|📄 |📍 Localização)/u.test(marca))) {
       console.log("[link] mídia sem texto, robô calado:", phone)
       return false
     }
@@ -886,6 +887,19 @@ export async function responderSemIA({
       // respondido — e respondia tudo de novo.
       try { await espelhar?.(texto) } catch { /* espelho é bônus */ }
       return true
+    }
+
+    // ÁUDIO. O robô do link não tem como ouvir (isso é da IA). Mas ficar MUDO é
+    // pior: quem mandou o áudio fica esperando uma resposta que não vem — foi o
+    // que aconteceu no teste do Braseiro (09/10/2026). Ele diz que não escuta e
+    // pede por escrito, uma vez por hora, pra não virar papagaio.
+    if (ehAudio) {
+      if (!(await reservarAviso(supabase, empresaId, phone, "audio", 60))) return false
+      return await responder(
+        `Oi! 😊 Por aqui eu ainda não consigo ouvir áudio.${NL}` +
+        `Me escreve rapidinho o que você precisa que eu já te respondo!${NL}${NL}` +
+        `Se preferir, o cardápio tá aqui: ${link}`,
+      )
     }
 
     // As últimas falas do robô: é o que diz se o link já foi (não repete a cada
@@ -965,7 +979,11 @@ export async function responderSemIA({
           .trim()
         // Sem o link em lugar nenhum ele entra no fim: loja fechada é quando
         // mais vale deixar o cardápio na mão de quem vai voltar.
-        return await responder(texto.includes(link) ? texto : `${texto}${NL}${NL}${link}`)
+        const comLink = texto.includes(link) ? texto : `${texto}${NL}${NL}${link}`
+        // A PERGUNTA dele vem junto. Trocar o texto padrão pelo da loja estava
+        // engolindo a resposta: quem perguntou o preço com a loja fechada
+        // recebia só "tamo fechado" (teste real no Braseiro, 09/10/2026).
+        return await responder(daInfoFechada ? `${comLink}${NL}${NL}${daInfoFechada}` : comLink)
       }
       return await responder(`${aviso}${extra}`)
     }

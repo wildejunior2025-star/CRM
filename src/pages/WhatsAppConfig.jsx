@@ -101,6 +101,7 @@ export default function WhatsAppConfig() {
   const [linkAtivo,       setLinkAtivo]       = useState(false)
   const [produtoAtivo,    setProdutoAtivo]    = useState(false)
   const [salvandoProduto, setSalvandoProduto] = useState(false)
+  const [audioAtivo,      setAudioAtivo]      = useState(false)
   const [textoFechado,    setTextoFechado]    = useState('')
   const [recadoAtivo,     setRecadoAtivo]     = useState(false)
   const [recadoTexto,     setRecadoTexto]     = useState('')
@@ -183,6 +184,7 @@ export default function WhatsAppConfig() {
       setIaAtivo(data.ia_ativo ?? false)
       setLinkAtivo(data.resposta_link_ativo ?? false)
       setProdutoAtivo(data.resposta_produto_ativo ?? false)
+      setAudioAtivo(data.ouvir_audio_ativo ?? false)
       setTextoFechado(data.texto_fechado ?? '')
       setRecadoAtivo(data.recado_ativo ?? false)
       setRecadoTexto(data.recado_texto ?? '')
@@ -858,6 +860,28 @@ export default function WhatsAppConfig() {
               {linkMsg.type === 'success' ? <CheckIcon /> : <AlertIcon />}
               {linkMsg.text}
             </div>
+          )}
+
+          {/* Cliente que manda áudio é cliente que não vai digitar. Ficar mudo
+              com ele é perder a venda — e a transcrição é barata. */}
+          {linkAtivo && (
+            <label className="wa-checkbox-row">
+              <input
+                type="checkbox"
+                checked={audioAtivo}
+                disabled={salvandoRecado}
+                onChange={(e) => { setAudioAtivo(e.target.checked); salvarCampoRobo({ ouvir_audio_ativo: e.target.checked }, e.target.checked ? 'Agora o robô escuta os áudios.' : 'O robô voltou a pedir por escrito.') }}
+              />
+              <div className="wa-checkbox-text">
+                <span>Entender áudio do cliente</span>
+                <small>
+                  Muita gente manda áudio em vez de escrever. Com isto ligado, o robô
+                  <strong> escuta o áudio</strong> e responde o que foi falado — preço, horário,
+                  taxa, o que ele já sabe. Desligado, ele pede pra mandar por escrito.{' '}
+                  <strong>Por enquanto é por nossa conta</strong>, sem custo pra loja.
+                </small>
+              </div>
+            </label>
           )}
 
           {/* Responder preço é o passo que transforma "manda o cardápio" em

@@ -500,7 +500,7 @@ async function processar(body: any) {
   // Acha a loja dona desse número
   const { data: cfg } = await supabase
     .from("whatsapp_config")
-    .select("empresa_id, instance_name, cloud_phone_number_id, ativo, ia_ativo, resposta_link_ativo, resposta_link_texto, resposta_produto_ativo, texto_fechado, recado_ativo, recado_texto, recado_palavras, empresas(nome, slug, agendamento_ativo, delivery_ativo, delivery_fechado_por, feriados_fecha, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
+    .select("empresa_id, instance_name, cloud_phone_number_id, ativo, ia_ativo, resposta_link_ativo, resposta_link_texto, resposta_produto_ativo, ouvir_audio_ativo, texto_fechado, recado_ativo, recado_texto, recado_palavras, empresas(nome, slug, agendamento_ativo, delivery_ativo, delivery_fechado_por, feriados_fecha, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
     .eq("cloud_phone_number_id", phoneNumberId)
     .eq("ativo", true)
     .maybeSingle()
@@ -601,7 +601,22 @@ async function processar(body: any) {
     // Mesma razão do whatsapp-webhook: robô desligado não pode significar
     // mensagem perdida. A loja atende pelo gestor, e pra isso precisa ter o
     // que o cliente escreveu.
-    const conteudo = textoParaRegistroCloud(message)
+    let conteudo = textoParaRegistroCloud(message)
+
+    // ÁUDIO VIRA TEXTO (mig 0315), igual ao Evolution: o cliente fala, o robô
+    // de graça responde pelo texto. Só a transcrição custa (~US$ 0,006 o
+    // minuto) — a resposta continua saindo do banco.
+    let audioTranscrito = ""
+    if (cfg.ouvir_audio_ativo === true && message.type === "audio" && message.audio?.id) {
+      const arq = await baixarMidiaCloud(String(message.audio.id), token)
+      const texto = arq?.base64 ? await transcreverAudio(arq.base64, arq.mimetype) : null
+      if (texto?.trim()) {
+        audioTranscrito = texto.trim()
+        conteudo = `🎤 ${audioTranscrito}`
+        console.log("[cloud link] áudio transcrito:", audioTranscrito.slice(0, 80))
+      }
+    }
+
     if (cfg.empresa_id && conteudo) {
       await supabase.from("whatsapp_conversas").insert({
         empresa_id: cfg.empresa_id, phone: from, role: "user", content: conteudo,
@@ -624,7 +639,8 @@ async function processar(body: any) {
       // 24h da Meta não atrapalha: o cliente ACABOU de escrever, então texto
       // livre é permitido e não é cobrado.
       await responderSemIA({
-        supabase, cfg: cfg as Record<string, unknown>, phone: from, mensagem: conteudo,
+        supabase, cfg: cfg as Record<string, unknown>, phone: from,
+        mensagem: audioTranscrito || conteudo,
         enviar: (texto: string) => sendText(phoneNumberId, from, texto, token),
         espelhar: (texto: string) =>
           espelharNoChat(supabase, cfg.empresa_id, from, texto, "loja", true),

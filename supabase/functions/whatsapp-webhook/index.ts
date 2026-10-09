@@ -3033,7 +3033,7 @@ serve(async (req) => {
     {
       const { data: liga } = await supabase
         .from("whatsapp_config")
-        .select("empresa_id, ia_ativo, resposta_link_ativo, resposta_link_texto, resposta_produto_ativo, texto_fechado, recado_ativo, recado_texto, recado_palavras, empresas(nome, slug, agendamento_ativo, delivery_ativo, delivery_fechado_por, feriados_fecha, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
+        .select("empresa_id, ia_ativo, resposta_link_ativo, resposta_link_texto, resposta_produto_ativo, ouvir_audio_ativo, texto_fechado, recado_ativo, recado_texto, recado_palavras, empresas(nome, slug, agendamento_ativo, delivery_ativo, delivery_fechado_por, feriados_fecha, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
         .eq("instance_name", instanceName)
         .eq("ativo", true)
         .maybeSingle()
@@ -3046,7 +3046,22 @@ serve(async (req) => {
         // Áudio e foto entram como marca ("🎤 Áudio"), sem transcrever: gastar
         // Whisper com o robô desligado é cobrar da loja um trabalho que ninguém
         // pediu. Quem for atender abre o WhatsApp e ouve.
-        const conteudo = textoParaRegistro(msg)
+        let conteudo = textoParaRegistro(msg)
+
+        // ÁUDIO VIRA TEXTO (mig 0315). Opcional, desligado por padrão: é o
+        // único lugar deste robô que gasta — ~US$ 0,006 por minuto de áudio
+        // (menos de 2 centavos num áudio de 30 s). Depois de transcrito, quem
+        // responde é o robô de graça: preço, horário e taxa saem do banco.
+        let audioTranscrito = ""
+        if (liga?.ouvir_audio_ativo === true && (msg.messageType === "pttMessage" || msg.messageType === "audioMessage")) {
+          const media = await getMediaBase64(instanceName, msg)
+          const texto = media?.base64 ? await transcribeAudio(media.base64, media.mimetype) : null
+          if (texto?.trim()) {
+            audioTranscrito = texto.trim()
+            conteudo = `🎤 ${audioTranscrito}`
+            console.log("[link] áudio transcrito:", audioTranscrito.slice(0, 80))
+          }
+        }
 
         // MODO TESTE também no robô do link. Antes só o robô de IA dava pra
         // simular (?test=true): o do link saía daqui calado, e a única forma de
@@ -3056,7 +3071,9 @@ serve(async (req) => {
         if (isTest && liga?.empresa_id && conteudo) {
           let saiu = ""
           const respondeu = await responderSemIA({
-            supabase, cfg: liga as Record<string, unknown>, phone: phoneEarly, mensagem: conteudo,
+            supabase, cfg: liga as Record<string, unknown>, phone: phoneEarly,
+            // O robô lê o que foi FALADO; a marca "🎤" é só pra tela da loja.
+            mensagem: audioTranscrito || conteudo,
             enviar: (texto: string) => { saiu = texto; return Promise.resolve(null) },
           })
           return new Response(
@@ -3089,7 +3106,10 @@ serve(async (req) => {
           // crédito: o cardápio é que sabe preço, taxa, cashback e agendamento —
           // e ele está sempre atualizado, coisa que nenhum prompt fica.
           const respondeu = await responderSemIA({
-            supabase, cfg: liga as Record<string, unknown>, phone: phoneEarly, mensagem: conteudo,
+            supabase, cfg: liga as Record<string, unknown>, phone: phoneEarly,
+            // Áudio transcrito (mig 0315): o robô responde o que foi FALADO. A
+            // marca "🎤" fica só no histórico e na tela da loja.
+            mensagem: audioTranscrito || conteudo,
             enviar: (texto: string) => fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
               method: "POST",
               headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
