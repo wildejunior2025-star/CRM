@@ -45,6 +45,10 @@ export default function AcademiaRecepcao() {
   // Catraca ligada neste PC: null = não usa (tablet), 'ok', 'abrindo' ou o texto do erro.
   // Tudo automático — a academia funciona sem ninguém na recepção.
   const [catraca, setCatracaEstado] = useState(null)
+  // Tem computador com a tela "Porta" aberta e pronto? Null = ainda nao sei.
+  const [portaLigada, setPortaLigadaEstado] = useState(null)
+  const portaLigadaRef = useRef(null)
+  const setPortaLigada = v => { portaLigadaRef.current = v; setPortaLigadaEstado(v) }
   const catracaRef = useRef(null)
   const setCatraca = v => { catracaRef.current = v; setCatracaEstado(v) }
 
@@ -98,7 +102,13 @@ export default function AcademiaRecepcao() {
     if (!canal) return setCatraca('Sem ligação com o computador da catraca. Abra a tela "Porta" no computador.')
     setCatraca('abrindo')
     canal.send({ type: 'broadcast', event: 'liberar', payload: { nome: aluno?.nome, aluno_id: aluno?.id } })
-      .then(() => setCatraca('pc'), e => setCatraca('Não avisei o computador: ' + e.message))
+      .then(() => {
+        // Mandar o aviso dá "certo" mesmo quando não tem ninguém escutando.
+        // Só diz que foi pro computador se o computador se anunciou.
+        setCatraca(portaLigadaRef.current
+          ? 'pc'
+          : 'Ninguém com a tela "Porta" aberta no computador da catraca.')
+      }, e => setCatraca('Não avisei o computador: ' + e.message))
   }
 
   async function carregarAlunos() {
@@ -237,7 +247,15 @@ export default function AcademiaRecepcao() {
         setEstado({ fase: 'rodando', msg: '' })
         // Liga SEMPRE no canal do computador da catraca (tela /porta): é por ele
         // que o celular manda abrir. O canal também é a reserva do próprio PC.
-        const canal = supabase.channel(`catraca-${empresa.id}`)
+        const canal = supabase.channel(`catraca-${empresa.id}`, { config: { presence: {} } })
+        // Tem um computador com a tela "Porta" aberta do outro lado? Sem
+        // isso, o celular reconhece o aluno, manda o aviso pro vazio e diz
+        // que deu tudo certo — e a catraca não abre. Agora a tela sabe.
+        const verPorta = () => {
+          const todos = Object.values(canal.presenceState() || {}).flat()
+          setPortaLigada(todos.some(p => p.papel === 'porta' && p.pronto))
+        }
+        canal.on('presence', { event: 'sync' }, verPorta)
         canal.subscribe(st => {
           if (st === 'SUBSCRIBED') {
             canalPorta.current = canal
@@ -334,12 +352,22 @@ export default function AcademiaRecepcao() {
             </div>
           </div>
         ))}
-        {catraca && (
+        {catraca && !(catraca === 'pc' && portaLigada === false) && (
           <div className="ac-rec-catraca">
             <div className={['ok', 'pc', 'abrindo'].includes(catraca) ? 'ok' : 'erro'}>
               {catraca === 'ok' ? '● Catraca conectada'
                 : catraca === 'pc' ? '● Catraca pelo computador'
                 : catraca === 'abrindo' ? '● Abrindo a catraca...' : `● ${catraca}`}
+            </div>
+          </div>
+        )}
+        {/* Este aparelho não fala com a catraca e não tem ninguém do outro
+            lado: o aluno seria reconhecido e a catraca ficaria trancada. */}
+        {catraca !== 'ok' && portaLigada === false && (
+          <div className="ac-rec-catraca">
+            <div className="erro">
+              ⚠ A catraca não vai abrir<br />
+              No computador da catraca, abra a tela <b>Porta</b> e deixe ela aberta.
             </div>
           </div>
         )}

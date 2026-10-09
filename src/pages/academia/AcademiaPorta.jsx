@@ -22,6 +22,8 @@ export default function AcademiaPorta() {
   const [msg, setMsg] = useState('Preparando...')
   const [log, setLog] = useState([])
   const ocupado = useRef(false)
+  const canalRef = useRef(null)
+  const prontoRef = useRef(false)
 
   const anotar = t => setLog(l => [{ t, hora: new Date() }, ...l].slice(0, 12))
 
@@ -50,10 +52,13 @@ export default function AcademiaPorta() {
   }, [])
 
   // Fica ouvindo o aviso que a Recepção (celular ou tablet) manda.
+  // E se ANUNCIA no canal: é assim que o celular sabe que tem alguém aqui
+  // pra abrir a catraca. Sem isso, a Recepção no celular reconhecia o aluno,
+  // mandava o aviso no vazio e dizia que estava tudo certo.
   useEffect(() => {
     if (!empresa?.id) return
     const canal = supabase
-      .channel(`catraca-${empresa.id}`)
+      .channel(`catraca-${empresa.id}`, { config: { presence: { key: 'porta' } } })
       .on('broadcast', { event: 'liberar' }, async ({ payload }) => {
         const nome = payload?.nome || 'aluno'
         if (ocupado.current) return
@@ -75,9 +80,19 @@ export default function AcademiaPorta() {
         }
         ocupado.current = false
       })
-      .subscribe()
-    return () => { supabase.removeChannel(canal) }
+      .subscribe(st => {
+        if (st === 'SUBSCRIBED') canal.track({ papel: 'porta', pronto: prontoRef.current })
+      })
+    canalRef.current = canal
+    return () => { canalRef.current = null; supabase.removeChannel(canal) }
   }, [empresa?.id])
+
+  // A porta avisa também QUANDO muda de estado: se a serial cair, o celular
+  // tem que parar de achar que tem alguém pronto deste lado.
+  useEffect(() => {
+    prontoRef.current = estado === 'pronto'
+    canalRef.current?.track({ papel: 'porta', pronto: estado === 'pronto' })
+  }, [estado])
 
   async function escolher() {
     try {
