@@ -748,6 +748,34 @@ export default function DeliveryLoja() {
     })
   }
 
+  // Recado do item ("sem cebola"). Fica na própria linha da sacola, então já
+  // sobrevive ao recarregar (a sacola inteira vive no localStorage).
+  function mudarObsKey(key, texto) {
+    setCarrinho(prev => (prev[key]
+      ? { ...prev, [key]: { ...prev[key], observacao: String(texto).slice(0, 140) } }
+      : prev))
+  }
+
+  // "2 hambúrgueres iguais" são UMA linha e dividem o mesmo recado. Pra cada um
+  // ter o seu, tira uma unidade da linha e faz dela uma linha própria (chave
+  // única). Fora: montagem de atacado (a quantidade é a soma dos sabores) e item
+  // com faixa de preço por quantidade (separar quebraria o preço de atacado).
+  function podeSepararKey(item) {
+    return item && item.quantidade > 1 && !qtdTravada(item) && !(item.faixas_preco?.length > 0)
+  }
+  function separarUmKey(key) {
+    setCarrinho(prev => {
+      const item = prev[key]
+      if (!podeSepararKey(item)) return prev
+      const nova = `${key}::s${Date.now()}${Math.floor(Math.random() * 1000)}`
+      return {
+        ...prev,
+        [key]: comPrecoDaFaixa(item, item.quantidade - 1),
+        [nova]: { ...item, key: nova, quantidade: 1, observacao: '' },
+      }
+    })
+  }
+
   // Quantidade total de um produto somando todos os combos dele
   function qtdProduto(prodId) {
     return Object.values(carrinho)
@@ -1079,6 +1107,7 @@ export default function DeliveryLoja() {
           quantidade: i.quantidade,
           preco: Number(i.preco),
           complementos: i.complementos ?? [],
+          observacao: (i.observacao ?? '').trim(),
         })),
         subtotal,
         taxaEntrega,
@@ -1472,6 +1501,27 @@ export default function DeliveryLoja() {
                       <IconTrash />
                     </button>
                   </div>
+                  {/* Recado só deste item (ex.: sem cebola). Sai no papel da cozinha
+                      embaixo do item certo. No modo "alterar pedido" não aparece:
+                      aquele caminho não leva recado pro pedido. */}
+                  {!pedidoAlterando && (
+                    <>
+                      <input
+                        className="dloja-drawer-item-obs"
+                        type="text"
+                        maxLength={140}
+                        value={item.observacao ?? ''}
+                        onChange={e => mudarObsKey(item.key, e.target.value)}
+                        placeholder="📝 Observação do item (ex: sem cebola)"
+                        aria-label={`Observação de ${item.nome}`}
+                      />
+                      {podeSepararKey(item) && (
+                        <button type="button" className="dloja-drawer-item-sep" onClick={() => separarUmKey(item.key)}>
+                          ✂️ Separar 1 (recado só pra ele)
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
               ))}
             </div>

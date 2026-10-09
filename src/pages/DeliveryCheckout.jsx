@@ -1897,6 +1897,9 @@ export default function DeliveryCheckout() {
       preco_unitario: i.preco,
       subtotal:      i.quantidade * i.preco,
       complementos:  i.complementos ?? [],
+      // Recado do cliente pra ESTE item ("sem cebola"). O cupom e o card do
+      // gestor já imprimem item.observacao.
+      observacao:    (i.observacao ?? '').trim() || null,
     }))
 
     function lembrarCliente() {
@@ -2703,6 +2706,11 @@ export default function DeliveryCheckout() {
                         {item.complementos?.length > 0 && (
                           <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted, #888)', fontWeight: 400 }}>
                             {item.complementos.map(c => `${Number(c.qtd ?? 1)}× ${c.nome}`).join(', ')}
+                          </span>
+                        )}
+                        {item.observacao && (
+                          <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted, #888)', fontWeight: 400, fontStyle: 'italic' }}>
+                            📝 {item.observacao}
                           </span>
                         )}
                       </span>
