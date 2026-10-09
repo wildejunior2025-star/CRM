@@ -101,6 +101,12 @@ export default function WhatsAppConfig() {
   const [linkAtivo,       setLinkAtivo]       = useState(false)
   const [produtoAtivo,    setProdutoAtivo]    = useState(false)
   const [salvandoProduto, setSalvandoProduto] = useState(false)
+  const [textoFechado,    setTextoFechado]    = useState('')
+  const [recadoAtivo,     setRecadoAtivo]     = useState(false)
+  const [recadoTexto,     setRecadoTexto]     = useState('')
+  const [recadoPalavras,  setRecadoPalavras]  = useState('')
+  const [salvandoRecado,  setSalvandoRecado]  = useState(false)
+  const [recadoMsg,       setRecadoMsg]       = useState(null)
   const [salvandoLink,    setSalvandoLink]    = useState(false)
   const [linkMsg,         setLinkMsg]         = useState(null)
   // Texto da primeira fala. Vazio = o padrão da casa; cada loja fala do seu jeito.
@@ -177,6 +183,10 @@ export default function WhatsAppConfig() {
       setIaAtivo(data.ia_ativo ?? false)
       setLinkAtivo(data.resposta_link_ativo ?? false)
       setProdutoAtivo(data.resposta_produto_ativo ?? false)
+      setTextoFechado(data.texto_fechado ?? '')
+      setRecadoAtivo(data.recado_ativo ?? false)
+      setRecadoTexto(data.recado_texto ?? '')
+      setRecadoPalavras(data.recado_palavras ?? '')
       setAvisoAbertura(data.aviso_abertura_ativo ?? true)
       setTutorialAtivo(data.tutorial_ativo ?? true)
       setTutorialUrl(data.tutorial_url ?? '')
@@ -560,6 +570,19 @@ export default function WhatsAppConfig() {
     if (!error) setTimeout(() => setTextoMsg(null), 3000)
   }
 
+  // Texto de "loja fechada" e recado do dia (mig 0314). Campo vazio = volta
+  // pro padrão da casa; é o mesmo gesto de "não personalizei".
+  async function salvarCampoRobo(patch, msgOk) {
+    setSalvandoRecado(true)
+    setRecadoMsg(null)
+    const { error } = await supabase
+      .from('whatsapp_config')
+      .upsert({ empresa_id: profile.empresa_id, ...patch }, { onConflict: 'empresa_id' })
+    setSalvandoRecado(false)
+    setRecadoMsg(error ? { type: 'error', text: error.message } : { type: 'success', text: msgOk })
+    if (!error) setTimeout(() => setRecadoMsg(null), 3000)
+  }
+
   async function handleSaveInstrucoes(e) {
     e.preventDefault()
     setSavingIa(true)
@@ -926,6 +949,108 @@ export default function WhatsAppConfig() {
                   {textoMsg.text}
                 </div>
               )}
+
+              {/* ── Loja fechada, do jeito da loja (mig 0314) ───────────────
+                  Era um texto só pra todas. Cada uma fala do seu jeito e tem
+                  coisa pra dizer ali — foi o Braseiro, que fecha o delivery e
+                  continua com o salão cheio. */}
+              <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+                <label htmlFor="wa-msg-fechado" className="wa-primeira-fala-label">
+                  Mensagem quando a loja está fechada
+                </label>
+                <p className="wa-hint" style={{ margin: '2px 0 8px' }}>
+                  Use <code>{'{abre}'}</code> pra entrar sozinho quando a loja volta
+                  (<em>"hoje às 18:00"</em>) e <code>{'{link}'}</code> pro cardápio.
+                  Em branco, vale a nossa: <em>"Agora a gente tá fechado 😴 A gente abre {'{abre}'}."</em>
+                </p>
+                <textarea
+                  id="wa-msg-fechado"
+                  className="wa-textarea"
+                  rows={4}
+                  value={textoFechado}
+                  onChange={e => setTextoFechado(e.target.value)}
+                  placeholder={'Agora a gente tá fechado pra entrega 😴 A gente abre {abre}.\n\nMas o salão tá aberto, vem tomar uma com a gente! 🍻\n\nCardápio: {link}'}
+                />
+                <div className="wa-primeira-fala-acoes">
+                  <button type="button" className="btn btn-primary btn-sm" disabled={salvandoRecado}
+                    onClick={() => salvarCampoRobo({ texto_fechado: textoFechado.trim() || null },
+                      'Mensagem de loja fechada salva.')}>
+                    {salvandoRecado ? 'Salvando...' : 'Salvar mensagem'}
+                  </button>
+                  <button type="button" className="btn btn-secondary btn-sm"
+                    disabled={salvandoRecado || !textoFechado.trim()}
+                    onClick={() => { setTextoFechado(''); salvarCampoRobo({ texto_fechado: null }, 'Voltou pra mensagem padrão.') }}>
+                    Usar a mensagem padrão
+                  </button>
+                </div>
+              </div>
+
+              {/* ── Recado do dia (mig 0314) ────────────────────────────────
+                  O happy hour que é só no salão, a promoção que acaba às 18h:
+                  o preço do cardápio não conta essa história, e quem responde
+                  de cabeça erra. */}
+              <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+                <label className="wa-checkbox-row" style={{ padding: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={recadoAtivo}
+                    disabled={salvandoRecado}
+                    onChange={(e) => { setRecadoAtivo(e.target.checked); salvarCampoRobo({ recado_ativo: e.target.checked }, e.target.checked ? 'Recado ligado.' : 'Recado desligado.') }}
+                  />
+                  <div className="wa-checkbox-text">
+                    <span>Recado do dia (promoção, happy hour)</span>
+                    <small>
+                      Quando o cliente perguntar <em>"tem promoção hoje?"</em> ou
+                      <em> "tem happy hour?"</em>, o robô responde isto. Serve pra regra que o
+                      preço não conta sozinho — tipo promoção <strong>só no salão</strong>, com o
+                      delivery no preço normal.
+                    </small>
+                  </div>
+                </label>
+
+                {recadoAtivo && (
+                  <>
+                    <textarea
+                      className="wa-textarea"
+                      rows={4}
+                      style={{ marginTop: 10 }}
+                      value={recadoTexto}
+                      onChange={e => setRecadoTexto(e.target.value)}
+                      placeholder={'🍻 Hoje tem Happy Hour aqui no salão, das 18h às 20h!\n\nA promoção é só pra quem vem tomar aqui — no delivery os preços são os normais do cardápio.'}
+                    />
+                    <label htmlFor="wa-recado-palavras" className="wa-primeira-fala-label" style={{ marginTop: 10 }}>
+                      Outras palavras que puxam esse recado
+                    </label>
+                    <p className="wa-hint" style={{ margin: '2px 0 6px' }}>
+                      Separadas por vírgula. <em>Promoção, promo, oferta, desconto e happy hour</em> já
+                      valem sempre — ponha aqui o que é seu: <em>chopp, dose dupla, rodízio</em>.
+                    </p>
+                    <input
+                      id="wa-recado-palavras"
+                      className="wa-input"
+                      value={recadoPalavras}
+                      onChange={e => setRecadoPalavras(e.target.value)}
+                      placeholder="chopp, dose dupla"
+                    />
+                    <div className="wa-primeira-fala-acoes">
+                      <button type="button" className="btn btn-primary btn-sm" disabled={salvandoRecado}
+                        onClick={() => salvarCampoRobo({
+                          recado_texto: recadoTexto.trim() || null,
+                          recado_palavras: recadoPalavras.trim() || null,
+                        }, 'Recado salvo. É o que o robô vai responder.')}>
+                        {salvandoRecado ? 'Salvando...' : 'Salvar recado'}
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {recadoMsg && (
+                  <div className={`wa-test-result ${recadoMsg.type}`} style={{ marginTop: 8 }}>
+                    {recadoMsg.type === 'success' ? <CheckIcon /> : <AlertIcon />}
+                    {recadoMsg.text}
+                  </div>
+                )}
+              </div>
 
               {/* Prévia dos dois casos, porque é onde o {nome} engana: a loja
                   escreve pensando em quem ela conhece e esquece de quem chega

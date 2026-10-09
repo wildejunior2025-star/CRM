@@ -321,6 +321,48 @@ export function avisoDeFechada(
   return fechado
 }
 
+/**
+ * A volta da loja em uma frase, pro {abre} do texto que a loja escreve:
+ * "hoje às 18:00", "amanhã das 18:00 às 23:00". Vazio quando nem o calendário
+ * sabe — aí a frase da loja fica sem a promessa, que é melhor que prometer
+ * errado.
+ */
+export function quandoVolta(
+  empresa: Record<string, unknown>, excecoes: Excecoes = {},
+): string {
+  const { min: agora, ymd: hoje } = agoraNaLoja()
+  const dia = comoFicaNoDia(hoje, empresa, excecoes)
+  if (dia.aberto) {
+    const proximo = dia.periodos.map(p => paraMin(p.i)).filter(i => i > agora).sort((a, b) => a - b)[0]
+    if (proximo != null) {
+      return `hoje às ${String(Math.floor(proximo / 60)).padStart(2, "0")}:${String(proximo % 60).padStart(2, "0")}`
+    }
+  }
+  const volta = proximoDiaQueAbre(hoje, empresa, excecoes)
+  return volta ? `${volta.nome.toLowerCase()} ${textoDosPeriodos(volta.periodos)}` : ""
+}
+
+// ── O recado do dia (mig 0314) ───────────────────────────────────────────────
+// "Hoje tem happy hour, mas só no salão; pelo delivery é o preço normal."
+// Isso não cabe no cadastro do produto — lá o preço é um só — e é exatamente o
+// tipo de coisa que sai errada quando alguém responde de cabeça.
+const PALAVRAS_RECADO = [
+  "promocao", "promocoes", "promo", "oferta", "ofertas", "desconto", "descontos",
+  "happy hour", "happyhour", "happy", "combo", "novidade", "tem algo hoje",
+]
+
+function recadoDoDia(cfg: Record<string, unknown>, texto: string): string | null {
+  if (cfg.recado_ativo !== true) return null
+  const recado = String(cfg.recado_texto ?? "").trim()
+  if (!recado) return null
+  const t = semAcento(texto)
+  const extras = String(cfg.recado_palavras ?? "")
+    .split(",").map(p => semAcento(p).trim()).filter(p => p.length >= 3)
+  const casa = [...PALAVRAS_RECADO, ...extras].some(p =>
+    new RegExp(`(^|[^a-z0-9])${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(t))
+  return casa ? recado : null
+}
+
 function respostaDeEndereco(empresa: Record<string, unknown>): string | null {
   const rua = String(empresa.endereco ?? "").trim()
   if (!rua) return null
@@ -875,10 +917,26 @@ export async function responderSemIA({
         String(m.content ?? "").includes(MARCA_FECHADA))
         || !(await reservarAviso(supabase, empresaId, phone, "fechada"))
       const aviso = avisoDeFechada(empresa, excecoes)
-      const daInfoFechada = respostaDeInfo(mensagem, empresa, link, excecoes)
+      // Loja fechada é o DELIVERY fechado — o salão pode estar cheio. Foi o
+      // Braseiro (09/10/2026): happy hour rolando no salão com a entrega
+      // parada, e o robô mudo pra quem perguntava da promoção. Recado e preço
+      // respondem igual; só o convite a pedir é que não cabe aqui.
+      const recadoFechada = recadoDoDia(cfg, mensagem)
+      let produtoFechada: string | null = null
+      if (!recadoFechada && cfg.resposta_produto_ativo === true) {
+        const achados = await produtosQueCasam(supabase, empresaId, mensagem)
+        if (achados.length) {
+          const volta = quandoVolta(empresa, excecoes)
+          produtoFechada = textoDosProdutos(achados, link) +
+            (volta ? `${NL}${NL}_A entrega está fechada agora — a gente volta ${volta}._` : "")
+        }
+      }
+      const daInfoFechada = recadoFechada ?? produtoFechada
+        ?? respostaDeInfo(mensagem, empresa, link, excecoes)
       if (jaAvisou) {
         // Já sabe que está fechado. Ainda assim responde o que sabe (taxa,
-        // endereço, horário) — a dúvida dele não fecha junto com a loja.
+        // endereço, horário, promoção, preço) — a dúvida dele não fecha junto
+        // com a loja.
         return daInfoFechada ? await responder(daInfoFechada) : false
       }
       // O link vai de qualquer jeito: com a loja fechada ele não deixa comprar
@@ -893,6 +951,22 @@ export async function responderSemIA({
         : agendavel
           ? `${NL}${NL}Se quiser, já deixa seu pedido agendado por aqui que a gente separa:${NL}${link}`
           : `${NL}${NL}Se quiser dar uma olhada no cardápio e nos preços, é aqui:${NL}${link}`
+
+      // Texto da LOJA (mig 0314), quando ela escreveu o dela. {abre} é a volta
+      // ("hoje às 18:00"), {link} é o cardápio. Quem não escreveu nada segue
+      // com o texto da casa, igualzinho a antes.
+      const meu = String(cfg.texto_fechado ?? "").trim()
+      if (meu) {
+        const quando = quandoVolta(empresa, excecoes)
+        const texto = meu
+          .replace(/\{abre\}/gi, quando)
+          .replace(/\{link\}/gi, link)
+          .replace(/\s*\{[a-z_]+\}/gi, "")   // token que a loja inventou não vai pro cliente
+          .trim()
+        // Sem o link em lugar nenhum ele entra no fim: loja fechada é quando
+        // mais vale deixar o cardápio na mão de quem vai voltar.
+        return await responder(texto.includes(link) ? texto : `${texto}${NL}${NL}${link}`)
+      }
       return await responder(`${aviso}${extra}`)
     }
 
@@ -943,6 +1017,12 @@ export async function responderSemIA({
     // 3) Cardápio, horário, taxa de entrega, endereço — o que ele SABE.
     const daInfo = respostaDeInfo(mensagem, empresa, link, excecoes)
     if (daInfo) return await responder(daInfo)
+
+    // 3a) O recado do dia (mig 0314): "tem promoção hoje?", "tem happy hour?".
+    //     Vem antes do produto porque a regra da promoção (só no salão, só até
+    //     tal hora) muda o que o preço do cardápio significa.
+    const recado = recadoDoDia(cfg, mensagem)
+    if (recado) return await responder(recado)
 
     // 3b) "Tem picolé? Quanto é?" — preço e link DAQUELE produto (mig 0312).
     //     Opcional: a loja liga em WhatsApp → Resposta automática. Vem depois
