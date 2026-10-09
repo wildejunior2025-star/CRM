@@ -13,7 +13,12 @@ function hojeMais(dias) {
   return d.toISOString().slice(0, 10)
 }
 
-const VAZIO = { nome: '', telefone: '', plano: 'Mensal', valor: '', vencimento: '', ativo: true }
+const VAZIO = { nome: '', telefone: '', plano: 'Mensal', valor: '', vencimento: '', ativo: true, cortesia: false }
+
+// Procurar "fabio" tem que achar "Fábio". O banco guarda o nome sem acento
+// numa coluna à parte (nome_busca); aqui a gente tira o acento do que foi
+// digitado pra os dois ficarem no mesmo pé.
+const semAcento = t => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 
 export default function AcademiaAlunos() {
   const { empresa } = useAuth()
@@ -84,7 +89,7 @@ export default function AcademiaAlunos() {
         .from('academia_alunos')
         .select('*')
         .eq('empresa_id', empresa.id)
-        .or(`nome.ilike.%${t}%,matricula.ilike.%${t}%`)
+        .or(`nome_busca.ilike.%${semAcento(t)}%,matricula.ilike.%${t}%`)
         .order('ativo', { ascending: false })  // quem é aluno hoje aparece em cima
         .order('nome')
         .limit(60)
@@ -107,7 +112,8 @@ export default function AcademiaAlunos() {
       .then(({ data }) => setAntigos(data || []))
   }, [filtro, antigos, empresa.id])
   const hoje = hojeMais(0)
-  const emDia = a => a.ativo && (!a.vencimento || a.vencimento >= hoje)
+  // Cortesia nunca vence: treina de graca, nao entra na conta de vencidos.
+  const emDia = a => a.ativo && (a.cortesia || !a.vencimento || a.vencimento >= hoje)
   // Os ex-alunos nunca entram nas contas do dia a dia: eles são milhares e
   // afogariam "Todos" e "Vencidos", que é o que o dono olha todo dia.
   const daCasa = alunos
@@ -116,6 +122,7 @@ export default function AcademiaAlunos() {
     emdia: daCasa.filter(emDia).length,
     vencidos: daCasa.filter(a => !emDia(a)).length,
     semrosto: daCasa.filter(a => !a.descritores?.length).length,
+    cortesia: daCasa.filter(a => a.cortesia).length,
   }
   const procurando = termo.length >= 2
   const filtrados = procurando
@@ -125,7 +132,8 @@ export default function AcademiaAlunos() {
       : daCasa.filter(a => filtro === 'todos'
         || (filtro === 'emdia' && emDia(a))
         || (filtro === 'vencidos' && !emDia(a))
-        || (filtro === 'semrosto' && !a.descritores?.length))
+        || (filtro === 'semrosto' && !a.descritores?.length)
+      || (filtro === 'cortesia' && a.cortesia))
   const semRosto = contas.semrosto
 
   if (ficha) {
@@ -173,6 +181,7 @@ export default function AcademiaAlunos() {
             { id: 'emdia', nome: 'Em dia' },
             { id: 'vencidos', nome: 'Vencidos' },
             { id: 'semrosto', nome: 'Sem rosto' },
+            { id: 'cortesia', nome: 'Cortesia' },
             { id: 'inativos', nome: 'Sumidos' },
           ].map(f => (
             <button key={f.id} type="button"
@@ -229,7 +238,7 @@ export default function AcademiaAlunos() {
                     <td data-rotulo="Valor" className="ac-num">{a.valor ? dinheiro(a.valor) : '—'}</td>
                     <td data-rotulo="Vence em" className="ac-num">{a.vencimento ? dataBr(a.vencimento) : '—'}</td>
                     <td data-rotulo="Situação">
-                      <span className={`ac-status ac-${s.status}${s.aviso ? ' ac-quase' : ''}`}>{s.texto}</span>
+                      <span className={`ac-status ${s.cortesia ? 'ac-cortesia' : `ac-${s.status}`}${s.aviso ? ' ac-quase' : ''}`}>{s.texto}</span>
                       {!a.descritores?.length && <span className="ac-status ac-vencido">Sem rosto</span>}
                     </td>
                     <td className="ac-col-acoes">
@@ -239,7 +248,7 @@ export default function AcademiaAlunos() {
                           Reativar
                         </button>
                       )}
-                      <button className="btn btn-secondary btn-sm" onClick={() => setRecebendo(a)} title="Registrar mensalidade paga">Renovar</button>
+                      {!a.cortesia && <button className="btn btn-secondary btn-sm" onClick={() => setRecebendo(a)} title="Registrar mensalidade paga">Renovar</button>}
                       <button className="btn btn-secondary btn-sm" onClick={() => setFicha(a)}>Ficha</button>
                       <button className="btn btn-secondary btn-sm" onClick={() => setEditando(a)}>Editar</button>
                     </td>
@@ -263,6 +272,7 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
   const [dados, setDados] = useState(() => aluno ? {
     nome: aluno.nome, telefone: aluno.telefone || '', plano: aluno.plano || '',
     valor: aluno.valor ?? '', vencimento: aluno.vencimento || '', ativo: aluno.ativo,
+    cortesia: !!aluno.cortesia,
   } : { ...VAZIO, vencimento: hojeMais(30) })
   const [rosto, setRosto] = useState(null) // { descritores, foto } capturado agora
   const [salvando, setSalvando] = useState(false)
@@ -283,8 +293,9 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
       telefone: dados.telefone.trim() || null,
       plano: dados.plano.trim() || null,
       valor: dados.valor === '' ? null : Number(String(dados.valor).replace(',', '.')),
-      vencimento: dados.vencimento || null,
+      vencimento: dados.cortesia ? null : (dados.vencimento || null),
       ativo: dados.ativo,
+      cortesia: dados.cortesia,
     }
     // Empurrou o vencimento pra frente num aluno inativo? Ele voltou. Quem
     // mexe na data de um sumido está reativando, não anotando curiosidade —
@@ -365,9 +376,21 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
               <input inputMode="decimal" value={dados.valor} onChange={e => set('valor', e.target.value)} placeholder="89,90" />
             </label>
           </div>
-          <label>Vence em
-            <input type="date" value={dados.vencimento} onChange={e => set('vencimento', e.target.value)} />
+          {!dados.cortesia && (
+            <label>Vence em
+              <input type="date" value={dados.vencimento} onChange={e => set('vencimento', e.target.value)} />
+            </label>
+          )}
+          <label className="ac-check">
+            <input type="checkbox" checked={dados.cortesia} onChange={e => set('cortesia', e.target.checked)} />
+            Cortesia — treina de graça
           </label>
+          {dados.cortesia && (
+            <p className="ac-aviso">
+              Sem mensalidade e sem vencimento: a catraca abre sempre. É pra dono,
+              família, funcionário e parceria.
+            </p>
+          )}
           {aluno && (
             <label className="ac-check">
               <input type="checkbox" checked={dados.ativo} onChange={e => set('ativo', e.target.checked)} />

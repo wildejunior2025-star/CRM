@@ -276,6 +276,9 @@ export function miniaturaDoRosto(video, caixa, lado = 160) {
 // Situação da mensalidade pelo vencimento (data 'AAAA-MM-DD').
 export function situacaoAluno(aluno) {
   if (!aluno.ativo) return { status: 'inativo', texto: 'Matrícula inativa' }
+  // Cortesia não vence: dono, família, funcionário, parceria. Antes isso era
+  // feito com um vencimento de mentira lá em 2040.
+  if (aluno.cortesia) return { status: 'liberado', texto: 'Cortesia', cortesia: true }
   if (!aluno.vencimento) return { status: 'liberado', texto: 'Sem vencimento cadastrado' }
   const hoje = new Date()
   hoje.setHours(0, 0, 0, 0)

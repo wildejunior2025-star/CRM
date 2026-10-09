@@ -269,3 +269,6 @@ body { overflow-x: hidden; }
 .ac-outra { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); min-width: 220px; flex: 1; }
 .ac-subiu { color: var(--success); font-weight: 700; }
 .ac-desceu { color: var(--danger); font-weight: 700; }
+
+/* Cortesia: treina de graca. Nao e "em dia" nem "vencido" — e outra coisa. */
+.ac-status.ac-cortesia { color: #6b21a8; background: #f3e8ff; }
