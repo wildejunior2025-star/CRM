@@ -3033,7 +3033,7 @@ serve(async (req) => {
     {
       const { data: liga } = await supabase
         .from("whatsapp_config")
-        .select("empresa_id, ia_ativo, resposta_link_ativo, resposta_link_texto, empresas(nome, slug, agendamento_ativo, delivery_ativo, delivery_fechado_por, feriados_fecha, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
+        .select("empresa_id, ia_ativo, resposta_link_ativo, resposta_link_texto, resposta_produto_ativo, empresas(nome, slug, agendamento_ativo, delivery_ativo, delivery_fechado_por, feriados_fecha, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
         .eq("instance_name", instanceName)
         .eq("ativo", true)
         .maybeSingle()
@@ -3047,6 +3047,24 @@ serve(async (req) => {
         // Whisper com o robô desligado é cobrar da loja um trabalho que ninguém
         // pediu. Quem for atender abre o WhatsApp e ouve.
         const conteudo = textoParaRegistro(msg)
+
+        // MODO TESTE também no robô do link. Antes só o robô de IA dava pra
+        // simular (?test=true): o do link saía daqui calado, e a única forma de
+        // conferir uma mudança nele era mandando mensagem de verdade pra loja
+        // de verdade. Aqui ele roda inteiro e DEVOLVE o texto, sem mandar nada
+        // pro WhatsApp de ninguém.
+        if (isTest && liga?.empresa_id && conteudo) {
+          let saiu = ""
+          const respondeu = await responderSemIA({
+            supabase, cfg: liga as Record<string, unknown>, phone: phoneEarly, mensagem: conteudo,
+            enviar: (texto: string) => { saiu = texto; return Promise.resolve(null) },
+          })
+          return new Response(
+            JSON.stringify({ ok: true, robo: "link", respondeu, resposta: saiu || "(calado)" }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          )
+        }
+
         if (liga?.empresa_id && conteudo && !isTest) {
           await supabase.from("whatsapp_conversas").insert({
             empresa_id: liga.empresa_id, phone: phoneEarly, role: "user", content: conteudo,

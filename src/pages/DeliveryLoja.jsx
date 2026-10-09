@@ -213,6 +213,13 @@ export default function DeliveryLoja() {
   // com a prévia de cada uma. Fica aqui em cima porque a busca (mais abaixo)
   // precisa fechá-la.
   const [catAberta, setCatAberta] = useState(null)
+  // Produto que veio no link do robô (?p=<id>). O robô responde "tem sim, custa
+  // R$ X" e manda o link DAQUELE item: cair no catálogo inteiro faria o cliente
+  // procurar de novo o que ele acabou de perguntar (mig 0312).
+  const produtoDoLink = (() => {
+    try { return new URLSearchParams(window.location.search).get('p') || null } catch { return null }
+  })()
+  const produtoDoLinkAberto = useRef(false)
   // Telefone que veio no link do WhatsApp (?t=). É ele que faz o checkout abrir
   // com nome, endereço e pino já preenchidos — sem isso o cliente que chegou
   // pela resposta automática ainda teria que digitar tudo.
@@ -567,6 +574,9 @@ export default function DeliveryLoja() {
     })
   }, [id, slug, tentativa, alterandoId])
 
+  // Chegou pelo link do robô com o produto na URL: abre nele assim que o
+  // cardápio termina de carregar. Uma vez só — se o cliente fechar a tela, não
+  // insiste (mig 0312).
   useEffect(() => {
     if (!drawerOpen) return
     function onKey(e) {
@@ -870,8 +880,10 @@ export default function DeliveryLoja() {
   const bannersVisiveis = useMemo(() => banners.filter(b =>
     !b.produto_id || produtos.some(p => String(p.id) === String(b.produto_id))), [banners, produtos])
 
-  function abrirBanner(b) {
-    const p = produtos.find(x => String(x.id) === String(b.produto_id))
+  // Leva o cliente ATÉ o produto: tela de montar quando tem sabor/complemento,
+  // senão rola até o card e pisca. Serve pro banner e pro link que o robô
+  // manda ("…?p=<id>") quando responde "tem sim, custa tanto" (mig 0312).
+  function irParaProduto(p) {
     if (!p) return
     if (p.complementos?.length) { abrirProduto(p); return }
     // Sem complementos não tem tela de escolha: leva até o card do produto
@@ -883,6 +895,24 @@ export default function DeliveryLoja() {
     alvo.classList.add('dloja-prod-card--piscar')
     setTimeout(() => alvo.classList.remove('dloja-prod-card--piscar'), 1800)
   }
+
+  function abrirBanner(b) {
+    irParaProduto(produtos.find(x => String(x.id) === String(b.produto_id)))
+  }
+
+  // Chegou pelo link do robô com o produto na URL: abre nele assim que o
+  // cardápio termina de carregar. Uma vez só — se o cliente fechar a tela, não
+  // insiste (mig 0312).
+  useEffect(() => {
+    if (produtoDoLinkAberto.current || !produtoDoLink || !produtos.length) return
+    produtoDoLinkAberto.current = true
+    const p = produtos.find(x => String(x.id) === String(produtoDoLink))
+    // Produto que saiu do ar entre a pergunta e o clique: o cliente cai no
+    // catálogo normal em vez de numa tela vazia.
+    if (p) setTimeout(() => irParaProduto(p), 300)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [produtos, produtoDoLink])
+
   const todasCats = semCategoria.length > 0 ? [...categorias, '__sem__'] : categorias
   // Mercado/depósito (4.278 itens no maior) abre em prévia; restaurante (o mais
   // gordo tem 218) segue mostrando tudo. O corte é automático — a loja não

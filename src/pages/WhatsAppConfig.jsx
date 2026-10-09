@@ -99,6 +99,8 @@ export default function WhatsAppConfig() {
   // Resposta automática com o link do cardápio (mig 0226). Vive fora do robô de
   // IA de propósito: não gasta crédito e não precisa aprender nada.
   const [linkAtivo,       setLinkAtivo]       = useState(false)
+  const [produtoAtivo,    setProdutoAtivo]    = useState(false)
+  const [salvandoProduto, setSalvandoProduto] = useState(false)
   const [salvandoLink,    setSalvandoLink]    = useState(false)
   const [linkMsg,         setLinkMsg]         = useState(null)
   // Texto da primeira fala. Vazio = o padrão da casa; cada loja fala do seu jeito.
@@ -174,6 +176,7 @@ export default function WhatsAppConfig() {
       })
       setIaAtivo(data.ia_ativo ?? false)
       setLinkAtivo(data.resposta_link_ativo ?? false)
+      setProdutoAtivo(data.resposta_produto_ativo ?? false)
       setAvisoAbertura(data.aviso_abertura_ativo ?? true)
       setTutorialAtivo(data.tutorial_ativo ?? true)
       setTutorialUrl(data.tutorial_url ?? '')
@@ -485,6 +488,25 @@ export default function WhatsAppConfig() {
       return
     }
     setLinkMsg({ type: 'success', text: novoValor ? 'Resposta automática ligada.' : 'Resposta automática desligada.' })
+    setTimeout(() => setLinkMsg(null), 2500)
+  }
+
+  async function handleToggleProduto(novoValor) {
+    setProdutoAtivo(novoValor)
+    setSalvandoProduto(true)
+    setLinkMsg(null)
+    const { error } = await supabase
+      .from('whatsapp_config')
+      .upsert({ empresa_id: profile.empresa_id, resposta_produto_ativo: novoValor }, { onConflict: 'empresa_id' })
+    setSalvandoProduto(false)
+    if (error) {
+      setLinkMsg({ type: 'error', text: error.message })
+      setProdutoAtivo(!novoValor)
+      return
+    }
+    setLinkMsg({ type: 'success', text: novoValor
+      ? 'Agora o robô responde produto e preço.'
+      : 'O robô voltou a responder só com o link.' })
     setTimeout(() => setLinkMsg(null), 2500)
   }
 
@@ -813,6 +835,31 @@ export default function WhatsAppConfig() {
               {linkMsg.type === 'success' ? <CheckIcon /> : <AlertIcon />}
               {linkMsg.text}
             </div>
+          )}
+
+          {/* Responder preço é o passo que transforma "manda o cardápio" em
+              venda — e aqui sai do banco, sem IA e sem crédito. Fica dentro do
+              bloco do link porque depende dele estar ligado. */}
+          {linkAtivo && (
+            <label className="wa-checkbox-row">
+              <input
+                type="checkbox"
+                checked={produtoAtivo}
+                disabled={salvandoProduto}
+                onChange={(e) => handleToggleProduto(e.target.checked)}
+              />
+              <div className="wa-checkbox-text">
+                <span>Responder sobre produto e preço</span>
+                <small>
+                  Cliente perguntou <em>"tem picolé?"</em> ou <em>"quanto é o açaí?"</em> e o
+                  sistema responde na hora: <strong>nome, preço</strong> (com promoção e preço
+                  de atacado, se tiver) e o <strong>link daquele produto</strong>, que abre a
+                  loja já na tela de adicionar. O preço vem do seu cadastro, sempre o de agora —
+                  item pausado e categoria fora do horário não aparecem.{' '}
+                  <strong>Também não gasta crédito</strong>: é consulta no sistema, não é IA.
+                </small>
+              </div>
+            </label>
           )}
 
           {/* A primeira fala é a cara da loja. Cada uma fala do seu jeito — o

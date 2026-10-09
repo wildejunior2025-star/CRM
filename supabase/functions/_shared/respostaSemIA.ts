@@ -357,7 +357,12 @@ function respostaDeInfo(
   texto: string, empresa: Record<string, unknown>, link: string, excecoes: Excecoes = {},
 ): string | null {
   const t = semAcento(texto)
-  const tem = (...ps: string[]) => ps.some(p => t.includes(p))
+  // Começo de PALAVRA, não pedaço de palavra. "cala*bre*sa" casava com "abre" e
+  // "tem pizza de calabresa?" era respondido com o horário da loja (09/10/2026).
+  // O começo continua solto de propósito: "horari" pega horário e horários,
+  // "fechad" pega fechado e fechada.
+  const tem = (...ps: string[]) => ps.some(p =>
+    new RegExp(`(^|[^a-z0-9])${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(t))
 
   // "Manda o cardápio" é o pedido mais fácil da lista e o robô não tinha
   // resposta pra ele. O link É o cardápio — com preço certo e sempre atualizado.
@@ -374,6 +379,103 @@ function respostaDeInfo(
     return respostaDeEndereco(empresa)
 
   return null
+}
+
+// ── "Tem picolé? Quanto é?" — produto, preço e link (mig 0312) ───────────────
+//
+// Opcional por loja (`resposta_produto_ativo`, padrão desligado).
+//
+// POR QUE AQUI E NÃO NA IA: quem pergunta preço está decidindo comprar, e
+// mandar procurar no cardápio é onde a venda esfria. O robô de IA já resolvia
+// isso, só que cada resposta dele custa. Esta resposta sai do BANCO — uma
+// consulta, custo zero por mensagem, e o preço é sempre o de agora.
+//
+// O que NÃO muda: ele continua sem montar sacola. Depois do preço vem o link
+// DAQUELE produto, que abre a loja já na tela de adicionar.
+
+// Palavras que aparecem em toda pergunta e não são produto. Sem esta peneira,
+// "quanto custa a entrega" procuraria um produto chamado "quanto".
+const NAO_E_PRODUTO = new Set([
+  "tem", "temos", "voce", "voces", "vcs", "vc", "qual", "quais", "quanto", "quantos",
+  "custa", "preco", "valor", "valores", "sai", "fica", "esta", "ta", "por", "pra", "para",
+  "com", "sem", "uma", "umas", "uns", "dos", "das", "que", "the", "favor", "bom", "boa",
+  "dia", "tarde", "noite", "oi", "ola", "sim", "nao", "obrigado", "obrigada", "entrega",
+  "entregam", "entregar", "taxa", "frete", "endereco", "horario", "aberto", "fechado",
+  "pedido", "pedir", "quero", "queria", "gostaria", "me", "ver", "manda", "mandar",
+  "ainda", "hoje", "agora", "amanha", "mais", "menos", "tudo", "aqui", "ali", "pode",
+  "cardapio", "catalogo", "menu", "lista", "promocao", "promocoes", "delivery",
+])
+
+function termosDeProduto(texto: string): string[] {
+  const limpo = semAcento(texto).replace(/[^a-z0-9 ]/g, " ")
+  const vistos = new Set<string>()
+  const termos: string[] = []
+  for (const palavra of limpo.split(/ +/)) {
+    if (palavra.length < 3 || NAO_E_PRODUTO.has(palavra) || /^\d+$/.test(palavra)) continue
+    if (vistos.has(palavra)) continue
+    vistos.add(palavra)
+    termos.push(palavra)
+  }
+  return termos.slice(0, 3)
+}
+
+type ProdutoAchado = {
+  id: string; nome: string; preco: number; promo: number | null
+  faixas: { qtd_min: number; preco: number }[]; embalagem: string | null
+}
+
+async function produtosQueCasam(supabase: Sb, empresaId: string, mensagem: string): Promise<ProdutoAchado[]> {
+  // Palavra mais específica primeiro. "tem pizza de calabresa?" tem dois
+  // termos: procurando por "pizza" primeiro, as três vagas iam pra pizza doce
+  // e pro "monte a sua", e a calabresa nem aparecia (teste 09/10/2026).
+  const termos = termosDeProduto(mensagem).sort((a, b) => b.length - a.length)
+  if (!termos.length) return []
+  const achados: ProdutoAchado[] = []
+  const ids = new Set<string>()
+  for (const termo of termos) {
+    const { data, error } = await supabase.rpc("buscar_produto_cardapio", {
+      p_empresa: empresaId, p_termo: termo, p_limite: 3,
+    })
+    if (error) { console.error("[produto] busca falhou:", error.message); continue }
+    for (const p of (Array.isArray(data) ? data : [])) {
+      if (ids.has(p.id) || achados.length >= 3) continue
+      ids.add(p.id)
+      achados.push({
+        id: p.id, nome: String(p.nome), preco: Number(p.preco) || 0,
+        promo: p.promo != null ? Number(p.promo) : null,
+        faixas: (Array.isArray(p.faixas) ? p.faixas : [])
+          .map((f: Record<string, unknown>) => ({ qtd_min: Number(f?.qtd_min) || 0, preco: Number(f?.preco) || 0 }))
+          .filter((f: { qtd_min: number; preco: number }) => f.qtd_min > 1 && f.preco > 0)
+          .sort((a: { qtd_min: number }, b: { qtd_min: number }) => a.qtd_min - b.qtd_min),
+        embalagem: p.embalagem ?? null,
+      })
+    }
+    if (achados.length >= 3) break
+  }
+  return achados
+}
+
+/** O preço do jeito que o cliente precisa ouvir: promoção e atacado inclusos. */
+function linhaDePreco(p: ProdutoAchado): string {
+  const base = p.promo && p.promo < p.preco
+    ? `de ~${dinheiro(p.preco)}~ por *${dinheiro(p.promo)}*`
+    : `*${dinheiro(p.preco)}*`
+  const atacado = p.faixas.length
+    ? `${NL}_a partir de ${p.faixas[0].qtd_min} un: ${dinheiro(p.faixas[0].preco)} cada_`
+    : ""
+  return `${base}${atacado}`
+}
+
+/**
+ * A resposta inteira. Um produto achado vira "tem sim"; vários viram a lista
+ * curta — três no máximo, porque parede de texto ninguém lê.
+ */
+function textoDosProdutos(achados: ProdutoAchado[], link: string): string {
+  const abre = achados.length === 1 ? "Tem sim! 😊" : "Tem sim! 😊 Olha os preços:"
+  const blocos = achados.map(p =>
+    `*${p.nome}* — ${linhaDePreco(p)}${NL}👉 ${link}${link.includes("?") ? "&" : "?"}p=${p.id}`)
+  return `${abre}${NL}${NL}${blocos.join(NL + NL)}${NL}${NL}` +
+    "_É só tocar no link que já abre pra adicionar._"
 }
 
 // ── Taxa de entrega pelo endereço do cliente ─────────────────────────────────
@@ -841,6 +943,15 @@ export async function responderSemIA({
     // 3) Cardápio, horário, taxa de entrega, endereço — o que ele SABE.
     const daInfo = respostaDeInfo(mensagem, empresa, link, excecoes)
     if (daInfo) return await responder(daInfo)
+
+    // 3b) "Tem picolé? Quanto é?" — preço e link DAQUELE produto (mig 0312).
+    //     Opcional: a loja liga em WhatsApp → Resposta automática. Vem depois
+    //     das perguntas acima de propósito ("tem entrega?" é taxa, não produto)
+    //     e antes do link genérico, que é a resposta que não responde.
+    if (cfg.resposta_produto_ativo === true) {
+      const achados = await produtosQueCasam(supabase, empresaId, mensagem)
+      if (achados.length) return await responder(textoDosProdutos(achados, link))
+    }
 
     // O cliente falando que não quer o link. Não é dúvida, é recado: ele quer
     // gente. Aqui não se pergunta "quer que eu chame?" — chama.
