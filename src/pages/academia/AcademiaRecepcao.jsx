@@ -327,6 +327,10 @@ export default function AcademiaRecepcao() {
 
   return (
     <div className="ac-rec">
+      {/* Saída SEMPRE à vista. Antes o "← Alunos" ficava no fim da barra
+          lateral e, no celular, fora da tela: pra sair da Recepção a pessoa
+          tinha que adivinhar que precisava rolar a tela pra baixo. */}
+      <Link to="/" className="ac-rec-sair" title="Voltar para os alunos">← Alunos</Link>
       <div className="ac-rec-video-caixa">
         <video ref={videoRef} className="ac-video" playsInline muted />
         {estado.fase !== 'rodando' && (
