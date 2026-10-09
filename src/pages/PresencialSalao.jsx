@@ -4117,13 +4117,18 @@ export default function PresencialSalao() {
             <div className="sal-fechar-linha" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '4px 0' }}>
               <span>Subtotal</span><span>{fmt(subtotalSel)}</span>
             </div>
-            <label className="sal-fechar-linha" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14, padding: '4px 0', cursor: 'pointer' }}>
-              <span>
-                <input type="checkbox" checked={aplicarTaxa} onChange={e => setAplicarTaxa(e.target.checked)} style={{ marginRight: 8 }} />
-                Taxa de serviço ({taxaPct}%)
-              </span>
-              <span>{fmt(taxaSel)}</span>
-            </label>
+            {/* Loja que não cobra serviço (taxa 0) não vê essa linha: "Taxa de
+                serviço (0%) — R$ 0,00" com caixinha de marcar é linha morta na
+                conta, e o atendente ainda para pra pensar se marca ou não. */}
+            {taxaPct > 0 && (
+              <label className="sal-fechar-linha" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14, padding: '4px 0', cursor: 'pointer' }}>
+                <span>
+                  <input type="checkbox" checked={aplicarTaxa} onChange={e => setAplicarTaxa(e.target.checked)} style={{ marginRight: 8 }} />
+                  Taxa de serviço ({taxaPct}%)
+                </span>
+                <span>{fmt(taxaSel)}</span>
+              </label>
+            )}
             <div className="sal-fechar-total" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, fontWeight: 800, padding: '10px 0', borderTop: '1px dashed var(--border)', marginTop: 6 }}>
               <span>Total</span><span style={{ color: 'var(--primary)' }}>{fmt(totalSel)}</span>
             </div>
