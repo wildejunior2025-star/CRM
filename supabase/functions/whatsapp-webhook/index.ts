@@ -3033,7 +3033,7 @@ serve(async (req) => {
     {
       const { data: liga } = await supabase
         .from("whatsapp_config")
-        .select("empresa_id, ia_ativo, resposta_link_ativo, resposta_link_texto, resposta_produto_ativo, ouvir_audio_ativo, texto_fechado, recado_ativo, recado_texto, recado_palavras, empresas(nome, slug, agendamento_ativo, delivery_ativo, delivery_fechado_por, feriados_fecha, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
+        .select("empresa_id, ia_ativo, resposta_link_ativo, resposta_link_texto, resposta_produto_ativo, resposta_presencial_ativo, ouvir_audio_ativo, texto_fechado, recado_ativo, recado_texto, recado_palavras, empresas(nome, slug, agendamento_ativo, presencial_ativo, delivery_ativo, delivery_fechado_por, feriados_fecha, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
         .eq("instance_name", instanceName)
         .eq("ativo", true)
         .maybeSingle()

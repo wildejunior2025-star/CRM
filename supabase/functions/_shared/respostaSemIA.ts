@@ -374,9 +374,29 @@ function respostaDeEndereco(empresa: Record<string, unknown>): string | null {
   return `A gente fica em ${linha}.${NL}${mapa}`
 }
 
-function respostaDeTaxa(empresa: Record<string, unknown>, link: string): string | null {
+// Como a loja atende, tirando a entrega: "comer aqui na loja", "retirar", ou
+// os dois. Sai do cadastro (presencial_ativo + aceita_retirada), que é o mesmo
+// que manda na Loja Online — robô e cardápio não podem dizer coisas diferentes.
+function jeitosDeAtender(empresa: Record<string, unknown>): string {
+  const partes: string[] = []
+  if (empresa.presencial_ativo === true) partes.push("comer aqui na loja")
+  if (empresa.aceita_retirada !== false) partes.push("pedir pra retirar")
+  if (!partes.length) return ""
+  return partes.length === 1 ? partes[0] : `${partes[0]} ou ${partes[1]}`
+}
+
+function respostaDeTaxa(
+  empresa: Record<string, unknown>, link: string, falaDoPresencial = false,
+): string | null {
   if (empresa.aceita_entrega === false) {
-    return "A gente não faz entrega, só retirada aqui na loja. 😉"
+    // Loja com mesa não é "só retirada". Quem pergunta entrega quer saber se
+    // tem como comer — responder "não entregamos" e parar aí manda embora o
+    // cliente que ia sentar na mesa. Só muda a fala na loja que LIGOU a chave
+    // (mig 0317); nas outras continua a resposta de sempre, palavra por palavra.
+    const jeitos = falaDoPresencial ? jeitosDeAtender(empresa) : ""
+    return jeitos
+      ? `A gente não faz entrega, não. 😉 Mas dá pra ${jeitos} — como você preferir.`
+      : "A gente não faz entrega, só retirada aqui na loja. 😉"
   }
   const porBairro = Array.isArray(empresa.taxas_entrega_bairro) ? empresa.taxas_entrega_bairro : []
   const porKm = Array.isArray(empresa.taxas_entrega_km) ? empresa.taxas_entrega_km : []
@@ -397,6 +417,7 @@ function respostaDeTaxa(empresa: Record<string, unknown>, link: string): string 
 
 function respostaDeInfo(
   texto: string, empresa: Record<string, unknown>, link: string, excecoes: Excecoes = {},
+  falaDoPresencial = false,
 ): string | null {
   const t = semAcento(texto)
   // Começo de PALAVRA, não pedaço de palavra. "cala*bre*sa" casava com "abre" e
@@ -414,8 +435,22 @@ function respostaDeInfo(
   if (tem("horari", "que horas", "quantas horas", "abre", "aberto", "fecha", "fechad", "funciona", "atende hoje", "ta ai", "tao ai"))
     return respostaDeHorario(empresa, excecoes)
 
+  // "Posso comer aí?" — só pra loja que atende na mesa/balcão. As palavras são
+  // frases inteiras de propósito: "comer" sozinho pegaria "quero comer um
+  // hambúrguer", e esta resposta roda ANTES da de produto (passo 3b).
+  if (falaDoPresencial && empresa.presencial_ativo === true && tem(
+    "comer ai", "comer aqui", "comer na loja", "comer no local", "comer ae",
+    "consumir no local", "tem mesa", "tem mesas", "pra sentar", "sentar ai",
+    "lugar pra comer", "come ai", "da pra comer",
+  )) {
+    const extra = empresa.aceita_entrega === false
+      ? (empresa.aceita_retirada !== false ? " Ou, se preferir, é só pedir pra retirar." : "")
+      : " Ou pede pelo cardápio, que a gente leva aí."
+    return `Pode sim! 😄 A gente atende aqui na loja.${extra}${NL}O cardápio tá aqui: ${link}`
+  }
+
   if (tem("taxa", "frete", "entrega", "entregam", "entregar", "delivery", "leva quanto", "demora"))
-    return respostaDeTaxa(empresa, link)
+    return respostaDeTaxa(empresa, link, falaDoPresencial)
 
   if (tem("endereco", "onde fica", "onde voce", "onde eh", "onde e a", "localiza", "como chego", "fica onde", "retirar", "retirada", "buscar ai"))
     return respostaDeEndereco(empresa)
@@ -869,6 +904,11 @@ export async function responderSemIA({
     const slug = String(empresa.slug ?? "").trim()
     if (!slug || !empresaId) return false
 
+    // Loja que atende na mesa e ligou a chave (mig 0317): o robô conta que dá
+    // pra comer ali, em vez de só "não fazemos entrega". Desligada, cada
+    // resposta sai idêntica ao que já saía.
+    const falaDoPresencial = cfg.resposta_presencial_ativo === true
+
     // Conversa que gente já assumiu: o robô não fala por cima.
     if (await roboPausado(supabase, empresaId, phone)) {
       console.log("[link] número pausado, robô calado:", phone)
@@ -972,7 +1012,7 @@ export async function responderSemIA({
         }
       }
       const daInfoFechada = recadoFechada ?? produtoFechada
-        ?? respostaDeInfo(mensagem, empresa, link, excecoes)
+        ?? respostaDeInfo(mensagem, empresa, link, excecoes, falaDoPresencial)
       if (jaAvisou) {
         // Já sabe que está fechado. Ainda assim responde o que sabe (taxa,
         // endereço, horário, promoção, preço) — a dúvida dele não fecha junto
@@ -1059,7 +1099,7 @@ export async function responderSemIA({
     }
 
     // 3) Cardápio, horário, taxa de entrega, endereço — o que ele SABE.
-    const daInfo = respostaDeInfo(mensagem, empresa, link, excecoes)
+    const daInfo = respostaDeInfo(mensagem, empresa, link, excecoes, falaDoPresencial)
     if (daInfo) return await responder(daInfo)
 
     // 3a) O recado do dia (mig 0314): "tem promoção hoje?", "tem happy hour?".
