@@ -300,7 +300,7 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
       nome: dados.nome.trim(),
       telefone: dados.telefone.trim() || null,
       plano: dados.plano.trim() || null,
-      valor: dados.valor === '' ? null : Number(String(dados.valor).replace(',', '.')),
+      valor: dados.cortesia || dados.valor === '' ? null : Number(String(dados.valor).replace(',', '.')),
       vencimento: dados.cortesia ? null : (dados.vencimento || null),
       ativo: dados.ativo,
       cortesia: dados.cortesia,
@@ -376,14 +376,22 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
           <label>WhatsApp
             <input inputMode="tel" value={dados.telefone} onChange={e => set('telefone', e.target.value)} placeholder="(84) 99999-9999" />
           </label>
-          <div className="ac-dupla">
+          {/* Cortesia não paga: sem valor e sem vencimento. O plano fica,
+              porque serve pra saber o que a pessoa usa na academia. */}
+          {dados.cortesia ? (
             <label>Plano
               <input value={dados.plano} onChange={e => set('plano', e.target.value)} placeholder="Mensal" />
             </label>
-            <label>Valor (R$)
-              <input inputMode="decimal" value={dados.valor} onChange={e => set('valor', e.target.value)} placeholder="89,90" />
-            </label>
-          </div>
+          ) : (
+            <div className="ac-dupla">
+              <label>Plano
+                <input value={dados.plano} onChange={e => set('plano', e.target.value)} placeholder="Mensal" />
+              </label>
+              <label>Valor (R$)
+                <input inputMode="decimal" value={dados.valor} onChange={e => set('valor', e.target.value)} placeholder="89,90" />
+              </label>
+            </div>
+          )}
           {!dados.cortesia && (
             <label>Vence em
               <input type="date" value={dados.vencimento} onChange={e => set('vencimento', e.target.value)} />
