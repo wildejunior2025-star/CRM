@@ -238,7 +238,10 @@ export default function AcademiaRecepcao() {
     ;(async () => {
       try {
         setEstado({ fase: 'carregando', msg: 'Baixando o reconhecimento...' })
-        await Promise.all([carregarFaceApi(), carregarAlunos()])
+        await Promise.all([
+          carregarFaceApi(passo => vivo && setEstado({ fase: 'carregando', msg: passo })),
+          carregarAlunos(),
+        ])
         if (!vivo) return
         setEstado({ fase: 'carregando', msg: 'Ligando a câmera...' })
         stream = await ligarCamera(videoRef.current)

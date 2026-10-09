@@ -24,6 +24,7 @@ export default function CapturaRosto({ alunos, onPronto, onCancelar }) {
   // Câmera de TRÁS por padrão no celular: resolução melhor e quem tira a foto
   // é a recepção, não o aluno.
   const [camera, setCamera] = useState(cameraPadrao)
+  const [tentativa, setTentativa] = useState(0) // "Tentar de novo" sem recarregar a pagina
   const capturaRef = useRef(0) // muda a cada captura; captura antiga que ainda estiver rodando para sozinha
 
   useEffect(() => {
@@ -31,8 +32,9 @@ export default function CapturaRosto({ alunos, onPronto, onCancelar }) {
     let vivo = true
     ;(async () => {
       try {
+        setFase('carregando')
         setMsg('Baixando o reconhecimento (só na primeira vez)...')
-        await carregarFaceApi()
+        await carregarFaceApi(passo => { if (vivo) setMsg(passo) })
         if (!vivo) return
         stream = await ligarCamera(videoRef.current, { camera })
         if (!vivo) return desligarCamera(stream)
@@ -45,7 +47,7 @@ export default function CapturaRosto({ alunos, onPronto, onCancelar }) {
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- é um contador, não um nó
     return () => { vivo = false; capturaRef.current++; desligarCamera(stream); sairTelaCheia() }
-  }, [camera])
+  }, [camera, tentativa])
 
   // Pega AMOSTRAS leituras boas de frente. Não pula por tempo: se o rosto
   // sair do enquadramento ela espera ali, e quem desistir aperta Parar.
@@ -129,9 +131,15 @@ export default function CapturaRosto({ alunos, onPronto, onCancelar }) {
                 guardarCamera(nova)
                 setCamera(nova)
               }}>🔄 {camera === 'environment' ? 'Trás' : 'Frente'}</button>
-            <button type="button" className="btn btn-primary" onClick={capturar} disabled={fase !== 'pronto'}>
-              {fase === 'capturando' ? 'Capturando...' : '📷 Capturar rosto'}
-            </button>
+            {fase === 'erro' ? (
+              <button type="button" className="btn btn-primary" onClick={() => setTentativa(n => n + 1)}>
+                Tentar de novo
+              </button>
+            ) : (
+              <button type="button" className="btn btn-primary" onClick={capturar} disabled={fase !== 'pronto'}>
+                {fase === 'capturando' ? 'Capturando...' : '📷 Capturar rosto'}
+              </button>
+            )}
           </>
         )}
       </div>

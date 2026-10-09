@@ -35,19 +35,51 @@ function carregarScript(src) {
   })
 }
 
+// Nenhum passo pode ficar pendurado pra sempre. Num iPhone antigo, em 4G
+// ruim, o download emperrava e a tela ficava eternamente em "Baixando o
+// reconhecimento" — sem dizer o que estava acontecendo nem dar saída.
+function comPrazo(promessa, segundos, oQue) {
+  return Promise.race([
+    promessa,
+    new Promise((_, rejeitar) => setTimeout(
+      () => rejeitar(new Error(`Demorou demais ${oQue}. Internet fraca? Tente de novo, de preferência no Wi-Fi.`)),
+      segundos * 1000)),
+  ])
+}
+
 // Baixa a biblioteca e os 3 modelos (detector, pontos do rosto, reconhecimento).
+// São uns 7 MB na primeira vez; depois o navegador guarda.
+// `aviso` recebe o passo atual, pra tela mostrar que a coisa anda.
 // Chamado de novo, devolve o mesmo carregamento.
-export function carregarFaceApi() {
+export function carregarFaceApi(aviso = () => {}) {
   if (!carregando) {
     carregando = (async () => {
-      if (!window.faceapi) await carregarScript(`${BASE}/dist/face-api.js`)
+      if (!window.faceapi) {
+        aviso('Baixando o programa (1 de 4)...')
+        await comPrazo(carregarScript(`${BASE}/dist/face-api.js`), 40, 'baixando o programa')
+      }
       const faceapi = window.faceapi
-      await faceapi.tf.ready()
-      await Promise.all([
-        faceapi.nets.tinyFaceDetector.loadFromUri(`${BASE}/model`),
-        faceapi.nets.faceLandmark68Net.loadFromUri(`${BASE}/model`),
-        faceapi.nets.faceRecognitionNet.loadFromUri(`${BASE}/model`),
-      ])
+      if (!faceapi) throw new Error('O reconhecimento não carregou neste aparelho. Tente outro navegador.')
+
+      aviso('Preparando o aparelho...')
+      await comPrazo(faceapi.tf.ready(), 20, 'preparando o aparelho')
+      // Aparelho velho às vezes não dá conta do WebGL e o programa trava
+      // calado. Melhor cair pro modo lento do que não funcionar.
+      if (!faceapi.tf.getBackend()) {
+        try { await faceapi.tf.setBackend('cpu') } catch { /* segue */ }
+      }
+
+      const modelos = [
+        ['Baixando o detector (2 de 4)...', faceapi.nets.tinyFaceDetector, 'baixando o detector'],
+        ['Baixando os pontos do rosto (3 de 4)...', faceapi.nets.faceLandmark68Net, 'baixando os pontos do rosto'],
+        ['Baixando o reconhecimento (4 de 4)...', faceapi.nets.faceRecognitionNet, 'baixando o reconhecimento'],
+      ]
+      // Um de cada vez: em internet fraca, três downloads juntos brigam
+      // entre si e nenhum termina.
+      for (const [texto, net, oQue] of modelos) {
+        aviso(texto)
+        await comPrazo(net.loadFromUri(`${BASE}/model`), 60, oQue)
+      }
       return faceapi
     })().catch(e => { carregando = null; throw e })
   }
