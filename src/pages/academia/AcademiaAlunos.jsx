@@ -23,13 +23,21 @@ export default function AcademiaAlunos() {
   const [editando, setEditando] = useState(null) // null | 'novo' | aluno
   const [recebendo, setRecebendo] = useState(null) // aluno a quem registrar a mensalidade
   const [ficha, setFicha] = useState(null) // aluno cuja ficha (saúde + medidas) está aberta
-  const [filtro, setFiltro] = useState('todos') // todos | emdia | vencidos | semrosto
+  const [filtro, setFiltro] = useState('todos') // todos | emdia | vencidos | semrosto | inativos
+  const [antigos, setAntigos] = useState(null) // ex-alunos, só quando pedidos
+  const [achados, setAchados] = useState(null) // resultado da busca no banco
 
+  // A tela carrega SÓ os alunos ativos. O sistema antigo tem milhares de
+  // ex-alunos e o Supabase corta qualquer consulta em 1000 linhas — trazendo
+  // todo mundo, metade dos alunos de verdade sumiria da lista sem avisar.
+  // Os antigos vêm por busca ou pelo filtro "Antigos", que é o que acontece
+  // na prática: alguém chega no balcão e a recepção procura pelo nome.
   async function carregar() {
     const { data, error } = await supabase
       .from('academia_alunos')
       .select('*')
       .eq('empresa_id', empresa.id)
+      .eq('ativo', true)
       .order('nome')
     if (!error) setAlunos(data || [])
     setCarregando(false)
@@ -37,34 +45,77 @@ export default function AcademiaAlunos() {
 
   useEffect(() => { carregar() }, [empresa.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Religa a matrícula de quem voltou, num toque só. É o caminho que faltava:
+  // antes era preciso abrir Editar e achar a caixinha "Matrícula ativa", e
+  // quem não achava ficava com o aluno travado na catraca sem entender.
+  // Não cobra nada nem mexe no vencimento — pra isso existe o Renovar.
+  async function reativar(aluno) {
+    const { error } = await supabase
+      .from('academia_alunos')
+      .update({ ativo: true })
+      .eq('id', aluno.id)
+    if (error) return alert('Não deu pra reativar: ' + error.message)
+    setAchados(l => l && l.map(x => (x.id === aluno.id ? { ...x, ativo: true } : x)))
+    setAntigos(l => l && l.filter(x => x.id !== aluno.id))
+    carregar()
+  }
+
   // Busca por nome OU matrícula: na recepção eles chamam o aluno pelo número.
   const termo = busca.trim().toLowerCase()
+
+  // Procurar varre o banco inteiro, ativo ou não: a pessoa está na frente da
+  // recepção e ninguém sabe de cabeça se ela ainda consta como aluna.
+  useEffect(() => {
+    const t = busca.trim()
+    if (t.length < 2) { setAchados(null); return }
+    let valeu = true
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from('academia_alunos')
+        .select('*')
+        .eq('empresa_id', empresa.id)
+        .or(`nome.ilike.%${t}%,matricula.ilike.%${t}%`)
+        .order('ativo', { ascending: false })  // quem é aluno hoje aparece em cima
+        .order('nome')
+        .limit(60)
+      if (valeu) setAchados(data || [])
+    }, 300)
+    return () => { valeu = false; clearTimeout(timer) }
+  }, [busca, empresa.id])
+
+  // Ex-alunos: só carrega quando o filtro é aberto, e os mais recentes
+  // primeiro — quem parou mês passado volta; quem parou em 2019, não.
+  useEffect(() => {
+    if (filtro !== 'inativos' || antigos) return
+    supabase
+      .from('academia_alunos')
+      .select('*')
+      .eq('empresa_id', empresa.id)
+      .eq('ativo', false)
+      .order('vencimento', { ascending: false, nullsFirst: false })
+      .limit(300)
+      .then(({ data }) => setAntigos(data || []))
+  }, [filtro, antigos, empresa.id])
   const hoje = hojeMais(0)
   const emDia = a => a.ativo && (!a.vencimento || a.vencimento >= hoje)
-  // Quem não treina mais fica FORA das contas do dia a dia. São os 579 que
-  // vieram do sistema antigo (pararam de pagar de 2 a 12 meses atrás): ficam
-  // guardados pra quando um deles voltar — a recepção acha pela busca e só
-  // aperta Renovar —, mas não podem inchar "Todos" nem "Vencidos".
-  const daCasa = alunos.filter(a => a.ativo)
+  // Os ex-alunos nunca entram nas contas do dia a dia: eles são milhares e
+  // afogariam "Todos" e "Vencidos", que é o que o dono olha todo dia.
+  const daCasa = alunos
   const contas = {
     todos: daCasa.length,
     emdia: daCasa.filter(emDia).length,
     vencidos: daCasa.filter(a => !emDia(a)).length,
     semrosto: daCasa.filter(a => !a.descritores?.length).length,
-    inativos: alunos.length - daCasa.length,
   }
-  // Procurando pelo nome, procura em TODO MUNDO: a pessoa está no balcão e
-  // ninguém sabe de cabeça se ela consta como ativa.
-  const procurando = termo.length > 0
-  const base = procurando || filtro === 'inativos' ? alunos : daCasa
-  const filtrados = base
-    .filter(a => a.nome.toLowerCase().includes(termo) || String(a.matricula || '').toLowerCase().includes(termo))
-    .filter(a => procurando
-      || filtro === 'todos'
-      || (filtro === 'emdia' && emDia(a))
-      || (filtro === 'vencidos' && !emDia(a))
-      || (filtro === 'semrosto' && !a.descritores?.length)
-      || (filtro === 'inativos' && !a.ativo))
+  const procurando = termo.length >= 2
+  const filtrados = procurando
+    ? (achados || [])
+    : filtro === 'inativos'
+      ? (antigos || [])
+      : daCasa.filter(a => filtro === 'todos'
+        || (filtro === 'emdia' && emDia(a))
+        || (filtro === 'vencidos' && !emDia(a))
+        || (filtro === 'semrosto' && !a.descritores?.length))
   const semRosto = contas.semrosto
 
   if (ficha) {
@@ -110,15 +161,26 @@ export default function AcademiaAlunos() {
             <button key={f.id} type="button"
               className={`ac-filtro${filtro === f.id ? ' ativo' : ''}${f.id === 'vencidos' && contas.vencidos ? ' alerta' : ''}`}
               onClick={() => setFiltro(f.id)}>
-              {f.nome} <b>{contas[f.id]}</b>
+              {f.nome}{contas[f.id] !== undefined && <b> {contas[f.id]}</b>}
             </button>
           ))}
         </div>
       </div>
 
-      {carregando ? <p className="ac-muted">Carregando...</p> : filtrados.length === 0 ? (
-        <p className="ac-muted">{alunos.length ? 'Ninguém com esse nome.' : 'Nenhum aluno ainda. Cadastre o primeiro.'}</p>
-      ) : (
+      {busca.trim().length === 1 && (
+        <p className="ac-muted">Escreva pelo menos duas letras pra procurar.</p>
+      )}
+
+      {carregando ? <p className="ac-muted">Carregando...</p>
+        : procurando && achados === null ? <p className="ac-muted">Procurando...</p>
+        : filtro === 'inativos' && antigos === null ? <p className="ac-muted">Carregando...</p>
+        : filtrados.length === 0 ? (
+          <p className="ac-muted">
+            {procurando ? 'Ninguém com esse nome — nem entre os antigos.'
+              : alunos.length ? 'Ninguém nesse filtro.'
+                : 'Nenhum aluno ainda. Cadastre o primeiro.'}
+          </p>
+        ) : (
         <div className="ac-tabela-caixa">
           <table className="ac-tabela">
             <thead>
@@ -154,6 +216,12 @@ export default function AcademiaAlunos() {
                       {!a.descritores?.length && <span className="ac-status ac-vencido">Sem rosto</span>}
                     </td>
                     <td className="ac-col-acoes">
+                      {!a.ativo && (
+                        <button className="btn btn-primary btn-sm" onClick={() => reativar(a)}
+                          title="Religar a matrícula sem cobrar nada agora">
+                          Reativar
+                        </button>
+                      )}
                       <button className="btn btn-secondary btn-sm" onClick={() => setRecebendo(a)} title="Registrar mensalidade paga">Renovar</button>
                       <button className="btn btn-secondary btn-sm" onClick={() => setFicha(a)}>Ficha</button>
                       <button className="btn btn-secondary btn-sm" onClick={() => setEditando(a)}>Editar</button>
