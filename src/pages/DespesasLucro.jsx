@@ -91,7 +91,7 @@ const emptyFunc = { nome: '', cargo: '', salario_mensal: '' }
 // Produção do dia: 'cadastrado' é receita (ficha) ou insumo (matéria-prima);
 // 'avulso' é o que não está cadastrado em lugar nenhum (digita nome + valor).
 const emptyProd = () => ({ modo: 'cadastrado', item: '', qtd_feita: '', qtd_sobrou: '', unidade: 'kg', nome: '', valor: '' })
-const emptyImprev = { tipo: 'pedido', numero: '', descricao: '', valor: '', info: null }
+const emptyImprev = { tipo: 'pedido', numero: '', descricao: '', valor: '', info: null, produto_id: '', quantidade: '' }
 
 export default function DespesasLucro({ empresaId }) {
   const hoje = new Date()
@@ -147,6 +147,9 @@ export default function DespesasLucro({ empresaId }) {
   const [prodForm, setProdForm] = useState(emptyProd())
   const [showImprev, setShowImprev] = useState(false)
   const [imprevForm, setImprevForm] = useState(emptyImprev)
+  // Produtos com o custo de cadastro: alimentam o seletor do desperdício e
+  // sugerem sozinhos quanto se perdeu em dinheiro.
+  const [produtosCusto, setProdutosCusto] = useState([])
   const [buscandoPed, setBuscandoPed] = useState(false)
 
   const carregar = useCallback(async () => {
@@ -181,7 +184,7 @@ export default function DespesasLucro({ empresaId }) {
         supabase.from('estoque_movimentos').select('produto_id, quantidade')
           .eq('empresa_id', empresaId).eq('tipo', 'saida').eq('motivo', 'venda')
           .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString()),
-        fetchAll(() => supabase.from('produtos').select('id, nome, preco_custo').eq('empresa_id', empresaId).order('id')),
+        fetchAll(() => supabase.from('produtos').select('id, nome, preco_custo, ativo, controla_estoque, arquivado_em').eq('empresa_id', empresaId).order('id')),
         // Custo que a baixa de estoque NÃO enxerga: prato no peso (% do vendido) e
         // produto sem controle de estoque (qtd vendida × custo). Quem faz a conta é
         // o banco, que vê mesa e delivery juntos.
@@ -223,6 +226,9 @@ export default function DespesasLucro({ empresaId }) {
         return { id, nome: p?.nome || 'Produto', qtd, custo_unit: Number(p?.preco_custo || 0) }
       }).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')))
 
+      setProdutosCusto((prd.error ? [] : (prd.data || []))
+        .filter(p => p.ativo !== false && !p.arquivado_em)
+        .sort((x, y) => String(x.nome).localeCompare(String(y.nome), 'pt-BR')))
       setCustoVendido(cpc.error ? [] : (cpc.data || []))
       setCustoComplementos(ccp.error ? [] : (ccp.data || []))
 
@@ -536,14 +542,70 @@ export default function DespesasLucro({ empresaId }) {
       info: { erro: false, txt: `✓ ${data.cliente_nome || 'Cliente'} · ${brl(data.total)}${data.status === 'cancelado' ? ' · cancelado' : ' · status: ' + (data.status || '?')}` },
     }))
   }
+  // Produto escolhido no modo desperdício: sugere o prejuízo pelo custo de
+  // cadastro. É só sugestão — quem perdeu sabe melhor do que a tabela.
+  const produtoDoImprev = useMemo(
+    () => produtosCusto.find(p => String(p.id) === String(imprevForm.produto_id)) || null,
+    [produtosCusto, imprevForm.produto_id])
+
+  function mudarProdutoImprev(id) {
+    setImprevForm(f => {
+      const prod = produtosCusto.find(p => String(p.id) === String(id))
+      const qtd = num(f.quantidade)
+      const custo = Number(prod?.preco_custo || 0)
+      return {
+        ...f,
+        produto_id: id,
+        valor: custo > 0 && qtd > 0 ? String((custo * qtd).toFixed(2)).replace('.', ',') : f.valor,
+      }
+    })
+  }
+  function mudarQtdImprev(valorDigitado) {
+    setImprevForm(f => {
+      const prod = produtosCusto.find(p => String(p.id) === String(f.produto_id))
+      const qtd = num(valorDigitado)
+      const custo = Number(prod?.preco_custo || 0)
+      return {
+        ...f,
+        quantidade: valorDigitado,
+        valor: custo > 0 && qtd > 0 ? String((custo * qtd).toFixed(2)).replace('.', ',') : f.valor,
+      }
+    })
+  }
+
   async function salvarImprev(e) {
     e.preventDefault()
-    if (!imprevForm.descricao.trim()) { alert('Descreva o imprevisto (ex.: pedido cancelado).'); return }
-    const { error } = await supabase.from('custos_imprevistos').insert({ empresa_id: empresaId, data: dia, descricao: imprevForm.descricao.trim(), valor: num(imprevForm.valor) })
+    const ehDesperdicio = imprevForm.tipo === 'produto'
+    if (ehDesperdicio && !imprevForm.produto_id) { alert('Escolha o produto que se perdeu.'); return }
+    if (ehDesperdicio && num(imprevForm.quantidade) <= 0) { alert('Diga quantos se perderam.'); return }
+
+    // Descrição some no modo desperdício: o produto e a quantidade já contam a
+    // história, e obrigar a escrever de novo é o que faz ninguém registrar.
+    const descricao = imprevForm.descricao.trim() || (ehDesperdicio && produtoDoImprev
+      ? `Perda: ${num(imprevForm.quantidade)}x ${produtoDoImprev.nome}`
+      : '')
+    if (!descricao) { alert('Descreva o imprevisto (ex.: pedido cancelado).'); return }
+
+    // Uma função só grava o custo E a baixa do estoque: não existe o caso de
+    // sair do freezer sem virar prejuízo, nem o contrário (mig 0318).
+    const { error } = await supabase.rpc('imprevisto_registrar', {
+      p_descricao: descricao,
+      p_valor: num(imprevForm.valor),
+      p_data: dia,
+      p_produto_id: ehDesperdicio ? imprevForm.produto_id : null,
+      p_quantidade: ehDesperdicio ? num(imprevForm.quantidade) : null,
+    })
     if (error) { alert(recadoDeErro(error, 'fazer isso agora')); return }
     setShowImprev(false); carregar()
   }
-  async function excluirImprev(i) { if (!confirm(`Excluir "${i.descricao}"?`)) return; await supabase.from('custos_imprevistos').delete().eq('id', i.id); carregar() }
+  // Pela função também: apagar um desperdício DEVOLVE o produto pro estoque.
+  // Apagar direto na tabela deixaria o furo lá, sem ninguém saber de onde veio.
+  async function excluirImprev(i) {
+    if (!confirm(`Excluir "${i.descricao}"?`)) return
+    const { error } = await supabase.rpc('imprevisto_excluir', { p_id: i.id })
+    if (error) { alert(recadoDeErro(error, 'excluir agora')); return }
+    carregar()
+  }
 
   if (!empresaId) return <div className="card">Selecione uma loja.</div>
 
@@ -849,7 +911,10 @@ export default function DespesasLucro({ empresaId }) {
               imprevistos.length === 0
                 ? <Vazio texto="Ex.: pedido cancelado que estragou o produto, algo que caiu/quebrou, compra de emergência…" />
                 : imprevistos.map(i => (
-                  <ItemLinha key={i.id} onDel={() => excluirImprev(i)} titulo={i.descricao} valor={brl(i.valor)} />
+                  <ItemLinha key={i.id} onDel={() => excluirImprev(i)} titulo={i.descricao} valor={brl(i.valor)}
+                    sub={i.produto_id && i.estoque_movimento_id
+                      ? <>📦 saiu {Number(i.quantidade || 0)} do estoque</>
+                      : (i.produto_id ? <>só custo — o produto não controla estoque</> : undefined)} />
                 ))
             )}
           </Secao>
@@ -1063,7 +1128,7 @@ export default function DespesasLucro({ empresaId }) {
           <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
             {[['cadastrado', '🍲 Receita ou insumo'], ['avulso', '✍️ Digitar na hora']].map(([id, lb]) => (
               <button key={id} type="button" onClick={() => setProdForm(f => ({ ...f, modo: id }))}
-                style={{ flex: 1, padding: '9px 8px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                style={{ flex: 1, padding: '9px 6px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 12, fontWeight: 700,
                   background: prodForm.modo === id ? 'var(--primary)' : 'transparent', color: prodForm.modo === id ? '#fff' : 'var(--text)' }}>
                 {lb}
               </button>
@@ -1128,7 +1193,7 @@ export default function DespesasLucro({ empresaId }) {
         <Modal onClose={() => setShowImprev(false)} onSubmit={salvarImprev} titulo="Novo custo imprevisto">
           {/* modo: pedido cancelado x outro gasto */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-            {[['pedido', '🧾 Pedido cancelado'], ['outro', '✍️ Outro gasto']].map(([id, lb]) => (
+            {[['pedido', '🧾 Pedido cancelado'], ['produto', '📦 Produto perdido'], ['outro', '✍️ Outro gasto']].map(([id, lb]) => (
               <button key={id} type="button" onClick={() => setImprevForm(f => ({ ...f, tipo: id, info: null }))}
                 style={{ flex: 1, padding: '9px 8px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
                   background: imprevForm.tipo === id ? 'var(--primary)' : 'transparent', color: imprevForm.tipo === id ? '#fff' : 'var(--text)' }}>
@@ -1152,11 +1217,43 @@ export default function DespesasLucro({ empresaId }) {
             </div>
           )}
 
+          {imprevForm.tipo === 'produto' && (
+            <div className="form-grid" style={{ marginBottom: 4 }}>
+              <div className="form-field full">
+                <label>Qual produto se perdeu?</label>
+                <BuscaSelect
+                  opcoes={produtosCusto.map(pr => ({ value: pr.id, label: pr.nome }))}
+                  value={imprevForm.produto_id}
+                  onChange={mudarProdutoImprev}
+                  placeholder="Digite o nome do produto…"
+                  permitirVazio={false}
+                />
+              </div>
+              <div className="form-field full">
+                <label>Quantos</label>
+                <input autoFocus inputMode="decimal" placeholder="Ex.: 3"
+                  value={imprevForm.quantidade} onChange={e => mudarQtdImprev(e.target.value)} />
+              </div>
+              {/* Produto sem controle de estoque entra só como custo. Dizer isso
+                  aqui evita o dono procurar a baixa depois e não achar. */}
+              {produtoDoImprev && produtoDoImprev.controla_estoque === false && (
+                <div className="form-field full" style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                  ℹ️ Esse produto não controla estoque — vai entrar só como custo do dia.
+                </div>
+              )}
+              {produtoDoImprev && produtoDoImprev.controla_estoque !== false && (
+                <div className="form-field full" style={{ fontSize: 11.5, color: 'var(--success)' }}>
+                  ✓ Vai sair {num(imprevForm.quantidade) || 0} do estoque de {produtoDoImprev.nome}.
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="form-grid">
-            <div className="form-field full"><label>{imprevForm.tipo === 'pedido' ? 'Descrição (veio do pedido — pode editar)' : 'O que aconteceu?'}</label>
-              <input placeholder={imprevForm.tipo === 'pedido' ? 'Busque o pedido acima…' : 'Ex.: Copo quebrou, compra de gás de emergência…'}
+            <div className="form-field full"><label>{imprevForm.tipo === 'pedido' ? 'Descrição (veio do pedido — pode editar)' : imprevForm.tipo === 'produto' ? 'O que aconteceu? (opcional)' : 'O que aconteceu?'}</label>
+              <input placeholder={imprevForm.tipo === 'pedido' ? 'Busque o pedido acima…' : imprevForm.tipo === 'produto' ? 'Ex.: derreteu na câmara, caiu no chão, venceu…' : 'Ex.: Copo quebrou, compra de gás de emergência…'}
                 value={imprevForm.descricao} onChange={e => setImprevForm(f => ({ ...f, descricao: e.target.value }))} /></div>
-            <div className="form-field full"><label>Valor perdido/gasto (R$)</label>
+            <div className="form-field full"><label>{imprevForm.tipo === 'produto' ? 'Prejuízo (R$) — calculado pelo custo, pode ajustar' : 'Valor perdido/gasto (R$)'}</label>
               <input inputMode="decimal" placeholder="Ex.: 25,00" value={imprevForm.valor} onChange={e => setImprevForm(f => ({ ...f, valor: e.target.value }))} /></div>
           </div>
           {imprevForm.tipo === 'pedido' && (
