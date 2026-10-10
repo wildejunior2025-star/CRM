@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 29
+const APP_VERSION = 30
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -784,7 +784,14 @@ const server = http.createServer(async (req, res) => {
         const f = await jsonBody(req)
         // Respeita o filtro por origem (ex.: conta da mesa vem com origem:'mesa').
         if (f.origem && !origemLigada(f.origem)) { log('  (' + f.origem + ' DESLIGADO — nao imprimiu ' + (f.titulo || 'doc') + ')'); return sendJson(res, { ok: true, filtrado: true }) }
-        const ok = imprimirBytes(montarTexto(htmlParaLinhas(f.html || ''), f.titulo), 'doc')
+        // CONTA, PRÉ-CONTA e QR do Pix são papel da FRENTE — quem recebe dinheiro
+        // é o caixa, não a cozinha. Com 2 impressoras, isto ia pra `printer`
+        // (a principal, que o painel chama de COZINHA) e a conta do cliente saía
+        // lá dentro. Só a comanda de cozinha manda setor:'cozinha'.
+        const bar = config().printerBar
+        const paraFrente = bar && f.setor !== 'cozinha'
+        const ok = imprimirBytes(montarTexto(htmlParaLinhas(f.html || ''), f.titulo), 'doc',
+                                 paraFrente ? bar : undefined)
         return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
       }
       // Comanda de MESA nativa (nome da loja + MESA grandes, data, itens com valor).

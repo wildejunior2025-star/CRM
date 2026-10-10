@@ -257,7 +257,9 @@ export async function imprimirHtml(html, titulo, opts = {}) {
   // nome da loja (titulo-loja), tira dele pra não sair duas vezes na térmica.
   if (titulo) htmlParaApp = htmlParaApp.replace(/<div[^>]*class="[^"]*titulo-loja[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '')
   // opts.origem (ex.: 'mesa') → o app respeita o filtro por origem deste PC.
-  if (await imprimirViaAppFwc('imprimir-html', { html: htmlParaApp, titulo, origem: opts.origem })) return 'app'
+  // opts.setor='cozinha' → sai na impressora da COZINHA. Sem isso vai pra da
+  // FRENTE quando a loja tem duas: conta, pré-conta e QR do Pix são do caixa.
+  if (await imprimirViaAppFwc('imprimir-html', { html: htmlParaApp, titulo, origem: opts.origem, setor: opts.setor })) return 'app'
   if (opts.soApp) return false // sem app FWC local (celular): não imprime no navegador do aparelho
   imprimirHtmlNavegador(html)
   // 'navegador' e não true: abrir a janela do Chrome não é "saiu na térmica", e
@@ -273,7 +275,7 @@ export async function imprimirComandaMesaApp({ numeroMesa, itens = [], nomeLoja 
   // Comanda de mesa NUNCA cai no navegador (Chrome). Quem imprime é o app FWC — que já
   // recebe o pedido em tempo real e filtra por PC (botões de origem). Se não há app FWC
   // neste aparelho, não imprime aqui (evita o Chrome abrindo e a 2ª via no outro PC).
-  imprimirHtml(montarComandaCozinhaHtml({ numeroMesa, itens, nomeLoja, area, atendente, pessoas, rodape, rotulo }), null, { soApp: true })
+  imprimirHtml(montarComandaCozinhaHtml({ numeroMesa, itens, nomeLoja, area, atendente, pessoas, rodape, rotulo }), null, { soApp: true, setor: 'cozinha' })
 }
 
 // Comanda da COZINHA (fonte grande) — "pedido sai na cozinha". SEM preço (o preço sai

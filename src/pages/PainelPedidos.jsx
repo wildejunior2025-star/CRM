@@ -8619,7 +8619,7 @@ export default function PainelPedidos() {
     // disse que ali não precisa de papel.
     const paraPapel = dados.itens.filter(i => i.setor !== 'nenhum')
     if (!paraPapel.length) return
-    imprimirHtml(montarComandaCozinhaHtml({ ...dados, itens: paraPapel }), null, { soApp: semJanelaDoNavegador() })
+    imprimirHtml(montarComandaCozinhaHtml({ ...dados, itens: paraPapel }), null, { soApp: semJanelaDoNavegador(), setor: 'cozinha' })
   }
 
   // A CONTA da mesa também respeita o filtro "Mesa" deste PC: se a Mesa está

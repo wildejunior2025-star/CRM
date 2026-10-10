@@ -528,7 +528,7 @@ export default function PresencialCozinha({ embutido = false }) {
               <div style={{ background: aba === 'historico' ? '#16a34a' : 'var(--primary)', color: '#fff', padding: '10px 14px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span>{grupo.rotulo}</span>
                 <button type="button" title="Imprimir comanda"
-                  onClick={() => imprimirHtml(montarComandaCozinhaHtml({ rotulo: grupo.rotulo, itens: grupo.itens }))}
+                  onClick={() => imprimirHtml(montarComandaCozinhaHtml({ rotulo: grupo.rotulo, itens: grupo.itens }), null, { setor: 'cozinha' })}
                   style={{ background: 'rgba(255,255,255,.2)', border: 'none', color: '#fff', borderRadius: 8, cursor: 'pointer', fontSize: 16, padding: '2px 8px' }}>
                   🖨️
                 </button>
