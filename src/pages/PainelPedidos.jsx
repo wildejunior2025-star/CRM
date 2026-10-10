@@ -6762,6 +6762,15 @@ export default function PainelPedidos() {
   const [buscaCatalogo, setBuscaCatalogo] = useState('')
   const [ordemCategorias, setOrdemCategorias] = useState({})
   const [pausandoId, setPausandoId] = useState(null)
+  // Entrada de estoque pelo próprio Catálogo: quem pausa o item porque acabou é
+  // a mesma pessoa que o repõe depois. Obrigar a sair daqui e ir numa tela de
+  // estoque é o que fazia ninguém lançar. SÓ SOMA — tirar sem vender tem que
+  // dizer o motivo, e isso mora no Financeiro (mesma regra da /entrada-estoque).
+  const [saldoEstoque, setSaldoEstoque] = useState({})   // produto_id -> quantidade atual
+  const [entradaAberta, setEntradaAberta] = useState(null) // produto_id com o campo aberto
+  const [entradaQtd, setEntradaQtd] = useState('')
+  const [salvandoEntrada, setSalvandoEntrada] = useState(false)
+  const [erroEntrada, setErroEntrada] = useState(null)
   function patchPainelConfig(patch) {
     try {
       const cfg = JSON.parse(localStorage.getItem('painelConfig') || '{}')
@@ -8076,11 +8085,17 @@ export default function PainelPedidos() {
     setLoadingCatalogo(true)
     const { data } = await supabase
       .from('produtos')
-      .select('id, nome, preco_venda, categoria, disponivel_delivery, destaque')
+      .select('id, nome, preco_venda, categoria, disponivel_delivery, destaque, controla_estoque')
       .eq('empresa_id', empresa.id)
       .is('arquivado_em', null)
       .order('nome', { ascending: true })
     setCatalogo(data || [])
+    // Saldo de hoje, pra entrada mostrar em cima do que já tem. Falhar aqui não
+    // pode derrubar o painel: sem saldo o botão de entrada ainda funciona.
+    try {
+      const { data: saldos } = await supabase.from('estoque_saldo').select('produto_id, quantidade_atual')
+      setSaldoEstoque(Object.fromEntries((saldos ?? []).map(s => [s.produto_id, Number(s.quantidade_atual) || 0])))
+    } catch { /* segue sem o saldo */ }
     // A ordem das categorias é a MESMA do cardápio (tabela categorias). Ordenar
     // por nome aqui deixaria a lista do painel numa ordem e a da loja em outra —
     // e quem pausa item procura pela ordem que conhece.
@@ -8116,6 +8131,33 @@ export default function PainelPedidos() {
       n.has(produtoId) ? n.delete(produtoId) : n.add(produtoId)
       return n
     })
+  }
+
+  // Entrada de estoque direto do Catálogo. Só soma, e só em produto que controla
+  // estoque — nos outros o número não quer dizer nada e o botão nem aparece.
+  async function lancarEntradaEstoque(prod) {
+    const qtd = Number(String(entradaQtd).replace(',', '.'))
+    if (!Number.isFinite(qtd) || qtd <= 0) return
+    setSalvandoEntrada(true)
+    try {
+      const { error } = await supabase.from('estoque_movimentos').insert({
+        empresa_id: empresa.id,
+        produto_id: prod.id,
+        tipo: 'entrada',
+        quantidade: qtd,
+        motivo: 'compra',
+        observacao: 'Entrada pelo Catálogo',
+      })
+      if (error) throw error
+      setSaldoEstoque(prev => ({ ...prev, [prod.id]: (Number(prev[prod.id]) || 0) + qtd }))
+      setEntradaAberta(null)
+      setEntradaQtd('')
+      setErroEntrada(null)
+    } catch (e) {
+      setErroEntrada(e.message || 'Não deu pra lançar a entrada.')
+    } finally {
+      setSalvandoEntrada(false)
+    }
   }
 
   // Categorias nascem fechadas: numa loja com 200 produtos o lojista rolava a
@@ -10248,7 +10290,7 @@ export default function PainelPedidos() {
           {painelDireito === 'catalogo' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <p style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
-                Pause um item quando ele acabar — ele <strong>some da loja online na hora</strong>. Reative quando voltar ao estoque. A <strong>⭐</strong> põe o item nos destaques do topo da loja online.
+                Pause um item quando ele acabar — ele <strong>some da loja online na hora</strong>. Reative quando voltar ao estoque. A <strong>⭐</strong> põe o item nos destaques do topo da loja online. Em quem controla estoque, <strong>＋ Estoque</strong> lança o que chegou (só soma).
               </p>
               <input
                 type="search"
@@ -10358,6 +10400,31 @@ export default function PainelPedidos() {
                                 filter: prod.destaque ? 'none' : 'grayscale(1)', opacity: prod.destaque ? 1 : 0.55,
                               }}
                             >⭐</button>
+                            {/* Entrada de estoque: só em produto que controla estoque.
+                                Nos outros o saldo não quer dizer nada. */}
+                            {prod.controla_estoque !== false && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setErroEntrada(null)
+                                  setEntradaQtd('')
+                                  setEntradaAberta(entradaAberta === prod.id ? null : prod.id)
+                                }}
+                                title="Lançar entrada de estoque (só soma)"
+                                style={{
+                                  display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 8, cursor: 'pointer',
+                                  fontWeight: 700, fontSize: 12, border: '1.5px solid',
+                                  borderColor: entradaAberta === prod.id ? '#16a34a' : 'var(--border, #2a2a3a)',
+                                  background: entradaAberta === prod.id ? 'rgba(34,197,94,.12)' : 'transparent',
+                                  color: entradaAberta === prod.id ? '#16a34a' : 'var(--text-muted)',
+                                }}
+                              >
+                                ＋ Estoque
+                                <span style={{ fontSize: 10, fontWeight: 800, background: 'rgba(148,163,184,.25)', borderRadius: 20, padding: '0 6px' }}>
+                                  {Number(saldoEstoque[prod.id]) || 0}
+                                </span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => togglePausarProduto(prod)}
@@ -10374,6 +10441,54 @@ export default function PainelPedidos() {
                             </button>
                           </div>
                         </div>
+
+                        {/* Campo da entrada: quantidade que CHEGOU, e soma no saldo. */}
+                        {entradaAberta === prod.id && (
+                          <div style={{
+                            borderTop: '1px solid var(--border, #2a2a3a)', background: 'rgba(34,197,94,.06)',
+                            padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6,
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }}>
+                                Chegou quanto?
+                              </span>
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                min="0"
+                                step="any"
+                                autoFocus
+                                value={entradaQtd}
+                                onChange={e => setEntradaQtd(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') lancarEntradaEstoque(prod) }}
+                                placeholder="0"
+                                style={{
+                                  width: 90, padding: '6px 8px', borderRadius: 8, fontSize: 13,
+                                  border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => lancarEntradaEstoque(prod)}
+                                disabled={salvandoEntrada || !(Number(String(entradaQtd).replace(',', '.')) > 0)}
+                                style={{
+                                  padding: '6px 14px', borderRadius: 8, fontWeight: 800, fontSize: 12,
+                                  border: '1.5px solid #16a34a', background: 'rgba(34,197,94,.15)', color: '#16a34a',
+                                  cursor: salvandoEntrada ? 'wait' : 'pointer',
+                                  opacity: Number(String(entradaQtd).replace(',', '.')) > 0 ? 1 : 0.5,
+                                }}
+                              >
+                                {salvandoEntrada ? '...' : 'Dar entrada'}
+                              </button>
+                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                tem {Number(saldoEstoque[prod.id]) || 0}
+                              </span>
+                            </div>
+                            {erroEntrada && (
+                              <div style={{ fontSize: 11.5, color: '#dc2626', fontWeight: 600 }}>{erroEntrada}</div>
+                            )}
+                          </div>
+                        )}
 
                         {/* Complementos aninhados (grupos + opções) */}
                         {temComp && aberto && (
