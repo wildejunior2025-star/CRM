@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import { FORMAS, hojeIso, cancelarPagamento, dinheiro, dataBr } from '../../lib/academiaPagamento'
+import SenhaCaixa from './SenhaCaixa'
+import { caixaLiberado } from '../../lib/caixaAcademia'
 
 // academia.fwcinter.com/pagamentos — quem pagou, quanto entrou e o fechamento
 // do dia. Cada linha vem do botão "Renovar" da lista de alunos (mig 0294).
@@ -20,6 +22,8 @@ export default function AcademiaPagamentos() {
   const [pagamentos, setPagamentos] = useState([])
   const [mes, setMes] = useState({ total: 0, quantos: 0 })
   const [carregando, setCarregando] = useState(true)
+  // O faturamento da academia nao fica a vista de quem pegar o computador.
+  const [liberado, setLiberado] = useState(() => caixaLiberado())
 
   const carregar = useCallback(async () => {
     setCarregando(true)
@@ -43,7 +47,9 @@ export default function AcademiaPagamentos() {
     setCarregando(false)
   }, [empresa.id, de, ate])
 
-  useEffect(() => { carregar() }, [carregar])
+  // So busca os numeros depois da senha: sem isso o faturamento ja estaria
+  // baixado no aparelho antes de alguem provar que pode ver.
+  useEffect(() => { if (liberado) carregar() }, [carregar, liberado])
 
   async function cancelar(p) {
     if (!window.confirm(`Cancelar o pagamento de ${p.academia_alunos?.nome}? O vencimento volta para ${dataBr(p.vencimento_antes)}.`)) return
@@ -62,6 +68,15 @@ export default function AcademiaPagamentos() {
   const porForma = FORMAS
     .map(f => ({ ...f, total: validos.reduce((s, p) => s + quanto(p, f.id), 0) }))
     .filter(f => f.total > 0)
+
+  if (!liberado) {
+    return (
+      <SenhaCaixa
+        onLiberar={() => setLiberado(true)}
+        onCancelar={() => { window.location.href = '/' }}
+      />
+    )
+  }
 
   return (
     <div>

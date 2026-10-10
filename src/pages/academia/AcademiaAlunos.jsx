@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
+import SenhaCaixa from './SenhaCaixa'
+import { caixaLiberado } from '../../lib/caixaAcademia'
 import { useAuth } from '../../hooks/useAuth'
 import { situacaoAluno, entrarTelaCheia } from '../../lib/reconhecimentoFacial'
 import { FORMAS, hojeIso, somarMeses, registrarPagamento, dinheiro, dataBr } from '../../lib/academiaPagamento'
@@ -27,6 +29,7 @@ export default function AcademiaAlunos() {
   const [busca, setBusca] = useState('')
   const [editando, setEditando] = useState(null) // null | 'novo' | aluno
   const [recebendo, setRecebendo] = useState(null) // aluno a quem registrar a mensalidade
+  const [pedindoSenha, setPedindoSenha] = useState(null) // aluno esperando a senha do caixa
   const [ficha, setFicha] = useState(null) // aluno cuja ficha (saúde + medidas) está aberta
   const [filtro, setFiltro] = useState('todos') // todos | emdia | vencidos | semrosto | inativos
   const [antigos, setAntigos] = useState(null) // ex-alunos, só quando pedidos
@@ -59,6 +62,14 @@ export default function AcademiaAlunos() {
     carregar()
     setAntigos(null)
     setVersao(v => v + 1)
+  }
+
+  // Receber mensalidade mexe em dinheiro: pede a senha do caixa antes.
+  // Acertou uma vez, fica liberado por alguns minutos — quem recebe de cinco
+  // alunos seguidos nao digita cinco vezes.
+  function receber(aluno) {
+    if (caixaLiberado()) setRecebendo(aluno)
+    else setPedindoSenha(aluno)
   }
 
   // Religa a matrícula de quem voltou, num toque só. É o caminho que faltava:
@@ -154,7 +165,7 @@ export default function AcademiaAlunos() {
           // é só apertar "Não pagou ainda" se for o caso.
           // Cortesia não: quem treina de graça não tem o que pagar, e pedir
           // valor pra ele ainda fazia a matrícula virar dinheiro no caixa.
-          if (novo && !novo.cortesia) setRecebendo({ ...novo, primeira: true })
+          if (novo && !novo.cortesia) receber({ ...novo, primeira: true })
         }}
       />
     )
@@ -162,6 +173,12 @@ export default function AcademiaAlunos() {
 
   return (
     <div>
+      {pedindoSenha && (
+        <SenhaCaixa
+          onCancelar={() => setPedindoSenha(null)}
+          onLiberar={() => { setRecebendo(pedindoSenha); setPedindoSenha(null) }}
+        />
+      )}
       {recebendo && (
         <ReceberMensalidade
           aluno={recebendo}
@@ -256,7 +273,7 @@ export default function AcademiaAlunos() {
                           Reativar
                         </button>
                       )}
-                      {!a.cortesia && <button className="btn btn-secondary btn-sm" onClick={() => setRecebendo(a)} title="Registrar mensalidade paga">Renovar</button>}
+                      {!a.cortesia && <button className="btn btn-secondary btn-sm" onClick={() => receber(a)} title="Registrar mensalidade paga">Renovar</button>}
                       <button className="btn btn-secondary btn-sm" onClick={() => setFicha(a)}>Ficha</button>
                       <button className="btn btn-secondary btn-sm" onClick={() => setEditando(a)}>Editar</button>
                     </td>
@@ -286,14 +303,28 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
   const [cameraAberta, setCameraAberta] = useState(false)
+  const [pedindoSenha, setPedindoSenha] = useState(false)
 
   const set = (k, v) => setDados(d => ({ ...d, [k]: v }))
   const fotoAtual = rosto?.foto || aluno?.foto
 
-  async function salvar(e) {
+  // Mexer no vencimento, ou marcar alguem como cortesia, e dar tempo de
+  // treino de graca — vale tanto quanto receber dinheiro. Entao passa pela
+  // mesma senha do caixa. Trocar nome, telefone ou tirar a foto, nao.
+  const mexeEmDinheiro = !!aluno && (
+    (dados.vencimento || '') !== (aluno.vencimento || '')
+    || !!dados.cortesia !== !!aluno.cortesia
+  )
+
+  function salvar(e) {
     e.preventDefault()
     setErro(null)
     if (!dados.nome.trim()) return setErro('Coloque o nome.')
+    if (mexeEmDinheiro && !caixaLiberado()) { setPedindoSenha(true); return }
+    gravar()
+  }
+
+  async function gravar() {
     setSalvando(true)
     const linha = {
       empresa_id: empresaId,
@@ -346,6 +377,12 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
 
   return (
     <form className="ac-card ac-form" onSubmit={salvar}>
+      {pedindoSenha && (
+        <SenhaCaixa
+          onCancelar={() => setPedindoSenha(false)}
+          onLiberar={() => { setPedindoSenha(false); gravar() }}
+        />
+      )}
       <div className="ac-linha-titulo">
         <h2>{aluno ? 'Editar aluno' : 'Novo aluno'}</h2>
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => onFechar(false)}>Voltar</button>
