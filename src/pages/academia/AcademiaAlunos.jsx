@@ -376,13 +376,17 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
   }
 
   return (
-    <form className="ac-card ac-form" onSubmit={salvar}>
+    <>
+      {/* FORA do <form>: a telinha da senha tem formulário próprio, e
+          formulário dentro de formulário o navegador descarta — o botão
+          "Entrar" virava um segundo "Salvar" e o cadastro nunca gravava. */}
       {pedindoSenha && (
         <SenhaCaixa
           onCancelar={() => setPedindoSenha(false)}
           onLiberar={() => { setPedindoSenha(false); gravar() }}
         />
       )}
+      <form className="ac-card ac-form" onSubmit={salvar}>
       <div className="ac-linha-titulo">
         <h2>{aluno ? 'Editar aluno' : 'Novo aluno'}</h2>
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => onFechar(false)}>Voltar</button>
@@ -466,7 +470,8 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
         {aluno && <button type="button" className="btn btn-secondary" onClick={redefinirSenha}>Redefinir senha do app</button>}
         <button className="btn btn-primary" disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar'}</button>
       </div>
-    </form>
+      </form>
+    </>
   )
 }
 
