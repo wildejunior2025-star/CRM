@@ -6771,6 +6771,16 @@ export default function PainelPedidos() {
   const [entradaQtd, setEntradaQtd] = useState('')
   const [salvandoEntrada, setSalvandoEntrada] = useState(false)
   const [erroEntrada, setErroEntrada] = useState(null)
+  // Baixa por desperdício (garrafa que caiu, prato que estragou). Vai pro
+  // "Custos imprevistos de hoje" no Financeiro e tira do estoque, tudo pela
+  // rpc imprevisto_registrar — ela é quem exige o motivo e carimba a hora.
+  // O atendente não precisa abrir o Financeiro: lança aqui e segue servindo.
+  const [baixaAberta, setBaixaAberta] = useState(null)
+  const [baixaQtd, setBaixaQtd] = useState('1')
+  const [baixaMotivo, setBaixaMotivo] = useState('')
+  const [salvandoBaixa, setSalvandoBaixa] = useState(false)
+  const [erroBaixa, setErroBaixa] = useState(null)
+  const [okBaixa, setOkBaixa] = useState(null)   // { produtoId, texto } — a tal mensagem verde
   function patchPainelConfig(patch) {
     try {
       const cfg = JSON.parse(localStorage.getItem('painelConfig') || '{}')
@@ -8085,7 +8095,7 @@ export default function PainelPedidos() {
     setLoadingCatalogo(true)
     const { data } = await supabase
       .from('produtos')
-      .select('id, nome, preco_venda, categoria, disponivel_delivery, destaque, controla_estoque')
+      .select('id, nome, preco_venda, preco_custo, categoria, disponivel_delivery, destaque, controla_estoque')
       .eq('empresa_id', empresa.id)
       .is('arquivado_em', null)
       .order('nome', { ascending: true })
@@ -8157,6 +8167,41 @@ export default function PainelPedidos() {
       setErroEntrada(e.message || 'Não deu pra lançar a entrada.')
     } finally {
       setSalvandoEntrada(false)
+    }
+  }
+
+  // Baixa por desperdício: vira custo no Financeiro E sai do estoque.
+  // O prejuízo é o que a loja PAGOU no produto — por isso custo, não venda.
+  // Sem custo cadastrado cai pro preço de venda, que é o número que ela tem.
+  async function lancarBaixaDesperdicio(prod) {
+    const qtd = Number(String(baixaQtd).replace(',', '.'))
+    const motivo = baixaMotivo.trim()
+    if (!Number.isFinite(qtd) || qtd <= 0) { setErroBaixa('Diga quantos se perderam.'); return }
+    if (!motivo) { setErroBaixa('Descreva o que aconteceu.'); return }
+    setSalvandoBaixa(true)
+    setErroBaixa(null)
+    try {
+      const unit = Number(prod.preco_custo) > 0 ? Number(prod.preco_custo) : Number(prod.preco_venda) || 0
+      const { error } = await supabase.rpc('imprevisto_registrar', {
+        p_descricao: `${prod.nome} — ${motivo}`,
+        p_valor: Math.round(unit * qtd * 100) / 100,
+        p_data: null,
+        p_produto_id: prod.id,
+        p_quantidade: qtd,
+      })
+      if (error) throw error
+      if (prod.controla_estoque !== false) {
+        setSaldoEstoque(prev => ({ ...prev, [prod.id]: (Number(prev[prod.id]) || 0) - qtd }))
+      }
+      setOkBaixa({ produtoId: prod.id, texto: `Baixa registrada — ${fmt(unit * qtd)} no Financeiro de hoje.` })
+      setBaixaAberta(null)
+      setBaixaQtd('1')
+      setBaixaMotivo('')
+      setTimeout(() => setOkBaixa(null), 6000)
+    } catch (e) {
+      setErroBaixa(e.message || 'Não deu pra registrar a baixa.')
+    } finally {
+      setSalvandoBaixa(false)
     }
   }
 
@@ -10425,6 +10470,28 @@ export default function PainelPedidos() {
                                 </span>
                               </button>
                             )}
+                            {/* Baixa por desperdício: vale pra qualquer produto —
+                                o prejuízo existe mesmo em item sem controle de estoque. */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setErroBaixa(null)
+                                setOkBaixa(null)
+                                setBaixaQtd('1')
+                                setBaixaMotivo('')
+                                setBaixaAberta(baixaAberta === prod.id ? null : prod.id)
+                              }}
+                              title="Registrar perda/quebra — vai pro Financeiro e sai do estoque"
+                              style={{
+                                padding: '6px 10px', borderRadius: 8, cursor: 'pointer',
+                                fontWeight: 700, fontSize: 12, border: '1.5px solid',
+                                borderColor: baixaAberta === prod.id ? '#f59e0b' : 'var(--border, #2a2a3a)',
+                                background: baixaAberta === prod.id ? 'rgba(245,158,11,.15)' : 'transparent',
+                                color: baixaAberta === prod.id ? '#f59e0b' : 'var(--text-muted)',
+                              }}
+                            >
+                              Baixa
+                            </button>
                             <button
                               type="button"
                               onClick={() => togglePausarProduto(prod)}
@@ -10487,6 +10554,75 @@ export default function PainelPedidos() {
                             {erroEntrada && (
                               <div style={{ fontSize: 11.5, color: '#dc2626', fontWeight: 600 }}>{erroEntrada}</div>
                             )}
+                          </div>
+                        )}
+
+                        {/* Baixa por desperdício: quantidade + motivo OBRIGATÓRIO. */}
+                        {baixaAberta === prod.id && (
+                          <div style={{
+                            borderTop: '1px solid var(--border, #2a2a3a)', background: 'rgba(245,158,11,.07)',
+                            padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6,
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }}>Perdeu quantos?</span>
+                              <input
+                                type="number" inputMode="decimal" min="0" step="any"
+                                value={baixaQtd}
+                                onChange={e => setBaixaQtd(e.target.value)}
+                                style={{
+                                  width: 70, padding: '6px 8px', borderRadius: 8, fontSize: 13,
+                                  border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
+                                }}
+                              />
+                              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                                {fmt((Number(prod.preco_custo) > 0 ? Number(prod.preco_custo) : Number(prod.preco_venda) || 0)
+                                  * (Number(String(baixaQtd).replace(',', '.')) || 0))} de prejuízo
+                              </span>
+                            </div>
+                            <input
+                              type="text"
+                              autoFocus
+                              value={baixaMotivo}
+                              onChange={e => setBaixaMotivo(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') lancarBaixaDesperdicio(prod) }}
+                              placeholder="O que aconteceu? (caiu e quebrou, estragou...)"
+                              style={{
+                                width: '100%', padding: '7px 10px', borderRadius: 8, fontSize: 13,
+                                border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
+                              }}
+                            />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <button
+                                type="button"
+                                onClick={() => lancarBaixaDesperdicio(prod)}
+                                disabled={salvandoBaixa}
+                                style={{
+                                  padding: '6px 14px', borderRadius: 8, fontWeight: 800, fontSize: 12,
+                                  border: '1.5px solid #f59e0b', background: 'rgba(245,158,11,.18)', color: '#f59e0b',
+                                  cursor: salvandoBaixa ? 'wait' : 'pointer',
+                                }}
+                              >
+                                {salvandoBaixa ? '...' : 'Dar baixa'}
+                              </button>
+                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                vai pro Financeiro de hoje{prod.controla_estoque !== false ? ' e sai do estoque' : ''}
+                              </span>
+                            </div>
+                            {erroBaixa && (
+                              <div style={{ fontSize: 11.5, color: '#dc2626', fontWeight: 600 }}>{erroBaixa}</div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Mensagem verde: o atendente não precisa abrir o Financeiro pra saber que entrou. */}
+                        {okBaixa?.produtoId === prod.id && (
+                          <div style={{
+                            borderTop: '1px solid var(--border, #2a2a3a)',
+                            background: 'rgba(34,197,94,.14)', color: '#16a34a',
+                            padding: '8px 12px', fontSize: 12, fontWeight: 700,
+                            display: 'flex', alignItems: 'center', gap: 6,
+                          }}>
+                            ✓ {okBaixa.texto}
                           </div>
                         )}
 
