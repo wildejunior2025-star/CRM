@@ -31,6 +31,11 @@ export default function EntradaEstoque() {
   const empresaId = profile?.empresa_id
 
   const [produtos, setProdutos] = useState([])
+  // Saldo de hoje. Quem recebe a carga precisa ver o que JÁ tem — senão
+  // confere no olho e lança em cima de um número que ele não conhece. No
+  // domínio do gestor esta é a única tela que mostra isso.
+  const [saldo, setSaldo] = useState({})   // { produto_id: {atual, minimo} }
+  const [verSaldo, setVerSaldo] = useState(false)
   const [usaEstoque, setUsaEstoque] = useState(true)
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState(null)
@@ -46,18 +51,25 @@ export default function EntradaEstoque() {
     setCarregando(true)
     setErro(null)
     try {
-      const [pr, emp] = await Promise.all([
+      const [pr, emp, sl] = await Promise.all([
         fetchAll(() => supabase.from('produtos')
           .select('id, nome, preco_custo, codigo_barras, categoria, controla_estoque')
           .eq('empresa_id', empresaId).eq('ativo', true).is('arquivado_em', null)
           .order('nome').order('id')),
         supabase.from('empresas').select('estoque_ativo').eq('id', empresaId).maybeSingle(),
+        fetchAll(() => supabase.from('estoque_saldo')
+          .select('produto_id, quantidade_atual, estoque_minimo').order('produto_id')),
       ])
       if (pr.error) throw pr.error
       // Só produto que controla estoque: dar entrada em quem não controla cria
       // um saldo que não aparece em tela nenhuma.
       setProdutos((pr.data || []).filter(p => p.controla_estoque !== false))
       setUsaEstoque(emp.data?.estoque_ativo !== false)
+      const mapa = {}
+      for (const l of (sl.error ? [] : (sl.data || []))) {
+        mapa[l.produto_id] = { atual: Number(l.quantidade_atual || 0), minimo: Number(l.estoque_minimo || 0) }
+      }
+      setSaldo(mapa)
     } catch (e) {
       setErro(recadoDeErro(e, 'carregar os produtos'))
     } finally {
@@ -156,6 +168,7 @@ export default function EntradaEstoque() {
 
       setSalvo({ itens: linhas.length, unidades: totalItens })
       setLinhas([])
+      await carregar()          // o saldo na tela tem que refletir o que acabou de entrar
       buscaRef.current?.focus()
     } catch (e) {
       setErro(recadoDeErro(e, 'salvar a entrada'))
@@ -215,7 +228,9 @@ export default function EntradaEstoque() {
                 onClick={() => { somar(p, 1); setBusca(''); buscaRef.current?.focus() }}
                 style={{ justifyContent: 'space-between', display: 'flex', textAlign: 'left', padding: '11px 12px' }}>
                 <span>{p.nome}</span>
-                <span style={{ opacity: .7, fontSize: 12 }}>{p.categoria || ''}</span>
+                <span style={{ opacity: .7, fontSize: 12 }}>
+                  tem {saldo[p.id]?.atual ?? 0}
+                </span>
               </button>
             ))}
           </div>
@@ -239,7 +254,15 @@ export default function EntradaEstoque() {
             <div key={l.produto_id}
               style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
                 padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ flex: '1 1 160px', minWidth: 0, fontSize: 14, fontWeight: 600 }}>{l.nome}</div>
+              <div style={{ flex: '1 1 160px', minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{l.nome}</div>
+                {/* O antes e o depois na mesma linha: é o que deixa a pessoa
+                    perceber na hora que digitou 100 onde queria 10. */}
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                  tem {saldo[l.produto_id]?.atual ?? 0} → fica{' '}
+                  <strong>{(saldo[l.produto_id]?.atual ?? 0) + num(l.quantidade)}</strong>
+                </div>
+              </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <button type="button" className="btn btn-secondary btn-sm"
@@ -284,6 +307,35 @@ export default function EntradaEstoque() {
           )}
         </div>
       )}
+
+      <div className="card">
+        <button type="button" className="btn btn-secondary"
+          onClick={() => setVerSaldo(v => !v)} style={{ width: '100%' }}>
+          {verSaldo ? '▾' : '▸'} O que tem hoje ({produtos.length})
+        </button>
+        {verSaldo && (
+          <div style={{ marginTop: 10 }}>
+            {/* Menor saldo primeiro: quem abre essa lista quer saber o que está
+                acabando, não ler o catálogo inteiro em ordem alfabética. */}
+            {[...produtos]
+              .sort((x, y) => (saldo[x.id]?.atual ?? 0) - (saldo[y.id]?.atual ?? 0))
+              .map(p => {
+                const s2 = saldo[p.id] || { atual: 0, minimo: 0 }
+                const baixo = s2.minimo > 0 && s2.atual <= s2.minimo
+                return (
+                  <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10,
+                    padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: 13.5 }}>
+                    <span style={{ minWidth: 0 }}>{p.nome}</span>
+                    <strong style={{ color: baixo ? 'var(--danger)' : 'var(--text)', whiteSpace: 'nowrap' }}>
+                      {s2.atual}{baixo ? ' ⚠️' : ''}
+                    </strong>
+                  </div>
+                )
+              })}
+            {!produtos.length && <div style={{ fontSize: 12.5, opacity: .8 }}>Nenhum produto com estoque ligado.</div>}
+          </div>
+        )}
+      </div>
 
       <div className="card" style={{ fontSize: 12.5, opacity: .85 }}>
         Aqui só entra mercadoria. A saída acontece sozinha quando a venda é feita —
