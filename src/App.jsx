@@ -75,9 +75,13 @@ function HostnameRedirect() {
       return
     }
 
-    // Vendedor só usa o gestor de pedidos (/painel), em qualquer domínio
+    // Vendedor só usa o gestor de pedidos (/painel), em qualquer domínio.
+    // Exceção: a entrada de estoque, que é trabalho dele quando a carga chega.
+    // Ela só SOMA — tirar do estoque sem venda mora no Financeiro, do dono.
     if (perfil === 'vendedor') {
-      if (!pathname.startsWith('/painel') && pathname !== '/login') navigate('/painel', { replace: true })
+      if (!pathname.startsWith('/painel') && !pathname.startsWith('/entrada-estoque') && pathname !== '/login') {
+        navigate('/painel', { replace: true })
+      }
       return
     }
 
@@ -122,7 +126,10 @@ function HostnameRedirect() {
       // sem parar.
       if (usaPainelDePedidos(perfil)) {
         // /mensalidade também: é onde o dono paga a mensalidade (mig 0263).
-        if (!pathname.startsWith('/painel') && !pathname.startsWith('/mensalidade') && pathname !== '/login') {
+        // `/entrada-estoque` entra na lista porque é tela de operação: quem
+        // recebe a carga está no gestor, não no portal do dono.
+        if (!pathname.startsWith('/painel') && !pathname.startsWith('/mensalidade')
+            && !pathname.startsWith('/entrada-estoque') && pathname !== '/login') {
           navigate('/painel', { replace: true })
         }
         return
@@ -157,6 +164,7 @@ const CardapioIfood = lazy(() => import('./pages/CardapioIfood'))
 const CategoriasComplemento = lazy(() => import('./pages/CategoriasComplemento'))
 const FichaTecnica = lazy(() => import('./pages/FichaTecnica'))
 const Estoque = lazy(() => import('./pages/Estoque'))
+const EntradaEstoque = lazy(() => import('./pages/EntradaEstoque'))
 const Caixa = lazy(() => import('./pages/Caixa'))
 const Financeiro = lazy(() => import('./pages/Financeiro'))
 const Fidelidade = lazy(() => import('./pages/Fidelidade'))
@@ -382,6 +390,13 @@ export default function App() {
             <Route
               path="estoque"
               element={<ProtectedRoute roles={['admin']} modulo="estoque"><Estoque /></ProtectedRoute>}
+            />
+            {/* Receber mercadoria é trabalho de quem está no balcão, então o
+                vendedor entra aqui — e esta tela SÓ SOMA. Tirar do estoque sem
+                venda é desperdício e mora no Financeiro, que é só do dono. */}
+            <Route
+              path="entrada-estoque"
+              element={<ProtectedRoute roles={['admin', 'vendedor']} modulo="estoque"><EntradaEstoque /></ProtectedRoute>}
             />
             <Route
               path="financeiro"

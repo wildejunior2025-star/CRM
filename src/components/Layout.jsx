@@ -61,6 +61,7 @@ const links = [
       { to: '/complementos', label: 'Complementos', roles: ['admin'], mod: 'produtos' },
       { to: '/ficha-tecnica', label: 'Ficha Técnica', roles: ['admin'], mod: 'produtos' },
       { to: '/estoque', label: 'Estoque', roles: ['admin'], mod: 'estoque' },
+      { to: '/entrada-estoque', label: 'Entrada de estoque', roles: ['admin', 'vendedor'], mod: 'estoque' },
     ],
   },
 
