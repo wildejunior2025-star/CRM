@@ -55,6 +55,13 @@ export default function AlunoApp() {
 
   useEffect(() => { carregar() }, [profile.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Marca que este aluno abriu o app hoje. Serve pra responder, daqui a
+  // alguns meses, quantos alunos realmente usam — sem isso, cobrar pelo app
+  // seria chute. Uma linha por aluno por dia; se falhar, não atrapalha nada.
+  useEffect(() => {
+    supabase.rpc('academia_marcar_uso').then(() => {}, () => {})
+  }, [profile.id])
+
   function abrir(id) {
     setGaveta(false)
     // Falar com a academia abre o WhatsApp dela, com a mensagem começada.
