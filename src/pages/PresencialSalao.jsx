@@ -15,7 +15,7 @@ import { clienteComMesmoNome } from '../lib/clientes'
 import ClientePicker from '../components/ClientePicker'
 import ClientesFiado from './ClientesFiado'
 import ConsumoFuncionario from '../components/ConsumoFuncionario'
-import { imprimirHtml, montarContaPresencialHtml, montarPixQrHtml, appFwcDisponivel } from '../utils/imprimirCupom'
+import { imprimirHtml, montarContaPresencialHtml, montarPixQrHtml } from '../utils/imprimirCupom'
 import '../components/Page.css'
 import './PresencialSalao.css'
 
@@ -2198,30 +2198,30 @@ export default function PresencialSalao() {
       return
     }
     setSalvando(true)
-    // Só fecha DIRETO (gera a venda + libera a mesa + imprime) quem é ADM e está no
-    // PC da loja (com o app FWC/térmica). ADM no CELULAR (sem impressora) NÃO fecha
-    // direto — senão a conta não sairia em lugar nenhum. Vai pro gestor, igual garçom.
+    // QUEM É ADM FECHA DE VEZ: gera a venda, libera a mesa e sai do quadro. O
+    // azul ("✓ Paga · liberar") é só do GARÇOM, que quem confere é o ADM depois.
     //
-    // 11/10/2026: "impressora local" passou a contar a térmica BLUETOOTH também.
-    // Antes a pergunta era só "o app FWC do PC responde?". A Saidera imprime em
-    // Bluetooth no celular — então o DONO, que é quem recebe o dinheiro, caía
-    // sempre no caminho do garçom: a conta saía no papel, mas a comanda ia pra
-    // "aguardando_conferencia" e a MESA FICAVA NO QUADRO, azul, esperando um ADM
-    // liberar... que é ele mesmo. É daí que vem o "fecho a mesa e ela volta
-    // aberta": 64 contas assim na conta do dono em 14 dias, uma esperando 2h08
-    // pra sair do quadro.
+    // Até 11/10/2026 o ADM só fechava direto se a tela achasse impressora no
+    // aparelho (app FWC no PC). A ideia era não perder a conta em papel, mas o
+    // efeito colateral era pior: a Saidera imprime em térmica BLUETOOTH no
+    // celular, então o DONO — que é quem recebe o dinheiro — caía sempre no
+    // caminho do garçom. A conta saía no papel, mas a comanda ia pra
+    // "aguardando_conferencia" e a mesa FICAVA NO QUADRO esperando um ADM
+    // liberar... que é ele mesmo. Foram 64 contas assim na conta do dono em 14
+    // dias, uma esperando 2h08 pra sair do quadro — é daí que vem o "fecho a
+    // mesa e ela volta aberta".
     //
-    // A térmica marcada como "só cozinha" NÃO conta: ela não tira conta, e nesse
-    // aparelho o caminho certo continua sendo mandar pro gestor, que imprime.
-    const btTiraConta = window.__fwcBtConectada === true && papelImpressora() !== 'cozinha'
-    const temImpressoraLocal = ehAdmin ? (btTiraConta || await appFwcDisponivel()) : false
-    if (ehAdmin && temImpressoraLocal) {
+    // Decisão do dono (11/10/2026): fechar não depende mais de impressora. Se o
+    // papel não sair, a 2ª via está em "🧾 Minhas mesas fechadas" (histórico) —
+    // uma conta que não imprimiu se resolve em dois toques, uma mesa pendurada
+    // no quadro faz o atendente ir catar se o cliente pagou.
+    if (ehAdmin) {
       // Quem fechou a conta, pro ranking (mig 0187). Carimba ANTES do RPC: ele
       // mexe em status/total e não encosta nestes campos.
       await supabase.from('comandas')
         .update({ fechada_por: user?.id ?? null, fechada_por_em: new Date().toISOString() })
         .eq('id', comandaSel.id)
-      // ADM no PC da loja: fecha de vez (gera a venda e libera a mesa) e imprime aqui.
+      // ADM: fecha de vez (gera a venda e libera a mesa) e tenta imprimir aqui.
       const { error } = await supabase.rpc('fechar_conta_presencial', {
         p_comanda_id: comandaSel.id,
         p_pagamentos: listaRpc,
@@ -2233,10 +2233,14 @@ export default function PresencialSalao() {
       setSalvando(false)
       if (error) { window.alert(recadoDeErro(error, 'fechar a conta')); return }
       escritaEm.current = Date.now()
-      imprimirConta().catch(() => { /* best-effort */ })
+      // Tenta por tudo, na ordem: térmica Bluetooth → app FWC → navegador.
+      // `soApp` só num CELULAR: lá a caixa de impressão do navegador não leva a
+      // lugar nenhum. Num PC sem o app, cair no navegador é o que faz o papel
+      // sair em vez de a conta simplesmente não existir.
+      imprimirConta({ soApp: ehCelular }).catch(() => { /* best-effort */ })
     } else {
-      // Garçom, OU ADM no celular (sem impressora): NÃO libera a mesa. Marca
-      // "aguardando_conferencia" e guarda o pagamento; depois o ADM confere e libera.
+      // GARÇOM: NÃO libera a mesa. Marca "aguardando_conferencia" e guarda o
+      // pagamento; depois o ADM confere e libera.
       //
       // A conta é impressa AQUI, por quem fechou. Antes dependia do Painel de Pedidos
       // estar aberto pra perceber a mesa em "aguardando" e mandar imprimir — se a
