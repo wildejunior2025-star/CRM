@@ -278,14 +278,17 @@ function montarTexto(linhas, titulo, topo) {
 // Comanda da COZINHA (mesa) — layout completo pro cozinheiro: nome da loja, mesa (+salao),
 // data/hora com segundos, atendente, nº de pessoas, itens GRANDES com espaço entre eles,
 // e um rodapé opcional da loja. SEM preço (o preço sai depois, na conta).
-function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente = '', pessoas = 0, itens = [], rodape = '', sufixo = '' }) {
+function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente = '', pessoas = 0, itens = [], rodape = '', sufixo = '', rotulo = '' }) {
   const d = new Date(), p2 = n => String(n).padStart(2, '0')
   const dataHora = p2(d.getDate()) + '/' + p2(d.getMonth() + 1) + '/' + String(d.getFullYear()).slice(2) +
     ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds())
   const parts = [INIT]
   // Cabecalho — nome da loja GRANDE (fonte dupla), igual ao cupom de delivery.
   if (nomeLoja) parts.push(ALIGN(1), SIZE(0x11), BOLD(1), linha(String(nomeLoja).toUpperCase()), BOLD(0), SIZE(0))
-  const mesaTxt = '~ Mesa: ' + numero + (area ? ' (' + area + ')' : '') + (sufixo || '') + ' ~'
+  // Comanda de balcao leva o NOME do cliente, nao o numero da mesa. O Braseiro
+  // nem usa numero de mesa: abre comanda com o nome, e a cozinha recebia
+  // "Mesa: 7" sem saber de quem era o hamburguer (11/10/2026).
+  const mesaTxt = '~ ' + (rotulo || ('Mesa: ' + numero)) + (area ? ' (' + area + ')' : '') + (sufixo || '') + ' ~'
   parts.push(ALIGN(1), BOLD(1), linha(mesaTxt), BOLD(0), ALIGN(0))
   parts.push(linha(dataHora))
   if (atendente) parts.push(linha('Atendente: ' + atendente))

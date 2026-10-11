@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 30
+const APP_VERSION = 31
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -443,13 +443,21 @@ const comandaBuf = new Map()            // comanda_id -> { itens:[], timer }
 const comandaItensImpressos = new Set() // dedupe por id de item (reconexão)
 // Busca os dados extras da comanda pro cabeçalho da cozinha (salão, atendente, pessoas).
 async function infoComandaMesa(cid) {
-  const info = { numero: '?', area: '', atendente: '', pessoas: 0 }
+  const info = { numero: '?', area: '', atendente: '', pessoas: 0, rotulo: '' }
   try {
     const { data: c } = await supabase.from('comandas')
-      .select('numero_mesa, num_pessoas, garcom_id, mesa_id').eq('id', cid).maybeSingle()
+      .select('numero_mesa, num_pessoas, garcom_id, mesa_id, nome_cliente, tipo').eq('id', cid).maybeSingle()
     if (c) {
       if (c.numero_mesa != null) info.numero = c.numero_mesa
       info.pessoas = c.num_pessoas || 0
+      // Quem le o papel na cozinha precisa do NOME pra entregar. Mesa segue
+      // com o numero, que e como o salao chama ela.
+      const nome = String(c.nome_cliente || '').trim()
+      if (c.tipo === 'balcao') {
+        info.rotulo = nome ? nome + ' (Comanda ' + info.numero + ')' : 'Comanda ' + info.numero
+      } else if (nome) {
+        info.rotulo = 'Mesa: ' + info.numero + ' - ' + nome
+      }
       if (c.garcom_id) {
         const { data: g } = await supabase.from('profiles').select('nome').eq('id', c.garcom_id).maybeSingle()
         if (g?.nome) info.atendente = String(g.nome).split(' ')[0]  // primeiro nome
@@ -471,13 +479,13 @@ function comandaMesaBytes(numero, itens, nomeLoja, opts) {
   return montarComandaMesa({
     nomeLoja, numero, itens,
     area: o.area || '', atendente: o.atendente || '', pessoas: o.pessoas || 0,
-    rodape: o.rodape || empresa?.rodape_cozinha || '', sufixo: o.sufixo || '',
+    rodape: o.rodape || empresa?.rodape_cozinha || '', sufixo: o.sufixo || '', rotulo: o.rotulo || '',
   })
 }
 async function imprimirComandaMesa(cid, itens) {
   const info = await infoComandaMesa(cid)
   const numero = info.numero
-  const base = { area: info.area, atendente: info.atendente, pessoas: info.pessoas }
+  const base = { area: info.area, atendente: info.atendente, pessoas: info.pessoas, rotulo: info.rotulo }
   const nomeLoja = empresa?.nome || ''
   const bar = config().printerBar
   // Categoria marcada como "nao imprime" nao vira papel em impressora nenhuma,
@@ -803,7 +811,7 @@ const server = http.createServer(async (req, res) => {
         // Busca salão/atendente/pessoas se o gestor mandou o comandaId (mesmo visual do auto).
         const info = f.comandaId ? await infoComandaMesa(f.comandaId) : { numero: f.numeroMesa, area: '', atendente: '', pessoas: 0 }
         const numero = info.numero != null && info.numero !== '?' ? info.numero : f.numeroMesa
-        const base = { area: info.area, atendente: info.atendente, pessoas: info.pessoas }
+        const base = { area: info.area, atendente: info.atendente, pessoas: info.pessoas, rotulo: info.rotulo }
         const bar = config().printerBar
         let ok = false
         if (bar) {
