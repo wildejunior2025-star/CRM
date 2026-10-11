@@ -83,6 +83,9 @@ const numeroParaMoeda = (n) => maskMoeda(String(Math.round(Number(n || 0) * 100)
 const formaLabelCurta = (f) => ({
   dinheiro: 'dinheiro', pix: 'PIX', credito: 'crédito', debito: 'débito',
   cartao: 'cartão', transferencia: 'transferência',
+  // Conta de mesa também fecha nestas, e sem elas o card da mesa que acabou de
+  // fechar mostrava a palavra crua do banco.
+  dividido: 'formas divididas', fiado: 'fiado', cashback: 'crédito do cliente',
 }[String(f || '').toLowerCase()] || f || '')
 
 // Logo do WhatsApp. É SVG e não emoji porque emoji de zap não existe — o 📲 que
@@ -187,6 +190,15 @@ export default function PresencialSalao() {
   const [salvandoObrig, setSalvandoObrig] = useState(false)
   const [mesas, setMesas]     = useState([])
   const [comandas, setComandas] = useState([])
+  // Mesas que FECHARAM há pouco: { mesa_id: { total, forma, fechada_at } }.
+  // Serve pra duas coisas no quadro (relato da Saidera, 11/10/2026 — "fechei a
+  // mesa 31 e do nada ela voltou aberta"): o card livre guarda o recibo do que
+  // acabou de sair ("✓ 04:39 · R$ 90,20 PIX"), e abrir a mesa de novo pergunta
+  // antes. Um toque sem querer no card abria comanda nova na hora, a mesa ficava
+  // vermelha com R$ 0,00 e o atendente ia catar no histórico se o cliente tinha
+  // pagado mesmo — e se ele saísse pelo "fora da mesa", a comanda vazia era
+  // APAGADA e não sobrava rastro nenhum pra entender depois.
+  const [fechadasRecentes, setFechadasRecentes] = useState({})
   // Comanda de balcão (mig 0143): comanda numerada que não é de mesa nenhuma —
   // pro cliente que pede em pé no balcão. Número zera todo dia. Ligado por loja.
   const [comandaBalcaoAtiva, setComandaBalcaoAtiva] = useState(false)
@@ -388,7 +400,8 @@ export default function PresencialSalao() {
     if (!empresaId) return
     const minhaVez = ++cargaSeq.current
     const comecouEm = Date.now()
-    const [ms, cs, cx, px] = await Promise.all([
+    const desdeFechadas = new Date(Date.now() - 40 * 60 * 1000).toISOString()
+    const [ms, cs, cx, px, fr] = await Promise.all([
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('comandas').select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
       supabase.rpc('caixa_aberto_da_loja'),
@@ -398,6 +411,15 @@ export default function PresencialSalao() {
       supabase.from('comanda_pix_cobrancas')
         .select('id, comanda_id, valor, qr_code, qr_base64, expira_em, status, parte')
         .eq('empresa_id', empresaId).in('status', ['pendente', 'pago']),
+      // O que saiu do quadro nos últimos 40 min. Leitura barata (poucas linhas)
+      // e é ela que deixa o atendente responder "o cliente pagou?" sem sair do
+      // Salão nem abrir o histórico.
+      supabase.from('comandas')
+        .select('mesa_id, total, forma_pagamento, fechada_at')
+        .eq('empresa_id', empresaId).eq('status', 'fechada')
+        .not('mesa_id', 'is', null)
+        .gte('fechada_at', desdeFechadas)
+        .order('fechada_at'),
     ])
     // Sai do "Carregando salão..." mesmo quando a leitura for descartada abaixo:
     // a tela não pode ficar pendurada porque duas releituras se cruzaram.
@@ -414,6 +436,13 @@ export default function PresencialSalao() {
     // recebido!" de 15 em 15 segundos, pra um pagamento de uma hora atrás.
     const abertas = new Set((cs.data ?? []).map(c => c.id))
     setPixPendentes((px.data ?? []).filter(x => abertas.has(x.comanda_id)))
+    // Vem em ordem crescente de fechamento: a última do rodízio da mesma mesa
+    // sobrescreve as anteriores e fica valendo a mais recente.
+    const rec = {}
+    for (const f of (fr.data ?? [])) {
+      rec[f.mesa_id] = { total: Number(f.total ?? 0), forma: f.forma_pagamento, fechada_at: f.fechada_at }
+    }
+    setFechadasRecentes(rec)
     setLoading(false)
   }, [empresaId, user?.id, loadAdiantamentos])
 
@@ -923,6 +952,21 @@ export default function PresencialSalao() {
       return
     }
     const existente = comandaPorMesa[mesa.id]
+    // Mesa que ACABOU de fechar: pergunta antes de abrir de novo, e já diz o que
+    // foi recebido. Um toque sem querer no card criava comanda nova na hora — a
+    // mesa voltava vermelha com R$ 0,00 e ninguém sabia se aquilo era cliente
+    // novo, conta não paga ou dedo errado (Saidera, mesa 31 em 11/10/2026).
+    // Vale só pra MESA de verdade: comanda de balcão não repete número no dia.
+    if (!existente && !mesa.is_comanda) {
+      const rec = fechadasRecentes[mesa.id]
+      if (rec) {
+        const ok = window.confirm(
+          `${mesa.is_balcao ? 'O balcão' : `A Mesa ${mesa.numero}`} foi FECHADA às ${horaCurta(rec.fechada_at)}`
+          + ` — ${fmt(rec.total)}${rec.forma ? ' em ' + formaLabelCurta(rec.forma) : ''}, já recebido.\n\n`
+          + 'Abrir de novo (cliente novo)?')
+        if (!ok) return
+      }
+    }
     // Comanda de balcão já nasce criada (o banco é quem dá o número) — só abre.
     if (!existente && !mesa.is_comanda) {
       // O `existente` acima é a MEMÓRIA DESTA TELA. Com a internet do salão
@@ -2157,7 +2201,20 @@ export default function PresencialSalao() {
     // Só fecha DIRETO (gera a venda + libera a mesa + imprime) quem é ADM e está no
     // PC da loja (com o app FWC/térmica). ADM no CELULAR (sem impressora) NÃO fecha
     // direto — senão a conta não sairia em lugar nenhum. Vai pro gestor, igual garçom.
-    const temImpressoraLocal = ehAdmin ? await appFwcDisponivel() : false
+    //
+    // 11/10/2026: "impressora local" passou a contar a térmica BLUETOOTH também.
+    // Antes a pergunta era só "o app FWC do PC responde?". A Saidera imprime em
+    // Bluetooth no celular — então o DONO, que é quem recebe o dinheiro, caía
+    // sempre no caminho do garçom: a conta saía no papel, mas a comanda ia pra
+    // "aguardando_conferencia" e a MESA FICAVA NO QUADRO, azul, esperando um ADM
+    // liberar... que é ele mesmo. É daí que vem o "fecho a mesa e ela volta
+    // aberta": 64 contas assim na conta do dono em 14 dias, uma esperando 2h08
+    // pra sair do quadro.
+    //
+    // A térmica marcada como "só cozinha" NÃO conta: ela não tira conta, e nesse
+    // aparelho o caminho certo continua sendo mandar pro gestor, que imprime.
+    const btTiraConta = window.__fwcBtConectada === true && papelImpressora() !== 'cozinha'
+    const temImpressoraLocal = ehAdmin ? (btTiraConta || await appFwcDisponivel()) : false
     if (ehAdmin && temImpressoraLocal) {
       // Quem fechou a conta, pro ranking (mig 0187). Carimba ANTES do RPC: ele
       // mexe em status/total e não encosta nestes campos.
@@ -2560,12 +2617,15 @@ export default function PresencialSalao() {
   //   verde forte + 🔔 → tem prato pronto esperando pra levar (feito no card)
   //   vermelho         → tem item pra sair da cozinha / servir
   //   cinza apagado    → tudo entregue, só falta fechar
-  //   azul             → fechada, esperando o ADM liberar
+  //   azul             → JÁ PAGA, esperando o ADM liberar a mesa
   //   verde claro      → livre
   const corStatus = (mesa) => {
     const c = comandaPorMesa[mesa.id]
     if (!c) return { bg: 'rgba(34,197,94,.12)', border: '#22c55e', label: 'Livre' }
-    if (c.status === 'aguardando_conferencia') return { bg: 'rgba(59,130,246,.16)', border: '#3b82f6', label: 'Aguard. ADM' }
+    // "Aguard. ADM" sozinho não dizia o principal: o dinheiro JÁ ENTROU, falta só
+    // alguém liberar a mesa. Quem passava pelo quadro lia como conta em aberto e
+    // ia conferir se o cliente tinha pagado (Saidera, 11/10/2026).
+    if (c.status === 'aguardando_conferencia') return { bg: 'rgba(59,130,246,.16)', border: '#3b82f6', label: '✓ Paga · liberar' }
     if (tudoEntregue(c)) return { bg: 'rgba(100,116,139,.10)', border: '#64748b', label: 'Servida' }
     const faltam = faltamDe(c)
     return { bg: 'rgba(239,68,68,.12)', border: '#ef4444', label: faltam > 0 ? `Faltam ${faltam}` : 'Ocupada' }
@@ -2881,6 +2941,14 @@ export default function PresencialSalao() {
                   <div style={{ fontSize: 11.5, marginTop: 1, fontWeight: 800 }}>
                     {fmt(totalDe(c))}
                     {totalDe(c) > sub && <span style={{ fontWeight: 600, opacity: .75 }}> c/ serv.</span>}
+                  </div>
+                )}
+                {/* Recibo da mesa livre: o que ela recebeu nos últimos 40 min.
+                    É a resposta de "o cliente pagou mesmo ou eu esqueci de
+                    fechar?" sem abrir o histórico — e some sozinho depois. */}
+                {!c && fechadasRecentes[mesa.id] && (
+                  <div style={{ fontSize: 9.5, marginTop: 2, fontWeight: 700, color: '#16a34a', lineHeight: 1.2 }}>
+                    ✓ {horaCurta(fechadasRecentes[mesa.id].fechada_at)} · {fmt(fechadasRecentes[mesa.id].total)}
                   </div>
                 )}
               </div>
