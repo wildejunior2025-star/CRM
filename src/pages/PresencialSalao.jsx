@@ -1608,6 +1608,23 @@ export default function PresencialSalao() {
     await loadMesas()
   }
 
+  // Irmão do "Marcar tudo pronto": entrega tudo que está pronto de uma vez.
+  // Mesa cheia saía item por item — numa comanda de dez linhas são dez toques
+  // pra registrar o que o garçom levou numa viagem só.
+  // Entrega só o que está PRONTO, igual ao botão de cada linha: o fluxo é
+  // preparando → pronto → entregue, e quem libera a comida é a cozinha.
+  async function marcarTudoEntregue() {
+    const ids = (comandaSel?.comanda_itens ?? [])
+      .filter(it => it.status === 'pronto')
+      .map(it => it.id)
+    if (!ids.length) return
+    const { error } = await supabase.from('comanda_itens')
+      .update({ status: 'entregue', entregue_por: user?.id ?? null, entregue_at: new Date().toISOString() })
+      .in('id', ids)
+    if (error) { window.alert(recadoDeErro(error, 'marcar entregue')); return }
+    await loadMesas()
+  }
+
   // Preço editado vale pra linha que o ADM vê — todos os lançamentos dela.
   async function salvarPrecoGrupo(grupo) {
     const texto = precoEdit[grupo.chave]
@@ -2994,6 +3011,16 @@ export default function PresencialSalao() {
                     style={{ fontSize: 12, fontWeight: 800, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
                       border: '1.5px solid #3b82f6', background: 'rgba(59,130,246,.12)', color: '#2563eb' }}>
                     {podeProntoDaCozinha ? '🔔 Marcar tudo pronto' : '🔔 Prontos (menos a cozinha)'}
+                  </button>
+                )}
+                {/* Entregar tudo numa vez. Só aparece quando há item pronto —
+                    senão seria um botão que não faz nada. */}
+                {!semCozinha && (comandaSel.comanda_itens ?? []).some(i => i.status === 'pronto') && (
+                  <button type="button" onClick={marcarTudoEntregue}
+                    title="Marcar como entregue tudo que já está pronto"
+                    style={{ fontSize: 12, fontWeight: 800, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
+                      border: '1.5px solid #16a34a', background: 'rgba(34,197,94,.12)', color: '#16a34a' }}>
+                    ✅ Marcar tudo entregue
                   </button>
                 )}
                 </div>
