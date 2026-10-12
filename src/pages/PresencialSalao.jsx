@@ -3608,11 +3608,14 @@ export default function PresencialSalao() {
                   )}
                   {ehAdmin ? (
                     <div className="sal-acoes">
-                      <button type="button" onClick={cancelarMesa}
-                        className="sal-acao-icone" title="Cancelar a comanda" aria-label="Cancelar a comanda"
-                        style={{ borderRadius: 10, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}>
-                        ✕<span className="sal-acao-txt">Cancelar</span>
-                      </button>
+                      {/* AQUI NÃO TEM CANCELAR (11/10/2026). Azul quer dizer que o
+                          garçom já fechou, já imprimiu e JÁ RECEBEU — esta tela
+                          serve só pra bater o dinheiro. Cancelar apagaria uma
+                          venda que aconteceu: em 60 dias foram 23 contas assim,
+                          R$ 1.202,40 que entraram no caixa e nunca viraram venda
+                          (R$ 909,90 só na Saidera). Valor errado se acerta com o
+                          garçom; conta fechada por engano se confirma e depois
+                          se estorna a venda, que fica registrado. */}
                       {subtotalSel > 0 && (
                         <button type="button" onClick={abrirFechamento}
                           style={{ flex: '0 0 auto', padding: '0 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
@@ -3623,6 +3626,12 @@ export default function PresencialSalao() {
                         className="btn btn-primary sal-acao-principal" style={{ marginTop: 0 }}>
                         {salvando ? 'Liberando...' : (subtotalSel <= 0 ? '✅ Liberar mesa (sem itens)' : '✅ Confirmar e liberar mesa')}
                       </button>
+                      {subtotalSel > 0 && (
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', marginTop: 8, lineHeight: 1.35 }}>
+                          Esta conta já foi recebida pelo garçom — por isso aqui só dá pra confirmar.
+                          Valor errado se acerta com ele.
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'center', padding: '4px 0' }}>
