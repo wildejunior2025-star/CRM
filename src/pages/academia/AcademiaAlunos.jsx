@@ -20,6 +20,11 @@ const VAZIO = { nome: '', telefone: '', plano: 'Mensal', valor: '', vencimento: 
 // Procurar "fabio" tem que achar "Fábio". O banco guarda o nome sem acento
 // numa coluna à parte (nome_busca); aqui a gente tira o acento do que foi
 // digitado pra os dois ficarem no mesmo pé.
+// Os 8 últimos dígitos: é por eles que o login acha o aluno, então é assim
+// que o sistema decide se dois telefones são o mesmo. (84) 99999-8888 e
+// 999998888 são o mesmo número.
+const digitosDoFim = t => String(t || '').replace(/\D/g, '').slice(-8)
+
 const semAcento = t => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 
 export default function AcademiaAlunos() {
@@ -356,7 +361,30 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
     const { data: criado, error } = aluno
       ? await supabase.from('academia_alunos').update(linha).eq('id', aluno.id).select().single()
       : await supabase.from('academia_alunos').insert(linha).select().single()
-    if (error) { setSalvando(false); return setErro('Não salvou: ' + error.message) }
+    if (error) {
+      setSalvando(false)
+      // Telefone repetido: o banco recusa (um telefone, um aluno), porque é
+      // por ele que o aluno entra no app. Em vez do erro cru do Postgres,
+      // diz de quem é o número — senão quem está no balcão não sabe o que
+      // fazer com a mensagem.
+      if (error.code === '23505' && /telefone/.test(error.message || '')) {
+        const fim = digitosDoFim(dados.telefone)
+        const { data: dono } = await supabase
+          .from('academia_alunos')
+          .select('nome, matricula, ativo')
+          .eq('empresa_id', empresaId)
+          .like('telefone', `%${fim}`)
+          .limit(1)
+          .maybeSingle()
+        return setErro(dono
+          ? `Esse telefone já é de ${dono.nome}${dono.matricula ? ` (matrícula ${dono.matricula})` : ''}`
+            + `${dono.ativo ? '' : ', que está como sumido'}.`
+            + ' Cada aluno precisa do próprio número, porque é por ele que se entra no app.'
+            + ' Se for família dividindo o mesmo celular, deixe o número em um só.'
+          : 'Esse telefone já está em outro aluno. Cada aluno precisa do próprio número.')
+      }
+      return setErro('Não salvou: ' + error.message)
+    }
 
     // Aluno novo nasce com a conta do app. As 309 contas da importação foram
     // feitas uma vez, na mão; quem foi cadastrado no balcão depois ficava sem
