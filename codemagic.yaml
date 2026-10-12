@@ -13,9 +13,13 @@ workflows:
     integrations:
       app_store_connect: FWC ASC
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.fwcinter.gestor
+      # Grupo "ios_cert" (aba Environment variables do app no Codemagic) traz a
+      # CERTIFICATE_PRIVATE_KEY: a chave particular do certificado de
+      # distribuição. Com ela o próprio build cria/reaproveita o certificado e o
+      # perfil na Apple — a conta é nova e não tinha nenhum ("No matching
+      # profiles found" no 1º build). Cópia da chave em keystore/ (fora do git).
+      groups:
+        - ios_cert
       node: 22
       xcode: latest
     scripts:
@@ -24,7 +28,12 @@ workflows:
       - name: Sincronizar Capacitor
         script: cd gestor-app && npx cap sync ios
       - name: Assinatura
-        script: xcode-project use-profiles --project gestor-app/ios/App/App.xcodeproj
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "com.fwcinter.gestor" \
+            --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles --project gestor-app/ios/App/App.xcodeproj
       - name: Gerar IPA
         script: |
           xcode-project build-ipa \
