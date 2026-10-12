@@ -356,8 +356,17 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
     const { data: criado, error } = aluno
       ? await supabase.from('academia_alunos').update(linha).eq('id', aluno.id).select().single()
       : await supabase.from('academia_alunos').insert(linha).select().single()
+    if (error) { setSalvando(false); return setErro('Não salvou: ' + error.message) }
+
+    // Aluno novo nasce com a conta do app. As 309 contas da importação foram
+    // feitas uma vez, na mão; quem foi cadastrado no balcão depois ficava sem
+    // login — entrava na catraca e não entrava no app, e ninguém percebia
+    // porque nada reclama. Se falhar, o cadastro continua salvo: a tela de
+    // edição tem o botão pra criar depois.
+    if (!aluno && criado?.id) {
+      await supabase.rpc('academia_criar_login', { p_aluno: criado.id })
+    }
     setSalvando(false)
-    if (error) return setErro('Não salvou: ' + error.message)
     onFechar(true, aluno ? null : criado)
   }
 
@@ -367,6 +376,22 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
     const { data, error } = await supabase.rpc('academia_resetar_senha', { p_aluno_id: aluno.id })
     if (error) return setErro(error.message)
     window.alert(`Senha redefinida. A nova senha de ${aluno.nome} é ${data} (os 4 últimos dígitos do celular dele).`)
+  }
+
+  // Aluno antigo que ficou sem conta do app (os cadastrados no balcao antes
+  // de o sistema passar a criar sozinho).
+  async function criarLogin() {
+    setErro(null)
+    const { data, error } = await supabase.rpc('academia_criar_login', { p_aluno: aluno.id })
+    if (error) return setErro(error.message)
+    if (!data?.ok) return setErro('Nao deu pra criar o login: ' + (data?.erro || 'erro desconhecido'))
+    window.alert(
+      `Login criado para ${aluno.nome}.
+
+`
+      + `Entra pelo telefone (ou pela matricula ${data.matricula}) e a senha e ${data.senha}.`
+    )
+    onFechar(true)
   }
 
   async function apagar() {
@@ -467,7 +492,10 @@ function FormAluno({ aluno, alunos, empresaId, onFechar }) {
       {erro && <div className="ac-erro">{erro}</div>}
       <div className="ac-form-botoes">
         {aluno && <button type="button" className="btn btn-danger" onClick={apagar}>Apagar</button>}
-        {aluno && <button type="button" className="btn btn-secondary" onClick={redefinirSenha}>Redefinir senha do app</button>}
+        {aluno && (aluno.profile_id
+          ? <button type="button" className="btn btn-secondary" onClick={redefinirSenha}>Redefinir senha do app</button>
+          : <button type="button" className="btn btn-secondary" onClick={criarLogin}>Criar login do app</button>
+        )}
         <button className="btn btn-primary" disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar'}</button>
       </div>
       </form>
