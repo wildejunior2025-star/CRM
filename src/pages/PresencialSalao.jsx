@@ -250,6 +250,11 @@ export default function PresencialSalao() {
   const [fechando, setFechando] = useState(false) // modal de fechamento
   const [forma, setForma]     = useState('dinheiro')
   const [aplicarTaxa, setAplicarTaxa] = useState(true)
+  // Cliente pagou a mais e mandou ficar com o troco. Sem isto a conta nao
+  // fechava: o botao travava em "Passou R$ 1,33" e o banco derrubava. O
+  // atendente so conseguia lancar o valor exato, e ai a maquininha mostrava
+  // R$ 100 contra R$ 98,67 no caixa (Braseiro, 11/10/2026).
+  const [ehGorjeta, setEhGorjeta] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [precoEdit, setPrecoEdit] = useState({})  // preço em edição por item (só admin)
   // Preço em edição no rascunho, por linha. Existe pra comida no peso: o atendente
@@ -863,6 +868,7 @@ export default function PresencialSalao() {
   useEffect(() => {
     if (comandaSel?.status === 'aguardando_conferencia') {
       setAplicarTaxa(comandaSel?.fechamento_pendente?.aplicar_taxa !== false)
+      setEhGorjeta(false)
     }
   }, [comandaSel?.id, comandaSel?.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -921,7 +927,9 @@ export default function PresencialSalao() {
   // sem esta separação, quem clicava em PIX online e depois trocava pra dividir
   // ficava com o botão de receber travado sem entender por quê.
   const esperandoPix = (modoPag === 'unico' && forma === 'pix_online') || pixAbertos.length > 0
-  const podeReceber = (modoPag === 'unico' || Math.abs(restante) < 0.05) && !fiadoSemDono && !esperandoPix
+  // So vira gorjeta o que PASSOU (restante negativo) e depois de alguem marcar.
+  const gorjeta = ehGorjeta && restante < -0.005 ? Math.round(-restante * 100) / 100 : 0
+  const podeReceber = (modoPag === 'unico' || Math.abs(restante) < 0.05 || gorjeta > 0) && !fiadoSemDono && !esperandoPix
 
   // A trava do caixa existe pra a venda não escapar do caixa — e quem CRIA a
   // venda é quem libera a mesa no fim, sempre um ADM. O garçom só lança e manda
@@ -2229,6 +2237,7 @@ export default function PresencialSalao() {
         // No dividir, cada linha de fiado já leva o seu cliente_id; aqui vai só o
         // cliente da conta (o que fica na comanda e paga a parte à vista).
         p_cliente_id: (modoPag === 'unico' ? clienteSel?.id : null) ?? comandaSel.cliente_id ?? null,
+        p_gorjeta: gorjeta,
       })
       setSalvando(false)
       if (error) { window.alert(recadoDeErro(error, 'fechar a conta')); return }
@@ -2269,6 +2278,9 @@ export default function PresencialSalao() {
           // Avisa o Painel de Pedidos que a conta já saiu aqui — senão, com o painel
           // aberto noutra aba, sairiam duas vias da mesma conta.
           conta_impressa: vaiImprimirAqui,
+          // Sem isto a gorjeta morria aqui: o ADM confirmava depois e o banco
+          // derrubava de novo, porque os pagamentos somam mais que a conta.
+          gorjeta,
         },
       // `.eq('status','aberta')`: se a conta JÁ foi fechada (outro aparelho, ou
       // esta tela está velha), este update sem trava a puxava de volta pra
@@ -2513,6 +2525,7 @@ export default function PresencialSalao() {
       p_pagamentos: lista,
       p_aplicar_taxa: aplicar,
       p_cliente_id: pend.cliente_id ?? null,
+      p_gorjeta: Number(pend.gorjeta || 0),
     })
     setSalvando(false)
     if (error) { window.alert(recadoDeErro(error, 'liberar a mesa')); return }
@@ -4446,10 +4459,27 @@ export default function PresencialSalao() {
                 </button>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, fontSize: 14, fontWeight: 800,
-                  color: Math.abs(restante) < 0.05 ? 'var(--success)' : 'var(--danger)' }}>
-                  <span>{Math.abs(restante) < 0.05 ? '✓ Fecha certinho' : restante > 0 ? 'Falta receber' : 'Passou'}</span>
+                  color: (Math.abs(restante) < 0.05 || gorjeta > 0) ? 'var(--success)' : 'var(--danger)' }}>
+                  <span>{gorjeta > 0 ? '✓ Gorjeta' : Math.abs(restante) < 0.05 ? '✓ Fecha certinho' : restante > 0 ? 'Falta receber' : 'Passou'}</span>
                   <span>{fmt(Math.abs(restante))}</span>
                 </div>
+
+                {/* Pagou a mais: ou foi gorjeta, ou alguem digitou errado. Perguntar
+                    e deixar o atendente dizer e melhor do que travar a tela sem
+                    saida — e melhor ainda do que aceitar calado e sumir com o
+                    dinheiro do caixa. */}
+                {restante < -0.005 && (
+                  <button type="button" onClick={() => setEhGorjeta(v => !v)}
+                    style={{ width: '100%', marginTop: 8, padding: '10px 0', borderRadius: 8, cursor: 'pointer',
+                      fontSize: 13.5, fontWeight: 800,
+                      border: `1.5px solid ${ehGorjeta ? 'var(--success)' : 'var(--border)'}`,
+                      background: ehGorjeta ? 'rgba(34,197,94,.12)' : 'transparent',
+                      color: ehGorjeta ? 'var(--success)' : 'var(--text)' }}>
+                    {ehGorjeta
+                      ? `✓ ${fmt(gorjeta)} de gorjeta — entra no caixa`
+                      : `O cliente deixou os ${fmt(-restante)} de gorjeta?`}
+                  </button>
+                )}
               </div>
             )}
 
@@ -4548,6 +4578,9 @@ export default function PresencialSalao() {
                   // No fiado não entra dinheiro agora: "Receber" mentiria no valor.
                   : valorFiado >= faltaSel - 0.05 ? `Fechar no fiado · ${fmt(faltaSel)}`
                   : temFiadoNaTela ? `Receber ${fmt(faltaSel - valorFiado)} · fiado ${fmt(valorFiado)}`
+                  // Com gorjeta o caixa recebe mais que a conta: o botao mostra
+                  // o que entra de verdade, senao o atendente confere errado.
+                  : gorjeta > 0 ? `Receber ${fmt(faltaSel + gorjeta)} · ${fmt(gorjeta)} de gorjeta`
                   : `Receber ${fmt(faltaSel)}`}
               </button>
             </div>
