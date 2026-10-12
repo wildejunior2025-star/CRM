@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 32
+const APP_VERSION = 33
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -817,13 +817,27 @@ const server = http.createServer(async (req, res) => {
         const base = { area: info.area, atendente: info.atendente, pessoas: info.pessoas, rotulo: info.rotulo }
         const bar = config().printerBar
         let ok = false
+        // Mesmos dois filtros do caminho automatico. Antes faltavam aqui porque
+        // isto era so o botao de reimprimir, usado de vez em quando. Agora e o
+        // gestor que EMPURRA toda comanda por aqui, entao a falta aparecia em
+        // todo pedido: categoria marcada como "Nao imprime" voltaria a sair, e
+        // um PC marcado so pra um setor imprimiria o do outro.
+        let paraPapel = itens.filter(it => setorDe(it) !== 'nenhum')
+        const papel = papelDoPc()
+        if (papel !== 'tudo') {
+          paraPapel = paraPapel.filter(it => (setorDe(it) === 'cozinha' ? 'cozinha' : 'frente') === papel)
+        }
+        if (!paraPapel.length) return sendJson(res, { ok: true, filtrado: true })
         if (bar) {
-          const comida = itens.filter(it => setorDe(it) !== 'salao')
-          const bebida = itens.filter(it => setorDe(it) === 'salao')
+          const comida = paraPapel.filter(it => setorDe(it) === 'cozinha')
+          const bebida = paraPapel.filter(it => setorDe(it) !== 'cozinha')
           if (comida.length) ok = imprimirBytes(comandaMesaBytes(numero, comida, nomeLoja, base), 'mesa-man')
-          if (bebida.length) imprimirBytes(comandaMesaBytes(numero, bebida, nomeLoja, { ...base, sufixo: ' - BEBIDAS' }), 'mesa-man-bar', bar)
+          if (bebida.length) {
+            const okBar = imprimirBytes(comandaMesaBytes(numero, bebida, nomeLoja, { ...base, sufixo: ' - BEBIDAS' }), 'mesa-man-bar', bar)
+            if (!comida.length) ok = okBar
+          }
         } else {
-          ok = imprimirBytes(comandaMesaBytes(numero, itens, nomeLoja, base), 'mesa-man')
+          ok = imprimirBytes(comandaMesaBytes(numero, paraPapel, nomeLoja, base), 'mesa-man')
         }
         return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
       }
