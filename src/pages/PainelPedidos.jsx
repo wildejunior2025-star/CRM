@@ -9352,6 +9352,7 @@ export default function PainelPedidos() {
 
           {temBackupSuperAdmin && (
             <button type="button" className="pp-back-link" title="Trocar de loja"
+              style={{ background: '#f59e0b', color: '#1a1200', borderColor: '#f59e0b', fontWeight: 800 }}
               onClick={async () => { if (await voltarSuperAdmin()) window.location.href = '/escolher-loja' }}>
               <span>Trocar de loja</span>
             </button>
