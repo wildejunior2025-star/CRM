@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 33
+const APP_VERSION = 34
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -814,7 +814,16 @@ const server = http.createServer(async (req, res) => {
         // Busca salão/atendente/pessoas se o gestor mandou o comandaId (mesmo visual do auto).
         const info = f.comandaId ? await infoComandaMesa(f.comandaId) : { numero: f.numeroMesa, area: '', atendente: '', pessoas: 0 }
         const numero = info.numero != null && info.numero !== '?' ? info.numero : f.numeroMesa
-        const base = { area: info.area, atendente: info.atendente, pessoas: info.pessoas, rotulo: info.rotulo }
+        // O que o GESTOR mandou manda mais do que o que o app conseguiu buscar:
+        // ele le `comandas` logado, o app pode estar com a sessao vencida e
+        // voltar vazio - foi o que fez a comanda de balcao perder o nome do
+        // cliente e sair "Mesa: 7" na cozinha (12/10/2026).
+        const base = {
+          area: info.area,
+          atendente: f.atendente || info.atendente,
+          pessoas: f.pessoas || info.pessoas,
+          rotulo: f.rotulo || info.rotulo,
+        }
         const bar = config().printerBar
         let ok = false
         // Mesmos dois filtros do caminho automatico. Antes faltavam aqui porque

@@ -274,7 +274,10 @@ export async function imprimirHtml(html, titulo, opts = {}) {
 // como impressos e NÃO repete pelo tempo real — é o que deixa o gestor EMPURRAR
 // a comanda sem arriscar duas vias. App antigo ignora o campo e segue igual.
 export async function imprimirComandaMesaApp({ numeroMesa, itens = [], nomeLoja = '', comandaId, ids = [], area = '', atendente = '', pessoas = 0, rodape = '', rotulo = '' }) {
-  if (await imprimirViaAppFwc('imprimir-mesa', { numeroMesa, itens, nomeLoja, comandaId, ids })) return
+  // rotulo/atendente/pessoas vao JUNTO: o app so consegue buscar isso no banco
+  // com a sessao dele viva, e `comandas` nao tem leitura publica. Sem mandar,
+  // a comanda de balcao perdia o nome do cliente e saia "Mesa: 7" na cozinha.
+  if (await imprimirViaAppFwc('imprimir-mesa', { numeroMesa, itens, nomeLoja, comandaId, ids, rotulo, atendente, pessoas })) return
   // Comanda de mesa NUNCA cai no navegador (Chrome). Quem imprime é o app FWC — que já
   // recebe o pedido em tempo real e filtra por PC (botões de origem). Se não há app FWC
   // neste aparelho, não imprime aqui (evita o Chrome abrindo e a 2ª via no outro PC).
