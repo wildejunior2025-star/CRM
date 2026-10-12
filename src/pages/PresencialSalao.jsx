@@ -190,15 +190,6 @@ export default function PresencialSalao() {
   const [salvandoObrig, setSalvandoObrig] = useState(false)
   const [mesas, setMesas]     = useState([])
   const [comandas, setComandas] = useState([])
-  // Mesas que FECHARAM há pouco: { mesa_id: { total, forma, fechada_at } }.
-  // Serve pra duas coisas no quadro (relato da Saidera, 11/10/2026 — "fechei a
-  // mesa 31 e do nada ela voltou aberta"): o card livre guarda o recibo do que
-  // acabou de sair ("✓ 04:39 · R$ 90,20 PIX"), e abrir a mesa de novo pergunta
-  // antes. Um toque sem querer no card abria comanda nova na hora, a mesa ficava
-  // vermelha com R$ 0,00 e o atendente ia catar no histórico se o cliente tinha
-  // pagado mesmo — e se ele saísse pelo "fora da mesa", a comanda vazia era
-  // APAGADA e não sobrava rastro nenhum pra entender depois.
-  const [fechadasRecentes, setFechadasRecentes] = useState({})
   // Comanda de balcão (mig 0143): comanda numerada que não é de mesa nenhuma —
   // pro cliente que pede em pé no balcão. Número zera todo dia. Ligado por loja.
   const [comandaBalcaoAtiva, setComandaBalcaoAtiva] = useState(false)
@@ -405,8 +396,7 @@ export default function PresencialSalao() {
     if (!empresaId) return
     const minhaVez = ++cargaSeq.current
     const comecouEm = Date.now()
-    const desdeFechadas = new Date(Date.now() - 40 * 60 * 1000).toISOString()
-    const [ms, cs, cx, px, fr] = await Promise.all([
+    const [ms, cs, cx, px] = await Promise.all([
       supabase.from('mesas').select('*').eq('empresa_id', empresaId).eq('ativa', true).order('numero'),
       supabase.from('comandas').select('*, comanda_itens(*), cliente:clientes(id, nome, telefone)').eq('empresa_id', empresaId).in('status', ['aberta', 'aguardando_conferencia']),
       supabase.rpc('caixa_aberto_da_loja'),
@@ -416,15 +406,6 @@ export default function PresencialSalao() {
       supabase.from('comanda_pix_cobrancas')
         .select('id, comanda_id, valor, qr_code, qr_base64, expira_em, status, parte')
         .eq('empresa_id', empresaId).in('status', ['pendente', 'pago']),
-      // O que saiu do quadro nos últimos 40 min. Leitura barata (poucas linhas)
-      // e é ela que deixa o atendente responder "o cliente pagou?" sem sair do
-      // Salão nem abrir o histórico.
-      supabase.from('comandas')
-        .select('mesa_id, total, forma_pagamento, fechada_at')
-        .eq('empresa_id', empresaId).eq('status', 'fechada')
-        .not('mesa_id', 'is', null)
-        .gte('fechada_at', desdeFechadas)
-        .order('fechada_at'),
     ])
     // Sai do "Carregando salão..." mesmo quando a leitura for descartada abaixo:
     // a tela não pode ficar pendurada porque duas releituras se cruzaram.
@@ -443,11 +424,6 @@ export default function PresencialSalao() {
     setPixPendentes((px.data ?? []).filter(x => abertas.has(x.comanda_id)))
     // Vem em ordem crescente de fechamento: a última do rodízio da mesma mesa
     // sobrescreve as anteriores e fica valendo a mais recente.
-    const rec = {}
-    for (const f of (fr.data ?? [])) {
-      rec[f.mesa_id] = { total: Number(f.total ?? 0), forma: f.forma_pagamento, fechada_at: f.fechada_at }
-    }
-    setFechadasRecentes(rec)
     setLoading(false)
   }, [empresaId, user?.id, loadAdiantamentos])
 
@@ -834,7 +810,6 @@ export default function PresencialSalao() {
 
   const subtotalSel = subtotalDe(comandaSel)
 
-
   // Busca o crédito sempre que muda o cliente da comanda aberta. A conta pode
   // ficar aberta por horas e ele pode ter gasto noutra mesa nesse meio-tempo —
   // por isso é consulta, e não algo guardado quando o cliente foi ligado.
@@ -960,21 +935,6 @@ export default function PresencialSalao() {
       return
     }
     const existente = comandaPorMesa[mesa.id]
-    // Mesa que ACABOU de fechar: pergunta antes de abrir de novo, e já diz o que
-    // foi recebido. Um toque sem querer no card criava comanda nova na hora — a
-    // mesa voltava vermelha com R$ 0,00 e ninguém sabia se aquilo era cliente
-    // novo, conta não paga ou dedo errado (Saidera, mesa 31 em 11/10/2026).
-    // Vale só pra MESA de verdade: comanda de balcão não repete número no dia.
-    if (!existente && !mesa.is_comanda) {
-      const rec = fechadasRecentes[mesa.id]
-      if (rec) {
-        const ok = window.confirm(
-          `${mesa.is_balcao ? 'O balcão' : `A Mesa ${mesa.numero}`} foi FECHADA às ${horaCurta(rec.fechada_at)}`
-          + ` — ${fmt(rec.total)}${rec.forma ? ' em ' + formaLabelCurta(rec.forma) : ''}, já recebido.\n\n`
-          + 'Abrir de novo (cliente novo)?')
-        if (!ok) return
-      }
-    }
     // Comanda de balcão já nasce criada (o banco é quem dá o número) — só abre.
     if (!existente && !mesa.is_comanda) {
       // O `existente` acima é a MEMÓRIA DESTA TELA. Com a internet do salão
@@ -2961,14 +2921,6 @@ export default function PresencialSalao() {
                   <div style={{ fontSize: 11.5, marginTop: 1, fontWeight: 800 }}>
                     {fmt(totalDe(c))}
                     {totalDe(c) > sub && <span style={{ fontWeight: 600, opacity: .75 }}> c/ serv.</span>}
-                  </div>
-                )}
-                {/* Recibo da mesa livre: o que ela recebeu nos últimos 40 min.
-                    É a resposta de "o cliente pagou mesmo ou eu esqueci de
-                    fechar?" sem abrir o histórico — e some sozinho depois. */}
-                {!c && fechadasRecentes[mesa.id] && (
-                  <div style={{ fontSize: 9.5, marginTop: 2, fontWeight: 700, color: '#16a34a', lineHeight: 1.2 }}>
-                    ✓ {horaCurta(fechadasRecentes[mesa.id].fechada_at)} · {fmt(fechadasRecentes[mesa.id].total)}
                   </div>
                 )}
               </div>
