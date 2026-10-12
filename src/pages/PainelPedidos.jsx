@@ -6333,7 +6333,9 @@ function ordenarThreads(threads) {
 
 // ── Componente principal ────────────────────────────────────
 export default function PainelPedidos() {
-  const { empresa, logout, profile } = useAuth()
+  const { empresa, logout, profile, voltarSuperAdmin } = useAuth()
+  // Super admin que entrou numa loja pelo gestor: pode voltar à lista de lojas.
+  const temBackupSuperAdmin = !!localStorage.getItem('crm_superadmin_backup')
   // Só o dono (admin/super_admin) pode editar o preço de item da mesa.
   const podeFinanceiro = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
   const { theme, toggleTheme } = useTheme()
@@ -9347,6 +9349,13 @@ export default function PainelPedidos() {
               </svg>
             )}
           </button>
+
+          {temBackupSuperAdmin && (
+            <button type="button" className="pp-back-link" title="Trocar de loja"
+              onClick={async () => { if (await voltarSuperAdmin()) window.location.href = '/escolher-loja' }}>
+              <span>Trocar de loja</span>
+            </button>
+          )}
 
           {/* Sair */}
           <button type="button" className="pp-back-link" title="Sair" onClick={logout}>

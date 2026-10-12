@@ -71,7 +71,7 @@ function HostnameRedirect() {
     // Super admin SEM loja não usa o gestor (/painel é por loja): sai sozinho pro
     // painel dele. Se estiver impersonando uma loja (tem empresa), deixa usar.
     if (perfil === 'super_admin' && !empresa && pathname.startsWith('/painel')) {
-      if (!pathname.startsWith('/super-admin')) navigate('/super-admin', { replace: true })
+      if (!pathname.startsWith('/super-admin')) navigate(h === 'gestor.fwcinter.com' ? '/escolher-loja' : '/super-admin', { replace: true })
       return
     }
 
@@ -116,8 +116,10 @@ function HostnameRedirect() {
     } else if (h === 'gestor.fwcinter.com') {
       // Super admin sem loja fica no painel dele (pra escolher qual loja entrar);
       // o guard lá em cima já cuida.
+      // No gestor ele cai na lista de lojas (/escolher-loja); o painel completo
+      // continua acessível digitando /super-admin.
       if (perfil === 'super_admin' && !empresa) {
-        if (!pathname.startsWith('/super-admin')) navigate('/super-admin', { replace: true })
+        if (!pathname.startsWith('/super-admin') && !pathname.startsWith('/escolher-loja')) navigate('/escolher-loja', { replace: true })
         return
       }
       // Aqui morava um loop: mandava TODO MUNDO pro /painel, mas o /painel só
@@ -179,6 +181,7 @@ const PortalIndicacoes = lazy(() => import('./pages/PortalIndicacoes'))
 const SuperAdminDashboard = lazy(() => import('./pages/SuperAdminDashboard'))
 const SuperAdminMLM = lazy(() => import('./pages/SuperAdminMLM'))
 const SuperAdminEmpresas = lazy(() => import('./pages/SuperAdminEmpresas'))
+const EscolherLoja = lazy(() => import('./pages/EscolherLoja'))
 const SuperAdminClientes = lazy(() => import('./pages/SuperAdminClientes'))
 const SuperAdminComissoes = lazy(() => import('./pages/SuperAdminComissoes'))
 const SuperAdminWhatsApp = lazy(() => import('./pages/SuperAdminWhatsApp'))
@@ -329,6 +332,8 @@ export default function App() {
               diz o que houve — com um botão que recarrega de verdade, que é o
               que resolve quando o aparelho está com uma versão velha guardada. */}
           <Route path="*" element={<PaginaNaoEncontrada />} />
+
+          <Route path="/escolher-loja" element={<ProtectedRoute roles={['super_admin']}><EscolherLoja /></ProtectedRoute>} />
 
           <Route
             element={
