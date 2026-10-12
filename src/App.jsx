@@ -221,6 +221,7 @@ const PresencialMesas = lazy(() => import('./pages/PresencialMesas'))
 const PresencialSalao = lazy(() => import('./pages/PresencialSalao'))
 const PresencialCozinha = lazy(() => import('./pages/PresencialCozinha'))
 const PresencialHistorico = lazy(() => import('./pages/PresencialHistorico'))
+const PresencialDesfeitos = lazy(() => import('./pages/PresencialDesfeitos'))
 const PresencialReservas = lazy(() => import('./pages/PresencialReservas'))
 const MesaCardapio = lazy(() => import('./pages/MesaCardapio'))
 const ClienteLink = lazy(() => import('./pages/ClienteLink'))
@@ -457,6 +458,12 @@ export default function App() {
             <Route
               path="presencial/historico"
               element={<ProtectedRoute roles={['admin', 'garcom']} modulo="presencial"><PresencialHistorico /></ProtectedRoute>}
+            />
+            {/* Mesma regra de quem entra do histórico: a RLS da tabela é que
+                decide se a pessoa vê só o dela ou a loja inteira. */}
+            <Route
+              path="presencial/desfeitos"
+              element={<ProtectedRoute roles={['admin', 'garcom']} modulo="presencial"><PresencialDesfeitos /></ProtectedRoute>}
             />
             <Route
               path="presencial/reservas"

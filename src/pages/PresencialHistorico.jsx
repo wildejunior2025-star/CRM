@@ -332,10 +332,10 @@ export default function PresencialHistorico() {
       setLoading(false)
     })
     supabase.from('comanda_eventos')
-      .select('id, tipo, rotulo, quem, quando, descricao, quantidade, valor')
+      .select('id')
       .eq('empresa_id', empresaId)
       .order('quando', { ascending: false })
-      .limit(60)
+      .limit(200)
       .then(({ data }) => setEventos(data ?? []))
 
     carregarAcumulado()
@@ -1220,53 +1220,19 @@ export default function PresencialHistorico() {
         </div>
       )}
 
-      {/* O QUE FOI DESFEITO (mig 0320).
-          Item tirado da comanda e mesa cancelada nao deixavam rastro nenhum: o
-          item sumia num DELETE e o cancelamento gravava so o status. Quando a
-          duvida aparecia ("cancelaram depois de receber?"), nao havia o que
-          olhar. Agora fica registrado com nome e hora.
-          Nao e acusacao: cliente desiste de uma cerveja todo dia. E registro —
-          e registro que aparece pra quem fez e pro dono e o que faz a conversa
-          ser sobre fato. A RLS ja decide quem ve o que. */}
+      {/* A lista inteira virou tela própria (12/10/2026): aqui no fim ela ficava
+          escondida atrás de toda a rolagem. Fica só o atalho. */}
       {eventos.length > 0 && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 2 }}>
+        <Link to="/presencial/desfeitos" className="card"
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            gap: 10, marginBottom: 12, textDecoration: 'none', color: 'var(--text)' }}>
+          <span style={{ fontSize: 13.5, fontWeight: 700 }}>
             ↩️ {ehAdmin ? 'Cancelamentos e itens removidos' : 'O que você desfez'}
-          </div>
-          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
-            {ehAdmin
-              ? 'Últimos 60 registros da loja, com quem fez e quando.'
-              : 'Mesa que você cancelou ou item que você tirou da comanda.'}
-          </div>
-          {eventos.map(ev => (
-            <div key={ev.id}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0',
-                borderBottom: '1px solid var(--border)' }}>
-              <span style={{ fontSize: 16 }}>{ev.tipo === 'comanda_cancelada' ? '🚫' : '➖'}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 700 }}>
-                  {ev.tipo === 'comanda_cancelada' ? 'Cancelou ' : 'Tirou '}
-                  {ev.tipo === 'comanda_cancelada'
-                    ? (ev.rotulo || 'a comanda')
-                    : `${Number(ev.quantidade || 1)}x ${ev.descricao || 'item'}`}
-                </div>
-                <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                  {ehAdmin && <>{garcons[ev.quem] || 'alguém'} · </>}
-                  {new Date(ev.quando).toLocaleString('pt-BR', {
-                    timeZone: 'America/Fortaleza', day: '2-digit', month: '2-digit',
-                    hour: '2-digit', minute: '2-digit' })}
-                  {ev.tipo === 'item_removido' && ev.rotulo ? ` · ${ev.rotulo}` : ''}
-                  {ev.tipo === 'comanda_cancelada' ? ` · ${ev.descricao}` : ''}
-                </div>
-              </div>
-              {Number(ev.valor) > 0 && (
-                <strong style={{ fontSize: 13.5, color: 'var(--danger)', whiteSpace: 'nowrap' }}>
-                  {fmt(ev.valor)}
-                </strong>
-              )}
-            </div>
-          ))}
-        </div>
+          </span>
+          <span style={{ fontSize: 12.5, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+            {eventos.length} · ver →
+          </span>
+        </Link>
       )}
 
       {pickerComanda && (

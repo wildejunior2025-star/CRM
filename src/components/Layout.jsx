@@ -43,12 +43,16 @@ const links = [
     to: '/presencial', label: 'Serviço Presencial', roles: ['admin'], mod: 'presencial',
     children: [
       { to: '/presencial/cozinha', label: 'Cozinha (KDS)', roles: ['admin'] },
+      { to: '/presencial/desfeitos', label: 'Cancelamentos e remoções', roles: ['admin'], mod: 'presencial' },
     ],
   },
   // Garçom vê o Salão; a Cozinha é só do cozinheiro (vendedor só usa o /painel)
   { to: '/presencial/salao', label: 'Salão', roles: ['garcom'], mod: 'presencial' },
   // O garçom vê o histórico DELE (a mesma tela, filtrada nas mesas que ele atendeu).
   { to: '/presencial/historico', label: 'Minhas mesas', roles: ['garcom'], mod: 'presencial' },
+  // Logo abaixo de "Minhas mesas" de propósito: estava no fim daquela tela e
+  // o garçom tinha que rolar tudo pra achar.
+  { to: '/presencial/desfeitos', label: 'O que desfiz', roles: ['garcom'], mod: 'presencial' },
   { to: '/presencial/cozinha', label: 'Cozinha (KDS)', roles: ['cozinheiro'], mod: 'presencial' },
 
   {
