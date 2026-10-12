@@ -2169,24 +2169,35 @@ export default function PresencialSalao() {
       return
     }
     setSalvando(true)
-    // QUEM É ADM FECHA DE VEZ: gera a venda, libera a mesa e sai do quadro. O
-    // azul ("✓ Paga · liberar") é só do GARÇOM, que quem confere é o ADM depois.
+    // QUEM FECHA DE VEZ: só o ADM, e só se ESTE aparelho tem impressora. Sem
+    // impressora aqui, a conta vai pro azul ("✓ Paga · liberar") e sai do papel
+    // na estação da loja.
     //
-    // Até 11/10/2026 o ADM só fechava direto se a tela achasse impressora no
-    // aparelho (app FWC no PC). A ideia era não perder a conta em papel, mas o
-    // efeito colateral era pior: a Saidera imprime em térmica BLUETOOTH no
-    // celular, então o DONO — que é quem recebe o dinheiro — caía sempre no
-    // caminho do garçom. A conta saía no papel, mas a comanda ia pra
-    // "aguardando_conferencia" e a mesa FICAVA NO QUADRO esperando um ADM
-    // liberar... que é ele mesmo. Foram 64 contas assim na conta do dono em 14
-    // dias, uma esperando 2h08 pra sair do quadro — é daí que vem o "fecho a
-    // mesa e ela volta aberta".
+    // Isto já foi e voltou, então vale registrar por quê:
+    //  - 11/10: o ADM passou a fechar de vez SEMPRE. O motivo era real — a mesa
+    //    ficava pendurada no quadro esperando o próprio dono liberar (64 contas
+    //    assim em 14 dias, uma por 2h08), e dali vinha o "fecho a mesa e ela
+    //    volta aberta".
+    //  - 12/10: a dona da Saidera pediu pra voltar. Ela QUER passar pelo azul,
+    //    mesmo sendo ADM: é lá que ela reenvia a conta quando o papel não sai.
+    //    Mesa liberada já saiu do quadro, e aí ela tem que catar no histórico —
+    //    mais trabalho do que confirmar.
     //
-    // Decisão do dono (11/10/2026): fechar não depende mais de impressora. Se o
-    // papel não sair, a 2ª via está em "🧾 Minhas mesas fechadas" (histórico) —
-    // uma conta que não imprimiu se resolve em dois toques, uma mesa pendurada
-    // no quadro faz o atendente ir catar se o cliente pagou.
+    // O remédio pro problema de 11/10 passou a ser outro, e melhor: conta azul
+    // não pode mais ser CANCELADA (mig 0322), que era por onde o dinheiro sumia.
+    //
+    // "Impressora no aparelho" é o app FWC (o PC da loja). A térmica BLUETOOTH
+    // do celular NÃO conta aqui DE PROPÓSITO: a Saidera imprime nela e mesmo
+    // assim quer o azul. Se o Bluetooth contasse, ela voltaria a fechar direto —
+    // exatamente o que ela pediu pra desfazer.
+    let temImpressoraLocal = false
     if (ehAdmin) {
+      try {
+        const mod = await import('../utils/imprimirCupom')
+        temImpressoraLocal = await mod.appFwcDisponivel()
+      } catch { temImpressoraLocal = false }
+    }
+    if (ehAdmin && temImpressoraLocal) {
       // Quem fechou a conta, pro ranking (mig 0187). Carimba ANTES do RPC: ele
       // mexe em status/total e não encosta nestes campos.
       await supabase.from('comandas')
@@ -2211,8 +2222,9 @@ export default function PresencialSalao() {
       // sair em vez de a conta simplesmente não existir.
       imprimirConta({ soApp: ehCelular }).catch(() => { /* best-effort */ })
     } else {
-      // GARÇOM: NÃO libera a mesa. Marca "aguardando_conferencia" e guarda o
-      // pagamento; depois o ADM confere e libera.
+      // GARÇOM, ou ADM sem impressora neste aparelho: NÃO libera a mesa. Marca
+      // "aguardando_conferencia" e guarda o pagamento. Pro ADM isso é de
+      // propósito — é no azul que ele reenvia a conta se o papel não saiu.
       //
       // A conta é impressa AQUI, por quem fechou. Antes dependia do Painel de Pedidos
       // estar aberto pra perceber a mesa em "aguardando" e mandar imprimir — se a
