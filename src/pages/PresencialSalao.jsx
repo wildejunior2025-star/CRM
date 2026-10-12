@@ -2164,8 +2164,11 @@ export default function PresencialSalao() {
       const soma = lista.reduce((s, p) => s + p.valor, 0)
       if (lista.length === 0) { window.alert('Adicione ao menos um pagamento.'); return }
       // Dividindo a conta, as linhas cobrem só o que sobrou depois do crédito.
-      if (Math.abs(soma - totalAPagar) > 0.05) {
-        window.alert(`A soma (R$ ${soma.toFixed(2)}) não bate com o total a receber (R$ ${totalAPagar.toFixed(2)}).`)
+      // A sobra MARCADA COMO GORJETA é esperada: ela vira taxa de serviço e o
+      // total cresce junto no banco (mig 0319). Sem esta soma aqui, a conferência
+      // reclamava mesmo depois de o atendente dizer que foi gorjeta.
+      if (Math.abs(soma - (totalAPagar + gorjeta)) > 0.05) {
+        window.alert(`A soma (R$ ${soma.toFixed(2)}) não bate com o total a receber (R$ ${(totalAPagar + gorjeta).toFixed(2)}).`)
         return
       }
       lista = [...linhaCashback, ...lista]
