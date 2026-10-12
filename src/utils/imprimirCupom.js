@@ -270,8 +270,11 @@ export async function imprimirHtml(html, titulo, opts = {}) {
 // Comanda de MESA: pede pro app FWC montar nativamente (nome da loja + MESA grandes,
 // data, itens com valor). Se o app não responder (ou for versão antiga), cai no HTML
 // pelo navegador. Assim o botão manual do gestor sai igual ao automático.
-export async function imprimirComandaMesaApp({ numeroMesa, itens = [], nomeLoja = '', comandaId, area = '', atendente = '', pessoas = 0, rodape = '', rotulo = '' }) {
-  if (await imprimirViaAppFwc('imprimir-mesa', { numeroMesa, itens, nomeLoja, comandaId })) return
+// `ids` são os ids dos comanda_itens que estão indo no papel. O app marca eles
+// como impressos e NÃO repete pelo tempo real — é o que deixa o gestor EMPURRAR
+// a comanda sem arriscar duas vias. App antigo ignora o campo e segue igual.
+export async function imprimirComandaMesaApp({ numeroMesa, itens = [], nomeLoja = '', comandaId, ids = [], area = '', atendente = '', pessoas = 0, rodape = '', rotulo = '' }) {
+  if (await imprimirViaAppFwc('imprimir-mesa', { numeroMesa, itens, nomeLoja, comandaId, ids })) return
   // Comanda de mesa NUNCA cai no navegador (Chrome). Quem imprime é o app FWC — que já
   // recebe o pedido em tempo real e filtra por PC (botões de origem). Se não há app FWC
   // neste aparelho, não imprime aqui (evita o Chrome abrindo e a 2ª via no outro PC).

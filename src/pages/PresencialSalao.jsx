@@ -1323,13 +1323,36 @@ export default function PresencialSalao() {
     ok = await viaBluetooth('comanda', dadosComanda)
     if (ok) return ok
 
-    // Sem Bluetooth NESTE aparelho não quer dizer que não saiu papel: no PC da
-    // loja quem imprime é o app Impressora FWC, que recebe o item pelo tempo
-    // real e nem passa por aqui. Avisar nesse caso é alarme falso a cada
-    // pedido — foi o que aconteceu na Saidera assim que o papel voltou a sair.
+    // PC da loja: quem imprime é o app Impressora FWC — e agora a gente MANDA a
+    // comanda pra ele, igual já fazia com a conta.
+    //
+    // 12/10/2026, O Braseiro: aqui só se conferia "o app está vivo?" e confiava
+    // que ele ia BUSCAR o item no banco sozinho, pelo tempo real. Só que essa
+    // busca é a única do caminho que exige a sessão do app logada: `empresas`,
+    // `categorias`, `produtos` e `pedidos_delivery` têm regra de leitura
+    // pública, `comanda_itens` não tem. Com a sessão do app vencida, a loja
+    // ficou num estado que ninguém entende: conta sai, pré-conta sai, cupom do
+    // iFood sai — e o pedido da cozinha, só ele, some. Sem erro em lugar
+    // nenhum, porque o banco responde "vazio", não "sem permissão".
+    //
+    // Mandar o papel pronto tira a sessão do caminho: o app só imprime o que
+    // recebeu. `ids` vai junto pra ele não imprimir a mesma comanda de novo
+    // quando o tempo real entregar o item (app v32+; o antigo ignora).
     try {
       const mod = await import('../utils/imprimirCupom')
-      if (await mod.appFwcDisponivel()) return 'app'
+      if (await mod.appFwcDisponivel()) {
+        await mod.imprimirComandaMesaApp({
+          numeroMesa: mesaSel?.numero,
+          itens: dadosComanda.itens,
+          nomeLoja: empresaNome,
+          comandaId: comandaSel?.id,
+          ids: itens.map(i => i.id),
+          rotulo: dadosComanda.rotulo,
+          atendente: dadosComanda.atendente,
+          pessoas: dadosComanda.pessoas,
+        })
+        return 'app'
+      }
     } catch { /* sem app neste aparelho */ }
 
     // Desfaz a marca, senão o item fica "já impresso" pra sempre e nem o caminho

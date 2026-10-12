@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 31
+const APP_VERSION = 32
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -808,6 +808,9 @@ const server = http.createServer(async (req, res) => {
         const f = await jsonBody(req)
         const nomeLoja = f.nomeLoja || empresa?.nome || ''
         const itens = Array.isArray(f.itens) ? f.itens : []
+        // O gestor EMPURROU esta comanda (12/10/2026). Marca os itens como
+        // impressos pra o tempo real nao mandar a segunda via do mesmo papel.
+        for (const id of (Array.isArray(f.ids) ? f.ids : [])) comandaItensImpressos.add(id)
         // Busca salão/atendente/pessoas se o gestor mandou o comandaId (mesmo visual do auto).
         const info = f.comandaId ? await infoComandaMesa(f.comandaId) : { numero: f.numeroMesa, area: '', atendente: '', pessoas: 0 }
         const numero = info.numero != null && info.numero !== '?' ? info.numero : f.numeroMesa
