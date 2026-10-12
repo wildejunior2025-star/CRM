@@ -394,8 +394,15 @@ function respostaDeTaxa(
     // cliente que ia sentar na mesa. Só muda a fala na loja que LIGOU a chave
     // (mig 0317); nas outras continua a resposta de sempre, palavra por palavra.
     const jeitos = falaDoPresencial ? jeitosDeAtender(empresa) : ""
+    // O UBER É A TERCEIRA SAÍDA. Loja que só faz retirada não precisa recusar
+    // quem mora longe: o cliente manda um motoboy/Uber e a loja entrega na mão
+    // dele. A Nádira fez exatamente isso no Braseiro (12/10/2026) e funcionou —
+    // só que quem contou pra ela foi a atendente, no chat. O robô dizia "não
+    // fazemos entrega" e parava ali, que é onde a venda morre.
     return jeitos
-      ? `A gente não faz entrega, não. 😉 Mas dá pra ${jeitos} — como você preferir.`
+      ? `A gente não faz entrega, não. 😉 Mas dá pra ${jeitos}.${NL}`
+        + "E se você estiver longe, pode mandar um Uber/motoboy buscar — "
+        + "a gente entrega na mão dele certinho. 🛵"
       : "A gente não faz entrega, só retirada aqui na loja. 😉"
   }
   const porBairro = Array.isArray(empresa.taxas_entrega_bairro) ? empresa.taxas_entrega_bairro : []
@@ -545,10 +552,33 @@ async function produtosQueCasam(supabase: Sb, empresaId: string, mensagem: strin
  * não achou e põe o cardápio na mão — foi o "tem coca?" numa loja que cadastrou
  * "Refrigerante (lata ou KS)" (Braseiro, 09/10/2026).
  */
+// A frase está PEDINDO alguma coisa? "tem X", "quanto é X", "vocês vendem X".
+//
+// Sem esta peneira, o "não achei no cardápio" saía em cima de qualquer frase
+// que tivesse uma palavra de 3+ letras fora da lista de descarte — e foi o que
+// aconteceu com a Nádira no Braseiro (12/10/2026): ela escreveu "me confirma
+// que eu finalizo o pedido" e o robô respondeu "esse eu não achei aqui no
+// cardápio 😕". Ela não tinha perguntado por produto nenhum.
+//
+// Frase que não pede nada cai na escada de sempre (link, atendente), que é a
+// resposta certa pra quem está conversando e não consultando preço.
+function pareceProcurandoProduto(texto: string): boolean {
+  // Sem regex de propósito: são frases fixas, e escapar caractere especial aqui
+  // só criaria bug onde não tem problema nenhum.
+  const t = " " + semAcento(texto).replace(/[^a-z0-9 ]/g, " ").replace(/ +/g, " ") + " "
+  const PEDIDOS = [
+    " tem ", " teria ", " tinha ", " quanto ", " qto ", " preco ", " valor ",
+    " custa ", " custo ", " vende ", " vendem ", " aceita ", " aceitam ",
+    " trabalha com ", " trabalham com ", " sai por ", " ainda tem ",
+  ]
+  return PEDIDOS.some(x => t.includes(x))
+}
+
 async function naoAcheiOItem(
   supabase: Sb, empresaId: string, phone: string, mensagem: string, link: string,
 ): Promise<string | null> {
   if (!termosDeProduto(mensagem).length) return null
+  if (!pareceProcurandoProduto(mensagem)) return null
   if (!(await reservarAviso(supabase, empresaId, phone, "sem-produto", 60))) return null
   return `Esse eu não achei aqui no cardápio 😕${NL}` +
     `Dá uma olhada no que tem hoje — se precisar, é só me chamar:${NL}${link}`
