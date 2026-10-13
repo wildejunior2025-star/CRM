@@ -22,19 +22,23 @@ const links = [
   // Loja nova: o passo a passo fica no topo até terminar (mig 0273). Depois
   // mora em Minha Loja, pra quem quiser revisar.
   { to: '/configurar-loja', label: 'Configurar Loja', roles: ['admin'], cfg: 'pendente' },
-  { to: '/', label: 'Dashboard', end: true, roles: ['admin'] },
+  // O vendedor entra pelo /painel (gestor) e é pra continuar assim — mas se ele
+  // vier pro Portal, vê estas cinco: Dashboard, Vendas, Clientes, Catálogo e
+  // WhatsApp (decisão do dono, 13/10/2026). A RLS delas foi junto na mig 0325:
+  // abrir a rota sem abrir o banco é o erro que já deu três vezes aqui.
+  { to: '/', label: 'Dashboard', end: true, roles: ['admin', 'vendedor'] },
   {
     // "Vendas física" saiu: quem vende no balcão usa Mesa/Balcão (Serviço
     // Presencial). O grupo agora abre direto no delivery.
     to: '/pedidos-delivery', label: 'Vendas', roles: ['admin', 'vendedor'], mod: 'delivery',
     children: [
-      { to: '/pedidos-delivery', label: 'Vendas delivery', roles: ['admin'], mod: 'delivery' },
+      { to: '/pedidos-delivery', label: 'Vendas delivery', roles: ['admin', 'vendedor'], mod: 'delivery' },
       { to: '/entregadores', label: 'Entregadores', roles: ['admin'], mod: 'delivery' },
       // Contas fechadas do salão: é venda, o lugar dele é aqui e não no presencial.
-      { to: '/presencial/historico', label: 'Vendas salão', roles: ['admin'], mod: 'presencial' },
+      { to: '/presencial/historico', label: 'Vendas salão', roles: ['admin', 'vendedor'], mod: 'presencial' },
     ],
   },
-  { to: '/clientes', label: 'Clientes', roles: ['admin'], mod: 'clientes' },
+  { to: '/clientes', label: 'Clientes', roles: ['admin', 'vendedor'], mod: 'clientes' },
   { to: '/usuarios', label: 'Funcionários', roles: ['admin'], mod: 'funcionarios' },
   {
     // Salão, Caixa, Reservas e Mesas saíram daqui: são as MESMAS telas que já
@@ -56,15 +60,16 @@ const links = [
   { to: '/presencial/cozinha', label: 'Cozinha (KDS)', roles: ['cozinheiro'], mod: 'presencial' },
 
   {
-    to: '/produtos', label: 'Catálogo', roles: ['admin'], mod: 'produtos',
+    to: '/produtos', label: 'Catálogo', roles: ['admin', 'vendedor'], mod: 'produtos',
     children: [
-      { to: '/produtos', label: 'Produtos', roles: ['admin'], mod: 'produtos' },
-      { to: '/banners-ia', label: 'Banners com IA', roles: ['admin'], mod: 'produtos' },
+      { to: '/produtos', label: 'Produtos', roles: ['admin', 'vendedor'], mod: 'produtos' },
+      { to: '/banners-ia', label: 'Banners com IA', roles: ['admin', 'vendedor'], mod: 'produtos' },
       // `ifood: true` — só aparece pra quem tem loja conectada no iFood (ver useIfoodAtivo).
       { to: '/cardapio-ifood', label: 'Cardápio iFood', roles: ['admin'], mod: 'produtos', ifood: true },
-      { to: '/complementos', label: 'Complementos', roles: ['admin'], mod: 'produtos' },
-      { to: '/ficha-tecnica', label: 'Ficha Técnica', roles: ['admin'], mod: 'produtos' },
-      { to: '/estoque', label: 'Estoque', roles: ['admin'], mod: 'estoque' },
+      { to: '/complementos', label: 'Complementos', roles: ['admin', 'vendedor'], mod: 'produtos' },
+      { to: '/ficha-tecnica', label: 'Ficha Técnica', roles: ['admin', 'vendedor'], mod: 'produtos' },
+      // Estoque: o vendedor VÊ e dá entrada; saída continua só pela venda (mig 0319).
+      { to: '/estoque', label: 'Estoque', roles: ['admin', 'vendedor'], mod: 'estoque' },
       { to: '/entrada-estoque', label: 'Entrada de estoque', roles: ['admin', 'vendedor'], mod: 'estoque' },
     ],
   },
@@ -85,11 +90,11 @@ const links = [
   },
   { group: 'Automação' },
   {
-    to: '/whatsapp', label: 'WhatsApp', roles: ['admin', 'super_admin'], mod: 'whatsapp',
+    to: '/whatsapp', label: 'WhatsApp', roles: ['admin', 'super_admin', 'vendedor'], mod: 'whatsapp',
     children: [
-      { to: '/whatsapp', label: 'Conexão / Config', roles: ['admin', 'super_admin'] },
-      { to: '/whatsapp-conversas', label: 'Conversas', roles: ['admin'] },
-      { to: '/whatsapp-creditos', label: 'Créditos Bot', roles: ['admin'] },
+      { to: '/whatsapp', label: 'Conexão / Config', roles: ['admin', 'super_admin', 'vendedor'] },
+      { to: '/whatsapp-conversas', label: 'Conversas', roles: ['admin', 'vendedor'] },
+      { to: '/whatsapp-creditos', label: 'Créditos Bot', roles: ['admin', 'vendedor'] },
       { to: '/bot-teste', label: 'Teste Bot', roles: ['admin', 'super_admin'] },
     ],
   },

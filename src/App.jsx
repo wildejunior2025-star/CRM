@@ -373,11 +373,11 @@ export default function App() {
             <Route path="relatorios" element={<ProtectedRoute modulo="relatorios"><Relatorios /></ProtectedRoute>} />
             <Route
               path="produtos"
-              element={<ProtectedRoute roles={['admin']} modulo="produtos"><Produtos /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'vendedor']} modulo="produtos"><Produtos /></ProtectedRoute>}
             />
             <Route
               path="banners-ia"
-              element={<ProtectedRoute roles={['admin']} modulo="produtos"><BannersIA /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'vendedor']} modulo="produtos"><BannersIA /></ProtectedRoute>}
             />
             {/* Cardápio do iFood: lista separada da de Produtos de propósito — preço e
                 nome costumam ser diferentes nos dois, e casar item por item erraria preço. */}
@@ -387,15 +387,15 @@ export default function App() {
             />
             <Route
               path="complementos"
-              element={<ProtectedRoute roles={['admin']} modulo="produtos"><CategoriasComplemento /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'vendedor']} modulo="produtos"><CategoriasComplemento /></ProtectedRoute>}
             />
             <Route
               path="ficha-tecnica"
-              element={<ProtectedRoute roles={['admin']} modulo="produtos"><FichaTecnica /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'vendedor']} modulo="produtos"><FichaTecnica /></ProtectedRoute>}
             />
             <Route
               path="estoque"
-              element={<ProtectedRoute roles={['admin']} modulo="estoque"><Estoque /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'vendedor']} modulo="estoque"><Estoque /></ProtectedRoute>}
             />
             {/* Receber mercadoria é trabalho de quem está no balcão, então o
                 vendedor entra aqui — e esta tela SÓ SOMA. Tirar do estoque sem
@@ -462,7 +462,7 @@ export default function App() {
             />
             <Route
               path="presencial/historico"
-              element={<ProtectedRoute roles={['admin', 'garcom']} modulo="presencial"><PresencialHistorico /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'garcom', 'vendedor']} modulo="presencial"><PresencialHistorico /></ProtectedRoute>}
             />
             {/* Mesma regra de quem entra do histórico: a RLS da tabela é que
                 decide se a pessoa vê só o dela ou a loja inteira. */}
@@ -476,15 +476,15 @@ export default function App() {
             />
             <Route
               path="pedidos-delivery"
-              element={<ProtectedRoute roles={['admin']} modulo="delivery"><PedidosDelivery /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'vendedor']} modulo="delivery"><PedidosDelivery /></ProtectedRoute>}
             />
             <Route
               path="whatsapp"
-              element={<ProtectedRoute roles={['admin', 'super_admin']} modulo="whatsapp"><WhatsAppConfig /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'super_admin', 'vendedor']} modulo="whatsapp"><WhatsAppConfig /></ProtectedRoute>}
             />
             <Route
               path="whatsapp-conversas"
-              element={<ProtectedRoute roles={['admin']} modulo="whatsapp"><WhatsAppConversas /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'vendedor']} modulo="whatsapp"><WhatsAppConversas /></ProtectedRoute>}
             />
             <Route
               path="entregadores"
@@ -496,7 +496,7 @@ export default function App() {
             />
             <Route
               path="whatsapp-creditos"
-              element={<ProtectedRoute roles={['admin']} modulo="whatsapp"><WhatsAppCreditos /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'vendedor']} modulo="whatsapp"><WhatsAppCreditos /></ProtectedRoute>}
             />
             <Route
               path="assistente-ia"
