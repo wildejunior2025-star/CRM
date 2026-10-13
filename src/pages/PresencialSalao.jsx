@@ -152,6 +152,20 @@ export default function PresencialSalao() {
   // Só o ADM confere o pagamento e libera a mesa. Garçom fecha, mas não libera.
   const ehAdmin = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
 
+  // QUEM TEM O CAIXA NA MAO pode conferir a conta azul e liberar a mesa.
+  //
+  // 13/10/2026: o VENDEDOR entrou aqui. Ele nao e garcom - garcom anota e
+  // recebe, mas quem bate o dinheiro e quem tem caixa proprio, e o vendedor
+  // tem. Deixar a mesa azul esperando um ADM aparecer trava a loja que opera
+  // sem o dono no salao: a mesa fica pendurada no quadro, paga, e ninguem
+  // libera.
+  //
+  // Ele NAO herda o resto do que o ADM faz no Salao: nao marca pronto da
+  // cozinha, nao liga/desliga "sem cozinha" nem "sem obrigatorios", nao ve o
+  // atalho de /presencial. Por isso e uma bandeira separada, e nao um
+  // `ehAdmin || vendedor` espalhado.
+  const podeConferirCaixa = ehAdmin || profile?.perfil === 'vendedor'
+
   // QUEM DIZ QUE O PRATO FICOU PRONTO É A COZINHA.
   //
   // O "pronto" da cozinha é o aviso de que a comida saiu da panela — quem sabe
@@ -1347,6 +1361,7 @@ export default function PresencialSalao() {
           nomeLoja: empresaNome,
           comandaId: comandaSel?.id,
           ids: itens.map(i => i.id),
+          auto: true,
           rotulo: dadosComanda.rotulo,
           atendente: dadosComanda.atendente,
           pessoas: dadosComanda.pessoas,
@@ -2187,7 +2202,7 @@ export default function PresencialSalao() {
     }
     // Aqui a venda nasce de verdade. Sem caixa aberto ela entraria com caixa
     // NULO: o faturamento contaria e o dinheiro não apareceria em caixa nenhum.
-    if (ehAdmin && exigeCaixaPraFechar) {
+    if (podeConferirCaixa && exigeCaixaPraFechar) {
       window.alert('⚠️ Abra o caixa (aba 💵 Caixa) pra receber esta conta.\n\nLançar na mesa não precisa de caixa — receber precisa, senão o dinheiro não entra em caixa nenhum e a gaveta não fecha no fim da noite.')
       return
     }
@@ -2214,13 +2229,13 @@ export default function PresencialSalao() {
     // assim quer o azul. Se o Bluetooth contasse, ela voltaria a fechar direto —
     // exatamente o que ela pediu pra desfazer.
     let temImpressoraLocal = false
-    if (ehAdmin) {
+    if (podeConferirCaixa) {
       try {
         const mod = await import('../utils/imprimirCupom')
         temImpressoraLocal = await mod.appFwcDisponivel()
       } catch { temImpressoraLocal = false }
     }
-    if (ehAdmin && temImpressoraLocal) {
+    if (podeConferirCaixa && temImpressoraLocal) {
       // Quem fechou a conta, pro ranking (mig 0187). Carimba ANTES do RPC: ele
       // mexe em status/total e não encosta nestes campos.
       await supabase.from('comandas')
@@ -3641,7 +3656,7 @@ export default function PresencialSalao() {
                   {preContaMsg && (
                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'center', marginBottom: 8 }}>{preContaMsg}</div>
                   )}
-                  {ehAdmin ? (
+                  {podeConferirCaixa ? (
                     <div className="sal-acoes">
                       {/* AQUI NÃO TEM CANCELAR (11/10/2026). Azul quer dizer que o
                           garçom já fechou, já imprimiu e JÁ RECEBEU — esta tela

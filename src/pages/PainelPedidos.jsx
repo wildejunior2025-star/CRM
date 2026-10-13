@@ -6487,7 +6487,11 @@ export default function PainelPedidos() {
   // Super admin que entrou numa loja pelo gestor: pode voltar à lista de lojas.
   const temBackupSuperAdmin = !!localStorage.getItem('crm_superadmin_backup')
   // Só o dono (admin/super_admin) pode editar o preço de item da mesa.
-  const podeFinanceiro = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
+  // Só serve pros dois botões da mesa: corrigir o preço de um item (açaí no peso)
+  // e ajustar a taxa de serviço. Os dois são VENDA, não financeiro — e quem está
+  // com o caixa na mão precisa deles pra fechar a conta certa. Por isso o
+  // vendedor entrou aqui em 13/10/2026, junto com a conta azul.
+  const podeFinanceiro = ['admin', 'super_admin', 'vendedor'].includes(profile?.perfil)
   const { theme, toggleTheme } = useTheme()
   const [pedidos, setPedidos] = useState([])
   const [entregadores, setEntregadores] = useState([])
