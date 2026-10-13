@@ -50,8 +50,16 @@ function LayoutOrLanding() {
   if (naRaiz && isDominioLanding() && !loading && !session) {
     return <Landing />
   }
+  // ESTE é o portão do Portal inteiro: ele embrulha todas as telas do Layout, e
+  // quem não está aqui é devolvido pra home do perfil dele ANTES de qualquer
+  // guard de rota. O vendedor nunca esteve na lista — por isso ele caía no
+  // /painel mesmo com as rotas dele liberadas (13/10/2026).
+  //
+  // De quebra, isto explica por que a "Entrada de estoque" do vendedor (mig
+  // 0319, de 10/10) nunca chegou a abrir: a rota aceitava vendedor, a RLS
+  // também, e este portão barrava antes das duas.
   return (
-    <ProtectedRoute roles={['admin', 'garcom', 'cozinheiro']}>
+    <ProtectedRoute roles={['admin', 'garcom', 'cozinheiro', 'vendedor']}>
       <Layout />
     </ProtectedRoute>
   )
