@@ -73,6 +73,7 @@ Deno.serve(async (req) => {
     if (acao === "status") return json(await runStatus(sb, body?.pedido_id, body?.novo_status))
     if (acao === "verify_delivery_code") return json(await runVerifyDeliveryCode(sb, body?.pedido_id, body?.codigo))
     if (acao === "validar_codigo_coleta") return json(await runValidarCodigoColeta(sb, body?.pedido_id, body?.codigo))
+    if (acao === "coleta_diagnostico") return json(await runColetaDiagnostico(sb, body?.pedido_id))
     if (acao === "catalogo") return json(await runImportarCatalogo(sb, body?.empresa_id, body?.categoria_ids))
     if (acao === "catalogo_listar") return json(await runCatalogoListar(sb, body?.empresa_id))
     if (acao === "catalogo_pausar") return json(await runCatalogoPausar(sb, body?.empresa_id, body?.item_id, body?.pausar))
@@ -1486,6 +1487,62 @@ async function runStatus(sb: any, pedidoId: string, novoStatus: string) {
   if (novoStatus === "pronto") await guardarCodigoColeta(sb, token, orderId)
 
   return { ok: true, enviado: novoStatus }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// DIAGNÓSTICO DA COLETA — relê o detalhe do pedido no iFood e diz onde está
+// (ou se não está) o código de coleta.
+// ─────────────────────────────────────────────────────────────────────
+// Existe porque a documentação do iFood cita `pickupCode` mas não mostra o JSON
+// inteiro, e o campo só aparece em pedido com entrega do iFood e código
+// habilitado pra loja. Em vez de chutar o nome, isto olha o pedido de verdade.
+// Devolve só o que interessa pra essa pergunta — não é um dump do pedido.
+async function runColetaDiagnostico(sb: any, pedidoId: string) {
+  if (!pedidoId) return { ok: false, error: "pedido_id obrigatório" }
+
+  const { data: pedido } = await sb
+    .from("pedidos_delivery")
+    .select("id, empresa_id, origem, ifood_order_id, ifood_merchant_id, ifood_display_id")
+    .eq("id", pedidoId)
+    .maybeSingle()
+  if (!pedido?.ifood_order_id) return { ok: false, error: "pedido não é do iFood" }
+
+  const cfg = await cfgDaEmpresa(sb, pedido.empresa_id, pedido.ifood_merchant_id)
+  if (!cfg) return { ok: false, error: "iFood não configurado para esta empresa" }
+
+  const token = await getToken(sb, cfg as Config)
+  const res = await fetch(`${IFOOD}/order/v1.0/orders/${pedido.ifood_order_id}`, {
+    headers: { "Authorization": `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    return { ok: false, error: `iFood ${res.status}: ${(await res.text()).slice(0, 200)}` }
+  }
+  const o = await res.json()
+
+  // Varre o JSON todo atrás de qualquer chave com "code" no nome, em qualquer
+  // profundidade. Assim, se o iFood chamar de outra coisa, a gente descobre.
+  const achados: string[] = []
+  const anda = (v: any, caminho: string) => {
+    if (v === null || typeof v !== "object") return
+    for (const [k, val] of Object.entries(v)) {
+      const onde = caminho ? `${caminho}.${k}` : k
+      if (/code/i.test(k) && (val === null || typeof val !== "object")) {
+        achados.push(`${onde} = ${val === null ? "null" : String(val)}`)
+      }
+      anda(val, onde)
+    }
+  }
+  anda(o, "")
+
+  return {
+    ok: true,
+    pedido: pedido.ifood_display_id,
+    status_no_ifood: o?.status ?? null,
+    entregue_por: o?.delivery?.deliveredBy ?? null,
+    chaves_da_raiz: Object.keys(o ?? {}),
+    campos_com_code: achados,
+    codigo_de_coleta_lido: codigoDeColeta(o),
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
