@@ -75,10 +75,22 @@ function HostnameRedirect() {
       return
     }
 
-    // Vendedor só usa o gestor de pedidos (/painel), em qualquer domínio.
-    // Exceção: a entrada de estoque, que é trabalho dele quando a carga chega.
-    // Ela só SOMA — tirar do estoque sem venda mora no Financeiro, do dono.
+    // Vendedor: o lugar dele é o gestor de pedidos (/painel) — menos quando ele
+    // ESTÁ NO PORTAL.
+    //
+    // 13/10/2026: o vendedor ganhou cinco seções no Portal (Dashboard, Vendas,
+    // Clientes, Catálogo e WhatsApp). Só que este empurrão valia em QUALQUER
+    // domínio: ela entrava em portal.fwcinter.com, fazia login e era cuspida no
+    // gestor antes de ver qualquer coisa — e não tinha como ficar, porque o
+    // empurrão se repetia a cada navegação.
+    //
+    // No Portal quem decide o que ela abre é o guard de CADA rota (roles), que
+    // é onde a permissão já está escrita. Aqui não precisa de lista nenhuma.
+    // Exceção fora do Portal: a entrada de estoque, que é trabalho dela quando
+    // a carga chega. Ela só SOMA — tirar do estoque sem venda mora no
+    // Financeiro, do dono.
     if (perfil === 'vendedor') {
+      if (h === 'portal.fwcinter.com') return
       if (!pathname.startsWith('/painel') && !pathname.startsWith('/entrada-estoque') && pathname !== '/login') {
         navigate('/painel', { replace: true })
       }
