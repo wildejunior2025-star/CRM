@@ -2958,7 +2958,9 @@ function AtualizarAppCard() {
 function CodigoColetaIfood({ pedido }) {
   const [digitos, setDigitos] = useState(['', '', '', ''])
   const [estado, setEstado] = useState(null) // null | 'validando' | 'ok' | erro (texto)
-  const [aberto, setAberto] = useState(false)
+  // Já aberta: nesse momento do pedido, conferir a coleta É o que a loja tem
+  // pra fazer. Quem não quiser fecha no "deixar pra depois".
+  const [aberto, setAberto] = useState(true)
   const refs = useRef([])
 
   const jaValidado = !!pedido.ifood_coleta_validada_at
@@ -4478,6 +4480,11 @@ function acaoRapidaPedido(pedido) {
       // aqui não despacha nada (o iFood só aceita /dispatch de entrega da loja),
       // então o rótulo diz o que o clique faz de verdade: baixa a sacola.
       if (pedido.origem === 'ifood' && pedido.ifood_valores?.entregue_por === 'IFOOD') {
+        // Ainda não conferiu a coleta? O botão abre o pedido, que é onde fica a
+        // caixa dos 4 dígitos. Avançar daqui pularia a conferência calado.
+        if (!pedido.ifood_coleta_validada_at) {
+          return { abrir: true, label: '🔒 Conferir código de coleta', cor: '#7c3aed' }
+        }
         return { status: 'saiu_entrega', label: '🛵 Entreguei ao entregador', cor: '#7c3aed' }
       }
       return { status: 'saiu_entrega', label: '🛵 Despachar', cor: '#7c3aed' }
@@ -4670,7 +4677,13 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
         <span className="pp-mini-itens">{qtdItens} {qtdItens === 1 ? 'item' : 'itens'}</span>
         {isRetirada && <span className="pp-mini-itens">{pedido.origem === 'balcao' ? 'Balcão' : 'Retirada'}</span>}
         {entregadorNome && <span className="pp-mini-itens">🛵 {entregadorNome}</span>}
-        {aguardandoEntregador && <span className="pp-mini-itens" style={{ color: '#a16207' }}>aguardando entregador</span>}
+        {aguardandoEntregador && (
+          <span className="pp-mini-itens" style={{ color: '#a16207' }}>
+            {pedido.origem === 'ifood' && pedido.ifood_valores?.entregue_por === 'IFOOD'
+              ? 'aguardando o entregador do iFood'
+              : 'aguardando entregador'}
+          </span>
+        )}
         {['confirmado', 'em_preparo', 'pronto'].includes(pedido.status) && (
           pedidoAtrasado(pedido)
             ? <span className="pp-mini-badge" style={{ background: '#dc2626', color: '#fff' }}>⚠️ Em atraso · {tempoDecorridoTxt(relogioDoPedido(pedido))}</span>
@@ -4687,7 +4700,7 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
       </div>
       {acao && (
         <button type="button"
-          onClick={e => { e.stopPropagation(); onAvancar(pedido.id, acao.status) }}
+          onClick={e => { e.stopPropagation(); if (acao.abrir) onClick?.(); else onAvancar(pedido.id, acao.status) }}
           style={{ marginTop: 8, width: '100%', padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
             fontWeight: 800, fontSize: 15, border: `1.5px solid ${acao.cor}`, background: `${acao.cor}1e`, color: acao.cor }}>
           {acao.label}
