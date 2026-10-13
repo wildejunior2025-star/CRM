@@ -12,6 +12,10 @@ import { runConciliacaoMensal, runConciliacaoSolicitar, runConciliacaoStatus, ru
 // acao: "status" -> { pedido_id, novo_status }. Devolve o status pro iFood
 //                   (confirm / dispatch / readyToPickup / cancel). Chamado
 //                   pelo /painel quando o lojista avança o pedido.
+// acao: "validar_codigo_coleta" -> { pedido_id, codigo }. O entregador do iFood
+//                   chega na loja e fala o código; a loja digita e a gente
+//                   valida no iFood (validatePickupCode). Fica como prova de
+//                   que o pedido saiu com o entregador certo.
 // acao: "test"   -> { empresa_id }. Testa as credenciais (autentica) e
 //                   devolve ok/erro. Usado pelo botão "Testar conexão".
 // acao: "detectar_merchant" -> { empresa_id }. Descobre o Merchant ID da loja
@@ -68,6 +72,7 @@ Deno.serve(async (req) => {
     if (acao === "test") return json(await runTest(sb, body?.empresa_id, body?.merchant_id))
     if (acao === "status") return json(await runStatus(sb, body?.pedido_id, body?.novo_status))
     if (acao === "verify_delivery_code") return json(await runVerifyDeliveryCode(sb, body?.pedido_id, body?.codigo))
+    if (acao === "validar_codigo_coleta") return json(await runValidarCodigoColeta(sb, body?.pedido_id, body?.codigo))
     if (acao === "catalogo") return json(await runImportarCatalogo(sb, body?.empresa_id, body?.categoria_ids))
     if (acao === "catalogo_listar") return json(await runCatalogoListar(sb, body?.empresa_id))
     if (acao === "catalogo_pausar") return json(await runCatalogoPausar(sb, body?.empresa_id, body?.item_id, body?.pausar))
@@ -206,6 +211,53 @@ async function cfgDaEmpresa(sb: any, empresaId: string, merchantId?: string | nu
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// CÓDIGO DE COLETA — o que o entregador do iFood fala ao chegar na loja
+// ─────────────────────────────────────────────────────────────────────
+// Diferente do código do cliente (esse fica em ifood_codigo_entrega, vem do
+// evento DDCR e é digitado na PORTA). O de coleta é digitado no BALCÃO, e só
+// existe quando a entrega é do iFood — em entrega com motoboy da loja não há
+// código nenhum, quem busca é o funcionário.
+//
+// O iFood não manda o código em evento: ele aparece no detalhe do pedido, mas
+// só depois de designar o entregador. Como a gente lê o detalhe uma única vez
+// (no PLACED), tem que reler — é o que estas duas funções fazem.
+function codigoDeColeta(o: any): string | null {
+  const bruto = o?.pickupCode ?? o?.delivery?.pickupCode ?? o?.pickup?.code ?? null
+  const s = bruto == null ? "" : String(bruto).trim()
+  return s || null
+}
+
+// Eventos de entregador: designado, a caminho da loja, chegou na loja. O iFood
+// tem nomes diferentes por módulo/versão, então reconhece pelo assunto em vez
+// de listar código por código (lista fecha, assunto não).
+function ehEventoDeEntregador(code: string, full: string): boolean {
+  const t = `${code ?? ""} ${full ?? ""}`.toUpperCase()
+  return t.includes("DRIVER") || t.includes("ORIGIN") || t.includes("COLLECT")
+}
+
+async function guardarCodigoColeta(sb: any, token: string, orderId: string) {
+  try {
+    const { data: p } = await sb.from("pedidos_delivery")
+      .select("id, ifood_codigo_coleta")
+      .eq("ifood_order_id", orderId)
+      .maybeSingle()
+    // Já tem? Não gasta chamada. Vários eventos de entregador caem no mesmo pedido.
+    if (!p || p.ifood_codigo_coleta) return
+    const res = await fetch(`${IFOOD}/order/v1.0/orders/${orderId}`, {
+      headers: { "Authorization": `Bearer ${token}` },
+    })
+    if (!res.ok) return
+    const cod = codigoDeColeta(await res.json())
+    if (cod) {
+      await sb.from("pedidos_delivery").update({ ifood_codigo_coleta: cod }).eq("id", p.id)
+    }
+  } catch {
+    // Isto é um extra: se falhar, o pedido segue normal e a loja entrega do
+    // mesmo jeito (validar não é obrigatório). Não derruba o polling.
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // POLL — busca eventos de todas as empresas e grava os pedidos novos
 // ─────────────────────────────────────────────────────────────────────
 async function runPoll(sb: any) {
@@ -262,6 +314,12 @@ async function runPoll(sb: any) {
           const upd: Record<string, unknown> = { ifood_requer_codigo: true }
           if (cod) upd.ifood_codigo_entrega = String(cod)
           await sb.from("pedidos_delivery").update(upd).eq("ifood_order_id", orderId)
+        } else if (ehEventoDeEntregador(code, full)) {
+          // O código de COLETA (o que o entregador do iFood fala no balcão) só
+          // nasce depois que o iFood designa o entregador. Na leitura do PLACED
+          // ele vem vazio — por isso busca de novo agora.
+          await guardarCodigoColeta(sb, token, orderId)
+          await atualizarStatusLocal(sb, orderId, code)
         } else {
           await atualizarStatusLocal(sb, orderId, code)
         }
@@ -431,6 +489,10 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     // pedidos de RETIRADA a partir de 03/08/2026. Só usado pra NFC-e — NÃO é o
     // endereço da operação/rota (esse continua em endereco_*). Fica null até lá.
     ifood_billing_address: o.customer?.billingAddress ?? null,
+    // Código que o entregador do iFood vai falar no balcão. Costuma vir vazio
+    // aqui (só nasce quando o iFood designa o entregador) — o polling relê e
+    // preenche depois, em guardarCodigoColeta.
+    ifood_codigo_coleta: codigoDeColeta(o),
   }
 
   const { error } = await sb.from("pedidos_delivery").insert(novo)
@@ -1418,7 +1480,65 @@ async function runStatus(sb: any, pedidoId: string, novoStatus: string) {
   }
 
   await sb.from("pedidos_delivery").update({ ifood_status: novoStatus }).eq("id", pedidoId)
+
+  // Marcou pronto? É agora que a loja vai precisar do código de coleta —
+  // o entregador já pode estar na porta. Tenta preencher antes de ele chegar.
+  if (novoStatus === "pronto") await guardarCodigoColeta(sb, token, orderId)
+
   return { ok: true, enviado: novoStatus }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// VALIDAR CÓDIGO DE COLETA — o entregador do iFood chega na loja, fala o
+// código, a loja digita aqui e a gente valida no iFood (validatePickupCode).
+// ─────────────────────────────────────────────────────────────────────
+// Para que serve: o iFood registra que ESTE pedido foi entregue a ESTE
+// entregador. Se depois alguém disser que não retirou nada na loja, o registro
+// responde. Validar não é obrigatório — quem não quiser, entrega sem digitar.
+//
+// Só funciona em deliveredBy = IFOOD. Em entrega da própria loja o iFood
+// recusa (e faz sentido: não existe código, quem busca é o funcionário).
+async function runValidarCodigoColeta(sb: any, pedidoId: string, codigo: string) {
+  if (!pedidoId || !codigo) return { ok: false, error: "pedido_id e codigo obrigatórios" }
+
+  const { data: pedido } = await sb
+    .from("pedidos_delivery")
+    .select("id, empresa_id, origem, ifood_order_id, ifood_merchant_id, ifood_codigo_coleta")
+    .eq("id", pedidoId)
+    .maybeSingle()
+  if (!pedido) return { ok: false, error: "pedido não encontrado" }
+  if (pedido.origem !== "ifood" || !pedido.ifood_order_id) {
+    return { ok: false, error: "pedido não é do iFood" }
+  }
+
+  const cfg = await cfgDaEmpresa(sb, pedido.empresa_id, pedido.ifood_merchant_id)
+  if (!cfg) return { ok: false, error: "iFood não configurado para esta empresa" }
+
+  const token = await getToken(sb, cfg as Config)
+  const digitado = String(codigo).trim()
+  const res = await fetch(
+    `${IFOOD}/order/v1.0/orders/${pedido.ifood_order_id}/validatePickupCode`,
+    {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ code: digitado }),
+    },
+  )
+
+  // 400/422 = o iFood recusou o código. Não é erro nosso: é código errado.
+  if (!res.ok) {
+    const txt = await res.text()
+    return { ok: true, valid: false, status: res.status, detalhe: txt.slice(0, 200) }
+  }
+  const data = await res.json().catch(() => ({}))
+  const valid = data?.valid !== false // 200 sem "valid:false" = válido
+
+  if (valid) {
+    await sb.from("pedidos_delivery")
+      .update({ ifood_coleta_validada_at: new Date().toISOString(), ifood_codigo_coleta: digitado })
+      .eq("id", pedidoId)
+  }
+  return { ok: true, valid }
 }
 
 // ─────────────────────────────────────────────────────────────────────

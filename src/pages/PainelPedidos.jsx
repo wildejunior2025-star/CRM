@@ -7,7 +7,7 @@ import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDescon
 import { tocarPedidoNovo } from '../lib/somChamado'
 import { precoPorQuantidade, faixaAplicada, menorFaixa } from '../lib/precoQuantidade'
 import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
-import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarComandaCozinhaHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
+import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
 import { rotuloComanda, agruparItensComanda } from '../lib/comanda'
 import { acharPorCodigo, combinaCodigo, ouvirBipada } from '../lib/codigoBarras'
 import { useChamados } from '../hooks/useChamados'
@@ -2946,6 +2946,110 @@ function AtualizarAppCard() {
   )
 }
 
+// CÓDIGO DE COLETA DO IFOOD — o entregador deles chega no balcão e FALA um
+// código; a loja digita aqui e a gente valida no iFood.
+//
+// Não é obrigatório pro iFood: o entregador leva a sacola com ou sem isso.
+// Serve de prova. Se amanhã alguém disser que não retirou o pedido na loja, a
+// validação registrada no iFood responde. Por isso o texto fala em "conferir"
+// e nada aqui trava o pedido.
+//
+// Não confundir com o código do CLIENTE (esse é na porta, no fim da entrega).
+function CodigoColetaIfood({ pedido }) {
+  const [digitos, setDigitos] = useState(['', '', '', ''])
+  const [estado, setEstado] = useState(null) // null | 'validando' | 'ok' | erro (texto)
+  const [aberto, setAberto] = useState(false)
+  const refs = useRef([])
+
+  const jaValidado = !!pedido.ifood_coleta_validada_at
+  const codigo = digitos.join('')
+
+  function digitou(i, v) {
+    const d = v.replace(/\D/g, '').slice(-1)
+    const novos = [...digitos]
+    novos[i] = d
+    setDigitos(novos)
+    if (estado && estado !== 'validando') setEstado(null)
+    if (d && i < 3) refs.current[i + 1]?.focus()
+  }
+
+  function apagou(i, e) {
+    if (e.key === 'Backspace' && !digitos[i] && i > 0) {
+      const novos = [...digitos]
+      novos[i - 1] = ''
+      setDigitos(novos)
+      refs.current[i - 1]?.focus()
+    }
+  }
+
+  async function conferir() {
+    setEstado('validando')
+    try {
+      const { data, error } = await supabase.functions.invoke('ifood-integration', {
+        body: { acao: 'validar_codigo_coleta', pedido_id: pedido.id, codigo },
+      })
+      if (error || !data?.valid) {
+        setEstado('O iFood não aceitou esse código. Peça pro entregador repetir.')
+        setDigitos(['', '', '', ''])
+        refs.current[0]?.focus()
+        return
+      }
+      setEstado('ok')
+    } catch {
+      setEstado('Não deu pra falar com o iFood agora. Pode entregar — não é obrigatório.')
+    }
+  }
+
+  if (jaValidado || estado === 'ok') {
+    return (
+      <p style={{ textAlign: 'center', fontSize: 12.5, fontWeight: 700, color: '#16a34a', margin: '0 0 10px' }}>
+        ✅ Coleta conferida — ficou registrado no iFood
+      </p>
+    )
+  }
+
+  if (!aberto) {
+    return (
+      <button type="button" onClick={() => { setAberto(true); setTimeout(() => refs.current[0]?.focus(), 80) }}
+        style={{ width: '100%', padding: '8px', marginBottom: 8, borderRadius: 8, cursor: 'pointer',
+          border: '1.5px dashed var(--border)', background: 'transparent',
+          color: 'var(--text-muted)', fontWeight: 700, fontSize: 12.5 }}>
+        🔒 Conferir código de coleta
+      </button>
+    )
+  }
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', margin: '0 0 6px' }}>
+        Pergunte ao entregador do iFood o código de coleta:
+      </p>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'center', margin: '0 0 8px' }}>
+        {[0, 1, 2, 3].map(i => (
+          <input key={i} ref={el => { refs.current[i] = el }}
+            value={digitos[i]} onChange={e => digitou(i, e.target.value)} onKeyDown={e => apagou(i, e)}
+            inputMode="numeric" maxLength={1} aria-label={`Dígito ${i + 1} do código de coleta`}
+            style={{ width: 40, height: 46, textAlign: 'center', fontSize: 20, fontWeight: 800,
+              borderRadius: 8, border: '1.5px solid var(--border)',
+              background: 'var(--surface)', color: 'var(--text)' }} />
+        ))}
+      </div>
+      {typeof estado === 'string' && estado !== 'validando' && estado !== 'ok' && (
+        <p style={{ fontSize: 11.5, color: '#ef4444', textAlign: 'center', margin: '0 0 8px' }}>{estado}</p>
+      )}
+      <button type="button" className="pp-btn pp-btn-avancar" disabled={codigo.length < 4 || estado === 'validando'}
+        onClick={conferir} style={{ width: '100%', opacity: codigo.length < 4 ? .5 : 1 }}>
+        {estado === 'validando' ? 'Conferindo…' : 'Conferir no iFood'}
+      </button>
+      <button type="button" onClick={() => setAberto(false)}
+        style={{ width: '100%', marginTop: 6, padding: 6, borderRadius: 8, cursor: 'pointer',
+          border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 11.5 }}>
+        Deixar pra depois — não é obrigatório
+      </button>
+    </div>
+  )
+}
+
 function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onImprimirCelular, onAtribuir, onEditar, entregadores = [], nfceHabilitada = false, onEmitirNfce, nfceEmitindo }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const pagamento = pedido.forma_pagamento || ''
@@ -2960,6 +3064,10 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
   // do iFood), não pelo nosso código interno. ifood_requer_codigo vem do handshake.
   const isIfood = pedido.origem === 'ifood'
   const precisaCodigoIfood = isIfood && pedido.ifood_requer_codigo
+  // Quem leva o pedido. IFOOD = entregador deles vem buscar no balcão (e aí
+  // existe código de coleta). MERCHANT = motoboy da própria loja, sem código.
+  // Pedido antigo pode não ter o campo — nesse caso segue o fluxo de sempre.
+  const entregaDoIfood = isIfood && pedido.ifood_valores?.entregue_por === 'IFOOD'
   // Precisa digitar código? iFood (código do iFood) ou nosso pedido com código gerado.
   const precisaCodigo = precisaCodigoIfood || (!isIfood && !!pedido.codigo_entrega)
 
@@ -3452,9 +3560,14 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         {pedido.origem !== 'balcao' && !isRetirada && pedido.status === 'pronto' && (
           <div style={{ width: '100%' }}>
             <p style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, margin: '0 0 10px', color: pedido.entregador_id ? '#16a34a' : '#a16207' }}>
-              {pedido.entregador_id ? '🛵 Entregador a caminho' : '✅ Pronto · aguardando um entregador aceitar'}
+              {pedido.entregador_id ? '🛵 Entregador a caminho'
+                : entregaDoIfood ? '⏳ Pronto · aguardando o entregador do iFood buscar'
+                : '✅ Pronto · aguardando um entregador aceitar'}
             </p>
-            {!pedido.entregador_id && (
+            {/* Entrega do iFood: a sacola sai no balcão, com o entregador deles.
+                Não tem motoboy nosso pra escolher — tem código pra conferir. */}
+            {entregaDoIfood && <CodigoColetaIfood pedido={pedido} />}
+            {!pedido.entregador_id && !entregaDoIfood && (
               <>
                 <SeletorEntregador entregadores={entregadores} onAtribuir={onAtribuir} pedidoId={pedido.id} />
                 <button type="button" className="pp-btn pp-btn-avancar"
@@ -3462,6 +3575,17 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
                   Despachar mesmo assim
                 </button>
               </>
+            )}
+            {/* O iFood conclui o pedido sozinho quando o entregador finaliza.
+                Este botão é pro caso de a loja querer tirar da tela antes. */}
+            {entregaDoIfood && (
+              <button type="button"
+                onClick={() => onAvancar(pedido.id, 'saiu_entrega')}
+                style={{ width: '100%', padding: '8px', borderRadius: 8, cursor: 'pointer',
+                  border: '1.5px solid var(--border)', background: 'var(--surface)',
+                  color: 'var(--text)', fontWeight: 700, fontSize: 12.5 }}>
+                Já entreguei ao entregador
+              </button>
             )}
           </div>
         )}
@@ -4349,9 +4473,14 @@ function acaoRapidaPedido(pedido) {
     case 'em_preparo':
       return { status: 'pronto', label: '✓ Pronto', cor: '#1d4ed8' }
     case 'pronto':
-      return isRet
-        ? { status: 'entregue', label: '✓ Confirmar retirada', cor: '#16a34a' }
-        : { status: 'saiu_entrega', label: '🛵 Despachar', cor: '#7c3aed' }
+      if (isRet) return { status: 'entregue', label: '✓ Confirmar retirada', cor: '#16a34a' }
+      // Entrega do iFood: quem leva é o entregador deles, no balcão. "Despachar"
+      // aqui não despacha nada (o iFood só aceita /dispatch de entrega da loja),
+      // então o rótulo diz o que o clique faz de verdade: baixa a sacola.
+      if (pedido.origem === 'ifood' && pedido.ifood_valores?.entregue_por === 'IFOOD') {
+        return { status: 'saiu_entrega', label: '🛵 Entreguei ao entregador', cor: '#7c3aed' }
+      }
+      return { status: 'saiu_entrega', label: '🛵 Despachar', cor: '#7c3aed' }
     case 'saiu_entrega':
       // Retirada: confirma no próprio gestor. Entrega por motoboy: só o CÓDIGO
       // do cliente confirma (no app do entregador) — sem botão "Entregue" aqui.
@@ -4548,7 +4677,12 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
             : <span className="pp-mini-itens">⏱ {tempoDecorridoTxt(relogioDoPedido(pedido))}</span>
         )}
         {pedido.status === 'saiu_entrega' && !isRetirada && (
-          <span className="pp-mini-itens" style={{ color: '#7c3aed', fontWeight: 700 }}>🛵 Despachado {tempoDecorridoTxt(pedido.saiu_entrega_at || pedido.updated_at)}</span>
+          <span className="pp-mini-itens" style={{ color: '#7c3aed', fontWeight: 700 }}>
+            {pedido.origem === 'ifood' && pedido.ifood_valores?.entregue_por === 'IFOOD'
+              ? '🛵 Com o entregador do iFood '
+              : '🛵 Despachado '}
+            {tempoDecorridoTxt(pedido.saiu_entrega_at || pedido.updated_at)}
+          </span>
         )}
       </div>
       {acao && (
@@ -8560,7 +8694,15 @@ export default function PainelPedidos() {
     // do envio. Sem esta marca sairiam duas vias da mesma comanda.
     const jaSaiu = window.__fwcMesaImpressa
     if (jaSaiu?.has(item.id)) { jaSaiu.delete(item.id); return }
-    if (!deveAutoImprimir() || fwcImprimeRef.current || (item.status && item.status !== 'pendente')) return
+    // ANTES: `fwcImprimeRef.current` fazia o Painel se calar quando o app FWC
+    // estava vivo, assumindo que o app ia imprimir sozinho pelo tempo real.
+    // 12/10/2026, O Braseiro: o app estava vivo e CEGO (sessao vencida, e
+    // `comanda_itens` e a unica tabela do caminho sem leitura publica). Quem
+    // enviava do celular do garcom - que nao tem impressora nenhuma - ficava sem
+    // papel em lugar nenhum, e ninguem via erro.
+    // Agora o Painel EMPURRA a comanda pro app: ele esta logado e ja tem o item
+    // na mao. O app pula os ids que ja imprimiu, entao nao sai 2 via.
+    if (!deveAutoImprimir() || (item.status && item.status !== 'pendente')) return
     const cid = item.comanda_id
     const buf = mesaPrintRef.current
     if (!buf[cid]) buf[cid] = { itens: [], timer: null }
@@ -8621,7 +8763,15 @@ export default function PainelPedidos() {
     // disse que ali não precisa de papel.
     const paraPapel = dados.itens.filter(i => i.setor !== 'nenhum')
     if (!paraPapel.length) return
-    imprimirHtml(montarComandaCozinhaHtml({ ...dados, itens: paraPapel }), null, { soApp: semJanelaDoNavegador(), setor: 'cozinha' })
+    // Vai pelo mesmo caminho do Salão: o app recebe a comanda PRONTA (layout
+    // nativo, e o `setor` de cada item decide cozinha x bar lá dentro), com os
+    // ids pra ele não repetir. Só cai no HTML se não houver app neste aparelho.
+    await imprimirComandaMesaApp({
+      ...dados, itens: paraPapel,
+      comandaId: cid,
+      ids: entry.itens.map(i => i.id),
+      auto: true,
+    })
   }
 
   // A CONTA da mesa também respeita o filtro "Mesa" deste PC: se a Mesa está
