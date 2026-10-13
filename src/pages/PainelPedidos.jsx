@@ -2955,16 +2955,22 @@ function AtualizarAppCard() {
 // e nada aqui trava o pedido.
 //
 // Não confundir com o código do CLIENTE (esse é na porta, no fim da entrega).
-function CodigoColetaIfood({ pedido }) {
+//
+// A REGRA (decisão do usuário, 13/10): um botão só, e o código é opcional.
+//   campo vazio          -> libera direto, sem conferir nada
+//   4 dígitos e bate     -> confere no iFood e libera
+//   4 dígitos e não bate -> NÃO libera, fica vermelho
+//
+// O motivo de não exigir: na correria a pessoa não pergunta o código, e um
+// pedido preso na tela esperando digitação atrapalha mais do que ajuda.
+function CodigoColetaIfood({ pedido, onLiberar }) {
   const [digitos, setDigitos] = useState(['', '', '', ''])
-  const [estado, setEstado] = useState(null) // null | 'validando' | 'ok' | erro (texto)
-  // Já aberta: nesse momento do pedido, conferir a coleta É o que a loja tem
-  // pra fazer. Quem não quiser fecha no "deixar pra depois".
-  const [aberto, setAberto] = useState(true)
+  const [estado, setEstado] = useState(null) // null | 'validando' | erro (texto)
   const refs = useRef([])
 
   const jaValidado = !!pedido.ifood_coleta_validada_at
   const codigo = digitos.join('')
+  const incompleto = codigo.length > 0 && codigo.length < 4
 
   function digitou(i, v) {
     const d = v.replace(/\D/g, '').slice(-1)
@@ -2984,25 +2990,34 @@ function CodigoColetaIfood({ pedido }) {
     }
   }
 
-  async function conferir() {
+  // Um clique, três caminhos. Quem decide é o que está digitado.
+  async function entregar() {
+    // Nada digitado = a loja não perguntou o código. Libera e segue a vida.
+    if (!codigo) { onLiberar(); return }
+    if (incompleto) {
+      setEstado('O código tem 4 dígitos. Complete, ou apague tudo pra entregar sem conferir.')
+      return
+    }
     setEstado('validando')
     try {
       const { data, error } = await supabase.functions.invoke('ifood-integration', {
         body: { acao: 'validar_codigo_coleta', pedido_id: pedido.id, codigo },
       })
+      // Digitou e não bateu: NÃO libera. Pode ser pedido trocado, ou alguém
+      // que não é o entregador. É justamente a hora de segurar a sacola.
       if (error || !data?.valid) {
-        setEstado('O iFood não aceitou esse código. Peça pro entregador repetir.')
+        setEstado('Esse código não bate com o deste pedido. Confira com o entregador antes de entregar.')
         setDigitos(['', '', '', ''])
         refs.current[0]?.focus()
         return
       }
-      setEstado('ok')
+      onLiberar()
     } catch {
-      setEstado('Não deu pra falar com o iFood agora. Pode entregar — não é obrigatório.')
+      setEstado('Não deu pra falar com o iFood agora. Apague o código pra entregar sem conferir.')
     }
   }
 
-  if (jaValidado || estado === 'ok') {
+  if (jaValidado) {
     return (
       <p style={{ textAlign: 'center', fontSize: 12.5, fontWeight: 700, color: '#16a34a', margin: '0 0 10px' }}>
         ✅ Coleta conferida — ficou registrado no iFood
@@ -3010,21 +3025,10 @@ function CodigoColetaIfood({ pedido }) {
     )
   }
 
-  if (!aberto) {
-    return (
-      <button type="button" onClick={() => { setAberto(true); setTimeout(() => refs.current[0]?.focus(), 80) }}
-        style={{ width: '100%', padding: '8px', marginBottom: 8, borderRadius: 8, cursor: 'pointer',
-          border: '1.5px dashed var(--border)', background: 'transparent',
-          color: 'var(--text-muted)', fontWeight: 700, fontSize: 12.5 }}>
-        🔒 Conferir código de coleta
-      </button>
-    )
-  }
-
   return (
     <div style={{ marginBottom: 10 }}>
       <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', margin: '0 0 6px' }}>
-        Pergunte ao entregador do iFood o código de coleta:
+        Código de coleta do entregador <span style={{ opacity: .7 }}>(opcional)</span>
       </p>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'center', margin: '0 0 8px' }}>
         {[0, 1, 2, 3].map(i => (
@@ -3036,18 +3040,19 @@ function CodigoColetaIfood({ pedido }) {
               background: 'var(--surface)', color: 'var(--text)' }} />
         ))}
       </div>
-      {typeof estado === 'string' && estado !== 'validando' && estado !== 'ok' && (
+      {typeof estado === 'string' && estado !== 'validando' && (
         <p style={{ fontSize: 11.5, color: '#ef4444', textAlign: 'center', margin: '0 0 8px' }}>{estado}</p>
       )}
-      <button type="button" className="pp-btn pp-btn-avancar" disabled={codigo.length < 4 || estado === 'validando'}
-        onClick={conferir} style={{ width: '100%', opacity: codigo.length < 4 ? .5 : 1 }}>
-        {estado === 'validando' ? 'Conferindo…' : 'Conferir no iFood'}
+      {/* Sempre clicável: sem código entrega direto, com código confere antes. */}
+      <button type="button" className="pp-btn pp-btn-avancar" disabled={estado === 'validando'}
+        onClick={entregar} style={{ width: '100%' }}>
+        {estado === 'validando' ? 'Conferindo…'
+          : codigo.length === 4 ? '🔒 Conferir e entregar'
+          : '🛵 Entreguei ao entregador'}
       </button>
-      <button type="button" onClick={() => setAberto(false)}
-        style={{ width: '100%', marginTop: 6, padding: 6, borderRadius: 8, cursor: 'pointer',
-          border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 11.5 }}>
-        Deixar pra depois — não é obrigatório
-      </button>
+      <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', margin: '6px 0 0', lineHeight: 1.35 }}>
+        Sem digitar nada, entrega direto. Se digitar, só libera se bater.
+      </p>
     </div>
   )
 }
@@ -3567,8 +3572,12 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
                 : '✅ Pronto · aguardando um entregador aceitar'}
             </p>
             {/* Entrega do iFood: a sacola sai no balcão, com o entregador deles.
-                Não tem motoboy nosso pra escolher — tem código pra conferir. */}
-            {entregaDoIfood && <CodigoColetaIfood pedido={pedido} />}
+                Não tem motoboy nosso pra escolher — tem código pra conferir.
+                O próprio botão de entregar vive dentro desse componente, porque
+                quem decide se libera é o que está (ou não está) digitado. */}
+            {entregaDoIfood && (
+              <CodigoColetaIfood pedido={pedido} onLiberar={() => onAvancar(pedido.id, 'saiu_entrega')} />
+            )}
             {!pedido.entregador_id && !entregaDoIfood && (
               <>
                 <SeletorEntregador entregadores={entregadores} onAtribuir={onAtribuir} pedidoId={pedido.id} />
@@ -3578,15 +3587,11 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
                 </button>
               </>
             )}
-            {/* O iFood conclui o pedido sozinho quando o entregador finaliza.
-                Este botão é pro caso de a loja querer tirar da tela antes. */}
-            {entregaDoIfood && (
-              <button type="button"
-                onClick={() => onAvancar(pedido.id, 'saiu_entrega')}
-                style={{ width: '100%', padding: '8px', borderRadius: 8, cursor: 'pointer',
-                  border: '1.5px solid var(--border)', background: 'var(--surface)',
-                  color: 'var(--text)', fontWeight: 700, fontSize: 12.5 }}>
-                Já entreguei ao entregador
+            {/* Já conferiu a coleta antes? Então só falta baixar a sacola. */}
+            {entregaDoIfood && pedido.ifood_coleta_validada_at && (
+              <button type="button" className="pp-btn pp-btn-avancar"
+                onClick={() => onAvancar(pedido.id, 'saiu_entrega')} style={{ width: '100%' }}>
+                🛵 Entreguei ao entregador
               </button>
             )}
           </div>
@@ -4480,11 +4485,9 @@ function acaoRapidaPedido(pedido) {
       // aqui não despacha nada (o iFood só aceita /dispatch de entrega da loja),
       // então o rótulo diz o que o clique faz de verdade: baixa a sacola.
       if (pedido.origem === 'ifood' && pedido.ifood_valores?.entregue_por === 'IFOOD') {
-        // Ainda não conferiu a coleta? O botão abre o pedido, que é onde fica a
-        // caixa dos 4 dígitos. Avançar daqui pularia a conferência calado.
-        if (!pedido.ifood_coleta_validada_at) {
-          return { abrir: true, label: '🔒 Conferir código de coleta', cor: '#7c3aed' }
-        }
+        // Clicar aqui equivale a entregar sem digitar código — que é permitido
+        // de propósito. Quem quiser conferir abre o pedido (é lá que fica a
+        // caixa dos 4 dígitos); o botão do quadro nunca segura a sacola.
         return { status: 'saiu_entrega', label: '🛵 Entreguei ao entregador', cor: '#7c3aed' }
       }
       return { status: 'saiu_entrega', label: '🛵 Despachar', cor: '#7c3aed' }
@@ -4700,7 +4703,7 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
       </div>
       {acao && (
         <button type="button"
-          onClick={e => { e.stopPropagation(); if (acao.abrir) onClick?.(); else onAvancar(pedido.id, acao.status) }}
+          onClick={e => { e.stopPropagation(); onAvancar(pedido.id, acao.status) }}
           style={{ marginTop: 8, width: '100%', padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
             fontWeight: 800, fontSize: 15, border: `1.5px solid ${acao.cor}`, background: `${acao.cor}1e`, color: acao.cor }}>
           {acao.label}
