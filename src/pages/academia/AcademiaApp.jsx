@@ -24,6 +24,7 @@ const AcademiaCatraca = lazy(() => import('./AcademiaCatraca'))
 const AcademiaPorta = lazy(() => import('./AcademiaPorta'))
 const AcademiaImportar = lazy(() => import('./AcademiaImportar'))
 const AcademiaPagamentos = lazy(() => import('./AcademiaPagamentos'))
+const AcademiaEquipe = lazy(() => import('./AcademiaEquipe'))
 const AlunoApp = lazy(() => import('./AlunoApp'))
 const ProfessorApp = lazy(() => import('./ProfessorApp'))
 
@@ -149,6 +150,7 @@ function Topo() {
         <NavLink to="/pagamentos">Pagamentos</NavLink>
         <NavLink to="/recepcao">Recepção</NavLink>
         <NavLink to="/porta">Porta</NavLink>
+        <NavLink to="/equipe">Equipe</NavLink>
       </nav>
       <BotaoAbrirCatraca />
       <button className="btn btn-secondary btn-sm" onClick={logout}>Sair</button>
@@ -200,6 +202,7 @@ function Portaria() {
             <Route path="/catraca" element={<AcademiaCatraca />} />
             <Route path="/porta" element={<AcademiaPorta />} />
             <Route path="/importar" element={<AcademiaImportar />} />
+            <Route path="/equipe" element={<AcademiaEquipe />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main></>} />
