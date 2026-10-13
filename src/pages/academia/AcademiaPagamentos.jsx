@@ -135,6 +135,7 @@ export default function AcademiaPagamentos() {
                   <td data-rotulo="Matrícula" className="ac-num">{p.academia_alunos?.matricula || '—'}</td>
                   <td data-rotulo="Aluno"><strong>{p.academia_alunos?.nome}</strong></td>
                   <td data-rotulo="Forma">
+                    {p.recebido_por_nome ? `${p.recebido_por_nome} · ` : ''}
                     {p.partes
                       ? p.partes.map(x => `${nomeForma(x.forma)} ${dinheiro(x.valor)}`).join(' + ')
                       : nomeForma(p.forma)}{p.meses > 1 ? ` · ${p.meses} meses` : ''}

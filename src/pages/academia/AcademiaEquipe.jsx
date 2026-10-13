@@ -18,6 +18,79 @@ const URL_CRIAR = 'https://ycytrsqdvrviihkqfvno.supabase.co/functions/v1/create-
 
 const VAZIO = { nome: '', email: '', senha: '', telefone: '' }
 
+// Códigos do caixa: a academia usa UM login no balcão (eles não se dão bem
+// com computador), então quem diz QUEM está recebendo é o código. Cada um
+// tem o seu, e é o nome dele que fica no recebimento.
+function CodigosDoCaixa() {
+  const [lista, setLista] = useState([])
+  const [nome, setNome] = useState('')
+  const [codigo, setCodigo] = useState('')
+  const [erro, setErro] = useState(null)
+  const [indo, setIndo] = useState(false)
+
+  const carregar = () => supabase.rpc('academia_caixa_listar').then(({ data }) => setLista(data || []))
+  useEffect(() => { carregar() }, [])
+
+  async function salvar(e) {
+    e.preventDefault()
+    setErro(null)
+    setIndo(true)
+    const { data, error } = await supabase.rpc('academia_caixa_salvar', { p_nome: nome, p_codigo: codigo })
+    setIndo(false)
+    if (error) return setErro(error.message)
+    if (!data?.ok) return setErro(data?.erro || 'Não deu pra salvar.')
+    setNome(''); setCodigo(''); carregar()
+  }
+
+  async function remover(p) {
+    if (!window.confirm(`Tirar o código de ${p.nome}? Ela deixa de conseguir receber mensalidade.`)) return
+    await supabase.rpc('academia_caixa_remover', { p_id: p.id })
+    carregar()
+  }
+
+  return (
+    <div className="ac-card ac-form" style={{ marginTop: 16 }}>
+      <h3 style={{ margin: 0 }}>Códigos do caixa</h3>
+      <p className="ac-muted">
+        Todo mundo entra no mesmo login. O que muda é o código: ele libera o
+        recebimento e marca o nome de quem recebeu em cada mensalidade.
+      </p>
+
+      {lista.length > 0 && (
+        <div className="ac-lista">
+          {lista.map(p => (
+            <div key={p.id} className="ac-aluno" style={{ padding: '8px 12px' }}>
+              <span style={{ flex: 1 }}><strong>{p.nome}</strong></span>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => remover(p)}>Tirar</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="ac-dupla">
+        <label>Nome
+          <input value={nome} onChange={e => setNome(e.target.value)} placeholder="Quem vai receber" />
+        </label>
+        <label>Código
+          <input inputMode="numeric" autoComplete="off" value={codigo}
+            onChange={e => setCodigo(e.target.value)} placeholder="mínimo 4 números" />
+        </label>
+      </div>
+      <p className="ac-muted">
+        Pra trocar o código de alguém, cadastre o mesmo nome de novo com o código novo
+        e tire o antigo.
+      </p>
+
+      {erro && <div className="ac-erro">{erro}</div>}
+      <div className="ac-form-botoes">
+        <button type="button" className="btn btn-primary" disabled={indo} onClick={salvar}>
+          {indo ? 'Salvando...' : 'Salvar código'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function AcademiaEquipe() {
   const { empresa, profile } = useAuth()
   const [gente, setGente] = useState([])
@@ -114,6 +187,8 @@ export default function AcademiaEquipe() {
           </table>
         </div>
       )}
+
+      <CodigosDoCaixa />
 
       <form className="ac-card ac-form" onSubmit={criar} style={{ marginTop: 16 }}>
         <h3 style={{ margin: 0 }}>Adicionar alguém</h3>

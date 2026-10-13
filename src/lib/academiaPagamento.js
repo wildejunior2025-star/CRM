@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient'
+import { quemAbriuOCaixa } from './caixaAcademia'
 
 // Mensalidade da academia (mig 0294). "Renovar" grava o pagamento E empurra o
 // vencimento; cancelar desfaz os dois.
@@ -40,6 +41,11 @@ export async function registrarPagamento({ empresaId, aluno, valor, forma, meses
     partes,
     meses,
     data,
+    // Quem estava no balcao: vem do codigo que abriu o caixa. Guarda o nome
+    // junto do id — se a pessoa sair da academia, o recibo antigo continua
+    // dizendo quem recebeu.
+    recebido_por: quemAbriuOCaixa()?.id ?? null,
+    recebido_por_nome: quemAbriuOCaixa()?.nome ?? null,
     vencimento_antes: aluno.vencimento,
     vencimento_depois: vencimentoDepois,
     observacao,

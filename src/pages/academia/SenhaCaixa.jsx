@@ -27,6 +27,7 @@ export default function SenhaCaixa({ onLiberar, onCancelar }) {
     e.preventDefault()
     setErro(null)
     setIndo(true)
+    let pessoa = null
     try {
       if (temSenha === false) {
         // Primeira vez: está criando a senha agora.
@@ -36,11 +37,12 @@ export default function SenhaCaixa({ onLiberar, onCancelar }) {
         if (error) throw error
         if (!data) throw new Error('Não consegui gravar a senha.')
       } else {
-        const { data, error } = await supabase.rpc('academia_conferir_senha', { p_senha: senha })
+        const { data, error } = await supabase.rpc('academia_abrir_caixa', { p_senha: senha })
         if (error) throw error
-        if (!data) throw new Error('Senha errada.')
+        if (!data?.ok) throw new Error('Código errado.')
+        pessoa = data.nome ? { id: data.id, nome: data.nome } : null
       }
-      liberarCaixa()
+      liberarCaixa(pessoa)
       onLiberar()
     } catch (err) {
       setErro(err.message)
@@ -55,14 +57,14 @@ export default function SenhaCaixa({ onLiberar, onCancelar }) {
   return (
     <div className="ac-modal" role="dialog" aria-modal="true">
       <form className="ac-card ac-form ac-modal-caixa" onSubmit={enviar}>
-        <h2>{temSenha ? '🔒 Senha do caixa' : '🔒 Criar a senha do caixa'}</h2>
+        <h2>{temSenha ? '🔒 Seu código do caixa' : '🔒 Criar a senha do caixa'}</h2>
         <p className="ac-muted">
           {temSenha
-            ? 'Pra receber mensalidade e ver os pagamentos.'
+            ? 'O código é seu, não da academia — é por ele que o sistema sabe quem recebeu.'
             : 'Ninguém cadastrou senha ainda. Escolha uma agora — ela passa a ser pedida pra receber mensalidade e pra ver os pagamentos.'}
         </p>
 
-        <label>Senha
+        <label>{temSenha ? 'Código' : 'Senha'}
           <input type="password" inputMode="numeric" autoFocus autoComplete="off"
             value={senha} onChange={e => setSenha(e.target.value)} />
         </label>
