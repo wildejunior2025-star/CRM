@@ -80,6 +80,12 @@ async function comprimirImagem(file, maxLado = 1200, qualidade = 0.82) {
 // Preço do app FWC: escondido enquanto o app não está no ar. O valor continua
 // gravado em produtos.preco_app — é só voltar pra true quando o app publicar.
 const MOSTRAR_PRECO_APP = false
+// `unidades_por_caixa` nao faz conta nenhuma no sistema: nao soma estoque na
+// entrada, nao converte venda, nao mexe em preco. Era so um rotulo, e campo que
+// nao faz nada so atrapalha quem cadastra (13/10/2026). O valor continua gravado
+// no banco - tem loja com 12 e 100 salvos. Quando a ENTRADA POR CAIXA existir de
+// verdade, volta pra true e o campo reaparece no cadastro e na tabela.
+const MOSTRAR_UN_CAIXA = false
 
 // CAMPO DE DINHEIRO.
 //
@@ -1457,7 +1463,7 @@ export default function Produtos() {
   const totalPaginas = Math.ceil(produtosOrdenados.length / PAGE_SIZE)
   const usaCasco = produtos.some((p) => p.controla_casco)
   // Nome, Categoria, Custo, Venda, Disponível e ações são fixas.
-  const totalColunas = 6 + (MOSTRAR_PRECO_APP ? 1 : 0) + (usaEstoque ? 3 : 0) + (usaCasco ? 1 : 0)
+  const totalColunas = 6 + (MOSTRAR_PRECO_APP ? 1 : 0) + (usaEstoque ? (MOSTRAR_UN_CAIXA ? 3 : 2) : 0) + (usaCasco ? 1 : 0)
 
   return (
     <div>
@@ -1569,7 +1575,6 @@ export default function Produtos() {
                 <th>Nome</th>
                 <th className="col-extra">Categoria</th>
                 {usaEstoque && <th className="col-extra">Embalagem</th>}
-                {usaEstoque && <th className="col-extra">Un./caixa</th>}
                 {usaCasco && <th className="col-extra">Casco</th>}
                 <th className="col-extra">Custo</th>
                 <th>Venda</th>
@@ -1696,7 +1701,6 @@ export default function Produtos() {
                   </td>
                   <td className="col-extra">{p.categoria}</td>
                   {usaEstoque && <td className="col-extra">{p.embalagem}</td>}
-                  {usaEstoque && <td className="col-extra">{p.unidades_por_caixa}</td>}
                   {usaCasco && <td className="col-extra">{p.controla_casco ? 'Sim' : 'Não'}</td>}
                   <td className="col-extra">
                     {p.custo_pct_venda != null
@@ -2018,8 +2022,13 @@ export default function Produtos() {
                 </div>
                 )}
 
-                {/* Unidades por caixa só faz sentido quando controla estoque (ex.: caixa de bebida) */}
-                {usaEstoque && form.controla_estoque && (
+                {/* ESCONDIDO 13/10/2026: `unidades_por_caixa` nao faz conta nenhuma -
+                    nao soma estoque na entrada, nao converte venda, nao mexe em preco.
+                    Era so um rotulo, e um campo que nao faz nada so atrapalha quem
+                    cadastra. O valor continua gravado no banco (tem loja com 12 e 100
+                    salvos); quando a entrada POR CAIXA for feita de verdade, e so
+                    trocar o `false` de volta pela condicao antiga. */}
+                {MOSTRAR_UN_CAIXA && usaEstoque && form.controla_estoque && (
                 <div className="form-field">
                   <label>Unidades por caixa</label>
                   <input

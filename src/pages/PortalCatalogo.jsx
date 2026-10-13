@@ -176,7 +176,9 @@ export default function PortalCatalogo() {
                 {/* Info */}
                 <div className="loja-card-body">
                   <p className="loja-card-nome">{p.nome}</p>
-                  <p className="loja-card-sub">{p.embalagem} {p.unidades_por_caixa > 1 ? `· ${p.unidades_por_caixa} un.` : ''}</p>
+                  {/* un./caixa escondido (13/10/2026): o campo nao faz conta nenhuma
+                      e aqui virava armadilha - "Lata · 12 un." num preco de unidade. */}
+                  <p className="loja-card-sub">{p.embalagem}</p>
                   <p className="loja-card-preco">
                     R$ {Number(p.preco_venda).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </p>

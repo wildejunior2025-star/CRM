@@ -1124,11 +1124,9 @@ function ProdutoCard({ produto: p, qtd, onAdd, onRemove, lojaFechada }) {
       <div className="loja-card-info">
         <p className="loja-card-nome">{p.nome}</p>
         {p.descricao && <p className="loja-card-descricao">{p.descricao}</p>}
-        <p className="loja-card-meta">
-          {[p.embalagem, p.unidades_por_caixa > 1 ? `${p.unidades_por_caixa} un.` : null]
-            .filter(Boolean)
-            .join(' · ')}
-        </p>
+        {/* un./caixa escondido (13/10/2026): nao faz conta nenhuma no sistema e
+            aqui enganava - "12 un." ao lado de um preco que e da unidade. */}
+        <p className="loja-card-meta">{p.embalagem}</p>
         <p className="loja-card-preco">
           R$ {Number(p.preco_venda).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
         </p>
