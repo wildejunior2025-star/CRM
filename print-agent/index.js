@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 34
+const APP_VERSION = 35
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -807,10 +807,22 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' && req.url === '/api/imprimir-mesa') {
         const f = await jsonBody(req)
         const nomeLoja = f.nomeLoja || empresa?.nome || ''
-        const itens = Array.isArray(f.itens) ? f.itens : []
-        // O gestor EMPURROU esta comanda (12/10/2026). Marca os itens como
-        // impressos pra o tempo real nao mandar a segunda via do mesmo papel.
-        for (const id of (Array.isArray(f.ids) ? f.ids : [])) comandaItensImpressos.add(id)
+        let itens = Array.isArray(f.itens) ? f.itens : []
+        // O gestor EMPURROU esta comanda (12/10/2026). Dois lugares empurram -
+        // a tela do Salao (quem enviou) e o Painel de Pedidos (que escuta o
+        // tempo real logado, e cobre o envio do celular do garcom, que nao tem
+        // impressora) - e o tempo real do proprio app e um terceiro. Por isso
+        // `auto` pula o que ja saiu: quem chegar primeiro imprime, os outros
+        // nao repetem. Sem `auto` (botao reimprimir) sai de novo, de proposito.
+        const ids = Array.isArray(f.ids) ? f.ids : []
+        if (f.auto === true && ids.length) {
+          const novos = ids.map((id, i) => [id, i]).filter(([id]) => !comandaItensImpressos.has(id))
+          if (!novos.length) return sendJson(res, { ok: true, repetido: true })
+          if (novos.length < ids.length && itens.length === ids.length) {
+            itens = novos.map(([, i]) => itens[i])
+          }
+        }
+        for (const id of ids) comandaItensImpressos.add(id)
         // Busca salão/atendente/pessoas se o gestor mandou o comandaId (mesmo visual do auto).
         const info = f.comandaId ? await infoComandaMesa(f.comandaId) : { numero: f.numeroMesa, area: '', atendente: '', pessoas: 0 }
         const numero = info.numero != null && info.numero !== '?' ? info.numero : f.numeroMesa
