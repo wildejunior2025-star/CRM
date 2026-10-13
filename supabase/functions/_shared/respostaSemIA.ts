@@ -830,6 +830,38 @@ export async function pausarPorAtendimentoHumano(supabase: Sb, empresaId: string
 }
 
 // ── Chamado de atendente ─────────────────────────────────────────────────────
+// PEDIU UMA PESSOA, com todas as letras: "falo com o gestor?", "quero falar com
+// o dono", "tem alguém aí?". Até hoje o robô só abria chamado em dois casos —
+// quando o cliente recusava o link, e depois de ELE mesmo perguntar "quer que eu
+// chame um atendente?". Quem chegava pedindo gente direto não casava com regra
+// nenhuma e, com a loja fechada, não recebia nem resposta (Braseiro, 13/10/2026:
+// "Falo com o gestor da O Brasileiro?" ficou sem resposta).
+//
+// Não é dúvida de cardápio: fornecedor, parceiro, reclamação, imprensa. O robô
+// não tem o que responder — o que ele tem a fazer é chamar gente.
+export function pediuFalarComGente(texto: string): boolean {
+  const t = " " + semAcento(texto).replace(/[^a-z0-9 ]/g, " ").replace(/ +/g, " ") + " "
+  const QUEM = [
+    "gestor", "gestora", "dono", "dona", "proprietario", "proprietaria",
+    "responsavel", "gerente", "atendente", "vendedor", "vendedora",
+    "humano", "pessoa", "alguem", "funcionario", "encarregado",
+  ]
+  // "falo com", "falar com", "fala com", "conversar com" + quem
+  const PEDE = [" falo ", " falar ", " fala ", " conversar ", " conversa "]
+  if (PEDE.some(p => t.includes(p)) && QUEM.some(q => t.includes(" " + q))) return true
+  // "quem é o dono", "qual o responsável"
+  if ((t.includes(" quem e ") || t.includes(" quem eh ") || t.includes(" qual o ") || t.includes(" qual a "))
+    && QUEM.some(q => t.includes(" " + q))) return true
+  // "tem alguém aí?" sim; "tem alguém pra entregar?" não — esse é pergunta de
+  // entrega, e virar chamado tiraria a loja do fogão à toa.
+  const PRESENCA = [" ai ", " ai ", " online ", " disponivel ", " na loja ", " agora ", " acordado "]
+  if ((t.includes(" tem alguem ") || t.includes(" tem gente ") || t.includes(" tem atendente "))
+    && PRESENCA.some(p => t.includes(p))) return true
+  // "tem alguém?" sozinho, sem mais nada: é chamado.
+  if (/^ (tem|tem alguem|alguem|oi tem alguem|tem gente|tem atendente) ?\??$/.test(t.replace(/ +/g, " "))) return true
+  return false
+}
+
 export async function chamadoAberto(supabase: Sb, empresaId: string, phone: string) {
   const { data } = await supabase.from("whatsapp_chamados")
     .select("id").eq("empresa_id", empresaId).is("atendido_em", null)
@@ -1015,6 +1047,20 @@ export async function responderSemIA({
     //    esperando. Ele avisa UMA vez e cala — repetir "tamos fechados" a cada
     //    mensagem é pior que não responder.
     if (!lojaAbertaAgora(empresa, excecoes)) {
+      // Pediu uma PESSOA com a porta fechada. Calar é o pior dos mundos: do
+      // outro lado pode ser fornecedor, parceiro ou reclamação, e ninguém volta
+      // a chamar depois de falar sozinho. O sino fica tocando no gestor até
+      // alguém atender — a loja vê assim que abrir o painel.
+      if (pediuFalarComGente(mensagem)) {
+        if (!(await reservarAviso(supabase, empresaId, phone, "chamado", 60))) return false
+        await abrirChamado(supabase, empresaId, phone, mensagem)
+        const volta = quandoVolta(empresa, excecoes)
+        return await responder(
+          `Agora ${MARCA_FECHADA}${volta ? `, a gente volta ${volta}` : ""}. 😴${NL}${NL}` +
+          "Mas já avisei aqui da loja que você quer falar com alguém — " +
+          "assim que abrir te respondem por aqui mesmo. 🙌",
+        )
+      }
       // Duas checagens porque são dois problemas diferentes: o histórico pega
       // o aviso que já saiu, a reserva pega o aviso que está saindo AGORA na
       // outra execução — cliente que manda "Bom dia" e "Ok" seguidos acorda
@@ -1126,6 +1172,17 @@ export async function responderSemIA({
         `Não consegui achar esse endereço aqui. 😕${NL}` +
         `Nesse link você marca no mapa e ele mostra a taxa exata:${NL}${link}`,
       )
+    }
+
+    // 2b) PEDIU UMA PESSOA ("falo com o gestor?", "tem alguém aí?"). Vem antes
+    //     da busca de produto de propósito: "tem alguém aí?" tem um "tem" e
+    //     caía no "esse eu não achei no cardápio" — o robô procurando ALGUÉM na
+    //     lista de hambúrguer. E perguntar "quer que eu chame um atendente?"
+    //     pra quem acabou de pedir atendente é fazer o cliente repetir.
+    if (pediuFalarComGente(mensagem)) {
+      if (!(await reservarAviso(supabase, empresaId, phone, "chamado", 60))) return false
+      await abrirChamado(supabase, empresaId, phone, mensagem)
+      return await responder("Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!")
     }
 
     // 3) Cardápio, horário, taxa de entrega, endereço — o que ele SABE.
