@@ -139,7 +139,7 @@ export default function AcademiaRecepcao() {
       const situacao = situacaoAluno(achado.aluno)
       cartaoAtualId = achado.aluno.id
       mostrar({ aluno: achado.aluno, situacao })
-      bipe(situacao.status === 'liberado')
+      bipe(situacao.carencia ? 'aviso' : situacao.status === 'liberado' ? 'ok' : 'nao')
       // PC com a catraca ligada (configurada em /catraca): abre sozinha.
       if (situacao.status === 'liberado') abrirCatraca(achado.aluno)
       registrar(achado.aluno, situacao, achado.distancia)
@@ -226,7 +226,7 @@ export default function AcademiaRecepcao() {
           if (desconhecidas === DESCONHECIDO_LEITURAS && Date.now() > cartaoAte) {
             cartaoAtualId = null
             mostrar({ desconhecido: true })
-            bipe(false)
+            bipe('nao')
           }
         }
         // Já reconheceu alguém e está só confirmando? Emenda a próxima
@@ -321,8 +321,8 @@ export default function AcademiaRecepcao() {
         <p>Tela da recepção. Deixe o tablet de pé, com a câmera na altura do rosto.</p>
         <button className="btn btn-primary ac-rec-comecar" onClick={comecar}>Começar</button>
         {/* Dá pra conferir o volume da caixinha sem esperar um aluno chegar. */}
-        <button type="button" className="btn btn-secondary" onClick={() => { destravarSom(); bipe(true) }}>
-          🔊 Testar o som
+        <button type="button" className="btn btn-secondary" onClick={() => { destravarSom(); bipe('ok'); setTimeout(() => bipe('aviso'), 700); setTimeout(() => bipe('nao'), 1500) }}>
+          🔊 Testar os 3 toques
         </button>
         <Link to="/" className="ac-rec-voltar">← Voltar pros alunos</Link>
       </div>
@@ -440,26 +440,36 @@ function destravarSom() {
 // de PC sumia no barulho da academia. Agora é onda quadrada (atravessa muito
 // melhor alto-falante pequeno), mais alta e mais longa.
 //
-// Libera: duas notas subindo. Barra: duas notas graves descendo — dá pra
-// saber o que aconteceu sem ler a tela.
-function bipe(ok) {
+// São TRÊS toques diferentes, pra dar pra saber o que aconteceu sem ler a
+// tela — inclusive de longe, de dentro da academia:
+//   'ok'    duas notas subindo, curtas        — em dia, pode entrar
+//   'aviso' três notas repetidas no meio      — passou, mas está atrasado
+//   'nao'   duas notas graves descendo, longas — barrado
+function bipe(tipo) {
   if (!audioCtx) return
+  // Aceita o true/false de antes, pra nada quebrar se sobrar chamada velha.
+  const t = tipo === true ? 'ok' : tipo === false ? 'nao' : tipo
+  const receita = {
+    ok:    { notas: [880, 1320],      dur: 0.18, volume: 0.55 },
+    aviso: { notas: [660, 660, 660],  dur: 0.14, volume: 0.6 },
+    nao:   { notas: [300, 196],       dur: 0.30, volume: 0.55 },
+  }[t] || { notas: [880, 1320], dur: 0.18, volume: 0.55 }
+
   try {
-    const notas = ok ? [880, 1320] : [300, 196]
-    const dur = ok ? 0.18 : 0.30
-    notas.forEach((f, i) => {
+    receita.notas.forEach((f, i) => {
       const o = audioCtx.createOscillator()
       const g = audioCtx.createGain()
       o.type = 'square'
       o.frequency.value = f
       o.connect(g); g.connect(audioCtx.destination)
-      const t = audioCtx.currentTime + i * dur
+      const quando = audioCtx.currentTime + i * receita.dur
+      const fim = quando + receita.dur
       // Sobe e desce rápido pra não estalar no alto-falante.
-      g.gain.setValueAtTime(0.0001, t)
-      g.gain.exponentialRampToValueAtTime(0.55, t + 0.012)
-      g.gain.setValueAtTime(0.55, t + dur - 0.05)
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur - 0.01)
-      o.start(t); o.stop(t + dur)
+      g.gain.setValueAtTime(0.0001, quando)
+      g.gain.exponentialRampToValueAtTime(receita.volume, quando + 0.012)
+      g.gain.setValueAtTime(receita.volume, fim - 0.05)
+      g.gain.exponentialRampToValueAtTime(0.0001, fim - 0.01)
+      o.start(quando); o.stop(fim)
     })
   } catch { /* sem som, segue */ }
 }
