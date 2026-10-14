@@ -12,6 +12,11 @@ import { runConciliacaoMensal, runConciliacaoSolicitar, runConciliacaoStatus, ru
 // acao: "status" -> { pedido_id, novo_status }. Devolve o status pro iFood
 //                   (confirm / dispatch / readyToPickup / cancel). Chamado
 //                   pelo /painel quando o lojista avança o pedido.
+// acao: "conferir" -> { empresa_id?, horas? }. Rede de segurança do
+//                   espelhamento: acha pedido do iFood que ficou aberto aqui e
+//                   já terminou lá (comparando com `ifood_vendas`) e acerta.
+//                   Roda no servidor, pelo cron — o painel não precisa estar
+//                   aberto. Chamado depois do `poll`.
 // acao: "validar_codigo_coleta" -> { pedido_id, codigo }. O entregador do iFood
 //                   chega na loja e fala o código; a loja digita e a gente
 //                   valida no iFood (validatePickupCode). Fica como prova de
@@ -74,6 +79,7 @@ Deno.serve(async (req) => {
     if (acao === "verify_delivery_code") return json(await runVerifyDeliveryCode(sb, body?.pedido_id, body?.codigo))
     if (acao === "validar_codigo_coleta") return json(await runValidarCodigoColeta(sb, body?.pedido_id, body?.codigo))
     if (acao === "coleta_diagnostico") return json(await runColetaDiagnostico(sb, body?.pedido_id))
+    if (acao === "conferir") return json(await runConferirIfood(sb, body?.empresa_id, body?.horas ?? 3))
     if (acao === "catalogo") return json(await runImportarCatalogo(sb, body?.empresa_id, body?.categoria_ids))
     if (acao === "catalogo_listar") return json(await runCatalogoListar(sb, body?.empresa_id))
     if (acao === "catalogo_pausar") return json(await runCatalogoPausar(sb, body?.empresa_id, body?.item_id, body?.pausar))
@@ -296,8 +302,30 @@ async function runPoll(sb: any) {
       const eventos: any[] = await evRes.json()
       totalEventos += eventos.length
 
+      // ORDEM DOS EVENTOS (14/10/2026). O iFood entrega a leva fora de ordem, e
+      // o polling é de 30 em 30 segundos: pedido feito e cancelado no mesmo
+      // minuto chega com PLACED e CANCELLED JUNTOS. Se o CANCELLED vier
+      // primeiro, ele tenta atualizar um pedido que ainda não existe — o
+      // UPDATE casa zero linhas e não reclama — e logo depois o PLACED cria o
+      // pedido como novo. Resultado: pedido cancelado no iFood vivo no painel.
+      //
+      // Aconteceu no Braseiro em 13/10: três pedidos da mesma cliente,
+      // cancelados 7, 8 e 11 segundos depois de entrarem. Ficaram a noite
+      // inteira "em rota" e quase viraram faturamento pela auto-conclusão.
+      //
+      // Duas passadas resolvem sem depender da ordem que o iFood mandou:
+      // primeiro quem CRIA, depois quem MUDA — essa em ordem de relógio.
+      const ehPlaced = (e: any) => (e.code ?? e.fullCode) === "PLC" ||
+        (e.code ?? e.fullCode) === "PLACED"
+      const porRelogio = (a: any, b: any) =>
+        String(a.createdAt ?? "").localeCompare(String(b.createdAt ?? ""))
+      const emOrdem = [
+        ...eventos.filter(ehPlaced).sort(porRelogio),
+        ...eventos.filter(e => !ehPlaced(e)).sort(porRelogio),
+      ]
+
       // 2. Processa cada evento de pedido novo (PLACED)
-      for (const ev of eventos) {
+      for (const ev of emOrdem) {
         const code = ev.code ?? ev.fullCode
         const orderId = ev.orderId
         if (!orderId) continue
@@ -1399,7 +1427,15 @@ async function atualizarStatusLocal(sb: any, orderId: string, code: string) {
     }
   }
 
-  await sb.from("pedidos_delivery").update(patch).eq("ifood_order_id", orderId)
+  // `count` pra saber se casou alguma linha. Sem isto, evento de pedido que não
+  // existe aqui some sem deixar rastro — foi o que escondeu os cancelamentos do
+  // Braseiro por um dia inteiro.
+  const { count } = await sb.from("pedidos_delivery")
+    .update(patch, { count: "exact" })
+    .eq("ifood_order_id", orderId)
+  if (!count) {
+    console.log(`[ifood] evento ${c} para pedido ${orderId} nao casou com nenhum pedido daqui`)
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1490,6 +1526,64 @@ async function runStatus(sb: any, pedidoId: string, novoStatus: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// CONFERÊNCIA — pedido que ficou aberto aqui e já acabou no iFood
+// ─────────────────────────────────────────────────────────────────────
+// A rede de segurança do espelhamento. O caminho normal é o evento do polling;
+// quando ele se perde (chegou fora de ordem, caiu no meio, a função falhou numa
+// rodada), o pedido fica parado no painel e ninguém descobre — pior, a
+// auto-conclusão de 6h do painel transforma pedido CANCELADO em venda.
+//
+// Aqui a fonte é outra: `ifood_vendas`, que o sync financeiro já traz, tem o
+// `currentStatus` de cada pedido direto do iFood. Então não é "perguntar de
+// novo" — é cruzar duas informações que a gente JÁ TEM e que discordam.
+//
+// Só mexe em pedido com mais de `horas` de idade: pedido do movimento de agora
+// ainda está mudando, e o financeiro demora a refletir.
+async function runConferirIfood(sb: any, empresaId?: string, horas = 3) {
+  const limite = new Date(Date.now() - horas * 3600 * 1000).toISOString()
+
+  let q = sb.from("pedidos_delivery")
+    .select("id, empresa_id, ifood_display_id, status, total, created_at")
+    .eq("origem", "ifood")
+    .not("status", "in", "(entregue,cancelado)")
+    .lt("created_at", limite)
+  if (empresaId) q = q.eq("empresa_id", empresaId)
+  const { data: abertos, error } = await q
+  if (error) return { ok: false, error: error.message }
+  if (!abertos?.length) return { ok: true, abertos: 0, corrigidos: [] }
+
+  const corrigidos: unknown[] = []
+  for (const p of abertos) {
+    const { data: v } = await sb.from("ifood_vendas")
+      .select("status")
+      .eq("empresa_id", p.empresa_id)
+      .eq("numero_curto", p.ifood_display_id)
+      .maybeSingle()
+    const real = String(v?.status ?? "").toUpperCase()
+    if (!real) continue
+
+    // O ifood_status vai junto pra o gatilho anti-eco NÃO devolver a mudança
+    // pro iFood: lá o pedido já está nesse estado, quem está atrasado é a gente.
+    let patch: Record<string, unknown> | null = null
+    if (real === "CANCELLED") {
+      patch = {
+        status: "cancelado", ifood_status: "CANCELLED",
+        motivo_cancelamento: "Cancelado no iFood (conferência automática)",
+      }
+    } else if (real === "CONCLUDED") {
+      patch = { status: "entregue", ifood_status: "CONCLUDED" }
+    }
+    if (!patch) continue
+
+    await sb.from("pedidos_delivery").update(patch).eq("id", p.id)
+    corrigidos.push({
+      pedido: p.ifood_display_id, de: p.status, para: patch.status, total: p.total,
+    })
+  }
+  return { ok: true, abertos: abertos.length, corrigidos }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // DIAGNÓSTICO DA COLETA — relê o detalhe do pedido no iFood e diz onde está
 // (ou se não está) o código de coleta.
 // ─────────────────────────────────────────────────────────────────────
@@ -1537,6 +1631,12 @@ async function runColetaDiagnostico(sb: any, pedidoId: string) {
   return {
     ok: true,
     pedido: pedido.ifood_display_id,
+    // isTest: o iFood marca assim o pedido gerado no Portal do Desenvolvedor.
+    // E a unica forma de distinguir teste de pedido real — nome, telefone e
+    // valor nao servem (o 0800 do call center aparece nos reais tambem).
+    teste: o?.isTest ?? null,
+    cliente: o?.customer?.name ?? null,
+    total_no_ifood: o?.total?.orderAmount ?? null,
     status_no_ifood: o?.status ?? null,
     entregue_por: o?.delivery?.deliveredBy ?? null,
     chaves_da_raiz: Object.keys(o ?? {}),

@@ -9124,6 +9124,12 @@ export default function PainelPedidos() {
       const agora = Date.now()
       pedidos.forEach(p => {
         if (p.status !== 'saiu_entrega') return
+        // iFood NUNCA se conclui sozinho — quem diz se foi entregue ou
+        // cancelado é o iFood, pelo evento ou pela conferência. O cron do
+        // servidor já pensava assim (`origem <> 'ifood'`); aqui tinha ficado
+        // de fora, e era isso que ia virar venda três pedidos CANCELADOS do
+        // Braseiro que passaram a noite em rota (14/10/2026).
+        if (p.origem === 'ifood') return
         const ref = p.saiu_entrega_at ?? p.updated_at ?? p.created_at
         if (!ref) return
         if (agora - new Date(ref).getTime() >= AUTO_CONCLUIR_ENTREGA_MS) {
