@@ -320,6 +320,10 @@ export default function AcademiaRecepcao() {
         <h1>{empresa?.nome}</h1>
         <p>Tela da recepção. Deixe o tablet de pé, com a câmera na altura do rosto.</p>
         <button className="btn btn-primary ac-rec-comecar" onClick={comecar}>Começar</button>
+        {/* Dá pra conferir o volume da caixinha sem esperar um aluno chegar. */}
+        <button type="button" className="btn btn-secondary" onClick={() => { destravarSom(); bipe(true) }}>
+          🔊 Testar o som
+        </button>
         <Link to="/" className="ac-rec-voltar">← Voltar pros alunos</Link>
       </div>
     )
@@ -431,19 +435,31 @@ function destravarSom() {
     audioCtx.resume()
   } catch { audioCtx = null }
 }
+// O bipe é o aviso do aluno: a catraca fica longe da tela e ele não está
+// olhando pro monitor. Antes era onda senoidal em volume 0,2 — em caixinha
+// de PC sumia no barulho da academia. Agora é onda quadrada (atravessa muito
+// melhor alto-falante pequeno), mais alta e mais longa.
+//
+// Libera: duas notas subindo. Barra: duas notas graves descendo — dá pra
+// saber o que aconteceu sem ler a tela.
 function bipe(ok) {
   if (!audioCtx) return
   try {
-    const notas = ok ? [880, 1320] : [300, 220]
+    const notas = ok ? [880, 1320] : [300, 196]
+    const dur = ok ? 0.18 : 0.30
     notas.forEach((f, i) => {
       const o = audioCtx.createOscillator()
       const g = audioCtx.createGain()
+      o.type = 'square'
       o.frequency.value = f
       o.connect(g); g.connect(audioCtx.destination)
-      const t = audioCtx.currentTime + i * 0.15
-      g.gain.setValueAtTime(0.2, t)
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.14)
-      o.start(t); o.stop(t + 0.15)
+      const t = audioCtx.currentTime + i * dur
+      // Sobe e desce rápido pra não estalar no alto-falante.
+      g.gain.setValueAtTime(0.0001, t)
+      g.gain.exponentialRampToValueAtTime(0.55, t + 0.012)
+      g.gain.setValueAtTime(0.55, t + dur - 0.05)
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur - 0.01)
+      o.start(t); o.stop(t + dur)
     })
   } catch { /* sem som, segue */ }
 }
