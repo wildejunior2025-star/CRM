@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 import { adicionalComplementos, complementosParaGravar } from '../lib/complementos'
 import { rotuloComanda, agruparItensComanda } from '../lib/comanda'
 import { acharPorCodigo, combinaCodigo, ouvirBipada } from '../lib/codigoBarras'
+import { precoPorQuantidade, faixaAplicada } from '../lib/precoQuantidade'
 import { recadoDeErro } from '../lib/erroRede'
 import { calcularTaxa, itemIsento, MARCA_ISENTO } from '../lib/taxaServico'
 import { useProdutosNoHorario } from '../lib/horarioCategoria'
@@ -451,7 +452,9 @@ export default function PresencialSalao() {
       supabase.rpc('mp_conectado_loja'),
       // Deposito tem milhares de itens: sem paginar o cardapio do salao parava nos
       // primeiros 500 nomes em ordem alfabetica e o resto sumia da tela.
-      fetchAll(() => supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria, codigo_barras').eq('empresa_id', empresaId).order('nome')),
+      // `faixas_preco` e `preco_promocional` vem junto desde 15/10/2026: sem eles a
+      // mesa cobrava o preco cheio mesmo com atacado ou promocao cadastrados (mig 0326).
+      fetchAll(() => supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria, codigo_barras, faixas_preco, preco_promocional').eq('empresa_id', empresaId).order('nome')),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
       // `setor` vem junto: é ele que diz qual categoria NÃO sai no papel — e
       // essas o garçom pega ele mesmo, sem esperar cozinha nenhuma (mig 0185).
@@ -820,7 +823,20 @@ export default function PresencialSalao() {
   // celular o que já entrou na conta.
   // Mesa nova, faixa limpa: o "lançados agora" é desta mesa, deste momento.
   useEffect(() => { setLancadosAgora([]) }, [comandaSel?.id])
-  const subtotalRascunho = rascunho.reduce((s, r) => s + Number(r.preco_venda) * r.quantidade, 0)
+  // PREÇO QUE VAI SER COBRADO nesta linha do rascunho.
+  //
+  // Até 15/10/2026 a mesa usava o preço cheio e pronto: 20 Pine Vermelho saíam
+  // a R$ 0,75 cada, mesmo com a faixa "20+ a R$ 0,50" cadastrada. A Nova venda,
+  // a Loja Online e o robô já respeitavam; só o Salão não — ele nem carregava
+  // as faixas do catálogo.
+  //
+  // Vale pela quantidade DESTA linha, igual à Nova venda. Preço digitado na mão
+  // (prato no peso) manda mais que qualquer faixa.
+  const precoDaLinha = (r) => (r?.precoManual
+    ? Number(r.preco_venda) || 0
+    : precoPorQuantidade(r?.preco_venda, r?.faixas_preco, r?.quantidade, r?.preco_promocional))
+
+  const subtotalRascunho = rascunho.reduce((s, r) => s + precoDaLinha(r) * r.quantidade, 0)
 
   const subtotalSel = subtotalDe(comandaSel)
 
@@ -1062,6 +1078,10 @@ export default function PresencialSalao() {
     empilhar({
       produto_id: produto.produto_id, linha: String(produto.produto_id),
       nome: produto.nome, preco_venda: Number(produto.preco_venda),
+      // Atacado e promoção viajam COM a linha: o preço de verdade depende da
+      // quantidade, e ela só se fecha na hora de enviar (ver `precoDaLinha`).
+      faixas_preco: produto.faixas_preco ?? null,
+      preco_promocional: produto.preco_promocional ?? null,
       complementos: [], quantidade: 1, observacao: '',
     })
   }
@@ -1246,7 +1266,9 @@ export default function PresencialSalao() {
       if (k !== linha || Number(r.preco_venda) === preco) return r
       // Preço digitado na mão vira uma linha ÚNICA: senão o próximo prato igual
       // empilhava em cima desta e herdava o peso do prato anterior.
-      return { ...r, preco_venda: preco, linha: `${k}::p${Date.now()}` }
+      // `precoManual`: prato no peso tem preço de balança. Faixa de atacado e
+      // promoção não podem passar por cima do que a pessoa digitou.
+      return { ...r, preco_venda: preco, precoManual: true, faixas_preco: null, preco_promocional: null, linha: `${k}::p${Date.now()}` }
     }))
   }
 
@@ -1463,7 +1485,7 @@ export default function PresencialSalao() {
       empresa_id: empresaId, comanda_id: comandaSel.id,
       produto_id: (r.produto_id && !String(r.produto_id).startsWith('avulso:')) ? r.produto_id : null,
       nome: r.nome,
-      preco_unitario: Number(r.preco_venda), quantidade: r.quantidade,
+      preco_unitario: precoDaLinha(r), quantidade: r.quantidade,
       // A montagem vai estruturada também, não só dentro do nome: é ela que diz
       // depois quanto os adicionais custaram pra loja (migração 0247).
       complementos: complementosParaGravar(r.complementos),
@@ -3304,7 +3326,20 @@ export default function PresencialSalao() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 15.5, fontWeight: 700 }}>{r.nome}</div>
-                          <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{fmt(r.preco_venda)}</div>
+                          {/* Mostra o preço QUE VAI SER COBRADO e, quando a faixa de
+                              atacado pegou, risca o cheio e diz a partir de quanto —
+                              senão o atendente acha que o sistema errou a conta. */}
+                          <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                            {precoDaLinha(r) < Number(r.preco_venda) ? (
+                              <>
+                                <span style={{ textDecoration: 'line-through', opacity: .6 }}>{fmt(r.preco_venda)}</span>
+                                {' '}<strong style={{ color: '#16a34a' }}>{fmt(precoDaLinha(r))}</strong>
+                                {faixaAplicada(r.faixas_preco, r.quantidade) && (
+                                  <span style={{ color: '#16a34a' }}> · {faixaAplicada(r.faixas_preco, r.quantidade).qtd_min}+</span>
+                                )}
+                              </>
+                            ) : fmt(r.preco_venda)}
+                          </div>
                         </div>
                         <button type="button" onClick={() => mudarQtdRascunho(r.linha ?? String(r.produto_id), -1)} style={qtdBtn}>−</button>
                         <input type="number" min="0" inputMode="numeric"
@@ -3335,12 +3370,12 @@ export default function PresencialSalao() {
                             onClick={() => setPrecoRascEdit(prev => ({ ...prev, [r.linha ?? String(r.produto_id)]: Number(r.preco_venda) > 0 ? numeroParaMoeda(r.preco_venda) : '' }))}
                             style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
                               border: '1px dashed var(--border)', borderRadius: 6, padding: '3px 6px', background: 'transparent', color: 'var(--text)' }}>
-                            {fmt(r.preco_venda * r.quantidade)} ✎
+                            {fmt(precoDaLinha(r) * r.quantidade)} ✎
                           </button>
                         ) : (
                           // Garçom vê o valor, não mexe — mesma regra do item já enviado.
                           <span style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>
-                            {fmt(r.preco_venda * r.quantidade)}
+                            {fmt(precoDaLinha(r) * r.quantidade)}
                           </span>
                         )}
                       </div>
