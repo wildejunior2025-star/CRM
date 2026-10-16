@@ -178,11 +178,7 @@ export default function DespesasLucro({ empresaId }) {
         supabase.from('historico_dia').select('*').eq('empresa_id', empresaId).order('data', { ascending: false }).limit(90),
         supabase.from('custos_imprevistos').select('*').eq('empresa_id', empresaId).eq('data', dia).order('created_at', { ascending: false }),
         // Vendas do SALÃO/balcão (fechar conta presencial) — não vivem em pedidos_delivery.
-        // `pedido_id is null`: a venda nascida de um pedido do balcao (fiado no
-        // "+ Vender", mig 0327) e so o registro da divida - o dinheiro dela ja
-        // esta contado no pedido. Sem isto o lucro do dia contaria duas vezes.
         supabase.from('vendas').select('total').eq('empresa_id', empresaId).neq('status', 'cancelado')
-          .is('pedido_id', null)
           .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString()),
         // Insumos: dá pra lançar a batata doce direto, sem inventar uma ficha pra ela.
         supabase.from('materias_primas').select('id, nome, unidade, custo').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
