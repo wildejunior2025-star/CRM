@@ -132,6 +132,9 @@ export default function DespesasLucro({ empresaId }) {
   const [excecoes, setExcecoes] = useState({})
   const [fechaFeriado, setFechaFeriado] = useState(false)
   const [receitaDia, setReceitaDia] = useState({ proprios: 0, salao: 0, ifood: 0 })
+  // Quantos pedidos do iFood entraram pelo valor REAL do financeiro e quantos
+  // ainda pela estimativa (o real só chega no dia seguinte, ~6h).
+  const [ifoodFonte, setIfoodFonte] = useState({ real: 0, estimado: 0 })
   const [fechando, setFechando] = useState(false)
   const [histAberto, setHistAberto] = useState({}) // { [id]: bool } dias expandidos no histórico
   const [semanaOffset, setSemanaOffset] = useState(0)  // 0 = esta semana; as setas andam pra trás
@@ -168,7 +171,7 @@ export default function DespesasLucro({ empresaId }) {
         supabase.from('ficha_itens').select('ficha_id, quantidade, unidade, custo_unit').eq('empresa_id', empresaId),
         supabase.from('empresas').select('dias_abertos_mes, ifood_comissao_pct, ifood_transacao_pct, ifood_entrega_propria, horarios_funcionamento, feriados_fecha').eq('id', empresaId).maybeSingle(),
         fetchAll(() => supabase.from('pedidos_delivery')
-          .select('origem, total, taxa_entrega, subtotal, ifood_valores, forma_pagamento, status')
+          .select('origem, total, taxa_entrega, subtotal, ifood_valores, forma_pagamento, status, ifood_order_id')
           .neq('status', 'cancelado').gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())),
         supabase.from('profiles').select('id, nome, perfil, cargo').eq('empresa_id', empresaId).eq('ativo', true)
           .in('perfil', ['admin', 'vendedor', 'garcom', 'cozinheiro', 'entregador']).order('nome'),
@@ -236,9 +239,28 @@ export default function DespesasLucro({ empresaId }) {
       const proprios = peds.filter(p => ['whatsapp', 'app', 'cardapio'].includes(p.origem) || !p.origem)
         .reduce((s, p) => s + (Number(p.total || 0) - Number(p.taxa_entrega || 0)), 0)
       const rates = { comissao: emp.data?.ifood_comissao_pct, transacao: emp.data?.ifood_transacao_pct, entregaPropria: emp.data?.ifood_entrega_propria !== false }
-      const ifoodLiq = calcIfoodLiquido(peds.filter(p => p.origem === 'ifood'), rates)
+      // iFood: pedido que o financeiro homologado já fechou entra pelo valor REAL
+      // (ifood_vendas.saldo, sincronizado toda manhã com a venda do dia anterior);
+      // o resto — na prática, o dia de hoje — segue pela estimativa calibrada.
+      // saldo = o que o iFood deposita por aquele pedido. No pago na entrega o
+      // dinheiro veio na mão e o saldo vem negativo (a comissão cobrada depois),
+      // então o recebido é total + saldo — a mesma conta da estimativa.
+      const pedsIfood = peds.filter(p => p.origem === 'ifood')
+      const ids = [...new Set(pedsIfood.map(p => p.ifood_order_id).filter(Boolean))]
+      const saldoPor = {}
+      for (let i = 0; i < ids.length; i += 300) {
+        const { data: vendasIfood } = await supabase.from('ifood_vendas')
+          .select('venda_id, saldo').eq('empresa_id', empresaId).in('venda_id', ids.slice(i, i + 300))
+        for (const r of (vendasIfood || [])) if (r.saldo != null) saldoPor[r.venda_id] = Number(r.saldo)
+      }
+      const comReal = pedsIfood.filter(p => p.ifood_order_id && saldoPor[p.ifood_order_id] != null)
+      const semReal = pedsIfood.filter(p => !(p.ifood_order_id && saldoPor[p.ifood_order_id] != null))
+      const ifoodReal = comReal.reduce((s, p) =>
+        s + saldoPor[p.ifood_order_id] + (p.ifood_valores?.pago_online ? 0 : Number(p.total || 0)), 0)
+      const ifoodLiq = calcIfoodLiquido(semReal, rates)
       const salao = (vd.error ? [] : (vd.data || [])).reduce((s, v) => s + Number(v.total || 0), 0)
-      setReceitaDia({ proprios, salao, ifood: Number(ifoodLiq.voceRecebe || 0) })
+      setReceitaDia({ proprios, salao, ifood: ifoodReal + Number(ifoodLiq.voceRecebe || 0) })
+      setIfoodFonte({ real: comReal.length, estimado: semReal.length })
     } catch (e) {
       setError(e.message || 'Erro ao carregar')
     } finally {
@@ -703,6 +725,15 @@ export default function DespesasLucro({ empresaId }) {
               {fechado
                 ? <>próprios {brl(fechado.receita_proprios)} · iFood {brl(fechado.receita_ifood)}</>
                 : <>salão {brl(receitaDia.salao || 0)} · delivery {brl(receitaDia.proprios)} · iFood {brl(receitaDia.ifood)}</>}
+              {!fechado && (ifoodFonte.real + ifoodFonte.estimado) > 0 && (
+                <div style={{ marginTop: 2 }}>
+                  {ifoodFonte.estimado === 0
+                    ? <>iFood pelo valor real do financeiro ({ifoodFonte.real} pedidos)</>
+                    : ifoodFonte.real === 0
+                      ? <>iFood estimado ({ifoodFonte.estimado} pedidos) · o valor real chega amanhã cedo</>
+                      : <>iFood: {ifoodFonte.real} pedidos pelo valor real, {ifoodFonte.estimado} estimados (o real chega amanhã cedo)</>}
+                </div>
+              )}
             </div>
             <Linha label={fechado ? '− Custos fixos (rateio do dia)' : !abre ? '− Custos fixos (loja fechada nesse dia)' : `− Custos fixos (rateio do dia: ${brl(totalFixo)}/${dias})`} valor={`− ${brl(v.fixo)}`} cor="var(--danger)" />
             <Linha label={fechado ? '− Funcionários (rateio do dia)' : !abre ? '− Funcionários (loja fechada nesse dia)' : `− Funcionários (rateio do dia: ${brl(totalFunc)}/${dias})`} valor={`− ${brl(v.func)}`} cor="var(--danger)" />
