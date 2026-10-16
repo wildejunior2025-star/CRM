@@ -172,7 +172,7 @@ export default function DespesasLucro({ empresaId }) {
         supabase.from('empresas').select('dias_abertos_mes, ifood_comissao_pct, ifood_transacao_pct, ifood_entrega_propria, horarios_funcionamento, feriados_fecha').eq('id', empresaId).maybeSingle(),
         fetchAll(() => supabase.from('pedidos_delivery')
           .select('origem, total, taxa_entrega, subtotal, ifood_valores, forma_pagamento, status, ifood_order_id')
-          .neq('status', 'cancelado').gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())),
+          .eq('empresa_id', empresaId).neq('status', 'cancelado').gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())),
         supabase.from('profiles').select('id, nome, perfil, cargo').eq('empresa_id', empresaId).eq('ativo', true)
           .in('perfil', ['admin', 'vendedor', 'garcom', 'cozinheiro', 'entregador']).order('nome'),
         supabase.from('historico_dia').select('*').eq('empresa_id', empresaId).order('data', { ascending: false }).limit(90),
@@ -191,10 +191,10 @@ export default function DespesasLucro({ empresaId }) {
         // Custo que a baixa de estoque NÃO enxerga: prato no peso (% do vendido) e
         // produto sem controle de estoque (qtd vendida × custo). Quem faz a conta é
         // o banco, que vê mesa e delivery juntos.
-        supabase.rpc('custo_vendido_periodo', { p_ini: ini.toISOString(), p_fim: fim.toISOString() }),
+        supabase.rpc('custo_vendido_periodo', { p_ini: ini.toISOString(), p_fim: fim.toISOString(), p_empresa_id: empresaId }),
         // Adicional também custa: o queijo do lanche sai da geladeira igual. Só
         // entra quem tem custo digitado no cadastro do complemento (mig 0247).
-        supabase.rpc('custo_complementos_periodo', { p_ini: ini.toISOString(), p_fim: fim.toISOString() }),
+        supabase.rpc('custo_complementos_periodo', { p_ini: ini.toISOString(), p_fim: fim.toISOString(), p_empresa_id: empresaId }),
       ])
       for (const r of [dp, fn, pd, fi, fit, ped, hi, im]) if (r.error) throw r.error
 
@@ -236,7 +236,10 @@ export default function DespesasLucro({ empresaId }) {
       setCustoComplementos(ccp.error ? [] : (ccp.data || []))
 
       const peds = ped.data || []
-      const proprios = peds.filter(p => ['whatsapp', 'app', 'cardapio'].includes(p.origem) || !p.origem)
+      // Tudo que não é iFood é venda própria — inclusive o BALCÃO (pedido lançado
+      // na Nova venda), que ficou de fora daqui desde o começo e sumia do lucro.
+      // Nenhuma dessas origens gera linha em `vendas`, então não conta duas vezes.
+      const proprios = peds.filter(p => p.origem !== 'ifood')
         .reduce((s, p) => s + (Number(p.total || 0) - Number(p.taxa_entrega || 0)), 0)
       const rates = { comissao: emp.data?.ifood_comissao_pct, transacao: emp.data?.ifood_transacao_pct, entregaPropria: emp.data?.ifood_entrega_propria !== false }
       // iFood: pedido que o financeiro homologado já fechou entra pelo valor REAL
@@ -296,7 +299,7 @@ export default function DespesasLucro({ empresaId }) {
   useEffect(() => {
     if (!empresaId || !dia) return
     let vivo = true
-    supabase.rpc('fidelidade_custo_dia', { p_data: dia })
+    supabase.rpc('fidelidade_custo_dia', { p_data: dia, p_empresa_id: empresaId })
       .then(({ data }) => { if (vivo) setCashbackHoje(Number(data ?? 0)) })
     return () => { vivo = false }
   }, [empresaId, dia])
