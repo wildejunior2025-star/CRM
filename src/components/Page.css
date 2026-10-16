@@ -90,6 +90,8 @@
   transition: background-color 160ms ease, border-color 160ms ease;
 }
 
+.so-no-celular { display: none; }
+
 .data-table table th,
 .data-table table td {
   text-align: left;
@@ -523,6 +525,26 @@ a.dashboard-card-link:hover {
   .tabela-produtos table th,
   .tabela-produtos table td { padding: 8px 6px; white-space: normal; }
   .tabela-produtos .btn-label { display: none; }
+
+  /* ── Estoque no celular ───────────────────────────────────────────────
+     Mesmo problema que o Catálogo tinha: a tabela de saldo ia inteira pro
+     celular, batia no `min-width: 500px` e virava rolagem lateral - a pessoa
+     tinha que arrastar pro lado pra ver QUANTO tem e se está baixo, que é a
+     única coisa que ela abriu a tela pra saber (relato do usuário, 16/10/2026).
+
+     Agora sobram Produto, Estoque atual e Status; Categoria e Estoque mínimo
+     ficam de fora, e o mínimo volta como legenda embaixo da quantidade pra o
+     "Estoque baixo" não ficar sem referência. */
+  .tabela-estoque table { min-width: 0; width: 100%; }
+  .tabela-estoque .col-extra { display: none; }
+  .tabela-estoque table th,
+  .tabela-estoque table td { padding: 8px 8px; white-space: normal; }
+  .tabela-estoque .so-no-celular {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
   .tabela-produtos .btn-sm { padding: 8px 9px; font-size: 14px; }
   .tabela-produtos .prod-acoes { gap: 4px; }
   /* Sem colunas escondidas não há rolagem lateral: a sombra da coluna colada

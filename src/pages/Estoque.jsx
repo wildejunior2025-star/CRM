@@ -366,7 +366,7 @@ export default function Estoque() {
 
       {usaEstoque && (<>
       <h2 style={{ fontSize: 16, marginBottom: 8 }}>Saldo por produto</h2>
-      <div className="data-table" style={{ marginBottom: 24 }}>
+      <div className="data-table tabela-estoque" style={{ marginBottom: 24 }}>
         {loading ? (
           <div className="empty-state">Carregando...</div>
         ) : saldoControlado.length === 0 ? (
@@ -376,9 +376,9 @@ export default function Estoque() {
             <thead>
               <tr>
                 <th>Produto</th>
-                <th>Categoria</th>
+                <th className="col-extra">Categoria</th>
                 <th>Estoque atual</th>
-                <th>Estoque mínimo</th>
+                <th className="col-extra">Estoque mínimo</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -390,9 +390,16 @@ export default function Estoque() {
                 return (
                   <tr key={s.produto_id}>
                     <td>{s.nome}</td>
-                    <td>{s.categoria}</td>
-                    <td>{s.quantidade_atual}</td>
-                    <td>{s.estoque_minimo}</td>
+                    <td className="col-extra">{s.categoria}</td>
+                    <td>
+                      {s.quantidade_atual}
+                      {/* No celular a coluna do mínimo some, e sem ele o "Estoque
+                          baixo" fica sem referência. Aqui ele volta como legenda. */}
+                      {Number(s.estoque_minimo) > 0 && (
+                        <span className="so-no-celular"> mín. {s.estoque_minimo}</span>
+                      )}
+                    </td>
+                    <td className="col-extra">{s.estoque_minimo}</td>
                     <td>
                       <span
                         className={`badge ${baixo ? 'badge-danger' : 'badge-success'}`}
@@ -413,7 +420,7 @@ export default function Estoque() {
       <h2 style={{ fontSize: 16, marginBottom: 8 }}>
         Vasilhame (casco) pendente com clientes
       </h2>
-      <div className="data-table">
+      <div className="data-table tabela-estoque">
         {loading ? (
           <div className="empty-state">Carregando...</div>
         ) : cascoSaldo.length === 0 ? (

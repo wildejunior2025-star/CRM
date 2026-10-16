@@ -10597,12 +10597,20 @@ export default function PainelPedidos() {
                     const aberto = catExpandido.has(prod.id) || achouNoComp
                     return (
                       <div key={prod.id} style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, overflow: 'hidden' }}>
-                        {/* Linha do produto */}
+                        {/* Linha do produto.
+                            `flexWrap` + a base de 200px no nome: no PC cabe tudo
+                            numa fileira so, e no CELULAR os botoes descem pra
+                            linha de baixo em vez de espremer o nome ate sumir.
+                            Eram ate CINCO botoes (Complementos, estrela,
+                            + Estoque, Baixa, Pausar) num grupo que nao encolhia
+                            (`flexShrink: 0`) - por isso a tela so servia no PC
+                            (relato do usuario, 16/10/2026). */}
                         <div style={{
-                          padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                          padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          gap: 8, flexWrap: 'wrap',
                           opacity: pausado ? 0.6 : 1,
                         }}>
-                          <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ minWidth: 0, flex: '1 1 200px' }}>
                             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', lineHeight: 1.25 }}>
                               {prod.nome}
                             </div>
@@ -10611,7 +10619,7 @@ export default function PainelPedidos() {
                               {pausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
                             </div>
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginLeft: 'auto' }}>
                             {temComp && (
                               <button
                                 type="button"
@@ -10715,7 +10723,7 @@ export default function PainelPedidos() {
                             borderTop: '1px solid var(--border, #2a2a3a)', background: 'rgba(34,197,94,.06)',
                             padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6,
                           }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                               <span style={{ fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }}>
                                 Chegou quanto?
                               </span>
@@ -10791,7 +10799,7 @@ export default function PainelPedidos() {
                                 border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
                               }}
                             />
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                               <button
                                 type="button"
                                 onClick={() => lancarBaixaDesperdicio(prod)}
