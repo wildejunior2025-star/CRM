@@ -843,6 +843,18 @@ export default function PresencialSalao() {
   for (const r of rascunho) {
     if (faixaDaCat(r)) somaCatRascunho[r.categoria] = (somaCatRascunho[r.categoria] || 0) + (Number(r.quantidade) || 0)
   }
+  // O que a mesa JÁ pediu antes também conta: quem comeu 3 espetos a R$ 3,33 e pede
+  // "mais um" já tem 3 da categoria na comanda — o quarto sai a R$ 3,33, não a R$ 4,00.
+  // Os itens já lançados não mudam de preço; só entra na soma da quantidade.
+  const categoriaDoProduto = useMemo(
+    () => new Map((produtosTodos ?? []).map(p => [String(p.produto_id), p.categoria])),
+    [produtosTodos],
+  )
+  for (const i of (comandaSel?.comanda_itens ?? [])) {
+    const cat = categoriaDoProduto.get(String(i.produto_id))
+    const f = catInfo?.[cat]?.faixas_preco
+    if (cat && Array.isArray(f) && f.length) somaCatRascunho[cat] = (somaCatRascunho[cat] || 0) + (Number(i.quantidade) || 0)
+  }
   const precoDaLinha = (r) => {
     if (r?.precoManual) return Number(r.preco_venda) || 0
     const fc = faixaDaCat(r)
