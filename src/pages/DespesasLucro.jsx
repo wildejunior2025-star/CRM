@@ -786,7 +786,7 @@ export default function DespesasLucro({ empresaId }) {
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>⚖️ Prato no peso {rotuloDia} {custoPctAberto ? '▲' : '▼'}</div>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                        custo estimado por % do que vendeu · {custoPct.length} item{custoPct.length === 1 ? '' : 'ns'}
+                        custo estimado por % do que vendeu · {custoPct.length} {custoPct.length === 1 ? 'item' : 'itens'}
                       </div>
                     </div>
                     <strong style={{ fontSize: 17 }}>{brl(custoPctHoje)}</strong>
