@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { capturarIndicacao, registrarIndicacao } from '../lib/indicacao'
@@ -165,6 +165,9 @@ function PixScreen({ pixData, onConcluido }) {
 }
 
 export default function PortalLoja() {
+  const categoriasOcultas = useRef(new Set())
+  // Quantos itens já vieram do servidor (inclui os de categoria oculta, que não vão pra tela).
+  const [lidos, setLidos] = useState(0)
   const { empresaId } = useParams()
   const navigate = useNavigate()
   useAuth()
@@ -262,8 +265,13 @@ export default function PortalLoja() {
         .from('estoque_catalogo').select('*', { count: 'exact' })
         .eq('empresa_id', resolvedId).order('categoria').order('nome').range(0, 199)
       if (prodRes.error) setError(prodRes.error.message)
+      // Categoria "só no salão" (mig 0328) não aparece pro cliente.
+      const { data: catsOcultas } = await supabase
+        .from('categorias').select('nome').eq('empresa_id', resolvedId).eq('oculta_online', true)
+      categoriasOcultas.current = new Set((catsOcultas ?? []).map(c => c.nome))
       setEmpresa(empRes.data ?? null)
-      setProdutos(prodRes.data ?? [])
+      setLidos((prodRes.data ?? []).length)
+      setProdutos((prodRes.data ?? []).filter(p => !categoriasOcultas.current.has(p.categoria)))
       setTotalProdutos(prodRes.count ?? 0)
       setLoading(false)
     }
@@ -359,8 +367,9 @@ export default function PortalLoja() {
       .select('*')
       .eq('empresa_id', empresa.id)
       .order('categoria').order('nome')
-      .range(produtos.length, produtos.length + 199)
-    setProdutos(prev => [...prev, ...(data ?? [])])
+      .range(lidos, lidos + 199)
+    setLidos(n => n + (data ?? []).length)
+    setProdutos(prev => [...prev, ...(data ?? []).filter(p => !categoriasOcultas.current.has(p.categoria))])
     setCarregandoMais(false)
   }
 
@@ -710,14 +719,14 @@ export default function PortalLoja() {
           </>
         )}
 
-        {produtos.length < totalProdutos && !busca && categoriaAtiva === 'Todos' && (
+        {lidos < totalProdutos && !busca && categoriaAtiva === 'Todos' && (
           <div style={{ textAlign: 'center', padding: '24px 0' }}>
             <button
               className="btn btn-secondary"
               onClick={carregarMais}
               disabled={carregandoMais}
             >
-              {carregandoMais ? 'Carregando...' : `Carregar mais (${totalProdutos - produtos.length} restantes)`}
+              {carregandoMais ? 'Carregando...' : `Carregar mais (${totalProdutos - lidos} restantes)`}
             </button>
           </div>
         )}

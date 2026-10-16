@@ -437,8 +437,11 @@ export default function DeliveryLoja() {
       // Ordem personalizada + horário de disponibilidade das categorias
       const { data: catData } = await supabase
         .from('categorias')
-        .select('nome, ordem, hora_inicio, hora_fim, dias_semana')
+        .select('nome, ordem, hora_inicio, hora_fim, dias_semana, oculta_online')
         .eq('empresa_id', lojaData.id)
+      // Categoria "só no salão" (mig 0328): não vai pra Loja Online.
+      const ocultas = new Set((catData ?? []).filter(c => c.oculta_online).map(c => c.nome))
+      if (ocultas.size) produtosFinal = produtosFinal.filter(p => !ocultas.has(p.categoria))
       const ordemMap = {}
       const horarioMap = {}
       const diasMap = {}

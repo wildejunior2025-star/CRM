@@ -3570,7 +3570,7 @@ serve(async (req) => {
     // montagem (lista + complementos + preços) usa `produtos`, o filtro cobre tudo.
     const { data: catsHorario } = await supabase
       .from("categorias")
-      .select("nome, hora_inicio, hora_fim, dias_semana")
+      .select("nome, hora_inicio, hora_fim, dias_semana, oculta_online")
       .eq("empresa_id", empresaId)
     const nowBRT = new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit" })
     const toMinBRT = (t: string) => { const [h, m] = String(t).slice(0, 5).split(":").map(Number); return h * 60 + m }
@@ -3580,6 +3580,8 @@ serve(async (req) => {
       .indexOf(new Date().toLocaleDateString("en-US", { timeZone: "America/Fortaleza", weekday: "short" }))
     const catForaHorario = new Set<string>()
     for (const c of ((catsHorario ?? []) as any[])) {
+      // "Só no salão" (mig 0328): nunca é oferecida pelo robô.
+      if (c.oculta_online === true) { catForaHorario.add(c.nome); continue }
       // Categoria só de alguns dias ("Promoção de Quarta"): a Loja Online já
       // escondia fora do dia; o robô vendia a promoção a semana inteira.
       if (Array.isArray(c.dias_semana) && c.dias_semana.length > 0 && !c.dias_semana.map(Number).includes(diaBRT)) {
