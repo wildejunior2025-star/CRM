@@ -785,6 +785,7 @@ export default function DeliveryCheckout() {
   const [nomeCadastro, setNomeCadastro] = useState(null)
   const [telDuvida, setTelDuvida] = useState(false)
   const telConfirmadoRef = useRef(false)
+  const enderecoCadastroRef = useRef(null)
   const [reconfirmar, setReconfirmar] = useState(false) // só a minoria com endereço errado: obriga remarcar o pino uma vez
   const [coordCliente, setCoordCliente] = useState(null) // {lat,lng} do ponto de entrega
   const [mapaAberto, setMapaAberto]     = useState(false)
@@ -1110,6 +1111,10 @@ export default function DeliveryCheckout() {
       reconhecidoRef.current = true
       setReconhecido(true)
       setNomeCadastro(data.nome || null)
+      // O endereço que veio do cadastro — pra saber depois se ainda é ele que
+      // está na tela (CDBom 16/10: cliente de Jardins confirmou "é meu" e saiu
+      // com o endereço e a taxa de Ponta Negra de quem usou o número antes).
+      enderecoCadastroRef.current = chaveEndereco({ rua: data.endereco, numero: data.numero, cidade: data.cidade })
       setReconfirmar(!!data.reconfirmar_endereco) // marcado no banco → força remarcar o mapa
       // Pino que ESTE cliente já apontou no mapa (mig 0160). Só o manual volta:
       // ponto que o buscador chutou não é confiável pra calcular taxa — foi ele
@@ -2103,6 +2108,19 @@ export default function DeliveryCheckout() {
                           onClick={e => {
                             telConfirmadoRef.current = true
                             setTelDuvida(false)
+                            // Número é dele, mas o endereço do cadastro é de OUTRA pessoa:
+                            // não vale. Só limpa se a tela ainda mostra o endereço do
+                            // cadastro (se ele já digitou o dele, fica).
+                            if (enderecoCadastroRef.current && chaveEndereco(form) === enderecoCadastroRef.current) {
+                              setForm(prev => ({ ...prev, cep: '', rua: '', numero: '', complemento: '', bairro: '' }))
+                              setPinSalvo(null)
+                              setCoordCliente(null)
+                              pinManualRef.current = false
+                              setPasso(1)
+                              setErroGlobal('Esse número tinha o endereço de outra pessoa. Informe o seu endereço de entrega.')
+                              window.scrollTo({ top: 0, behavior: 'smooth' })
+                              return
+                            }
                             e.currentTarget.closest('form')?.requestSubmit()
                           }}>
                           É meu, pode seguir
