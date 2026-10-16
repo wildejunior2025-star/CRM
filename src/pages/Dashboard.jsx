@@ -194,7 +194,11 @@ export default function Dashboard() {
       }
       const desdeISO = desde.toISOString()
       const [vData, pData, iData, cnData, nRes, caRes, saRes, csRes, fiRes, empRes, fnData, fcData] = await Promise.all([
-        fetchAll(() => supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes, cliente_id, clientes(nome)').neq('status', 'cancelado').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
+        // `pedido_id is null`: venda nascida de um pedido do balcao (fiado no
+        // "+ Vender", mig 0327) e SO o registro da divida - o dinheiro dela ja
+        // esta contado em `pedidos_delivery`, que o Dashboard soma logo abaixo.
+        // Sem este filtro o dia contaria o mesmo fiado duas vezes.
+        fetchAll(() => supabase.from('vendas').select('total, created_at, forma_pagamento, observacoes, cliente_id, clientes(nome)').neq('status', 'cancelado').is('pedido_id', null).gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('pedidos_delivery').select('total, created_at, origem, status, itens, subtotal, taxa_entrega, ifood_valores, forma_pagamento, pagamentos, cliente_id, cliente_nome, cliente_telefone').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('venda_itens').select('produto_id, nome_produto, quantidade, subtotal, vendas!inner(created_at, status)').neq('vendas.status', 'cancelado').gte('vendas.created_at', desdeISO).order('id', { ascending: false })).then(r => r.data),
         fetchAll(() => supabase.from('clientes').select('created_at').gte('created_at', desdeISO).order('created_at', { ascending: false })).then(r => r.data),

@@ -2084,6 +2084,15 @@ ${url}
       } catch { /* não bloqueia a venda */ }
     }
 
+    // Fiado sem dono e divida que ninguem cobra. O Salao ja barra assim; aqui
+    // tambem, e DEPOIS do upsert pelo telefone - quem digitou o telefone acabou
+    // de ganhar cadastro e ja serve de dono.
+    if (pagamento === 'fiado' && !clienteId) {
+      setSalvando(false)
+      setErro('Fiado precisa de cliente: escolha um cadastrado, ou informe nome e telefone.')
+      return
+    }
+
     const payload = {
       empresa_id: empresa.id,
       cliente_id: clienteId,
@@ -2123,6 +2132,7 @@ ${url}
       payload.endereco_lng = coordCliente?.lng ?? null
     }
     let error
+    let novoPedido = null
     if (editando) {
       // Edição: não mexe em origem/status; atualiza os dados do pedido.
       const upd = { ...payload }
@@ -2133,10 +2143,43 @@ ${url}
       }
       ;({ error } = await supabase.from('pedidos_delivery').update(upd).eq('id', pedidoEdicao.id))
     } else {
-      ;({ error } = await supabase.from('pedidos_delivery').insert(payload))
+      // `.select()`: o id do pedido e necessario pra amarrar a divida do fiado
+      // nele (ver abaixo).
+      const r = await supabase.from('pedidos_delivery').insert(payload).select('id, numero_pedido').single()
+      error = r.error
+      novoPedido = r.data ?? null
     }
     setSalvando(false)
     if (error) { setErro(error.message); return }
+
+    // FIADO: a venda do balcao fica em `pedidos_delivery`, mas a cobranca do
+    // fiado le `vendas` - sao tabelas diferentes e nada liga uma na outra. Sem
+    // esta linha o vendedor marca fiado, a tela diz que deu certo e a divida
+    // nao aparece em lugar nenhum pra cobrar.
+    //
+    // `pedido_id` (mig 0327) e o que impede o dia de contar o mesmo dinheiro
+    // duas vezes: o Dashboard soma as duas tabelas, entao ele ignora a venda
+    // que nasceu de um pedido. Quem soma DIVIDA continua contando, que e o
+    // ponto desta linha existir.
+    if (!editando && pagamento === 'fiado' && novoPedido?.id) {
+      const { error: errFiado } = await supabase.from('vendas').insert({
+        empresa_id: empresa.id,
+        cliente_id: clienteId,
+        forma_pagamento: 'fiado',
+        status: 'entregue',
+        total,
+        pedido_id: novoPedido.id,
+        observacoes: 'Balcao - Pedido #' + (novoPedido.numero_pedido ?? ''),
+      })
+      // O pedido JA foi gravado e a mercadoria vai sair. Se a divida falhar,
+      // nao da pra deixar passar calado: quem esta no balcao precisa saber
+      // agora, com o cliente na frente.
+      if (errFiado) {
+        setErro('O pedido foi salvo, mas a DIVIDA do fiado nao foi registrada: '
+          + errFiado.message + '. Anote e avise o dono.')
+        return
+      }
+    }
     limparDraft()
     onCriado()
     onFechar()
@@ -2643,13 +2686,29 @@ ${url}
             <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>Se o total mudar, a diferença vai na parte cobrada na entrega. Clicar numa forma abaixo troca pra forma única.</div>
           </div>
         )}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
           {FORMAS_PAGAMENTO.filter(f => formasLoja.includes(f.value)).map(f => (
             <button key={f.value} type="button" style={pagBtn(f.value)} onClick={() => setPagamento(f.value)}>
               {f.label}
             </button>
           ))}
+          {/* FIADO E SO DO BALCAO (16/10/2026). Fica FORA de `formasLoja` de
+              proposito: aquela lista e a mesma que monta o cardapio online, e
+              fiado pra quem compra pela internet nao existe. Aqui quem decide e
+              a vendedora, olhando pro cliente. */}
+          <button type="button" style={pagBtn('fiado')} onClick={() => setPagamento('fiado')}>
+            Fiado
+          </button>
         </div>
+        {pagamento === 'fiado' && (
+          <div style={{
+            marginBottom: 10, padding: '8px 10px', borderRadius: 8, fontSize: 12.5,
+            border: '1px solid #d97706', background: 'rgba(217,119,6,.10)', color: '#d97706', fontWeight: 600,
+          }}>
+            Vai entrar como d&iacute;vida do cliente, em Clientes &gt; Fiado.
+            {' '}Preencha o cliente ali em cima &mdash; sem nome ningu&eacute;m tem como cobrar depois.
+          </div>
+        )}
         {pagamento === 'dinheiro' && (
           <input value={troco} onChange={e => setTroco(e.target.value)} placeholder="Troco para (R$) — opcional" inputMode="decimal" style={{ ...inputSt, marginBottom: 10 }} />
         )}

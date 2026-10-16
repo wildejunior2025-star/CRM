@@ -53,6 +53,11 @@ export default function Relatorios() {
     const vendasRes = await fetchAll(() => {
       let vendasQuery = supabase
         .from('vendas')
+        // A venda nascida de um pedido do balcao (fiado no "+ Vender", mig 0327)
+        // e so o registro da divida, nao um evento de venda a parte - e este
+        // relatorio nem le `pedidos_delivery`, entao ela apareceria sozinha,
+        // destoando das outras vendas de balcao.
+        .is('pedido_id', null)
         .select('*, clientes(nome)')
         .gte('created_at', inicioISO)
         .lt('created_at', fimExclusivo.toISOString())
