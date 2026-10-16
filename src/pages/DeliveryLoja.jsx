@@ -8,7 +8,7 @@ import AvisoCookies from '../components/AvisoCookies'
 import { adicionalComplementos, blocosDeOpcoes, cobraPeloMaior, rotuloPrecoOpcao } from '../lib/complementos'
 import { categoriaAbertaAgora } from '../lib/horarioCategoria'
 import { semAcento } from '../lib/texto'
-import { precoPorQuantidade, faixaAplicada, menorFaixa, precoRiscado } from '../lib/precoQuantidade'
+import { precoPorQuantidade, faixaAplicada, menorFaixa, precoRiscado, mapaFaixasCategoria, comFaixaDaCategoria, somaPorCategoria } from '../lib/precoQuantidade'
 import { criarBuscadorDescricao, comDescricaoNasOpcoes } from '../lib/descricaoSabor'
 import { abertaAgora, comoFicaNoDia, carregarExcecoes, hojeBR } from '../lib/feriados'
 import { capturarIndicacao } from '../lib/indicacao'
@@ -133,6 +133,7 @@ function reprecificarItemSalvo(item, prod) {
   return {
     ...item,
     precoBase: Number(prod.preco),
+    categoria: prod.categoria ?? null,
     faixas_preco: prod.faixas_preco ?? [],
     preco_promocional: prod.preco_promocional ?? null,
     preco: precoPorQuantidade(prod.preco, prod.faixas_preco, qtd, prod.preco_promocional),
@@ -180,6 +181,8 @@ export default function DeliveryLoja() {
   const catRefs = useRef({})
   const navRef = useRef(null)
   const [carrinho, setCarrinho] = useState({})
+  // Categorias com faixa própria (mig 0329): nome -> faixas.
+  const [catsFaixa, setCatsFaixa] = useState(() => new Map())
   // ── Modo alteração (?alterar=<id do pedido>) ──────────────────────────────
   //
   // "Finalizei e esqueci a Coca." Em vez de uma tela nova com meio cardápio, a
@@ -437,11 +440,16 @@ export default function DeliveryLoja() {
       // Ordem personalizada + horário de disponibilidade das categorias
       const { data: catData } = await supabase
         .from('categorias')
-        .select('nome, ordem, hora_inicio, hora_fim, dias_semana, oculta_online')
+        .select('nome, ordem, hora_inicio, hora_fim, dias_semana, oculta_online, faixas_preco')
         .eq('empresa_id', lojaData.id)
       // Categoria "só no salão" (mig 0328): não vai pra Loja Online.
       const ocultas = new Set((catData ?? []).filter(c => c.oculta_online).map(c => c.nome))
       if (ocultas.size) produtosFinal = produtosFinal.filter(p => !ocultas.has(p.categoria))
+      // Faixa de preço da categoria (mig 0329): o produto passa a carregar ela, e a
+      // sacola soma a quantidade de tudo da categoria (ver o efeito abaixo).
+      const faixasCat = mapaFaixasCategoria(catData)
+      setCatsFaixa(faixasCat)
+      if (faixasCat.size) produtosFinal = produtosFinal.map(p => comFaixaDaCategoria(p, faixasCat))
       const ordemMap = {}
       const horarioMap = {}
       const diasMap = {}
@@ -548,7 +556,7 @@ export default function DeliveryLoja() {
               : {
                   key: chave, id: prod.id, nome: prod.nome, foto_url: prod.foto_url,
                   quantidade: qtd,
-                  precoBase: Number(prod.preco), faixas_preco: prod.faixas_preco ?? [],
+                  precoBase: Number(prod.preco), categoria: prod.categoria ?? null, faixas_preco: prod.faixas_preco ?? [],
                   preco_promocional: prod.preco_promocional ?? null,
                   preco: precoPorQuantidade(prod.preco, prod.faixas_preco, qtd, prod.preco_promocional),
                 }
@@ -607,7 +615,7 @@ export default function DeliveryLoja() {
           // Guarda base e faixas pra o +/- do carrinho poder recalcular: passar
           // de 9 pra 10 tem que trocar o preco sozinho, senão o "a partir de 10"
           // vira promessa que a loja não cumpre.
-          precoBase: Number(prod.preco), faixas_preco: prod.faixas_preco ?? [],
+          precoBase: Number(prod.preco), categoria: prod.categoria ?? null, faixas_preco: prod.faixas_preco ?? [],
           preco_promocional: prod.preco_promocional ?? null,
           preco: precoPorQuantidade(prod.preco, prod.faixas_preco, qtd, prod.preco_promocional),
         },
@@ -702,6 +710,27 @@ export default function DeliveryLoja() {
     }
   }
 
+  // Faixa da categoria: a quantidade que vale é a SOMA da categoria na sacola
+  // (1 carne + 1 frango + 1 queijo = 3). Reprecifica toda vez que a sacola muda;
+  // devolve o mesmo objeto quando nada muda, então não entra em laço.
+  useEffect(() => {
+    if (!catsFaixa.size) return
+    setCarrinho(prev => {
+      const simples = i => i?.precoBase != null && !(i.complementos?.length)
+      const somas = somaPorCategoria(Object.values(prev).filter(simples), catsFaixa, i => i.quantidade)
+      let mudou = false
+      const next = {}
+      for (const [k, i] of Object.entries(prev)) {
+        if (simples(i) && catsFaixa.has(i.categoria)) {
+          const preco = precoPorQuantidade(i.precoBase, catsFaixa.get(i.categoria), somas.get(i.categoria), i.preco_promocional)
+          if (preco !== i.preco) { mudou = true; next[k] = { ...i, preco, faixas_preco: catsFaixa.get(i.categoria) }; continue }
+        }
+        next[k] = i
+      }
+      return mudou ? next : prev
+    })
+  }, [carrinho, catsFaixa])
+
   function incKey(key) {
     setCarrinho(prev => {
       const item = prev[key]
@@ -738,7 +767,7 @@ export default function DeliveryLoja() {
       if (atual) { next[key] = comPrecoDaFaixa(atual, qtd); return next }
       next[key] = {
         key, id: prod.id, nome: prod.nome, foto_url: prod.foto_url, quantidade: qtd,
-        precoBase: Number(prod.preco), faixas_preco: prod.faixas_preco ?? [],
+        precoBase: Number(prod.preco), categoria: prod.categoria ?? null, faixas_preco: prod.faixas_preco ?? [],
         preco_promocional: prod.preco_promocional ?? null,
         preco: precoPorQuantidade(prod.preco, prod.faixas_preco, qtd, prod.preco_promocional),
       }

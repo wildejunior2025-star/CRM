@@ -1643,6 +1643,11 @@ function acertarProdutoPelasEscolhas(itens: any[], catalogo: any[], sabores: Sab
   }
 }
 
+/** Em que "balde" a quantidade do item conta pra faixa: a categoria (se ela tem faixa) ou o produto. */
+function chaveDaFaixa(prod: any, id: string): string {
+  return prod?._catSoma && prod?.categoria ? `cat:${prod.categoria}` : id
+}
+
 function reprecificarItens(itens: any[], catalogo: any[], precoOpcaoMap: Record<string, number> = {}, regrasOpcao: RegrasOpcao = {}): void {
   const porId = new Map<string, any>()
   for (const p of catalogo ?? []) porId.set(String(p.id), p)
@@ -1665,13 +1670,16 @@ function reprecificarItens(itens: any[], catalogo: any[], precoOpcaoMap: Record<
   const qtdPorProduto: Record<string, number> = {}
   for (const it of itens ?? []) {
     const id = String(it?.produto_id ?? "")
-    if (id) qtdPorProduto[id] = (qtdPorProduto[id] ?? 0) + (Number(it.qtd) || 0)
+    if (id) {
+      const k = chaveDaFaixa(porId.get(id), id)
+      qtdPorProduto[k] = (qtdPorProduto[k] ?? 0) + (Number(it.qtd) || 0)
+    }
   }
   for (const it of itens ?? []) {
     const prod = porId.get(String(it?.produto_id ?? ""))
     if (!prod) continue
     const adicionais = adicionalDoItem(it, precoOpcaoMap, regrasOpcao)
-    const novo = +(precoPorQuantidade(prod, qtdPorProduto[String(prod.id)]) + adicionais).toFixed(2)
+    const novo = +(precoPorQuantidade(prod, qtdPorProduto[chaveDaFaixa(prod, String(prod.id))]) + adicionais).toFixed(2)
     if (novo !== Number(it.preco)) console.log(`[Preço] corrigido ${it.nome}: ${it.preco} → ${novo}`)
     it.preco = novo
   }
@@ -1685,23 +1693,29 @@ function reprecificarItens(itens: any[], catalogo: any[], precoOpcaoMap: Record<
 function avisoDeAtacado(itens: any[], catalogo: any[]): string {
   const rs = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`
   const qtdPorProduto = new Map<string, number>()
+  const prodDaChave = new Map<string, any>()
   for (const it of itens ?? []) {
     const id = String(it?.produto_id ?? "")
-    if (id) qtdPorProduto.set(id, (qtdPorProduto.get(id) ?? 0) + (Number(it.qtd) || 0))
+    if (!id) continue
+    const p = (catalogo ?? []).find((x: any) => String(x.id) === id)
+    const k = chaveDaFaixa(p, id)
+    qtdPorProduto.set(k, (qtdPorProduto.get(k) ?? 0) + (Number(it.qtd) || 0))
+    if (!prodDaChave.has(k)) prodDaChave.set(k, p)
   }
   const linhas: string[] = []
   for (const [id, qtd] of qtdPorProduto) {
-    const prod = (catalogo ?? []).find((p: any) => String(p.id) === id)
+    const prod = prodDaChave.get(id)
     const faixas = faixasOrdenadas(prod?.faixas_preco)
     if (!prod || !faixas.length) continue
+    const rotulo = prod._catSoma ? prod.categoria : prod.nome
     const aplicada = faixas.find(f => qtd >= f.qtd_min)
     const proxima = [...faixas].reverse().find(f => qtd < f.qtd_min)
     if (proxima && proxima.qtd_min - qtd <= Math.ceil(proxima.qtd_min / 2)) {
       const falta = proxima.qtd_min - qtd
       const comSabor = (itens ?? []).some((it: any) => String(it?.produto_id ?? "") === id && Array.isArray(it.complementos) && it.complementos.length > 0)
-      linhas.push(`💡 *${prod.nome}*: com mais ${falta} (${proxima.qtd_min} no total${comSabor ? ", pode misturar os sabores" : ""}) sai a *${rs(proxima.preco)}* cada!`)
+      linhas.push(`💡 *${rotulo}*: com mais ${falta} (${proxima.qtd_min} no total${comSabor || prod._catSoma ? ", pode misturar os sabores" : ""}) sai a *${rs(proxima.preco)}* cada!`)
     } else if (aplicada && aplicada.preco < (Number(prod.preco_venda) || 0)) {
-      linhas.push(`💰 *${prod.nome}*: levando ${qtd}, sai a *${rs(aplicada.preco)}* cada (preço de atacado).`)
+      linhas.push(`💰 *${rotulo}*: levando ${qtd}, sai a *${rs(aplicada.preco)}* cada (preço de atacado).`)
     }
   }
   return linhas.join("\n")
@@ -3570,7 +3584,7 @@ serve(async (req) => {
     // montagem (lista + complementos + preços) usa `produtos`, o filtro cobre tudo.
     const { data: catsHorario } = await supabase
       .from("categorias")
-      .select("nome, hora_inicio, hora_fim, dias_semana, oculta_online")
+      .select("nome, hora_inicio, hora_fim, dias_semana, oculta_online, faixas_preco")
       .eq("empresa_id", empresaId)
     const nowBRT = new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit" })
     const toMinBRT = (t: string) => { const [h, m] = String(t).slice(0, 5).split(":").map(Number); return h * 60 + m }
@@ -3609,7 +3623,17 @@ serve(async (req) => {
       produtosBase = await catalogoRelevante(supabase, empresaId, falas, idsCarrinho)
       console.log(`[menu] catálogo com ${totalProdutos} itens → ${produtosBase.length} relevantes`)
     }
-    const produtos = produtosBase.filter((p: any) => !p.categoria || !catForaHorario.has(p.categoria))
+    // Faixa de preço da CATEGORIA (mig 0329): o produto passa a carregar ela e a
+    // quantidade que vale é a soma da categoria (ver chaveDaFaixa).
+    const faixaPorCategoria = new Map<string, any>()
+    for (const c of ((catsHorario ?? []) as any[])) {
+      if (faixasOrdenadas(c.faixas_preco).length) faixaPorCategoria.set(c.nome, c.faixas_preco)
+    }
+    const produtos = produtosBase
+      .filter((p: any) => !p.categoria || !catForaHorario.has(p.categoria))
+      .map((p: any) => faixaPorCategoria.has(p.categoria)
+        ? { ...p, faixas_preco: faixaPorCategoria.get(p.categoria), _catSoma: true }
+        : p)
 
     // ── Preço especial de parceria (cliente + produto) ──
     // Se ESTE cliente tem preço combinado num produto, sobrescreve o preço base só pra ele.

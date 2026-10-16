@@ -5,7 +5,7 @@ import { supabase, invocarEdge, fetchAll } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto } from '../lib/descontoEntrega'
 import { tocarPedidoNovo } from '../lib/somChamado'
-import { precoPorQuantidade, faixaAplicada, menorFaixa } from '../lib/precoQuantidade'
+import { precoPorQuantidade, faixaAplicada, menorFaixa, mapaFaixasCategoria, comFaixaDaCategoria, somaPorCategoria } from '../lib/precoQuantidade'
 import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
 import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
 import { rotuloComanda, agruparItensComanda } from '../lib/comanda'
@@ -1043,6 +1043,7 @@ function dadosDePreco(produto, adicionalUnit = 0) {
     faixas_preco: produto?.faixas_preco ?? [],
     preco_promocional: produto?.preco_promocional ?? null,
     adicionalUnit: Number(adicionalUnit) || 0,
+    categoria: produto?.categoria ?? null,
   }
 }
 
@@ -1086,7 +1087,7 @@ async function carregarCatalogoCompleto(empresaId) {
     // A ordem das categorias é a MESMA do cardápio da loja. Ordenar por nome
     // aqui deixaria a lista do gestor numa ordem e a do cliente em outra — e
     // quem monta o pedido procura pela ordem que conhece.
-    supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId),
+    supabase.from('categorias').select('nome, ordem, faixas_preco').eq('empresa_id', empresaId),
   ])
   if (prodRes.error) throw prodRes.error
   const compMap = {}
@@ -1107,7 +1108,11 @@ async function carregarCatalogoCompleto(empresaId) {
     })
   }
   const ordemCategorias = Object.fromEntries((catRes?.data ?? []).map(c => [c.nome, Number(c.ordem ?? 0)]))
-  const catalogo = { produtos: prodRes.data || [], compMap, ordemCategorias }
+  // Faixa de preço da categoria (mig 0329): o produto carrega ela e a venda soma a
+  // quantidade da categoria inteira (ver o efeito no ModalVenda).
+  const catsFaixa = mapaFaixasCategoria(catRes?.data)
+  const produtosCat = (prodRes.data || []).map(p => comFaixaDaCategoria(p, catsFaixa))
+  const catalogo = { produtos: produtosCat, compMap, ordemCategorias, catsFaixa }
   catalogoCache[empresaId] = catalogo
   return catalogo
 }
@@ -1486,6 +1491,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const listaRef = useRef(null)
   const [cart, setCart]         = useState(() => draft?.cart ?? cartFromPedido(pedidoEdicao))
   const [compMap, setCompMap]   = useState({}) // { [produto_id]: grupos[] }
+  const [catsFaixa, setCatsFaixa] = useState(() => new Map()) // faixa por categoria (mig 0329)
   const [produtoComp, setProdutoComp] = useState(null) // produto sendo montado (complementos)
   const [nome, setNome]         = useState(draft?.nome ?? (pedidoEdicao && pedidoEdicao.cliente_nome !== 'Balcão' ? (pedidoEdicao.cliente_nome ?? '') : ''))
   const [telefone, setTelefone] = useState(draft?.telefone ?? (pedidoEdicao && pedidoEdicao.cliente_telefone !== '—' ? (pedidoEdicao.cliente_telefone ?? '') : ''))
@@ -1564,6 +1570,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     if (cache) {
       setProdutos(cache.produtos)
       setCompMap(cache.compMap)
+      setCatsFaixa(cache.catsFaixa ?? new Map())
       setLoading(false)
     }
     // Carrega/atualiza em segundo plano (catálogo pode ter mudado).
@@ -1573,6 +1580,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         if (!ativo) return
         setProdutos(catalogo.produtos)
         setCompMap(catalogo.compMap)
+        setCatsFaixa(catalogo.catsFaixa ?? new Map())
       } catch (e) {
         if (ativo && !cache) setErro(`Erro ao carregar produtos: ${String(e?.message ?? e)}`)
       } finally {
@@ -1883,6 +1891,30 @@ ${url}
     })
     setProdutoComp(null)
   }
+  // Faixa da categoria: o preço de cada linha segue a SOMA da categoria no carrinho.
+  // Só linhas simples (sem complemento, com precoBase); devolve o mesmo objeto se
+  // nada muda, pra não entrar em laço.
+  useEffect(() => {
+    if (!catsFaixa.size) return
+    setCart(prev => {
+      const simples = i => i?.precoBase != null && !(i.complementos?.length)
+      const somas = somaPorCategoria(Object.values(prev).filter(simples), catsFaixa, i => i.qtd)
+      let mudou = false
+      const novo = {}
+      for (const [k, i] of Object.entries(prev)) {
+        if (simples(i) && catsFaixa.has(i.categoria)) {
+          const preco = Math.min(
+            precoPorQuantidade(i.precoBase, catsFaixa.get(i.categoria), somas.get(i.categoria), i.preco_promocional),
+            i.precoBase,
+          )
+          if (preco !== i.preco) { mudou = true; novo[k] = { ...i, preco, faixas_preco: catsFaixa.get(i.categoria) }; continue }
+        }
+        novo[k] = i
+      }
+      return mudou ? novo : prev
+    })
+  }, [cart, catsFaixa])
+
   function subItem(id) {
     setCart(prev => {
       const cur = prev[id]

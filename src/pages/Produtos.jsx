@@ -627,7 +627,7 @@ export default function Produtos() {
   async function loadCategorias() {
     const { data } = await supabase
       .from('categorias')
-      .select('id, nome, ordem, hora_inicio, hora_fim, setor, isento_taxa, dias_semana, oculta_online')
+      .select('id, nome, ordem, hora_inicio, hora_fim, setor, isento_taxa, dias_semana, oculta_online, faixas_preco')
       .order('ordem', { ascending: true })
       .order('nome', { ascending: true })
     const lista = data ?? []
@@ -687,6 +687,17 @@ export default function Produtos() {
   async function salvarOcultaOnline(id, oculta) {
     setCategorias(cs => cs.map(c => (c.id === id ? { ...c, oculta_online: oculta } : c)))
     await supabase.from('categorias').update({ oculta_online: oculta }).eq('id', id)
+  }
+
+  // Preço por quantidade da CATEGORIA (mig 0329): "a partir de 3, R$ 3,33". Conta
+  // a soma de tudo que o cliente leva da categoria (misturando os sabores) e vale
+  // no lugar da faixa de cada produto. Qtd ou preço vazios = sem faixa.
+  async function salvarFaixaCategoria(id, qtdTxt, precoTxt) {
+    const qtd = parseInt(String(qtdTxt).replace(/\D/g, ''), 10) || 0
+    const preco = parseFloat(String(precoTxt).replace(',', '.')) || 0
+    const faixas = qtd > 1 && preco > 0 ? [{ qtd_min: qtd, preco: Math.round(preco * 100) / 100 }] : []
+    setCategorias(cs => cs.map(c => (c.id === id ? { ...c, faixas_preco: faixas } : c)))
+    await supabase.from('categorias').update({ faixas_preco: faixas }).eq('id', id)
   }
 
   // Persiste a ordem 1..n de uma nova lista de categorias (otimista)
@@ -2601,6 +2612,12 @@ export default function Produtos() {
               🍻 <strong>Só no salão</strong> — marque a categoria que <strong>não deve aparecer na Loja Online, no app nem no robô</strong>
               (Happy Hour, por exemplo). Os itens continuam vendendo normalmente no balcão, no salão e na mesa.
             </p>
+
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+              🏷️ <strong>A partir de ... por R$ ...</strong> — desconto por quantidade <strong>da categoria inteira</strong>. Ex.: espetos,
+              a partir de 3 por R$ 3,33: um de carne + um de frango + um de queijo já saem a R$ 3,33 cada. Estoque e custo
+              seguem por produto. Preenchido, vale no lugar da faixa de cada produto; vazio, cada produto segue a sua.
+            </p>
             </div>
 
             <div className="data-table tabela-categorias">
@@ -2720,6 +2737,25 @@ export default function Produtos() {
                               Só no salão
                             </span>
                           </label>
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
+                          {(() => {
+                            const f = Array.isArray(c.faixas_preco) ? c.faixas_preco[0] : null
+                            const campo = { width: 52, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 12.5 }
+                            const salvar = (e) => {
+                              const linha = e.currentTarget.closest('[data-faixa]')
+                              salvarFaixaCategoria(c.id, linha.querySelector('[data-q]').value, linha.querySelector('[data-p]').value)
+                            }
+                            return (
+                              <div data-faixa style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12.5 }}
+                                title="Desconto por quantidade da categoria. A quantidade é a SOMA de tudo que o cliente leva dela (pode misturar os itens). Deixe vazio pra não ter.">
+                                <span style={{ color: 'var(--text-muted)' }}>A partir de</span>
+                                <input data-q key={`q${c.id}${f?.qtd_min ?? ''}`} defaultValue={f?.qtd_min ?? ''} onBlur={salvar} inputMode="numeric" placeholder="3" draggable={false} style={campo} />
+                                <span style={{ color: 'var(--text-muted)' }}>un. por R$</span>
+                                <input data-p key={`p${c.id}${f?.preco ?? ''}`} defaultValue={f ? String(f.preco).replace('.', ',') : ''} onBlur={salvar} inputMode="decimal" placeholder="3,33" draggable={false} style={campo} />
+                              </div>
+                            )
+                          })()}
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
                           <div style={{ display: 'flex', gap: 3 }} title="Em que dias esta categoria aparece. Nada marcado = todo dia.">

@@ -74,3 +74,35 @@ export function menorFaixa(faixas) {
   const ord = faixasOrdenadas(faixas)
   return ord.length ? ord[ord.length - 1] : null
 }
+
+// ── Faixa da CATEGORIA (mig 0329) ───────────────────────────────────────────
+// A categoria pode ter a própria faixa ("espetos: 3 por R$ 3,33"). Quando tem,
+// ela vale no lugar da faixa de cada produto e conta a SOMA de tudo que o
+// cliente levou da categoria — misturar sabores completa a faixa.
+
+/** { nome da categoria -> faixas } só das categorias que têm faixa. */
+export function mapaFaixasCategoria(categorias) {
+  const m = new Map()
+  for (const c of (categorias ?? [])) {
+    if (c?.nome && faixasOrdenadas(c.faixas_preco).length) m.set(c.nome, c.faixas_preco)
+  }
+  return m
+}
+
+/** O produto passa a carregar a faixa da categoria (cards, "3+ R$ 3,33" e preço). */
+export function comFaixaDaCategoria(produto, mapa) {
+  const f = mapa?.get(produto?.categoria)
+  return f ? { ...produto, faixas_preco: f } : produto
+}
+
+/** Soma das quantidades por categoria que tem faixa. `linhas` = só itens simples. */
+export function somaPorCategoria(linhas, mapa, qtdDe) {
+  const soma = new Map()
+  if (!mapa?.size) return soma
+  for (const l of linhas ?? []) {
+    if (l?.categoria && mapa.has(l.categoria)) {
+      soma.set(l.categoria, (soma.get(l.categoria) || 0) + (Number(qtdDe(l)) || 0))
+    }
+  }
+  return soma
+}

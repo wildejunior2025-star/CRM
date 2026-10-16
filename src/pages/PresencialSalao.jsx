@@ -458,7 +458,7 @@ export default function PresencialSalao() {
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
       // `setor` vem junto: é ele que diz qual categoria NÃO sai no papel — e
       // essas o garçom pega ele mesmo, sem esperar cozinha nenhuma (mig 0185).
-      supabase.from('categorias').select('nome, ordem, setor, hora_inicio, hora_fim, dias_semana').eq('empresa_id', empresaId),
+      supabase.from('categorias').select('nome, ordem, setor, hora_inicio, hora_fim, dias_semana, faixas_preco').eq('empresa_id', empresaId),
       // Complementos por produto. A tabela de vínculo não tem empresa_id e é lida por
       // todos (policy le_publico_pcg), então o "!inner" é o que garante a separação:
       // vira INNER JOIN com complemento_grupos, que a RLS já filtra por empresa — os
@@ -832,9 +832,24 @@ export default function PresencialSalao() {
   //
   // Vale pela quantidade DESTA linha, igual à Nova venda. Preço digitado na mão
   // (prato no peso) manda mais que qualquer faixa.
-  const precoDaLinha = (r) => (r?.precoManual
-    ? Number(r.preco_venda) || 0
-    : precoPorQuantidade(r?.preco_venda, r?.faixas_preco, r?.quantidade, r?.preco_promocional))
+  //
+  // Faixa da CATEGORIA (mig 0329): se a categoria tem faixa própria, a quantidade
+  // que vale é a soma das linhas dela no rascunho (misturar sabores completa).
+  const faixaDaCat = (r) => {
+    const f = catInfo?.[r?.categoria]?.faixas_preco
+    return Array.isArray(f) && f.length && !r?.precoManual && !(r?.complementos?.length) ? f : null
+  }
+  const somaCatRascunho = {}
+  for (const r of rascunho) {
+    if (faixaDaCat(r)) somaCatRascunho[r.categoria] = (somaCatRascunho[r.categoria] || 0) + (Number(r.quantidade) || 0)
+  }
+  const precoDaLinha = (r) => {
+    if (r?.precoManual) return Number(r.preco_venda) || 0
+    const fc = faixaDaCat(r)
+    return fc
+      ? precoPorQuantidade(r?.preco_venda, fc, somaCatRascunho[r.categoria], r?.preco_promocional)
+      : precoPorQuantidade(r?.preco_venda, r?.faixas_preco, r?.quantidade, r?.preco_promocional)
+  }
 
   const subtotalRascunho = rascunho.reduce((s, r) => s + precoDaLinha(r) * r.quantidade, 0)
 
@@ -1082,6 +1097,7 @@ export default function PresencialSalao() {
       // quantidade, e ela só se fecha na hora de enviar (ver `precoDaLinha`).
       faixas_preco: produto.faixas_preco ?? null,
       preco_promocional: produto.preco_promocional ?? null,
+      categoria: produto.categoria ?? null,
       complementos: [], quantidade: 1, observacao: '',
     })
   }
