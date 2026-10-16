@@ -3003,9 +3003,23 @@ function CodigoColetaIfood({ pedido, onLiberar }) {
       const { data, error } = await supabase.functions.invoke('ifood-integration', {
         body: { acao: 'validar_codigo_coleta', pedido_id: pedido.id, codigo },
       })
-      // Digitou e não bateu: NÃO libera. Pode ser pedido trocado, ou alguém
-      // que não é o entregador. É justamente a hora de segurar a sacola.
-      if (error || !data?.valid) {
+      // ANTES: qualquer falha virava "esse código não bate", e a loja ia
+      // procurar erro no entregador. Só que o iFood recusa por vários motivos
+      // que não têm nada a ver com o código — recurso não habilitado pra loja,
+      // entrega que não é dele, pedido que já saiu do estado de coleta — e aí
+      // o lojista fica tentando de novo um código que estava certo (Braseiro,
+      // 15/10/2026). Agora cada caso diz o que é, e o que fazer.
+      if (error) {
+        setEstado('Não deu pra falar com o iFood agora. Apague o código pra entregar sem conferir.')
+        return
+      }
+      if (data?.recusadoPeloIfood) {
+        setEstado(`O iFood não aceitou conferir este pedido (erro ${data.status ?? '?'}). Não é o código: pode ser que a conferência não esteja liberada pra loja, ou que a entrega não seja do iFood. Apague o código e entregue — conferir não é obrigatório.`)
+        return
+      }
+      // 200 com valid:false = aí sim o código está errado. NÃO libera: pode ser
+      // pedido trocado, ou alguém que não é o entregador.
+      if (!data?.valid) {
         setEstado('Esse código não bate com o deste pedido. Confira com o entregador antes de entregar.')
         setDigitos(['', '', '', ''])
         refs.current[0]?.focus()

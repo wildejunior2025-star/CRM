@@ -1682,14 +1682,21 @@ async function runValidarCodigoColeta(sb: any, pedidoId: string, codigo: string)
     },
   )
 
-  // 400/422 = o iFood recusou o código. Não é erro nosso: é código errado.
+  // 400/422 nem sempre é "código errado". O iFood tambem recusa quando o
+  // recurso nao esta habilitado pra loja, quando a entrega nao e dele
+  // (deliveredBy != IFOOD) ou quando o pedido ja saiu do estado de coleta.
+  // Antes isso tudo chegava na tela como "esse codigo nao bate", e a loja ia
+  // procurar erro no entregador (Braseiro, 15/10/2026). Agora o motivo fica no
+  // log e volta pra tela dizer o que houve.
   if (!res.ok) {
     const txt = await res.text()
-    return { ok: true, valid: false, status: res.status, detalhe: txt.slice(0, 200) }
+    console.log(`[coleta] iFood RECUSOU pedido=${pedido.ifood_order_id} status=${res.status} corpo=${txt.slice(0, 300) || "(vazio)"}`)
+    return { ok: true, valid: false, recusadoPeloIfood: true, status: res.status, detalhe: txt.slice(0, 300) }
   }
   const data = await res.json().catch(() => ({}))
   const valid = data?.valid !== false // 200 sem "valid:false" = válido
 
+  console.log(`[coleta] iFood respondeu pedido=${pedido.ifood_order_id} valid=${valid}`)
   if (valid) {
     await sb.from("pedidos_delivery")
       .update({ ifood_coleta_validada_at: new Date().toISOString(), ifood_codigo_coleta: digitado })
