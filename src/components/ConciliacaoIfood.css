@@ -66,6 +66,8 @@
 .ci-selo.ok { color: var(--success, #16a34a); border-color: currentColor; }
 .ci-selo.aviso { color: #b45309; border-color: currentColor; }
 .ci-selo.erro { color: var(--danger, #dc2626); border-color: currentColor; }
+/* Selo com frase longa: quebra a linha em vez de vazar pra fora do card. */
+.ci-selo.quebra { white-space: normal; border-radius: 10px; overflow-wrap: anywhere; }
 
 .ci-detalhe { background: var(--bg); padding: 10px 12px !important; white-space: normal !important; text-align: left !important; }
 

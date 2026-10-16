@@ -122,6 +122,16 @@ function Relogio() {
   return <b>{agora.toLocaleString('pt-BR')}</b>
 }
 
+// O iFood responde em inglês quando não gerou o arquivo oficial do mês pra loja
+// (acontece com as lojas reais; quem gera é ele). Traduz e aponta a saída.
+function erroMensal(erro) {
+  if (!erro) return 'não disponível'
+  if (/No reconciliation file/i.test(erro)) {
+    return 'O iFood não gerou o arquivo oficial deste mês para a loja. Use "Gerar relatório sob demanda".'
+  }
+  return erro
+}
+
 export default function ConciliacaoIfood({ empresaId }) {
   const [aba, setAba] = useState('repasses')
   const [lojas, setLojas] = useState(null)          // linhas de ifood_config
@@ -729,7 +739,7 @@ function Relatorio({ empresaId, versao, nomeLoja, variasLojas }) {
       const d = await chamarFuncao({ acao: 'conciliacao_mensal', empresa_id: empresaId, competencia: comp })
       const r = d.resultados ?? []
       const erro = r.find(x => x.status !== 'pronto')
-      setMsg(erro ? { tipo: 'erro', txt: erro.erro || 'O iFood não entregou o arquivo.' } : { tipo: 'ok', txt: `Arquivo de ${rotuloComp} atualizado.` })
+      setMsg(erro ? { tipo: 'erro', txt: erro.erro ? erroMensal(erro.erro) : 'O iFood não entregou o arquivo.' } : { tipo: 'ok', txt: `Arquivo de ${rotuloComp} atualizado.` })
     } catch (e) { setMsg({ tipo: 'erro', txt: e.message }) }
     await carregar()
     setOcupado(null)
@@ -918,7 +928,7 @@ function Relatorio({ empresaId, versao, nomeLoja, variasLojas }) {
                 <b style={{ fontSize: 13 }}>Arquivo mensal{variasLojas ? ` · ${nomeLoja[l.merchant_id] ?? ''}` : ''}</b>
                 {l.status === 'pronto'
                   ? <span className="ci-selo ok">✓ pronto · {l.linhas} linhas · {dataHora(l.atualizado_em)}</span>
-                  : <span className="ci-selo erro">⚠ {l.erro || 'não disponível'}</span>}
+                  : <span className="ci-selo erro quebra">⚠ {erroMensal(l.erro)}</span>}
                 {l.status === 'pronto' && l.arquivo_path && (
                   <button type="button" className="ci-btn cheio" onClick={() => baixar(l)} disabled={!!ocupado}>
                     {ocupado === `baixar:${l.id}` ? 'Gerando link…' : '⬇ Baixar CSV'}
