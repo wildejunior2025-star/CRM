@@ -93,6 +93,7 @@ export default function Estoque() {
 
   const [motivos, setMotivos] = useState(MOTIVOS_PADRAO)
   const [showMotivosModal, setShowMotivosModal] = useState(false)
+  const [filtroEstoque, setFiltroEstoque] = useState('todos') // todos | baixo | zerado
   const [motivoTab, setMotivoTab] = useState('entrada')
   const [novoMotivo, setNovoMotivo] = useState('')
   const [savingMotivo, setSavingMotivo] = useState(false)
@@ -217,6 +218,21 @@ export default function Estoque() {
   // Produto sem controle (self-service, prato na hora) não faz sentido aparecer aqui.
   const saldoControlado = saldo.filter((s) => s.controla_estoque !== false)
 
+  // Situação de cada produto, numa regra só — a tabela e o filtro leem daqui,
+  // senão um dia a etiqueta diz uma coisa e o filtro mostra outra.
+  const situacaoDe = (s) => {
+    if (Number(s.quantidade_atual) <= 0) return 'zerado'
+    if (Number(s.estoque_minimo) > 0 && Number(s.quantidade_atual) <= Number(s.estoque_minimo)) return 'baixo'
+    return 'ok'
+  }
+  const nZerado = saldoControlado.filter((s) => situacaoDe(s) === 'zerado').length
+  const nBaixo = saldoControlado.filter((s) => situacaoDe(s) === 'baixo').length
+  // Numa loja de conveniência a lista passa de cem itens, e o que o dono quer
+  // saber é só "o que eu preciso comprar hoje" (pedido do usuário, 16/10/2026).
+  const saldoFiltrado = filtroEstoque === 'todos'
+    ? saldoControlado
+    : saldoControlado.filter((s) => situacaoDe(s) === filtroEstoque)
+
   async function handleMovSubmit(e) {
     e.preventDefault()
     setSavingMov(true)
@@ -317,7 +333,11 @@ export default function Estoque() {
     <div>
       <div className="page-header">
         <h1>Estoque</h1>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        {/* `flexWrap`: o .page-header ja quebra linha, mas esta caixa nao quebrava
+            - ela segurava os quatro botoes numa fileira so e ESTICAVA a pagina.
+            No celular dava pra rolar a tela inteira pro lado e cair num vazio,
+            com a tabela ficando pra tras (16/10/2026). */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <button
             className={`btn ${usaEstoque ? 'btn-secondary' : 'btn-primary'}`}
             onClick={alternarUsoEstoque}
@@ -366,11 +386,44 @@ export default function Estoque() {
 
       {usaEstoque && (<>
       <h2 style={{ fontSize: 16, marginBottom: 8 }}>Saldo por produto</h2>
+      {/* Filtro: numa conveniência a lista passa de cem itens e o dono abre a
+          tela pra saber UMA coisa — o que precisa comprar hoje. */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        {[
+          { id: 'todos', rotulo: 'Todos', n: saldoControlado.length, cor: 'var(--primary)' },
+          { id: 'baixo', rotulo: 'Estoque baixo', n: nBaixo, cor: '#d97706' },
+          { id: 'zerado', rotulo: 'Sem estoque', n: nZerado, cor: '#dc2626' },
+        ].map((f) => {
+          const ativo = filtroEstoque === f.id
+          return (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setFiltroEstoque(f.id)}
+              style={{
+                padding: '7px 12px', borderRadius: 999, cursor: 'pointer',
+                fontSize: 13, fontWeight: 700, border: '1.5px solid',
+                borderColor: ativo ? f.cor : 'var(--border)',
+                background: ativo ? f.cor : 'transparent',
+                color: ativo ? '#fff' : 'var(--text-muted)',
+              }}
+            >
+              {f.rotulo} ({f.n})
+            </button>
+          )
+        })}
+      </div>
       <div className="data-table tabela-estoque" style={{ marginBottom: 24 }}>
         {loading ? (
           <div className="empty-state">Carregando...</div>
         ) : saldoControlado.length === 0 ? (
           <div className="empty-state">Nenhum produto com controle de estoque. Ligue o "Controla estoque" no produto (Catálogo) pra ele aparecer aqui.</div>
+        ) : saldoFiltrado.length === 0 ? (
+          <div className="empty-state">
+            {filtroEstoque === 'baixo'
+              ? 'Nenhum produto no mínimo. Está tudo abastecido.'
+              : 'Nenhum produto zerado.'}
+          </div>
         ) : (
           <table>
             <thead>
@@ -383,10 +436,12 @@ export default function Estoque() {
               </tr>
             </thead>
             <tbody>
-              {saldoControlado.map((s) => {
+              {saldoFiltrado.map((s) => {
                 // Sem mínimo definido não existe "baixo": era por isso que a
                 // tela pintava TODA linha de vermelho quando mínimo era 0.
-                const baixo = Number(s.estoque_minimo) > 0 && Number(s.quantidade_atual) <= Number(s.estoque_minimo)
+                const sit = situacaoDe(s)
+                const zerado = sit === 'zerado'
+                const baixo = sit === 'baixo'
                 return (
                   <tr key={s.produto_id}>
                     <td>{s.nome}</td>
@@ -402,9 +457,9 @@ export default function Estoque() {
                     <td className="col-extra">{s.estoque_minimo}</td>
                     <td>
                       <span
-                        className={`badge ${baixo ? 'badge-danger' : 'badge-success'}`}
+                        className={`badge ${zerado || baixo ? 'badge-danger' : 'badge-success'}`}
                       >
-                        {baixo ? 'Estoque baixo' : 'Ok'}
+                        {zerado ? 'Sem estoque' : baixo ? 'Estoque baixo' : 'Ok'}
                       </span>
                     </td>
                   </tr>
