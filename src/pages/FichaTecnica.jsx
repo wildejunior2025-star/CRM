@@ -152,6 +152,8 @@ export default function FichaTecnica() {
 
   // Carrinho rápido (mesma tela pra dar BAIXA ou ENTRADA em vários insumos de uma vez).
   const [showBaixa, setShowBaixa] = useState(false)
+  const [movMotivo, setMovMotivo] = useState('')      // justificativa da saída (obrigatória)
+  const [cartMotivo, setCartMotivo] = useState('')
   const [cartTipo, setCartTipo] = useState('saida') // 'saida' (baixa) | 'entrada'
   const [baixaBusca, setBaixaBusca] = useState('')
   const [baixaCart, setBaixaCart] = useState([]) // [{ id, nome, unidade, qtd, pago }]
@@ -409,6 +411,7 @@ export default function FichaTecnica() {
   function abrirMov(m) {
     setMovMateria(m)
     setMovTipo('entrada')
+    setMovMotivo('')
     const custo = Number(m.custo || 0)
     setMovTrio({ qtdTxt: '', unitTxt: custo > 0 ? txtNum(custo, 2) : '', totalTxt: '', ordem: ORDEM_PADRAO })
     setMovAtualizaCusto(true)
@@ -434,11 +437,27 @@ export default function FichaTecnica() {
     const pagoBruto = numOuNulo(movTrio.totalTxt) ?? (movUnit && qtd > 0 ? movUnit * qtd : null)
     const pago = pagoBruto ?? 0
     const temPago = movTipo === 'entrada' && pago > 0
+    // SAÍDA só com justificativa — e pela função do banco que carimba quem fez e
+    // quando, lança o prejuízo nos custos imprevistos e tira do estoque (mig 0331).
+    // O vendedor não escreve saída direto no estoque: só por aqui.
+    if (movTipo === 'saida') {
+      if (!movMotivo.trim()) { alert('Diga o que aconteceu (ex.: caiu no chão, joguei fora).'); return }
+      setSavingMov(true)
+      const { error: erroSaida } = await supabase.rpc('imprevisto_registrar_mp', {
+        p_materia_prima_id: m.id, p_quantidade: quantidade, p_descricao: movMotivo.trim(),
+      })
+      setSavingMov(false)
+      if (erroSaida) { alert(erroSaida.message || recadoDeErro(erroSaida, 'movimentar')); return }
+      setShowMov(false); carregar()
+      return
+    }
     setSavingMov(true)
     const { error } = await supabase.from('materia_prima_movimentos').insert({
       empresa_id: empresaId, materia_prima_id: m.id, tipo: movTipo, quantidade,
       custo_unit: temPago ? movUnit : null,
       valor_total: temPago ? pago : null,
+      observacao: movTipo === 'ajuste' ? `Acerto de contagem por ${profile?.nome || 'usuário'}` : null,
+      created_by: profile?.id ?? null,
     })
     // O custo do cadastro é o que a ficha técnica usa pra calcular o prato. Se o
     // preço mudou na compra, ele tem que acompanhar — mas só se o dono deixar.
@@ -456,7 +475,7 @@ export default function FichaTecnica() {
   )
 
   // ── Carrinho rápido (baixa ou entrada de insumos) ──
-  function abrirCarrinho(tipo) { setCartTipo(tipo); setBaixaBusca(''); setBaixaCart([]); setCartAtualizaCusto(true); setShowBaixa(true) }
+  function abrirCarrinho(tipo) { setCartTipo(tipo); setCartMotivo(''); setBaixaBusca(''); setBaixaCart([]); setCartAtualizaCusto(true); setShowBaixa(true) }
   // A lista do carrinho de ENTRADA mistura insumo e produto de revenda: quem
   // chega da compra tem tudo no mesmo saco. Cada opção carrega de onde veio, e na
   // hora de salvar cada uma vai pro estoque certo. Na BAIXA só entra insumo — dar
@@ -549,6 +568,23 @@ export default function FichaTecnica() {
     if (!itens.length) return
     // Mesmo carrinho, dois destinos: insumo vai pro estoque de matéria-prima,
     // produto de revenda vai pro estoque do catálogo (que é o que baixa na venda).
+    // Baixa rápida (saída): cada insumo passa pela função que exige a justificativa
+    // e carimba quem fez. Entrada segue como sempre.
+    if (cartTipo === 'saida') {
+      if (!cartMotivo.trim()) { alert('Diga o que aconteceu (ex.: usado na produção, caiu no chão).'); return }
+      setSalvandoBaixa(true)
+      let erroSaida = null
+      for (const x of itens.filter(y => y.origem === 'mat')) {
+        const { error } = await supabase.rpc('imprevisto_registrar_mp', {
+          p_materia_prima_id: x.id, p_quantidade: x.qtd, p_descricao: cartMotivo.trim(),
+        })
+        if (error) { erroSaida = error; break }
+      }
+      setSalvandoBaixa(false)
+      if (erroSaida) { alert(erroSaida.message || recadoDeErro(erroSaida, 'lançar')); carregar(); return }
+      setShowBaixa(false); carregar()
+      return
+    }
     const linhasMat = itens.filter(x => x.origem === 'mat').map(x => ({
       empresa_id: empresaId, materia_prima_id: x.id, tipo: cartTipo, quantidade: x.qtd,
       custo_unit: x.unit, valor_total: x.pagoNum,
@@ -799,7 +835,7 @@ export default function FichaTecnica() {
           : <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <LancarNotaIA empresaId={empresaId} onDone={carregar} />
               <button className="btn btn-secondary" onClick={() => abrirCarrinho('entrada')} title="Dar entrada rápida no que comprou/chegou">⬆️ Dar entrada</button>
-              <button className="btn btn-secondary" onClick={() => abrirCarrinho('saida')} title="Dar baixa rápida no que foi usado hoje">⬇️ Dar baixa</button>
+              <button className="btn btn-secondary" onClick={() => abrirCarrinho('saida')} title="Baixa por imprevisto (caiu, estragou, venceu) — exige motivo">⚠️ Baixa por imprevisto</button>
               <button className="btn btn-primary" onClick={abrirNovaMateria}>+ Nova matéria-prima</button>
             </div>}
       </div>
@@ -1194,7 +1230,7 @@ export default function FichaTecnica() {
             </div>
 
             <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-              {[['entrada', '⬆️ Comprei'], ['saida', '⬇️ Usei'], ['ajuste', '✏️ Acertar']].map(([id, lb]) => (
+              {[['entrada', '⬆️ Comprei'], ['saida', '⚠️ Baixa (imprevisto)'], ['ajuste', '✏️ Acertar']].map(([id, lb]) => (
                 <button key={id} type="button" onClick={() => setMovTipo(id)}
                   style={{ flex: 1, padding: '9px 0', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
                     border: `1.5px solid ${movTipo === id ? 'var(--primary)' : 'var(--border)'}`,
@@ -1210,10 +1246,18 @@ export default function FichaTecnica() {
                 onChange={e => setMovCampo('qtd', e.target.value)} />
               <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>
                 {movTipo === 'entrada' && 'Entra no estoque (compra de insumo).'}
-                {movTipo === 'saida' && 'Sai do estoque (usou na produção / perdeu).'}
+                {movTipo === 'saida' && 'Sai do estoque e vai pro prejuízo do dia, com o seu nome e a hora.'}
                 {movTipo === 'ajuste' && 'Acerta o saldo pro que você contou (grava só a diferença).'}
               </span>
             </div>
+
+            {movTipo === 'saida' && (
+              <div className="form-field full" style={{ marginTop: 10 }}>
+                <label>O que aconteceu? (obrigatório)</label>
+                <input placeholder="Ex.: caiu no chão, joguei fora" value={movMotivo}
+                  onChange={e => setMovMotivo(e.target.value)} />
+              </div>
+            )}
 
             {/* Preço pago: fica gravado NESTA compra, então dá pra ver depois
                 quanto se gastou no dia e como o preço do insumo foi mudando.
@@ -1272,7 +1316,7 @@ export default function FichaTecnica() {
       {showBaixa && (
         <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowBaixa(false) }}>
           <div className="modal modal-lg" style={{ maxWidth: 660, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-            <h2>{cartTipo === 'entrada' ? '⬆️ Dar entrada rápida (o que chegou)' : '⬇️ Dar baixa rápida (insumos usados)'}</h2>
+            <h2>{cartTipo === 'entrada' ? '⬆️ Dar entrada rápida (o que chegou)' : '⚠️ Baixa por imprevisto (insumos)'}</h2>
             <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 10px' }}>
               {cartTipo === 'entrada'
                 ? 'Insumo e produto de revenda na mesma lista — toque pra adicionar e lance tudo de uma vez. Cada um vai pro estoque certo.'
@@ -1371,6 +1415,14 @@ export default function FichaTecnica() {
                 )}
               </div>
             </div>
+
+            {cartTipo === 'saida' && (
+              <div className="form-field full" style={{ marginTop: 10 }}>
+                <label>O que aconteceu? (obrigatório)</label>
+                <input placeholder="Ex.: caiu no chão, joguei fora" value={cartMotivo}
+                  onChange={e => setCartMotivo(e.target.value)} />
+              </div>
+            )}
 
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShowBaixa(false)}>Cancelar</button>

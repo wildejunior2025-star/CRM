@@ -5,6 +5,7 @@ import { supabase, invocarEdge, fetchAll } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto } from '../lib/descontoEntrega'
 import { tocarPedidoNovo } from '../lib/somChamado'
+import BaixaInsumos from '../components/BaixaInsumos'
 import { precoPorQuantidade, faixaAplicada, menorFaixa, mapaFaixasCategoria, comFaixaDaCategoria, somaPorCategoria } from '../lib/precoQuantidade'
 import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
 import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
@@ -10943,6 +10944,7 @@ export default function PainelPedidos() {
                   ))}
                 </div>
               )}
+              <BaixaInsumos />
             </div>
           )}
           {/* Painel: Concluídos do dia */}

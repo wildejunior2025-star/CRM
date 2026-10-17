@@ -364,7 +364,7 @@ export default function DespesasLucro({ empresaId }) {
           vendido: Number(c.valor_vendido || 0),
           semEstoque: c.modo !== 'pct' })),
       ]
-      const impSnap = imprevistos.map(i => ({ descricao: i.descricao, valor: Number(i.valor || 0) }))
+      const impSnap = imprevistos.map(i => ({ descricao: i.descricao, valor: Number(i.valor || 0), por: i.registrado_por_nome || null, hora: i.created_at || null }))
       const { error: upErr } = await supabase.from('historico_dia').upsert({
         empresa_id: empresaId, data: dia,
         receita_liquida: receita, receita_proprios: receitaDia.proprios + (receitaDia.salao || 0), receita_ifood: receitaDia.ifood,
@@ -940,15 +940,22 @@ export default function DespesasLucro({ empresaId }) {
             {fechado ? (
               imprevFechado.length === 0
                 ? <Vazio texto="Nenhum imprevisto nesse dia." />
-                : imprevFechado.map((i, k) => <ItemLinha key={k} titulo={i.descricao} valor={brl(i.valor)} />)
+                : imprevFechado.map((i, k) => <ItemLinha key={k} titulo={i.descricao} valor={brl(i.valor)}
+                    sub={i.por ? <>por <strong>{i.por}</strong>{i.hora ? ' · ' + new Date(i.hora).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''}</> : undefined} />)
             ) : (
               imprevistos.length === 0
                 ? <Vazio texto="Ex.: pedido cancelado que estragou o produto, algo que caiu/quebrou, compra de emergência…" />
                 : imprevistos.map(i => (
                   <ItemLinha key={i.id} onDel={() => excluirImprev(i)} titulo={i.descricao} valor={brl(i.valor)}
-                    sub={i.produto_id && i.estoque_movimento_id
-                      ? <>📦 saiu {Number(i.quantidade || 0)} do estoque</>
-                      : (i.produto_id ? <>só custo — o produto não controla estoque</> : undefined)} />
+                    sub={<>
+                      {i.materia_prima_id && i.mp_movimento_id
+                        ? <>🥩 saiu {Number(i.quantidade || 0)} do estoque do insumo</>
+                        : i.produto_id && i.estoque_movimento_id
+                          ? <>📦 saiu {Number(i.quantidade || 0)} do estoque</>
+                          : (i.produto_id ? <>só custo — o produto não controla estoque</> : null)}
+                      {i.registrado_por_nome && <>{' · '}por <strong>{i.registrado_por_nome}</strong></>}
+                      {i.created_at && <>{' · '}{new Date(i.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</>}
+                    </>} />
                 ))
             )}
           </Secao>
