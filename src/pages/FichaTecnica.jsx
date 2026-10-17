@@ -103,7 +103,7 @@ const emptyMateria = { nome: '', unidade: 'kg', custo: '', ativo: true, quantida
 const linhaVazia = () => ({ materia_prima_id: '', ficha_ref_id: '', nome: '', quantidade: '', unidade: 'g', custo_unit: 0 })
 const emptyFicha = {
   nome: '', produto_id: '', complemento_opcao_id: '', rendimento: '', unid_rendimento: 'g',
-  peso_porcao: '', unid_porcao: 'g', observacoes: '', itens: [linhaVazia()],
+  peso_porcao: '', unid_porcao: 'g', observacoes: '', baixa_estoque: false, itens: [linhaVazia()],
 }
 
 const stepBtn = { width: 28, height: 28, borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 16, lineHeight: 1, flexShrink: 0 }
@@ -652,6 +652,7 @@ export default function FichaTecnica() {
       peso_porcao: String(f.peso_porcao ?? ''),
       unid_porcao: f.unid_porcao || 'g',
       observacoes: f.observacoes || '',
+      baixa_estoque: f.baixa_estoque === true,
       itens: itens.length ? itens : [linhaVazia()],
     })
     setShowFicha(true)
@@ -718,6 +719,9 @@ export default function FichaTecnica() {
         peso_porcao: Number(String(fichaForm.peso_porcao).replace(',', '.')) || 0,
         unid_porcao: fichaForm.unid_porcao,
         observacoes: fichaForm.observacoes.trim() || null,
+        // Baixa de estoque (mig 0330): ligar agora vale só pras vendas daqui pra frente.
+        baixa_estoque: !!fichaForm.baixa_estoque,
+        ...(fichaForm.baixa_estoque && !fichaEdit?.baixa_estoque ? { baixa_desde: new Date().toISOString() } : {}),
       }
       let fichaId = fichaEdit?.id
       if (fichaEdit) {
@@ -1461,6 +1465,19 @@ export default function FichaTecnica() {
                 <label>Observações (opcional)</label>
                 <input placeholder="Ex.: modo de preparo, rendimento aproximado…" value={fichaForm.observacoes}
                   onChange={e => setFichaForm(f => ({ ...f, observacoes: e.target.value }))} />
+              </div>
+              <div className="form-field full">
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', textTransform: 'none', letterSpacing: 0 }}>
+                  <input type="checkbox" checked={!!fichaForm.baixa_estoque} style={{ marginTop: 3 }}
+                    onChange={e => setFichaForm(f => ({ ...f, baixa_estoque: e.target.checked }))} />
+                  <span>
+                    <strong>Dar baixa no estoque das matérias-primas a cada venda</strong>
+                    <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', fontWeight: 400 }}>
+                      Cada vez que o produto vinculado sair (Loja Online, balcão, mesa, robô, iFood), a quantidade dos ingredientes
+                      abaixo é descontada do estoque da aba Matérias-primas. Cancelou o pedido, volta sozinho.
+                    </span>
+                  </span>
+                </label>
               </div>
             </div>
 
