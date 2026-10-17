@@ -4305,15 +4305,21 @@ const RIGHTBAR_BOTOES = [
       </svg>
     ),
   },
+  // Saiu o "Hoje" (17/10/2026): ele listava os concluidos do dia, que ja estao
+  // na coluna "Concluidos hoje" do quadro, no Portal e no app - e a unica coisa
+  // so dele, reimprimir o cupom, tem botao no proprio card do pedido. No lugar
+  // entrou o Caixa, que nasceu agora e nao tinha porta no gestor.
   {
-    id: 'hoje', label: 'Hoje',
+    // ATALHO: a tela de Caixa ja esta no gestor, dentro de Mesas (aba Caixa).
+    // So faltava uma porta na barra — pra chegar nela a pessoa tinha que abrir
+    // Mesas e lembrar que o caixa estava escondido ali dentro.
+    id: 'caixa', label: 'Caixa', soFinanceiro: true, abreSalao: 'caixa',
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="3" y="4" width="18" height="18" rx="2"/>
-        <line x1="16" y1="2" x2="16" y2="6"/>
-        <line x1="8" y1="2" x2="8" y2="6"/>
-        <line x1="3" y1="10" x2="21" y2="10"/>
-        <polyline points="9 16 11 18 15 14"/>
+        <rect x="2" y="6" width="20" height="12" rx="2"/>
+        <circle cx="12" cy="12" r="2.5"/>
+        <path d="M6 12h.01"/>
+        <path d="M18 12h.01"/>
       </svg>
     ),
   },
@@ -6896,9 +6902,13 @@ export default function PainelPedidos() {
   // ── Painel lateral direito (Impressora / Pedidos) ─────────
   // Lembra a seção aberta (ex.: Mesas) ao sair e voltar do gestor.
   const [painelDireito, setPainelDireito] = useState(() => {
-    // 'pedidos' foi removido do rail — ignora valor antigo lembrado no navegador.
-    try { const v = localStorage.getItem('gestor-painel-direito'); return v === 'pedidos' ? null : (v || null) } catch { return null }
-  }) // null | 'impressora' | 'salao' | 'hoje' | 'chat' | 'catalogo' | 'entregadores'
+    // 'pedidos' e 'hoje' foram removidos do rail — quem tinha um deles guardado
+    // no navegador abriria o gestor numa gaveta vazia.
+    try {
+      const v = localStorage.getItem('gestor-painel-direito')
+      return (v === 'pedidos' || v === 'hoje') ? null : (v || null)
+    } catch { return null }
+  }) // null | 'impressora' | 'salao' | 'caixa' | 'chat' | 'catalogo' | 'entregadores'
   const [subAbaSalao, setSubAbaSalao] = useState(() => {
     try { return localStorage.getItem('gestor-subaba-salao') || 'salao' } catch { return 'salao' }
   }) // dentro de Mesas: 'salao' | 'reservas' | 'mesas'
@@ -6923,7 +6933,6 @@ export default function PainelPedidos() {
   const [concluidosHoje, setConcluidosHoje] = useState([])
   const [mesasFechadasHoje, setMesasFechadasHoje] = useState([]) // G3: mesas com conta fechada hoje
   const [canceladosHoje, setCanceladosHoje] = useState([])
-  const [loadingHoje, setLoadingHoje] = useState(false)
   // Entregadores — estatísticas e histórico por motoboy
   const [entregasConcluidas, setEntregasConcluidas] = useState([])
   const [entregadorSel, setEntregadorSel] = useState(null)
@@ -7216,7 +7225,6 @@ export default function PainelPedidos() {
   // ── Concluídos do dia (vendas finalizadas hoje) ─────────────
   const carregarConcluidosHoje = useCallback(async () => {
     if (!empresa) return
-    setLoadingHoje(true)
     const inicio = new Date()
     inicio.setHours(0, 0, 0, 0)
     const { data } = await supabase
@@ -7239,12 +7247,7 @@ export default function PainelPedidos() {
       .gte('fechada_at', inicio.toISOString())
       .order('fechada_at', { ascending: false })
     setMesasFechadasHoje(mesas ?? [])
-    setLoadingHoje(false)
   }, [empresa])
-
-  useEffect(() => {
-    if (painelDireito === 'hoje') carregarConcluidosHoje()
-  }, [painelDireito, carregarConcluidosHoje])
 
   // Carrega a coluna "Concluídos" do quadro assim que o painel abre
   useEffect(() => { carregarConcluidosHoje() }, [carregarConcluidosHoje])
@@ -10353,7 +10356,6 @@ export default function PainelPedidos() {
             <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
               {painelDireito === 'impressora' ? 'Impressora'
                 : painelDireito === 'pedidos' ? 'Pedidos finalizados'
-                : painelDireito === 'hoje' ? 'Concluídos hoje'
                 : painelDireito === 'chat' ? 'Mensagens'
                 : painelDireito === 'entregadores' ? 'Entregadores'
                 : 'Catálogo'}
@@ -11112,61 +11114,6 @@ export default function PainelPedidos() {
               <BaixaInsumos />
             </div>
           )}
-          {/* Painel: Concluídos do dia */}
-          {painelDireito === 'hoje' && (
-            loadingHoje ? (
-              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 13 }}>Carregando...</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {/* Resumo do dia */}
-                <div style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '12px 14px', background: 'rgba(34,197,94,.08)' }}>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>
-                    {concluidosHoje.length} pedido{concluidosHoje.length !== 1 ? 's' : ''} concluído{concluidosHoje.length !== 1 ? 's' : ''} hoje
-                  </div>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: '#16a34a', marginTop: 2 }}>
-                    {fmt(concluidosHoje.reduce((s, p) => s + Number(p.total || 0), 0))}
-                  </div>
-                </div>
-
-                {concluidosHoje.length === 0 ? (
-                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 13 }}>
-                    Nenhum pedido concluído hoje ainda.
-                  </div>
-                ) : (
-                  concluidosHoje.map(p => {
-                    const oc = ORIGEM_CONFIG[p.origem] ?? ORIGEM_CONFIG.cardapio
-                    return (
-                      <div key={p.id} style={{
-                        border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '10px 12px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-                      }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
-                            #{p.numero_pedido ?? p.id.slice(-4).toUpperCase()} · {fmt(p.total)}
-                          </div>
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            {new Date(p.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
-                          </div>
-                          <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 20, background: oc.bg, color: oc.color }}>
-                            {oc.label}
-                          </span>
-                        </div>
-                        <button type="button" onClick={() => reimprimirPedido(p)} title="Reimprimir cupom"
-                          style={{ background: 'none', border: '1px solid var(--border, #2a2a3a)', borderRadius: 8, cursor: 'pointer', padding: 6, color: 'var(--text-muted)', flexShrink: 0 }}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <polyline points="6 9 6 2 18 2 18 9"/>
-                            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
-                            <rect x="6" y="14" width="12" height="8"/>
-                          </svg>
-                        </button>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-            )
-          )}
-
           {/* Painel: Entregadores (contagem + histórico por motoboy) */}
           {painelDireito === 'entregadores' && (() => {
             const emRota = (id) => pedidos.filter(p => p.entregador_id === id && p.status === 'saiu_entrega')
@@ -11537,11 +11484,27 @@ export default function PainelPedidos() {
         background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '10px 0',
       }}>
-        {RIGHTBAR_BOTOES.map(b => {
-          const ativo = painelDireito === b.id
+        {/* O Caixa mostra o dinheiro do dia: fica so pra quem ja tem o
+            Financeiro (admin/vendedor). Garcom e cozinheiro nao veem o botao —
+            e `fechar_caixa` tambem recusa os dois no banco. */}
+        {RIGHTBAR_BOTOES.filter(b => !b.soFinanceiro || podeFinanceiro).map(b => {
+          // Mesas e Caixa sao a MESMA gaveta em abas diferentes, entao quem
+          // acende e a aba que esta na tela — senao os dois acendem juntos.
+          const ativo = b.abreSalao
+            ? (painelDireito === 'salao' && subAbaSalao === b.abreSalao)
+            : b.id === 'salao'
+              ? (painelDireito === 'salao' && subAbaSalao !== 'caixa')
+              : painelDireito === b.id
           return (
             <button key={b.id} type="button" title={b.label}
-              onClick={() => setPainelDireito(prev => prev === b.id ? null : b.id)}
+              onClick={() => {
+                if (!b.abreSalao) { setPainelDireito(prev => prev === b.id ? null : b.id); return }
+                // Atalho: abre a gaveta de Mesas ja na aba certa. Clicar de
+                // novo fecha, igual aos outros botoes.
+                if (ativo) { setPainelDireito(null); return }
+                setSubAbaSalao(b.abreSalao)
+                setPainelDireito('salao')
+              }}
               style={{
                 position: 'relative',
                 width: 44, height: 48, borderRadius: 10, cursor: 'pointer',
