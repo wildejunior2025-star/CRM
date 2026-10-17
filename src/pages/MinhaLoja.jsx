@@ -1035,12 +1035,12 @@ export default function MinhaLoja({ secao = 'loja' }) {
             <span>
               <strong style={{ fontSize: 14 }}>Separar o caixa por dia</strong>
               <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 3 }}>
-                Cada dia começa zerado e é conferido sozinho, com setas pra voltar
+                O <strong>movimento</strong> de cada dia é conferido sozinho: as vendas
+                e sangrias de hoje não se misturam com as de ontem, e as setas voltam
                 nos dias atrasados — igual ao <strong>Dia a dia</strong> do Financeiro.
                 <br />
-                <strong>Desligado</strong> (como é hoje): você abre o caixa, ele vai
-                somando, e só zera quando alguém fechar na mão. Se ficar dias aberto,
-                o valor junta tudo.
+                <strong>Desligado</strong> (como é hoje): um caixa só, que vai somando
+                até alguém fechar na mão. Se ficar dias aberto, o valor junta tudo.
               </span>
             </span>
           </label>
@@ -1050,14 +1050,18 @@ export default function MinhaLoja({ secao = 'loja' }) {
               onChange={e => setCaixaAbreComFechamento(e.target.checked)} />
             <span>
               <strong style={{ fontSize: 14 }}>Começar com o que sobrou do anterior</strong>
+              <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                Esta é sobre o DINHEIRO na gaveta, não sobre o movimento — vale ligada
+                ou desligada a de cima.
+              </span>
               <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 3 }}>
                 Ligue se o <strong>troco fica na gaveta</strong> de um dia pro outro: a
                 abertura já vem com o valor contado no fechamento passado, e ninguém
                 precisa digitar.
                 <br />
-                <strong>Desligado</strong>: começa zerado. É o certo pra quem recolhe
-                todo o dinheiro no fim do expediente — senão o troco que ficou aparece
-                como sobra todo dia.
+                <strong>Desligado</strong>: a abertura começa em R$ 0,00. É o certo pra
+                quem recolhe todo o dinheiro no fim do expediente — senão o troco que
+                ficou aparece como sobra todo dia.
               </span>
             </span>
           </label>
