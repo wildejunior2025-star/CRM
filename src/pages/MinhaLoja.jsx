@@ -1033,14 +1033,15 @@ export default function MinhaLoja({ secao = 'loja' }) {
             <input type="checkbox" checked={caixaPorDia} style={{ marginTop: 3, width: 18, height: 18, flexShrink: 0 }}
               onChange={e => setCaixaPorDia(e.target.checked)} />
             <span>
-              <strong style={{ fontSize: 14 }}>Separar o caixa por dia</strong>
+              <strong style={{ fontSize: 14 }}>Abrir o caixa sozinho, todo dia</strong>
               <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 3 }}>
-                O <strong>movimento</strong> de cada dia é conferido sozinho: as vendas
-                e sangrias de hoje não se misturam com as de ontem, e as setas voltam
-                nos dias atrasados — igual ao <strong>Dia a dia</strong> do Financeiro.
+                Ninguém precisa lembrar de abrir: todo dia já começa aberto e
+                separado, e o movimento de hoje não se mistura com o de ontem. Você
+                só confere e fecha no fim — e as setas voltam nos dias atrasados,
+                igual ao <strong>Dia a dia</strong> do Financeiro.
                 <br />
-                <strong>Desligado</strong> (como é hoje): um caixa só, que vai somando
-                até alguém fechar na mão. Se ficar dias aberto, o valor junta tudo.
+                <strong>Desligado</strong> (como é hoje): você abre na mão. É um caixa
+                só, que vai somando até alguém fechar. Se ficar dias aberto, junta tudo.
               </span>
             </span>
           </label>

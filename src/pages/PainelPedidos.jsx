@@ -9085,6 +9085,10 @@ export default function PainelPedidos() {
   // não fecha à noite. Desde 02/09/2026 o ADM lança na mesa sem caixa — o que
   // torna fácil chegar até aqui sem ter aberto o dia.
   async function caixaAbertoAgora() {
+    // MODO "UM DIA POR VEZ" (mig 0336): nao existe caixa pra abrir — o dia
+    // existe sozinho, pela data. Exigir caixa aberto aqui travaria a mesa pra
+    // sempre nessas lojas, justamente nas que nunca abriram um caixa.
+    if (empresa?.caixa_por_dia) return true
     const { data: s } = await supabase.auth.getUser()
     if (!s?.user?.id) return true   // sem sessão, deixa o servidor decidir
     // Caixa é da LOJA, não de quem está logado (mig 0287).
