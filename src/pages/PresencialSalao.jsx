@@ -1084,10 +1084,20 @@ export default function PresencialSalao() {
   async function sairDaMesa() {
     const c = comandaSel
     if (c && c.status === 'aberta' && (c.comanda_itens ?? []).length === 0 && rascunho.length === 0) {
-      await supabase.from('comandas').delete().eq('id', c.id)
-      // Comanda de balcão não tem mesa pra liberar — some sozinha ao ser apagada.
-      if (c.mesa_id) await supabase.from('mesas').update({ status: 'livre' }).eq('id', c.mesa_id)
-      if (rascunhoKey) { try { localStorage.removeItem(rascunhoKey) } catch { /* ignora */ } }
+      // QUEM DECIDE SE ESTÁ VAZIA É O BANCO, não esta tela (mig 0337).
+      //
+      // O Braseiro, mesa 4, 17/10 19:12: o pedido foi lançado, saiu na cozinha
+      // e sumiu. Lançar um item IMPRIME antes de recarregar a lista, e a
+      // impressão é esperada até a impressora responder. Nessa janela a comanda já
+      // tem item no banco e ainda parece vazia aqui — quem saísse da mesa
+      // apagava o pedido inteiro, e `comanda_itens` é CASCADE: sem rastro.
+      // Lá a impressora é de REDE (print-agent): se o agente estiver lento ou
+      // fora do ar, essa espera vai até o timeout e a janela fica bem maior.
+      //
+      // A RPC só apaga se não houver NENHUM item; devolve false se houver.
+      const { data: apagou, error: errApagar } = await supabase.rpc('apagar_comanda_vazia', { p_comanda: c.id })
+      if (errApagar) { window.alert(recadoDeErro(errApagar, 'sair da mesa')); return }
+      if (apagou && rascunhoKey) { try { localStorage.removeItem(rascunhoKey) } catch { /* ignora */ } }
       setMesaSel(null)
       await loadMesas()
       return
