@@ -33,6 +33,10 @@ export default function MinhaLoja({ secao = 'loja' }) {
   // Taxa da maquineta por forma de cartão: o que a máquina desconta antes de
   // cair na conta. É o que o Caixa usa pra mostrar o valor real do dia.
   const [taxasCartao, setTaxasCartao] = useState({ taxa_credito_pct: '', taxa_debito_pct: '', taxa_cartao_pct: '' })
+  // Como o caixa funciona (migs 0336 / 0173). As duas chaves existiam só no
+  // banco: ninguém conseguia ligar nem desligar sem eu mexer no SQL.
+  const [caixaPorDia, setCaixaPorDia] = useState(false)
+  const [caixaAbreComFechamento, setCaixaAbreComFechamento] = useState(false)
   // Repasse ao cliente (mig 0223) — separado da taxa da maquineta de propósito:
   // tem loja que só quer o controle do caixa e não cobra nada a mais.
   const [repasses, setRepasses] = useState({ repasse_credito_pct: '', repasse_debito_pct: '', repasse_cartao_pct: '' })
@@ -363,6 +367,8 @@ export default function MinhaLoja({ secao = 'loja' }) {
     setBannerUrl(empresa.banner_url ?? '')
     setLogoUrl(empresa.logo_url ?? '')
     setFormasPagamento(formasAtivas(empresa))
+    setCaixaPorDia(!!empresa.caixa_por_dia)
+    setCaixaAbreComFechamento(!!empresa.caixa_abre_com_fechamento)
     setTaxasCartao({
       taxa_credito_pct: String(empresa.taxa_credito_pct ?? 0).replace('.', ','),
       taxa_debito_pct: String(empresa.taxa_debito_pct ?? 0).replace('.', ','),
@@ -531,6 +537,8 @@ export default function MinhaLoja({ secao = 'loja' }) {
         taxa_credito_pct: pctNum(taxasCartao.taxa_credito_pct),
         taxa_debito_pct: pctNum(taxasCartao.taxa_debito_pct),
         taxa_cartao_pct: pctNum(taxasCartao.taxa_cartao_pct),
+        caixa_por_dia: caixaPorDia,
+        caixa_abre_com_fechamento: caixaAbreComFechamento,
         repasse_credito_pct: cobrarDoCliente ? pctNum(repasses.repasse_credito_pct) : 0,
         repasse_debito_pct: cobrarDoCliente ? pctNum(repasses.repasse_debito_pct) : 0,
         repasse_cartao_pct: cobrarDoCliente ? pctNum(repasses.repasse_cartao_pct) : 0,
@@ -1009,6 +1017,50 @@ export default function MinhaLoja({ secao = 'loja' }) {
               cupom do entregador. Sem ela o cliente não sabe pra quem pagar.
             </p>
           )}
+        </div>
+
+
+        {/* ── COMO O CAIXA FUNCIONA (migs 0173/0336) ──
+            As duas chaves já existiam no banco e não tinham onde ligar: quem
+            quisesse mudar dependia de a gente mexer no SQL. */}
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Como o caixa funciona</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 14 }}>
+            Muda só o jeito de conferir. Nenhuma venda é alterada, e dá pra voltar atrás quando quiser.
+          </p>
+
+          <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer', marginBottom: 14 }}>
+            <input type="checkbox" checked={caixaPorDia} style={{ marginTop: 3, width: 18, height: 18, flexShrink: 0 }}
+              onChange={e => setCaixaPorDia(e.target.checked)} />
+            <span>
+              <strong style={{ fontSize: 14 }}>Separar o caixa por dia</strong>
+              <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 3 }}>
+                Cada dia começa zerado e é conferido sozinho, com setas pra voltar
+                nos dias atrasados — igual ao <strong>Dia a dia</strong> do Financeiro.
+                <br />
+                <strong>Desligado</strong> (como é hoje): você abre o caixa, ele vai
+                somando, e só zera quando alguém fechar na mão. Se ficar dias aberto,
+                o valor junta tudo.
+              </span>
+            </span>
+          </label>
+
+          <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer' }}>
+            <input type="checkbox" checked={caixaAbreComFechamento} style={{ marginTop: 3, width: 18, height: 18, flexShrink: 0 }}
+              onChange={e => setCaixaAbreComFechamento(e.target.checked)} />
+            <span>
+              <strong style={{ fontSize: 14 }}>Começar com o que sobrou do anterior</strong>
+              <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 3 }}>
+                Ligue se o <strong>troco fica na gaveta</strong> de um dia pro outro: a
+                abertura já vem com o valor contado no fechamento passado, e ninguém
+                precisa digitar.
+                <br />
+                <strong>Desligado</strong>: começa zerado. É o certo pra quem recolhe
+                todo o dinheiro no fim do expediente — senão o troco que ficou aparece
+                como sobra todo dia.
+              </span>
+            </span>
+          </label>
         </div>
 
         <div className="card" style={{ marginBottom: 16 }}>
