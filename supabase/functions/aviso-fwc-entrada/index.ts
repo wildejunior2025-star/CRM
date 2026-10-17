@@ -17,6 +17,20 @@ const EVOLUTION_API_URL = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/[/]
 const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY") ?? ""
 
 const JANELA_MIN = 30
+// Resposta automática pro contato (mig 0338): no máximo 1 a cada 12 h, e nunca
+// se o Wilde já falou com ele à mão nesse período.
+const JANELA_RESPOSTA_H = 12
+
+function respostaAutomatica(): string {
+  const hora = Number(new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Fortaleza", hour: "numeric", hourCycle: "h23",
+  }).format(new Date()))
+  if (hora >= 7 && hora < 22) {
+    return "Oi! 👋 Aqui é o Wilde, da FWC Inter. Recebi sua mensagem, em um minutinho já te atendo."
+  }
+  return "Oi! 👋 Aqui é o Wilde, da FWC Inter. Recebi sua mensagem e logo cedo te respondo, combinado?"
+}
+const PREFIXO_AUTOMATICA = "Oi! 👋 Aqui é o Wilde, da FWC Inter. Recebi sua mensagem"
 
 const ok = (data: unknown = { ok: true }, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } })
@@ -82,7 +96,18 @@ serve(async (req) => {
 
     const msg = body.data
     const jid = String(msg?.key?.remoteJid ?? "")
-    if (!msg || msg.key?.fromMe || !jid.endsWith("@s.whatsapp.net")) return ok()
+    if (!msg || !jid.endsWith("@s.whatsapp.net")) return ok()
+
+    // Mensagem que saiu do próprio número: se foi o Wilde respondendo à mão
+    // (e não a resposta automática nem o aviso), anota pra o robô não se meter.
+    if (msg.key?.fromMe) {
+      const texto = textoDaMensagem(msg)
+      const para = jid.replace("@s.whatsapp.net", "").replace(/[^0-9]/g, "")
+      if (para && !texto.startsWith(PREFIXO_AUTOMATICA) && !texto.startsWith("🔔")) {
+        await sb.from("aviso_fwc_entrada").upsert({ telefone: para, humano_em: new Date().toISOString() })
+      }
+      return ok()
+    }
 
     // Evolution reiniciando reenvia conversa velha: não é mensagem nova.
     const ts = msg.messageTimestamp
@@ -98,9 +123,25 @@ serve(async (req) => {
     // ele de si mesmo.
     if (de.slice(-8) === destino.slice(-8)) return ok()
 
+    const { data: ultimo } = await sb.from("aviso_fwc_entrada")
+      .select("avisado_em, respondido_em, humano_em").eq("telefone", de).maybeSingle()
+    const ha = (iso: string | null | undefined) => iso ? Date.now() - new Date(iso).getTime() : Infinity
+
+    // Resposta automática pro contato, antes do aviso (quem chamou não pode
+    // ficar no vácuo enquanto o Wilde não vê).
+    const janelaResp = JANELA_RESPOSTA_H * 3600_000
+    if (ha(ultimo?.respondido_em) > janelaResp && ha(ultimo?.humano_em) > janelaResp) {
+      const r = await fetch(`${EVOLUTION_API_URL}/message/sendText/${instancia}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+        body: JSON.stringify({ number: de, text: respostaAutomatica() }),
+      })
+      if (r.ok) await sb.from("aviso_fwc_entrada").upsert({ telefone: de, respondido_em: new Date().toISOString() })
+      else console.error("[aviso-fwc] resposta automática falhou:", r.status, (await r.text()).slice(0, 200))
+    }
+
     // Quem manda 5 mensagens seguidas gera 1 aviso só.
-    const { data: ultimo } = await sb.from("aviso_fwc_entrada").select("avisado_em").eq("telefone", de).maybeSingle()
-    if (ultimo?.avisado_em && Date.now() - new Date(ultimo.avisado_em).getTime() < JANELA_MIN * 60_000) return ok()
+    if (ha(ultimo?.avisado_em) < JANELA_MIN * 60_000) return ok()
     await sb.from("aviso_fwc_entrada").upsert({ telefone: de, avisado_em: new Date().toISOString() })
 
     const nome = String(msg.pushName ?? "").trim() || "Sem nome"
