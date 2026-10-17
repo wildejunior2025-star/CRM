@@ -26,6 +26,27 @@ function semanaDe(offset) {
 
 const ddmm = (d) => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
 
+// ── MODO "UM DIA POR VEZ" (mig 0336) ───────────────────────────────────────
+// O fuso e fixo em America/Fortaleza, o MESMO que a funcao do banco usa pra
+// decidir a que dia pertence cada venda. Se a tela usasse o fuso do navegador
+// e o banco outro, a venda das 23h cairia num dia na lista e noutro no total.
+const FUSO = 'America/Fortaleza'
+const ymdLocal = (d = new Date()) => d.toLocaleDateString('sv-SE', { timeZone: FUSO })
+// Meio-dia de proposito: somar dias a partir da meia-noite escorrega quando o
+// horario de verao volta.
+const addDia = (ymd, n) => {
+  const d = new Date(ymd + 'T12:00:00')
+  d.setDate(d.getDate() + n)
+  return d.toLocaleDateString('sv-SE')
+}
+const ddmmDeYMD = (ymd) => ymd.split('-').reverse().slice(0, 2).join('/')
+// Comeco e fim do dia em ISO, pra filtrar `created_at` (que e timestamptz).
+const limitesDoDia = (ymd) => {
+  const ini = new Date(ymd + 'T00:00:00-03:00')
+  const fim = new Date(ini.getTime() + 24 * 3600 * 1000)
+  return [ini.toISOString(), fim.toISOString()]
+}
+
 // Como cada forma aparece na lista de sangrias/suprimentos.
 const rotuloForma = (f) => (f === 'pix' ? '📱 PIX' : f === 'cartao' ? '💳 Cartão' : '💵 Dinheiro')
 
@@ -68,6 +89,14 @@ export default function Caixa() {
   const [historico, setHistorico] = useState([])
   // Resumo de cada caixa da semana (null = ainda somando). É o que alimenta o
   // total da semana embaixo da tabela.
+  // Modo "um dia por vez": a loja escolhe em Minha Loja. Desligado = o caixa
+  // abre e fecha na mao, como sempre.
+  const [porDia, setPorDia] = useState(false)
+  const [dia, setDia] = useState(ymdLocal)
+  const [diaRow, setDiaRow] = useState(null)        // fechamento deste dia
+  const [diaVersao, setDiaVersao] = useState(0)     // sobe pra recarregar
+  const [diasSemana, setDiasSemana] = useState(null) // historico no modo-dia
+
   const [resumosSemana, setResumosSemana] = useState(null)
   const [semanaOffset, setSemanaOffset] = useState(0)   // 0 = esta semana
   const [carregandoHist, setCarregandoHist] = useState(false)
@@ -158,15 +187,21 @@ export default function Caixa() {
     setDetalhe(cfg)
     setDetalheLinhas('carregando')
     const id = caixaAtual?.id
-    if (!id) { setDetalheLinhas([]); return }
+    if (!id && !porDia) { setDetalheLinhas([]); return }
+    const [iniDia, fimDia] = limitesDoDia(dia)
+    // No modo-dia nao se filtra por caixa: o recorte e a DATA, que e o mesmo
+    // recorte que o card usou pra somar.
+    const porCaixaOuDia = (q) => (porDia
+      ? q.gte('created_at', iniDia).lt('created_at', fimDia)
+      : q.eq('caixa_id', id))
 
     const linhas = []
 
     // ── Salão (e recebimento de fiado antigo, que tambem cai em `pagamentos`)
     if (cfg.formas?.length) {
-      let q = supabase.from('pagamentos')
-        .select('id, valor, forma_pagamento, observacao, created_at')
-        .eq('caixa_id', id).in('forma_pagamento', cfg.formas)
+      let q = porCaixaOuDia(supabase.from('pagamentos')
+        .select('id, valor, forma_pagamento, observacao, created_at'))
+        .in('forma_pagamento', cfg.formas)
       if (cfg.soFiadoAntigo) q = q.eq('observacao', 'Recebimento de fiado')
       const { data } = await q
       for (const pg of (data ?? [])) {
@@ -189,9 +224,10 @@ export default function Caixa() {
 
     // ── Delivery e balcão (a view ja separou iFood pago no app, PIX do MP etc.)
     if (cfg.baldes?.length) {
-      const { data } = await supabase.from('caixa_delivery_partes')
+      const qd = supabase.from('caixa_delivery_partes')
         .select('pedido_id, bucket, valor, numero_pedido, origem, cliente_nome, created_at, forma_pagamento')
-        .eq('caixa_id', id).in('bucket', cfg.baldes)
+      const { data } = await (porDia ? qd.eq('dia', dia) : qd.eq('caixa_id', id))
+        .in('bucket', cfg.baldes)
       for (const d of (data ?? [])) {
         linhas.push({
           id: 'pd-' + d.pedido_id + '-' + d.bucket,
@@ -206,9 +242,9 @@ export default function Caixa() {
 
     // ── Vendas no fiado: a divida que NASCEU neste caixa
     if (cfg.tipo === 'fiado') {
-      const { data } = await supabase.from('vendas')
-        .select('id, total, observacoes, created_at, cliente_id')
-        .eq('caixa_id', id).eq('forma_pagamento', 'fiado').neq('status', 'cancelado')
+      const { data } = await porCaixaOuDia(supabase.from('vendas')
+        .select('id, total, observacoes, created_at, cliente_id'))
+        .eq('forma_pagamento', 'fiado').neq('status', 'cancelado')
       const ids = [...new Set((data ?? []).map(v => v.cliente_id).filter(Boolean))]
       let nomes = {}
       if (ids.length) {
@@ -350,7 +386,7 @@ export default function Caixa() {
       caixaAtivaQuery,
       isAdmin ? supabase.from('profiles').select('id, nome, email') : Promise.resolve({ data: [] }),
       profile?.empresa_id
-        ? supabase.from('empresas').select('taxa_cartao_pct, taxa_credito_pct, taxa_debito_pct, caixa_abre_com_fechamento').eq('id', profile.empresa_id).maybeSingle()
+        ? supabase.from('empresas').select('taxa_cartao_pct, taxa_credito_pct, taxa_debito_pct, caixa_abre_com_fechamento, caixa_por_dia').eq('id', profile.empresa_id).maybeSingle()
         : Promise.resolve({ data: null }),
     ])
     setRegraFechamento(!!empresaRes.data?.caixa_abre_com_fechamento)
@@ -367,9 +403,22 @@ export default function Caixa() {
     const firstError = caixaRes.error || usuariosRes.error
     if (firstError) setError(firstError.message)
 
+    setUsuarios(usuariosRes.data ?? [])
+
+    // MODO DIA: quem monta a tela e o efeito do dia (logo abaixo), nao este.
+    // Sair aqui evita que o caixa aberto sobrescreva o dia escolhido — eram as
+    // duas coisas disputando o mesmo `caixaAtual`.
+    const ehPorDia = !!empresaRes.data?.caixa_por_dia
+    setPorDia(ehPorDia)
+    if (ehPorDia) {
+      setCaixasAbertos([])
+      setDiaVersao(v => v + 1)
+      setLoading(false)
+      return
+    }
+
     setCaixaAtual(caixaRes.data?.[0] ?? null)
     setCaixasAbertos(caixaRes.data ?? [])
-    setUsuarios(usuariosRes.data ?? [])
 
     if (caixaRes.data?.[0]) {
       const [resumoRes, movimentosRes] = await Promise.all([
@@ -396,6 +445,64 @@ export default function Caixa() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id])
 
+  // ── Carrega UM dia ────────────────────────────────────────────────────────
+  // Os numeros vem da funcao `caixa_resumo_do_dia`, que devolve exatamente as
+  // mesmas colunas do `caixa_resumo`. Por isso os cards, o esperado e o pop-up
+  // de "de onde veio" funcionam nos dois modos sem saber em qual estao.
+  useEffect(() => {
+    if (!porDia || !user?.id || !profile?.empresa_id) return
+    let vivo = true
+    ;(async () => {
+      setLoading(true)
+      const ontem = addDia(dia, -1)
+      const [ini, fim] = limitesDoDia(dia)
+      const [resDia, resFech, resMovs] = await Promise.all([
+        supabase.rpc('caixa_resumo_do_dia', { p_data: dia }),
+        supabase.from('caixa_dia').select('*').in('data', [dia, ontem]),
+        supabase.from('caixa_movimentos').select('*')
+          .gte('created_at', ini).lt('created_at', fim)
+          .order('created_at', { ascending: false }),
+      ])
+      if (!vivo) return
+
+      const linhaHoje  = (resFech.data ?? []).find(d => d.data === dia) ?? null
+      const linhaOntem = (resFech.data ?? []).find(d => d.data === ontem) ?? null
+      setDiaRow(linhaHoje)
+
+      // De onde sai a abertura do dia (decisao do dono, 17/10): cada loja
+      // escolhe. Com a regra ligada o dia herda o que foi CONTADO ontem — a
+      // gaveta nao foi esvaziada, o troco continua la. Sem a regra, comeca em
+      // zero (ou no que alguem digitou pra este dia).
+      const herda = regraFechamento && linhaOntem?.contado_dinheiro != null
+      const abertura = herda
+        ? {
+            dinheiro: Number(linhaOntem.contado_dinheiro || 0),
+            pix:      Number(linhaOntem.contado_pix || 0),
+            cartao:   Number(linhaOntem.contado_cartao || 0),
+          }
+        : {
+            dinheiro: Number(linhaHoje?.abertura_dinheiro || 0),
+            pix:      Number(linhaHoje?.abertura_pix || 0),
+            cartao:   Number(linhaHoje?.abertura_cartao || 0),
+          }
+
+      // `caixaAtual` de mentirinha: o resto da tela ja sabe fazer a conta a
+      // partir dele, entao o modo-dia entra sem reescrever nada disso.
+      setCaixaAtual({
+        id: null, porDia: true, aberto_em: dia + 'T00:00:00',
+        valor_abertura: abertura.dinheiro,
+        valor_abertura_pix: abertura.pix,
+        valor_abertura_cartao: abertura.cartao,
+      })
+      setResumo(Array.isArray(resDia.data) ? (resDia.data[0] ?? null) : (resDia.data ?? null))
+      setMovimentos(resMovs.data ?? [])
+      setError(resDia.error?.message ?? null)
+      setLoading(false)
+    })()
+    return () => { vivo = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [porDia, dia, diaVersao, regraFechamento, user?.id, profile?.empresa_id])
+
   // Histórico: uma semana por vez. Roda ao abrir a tela, ao trocar de semana e
   // depois de abrir/fechar um caixa (loadAll mexe no histVersao).
   useEffect(() => {
@@ -404,6 +511,30 @@ export default function Caixa() {
     async function carregarHistorico() {
       setCarregandoHist(true)
       const { inicio, fim } = semanaDe(semanaOffset)
+
+      // MODO DIA: a semana e uma lista de DIAS. Em vez de uma linha por caixa
+      // aberto (que no modo-dia nem existe), uma linha por dia com o resumo
+      // dele — e e dai que a pessoa volta pra conferir um dia atrasado.
+      if (porDia) {
+        const iniY = inicio.toLocaleDateString('sv-SE')
+        const fimY = addDia(fim.toLocaleDateString('sv-SE'), -1)
+        const { data: fechs } = await supabase.from('caixa_dia').select('*')
+          .gte('data', iniY).lte('data', fimY)
+        if (!vivo) return
+        const porData = Object.fromEntries((fechs ?? []).map(d => [d.data, d]))
+        // Um resumo por dia. Sao no maximo 7 chamadas e so quando a pessoa
+        // troca de semana — nao vale a complexidade de uma funcao em lote.
+        const dias = []
+        for (let d = iniY; d <= fimY && d <= ymdLocal(); d = addDia(d, 1)) {
+          const { data: r } = await supabase.rpc('caixa_resumo_do_dia', { p_data: d })
+          if (!vivo) return
+          dias.push({ data: d, resumo: Array.isArray(r) ? (r[0] ?? null) : r, fech: porData[d] ?? null })
+        }
+        setDiasSemana(dias.reverse())
+        setCarregandoHist(false)
+        return
+      }
+
       const { data, error: err } = await supabase
         .from('caixas').select('*')
         .gte('aberto_em', inicio.toISOString())
@@ -431,7 +562,7 @@ export default function Caixa() {
     }
     carregarHistorico()
     return () => { vivo = false }
-  }, [user?.id, semanaOffset, histVersao])
+  }, [user?.id, semanaOffset, histVersao, porDia, diaVersao])
 
   function nomeUsuario(id) {
     const u = usuarios.find((x) => x.id === id)
@@ -503,13 +634,22 @@ export default function Caixa() {
     }
 
     setSaving(true)
-    const { error: rpcError } = await supabase.rpc('registrar_movimento_caixa', {
-      p_caixa_id: caixaAtual.id,
-      p_tipo: showMovimento,
-      p_valor: valor,
-      p_observacao: obsMovimento || null,
-      p_forma: formaMovimento,
-    })
+    // No modo-dia nao existe um caixa aberto pra amarrar: o movimento se
+    // amarra na loja e na data (ver `registrar_movimento_dia`, mig 0336).
+    const { error: rpcError } = porDia
+      ? await supabase.rpc('registrar_movimento_dia', {
+          p_tipo: showMovimento,
+          p_valor: valor,
+          p_observacao: obsMovimento || null,
+          p_forma: formaMovimento,
+        })
+      : await supabase.rpc('registrar_movimento_caixa', {
+          p_caixa_id: caixaAtual.id,
+          p_tipo: showMovimento,
+          p_valor: valor,
+          p_observacao: obsMovimento || null,
+          p_forma: formaMovimento,
+        })
     setSaving(false)
 
     if (rpcError) {
@@ -518,7 +658,7 @@ export default function Caixa() {
     }
 
     setShowMovimento(null)
-    loadAll()
+    if (porDia) setDiaVersao(v => v + 1); else loadAll()
   }
 
   // Abre o fechamento com os três campos JÁ PREENCHIDOS com o esperado. Na
@@ -536,6 +676,24 @@ export default function Caixa() {
     setShowFechamento(true)
   }
 
+  // Tira o retrato congelado e o dia volta a ser calculado ao vivo. Venda
+  // nenhuma e tocada: o fechamento do dia so guarda o que foi CONTADO.
+  async function reabrirDia() {
+    if (!diaRow?.id) return
+    if (!confirm(`Reabrir o dia ${ddmmDeYMD(dia)}?
+
+O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao vivo. Nenhuma venda é alterada.`)) return
+    setSaving(true)
+    const { error: err } = await supabase.from('caixa_dia').update({
+      contado_dinheiro: null, contado_pix: null, contado_cartao: null,
+      esperado_dinheiro: null, esperado_pix: null, esperado_cartao: null,
+      fechado_em: null, fechado_por: null,
+    }).eq('id', diaRow.id)
+    setSaving(false)
+    if (err) { setError(err.message); return }
+    setDiaVersao(v => v + 1)
+  }
+
   async function handleFechar(e) {
     e.preventDefault()
     setFormError(null)
@@ -543,6 +701,35 @@ export default function Caixa() {
     const valor = Number(valorFechamento)
     if (!(valor >= 0)) {
       setFormError('Informe um valor de fechamento válido.')
+      return
+    }
+
+    // ── FECHAR O DIA ──
+    // Grava o que foi CONTADO e congela o que o sistema esperava AGORA. O
+    // esperado precisa ficar congelado: sem isso, um pedido cancelado semana
+    // que vem mudaria a diferenca de um dia que ja foi conferido e assinado.
+    if (porDia) {
+      setSaving(true)
+      const { error: errDia } = await supabase.from('caixa_dia').upsert({
+        empresa_id: profile.empresa_id,
+        data: dia,
+        abertura_dinheiro: Number(caixaAtual?.valor_abertura || 0),
+        abertura_pix: Number(caixaAtual?.valor_abertura_pix || 0),
+        abertura_cartao: Number(caixaAtual?.valor_abertura_cartao || 0),
+        contado_dinheiro: valor,
+        contado_pix: valorFechamentoPix === '' ? null : Number(valorFechamentoPix),
+        contado_cartao: valorFechamentoCartao === '' ? null : Number(valorFechamentoCartao),
+        esperado_dinheiro: valorEsperadoDinheiro,
+        esperado_pix: valorEsperadoPix,
+        esperado_cartao: valorEsperadoCartao,
+        observacoes: obsFechamento || null,
+        fechado_em: new Date().toISOString(),
+        fechado_por: user?.id ?? null,
+      }, { onConflict: 'empresa_id,data' })
+      setSaving(false)
+      if (errDia) { setFormError(errDia.message); return }
+      setShowFechamento(false)
+      setDiaVersao(v => v + 1)
       return
     }
 
@@ -618,21 +805,23 @@ export default function Caixa() {
   const totalCartaoLiquido = resumo ? cartaoLiquidoDe(resumo) : 0
 
   // Faturamento total do caixa: soma de TODAS as formas (dinheiro + pix + cartão + transferência + fiado).
-  const faturamentoTotal = resumo
-    ? dinheiroDe(resumo) +
-      pixDe(resumo) +
-      cartaoDe(resumo) +
-      Number(resumo.recebimentos_transferencia || 0) +
+  const faturamentoDe = (r) => (r
+    ? dinheiroDe(r) +
+      pixDe(r) +
+      cartaoDe(r) +
+      Number(r.recebimentos_transferencia || 0) +
       // iFood pago no app + PIX pago no Mercado Pago: a loja vendeu, mas o
       // dinheiro esta la fora. Entra no faturamento e em nenhum esperado.
-      foraDaLojaDe(resumo) +
-      Number(resumo.delivery_outros || 0) +
+      foraDaLojaDe(r) +
+      Number(r.delivery_outros || 0) +
       // Crédito da loja (mig 0179): a venda foi CHEIA, então ele faz parte do
       // faturamento. Não entra em nenhum "esperado" porque não é dinheiro que
       // caiu em lugar nenhum — o custo dele aparece no Despesas & Lucro.
-      Number(resumo.recebimentos_cashback || 0) +
-      Number(resumo.vendas_fiado || 0)
-    : 0
+      Number(r.recebimentos_cashback || 0) +
+      Number(r.vendas_fiado || 0)
+    : 0)
+
+  const faturamentoTotal = faturamentoDe(resumo)
 
   // ── Total da semana ────────────────────────────────────────────────────────
   // A mesma conta do faturamento de um caixa, somando os caixas todos da semana
@@ -640,7 +829,12 @@ export default function Caixa() {
   // semana, e em quê?") que a tabela não respondia: ela mostra abertura e
   // fechamento, que é quanto tinha na gaveta — não quanto a loja vendeu.
   const totaisSemana = (() => {
-    const rs = resumosSemana ?? []
+    // No modo-dia a semana e a lista de dias, nao a de caixas. Lendo a fonte
+    // errada o rodape dizia R$ 58,19 enquanto a tabela logo acima somava
+    // R$ 627,09 — dois numeros da mesma semana na mesma tela.
+    const rs = porDia
+      ? (diasSemana ?? []).map(d => d.resumo).filter(Boolean)
+      : (resumosSemana ?? [])
     const soma = (campo) => rs.reduce((t, r) => t + Number(r?.[campo] || 0), 0)
     // `somaCom` passa pelos helpers que juntam salao + delivery, pra semana dar
     // exatamente a soma dos caixas que estao logo abaixo na tabela.
@@ -703,10 +897,43 @@ export default function Caixa() {
               </div>
             </div>
           )}
+          {/* MODO DIA: as setas andam de dia em dia e nunca passam de hoje —
+              conferir um dia que ainda nao aconteceu nao quer dizer nada. */}
+          {porDia && (
+            <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" onClick={() => setDia(addDia(dia, -1))} title="Dia anterior"
+                className="btn btn-secondary" style={{ padding: '6px 12px' }}>◀</button>
+              <input type="date" value={dia} max={ymdLocal()}
+                onChange={e => { if (e.target.value && e.target.value <= ymdLocal()) setDia(e.target.value) }}
+                style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontWeight: 700 }} />
+              <button type="button" onClick={() => setDia(addDia(dia, 1))} disabled={dia >= ymdLocal()}
+                title="Próximo dia" className="btn btn-secondary"
+                style={{ padding: '6px 12px', opacity: dia >= ymdLocal() ? .4 : 1 }}>▶</button>
+              {dia !== ymdLocal() && (
+                <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px' }}
+                  onClick={() => setDia(ymdLocal())}>Hoje</button>
+              )}
+              {dia !== addDia(ymdLocal(), -1) && (
+                <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px' }}
+                  onClick={() => setDia(addDia(ymdLocal(), -1))}>Ontem</button>
+              )}
+              <span style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 700,
+                color: diaRow?.fechado_em ? 'var(--success, #16a34a)' : 'var(--text-muted)' }}>
+                {diaRow?.fechado_em
+                  ? '✓ Dia ' + ddmmDeYMD(dia) + ' já conferido'
+                  : 'Dia ' + ddmmDeYMD(dia) + ' em aberto'}
+              </span>
+            </div>
+          )}
+
           <div className="card caixa-info-card" style={{ marginBottom: 20 }}>
             <div>
-              <div className="label">Caixa aberto em</div>
-              <div className="value-sm">{new Date(caixaAtual.aberto_em).toLocaleString('pt-BR')}</div>
+              <div className="label">{porDia ? 'Dia' : 'Caixa aberto em'}</div>
+              <div className="value-sm">
+                {porDia
+                  ? new Date(dia + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' })
+                  : new Date(caixaAtual.aberto_em).toLocaleString('pt-BR')}
+              </div>
             </div>
             <div>
               <div className="label">💵 Dinheiro inicial</div>
@@ -731,9 +958,17 @@ export default function Caixa() {
             <button className="btn btn-secondary" onClick={() => openMovimento('suprimento')}>
               + Registrar suprimento
             </button>
-            <button className="btn btn-danger" onClick={openFechamento}>
-              Fechar caixa
-            </button>
+            {porDia && diaRow?.fechado_em ? (
+              /* Dia ja conferido: reabrir e voltar a calcular ao vivo. Nao
+                 apaga venda nenhuma — so tira o retrato congelado. */
+              <button className="btn btn-secondary" disabled={saving} onClick={reabrirDia}>
+                Reabrir o dia {ddmmDeYMD(dia)}
+              </button>
+            ) : (
+              <button className="btn btn-danger" onClick={openFechamento}>
+                {porDia ? 'Fechar o dia ' + ddmmDeYMD(dia) : 'Fechar caixa'}
+              </button>
+            )}
           </div>
 
           {resumo && (
@@ -987,7 +1222,7 @@ export default function Caixa() {
         </>
       )}
 
-      <h2 className="caixa-table-title">Histórico de caixas</h2>
+      <h2 className="caixa-table-title">{porDia ? 'Histórico de dias' : 'Histórico de caixas'}</h2>
 
       {/* Uma semana por vez. As setas andam; "Hoje" volta pra semana atual e
           some quando você já está nela. */}
@@ -1013,6 +1248,67 @@ export default function Caixa() {
         )}
       </div>
 
+      {/* MODO DIA: uma linha por dia da semana. E daqui que a pessoa volta
+          num dia atrasado pra conferir — clicar na linha leva pro dia. */}
+      {porDia ? (
+        <div className="data-table caixa-hist">
+          {!diasSemana?.length ? (
+            <div className="empty-state">
+              {carregandoHist ? 'Carregando...' : 'Nenhum dia nesta semana ainda.'}
+            </div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Dia</th>
+                  <th className="caixa-amount-col">Faturamento</th>
+                  <th className="caixa-amount-col">Contado em dinheiro</th>
+                  <th className="caixa-amount-col">Diferença</th>
+                  <th>Situação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {diasSemana.map(({ data, resumo: r, fech }) => {
+                  const fat = faturamentoDe(r)
+                  // A diferenca sai do ESPERADO CONGELADO, nao de um recalculo:
+                  // e esse o numero que a pessoa viu e aceitou naquele dia.
+                  const dif = (fech?.contado_dinheiro != null && fech?.esperado_dinheiro != null)
+                    ? Number(fech.contado_dinheiro) - Number(fech.esperado_dinheiro)
+                    : null
+                  return (
+                    <tr key={data} onClick={() => setDia(data)} style={{ cursor: 'pointer' }}
+                      title="Abrir este dia">
+                      <td data-label="Dia">
+                        <strong>{ddmmDeYMD(data)}</strong>{' '}
+                        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                          {new Date(data + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short' })}
+                        </span>
+                      </td>
+                      <td data-label="Faturamento" className="caixa-amount-col">R$ {fat.toFixed(2)}</td>
+                      <td data-label="Contado em dinheiro" className="caixa-amount-col">
+                        {fech?.contado_dinheiro != null ? 'R$ ' + Number(fech.contado_dinheiro).toFixed(2) : '-'}
+                      </td>
+                      <td data-label="Diferença" className="caixa-amount-col">
+                        {dif === null ? '-' : (
+                          <span style={{ fontWeight: 700, color: Math.abs(dif) < 0.005
+                            ? 'var(--success, #16a34a)' : (dif > 0 ? 'var(--primary)' : 'var(--danger, #ef4444)') }}>
+                            R$ {dif.toFixed(2)}
+                          </span>
+                        )}
+                      </td>
+                      <td data-label="Situação">
+                        <span className={`badge ${fech?.fechado_em ? 'badge-success' : 'badge-neutral'}`}>
+                          {fech?.fechado_em ? 'Conferido' : 'Em aberto'}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      ) : (
       <div className="data-table caixa-hist">
         {historico.length === 0 ? (
           <div className="empty-state">
@@ -1265,11 +1561,12 @@ export default function Caixa() {
           </table>
         )}
       </div>
+      )}
 
       {/* Total da semana — embaixo da tabela, que é onde a pergunta aparece.
           A tabela conta quanto tinha na gaveta em cada dia; isto conta quanto a
           loja VENDEU na semana, e em qual forma. */}
-      {historico.length > 0 && (
+      {(porDia ? (diasSemana?.length ?? 0) > 0 : historico.length > 0) && (
         <div className="caixa-semana">
           <div className="caixa-semana-cab">
             <span className="caixa-semana-rot">💰 Total da semana · {rotuloSemana(semanaOffset)}</span>
@@ -1304,7 +1601,9 @@ export default function Caixa() {
 
               {/* O que NÃO soma no total: explica o número, não o forma. */}
               <div className="caixa-semana-notas">
-                <span>{historico.length} {historico.length === 1 ? 'caixa' : 'caixas'} nesta semana</span>
+                <span>{porDia
+                  ? `${diasSemana?.length ?? 0} ${(diasSemana?.length ?? 0) === 1 ? 'dia' : 'dias'} nesta semana`
+                  : `${historico.length} ${historico.length === 1 ? 'caixa' : 'caixas'} nesta semana`}</span>
                 {totaisSemana.cartao > 0 && totaisSemana.cartaoLiquido !== totaisSemana.cartao && (
                   <span>💳 cai na conta (já com as taxas): <strong>R$ {totaisSemana.cartaoLiquido.toFixed(2)}</strong></span>
                 )}
@@ -1568,7 +1867,7 @@ export default function Caixa() {
       {showFechamento && (
         <div className="modal-overlay" onClick={() => setShowFechamento(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Fechar caixa</h2>
+            <h2>{porDia ? 'Fechar o dia ' + ddmmDeYMD(dia) : 'Fechar caixa'}</h2>
             <p className="caixa-esperado">
               Faturamento total: <strong style={{ color: 'var(--primary)' }}>R$ {faturamentoTotal.toFixed(2)}</strong><br />
               {/* Avisa ANTES de contar a gaveta por que o faturamento e maior
