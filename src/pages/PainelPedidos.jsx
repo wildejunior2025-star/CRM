@@ -6959,6 +6959,11 @@ export default function PainelPedidos() {
   // Catálogo (pausar/ativar itens da loja online)
   const [catalogo, setCatalogo] = useState([])
   const [complementosPorProduto, setComplementosPorProduto] = useState({}) // produtoId -> [grupos] (pausáveis)
+  // { grupo_id: [nomes dos produtos que usam] }. A lista compartilhada era
+  // INVISÍVEL: a dona da CDBom pausava um sabor no balde e mudava na caixa
+  // junto, sem a tela dizer em lugar nenhum que a lista era a mesma (17/10/2026).
+  const [usoDaLista, setUsoDaLista] = useState({})
+  const [separandoLista, setSeparandoLista] = useState(null)
   const [catExpandido, setCatExpandido] = useState(() => new Set())        // produtos com complementos abertos
   const [catCatsAbertas, setCatCatsAbertas] = useState(() => new Set())    // categorias abertas (nascem fechadas)
   const [loadingCatalogo, setLoadingCatalogo] = useState(false)
@@ -8319,13 +8324,16 @@ export default function PainelPedidos() {
     // grupos ("subcategorias") e opções, cada um pausável individualmente.
     const { data: vinc } = await supabase
       .from('produto_complemento_grupos')
-      .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, preco_adicional, disponivel, ordem)), produtos!inner(empresa_id)')
+      .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, disponivel, regra_preco, complemento_opcoes(id, nome, preco_adicional, disponivel, ordem)), produtos!inner(empresa_id, nome)')
       .eq('produtos.empresa_id', empresa.id)
       .order('ordem')
     const porProduto = {}
+    const uso = {}
     for (const v of (vinc ?? [])) {
       const g = v.complemento_grupos
       if (!g) continue
+      // Quem mais usa esta lista. É o que a tela vai dizer em voz alta.
+      ;(uso[g.id] ??= []).push(v.produtos?.nome ?? 'produto')
       const opcoes = (g.complemento_opcoes ?? [])
         .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
       ;(porProduto[v.produto_id] ??= []).push({
@@ -8335,8 +8343,28 @@ export default function PainelPedidos() {
     }
     for (const pid in porProduto) porProduto[pid].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
     setComplementosPorProduto(porProduto)
+    setUsoDaLista(uso)
     setLoadingCatalogo(false)
   }, [empresa])
+
+  // Dá a ESTE produto uma cópia própria de uma lista compartilhada. O resto
+  // dos produtos continua na lista velha. Quem faz a cópia é o banco, numa
+  // operação só (`complemento_separar_lista`, mig 0330) - se fosse em três
+  // idas daqui, uma falha no meio deixaria lista pela metade.
+  async function separarListaDoProduto(prod, g) {
+    const outros = (usoDaLista[g.id] ?? []).filter(n => n !== prod.nome)
+    const ok = window.confirm(
+      `A lista "${g.nome}" é usada também por: ${outros.join(', ')}.
+
+`
+      + `Criar uma cópia só pra "${prod.nome}"? A partir daí, o que você pausar aqui não mexe nos outros.`)
+    if (!ok) return
+    setSeparandoLista(g.id)
+    const { error } = await supabase.rpc('complemento_separar_lista', { p_produto: prod.id, p_grupo: g.id })
+    setSeparandoLista(null)
+    if (error) { window.alert(recadoDeErro(error, 'separar a lista')); return }
+    await carregarCatalogo()
+  }
 
   function toggleExpandirCat(produtoId) {
     setCatExpandido(prev => {
@@ -10924,6 +10952,36 @@ export default function PainelPedidos() {
                                         {qtd} · {g.opcoes.length}
                                         {g.totalOpcoes ? ` de ${g.totalOpcoes}` : ''} {g.opcoes.length === 1 ? 'opção' : 'opções'}
                                       </div>
+                                      {/* A lista compartilhada era invisível: a pessoa pausava
+                                          um sabor aqui e mudava em outros produtos sem saber
+                                          (CDBom, 17/10/2026). Agora a tela fala, e dá o botão
+                                          pra separar na hora. */}
+                                      {(usoDaLista[g.id] ?? []).length > 1 && (
+                                        <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                          <span
+                                            title={`Também em: ${(usoDaLista[g.id] ?? []).filter(n => n !== prod.nome).join(', ')}`}
+                                            style={{
+                                              fontSize: 10.5, fontWeight: 700, color: '#d97706',
+                                              background: 'rgba(217,119,6,.12)', border: '1px solid #d97706',
+                                              borderRadius: 999, padding: '1px 7px',
+                                            }}>
+                                            ⚠ lista usada em {(usoDaLista[g.id] ?? []).length} produtos
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => separarListaDoProduto(prod, g)}
+                                            disabled={separandoLista === g.id}
+                                            title="Criar uma cópia desta lista só para este produto"
+                                            style={{
+                                              padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
+                                              fontSize: 10.5, fontWeight: 700, border: '1px solid var(--border, #2a2a3a)',
+                                              background: 'transparent', color: 'var(--text-muted)',
+                                            }}
+                                          >
+                                            {separandoLista === g.id ? '...' : 'Separar'}
+                                          </button>
+                                        </div>
+                                      )}
                                     </div>
                                     <button
                                       type="button"
