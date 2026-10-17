@@ -8554,7 +8554,16 @@ export default function PainelPedidos() {
         return
       }
       // Voltou o horário e quem fechou foi o relógio: abre de novo.
-      if (empresa.delivery_fechado_por === 'horario') {
+      //
+      // 'sem_gestor' entra junto (17/10/2026): a loja que fechou porque NINGUÉM
+      // estava no painel reabre no instante em que alguém abre o painel — e o
+      // painel sendo esta tela, chegar aqui já é a prova de que tem gente. A
+      // rotina do servidor também reabre, mas só de 3 em 3 min; esperar isso
+      // seria deixar a loja fechada com o dono olhando pra ela.
+      //
+      // 'manual' continua de fora, de propósito: quem fechou na mão (acabou o
+      // produto, cozinha lotada) abre na mão.
+      if (empresa.delivery_fechado_por === 'horario' || empresa.delivery_fechado_por === 'sem_gestor') {
         setLojaAberta(prev => {
           if (!prev) {
             supabase.from('empresas')
