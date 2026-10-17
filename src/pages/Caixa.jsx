@@ -137,6 +137,113 @@ export default function Caixa() {
   // verdade, e esse entra como dinheiro/cartao normal.
   const foraDaLojaDe = (r) => Number(r?.delivery_ifood || 0) + Number(r?.delivery_online || 0)
 
+  // ── DE ONDE VEIO ESTE VALOR ──────────────────────────────────────────────
+  // Todo card de dinheiro abre uma lista do que o formou. O total sozinho nao
+  // resolve a pergunta que o dono faz quando a gaveta nao bate: "esses R$ 240
+  // em dinheiro vieram de onde?". Agora ele clica e ve mesa por mesa, pedido
+  // por pedido.
+  //
+  // O salao sai de `pagamentos` (a observacao ja guarda "Presencial · Comanda
+  // 45 · Garcom: pedro") e o delivery sai da view `caixa_delivery_partes`, que
+  // e a MESMA que soma o card — por isso a lista sempre fecha com o total.
+  const [detalhe, setDetalhe] = useState(null)       // {titulo, formas, baldes, tipo}
+  const [detalheLinhas, setDetalheLinhas] = useState(null)  // null | 'carregando' | linhas[]
+
+  const ORIGEM_ROTULO = {
+    ifood: '🛵 iFood', balcao: '🏪 Balcão', cardapio: '🛒 Loja online',
+    whatsapp: '💬 WhatsApp', app: '📱 App',
+  }
+
+  async function abrirDetalhe(cfg) {
+    setDetalhe(cfg)
+    setDetalheLinhas('carregando')
+    const id = caixaAtual?.id
+    if (!id) { setDetalheLinhas([]); return }
+
+    const linhas = []
+
+    // ── Salão (e recebimento de fiado antigo, que tambem cai em `pagamentos`)
+    if (cfg.formas?.length) {
+      let q = supabase.from('pagamentos')
+        .select('id, valor, forma_pagamento, observacao, created_at')
+        .eq('caixa_id', id).in('forma_pagamento', cfg.formas)
+      if (cfg.soFiadoAntigo) q = q.eq('observacao', 'Recebimento de fiado')
+      const { data } = await q
+      for (const pg of (data ?? [])) {
+        const obs = pg.observacao ?? ''
+        const fiadoAntigo = obs === 'Recebimento de fiado'
+        // "Presencial · Comanda 45 · Garçom: pedro" -> "Comanda 45" + "Garçom: pedro"
+        const pedacos = obs.split('·').map(t => t.trim()).filter(Boolean)
+        const mesa = pedacos.find(t => /^(Comanda|Mesa)/i.test(t))
+        linhas.push({
+          id: 'pg-' + pg.id,
+          quando: pg.created_at,
+          valor: Number(pg.valor || 0),
+          titulo: fiadoAntigo ? '🤝 Fiado antigo recebido' : (mesa ? '🍽️ ' + mesa : '🧾 Venda no balcão'),
+          sub: fiadoAntigo ? 'dívida de outro dia — não é venda de hoje'
+             : pedacos.filter(t => t !== mesa && t !== 'Presencial').join(' · '),
+          forma: pg.forma_pagamento,
+        })
+      }
+    }
+
+    // ── Delivery e balcão (a view ja separou iFood pago no app, PIX do MP etc.)
+    if (cfg.baldes?.length) {
+      const { data } = await supabase.from('caixa_delivery_partes')
+        .select('pedido_id, bucket, valor, numero_pedido, origem, cliente_nome, created_at, forma_pagamento')
+        .eq('caixa_id', id).in('bucket', cfg.baldes)
+      for (const d of (data ?? [])) {
+        linhas.push({
+          id: 'pd-' + d.pedido_id + '-' + d.bucket,
+          quando: d.created_at,
+          valor: Number(d.valor || 0),
+          titulo: (ORIGEM_ROTULO[d.origem] ?? '🛒 Pedido') + ' #' + (d.numero_pedido ?? '—'),
+          sub: d.cliente_nome || '',
+          forma: d.forma_pagamento,
+        })
+      }
+    }
+
+    // ── Vendas no fiado: a divida que NASCEU neste caixa
+    if (cfg.tipo === 'fiado') {
+      const { data } = await supabase.from('vendas')
+        .select('id, total, observacoes, created_at, cliente_id')
+        .eq('caixa_id', id).eq('forma_pagamento', 'fiado').neq('status', 'cancelado')
+      const ids = [...new Set((data ?? []).map(v => v.cliente_id).filter(Boolean))]
+      let nomes = {}
+      if (ids.length) {
+        const { data: cli } = await supabase.from('clientes').select('id, nome').in('id', ids)
+        nomes = Object.fromEntries((cli ?? []).map(c => [c.id, c.nome]))
+      }
+      for (const v of (data ?? [])) {
+        const obs = v.observacoes ?? ''
+        const mesa = obs.split('·').map(t => t.trim()).find(t => /^(Comanda|Mesa)/i.test(t))
+        linhas.push({
+          id: 'vd-' + v.id,
+          quando: v.created_at,
+          valor: Number(v.total || 0),
+          titulo: '🧾 ' + (nomes[v.cliente_id] || 'Cliente sem cadastro'),
+          sub: mesa || obs,
+          forma: 'fiado',
+        })
+      }
+    }
+
+    linhas.sort((a, b) => new Date(b.quando) - new Date(a.quando))
+    setDetalheLinhas(linhas)
+  }
+
+  // Props que transformam um card em botao. O `style` extra entra junto porque
+  // varios cards ja tem borda colorida propria.
+  const cardClicavel = (cfg, styleExtra = {}) => ({
+    onClick: () => abrirDetalhe(cfg),
+    role: 'button',
+    tabIndex: 0,
+    onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrirDetalhe(cfg) } },
+    title: 'Ver de onde veio este valor',
+    style: { cursor: 'pointer', ...styleExtra },
+  })
+
   // A linha de baixo do valor: quanto daquele total e da mesa e quanto e do
   // delivery/balcao. Sem isso o dono ve um numero maior do que esperava e nao
   // tem onde procurar. Some quando nao houve delivery, pra nao poluir a loja
@@ -640,16 +747,16 @@ export default function Caixa() {
               {/* Fora daqui de propósito (a view caixa_resumo continua calculando tudo):
                   "Vendas à vista" repetia "Recebimentos em dinheiro" pro lojista, e
                   boleto/transferência não existem na operação — é tudo PIX. */}
-              <div className="card dashboard-card">
+              <div className="card dashboard-card" {...cardClicavel({ titulo: 'Vendas no fiado', tipo: 'fiado' })}>
                 <div className="label">Vendas fiado</div>
                 <div className="value">R$ {Number(resumo.vendas_fiado).toFixed(2)}</div>
               </div>
-              <div className="card dashboard-card">
+              <div className="card dashboard-card" {...cardClicavel({ titulo: 'Recebimentos em dinheiro', formas: ['dinheiro'], baldes: ['dinheiro'] })}>
                 <div className="label">Recebimentos em dinheiro</div>
                 <div className="value">R$ {dinheiroDe(resumo).toFixed(2)}</div>
                 {linhaOrigem(resumo.recebimentos_dinheiro, resumo.delivery_dinheiro)}
               </div>
-              <div className="card dashboard-card">
+              <div className="card dashboard-card" {...cardClicavel({ titulo: 'Recebimentos em PIX', formas: ['pix'], baldes: ['pix'] })}>
                 <div className="label">Recebimentos Pix</div>
                 <div className="value">R$ {pixDe(resumo).toFixed(2)}</div>
                 {linhaOrigem(resumo.recebimentos_pix, resumo.delivery_pix)}
@@ -662,7 +769,7 @@ export default function Caixa() {
                   cai na conta do iFood / do MP e chega depois, no repasse.
                   Se entrasse na gaveta, o caixa ia fechar faltando todo dia. */}
               {Number(resumo.delivery_ifood || 0) > 0 && (
-                <div className="card dashboard-card" style={{ borderLeft: '3px solid #ea1d2c' }}>
+                <div className="card dashboard-card" {...cardClicavel({ titulo: 'iFood — pago no app', baldes: ['ifood'] }, { borderLeft: '3px solid #ea1d2c' })}>
                   <div className="label">🛵 iFood (pago no app)</div>
                   <div className="value">R$ {Number(resumo.delivery_ifood).toFixed(2)}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
@@ -672,7 +779,7 @@ export default function Caixa() {
                 </div>
               )}
               {Number(resumo.delivery_online || 0) > 0 && (
-                <div className="card dashboard-card" style={{ borderLeft: '3px solid #2563eb' }}>
+                <div className="card dashboard-card" {...cardClicavel({ titulo: 'Pago online (Mercado Pago)', baldes: ['online'] }, { borderLeft: '3px solid #2563eb' })}>
                   <div className="label">🌐 Pago online (Mercado Pago)</div>
                   <div className="value">R$ {Number(resumo.delivery_online).toFixed(2)}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
@@ -685,7 +792,7 @@ export default function Caixa() {
                   virar dinheiro no esperado — melhor o dono ver R$ 0,00 de
                   diferença e uma linha estranha do que caçar uma falta. */}
               {Number(resumo.delivery_outros || 0) > 0 && (
-                <div className="card dashboard-card" style={{ borderLeft: '3px solid #d97706' }}>
+                <div className="card dashboard-card" {...cardClicavel({ titulo: 'Forma não reconhecida', baldes: ['outros'] }, { borderLeft: '3px solid #d97706' })}>
                   <div className="label">⚠️ Forma não reconhecida</div>
                   <div className="value">R$ {Number(resumo.delivery_outros).toFixed(2)}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
@@ -700,7 +807,7 @@ export default function Caixa() {
                   fora de todo "esperado" e some quando é zero, pra não poluir a
                   tela de quem não usa o programa. */}
               {Number(resumo.recebimentos_cashback || 0) > 0 && (
-                <div className="card dashboard-card" style={{ borderLeft: '3px solid #16a34a' }}>
+                <div className="card dashboard-card" {...cardClicavel({ titulo: 'Cashback usado', formas: ['cashback'] }, { borderLeft: '3px solid #16a34a' })}>
                   <div className="label">🎟️ Cashback usado</div>
                   <div className="value">R$ {Number(resumo.recebimentos_cashback).toFixed(2)}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
@@ -718,11 +825,12 @@ export default function Caixa() {
                   cartão. O "cartão" genérico segue escondido no zero: é forma
                   antiga, quem usa crédito/débito nunca vai ver essa linha. */}
               {[
-                ['Recebimentos crédito', creditoDe(resumo), taxas.credito, true],
-                ['Recebimentos débito', debitoDe(resumo), taxas.debito, true],
-                ['Recebimentos cartão', cartaoGenDe(resumo), taxas.cartao, false],
-              ].filter(([, bruto, , sempre]) => sempre || Number(bruto || 0) > 0).map(([titulo, bruto, pct]) => (
-                <div className="card dashboard-card" key={titulo}>
+                ['Recebimentos crédito', creditoDe(resumo), taxas.credito, true, 'credito'],
+                ['Recebimentos débito', debitoDe(resumo), taxas.debito, true, 'debito'],
+                ['Recebimentos cartão', cartaoGenDe(resumo), taxas.cartao, false, 'cartao'],
+              ].filter(([, bruto, , sempre]) => sempre || Number(bruto || 0) > 0).map(([titulo, bruto, pct, , forma]) => (
+                <div className="card dashboard-card" key={titulo}
+                  {...cardClicavel({ titulo, formas: [forma], baldes: [forma] })}>
                   <div className="label">{titulo}</div>
                   <div className="value">R$ {Number(bruto).toFixed(2)}</div>
                   {pct > 0 ? (
@@ -745,7 +853,8 @@ export default function Caixa() {
               {/* Quando as três formas de cartão aparecem juntas, o total ajuda a
                   conferir com o extrato da maquineta de uma vez. */}
               {cartaoDe(resumo) > 0 && totalCartaoLiquido !== cartaoDe(resumo) && (
-                <div className="card dashboard-card" style={{ borderLeft: '3px solid var(--primary)' }}>
+                <div className="card dashboard-card"
+                  {...cardClicavel({ titulo: 'Total no cartão', formas: ['credito', 'debito', 'cartao'], baldes: ['credito', 'debito', 'cartao'] }, { borderLeft: '3px solid var(--primary)' })}>
                   <div className="label">💳 Total no cartão</div>
                   <div className="value">R$ {cartaoDe(resumo).toFixed(2)}</div>
                   {linhaOrigem(resumo.recebimentos_cartao, resumo.delivery_cartao)}
@@ -760,7 +869,8 @@ export default function Caixa() {
                   dele foi contada no dia em que o cliente comeu. Sem essa linha, o dono
                   compara "entrou" com "vendi", não bate, e não sabe por quê. */}
               {Number(resumo.recebimentos_fiado) > 0 && (
-                <div className="card dashboard-card" style={{ borderLeft: '3px solid #d97706' }}>
+                <div className="card dashboard-card"
+                  {...cardClicavel({ titulo: 'Fiado antigo recebido', formas: ['dinheiro', 'pix', 'cartao', 'credito', 'debito', 'transferencia'], soFiadoAntigo: true }, { borderLeft: '3px solid #d97706' })}>
                   <div className="label">Fiado antigo recebido</div>
                   <div className="value" style={{ color: '#d97706' }}>R$ {Number(resumo.recebimentos_fiado).toFixed(2)}</div>
                   {/* Em que forma foi pago: o que veio em dinheiro está na gaveta,
@@ -1395,6 +1505,62 @@ export default function Caixa() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* De onde veio o valor do card que foi clicado */}
+      {detalhe && (
+        <div className="modal-overlay" onClick={() => { setDetalhe(null); setDetalheLinhas(null) }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560, width: '94vw' }}>
+            <h2 style={{ marginBottom: 4 }}>{detalhe.titulo}</h2>
+            {detalheLinhas === 'carregando' ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando…</p>
+            ) : !detalheLinhas?.length ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                Nada neste caixa ainda.
+              </p>
+            ) : (
+              <>
+                <p style={{ color: 'var(--text-muted)', fontSize: 12.5, margin: '0 0 10px' }}>
+                  {detalheLinhas.length} lançamento{detalheLinhas.length !== 1 ? 's' : ''} neste caixa
+                </p>
+                <div style={{ maxHeight: '55vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {detalheLinhas.map(l => (
+                    <div key={l.id} style={{
+                      border: '1px solid var(--border)', borderRadius: 10, padding: '9px 11px',
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                    }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 700 }}>{l.titulo}</div>
+                        {l.sub && (
+                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 1 }}>{l.sub}</div>
+                        )}
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
+                          {new Date(l.quando).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                          {l.forma ? ' · ' + l.forma : ''}
+                        </div>
+                      </div>
+                      <strong style={{ fontSize: 15, whiteSpace: 'nowrap' }}>R$ {l.valor.toFixed(2)}</strong>
+                    </div>
+                  ))}
+                </div>
+                {/* O total daqui tem que bater com o do card: os dois saem da
+                    mesma view. Se um dia nao bater, e sinal de que alguma venda
+                    caiu num balde que a lista nao pediu. */}
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border)', fontWeight: 800,
+                }}>
+                  <span>Total</span>
+                  <span>R$ {detalheLinhas.reduce((t, l) => t + l.valor, 0).toFixed(2)}</span>
+                </div>
+              </>
+            )}
+            <div className="modal-actions" style={{ marginTop: 14 }}>
+              <button type="button" className="btn btn-secondary"
+                onClick={() => { setDetalhe(null); setDetalheLinhas(null) }}>Fechar</button>
+            </div>
           </div>
         </div>
       )}
