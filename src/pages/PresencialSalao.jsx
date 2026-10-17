@@ -2360,6 +2360,14 @@ export default function PresencialSalao() {
       // soApp: false num PC — se o app FWC não responder, sai pelo navegador em vez
       // de a conta simplesmente não existir.
       if (vaiImprimirAqui) imprimirConta({ soApp: false }).catch(() => { /* best-effort */ })
+      // Celular sem térmica conectada: NADA sai, e antes ninguém ficava sabendo. O
+      // pior caso é o garçom tirar a taxa e refazer o fechamento — o papel que já
+      // saiu continua com a taxa e o cliente paga a mais (Saidera, 16/10/2026).
+      else if (papelImpressora() !== 'cozinha') {
+        window.alert('⚠️ A conta NÃO saiu no papel: este celular está sem a térmica conectada.\n\n'
+          + 'Conecte a impressora (aba Impressora) e use "Reenviar conta" na mesa azul. '
+          + 'Se já tinha saído uma conta antes, ela está desatualizada — não entregue ao cliente.')
+      }
     }
     limparRascunho(comandaSel.id)
     setFechando(false)

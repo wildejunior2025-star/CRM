@@ -135,11 +135,8 @@ export default function PresencialHistorico() {
   const [imprimindo, setImprimindo] = useState(null) // id da comanda saindo
   const [impMsg, setImpMsg] = useState(null)         // { id, texto }
 
-  async function imprimirSegundaVia(c) {
-    setImprimindo(c.id)
-    setImpMsg(null)
-    const nomeLoja = empresa?.nome || ''
-    const dados = {
+  function dadosDaConta(c) {
+    return {
       numeroMesa: c.numero_mesa,
       // Comanda de balcão sai como "COMANDA 07 · MARIA" no lugar de "MESA 7".
       rotulo: c.tipo === 'balcao' ? rotuloComanda(c) : null,
@@ -151,8 +148,40 @@ export default function PresencialHistorico() {
       // corrigida aqui mesmo, no "Trocar").
       formaPagamento: formaComOrigem(c),
       pagamentos: [],
-      empresa: { nome: nomeLoja },
+      empresa: { nome: empresa?.nome || '' },
     }
+  }
+
+  // CONECTAR A TÉRMICA É UM TOQUE À PARTE (28/10/2026).
+  //
+  // O navegador só abre a lista de impressoras Bluetooth no instante de um toque
+  // do usuário, e esse "aval" dura poucos segundos. A segunda via tentava
+  // religar sozinha, depois abria um window.confirm — a pessoa lia, tocava em OK
+  // e a lista NUNCA abria (o aval já tinha vencido), a conta caía na janela do
+  // navegador, que no celular não imprime nada: "aperta e não sai" (Saidera).
+  // Agora, sem térmica conectada no celular, a tela mostra um botão próprio: o
+  // toque nele É o aval, e a conexão é a primeira coisa que acontece.
+  async function conectarEImprimir(c) {
+    setImprimindo(c.id)
+    try {
+      const bt = await import('../utils/imprimirBluetooth')
+      await bt.conectarImpressoraCelular()
+      const via = await bt.imprimirMesaSeConectada('conta', dadosDaConta(c))
+      setImpMsg({ id: c.id, texto: via === 'filtrado'
+        ? '⚠️ Este aparelho está marcado como impressora da COZINHA — conta sai na da frente.'
+        : via ? '🧾 Segunda via enviada pra impressora.' : '⚠️ Conectei, mas não consegui imprimir. Tente de novo.' })
+    } catch (e) {
+      setImpMsg({ id: c.id, conectar: true, texto: '⚠️ ' + (e?.message || 'Não consegui conectar a impressora.') + ' Toque pra tentar de novo.' })
+    }
+    setImprimindo(null)
+    setTimeout(() => setImpMsg(m => (m && !m.conectar ? null : m)), 6000)
+  }
+
+  async function imprimirSegundaVia(c) {
+    setImprimindo(c.id)
+    setImpMsg(null)
+    const nomeLoja = empresa?.nome || ''
+    const dados = dadosDaConta(c)
     // Térmica pareada neste aparelho primeiro (é o caso do celular do balcão);
     // senão o app FWC do PC. O navegador é o ÚLTIMO recurso, não o segundo:
     // a segunda via da conta é papel de térmica, e cair na janela do Chrome
@@ -179,6 +208,16 @@ export default function PresencialHistorico() {
     // dele (este PC não está marcado pra imprimir conta de mesa) — oferecer
     // Bluetooth aqui só confundiria quem está no PC da loja.
     const temApp = via ? false : await appFwcDisponivel()
+    // Celular sem térmica conectada: o botão de conectar tem que ser um TOQUE
+    // novo (ver conectarEImprimir). Não cai no navegador — lá nada imprime.
+    const ehCelularAgora = typeof navigator !== 'undefined' && (
+      navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || ''))
+    if (!via && !temApp && bt && ehCelularAgora && typeof navigator !== 'undefined' && navigator.bluetooth) {
+      setImprimindo(null)
+      setImpMsg({ id: c.id, conectar: true,
+        texto: '🔌 A térmica não está conectada neste celular. Toque no botão abaixo pra conectar e imprimir.' })
+      return
+    }
     let ofereceu = false
     if (!via && !temApp && bt && typeof navigator !== 'undefined' && navigator.bluetooth) {
       ofereceu = true
@@ -1199,6 +1238,14 @@ export default function PresencialHistorico() {
                     </button>
                     {impMsg?.id === c.id && (
                       <div style={{ fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'center', marginTop: 6 }}>{impMsg.texto}</div>
+                    )}
+                    {impMsg?.id === c.id && impMsg.conectar && (
+                      <button type="button" onClick={() => conectarEImprimir(c)} disabled={imprimindo === c.id}
+                        style={{ width: '100%', marginTop: 8, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
+                          border: '1.5px solid var(--primary)', background: 'rgba(124,58,237,.08)',
+                          color: 'var(--primary)', fontSize: 13.5, fontWeight: 800 }}>
+                        {imprimindo === c.id ? 'Conectando…' : '🔌 Conectar a impressora e imprimir'}
+                      </button>
                     )}
 
                     {/* Ligar/trocar o cliente deste pedido já fechado — mexe em fiado
