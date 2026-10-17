@@ -9022,11 +9022,22 @@ export default function PainelPedidos() {
     const itens = Array.isArray(c.comanda_itens) ? c.comanda_itens : []
     const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
     const pct = Number(empresa?.taxa_servico_pct ?? 0)
-    const taxa = calcularTaxa(itens, pct, true)
+    const pend = c.fechamento_pendente || {}
+    // A TAXA SAI DE QUEM FECHOU, nao de uma suposicao daqui.
+    //
+    // Cliente que compra PRA LEVAR nao paga taxa: o garcom desmarca a
+    // caixinha no Salao e o sistema grava certo. Mas o papel saia COM a taxa,
+    // porque este caminho passava `true` fixo pro calculo. Quem imprime
+    // costuma ser OUTRO aparelho (o que tem a termica Bluetooth), e ele nao
+    // tinha como saber da escolha - so que tinha: ela viaja em
+    // `fechamento_pendente.aplicar_taxa` desde que a conta e enviada.
+    //
+    // Fica `true` quando o campo nao existe, que e o comportamento de sempre:
+    // conta sem fechamento pendente nao teve ninguem desmarcando nada.
+    const taxa = calcularTaxa(itens, pct, pend.aplicar_taxa !== false)
     const total = subtotal + taxa
     const adiants = Array.isArray(c.comanda_adiantamentos) ? c.comanda_adiantamentos : []
     const adiantado = adiants.reduce((s2, a) => s2 + Number(a.valor || 0), 0)
-    const pend = c.fechamento_pendente || {}
     const pagamentos = Array.isArray(pend.pagamentos) ? pend.pagamentos : []
     const forma = pagamentos.length > 1 ? 'Dividido' : (pagamentos[0]?.forma ?? '')
     imprimirContaSeMesa({
@@ -9044,11 +9055,12 @@ export default function PainelPedidos() {
     const itens = Array.isArray(c.comanda_itens) ? c.comanda_itens : []
     const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
     const pct = Number(empresa?.taxa_servico_pct ?? 0)
-    const taxa = calcularTaxa(itens, pct, true)
+    const pend = c.fechamento_pendente || {}
+    // Mesma correção da conta automática: a taxa vem de quem fechou.
+    const taxa = calcularTaxa(itens, pct, pend.aplicar_taxa !== false)
     const total = subtotal + taxa
     const adiants = Array.isArray(c.comanda_adiantamentos) ? c.comanda_adiantamentos : []
     const adiantado = adiants.reduce((s2, a) => s2 + Number(a.valor || 0), 0)
-    const pend = c.fechamento_pendente || {}
     const pagamentos = Array.isArray(pend.pagamentos) ? pend.pagamentos : []
     const forma = pagamentos.length > 1 ? 'Dividido' : (pagamentos[0]?.forma ?? '')
     const dados = {
