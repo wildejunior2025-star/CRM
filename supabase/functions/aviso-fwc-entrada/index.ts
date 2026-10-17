@@ -33,7 +33,7 @@ function respostaAutomatica(): string {
     "✅ Cozinha recebe no celular, sem papel\n" +
     "✅ Robô no WhatsApp que atende seu cliente e anota o pedido sozinho\n" +
     "✅ Conta e fechamento do dia prontos\n\n" +
-    "💰 Planos a partir de *R$ 25*, com *teste grátis*.\n" +
+    "💰 Planos a partir de *R$ 25 por semana*, com *teste grátis*.\n" +
     "Me conta: qual é a sua loja e como vocês anotam os pedidos hoje?"
 }
 
