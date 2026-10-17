@@ -690,7 +690,7 @@ function IconeLista() {
 }
 
 // ─── Tabela de pedidos ───
-function TabelaPedidos({ pedidos, taxaPlataforma, onRowClick, agruparPorDia = false, totaisPorDia = {} }) {
+function TabelaPedidos({ pedidos, taxaPlataforma, onRowClick, agruparPorDia = false, totaisPorDia = {}, entregadores = {} }) {
   const totalBruto = pedidos.reduce((acc, p) => acc + Number(p.total || 0), 0)
   const totalLiquido = pedidos.reduce((acc, p) => acc + Number(p.total || 0) * (1 - (taxaPlataforma ?? 5) / 100), 0)
 
@@ -707,6 +707,9 @@ function TabelaPedidos({ pedidos, taxaPlataforma, onRowClick, agruparPorDia = fa
               <th>Data</th>
               <th>Horário</th>
               <th>Cliente</th>
+              {/* Quem levou. O dono pergunta isso o tempo todo ("quem entregou o
+                  #38?") e so dava pra saber abrindo pedido por pedido. */}
+              <th>Entregador</th>
               <th>Status</th>
               <th style={{ textAlign: 'right' }}>Total</th>
               <th style={{ textAlign: 'right' }}>Líquido</th>
@@ -727,7 +730,7 @@ function TabelaPedidos({ pedidos, taxaPlataforma, onRowClick, agruparPorDia = fa
                 const t = totaisPorDia[data]
                 linhas.push(
                   <tr key={`dia-${data}`} className="pd-dia-row">
-                    <td colSpan={8}>
+                    <td colSpan={9}>
                       <div className="pd-dia-header">
                         <span className="pd-dia-data">📅 {data}</span>
                         {t && (
@@ -751,6 +754,13 @@ function TabelaPedidos({ pedidos, taxaPlataforma, onRowClick, agruparPorDia = fa
                   <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{data}</td>
                   <td style={{ color: 'var(--text-muted)', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>{hora}</td>
                   <td style={{ fontWeight: 500 }}>{pedido.cliente_nome || 'Anônimo'}</td>
+                  <td style={{ fontSize: 13 }}>
+                    {pedido.tipo_entrega === 'retirada'
+                      ? <span style={{ color: 'var(--text-muted)' }}>Retirada</span>
+                      : entregadores[pedido.entregador_id]
+                        ? <span style={{ fontWeight: 500 }}>{entregadores[pedido.entregador_id]}</span>
+                        : <span style={{ color: 'var(--text-muted)' }}>&mdash;</span>}
+                  </td>
                   <td>
                     <StatusBadge status={pedido.status} />
                   </td>
@@ -796,6 +806,9 @@ export default function PedidosDelivery() {
   const [pagina, setPagina] = useState(1)
   const [taxaPlataforma, setTaxaPlataforma] = useState(5)
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null)
+  // { id do entregador: nome } - so pra escrever o nome na lista. Os pedidos ja
+  // trazem `entregador_id`; o que faltava era o nome.
+  const [entregadores, setEntregadores] = useState({})
   const [filtroOrigem, setFiltroOrigem] = useState('todos')
   const [busca, setBusca] = useState('')
 
@@ -884,6 +897,18 @@ export default function PedidosDelivery() {
       setTaxaPlataforma(emp?.taxa_plataforma ?? 5)
     }
     buscarTaxa()
+  }, [empresa])
+
+  // Nomes dos entregadores, uma vez so. Os pedidos ja trazem `entregador_id`;
+  // sem isto a lista mostraria um id, que nao diz nada pra ninguem.
+  useEffect(() => {
+    if (!empresa) return
+    let vivo = true
+    supabase.from('profiles').select('id, nome').eq('empresa_id', empresa.id).eq('perfil', 'entregador')
+      .then(({ data }) => {
+        if (vivo) setEntregadores(Object.fromEntries((data ?? []).map(p => [p.id, p.nome])))
+      })
+    return () => { vivo = false }
   }, [empresa])
 
   const carregarPedidos = useCallback(async () => {
@@ -1317,7 +1342,7 @@ export default function PedidosDelivery() {
       ) : pedidosFiltrados.length === 0 ? (
         <EmptyState aba={abaAtiva} foraDoPeriodo={foraDoPeriodo} onVerHistorico={() => { setDataInicio(''); setDataFim('') }} />
       ) : viewMode === 'tabela' ? (
-        <TabelaPedidos pedidos={pedidosPagina} taxaPlataforma={taxaPlataforma} onRowClick={setPedidoDetalhe} agruparPorDia={abaAtiva === 'concluidos'} totaisPorDia={totaisPorDia} />
+        <TabelaPedidos pedidos={pedidosPagina} taxaPlataforma={taxaPlataforma} onRowClick={setPedidoDetalhe} agruparPorDia={abaAtiva === 'concluidos'} totaisPorDia={totaisPorDia} entregadores={entregadores} />
       ) : (
         <div className="pd-grid">
           {pedidosPagina.map(pedido => (

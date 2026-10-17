@@ -116,10 +116,43 @@ export default function Caixa() {
   // dela. É esse número que o esperado em cartão persegue: o extrato da conta
   // nunca mostra o valor cheio da venda, e é com o extrato que a loja confere.
   // Loja sem taxa cadastrada: líquido = bruto, nada muda.
+  //
+  // ── DELIVERY E BALCAO DENTRO DO CAIXA (mig 0334) ──
+  // O resumo chega com o salao (`recebimentos_*`, que vem do fechamento de
+  // conta da mesa) e o delivery/balcao (`delivery_*`, que vem dos pedidos)
+  // SEPARADOS. Quem confere a gaveta quer UM numero por forma, entao e aqui
+  // que os dois viram um. Antes o delivery simplesmente nao existia nesta
+  // tela: a loja vendia 300 reais no cardapio e o caixa fechava zerado.
+  const dinheiroDe   = (r) => Number(r?.recebimentos_dinheiro || 0) + Number(r?.delivery_dinheiro || 0)
+  const pixDe        = (r) => Number(r?.recebimentos_pix || 0) + Number(r?.delivery_pix || 0)
+  const cartaoDe     = (r) => Number(r?.recebimentos_cartao || 0) + Number(r?.delivery_cartao || 0)
+  const creditoDe    = (r) => Number(r?.recebimentos_credito || 0) + Number(r?.delivery_credito || 0)
+  const debitoDe     = (r) => Number(r?.recebimentos_debito || 0) + Number(r?.delivery_debito || 0)
+  const cartaoGenDe  = (r) => Number(r?.recebimentos_cartao_generico || 0) + Number(r?.delivery_cartao_generico || 0)
+  // DINHEIRO QUE NUNCA PASSOU PELA LOJA: pedido pago dentro do app do iFood e
+  // PIX pago no nosso checkout (cai no Mercado Pago). E faturamento, mas nao
+  // entra em esperado NENHUM — nem gaveta, nem PIX da loja, nem maquineta.
+  // Jogar isso no esperado faria o dono caçar todo dia uma falta que nao
+  // existe. Ja o iFood cobrado na entrega pelo motoboy DA LOJA e dinheiro de
+  // verdade, e esse entra como dinheiro/cartao normal.
+  const foraDaLojaDe = (r) => Number(r?.delivery_ifood || 0) + Number(r?.delivery_online || 0)
+
+  // A linha de baixo do valor: quanto daquele total e da mesa e quanto e do
+  // delivery/balcao. Sem isso o dono ve um numero maior do que esperava e nao
+  // tem onde procurar. Some quando nao houve delivery, pra nao poluir a loja
+  // que so vende no salao.
+  const linhaOrigem = (salao, delivery) => (
+    Number(delivery || 0) > 0 ? (
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
+        salão R$ {Number(salao || 0).toFixed(2)} · delivery/balcão R$ {Number(delivery).toFixed(2)}
+      </div>
+    ) : null
+  )
+
   const cartaoLiquidoDe = (r) => (
-    liquido(r?.recebimentos_credito, taxas.credito) +
-    liquido(r?.recebimentos_debito, taxas.debito) +
-    liquido(r?.recebimentos_cartao_generico, taxas.cartao)
+    liquido(creditoDe(r), taxas.credito) +
+    liquido(debitoDe(r), taxas.debito) +
+    liquido(cartaoGenDe(r), taxas.cartao)
   )
 
   // Histórico expandível: mostra o detalhamento por forma de pagamento de um caixa fechado.
@@ -429,7 +462,7 @@ export default function Caixa() {
   // aqui (fica registrado, mas não altera o dinheiro esperado na gaveta).
   const valorEsperadoDinheiro = resumo
     ? Number(caixaAtual.valor_abertura) +
-      Number(resumo.recebimentos_dinheiro) +
+      dinheiroDe(resumo) +
       Number(resumo.total_suprimentos_dinheiro ?? resumo.total_suprimentos) -
       Number(resumo.total_sangrias_dinheiro ?? resumo.total_sangrias)
     : 0
@@ -443,7 +476,7 @@ export default function Caixa() {
   // + recebido em PIX + suprimentos − sangrias (por PIX).
   const valorEsperadoPix = resumo
     ? Number(caixaAtual.valor_abertura_pix || 0) +
-      Number(resumo.recebimentos_pix || 0) +
+      pixDe(resumo) +
       Number(resumo.total_suprimentos_pix || 0) -
       Number(resumo.total_sangrias_pix || 0)
     : 0
@@ -462,7 +495,7 @@ export default function Caixa() {
   // confere no fechamento. Com o bruto, faltava a taxa todo dia — e como o
   // saldo passa de um dia pro outro e a sangria em cartão sai do dinheiro de
   // verdade, a diferença ia se acumulando.
-  const totalCartaoSistema = resumo ? Number(resumo.recebimentos_cartao || 0) : 0
+  const totalCartaoSistema = resumo ? cartaoDe(resumo) : 0
   const valorEsperadoCartao = resumo
     ? Number(caixaAtual.valor_abertura_cartao || 0) +
       cartaoLiquidoDe(resumo) +
@@ -479,10 +512,14 @@ export default function Caixa() {
 
   // Faturamento total do caixa: soma de TODAS as formas (dinheiro + pix + cartão + transferência + fiado).
   const faturamentoTotal = resumo
-    ? Number(resumo.recebimentos_dinheiro || 0) +
-      Number(resumo.recebimentos_pix || 0) +
-      Number(resumo.recebimentos_cartao || 0) +
+    ? dinheiroDe(resumo) +
+      pixDe(resumo) +
+      cartaoDe(resumo) +
       Number(resumo.recebimentos_transferencia || 0) +
+      // iFood pago no app + PIX pago no Mercado Pago: a loja vendeu, mas o
+      // dinheiro esta la fora. Entra no faturamento e em nenhum esperado.
+      foraDaLojaDe(resumo) +
+      Number(resumo.delivery_outros || 0) +
       // Crédito da loja (mig 0179): a venda foi CHEIA, então ele faz parte do
       // faturamento. Não entra em nenhum "esperado" porque não é dinheiro que
       // caiu em lugar nenhum — o custo dele aparece no Despesas & Lucro.
@@ -498,21 +535,27 @@ export default function Caixa() {
   const totaisSemana = (() => {
     const rs = resumosSemana ?? []
     const soma = (campo) => rs.reduce((t, r) => t + Number(r?.[campo] || 0), 0)
-    const dinheiro = soma('recebimentos_dinheiro')
-    const pix = soma('recebimentos_pix')
-    const cartao = soma('recebimentos_cartao')
+    // `somaCom` passa pelos helpers que juntam salao + delivery, pra semana dar
+    // exatamente a soma dos caixas que estao logo abaixo na tabela.
+    const somaCom = (fn) => rs.reduce((t, r) => t + fn(r), 0)
+    const dinheiro = somaCom(dinheiroDe)
+    const pix = somaCom(pixDe)
+    const cartao = somaCom(cartaoDe)
     const transferencia = soma('recebimentos_transferencia')
     const fiado = soma('vendas_fiado')
     const cashback = soma('recebimentos_cashback')
+    const ifood = soma('delivery_ifood')
+    const online = soma('delivery_online')
+    const outros = soma('delivery_outros')
     return {
-      dinheiro, pix, cartao, transferencia, fiado, cashback,
-      credito: soma('recebimentos_credito'),
-      debito: soma('recebimentos_debito'),
+      dinheiro, pix, cartao, transferencia, fiado, cashback, ifood, online, outros,
+      credito: somaCom(creditoDe),
+      debito: somaCom(debitoDe),
       fiadoRecebido: soma('recebimentos_fiado'),
       sangrias: soma('total_sangrias'),
       suprimentos: soma('total_suprimentos'),
       cartaoLiquido: rs.reduce((t, r) => t + cartaoLiquidoDe(r), 0),
-      total: dinheiro + pix + cartao + transferencia + cashback + fiado,
+      total: dinheiro + pix + cartao + transferencia + cashback + fiado + ifood + online + outros,
     }
   })()
 
@@ -603,12 +646,54 @@ export default function Caixa() {
               </div>
               <div className="card dashboard-card">
                 <div className="label">Recebimentos em dinheiro</div>
-                <div className="value">R$ {Number(resumo.recebimentos_dinheiro).toFixed(2)}</div>
+                <div className="value">R$ {dinheiroDe(resumo).toFixed(2)}</div>
+                {linhaOrigem(resumo.recebimentos_dinheiro, resumo.delivery_dinheiro)}
               </div>
               <div className="card dashboard-card">
                 <div className="label">Recebimentos Pix</div>
-                <div className="value">R$ {Number(resumo.recebimentos_pix).toFixed(2)}</div>
+                <div className="value">R$ {pixDe(resumo).toFixed(2)}</div>
+                {linhaOrigem(resumo.recebimentos_pix, resumo.delivery_pix)}
               </div>
+
+              {/* ── O QUE A LOJA VENDEU MAS NÃO RECEBEU NA MÃO ──
+                  Pedido pago dentro do app do iFood e PIX pago no nosso
+                  checkout (cai no Mercado Pago). É venda, está no faturamento,
+                  e de propósito NÃO está em nenhum "esperado": esse dinheiro
+                  cai na conta do iFood / do MP e chega depois, no repasse.
+                  Se entrasse na gaveta, o caixa ia fechar faltando todo dia. */}
+              {Number(resumo.delivery_ifood || 0) > 0 && (
+                <div className="card dashboard-card" style={{ borderLeft: '3px solid #ea1d2c' }}>
+                  <div className="label">🛵 iFood (pago no app)</div>
+                  <div className="value">R$ {Number(resumo.delivery_ifood).toFixed(2)}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
+                    O cliente pagou no iFood. <strong>Não entra na gaveta</strong> —
+                    vem no repasse. O iFood cobrado na entrega está no dinheiro/cartão acima.
+                  </div>
+                </div>
+              )}
+              {Number(resumo.delivery_online || 0) > 0 && (
+                <div className="card dashboard-card" style={{ borderLeft: '3px solid #2563eb' }}>
+                  <div className="label">🌐 Pago online (Mercado Pago)</div>
+                  <div className="value">R$ {Number(resumo.delivery_online).toFixed(2)}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
+                    PIX do cardápio, já confirmado. Caiu na conta do Mercado Pago,
+                    então <strong>não entra na gaveta nem no PIX da loja</strong>.
+                  </div>
+                </div>
+              )}
+              {/* Forma que o sistema não soube classificar. Aparece em vez de
+                  virar dinheiro no esperado — melhor o dono ver R$ 0,00 de
+                  diferença e uma linha estranha do que caçar uma falta. */}
+              {Number(resumo.delivery_outros || 0) > 0 && (
+                <div className="card dashboard-card" style={{ borderLeft: '3px solid #d97706' }}>
+                  <div className="label">⚠️ Forma não reconhecida</div>
+                  <div className="value">R$ {Number(resumo.delivery_outros).toFixed(2)}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
+                    Venda de delivery numa forma que o caixa não sabe onde pôr.
+                    Está no faturamento e fora dos esperados. Avise o suporte.
+                  </div>
+                </div>
+              )}
 
               {/* Cashback (mig 0179): a venda entrou cheia, mas este pedaço NÃO
                   é dinheiro em lugar nenhum — é desconto que a loja deu. Fica
@@ -633,9 +718,9 @@ export default function Caixa() {
                   cartão. O "cartão" genérico segue escondido no zero: é forma
                   antiga, quem usa crédito/débito nunca vai ver essa linha. */}
               {[
-                ['Recebimentos crédito', resumo.recebimentos_credito, taxas.credito, true],
-                ['Recebimentos débito', resumo.recebimentos_debito, taxas.debito, true],
-                ['Recebimentos cartão', resumo.recebimentos_cartao_generico, taxas.cartao, false],
+                ['Recebimentos crédito', creditoDe(resumo), taxas.credito, true],
+                ['Recebimentos débito', debitoDe(resumo), taxas.debito, true],
+                ['Recebimentos cartão', cartaoGenDe(resumo), taxas.cartao, false],
               ].filter(([, bruto, , sempre]) => sempre || Number(bruto || 0) > 0).map(([titulo, bruto, pct]) => (
                 <div className="card dashboard-card" key={titulo}>
                   <div className="label">{titulo}</div>
@@ -659,10 +744,11 @@ export default function Caixa() {
 
               {/* Quando as três formas de cartão aparecem juntas, o total ajuda a
                   conferir com o extrato da maquineta de uma vez. */}
-              {Number(resumo.recebimentos_cartao || 0) > 0 && totalCartaoLiquido !== Number(resumo.recebimentos_cartao) && (
+              {cartaoDe(resumo) > 0 && totalCartaoLiquido !== cartaoDe(resumo) && (
                 <div className="card dashboard-card" style={{ borderLeft: '3px solid var(--primary)' }}>
                   <div className="label">💳 Total no cartão</div>
-                  <div className="value">R$ {Number(resumo.recebimentos_cartao).toFixed(2)}</div>
+                  <div className="value">R$ {cartaoDe(resumo).toFixed(2)}</div>
+                  {linhaOrigem(resumo.recebimentos_cartao, resumo.delivery_cartao)}
                   <div style={{ fontSize: 14.5, fontWeight: 800, marginTop: 6 }}>
                     Cai na conta: R$ {totalCartaoLiquido.toFixed(2)}
                   </div>
@@ -840,13 +926,13 @@ export default function Caixa() {
                 const r = histResumo[c.id]
                 const nCols = isAdmin ? 6 : 5
                 const espDin = r && r !== 'loading'
-                  ? Number(c.valor_abertura || 0) + Number(r.recebimentos_dinheiro || 0) + Number(r.total_suprimentos_dinheiro ?? r.total_suprimentos ?? 0) - Number(r.total_sangrias_dinheiro ?? r.total_sangrias ?? 0)
+                  ? Number(c.valor_abertura || 0) + dinheiroDe(r) + Number(r.total_suprimentos_dinheiro ?? r.total_suprimentos ?? 0) - Number(r.total_sangrias_dinheiro ?? r.total_sangrias ?? 0)
                   : 0
                 const espPix = r && r !== 'loading'
-                  ? Number(c.valor_abertura_pix || 0) + Number(r.recebimentos_pix || 0) + Number(r.total_suprimentos_pix || 0) - Number(r.total_sangrias_pix || 0)
+                  ? Number(c.valor_abertura_pix || 0) + pixDe(r) + Number(r.total_suprimentos_pix || 0) - Number(r.total_sangrias_pix || 0)
                   : 0
                 const fatTot = r && r !== 'loading'
-                  ? Number(r.recebimentos_dinheiro || 0) + Number(r.recebimentos_pix || 0) + Number(r.recebimentos_cartao || 0) + Number(r.recebimentos_transferencia || 0) + Number(r.vendas_fiado || 0)
+                  ? dinheiroDe(r) + pixDe(r) + cartaoDe(r) + Number(r.recebimentos_transferencia || 0) + Number(r.vendas_fiado || 0) + foraDaLojaDe(r) + Number(r.delivery_outros || 0)
                   : 0
                 const dif = (r && r !== 'loading' && c.valor_fechamento_informado != null) ? Number(c.valor_fechamento_informado) - espDin : null
                 const difPix = (r && r !== 'loading' && c.valor_fechamento_pix != null) ? Number(c.valor_fechamento_pix) - espPix : null
@@ -892,16 +978,20 @@ export default function Caixa() {
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
                               {[
                                 (Number(c.valor_abertura_pix) > 0 ? ['📱 PIX inicial (abertura)', c.valor_abertura_pix] : null),
-                                ['💵 Recebido em dinheiro', r.recebimentos_dinheiro],
-                                ['📱 Recebido em PIX', r.recebimentos_pix],
-                                ['💳 Recebido em cartão', r.recebimentos_cartao],
-                                (Number(r.recebimentos_credito) > 0 ? ['↳ crédito', r.recebimentos_credito] : null),
-                                (Number(r.recebimentos_debito) > 0 ? ['↳ débito', r.recebimentos_debito] : null),
+                                ['💵 Recebido em dinheiro', dinheiroDe(r)],
+                                ['📱 Recebido em PIX', pixDe(r)],
+                                ['💳 Recebido em cartão', cartaoDe(r)],
+                                (creditoDe(r) > 0 ? ['↳ crédito', creditoDe(r)] : null),
+                                (debitoDe(r) > 0 ? ['↳ débito', debitoDe(r)] : null),
                                 // O que sobra do cartão depois da maquineta (com as taxas de hoje).
-                                (Number(r.recebimentos_cartao) > 0 && (taxas.credito > 0 || taxas.debito > 0 || taxas.cartao > 0)
-                                  ? ['↳ cai na conta (já com as taxas)',
-                                     liquido(r.recebimentos_credito, taxas.credito) + liquido(r.recebimentos_debito, taxas.debito) + liquido(r.recebimentos_cartao_generico, taxas.cartao)]
+                                (cartaoDe(r) > 0 && (taxas.credito > 0 || taxas.debito > 0 || taxas.cartao > 0)
+                                  ? ['↳ cai na conta (já com as taxas)', cartaoLiquidoDe(r)]
                                   : null),
+                                // Fora da loja: vendeu, mas o dinheiro ficou no
+                                // iFood / no Mercado Pago. Não entra em esperado.
+                                (Number(r.delivery_ifood) > 0 ? ['🛵 iFood (pago no app)', r.delivery_ifood] : null),
+                                (Number(r.delivery_online) > 0 ? ['🌐 Pago online (Mercado Pago)', r.delivery_online] : null),
+                                (Number(r.delivery_outros) > 0 ? ['⚠️ Forma não reconhecida', r.delivery_outros] : null),
                                 (Number(r.recebimentos_transferencia) > 0 ? ['🔁 Transferência', r.recebimentos_transferencia] : null),
                                 ['🧾 Vendas no fiado', r.vendas_fiado],
                                 // Dívida velha que entrou neste caixa: está DENTRO dos
@@ -1092,6 +1182,8 @@ export default function Caixa() {
                   ['🔁 Transferência', totaisSemana.transferencia, totaisSemana.transferencia > 0],
                   ['🧾 Vendas no fiado', totaisSemana.fiado, totaisSemana.fiado > 0],
                   ['🎟️ Cashback usado', totaisSemana.cashback, totaisSemana.cashback > 0],
+                  ['🛵 iFood (pago no app)', totaisSemana.ifood, totaisSemana.ifood > 0],
+                  ['🌐 Pago online', totaisSemana.online, totaisSemana.online > 0],
                 ].filter(([, , mostrar]) => mostrar).map(([rot, valor]) => (
                   <div className="caixa-semana-card" key={rot}>
                     <div className="caixa-semana-card-rot">{rot}</div>
@@ -1313,6 +1405,11 @@ export default function Caixa() {
             <h2>Fechar caixa</h2>
             <p className="caixa-esperado">
               Faturamento total: <strong style={{ color: 'var(--primary)' }}>R$ {faturamentoTotal.toFixed(2)}</strong><br />
+              {/* Avisa ANTES de contar a gaveta por que o faturamento e maior
+                  que o esperado: parte da venda caiu no iFood / no Mercado Pago. */}
+              {foraDaLojaDe(resumo) > 0 && (
+                <>Pago fora da loja (iFood/online): <strong>R$ {foraDaLojaDe(resumo).toFixed(2)}</strong> — não está nos esperados abaixo<br /></>
+              )}
               Esperado em dinheiro: <strong>R$ {valorEsperadoDinheiro.toFixed(2)}</strong><br />
               Esperado em PIX: <strong>R$ {valorEsperadoPix.toFixed(2)}</strong>
             </p>
