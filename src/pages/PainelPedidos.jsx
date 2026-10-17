@@ -8708,6 +8708,17 @@ export default function PainelPedidos() {
     const ch = supabase
       .channel(`painel_comandas_${empresa.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas', filter: `empresa_id=eq.${empresa.id}` }, carregarComandas)
+      // Segunda via pedida de um aparelho sem impressora (mig 0333): quem está com a
+      // térmica tira o papel. Carimbo anterior à abertura desta tela é ignorado.
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'comandas', filter: `empresa_id=eq.${empresa.id}` }, (payload) => {
+        const stamp = payload.new?.segunda_via_pedida_em
+        if (!stamp) return
+        const quando = new Date(stamp).getTime()
+        if (!Number.isFinite(quando) || quando < abertoEmRef.current) return
+        if (segundaViaFeitaRef.current.get(payload.new.id) === quando) return
+        segundaViaFeitaRef.current.set(payload.new.id, quando)
+        imprimirSegundaViaPedida(payload.new.id)
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `empresa_id=eq.${empresa.id}` }, (payload) => {
         carregarComandas()
         if (payload.eventType === 'INSERT') agendarImpressaoMesa(payload.new)
@@ -8847,7 +8858,25 @@ export default function PainelPedidos() {
   // Pré-conta pedida do celular do garçom: guarda o que já saiu (por comanda e
   // por carimbo) pra não repetir a cada recarga da lista, que roda de 30 em 30s.
   const precontaFeitaRef = useRef(new Map())
+  const segundaViaFeitaRef = useRef(new Map())
   const abertoEmRef = useRef(Date.now())
+
+  // Segunda via de uma conta JÁ FECHADA, pedida por outro aparelho (mig 0333). A
+  // comanda fechada não está na lista do painel: busca com os itens e imprime o
+  // que foi cobrado de verdade (subtotal, taxa e total gravados no fechamento).
+  async function imprimirSegundaViaPedida(comandaId) {
+    const { data: c } = await supabase.from('comandas')
+      .select('id, numero_mesa, tipo, nome_cliente, subtotal, taxa_servico, total, forma_pagamento, comanda_itens(*)')
+      .eq('id', comandaId).maybeSingle()
+    if (!c) return
+    const dados = {
+      numeroMesa: c.numero_mesa, rotulo: rotuloComanda(c),
+      itens: c.comanda_itens ?? [],
+      subtotal: Number(c.subtotal || 0), taxa: Number(c.taxa_servico || 0), total: Number(c.total || 0),
+      formaPagamento: c.forma_pagamento || '', pagamentos: [], empresa,
+    }
+    await imprimirContaSeMesa(dados, empresa?.nome)
+  }
 
   async function imprimirPreContaMesa(c) {
     const itens = Array.isArray(c.comanda_itens) ? c.comanda_itens : []

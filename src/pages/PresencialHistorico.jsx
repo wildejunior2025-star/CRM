@@ -212,10 +212,19 @@ export default function PresencialHistorico() {
     // novo (ver conectarEImprimir). Não cai no navegador — lá nada imprime.
     const ehCelularAgora = typeof navigator !== 'undefined' && (
       navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || ''))
-    if (!via && !temApp && bt && ehCelularAgora && typeof navigator !== 'undefined' && navigator.bluetooth) {
+    if (!via && !temApp && ehCelularAgora) {
+      // Muita loja tem UMA térmica Bluetooth, ligada no celular do balcão: este
+      // celular nem precisa dela. Carimba a comanda e quem está com a impressora
+      // tira o papel (igual à pré-conta — mig 0333).
+      const { error: erroPedido } = await supabase.from('comandas')
+        .update({ segunda_via_pedida_em: new Date().toISOString() }).eq('id', c.id)
       setImprimindo(null)
-      setImpMsg({ id: c.id, conectar: true,
-        texto: '🔌 A térmica não está conectada neste celular. Toque no botão abaixo pra conectar e imprimir.' })
+      setImpMsg({ id: c.id, conectar: !!(bt && navigator.bluetooth),
+        texto: erroPedido
+          ? '⚠️ Não consegui pedir a segunda via. Tente de novo.'
+          : '🧾 Pedi a segunda via na impressora da loja — pode ir buscar o papel.'
+            + (bt && navigator.bluetooth ? ' (Se a impressora estiver neste celular, conecte abaixo.)' : '') })
+      setTimeout(() => setImpMsg(m => (m && m.id === c.id ? null : m)), 20000)
       return
     }
     let ofereceu = false
