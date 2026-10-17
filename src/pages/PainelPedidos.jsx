@@ -1516,8 +1516,18 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const pagInicial = draft?.pagamento ?? pedidoEdicao?.forma_pagamento ?? 'dinheiro'
   // Pedido pago em duas formas (mig 0274) abre como está; clicar numa forma
   // troca o pedido pra forma única (o banco apaga as partes).
+  // `fiado` entra na lista de validos mesmo nao estando em `formasLoja`: ele e
+  // so do BALCAO de proposito (a lista da loja e a mesma do cardapio online, e
+  // fiado pra quem compra pela internet nao existe).
+  //
+  // Sem esta linha o rascunho com fiado voltava pra PRIMEIRA forma da loja ao
+  // reabrir a tela - na Zebu, 'cartao'. Foi o que aconteceu no pedido #43 de
+  // 17/10: a gravacao falhou por outro motivo, ele atualizou a tela, e a venda
+  // saiu no CARTAO sem ninguem perceber. Divida nenhuma registrada e o
+  // relatorio dizendo que entrou no cartao - pior do que simplesmente falhar.
   const [pagamento, setPagamento] = useState(
     pagInicial === 'dividido' && ehDividido(pedidoEdicao) ? 'dividido'
+      : pagInicial === 'fiado' ? 'fiado'
       : formasLoja.includes(pagInicial) ? pagInicial : formasLoja[0]
   )
   const [troco, setTroco]       = useState(draft?.troco ?? (pedidoEdicao?.troco_para ? String(pedidoEdicao.troco_para) : ''))
