@@ -20,17 +20,22 @@ const JANELA_MIN = 30
 // Resposta automática pro contato (mig 0338): no máximo 1 a cada 12 h, e nunca
 // se o Wilde já falou com ele à mão nesse período.
 const JANELA_RESPOSTA_H = 12
+const PREFIXO_AUTOMATICA = "Oi! 👋 Aqui é o Wilde, da FWC Inter."
 
 function respostaAutomatica(): string {
   const hora = Number(new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Fortaleza", hour: "numeric", hourCycle: "h23",
   }).format(new Date()))
-  if (hora >= 7 && hora < 22) {
-    return "Oi! 👋 Aqui é o Wilde, da FWC Inter. Recebi sua mensagem, em um minutinho já te atendo."
-  }
-  return "Oi! 👋 Aqui é o Wilde, da FWC Inter. Recebi sua mensagem e logo cedo te respondo, combinado?"
+  const abertura = hora >= 7 && hora < 22 ? "Já te atendo!" : "Logo cedo te respondo!"
+  return `${PREFIXO_AUTOMATICA} ${abertura}\n\n` +
+    "Enquanto isso, um resumo:\n" +
+    "✅ Pedido da mesa, balcão, delivery, iFood e WhatsApp numa tela só\n" +
+    "✅ Cozinha recebe no celular, sem papel\n" +
+    "✅ Robô no WhatsApp que atende seu cliente e anota o pedido sozinho\n" +
+    "✅ Conta e fechamento do dia prontos\n\n" +
+    "💰 Planos a partir de *R$ 25*, com *teste grátis*.\n" +
+    "Me conta: qual é a sua loja e como vocês anotam os pedidos hoje?"
 }
-const PREFIXO_AUTOMATICA = "Oi! 👋 Aqui é o Wilde, da FWC Inter. Recebi sua mensagem"
 
 const ok = (data: unknown = { ok: true }, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } })
