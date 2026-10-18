@@ -6936,6 +6936,10 @@ export default function PainelPedidos() {
   // Entregadores — estatísticas e histórico por motoboy
   const [entregasConcluidas, setEntregasConcluidas] = useState([])
   const [entregadorSel, setEntregadorSel] = useState(null)
+  // Filtro por forma de recebimento no acerto do entregador (null = tudo).
+  // Fica aqui fora porque o painel inteiro remonta a cada atualização da lista
+  // de pedidos: guardado lá dentro, o filtro se perdia sozinho a cada 40s.
+  const [filtroForma, setFiltroForma] = useState(null)
   const [periodoEnt, setPeriodoEnt] = useState('hoje') // filtro de data do histórico do entregador (começa em Hoje)
   // Filtro do quadro — null = todas as colunas; ou 'aceitar'|'cozinha'|'entrega'|'concluidos'
   // Persistem no localStorage: ao sair e voltar da tela, mantêm o filtro escolhido.
@@ -11182,6 +11186,17 @@ export default function PainelPedidos() {
                 if (ehIfood && f !== 'online') return { pago: false, label: (f || 'via iFood') + ' (via iFood)' }
                 return { pago: true, label: ehIfood ? 'Pago no iFood' : (f || 'Pago') }
               }
+              // Em que balde do acerto este pedido cai. Mesma regra que soma as
+              // linhas e que o filtro usa, pra número e lista nunca divergirem.
+              const baldeDoPedido = p => {
+                if (pagCliente(p).pago) return 'pago'
+                const f = p.forma_pagamento
+                if (f === 'dinheiro') return 'dinheiro'
+                if (['cartao', 'cartão', 'credito', 'debito'].includes(f)) return 'maquina'
+                if (['pix', 'pix_entrega'].includes(f)) return 'pix'
+                return 'outros'
+              }
+              const filtrar = ps => (filtroForma ? ps.filter(p => baldeDoPedido(p) === filtroForma) : ps)
               const dataDe = p => new Date(p.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
               const agrupaPorData = arr => {
                 const g = {}
@@ -11221,7 +11236,7 @@ export default function PainelPedidos() {
               }
               return (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <button type="button" onClick={() => setEntregadorSel(null)}
+                  <button type="button" onClick={() => { setFiltroForma(null); setEntregadorSel(null) }}
                     style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: 'var(--primary, #a78bfa)', cursor: 'pointer', fontSize: 13, fontWeight: 700, padding: 0 }}>
                     ← Todos os entregadores
                   </button>
@@ -11229,25 +11244,51 @@ export default function PainelPedidos() {
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
                     Histórico completo (7/30 dias, tudo) em <b>Vendas → Entregadores</b>.
                   </div>
-                  {/* `flexWrap` porque virou o quarto card: em tela estreita eles
-                      descem pra segunda linha em vez de espremer o número. */}
+                  {/* Cada card de forma de recebimento TAMBEM e filtro: tocar
+                      deixa na lista so as corridas daquela forma, tocar de novo
+                      volta tudo. Os numeros ja estavam na tela, faltava poder
+                      chegar nas corridas por tras deles.
+                      `flexWrap`: em tela estreita descem de linha em vez de
+                      espremer o valor. */}
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {[
-                      ['A receber', fmt(somaTaxa(pendentes)), '#f59e0b'],
-                      ['Pago', fmt(somaTaxa(pagos)), '#16a34a'],
-                      // Dinheiro vivo que ele pegou do cliente e tem que devolver.
-                      // Fica aqui em cima porque é a pergunta do fim do turno, e
-                      // antes só dava pra saber somando pedido por pedido.
-                      ['Em dinheiro', fmt(concl
-                        .filter(p => !pagCliente(p).pago && p.forma_pagamento === 'dinheiro')
-                        .reduce((s, p) => s + (Number(p.total) || 0), 0)), '#0ea5e9'],
-                      ['Em rota', rota.length, '#7c3aed'],
-                    ].map(([lab, val, cor]) => (
-                      <div key={lab} style={{ flex: '1 1 90px', textAlign: 'center', border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '8px 4px' }}>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: cor }}>{val}</div>
-                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{lab}</div>
-                      </div>
-                    ))}
+                    {(() => {
+                      const naoPago = concl.filter(p => !pagCliente(p).pago)
+                      const soma = ps => ps.reduce((s, p) => s + (Number(p.total) || 0), 0)
+                      const porBalde = b => soma(naoPago.filter(p => baldeDoPedido(p) === b))
+                      const cards = [
+                        // Verde: e o que a LOJA deve pagar pro motoqueiro.
+                        ['A receber', fmt(somaTaxa(pendentes)), '#16a34a', null],
+                        ['Pago', fmt(somaTaxa(pagos)), 'var(--text-muted)', null],
+                        ['Em dinheiro', fmt(porBalde('dinheiro')), '#0ea5e9', 'dinheiro'],
+                        ['Maquineta', fmt(porBalde('maquina')), '#8b5cf6', 'maquina'],
+                        ['PIX', fmt(porBalde('pix')), '#0891b2', 'pix'],
+                        ['Em rota', rota.length, '#7c3aed', null],
+                      ]
+                      const outros = porBalde('outros')
+                      if (outros > 0.004) cards.splice(5, 0, ['Outras formas', fmt(outros), '#f59e0b', 'outros'])
+                      return cards.map(([lab, val, cor, balde]) => {
+                        const ativo = balde && filtroForma === balde
+                        const dentro = (
+                          <>
+                            <div style={{ fontSize: 16, fontWeight: 800, color: cor }}>{val}</div>
+                            <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{lab}{ativo ? ' ✕' : ''}</div>
+                          </>
+                        )
+                        const base = {
+                          flex: '1 1 92px', textAlign: 'center', borderRadius: 10, padding: '8px 4px',
+                          border: `1px solid ${ativo ? cor : 'var(--border, #2a2a3a)'}`,
+                          background: ativo ? 'rgba(14,165,233,.14)' : 'transparent',
+                        }
+                        if (!balde) return <div key={lab} style={base}>{dentro}</div>
+                        return (
+                          <button key={lab} type="button" style={{ ...base, cursor: 'pointer', font: 'inherit' }}
+                            title={ativo ? 'Mostrar todas de novo' : `Ver so as corridas de ${lab}`}
+                            onClick={() => setFiltroForma(ativo ? null : balde)}>
+                            {dentro}
+                          </button>
+                        )
+                      })
+                    })()}
                   </div>
 
                   {/* Desconto que a loja fica por corrida — uma faixa pro iFood, outra pra loja */}
@@ -11261,53 +11302,6 @@ export default function PainelPedidos() {
                     ) : null
                   ))}
 
-                  {/* ACERTO DO DIA — o que ele pegou na rua e tem que devolver.
-                      A tela já dizia quanto a LOJA deve a ele, mas não o
-                      contrário: o dinheiro que ele recebeu na mão do cliente.
-                      No fim do expediente isso era conferido somando pedido por
-                      pedido no papel. */}
-                  {(() => {
-                    const naoPago = concl.filter(p => !pagCliente(p).pago)
-                    const soma = ps => ps.reduce((s, p) => s + (Number(p.total) || 0), 0)
-                    const dinheiro = soma(naoPago.filter(p => p.forma_pagamento === 'dinheiro'))
-                    const maquina = soma(naoPago.filter(p => ['cartao', 'cartão', 'credito', 'debito'].includes(p.forma_pagamento)))
-                    const pix = soma(naoPago.filter(p => ['pix', 'pix_entrega'].includes(p.forma_pagamento)))
-                    const outros = soma(naoPago) - dinheiro - maquina - pix
-                    if (!naoPago.length) return null
-                    // A taxa dele sai do dinheiro vivo: ele entrega o que sobra.
-                    const aReceber = somaTaxa(pendentes)
-                    const entrega = dinheiro - aReceber
-                    const linha = (rot, val, cor) => (
-                      <div key={rot} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: 'var(--text-muted)' }}>
-                        <span>{rot}</span><strong style={{ color: cor || 'var(--text)' }}>{fmt(val)}</strong>
-                      </div>
-                    )
-                    return (
-                      <div style={{ border: '1.5px solid #0ea5e9', background: 'rgba(14,165,233,.08)', borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text)' }}>🧾 Acerto do dia — o que ele recebeu na rua</div>
-                        {linha('💵 Dinheiro', dinheiro)}
-                        {maquina > 0 && linha('💳 Maquineta / cartão', maquina)}
-                        {pix > 0 && linha('📲 PIX na entrega', pix)}
-                        {outros > 0.004 && linha('🎫 Outras formas', outros)}
-                        <div style={{ borderTop: '1px solid rgba(14,165,233,.35)', margin: '3px 0' }} />
-                        {linha('Taxa dele (a receber)', -aReceber, '#f59e0b')}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
-                          <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text)' }}>
-                            {entrega >= 0 ? '= Ele entrega em dinheiro' : '= A loja paga a ele'}
-                          </span>
-                          <strong style={{ fontSize: 16, color: entrega >= 0 ? '#0ea5e9' : '#16a34a' }}>{fmt(Math.abs(entrega))}</strong>
-                        </div>
-                        {(maquina > 0 || pix > 0) && (
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                            {pix > 0 && 'O PIX cai direto na conta da loja. '}
-                            {maquina > 0 && 'A maquineta também não passa pela mão dele. '}
-                            Por isso só o dinheiro entra na conta do que ele devolve.
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })()}
-
                   {rota.length > 0 && (
                     <>
                       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginTop: 4 }}>Em rota agora</div>
@@ -11315,13 +11309,23 @@ export default function PainelPedidos() {
                     </>
                   )}
 
+                  {/* Com filtro ligado as listas encolhem; sem este aviso o dono
+                      acha que sumiu corrida. Clicar aqui destrava. */}
+                  {filtroForma && (
+                    <button type="button" onClick={() => setFiltroForma(null)}
+                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, width: '100%', cursor: 'pointer', border: '1px solid #0ea5e9', background: 'rgba(14,165,233,.12)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontSize: 12, fontWeight: 700, font: 'inherit' }}>
+                      <span>Mostrando só: {({ dinheiro: '💵 Dinheiro', maquina: '💳 Maquineta / cartão', pix: '📲 PIX na entrega', outros: '🎫 Outras formas' })[filtroForma]}</span>
+                      <span style={{ color: '#0ea5e9', fontWeight: 800 }}>✕ limpar</span>
+                    </button>
+                  )}
+
                   {/* A PAGAR (pendentes por data) */}
                   <div style={{ fontSize: 13, fontWeight: 800, color: '#f59e0b', marginTop: 6 }}>
-                    A pagar · {fmt(somaTaxa(pendentes))}
+                    A pagar · {fmt(somaTaxa(filtrar(pendentes)))}
                   </div>
-                  {pendentes.length === 0
-                    ? <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Tudo acertado. 🎉</div>
-                    : agrupaPorData(pendentes).map(([data, ps]) => (
+                  {filtrar(pendentes).length === 0
+                    ? <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{filtroForma ? 'Nenhuma corrida a pagar nessa forma.' : 'Tudo acertado. 🎉'}</div>
+                    : agrupaPorData(filtrar(pendentes)).map(([data, ps]) => (
                       <div key={data} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
                           <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)' }}>{data} · {ps.length} corrida{ps.length > 1 ? 's' : ''} · {fmt(somaTaxa(ps))}</span>
@@ -11336,11 +11340,11 @@ export default function PainelPedidos() {
 
                   {/* PAGAS (por data) */}
                   <div style={{ fontSize: 13, fontWeight: 800, color: '#16a34a', marginTop: 10 }}>
-                    Pagas · {fmt(somaTaxa(pagos))}
+                    Pagas · {fmt(somaTaxa(filtrar(pagos)))}
                   </div>
-                  {pagos.length === 0
-                    ? <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Nenhuma corrida paga ainda.</div>
-                    : agrupaPorData(pagos).map(([data, ps]) => (
+                  {filtrar(pagos).length === 0
+                    ? <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{filtroForma ? 'Nenhuma corrida paga nessa forma.' : 'Nenhuma corrida paga ainda.'}</div>
+                    : agrupaPorData(filtrar(pagos)).map(([data, ps]) => (
                       <div key={data} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)', marginTop: 2 }}>{data} · {ps.length} corrida{ps.length > 1 ? 's' : ''} · {fmt(somaTaxa(ps))}</div>
                         {ps.map(p => OrderRow(p, { pago: true }))}
@@ -11395,7 +11399,7 @@ export default function PainelPedidos() {
                   }
 
                   return doDia.map(({ e, r, c }) => (
-                    <button key={e.id} type="button" onClick={() => setEntregadorSel(e.id)}
+                    <button key={e.id} type="button" onClick={() => { setFiltroForma(null); setEntregadorSel(e.id) }}
                       style={{ textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border, #2a2a3a)', borderRadius: 12, padding: '12px 14px', background: 'transparent' }}>
                       <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>🛵 {e.nome || 'Entregador'}</div>
                       <PosicaoDoEntregador
