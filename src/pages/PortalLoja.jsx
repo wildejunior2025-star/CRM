@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { capturarIndicacao, registrarIndicacao } from '../lib/indicacao'
 import { useAuth } from '../hooks/useAuth'
@@ -284,6 +284,19 @@ export default function PortalLoja() {
     }
     load()
   }, [empresaId])
+
+  // Botão "Sacola" do menu de baixo: abre a sacola daqui. Se o cliente estava em
+  // outra tela, o menu navega pra cá já pedindo pra abrir (location.state).
+  const location = useLocation()
+  useEffect(() => {
+    if (location.state?.abrirSacola) {
+      setCarrinhoAberto(true)
+      navigate(location.pathname, { replace: true, state: null })
+    }
+    const abrir = () => setCarrinhoAberto(true)
+    window.addEventListener('abrir-sacola-portal', abrir)
+    return () => window.removeEventListener('abrir-sacola-portal', abrir)
+  }, [location.state, location.pathname, navigate])
 
   // "Aberta/fechada" depende do sinal de vida da loja (heartbeat, vale 2 min). A tela
   // lia isso uma vez só: quem saía do app e voltava via a loja "fechada" até reabrir.

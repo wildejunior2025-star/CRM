@@ -256,7 +256,13 @@ export default function PortalLayout() {
         {totalCarrinho > 0 && (
           <button
             className="portal-nav-item portal-nav-sacola"
-            onClick={() => lojaCarrinhoId && navigate(`/portal/loja/${lojaCarrinhoId}`)}
+            onClick={() => {
+              if (!lojaCarrinhoId) return
+              const destino = `/portal/loja/${lojaCarrinhoId}`
+              // Já está na loja: só abre a sacola. Senão vai pra loja pedindo pra abrir.
+              if (window.location.pathname === destino) window.dispatchEvent(new Event('abrir-sacola-portal'))
+              else navigate(destino, { state: { abrirSacola: true } })
+            }}
             aria-label="Sacola"
           >
             <span className="portal-nav-sacola-icon">
