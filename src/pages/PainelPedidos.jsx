@@ -7,6 +7,7 @@ import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDescon
 import { tocarPedidoNovo } from '../lib/somChamado'
 import BaixaInsumos from '../components/BaixaInsumos'
 import ModalTaxaMotoboy from '../components/ModalTaxaMotoboy'
+import { infoRota, textoKm } from '../lib/rotaEntrega'
 import { precoPorQuantidade, faixaAplicada, menorFaixa, mapaFaixasCategoria, comFaixaDaCategoria, somaPorCategoria } from '../lib/precoQuantidade'
 import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
 import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
@@ -7294,7 +7295,7 @@ export default function PainelPedidos() {
     if (!empresa) return
     const { data } = await supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, valor_entregador_calculado, valor_entregador_origem, forma_pagamento, pagamentos, pix_status, created_at, entregador_id, origem, endereco_bairro, endereco_cidade, entregador_pago, entregador_pago_em')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, valor_entregador_calculado, valor_entregador_origem, forma_pagamento, pagamentos, pix_status, created_at, entregador_id, origem, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, endereco_lat, endereco_lng, entregador_pago, entregador_pago_em')
       .eq('empresa_id', empresa.id)
       .eq('status', 'entregue')
       .not('entregador_id', 'is', null)
@@ -11407,6 +11408,17 @@ export default function PainelPedidos() {
                     {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
                     {descontoDoPedido(descontos, p) > 0 && <span style={{ color: '#f59e0b' }}> · {rotuloDoDesconto(p)} −{fmt(descontoDoPedido(descontos, p))}</span>}
                     {rv && <span style={{ color: editada ? '#dc2626' : 'var(--text-muted)', fontWeight: editada ? 800 : 600 }}> · {rv.texto}</span>}
+                    {(() => {
+                      // Rota da loja até a entrega + km em linha reta (o que a taxa usa): pra conferir os km
+                      const r = infoRota(empresa, p)
+                      return r.url && (
+                        <> · <a href={r.url} target="_blank" rel="noopener noreferrer"
+                          title="Abre a rota no mapa. O número é a distância em linha reta da loja até a entrega, a que o cálculo da taxa usa."
+                          style={{ color: '#7c3aed', fontWeight: 800, textDecoration: 'none' }}>
+                          🗺️ Rota{r.km != null ? ` · ${textoKm(r.km)}` : ''}
+                        </a></>
+                      )
+                    })()}
                   </div>
                   {/* Valor do pedido: laranja = cobrar na entrega; verde = já pago */}
                   <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: 'flex', justifyContent: 'space-between', gap: 8, color: pgc.pago ? '#16a34a' : '#f59e0b' }}>

@@ -3,6 +3,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, rotuloValorEntregador } from '../lib/descontoEntrega'
 import ModalTaxaMotoboy from '../components/ModalTaxaMotoboy'
+import { infoRota, textoKm } from '../lib/rotaEntrega'
 import { partesPagamento, ehDividido, textoPagamento } from '../lib/pagamentoPartes'
 import '../components/Page.css'
 import './Entregadores.css'
@@ -602,7 +603,7 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
     const [{ data: pd }, { data: pf }] = await Promise.all([
       fetchAll(() => {
         let q = supabase.from('pedidos_delivery')
-          .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, valor_entregador_calculado, valor_entregador_origem, forma_pagamento, pagamentos, pix_status, mp_payment_status, created_at, origem, status, entregador_pago, entregador_pago_em')
+          .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, valor_entregador_calculado, valor_entregador_origem, forma_pagamento, pagamentos, pix_status, mp_payment_status, created_at, origem, status, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, endereco_lat, endereco_lng, entregador_pago, entregador_pago_em')
           .eq('empresa_id', empresa.id).eq('entregador_id', id).neq('status', 'cancelado')
         if (faixa.desde) q = q.gte('created_at', faixa.desde)
         if (faixa.ate) q = q.lte('created_at', faixa.ate)
@@ -703,6 +704,17 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
           {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
           {descontoDoPedido(descontos, p) > 0 ? ` · ${rotuloDoDesconto(p)} −${fmt(descontoDoPedido(descontos, p))}` : ''}
           {rv && <span style={editada ? { color: '#dc2626', fontWeight: 800 } : undefined}> · {rv.texto}</span>}
+          {(() => {
+            // Rota da loja até a entrega + km em linha reta (o que a taxa usa): pra conferir os km
+            const r = infoRota(empresa, p)
+            return r.url && (
+              <> · <a href={r.url} target="_blank" rel="noopener noreferrer"
+                title="Abre a rota no mapa. O número é a distância em linha reta da loja até a entrega, a que o cálculo da taxa usa."
+                style={{ color: '#7c3aed', fontWeight: 800, textDecoration: 'none' }}>
+                🗺️ Rota{r.km != null ? ` · ${textoKm(r.km)}` : ''}
+              </a></>
+            )
+          })()}
         </div>
         {pago && p.entregador_pago_em && (
           <div className="ent-corrida-meta c-ok">🧾 Pago em {dataHora(p.entregador_pago_em)}</div>
