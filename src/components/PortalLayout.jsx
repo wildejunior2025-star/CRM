@@ -72,6 +72,16 @@ export default function PortalLayout() {
             lojaId = key.replace('sacola_portal_', '')
           }
         } catch {} // eslint-disable-line no-empty
+      } else if (key.startsWith('combos_portal_')) {
+        // Itens montados (pizza com sabores, borda...): cada linha guarda a própria quantidade.
+        try {
+          const obj = JSON.parse(localStorage.getItem(key) || '{}')
+          const qtd = Object.values(obj).reduce((s, c) => s + Number(c?.quantidade || 0), 0)
+          if (qtd > 0) {
+            total += qtd
+            lojaId = key.replace('combos_portal_', '')
+          }
+        } catch {} // eslint-disable-line no-empty
       }
     }
     setTotalCarrinho(total)

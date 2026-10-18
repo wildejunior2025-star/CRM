@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
+import { cobraPeloMaior } from '../lib/complementos'
 import { capturarIndicacao, registrarIndicacao } from '../lib/indicacao'
 import { useAuth } from '../hooks/useAuth'
 import { useBranding } from '../context/BrandingContext'
@@ -9,6 +10,10 @@ import { formasAtivas, repassePct } from '../lib/constants'
 import './PortalLoja.css'
 
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
+
+// A janela de escolher sabores, borda e outros complementos é a MESMA da Loja Online (um
+// pizza "monte a sua" só existe por ela). Carrega sob demanda pra não pesar a vitrine.
+const OptionsModal = lazy(() => import('./DeliveryLoja').then(m => ({ default: m.OptionsModal })))
 
 function haversineKm(lat1, lng1, lat2, lng2) {
   const R = 6371
@@ -188,6 +193,15 @@ export default function PortalLoja() {
       return saved ? JSON.parse(saved) : {}
     } catch { return {} /* localStorage indisponível */ }
   })
+  // Itens MONTADOS (pizza com sabores e borda...): cada combinação escolhida é uma linha, com o
+  // preço já fechado e os complementos. Os produtos simples seguem em `carrinho` (id → quantidade).
+  const COMBOS_KEY = `combos_portal_${empresaId}`
+  const [combos, setCombos] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(`combos_portal_${empresaId}`) || '{}') || {} } catch { return {} }
+  })
+  const [complementosPorProduto, setComplementosPorProduto] = useState({}) // { produto_id: grupos[] }
+  const [optProduto, setOptProduto] = useState(null) // produto aberto na janela de escolha
+  const [complementosFalhou, setComplementosFalhou] = useState(false)
   // Categoria que está na tela agora (só destaque na barra; tocar nela rola até lá, não filtra)
   const [categoriaAtiva, setCategoriaAtiva] = useState('')
   const barraCatRef = useRef(null)
@@ -245,6 +259,29 @@ export default function PortalLoja() {
     } catch { /* localStorage indisponível (modo privado restrito) */ }
   }, [carrinho, SACOLA_KEY])
 
+  /* ── Persistir os itens montados ── */
+  useEffect(() => {
+    try {
+      if (Object.keys(combos).length === 0) {
+        localStorage.removeItem(COMBOS_KEY)
+      } else {
+        localStorage.setItem(COMBOS_KEY, JSON.stringify(combos))
+      }
+      window.dispatchEvent(new CustomEvent('carrinho-portal-changed'))
+    } catch { /* localStorage indisponível */ }
+  }, [combos, COMBOS_KEY])
+
+  /* ── Item montado de produto que saiu do cardápio some da sacola (só depois de ler tudo) ── */
+  useEffect(() => {
+    if (produtos.length === 0 || lidos < totalProdutos) return
+    const ids = new Set(produtos.map(p => String(p.produto_id)))
+    setCombos(prev => {
+      const limpo = {}
+      for (const [k, c] of Object.entries(prev)) if (ids.has(String(c.id))) limpo[k] = c
+      return Object.keys(limpo).length === Object.keys(prev).length ? prev : limpo
+    })
+  }, [produtos, lidos, totalProdutos])
+
   /* ── Sanitizar carrinho após produtos carregarem (remove IDs obsoletos) ── */
   useEffect(() => {
     if (produtos.length === 0) return
@@ -286,6 +323,40 @@ export default function PortalLoja() {
       setLidos((prodRes.data ?? []).length)
       setProdutos((prodRes.data ?? []).filter(p => !categoriasOcultas.current.has(p.categoria) && p.disponivel_delivery !== false))
       setTotalProdutos(prodRes.count ?? 0)
+
+      // Complementos (sabores, bordas...): mesma consulta da Loja Online. Só chegam pro cliente
+      // logado depois da mig 0347. Se a leitura FALHAR, o produto "monte a sua" ficaria sem grupos
+      // e entraria na sacola a R$ 0,00 — por isso falha com aviso em vez de seguir calado.
+      const vinc = await fetchAll(() => supabase
+        .from('produto_complemento_grupos')
+        .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
+        .eq('complemento_grupos.empresa_id', resolvedId)
+        .order('produto_id'))
+      if (vinc.error) {
+        setComplementosFalhou(true)
+        setError('Não consegui carregar as opções do cardápio. Feche e abra a loja de novo.')
+      } else {
+        setComplementosFalhou(false)
+        // Opção "opt-out" (Sem X / Não quero) serve pra recusar a categoria.
+        const soSemOpcao = nome => /^\s*sem\s|n[ãa]o\s*quero/i.test(String(nome || ''))
+        const porProduto = {}
+        for (const v of (vinc.data ?? [])) {
+          const g = v.complemento_grupos
+          if (!g || g.disponivel === false) continue // grupo pausado some da loja
+          const opcoes = (g.complemento_opcoes ?? [])
+            .filter(o => o.disponivel !== false)
+            .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+          // Grupo que sobrou só com "Sem/Não quero" (nenhuma opção real) não aparece.
+          if (!opcoes.some(o => !soSemOpcao(o.nome))) continue
+          ;(porProduto[v.produto_id] ??= []).push({
+            id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1,
+            regra_preco: g.regra_preco ?? 'somar', ordem: v.ordem ?? 0, opcoes,
+            modo_quantidade: g.modo_quantidade === true,
+          })
+        }
+        for (const k of Object.keys(porProduto)) porProduto[k].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+        setComplementosPorProduto(porProduto)
+      }
       setLoading(false)
     }
     load()
@@ -398,7 +469,14 @@ export default function PortalLoja() {
   const lojaFechada = empresa?.aceita_delivery && !lojaOnline(empresa)
 
   /* ── Carrinho ── */
-  function addOne(id) { setCarrinho(p => ({ ...p, [id]: (p[id] ?? 0) + 1 })) }
+  function addOne(id) {
+    // Sem os complementos carregados, um produto "monte a sua" (preço 0) entraria de graça.
+    if (complementosFalhou) {
+      const prod = produtos.find(x => x.produto_id === id)
+      if (prod && Number(prod.preco_venda) <= 0) return
+    }
+    setCarrinho(p => ({ ...p, [id]: (p[id] ?? 0) + 1 }))
+  }
   function removeOne(id) {
     setCarrinho(p => {
       const n = { ...p }
@@ -408,12 +486,102 @@ export default function PortalLoja() {
     })
   }
 
-  const itensCarrinho = Object.entries(carrinho)
-    .map(([id, qtd]) => ({ produto: produtos.find(p => p.produto_id === id), qtd }))
-    .filter(i => i.produto)
+  // ── Itens montados (pizza com sabores, borda...) ──
+  const temComplementos = p => (complementosPorProduto[p.produto_id]?.length ?? 0) > 0
+  const qtdMontadaDoProduto = id =>
+    Object.values(combos).filter(c => String(c.id) === String(id)).reduce((s, c) => s + (Number(c.quantidade) || 0), 0)
+  // O produto no formato que a janela de escolha (a da Loja Online) espera.
+  const produtoParaJanela = p => ({
+    id: p.produto_id, nome: p.nome, descricao: p.descricao, foto_url: p.foto_url, categoria: p.categoria,
+    preco: Number(p.preco_venda), faixas_preco: p.faixas_preco ?? [], preco_promocional: p.preco_promocional ?? null,
+    complementos: complementosPorProduto[p.produto_id] ?? [],
+  })
+  const abrirOpcoes = p => setOptProduto(produtoParaJanela(p))
+
+  // Confirmou a montagem: vira uma linha da sacola. Mesma combinação soma na mesma linha.
+  function addCombo(prod, selecoes, precoUnit, qtdItem = 1, observacao = '') {
+    const key = selecoes.length
+      ? `${prod.id}::${selecoes.map(s => `${s.opcaoId}x${s.qtd ?? 1}`).sort().join('-')}`
+      : String(prod.id)
+    setCombos(prev => ({
+      ...prev,
+      [key]: {
+        key, id: prod.id, nome: prod.nome, preco: precoUnit, foto_url: prod.foto_url,
+        complementos: selecoes.map(s => ({
+          grupoId: s.grupoId, opcaoId: s.opcaoId,
+          grupo: s.grupo, nome: s.nome, preco: s.preco, qtd: s.qtd ?? 1, absoluto: !!s.absoluto,
+        })),
+        quantidade: (prev[key]?.quantidade ?? 0) + (Number(qtdItem) || 1),
+        observacao: String(observacao ?? '').trim() || prev[key]?.observacao || '',
+      },
+    }))
+    setOptProduto(null)
+  }
+  function mudarCombo(key, delta) {
+    setCombos(prev => {
+      const c = prev[key]
+      if (!c) return prev
+      const q = (Number(c.quantidade) || 0) + delta
+      const n = { ...prev }
+      if (q <= 0) delete n[key]
+      else n[key] = { ...c, quantidade: q }
+      return n
+    })
+  }
+
+  // "A partir de": preço base + as opções obrigatórias mais baratas (o `min` de cada grupo).
+  // Sem isso o "monte a sua" (base R$ 0) apareceria como "R$ 0,00" no cardápio.
+  const precoAPartirDe = p => {
+    const grupos = complementosPorProduto[p.produto_id] ?? []
+    const extra = grupos.reduce((s, g) => {
+      const n = g.min ?? 0
+      if (n <= 0) return s
+      const precos = (g.opcoes ?? []).map(o => Number(o.preco_adicional || 0)).sort((a, b) => a - b)
+      // Grupo que cobra pelo mais caro: pegar n opções baratas custa o preço de UMA.
+      if (cobraPeloMaior(g)) return s + (precos[0] ?? 0)
+      return s + precos.slice(0, n).reduce((a, b) => a + b, 0)
+    }, 0)
+    return Number(p.preco_venda) + extra
+  }
+
+  // Card do produto. Produto com complementos (pizza, quentinha...) NÃO entra direto: o "+" abre a
+  // janela de escolher sabores/borda, e o "−" leva pra sacola, onde cada montagem é uma linha.
+  const renderCard = p => {
+    const montavel = temComplementos(p)
+    return (
+      <ProdutoCard
+        key={p.produto_id}
+        produto={p}
+        qtd={montavel ? qtdMontadaDoProduto(p.produto_id) : (carrinho[p.produto_id] ?? 0)}
+        onAdd={montavel ? () => abrirOpcoes(p) : addOne}
+        onRemove={montavel ? () => setCarrinhoAberto(true) : removeOne}
+        lojaFechada={lojaFechada}
+        precoExibir={montavel ? precoAPartirDe(p) : Number(p.preco_venda)}
+        aPartirDe={montavel}
+      />
+    )
+  }
+
+  // Cada linha da sacola: produto simples (preço do cadastro) ou item montado (preço fechado na montagem).
+  const linhasSimples = Object.entries(carrinho)
+    .map(([id, qtd]) => {
+      const produto = produtos.find(p => p.produto_id === id)
+      return produto ? { key: id, produto, qtd, precoUnit: Number(produto.preco_venda), complementos: null, observacao: '' } : null
+    })
+    .filter(Boolean)
+  const linhasMontadas = Object.values(combos)
+    .map(c => {
+      const produto = produtos.find(p => String(p.produto_id) === String(c.id))
+      return produto
+        ? { key: c.key, produto, qtd: Number(c.quantidade) || 0, precoUnit: Number(c.preco) || 0,
+            complementos: c.complementos ?? [], observacao: c.observacao ?? '', ehCombo: true }
+        : null
+    })
+    .filter(Boolean)
+  const itensCarrinho = [...linhasSimples, ...linhasMontadas]
 
   const totalItens = itensCarrinho.reduce((s, i) => s + i.qtd, 0)
-  const totalValor = itensCarrinho.reduce((s, i) => s + i.qtd * Number(i.produto.preco_venda), 0)
+  const totalValor = itensCarrinho.reduce((s, i) => s + i.qtd * i.precoUnit, 0)
   const temFaixasKm = Array.isArray(empresa?.taxas_entrega_km) && empresa.taxas_entrega_km.length > 0
   const taxa = taxaCalculada !== null ? taxaCalculada : (temFaixasKm ? null : Number(empresa?.taxa_entrega ?? 0))
   const totalComTaxa = totalValor + (taxa ?? 0)
@@ -676,12 +844,17 @@ export default function PortalLoja() {
     // Chegou pelo link de alguém? Amarra o vínculo (mig 0176).
     await registrarIndicacao(clienteId)
 
+    // Mesmo formato da Loja Online: o nome dobra as escolhas ("Pizza (Sabor A, Sabor B, Borda)")
+    // pro painel e o cupom, e `complementos` guarda o estruturado.
     const itens = itensCarrinho.map(i => ({
       produto_id: i.produto.produto_id,
-      nome: i.produto.nome,
+      nome: i.complementos?.length
+        ? `${i.produto.nome} (${i.complementos.map(c => (c?.absoluto ? `${Number(c.qtd) || 1}× ${c.nome}` : c.nome)).join(', ')})`
+        : i.produto.nome,
       quantidade: i.qtd,
-      preco_unitario: Number(i.produto.preco_venda),
-      subtotal: i.qtd * Number(i.produto.preco_venda),
+      preco_unitario: i.precoUnit,
+      subtotal: Math.round(i.qtd * i.precoUnit * 100) / 100,
+      ...(i.ehCombo ? { complementos: i.complementos ?? [], observacao: (i.observacao ?? '').trim() || null } : {}),
     }))
 
     const isRetirada = form.tipo_entrega === 'retirada'
@@ -746,6 +919,7 @@ export default function PortalLoja() {
     localStorage.removeItem(SACOLA_KEY)
     window.dispatchEvent(new CustomEvent('carrinho-portal-changed'))
     setCarrinho({})
+    setCombos({})
     setCheckoutAberto(false)
     navigate('/portal/pedidos')
   }
@@ -765,6 +939,7 @@ export default function PortalLoja() {
         window.dispatchEvent(new CustomEvent('carrinho-portal-changed'))
         setPixData(null)
         setCarrinho({})
+        setCombos({})
         navigate('/portal/pedidos')
       }}
     />
@@ -878,16 +1053,7 @@ export default function PortalLoja() {
               <section key={secao.nome} className="loja-secao" data-secao={secao.nome}>
                 <h3 className="loja-secao-titulo">{secao.nome}</h3>
                 <div className="loja-lista">
-                  {secao.produtos.map(p => (
-                    <ProdutoCard
-                      key={p.produto_id}
-                      produto={p}
-                      qtd={carrinho[p.produto_id] ?? 0}
-                      onAdd={addOne}
-                      onRemove={removeOne}
-                      lojaFechada={lojaFechada}
-                    />
-                  ))}
+                  {secao.produtos.map(renderCard)}
                 </div>
               </section>
             ))}
@@ -896,16 +1062,7 @@ export default function PortalLoja() {
               <section className="loja-secao">
                 <h3 className="loja-secao-titulo">Outros</h3>
                 <div className="loja-lista">
-                  {semCategoria.map(p => (
-                    <ProdutoCard
-                      key={p.produto_id}
-                      produto={p}
-                      qtd={carrinho[p.produto_id] ?? 0}
-                      onAdd={addOne}
-                      onRemove={removeOne}
-                      lojaFechada={lojaFechada}
-                    />
-                  ))}
+                  {semCategoria.map(renderCard)}
                 </div>
               </section>
             )}
@@ -924,6 +1081,25 @@ export default function PortalLoja() {
           </div>
         )}
       </div>
+
+      {/* ── Escolher sabores, borda e outros complementos (a mesma janela da Loja Online) ── */}
+      {optProduto && (
+        // `dloja-root` traz as cores da janela; `display: contents` não cria caixa nenhuma na tela.
+        <div
+          className="dloja-root"
+          data-tema={document.documentElement.getAttribute('data-theme') === 'dark' ? 'escuro' : 'claro'}
+          style={{ display: 'contents', minHeight: 0, background: 'transparent' }}
+        >
+          <Suspense fallback={null}>
+            <OptionsModal
+              produto={optProduto}
+              onClose={() => setOptProduto(null)}
+              onConfirm={(selecoes, precoUnit, qtdItem, obs) => addCombo(optProduto, selecoes, precoUnit, qtdItem, obs)}
+              lojaAberta={!lojaFechada}
+            />
+          </Suspense>
+        </div>
+      )}
 
       {/* ── Barra flutuante da sacola ── */}
       {totalItens > 0 && !lojaFechada && (
@@ -951,21 +1127,34 @@ export default function PortalLoja() {
             </div>
 
             <div className="loja-drawer-itens">
-              {itensCarrinho.map(({ produto, qtd }) => (
-                <div key={produto.produto_id} className="loja-drawer-item">
+              {itensCarrinho.map(i => (
+                <div key={i.key} className="loja-drawer-item">
                   <div className="loja-drawer-item-info">
-                    <span className="loja-drawer-item-nome">{produto.nome}</span>
+                    <span className="loja-drawer-item-nome">{i.produto.nome}</span>
+                    {/* Item montado: mostra o que foi escolhido (sabores, borda...) */}
+                    {i.ehCombo && i.complementos?.length > 0 && (
+                      <span className="loja-drawer-item-sub" style={{ whiteSpace: 'normal', lineHeight: 1.35 }}>
+                        {i.complementos.map(c => (c?.absoluto ? `${Number(c.qtd) || 1}× ${c.nome}` : c.nome)).join(', ')}
+                      </span>
+                    )}
+                    {i.ehCombo && i.observacao && (
+                      <span className="loja-drawer-item-sub" style={{ whiteSpace: 'normal' }}>📝 {i.observacao}</span>
+                    )}
                     <span className="loja-drawer-item-sub">
-                      R$ {Number(produto.preco_venda).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} cada
+                      R$ {i.precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} cada
                     </span>
                   </div>
                   <div className="loja-qty-ctrl">
-                    <button className="loja-qty-btn" onClick={() => removeOne(produto.produto_id)}>−</button>
-                    <span className="loja-qty-val">{qtd}</span>
-                    <button className="loja-qty-btn" onClick={() => addOne(produto.produto_id)}>+</button>
+                    <button className="loja-qty-btn" onClick={() => (i.ehCombo ? mudarCombo(i.key, -1) : removeOne(i.produto.produto_id))}>−</button>
+                    <span className="loja-qty-val">{i.qtd}</span>
+                    <button
+                      className="loja-qty-btn"
+                      disabled={i.ehCombo && i.complementos?.some(c => c?.absoluto)}
+                      onClick={() => (i.ehCombo ? mudarCombo(i.key, 1) : addOne(i.produto.produto_id))}
+                    >+</button>
                   </div>
                   <span className="loja-drawer-item-total">
-                    R$ {(qtd * Number(produto.preco_venda)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    R$ {(i.qtd * i.precoUnit).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </span>
                 </div>
               ))}
@@ -1004,10 +1193,17 @@ export default function PortalLoja() {
               {/* Resumo */}
               <div className="loja-checkout-section">
                 <h3>Resumo</h3>
-                {itensCarrinho.map(({ produto, qtd }) => (
-                  <div key={produto.produto_id} className="loja-checkout-item">
-                    <span>{qtd}× {produto.nome}</span>
-                    <span>R$ {(qtd * Number(produto.preco_venda)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                {itensCarrinho.map(i => (
+                  <div key={i.key} className="loja-checkout-item">
+                    <span>
+                      {i.qtd}× {i.produto.nome}
+                      {i.ehCombo && i.complementos?.length > 0 && (
+                        <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                          {i.complementos.map(c => (c?.absoluto ? `${Number(c.qtd) || 1}× ${c.nome}` : c.nome)).join(', ')}
+                        </span>
+                      )}
+                    </span>
+                    <span>R$ {(i.qtd * i.precoUnit).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                   </div>
                 ))}
                 {form.tipo_entrega === 'entrega' && (
@@ -1337,7 +1533,7 @@ export default function PortalLoja() {
 }
 
 /* ── Card de produto horizontal (iFood style) ── */
-function ProdutoCard({ produto: p, qtd, onAdd, onRemove, lojaFechada }) {
+function ProdutoCard({ produto: p, qtd, onAdd, onRemove, lojaFechada, precoExibir, aPartirDe = false }) {
   const indisponivel = p.disponivel_delivery === false
   const bloqueado = indisponivel || lojaFechada
 
@@ -1350,7 +1546,8 @@ function ProdutoCard({ produto: p, qtd, onAdd, onRemove, lojaFechada }) {
             aqui enganava - "12 un." ao lado de um preco que e da unidade. */}
         <p className="loja-card-meta">{p.embalagem}</p>
         <p className="loja-card-preco">
-          R$ {Number(p.preco_venda).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+          {aPartirDe && <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)' }}>a partir de </span>}
+          R$ {Number(precoExibir ?? p.preco_venda).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
         </p>
       </div>
 

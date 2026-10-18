@@ -2073,7 +2073,8 @@ function somaQtd(sel, grupoId) {
   return escolhidasDe(sel, grupoId).reduce((t, [, q]) => t + (Number(q) || 0), 0)
 }
 
-function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm, lojaAberta = true }) {
+// Exportada pro app do cliente (PortalLoja) abrir a MESMA janela de escolha de sabores/bordas.
+export function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm, lojaAberta = true }) {
   const grupos = produto.complementos ?? []
   // seleção: { [grupoId]: { [opcaoId]: quantidade } } — começa do rascunho, se
   // voltou de um recarregamento no meio da montagem.
