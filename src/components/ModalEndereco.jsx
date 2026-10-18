@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { UFS, buscarRuas, geocodeRua, geocodeCidade } from '../lib/enderecoBusca'
+import MapaPinoEndereco from './MapaPinoEndereco'
 import {
   LS_HIST,
   getEnderecoAtivo, getHistorico,
@@ -39,35 +41,53 @@ function linhaEndereco2(end) {
   return partes.join(', ')
 }
 
+// Mesmo endereço? O CEP sozinho não serve: rua achada pelo mapa às vezes vem sem CEP.
+const mesmoEndereco = (a, b) => !!a && !!b
+  && (a.cep ?? '') === (b.cep ?? '') && (a.numero ?? '') === (b.numero ?? '') && (a.endereco ?? '') === (b.endereco ?? '')
+
 // ── Modal ─────────────────────────────────────────────────────────────────────
 export default function ModalEndereco({ onClose, onSalvo }) {
   const [historico, setHistorico] = useState(() => getHistorico())
   const [enderecoAtivo, setEnderecoAtivo] = useState(() => getEnderecoAtivo())
   const [mostrarForm, setMostrarForm] = useState(false)
 
-  const [form, setForm] = useState({
-    cep: '', endereco: '', numero: '', complemento: '', bairro: '', cidade: '',
-  })
-  const [buscandoCep, setBuscandoCep]     = useState(false)
-  const [erroCep, setErroCep]             = useState(null)
-  const [saving, setSaving]               = useState(false)
-  const [error, setError]                 = useState(null)
+  // Novo endereço em 3 passos: 1) a rua  2) o ponto no mapa  3) número e complemento
+  const [passo, setPasso]         = useState(1)
+  const [uf, setUf]               = useState('RN')
+  const [cidadeBase, setCidadeBase] = useState('')   // cidade do perfil: 1ª tentativa da busca
+  const [busca, setBusca]         = useState('')
+  const [sugestoes, setSugestoes] = useState([])
+  const [buscando, setBuscando]   = useState(false)
+  const [naoAchou, setNaoAchou]   = useState(false)
+  const [rua, setRua]             = useState(null)   // { logradouro, bairro, localidade, uf, cep }
+  const [manual, setManual]       = useState(false)  // rua que não está na lista
+  const [bairroManual, setBairroManual] = useState('')
+  const [cidadeManual, setCidadeManual] = useState('')
+  const [centro, setCentro]       = useState(null)   // onde o mapa abre
+  const [coord, setCoord]         = useState(null)   // ponto confirmado pelo cliente
+  const [procurandoPonto, setProcurandoPonto] = useState(false)
+  const [numero, setNumero]       = useState('')
+  const [complemento, setComplemento] = useState('')
+  const [saving, setSaving]       = useState(false)
+  const [error, setError]         = useState(null)
 
   // Se não tem histórico, abre o formulário direto
   useEffect(() => {
     if (historico.length === 0) setMostrarForm(true)
   }, [historico.length])
 
-  // Carrega endereço salvo no perfil (profiles) → histórico local
+  // Carrega endereço salvo no perfil (profiles) → histórico local, e a cidade/UF base da busca
   useEffect(() => {
     async function loadPerfil() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
       const { data } = await supabase
         .from('profiles')
-        .select('cep, endereco, numero, bairro, cidade')
+        .select('cep, endereco, numero, bairro, cidade, estado')
         .eq('id', user.id)
         .maybeSingle()
+      if (data?.estado && UFS.includes(data.estado)) setUf(data.estado)
+      if (data?.cidade) setCidadeBase(data.cidade)
       if (data && (data.cep || data.cidade)) {
         const endBanco = {
           cep:      data.cep      || '',
@@ -77,7 +97,7 @@ export default function ModalEndereco({ onClose, onSalvo }) {
           cidade:   data.cidade   || '',
         }
         setHistorico(prev => {
-          const existe = prev.find(h => h.cep === endBanco.cep && h.numero === endBanco.numero)
+          const existe = prev.find(h => mesmoEndereco(h, endBanco))
           if (!existe) {
             const novoHist = [endBanco, ...prev].slice(0, 5)
             localStorage.setItem(LS_HIST, JSON.stringify(novoHist))
@@ -90,38 +110,88 @@ export default function ModalEndereco({ onClose, onSalvo }) {
     loadPerfil()
   }, [])
 
-  function setField(field) {
-    return e => {
-      setForm(p => ({ ...p, [field]: e.target.value }))
-      setError(null)
-    }
+  // ── Passo 1: sugere as ruas conforme o cliente digita ──
+  useEffect(() => {
+    if (passo !== 1 || rua || manual) return
+    const termo = busca.trim()
+    if (termo.length < 3) { setSugestoes([]); setNaoAchou(false); return }
+    let vivo = true
+    setBuscando(true)
+    const t = setTimeout(async () => {
+      try {
+        const lista = await buscarRuas({ termo, uf, cidades: [cidadeBase] })
+        if (!vivo) return
+        setSugestoes(lista)
+        setNaoAchou(lista.length === 0)
+      } catch {
+        if (vivo) { setSugestoes([]); setNaoAchou(true) }
+      } finally {
+        if (vivo) setBuscando(false)
+      }
+    }, 500)
+    return () => { vivo = false; clearTimeout(t); setBuscando(false) }
+  }, [busca, uf, cidadeBase, passo, rua, manual])
+
+  function escolherRua(r) {
+    setRua(r)
+    setBusca(r.logradouro)
+    if (r.uf && UFS.includes(r.uf)) setUf(r.uf)
+    setSugestoes([])
+    setNaoAchou(false)
+    setError(null)
   }
 
-  function handleCepChange(e) {
-    const v = e.target.value.replace(/\D/g, '').slice(0, 8)
-    const fmt = v.length > 5 ? `${v.slice(0, 5)}-${v.slice(5)}` : v
-    setForm(p => ({ ...p, cep: fmt }))
-    setErroCep(null)
-    if (v.length === 8) buscarCep(v)
+  function trocarRua() {
+    setRua(null)
+    setManual(false)
+    setCoord(null)
+    setCentro(null)
+    setError(null)
   }
 
-  async function buscarCep(numeros) {
-    setBuscandoCep(true)
-    try {
-      const res = await fetch(`https://viacep.com.br/ws/${numeros}/json/`)
-      const data = await res.json()
-      if (data.erro) { setErroCep('CEP não encontrado.'); return }
-      setForm(p => ({
-        ...p,
-        endereco: data.logradouro || p.endereco,
-        bairro:   data.bairro    || p.bairro,
-        cidade:   data.localidade || p.cidade,
-      }))
-    } catch {
-      setErroCep('Erro ao buscar CEP. Tente novamente.')
-    } finally {
-      setBuscandoCep(false)
+  // Rua que o cadastro não tem (loteamento novo, nome popular): o cliente escreve e
+  // marca no mapa. O que vale pra entrega é o pino.
+  function usarRuaManual() {
+    setManual(true)
+    setSugestoes([])
+    setNaoAchou(false)
+  }
+
+  // Dados da rua que valem daqui pra frente (da lista ou digitados à mão)
+  const dadosRua = manual
+    ? { logradouro: busca.trim(), bairro: bairroManual.trim(), localidade: cidadeManual.trim(), uf, cep: '' }
+    : rua
+
+  const podeIrParaMapa = manual
+    ? busca.trim().length >= 3 && cidadeManual.trim().length >= 3
+    : !!rua
+
+  // ── Passo 2: abre o mapa já na rua escolhida ──
+  async function irParaMapa() {
+    if (!podeIrParaMapa || !dadosRua) return
+    setError(null)
+    setCoord(null)
+    setCentro(null)
+    setPasso(2)
+    setProcurandoPonto(true)
+    const g = await geocodeRua({
+      rua: dadosRua.logradouro, bairro: dadosRua.bairro, cidade: dadosRua.localidade,
+      estado: dadosRua.uf || uf, cep: dadosRua.cep,
+    })
+    if (g) {
+      setCentro(g)
+      setCoord(g)
+    } else {
+      // Não achou a rua no mapa: abre na cidade e o cliente toca no ponto da casa.
+      const c = await geocodeCidade({ cidade: dadosRua.localidade, estado: dadosRua.uf || uf })
+      if (c) setCentro(c)
     }
+    setProcurandoPonto(false)
+  }
+
+  function aoMoverPino(c) {
+    setCoord(c)
+    setError(null)
   }
 
   function handleSelecionarHistorico(end) {
@@ -133,31 +203,45 @@ export default function ModalEndereco({ onClose, onSalvo }) {
 
   async function handleConfirmar(e) {
     e.preventDefault()
-    if (!form.cep.trim() || !form.numero.trim()) {
-      setError('CEP e número são obrigatórios.')
-      return
-    }
+    if (!numero.trim()) { setError('Informe o número da casa (ou "s/n").'); return }
+    if (!coord || !dadosRua) { setError('Marque o ponto no mapa.'); return }
     setSaving(true)
     setError(null)
 
     const novoEnd = {
-      cep:      form.cep.trim(),
-      endereco: form.endereco.trim(),
-      numero:   form.numero.trim(),
-      bairro:   form.bairro.trim(),
-      cidade:   form.cidade.trim(),
+      cep:         dadosRua.cep ? `${dadosRua.cep.slice(0, 5)}-${dadosRua.cep.slice(5)}` : '',
+      endereco:    dadosRua.logradouro,
+      numero:      numero.trim(),
+      complemento: complemento.trim(),
+      bairro:      dadosRua.bairro,
+      cidade:      dadosRua.localidade,
+      estado:      dadosRua.uf || uf,
+      // Ponto confirmado no mapa: é ele que vale pro filtro das lojas e pra entrega.
+      latitude:    coord.lat,
+      longitude:   coord.lng,
     }
 
     const { error: err } = await supabase.rpc('salvar_endereco_portal', {
       p_cep:         novoEnd.cep,
       p_endereco:    novoEnd.endereco,
       p_numero:      novoEnd.numero,
-      p_complemento: form.complemento.trim(),
+      p_complemento: novoEnd.complemento,
       p_bairro:      novoEnd.bairro,
       p_cidade:      novoEnd.cidade,
     })
+    if (err) { setSaving(false); setError(err.message); return }
+
+    // Guarda o ponto e o estado no perfil (o RPC acima não leva). Se falhar, o endereço
+    // já foi salvo e o ponto continua valendo neste aparelho.
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.from('profiles')
+          .update({ latitude: coord.lat, longitude: coord.lng, estado: novoEnd.estado })
+          .eq('id', user.id)
+      }
+    } catch { /* ignora */ }
     setSaving(false)
-    if (err) { setError(err.message); return }
 
     salvarEnderecoAtivo(novoEnd)
     adicionarAoHistorico(novoEnd)
@@ -165,7 +249,14 @@ export default function ModalEndereco({ onClose, onSalvo }) {
     onClose()
   }
 
-  const podeConfirmar = form.cep.trim().length >= 8 && form.numero.trim().length > 0 && !saving
+  function voltarDoFormulario() {
+    // Do passo 1 volta pra lista de salvos; dos outros, um passo atrás.
+    if (passo === 3) { setPasso(2); return }
+    if (passo === 2) { setPasso(1); return }
+    setMostrarForm(false)
+  }
+
+  const tituloPasso = passo === 1 ? 'Qual é a sua rua?' : passo === 2 ? 'Onde fica a sua casa?' : 'Falta pouco!'
 
   return (
     <div
@@ -181,9 +272,9 @@ export default function ModalEndereco({ onClose, onSalvo }) {
         </div>
 
         <h2 id="ph-modal-title" className="ph-modal-title">
-          {historico.length > 0 ? 'Onde você quer receber?' : 'Onde você está?'}
+          {mostrarForm ? tituloPasso : (historico.length > 0 ? 'Onde você quer receber?' : 'Onde você está?')}
         </h2>
-        {historico.length === 0 && (
+        {historico.length === 0 && !mostrarForm && (
           <p className="ph-modal-subtitle">
             Precisamos do seu endereço para mostrar as lojas mais próximas de você.
           </p>
@@ -193,10 +284,10 @@ export default function ModalEndereco({ onClose, onSalvo }) {
         {historico.length > 0 && !mostrarForm && (
           <div className="ph-modal-hist">
             {historico.map((end, i) => {
-              const ativo = enderecoAtivo?.cep === end.cep && enderecoAtivo?.numero === end.numero
+              const ativo = mesmoEndereco(enderecoAtivo, end)
               return (
                 <button
-                  key={`${end.cep}-${end.numero}-${i}`}
+                  key={`${end.cep}-${end.endereco}-${end.numero}-${i}`}
                   className={`ph-hist-item${ativo ? ' ph-hist-item--ativo' : ''}`}
                   onClick={() => handleSelecionarHistorico(end)}
                 >
@@ -222,7 +313,7 @@ export default function ModalEndereco({ onClose, onSalvo }) {
 
             <button
               className="ph-hist-add-btn"
-              onClick={() => setMostrarForm(true)}
+              onClick={() => { setMostrarForm(true); setPasso(1) }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="5" x2="12" y2="19"/>
@@ -233,118 +324,203 @@ export default function ModalEndereco({ onClose, onSalvo }) {
           </div>
         )}
 
-        {/* Formulário de novo endereço */}
+        {/* Novo endereço: 3 passos */}
         {mostrarForm && (
           <>
-            {historico.length > 0 && (
-              <button className="ph-modal-back" onClick={() => setMostrarForm(false)}>
+            {(historico.length > 0 || passo > 1) && (
+              <button className="ph-modal-back" onClick={voltarDoFormulario}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="15 18 9 12 15 6"/>
                 </svg>
-                Voltar para endereços salvos
+                {passo === 1 ? 'Voltar para endereços salvos' : 'Voltar'}
               </button>
             )}
 
-            <form onSubmit={handleConfirmar} className="ph-modal-form">
-              <div className="ph-modal-field" style={{ position: 'relative' }}>
-                <label className="ph-modal-label" htmlFor="modal-cep">
-                  CEP <span className="ph-modal-required">*</span>
-                </label>
-                <input
-                  id="modal-cep"
-                  type="text"
-                  className="ph-modal-input"
-                  value={form.cep}
-                  onChange={handleCepChange}
-                  placeholder="00000-000"
-                  maxLength={9}
-                  autoComplete="postal-code"
-                  inputMode="numeric"
-                  autoFocus
-                />
-                {buscandoCep && <span className="ph-modal-cep-hint">Buscando...</span>}
-                {erroCep && <span className="ph-modal-field-error">{erroCep}</span>}
-              </div>
+            <div className="ph-end-passos" aria-label={`Passo ${passo} de 3`}>
+              {[1, 2, 3].map(n => (
+                <span key={n} className={`ph-end-passo${n === passo ? ' ativo' : ''}${n < passo ? ' feito' : ''}`} />
+              ))}
+              <span className="ph-end-passo-txt">Passo {passo} de 3</span>
+            </div>
 
-              <div className="ph-modal-field">
-                <label className="ph-modal-label" htmlFor="modal-endereco">Rua / Av.</label>
-                <input
-                  id="modal-endereco"
-                  type="text"
-                  className="ph-modal-input"
-                  value={form.endereco}
-                  onChange={setField('endereco')}
-                  placeholder="Rua das Flores"
-                  autoComplete="street-address"
-                />
-              </div>
-
-              <div className="ph-modal-row">
+            {/* ── Passo 1: a rua ── */}
+            {passo === 1 && (
+              <div className="ph-modal-form">
                 <div className="ph-modal-field">
-                  <label className="ph-modal-label" htmlFor="modal-numero">
-                    Número <span className="ph-modal-required">*</span>
+                  <label className="ph-modal-label" htmlFor="modal-uf">Estado</label>
+                  <select
+                    id="modal-uf"
+                    className="ph-modal-input"
+                    value={uf}
+                    onChange={e => { setUf(e.target.value); trocarRua() }}
+                  >
+                    {UFS.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+
+                <div className="ph-modal-field" style={{ position: 'relative' }}>
+                  <label className="ph-modal-label" htmlFor="modal-rua">
+                    Nome da rua <span className="ph-modal-required">*</span>
                   </label>
                   <input
-                    id="modal-numero"
+                    id="modal-rua"
                     type="text"
                     className="ph-modal-input"
-                    value={form.numero}
-                    onChange={setField('numero')}
-                    placeholder="123"
-                    inputMode="numeric"
+                    value={busca}
+                    onChange={e => { setBusca(e.target.value); if (rua) trocarRua() }}
+                    placeholder="Digite o nome da sua rua"
+                    autoComplete="off"
+                    autoFocus
                   />
+                  {buscando && <span className="ph-modal-cep-hint">Buscando...</span>}
                 </div>
-                <div className="ph-modal-field">
-                  <label className="ph-modal-label" htmlFor="modal-complemento">Complemento</label>
-                  <input
-                    id="modal-complemento"
-                    type="text"
-                    className="ph-modal-input"
-                    value={form.complemento}
-                    onChange={setField('complemento')}
-                    placeholder="Apto 4"
-                  />
-                </div>
+
+                {sugestoes.length > 0 && !rua && (
+                  <div className="ph-end-lista">
+                    {sugestoes.map(r => (
+                      <button key={`${r.cep}-${r.logradouro}-${r.bairro}-${r.localidade}`} type="button" onClick={() => escolherRua(r)}>
+                        <strong>{r.logradouro}</strong>
+                        <span>{[r.bairro, r.localidade].filter(Boolean).join(' · ')}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {rua && (
+                  <div className="ph-end-escolhida">
+                    <div>
+                      <strong>{rua.logradouro}</strong>
+                      <span>{[rua.bairro, rua.localidade].filter(Boolean).join(' · ')}</span>
+                    </div>
+                    <button type="button" onClick={trocarRua}>Trocar</button>
+                  </div>
+                )}
+
+                {naoAchou && !buscando && !rua && !manual && busca.trim().length >= 3 && (
+                  <div className="ph-end-aviso">
+                    Não achei essa rua em <strong>{uf}</strong>. Confira o nome, ou
+                    {' '}<button type="button" className="ph-end-link" onClick={usarRuaManual}>escreva à mão e marque no mapa</button>.
+                  </div>
+                )}
+
+                {manual && (
+                  <>
+                    <div className="ph-modal-row">
+                      <div className="ph-modal-field">
+                        <label className="ph-modal-label" htmlFor="modal-bairro-m">Bairro</label>
+                        <input id="modal-bairro-m" className="ph-modal-input" value={bairroManual}
+                          onChange={e => setBairroManual(e.target.value)} placeholder="Centro" />
+                      </div>
+                      <div className="ph-modal-field">
+                        <label className="ph-modal-label" htmlFor="modal-cidade-m">
+                          Cidade <span className="ph-modal-required">*</span>
+                        </label>
+                        <input id="modal-cidade-m" className="ph-modal-input" value={cidadeManual}
+                          onChange={e => setCidadeManual(e.target.value)} placeholder="Natal" />
+                      </div>
+                    </div>
+                    <button type="button" className="ph-end-link" onClick={() => setManual(false)}>
+                      Voltar a procurar na lista
+                    </button>
+                  </>
+                )}
+
+                <button
+                  type="button"
+                  className="ph-modal-btn"
+                  disabled={!podeIrParaMapa}
+                  onClick={irParaMapa}
+                >
+                  Próximo: marcar no mapa
+                </button>
               </div>
+            )}
 
-              <div className="ph-modal-row">
-                <div className="ph-modal-field">
-                  <label className="ph-modal-label" htmlFor="modal-bairro">Bairro</label>
-                  <input
-                    id="modal-bairro"
-                    type="text"
-                    className="ph-modal-input"
-                    value={form.bairro}
-                    onChange={setField('bairro')}
-                    placeholder="Centro"
-                  />
-                </div>
-                <div className="ph-modal-field">
-                  <label className="ph-modal-label" htmlFor="modal-cidade">Cidade</label>
-                  <input
-                    id="modal-cidade"
-                    type="text"
-                    className="ph-modal-input"
-                    value={form.cidade}
-                    onChange={setField('cidade')}
-                    placeholder="Mossoró"
-                  />
-                </div>
+            {/* ── Passo 2: o ponto no mapa ── */}
+            {passo === 2 && dadosRua && (
+              <div className="ph-modal-form">
+                <p className="ph-end-dica">
+                  <strong>{dadosRua.logradouro}</strong>
+                  {[dadosRua.bairro, dadosRua.localidade].filter(Boolean).length > 0 && (
+                    <> — {[dadosRua.bairro, dadosRua.localidade].filter(Boolean).join(', ')}</>
+                  )}
+                </p>
+                {procurandoPonto
+                  ? <p className="ph-end-dica">Procurando sua rua no mapa...</p>
+                  : (
+                    <p className="ph-end-dica">
+                      {coord
+                        ? '👉 Arraste o pino até a porta da sua casa, ou toque no ponto certo.'
+                        : '👆 Não achei sua rua sozinho. Toque no mapa no ponto da sua casa.'}
+                    </p>
+                  )}
+                <MapaPinoEndereco centro={centro} onMover={aoMoverPino} />
+                {error && <div className="ph-modal-error">{error}</div>}
+                <button
+                  type="button"
+                  className="ph-modal-btn"
+                  disabled={!coord || procurandoPonto}
+                  onClick={() => { setError(null); setPasso(3) }}
+                >
+                  Próximo: número da casa
+                </button>
               </div>
+            )}
 
-              {error && <div className="ph-modal-error">{error}</div>}
+            {/* ── Passo 3: número e complemento ── */}
+            {passo === 3 && dadosRua && (
+              <form onSubmit={handleConfirmar} className="ph-modal-form">
+                <div className="ph-end-escolhida">
+                  <div>
+                    <strong>{dadosRua.logradouro}</strong>
+                    <span>{[dadosRua.bairro, dadosRua.localidade].filter(Boolean).join(' · ')}</span>
+                  </div>
+                  <span aria-hidden="true">📍</span>
+                </div>
 
-              <button
-                type="submit"
-                className="ph-modal-btn"
-                disabled={!podeConfirmar}
-              >
-                {saving
-                  ? <><span className="ph-modal-spinner" /> Salvando...</>
-                  : 'Confirmar endereço'
-                }
-              </button>
-            </form>
+                <div className="ph-modal-row">
+                  <div className="ph-modal-field">
+                    <label className="ph-modal-label" htmlFor="modal-numero">
+                      Número <span className="ph-modal-required">*</span>
+                    </label>
+                    <input
+                      id="modal-numero"
+                      type="text"
+                      className="ph-modal-input"
+                      value={numero}
+                      onChange={e => { setNumero(e.target.value); setError(null) }}
+                      placeholder="123"
+                      inputMode="numeric"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="ph-modal-field">
+                    <label className="ph-modal-label" htmlFor="modal-complemento">Complemento</label>
+                    <input
+                      id="modal-complemento"
+                      type="text"
+                      className="ph-modal-input"
+                      value={complemento}
+                      onChange={e => setComplemento(e.target.value)}
+                      placeholder="Apto 4, casa azul..."
+                    />
+                  </div>
+                </div>
+
+                {error && <div className="ph-modal-error">{error}</div>}
+
+                <button
+                  type="submit"
+                  className="ph-modal-btn"
+                  disabled={!numero.trim() || saving}
+                >
+                  {saving
+                    ? <><span className="ph-modal-spinner" /> Salvando...</>
+                    : 'Confirmar endereço'
+                  }
+                </button>
+              </form>
+            )}
           </>
         )}
       </div>

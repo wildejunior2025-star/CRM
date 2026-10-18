@@ -18,7 +18,8 @@ export function salvarEnderecoAtivo(obj) {
 
 export function adicionarAoHistorico(obj) {
   const hist = getHistorico()
-  const existe = hist.findIndex(h => h.cep === obj.cep && h.numero === obj.numero)
+  // CEP + número + rua: rua achada pelo mapa às vezes vem sem CEP, e só CEP+número juntava endereços diferentes
+  const existe = hist.findIndex(h => h.cep === obj.cep && h.numero === obj.numero && (h.endereco ?? '') === (obj.endereco ?? ''))
   if (existe >= 0) hist.splice(existe, 1)
   hist.unshift(obj)
   localStorage.setItem(LS_HIST, JSON.stringify(hist.slice(0, 5)))
