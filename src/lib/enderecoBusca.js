@@ -72,6 +72,12 @@ async function buscarRuaNoEstado(uf, termo) {
   }).filter(r => r.logradouro && r.localidade)
 }
 
+// Região atendida hoje: a pessoa não cadastra nem indica endereço de fora dela.
+export const CIDADES_ATENDIDAS = ['Natal', 'São Gonçalo do Amarante']
+export const BBOX_ATENDIDO = [-35.45, -6.00, -35.10, -5.65]
+const normCidade = t => String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+export const cidadeAtendida = c => CIDADES_ATENDIDAS.some(x => normCidade(x) === normCidade(c))
+
 // Photon (busca do OpenStreetMap feita pra autocomplete): acha rua mesmo com o nome parcial e
 // traz as ruas que o ViaCEP não tem. `bbox` = [oeste, sul, leste, norte] limita a região.
 async function buscarRuaPhoton(uf, termo, bbox) {

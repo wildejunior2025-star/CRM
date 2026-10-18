@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { UFS, buscarRuas, geocodeRua, geocodeCidade } from '../lib/enderecoBusca'
+import { UFS, CIDADES_ATENDIDAS, BBOX_ATENDIDO, cidadeAtendida, buscarRuas, geocodeRua, geocodeCidade } from '../lib/enderecoBusca'
 import MapaPinoEndereco from './MapaPinoEndereco'
 import {
   LS_HIST,
@@ -87,7 +87,6 @@ export default function ModalEndereco({ onClose, onSalvo }) {
         .select('cep, endereco, numero, bairro, cidade, estado')
         .eq('id', user.id)
         .maybeSingle()
-      if (data?.estado && UFS.includes(data.estado)) setUf(data.estado)
       if (data?.cidade) setCidadeBase(data.cidade)
       if (data && (data.cep || data.cidade)) {
         const endBanco = {
@@ -122,7 +121,8 @@ export default function ModalEndereco({ onClose, onSalvo }) {
     setBuscando(true)
     const t = setTimeout(async () => {
       try {
-        const lista = await buscarRuas({ termo, uf, cidades: [cidadeBase] })
+        const lista = (await buscarRuas({ termo, uf, cidades: CIDADES_ATENDIDAS, bbox: BBOX_ATENDIDO }))
+          .filter(r => cidadeAtendida(r.localidade))
         if (!vivo) return
         setSugestoes(lista)
         setNaoAchou(lista.length === 0)
@@ -383,18 +383,6 @@ export default function ModalEndereco({ onClose, onSalvo }) {
             {/* ── Passo 1: a rua ── */}
             {passo === 1 && (
               <div className="ph-modal-form">
-                <div className="ph-modal-field">
-                  <label className="ph-modal-label" htmlFor="modal-uf">Estado</label>
-                  <select
-                    id="modal-uf"
-                    className="ph-modal-input"
-                    value={uf}
-                    onChange={e => { setUf(e.target.value); trocarRua() }}
-                  >
-                    {UFS.map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
-                </div>
-
                 <div className="ph-modal-field" style={{ position: 'relative' }}>
                   <label className="ph-modal-label" htmlFor="modal-rua">
                     Nome da rua <span className="ph-modal-required">*</span>
