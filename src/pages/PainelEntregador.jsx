@@ -5,7 +5,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { separarItem } from '../lib/itensPedido'
 import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma, textoPagamento } from '../lib/pagamentoPartes'
-import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto, temValorDigitado } from '../lib/descontoEntrega'
+import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto, temValorDigitado, rotuloValorEntregador } from '../lib/descontoEntrega'
 
 // Cada aba tem seu endereço (/entregas?aba=minhas). O motoqueiro sai pro Waze,
 // pro iFood, atende o telefone — e quando volta o celular já descarregou a
@@ -902,6 +902,102 @@ function btnFila(cor) {
 }
 
 // ── Tela do entregador ──────────────────────────────────────
+// Janela com a corrida completa: abre ao tocar num cartão do Histórico. Mostra o endereço, quanto o
+// motoboy recebe (e de onde veio o valor), o pagamento, os itens e se já foi pago.
+function DetalheCorrida({ pedido: p, descontos, empresa, onFechar }) {
+  const ganho = ganhoDaCorrida(descontos, p)
+  const desc = descontoDoPedido(descontos, p)
+  const rotulo = rotuloValorEntregador(p)
+  const itens = Array.isArray(p.itens) ? p.itens : []
+  const linha = { display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13.5, padding: '5px 0' }
+  const titulo = { fontSize: 11.5, fontWeight: 800, letterSpacing: '.04em', color: 'var(--text-muted)', margin: '14px 0 4px' }
+  const rua = [p.endereco_rua, p.endereco_numero].filter(Boolean).join(', ')
+  const bairro = [p.endereco_bairro, p.endereco_cidade].filter(Boolean).join(', ')
+  return (
+    <div onClick={onFechar} style={{
+      position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,.6)',
+      display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: '100%', maxWidth: 560, maxHeight: '90dvh', overflowY: 'auto',
+        background: 'var(--surface, #16161f)', color: 'var(--text)', borderRadius: '18px 18px 0 0',
+        padding: '18px 18px calc(20px + env(safe-area-inset-bottom, 0px))',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>
+              {p.origem === 'ifood' && p.ifood_display_id
+                ? <>iFood #{p.ifood_display_id} <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>#{p.numero_pedido}</span></>
+                : <>Pedido #{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</>}
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+              {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+            </div>
+          </div>
+          {p.entregador_pago
+            ? <span style={{ fontSize: 12, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '4px 10px', borderRadius: 20 }}>✓ Pago</span>
+            : <span style={{ fontSize: 12, fontWeight: 800, color: '#f59e0b', background: 'rgba(245,158,11,.14)', padding: '4px 10px', borderRadius: 20 }}>A receber</span>}
+        </div>
+
+        <div style={titulo}>CLIENTE</div>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>{p.cliente_nome || 'Cliente'}</div>
+
+        <div style={titulo}>ENDEREÇO</div>
+        <div style={{ fontSize: 14.5, fontWeight: 600 }}>{rua || '—'}</div>
+        {bairro && <div style={{ fontSize: 13.5, color: 'var(--text-muted)' }}>{bairro}</div>}
+        {p.endereco_complemento && <div style={{ fontSize: 13.5, fontWeight: 800, color: '#7c3aed', marginTop: 3 }}>🏠 {p.endereco_complemento}</div>}
+        {String(p.observacoes || '').trim() && (
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b', marginTop: 6 }}>📝 {p.observacoes}</div>
+        )}
+        <a href={mapsUrl(p, empresa)} target="_blank" rel="noopener noreferrer"
+          style={{ display: 'inline-block', marginTop: 8, fontSize: 13, fontWeight: 800, color: '#7c3aed' }}>
+          🗺️ Ver no mapa
+        </a>
+
+        <div style={titulo}>QUANTO VOCÊ RECEBE</div>
+        <div style={{ ...linha, fontSize: 18, fontWeight: 800 }}>
+          <span>Esta corrida</span><span style={{ color: '#16a34a' }}>{fmt(ganho)}</span>
+        </div>
+        {rotulo ? (
+          <div style={{ fontSize: 12.5, color: rotulo.editado ? '#f59e0b' : 'var(--text-muted)', fontWeight: rotulo.editado ? 700 : 500 }}>
+            {rotulo.texto}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+            Taxa {fmt(p.taxa_entrega)}{desc > 0 ? ` − ${rotuloDoDesconto(p)} ${fmt(desc)}` : ''}
+          </div>
+        )}
+        {p.entregador_pago && p.entregador_pago_em && (
+          <div style={{ fontSize: 12.5, color: '#16a34a', marginTop: 4 }}>
+            🧾 Pago em {new Date(p.entregador_pago_em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+          </div>
+        )}
+
+        <div style={titulo}>PAGAMENTO DO CLIENTE</div>
+        <div style={linha}>
+          <span>{p.forma_pagamento ? (ehDividido(p) ? textoPagamento(p) : p.forma_pagamento) : '—'}</span>
+          <strong>{fmt(p.total)}</strong>
+        </div>
+
+        {itens.length > 0 && (
+          <>
+            <div style={titulo}>ITENS</div>
+            {itens.map((it, i) => (
+              <div key={i} style={linha}>
+                <span>{it.quantidade ?? it.qtd ?? 1}× {it.nome}</span>
+                {it.subtotal != null && <span style={{ color: 'var(--text-muted)' }}>{fmt(it.subtotal)}</span>}
+              </div>
+            ))}
+          </>
+        )}
+
+        <button type="button" onClick={onFechar}
+          style={{ ...btnPrimario('#7c3aed'), marginTop: 18 }}>Fechar</button>
+      </div>
+    </div>
+  )
+}
+
 export default function PainelEntregador() {
   const { user, profile, empresa, logout } = useAuth()
   const [pedidos, setPedidos] = useState([])
@@ -933,6 +1029,7 @@ export default function PainelEntregador() {
   const [busca, setBusca] = useState('') // filtra por nº/código/cliente/endereço
   const [historico, setHistorico] = useState([])
   const [histLoading, setHistLoading] = useState(false)
+  const [detalheHist, setDetalheHist] = useState(null) // corrida aberta (toque no cartão do histórico)
   const [periodoHist, setPeriodoHist] = useState('tudo') // filtro de data do histórico
   const [, setTick] = useState(0) // atualiza "há X min" / atraso a cada 30s
   // Fila (E4): null = ainda não carregou. { fila_ativa, online, pausado, na_vez, posicao, total_fila }
@@ -1297,7 +1394,7 @@ export default function PainelEntregador() {
     setHistLoading(true)
     supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, valor_entregador_origem, valor_entregador_calculado, forma_pagamento, pagamentos, origem, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, valor_entregador_origem, valor_entregador_calculado, forma_pagamento, pagamentos, origem, subtotal, itens, observacoes, ifood_display_id, endereco_complemento, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
       .eq('entregador_id', user.id)
       .eq('status', 'entregue')
       .order('created_at', { ascending: false })
@@ -1684,7 +1781,10 @@ export default function PainelEntregador() {
                   return Object.entries(g)
                 }
                 const Card = (p) => (
-                  <div key={p.id} style={{ background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)', borderRadius: 12, padding: 14 }}>
+                  <div key={p.id} role="button" tabIndex={0}
+                    onClick={() => setDetalheHist(p)}
+                    onKeyDown={e => { if (e.key === 'Enter') setDetalheHist(p) }}
+                    style={{ background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)', borderRadius: 12, padding: 14, cursor: 'pointer' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontWeight: 800, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1701,6 +1801,7 @@ export default function PainelEntregador() {
                       {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{p.forma_pagamento ? ` · ${ehDividido(p) ? textoPagamento(p) : p.forma_pagamento}` : ''}
                       {descontoDoPedido(descontos, p) > 0 && <span style={{ color: '#f59e0b' }}> · {rotuloDoDesconto(p)} −{fmt(descontoDoPedido(descontos, p))}</span>}
                     </div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: '#7c3aed', marginTop: 6 }}>Ver detalhes →</div>
                   </div>
                 )
                 return (
@@ -1765,6 +1866,11 @@ export default function PainelEntregador() {
           )
         )}
       </main>
+
+      {detalheHist && (
+        <DetalheCorrida pedido={detalheHist} descontos={descontosEntrega} empresa={empresa}
+          onFechar={() => setDetalheHist(null)} />
+      )}
     </div>
   )
 }
