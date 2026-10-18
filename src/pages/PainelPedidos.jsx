@@ -12,6 +12,7 @@ import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarContaPresencialHt
 import { rotuloComanda, agruparItensComanda } from '../lib/comanda'
 import { acharPorCodigo, combinaCodigo, ouvirBipada } from '../lib/codigoBarras'
 import { useChamados } from '../hooks/useChamados'
+import { useConfirmar } from '../hooks/useConfirmar'
 import { calcularTaxa } from '../lib/taxaServico'
 import { fwcFetch, explicaErroFwc } from '../lib/appFwc'
 import 'leaflet/dist/leaflet.css'   // mapa da posição do entregador (mig 0245)
@@ -6935,6 +6936,7 @@ export default function PainelPedidos() {
   const [canceladosHoje, setCanceladosHoje] = useState([])
   // Entregadores — estatísticas e histórico por motoboy
   const [entregasConcluidas, setEntregasConcluidas] = useState([])
+  const [confirmar, avisoConfirmar] = useConfirmar()
   const [entregadorSel, setEntregadorSel] = useState(null)
   // Filtro por forma de recebimento no acerto do entregador (null = tudo).
   // Fica aqui fora porque o painel inteiro remonta a cada atualização da lista
@@ -11304,11 +11306,21 @@ export default function PainelPedidos() {
                           return (
                             <button key={lab} type="button" style={{ ...base, cursor: 'pointer', font: 'inherit' }}
                               title={`Marcar as ${ids.length} corridas como pagas`}
-                              onClick={() => {
-                                const msg = acerto >= 0
-                                  ? `Pagar ${fmt(Math.abs(acerto))} a ${ent?.nome || 'ele'} e marcar as ${ids.length} corridas como pagas?`
-                                  : `${ent?.nome || 'Ele'} devolve ${fmt(Math.abs(acerto))} e as ${ids.length} corridas ficam pagas. Confirma?`
-                                if (window.confirm(msg)) pagarCorridas(ids)
+                              onClick={async () => {
+                                const quem = ent?.nome || 'o entregador'
+                                const ok = await confirmar({
+                                  titulo: acerto >= 0
+                                    ? `Pagar ${fmt(Math.abs(acerto))} a ${quem}?`
+                                    : `${quem} devolve ${fmt(Math.abs(acerto))}?`,
+                                  texto: `As ${ids.length} corridas de hoje ficam marcadas como pagas.`,
+                                  itens: [
+                                    `Taxa das corridas: ${fmt(somaTaxa(pendentes))}`,
+                                    `Dinheiro que ele já tem na mão: ${fmt(emDinheiro)}`,
+                                  ],
+                                  aviso: 'Isso NÃO tem como desfazer. Se marcar errado, a dívida some e não dá pra voltar atrás.',
+                                  textoOk: acerto >= 0 ? 'Sim, paguei' : 'Sim, recebi',
+                                })
+                                if (ok) pagarCorridas(ids)
                               }}>
                               {dentro}
                             </button>
@@ -11765,6 +11777,9 @@ export default function PainelPedidos() {
         </div>
       )}
 
+      {/* Confirmação no visual do sistema (useConfirmar). Fica na raiz pra
+          aparecer por cima de qualquer painel aberto. */}
+      {avisoConfirmar}
     </div>
   )
 }
