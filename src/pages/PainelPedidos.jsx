@@ -11170,10 +11170,14 @@ export default function PainelPedidos() {
                   return { pago: false, label: n + (ehIfood ? ' (via iFood)' : ' (maquininha)') }
                 }
                 if (f === 'vale') return { pago: false, label: 'Vale' + (ehIfood ? ' (via iFood)' : '') }
-                if (f === 'pix') return (p.pix_status === 'pago' || p.mp_payment_status === 'approved') ? { pago: true, label: 'PIX pago' } : { pago: false, label: 'PIX não confirmado' }
-                // PIX na entrega cai direto na conta da loja — o motoqueiro não
-                // fica com nada na mão, então não entra no repasse.
-                if (f === 'pix_entrega') return { pago: true, label: 'PIX na entrega (direto pra loja)' }
+                if (f === 'pix') return (p.pix_status === 'pago' || p.mp_payment_status === 'approved') ? { pago: true, label: 'PIX pago' } : { pago: false, label: 'PIX na entrega' }
+                // PIX na entrega NÃO é pedido pago: o cliente só transfere quando
+                // o motoqueiro chega, e é o motoqueiro que tem que ver o
+                // comprovante antes de soltar a sacola. Marcar como "pago" aqui
+                // dava a entender que não havia nada a fazer na porta.
+                // O dinheiro cai direto na conta da loja — por isso ele aparece
+                // numa linha própria do acerto, fora do dinheiro vivo.
+                if (f === 'pix_entrega') return { pago: false, label: 'PIX na entrega' }
                 // iFood com forma não mapeada ("outro") = cobrar na entrega, não "pago".
                 if (ehIfood && f !== 'online') return { pago: false, label: (f || 'via iFood') + ' (via iFood)' }
                 return { pago: true, label: ehIfood ? 'Pago no iFood' : (f || 'Pago') }
@@ -11267,7 +11271,8 @@ export default function PainelPedidos() {
                     const soma = ps => ps.reduce((s, p) => s + (Number(p.total) || 0), 0)
                     const dinheiro = soma(naoPago.filter(p => p.forma_pagamento === 'dinheiro'))
                     const maquina = soma(naoPago.filter(p => ['cartao', 'cartão', 'credito', 'debito'].includes(p.forma_pagamento)))
-                    const outros = soma(naoPago) - dinheiro - maquina
+                    const pix = soma(naoPago.filter(p => ['pix', 'pix_entrega'].includes(p.forma_pagamento)))
+                    const outros = soma(naoPago) - dinheiro - maquina - pix
                     if (!naoPago.length) return null
                     // A taxa dele sai do dinheiro vivo: ele entrega o que sobra.
                     const aReceber = somaTaxa(pendentes)
@@ -11282,6 +11287,7 @@ export default function PainelPedidos() {
                         <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text)' }}>🧾 Acerto do dia — o que ele recebeu na rua</div>
                         {linha('💵 Dinheiro', dinheiro)}
                         {maquina > 0 && linha('💳 Maquineta / cartão', maquina)}
+                        {pix > 0 && linha('📲 PIX na entrega', pix)}
                         {outros > 0.004 && linha('🎫 Outras formas', outros)}
                         <div style={{ borderTop: '1px solid rgba(14,165,233,.35)', margin: '3px 0' }} />
                         {linha('Taxa dele (a receber)', -aReceber, '#f59e0b')}
@@ -11291,9 +11297,11 @@ export default function PainelPedidos() {
                           </span>
                           <strong style={{ fontSize: 16, color: entrega >= 0 ? '#0ea5e9' : '#16a34a' }}>{fmt(Math.abs(entrega))}</strong>
                         </div>
-                        {maquina > 0 && (
+                        {(maquina > 0 || pix > 0) && (
                           <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                            A maquineta não entra na conta do dinheiro — esse valor não passa pela mão dele.
+                            {pix > 0 && 'O PIX cai direto na conta da loja. '}
+                            {maquina > 0 && 'A maquineta também não passa pela mão dele. '}
+                            Por isso só o dinheiro entra na conta do que ele devolve.
                           </div>
                         )}
                       </div>
