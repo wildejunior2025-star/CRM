@@ -11210,9 +11210,9 @@ export default function PainelPedidos() {
                 return (
                 <div key={p.id} style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '9px 11px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <strong style={{ fontSize: 13, color: corTaxa }}
+                      <strong style={{ fontSize: 15, color: corTaxa }}
                         title={descontoDoPedido(descontos, p) > 0 ? `Taxa ${fmt(p.taxa_entrega)} − ${rotuloDoDesconto(p)} ${fmt(descontoDoPedido(descontos, p))}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
                       {!ehRota && (pago
                         ? <span style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '2px 8px', borderRadius: 20 }}>✓ Pago</span>
@@ -11222,7 +11222,7 @@ export default function PainelPedidos() {
                           </button>)}
                     </div>
                   </div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
                     {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
                     {descontoDoPedido(descontos, p) > 0 && <span style={{ color: '#f59e0b' }}> · {rotuloDoDesconto(p)} −{fmt(descontoDoPedido(descontos, p))}</span>}
                   </div>
@@ -11240,7 +11240,7 @@ export default function PainelPedidos() {
                     style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: 'var(--primary, #a78bfa)', cursor: 'pointer', fontSize: 13, fontWeight: 700, padding: 0 }}>
                     ← Todos os entregadores
                   </button>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{ent?.nome || 'Entregador'} <span style={{ fontSize: 12, fontWeight: 700, color: '#7c3aed' }}>· hoje</span></div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--text)' }}>{ent?.nome || 'Entregador'} <span style={{ fontSize: 12, fontWeight: 700, color: '#7c3aed' }}>· hoje</span></div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
                     Histórico completo (7/30 dias, tudo) em <b>Vendas → Entregadores</b>.
                   </div>
@@ -11255,34 +11255,68 @@ export default function PainelPedidos() {
                       const naoPago = concl.filter(p => !pagCliente(p).pago)
                       const soma = ps => ps.reduce((s, p) => s + (Number(p.total) || 0), 0)
                       const porBalde = b => soma(naoPago.filter(p => baldeDoPedido(p) === b))
+                      // ACERTO FINAL: a taxa que a loja deve MENOS o dinheiro que
+                      // ele já tem na mão. Era a conta que sobrava pra cabeça do
+                      // dono — ele via "a receber 108" e "em dinheiro 59" e tinha
+                      // que subtrair na hora de pagar.
+                      const emDinheiro = porBalde('dinheiro')
+                      const acerto = somaTaxa(pendentes) - emDinheiro
                       const cards = [
                         // Verde: e o que a LOJA deve pagar pro motoqueiro.
                         ['A receber', fmt(somaTaxa(pendentes)), '#16a34a', null],
                         ['Pago', fmt(somaTaxa(pagos)), 'var(--text-muted)', null],
-                        ['Em dinheiro', fmt(porBalde('dinheiro')), '#0ea5e9', 'dinheiro'],
+                        ['Em dinheiro', fmt(emDinheiro), '#0ea5e9', 'dinheiro'],
                         ['Maquineta', fmt(porBalde('maquina')), '#8b5cf6', 'maquina'],
                         ['PIX', fmt(porBalde('pix')), '#0891b2', 'pix'],
                         ['Em rota', rota.length, '#7c3aed', null],
                       ]
+                      if (pendentes.length > 0) {
+                        cards.push([
+                          acerto >= 0 ? 'Pagar a ele ✓' : 'Ele devolve ✓',
+                          fmt(Math.abs(acerto)),
+                          acerto >= 0 ? '#16a34a' : '#0ea5e9',
+                          '__acertar',
+                        ])
+                      }
                       const outros = porBalde('outros')
                       if (outros > 0.004) cards.splice(5, 0, ['Outras formas', fmt(outros), '#f59e0b', 'outros'])
                       return cards.map(([lab, val, cor, balde]) => {
                         const ativo = balde && filtroForma === balde
+                        const acertarAqui = balde === '__acertar'
                         const dentro = (
                           <>
-                            <div style={{ fontSize: 16, fontWeight: 800, color: cor }}>{val}</div>
-                            <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{lab}{ativo ? ' ✕' : ''}</div>
+                            <div style={{ fontSize: 20, fontWeight: 800, color: cor, lineHeight: 1.15 }}>{val}</div>
+                            <div style={{ fontSize: 12, color: acertarAqui ? cor : 'var(--text-muted)', fontWeight: acertarAqui ? 700 : 400, marginTop: 2 }}>{lab}{ativo ? ' ✕' : ''}</div>
                           </>
                         )
                         const base = {
-                          flex: '1 1 92px', textAlign: 'center', borderRadius: 10, padding: '8px 4px',
-                          border: `1px solid ${ativo ? cor : 'var(--border, #2a2a3a)'}`,
-                          background: ativo ? 'rgba(14,165,233,.14)' : 'transparent',
+                          flex: '1 1 110px', textAlign: 'center', borderRadius: 10, padding: '10px 6px',
+                          border: `${acertarAqui ? 2 : 1}px solid ${ativo || acertarAqui ? cor : 'var(--border, #2a2a3a)'}`,
+                          background: ativo ? 'rgba(14,165,233,.14)' : acertarAqui ? 'rgba(22,163,74,.10)' : 'transparent',
                         }
                         if (!balde) return <div key={lab} style={base}>{dentro}</div>
+                        // O card do acerto não filtra: ele FECHA a conta do dia.
+                        // Com confirmação porque marca tudo de uma vez e não tem
+                        // desfazer — um toque errado no meio do movimento apagaria
+                        // a dívida inteira sem ninguém ver.
+                        if (acertarAqui) {
+                          const ids = pendentes.map(p => p.id)
+                          return (
+                            <button key={lab} type="button" style={{ ...base, cursor: 'pointer', font: 'inherit' }}
+                              title={`Marcar as ${ids.length} corridas como pagas`}
+                              onClick={() => {
+                                const msg = acerto >= 0
+                                  ? `Pagar ${fmt(Math.abs(acerto))} a ${ent?.nome || 'ele'} e marcar as ${ids.length} corridas como pagas?`
+                                  : `${ent?.nome || 'Ele'} devolve ${fmt(Math.abs(acerto))} e as ${ids.length} corridas ficam pagas. Confirma?`
+                                if (window.confirm(msg)) pagarCorridas(ids)
+                              }}>
+                              {dentro}
+                            </button>
+                          )
+                        }
                         return (
                           <button key={lab} type="button" style={{ ...base, cursor: 'pointer', font: 'inherit' }}
-                            title={ativo ? 'Mostrar todas de novo' : `Ver so as corridas de ${lab}`}
+                            title={ativo ? 'Mostrar todas de novo' : `Ver só as corridas de ${lab}`}
                             onClick={() => setFiltroForma(ativo ? null : balde)}>
                             {dentro}
                           </button>
@@ -11320,7 +11354,7 @@ export default function PainelPedidos() {
                   )}
 
                   {/* A PAGAR (pendentes por data) */}
-                  <div style={{ fontSize: 13, fontWeight: 800, color: '#f59e0b', marginTop: 6 }}>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: '#f59e0b', marginTop: 6 }}>
                     A pagar · {fmt(somaTaxa(filtrar(pendentes)))}
                   </div>
                   {filtrar(pendentes).length === 0
@@ -11328,7 +11362,7 @@ export default function PainelPedidos() {
                     : agrupaPorData(filtrar(pendentes)).map(([data, ps]) => (
                       <div key={data} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
-                          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)' }}>{data} · {ps.length} corrida{ps.length > 1 ? 's' : ''} · {fmt(somaTaxa(ps))}</span>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>{data} · {ps.length} corrida{ps.length > 1 ? 's' : ''} · {fmt(somaTaxa(ps))}</span>
                           <button type="button" onClick={() => pagarCorridas(ps.map(p => p.id))}
                             style={{ fontSize: 11, fontWeight: 800, color: '#fff', background: '#16a34a', border: 'none', borderRadius: 20, padding: '3px 12px', cursor: 'pointer' }}>
                             Pagar todas
@@ -11339,14 +11373,14 @@ export default function PainelPedidos() {
                     ))}
 
                   {/* PAGAS (por data) */}
-                  <div style={{ fontSize: 13, fontWeight: 800, color: '#16a34a', marginTop: 10 }}>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: '#16a34a', marginTop: 10 }}>
                     Pagas · {fmt(somaTaxa(filtrar(pagos)))}
                   </div>
                   {filtrar(pagos).length === 0
                     ? <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{filtroForma ? 'Nenhuma corrida paga nessa forma.' : 'Nenhuma corrida paga ainda.'}</div>
                     : agrupaPorData(filtrar(pagos)).map(([data, ps]) => (
                       <div key={data} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)', marginTop: 2 }}>{data} · {ps.length} corrida{ps.length > 1 ? 's' : ''} · {fmt(somaTaxa(ps))}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)', marginTop: 2 }}>{data} · {ps.length} corrida{ps.length > 1 ? 's' : ''} · {fmt(somaTaxa(ps))}</div>
                         {ps.map(p => OrderRow(p, { pago: true }))}
                       </div>
                     ))}
