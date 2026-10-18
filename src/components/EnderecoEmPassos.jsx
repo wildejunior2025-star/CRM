@@ -11,6 +11,7 @@ import '../pages/PortalHome.css' // .ph-end-* (lista de ruas, mapa, passos)
 // Só atendemos a região de Natal: a pessoa não indica gente de outra cidade.
 const UF = 'RN'
 const CIDADES = ['Natal', 'São Gonçalo do Amarante']
+const BBOX = [-35.45, -6.00, -35.10, -5.65] // Natal + São Gonçalo do Amarante + arredores
 const norm = t => String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 const cidadePermitida = c => CIDADES.some(x => norm(x) === norm(c))
 
@@ -41,7 +42,7 @@ export default function EnderecoEmPassos({ onVoltar, onConcluir }) {
     setBuscando(true)
     const t = setTimeout(async () => {
       try {
-        const lista = (await buscarRuas({ termo, uf, cidades: CIDADES })).filter(r => cidadePermitida(r.localidade))
+        const lista = (await buscarRuas({ termo, uf, cidades: CIDADES, bbox: BBOX })).filter(r => cidadePermitida(r.localidade))
         if (!vivo) return
         setSugestoes(lista)
         setNaoAchou(lista.length === 0)

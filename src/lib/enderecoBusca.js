@@ -72,9 +72,28 @@ async function buscarRuaNoEstado(uf, termo) {
   }).filter(r => r.logradouro && r.localidade)
 }
 
+// Photon (busca do OpenStreetMap feita pra autocomplete): acha rua mesmo com o nome parcial e
+// traz as ruas que o ViaCEP não tem. `bbox` = [oeste, sul, leste, norte] limita a região.
+async function buscarRuaPhoton(uf, termo, bbox) {
+  if (!termo || termo.length < 3 || !bbox) return []
+  const params = new URLSearchParams({ q: termo, limit: '15', lang: 'default', bbox: bbox.join(',') })
+  const d = await buscarJson(`https://photon.komoot.io/api/?${params}`, 6000)
+  const itens = Array.isArray(d?.features) ? d.features : []
+  return itens.map(f => f.properties ?? {})
+    .filter(p => p.osm_key === 'highway' && p.name)
+    .map(p => ({
+      logradouro: p.name,
+      bairro:     p.district ?? p.locality ?? '',
+      localidade: p.city ?? p.town ?? p.county ?? '',
+      uf,
+      cep:        String(p.postcode ?? '').replace(/[^0-9]/g, ''),
+    }))
+    .filter(r => r.localidade)
+}
+
 // Sugestões de rua pelo nome. `cidades` = cidades conhecidas do cliente (opcional);
 // sem elas, procura só no estado inteiro.
-export async function buscarRuas({ termo, uf, cidades = [] }) {
+export async function buscarRuas({ termo, uf, cidades = [], bbox = null }) {
   const t = String(termo ?? '').trim()
   if (t.length < 3 || !uf) return []
   // A busca do ViaCEP é literal: "Rua Eliane Barros" não acha "Rua Doutora Eliane
@@ -97,6 +116,7 @@ export async function buscarRuas({ termo, uf, cidades = [] }) {
   if (!d.some(x => ruaCasouInteira(x.logradouro, semTipo || t))) {
     d = [...d, ...(await buscarRuaNoEstado(uf, semTipo || t))]
   }
+  if (bbox) d = [...d, ...(await buscarRuaPhoton(uf, semTipo || t, bbox))]
   // Sem repetir a mesma rua em CEPs diferentes (numa avenida longa o ViaCEP devolve dezenas).
   const vistas = new Set()
   const lista = d.filter(x => {
@@ -106,7 +126,7 @@ export async function buscarRuas({ termo, uf, cidades = [] }) {
     return !!x.logradouro
   })
   lista.sort((a, b) => pontosDaRua(b.logradouro, semTipo || t) - pontosDaRua(a.logradouro, semTipo || t))
-  return lista.slice(0, 8)
+  return lista.slice(0, bbox ? 12 : 8)
 }
 
 // Ponto da RUA no mapa (o número vem depois). O Nominatim quase nunca diz "não achei":
