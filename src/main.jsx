@@ -142,8 +142,13 @@ function mostrarAvisoAtualizacao(motivo = 'impressora') {
 
   const barra = document.createElement('div')
   barra.id = 'fwc-update-bar'
+  // No celular a tela vai até atrás da barra do sistema: sem contar a área segura o botão
+  // "Atualizar agora" ficava por baixo dela, impossível de tocar. No app do cliente ainda
+  // sobe acima do menu de baixo (60px).
+  const temMenuInferior = !!document.querySelector('.portal-bottom-nav')
   Object.assign(barra.style, {
-    position: 'fixed', left: '12px', right: '12px', bottom: '12px', zIndex: '99999',
+    position: 'fixed', left: '12px', right: '12px', zIndex: '99999',
+    bottom: `calc(${temMenuInferior ? 72 : 12}px + env(safe-area-inset-bottom, 0px))`,
     display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap',
     padding: '12px 14px', borderRadius: '12px',
     background: '#1f1b2e', color: '#fff',
