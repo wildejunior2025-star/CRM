@@ -11225,9 +11225,21 @@ export default function PainelPedidos() {
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
                     Histórico completo (7/30 dias, tudo) em <b>Vendas → Entregadores</b>.
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    {[['A receber', fmt(somaTaxa(pendentes)), '#f59e0b'], ['Pago', fmt(somaTaxa(pagos)), '#16a34a'], ['Em rota', rota.length, '#7c3aed']].map(([lab, val, cor]) => (
-                      <div key={lab} style={{ flex: 1, textAlign: 'center', border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '8px 4px' }}>
+                  {/* `flexWrap` porque virou o quarto card: em tela estreita eles
+                      descem pra segunda linha em vez de espremer o número. */}
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {[
+                      ['A receber', fmt(somaTaxa(pendentes)), '#f59e0b'],
+                      ['Pago', fmt(somaTaxa(pagos)), '#16a34a'],
+                      // Dinheiro vivo que ele pegou do cliente e tem que devolver.
+                      // Fica aqui em cima porque é a pergunta do fim do turno, e
+                      // antes só dava pra saber somando pedido por pedido.
+                      ['Em dinheiro', fmt(concl
+                        .filter(p => !pagCliente(p).pago && p.forma_pagamento === 'dinheiro')
+                        .reduce((s, p) => s + (Number(p.total) || 0), 0)), '#0ea5e9'],
+                      ['Em rota', rota.length, '#7c3aed'],
+                    ].map(([lab, val, cor]) => (
+                      <div key={lab} style={{ flex: '1 1 90px', textAlign: 'center', border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '8px 4px' }}>
                         <div style={{ fontSize: 16, fontWeight: 800, color: cor }}>{val}</div>
                         <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{lab}</div>
                       </div>
@@ -11244,6 +11256,49 @@ export default function PainelPedidos() {
                       </div>
                     ) : null
                   ))}
+
+                  {/* ACERTO DO DIA — o que ele pegou na rua e tem que devolver.
+                      A tela já dizia quanto a LOJA deve a ele, mas não o
+                      contrário: o dinheiro que ele recebeu na mão do cliente.
+                      No fim do expediente isso era conferido somando pedido por
+                      pedido no papel. */}
+                  {(() => {
+                    const naoPago = concl.filter(p => !pagCliente(p).pago)
+                    const soma = ps => ps.reduce((s, p) => s + (Number(p.total) || 0), 0)
+                    const dinheiro = soma(naoPago.filter(p => p.forma_pagamento === 'dinheiro'))
+                    const maquina = soma(naoPago.filter(p => ['cartao', 'cartão', 'credito', 'debito'].includes(p.forma_pagamento)))
+                    const outros = soma(naoPago) - dinheiro - maquina
+                    if (!naoPago.length) return null
+                    // A taxa dele sai do dinheiro vivo: ele entrega o que sobra.
+                    const aReceber = somaTaxa(pendentes)
+                    const entrega = dinheiro - aReceber
+                    const linha = (rot, val, cor) => (
+                      <div key={rot} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                        <span>{rot}</span><strong style={{ color: cor || 'var(--text)' }}>{fmt(val)}</strong>
+                      </div>
+                    )
+                    return (
+                      <div style={{ border: '1.5px solid #0ea5e9', background: 'rgba(14,165,233,.08)', borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text)' }}>🧾 Acerto do dia — o que ele recebeu na rua</div>
+                        {linha('💵 Dinheiro', dinheiro)}
+                        {maquina > 0 && linha('💳 Maquineta / cartão', maquina)}
+                        {outros > 0.004 && linha('🎫 Outras formas', outros)}
+                        <div style={{ borderTop: '1px solid rgba(14,165,233,.35)', margin: '3px 0' }} />
+                        {linha('Taxa dele (a receber)', -aReceber, '#f59e0b')}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text)' }}>
+                            {entrega >= 0 ? '= Ele entrega em dinheiro' : '= A loja paga a ele'}
+                          </span>
+                          <strong style={{ fontSize: 16, color: entrega >= 0 ? '#0ea5e9' : '#16a34a' }}>{fmt(Math.abs(entrega))}</strong>
+                        </div>
+                        {maquina > 0 && (
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                            A maquineta não entra na conta do dinheiro — esse valor não passa pela mão dele.
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
 
                   {rota.length > 0 && (
                     <>
