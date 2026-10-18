@@ -11364,9 +11364,12 @@ export default function PainelPedidos() {
               const OrderRow = (p, { pago = false, rota: ehRota = false } = {}) => {
                 const pgc = pagCliente(p)
                 // Taxa a pagar ao motoqueiro: laranja enquanto pendente, verde quando pago.
-                const corTaxa = ehRota ? '#7c3aed' : (pago ? '#16a34a' : '#f59e0b')
+                // Taxa EDITADA pelo motoboy (mig 0345): valor e aviso em vermelho pra dono ver de longe.
+                const rv = rotuloValorEntregador(p)
+                const editada = !!rv?.editado
+                const corTaxa = editada ? '#dc2626' : ehRota ? '#7c3aed' : (pago ? '#16a34a' : '#f59e0b')
                 return (
-                <div key={p.id} style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '9px 11px' }}>
+                <div key={p.id} style={{ border: editada ? '1.5px solid #dc2626' : '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '9px 11px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -11383,7 +11386,7 @@ export default function PainelPedidos() {
                   <div style={{ fontSize: 14, color: 'var(--text-muted)', marginTop: 3 }}>
                     {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
                     {descontoDoPedido(descontos, p) > 0 && <span style={{ color: '#f59e0b' }}> · {rotuloDoDesconto(p)} −{fmt(descontoDoPedido(descontos, p))}</span>}
-                    {(() => { const r = rotuloValorEntregador(p); return r && <span style={{ color: r.editado ? '#f59e0b' : 'var(--text-muted)', fontWeight: r.editado ? 800 : 600 }}> · {r.texto}</span> })()}
+                    {rv && <span style={{ color: editada ? '#dc2626' : 'var(--text-muted)', fontWeight: editada ? 800 : 600 }}> · {rv.texto}</span>}
                   </div>
                   {/* Valor do pedido: laranja = cobrar na entrega; verde = já pago */}
                   <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: 'flex', justifyContent: 'space-between', gap: 8, color: pgc.pago ? '#16a34a' : '#f59e0b' }}>

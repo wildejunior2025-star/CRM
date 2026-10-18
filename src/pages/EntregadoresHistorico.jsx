@@ -664,15 +664,19 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
     const cb = cobranca(p)
     const naConta = cb.tipo === 'conta'
     const aberta = p.status !== 'entregue'
+    // Taxa EDITADA pelo motoboy (mig 0345): valor e aviso em vermelho pro dono ver de longe.
+    const rv = rotuloValorEntregador(p)
+    const editada = !!rv?.editado
     return (
-      <div key={p.id} className={`ent-corrida ${aberta ? 'ent-corrida--aberta' : ''}`}>
+      <div key={p.id} className={`ent-corrida ${aberta ? 'ent-corrida--aberta' : ''}`}
+        style={editada ? { border: '1.5px solid #dc2626' } : undefined}>
         <div className="ent-corrida-top">
           <span className="ent-corrida-num">
             #{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}
             {aberta && <span className="ent-chip ent-chip--rota" style={{ marginLeft: 6 }}>{STATUS_LABEL[p.status] || p.status}</span>}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <strong style={{ fontSize: 13 }} className={pago ? 'c-ok' : 'c-warn'}>{fmt(ganho(p))}</strong>
+            <strong style={{ fontSize: 13, ...(editada ? { color: '#dc2626' } : {}) }} className={editada ? undefined : (pago ? 'c-ok' : 'c-warn')}>{fmt(ganho(p))}</strong>
             {pago
               ? <button type="button" className="ent-chip ent-chip--ok" style={{ border: 'none', cursor: 'pointer' }}
                   title="Desfazer pagamento" disabled={salvando}
@@ -691,7 +695,7 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
         <div className="ent-corrida-meta">
           {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
           {descontoDoPedido(descontos, p) > 0 ? ` · ${rotuloDoDesconto(p)} −${fmt(descontoDoPedido(descontos, p))}` : ''}
-          {(() => { const r = rotuloValorEntregador(p); return r && <span style={r.editado ? { color: '#f59e0b', fontWeight: 800 } : undefined}> · {r.texto}</span> })()}
+          {rv && <span style={editada ? { color: '#dc2626', fontWeight: 800 } : undefined}> · {rv.texto}</span>}
         </div>
         {pago && p.entregador_pago_em && (
           <div className="ent-corrida-meta c-ok">🧾 Pago em {dataHora(p.entregador_pago_em)}</div>
