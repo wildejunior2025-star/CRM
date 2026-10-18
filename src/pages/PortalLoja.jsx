@@ -178,6 +178,7 @@ export default function PortalLoja() {
 
   const [empresa, setEmpresa] = useState(null)
   const [produtos, setProdutos] = useState([])
+  const [catOrdem, setCatOrdem] = useState({}) // { nomeCategoria: ordem do cardápio }
   const [totalProdutos, setTotalProdutos] = useState(0)
   const [carregandoMais, setCarregandoMais] = useState(false)
   const [carrinho, setCarrinho] = useState(() => {
@@ -263,15 +264,19 @@ export default function PortalLoja() {
       const resolvedId = empRes.data?.id ?? empresaId
       const prodRes = await supabase
         .from('estoque_catalogo').select('*', { count: 'exact' })
-        .eq('empresa_id', resolvedId).order('categoria').order('nome').range(0, 199)
+        .eq('empresa_id', resolvedId).order('categoria').order('ordem', { nullsFirst: false }).order('nome').range(0, 199)
       if (prodRes.error) setError(prodRes.error.message)
-      // Categoria "só no salão" (mig 0328) não aparece pro cliente.
-      const { data: catsOcultas } = await supabase
-        .from('categorias').select('nome').eq('empresa_id', resolvedId).eq('oculta_online', true)
-      categoriasOcultas.current = new Set((catsOcultas ?? []).map(c => c.nome))
+      // Categoria "só no salão" (mig 0328) não aparece pro cliente. A ordem das
+      // categorias é a que o dono montou no cardápio (igual à Loja Online).
+      const { data: catsLoja } = await supabase
+        .from('categorias').select('nome, ordem, oculta_online').eq('empresa_id', resolvedId)
+      categoriasOcultas.current = new Set((catsLoja ?? []).filter(c => c.oculta_online).map(c => c.nome))
+      const ordemMap = {}
+      for (const c of (catsLoja ?? [])) ordemMap[c.nome] = c.ordem ?? 999
+      setCatOrdem(ordemMap)
       setEmpresa(empRes.data ?? null)
       setLidos((prodRes.data ?? []).length)
-      setProdutos((prodRes.data ?? []).filter(p => !categoriasOcultas.current.has(p.categoria)))
+      setProdutos((prodRes.data ?? []).filter(p => !categoriasOcultas.current.has(p.categoria) && p.disponivel_delivery !== false))
       setTotalProdutos(prodRes.count ?? 0)
       setLoading(false)
     }
@@ -366,23 +371,30 @@ export default function PortalLoja() {
       .from('estoque_catalogo')
       .select('*')
       .eq('empresa_id', empresa.id)
-      .order('categoria').order('nome')
+      .order('categoria').order('ordem', { nullsFirst: false }).order('nome')
       .range(lidos, lidos + 199)
     setLidos(n => n + (data ?? []).length)
-    setProdutos(prev => [...prev, ...(data ?? []).filter(p => !categoriasOcultas.current.has(p.categoria))])
+    setProdutos(prev => [...prev, ...(data ?? []).filter(p => !categoriasOcultas.current.has(p.categoria) && p.disponivel_delivery !== false)])
     setCarregandoMais(false)
   }
 
   /* ── Categorias ── */
-  const categorias = ['Todos', ...new Set(produtos.map(p => p.categoria).filter(Boolean))]
+  // Cardápio na ordem que o dono montou: categorias pela ordem delas, produtos pela
+  // ordem manual dentro da categoria (quem nunca foi ordenado vai pro fim, por nome).
+  const produtosOrdenados = useMemo(() => [...produtos].sort((a, b) =>
+    ((catOrdem[a.categoria] ?? 999) - (catOrdem[b.categoria] ?? 999))
+    || String(a.categoria ?? '').localeCompare(String(b.categoria ?? ''))
+    || ((a.ordem ?? 9999) - (b.ordem ?? 9999))
+    || String(a.nome).localeCompare(String(b.nome))), [produtos, catOrdem])
+  const categorias = ['Todos', ...new Set(produtosOrdenados.map(p => p.categoria).filter(Boolean))]
 
   /* ── Filtro ── */
-  const produtosFiltrados = useMemo(() => produtos.filter(p => {
+  const produtosFiltrados = useMemo(() => produtosOrdenados.filter(p => {
     const matchCategoria = categoriaAtiva === 'Todos' || p.categoria === categoriaAtiva
     const termo = busca.trim().toLowerCase()
     const matchBusca = !termo || p.nome?.toLowerCase().includes(termo) || p.descricao?.toLowerCase().includes(termo)
     return matchCategoria && matchBusca
-  }), [produtos, categoriaAtiva, busca])
+  }), [produtosOrdenados, categoriaAtiva, busca])
 
   /* ── Agrupamento por categoria ──
      Uma passada só. Antes cada categoria varria a lista inteira (`filter` dentro
