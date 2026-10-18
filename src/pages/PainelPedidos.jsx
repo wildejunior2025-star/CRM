@@ -4736,7 +4736,7 @@ function ModalCodigoRetirada({ pedido, onOk, onCancelar }) {
         <h3 style={{ margin: '0 0 4px' }}>Confirmar retirada</h3>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 16px' }}>
           Pedido #{pedido.numero_pedido} · {ehIfood
-            ? <>peça os <strong>4 últimos dígitos do telefone</strong> do cliente:</>
+            ? <>peça ao cliente o <strong>código de confirmação do iFood</strong> (4 dígitos, no app dele):</>
             : <>peça o <strong>código de retirada</strong> ao cliente:</>}
         </p>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center', margin: '0 0 12px' }}>
@@ -9540,7 +9540,15 @@ export default function PainelPedidos() {
     if (novoStatus === 'entregue' && !extra.__codigoOk) {
       const pAtual = pedidos.find(x => x.id === id)
       const ehRet = pAtual && (pAtual.tipo_entrega || 'entrega') === 'retirada'
-      if (ehRet && pAtual.codigo_entrega) { setModalCodRetirada(pAtual); return }
+      // Retirada do iFood também pede o código: ela não tem o nosso `codigo_entrega`, e por
+      // isso concluía direto no painel enquanto o iFood nunca recebia a validação (foi o
+      // pedido 5510 do Zebu, concluído pelo próprio cliente no app). Se o iFood JÁ concluiu
+      // sozinho, não há o que validar e não trava a loja.
+      const ifoodJaConcluiu = pAtual && ['CON', 'CONCLUDED'].includes(String(pAtual.ifood_status ?? '').toUpperCase())
+      // Se o iFood já marcou "exige código" (ifood_requer_codigo), o próprio cartão pede o código
+      // antes de chegar aqui — abrir a janela de novo pediria o código duas vezes.
+      const retiradaIfood = ehRet && pAtual.origem === 'ifood' && !ifoodJaConcluiu && !pAtual.ifood_requer_codigo
+      if (ehRet && (pAtual.codigo_entrega || retiradaIfood)) { setModalCodRetirada(pAtual); return }
     }
 
     const { __codigoOk, ...extraLimpo } = extra
