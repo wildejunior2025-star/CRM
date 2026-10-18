@@ -392,18 +392,26 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
   const [valorTxt, setValorTxt] = useState(
     pedido.valor_entregador != null ? String(Number(pedido.valor_entregador)).replace('.', ',') : '')
   const [erroValor, setErroValor] = useState(null)
+  // O campo fica escondido atrás de um botão curto ("＋ Taxa de entrega"): só abre ao tocar.
+  const [editandoValor, setEditandoValor] = useState(false)
+  const [valorSalvo, setValorSalvo] = useState(
+    pedido.valor_entregador != null ? Number(pedido.valor_entregador) : null)
 
-  // Grava o valor ANTES de concluir. Volta true quando pode seguir.
+  // Grava o valor. Vale ao tocar em OK e de novo ao concluir a entrega (não deixa concluir sem).
+  // Volta true quando pode seguir.
   async function salvarValor() {
     if (!exigeValor) return true
     const v = parseFloat(String(valorTxt).replace(',', '.'))
     if (!Number.isFinite(v) || v <= 0) {
-      setErroValor('Digite o valor desta entrega (quanto o dono te paga).')
+      setErroValor('Digite a taxa desta entrega (quanto o dono te paga).')
+      setEditandoValor(true)
       return false
     }
     const { error } = await supabase.rpc('entregador_informar_valor', { p_pedido: pedido.id, p_valor: v })
-    if (error) { setErroValor(error.message || 'Não consegui salvar o valor. Tente de novo.'); return false }
+    if (error) { setErroValor(error.message || 'Não consegui salvar a taxa. Tente de novo.'); setEditandoValor(true); return false }
     setErroValor(null)
+    setValorSalvo(Math.round(v * 100) / 100)
+    setEditandoValor(false)
     return true
   }
   const [verItens, setVerItens] = useState(false)
@@ -680,7 +688,9 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
         </div>
       )}
       {/* O que o motoqueiro RECEBE nesta corrida (já com o desconto abatido) */}
-      {pedido.taxa_entrega != null && Number(pedido.taxa_entrega) > 0 && (() => {
+      {/* Na loja que pede a taxa ao motoboy (Zebu) a taxa do pedido é do iFood/da loja, não dele:
+          esconde este "Você recebe" pra não passar a ideia errada; o botão de taxa mostra o dele. */}
+      {!exigeValor && pedido.taxa_entrega != null && Number(pedido.taxa_entrega) > 0 && (() => {
         const desc = descontoDoPedido(descontos, pedido)
         const liquido = Math.max(0, Number(pedido.taxa_entrega) - desc)
         return (
@@ -715,28 +725,44 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
         </>
       )}
 
-      {/* Valor da entrega (só lojas que pedem — Zebu): o motoboy digita antes de concluir */}
-      {mine && emRota && exigeValor && (
-        <div style={{
-          margin: '0 0 10px', padding: 10, borderRadius: 10,
-          border: `1.5px solid ${erroValor ? '#ef4444' : '#7c3aed'}`, background: 'rgba(124,58,237,.08)',
-        }}>
-          <label style={{ display: 'block', fontSize: 12.5, fontWeight: 800, color: '#7c3aed', marginBottom: 6 }}>
-            💰 Valor desta entrega — quanto o dono te paga
-          </label>
-          <input
-            value={valorTxt}
-            onChange={e => { setValorTxt(e.target.value.replace(/[^0-9,.]/g, '').slice(0, 7)); setErroValor(null) }}
-            inputMode="decimal"
-            placeholder="R$ 0,00"
+      {/* Taxa da entrega digitada pelo motoboy (só lojas que pedem — Zebu): um botão curto que abre o campo */}
+      {mine && exigeValor && (
+        editandoValor ? (
+          <div style={{
+            margin: '0 0 10px', padding: 10, borderRadius: 10,
+            border: `1.5px solid ${erroValor ? '#ef4444' : '#7c3aed'}`, background: 'rgba(124,58,237,.08)',
+          }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                autoFocus
+                value={valorTxt}
+                onChange={e => { setValorTxt(e.target.value.replace(/[^0-9,.]/g, '').slice(0, 7)); setErroValor(null) }}
+                inputMode="decimal"
+                placeholder="Taxa R$ 0,00"
+                style={{
+                  flex: 1, minWidth: 0, padding: '10px 8px', borderRadius: 10, textAlign: 'center',
+                  fontSize: 18, fontWeight: 800, boxSizing: 'border-box',
+                  border: '1.5px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
+                }}
+              />
+              <button type="button" disabled={ocupado} onClick={() => run(salvarValor)}
+                style={{ ...btnPrimario('#7c3aed'), width: 'auto', flexShrink: 0, padding: '0 18px' }}>
+                {ocupado ? '...' : 'OK'}
+              </button>
+            </div>
+            {erroValor && <div style={{ fontSize: 12.5, color: 'var(--danger, #ef4444)', marginTop: 6 }}>{erroValor}</div>}
+          </div>
+        ) : (
+          <button type="button" onClick={() => setEditandoValor(true)}
             style={{
-              width: '100%', padding: '10px 8px', borderRadius: 10, textAlign: 'center',
-              fontSize: 20, fontWeight: 800, boxSizing: 'border-box',
-              border: '1.5px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
-            }}
-          />
-          {erroValor && <div style={{ fontSize: 12.5, color: 'var(--danger, #ef4444)', marginTop: 6 }}>{erroValor}</div>}
-        </div>
+              width: '100%', margin: '0 0 10px', padding: '9px 0', borderRadius: 10, cursor: 'pointer',
+              fontSize: 13.5, fontWeight: 800, color: '#7c3aed',
+              background: valorSalvo != null ? 'rgba(124,58,237,.08)' : 'transparent',
+              border: `1.5px ${valorSalvo != null ? 'solid' : 'dashed'} #7c3aed`,
+            }}>
+            {valorSalvo != null ? `🛵 Taxa ${fmt(valorSalvo)} · editar` : '＋ Taxa de entrega'}
+          </button>
+        )
       )}
 
       {/* Ação principal */}
