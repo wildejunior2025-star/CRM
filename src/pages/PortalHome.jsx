@@ -299,6 +299,13 @@ export default function PortalHome() {
     load()
   }, [])
 
+  // Troca de endereço pelo cabeçalho: a lista refiltra na hora, sem fechar o app.
+  useEffect(() => {
+    const atualizar = () => setEnderecoAtivo(getEnderecoAtivo())
+    window.addEventListener('endereco-portal-changed', atualizar)
+    return () => window.removeEventListener('endereco-portal-changed', atualizar)
+  }, [])
+
   // Geocodifica o endereço ativo do cliente para o filtro por raio.
   // Reativo: roda no 1º carregamento e sempre que o cliente troca de endereço.
   useEffect(() => {
@@ -312,7 +319,7 @@ export default function PortalHome() {
       .filter(Boolean).join(', ')
     if (!endStr) { setCoordsCliente(null); return }
     let cancelado = false
-    geocodificar(endStr).then(coords => { if (!cancelado && coords) setCoordsCliente(coords) })
+    geocodificar(endStr).then(coords => { if (!cancelado) setCoordsCliente(coords || null) })
     return () => { cancelado = true }
   }, [enderecoAtivo])
 
