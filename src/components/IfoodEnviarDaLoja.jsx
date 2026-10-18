@@ -43,7 +43,7 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
     // categoria apareceria pela metade sem ninguém notar.
     fetchAll(() =>
       supabase.from('produtos')
-        .select('id, nome, categoria, preco_venda, foto_url, ifood_item_id')
+        .select('id, nome, categoria, preco_venda, preco_promocional, foto_url, ifood_item_id')
         .eq('empresa_id', empresaId)
         .eq('ativo', true)
         .order('categoria')
@@ -272,8 +272,25 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
                         {/* Já publicado: reenviar atualiza o item de lá, não cria outro. */}
                         {p.ifood_item_id && <span style={{ color: '#16a34a', fontSize: 11 }}> · 🔗 já no iFood, vai atualizar</span>}
                       </span>
-                      <span style={{ flexShrink: 0, color: 'var(--text-muted)' }}>R$ {reais(p.preco_venda)}</span>
-                      <span style={{ flexShrink: 0, color: RED, fontWeight: 700 }}>→ R$ {reais(comAcrescimo(p.preco_venda))}</span>
+                      {(() => {
+                        // Mesma regra do envio: promocional menor que o de venda = o de
+                        // venda vira o riscado e o promocional é o que o cliente paga.
+                        const promo = Number(p.preco_promocional ?? 0)
+                        const emPromo = promo > 0 && promo < Number(p.preco_venda ?? 0)
+                        return emPromo ? (
+                          <>
+                            <span style={{ flexShrink: 0, color: 'var(--text-muted)' }}>R$ {reais(p.preco_promocional)}</span>
+                            <span style={{ flexShrink: 0, color: RED, fontWeight: 700 }}>
+                              → <s style={{ fontWeight: 400, color: 'var(--text-muted)' }}>R$ {reais(comAcrescimo(p.preco_venda))}</s> R$ {reais(comAcrescimo(promo))}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ flexShrink: 0, color: 'var(--text-muted)' }}>R$ {reais(p.preco_venda)}</span>
+                            <span style={{ flexShrink: 0, color: RED, fontWeight: 700 }}>→ R$ {reais(comAcrescimo(p.preco_venda))}</span>
+                          </>
+                        )
+                      })()}
                     </label>
                   )
                 })}
