@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { supabase } from '../lib/supabaseClient'
 import ThemeToggle from '../components/ThemeToggle'
-import ModalMapaEndereco from '../components/ModalMapaEndereco'
+import EnderecoEmPassos from '../components/EnderecoEmPassos'
 import './Login.css'
 
 const ESTADOS_BR = [
@@ -75,14 +75,10 @@ export default function CadastroCliente() {
   const [numero, setNumero]               = useState('')
   const [complemento, setComplemento]     = useState('')
   const [estado, setEstado]               = useState('')
-  const [cidades, setCidades]             = useState([])
-  const [loadingCidades, setLoadingCidades] = useState(false)
   const [cidade, setCidade]               = useState('')
   const [bairro, setBairro]               = useState('')
   const [password, setPassword]           = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [buscandoCep, setBuscandoCep]     = useState(false)
-  const [erroCep, setErroCep]             = useState(null)
   const [error, setError]                 = useState(null)
   const [success, setSuccess]             = useState(null)
   const [loading, setLoading]             = useState(false)
@@ -91,10 +87,9 @@ export default function CadastroCliente() {
   const [step, setStep]                   = useState(1)
   const PASSOS = ['Seus dados', 'Endereço', 'Senha']
 
-  // Localização exata escolhida no mapa (pino arrastável)
+  // Localização exata escolhida no mapa (pino arrastável), no passo do endereço
   const [latitude, setLatitude]   = useState(null)
   const [longitude, setLongitude] = useState(null)
-  const [showMapa, setShowMapa]   = useState(false)
 
   if (session) {
     return <Navigate to="/portal" replace />
@@ -164,61 +159,6 @@ export default function CadastroCliente() {
     setCpf(fmt)
   }
 
-  function handleCepChange(e) {
-    const v = e.target.value.replace(/\D/g, '').slice(0, 8)
-    const fmt = v.length > 5 ? `${v.slice(0, 5)}-${v.slice(5)}` : v
-    setCep(fmt)
-    setErroCep(null)
-    if (v.length === 8) buscarCep(v)
-  }
-
-  async function carregarCidades(uf, cidadeParaSelecionar = '') {
-    setLoadingCidades(true)
-    try {
-      const res = await fetch(
-        `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios?orderBy=nome`
-      )
-      const data = await res.json()
-      const lista = data.map(c => c.nome)
-      setCidades(lista)
-      if (cidadeParaSelecionar) {
-        const match = lista.find(c => c.toLowerCase() === cidadeParaSelecionar.toLowerCase())
-        if (match) setCidade(match)
-      }
-    } catch {
-      setCidades([])
-    } finally {
-      setLoadingCidades(false)
-    }
-  }
-
-  async function buscarCep(numeros) {
-    setBuscandoCep(true)
-    try {
-      const res = await fetch(`https://viacep.com.br/ws/${numeros}/json/`)
-      const data = await res.json()
-      if (data.erro) { setErroCep('CEP não encontrado.'); return }
-      setEndereco(data.logradouro || '')
-      setBairro(data.bairro || '')
-      if (data.uf) {
-        setEstado(data.uf)
-        await carregarCidades(data.uf, data.localidade || '')
-      }
-    } catch {
-      setErroCep('Erro ao buscar CEP.')
-    } finally {
-      setBuscandoCep(false)
-    }
-  }
-
-  async function handleEstadoChange(e) {
-    const uf = e.target.value
-    setEstado(uf)
-    setCidade('')
-    setCidades([])
-    if (uf) await carregarCidades(uf)
-  }
-
   // ── Validação por passo ──────────────────────────────────────────────────
   function validarPasso1() {
     if (!username || username.length < 3) return 'Escolha um apelido com pelo menos 3 caracteres.'
@@ -248,12 +188,8 @@ export default function CadastroCliente() {
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
-    if (step === 2) {
-      const err = validarPasso2()
-      if (err) { setError(err); return }
-      setError(null)
-      setShowMapa(true) // antes de ir pra senha, marca a casa no mapa
-    }
+    // Passo 2 (endereço): quem avança é o próprio fluxo rua → mapa → número (EnderecoEmPassos),
+    // que chama concluirEndereco(). Enter no formulário não faz nada aqui.
   }
 
   function voltar() {
@@ -262,21 +198,21 @@ export default function CadastroCliente() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  function confirmarLocalizacao(lat, lng) {
-    setLatitude(lat)
-    setLongitude(lng)
-    setShowMapa(false)
+  // Terminou os 3 passos do endereço (rua → mapa → número): guarda tudo e vai pra senha.
+  function concluirEndereco(end) {
+    setCep(end.cep || '')
+    setEndereco(end.endereco || '')
+    setNumero(end.numero || '')
+    setComplemento(end.complemento || '')
+    setBairro(end.bairro || '')
+    setCidade(end.cidade || '')
+    setEstado(end.estado || '')
+    setLatitude(end.latitude ?? null)
+    setLongitude(end.longitude ?? null)
+    setError(null)
     setStep(3)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
-
-  function pularMapa() {
-    setShowMapa(false)
-    setStep(3)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
-  const enderecoTextoMapa = [endereco, numero, bairro, cidade, estado].filter(Boolean).join(', ')
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -594,78 +530,9 @@ export default function CadastroCliente() {
           {/* ── PASSO 2 · Endereço ────────────────────────────────────────── */}
           {step === 2 && (<>
 
-          {/* Separador de endereço */}
-          <p style={{ margin: '8px 0 0', fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-            Endereço de entrega
-          </p>
-
-          {/* CEP — opcional, preenche automático */}
-          <div className="form-field" style={{ position: 'relative' }}>
-            <label htmlFor="cep">
-              CEP <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 12 }}>(opcional — preenche o endereço automaticamente)</span>
-            </label>
-            <input id="cep" type="text" placeholder="00000-000" value={cep}
-              onChange={handleCepChange} inputMode="numeric" maxLength={9} autoComplete="postal-code" />
-            {buscandoCep && (
-              <span style={{ position: 'absolute', right: 10, top: 34, fontSize: 12, color: 'var(--text-muted)' }}>
-                Buscando...
-              </span>
-            )}
-            {erroCep && <span style={{ fontSize: 12, color: 'var(--danger)' }}>{erroCep}</span>}
-          </div>
-
-          {/* Rua */}
-          <div className="form-field">
-            <label htmlFor="endereco">Rua / Av. <span style={{ color: 'var(--danger)' }}>*</span></label>
-            <input id="endereco" type="text" placeholder="Rua das Flores" value={endereco}
-              onChange={(e) => setEndereco(e.target.value)} autoComplete="street-address" />
-          </div>
-
-          {/* Número + Complemento */}
-          <div className="addr-row addr-row--num-comp">
-            <div className="form-field">
-              <label htmlFor="numero">Número <span style={{ color: 'var(--danger)' }}>*</span></label>
-              <input id="numero" type="text" placeholder="123" value={numero}
-                onChange={(e) => setNumero(e.target.value)} />
-            </div>
-            <div className="form-field">
-              <label htmlFor="complemento">
-                Complemento <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 12 }}>(opc.)</span>
-              </label>
-              <input id="complemento" type="text" placeholder="Apto 4" value={complemento}
-                onChange={(e) => setComplemento(e.target.value)} />
-            </div>
-          </div>
-
-          {/* Estado + Cidade na mesma linha */}
-          <div className="addr-row addr-row--estado-cidade">
-            <div className="form-field">
-              <label htmlFor="estado">Estado <span style={{ color: 'var(--danger)' }}>*</span></label>
-              <select id="estado" value={estado} onChange={handleEstadoChange} style={selectStyle}>
-                <option value="">UF</option>
-                {ESTADOS_BR.map(({ uf, nome: n }) => (
-                  <option key={uf} value={uf}>{uf} — {n}</option>
-                ))}
-              </select>
-            </div>
-            <div className="form-field">
-              <label htmlFor="cidade">Cidade <span style={{ color: 'var(--danger)' }}>*</span></label>
-              <select id="cidade" value={cidade} onChange={(e) => setCidade(e.target.value)}
-                disabled={!estado || loadingCidades} style={{ ...selectStyle, opacity: (!estado || loadingCidades) ? 0.6 : 1 }}>
-                <option value="">
-                  {loadingCidades ? 'Carregando...' : estado ? 'Selecione' : 'Selecione o estado'}
-                </option>
-                {cidades.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Bairro */}
-          <div className="form-field">
-            <label htmlFor="bairro">Bairro <span style={{ color: 'var(--danger)' }}>*</span></label>
-            <input id="bairro" type="text" placeholder="Centro" value={bairro}
-              onChange={(e) => setBairro(e.target.value)} />
-          </div>
+          {/* Endereço em 3 passos (igual ao do app): rua → ponto no mapa → número e complemento.
+              Termina chamando concluirEndereco(), que já leva pra senha. */}
+          <EnderecoEmPassos onVoltar={voltar} onConcluir={concluirEndereco} />
 
           </>)}
 
@@ -716,8 +583,8 @@ export default function CadastroCliente() {
             </p>
           )}
 
-          {/* Botões de navegação entre os passos */}
-          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+          {/* Botões de navegação entre os passos (o passo do endereço tem os próprios) */}
+          {step !== 2 && (<div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
             {step > 1 && (
               <button type="button" className="btn" onClick={voltar} disabled={loading}
                 style={{
@@ -746,7 +613,7 @@ export default function CadastroCliente() {
                 )}
               </button>
             )}
-          </div>
+          </div>)}
 
           <p className="login-links">
             Já tem conta? <Link to="/login?tipo=cliente">Entrar</Link>
@@ -754,14 +621,6 @@ export default function CadastroCliente() {
         </form>
       </div>
 
-      {showMapa && (
-        <ModalMapaEndereco
-          enderecoTexto={enderecoTextoMapa}
-          onConfirmar={confirmarLocalizacao}
-          onFechar={() => setShowMapa(false)}
-          onPular={pularMapa}
-        />
-      )}
     </div>
   )
 }
