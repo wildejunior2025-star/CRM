@@ -11301,11 +11301,37 @@ export default function PainelPedidos() {
                     <span style={{ flex: 1, textAlign: 'center', fontSize: 12, padding: '4px 0', borderRadius: 8, background: 'var(--border, #2a2a3a)', color: 'var(--text)', fontWeight: 800 }}>Total {totRota + totConcl}</span>
                   </div>
                 </div>
-                {entregadores.map(e => {
-                  const r = emRota(e.id).length
-                  // No gestor o resumo é só do DIA (histórico completo fica em Vendas → Entregadores)
-                  const c = concluidas(e.id).filter(p => dentroDoPeriodo(p.created_at, 'hoje')).length
-                  return (
+                {(() => {
+                  // SÓ QUEM ESTÁ RODANDO HOJE.
+                  //
+                  // A lista trazia o cadastro inteiro, e loja que já teve dez
+                  // entregadores mostrava dez — nove deles zerados. No meio do
+                  // movimento o dono rolava a tela atrás de quem está com pedido
+                  // na mão e passava por um monte de nome parado.
+                  //
+                  // Entra quem concluiu alguma entrega hoje OU está com pedido
+                  // em rota agora. O "em rota" conta junto de propósito: quem
+                  // saiu com a primeira entrega ainda está zerado em concluídas,
+                  // e some justo na hora em que precisa ser acompanhado.
+                  const doDia = entregadores
+                    .map(e => ({
+                      e,
+                      r: emRota(e.id).length,
+                      // No gestor o resumo é só do DIA (histórico completo fica em Vendas → Entregadores)
+                      c: concluidas(e.id).filter(p => dentroDoPeriodo(p.created_at, 'hoje')).length,
+                    }))
+                    .filter(x => x.r > 0 || x.c > 0)
+
+                  if (!doDia.length) {
+                    return (
+                      <div style={{ border: '1px dashed var(--border, #2a2a3a)', borderRadius: 12, padding: '16px 14px', textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>
+                        Nenhum entregador rodou hoje ainda. 🛵<br />
+                        <span style={{ fontSize: 12 }}>Assim que alguém sair com um pedido, ele aparece aqui.</span>
+                      </div>
+                    )
+                  }
+
+                  return doDia.map(({ e, r, c }) => (
                     <button key={e.id} type="button" onClick={() => setEntregadorSel(e.id)}
                       style={{ textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border, #2a2a3a)', borderRadius: 12, padding: '12px 14px', background: 'transparent' }}>
                       <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>🛵 {e.nome || 'Entregador'}</div>
@@ -11324,8 +11350,8 @@ export default function PainelPedidos() {
                         <span style={{ flex: 1, textAlign: 'center', fontSize: 12, padding: '4px 0', borderRadius: 8, background: 'var(--border, #2a2a3a)', color: 'var(--text)', fontWeight: 700 }}>Total {r + c}</span>
                       </div>
                     </button>
-                  )
-                })}
+                  ))
+                })()}
 
                 {/* O mapa fica DEPOIS da lista: quem abre o painel quer ver os
                     números primeiro; o mapa é pra decidir o próximo despacho.
