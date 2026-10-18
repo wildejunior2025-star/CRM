@@ -5,7 +5,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { separarItem } from '../lib/itensPedido'
 import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma, textoPagamento } from '../lib/pagamentoPartes'
-import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto } from '../lib/descontoEntrega'
+import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto, temValorDigitado } from '../lib/descontoEntrega'
 
 // Cada aba tem seu endereço (/entregas?aba=minhas). O motoqueiro sai pro Waze,
 // pro iFood, atende o telefone — e quando volta o celular já descarregou a
@@ -386,6 +386,26 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState(null)
   const [ocupado, setOcupado] = useState(false)
+  // Loja que pede ao motoboy o valor da corrida (Zebu, teste — mig 0344): o promocional do iFood
+  // zera a taxa, e o dono precisa saber quanto pagar a ele por entrega.
+  const exigeValor = !!empresa?.entregador_digita_valor
+  const [valorTxt, setValorTxt] = useState(
+    pedido.valor_entregador != null ? String(Number(pedido.valor_entregador)).replace('.', ',') : '')
+  const [erroValor, setErroValor] = useState(null)
+
+  // Grava o valor ANTES de concluir. Volta true quando pode seguir.
+  async function salvarValor() {
+    if (!exigeValor) return true
+    const v = parseFloat(String(valorTxt).replace(',', '.'))
+    if (!Number.isFinite(v) || v <= 0) {
+      setErroValor('Digite o valor desta entrega (quanto o dono te paga).')
+      return false
+    }
+    const { error } = await supabase.rpc('entregador_informar_valor', { p_pedido: pedido.id, p_valor: v })
+    if (error) { setErroValor(error.message || 'Não consegui salvar o valor. Tente de novo.'); return false }
+    setErroValor(null)
+    return true
+  }
   const [verItens, setVerItens] = useState(false)
   const bebidasNomes = bebidas?.nomes ?? []
   const bebidasIdx = bebidas?.idx ?? new Set()
@@ -433,6 +453,12 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
   }
 
   async function confirmar() {
+    if (exigeValor) {
+      setOcupado(true)
+      const okValor = await salvarValor()
+      setOcupado(false)
+      if (!okValor) return
+    }
     // iFood que exige código: valida o código do CLIENTE no iFood (verifyDeliveryCode)
     if (precisaCodigoIfood) {
       if (codigo.trim().length < 2) { setErro('Digite o código do cliente.'); return }
@@ -689,6 +715,30 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
         </>
       )}
 
+      {/* Valor da entrega (só lojas que pedem — Zebu): o motoboy digita antes de concluir */}
+      {mine && emRota && exigeValor && (
+        <div style={{
+          margin: '0 0 10px', padding: 10, borderRadius: 10,
+          border: `1.5px solid ${erroValor ? '#ef4444' : '#7c3aed'}`, background: 'rgba(124,58,237,.08)',
+        }}>
+          <label style={{ display: 'block', fontSize: 12.5, fontWeight: 800, color: '#7c3aed', marginBottom: 6 }}>
+            💰 Valor desta entrega — quanto o dono te paga
+          </label>
+          <input
+            value={valorTxt}
+            onChange={e => { setValorTxt(e.target.value.replace(/[^0-9,.]/g, '').slice(0, 7)); setErroValor(null) }}
+            inputMode="decimal"
+            placeholder="R$ 0,00"
+            style={{
+              width: '100%', padding: '10px 8px', borderRadius: 10, textAlign: 'center',
+              fontSize: 20, fontWeight: 800, boxSizing: 'border-box',
+              border: '1.5px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
+            }}
+          />
+          {erroValor && <div style={{ fontSize: 12.5, color: 'var(--danger, #ef4444)', marginTop: 6 }}>{erroValor}</div>}
+        </div>
+      )}
+
       {/* Ação principal */}
       {!mine ? (
         onAceitar ? (
@@ -747,7 +797,10 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
           </div>
         </div>
       ) : (
-        <button type="button" onClick={() => run(() => onConfirmar(pedido))} disabled={ocupado}
+        <button type="button" onClick={() => run(async () => {
+            if (!(await salvarValor())) return
+            await onConfirmar(pedido)
+          })} disabled={ocupado}
           style={btnPrimario('#16a34a')}>
           {ocupado ? 'Confirmando...' : '✓ Confirmar entrega'}
         </button>
@@ -1189,7 +1242,7 @@ export default function PainelEntregador() {
     setHistLoading(true)
     supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, forma_pagamento, pagamentos, origem, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, forma_pagamento, pagamentos, origem, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
       .eq('entregador_id', user.id)
       .eq('status', 'entregue')
       .order('created_at', { ascending: false })
@@ -1581,7 +1634,7 @@ export default function PainelEntregador() {
                       <span style={{ fontWeight: 800, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <strong style={{ color: '#16a34a' }}
-                          title={descontoDoPedido(descontos, p) > 0 ? `Taxa ${fmt(p.taxa_entrega)} − ${rotuloDoDesconto(p)} ${fmt(descontoDoPedido(descontos, p))}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
+                          title={temValorDigitado(p) ? 'Valor que você informou' : descontoDoPedido(descontos, p) > 0 ? `Taxa ${fmt(p.taxa_entrega)} − ${rotuloDoDesconto(p)} ${fmt(descontoDoPedido(descontos, p))}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
                         {p.entregador_pago
                           ? <span style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '2px 8px', borderRadius: 20 }}>✓ Pago</span>
                           : <span style={{ fontSize: 11, fontWeight: 800, color: '#f59e0b', background: 'rgba(245,158,11,.14)', padding: '2px 8px', borderRadius: 20 }}>A receber</span>}

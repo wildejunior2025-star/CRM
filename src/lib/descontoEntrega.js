@@ -21,7 +21,14 @@ export function descontosDoEntregador(perfil) {
 
 // Pedido do iFood usa o desconto do iFood; todo o resto (app, loja online,
 // WhatsApp, balcão) usa o da loja. Porcentagem é da taxa, arredondada no centavo.
+// Lojas que pedem ao motoboy o valor da corrida (Zebu, teste — mig 0344): o valor DIGITADO
+// por ele vale no lugar de "taxa − desconto". Sem valor digitado, a regra de sempre.
+// No banco: COALESCE(valor_entregador, GREATEST(0, taxa − desconto)) em entregadores_resumo/acertos.
+export const temValorDigitado = pedido =>
+  pedido?.valor_entregador != null && pedido.valor_entregador !== ''
+
 export function descontoDoPedido(descontos, pedido) {
+  if (temValorDigitado(pedido)) return 0
   const d = String(pedido?.origem) === 'ifood' ? descontos?.ifood : descontos?.loja
   if (!d) return 0
   if (!d.pct) return d.valor
@@ -31,6 +38,7 @@ export function descontoDoPedido(descontos, pedido) {
 
 // O que o motoqueiro recebe naquela corrida: a taxa cheia menos o que fica com a loja.
 export function ganhoDaCorrida(descontos, pedido) {
+  if (temValorDigitado(pedido)) return Math.max(0, Number(pedido.valor_entregador) || 0)
   return Math.max(0, (Number(pedido?.taxa_entrega) || 0) - descontoDoPedido(descontos, pedido))
 }
 
