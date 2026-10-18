@@ -89,7 +89,7 @@ export async function buscarRuas({ termo, uf, cidades = [] }) {
       return Array.isArray(j) ? j : []
     } catch { return [] }
   }
-  const alvos = [...new Set(cidades.filter(c => c && c.length >= 3))].slice(0, 3)
+  const alvos = [...new Set(cidades.filter(c => c && c.length >= 3))].slice(0, 4)
   let d = (await Promise.all(alvos.map(c => viacep(semTipo || t, c)))).flat()
   if (!d.length && maior) d = (await Promise.all(alvos.map(c => viacep(maior, c)))).flat()
   // O estado inteiro entra sempre que NENHUMA rua casou com tudo o que ele escreveu:

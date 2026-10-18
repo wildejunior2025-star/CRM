@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { UFS, buscarRuas, geocodeRua, geocodeCidade } from '../lib/enderecoBusca'
+import { buscarRuas, geocodeRua, geocodeCidade } from '../lib/enderecoBusca'
 import MapaPinoEndereco from './MapaPinoEndereco'
 import '../pages/PortalHome.css' // .ph-end-* (lista de ruas, mapa, passos)
 
@@ -8,10 +8,15 @@ import '../pages/PortalHome.css' // .ph-end-* (lista de ruas, mapa, passos)
 //   2) o ponto da casa no mapa (arrasta o pino)
 //   3) o número e o complemento
 // Entrega pro cadastro: { cep, endereco, numero, complemento, bairro, cidade, estado, latitude, longitude }.
+// Só atendemos a região de Natal: a pessoa não indica gente de outra cidade.
+const UF = 'RN'
+const CIDADES = ['Natal', 'São Gonçalo do Amarante']
+const norm = t => String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+const cidadePermitida = c => CIDADES.some(x => norm(x) === norm(c))
+
 export default function EnderecoEmPassos({ onVoltar, onConcluir }) {
   const [passo, setPasso]         = useState(1)
-  const [uf, setUf]               = useState('RN')
-  const [cidadeInformada, setCidadeInformada] = useState('') // opcional: ajuda a achar a rua pela fonte oficial
+  const uf = UF
   const [busca, setBusca]         = useState('')
   const [sugestoes, setSugestoes] = useState([])
   const [buscando, setBuscando]   = useState(false)
@@ -19,7 +24,7 @@ export default function EnderecoEmPassos({ onVoltar, onConcluir }) {
   const [rua, setRua]             = useState(null)   // { logradouro, bairro, localidade, uf, cep }
   const [manual, setManual]       = useState(false)  // rua que não está na lista
   const [bairroManual, setBairroManual] = useState('')
-  const [cidadeManual, setCidadeManual] = useState('')
+  const [cidadeManual, setCidadeManual] = useState(CIDADES[0])
   const [centro, setCentro]       = useState(null)
   const [coord, setCoord]         = useState(null)
   const [procurandoPonto, setProcurandoPonto] = useState(false)
@@ -36,7 +41,7 @@ export default function EnderecoEmPassos({ onVoltar, onConcluir }) {
     setBuscando(true)
     const t = setTimeout(async () => {
       try {
-        const lista = await buscarRuas({ termo, uf, cidades: [cidadeInformada.trim()] })
+        const lista = (await buscarRuas({ termo, uf, cidades: CIDADES })).filter(r => cidadePermitida(r.localidade))
         if (!vivo) return
         setSugestoes(lista)
         setNaoAchou(lista.length === 0)
@@ -47,12 +52,11 @@ export default function EnderecoEmPassos({ onVoltar, onConcluir }) {
       }
     }, 500)
     return () => { vivo = false; clearTimeout(t); setBuscando(false) }
-  }, [busca, uf, cidadeInformada, passo, rua, manual])
+  }, [busca, passo, rua, manual])
 
   function escolherRua(r) {
     setRua(r)
     setBusca(r.logradouro)
-    if (r.uf && UFS.includes(r.uf)) setUf(r.uf)
     setSugestoes([])
     setNaoAchou(false)
     setErro(null)
@@ -64,7 +68,6 @@ export default function EnderecoEmPassos({ onVoltar, onConcluir }) {
 
   function usarRuaManual() {
     setManual(true); setSugestoes([]); setNaoAchou(false)
-    if (!cidadeManual && cidadeInformada) setCidadeManual(cidadeInformada)
   }
 
   // Dados da rua que valem daqui pra frente (da lista ou digitados à mão)
@@ -140,20 +143,6 @@ export default function EnderecoEmPassos({ onVoltar, onConcluir }) {
 
       {/* ── 1: a rua ── */}
       {passo === 1 && (<>
-        <div className="addr-row addr-row--estado-cidade">
-          <div className="form-field">
-            <label htmlFor="end-uf">Estado</label>
-            <select id="end-uf" value={uf} onChange={e => { setUf(e.target.value); trocarRua() }}>
-              {UFS.map(u => <option key={u} value={u}>{u}</option>)}
-            </select>
-          </div>
-          <div className="form-field">
-            <label htmlFor="end-cidade">Cidade <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 12 }}>(opc.)</span></label>
-            <input id="end-cidade" type="text" placeholder="Natal" value={cidadeInformada}
-              onChange={e => { setCidadeInformada(e.target.value); if (rua) trocarRua() }} autoComplete="off" />
-          </div>
-        </div>
-
         <div className="form-field" style={{ position: 'relative' }}>
           <label htmlFor="end-rua">Nome da rua <span style={{ color: 'var(--danger)' }}>*</span></label>
           <input id="end-rua" type="text" placeholder="Digite o nome da sua rua" value={busca}
@@ -186,7 +175,7 @@ export default function EnderecoEmPassos({ onVoltar, onConcluir }) {
 
         {naoAchou && !buscando && !rua && !manual && busca.trim().length >= 3 && (
           <div className="ph-end-aviso">
-            Não achei essa rua em <strong>{uf}</strong>. Confira o nome, informe a cidade acima, ou
+            Não achei essa rua em Natal nem em São Gonçalo do Amarante. Confira o nome, ou
             {' '}<button type="button" className="ph-end-link" onClick={usarRuaManual}>escreva à mão e marque no mapa</button>.
           </div>
         )}
@@ -199,7 +188,9 @@ export default function EnderecoEmPassos({ onVoltar, onConcluir }) {
             </div>
             <div className="form-field">
               <label htmlFor="end-cidade-m">Cidade <span style={{ color: 'var(--danger)' }}>*</span></label>
-              <input id="end-cidade-m" type="text" value={cidadeManual} onChange={e => setCidadeManual(e.target.value)} placeholder="Natal" />
+              <select id="end-cidade-m" value={cidadeManual} onChange={e => setCidadeManual(e.target.value)}>
+                {CIDADES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
             </div>
           </div>
           <button type="button" className="ph-end-link" onClick={() => setManual(false)}>Voltar a procurar na lista</button>
