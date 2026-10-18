@@ -27,7 +27,9 @@ export async function carregarCardapio(supabase, empresaId) {
   // Ordem personalizada das categorias (a mesma da loja online) + o horário em
   // que cada uma vende.
   const { data: cats } = await supabase
-    .from('categorias').select('nome, ordem, hora_inicio, hora_fim, dias_semana').eq('empresa_id', empresaId)
+    .from('categorias').select('nome, ordem, hora_inicio, hora_fim, dias_semana, so_ifood').eq('empresa_id', empresaId)
+  // Combo que existe só no iFood (mig 0347): não entra na mesa nem no link do cliente.
+  const soIfood = new Set((cats ?? []).filter(c => c.so_ifood).map(c => c.nome))
   const catOrdem = {}
   for (const c of (cats ?? [])) catOrdem[c.nome] = c.ordem ?? 999
 
@@ -76,7 +78,7 @@ export async function carregarCardapio(supabase, empresaId) {
     }
   }
 
-  return { produtos: produtos ?? [], catOrdem, catInfo, compMap }
+  return { produtos: (produtos ?? []).filter(p => !soIfood.has(p.categoria)), catOrdem, catInfo, compMap }
 }
 
 // Itens do carrinho -> payload das RPCs mesa_pedir / cliente_pedir. O nome já vai
