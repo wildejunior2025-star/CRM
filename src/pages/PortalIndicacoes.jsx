@@ -57,10 +57,14 @@ export default function PortalIndicacoes() {
                         'mlm_pct_nivel_4','mlm_pct_nivel_5',
                         'mlm_ativo','cashback_pct','cashback_ativo','acumulado_pct_diretos']),
 
+        // Só o que vale: compra cancelada depois de entregue vira 'estornado' (mig 0343) e não
+        // pode somar. Sem limite de 10: o total de "Cashback próprio" é a soma de TODAS; a
+        // lista na tela mostra só as 10 mais recentes (ver abaixo).
         supabase.from('cashback_transacoes')
           .select('valor_venda, valor_cashback, pontos, status, created_at')
           .eq('profile_id', userId)
-          .order('created_at', { ascending: false }).limit(10),
+          .eq('status', 'confirmado')
+          .order('created_at', { ascending: false }).range(0, 999),
       ])
 
       setProfile(profileRes.data)
@@ -256,10 +260,10 @@ export default function PortalIndicacoes() {
                   · {fmtPts(totalCbPontos)} pts no total
                 </span>
               </div>
-              {cashbacks.map((c, i) => (
+              {cashbacks.slice(0, 10).map((c, i, lista) => (
                 <div key={i} style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '9px 0', borderBottom: i < cashbacks.length - 1 ? '1px solid var(--border)' : 'none',
+                  padding: '9px 0', borderBottom: i < lista.length - 1 ? '1px solid var(--border)' : 'none',
                 }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>Compra de {fmt(c.valor_venda)}</div>
