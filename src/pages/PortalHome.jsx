@@ -323,8 +323,11 @@ export default function PortalHome() {
   const filtradas = empresas.filter(e => {
     // Filtro por nome
     if (busca.trim() && !e.nome.toLowerCase().includes(busca.trim().toLowerCase())) return false
-    // Filtro por raio — só aplica se cliente e loja têm coordenadas
-    if (coordsCliente && e.latitude && e.longitude && e.raio_entrega_km) {
+    // Loja sem pino no mapa ou sem raio de entrega não aparece: antes o filtro
+    // era pulado e ela aparecia pro Brasil inteiro.
+    if (!e.latitude || !e.longitude || !(Number(e.raio_entrega_km) > 0)) return false
+    // Filtro por raio — só aplica se o cliente tem coordenadas
+    if (coordsCliente) {
       const dist = haversineKm(coordsCliente.lat, coordsCliente.lng, Number(e.latitude), Number(e.longitude))
       if (dist > Number(e.raio_entrega_km)) return false
     }
@@ -367,6 +370,16 @@ export default function PortalHome() {
           </p>
           {busca.trim() && (
             <p className="ph-empty-sub">Tente outro termo de busca.</p>
+          )}
+          {!busca.trim() && enderecoAtivo && (
+            <>
+              <p className="ph-empty-sub">
+                Nenhuma loja entrega em {[enderecoAtivo.endereco, enderecoAtivo.bairro, enderecoAtivo.cidade].filter(Boolean).join(', ')}.
+              </p>
+              <button className="ph-card" style={{ justifyContent: 'center', marginTop: 12, fontWeight: 700 }} onClick={() => setShowEnderecoModal(true)}>
+                Trocar endereço
+              </button>
+            </>
           )}
         </div>
       )}
