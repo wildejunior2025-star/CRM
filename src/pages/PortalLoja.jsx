@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { capturarIndicacao, registrarIndicacao } from '../lib/indicacao'
@@ -187,7 +187,9 @@ export default function PortalLoja() {
       return saved ? JSON.parse(saved) : {}
     } catch { return {} /* localStorage indisponível */ }
   })
-  const [categoriaAtiva, setCategoriaAtiva] = useState('Todos')
+  // Categoria que está na tela agora (só destaque na barra; tocar nela rola até lá, não filtra)
+  const [categoriaAtiva, setCategoriaAtiva] = useState('')
+  const barraCatRef = useRef(null)
   const [busca, setBusca] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -386,24 +388,19 @@ export default function PortalLoja() {
     || String(a.categoria ?? '').localeCompare(String(b.categoria ?? ''))
     || ((a.ordem ?? 9999) - (b.ordem ?? 9999))
     || String(a.nome).localeCompare(String(b.nome))), [produtos, catOrdem])
-  const categorias = ['Todos', ...new Set(produtosOrdenados.map(p => p.categoria).filter(Boolean))]
+  const categorias = [...new Set(produtosOrdenados.map(p => p.categoria).filter(Boolean))]
 
   /* ── Filtro ── */
   const produtosFiltrados = useMemo(() => produtosOrdenados.filter(p => {
-    const matchCategoria = categoriaAtiva === 'Todos' || p.categoria === categoriaAtiva
     const termo = busca.trim().toLowerCase()
-    const matchBusca = !termo || p.nome?.toLowerCase().includes(termo) || p.descricao?.toLowerCase().includes(termo)
-    return matchCategoria && matchBusca
-  }), [produtosOrdenados, categoriaAtiva, busca])
+    return !termo || p.nome?.toLowerCase().includes(termo) || p.descricao?.toLowerCase().includes(termo)
+  }), [produtosOrdenados, busca])
 
   /* ── Agrupamento por categoria ──
      Uma passada só. Antes cada categoria varria a lista inteira (`filter` dentro
      do `map`), e isso rodava de novo a cada toque no + de um produto — no
      depósito, com centenas de itens na tela, a mão travava no carrinho. */
   const secoes = useMemo(() => {
-    if (categoriaAtiva !== 'Todos') {
-      return produtosFiltrados.length ? [{ nome: categoriaAtiva, produtos: produtosFiltrados }] : []
-    }
     const porCat = new Map()
     for (const p of produtosFiltrados) {
       if (!p.categoria) continue
@@ -412,9 +409,67 @@ export default function PortalLoja() {
       else porCat.set(p.categoria, [p])
     }
     return [...porCat.entries()].map(([nome, produtos]) => ({ nome, produtos }))
-  }, [produtosFiltrados, categoriaAtiva])
+  }, [produtosFiltrados])
 
   const semCategoria = useMemo(() => produtosFiltrados.filter(p => !p.categoria), [produtosFiltrados])
+
+  /* ── Barra de categorias ──
+     Fica fixa logo abaixo do cabeçalho, toca numa categoria e a tela rola até ela
+     (o cardápio continua inteiro), e o destaque acompanha o que está na tela. */
+  const irParaCategoria = useCallback((cat) => {
+    setCategoriaAtiva(cat)
+    const alvo = [...document.querySelectorAll('[data-secao]')].find(s => s.dataset.secao === cat)
+    alvo?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
+
+  useEffect(() => {
+    const raiz = document.documentElement
+    // O cabeçalho no celular é mais alto que 56px (barra de status): mede o real,
+    // senão a barra de categorias fica escondida atrás dele.
+    function medir() {
+      const cab = document.querySelector('.portal-header')
+      const h = cab ? cab.getBoundingClientRect().height : 56
+      const barra = barraCatRef.current?.parentElement
+      const b = barra ? barra.getBoundingClientRect().height : 44
+      raiz.style.setProperty('--loja-header-h', `${Math.round(h)}px`)
+      raiz.style.setProperty('--loja-offset', `${Math.round(h + b + 6)}px`)
+    }
+    let quadro = 0
+    function aoRolar() {
+      cancelAnimationFrame(quadro)
+      quadro = requestAnimationFrame(() => {
+        const corte = (parseInt(getComputedStyle(raiz).getPropertyValue('--loja-offset'), 10) || 120) + 4
+        const secs = document.querySelectorAll('[data-secao]')
+        let atual = secs[0]?.dataset.secao ?? ''
+        for (const s of secs) {
+          if (s.getBoundingClientRect().top <= corte) atual = s.dataset.secao
+          else break
+        }
+        setCategoriaAtiva(prev => (prev === atual ? prev : atual))
+      })
+    }
+    medir()
+    aoRolar()
+    window.addEventListener('resize', medir)
+    window.addEventListener('scroll', aoRolar, { passive: true })
+    return () => {
+      cancelAnimationFrame(quadro)
+      window.removeEventListener('resize', medir)
+      window.removeEventListener('scroll', aoRolar)
+      raiz.style.removeProperty('--loja-header-h')
+      raiz.style.removeProperty('--loja-offset')
+    }
+  }, [secoes.length])
+
+  // Mantém o botão da categoria atual à vista dentro da barra (que rola pro lado)
+  useEffect(() => {
+    const barra = barraCatRef.current
+    if (!barra || !categoriaAtiva) return
+    const pill = [...barra.children].find(c => c.dataset.cat === categoriaAtiva)
+    if (!pill) return
+    const esq = barra.scrollLeft + pill.getBoundingClientRect().left - barra.getBoundingClientRect().left - 16
+    barra.scrollTo({ left: esq, behavior: 'smooth' })
+  }, [categoriaAtiva])
 
   /* ── CEP ── */
   function handleCepChange(e) {
@@ -668,12 +723,13 @@ export default function PortalLoja() {
 
       {/* ── Categorias pills sticky ── */}
       <div className="loja-categorias-sticky">
-        <div className="loja-categorias">
+        <div className="loja-categorias" ref={barraCatRef}>
           {categorias.map(cat => (
             <button
               key={cat}
+              data-cat={cat}
               className={`loja-cat-pill${categoriaAtiva === cat ? ' active' : ''}`}
-              onClick={() => setCategoriaAtiva(cat)}
+              onClick={() => irParaCategoria(cat)}
             >
               {cat}
             </button>
@@ -694,7 +750,7 @@ export default function PortalLoja() {
         ) : (
           <>
             {secoes.map(secao => (
-              <section key={secao.nome} className="loja-secao">
+              <section key={secao.nome} className="loja-secao" data-secao={secao.nome}>
                 <h3 className="loja-secao-titulo">{secao.nome}</h3>
                 <div className="loja-lista">
                   {secao.produtos.map(p => (
@@ -731,7 +787,7 @@ export default function PortalLoja() {
           </>
         )}
 
-        {lidos < totalProdutos && !busca && categoriaAtiva === 'Todos' && (
+        {lidos < totalProdutos && !busca && (
           <div style={{ textAlign: 'center', padding: '24px 0' }}>
             <button
               className="btn btn-secondary"

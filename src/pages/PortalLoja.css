@@ -222,13 +222,13 @@
 ════════════════════════════════ */
 .loja-categorias-sticky {
   position: sticky;
-  /* 56px = altura do portal-header */
-  top: 56px;
+  /* Altura real do portal-header (medida em JS; no celular passa de 56px) */
+  top: var(--loja-header-h, 56px);
   z-index: 50;
   background: var(--bg);
   margin-left: -16px;
   margin-right: -16px;
-  padding: 10px 16px;
+  padding: 6px 16px;
   border-bottom: 1px solid var(--border);
   margin-top: 10px;
   /* Micro sombra para destacar ao fazer scroll */
@@ -247,12 +247,12 @@
 
 .loja-cat-pill {
   flex-shrink: 0;
-  padding: 6px 14px;
+  padding: 5px 12px;
   border-radius: 999px;
   border: 1.5px solid var(--border);
   background: var(--surface);
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
   transition: all 140ms;
@@ -286,6 +286,8 @@
 
 .loja-secao {
   margin-top: 20px;
+  /* Ao pular pra categoria, o título para logo abaixo do cabeçalho + barra fixos */
+  scroll-margin-top: var(--loja-offset, 120px);
 }
 
 .loja-secao-titulo {
