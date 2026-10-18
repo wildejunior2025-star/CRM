@@ -6,6 +6,7 @@ import {
   LS_HIST,
   getEnderecoAtivo, getHistorico,
   salvarEnderecoAtivo, adicionarAoHistorico,
+  removerDoHistorico, limparEnderecoAtivo, foiRemovido,
 } from '../utils/enderecoPortal'
 import '../pages/PortalHome.css'
 
@@ -96,6 +97,8 @@ export default function ModalEndereco({ onClose, onSalvo }) {
           bairro:   data.bairro   || '',
           cidade:   data.cidade   || '',
         }
+        // Endereço que o cliente excluiu não volta sozinho
+        if (foiRemovido(endBanco)) return
         setHistorico(prev => {
           const existe = prev.find(h => mesmoEndereco(h, endBanco))
           if (!existe) {
@@ -201,6 +204,24 @@ export default function ModalEndereco({ onClose, onSalvo }) {
     onClose()
   }
 
+  function handleExcluir(end) {
+    if (!window.confirm(`Excluir este endereço?\n\n${linhaEndereco1(end)}\n${linhaEndereco2(end)}`)) return
+    const restante = removerDoHistorico(end)
+    setHistorico(restante)
+    // Excluiu o que estava em uso: passa pro próximo da lista, ou fica sem endereço ativo
+    if (mesmoEndereco(enderecoAtivo, end)) {
+      if (restante[0]) {
+        salvarEnderecoAtivo(restante[0])
+        setEnderecoAtivo(restante[0])
+        onSalvo?.(restante[0])
+      } else {
+        limparEnderecoAtivo()
+        setEnderecoAtivo(null)
+        onSalvo?.(null)
+      }
+    }
+  }
+
   async function handleConfirmar(e) {
     e.preventDefault()
     if (!numero.trim()) { setError('Informe o número da casa (ou "s/n").'); return }
@@ -286,28 +307,42 @@ export default function ModalEndereco({ onClose, onSalvo }) {
             {historico.map((end, i) => {
               const ativo = mesmoEndereco(enderecoAtivo, end)
               return (
-                <button
-                  key={`${end.cep}-${end.endereco}-${end.numero}-${i}`}
-                  className={`ph-hist-item${ativo ? ' ph-hist-item--ativo' : ''}`}
-                  onClick={() => handleSelecionarHistorico(end)}
-                >
-                  <span className="ph-hist-clock">
-                    <IconClock size={18} />
-                  </span>
-                  <span className="ph-hist-texto">
-                    <span className="ph-hist-linha1">{linhaEndereco1(end)}</span>
-                    {linhaEndereco2(end) && (
-                      <span className="ph-hist-linha2">{linhaEndereco2(end)}</span>
-                    )}
-                  </span>
-                  {ativo && (
-                    <span className="ph-hist-check">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12"/>
-                      </svg>
+                <div key={`${end.cep}-${end.endereco}-${end.numero}-${i}`} className="ph-hist-row">
+                  <button
+                    className={`ph-hist-item${ativo ? ' ph-hist-item--ativo' : ''}`}
+                    onClick={() => handleSelecionarHistorico(end)}
+                  >
+                    <span className="ph-hist-clock">
+                      <IconClock size={18} />
                     </span>
-                  )}
-                </button>
+                    <span className="ph-hist-texto">
+                      <span className="ph-hist-linha1">{linhaEndereco1(end)}</span>
+                      {linhaEndereco2(end) && (
+                        <span className="ph-hist-linha2">{linhaEndereco2(end)}</span>
+                      )}
+                    </span>
+                    {ativo && (
+                      <span className="ph-hist-check">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="ph-hist-excluir"
+                    aria-label={`Excluir endereço ${linhaEndereco1(end)}`}
+                    onClick={() => handleExcluir(end)}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"/>
+                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                      <path d="M10 11v6M14 11v6"/>
+                      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                    </svg>
+                  </button>
+                </div>
               )
             })}
 

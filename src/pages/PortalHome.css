@@ -737,3 +737,15 @@
   border: 1.5px solid var(--primary);
 }
 .ph-end-gps:disabled { opacity: .6; cursor: default; }
+
+/* ── Linha do endereço salvo: seleciona + lixeira ao lado ── */
+.ph-hist-row { display: flex; align-items: stretch; gap: 8px; }
+.ph-hist-row .ph-hist-item { flex: 1; min-width: 0; width: auto; }
+.ph-hist-excluir {
+  flex-shrink: 0; width: 46px; display: flex; align-items: center; justify-content: center;
+  background: var(--bg); border: 1.5px solid var(--border); border-radius: 12px;
+  color: var(--text-muted); cursor: pointer; transition: color 120ms, border-color 120ms, background 120ms;
+}
+.ph-hist-excluir:hover, .ph-hist-excluir:active {
+  color: var(--danger, #ef4444); border-color: var(--danger, #ef4444); background: rgba(239, 68, 68, .08);
+}
