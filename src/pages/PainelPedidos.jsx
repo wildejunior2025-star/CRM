@@ -11212,9 +11212,9 @@ export default function PainelPedidos() {
                 return (
                 <div key={p.id} style={{ border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: '9px 11px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <strong style={{ fontSize: 15, color: corTaxa }}
+                      <strong style={{ fontSize: 17, color: corTaxa }}
                         title={descontoDoPedido(descontos, p) > 0 ? `Taxa ${fmt(p.taxa_entrega)} − ${rotuloDoDesconto(p)} ${fmt(descontoDoPedido(descontos, p))}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
                       {!ehRota && (pago
                         ? <span style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '2px 8px', borderRadius: 20 }}>✓ Pago</span>
@@ -11224,7 +11224,7 @@ export default function PainelPedidos() {
                           </button>)}
                     </div>
                   </div>
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
+                  <div style={{ fontSize: 14, color: 'var(--text-muted)', marginTop: 3 }}>
                     {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
                     {descontoDoPedido(descontos, p) > 0 && <span style={{ color: '#f59e0b' }}> · {rotuloDoDesconto(p)} −{fmt(descontoDoPedido(descontos, p))}</span>}
                   </div>
@@ -11242,7 +11242,7 @@ export default function PainelPedidos() {
                     style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: 'var(--primary, #a78bfa)', cursor: 'pointer', fontSize: 13, fontWeight: 700, padding: 0 }}>
                     ← Todos os entregadores
                   </button>
-                  <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--text)' }}>{ent?.nome || 'Entregador'} <span style={{ fontSize: 12, fontWeight: 700, color: '#7c3aed' }}>· hoje</span></div>
+                  <div style={{ fontSize: 19, fontWeight: 800, color: 'var(--text)' }}>{ent?.nome || 'Entregador'} <span style={{ fontSize: 12, fontWeight: 700, color: '#7c3aed' }}>· hoje</span></div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
                     Histórico completo (7/30 dias, tudo) em <b>Vendas → Entregadores</b>.
                   </div>
@@ -11287,12 +11287,12 @@ export default function PainelPedidos() {
                         const acertarAqui = balde === '__acertar'
                         const dentro = (
                           <>
-                            <div style={{ fontSize: 20, fontWeight: 800, color: cor, lineHeight: 1.15 }}>{val}</div>
-                            <div style={{ fontSize: 12, color: acertarAqui ? cor : 'var(--text-muted)', fontWeight: acertarAqui ? 700 : 400, marginTop: 2 }}>{lab}{ativo ? ' ✕' : ''}</div>
+                            <div style={{ fontSize: 24, fontWeight: 800, color: cor, lineHeight: 1.15 }}>{val}</div>
+                            <div style={{ fontSize: 13.5, color: acertarAqui ? cor : 'var(--text-muted)', fontWeight: acertarAqui ? 700 : 500, marginTop: 3 }}>{lab}{ativo ? ' ✕' : ''}</div>
                           </>
                         )
                         const base = {
-                          flex: '1 1 110px', textAlign: 'center', borderRadius: 10, padding: '10px 6px',
+                          flex: '1 1 125px', textAlign: 'center', borderRadius: 10, padding: '12px 8px',
                           border: `${acertarAqui ? 2 : 1}px solid ${ativo || acertarAqui ? cor : 'var(--border, #2a2a3a)'}`,
                           background: ativo ? 'rgba(14,165,233,.14)' : acertarAqui ? 'rgba(22,163,74,.10)' : 'transparent',
                         }
@@ -11366,7 +11366,7 @@ export default function PainelPedidos() {
                   )}
 
                   {/* A PAGAR (pendentes por data) */}
-                  <div style={{ fontSize: 15, fontWeight: 800, color: '#f59e0b', marginTop: 6 }}>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: '#f59e0b', marginTop: 8 }}>
                     A pagar · {fmt(somaTaxa(filtrar(pendentes)))}
                   </div>
                   {filtrar(pendentes).length === 0
@@ -11374,7 +11374,7 @@ export default function PainelPedidos() {
                     : agrupaPorData(filtrar(pendentes)).map(([data, ps]) => (
                       <div key={data} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>{data} · {ps.length} corrida{ps.length > 1 ? 's' : ''} · {fmt(somaTaxa(ps))}</span>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>{data} · {ps.length} corrida{ps.length > 1 ? 's' : ''} · {fmt(somaTaxa(ps))}</span>
                           <button type="button" onClick={() => pagarCorridas(ps.map(p => p.id))}
                             style={{ fontSize: 11, fontWeight: 800, color: '#fff', background: '#16a34a', border: 'none', borderRadius: 20, padding: '3px 12px', cursor: 'pointer' }}>
                             Pagar todas
@@ -11385,14 +11385,14 @@ export default function PainelPedidos() {
                     ))}
 
                   {/* PAGAS (por data) */}
-                  <div style={{ fontSize: 15, fontWeight: 800, color: '#16a34a', marginTop: 10 }}>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: '#16a34a', marginTop: 12 }}>
                     Pagas · {fmt(somaTaxa(filtrar(pagos)))}
                   </div>
                   {filtrar(pagos).length === 0
                     ? <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{filtroForma ? 'Nenhuma corrida paga nessa forma.' : 'Nenhuma corrida paga ainda.'}</div>
                     : agrupaPorData(filtrar(pagos)).map(([data, ps]) => (
                       <div key={data} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)', marginTop: 2 }}>{data} · {ps.length} corrida{ps.length > 1 ? 's' : ''} · {fmt(somaTaxa(ps))}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)', marginTop: 2 }}>{data} · {ps.length} corrida{ps.length > 1 ? 's' : ''} · {fmt(somaTaxa(ps))}</div>
                         {ps.map(p => OrderRow(p, { pago: true }))}
                       </div>
                     ))}
