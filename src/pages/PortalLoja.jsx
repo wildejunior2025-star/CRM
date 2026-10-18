@@ -285,6 +285,29 @@ export default function PortalLoja() {
     load()
   }, [empresaId])
 
+  // "Aberta/fechada" depende do sinal de vida da loja (heartbeat, vale 2 min). A tela
+  // lia isso uma vez só: quem saía do app e voltava via a loja "fechada" até reabrir.
+  // Agora relê ao voltar pro app e a cada 30s enquanto a tela está aberta.
+  useEffect(() => {
+    const id = empresa?.id
+    if (!id) return
+    async function atualizarStatus() {
+      if (document.visibilityState === 'hidden') return
+      const { data } = await supabase.from('empresas')
+        .select('aceita_delivery, aceita_retirada, delivery_ativo, last_heartbeat_at')
+        .eq('id', id).maybeSingle()
+      if (data) setEmpresa(prev => (prev ? { ...prev, ...data } : prev))
+    }
+    document.addEventListener('visibilitychange', atualizarStatus)
+    window.addEventListener('focus', atualizarStatus)
+    const timer = setInterval(atualizarStatus, 30000)
+    return () => {
+      document.removeEventListener('visibilitychange', atualizarStatus)
+      window.removeEventListener('focus', atualizarStatus)
+      clearInterval(timer)
+    }
+  }, [empresa?.id])
+
   useEffect(() => {
     async function loadCliente() {
       const { data: { user } } = await supabase.auth.getUser()

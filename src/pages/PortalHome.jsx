@@ -299,6 +299,30 @@ export default function PortalHome() {
     load()
   }, [])
 
+  // Aberta/fechada vem do sinal de vida da loja (vale 2 min). Relê ao voltar pro app
+  // e a cada 30s, senão a lista mostrava tudo "fechado" depois de um tempo fora.
+  useEffect(() => {
+    async function atualizarStatus() {
+      if (document.visibilityState === 'hidden') return
+      const { data } = await supabase
+        .from('empresas')
+        .select('id, delivery_ativo, aceita_delivery, last_heartbeat_at')
+        .in('status', ['trial', 'ativo', 'atrasado'])
+        .eq('aceita_delivery', true)
+      if (!data) return
+      const mapa = new Map(data.map(d => [d.id, d]))
+      setEmpresas(prev => prev.map(e => (mapa.has(e.id) ? { ...e, ...mapa.get(e.id) } : e)))
+    }
+    document.addEventListener('visibilitychange', atualizarStatus)
+    window.addEventListener('focus', atualizarStatus)
+    const timer = setInterval(atualizarStatus, 30000)
+    return () => {
+      document.removeEventListener('visibilitychange', atualizarStatus)
+      window.removeEventListener('focus', atualizarStatus)
+      clearInterval(timer)
+    }
+  }, [])
+
   // Troca de endereço pelo cabeçalho: a lista refiltra na hora, sem fechar o app.
   useEffect(() => {
     const atualizar = () => setEnderecoAtivo(getEnderecoAtivo())
