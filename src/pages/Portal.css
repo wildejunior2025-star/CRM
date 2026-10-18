@@ -92,6 +92,17 @@
   flex-shrink: 0;
 }
 
+/* Logo da loja no cartão do pedido */
+.portal-pedido-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
 .portal-pedido-loja {
   display: block;
   font-size: 14px;

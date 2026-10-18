@@ -286,7 +286,10 @@ export default function PortalPedidos() {
               <button key={p.id} className="portal-pedido-card" onClick={() => setDetalhe(p)}>
                 <div className="portal-pedido-card-header">
                   <div className="portal-pedido-data">
-                    <span className="portal-pedido-icon">{icon}</span>
+                    {/* Logo da loja no lugar do ícone do status: o status já está na etiqueta ao lado */}
+                    {p.empresas?.logo_url
+                      ? <img className="portal-pedido-logo" src={p.empresas.logo_url} alt="" loading="lazy" />
+                      : <span className="portal-pedido-icon">{icon}</span>}
                     <div>
                       <span className="portal-pedido-loja">{p.empresas?.nome ?? 'Loja'}</span>
                       <span className="portal-pedido-hora">
