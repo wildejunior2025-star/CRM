@@ -216,6 +216,7 @@ export default function PortalLoja() {
   const [erroCep, setErroCep] = useState(null)
   const [pixData, setPixData] = useState(null)
   const [taxaCalculada, setTaxaCalculada]   = useState(null)  // null = ainda não calculada por km
+  const [pinCliente, setPinCliente]         = useState(null)  // { lat, lng, rua }: ponto da casa marcado no mapa
   const [tempoCalculado, setTempoCalculado] = useState(null)  // tempo estimado pela faixa
 
   // Saldo de pontos (desconto nas compras)
@@ -331,7 +332,7 @@ export default function PortalLoja() {
           .eq('user_id', user.id)
           .maybeSingle(),
         supabase.from('profiles')
-          .select('nome, telefone, cep, endereco, numero, complemento, bairro, cidade, estado')
+          .select('nome, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, latitude, longitude')
           .eq('id', user.id)
           .maybeSingle(),
         supabase.from('saldo_pontos').select('pontos').eq('profile_id', user.id).maybeSingle(),
@@ -346,6 +347,14 @@ export default function PortalLoja() {
       if (cliente) setClienteProfile(cliente)
       const d = cliente ?? profile
       const endLocal = getEnderecoAtivo()
+      // Ponto da casa marcado no mapa (aparelho ou perfil), preso à rua em que foi marcado
+      {
+        const lat = Number(endLocal?.latitude ?? profile?.latitude)
+        const lng = Number(endLocal?.longitude ?? profile?.longitude)
+        if (Number.isFinite(lat) && Number.isFinite(lng) && (endLocal?.latitude != null || profile?.latitude != null)) {
+          setPinCliente({ lat, lng, rua: endLocal?.latitude != null ? endLocal?.endereco : (d?.endereco ?? profile?.endereco) })
+        }
+      }
       if (d || endLocal) {
         setForm(p => ({
           ...p,
@@ -536,6 +545,47 @@ export default function PortalLoja() {
     }
   }
 
+  /* ── Taxa de entrega: ponto do cliente + conta do servidor ── */
+  const mesmaRua = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase()
+
+  // O ponto confirmado no mapa (cadastro do endereço) vale enquanto a rua não mudou;
+  // senão procura o texto no mapa.
+  async function pontoDoCliente() {
+    const p = pinCliente
+    if (p && mesmaRua(form.rua, p.rua)) return { lat: p.lat, lng: p.lng }
+    const endStr = [form.rua, form.numero, form.bairro, form.cidade].filter(Boolean).join(', ')
+    return endStr ? await geocodificar(endStr) : null
+  }
+
+  // Quanto ESTA loja cobra por esta entrega — a mesma função que o banco usa pra
+  // recusar pedido com taxa errada. Assim a tela, o pedido e a trava dizem o mesmo
+  // número (antes o app ignorava a tabela de bairros e calculava só por km).
+  async function taxaDoServidor(coords) {
+    if (!empresa?.id) return null
+    const { data, error: e } = await supabase.rpc('taxa_entrega_esperada', {
+      p_empresa: empresa.id,
+      p_bairro:  form.bairro?.trim() || null,
+      p_lat:     coords?.lat ?? null,
+      p_lng:     coords?.lng ?? null,
+    })
+    if (e || data == null) return null
+    return Number(data)
+  }
+
+  // Mostra a taxa certa no resumo assim que o endereço está preenchido, em vez de
+  // só descobrir na hora de confirmar.
+  useEffect(() => {
+    if (!checkoutAberto || form.tipo_entrega !== 'entrega' || !empresa?.id) return
+    if (!form.rua.trim() || !form.cidade.trim()) return
+    let vivo = true
+    const t = setTimeout(async () => {
+      const v = await taxaDoServidor(await pontoDoCliente())
+      if (vivo && v != null) setTaxaCalculada(v)
+    }, 700)
+    return () => { vivo = false; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkoutAberto, form.tipo_entrega, form.rua, form.numero, form.bairro, form.cidade, empresa?.id, pinCliente])
+
   /* ── Checkout ── */
   async function handleConfirmarPedido() {
     setError(null)
@@ -550,12 +600,19 @@ export default function PortalLoja() {
       return
     }
 
-    // Valida raio + calcula taxa por km se configurada
-    if (precisaEndereco && empresa?.latitude && empresa?.longitude) {
-      const endStr = [form.rua, form.numero, form.bairro, form.cidade].filter(Boolean).join(', ')
-      const coords = await geocodificar(endStr)
-      if (coords) {
-        const dist = haversineKm(coords.lat, coords.lng, Number(empresa.latitude), Number(empresa.longitude))
+    // Valida raio e calcula a taxa. A taxa que vale é a do SERVIDOR (a mesma conta da
+    // trava que recusa pedido com taxa errada): bairro cadastrado manda, senão a
+    // tabela por km do ponto do cliente. Valor guardado em `taxaFinal` e NÃO no
+    // estado: o estado só muda na próxima renderização e o pedido saía com taxa 0.
+    let taxaFinal = taxa
+    let coordsPedido = null
+    if (precisaEndereco) {
+      coordsPedido = await pontoDoCliente()
+      const esperada = await taxaDoServidor(coordsPedido)
+      if (esperada != null) taxaFinal = esperada
+
+      if (coordsPedido && empresa?.latitude && empresa?.longitude) {
+        const dist = haversineKm(coordsPedido.lat, coordsPedido.lng, Number(empresa.latitude), Number(empresa.longitude))
 
         // Bloqueia se fora do raio
         if (empresa.raio_entrega_km && dist > Number(empresa.raio_entrega_km)) {
@@ -563,15 +620,16 @@ export default function PortalLoja() {
           return
         }
 
-        // Calcula taxa por faixas de km se configurado
+        // Tempo (e, sem resposta do servidor, a taxa) pela faixa de km
         const faixas = Array.isArray(empresa.taxas_entrega_km) ? empresa.taxas_entrega_km : []
         if (faixas.length > 0) {
           const ordenadas = [...faixas].sort((a, b) => a.km - b.km)
           const faixa = ordenadas.find(f => dist <= Number(f.km)) ?? ordenadas[ordenadas.length - 1]
-          setTaxaCalculada(Number(faixa.taxa))
+          if (esperada == null) taxaFinal = Number(faixa.taxa)
           if (faixa.tempo != null && faixa.tempo !== '') setTempoCalculado(Number(faixa.tempo))
         }
       }
+      if (taxaFinal != null) setTaxaCalculada(taxaFinal)
     }
 
     setEnviando(true)
@@ -619,10 +677,13 @@ export default function PortalLoja() {
       endereco_cidade:      isRetirada ? null : form.cidade.trim() || null,
       itens,
       subtotal:             totalValor,
-      taxa_entrega:         isRetirada ? 0 : (taxa ?? 0),
+      // Ponto da casa: o servidor usa ele pra conferir a taxa (sem ele cai no piso da tabela)
+      endereco_lat:         isRetirada ? null : (coordsPedido?.lat ?? null),
+      endereco_lng:         isRetirada ? null : (coordsPedido?.lng ?? null),
+      taxa_entrega:         isRetirada ? 0 : (taxaFinal ?? 0),
       desconto:             descontoPontos,
       pontos_usados:        pontosUsados,
-      total:                Math.max(0, (isRetirada ? totalValor : totalValor + (taxa ?? 0)) - descontoPontos),
+      total:                Math.max(0, (isRetirada ? totalValor : totalValor + (taxaFinal ?? 0)) - descontoPontos),
       forma_pagamento:      form.forma,
       troco_para:           form.forma === 'dinheiro' && form.troco ? Math.round(Number(form.troco) * 100) / 100 : null,
       observacoes:          form.obs.trim() || null,
