@@ -340,6 +340,8 @@ export default function PortalHome() {
     }
     return true
   })
+  // Abertas primeiro, fechadas no fim (a ordem por nome se mantém dentro de cada grupo)
+  .sort((a, b) => Number(lojaOnline(b)) - Number(lojaOnline(a)))
 
   return (
     <div className="ph-root">
