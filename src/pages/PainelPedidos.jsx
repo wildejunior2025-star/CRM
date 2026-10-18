@@ -6605,6 +6605,127 @@ function ordenarThreads(threads) {
 }
 
 // ── Componente principal ────────────────────────────────────
+// Acerto do entregador: fecha as corridas do dia e, se o dinheiro saiu da
+// gaveta, lança a sangria junto.
+//
+// A pergunta que importa NÃO é "desconta do dinheiro dele?" — é o que saiu do
+// caixa. O total do pedido já entrou no caixa na confirmação (mig 0334), então
+// o dinheiro que ficou na mão dele saiu da gaveta mesmo sem nunca ter chegado.
+// Por isso a conta tem duas pernas: o que ele reteve + o que você completou,
+// e só a parte paga pelo caixa vira sangria.
+function ModalAcertoEntregador({ dados, onFechar, onConfirmar }) {
+  const [ficou, setFicou] = useState(true)
+  const [ondePagou, setOndePagou] = useState('caixa')
+  const [salvando, setSalvando] = useState(false)
+  // Caixas abertos da loja. Quase sempre é um só — aí nem pergunto. Mas tem
+  // loja rodando com quatro abertos ao mesmo tempo (Lá em Casa, 18/10), e aí
+  // escolher sozinho pelo mais recente jogaria a sangria no caixa errado.
+  const [caixas, setCaixas] = useState([])
+  const [caixaId, setCaixaId] = useState(null)
+  useEffect(() => {
+    if (!dados) { setCaixas([]); setCaixaId(null); return }
+    let vivo = true
+    supabase.from('caixas')
+      .select('id, aberto_em, aberto_por')
+      .eq('status', 'aberto')
+      .order('aberto_em', { ascending: false })
+      .then(({ data }) => {
+        if (!vivo) return
+        setCaixas(data ?? [])
+        setCaixaId(data?.[0]?.id ?? null)
+      })
+    return () => { vivo = false }
+  }, [dados])
+  if (!dados) return null
+
+  const { nome, ids, aReceber, emDinheiro } = dados
+  const brl = v => `R$ ${Number(v || 0).toFixed(2).replace('.', ',')}`
+  const retido = ficou ? Math.min(emDinheiro, aReceber) : 0
+  const restante = aReceber - retido
+  const sangria = retido + (ondePagou === 'caixa' ? restante : 0)
+  const sobra = ficou ? emDinheiro - retido : 0   // ele reteve mais do que devia receber
+
+  const caixaLinha = { display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', fontSize: 14, lineHeight: 1.4 }
+
+  return (
+    <div onClick={onFechar}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 4000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ width: '100%', maxWidth: 440, background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)', borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 13, maxHeight: '92vh', overflowY: 'auto' }}>
+        <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)' }}>Acertar com {nome}</div>
+        <div style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+          Taxa das {ids.length} corridas: <strong style={{ color: '#16a34a' }}>{brl(aReceber)}</strong><br />
+          Dinheiro das entregas que ele recebeu: <strong style={{ color: '#0ea5e9' }}>{brl(emDinheiro)}</strong>
+        </div>
+
+        <label style={caixaLinha}>
+          <input type="checkbox" checked={ficou} onChange={e => setFicou(e.target.checked)} style={{ width: 19, height: 19, marginTop: 1, flexShrink: 0 }} />
+          <span style={{ color: 'var(--text)' }}>Ele ficou com o dinheiro das entregas ({brl(emDinheiro)})</span>
+        </label>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)' }}>
+            {retido > 0 ? `Os ${brl(restante)} que faltam, você pagou:` : 'Os ' + brl(aReceber) + ' você pagou:'}
+          </div>
+          {[['caixa', '💵 Do caixa (saiu da gaveta)'], ['fora', '📲 Por PIX / fora do caixa']].map(([v, rot]) => (
+            <label key={v} style={caixaLinha}>
+              <input type="radio" name="ondePagou" checked={ondePagou === v} onChange={() => setOndePagou(v)} style={{ width: 19, height: 19, marginTop: 1, flexShrink: 0 }} />
+              <span style={{ color: 'var(--text)' }}>{rot}</span>
+            </label>
+          ))}
+          {/* Só pergunta QUAL caixa quando há mais de um aberto. Com um só, a
+              escolha seria uma pergunta sem resposta possível. */}
+          {sangria > 0.004 && caixas.length > 1 && (
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>Há {caixas.length} caixas abertos — tirar de qual?</span>
+              <select value={caixaId ?? ''} onChange={e => setCaixaId(e.target.value)}
+                style={{ padding: '10px 12px', borderRadius: 9, border: '1px solid var(--border, #2a2a3a)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 14 }}>
+                {caixas.map((c, i) => (
+                  <option key={c.id} value={c.id}>
+                    {i === 0 ? 'Mais recente · ' : ''}aberto {new Date(c.aberto_em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+
+        {sobra > 0.004 && (
+          <div style={{ fontSize: 12.5, lineHeight: 1.45, color: '#eab308', background: 'rgba(234,179,8,.12)', border: '1px solid rgba(234,179,8,.4)', borderRadius: 8, padding: '9px 11px' }}>
+            Ele recebeu {brl(emDinheiro)} e a taxa dele é só {brl(aReceber)}. Então ele ainda devolve <strong>{brl(sobra)}</strong> — e isso já está contado na sangria abaixo.
+          </div>
+        )}
+
+        <div style={{ borderTop: '1px solid var(--border, #2a2a3a)', paddingTop: 11, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Sangria que vou lançar</span>
+          <strong style={{ fontSize: 20, color: sangria > 0 ? '#f59e0b' : 'var(--text-muted)' }}>{brl(sangria)}</strong>
+        </div>
+        {sangria <= 0 && (
+          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.4, marginTop: -6 }}>
+            Nada saiu da gaveta — só vou marcar as corridas como pagas.
+          </div>
+        )}
+
+        <div style={{ fontSize: 12.5, lineHeight: 1.45, color: '#f87171', background: 'rgba(248,113,113,.1)', border: '1px solid rgba(248,113,113,.4)', borderRadius: 8, padding: '9px 11px' }}>
+          ⚠️ Isso <strong>não tem como desfazer</strong>. As {ids.length} corridas ficam pagas de vez.
+        </div>
+
+        <div style={{ display: 'flex', gap: 9 }}>
+          <button type="button" onClick={onFechar} disabled={salvando}
+            style={{ flex: 1, padding: '12px', borderRadius: 10, border: '1px solid var(--border, #2a2a3a)', background: 'transparent', color: 'var(--text-muted)', fontWeight: 700, fontSize: 14.5, cursor: 'pointer' }}>
+            Cancelar
+          </button>
+          <button type="button" disabled={salvando}
+            onClick={async () => { setSalvando(true); await onConfirmar({ ids, sangria, nome, caixaId }); setSalvando(false) }}
+            style={{ flex: 1.4, padding: '12px', borderRadius: 10, border: 'none', background: '#16a34a', color: '#fff', fontWeight: 800, fontSize: 14.5, cursor: salvando ? 'wait' : 'pointer' }}>
+            {salvando ? 'Salvando…' : 'Confirmar acerto'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function PainelPedidos() {
   const { empresa, logout, profile, voltarSuperAdmin } = useAuth()
   // Super admin que entrou numa loja pelo gestor: pode voltar à lista de lojas.
@@ -6938,6 +7059,8 @@ export default function PainelPedidos() {
   const [entregasConcluidas, setEntregasConcluidas] = useState([])
   const [confirmar, avisoConfirmar] = useConfirmar()
   const [entregadorSel, setEntregadorSel] = useState(null)
+  // Dados do acerto que está sendo fechado (null = modal fechado).
+  const [acertoAberto, setAcertoAberto] = useState(null)
   // Filtro por forma de recebimento no acerto do entregador (null = tudo).
   // Fica aqui fora porque o painel inteiro remonta a cada atualização da lista
   // de pedidos: guardado lá dentro, o filtro se perdia sozinho a cada 40s.
@@ -7179,6 +7302,31 @@ export default function PainelPedidos() {
   }, [empresa])
 
   // Marca corridas como PAGAS ao entregador (acerto da taxa). Otimista + persiste.
+  // Fecha o acerto: marca as corridas e, quando saiu dinheiro da gaveta, lança
+  // a sangria no caixa ABERTO. Sem caixa aberto a sangria não tem onde entrar —
+  // aí o acerto acontece mesmo assim (o entregador não pode ficar esperando) e
+  // o dono é avisado pra lançar na mão depois.
+  async function fecharAcertoEntregador({ ids, sangria, nome, caixaId }) {
+    await pagarCorridas(ids)
+    if (sangria > 0.004) {
+      if (!caixaId) {
+        window.alert(`Corridas marcadas como pagas.\n\nMas não há caixa aberto, então a sangria de ${fmt(sangria)} não foi lançada. Abra o caixa e lance a sangria na mão.`)
+        setAcertoAberto(null)
+        return
+      }
+      const { error } = await supabase.from('caixa_movimentos').insert({
+        caixa_id: caixaId,
+        tipo: 'sangria',
+        valor: Number(sangria.toFixed(2)),
+        forma: 'dinheiro',
+        observacao: `Pagamento entregador ${nome} — ${ids.length} corrida${ids.length > 1 ? 's' : ''}`,
+        created_by: profile?.id,
+      })
+      if (error) window.alert(`Corridas marcadas como pagas, mas a sangria de ${fmt(sangria)} falhou: ${error.message}\n\nLance na mão no Caixa.`)
+    }
+    setAcertoAberto(null)
+  }
+
   async function pagarCorridas(ids) {
     if (!ids?.length) return
     const agora = new Date().toISOString()
@@ -11306,22 +11454,12 @@ export default function PainelPedidos() {
                           return (
                             <button key={lab} type="button" style={{ ...base, cursor: 'pointer', font: 'inherit' }}
                               title={`Marcar as ${ids.length} corridas como pagas`}
-                              onClick={async () => {
-                                const quem = ent?.nome || 'o entregador'
-                                const ok = await confirmar({
-                                  titulo: acerto >= 0
-                                    ? `Pagar ${fmt(Math.abs(acerto))} a ${quem}?`
-                                    : `${quem} devolve ${fmt(Math.abs(acerto))}?`,
-                                  texto: `As ${ids.length} corridas de hoje ficam marcadas como pagas.`,
-                                  itens: [
-                                    `Taxa das corridas: ${fmt(somaTaxa(pendentes))}`,
-                                    `Dinheiro que ele já tem na mão: ${fmt(emDinheiro)}`,
-                                  ],
-                                  aviso: 'Isso NÃO tem como desfazer. Se marcar errado, a dívida some e não dá pra voltar atrás.',
-                                  textoOk: acerto >= 0 ? 'Sim, paguei' : 'Sim, recebi',
-                                })
-                                if (ok) pagarCorridas(ids)
-                              }}>
+                              onClick={() => setAcertoAberto({
+                                nome: ent?.nome || 'o entregador',
+                                ids,
+                                aReceber: somaTaxa(pendentes),
+                                emDinheiro,
+                              })}>
                               {dentro}
                             </button>
                           )
@@ -11780,6 +11918,12 @@ export default function PainelPedidos() {
       {/* Confirmação no visual do sistema (useConfirmar). Fica na raiz pra
           aparecer por cima de qualquer painel aberto. */}
       {avisoConfirmar}
+
+      <ModalAcertoEntregador
+        dados={acertoAberto}
+        onFechar={() => setAcertoAberto(null)}
+        onConfirmar={fecharAcertoEntregador}
+      />
     </div>
   )
 }
