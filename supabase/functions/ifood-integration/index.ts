@@ -971,7 +971,11 @@ async function runSalvarItem(sb: any, empresaId: string, p: any) {
     return {
       item: {
         id: itemId, type: "DEFAULT", categoryId: p.categoriaId, status,
-        price: { value: Number(p.preco ?? 0) },
+        // precoOriginal > preco = promoção: o iFood mostra o original riscado.
+        price: {
+          value: Number(p.preco ?? 0),
+          ...(Number(p.precoOriginal) > Number(p.preco ?? 0) ? { originalValue: Number(p.precoOriginal) } : {}),
+        },
         externalCode: p.externalCode || `FWC-${itemId.slice(0, 8)}`,
         index: Number(p.index ?? 1), productId,
       },
@@ -1171,7 +1175,7 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
   const pct = Number(body?.acrescimo_pct ?? 0) || 0
   const { data: produtos } = await sb
     .from("produtos")
-    .select("id, nome, descricao, preco_venda, foto_url, ifood_item_id, ifood_product_id")
+    .select("id, nome, descricao, preco_venda, preco_promocional, foto_url, ifood_item_id, ifood_product_id")
     .eq("empresa_id", empresaId)
     .in("id", ids)
   if (!produtos?.length) return { ok: false, error: "produtos não encontrados" }
@@ -1209,7 +1213,13 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
         avisos.push(`${p.nome}: foto não subiu (${String(e).slice(0, 80)})`)
       }
     }
-    const preco = Math.round(Number(p.preco_venda ?? 0) * (1 + pct / 100) * 100) / 100
+    const comAcrescimo = (v: number) => Math.round(v * (1 + pct / 100) * 100) / 100
+    // Com preço promocional cadastrado (menor que o de venda), o de venda vira o
+    // riscado e o promocional é o que o cliente paga.
+    const promo = Number(p.preco_promocional ?? 0)
+    const emPromo = promo > 0 && promo < Number(p.preco_venda ?? 0)
+    const preco = comAcrescimo(emPromo ? promo : Number(p.preco_venda ?? 0))
+    const precoOriginal = emPromo ? comAcrescimo(Number(p.preco_venda)) : undefined
     // Produto que JÁ foi publicado reusa o id do item lá: o PUT do iFood é por
     // id, então mandar o mesmo id atualiza (preço, foto, descrição) em vez de
     // criar um segundo. Sem isso, reenviar a categoria duplicava o cardápio —
@@ -1217,7 +1227,7 @@ async function runEnviarDaLoja(sb: any, empresaId: string, body: any) {
     // Os complementos do produto, com o min/max que ele usa aqui.
     const grupos = comp.porProduto.get(p.id) ?? []
     const r = await runSalvarItem(sb, empresaId, {
-      categoriaId, nome: p.nome, descricao: p.descricao ?? "", preco, imagePath,
+      categoriaId, nome: p.nome, descricao: p.descricao ?? "", preco, precoOriginal, imagePath,
       itemId: p.ifood_item_id ?? undefined,
       productId: p.ifood_product_id ?? undefined,
       externalCode: `FWC-${String(p.id).slice(0, 8)}`,
