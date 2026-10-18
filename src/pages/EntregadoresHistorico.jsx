@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, rotuloValorEntregador } from '../lib/descontoEntrega'
+import ModalTaxaMotoboy from '../components/ModalTaxaMotoboy'
 import { partesPagamento, ehDividido, textoPagamento } from '../lib/pagamentoPartes'
 import '../components/Page.css'
 import './Entregadores.css'
@@ -592,6 +593,7 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
   const [pedidos, setPedidos] = useState([])
   const [perfil, setPerfil] = useState(null)
   const [carregando, setCarregando] = useState(true)
+  const [taxaEditando, setTaxaEditando] = useState(null) // corrida cuja taxa o dono está editando
 
   const carregar = useCallback(async () => {
     if (!empresa || !id) return
@@ -677,6 +679,11 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <strong style={{ fontSize: 13, ...(editada ? { color: '#dc2626' } : {}) }} className={editada ? undefined : (pago ? 'c-ok' : 'c-warn')}>{fmt(ganho(p))}</strong>
+            {/* O dono muda a taxa da corrida sem depender do motoboy (lojas com a função, antes de pagar) */}
+            {empresa?.entregador_digita_valor && !pago && (
+              <button type="button" className="btn btn-secondary btn-sm" title="Editar a taxa desta corrida"
+                style={{ fontSize: 12, padding: '3px 8px' }} onClick={() => setTaxaEditando(p)}>✏️</button>
+            )}
             {pago
               ? <button type="button" className="ent-chip ent-chip--ok" style={{ border: 'none', cursor: 'pointer' }}
                   title="Desfazer pagamento" disabled={salvando}
@@ -712,6 +719,18 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
 
   return (
     <div className="ent-wrap">
+      {taxaEditando && (
+        <ModalTaxaMotoboy
+          pedido={taxaEditando}
+          onFechar={() => setTaxaEditando(null)}
+          onSalvo={patch => {
+            const idCorrida = taxaEditando.id
+            setPedidos(prev => prev.map(x => (x.id === idCorrida ? { ...x, ...patch } : x)))
+            recarregarResumo?.()
+          }}
+        />
+      )}
+
       <button type="button" className="btn btn-secondary btn-sm" style={{ marginBottom: 12 }} onClick={onVoltar}>← Todos os entregadores</button>
 
       <div className="ent-det-head">

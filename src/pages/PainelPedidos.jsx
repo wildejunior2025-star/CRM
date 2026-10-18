@@ -6,6 +6,7 @@ import { adicionalComplementos } from '../lib/complementos'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto, temValorDigitado, rotuloValorEntregador } from '../lib/descontoEntrega'
 import { tocarPedidoNovo } from '../lib/somChamado'
 import BaixaInsumos from '../components/BaixaInsumos'
+import ModalTaxaMotoboy from '../components/ModalTaxaMotoboy'
 import { precoPorQuantidade, faixaAplicada, menorFaixa, mapaFaixasCategoria, comFaixaDaCategoria, somaPorCategoria } from '../lib/precoQuantidade'
 import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
 import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
@@ -6766,6 +6767,7 @@ export default function PainelPedidos() {
   const contaMesaImpressaRef = useRef(null) // ids de comanda cuja CONTA já saiu (garçom fechou)
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null) // pedido aberto em detalhe (card completo)
   const [modalCodRetirada, setModalCodRetirada] = useState(null) // retirada aguardando o código do cliente
+  const [taxaEditando, setTaxaEditando] = useState(null) // corrida cuja taxa do motoboy o dono está editando
   const [autoImprimir, setAutoImprimir] = useState(autoImprimirAtivo)
   const [aceitarAuto, setAceitarAuto] = useState(aceitarAutoAtivo)
   // NFC-e: a loja habilitou a emissão E registrou o certificado no emissor?
@@ -10506,6 +10508,18 @@ export default function PainelPedidos() {
         </div>
       )}
 
+      {taxaEditando && (
+        <ModalTaxaMotoboy
+          pedido={taxaEditando}
+          onFechar={() => setTaxaEditando(null)}
+          onSalvo={patch => {
+            const id = taxaEditando.id
+            setEntregasConcluidas(prev => prev.map(p => (p.id === id ? { ...p, ...patch } : p)))
+            setPedidos(prev => prev.map(p => (p.id === id ? { ...p, ...patch } : p)))
+          }}
+        />
+      )}
+
       {modalCodRetirada && (
         <ModalCodigoRetirada
           pedido={modalCodRetirada}
@@ -11375,6 +11389,12 @@ export default function PainelPedidos() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <strong style={{ fontSize: 17, color: corTaxa }}
                         title={temValorDigitado(p) ? 'Taxa da corrida do motoboy' : descontoDoPedido(descontos, p) > 0 ? `Taxa ${fmt(p.taxa_entrega)} − ${rotuloDoDesconto(p)} ${fmt(descontoDoPedido(descontos, p))}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
+                      {/* O dono muda a taxa da corrida sem depender do motoboy (lojas com a função, antes de pagar) */}
+                      {empresa?.entregador_digita_valor && !pago && (
+                        <button type="button" onClick={() => setTaxaEditando(p)} title="Editar a taxa desta corrida"
+                          style={{ fontSize: 14, lineHeight: 1, padding: '3px 7px', borderRadius: 8, cursor: 'pointer',
+                            border: '1px solid var(--border, #444)', background: 'transparent', color: 'var(--text)' }}>✏️</button>
+                      )}
                       {!ehRota && (pago
                         ? <span style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '2px 8px', borderRadius: 20 }}>✓ Pago</span>
                         : <button type="button" onClick={() => pagarCorridas([p.id])}
