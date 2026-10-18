@@ -5,6 +5,7 @@ import { capturarIndicacao, registrarIndicacao } from '../lib/indicacao'
 import { useAuth } from '../hooks/useAuth'
 import { useBranding } from '../context/BrandingContext'
 import { getEnderecoAtivo } from '../utils/enderecoPortal'
+import { formasAtivas, repassePct } from '../lib/constants'
 import './PortalLoja.css'
 
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
@@ -261,7 +262,7 @@ export default function PortalLoja() {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(empresaId)
       const baseQuery = supabase
         .from('empresas')
-        .select('id, nome, slug, banner_url, logo_url, descricao, taxa_entrega, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, aceita_delivery, aceita_retirada, delivery_ativo, last_heartbeat_at, cidade, latitude, longitude, raio_entrega_km')
+        .select('id, nome, slug, banner_url, logo_url, descricao, taxa_entrega, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, aceita_delivery, aceita_retirada, delivery_ativo, last_heartbeat_at, cidade, latitude, longitude, raio_entrega_km, formas_pagamento, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct')
       const empRes = await (isUuid ? baseQuery.eq('id', empresaId) : baseQuery.eq('slug', empresaId)).maybeSingle()
       if (empRes.error) { setError(empRes.error.message); setLoading(false); return }
       const resolvedId = empRes.data?.id ?? empresaId
@@ -321,6 +322,18 @@ export default function PortalLoja() {
       clearInterval(timer)
     }
   }, [empresa?.id])
+
+  // A forma marcada tem que existir na loja: senão cai na primeira que ela aceita.
+  useEffect(() => {
+    if (!empresa) return
+    const ligadas = formasAtivas(empresa)
+    setForm(p => {
+      if (ligadas.includes(p.forma)) return p
+      const preferida = ['pix', 'pix_entrega', 'dinheiro', 'credito', 'debito', 'cartao'].find(f => ligadas.includes(f))
+      return { ...p, forma: preferida ?? ligadas[0] }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empresa?.id, JSON.stringify(empresa?.formas_pagamento ?? null)])
 
   useEffect(() => {
     async function loadCliente() {
@@ -408,7 +421,13 @@ export default function PortalLoja() {
   const podeUsarSaldo   = pontosUsaveis >= minResgate
   const pontosUsados    = usarSaldo && podeUsarSaldo ? pontosUsaveis : 0
   const descontoPontos  = Math.round(pontosUsados * (valorPonto || 0.02) * 100) / 100
-  const totalFinal      = Math.max(0, baseDesconto - descontoPontos)
+  // Formas de pagamento: as que a loja ligou em Minha Loja → Pagamento. O cartão pode
+  // ter um acréscimo que a loja cobra do cliente (ex.: CDBom, 5% no crédito).
+  const formasLoja      = formasAtivas(empresa)
+  const pctRepasse      = repassePct(empresa, form.forma)
+  const baseCartao      = Math.max(0, baseDesconto - descontoPontos)
+  const acrescimoPag    = Math.round(baseCartao * pctRepasse) / 100
+  const totalFinal      = Math.round((baseCartao + acrescimoPag) * 100) / 100
 
   /* ── Carregar mais produtos ── */
   async function carregarMais() {
@@ -663,6 +682,10 @@ export default function PortalLoja() {
 
     const isRetirada = form.tipo_entrega === 'retirada'
 
+    // Total com a taxa JÁ calculada (taxaFinal) e o acréscimo do cartão, se a loja cobra.
+    const baseFinal = Math.max(0, (isRetirada ? totalValor : totalValor + (taxaFinal ?? 0)) - descontoPontos)
+    const acrescimoFinal = Math.round(baseFinal * repassePct(empresa, form.forma)) / 100
+
     const pedidoBase = {
       empresa_id:           empresa?.id ?? empresaId,
       origem:               'app',
@@ -683,7 +706,8 @@ export default function PortalLoja() {
       taxa_entrega:         isRetirada ? 0 : (taxaFinal ?? 0),
       desconto:             descontoPontos,
       pontos_usados:        pontosUsados,
-      total:                Math.max(0, (isRetirada ? totalValor : totalValor + (taxaFinal ?? 0)) - descontoPontos),
+      acrescimo:            acrescimoFinal,
+      total:                Math.round((baseFinal + acrescimoFinal) * 100) / 100,
       forma_pagamento:      form.forma,
       troco_para:           form.forma === 'dinheiro' && form.troco ? Math.round(Number(form.troco) * 100) / 100 : null,
       observacoes:          form.obs.trim() || null,
@@ -1000,6 +1024,12 @@ export default function PortalLoja() {
                     <span>~{tempoCalculado} min</span>
                   </div>
                 )}
+                {acrescimoPag > 0 && (
+                  <div className="loja-checkout-item">
+                    <span>Acréscimo do cartão ({String(pctRepasse).replace('.', ',')}%)</span>
+                    <span>R$ {acrescimoPag.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
                 <div className="loja-checkout-total">
                   <span>Total</span>
                   <strong>R$ {totalFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
@@ -1219,28 +1249,42 @@ export default function PortalLoja() {
               <div className="loja-checkout-section">
                 <h3>Forma de pagamento</h3>
                 <div className="loja-checkout-payment-opts">
-                  <button
-                    type="button"
-                    className={`loja-pay-opt${form.forma === 'pix' ? ' active' : ''}`}
-                    onClick={() => setForm(p => ({ ...p, forma: 'pix' }))}
-                  >
-                    Pix
-                  </button>
-                  <button
-                    type="button"
-                    className={`loja-pay-opt${form.forma === 'dinheiro' ? ' active' : ''}`}
-                    onClick={() => setForm(p => ({ ...p, forma: 'dinheiro' }))}
-                  >
-                    Dinheiro
-                  </button>
-                  <button
-                    type="button"
-                    className={`loja-pay-opt${form.forma === 'cartao' ? ' active' : ''}`}
-                    onClick={() => setForm(p => ({ ...p, forma: 'cartao' }))}
-                  >
-                    Cartão
-                  </button>
+                  {[
+                    { value: 'pix',         label: 'PIX' },
+                    { value: 'pix_entrega', label: 'PIX na entrega' },
+                    { value: 'dinheiro',    label: 'Dinheiro' },
+                    { value: 'credito',     label: 'Crédito' },
+                    { value: 'debito',      label: 'Débito' },
+                    { value: 'cartao',      label: 'Cartão' },
+                  ].filter(f => formasLoja.includes(f.value)).map(f => {
+                    const pct = repassePct(empresa, f.value)
+                    return (
+                      <button
+                        key={f.value}
+                        type="button"
+                        className={`loja-pay-opt${form.forma === f.value ? ' active' : ''}`}
+                        onClick={() => setForm(p => ({ ...p, forma: f.value }))}
+                      >
+                        {f.label}
+                        {pct > 0 && (
+                          <span style={{ display: 'block', fontSize: 11, fontWeight: 600, opacity: .8 }}>
+                            +{String(pct).replace('.', ',')}%
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
                 </div>
+                {form.forma === 'pix_entrega' && (
+                  <p style={{ margin: '8px 0 0', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    Você paga por PIX na hora em que o pedido chegar, direto para a loja.
+                  </p>
+                )}
+                {pctRepasse > 0 && (
+                  <p style={{ margin: '8px 0 0', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    Esta forma tem acréscimo de {String(pctRepasse).replace('.', ',')}% (taxa da maquineta). Já está no total.
+                  </p>
+                )}
                 {form.forma === 'dinheiro' && (
                   <label>Troco para (opcional)
                     <input
