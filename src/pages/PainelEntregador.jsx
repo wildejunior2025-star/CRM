@@ -397,10 +397,35 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
   const [valorSalvo, setValorSalvo] = useState(
     pedido.valor_entregador != null ? Number(pedido.valor_entregador) : null)
 
-  // Grava o valor. Vale ao tocar em OK e de novo ao concluir a entrega (não deixa concluir sem).
+  // Valor que o SISTEMA calculou pra esta corrida (tabela de km da loja — mig 0345). O motoboy só
+  // edita se não bater; cada edição fica registrada pro dono e pra gente melhorar o cálculo.
+  const [sugerido, setSugerido] = useState(null)
+  const [origemValor, setOrigemValor] = useState(pedido.valor_entregador_origem ?? null)
+  useEffect(() => {
+    if (!exigeValor || !mine || (pedido.tipo_entrega || 'entrega') === 'retirada') return
+    let vivo = true
+    supabase.rpc('entregador_valor_sugerido', { p_pedido: pedido.id })
+      .then(({ data }) => { if (vivo && data != null) setSugerido(Number(data)) })
+    return () => { vivo = false }
+  }, [exigeValor, mine, pedido.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const valorMostrado = valorSalvo ?? sugerido
+
+  function abrirEditorValor() {
+    if (valorMostrado != null) setValorTxt(String(valorMostrado).replace('.', ','))
+    setEditandoValor(true)
+  }
+
+  // Grava o valor. Vale ao tocar em OK e ao concluir a entrega. Sem nada digitado e sem cálculo do
+  // sistema não deixa concluir; com o cálculo, o banco grava ele sozinho ao concluir.
   // Volta true quando pode seguir.
   async function salvarValor() {
     if (!exigeValor) return true
+    if (String(valorTxt).trim() === '') {
+      if (valorSalvo != null || sugerido != null) return true
+      setErroValor('Digite a taxa desta entrega (quanto o dono te paga).')
+      setEditandoValor(true)
+      return false
+    }
     const v = parseFloat(String(valorTxt).replace(',', '.'))
     if (!Number.isFinite(v) || v <= 0) {
       setErroValor('Digite a taxa desta entrega (quanto o dono te paga).')
@@ -409,8 +434,10 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
     }
     const { error } = await supabase.rpc('entregador_informar_valor', { p_pedido: pedido.id, p_valor: v })
     if (error) { setErroValor(error.message || 'Não consegui salvar a taxa. Tente de novo.'); setEditandoValor(true); return false }
+    const arred = Math.round(v * 100) / 100
     setErroValor(null)
-    setValorSalvo(Math.round(v * 100) / 100)
+    setValorSalvo(arred)
+    setOrigemValor(sugerido != null && Math.abs(arred - sugerido) < 0.005 ? 'calculado' : 'motoboy')
     setEditandoValor(false)
     return true
   }
@@ -753,14 +780,16 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
             {erroValor && <div style={{ fontSize: 12.5, color: 'var(--danger, #ef4444)', marginTop: 6 }}>{erroValor}</div>}
           </div>
         ) : (
-          <button type="button" onClick={() => setEditandoValor(true)}
+          <button type="button" onClick={abrirEditorValor}
             style={{
               width: '100%', margin: '0 0 10px', padding: '9px 0', borderRadius: 10, cursor: 'pointer',
               fontSize: 13.5, fontWeight: 800, color: '#7c3aed',
-              background: valorSalvo != null ? 'rgba(124,58,237,.08)' : 'transparent',
-              border: `1.5px ${valorSalvo != null ? 'solid' : 'dashed'} #7c3aed`,
+              background: valorMostrado != null ? 'rgba(124,58,237,.08)' : 'transparent',
+              border: `1.5px ${valorMostrado != null ? 'solid' : 'dashed'} #7c3aed`,
             }}>
-            {valorSalvo != null ? `🛵 Taxa ${fmt(valorSalvo)} · editar` : '＋ Taxa de entrega'}
+            {valorMostrado != null
+              ? `🛵 Taxa ${fmt(valorMostrado)} · ${valorSalvo != null && origemValor === 'motoboy' ? 'editada' : 'calculada'} · editar`
+              : '＋ Taxa de entrega'}
           </button>
         )
       )}
@@ -1268,7 +1297,7 @@ export default function PainelEntregador() {
     setHistLoading(true)
     supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, forma_pagamento, pagamentos, origem, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, valor_entregador_origem, valor_entregador_calculado, forma_pagamento, pagamentos, origem, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
       .eq('entregador_id', user.id)
       .eq('status', 'entregue')
       .order('created_at', { ascending: false })
@@ -1660,7 +1689,7 @@ export default function PainelEntregador() {
                       <span style={{ fontWeight: 800, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <strong style={{ color: '#16a34a' }}
-                          title={temValorDigitado(p) ? 'Valor que você informou' : descontoDoPedido(descontos, p) > 0 ? `Taxa ${fmt(p.taxa_entrega)} − ${rotuloDoDesconto(p)} ${fmt(descontoDoPedido(descontos, p))}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
+                          title={temValorDigitado(p) ? (p.valor_entregador_origem === 'calculado' ? 'Taxa calculada pelo sistema' : 'Taxa que você editou') :descontoDoPedido(descontos, p) > 0 ? `Taxa ${fmt(p.taxa_entrega)} − ${rotuloDoDesconto(p)} ${fmt(descontoDoPedido(descontos, p))}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
                         {p.entregador_pago
                           ? <span style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '2px 8px', borderRadius: 20 }}>✓ Pago</span>
                           : <span style={{ fontSize: 11, fontWeight: 800, color: '#f59e0b', background: 'rgba(245,158,11,.14)', padding: '2px 8px', borderRadius: 20 }}>A receber</span>}

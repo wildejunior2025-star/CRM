@@ -3,7 +3,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { supabase, invocarEdge, fetchAll } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
-import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto, temValorDigitado } from '../lib/descontoEntrega'
+import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto, temValorDigitado, rotuloValorEntregador } from '../lib/descontoEntrega'
 import { tocarPedidoNovo } from '../lib/somChamado'
 import BaixaInsumos from '../components/BaixaInsumos'
 import { precoPorQuantidade, faixaAplicada, menorFaixa, mapaFaixasCategoria, comFaixaDaCategoria, somaPorCategoria } from '../lib/precoQuantidade'
@@ -7292,7 +7292,7 @@ export default function PainelPedidos() {
     if (!empresa) return
     const { data } = await supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, forma_pagamento, pagamentos, pix_status, created_at, entregador_id, origem, endereco_bairro, endereco_cidade, entregador_pago, entregador_pago_em')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, valor_entregador_calculado, valor_entregador_origem, forma_pagamento, pagamentos, pix_status, created_at, entregador_id, origem, endereco_bairro, endereco_cidade, entregador_pago, entregador_pago_em')
       .eq('empresa_id', empresa.id)
       .eq('status', 'entregue')
       .not('entregador_id', 'is', null)
@@ -11371,7 +11371,7 @@ export default function PainelPedidos() {
                     <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <strong style={{ fontSize: 17, color: corTaxa }}
-                        title={temValorDigitado(p) ? 'Valor informado pelo motoboy' : descontoDoPedido(descontos, p) > 0 ? `Taxa ${fmt(p.taxa_entrega)} − ${rotuloDoDesconto(p)} ${fmt(descontoDoPedido(descontos, p))}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
+                        title={temValorDigitado(p) ? 'Taxa da corrida do motoboy' : descontoDoPedido(descontos, p) > 0 ? `Taxa ${fmt(p.taxa_entrega)} − ${rotuloDoDesconto(p)} ${fmt(descontoDoPedido(descontos, p))}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
                       {!ehRota && (pago
                         ? <span style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', background: 'rgba(34,197,94,.14)', padding: '2px 8px', borderRadius: 20 }}>✓ Pago</span>
                         : <button type="button" onClick={() => pagarCorridas([p.id])}
@@ -11383,7 +11383,7 @@ export default function PainelPedidos() {
                   <div style={{ fontSize: 14, color: 'var(--text-muted)', marginTop: 3 }}>
                     {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
                     {descontoDoPedido(descontos, p) > 0 && <span style={{ color: '#f59e0b' }}> · {rotuloDoDesconto(p)} −{fmt(descontoDoPedido(descontos, p))}</span>}
-                    {temValorDigitado(p) && <span style={{ color: '#7c3aed', fontWeight: 700 }}> · ✍️ valor informado pelo motoboy</span>}
+                    {(() => { const r = rotuloValorEntregador(p); return r && <span style={{ color: r.editado ? '#f59e0b' : 'var(--text-muted)', fontWeight: r.editado ? 800 : 600 }}> · {r.texto}</span> })()}
                   </div>
                   {/* Valor do pedido: laranja = cobrar na entrega; verde = já pago */}
                   <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: 'flex', justifyContent: 'space-between', gap: 8, color: pgc.pago ? '#16a34a' : '#f59e0b' }}>

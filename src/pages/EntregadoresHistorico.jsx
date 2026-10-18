@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
-import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, temValorDigitado } from '../lib/descontoEntrega'
+import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, rotuloValorEntregador } from '../lib/descontoEntrega'
 import { partesPagamento, ehDividido, textoPagamento } from '../lib/pagamentoPartes'
 import '../components/Page.css'
 import './Entregadores.css'
@@ -600,7 +600,7 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
     const [{ data: pd }, { data: pf }] = await Promise.all([
       fetchAll(() => {
         let q = supabase.from('pedidos_delivery')
-          .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, forma_pagamento, pagamentos, pix_status, mp_payment_status, created_at, origem, status, entregador_pago, entregador_pago_em')
+          .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, valor_entregador_calculado, valor_entregador_origem, forma_pagamento, pagamentos, pix_status, mp_payment_status, created_at, origem, status, entregador_pago, entregador_pago_em')
           .eq('empresa_id', empresa.id).eq('entregador_id', id).neq('status', 'cancelado')
         if (faixa.desde) q = q.gte('created_at', faixa.desde)
         if (faixa.ate) q = q.lte('created_at', faixa.ate)
@@ -691,7 +691,7 @@ function DetalheEntregador({ empresa, id, entregador, periodo, setPeriodo, de, s
         <div className="ent-corrida-meta">
           {new Date(p.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {p.cliente_nome || '—'}
           {descontoDoPedido(descontos, p) > 0 ? ` · ${rotuloDoDesconto(p)} −${fmt(descontoDoPedido(descontos, p))}` : ''}
-          {temValorDigitado(p) ? ' · ✍️ valor informado pelo motoboy' : ''}
+          {(() => { const r = rotuloValorEntregador(p); return r && <span style={r.editado ? { color: '#f59e0b', fontWeight: 800 } : undefined}> · {r.texto}</span> })()}
         </div>
         {pago && p.entregador_pago_em && (
           <div className="ent-corrida-meta c-ok">🧾 Pago em {dataHora(p.entregador_pago_em)}</div>

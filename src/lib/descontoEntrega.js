@@ -27,6 +27,21 @@ export function descontosDoEntregador(perfil) {
 export const temValorDigitado = pedido =>
   pedido?.valor_entregador != null && pedido.valor_entregador !== ''
 
+// Texto curto de onde veio o valor da corrida e se foi EDITADO (mig 0345): o dono precisa ver
+// quando o motoboy mudou o que o sistema calculou. `editado` pinta de laranja nas listas.
+export function rotuloValorEntregador(pedido) {
+  if (!temValorDigitado(pedido)) return null
+  const calc = pedido.valor_entregador_calculado
+  const rs = v => `R$ ${Number(v).toFixed(2).replace('.', ',')}`
+  const sistema = calc != null ? ` (sistema calculou ${rs(calc)})` : ' (o sistema não conseguiu calcular)'
+  switch (pedido.valor_entregador_origem) {
+    case 'calculado': return { texto: '📍 calculada pelo sistema', editado: false }
+    case 'motoboy':   return { texto: `✏️ editada pelo motoboy${sistema}`, editado: true }
+    case 'dono':      return { texto: `✏️ editada pelo dono${sistema}`, editado: true }
+    default:          return { texto: '✍️ valor informado', editado: false }
+  }
+}
+
 export function descontoDoPedido(descontos, pedido) {
   if (temValorDigitado(pedido)) return 0
   const d = String(pedido?.origem) === 'ifood' ? descontos?.ifood : descontos?.loja
