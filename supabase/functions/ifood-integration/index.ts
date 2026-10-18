@@ -814,6 +814,7 @@ async function runCatalogoListar(sb: any, empresaId: string) {
           categoria: c.name ?? "",
           status: it.status ?? "AVAILABLE",
           preco: it.price?.value ?? it.price ?? 0,
+          precoOriginal: it.price?.originalValue ?? null,
         })
       }
     }
