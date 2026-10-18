@@ -229,8 +229,10 @@ export default function ModalEndereco({ onClose, onSalvo }) {
     setSaving(true)
     setError(null)
 
+    // O ViaCEP já traz o hífen ("59296-391"): formata a partir dos números, senão sai "59296--391".
+    const cepNum = String(dadosRua.cep ?? '').replace(/\D/g, '')
     const novoEnd = {
-      cep:         dadosRua.cep ? `${dadosRua.cep.slice(0, 5)}-${dadosRua.cep.slice(5)}` : '',
+      cep:         cepNum.length === 8 ? `${cepNum.slice(0, 5)}-${cepNum.slice(5)}` : cepNum,
       endereco:    dadosRua.logradouro,
       numero:      numero.trim(),
       complemento: complemento.trim(),

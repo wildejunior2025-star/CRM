@@ -207,11 +207,15 @@ export default function PortalLoja() {
   // A loja pode desligar "Retirar na loja" nas configurações (Raio de entrega).
   // Enquanto a empresa não carregou, deixa aparecer — a maioria tem ligado.
   const permiteRetirada = empresa ? empresa.aceita_retirada !== false : true
+  // Loja só de retirada (Branka, Lá em Casa, O Braseiro...) não oferece entrega.
+  const permiteEntrega = empresa ? empresa.aceita_entrega !== false : true
   useEffect(() => {
     if (!permiteRetirada && form.tipo_entrega === 'retirada') {
       setForm(p => ({ ...p, tipo_entrega: 'entrega' }))
+    } else if (!permiteEntrega && permiteRetirada && form.tipo_entrega === 'entrega') {
+      setForm(p => ({ ...p, tipo_entrega: 'retirada' }))
     }
-  }, [permiteRetirada, form.tipo_entrega])
+  }, [permiteRetirada, permiteEntrega, form.tipo_entrega])
 
   const [buscandoCep, setBuscandoCep] = useState(false)
   const [erroCep, setErroCep] = useState(null)
@@ -262,7 +266,7 @@ export default function PortalLoja() {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(empresaId)
       const baseQuery = supabase
         .from('empresas')
-        .select('id, nome, slug, banner_url, logo_url, descricao, taxa_entrega, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, aceita_delivery, aceita_retirada, delivery_ativo, last_heartbeat_at, cidade, latitude, longitude, raio_entrega_km, formas_pagamento, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct')
+        .select('id, nome, slug, banner_url, logo_url, descricao, taxa_entrega, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, aceita_delivery, aceita_entrega, aceita_retirada, delivery_ativo, last_heartbeat_at, cidade, latitude, longitude, raio_entrega_km, formas_pagamento, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct')
       const empRes = await (isUuid ? baseQuery.eq('id', empresaId) : baseQuery.eq('slug', empresaId)).maybeSingle()
       if (empRes.error) { setError(empRes.error.message); setLoading(false); return }
       const resolvedId = empRes.data?.id ?? empresaId
@@ -1137,8 +1141,8 @@ export default function PortalLoja() {
                 </label>
               </div>
 
-              {/* Tipo de pedido — some quando a loja desligou a retirada */}
-              {permiteRetirada && (
+              {/* Tipo de pedido — só aparece quando a loja oferece os DOIS (entrega e retirada) */}
+              {permiteRetirada && permiteEntrega && (
               <div className="loja-checkout-section">
                 <h3>Tipo de pedido</h3>
                 <div className="loja-checkout-payment-opts">
