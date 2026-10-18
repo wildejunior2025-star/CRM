@@ -122,7 +122,19 @@ export async function buscarRuas({ termo, uf, cidades = [], bbox = null }) {
   if (!d.some(x => ruaCasouInteira(x.logradouro, semTipo || t))) {
     d = [...d, ...(await buscarRuaNoEstado(uf, semTipo || t))]
   }
-  if (bbox) d = [...d, ...(await buscarRuaPhoton(uf, semTipo || t, bbox))]
+  if (bbox) {
+    // O mapa livre tem rua com nome incompleto ou lixo (a "Rua Eliane Barros" que é a mesma
+    // "Rua Prefeita Eliane Barros" do ViaCEP e leva o pino pra um prédio). Rua dele só entra
+    // se NENHUMA rua oficial da mesma cidade já contém aquele nome.
+    const palavras = n => semTipoLogradouro(n).split(/\s+/).filter(Boolean).map(w => w.toLowerCase())
+    const oficiais = d.map(x => ({ cidade: String(x.localidade ?? '').toLowerCase(), pal: palavras(x.logradouro ?? '') }))
+    const extras = (await buscarRuaPhoton(uf, semTipo || t, bbox)).filter(r => {
+      const pr = palavras(r.logradouro)
+      const cid = String(r.localidade ?? '').toLowerCase()
+      return !oficiais.some(o => o.cidade === cid && pr.every(w => o.pal.includes(w)))
+    })
+    d = [...d, ...extras]
+  }
   // Sem repetir a mesma rua em CEPs diferentes (numa avenida longa o ViaCEP devolve dezenas).
   const vistas = new Set()
   const lista = d.filter(x => {
