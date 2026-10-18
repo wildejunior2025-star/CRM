@@ -628,6 +628,9 @@ export default function Produtos() {
     const { data } = await supabase
       .from('categorias')
       .select('id, nome, ordem, hora_inicio, hora_fim, setor, isento_taxa, dias_semana, oculta_online, faixas_preco')
+      // A mig 0341 abriu a leitura de categorias pra qualquer logado; sem este filtro a
+      // tela listava (e renumerava junto) as categorias de todas as lojas.
+      .eq('empresa_id', profile.empresa_id)
       .order('ordem', { ascending: true })
       .order('nome', { ascending: true })
     const lista = data ?? []
