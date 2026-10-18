@@ -1245,15 +1245,22 @@ export async function responderSemIA({
       return await responder("Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!")
     }
 
-    // 3) Cardápio, horário, taxa de entrega, endereço — o que ele SABE.
-    const daInfo = respostaDeInfo(mensagem, empresa, link, excecoes, falaDoPresencial)
-    if (daInfo) return await responder(daInfo)
-
-    // 3a) O recado do dia (mig 0314): "tem promoção hoje?", "tem happy hour?".
-    //     Vem antes do produto porque a regra da promoção (só no salão, só até
-    //     tal hora) muda o que o preço do cardápio significa.
+    // 3) O recado do dia (mig 0314): "tem promoção hoje?", "tem happy hour?".
+    //
+    //    VEM ANTES DO HORÁRIO E DO PRODUTO, e isso é de propósito. Ele só
+    //    dispara quando a mensagem tem palavra de promoção, então não rouba
+    //    pergunta de ninguém — mas quando as duas coisas aparecem juntas, a
+    //    promoção é o assunto. "Até que horas é o happy hour?" tem "que horas"
+    //    e caía na regra de horário: o robô respondia o expediente da LOJA
+    //    ("das 18:00 às 23:00"), que não é o que foi perguntado (Braseiro,
+    //    18/10/2026). Pela mesma razão vem antes do produto: a regra da
+    //    promoção muda o que o preço do cardápio significa.
     const recado = recadoDoDia(cfg, mensagem, excecoes)
     if (recado) return await responder(recado)
+
+    // 3a) Cardápio, horário, taxa de entrega, endereço — o que ele SABE.
+    const daInfo = respostaDeInfo(mensagem, empresa, link, excecoes, falaDoPresencial)
+    if (daInfo) return await responder(daInfo)
 
     // 3b) "Tem picolé? Quanto é?" — preço e link DAQUELE produto (mig 0312).
     //     Opcional: a loja liga em WhatsApp → Resposta automática. Vem depois
