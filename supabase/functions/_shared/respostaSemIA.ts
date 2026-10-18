@@ -351,7 +351,60 @@ const PALAVRAS_RECADO = [
   "happy hour", "happyhour", "happy", "combo", "novidade", "tem algo hoje",
 ]
 
-function recadoDoDia(cfg: Record<string, unknown>, texto: string): string | null {
+// A JANELA DO RECADO (mig 0348). Promoção tem hora, e o recado não sabia disso:
+// o texto era fixo e o robô repetia "está funcionando" em qualquer dia. No
+// Braseiro, num DOMINGO, respondeu "Sim, nosso Happy Hour está funcionando!" —
+// o texto até explicava "de segunda a sexta" lá embaixo, mas quem lê a primeira
+// linha já entendeu errado.
+//
+// Fora da janela o robô não cala: ele diz que HOJE não tem e quando tem. Calar
+// seria o cliente ir até a loja atrás do preço que não existe.
+const DIAS_NOME = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"]
+
+function listaDeDias(dias: number[]): string {
+  const ord = [...new Set(dias)].filter(d => d >= 0 && d <= 6).sort((a, b) => a - b)
+  if (!ord.length) return ""
+  // Sequência corrida vira "de segunda a sexta"; salteada vira a lista mesmo.
+  const corrida = ord.every((d, i) => i === 0 || d === ord[i - 1] + 1)
+  if (corrida && ord.length > 2) return `de ${DIAS_NOME[ord[0]]} a ${DIAS_NOME[ord[ord.length - 1]]}`
+  if (ord.length === 1) return `${DIAS_NOME[ord[0]]}`
+  return ord.slice(0, -1).map(d => DIAS_NOME[d]).join(", ") + ` e ${DIAS_NOME[ord[ord.length - 1]]}`
+}
+
+const soHora = (v: unknown) => String(v ?? "").slice(0, 5)
+
+/** { vale, quando } — `quando` é a frase da janela, pra dizer o que HOJE não é. */
+function janelaDoRecado(
+  cfg: Record<string, unknown>, excecoes: Excecoes,
+): { vale: boolean; quando: string } {
+  const dias = Array.isArray(cfg.recado_dias) ? (cfg.recado_dias as number[]).map(Number) : null
+  const ini = soHora(cfg.recado_hora_inicio)
+  const fim = soHora(cfg.recado_hora_fim)
+  // Sem janela cadastrada vale sempre — é como todas as lojas estavam antes.
+  if (!dias?.length && !ini && !fim) return { vale: true, quando: "" }
+
+  const partes: string[] = []
+  if (dias?.length) partes.push(listaDeDias(dias))
+  if (ini && fim) partes.push(`das ${ini} às ${fim}`)
+  const quando = partes.join(", ")
+
+  const { min: agora, ymd: hoje } = agoraNaLoja()
+  const [a, m, d] = hoje.split("-").map(Number)
+  const dow = new Date(a, m - 1, d).getDay()
+
+  if (dias?.length && !dias.includes(dow)) return { vale: false, quando }
+  if (ini && agora < paraMin(ini)) return { vale: false, quando }
+  if (fim && agora >= paraMin(fim)) return { vale: false, quando }
+  // Feriado derruba mesmo caindo num dia bom — é o que a loja quis dizer com
+  // "não funciona em feriado". Usa o MESMO calendário da grade da loja.
+  if (cfg.recado_pula_feriado !== false && excecoes[hoje]) return { vale: false, quando }
+
+  return { vale: true, quando }
+}
+
+function recadoDoDia(
+  cfg: Record<string, unknown>, texto: string, excecoes: Excecoes = {},
+): string | null {
   if (cfg.recado_ativo !== true) return null
   const recado = String(cfg.recado_texto ?? "").trim()
   if (!recado) return null
@@ -360,7 +413,14 @@ function recadoDoDia(cfg: Record<string, unknown>, texto: string): string | null
     .split(",").map(p => semAcento(p).trim()).filter(p => p.length >= 3)
   const casa = [...PALAVRAS_RECADO, ...extras].some(p =>
     new RegExp(`(^|[^a-z0-9])${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(t))
-  return casa ? recado : null
+  if (!casa) return null
+
+  const { vale, quando } = janelaDoRecado(cfg, excecoes)
+  if (vale) return recado
+  const feriado = cfg.recado_pula_feriado !== false ? ", e não vale em feriado" : ""
+  return quando
+    ? `Hoje não, viu. 😅 É ${quando}${feriado}.`
+    : null
 }
 
 function respostaDeEndereco(empresa: Record<string, unknown>): string | null {
@@ -1073,7 +1133,7 @@ export async function responderSemIA({
       // Braseiro (09/10/2026): happy hour rolando no salão com a entrega
       // parada, e o robô mudo pra quem perguntava da promoção. Recado e preço
       // respondem igual; só o convite a pedir é que não cabe aqui.
-      const recadoFechada = recadoDoDia(cfg, mensagem)
+      const recadoFechada = recadoDoDia(cfg, mensagem, excecoes)
       let produtoFechada: string | null = null
       if (!recadoFechada && cfg.resposta_produto_ativo === true) {
         const achados = await produtosQueCasam(supabase, empresaId, mensagem)
@@ -1192,7 +1252,7 @@ export async function responderSemIA({
     // 3a) O recado do dia (mig 0314): "tem promoção hoje?", "tem happy hour?".
     //     Vem antes do produto porque a regra da promoção (só no salão, só até
     //     tal hora) muda o que o preço do cardápio significa.
-    const recado = recadoDoDia(cfg, mensagem)
+    const recado = recadoDoDia(cfg, mensagem, excecoes)
     if (recado) return await responder(recado)
 
     // 3b) "Tem picolé? Quanto é?" — preço e link DAQUELE produto (mig 0312).

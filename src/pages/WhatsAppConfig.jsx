@@ -106,6 +106,11 @@ export default function WhatsAppConfig() {
   const [recadoAtivo,     setRecadoAtivo]     = useState(false)
   const [recadoTexto,     setRecadoTexto]     = useState('')
   const [recadoPalavras,  setRecadoPalavras]  = useState('')
+  // Janela do recado (mig 0348): dias da semana, hora e feriado.
+  const [recadoDias,      setRecadoDias]      = useState([])
+  const [recadoInicio,    setRecadoInicio]    = useState('')
+  const [recadoFim,       setRecadoFim]       = useState('')
+  const [recadoPulaFeriado, setRecadoPulaFeriado] = useState(true)
   const [salvandoRecado,  setSalvandoRecado]  = useState(false)
   const [recadoMsg,       setRecadoMsg]       = useState(null)
   const [salvandoLink,    setSalvandoLink]    = useState(false)
@@ -189,6 +194,10 @@ export default function WhatsAppConfig() {
       setRecadoAtivo(data.recado_ativo ?? false)
       setRecadoTexto(data.recado_texto ?? '')
       setRecadoPalavras(data.recado_palavras ?? '')
+      setRecadoDias(Array.isArray(data.recado_dias) ? data.recado_dias.map(Number) : [])
+      setRecadoInicio(String(data.recado_hora_inicio ?? '').slice(0, 5))
+      setRecadoFim(String(data.recado_hora_fim ?? '').slice(0, 5))
+      setRecadoPulaFeriado(data.recado_pula_feriado !== false)
       setAvisoAbertura(data.aviso_abertura_ativo ?? true)
       setTutorialAtivo(data.tutorial_ativo ?? true)
       setTutorialUrl(data.tutorial_url ?? '')
@@ -1056,11 +1065,59 @@ export default function WhatsAppConfig() {
                       onChange={e => setRecadoPalavras(e.target.value)}
                       placeholder="chopp, dose dupla"
                     />
+
+                    {/* QUANDO O RECADO VALE (mig 0348). Sem isto o robô dizia
+                        "sim, está funcionando" em qualquer dia — no Braseiro
+                        respondeu isso num domingo. Fora da janela ele não cala:
+                        responde "hoje não, é de segunda a sexta das 18h às 20h". */}
+                    <label className="wa-primeira-fala-label" style={{ marginTop: 14 }}>
+                      Quando esse recado vale
+                    </label>
+                    <p className="wa-hint" style={{ margin: '2px 0 6px' }}>
+                      Deixe tudo em branco se a promoção vale sempre. Fora do que você marcar, o
+                      robô responde <em>"hoje não, é de tal a tal dia"</em> em vez de dizer que tem.
+                    </p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                      {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((d, i) => (
+                        <button key={i} type="button"
+                          onClick={() => setRecadoDias(prev =>
+                            prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i].sort())}
+                          style={{
+                            padding: '6px 11px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
+                            fontWeight: 700, border: '1.5px solid var(--border)',
+                            background: recadoDias.includes(i) ? 'var(--primary)' : 'transparent',
+                            color: recadoDias.includes(i) ? '#fff' : 'var(--text-muted)',
+                          }}>
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span className="wa-hint">das</span>
+                      <input type="time" className="wa-input" style={{ width: 120 }}
+                        value={recadoInicio} onChange={e => setRecadoInicio(e.target.value)} />
+                      <span className="wa-hint">às</span>
+                      <input type="time" className="wa-input" style={{ width: 120 }}
+                        value={recadoFim} onChange={e => setRecadoFim(e.target.value)} />
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13.5, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={recadoPulaFeriado}
+                        onChange={e => setRecadoPulaFeriado(e.target.checked)} />
+                      Não vale em feriado
+                    </label>
+                    <p className="wa-hint" style={{ margin: '4px 0 0' }}>
+                      Usa os feriados que você marcou no horário da loja.
+                    </p>
+
                     <div className="wa-primeira-fala-acoes">
                       <button type="button" className="btn btn-primary btn-sm" disabled={salvandoRecado}
                         onClick={() => salvarCampoRobo({
                           recado_texto: recadoTexto.trim() || null,
                           recado_palavras: recadoPalavras.trim() || null,
+                          recado_dias: recadoDias.length ? recadoDias : null,
+                          recado_hora_inicio: recadoInicio || null,
+                          recado_hora_fim: recadoFim || null,
+                          recado_pula_feriado: recadoPulaFeriado,
                         }, 'Recado salvo. É o que o robô vai responder.')}>
                         {salvandoRecado ? 'Salvando...' : 'Salvar recado'}
                       </button>
