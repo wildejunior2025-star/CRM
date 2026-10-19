@@ -115,7 +115,7 @@ export default function FichaTecnica() {
   // Aba fica no LINK (?aba=materias) pra sobreviver a refresh / sair e voltar.
   const [searchParams, setSearchParams] = useSearchParams()
   const abaUrl = searchParams.get('aba')
-  const aba = abaUrl === 'materias' || abaUrl === 'compras' ? abaUrl : 'fichas'
+  const aba = ['materias', 'compras', 'historico'].includes(abaUrl) ? abaUrl : 'fichas'
   const setAba = (v) => setSearchParams(
     (p) => { const n = new URLSearchParams(p); n.set('aba', v); return n },
     { replace: true },
@@ -171,6 +171,15 @@ export default function FichaTecnica() {
   const [compraAte, setCompraAte] = useState(hojeYMD)
   const [compras, setCompras] = useState([])
   const [loadingCompras, setLoadingCompras] = useState(false)
+  // HISTORICO (mig 0350): tudo que mexeu no estoque, nos dois sentidos.
+  // A aba Compras fala de DINHEIRO (o que entrou e quanto custou); esta fala de
+  // MOVIMENTO - entrada, baixa e acerto de contagem, com quem fez e quando.
+  const [hist, setHist] = useState([])
+  const [loadingHist, setLoadingHist] = useState(false)
+  // Saida de venda e automatica e numerosa (uma linha por item vendido): ligada
+  // por padrao, ela afogaria o que as pessoas lancaram na mao, que e o que o
+  // dono quer conferir.
+  const [histVendas, setHistVendas] = useState(false)
   // Dia aberto na lista. Nasce tudo recolhido: num dia de feira dá 20+ linhas e
   // quem só quer saber o total do dia não precisa rolar tudo isso.
   const [diaAberto, setDiaAberto] = useState(null)
@@ -257,6 +266,48 @@ export default function FichaTecnica() {
     setCompras(lista)
     setLoadingCompras(false)
   }, [empresaId, compraDe, compraAte])
+
+  // Historico de movimento: materia-prima e produto, nos dois sentidos.
+  const carregarHistorico = useCallback(async () => {
+    if (!empresaId) return
+    setLoadingHist(true)
+    const ini = new Date(`${compraDe}T00:00:00`)
+    const fim = new Date(`${compraAte}T00:00:00`)
+    fim.setDate(fim.getDate() + 1)
+    const [mp, pr, pessoas] = await Promise.all([
+      supabase.from('materia_prima_movimentos')
+        .select('id, created_at, tipo, quantidade, valor_total, observacao, created_by, materias_primas(nome, unidade)')
+        .eq('empresa_id', empresaId)
+        .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())
+        .order('created_at', { ascending: false }).limit(1000),
+      supabase.from('estoque_movimentos')
+        .select('id, created_at, tipo, quantidade, valor_total, observacao, motivo, produtos(nome)')
+        .eq('empresa_id', empresaId)
+        .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())
+        .order('created_at', { ascending: false }).limit(1000),
+      supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
+    ])
+    const nomes = Object.fromEntries((pessoas.data || []).map(x => [x.id, x.nome]))
+    const lista = [
+      ...(mp.data || []).map(r => ({
+        id: 'mp:' + r.id, quando: r.created_at, tipo: r.tipo, origem: 'insumo',
+        nome: r.materias_primas?.nome || '(insumo apagado)',
+        unidade: r.materias_primas?.unidade || '',
+        quantidade: Number(r.quantidade || 0), valor: r.valor_total,
+        obs: r.observacao || '', quem: nomes[r.created_by] || '',
+      })),
+      ...(pr.data || []).map(r => ({
+        id: 'pr:' + r.id, quando: r.created_at, tipo: r.tipo, origem: 'produto',
+        nome: r.produtos?.nome || '(produto apagado)', unidade: 'un',
+        quantidade: Number(r.quantidade || 0), valor: r.valor_total,
+        obs: r.observacao || r.motivo || '', quem: '',
+      })),
+    ].sort((a, b) => (a.quando < b.quando ? 1 : -1))
+    setHist(lista)
+    setLoadingHist(false)
+  }, [empresaId, compraDe, compraAte])
+
+  useEffect(() => { if (aba === 'historico') carregarHistorico() }, [aba, carregarHistorico])
 
   useEffect(() => { if (aba === 'compras') carregarCompras() }, [aba, carregarCompras])
 
@@ -855,6 +906,11 @@ export default function FichaTecnica() {
           onClick={() => setAba('compras')}
           title="O histórico do que entrou: dia, item, quantidade e quanto foi pago"
         >📥 Compras</button>
+        <button
+          className={'btn ' + (aba === 'historico' ? 'btn-primary' : 'btn-secondary')}
+          onClick={() => setAba('historico')}
+          title="Tudo que mexeu no estoque: entrada, baixa e acerto - com quem fez e quando"
+        >📜 Histórico</button>
       </div>
 
       {error && <div className="card error-text" style={{ marginBottom: 16 }}>{error}</div>}
@@ -1023,6 +1079,105 @@ export default function FichaTecnica() {
       )}
 
       {/* ─────────────── ABA: COMPRAS (o que entrou) ─────────────── */}
+      {/* ────────────── ABA: HISTÓRICO ────────────── */}
+      {/* Nasceu porque o gestor ganhou o botão de ENTRADA de insumo (além da
+          baixa que já existia) e nada disso tinha onde ser conferido: a aba
+          Compras só mostra entrada, e fala de dinheiro. Aqui é o movimento. */}
+      {aba === 'historico' && (
+        <>
+          <div className="card" style={{ marginBottom: 12, display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>De</label>
+              <input type="date" value={compraDe} max={compraAte} onChange={e => setCompraDe(e.target.value)}
+                style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Até</label>
+              <input type="date" value={compraAte} min={compraDe} onChange={e => setCompraAte(e.target.value)}
+                style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('hoje')}>Hoje</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('7')}>Últimos 7 dias</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('mes')}>Este mês</button>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', marginLeft: 'auto' }}>
+              <input type="checkbox" checked={histVendas} onChange={e => setHistVendas(e.target.checked)} />
+              Mostrar também a saída das vendas
+            </label>
+          </div>
+
+          {loadingHist ? (
+            <div className="card">Carregando…</div>
+          ) : (() => {
+            const linhas = hist.filter(h => histVendas || !/^Venda /i.test(h.obs))
+            if (!linhas.length) {
+              return (
+                <div className="card empty-state">
+                  <strong>Nada movimentado nesse período</strong>
+                  <p>
+                    Aqui entra tudo que mexeu no estoque: entrada de insumo, baixa do que se
+                    perdeu e acerto de contagem — com o nome de quem fez e a hora.
+                  </p>
+                </div>
+              )
+            }
+            const selo = (t) => t === 'entrada'
+              ? { txt: 'Entrada', cor: '#16a34a', bg: 'rgba(22,163,74,.12)' }
+              : t === 'saida'
+                ? { txt: 'Baixa', cor: '#f59e0b', bg: 'rgba(245,158,11,.12)' }
+                : { txt: 'Acerto', cor: '#2563eb', bg: 'rgba(37,99,235,.12)' }
+            return (
+              <div className="data-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Quando</th><th>O quê</th><th>Tipo</th>
+                      <th style={{ textAlign: 'right' }}>Quantidade</th>
+                      <th>Quem</th><th>Observação</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {linhas.map(h => {
+                      const sl = selo(h.tipo)
+                      return (
+                        <tr key={h.id}>
+                          <td style={{ whiteSpace: 'nowrap', fontSize: 13 }}>
+                            {new Date(h.quando).toLocaleString('pt-BR', {
+                              day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+                            })}
+                          </td>
+                          <td>
+                            <div style={{ fontWeight: 600 }}>{h.nome}</div>
+                            <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                              {h.origem === 'insumo' ? 'insumo' : 'produto'}
+                            </div>
+                          </td>
+                          <td>
+                            <span style={{
+                              padding: '2px 9px', borderRadius: 20, fontSize: 12, fontWeight: 700,
+                              color: sl.cor, background: sl.bg, border: `1px solid ${sl.cor}`,
+                            }}>{sl.txt}</span>
+                          </td>
+                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700,
+                            color: h.tipo === 'entrada' ? '#16a34a' : h.tipo === 'saida' ? '#f59e0b' : 'var(--text)' }}>
+                            {h.tipo === 'entrada' ? '+' : h.tipo === 'saida' ? '−' : ''}
+                            {fmtQtd(h.quantidade, h.unidade)}
+                            {h.valor ? <div style={{ fontSize: 11.5, fontWeight: 400, color: 'var(--text-muted)' }}>{brl(h.valor)}</div> : null}
+                          </td>
+                          <td style={{ fontSize: 13 }}>{h.quem || <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
+                          <td style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{h.obs || '—'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )
+          })()}
+        </>
+      )}
+
       {aba === 'compras' && (
         <>
           <div className="card" style={{ marginBottom: 12, display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
