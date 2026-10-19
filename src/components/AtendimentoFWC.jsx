@@ -105,8 +105,8 @@ function Midia({ path, tipo }) {
     return () => { vivo = false }
   }, [path])
 
-  if (erro) return <div style={{ fontSize: 13, opacity: 0.7, marginTop: 4 }}>(não consegui abrir o arquivo)</div>
-  if (!url) return <div style={{ fontSize: 13, opacity: 0.7, marginTop: 4 }}>carregando…</div>
+  if (erro) return <div style={{ fontSize: 19.5, opacity: 0.7, marginTop: 4 }}>(não consegui abrir o arquivo)</div>
+  if (!url) return <div style={{ fontSize: 19.5, opacity: 0.7, marginTop: 4 }}>carregando…</div>
   if (tipo === 'imagem') {
     return (
       <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginTop: 6 }}>
@@ -119,7 +119,7 @@ function Midia({ path, tipo }) {
   if (tipo === 'video') return <video src={url} controls preload="metadata" style={{ display: 'block', marginTop: 6, maxWidth: '100%', maxHeight: 260, borderRadius: 8 }} />
   return (
     <a href={url} target="_blank" rel="noopener noreferrer"
-      style={{ display: 'inline-block', marginTop: 6, fontSize: 13.5, color: '#60a5fa', textDecoration: 'underline' }}>
+      style={{ display: 'inline-block', marginTop: 6, fontSize: 20, color: '#60a5fa', textDecoration: 'underline' }}>
       abrir arquivo
     </a>
   )
@@ -368,7 +368,7 @@ export default function AtendimentoFWC() {
       {naoLidasTotal > 0 && (
         <span style={{
           position: 'absolute', top: -4, right: -4, minWidth: 22, height: 22, padding: '0 6px',
-          borderRadius: 11, background: '#ef4444', color: '#fff', fontSize: 13.5, fontWeight: 800,
+          borderRadius: 11, background: '#ef4444', color: '#fff', fontSize: 20, fontWeight: 800,
           display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--surface)',
         }}>{naoLidasTotal > 99 ? '99+' : naoLidasTotal}</span>
       )}
@@ -389,7 +389,7 @@ export default function AtendimentoFWC() {
           onChange={(e) => setBusca(e.target.value)}
           placeholder={escolhendoNova ? 'Buscar loja…' : 'Buscar conversa…'}
           style={{
-            flex: 1, minWidth: 0, padding: '8px 10px', borderRadius: 8, fontSize: 14.5,
+            flex: 1, minWidth: 0, padding: '11px 12px', borderRadius: 8, fontSize: 21.5,
             border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
           }}
         />
@@ -397,7 +397,7 @@ export default function AtendimentoFWC() {
           type="button"
           onClick={() => { setEscolhendoNova((v) => !v); setBusca('') }}
           style={{
-            padding: '8px 10px', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer',
+            padding: '8px 10px', borderRadius: 8, fontSize: 21, fontWeight: 700, cursor: 'pointer',
             border: '1px solid var(--primary)', whiteSpace: 'nowrap',
             background: escolhendoNova ? 'var(--primary)' : 'var(--primary-bg)',
             color: escolhendoNova ? 'var(--primary-contrast)' : 'var(--primary)',
@@ -415,20 +415,20 @@ export default function AtendimentoFWC() {
                 placeholder="Outro número: (84) 99999-0000"
                 inputMode="tel"
                 style={{
-                  flex: 1, minWidth: 0, padding: '7px 9px', borderRadius: 8, fontSize: 14,
+                  flex: 1, minWidth: 0, padding: '7px 9px', borderRadius: 8, fontSize: 21,
                   border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
                 }}
               />
               <button type="button" onClick={() => comecarCom(outroNumero)}
-                style={{ padding: '7px 10px', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+                style={{ padding: '7px 10px', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff', fontWeight: 700, fontSize: 21, cursor: 'pointer' }}>
                 Abrir
               </button>
             </div>
-            <div style={{ padding: '0 12px 6px', fontSize: 12.5, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+            <div style={{ padding: '0 12px 6px', fontSize: 18.5, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4 }}>
               Lojas com telefone de contato
             </div>
             {lojasComTelefone.length === 0 && (
-              <div style={{ padding: 12, fontSize: 14, color: 'var(--text-muted)' }}>Nenhuma loja com telefone de contato.</div>
+              <div style={{ padding: 12, fontSize: 21, color: 'var(--text-muted)' }}>Nenhuma loja com telefone de contato.</div>
             )}
             {lojasComTelefone.map((e) => (
               <button key={e.id} type="button" onClick={() => comecarCom(e.telefone_contato, e)}
@@ -436,15 +436,15 @@ export default function AtendimentoFWC() {
                   display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', border: 'none',
                   borderBottom: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer',
                 }}>
-                <div style={{ fontSize: 15, fontWeight: 600 }}>{e.nome}</div>
-                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{telefoneBonito(e.telefone_contato)}</div>
+                <div style={{ fontSize: 22.5, fontWeight: 600 }}>{e.nome}</div>
+                <div style={{ fontSize: 19.5, color: 'var(--text-muted)' }}>{telefoneBonito(e.telefone_contato)}</div>
               </button>
             ))}
           </div>
         ) : (
           <>
             {listaFiltrada.length === 0 && (
-              <div style={{ padding: 16, fontSize: 14.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              <div style={{ padding: 16, fontSize: 21.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
                 {conversas.length === 0
                   ? 'Nenhuma conversa ainda. Quando um lojista escrever pro número oficial, ou responder a cobrança, aparece aqui.'
                   : 'Nada encontrado.'}
@@ -455,7 +455,7 @@ export default function AtendimentoFWC() {
               return (
                 <button key={c.chave} type="button" onClick={() => abrirConversa(c.chave)}
                   style={{
-                    display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none',
+                    display: 'block', width: '100%', textAlign: 'left', padding: '14px 14px', border: 'none',
                     borderBottom: '1px solid var(--border)', cursor: 'pointer', color: 'var(--text)',
                     background: ativo ? 'var(--primary-bg)' : 'transparent',
                   }}>
@@ -464,26 +464,26 @@ export default function AtendimentoFWC() {
                         conversas do mesmo nome ficariam iguais na lista. */}
                     <span title={c.canal === 'evolution' ? 'Chamou o 99912-0349' : 'Chamou o número oficial'}
                       style={{
-                        width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                        width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
                         background: c.canal === 'evolution' ? '#16a34a' : '#2563eb',
                       }} />
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: c.naoLidas ? 800 : 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 22.5, fontWeight: c.naoLidas ? 800 : 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {c.titulo}
                     </span>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }}>{quando(c.ultima.created_at)}</span>
+                    <span style={{ fontSize: 18, color: 'var(--text-muted)', flexShrink: 0 }}>{quando(c.ultima.created_at)}</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 20, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {c.ultima.remetente === 'fwc' ? 'Você: ' : ''}{c.ultima.texto}
                     </span>
                     {c.naoLidas > 0 && (
-                      <span style={{ minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, background: '#16a34a', color: '#fff', fontSize: 12.5, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, background: '#16a34a', color: '#fff', fontSize: 18.5, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         {c.naoLidas}
                       </span>
                     )}
                   </div>
                   {c.empresa && c.nomePerfil && c.nomePerfil !== c.empresa.nome && (
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>WhatsApp: {c.nomePerfil}</div>
+                    <div style={{ fontSize: 18, color: 'var(--text-muted)', marginTop: 1 }}>WhatsApp: {c.nomePerfil}</div>
                   )}
                 </button>
               )
@@ -502,8 +502,8 @@ export default function AtendimentoFWC() {
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', fontSize: 22, lineHeight: 1, padding: 0 }}>‹</button>
         )}
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{atual.titulo}</div>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+          <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{atual.titulo}</div>
+          <div style={{ fontSize: 19.5, color: 'var(--text-muted)' }}>
             {telefoneBonito(atual.telefone)}{atual.empresa ? ' · lojista' : ''}
             {' · '}
             <span style={{ fontWeight: 700, color: ehEvolution ? '#16a34a' : '#2563eb' }}>
@@ -515,7 +515,7 @@ export default function AtendimentoFWC() {
 
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px' }}>
         {atual.msgs.length === 0 && (
-          <div style={{ margin: 'auto', textAlign: 'center', fontSize: 14, color: 'var(--text-muted)', maxWidth: 320, lineHeight: 1.5 }}>
+          <div style={{ margin: 'auto', textAlign: 'center', fontSize: 21, color: 'var(--text-muted)', maxWidth: 320, lineHeight: 1.5 }}>
             Conversa nova. Pra escrever primeiro, o WhatsApp oficial exige um <b>modelo aprovado</b> — escolha um aí embaixo.
           </div>
         )}
@@ -524,18 +524,18 @@ export default function AtendimentoFWC() {
           return (
             <div key={m.id} style={{ display: 'flex', justifyContent: daFwc ? 'flex-end' : 'flex-start' }}>
               <div style={{
-                maxWidth: '82%', padding: '7px 11px', borderRadius: 13, fontSize: 15, lineHeight: 1.4,
+                maxWidth: '86%', padding: '10px 14px', borderRadius: 14, fontSize: 22.5, lineHeight: 1.4,
                 background: daFwc ? 'rgba(34,197,94,.16)' : 'var(--bg)',
                 border: daFwc ? '1px solid rgba(34,197,94,.45)' : '1px solid var(--border)',
                 borderBottomRightRadius: daFwc ? 3 : 13, borderBottomLeftRadius: daFwc ? 13 : 3,
                 color: 'var(--text)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
               }}>
                 {m.tipo === 'modelo' && (
-                  <div style={{ fontSize: 11, fontWeight: 800, opacity: 0.75, marginBottom: 2 }}>📋 Modelo</div>
+                  <div style={{ fontSize: 16.5, fontWeight: 800, opacity: 0.75, marginBottom: 2 }}>📋 Modelo</div>
                 )}
                 {m.texto}
                 {m.midia_path && <Midia path={m.midia_path} tipo={m.midia_tipo} />}
-                <div style={{ fontSize: 11, opacity: 0.7, marginTop: 3, textAlign: 'right', display: 'flex', gap: 5, justifyContent: 'flex-end' }}>
+                <div style={{ fontSize: 16.5, opacity: 0.7, marginTop: 3, textAlign: 'right', display: 'flex', gap: 5, justifyContent: 'flex-end' }}>
                   <span>{quando(m.created_at)}</span>
                   {daFwc && <StatusEnvio m={m} />}
                 </div>
@@ -548,14 +548,14 @@ export default function AtendimentoFWC() {
 
       <div style={{ borderTop: '1px solid var(--border)', padding: '8px 12px 12px' }}>
         {aviso && (
-          <div style={{ fontSize: 13.5, fontWeight: 600, padding: '6px 9px', borderRadius: 8, marginBottom: 8, background: 'rgba(234,179,8,.14)', color: '#b45309', lineHeight: 1.4 }}>
+          <div style={{ fontSize: 20, fontWeight: 600, padding: '6px 9px', borderRadius: 8, marginBottom: 8, background: 'rgba(234,179,8,.14)', color: '#b45309', lineHeight: 1.4 }}>
             {aviso}
           </div>
         )}
 
         {janelaAberta ? (
           <>
-            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 6 }}>
+            <div style={{ fontSize: 18.5, color: 'var(--text-muted)', marginBottom: 6 }}>
               Pode responder livre até {quando(new Date(janelaAte).toISOString())} (24h da última mensagem dele).
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
@@ -566,13 +566,13 @@ export default function AtendimentoFWC() {
                 placeholder="Escreva a resposta… (Enter envia, Shift+Enter pula linha)"
                 rows={2}
                 style={{
-                  flex: 1, minWidth: 0, resize: 'vertical', padding: '8px 10px', borderRadius: 10, fontSize: 15,
+                  flex: 1, minWidth: 0, resize: 'vertical', padding: '11px 12px', borderRadius: 10, fontSize: 22.5,
                   border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontFamily: 'inherit',
                 }}
               />
               <button type="button" onClick={enviarTexto} disabled={enviando || !texto.trim()}
                 style={{
-                  padding: '10px 14px', borderRadius: 10, border: 'none', fontWeight: 700, fontSize: 15,
+                  padding: '10px 14px', borderRadius: 10, border: 'none', fontWeight: 700, fontSize: 22.5,
                   background: '#16a34a', color: '#fff', cursor: enviando || !texto.trim() ? 'default' : 'pointer',
                   opacity: enviando || !texto.trim() ? 0.55 : 1,
                 }}>{enviando ? '…' : 'Enviar'}</button>
@@ -580,15 +580,15 @@ export default function AtendimentoFWC() {
           </>
         ) : (
           <div>
-            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 19.5, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.4 }}>
               {atual.ultimaCliente
                 ? 'Passou de 24h desde a última mensagem dele: agora só dá pra mandar um modelo aprovado. Quando ele responder, a conversa livre abre de novo.'
                 : 'Ele ainda não escreveu pra FWC: o primeiro contato tem que ser um modelo aprovado.'}
             </div>
             {modelos === null ? (
-              <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>Buscando os modelos aprovados…</div>
+              <div style={{ fontSize: 21, color: 'var(--text-muted)' }}>Buscando os modelos aprovados…</div>
             ) : modelos.length === 0 ? (
-              <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: 21, color: 'var(--text-muted)' }}>
                 Nenhum modelo aprovado na conta. Crie no Gerenciador do WhatsApp da Meta (categoria Utilidade).
                 <button type="button" onClick={() => { setModelos(null); buscarModelos() }}
                   style={{ marginLeft: 6, background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: 700, padding: 0 }}>
@@ -605,7 +605,7 @@ export default function AtendimentoFWC() {
                     setParams(m ? Array.from({ length: m.campos }, () => '') : [])
                   }}
                   style={{
-                    width: '100%', padding: '8px 10px', borderRadius: 8, fontSize: 14.5,
+                    width: '100%', padding: '8px 10px', borderRadius: 8, fontSize: 21.5,
                     border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
                   }}
                 >
@@ -626,24 +626,24 @@ export default function AtendimentoFWC() {
                         placeholder={`Campo {{${i + 1}}}`}
                         style={{
                           display: 'block', width: '100%', boxSizing: 'border-box', marginBottom: 6, padding: '7px 9px',
-                          borderRadius: 8, fontSize: 14.5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
+                          borderRadius: 8, fontSize: 21.5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
                         }}
                       />
                     ))}
                     <div style={{
-                      fontSize: 14, lineHeight: 1.45, padding: '8px 10px', borderRadius: 10, marginBottom: 8,
+                      fontSize: 21, lineHeight: 1.45, padding: '8px 10px', borderRadius: 10, marginBottom: 8,
                       background: 'rgba(34,197,94,.10)', border: '1px dashed rgba(34,197,94,.5)', color: 'var(--text)', whiteSpace: 'pre-wrap',
                     }}>
                       {modeloSel.cabecalho && <div style={{ fontWeight: 700, marginBottom: 4 }}>{modeloSel.cabecalho}</div>}
                       {montarTexto(modeloSel.corpo, params)}
-                      {modeloSel.rodape && <div style={{ fontSize: 12.5, opacity: 0.7, marginTop: 4 }}>{modeloSel.rodape}</div>}
+                      {modeloSel.rodape && <div style={{ fontSize: 18.5, opacity: 0.7, marginTop: 4 }}>{modeloSel.rodape}</div>}
                       {modeloSel.botoes.length > 0 && (
-                        <div style={{ fontSize: 13, marginTop: 6, color: 'var(--text-muted)' }}>Botões: {modeloSel.botoes.join(' · ')}</div>
+                        <div style={{ fontSize: 19.5, marginTop: 6, color: 'var(--text-muted)' }}>Botões: {modeloSel.botoes.join(' · ')}</div>
                       )}
                     </div>
                     <button type="button" onClick={enviarModelo} disabled={enviando}
                       style={{
-                        width: '100%', padding: '10px 14px', borderRadius: 10, border: 'none', fontWeight: 700, fontSize: 15,
+                        width: '100%', padding: '10px 14px', borderRadius: 10, border: 'none', fontWeight: 700, fontSize: 22.5,
                         background: '#16a34a', color: '#fff', cursor: enviando ? 'default' : 'pointer', opacity: enviando ? 0.6 : 1,
                       }}>{enviando ? 'Enviando…' : 'Enviar modelo'}</button>
                   </div>
@@ -655,7 +655,7 @@ export default function AtendimentoFWC() {
       </div>
     </div>
   ) : (
-    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14.5, lineHeight: 1.5 }}>
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 21.5, lineHeight: 1.5 }}>
       Escolha uma conversa, ou toque em <b>&nbsp;+ Nova&nbsp;</b> pra falar com um lojista.
     </div>
   )
@@ -674,8 +674,8 @@ export default function AtendimentoFWC() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: '1px solid var(--border)', background: '#16a34a', color: '#fff' }}>
           <span style={{ fontSize: 20 }}>💬</span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 16.5, fontWeight: 800 }}>Atendimento FWC</div>
-            <div style={{ fontSize: 13, opacity: 0.9 }}>
+            <div style={{ fontSize: 25, fontWeight: 800 }}>Atendimento FWC</div>
+            <div style={{ fontSize: 19.5, opacity: 0.9 }}>
               Os dois números da FWC{numeroFwc ? ` · ${telefoneBonito(numeroFwc)}` : ''} · só você responde, sem robô
             </div>
           </div>
