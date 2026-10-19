@@ -380,7 +380,7 @@ export default function AtendimentoFWC() {
   const lista = (
     <div style={{
       display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%',
-      width: larga ? 300 : '100%', flexShrink: 0,
+      width: larga ? 430 : '100%', flexShrink: 0,
       borderRight: larga ? '1px solid var(--border)' : 'none',
     }}>
       <div style={{ padding: 10, display: 'flex', gap: 6 }}>
@@ -667,7 +667,7 @@ export default function AtendimentoFWC() {
       <div role="dialog" aria-label="Atendimento FWC"
         style={{
           position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 960,
-          width: larga ? 'min(900px, 94vw)' : '100vw',
+          width: larga ? 'min(1500px, 96vw)' : '100vw',
           background: 'var(--surface)', color: 'var(--text)', borderLeft: '1px solid var(--border)',
           boxShadow: '-12px 0 40px rgba(0,0,0,.25)', display: 'flex', flexDirection: 'column',
         }}>
