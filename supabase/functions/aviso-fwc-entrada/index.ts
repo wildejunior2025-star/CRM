@@ -32,6 +32,25 @@ function respostaAutomatica(): string {
   return `${PREFIXO_AUTOMATICA} Com quem eu falo? Logo cedo te respondo.`
 }
 
+// Segunda mensagem (mig 0350): 5 min depois do "Com quem eu falo?", se nem o
+// lead nem o Wilde escreveram nada, o robô puxa a conversa de novo. Só uma vez
+// e só de dia — de noite a primeira já disse "logo cedo te respondo".
+const FOLLOWUP_MIN = 5
+function saudacao(hora: number): string {
+  if (hora < 12) return "Bom dia"
+  if (hora < 18) return "Boa tarde"
+  return "Boa noite"
+}
+function textoFollowup(hora: number): string {
+  return `${saudacao(hora)}! Como posso te ajudar hoje? Você já usa algum sistema na sua loja?`
+}
+const FOLLOWUPS = new Set([5, 12, 18].map(textoFollowup))
+function horaFortaleza(): number {
+  return Number(new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Fortaleza", hour: "numeric", hourCycle: "h23",
+  }).format(new Date()))
+}
+
 const ok = (data: unknown = { ok: true }, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } })
 
@@ -129,6 +148,40 @@ serve(async (req) => {
       if (!r.ok) console.error("[aviso-fwc] aviso pronto falhou:", r.status, (await r.text()).slice(0, 200))
       return ok({ ok: r.ok })
     }
+    // Chamado pelo cron a cada minuto: manda a segunda mensagem pra quem
+    // ficou no vácuo depois do "Com quem eu falo?".
+    if (body?.action === "followup") {
+      const hora = horaFortaleza()
+      if (hora < 7 || hora >= 22) return ok({ enviados: 0, motivo: "noite" })
+      const agora = Date.now()
+      const { data: linhas } = await sb.from("aviso_fwc_entrada")
+        .select("telefone, respondido_em, humano_em, ultima_entrada_em, followup_em")
+        .gte("respondido_em", new Date(agora - 60 * 60_000).toISOString())
+        .lte("respondido_em", new Date(agora - FOLLOWUP_MIN * 60_000).toISOString())
+      let enviados = 0
+      for (const l of linhas ?? []) {
+        const resp = new Date(l.respondido_em).getTime()
+        const depois = (iso: string | null) => !!iso && new Date(iso).getTime() > resp + 15_000
+        if (l.followup_em && new Date(l.followup_em).getTime() >= resp) continue // já mandou
+        if (l.humano_em && new Date(l.humano_em).getTime() >= resp) continue    // o Wilde respondeu
+        if (depois(l.ultima_entrada_em)) continue                                // o lead respondeu
+        const texto = textoFollowup(hora)
+        const r = await fetch(`${EVOLUTION_API_URL}/message/sendText/${instancia}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+          body: JSON.stringify({ number: l.telefone, text: texto }),
+        })
+        if (r.ok) {
+          await sb.from("aviso_fwc_entrada").update({ followup_em: new Date().toISOString() }).eq("telefone", l.telefone)
+          await guardarNoChat(sb, l.telefone, "fwc", texto)
+          enviados++
+        } else {
+          console.error("[aviso-fwc] followup falhou:", r.status, (await r.text()).slice(0, 200))
+        }
+      }
+      return ok({ enviados })
+    }
+
     if (body?.event !== "messages.upsert" || body?.instance !== instancia) return ok()
 
     const msg = body.data
@@ -140,7 +193,7 @@ serve(async (req) => {
     if (msg.key?.fromMe) {
       const texto = textoDaMensagem(msg)
       const para = jid.replace("@s.whatsapp.net", "").replace(/[^0-9]/g, "")
-      if (para && !texto.startsWith(PREFIXO_AUTOMATICA) && !texto.startsWith("🔔")) {
+      if (para && !texto.startsWith(PREFIXO_AUTOMATICA) && !texto.startsWith("🔔") && !FOLLOWUPS.has(texto)) {
         await sb.from("aviso_fwc_entrada").upsert({ telefone: para, humano_em: new Date().toISOString() })
         // Respondeu pelo celular: entra no chat do Super ADM igual, senão a
         // conversa de lá fica pela metade e parece que ninguém respondeu.
@@ -169,6 +222,8 @@ serve(async (req) => {
 
     const { data: ultimo } = await sb.from("aviso_fwc_entrada")
       .select("avisado_em, respondido_em, humano_em").eq("telefone", de).maybeSingle()
+    // Marca que o lead escreveu (a segunda mensagem só sai pra quem ficou calado).
+    await sb.from("aviso_fwc_entrada").upsert({ telefone: de, ultima_entrada_em: new Date().toISOString() })
     const ha = (iso: string | null | undefined) => iso ? Date.now() - new Date(iso).getTime() : Infinity
 
     // Resposta automática pro contato, antes do aviso (quem chamou não pode
