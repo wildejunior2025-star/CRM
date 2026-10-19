@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import React from 'react'
+import { blocosDeOpcoes } from '../lib/complementos'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useConfirmar } from '../hooks/useConfirmar'
 import { useAuth } from '../hooks/useAuth'
@@ -1835,7 +1836,21 @@ export default function Produtos() {
                                 </button>
                               </div>
                               {/* Opções do grupo */}
-                              {g.opcoes.map(op => {
+                              {blocosDeOpcoes(g.opcoes).map(bloco => (
+                              <React.Fragment key={bloco.titulo ?? 'unico'}>
+                                {/* Bloco ("(Promoção)", "(Doce)"...): faixa colorida pra dar pra ver
+                                    onde um acaba e o outro começa, inclusive no celular. */}
+                                {bloco.titulo && (
+                                  <div style={{
+                                    marginTop: 6, padding: '9px 12px', fontSize: 12.5, fontWeight: 800, letterSpacing: 0.4,
+                                    textTransform: 'uppercase', color: 'var(--primary)',
+                                    background: 'rgba(124,58,237,.10)', borderTop: '2px solid rgba(124,58,237,.35)',
+                                    borderLeft: '5px solid var(--primary)',
+                                  }}>
+                                    {bloco.titulo} <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>· {bloco.opcoes.length}</span>
+                                  </div>
+                                )}
+                                {bloco.opcoes.map(op => {
                                 const oPausado = op.disponivel === false
                                 const oMatch = norm(search).length >= 2 && norm(op.nome).includes(norm(search))
                                 return (
@@ -1865,7 +1880,9 @@ export default function Produtos() {
                                     </button>
                                   </div>
                                 )
-                              })}
+})}
+                              </React.Fragment>
+                              ))}
                             </div>
                           )
                           })
