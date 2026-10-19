@@ -281,26 +281,33 @@ export default function FichaTecnica() {
         .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())
         .order('created_at', { ascending: false }).limit(1000),
       supabase.from('estoque_movimentos')
-        .select('id, created_at, tipo, quantidade, valor_total, observacao, motivo, produtos(nome)')
+        .select('id, created_at, tipo, quantidade, valor_total, observacao, motivo, created_by, produtos(nome)')
         .eq('empresa_id', empresaId)
         .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())
         .order('created_at', { ascending: false }).limit(1000),
-      supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
+      supabase.from('profiles').select('id, nome, email, perfil').eq('empresa_id', empresaId),
     ])
-    const nomes = Object.fromEntries((pessoas.data || []).map(x => [x.id, x.nome]))
+    // Quem lancou, pelo login. Sem autor = ninguem apertou nada (venda, robo,
+    // cron) - a tela escreve "automatico" em vez de deixar o campo vazio, que
+    // parece informacao perdida.
+    const quemFez = (id) => {
+      const u = (pessoas.data || []).find(x => x.id === id)
+      if (!u) return null
+      return { nome: u.nome || u.email, perfil: u.perfil || '', email: u.email || '' }
+    }
     const lista = [
       ...(mp.data || []).map(r => ({
         id: 'mp:' + r.id, quando: r.created_at, tipo: r.tipo, origem: 'insumo',
         nome: r.materias_primas?.nome || '(insumo apagado)',
         unidade: r.materias_primas?.unidade || '',
         quantidade: Number(r.quantidade || 0), valor: r.valor_total,
-        obs: r.observacao || '', quem: nomes[r.created_by] || '',
+        obs: r.observacao || '', quem: quemFez(r.created_by),
       })),
       ...(pr.data || []).map(r => ({
         id: 'pr:' + r.id, quando: r.created_at, tipo: r.tipo, origem: 'produto',
         nome: r.produtos?.nome || '(produto apagado)', unidade: 'un',
         quantidade: Number(r.quantidade || 0), valor: r.valor_total,
-        obs: r.observacao || r.motivo || '', quem: '',
+        obs: r.observacao || r.motivo || '', quem: quemFez(r.created_by),
       })),
     ].sort((a, b) => (a.quando < b.quando ? 1 : -1))
     setHist(lista)
@@ -1116,8 +1123,9 @@ export default function FichaTecnica() {
                 <div className="card empty-state">
                   <strong>Nada movimentado nesse período</strong>
                   <p>
-                    Aqui entra tudo que mexeu no estoque: entrada de insumo, baixa do que se
-                    perdeu e acerto de contagem — com o nome de quem fez e a hora.
+                    Aqui entra tudo que mexeu nos <b>dois estoques</b> — o insumo da ficha
+                    técnica e o produto do catálogo — nos dois sentidos: entrada, baixa do
+                    que se perdeu e acerto de contagem, com o nome e o login de quem fez.
                   </p>
                 </div>
               )
@@ -1165,7 +1173,19 @@ export default function FichaTecnica() {
                             {fmtQtd(h.quantidade, h.unidade)}
                             {h.valor ? <div style={{ fontSize: 11.5, fontWeight: 400, color: 'var(--text-muted)' }}>{brl(h.valor)}</div> : null}
                           </td>
-                          <td style={{ fontSize: 13 }}>{h.quem || <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
+                          <td style={{ fontSize: 13 }}>
+                            {h.quem ? (
+                              <>
+                                <div style={{ fontWeight: 600 }}>{h.quem.nome}</div>
+                                <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                                  {h.quem.perfil === 'admin' ? 'administrador' : (h.quem.perfil || 'usuário')}
+                                  {h.quem.email ? ` · ${h.quem.email}` : ''}
+                                </div>
+                              </>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)' }}>automático</span>
+                            )}
+                          </td>
                           <td style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{h.obs || '—'}</td>
                         </tr>
                       )
