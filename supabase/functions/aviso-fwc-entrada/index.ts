@@ -67,6 +67,43 @@ function formatarTel(d: string): string {
   return d
 }
 
+// Guarda a conversa do número da Evolution no MESMO lugar do número da Cloud
+// (mig 0349), pra ela aparecer no "Atendimento FWC" do Super ADM. Antes daqui
+// só sobrava o carimbo de hora em aviso_fwc_entrada: o texto se perdia, e
+// responder exigia pegar o celular.
+//
+// `empresa_id` liga a conversa à loja quando o telefone é de lojista — é o que
+// faz a lista mostrar "Zebu Restaurante" em vez de um número solto.
+// deno-lint-ignore no-explicit-any
+async function guardarNoChat(
+  sb: any, telefone: string, remetente: "cliente" | "fwc",
+  texto: string, nome?: string,
+) {
+  try {
+    let empresaId: string | null = null
+    const chave = telefone.slice(-8)
+    const { data: emp } = await sb.from("empresas")
+      .select("id").like("telefone_contato", `%${chave}`).limit(1).maybeSingle()
+    empresaId = emp?.id ?? null
+    if (!empresaId) {
+      const { data: prof } = await sb.from("profiles")
+        .select("empresa_id").like("telefone", `%${chave}`).limit(1).maybeSingle()
+      empresaId = prof?.empresa_id ?? null
+    }
+    await sb.from("admin_chat").insert({
+      telefone, canal: "evolution", empresa_id: empresaId,
+      nome: (nome ?? "").trim() || null,
+      remetente, texto: String(texto ?? "").slice(0, 4000), tipo: "texto",
+      status: remetente === "fwc" ? "enviado" : null,
+      lida: remetente === "fwc",
+    })
+  } catch (e) {
+    // Guardar a conversa é um extra: se falhar, o aviso e a resposta automática
+    // seguem normalmente. Perder o aviso seria pior que perder o histórico.
+    console.error("[aviso-fwc] nao guardou no chat:", String(e).slice(0, 180))
+  }
+}
+
 serve(async (req) => {
   if (req.method !== "POST") return ok()
   const sb = createClient(SUPABASE_URL, SERVICE_KEY)
@@ -105,6 +142,9 @@ serve(async (req) => {
       const para = jid.replace("@s.whatsapp.net", "").replace(/[^0-9]/g, "")
       if (para && !texto.startsWith(PREFIXO_AUTOMATICA) && !texto.startsWith("🔔")) {
         await sb.from("aviso_fwc_entrada").upsert({ telefone: para, humano_em: new Date().toISOString() })
+        // Respondeu pelo celular: entra no chat do Super ADM igual, senão a
+        // conversa de lá fica pela metade e parece que ninguém respondeu.
+        await guardarNoChat(sb, para, "fwc", texto)
       }
       return ok()
     }
@@ -123,6 +163,10 @@ serve(async (req) => {
     // ele de si mesmo.
     if (de.slice(-8) === destino.slice(-8)) return ok()
 
+    // A conversa entra no chat SEMPRE — antes dos freios de aviso. Quem manda
+    // 5 mensagens seguidas gera 1 aviso só, mas as 5 têm que aparecer na tela.
+    await guardarNoChat(sb, de, "cliente", textoDaMensagem(msg), String(msg.pushName ?? ""))
+
     const { data: ultimo } = await sb.from("aviso_fwc_entrada")
       .select("avisado_em, respondido_em, humano_em").eq("telefone", de).maybeSingle()
     const ha = (iso: string | null | undefined) => iso ? Date.now() - new Date(iso).getTime() : Infinity
@@ -136,7 +180,10 @@ serve(async (req) => {
         headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
         body: JSON.stringify({ number: de, text: respostaAutomatica() }),
       })
-      if (r.ok) await sb.from("aviso_fwc_entrada").upsert({ telefone: de, respondido_em: new Date().toISOString() })
+      if (r.ok) {
+        await sb.from("aviso_fwc_entrada").upsert({ telefone: de, respondido_em: new Date().toISOString() })
+        await guardarNoChat(sb, de, "fwc", respostaAutomatica())
+      }
       else console.error("[aviso-fwc] resposta automática falhou:", r.status, (await r.text()).slice(0, 200))
     }
 

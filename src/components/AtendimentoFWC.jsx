@@ -157,7 +157,7 @@ export default function AtendimentoFWC() {
 
   const carregar = useCallback(async () => {
     const { data } = await supabase.from('admin_chat')
-      .select('id, telefone, nome, empresa_id, remetente, texto, tipo, midia_path, midia_tipo, status, erro, lida, created_at')
+      .select('id, telefone, nome, empresa_id, remetente, texto, tipo, midia_path, midia_tipo, status, erro, lida, created_at, canal')
       .order('created_at', { ascending: false })
       .limit(1500)
     if (Array.isArray(data)) setMsgs(data.reverse())
@@ -201,16 +201,20 @@ export default function AtendimentoFWC() {
     return m
   }, [empresas])
 
-  // Uma conversa por pessoa. A chave são os 8 últimos dígitos: a Meta entrega
-  // o celular sem o 9 e a gente manda com o 9 — é o mesmo número.
+  // Uma conversa por pessoa E POR NÚMERO DA FWC. A chave são os 8 últimos
+  // dígitos (a Meta entrega o celular sem o 9 e a gente manda com o 9 — é o
+  // mesmo número) mais o canal: quem falou nos dois números da FWC tem duas
+  // conversas, porque a resposta precisa sair pelo mesmo número que ele chamou.
   const conversas = useMemo(() => {
     const mapa = new Map()
     for (const m of msgs) {
-      const k = chaveTel(m.telefone)
-      if (!k) continue
+      const tel = chaveTel(m.telefone)
+      if (!tel) continue
+      const canal = m.canal === 'evolution' ? 'evolution' : 'cloud'
+      const k = `${canal}|${tel}`
       let c = mapa.get(k)
       if (!c) {
-        c = { chave: k, telefone: m.telefone, nomePerfil: null, empresaId: null, msgs: [], naoLidas: 0, ultimaCliente: null }
+        c = { chave: k, chaveTel: tel, canal, telefone: m.telefone, nomePerfil: null, empresaId: null, msgs: [], naoLidas: 0, ultimaCliente: null }
         mapa.set(k, c)
       }
       c.msgs.push(m)
@@ -223,7 +227,7 @@ export default function AtendimentoFWC() {
       if (m.empresa_id) c.empresaId = m.empresa_id
     }
     const lista = [...mapa.values()].map((c) => {
-      const empresa = (c.empresaId && empPorId[c.empresaId]) || empPorChave[c.chave] || null
+      const empresa = (c.empresaId && empPorId[c.empresaId]) || empPorChave[c.chaveTel] || null
       return {
         ...c,
         empresa,
@@ -249,7 +253,8 @@ export default function AtendimentoFWC() {
     if (c) return c
     if (nova?.chave === sel) {
       return {
-        chave: nova.chave, telefone: nova.telefone, empresa: nova.empresa, msgs: [], naoLidas: 0, ultimaCliente: null,
+        chave: nova.chave, chaveTel: chaveTel(nova.telefone), canal: 'cloud',
+        telefone: nova.telefone, empresa: nova.empresa, msgs: [], naoLidas: 0, ultimaCliente: null,
         titulo: nova.empresa?.nome || telefoneBonito(nova.telefone),
       }
     }
@@ -260,16 +265,19 @@ export default function AtendimentoFWC() {
   useEffect(() => {
     if (!aberto || !atual?.naoLidas) return
     supabase.from('admin_chat').update({ lida: true })
-      .eq('remetente', 'cliente').eq('lida', false).like('telefone', `%${atual.chave}`)
+      .eq('remetente', 'cliente').eq('lida', false).like('telefone', `%${atual.chaveTel}`)
       .then(() => carregar())
-  }, [aberto, atual?.chave, atual?.naoLidas, carregar])
+  }, [aberto, atual?.chave, atual?.chaveTel, atual?.naoLidas, carregar])
 
   useEffect(() => {
     fimRef.current?.scrollIntoView({ block: 'end' })
   }, [atual?.chave, atual?.msgs.length, aberto])
 
+  // A janela de 24h é regra da Meta. No número do Evolution ela não existe:
+  // escreve e vai, a qualquer hora, sem modelo aprovado.
+  const ehEvolution = atual?.canal === 'evolution'
   const janelaAte = atual?.ultimaCliente ? new Date(atual.ultimaCliente).getTime() + JANELA_MS : 0
-  const janelaAberta = janelaAte > agora
+  const janelaAberta = ehEvolution || janelaAte > agora
 
   const buscarModelos = useCallback(async () => {
     const r = await chamar({ acao: 'modelos' })
@@ -278,8 +286,8 @@ export default function AtendimentoFWC() {
   }, [])
 
   useEffect(() => {
-    if (atual && !janelaAberta && modelos === null) buscarModelos()
-  }, [atual, janelaAberta, modelos, buscarModelos])
+    if (atual && !ehEvolution && !janelaAberta && modelos === null) buscarModelos()
+  }, [atual, ehEvolution, janelaAberta, modelos, buscarModelos])
 
   function abrirConversa(chave) {
     setSel(chave)
@@ -303,7 +311,7 @@ export default function AtendimentoFWC() {
     if (!t || !atual || enviando) return
     setEnviando(true)
     setAviso(null)
-    const r = await chamar({ acao: 'enviar', telefone: atual.telefone, texto: t })
+    const r = await chamar({ acao: 'enviar', telefone: atual.telefone, texto: t, canal: atual.canal })
     setEnviando(false)
     if (r.ok) { setTexto(''); carregar() }
     else setAviso(r.erro)
@@ -452,6 +460,13 @@ export default function AtendimentoFWC() {
                     background: ativo ? 'var(--primary-bg)' : 'transparent',
                   }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {/* Bolinha do número que a pessoa chamou. Sem ela, duas
+                        conversas do mesmo nome ficariam iguais na lista. */}
+                    <span title={c.canal === 'evolution' ? 'Chamou o 99912-0349' : 'Chamou o número oficial'}
+                      style={{
+                        width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                        background: c.canal === 'evolution' ? '#16a34a' : '#2563eb',
+                      }} />
                     <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: c.naoLidas ? 800 : 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {c.titulo}
                     </span>
@@ -490,6 +505,10 @@ export default function AtendimentoFWC() {
           <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{atual.titulo}</div>
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
             {telefoneBonito(atual.telefone)}{atual.empresa ? ' · lojista' : ''}
+            {' · '}
+            <span style={{ fontWeight: 700, color: ehEvolution ? '#16a34a' : '#2563eb' }}>
+              {ehEvolution ? 'chamou o 99912-0349' : 'chamou o oficial'}
+            </span>
           </div>
         </div>
       </div>
@@ -657,7 +676,7 @@ export default function AtendimentoFWC() {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 800 }}>Atendimento FWC</div>
             <div style={{ fontSize: 11.5, opacity: 0.9 }}>
-              Número oficial {numeroFwc ? telefoneBonito(numeroFwc) : ''} · só você responde, sem robô
+              Os dois números da FWC{numeroFwc ? ` · ${telefoneBonito(numeroFwc)}` : ''} · só você responde, sem robô
             </div>
           </div>
           <button type="button" onClick={() => setAberto(false)} aria-label="Fechar"

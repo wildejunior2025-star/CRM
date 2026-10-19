@@ -23,6 +23,9 @@ const SUPABASE_URL  = Deno.env.get("SUPABASE_URL") ?? ""
 const SUPABASE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
 const CLOUD_TOKEN   = Deno.env.get("WHATSAPP_CLOUD_TOKEN") ?? ""
 const GRAPH_VERSION = Deno.env.get("WHATSAPP_GRAPH_VERSION") ?? "v21.0"
+// O outro número da FWC (99912-0349) vive no Evolution, não na Meta.
+const EVOLUTION_URL = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$/, "")
+const EVOLUTION_KEY = Deno.env.get("EVOLUTION_API_KEY") ?? ""
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -256,6 +259,37 @@ serve(async (req) => {
     if (acao === "enviar") {
       const texto = String(body?.texto ?? "").trim()
       if (!texto) return json({ ok: false, erro: "Escreva a mensagem." }, 400)
+
+      // ── Conversa do número da Evolution (mig 0349) ───────────────────────
+      // Sai pelo cano de onde ela veio. Mandar pela Cloud uma conversa que
+      // começou no outro número faria a resposta chegar de um telefone que a
+      // pessoa não reconhece — e, fora das 24h, nem chegaria.
+      // Aqui não existe janela de 24h nem modelo: escreve e vai.
+      if (String(body?.canal ?? "cloud") === "evolution") {
+        const { data: cfgG } = await supabase.from("config_global")
+          .select("chave, valor").in("chave", ["admin_sender_instance"])
+        const instancia = (cfgG ?? []).find((c: Record<string, string>) =>
+          c.chave === "admin_sender_instance")?.valor?.trim() || "crmadmin"
+        if (!EVOLUTION_URL || !EVOLUTION_KEY) {
+          return json({ ok: false, erro: "Evolution não configurada." }, 503)
+        }
+        const r = await fetch(`${EVOLUTION_URL}/message/sendText/${instancia}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: EVOLUTION_KEY },
+          body: JSON.stringify({ number: comDDI(telefone), text: texto }),
+        })
+        if (!r.ok) {
+          return json({ ok: false, erro: `WhatsApp recusou (${r.status}). ${(await r.text()).slice(0, 160)}` })
+        }
+        const empId = await empresaDoTelefone(supabase, telefone)
+        await supabase.from("admin_chat").insert({
+          telefone, canal: "evolution", empresa_id: empId, remetente: "fwc",
+          texto, tipo: "texto", status: "enviado", lida: true,
+        })
+        await supabase.from("admin_chat").update({ lida: true })
+          .eq("remetente", "cliente").eq("lida", false).like("telefone", `%${telefone.slice(-8)}`)
+        return json({ ok: true })
+      }
 
       const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneId}/messages`, {
         method: "POST",
