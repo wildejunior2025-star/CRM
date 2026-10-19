@@ -655,7 +655,7 @@ export default function CategoriasComplemento() {
                 <p className="cc-section-title">Opções · {cat.opcoes.length}</p>
                 {cat.opcoes.length === 0 && <p className="cc-empty">Nenhuma opção ainda.</p>}
                 {(() => { const blocos = blocosDeOpcoes(cat.opcoes); return blocos.map((bloco, iBloco) => (
-                <div key={bloco.titulo ?? 'unico'}>
+                <div key={bloco.titulo ?? 'unico'} className="cc-bloco">
                   {/* Bloco = o que está entre parênteses no fim do nome. Vira subtítulo
                       na loja, e renomear aqui renomeia todas as opções de uma vez. */}
                   {bloco.titulo && (
