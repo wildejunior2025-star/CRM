@@ -5,6 +5,7 @@ import ModalComplementos, { btnQtd as btnQ } from '../components/ModalComplement
 import SenhaCliente from '../components/SenhaCliente'
 import { carregarCardapio, itensParaPedido } from '../lib/cardapioPublico'
 import { comoFicaNoDia } from '../lib/feriados'
+import { pollVisivel } from '../utils/pollVisivel'
 
 // LINK DO CLIENTE (mig 0147) — a página que o freguês abre pelo link só dele.
 // Sem login: quem identifica é o token na URL. Quatro abas:
@@ -128,8 +129,7 @@ export default function ClienteLink() {
   useEffect(() => {
     if (!info) return
     fetchConta()
-    const t = setInterval(fetchConta, 8000)
-    return () => clearInterval(t)
+    return pollVisivel(fetchConta, 8000, 30000)
   }, [info])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

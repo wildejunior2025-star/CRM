@@ -5,6 +5,7 @@ import { rotuloAgendado } from '../lib/agendamento'
 import { partesPagamento, ehDividido, temPixOnline, textoPagamento, nomeForma } from '../lib/pagamentoPartes'
 import { iniciarTags, registrarCompra } from '../lib/tracking'
 import AvisoCookies from '../components/AvisoCookies'
+import { pollVisivel } from '../utils/pollVisivel'
 import 'leaflet/dist/leaflet.css'
 import './DeliveryPedido.css'
 
@@ -332,8 +333,7 @@ function ChatLojaOnline({ empresaId, telefone, nome }) {
 
   useEffect(() => {
     carregar()
-    const poll = setInterval(carregar, 8000)
-    return () => clearInterval(poll)
+    return pollVisivel(carregar, 8000, 30000)
   }, [carregar])
 
   useEffect(() => { fimRef.current?.scrollIntoView({ block: 'end' }) }, [msgs.length])

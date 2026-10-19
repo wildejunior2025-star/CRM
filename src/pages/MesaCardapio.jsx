@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import ModalComplementos, { btnQtd as btnQ } from '../components/ModalComplementos'
 import { carregarCardapio, itensParaPedido } from '../lib/cardapioPublico'
 import { useProdutosNoHorario } from '../lib/horarioCategoria'
+import { pollVisivel } from '../utils/pollVisivel'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
 
@@ -76,8 +77,7 @@ export default function MesaCardapio() {
   useEffect(() => {
     if (!info) return
     fetchComanda()
-    const t = setInterval(fetchComanda, 8000)
-    return () => clearInterval(t)
+    return pollVisivel(fetchComanda, 8000, 30000)
   }, [info])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
