@@ -288,6 +288,10 @@ serve(async (req) => {
         })
         await supabase.from("admin_chat").update({ lida: true })
           .eq("remetente", "cliente").eq("lida", false).like("telefone", `%${telefone.slice(-8)}`)
+        // Respondeu pelo Super ADM: conta como resposta do Wilde, senão a
+        // resposta automática e a 2ª mensagem (aviso-fwc-entrada) atropelam.
+        await supabase.from("aviso_fwc_entrada")
+          .upsert({ telefone: comDDI(telefone), humano_em: new Date().toISOString() })
         return json({ ok: true })
       }
 

@@ -172,6 +172,13 @@ serve(async (req) => {
         if (l.followup_em && new Date(l.followup_em).getTime() >= resp) continue // já mandou
         if (l.humano_em && new Date(l.humano_em).getTime() >= resp) continue    // o Wilde respondeu
         if (depois(l.ultima_entrada_em)) continue                                // o lead respondeu
+        // Segurança extra: qualquer mensagem do Wilde já gravada no chat depois
+        // da resposta automática (por qualquer caminho) também conta.
+        const { data: falas } = await sb.from("admin_chat").select("texto")
+          .eq("remetente", "fwc").like("telefone", `%${String(l.telefone).slice(-8)}`)
+          .gt("created_at", new Date(resp + 5_000).toISOString()).limit(10)
+        if ((falas ?? []).some((f: { texto: string }) =>
+          !String(f.texto ?? "").startsWith(PREFIXO_AUTOMATICA) && !FOLLOWUPS.has(String(f.texto ?? "")))) continue
         const texto = textoFollowup(hora)
         const r = await fetch(`${EVOLUTION_API_URL}/message/sendText/${instancia}`, {
           method: "POST",
