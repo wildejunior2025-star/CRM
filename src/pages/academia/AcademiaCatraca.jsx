@@ -18,7 +18,7 @@ const TESTES = [
 export default function AcademiaCatraca() {
   const [porta, setPorta] = useState(null)
   const [baud, setBaud] = useState(9600)
-  const [ms, setMs] = useState(3000)
+  const [ms, setMs] = useState(() => lerConfigCatraca()?.ms || 3000)
   const [log, setLog] = useState([])
   const [ocupado, setOcupado] = useState(false)
   const [salva, setSalva] = useState(lerConfigCatraca)
@@ -112,12 +112,30 @@ export default function AcademiaCatraca() {
             {[9600, 4800, 19200, 38400, 115200].map(b => <option key={b} value={b}>{b}</option>)}
           </select>
         </label>
+        {/* Trocar o tempo salva na hora: antes so gravava refazendo o teste
+            da porta, e quem so queria a catraca aberta por mais tempo tinha
+            que passar por tudo de novo. */}
         <label>Tempo destravada
-          <select value={ms} onChange={e => setMs(Number(e.target.value))}>
-            {[1000, 2000, 3000, 5000, 8000].map(v => <option key={v} value={v}>{v / 1000} segundos</option>)}
+          <select value={ms} onChange={e => {
+            const v = Number(e.target.value)
+            setMs(v)
+            if (salva) {
+              const novo = { ...salva, ms: v }
+              salvarConfigCatraca(novo)
+              setSalva(novo)
+              anotar(`Tempo destravada agora e ${v / 1000}s.`)
+            }
+          }}>
+            {[1000, 2000, 3000, 5000, 8000, 12000, 15000].map(v => (
+              <option key={v} value={v}>{v / 1000} segundos</option>
+            ))}
           </select>
         </label>
       </div>
+      <p className="ac-muted">
+        E quanto tempo a catraca fica solta depois do reconhecimento. Se o aluno
+        nao chega a tempo de empurrar, aumente. Vale pra este computador.
+      </p>
 
       <div className="ac-form-botoes" style={{ justifyContent: 'flex-start' }}>
         <button className="btn btn-primary" onClick={escolher} disabled={ocupado}>
