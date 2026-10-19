@@ -41,7 +41,7 @@ const CAP_METRICAS = [
   // pedidos. Depois do conserto (migs 0278/0279), menos de 3. Amarelo em 30 é
   // dez vezes o normal de hoje — sobe assim se a carga crescer de verdade ou se
   // nascer policy nova sem `(select ...)`.
-  { key: 'leitura_por_seg',      label: 'Leitura do banco', sub: 'checagens de permissão por segundo', limite: 100, alerta: 30, unidade: '/s',  limiteLabel: '100/s' },
+  { key: 'leitura_por_seg',      label: 'Leitura do banco', sub: 'checagens de permissão por segundo', limite: 150, alerta: 80, unidade: '/s',  limiteLabel: '150/s' },
   { key: 'conexoes',             label: 'Conexões',         sub: 'lojas e telas ligadas ao banco',     limite: 90,  alerta: 60, unidade: '',    limiteLabel: '90' },
 ]
 
