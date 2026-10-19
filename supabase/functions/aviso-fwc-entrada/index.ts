@@ -49,7 +49,8 @@ function saudacao(hora: number): string {
   return "Boa noite"
 }
 function textoFollowup(hora: number): string {
-  return `${saudacao(hora)}! Como posso te ajudar hoje? Você já usa algum sistema na sua loja?`
+  // A 1ª (longa) já respondeu o que faz e quanto custa; a 2ª só puxa o nome.
+  return `${saudacao(hora)}! Com quem eu falo? 😊`
 }
 const FOLLOWUPS = new Set([5, 12, 18].map(textoFollowup))
 function horaFortaleza(): number {
