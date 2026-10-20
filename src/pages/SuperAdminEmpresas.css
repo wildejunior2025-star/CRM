@@ -225,6 +225,32 @@
   text-align: center;
 }
 
+/* ID do RustDesk: uma linha discreta, mas com alvo grande o bastante pro dedo,
+   porque esse botao e usado no celular no meio de um problema na loja. */
+.emp-remoto {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.emp-remoto:hover { border-color: var(--primary); border-style: solid; }
+.emp-remoto-rotulo { font-size: 11px; color: var(--text-muted); }
+.emp-remoto strong {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: .5px;
+  font-variant-numeric: tabular-nums;
+}
+.emp-remoto-copiar { font-size: 11px; font-weight: 700; color: var(--primary); }
+
 .emp-acoes { display: flex; gap: 8px; align-items: stretch; }
 .emp-acoes .btn { padding: 9px 14px; }
 .emp-acessar { flex: 1; font-weight: 800; }

@@ -33,8 +33,16 @@ const emptyForm = {
   cor_primaria: '#863bff',
   logo_url: '',
   dominio_personalizado: '',
+  rustdesk_id: '',
   vencimento: '',
   observacoes: '',
+}
+
+// O ID do RustDesk tem 9 dígitos e a gente guarda limpo; na tela ele volta a
+// sair em grupos de três, que é como o próprio RustDesk mostra — assim dá pra
+// conferir de bate-pronto com o que está na tela do PC da loja.
+function agrupaId(id) {
+  return String(id ?? '').replace(/\D/g, '').replace(/(\d{3})(?=\d)/g, '$1 ')
 }
 
 // Logo da loja no cartão (a mesma da Loja Online). Sem logo, ou com o link
@@ -92,6 +100,7 @@ export default function SuperAdminEmpresas() {
 
   // Cobrança por WhatsApp
   const [cobrando, setCobrando]   = useState(null) // empresaId
+  const [copiouRd, setCopiouRd]   = useState(null) // empresaId que acabou de copiar o ID
   const [cobrancaMsg, setCobrancaMsg] = useState({}) // { [empresaId]: 'ok' | 'erro: ...' }
 
   // Modal de funcionalidades (módulos) liga/desliga por loja
@@ -119,6 +128,29 @@ export default function SuperAdminEmpresas() {
     setSavingId(null)
     if (error) { setError(error.message); return }
     await loadAll()
+  }
+
+  // Copia o ID pro RustDesk. O clipboard do navegador falha em contexto não
+  // seguro e em alguns WebViews, então tem o caminho antigo como reserva —
+  // esse botão é usado no celular, no meio de um problema, e não pode falhar
+  // calado.
+  async function copiarRustdesk(emp) {
+    const id = String(emp.rustdesk_id ?? '').replace(/\D/g, '')
+    if (!id) return
+    try {
+      await navigator.clipboard.writeText(id)
+    } catch {
+      const campo = document.createElement('textarea')
+      campo.value = id
+      campo.style.position = 'fixed'
+      campo.style.opacity = '0'
+      document.body.appendChild(campo)
+      campo.select()
+      try { document.execCommand('copy') } catch { /* sem clipboard: o número está na tela */ }
+      document.body.removeChild(campo)
+    }
+    setCopiouRd(emp.id)
+    setTimeout(() => setCopiouRd(atual => (atual === emp.id ? null : atual)), 1800)
   }
 
   async function cobrarEmpresa(emp) {
@@ -241,6 +273,7 @@ export default function SuperAdminEmpresas() {
       cor_primaria: empresa.cor_primaria ?? '#863bff',
       logo_url: empresa.logo_url ?? '',
       dominio_personalizado: empresa.dominio_personalizado ?? '',
+      rustdesk_id: empresa.rustdesk_id ?? '',
       vencimento: empresa.vencimento ?? '',
       observacoes: empresa.observacoes ?? '',
     })
@@ -266,6 +299,9 @@ export default function SuperAdminEmpresas() {
       cor_primaria: form.cor_primaria || null,
       logo_url: form.logo_url || null,
       dominio_personalizado: form.dominio_personalizado || null,
+      // O RustDesk mostra o ID em grupos de tres ("373 097 079"), mas so aceita
+      // os digitos na hora de conectar. Guarda limpo e a tela reagrupa.
+      rustdesk_id: form.rustdesk_id.replace(/\D/g, '') || null,
       vencimento: form.vencimento || null,
       observacoes: form.observacoes || null,
     }
@@ -568,6 +604,15 @@ export default function SuperAdminEmpresas() {
                   )}
                 </div>
 
+                {emp.rustdesk_id && (
+                  <button type="button" className="emp-remoto" onClick={() => copiarRustdesk(emp)}
+                    title="Copiar o ID pra colar no RustDesk">
+                    <span className="emp-remoto-rotulo">Acesso remoto</span>
+                    <strong>{agrupaId(emp.rustdesk_id)}</strong>
+                    <span className="emp-remoto-copiar">{copiouRd === emp.id ? 'copiado ✓' : 'copiar'}</span>
+                  </button>
+                )}
+
                 <div className="emp-acoes">
                   <button className="btn btn-primary emp-acessar" disabled={savingId === emp.id} onClick={() => acessarEmpresa(emp)}>
                     {savingId === emp.id ? 'Entrando…' : 'Entrar na loja'}
@@ -689,6 +734,21 @@ export default function SuperAdminEmpresas() {
                     onChange={handleChange}
                     placeholder="pedidos.nomeda loja.com.br"
                   />
+                </div>
+
+                <div className="form-field full">
+                  <label>Acesso remoto · ID do RustDesk</label>
+                  <input
+                    name="rustdesk_id"
+                    value={form.rustdesk_id}
+                    onChange={handleChange}
+                    inputMode="numeric"
+                    placeholder="373 097 079"
+                  />
+                  <small style={{ color: 'var(--text-muted)' }}>
+                    O número que aparece no RustDesk do PC da loja. Fica no cartão
+                    dela com botão de copiar.
+                  </small>
                 </div>
 
                 <div className="form-field">
