@@ -197,6 +197,10 @@ function haversineKm(lat1, lng1, lat2, lng2) {
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
+const REGIAO_GRANDE_NATAL = [
+  'Natal', 'São Gonçalo do Amarante', 'Parnamirim', 'Extremoz', 'Macaíba',
+  'Ceará-Mirim', 'São José de Mipibu', 'Nísia Floresta', 'Monte Alegre',
+]
 function calcTaxaKm(faixas, distKm) {
   const arr = Array.isArray(faixas) ? [...faixas].sort((a, b) => a.km - b.km) : []
   if (!arr.length) return null
@@ -1216,11 +1220,15 @@ export default function DeliveryCheckout() {
         const normCid = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
           .toLowerCase().replace(/\s*-\s*[a-z]{2}$/, '').replace(/\s+/g, ' ').trim()
         const vistasCid = new Set()
-        const cidadesParaTentar = [cid, lojaEndereco?.cidade, ...cidadesLoja]
+        // Região toda: a busca varre a Grande Natal de uma vez (as consultas vão em
+        // paralelo), porque cliente de uma cidade pede em loja de outra — a rua
+        // dela não pode depender de a loja já ter entregado lá.
+        const regiao = uf.toUpperCase() === 'RN' ? REGIAO_GRANDE_NATAL : []
+        const cidadesParaTentar = [cid, lojaEndereco?.cidade, ...cidadesLoja, ...regiao]
           .filter(c => c && c.trim().length >= 3)
           .map(c => c.replace(/\s*-\s*[A-Za-z]{2}$/, '').trim())
           .filter(c => { const k = normCid(c); if (vistasCid.has(k)) return false; vistasCid.add(k); return true })
-          .slice(0, 4)
+          .slice(0, 12)
         // Procura em TODAS as cidades e JUNTA. Parar na primeira que devolvesse
         // alguma coisa era o furo: o ViaCEP casa pedaço de nome, então
         // "sebastiana" achava "Sebastiana Benevides" em São Gonçalo, a busca
@@ -1244,7 +1252,7 @@ export default function DeliveryCheckout() {
         // ViaCEP devolve dezenas de linhas iguais e a lista vira ruído.
         const vistas = new Set()
         const lista = (Array.isArray(d) ? d : []).filter(x => {
-          const k = `${x.logradouro}|${x.bairro}`
+          const k = `${x.logradouro}|${x.bairro}|${x.localidade}`
           if (vistas.has(k)) return false
           vistas.add(k)
           return !!x.logradouro
