@@ -1202,13 +1202,25 @@ export default function DeliveryCheckout() {
         //      que identifica a rua ("barros", "eliane").
         const semTipo = termo
           .replace(/^(r|rua|av|avn|avenida|trav|travessa|al|alameda|pc|praca|praça|rod|rodovia|estr|estrada|beco|conj|conjunto|lot|loteamento|vl|vila)\.?\s+/i, '')
+          // Grafia popular: "Lurdes" no cadastro oficial é "Lourdes".
+          .replace(/\blurdes\b/gi, 'Lourdes')
           .trim()
         const maior = semTipo.split(/\s+/).filter(w => w.length >= 4).sort((x, y) => y.length - x.length)[0]
         // Procura primeiro na cidade em jogo; não achando, nas outras em que a
         // loja já entregou. A lista mostra o bairro e a cidade de cada rua, e
         // escolher uma delas já preenche a cidade certa no formulário — que é
         // como a cliente de Natal acha a rua dela numa loja de São Gonçalo.
-        const cidadesParaTentar = [cid, ...cidadesLoja.filter(c => c && c !== cid)].slice(0, 3)
+        // Sem repetir a cidade escrita de outro jeito ("Natal", "NATAL", "NATAL - RN"):
+        // na CDBom elas ocupavam as 3 vagas e São Gonçalo ficava de fora. A cidade
+        // da loja entra sempre.
+        const normCid = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+          .toLowerCase().replace(/\s*-\s*[a-z]{2}$/, '').replace(/\s+/g, ' ').trim()
+        const vistasCid = new Set()
+        const cidadesParaTentar = [cid, lojaEndereco?.cidade, ...cidadesLoja]
+          .filter(c => c && c.trim().length >= 3)
+          .map(c => c.replace(/\s*-\s*[A-Za-z]{2}$/, '').trim())
+          .filter(c => { const k = normCid(c); if (vistasCid.has(k)) return false; vistasCid.add(k); return true })
+          .slice(0, 4)
         // Procura em TODAS as cidades e JUNTA. Parar na primeira que devolvesse
         // alguma coisa era o furo: o ViaCEP casa pedaço de nome, então
         // "sebastiana" achava "Sebastiana Benevides" em São Gonçalo, a busca
