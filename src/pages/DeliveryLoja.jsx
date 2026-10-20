@@ -341,9 +341,13 @@ export default function DeliveryLoja() {
         const exigeEscolha = (produtoAtual.complementos ?? []).some(g => Number(g.min ?? 0) > 0)
         if (exigeEscolha && !item.complementos?.length) continue
         // Combos (com complementos) mantêm o preço já calculado (base + adicionais)
+        // Item simples: preço pela QUANTIDADE (atacado/promoção), não o cheio. Aqui
+        // o preço era sempre reposto em `produtoAtual.preco`, e isso apagava o
+        // desconto por quantidade de toda sacola guardada: 20 pacotes de gelo com
+        // "5+ a R$ 2,50" apareciam a R$ 5,00 cada (CDBom, 20/10/2026).
         atualizado[key] = item.complementos?.length
           ? { key, ...item }
-          : { key, ...item, id: produtoAtual.id, preco: Number(produtoAtual.preco) }
+          : { key, ...reprecificarItemSalvo(item, produtoAtual), id: produtoAtual.id }
       }
       return atualizado
     })
