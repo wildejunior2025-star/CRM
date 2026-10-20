@@ -545,13 +545,45 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
   const [forma2, setForma2] = useState('cartao')
   const [valor2, setValor2] = useState('')
 
+  // Aluno que AINDA NAO venceu: por padrao o prazo soma em cima do
+  // vencimento (pagou adiantado, nao perde dia). Mas quando a data foi
+  // empurrada na mao — "prazo novo" pra nao bater de frente — somar outra
+  // vez joga o aluno pra dois meses na frente. Foi o que aconteceu em 13/10
+  // com 12 alunos. Entao agora a tela AVISA e deixa contar de hoje.
+  const [contarDeHoje, setContarDeHoje] = useState(false)
+  const [jaPagouHoje, setJaPagouHoje] = useState(null)
+
   const num = t => Number(String(t).replace(',', '.')) || 0
   const totalDividido = num(valor) + num(valor2)
 
   // Na PRIMEIRA mensalidade o prazo conta de hoje. O cadastro já deixa o
   // "Vence em" lá na frente; contar a partir dele daria o dobro de prazo.
   const primeira = !!aluno.primeira
-  const novoVencimento = somarMeses(primeira ? null : aluno.vencimento, meses, data)
+  const base = primeira || contarDeHoje ? null : aluno.vencimento
+  const novoVencimento = somarMeses(base, meses, data)
+
+  // Quantos dias o aluno ainda tem. So avisa quando sobra bastante: 1 ou 2
+  // dias e so o arredondamento do mes.
+  const diasQueFaltam = aluno.vencimento && !primeira
+    ? Math.round((new Date(aluno.vencimento + 'T00:00:00') - new Date(data + 'T00:00:00')) / 86400000)
+    : 0
+  const aindaTemPrazo = diasQueFaltam > 3
+
+  // Ja recebeu dessa pessoa hoje? Dois cliques no Renovar somavam dois meses
+  // sem ninguem perceber (foi o caso da Daize Stella em 13/10).
+  useEffect(() => {
+    if (!aluno?.id || primeira) return
+    supabase
+      .from('academia_pagamentos')
+      .select('valor, criado_em')
+      .eq('aluno_id', aluno.id)
+      .eq('data', hojeIso())
+      .eq('cancelado', false)
+      .order('criado_em', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data: d }) => setJaPagouHoje(d || null))
+  }, [aluno?.id, primeira])
 
   async function confirmar(e) {
     e.preventDefault()
@@ -589,6 +621,27 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
             ? <>Cadastro feito. Recebeu agora? Então <b>vence {dataBr(novoVencimento)}</b> e o valor entra no caixa de hoje.</>
             : <>Vence {aluno.vencimento ? dataBr(aluno.vencimento) : 'sem data'} → passa a vencer <b>{dataBr(novoVencimento)}</b></>}
         </p>
+
+        {/* Ja recebemos dessa pessoa hoje: quase sempre e o segundo clique. */}
+        {jaPagouHoje && (
+          <div className="ac-erro">
+            Já foi recebido {dinheiro(jaPagouHoje.valor)} desta pessoa hoje, às{' '}
+            {new Date(jaPagouHoje.criado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.
+            Se for o mesmo pagamento, feche esta tela — confirmar de novo soma mais um mês.
+          </div>
+        )}
+
+        {/* Ainda nao venceu: avisa, porque somar em cima de data empurrada na
+            mao joga o aluno dois meses pra frente sem ninguem notar. */}
+        {aindaTemPrazo && !jaPagouHoje && (
+          <div className="ac-aviso">
+            Essa pessoa ainda tem <b>{diasQueFaltam} dias</b> pagos (até {dataBr(aluno.vencimento)}).
+            <label className="ac-check" style={{ marginTop: 8 }}>
+              <input type="checkbox" checked={contarDeHoje} onChange={e => setContarDeHoje(e.target.checked)} />
+              Contar a partir de hoje (perde os dias que faltam)
+            </label>
+          </div>
+        )}
 
         <div className="ac-dupla">
           <label>{dividido ? 'Valor da 1ª forma' : 'Valor pago'}
