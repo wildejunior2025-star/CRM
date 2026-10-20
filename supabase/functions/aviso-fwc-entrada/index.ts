@@ -73,20 +73,61 @@ async function config(sb: any): Promise<Record<string, string>> {
 }
 
 // deno-lint-ignore-next-line no-explicit-any
+// QUAL É O TIPO DA MENSAGEM, DE VERDADE (20/10/2026).
+//
+// O `messageType` do Evolution não é confiável: em mensagem que SAI do celular
+// do Wilde ele vem vazio ou com outro nome, e aí cinco fotos entraram no chat
+// como a palavra "Mensagem", sem arquivo nenhum.
+//
+// Quem sempre sabe é o próprio conteúdo: `msg.message` tem uma chave terminada
+// em "Message" (imageMessage, audioMessage...). Isso vale pros dois sentidos.
+//
+// As duas cascas que escondem o tipo de verdade:
+//   ephemeralMessage  — mensagem temporária
+//   viewOnceMessage*  — "ver uma vez"
+// deno-lint-ignore no-explicit-any
+function conteudoDaMensagem(msg: any): any {
+  let m = msg?.message ?? {}
+  for (let i = 0; i < 3; i++) {
+    const casca = m?.ephemeralMessage ?? m?.viewOnceMessage
+      ?? m?.viewOnceMessageV2 ?? m?.viewOnceMessageV2Extension
+      ?? m?.documentWithCaptionMessage
+    if (casca?.message) m = casca.message
+    else break
+  }
+  return m ?? {}
+}
+
+// deno-lint-ignore no-explicit-any
+function tipoDaMensagem(msg: any): string {
+  const m = conteudoDaMensagem(msg)
+  const chave = Object.keys(m).find((k) => k.endsWith("Message"))
+  // O conteúdo manda; o rótulo só entra quando não há conteúdo pra ler.
+  if (chave) return chave
+  const t = String(msg?.messageType ?? "")
+  if (t) return t
+  if (m?.conversation != null) return "conversation"
+  return ""
+}
+
+// deno-lint-ignore no-explicit-any
 function textoDaMensagem(msg: any): string {
-  const t = msg?.messageType
+  const t = tipoDaMensagem(msg)
+  const m = conteudoDaMensagem(msg)
   if (t === "conversation" || t === "extendedTextMessage") {
-    return String(msg.message?.conversation ?? msg.message?.extendedTextMessage?.text ?? "").trim()
+    return String(m?.conversation ?? m?.extendedTextMessage?.text ?? msg.message?.conversation ?? "").trim()
   }
   if (t === "pttMessage" || t === "audioMessage") return "🎤 Áudio"
   if (t === "imageMessage") {
-    const cap = String(msg.message?.imageMessage?.caption ?? "").trim()
+    const cap = String(m?.imageMessage?.caption ?? "").trim()
     return cap ? `📷 Foto — ${cap}` : "📷 Foto"
   }
   if (t === "videoMessage") return "🎬 Vídeo"
   if (t === "documentMessage") return "📄 Documento"
   if (t === "locationMessage" || t === "liveLocationMessage") return "📍 Localização"
   if (t === "stickerMessage") return "🙂 Figurinha"
+  // Tipo novo: registra pra eu descobrir o nome em vez de ficar no escuro.
+  console.log("[aviso-fwc] tipo desconhecido:", t || "(vazio)", Object.keys(m).join(","))
   return "Mensagem"
 }
 
@@ -250,7 +291,7 @@ serve(async (req) => {
         // conversa de lá fica pela metade e parece que ninguém respondeu.
         // O áudio que ELE grava também tem que dar pra ouvir de volta.
         let midiaSaida = null
-        if (TIPOS_COM_ARQUIVO.includes(String(msg.messageType ?? ""))) {
+        if (TIPOS_COM_ARQUIVO.includes(tipoDaMensagem(msg))) {
           const arqS = await baixarMidia(instancia, msg)
           if (arqS?.base64) midiaSaida = await guardarMidiaDoChat(sb, "admin", arqS.base64, arqS.mimetype)
         }
@@ -279,7 +320,7 @@ serve(async (req) => {
     // loja) porque esta conversa é da própria FWC: a política do bucket já
     // libera essa pasta pro super admin, e é a mesma que o número da Cloud usa.
     let midia = null
-    if (TIPOS_COM_ARQUIVO.includes(String(msg.messageType ?? ""))) {
+    if (TIPOS_COM_ARQUIVO.includes(tipoDaMensagem(msg))) {
       const arq = await baixarMidia(instancia, msg)
       if (arq?.base64) midia = await guardarMidiaDoChat(sb, "admin", arq.base64, arq.mimetype)
     }
