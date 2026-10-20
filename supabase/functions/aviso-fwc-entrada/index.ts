@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { guardarMidiaDoChat } from "../_shared/midiaDoChat.ts"
 
 // Mensagem nova no WhatsApp da FWC (99912-0349, Evolution) vira um aviso no
 // WhatsApp pessoal do dono (config_global.aviso_fwc_destino). O número da FWC
@@ -94,6 +95,33 @@ function formatarTel(d: string): string {
   return d
 }
 
+// O arquivo em si (áudio, foto, vídeo, documento). O Evolution não manda o
+// binário no webhook — manda a mensagem, e a gente pede o conteúdo por esta
+// rota. Tem que ser AGORA: o arquivo só fica disponível por um tempo curto.
+// deno-lint-ignore no-explicit-any
+async function baixarMidia(instancia: string, msg: any): Promise<{ base64: string; mimetype: string } | null> {
+  try {
+    const r = await fetch(`${EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/${instancia}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+      body: JSON.stringify({ message: msg }),
+    })
+    if (!r.ok) return null
+    const d = await r.json()
+    if (!d?.base64) return null
+    return { base64: d.base64, mimetype: d.mimetype ?? "application/octet-stream" }
+  } catch (e) {
+    console.error("[aviso-fwc] midia nao baixou:", String(e).slice(0, 160))
+    return null
+  }
+}
+
+// Tipos que valem a pena guardar. Figurinha e localização ficam de fora: a
+// primeira não diz nada que o texto já não diga, a segunda não é arquivo.
+const TIPOS_COM_ARQUIVO = [
+  "audioMessage", "pttMessage", "imageMessage", "videoMessage", "documentMessage",
+]
+
 // Guarda a conversa do número da Evolution no MESMO lugar do número da Cloud
 // (mig 0349), pra ela aparecer no "Atendimento FWC" do Super ADM. Antes daqui
 // só sobrava o carimbo de hora em aviso_fwc_entrada: o texto se perdia, e
@@ -105,6 +133,7 @@ function formatarTel(d: string): string {
 async function guardarNoChat(
   sb: any, telefone: string, remetente: "cliente" | "fwc",
   texto: string, nome?: string,
+  midia?: { path: string; tipo: string; expiraEm: string } | null,
 ) {
   try {
     let empresaId: string | null = null
@@ -120,7 +149,14 @@ async function guardarNoChat(
     await sb.from("admin_chat").insert({
       telefone, canal: "evolution", empresa_id: empresaId,
       nome: (nome ?? "").trim() || null,
-      remetente, texto: String(texto ?? "").slice(0, 4000), tipo: "texto",
+      remetente, texto: String(texto ?? "").slice(0, 4000),
+      // `tipo` diz o que a tela desenha: com arquivo, ela monta o player/foto;
+      // sem, mostra só o texto. Era por isso que o áudio virava a palavra
+      // "Áudio" e não tocava (20/10).
+      tipo: midia?.tipo ?? "texto",
+      midia_path: midia?.path ?? null,
+      midia_tipo: midia?.tipo ?? null,
+      midia_expira_em: midia?.expiraEm ?? null,
       status: remetente === "fwc" ? "enviado" : null,
       lida: remetente === "fwc",
     })
@@ -212,7 +248,13 @@ serve(async (req) => {
         await sb.from("aviso_fwc_entrada").upsert({ telefone: para, humano_em: new Date().toISOString() })
         // Respondeu pelo celular: entra no chat do Super ADM igual, senão a
         // conversa de lá fica pela metade e parece que ninguém respondeu.
-        await guardarNoChat(sb, para, "fwc", texto)
+        // O áudio que ELE grava também tem que dar pra ouvir de volta.
+        let midiaSaida = null
+        if (TIPOS_COM_ARQUIVO.includes(String(msg.messageType ?? ""))) {
+          const arqS = await baixarMidia(instancia, msg)
+          if (arqS?.base64) midiaSaida = await guardarMidiaDoChat(sb, "admin", arqS.base64, arqS.mimetype)
+        }
+        await guardarNoChat(sb, para, "fwc", texto, undefined, midiaSaida)
       }
       return ok()
     }
@@ -233,7 +275,15 @@ serve(async (req) => {
 
     // A conversa entra no chat SEMPRE — antes dos freios de aviso. Quem manda
     // 5 mensagens seguidas gera 1 aviso só, mas as 5 têm que aparecer na tela.
-    await guardarNoChat(sb, de, "cliente", textoDaMensagem(msg), String(msg.pushName ?? ""))
+    // O ARQUIVO vem junto quando existe. A pasta é "admin" (e não o id de uma
+    // loja) porque esta conversa é da própria FWC: a política do bucket já
+    // libera essa pasta pro super admin, e é a mesma que o número da Cloud usa.
+    let midia = null
+    if (TIPOS_COM_ARQUIVO.includes(String(msg.messageType ?? ""))) {
+      const arq = await baixarMidia(instancia, msg)
+      if (arq?.base64) midia = await guardarMidiaDoChat(sb, "admin", arq.base64, arq.mimetype)
+    }
+    await guardarNoChat(sb, de, "cliente", textoDaMensagem(msg), String(msg.pushName ?? ""), midia)
 
     const { data: ultimo } = await sb.from("aviso_fwc_entrada")
       .select("avisado_em, respondido_em, humano_em").eq("telefone", de).maybeSingle()
