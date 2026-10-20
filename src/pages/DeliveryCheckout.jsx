@@ -201,6 +201,18 @@ const REGIAO_GRANDE_NATAL = [
   'Natal', 'São Gonçalo do Amarante', 'Parnamirim', 'Extremoz', 'Macaíba',
   'Ceará-Mirim', 'São José de Mipibu', 'Nísia Floresta', 'Monte Alegre',
 ]
+// Municípios do estado (IBGE), guardados na memória: a varredura de rua usa a
+// lista toda e ela não muda.
+const _cidadesUf = {}
+async function cidadesDoEstado(uf) {
+  if (_cidadesUf[uf]) return _cidadesUf[uf]
+  try {
+    const r = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios`)
+    const j = await r.json()
+    if (Array.isArray(j)) return (_cidadesUf[uf] = j.map(m => m.nome))
+  } catch { /* sem lista: fica só a região */ }
+  return []
+}
 function calcTaxaKm(faixas, distKm) {
   const arr = Array.isArray(faixas) ? [...faixas].sort((a, b) => a.km - b.km) : []
   if (!arr.length) return null
@@ -1239,6 +1251,20 @@ export default function DeliveryCheckout() {
         if (!d.length && maior) {
           const listas2 = await Promise.all(cidadesParaTentar.map(c => buscar(maior, c)))
           d = listas2.flat()
+        }
+        // Não achou na região: varre o ESTADO todo, cidade por cidade (o ViaCEP não
+        // busca só por UF). Em lotes pra não martelar o serviço, parando assim que
+        // alguma rua casar inteira. Usa a palavra mais longa, que tolera grafia.
+        if (!d.some(x => ruaCasouInteira(x.logradouro, semTipo || termo))) {
+          const todas = await cidadesDoEstado(uf)
+          const feitas = new Set(cidadesParaTentar.map(normCid))
+          const restantes = todas.filter(c => !feitas.has(normCid(c)))
+          const alvo = maior || semTipo || termo
+          for (let i = 0; i < restantes.length && vivo; i += 15) {
+            const lote = await Promise.all(restantes.slice(i, i + 15).map(c => buscar(alvo, c)))
+            d = [...d, ...lote.flat()]
+            if (d.some(x => ruaCasouInteira(x.logradouro, semTipo || termo))) break
+          }
         }
         // O ESTADO INTEIRO entra sempre que NENHUMA rua casou com tudo o que ele
         // escreveu — não só quando a lista está vazia. Uma lista com a rua
