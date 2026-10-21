@@ -68,6 +68,9 @@ export default function MensalidadeGate() {
     let tipo = null
     if (admin && estado.travaAgora) tipo = 'popup'
     else if (!admin && estado.travaEquipe) tipo = 'bloqueio_funcionario'
+    // A faixa da madrugada também fica registrada: é prova de que a loja foi
+    // avisada antes de todo mundo travar na abertura.
+    else if (!admin && estado.travaAgora) tipo = 'faixa_funcionario'
     else if (admin && estado.fase === 'vence_hoje') tipo = 'faixa_vence_hoje'
     else if (admin && (estado.fase === 'carencia' || estado.fase === 'prazo')) tipo = 'faixa_carencia'
     // O .then() é o que dispara: sem ele o supabase-js monta a chamada e não envia.
@@ -100,7 +103,23 @@ export default function MensalidadeGate() {
   // nunca no meio de um expediente que virou a madrugada. A pressão fica com
   // quem paga (o dono, que trava desde a meia-noite), não com o garçom.
   if (!admin) {
-    if (!estado.travaEquipe) return null
+    // Entre a meia-noite e a abertura: faixa, não tela travada. O garçom segue
+    // trabalhando e leva o recado pro dono — que é a cobrança que a gente quer,
+    // sem parar o salão cheio de quem vira a madrugada. Sem botão de fechar:
+    // o recado tem que incomodar a noite toda, senão some no primeiro toque.
+    if (!estado.travaEquipe) {
+      if (!estado.travaAgora) return null
+      return (
+        <div role="alert" style={{
+          position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 9000,
+          background: '#b45309', color: '#fff', padding: '10px 14px',
+          fontSize: 14, fontWeight: 700, textAlign: 'center', lineHeight: 1.35,
+          boxShadow: '0 -8px 24px rgba(0,0,0,.35)',
+        }}>
+          ⚠️ Pendência no sistema. Avise o responsável pela loja.
+        </div>
+      )
+    }
     return (
       <Tela>
         <div style={{ fontSize: 48, textAlign: 'center' }}>🔒</div>
