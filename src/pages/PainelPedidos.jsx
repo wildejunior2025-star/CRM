@@ -1093,8 +1093,10 @@ async function carregarCatalogoCompleto(empresaId) {
     // `ativo`/`disponivel_delivery` vêm junto pro cardápio por categoria mostrar
     // o mesmo que a busca por nome mostra (o RPC filtra os dois): item pausado
     // aparecendo na lista e sumindo na busca é bug na cara de quem atende.
-    fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, preco_promocional, faixas_preco, categoria, ativo, disponivel_delivery, codigo_barras')
-      .eq('empresa_id', empresaId).is('arquivado_em', null).order('nome', { ascending: true }).order('id')),
+    fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, preco_promocional, faixas_preco, categoria, ativo, disponivel_delivery, codigo_barras, ordem')
+      // A ordem do cardapio (produtos.ordem) vem primeiro: quem monta o pedido
+      // procura na ordem do papel. Sem ordem definida, volta pro nome.
+      .eq('empresa_id', empresaId).is('arquivado_em', null).order('ordem', { ascending: true, nullsFirst: false }).order('nome', { ascending: true }).order('id')),
     supabase.from('produto_complemento_grupos')
       .select('produto_id, ordem, min_override, max_override, complemento_grupos(id, nome, min, max, regra_preco, modo_quantidade, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel)), produtos!inner(empresa_id)')
       .eq('produtos.empresa_id', empresaId).order('ordem'),
@@ -1506,6 +1508,10 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const [cart, setCart]         = useState(() => draft?.cart ?? cartFromPedido(pedidoEdicao))
   const [compMap, setCompMap]   = useState({}) // { [produto_id]: grupos[] }
   const [catsFaixa, setCatsFaixa] = useState(() => new Map()) // faixa por categoria (mig 0329)
+  // Cardápio por categoria, igual ao do Salão: as categorias na ordem da loja e,
+  // ao tocar numa, os produtos dela. Digitar na busca continua achando em todas.
+  const [ordemCats, setOrdemCats] = useState({})
+  const [catSel, setCatSel] = useState(null)
   const [produtoComp, setProdutoComp] = useState(null) // produto sendo montado (complementos)
   const [nome, setNome]         = useState(draft?.nome ?? (pedidoEdicao && pedidoEdicao.cliente_nome !== 'Balcão' ? (pedidoEdicao.cliente_nome ?? '') : ''))
   const [telefone, setTelefone] = useState(draft?.telefone ?? (pedidoEdicao && pedidoEdicao.cliente_telefone !== '—' ? (pedidoEdicao.cliente_telefone ?? '') : ''))
@@ -1595,6 +1601,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       setProdutos(cache.produtos)
       setCompMap(cache.compMap)
       setCatsFaixa(cache.catsFaixa ?? new Map())
+      setOrdemCats(cache.ordemCategorias ?? {})
       setLoading(false)
     }
     // Carrega/atualiza em segundo plano (catálogo pode ter mudado).
@@ -1605,6 +1612,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         setProdutos(catalogo.produtos)
         setCompMap(catalogo.compMap)
         setCatsFaixa(catalogo.catsFaixa ?? new Map())
+        setOrdemCats(catalogo.ordemCategorias ?? {})
       } catch (e) {
         if (ativo && !cache) setErro(`Erro ao carregar produtos: ${String(e?.message ?? e)}`)
       } finally {
@@ -2076,8 +2084,19 @@ ${url}
   const buscaNorm = semAcento(busca)
   // A busca acha pelo nome OU pelo código de barras: bipar com o cursor no
   // campo filtra pro produto do número, e o Enter do leitor já o adiciona.
-  const filtrados = produtosComPreco.filter(p => !buscaNorm
-    || semAcento(p.nome).includes(buscaNorm) || combinaCodigo(p, busca))
+  // Sem busca: só os produtos da categoria aberta (e nenhum se nenhuma foi
+  // aberta — aí a tela mostra as categorias).
+  const catDoProduto = p => String(p.categoria ?? '').trim() || 'Sem categoria'
+  const filtrados = buscaNorm
+    ? produtosComPreco.filter(p => semAcento(p.nome).includes(buscaNorm) || combinaCodigo(p, busca))
+    : catSel ? produtosComPreco.filter(p => catDoProduto(p) === catSel) : []
+  const categoriasVenda = (() => {
+    const qtd = new Map()
+    for (const p of produtosComPreco) qtd.set(catDoProduto(p), (qtd.get(catDoProduto(p)) ?? 0) + 1)
+    const pos = c => (c === 'Sem categoria' ? Number.MAX_SAFE_INTEGER : (ordemCats?.[c] ?? Number.MAX_SAFE_INTEGER - 1))
+    return [...qtd.entries()]
+      .sort((a, b) => (pos(a[0]) - pos(b[0])) || a[0].localeCompare(b[0], 'pt-BR'))
+  })()
 
   // ── Teclado na busca ────────────────────────────────────────────────────
   // Digita, desce com a seta e confirma no Enter, sem tirar a mão do teclado
@@ -2454,9 +2473,33 @@ ${url}
               style={{ border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontWeight: 800 }}>×</button>
           </div>
         )}
+        {/* Categoria aberta: voltar pras categorias sem apagar nada do carrinho. */}
+        {catSel && !buscaNorm && (
+          <button type="button" onClick={() => setCatSel(null)}
+            style={{ marginBottom: 8, padding: '7px 12px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+              border: '1.5px solid #7c3aed', background: 'rgba(124,58,237,.12)', color: '#a78bfa', width: '100%', textAlign: 'left' }}>
+            ← Categorias · <span style={{ color: 'var(--text)' }}>{catSel}</span>
+          </button>
+        )}
         <div ref={listaRef} className="pp-venda-lista" style={{ overflowY: 'auto', flexShrink: 0, border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 6, marginBottom: 14 }}>
           {loading ? (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>Carregando produtos...</div>
+          ) : !buscaNorm && !catSel ? (
+            categoriasVenda.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>Nenhum produto cadastrado.</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8, padding: 4 }}>
+                {categoriasVenda.map(([nomeCat, n]) => (
+                  <button key={nomeCat} type="button" onClick={() => setCatSel(nomeCat)}
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, textAlign: 'left', cursor: 'pointer',
+                      padding: '12px 12px', borderRadius: 10, border: '1px solid var(--border,#2a2a3a)',
+                      background: 'var(--surface, transparent)', color: 'var(--text)' }}>
+                    <span style={{ fontSize: 14, fontWeight: 800, lineHeight: 1.25 }}>{nomeCat}</span>
+                    <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{n} {n === 1 ? 'item' : 'itens'}</span>
+                  </button>
+                ))}
+              </div>
+            )
           ) : filtrados.length === 0 ? (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>
               {produtos.length === 0 ? 'Nenhum produto cadastrado.' : `Nenhum produto com “${busca}”. (${produtos.length} produtos no catálogo)`}
