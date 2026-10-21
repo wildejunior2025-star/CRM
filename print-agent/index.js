@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 35
+const APP_VERSION = 36
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -244,6 +244,94 @@ function listarImpressoras() {
 }
 listarImpressoras() // aquece o cache ao abrir, pra primeira tela ja ter a lista
 
+// ---- saude das impressoras: olhar a FILA, nao so mandar ---------------------
+// O Windows aceita o cupom, responde OK e empilha quando a termica nao
+// responde. Foi assim que 18 pedidos sumiram no Braseiro em 20/10/2026 no meio
+// do movimento, sem ninguem perceber: o log do app dizia OK em todos. Olhar a
+// fila e a unica forma de saber se saiu papel de verdade.
+//
+// Este bloco SO LE e reporta. Nada aqui pode travar ou atrasar a impressao:
+// roda em segundo plano, com limite de tempo, e qualquer erro e engolido.
+const PS_FILAS =
+  "$ErrorActionPreference='SilentlyContinue';" +
+  "[Console]::OutputEncoding=[Text.Encoding]::UTF8;" +
+  "$n=Get-Date;" +
+  // Win32_PrintJob.Name vem como "Nome da impressora, 123" — tira so o ", 123"
+  // do fim, que e o numero do trabalho (cortar no primeiro virgula quebraria
+  // impressora com virgula no nome).
+  "$j=@(Get-CimInstance Win32_PrintJob|ForEach-Object{" +
+    "$m=0;if($_.TimeSubmitted){$m=[int]((New-TimeSpan -Start $_.TimeSubmitted -End $n).TotalMinutes)};" +
+    "[pscustomobject]@{p=($_.Name -replace ',\\s*\\d+$','');m=$m}});" +
+  "$p=@(Get-CimInstance Win32_Printer|ForEach-Object{" +
+    "[pscustomobject]@{n=$_.Name;off=[bool]$_.WorkOffline}});" +
+  "ConvertTo-Json @{j=$j;p=$p} -Depth 4 -Compress"
+
+// Quantos trabalhos estao parados em cada impressora NOSSA, e ha quanto tempo.
+// Devolve null quando nao deu pra ler — melhor nao reportar do que reportar
+// "tudo zero" e o servidor achar que esta tudo bem.
+async function lerFilas() {
+  const linhas = await _rodar('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', PS_FILAS], 20000)
+  let d
+  try { d = JSON.parse(linhas.join('')) } catch (e) { return null }
+  // O PowerShell 5.1 as vezes entrega UM item solto em vez de lista de um.
+  const lista = v => (Array.isArray(v) ? v : v ? [v] : [])
+  const jobs = lista(d.j), imps = lista(d.p)
+
+  // Só as impressoras que ESTE PC usa. A fila de uma impressora de documento
+  // qualquer do balcão não é problema nosso e viraria alarme falso.
+  const alvo = [
+    { nome: config().printer, papel: 'cozinha' },
+    { nome: config().printerBar, papel: 'bar' },
+  ].filter(x => x.nome)
+
+  const mesmo = (a, b) => norm(a) === norm(b)
+  return alvo.map(({ nome, papel }) => {
+    const meus = jobs.filter(j => mesmo(j.p, nome))
+    const info = imps.find(p => mesmo(p.n, nome))
+    return {
+      nome,
+      papel,
+      presos: meus.length,
+      idade_min: meus.reduce((m, j) => Math.max(m, Number(j.m) || 0), 0),
+      offline: !!(info && info.off),
+    }
+  })
+}
+
+// Conta pro servidor como estao as filas. Quem decide se isso e problema e
+// quem avisa e o banco (mig 0355) — aqui so se reporta o que se ve.
+var _saudeEm = 0, _saudeAgendada = null
+async function reportarSaude() {
+  if (!empresaId || !sessionAtiva) return   // sem sessao, o servidor nota o silencio
+  _saudeEm = Date.now()
+  try {
+    const filas = await lerFilas()
+    if (!filas) return
+    await supabase.from('impressora_saude').upsert({
+      empresa_id: empresaId,
+      pc: os.hostname(),
+      versao: APP_VERSION,
+      logado: true,
+      pausado: !!config().pausado,
+      setor: papelDoPc(),
+      filas,
+      visto_em: new Date().toISOString(),
+    }, { onConflict: 'empresa_id,pc' })
+  } catch (e) { /* silencioso: avisar nunca pode atrapalhar imprimir */ }
+}
+
+// Depois de imprimir, olha de novo em 1 min: e quando a fila entope. Sem isto
+// o entupimento so apareceria no relatorio de rotina, ate 2 min depois.
+function agendarRelatorioSaude() {
+  if (_saudeAgendada) return
+  _saudeAgendada = setTimeout(() => {
+    _saudeAgendada = null
+    reportarSaude().catch(() => {})
+  }, 60 * 1000)
+}
+
+setInterval(() => { reportarSaude().catch(() => {}) }, 2 * 60 * 1000)
+
 // Caminho real da Área de Trabalho (respeita redirecionamento do OneDrive).
 function caminhoDesktop() {
   try {
@@ -367,6 +455,9 @@ function imprimirBytes(bytes, nome, printerOverride) {
   }
 
   try { fs.unlinkSync(tmp) } catch (e) {}
+  // "ok" aqui quer dizer só que o Windows ACEITOU — não que saiu papel. Quem
+  // responde isso é a fila, daqui a pouco.
+  agendarRelatorioSaude()
   return ok
 }
 function imprimir(pedido) {
@@ -594,6 +685,9 @@ async function iniciarEscuta() {
       payload => { if (!origemLigada('mesa')) return; agendarComandaMesa(payload.new) })
     .subscribe(st => log('Conexao: ' + st + (st === 'SUBSCRIBED' ? ' — imprimindo pedidos (delivery + mesa) automaticamente!' : '')))
   log('Loja: ' + (empresa?.nome || '—'))
+  // Dá sinal de vida na hora: assim o servidor sabe que este PC voltou e fecha
+  // um aviso de "sem resposta" que estivesse aberto.
+  reportarSaude().catch(() => {})
   return true
 }
 
