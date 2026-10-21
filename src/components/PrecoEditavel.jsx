@@ -97,13 +97,29 @@ export default function PrecoEditavel({
         title={podeEditar ? 'Clique para mudar o preço' : undefined}
         style={{
           cursor: podeEditar ? 'pointer' : 'default',
-          // Tracejado embaixo: sem nenhuma marca ninguém descobre que dá pra
-          // clicar; com borda inteira a lista vira uma grade de caixinhas.
-          borderBottom: podeEditar ? '1px dashed var(--border)' : 'none',
+          ...(podeEditar ? {
+            // A PISTA TEM QUE SER VISÍVEL.
+            //
+            // A 1ª versão usava tracejado em `var(--border)`, que é cinza —
+            // sobre o preço cinza de 12px do cardápio do gestor sumia por
+            // completo, e o dono abriu a tela sem descobrir que dava pra
+            // clicar. Recurso que ninguém vê não existe.
+            //
+            // Agora vai na cor do sistema, em negrito, com o tracejado da
+            // mesma cor e um lápis pequeno. Chama sem virar botão: numa lista
+            // de 25 produtos, 25 botões viram uma parede.
+            color: 'var(--primary, #7c3aed)',
+            fontWeight: 700,
+            borderBottom: '1px dashed var(--primary, #7c3aed)',
+            whiteSpace: 'nowrap',
+          } : null),
           ...style,
         }}
       >
         {formatado}
+        {podeEditar && (
+          <span aria-hidden="true" style={{ fontSize: '0.85em', marginLeft: 4, opacity: 0.75 }}>✏️</span>
+        )}
       </span>
     )
   }
