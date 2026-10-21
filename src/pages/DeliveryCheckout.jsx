@@ -1177,7 +1177,10 @@ export default function DeliveryCheckout() {
     // e o cliente, vendo um pino já posto no mapa, confirma sem mexer. Era daí
     // que saía a taxa errada. Mapa vazio pedindo o número é melhor que pino
     // errado que parece certo.
-    if (!form.numero.trim()) return
+    // No celular o pino vem ANTES do número (passo do mapa, com a pessoa
+    // obrigada a confirmar), então ali o ponto da rua serve de ponto de partida.
+    const ehCelular = window.matchMedia('(max-width: 899px)').matches
+    if (!form.numero.trim() && !ehCelular) return
     const t = setTimeout(async () => {
       const c = await geocodeEndereco({ rua, numero: form.numero, bairro: form.bairro, cidade, estado: form.estado, cep: form.cep })
       // O endereço escrito passa a valer a partir DESTE ponto (ver o reverse do
@@ -1466,7 +1469,10 @@ export default function DeliveryCheckout() {
   function set(field, value) {
     // Só invalida em mudança de verdade: carregarCidades reescreve a mesma
     // cidade ao voltar do cadastro e derrubaria o pino recuperado à toa.
-    if (CAMPOS_DO_PINO.includes(field) && form[field] !== value) {
+    // O número NÃO derruba um pino que a própria pessoa já marcou: no celular o
+    // pino vem antes do número, e GPS não sabe em qual casa da rua ele fica.
+    if (CAMPOS_DO_PINO.includes(field) && form[field] !== value
+        && !(field === 'numero' && pinManualRef.current)) {
       setCoordCliente(null)
       pinManualRef.current = false
     }
@@ -1687,8 +1693,10 @@ export default function DeliveryCheckout() {
       rua: r.logradouro || prev.rua,
       bairro: r.bairro || prev.bairro,
       cep: cepNum.length === 8 ? `${cepNum.slice(0, 5)}-${cepNum.slice(5)}` : prev.cep,
-      cidade: prev.cidade || r.localidade || '',
-      estado: prev.estado || r.uf || '',
+      // A rua escolhida manda na cidade: a busca varre o estado todo, e rua de
+      // outra cidade com a cidade da loja gravada daria um endereço que não existe.
+      cidade: r.localidade || prev.cidade || '',
+      estado: r.uf || prev.estado || '',
     }))
     setRuaSugestoes([])
     setRuaAberta(false)
@@ -1768,19 +1776,25 @@ export default function DeliveryCheckout() {
     return e
   }
 
-  const CAMPOS_PASSO = [
-    ['telefone', 'nome'],
-    ['rua', 'numero', 'estado', 'cidade', 'bairro'],
-    ['troco', 'divisao'],
-  ]
+  // Celular, passos da ENTREGA: 0 dados · 1 rua · 2 mapa (pino) · 3 conferir o
+  // endereço + número · 4 pagamento · 5 resumo. Na retirada pula o 2 e o 3.
+  const SEQ_PASSOS = tipo === 'entrega' ? [0, 1, 2, 3, 4, 5] : [0, 1, 4, 5]
+  const CAMPOS_PASSO = {
+    0: ['telefone', 'nome'],
+    1: ['rua', 'estado', 'cidade', 'bairro'],
+    3: ['numero'],
+    4: ['troco', 'divisao'],
+  }
   function passoDoErro(errs) {
-    const i = CAMPOS_PASSO.findIndex(c => c.some(k => errs[k]))
-    return i < 0 ? 0 : i
+    for (const p of SEQ_PASSOS) {
+      if ((CAMPOS_PASSO[p] ?? []).some(k => errs[k])) return p
+    }
+    return 0
   }
 
   function proximoPasso() {
     const errs = validate()
-    const meus = CAMPOS_PASSO[passo]?.filter(k => errs[k]) ?? []
+    const meus = (CAMPOS_PASSO[passo] ?? []).filter(k => errs[k])
     if (meus.length > 0) {
       setErrors(prev => ({ ...prev, ...Object.fromEntries(meus.map(k => [k, errs[k]])) }))
       setTimeout(() => {
@@ -1788,22 +1802,28 @@ export default function DeliveryCheckout() {
       }, 50)
       return
     }
-    setErroGlobal(null)
-    // Abre o mapa sempre que o endereço mudou desde o último pino confirmado
-    // (voltou e trocou de rua = precisa confirmar de novo).
-    const assinatura = [form.rua, form.numero, form.bairro, form.cidade].join('|').toLowerCase()
-    if (passo === 1 && tipo === 'entrega' && !pinSalvo && pinAssinaturaRef.current !== assinatura
-        && lojaEndereco?.latitude && lojaEndereco?.longitude) {
-      jaForcouMapa.current = true
-      setMapaForcado(true)
-      setMapaAberto(true)
+    // Passo do mapa: sem pino não passa. Passando, o pino vira o oficial — digitar
+    // o número depois não mexe mais nele.
+    if (passo === 2) {
+      const lojaTemMapa = !!(lojaEndereco?.latitude && lojaEndereco?.longitude)
+      if (lojaTemMapa && (!coordCliente || (reconfirmar && !pinManualRef.current))) {
+        setErroGlobal(reconfirmar
+          ? 'Pra confirmar seu endereço, arraste o pino do mapa até onde você mora.'
+          : 'Arraste o pino do mapa até a sua casa pra o entregador achar o endereço.')
+        return
+      }
+      pinManualRef.current = true
     }
-    setPasso(p => Math.min(p + 1, 3))
+    setErroGlobal(null)
+    const i = SEQ_PASSOS.indexOf(passo)
+    setPasso(SEQ_PASSOS[Math.min(i + 1, SEQ_PASSOS.length - 1)])
     window.scrollTo({ top: 0 })
   }
 
   function voltarPasso() {
-    setPasso(p => Math.max(p - 1, 0))
+    const i = SEQ_PASSOS.indexOf(passo)
+    setPasso(SEQ_PASSOS[Math.max(i - 1, 0)])
+    setErroGlobal(null)
     window.scrollTo({ top: 0 })
   }
 
@@ -1835,7 +1855,9 @@ export default function DeliveryCheckout() {
       setErroGlobal(reconfirmar
         ? 'Pra confirmar seu endereço, arraste o pino do mapa até onde você mora.'
         : 'Arraste o pino do mapa até a sua casa pra o entregador achar o endereço.')
-      setMapaAberto(true)
+      // Celular: volta pro passo do mapa. PC: abre o mapa grande.
+      if (window.matchMedia('(max-width: 899px)').matches) setPasso(2)
+      else setMapaAberto(true)
       return
     }
 
@@ -2330,6 +2352,7 @@ export default function DeliveryCheckout() {
 
               {/* Endereço (só na entrega) */}
               {tipo === 'entrega' && (
+              <>
               <section className="dco-section" data-p="1">
                 <h2 className="dco-section-title">Endereço de entrega</h2>
                 <div className="dco-field-group">
@@ -2408,7 +2431,10 @@ export default function DeliveryCheckout() {
                     )}
                   </Field>
 
-                  {/* CEP — atalho pra quem sabe, não porta de entrada. */}
+                  {/* CEP — atalho pra quem sabe, não porta de entrada. No celular
+                      some: a caixa amarela acima já pede o CEP quando a rua não
+                      é achada, e um campo sempre aberto só polui a tela. */}
+                  <div className="dco-so-pc">
                   <Field label="CEP" hint="opcional — se souber, preenche tudo de uma vez">
                     <div style={{ position: 'relative' }}>
                       <input
@@ -2427,6 +2453,7 @@ export default function DeliveryCheckout() {
                     </div>
                     {erroCep && <span className="dco-field-error">{erroCep}</span>}
                   </Field>
+                  </div>
 
                   {/* Aviso quando a rua/bairro não batem com o CEP digitado */}
                   {cepDivergente && (
@@ -2436,27 +2463,6 @@ export default function DeliveryCheckout() {
                       {cepDivergente.bairro ? ` bairro ${cepDivergente.bairro}` : ''}. Confere se o endereço está certo.
                     </div>
                   )}
-
-                  {/* Número + Complemento */}
-                  <div className="dco-row">
-                    <Field label="Número" required error={errors.numero}>
-                      <input
-                        className={`dco-input${errors.numero ? ' dco-input--error' : ''}`}
-                        placeholder="123"
-                        value={form.numero}
-                        onChange={e => set('numero', e.target.value)}
-                        data-field-error={errors.numero ? true : undefined}
-                      />
-                    </Field>
-                    <Field label="Complemento" hint="opcional">
-                      <input
-                        className="dco-input"
-                        placeholder="Apto 4"
-                        value={form.complemento}
-                        onChange={e => set('complemento', e.target.value)}
-                      />
-                    </Field>
-                  </div>
 
                   {/* Estado */}
                   <Field label="Estado" required error={errors.estado}>
@@ -2473,7 +2479,10 @@ export default function DeliveryCheckout() {
                     </select>
                   </Field>
 
-                  {/* Cidade — lista quando o IBGE responde, campo de texto quando não */}
+                  {/* Cidade — lista quando o IBGE responde, campo de texto quando não.
+                      No celular só aparece se estiver vazia: preenchida, vai no
+                      resumo do passo de conferir (tela mais limpa). */}
+                  <div className={form.cidade ? 'dco-so-pc' : undefined}>
                   <Field label="Cidade" required error={errors.cidade}>
                     {cidadeLivre && !loadingCidades ? (
                       <>
@@ -2518,6 +2527,7 @@ export default function DeliveryCheckout() {
                       </select>
                     )}
                   </Field>
+                  </div>
 
                   {/* Bairro */}
                   <Field label="Bairro" required error={errors.bairro}>
@@ -2529,12 +2539,68 @@ export default function DeliveryCheckout() {
                       data-field-error={errors.bairro ? true : undefined}
                     />
                   </Field>
+                </div>
+              </section>
 
+              {/* Passo "conferir": o endereço como ficou (depois do pino, que
+                  pode ter trocado a rua) + o número da casa, obrigatório. No PC
+                  é só o número e o complemento, no meio do formulário. */}
+              <section className="dco-section" data-p="3">
+                <h2 className="dco-section-title dco-so-mobile">Confira seu endereço</h2>
+                <div className="dco-field-group">
+                  <div className="dco-so-mobile dco-confere">
+                    {enderecoDoPino && (
+                      <div style={{ marginBottom: 10, padding: '9px 11px', borderRadius: 10, border: '1px solid #eab308', background: 'rgba(234,179,8,.1)', fontSize: 12.5, lineHeight: 1.45, color: '#a16207' }}>
+                        📍 O pino do mapa trocou a rua para <strong>{enderecoDoPino.rua}</strong>. Se não for a sua, toque em “Trocar rua”.
+                      </div>
+                    )}
+                    <div className="dco-confere-card">
+                      <strong>{form.rua || '—'}</strong>
+                      <span>{[form.bairro, form.cidade && `${form.cidade}${form.estado ? ` - ${form.estado}` : ''}`, form.cep].filter(Boolean).join(' · ')}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                      <button type="button" className="dco-btn-voltar" style={{ padding: '8px 14px', fontSize: 13.5 }}
+                        onClick={() => { setPasso(1); window.scrollTo({ top: 0 }) }}>Trocar rua</button>
+                      <button type="button" className="dco-btn-voltar" style={{ padding: '8px 14px', fontSize: 13.5 }}
+                        onClick={() => { setPasso(2); window.scrollTo({ top: 0 }) }}>Ajustar pino</button>
+                    </div>
+                  </div>
+                  <div className="dco-row">
+                    <Field label="Número" required error={errors.numero}>
+                      <input
+                        className={`dco-input${errors.numero ? ' dco-input--error' : ''}`}
+                        placeholder="123"
+                        value={form.numero}
+                        onChange={e => set('numero', e.target.value)}
+                        data-field-error={errors.numero ? true : undefined}
+                      />
+                    </Field>
+                    <Field label="Complemento" hint="opcional">
+                      <input
+                        className="dco-input"
+                        placeholder="Apto 4"
+                        value={form.complemento}
+                        onChange={e => set('complemento', e.target.value)}
+                      />
+                    </Field>
+                  </div>
+                </div>
+              </section>
+
+              <section className="dco-section" data-p="2">
+                <h2 className="dco-section-title dco-so-mobile">Marque sua casa no mapa</h2>
+                <div className="dco-field-group">
+                  <div className="dco-so-mobile" style={{ fontSize: 13.5, lineHeight: 1.5, opacity: .85 }}>
+                    Arraste o pino até a porta da sua casa e toque em <strong>Próximo</strong>.
+                  </div>
                   {/* Localizador no mapa — ponto exato pra taxa certinha.
                       Fica ABERTO, não atrás de botão: mapa que precisa de clique
                       pra aparecer ninguém abre, e o entregador acaba indo pro
                       ponto que o buscador chutou. */}
-                  {lojaEndereco?.latitude && lojaEndereco?.longitude && (
+                  {/* No celular só monta no passo do mapa: mapa iniciado dentro de
+                      um bloco escondido (display:none) nasce com tamanho zero. */}
+                  {lojaEndereco?.latitude && lojaEndereco?.longitude
+                    && (passo === 2 || !window.matchMedia('(max-width: 899px)').matches) && (
                     <div className="dco-mapa-embutido" style={{ marginTop: 4 }}>
                       <MapaLocalizador
                         embutido
@@ -2562,7 +2628,7 @@ export default function DeliveryCheckout() {
                         </div>
                       )}
                       {!form.numero.trim() && (
-                        <div style={{ marginTop: 6, fontSize: 12.5, color: '#eab308' }}>
+                        <div className="dco-so-pc" style={{ marginTop: 6, fontSize: 12.5, color: '#eab308' }}>
                           ✏️ Digite o <strong>número da casa</strong> — é com ele que o mapa acha o ponto certo.
                         </div>
                       )}
@@ -2578,10 +2644,11 @@ export default function DeliveryCheckout() {
 
                 </div>
               </section>
+              </>
               )}
 
               {/* Pagamento */}
-              <section className="dco-section" data-p="2">
+              <section className="dco-section" data-p="4">
                 <h2 className="dco-section-title">Pagamento</h2>
                 {/* Só as formas que a loja aceita (Minha Loja → Pagamento) */}
                 <div className="dco-payment-row">
@@ -2746,7 +2813,7 @@ export default function DeliveryCheckout() {
               </section>
 
               {/* Observações */}
-              <section className="dco-section" data-p="2">
+              <section className="dco-section" data-p="4">
                 <h2 className="dco-section-title">Observações <span className="dco-optional">(opcional)</span></h2>
                 <textarea
                   className="dco-textarea"
@@ -2758,7 +2825,7 @@ export default function DeliveryCheckout() {
               </section>
             </div>
 
-            <div className="dco-col-aside" data-p="3">
+            <div className="dco-col-aside" data-p="5">
               <div className="dco-resumo">
                 <h2 className="dco-section-title">Resumo do pedido</h2>
                 <div className="dco-resumo-itens">
@@ -2890,13 +2957,13 @@ export default function DeliveryCheckout() {
               pelos MESMOS motivos do botão do desktop; antes ele nem olhava o
               bairro bloqueado. */}
           <div className="dco-submit-mobile">
-            {passo < 3 ? (
+            {passo < 5 ? (
               <div className="dco-passos-nav">
                 {passo > 0 && (
                   <button type="button" className="dco-btn-voltar" onClick={voltarPasso}>Voltar</button>
                 )}
                 <button type="button" className="dco-btn-submit" onClick={proximoPasso}>
-                  Próximo · {passo + 1}/4
+                  Próximo · {SEQ_PASSOS.indexOf(passo) + 1}/{SEQ_PASSOS.length}
                 </button>
               </div>
             ) : (

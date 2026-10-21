@@ -620,18 +620,25 @@
   .dco-form[data-passo="0"] [data-p]:not([data-p="0"]),
   .dco-form[data-passo="1"] [data-p]:not([data-p="1"]),
   .dco-form[data-passo="2"] [data-p]:not([data-p="2"]),
-  .dco-form[data-passo="3"] [data-p]:not([data-p="3"]) { display: none; }
+  .dco-form[data-passo="3"] [data-p]:not([data-p="3"]),
+  .dco-form[data-passo="4"] [data-p]:not([data-p="4"]),
+  .dco-form[data-passo="5"] [data-p]:not([data-p="5"]) { display: none; }
   .dco-form { padding-bottom: 90px; }
+  .dco-so-pc { display: none; }
 }
 @media (min-width: 900px) {
   .dco-passos-nav { display: none; }
+  .dco-so-mobile { display: none; }
 }
 
-/* Celular: o mapa embutido some da tela de endereço — o pino é confirmado no
-   mapa grande que abre ao tocar em Próximo. No PC continua na página. */
-@media (max-width: 899px) {
-  .dco-mapa-embutido { display: none; }
+/* Passo "conferir" (celular): o endereço como ficou. */
+.dco-confere-card {
+  padding: 12px 14px; border-radius: 12px;
+  background: var(--dco-surface, rgba(124, 58, 237, 0.08));
+  border: 1px solid rgba(124, 58, 237, 0.3);
 }
+.dco-confere-card strong { display: block; font-size: 15px; font-weight: 700; }
+.dco-confere-card span { display: block; margin-top: 3px; font-size: 13px; color: var(--dco-muted); }
 
 /* Celular: espaçamentos menores pra cada passo caber na tela sem rolar. */
 @media (max-width: 899px) {
