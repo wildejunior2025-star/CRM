@@ -5,6 +5,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { separarItem } from '../lib/itensPedido'
 import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma, textoPagamento } from '../lib/pagamentoPartes'
+import { partesCobranca } from '../lib/cobrancaEntregador'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto, temValorDigitado, rotuloValorEntregador } from '../lib/descontoEntrega'
 
 // Cada aba tem seu endereço (/entregas?aba=minhas). O motoqueiro sai pro Waze,
@@ -1393,7 +1394,7 @@ export default function PainelEntregador() {
     setHistLoading(true)
     supabase
       .from('pedidos_delivery')
-      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, valor_entregador_origem, valor_entregador_calculado, forma_pagamento, pagamentos, origem, subtotal, itens, observacoes, ifood_display_id, endereco_complemento, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em')
+      .select('id, numero_pedido, cliente_nome, total, taxa_entrega, valor_entregador, valor_entregador_origem, valor_entregador_calculado, forma_pagamento, pagamentos, origem, subtotal, itens, observacoes, ifood_display_id, endereco_complemento, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, created_at, entregador_pago, entregador_pago_em, pix_status, mp_payment_status')
       .eq('entregador_id', user.id)
       .eq('status', 'entregue')
       .order('created_at', { ascending: false })
@@ -1773,6 +1774,14 @@ export default function PainelEntregador() {
                 const descontos = descontosEntrega
                 const ganho = p => ganhoDaCorrida(descontos, p)
                 const soma = arr => arr.reduce((s, p) => s + ganho(p), 0)
+                // Prestação de contas: o que ele recebeu dos clientes e tem que repassar (mesma conta do gestor).
+                const naMao = pend.reduce((acc, p) => {
+                  for (const x of partesCobranca(p)) if (x.tipo !== 'conta') acc[x.tipo] = (acc[x.tipo] || 0) + Number(x.valor || 0)
+                  return acc
+                }, {})
+                const totalNaMao = ['dinheiro', 'cartao', 'pix'].reduce((s, k) => s + (naMao[k] || 0), 0)
+                const aPagarMim = soma(pend)
+                const saldoConta = totalNaMao - aPagarMim
                 const dataDe = p => new Date(p.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
                 const grupos = arr => {
                   const g = {}
@@ -1814,6 +1823,26 @@ export default function PainelEntregador() {
                       <div style={{ flex: 1, textAlign: 'center', background: 'var(--surface,#16161f)', border: '1px solid var(--border,#2a2a3a)', borderRadius: 12, padding: '10px 4px' }}>
                         <div style={{ fontSize: 17, fontWeight: 800, color: '#16a34a' }}>{fmt(soma(pagos))}</div>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Recebido ({pagos.length})</div>
+                      </div>
+                    </div>
+
+                    <div style={{ background: 'var(--surface,#16161f)', border: '1px solid var(--border,#2a2a3a)', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14 }}>
+                      <div style={{ fontWeight: 800, color: 'var(--text)', marginBottom: 2 }}>Prestação de contas</div>
+                      {[['dinheiro', '💵 Dinheiro em espécie'], ['cartao', '💳 Passou na maquininha'], ['pix', '📱 PIX não confirmado']].map(([k, lab]) => (
+                        (k !== 'pix' || naMao.pix > 0) && (
+                          <div key={k} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--text-muted)' }}>{lab}</span>
+                            <strong>{fmt(naMao[k] || 0)}</strong>
+                          </div>
+                        )
+                      ))}
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>− Minhas corridas ({pend.length})</span>
+                        <strong style={{ color: '#f59e0b' }}>− {fmt(aPagarMim)}</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border,#2a2a3a)', paddingTop: 8, marginTop: 2, fontWeight: 800 }}>
+                        <span>{saldoConta >= 0 ? 'Eu repasso pra loja' : 'A loja me paga'}</span>
+                        <span style={{ color: saldoConta >= 0 ? '#16a34a' : '#f59e0b', fontSize: 17 }}>{fmt(Math.abs(saldoConta))}</span>
                       </div>
                     </div>
 
