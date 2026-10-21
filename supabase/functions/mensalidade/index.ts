@@ -484,6 +484,15 @@ Deno.serve(async (req) => {
       }).then(() => {}, () => {})
 
       if (envio.erro) return json({ error: envio.erro }, 502)
+
+      // Entra também no Atendimento FWC. Sem isto a conversa fica pela metade:
+      // a loja responde a uma mensagem que não está na tela de quem atende, e
+      // quem lê o chat não entende do que ela está falando.
+      await sb.from("admin_chat").insert({
+        telefone: envio.telefone, empresa_id: loja.empresa_id, canal: "evolution",
+        remetente: "fwc", tipo: "texto", texto, status: "enviado", lida: true,
+      }).then(() => {}, () => {})
+
       return json({ ok: true, loja: (cfg?.empresas as any)?.nome, para: envio.telefone, total, texto })
     }
 
