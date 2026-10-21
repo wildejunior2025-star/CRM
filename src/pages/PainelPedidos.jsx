@@ -1167,6 +1167,16 @@ async function geocodificarPreciso({ rua, numero, bairro, cidade, estado, cep } 
     } catch { /* sem rede, sem ponto */ }
     return null
   }
+  // RUA + BAIRRO + CIDADE primeiro. "Rua São José" existe em 5 bairros de São
+  // Gonçalo do Amarante: com o CEP na frente, um CEP de outro trecho (ou o do
+  // cadastro velho) levava o ponto pra OUTRA rua São José e a taxa saía por
+  // 2,6 km numa casa a 250 m da loja (Mickey Burguer, 21/10/2026). O bairro
+  // escolhe a rua certa; o CEP fica de reserva.
+  if (bairro && String(bairro).trim() && rua && numero) {
+    const comBairro = [rua, numero, bairro, cidade, estado].filter(v => v && String(v).trim()).join(', ')
+    const c = await pega(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(comBairro + ', Brasil')}&format=json&limit=1`)
+    if (c) return c
+  }
   if (cepLimpo.length === 8) {
     const params = new URLSearchParams({
       street: [numero, rua].filter(Boolean).join(' '),
