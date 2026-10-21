@@ -11,7 +11,7 @@ import ModalTaxaMotoboy from '../components/ModalTaxaMotoboy'
 import { infoRota, textoKm } from '../lib/rotaEntrega'
 import { precoPorQuantidade, faixaAplicada, menorFaixa, mapaFaixasCategoria, comFaixaDaCategoria, somaPorCategoria } from '../lib/precoQuantidade'
 import { aguardandoHora, rotuloAgendado } from '../lib/agendamento'
-import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarContaPresencialHtml, imprimirComandaMesaApp } from '../utils/imprimirCupom'
+import { imprimirCupom, autoImprimirAtivo, imprimirHtml, montarContaPresencialHtml, imprimirComandaMesaApp, aparelhoMovel } from '../utils/imprimirCupom'
 import { rotuloComanda, agruparItensComanda } from '../lib/comanda'
 import { acharPorCodigo, combinaCodigo, ouvirBipada } from '../lib/codigoBarras'
 import { useChamados } from '../hooks/useChamados'
@@ -4022,9 +4022,7 @@ function ImpressoraFWCPanel({ empresaId }) {
   // ele NUNCA vai ser encontrado. Mostrar "App fechado" em vermelho, botão de
   // baixar .exe e três parágrafos de diagnóstico num celular é puro barulho:
   // ali a impressora certa é a Bluetooth, logo abaixo.
-  const ehCelular = typeof navigator !== 'undefined' && (
-    navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')
-  )
+  const ehCelular = aparelhoMovel()
 
   const inp = { width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }
   const btnRoxo = { padding: '10px 14px', borderRadius: 8, border: 'none', cursor: busy ? 'wait' : 'pointer', background: '#7c3aed', color: '#fff', fontWeight: 800, fontSize: 13, opacity: busy ? .6 : 1 }
@@ -9088,9 +9086,7 @@ export default function PainelPedidos() {
   // cair no navegador: a janela "Selec. impressora" do Android abre sozinha por
   // cima do Painel a cada pré-conta, no meio do atendimento (Saidera, 13/09).
   // No PC o navegador continua sendo a rede de segurança.
-  const semJanelaDoNavegador = () => typeof navigator !== 'undefined' && (
-    navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')
-  )
+  const semJanelaDoNavegador = () => aparelhoMovel()
 
   async function flushImpressaoMesa(cid) {
     const entry = mesaPrintRef.current[cid]

@@ -16,7 +16,7 @@ import { clienteComMesmoNome } from '../lib/clientes'
 import ClientePicker from '../components/ClientePicker'
 import ClientesFiado from './ClientesFiado'
 import ConsumoFuncionario from '../components/ConsumoFuncionario'
-import { imprimirHtml, montarContaPresencialHtml, montarPixQrHtml } from '../utils/imprimirCupom'
+import { imprimirHtml, montarContaPresencialHtml, montarPixQrHtml, aparelhoMovel } from '../utils/imprimirCupom'
 import '../components/Page.css'
 import './PresencialSalao.css'
 
@@ -2193,9 +2193,7 @@ export default function PresencialSalao() {
   // Celular/tablet não tem impressora: nesses a conta só sai pelo app FWC (soApp).
   // Num PC a gente deixa cair no navegador — antes o PC ficava sem conta nenhuma
   // quando o app não era alcançado, e ninguém percebia que nada foi enviado.
-  const ehCelular = typeof navigator !== 'undefined' && (
-    navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')
-  )
+  const ehCelular = aparelhoMovel()
 
   async function confirmarFechamento() {
     if (!comandaSel) return

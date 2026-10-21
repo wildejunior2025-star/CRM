@@ -229,6 +229,18 @@ export async function imprimirCupom(pedido, empresa = {}, opts = {}) {
   return 'navegador'
 }
 
+// Celular/tablet = aparelho do garçom, sem impressora. O iPad novo se apresenta
+// como Macintosh (modo "site para computador"), então o userAgent sozinho não
+// pega: sem isso a pré-conta caía no navegador do iPad, o sistema dizia
+// "enviada" e nada saía na térmica da loja (Mickey Burguer, 21/10/2026).
+export function aparelhoMovel() {
+  if (typeof navigator === 'undefined') return false
+  const ua = navigator.userAgent || ''
+  return navigator.userAgentData?.mobile === true
+    || /Android|iPhone|iPad|iPod/i.test(ua)
+    || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)
+}
+
 // ──────────────── Impressão genérica de HTML (qualquer cupom) ────────────────
 function imprimirHtmlNavegador(html) {
   const iframe = document.createElement('iframe')

@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import ClientePicker from '../components/ClientePicker'
 import { rotuloComanda } from '../lib/comanda'
-import { imprimirHtml, montarContaPresencialHtml, appFwcDisponivel } from '../utils/imprimirCupom'
+import { imprimirHtml, montarContaPresencialHtml, appFwcDisponivel, aparelhoMovel } from '../utils/imprimirCupom'
 import '../components/Page.css'
 import { recadoDeErro } from '../lib/erroRede'
 
@@ -210,8 +210,7 @@ export default function PresencialHistorico() {
     const temApp = via ? false : await appFwcDisponivel()
     // Celular sem térmica conectada: o botão de conectar tem que ser um TOQUE
     // novo (ver conectarEImprimir). Não cai no navegador — lá nada imprime.
-    const ehCelularAgora = typeof navigator !== 'undefined' && (
-      navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || ''))
+    const ehCelularAgora = aparelhoMovel()
     if (!via && !temApp && ehCelularAgora) {
       // Muita loja tem UMA térmica Bluetooth, ligada no celular do balcão: este
       // celular nem precisa dela. Carimba a comanda e quem está com a impressora
