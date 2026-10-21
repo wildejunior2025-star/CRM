@@ -30,7 +30,6 @@ function dentroDoPeriodo(iso, periodo) {
   if (periodo === '30d') return d >= Date.now() - 30 * 86400000
   return true
 }
-const PERIODOS_HIST = [['hoje', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias'], ['tudo', 'Tudo']]
 
 // Tempo decorrido e atraso — igual ao gestor, pro motoqueiro ver quanto tá na cozinha.
 function minutosDesde(iso) {
@@ -1030,7 +1029,7 @@ export default function PainelEntregador() {
   const [historico, setHistorico] = useState([])
   const [histLoading, setHistLoading] = useState(false)
   const [detalheHist, setDetalheHist] = useState(null) // corrida aberta (toque no cartão do histórico)
-  const [periodoHist, setPeriodoHist] = useState('tudo') // filtro de data do histórico
+  const periodoHist = 'hoje' // o motoqueiro só vê o ganho do dia; zera todo dia
   const [, setTick] = useState(0) // atualiza "há X min" / atraso a cada 30s
   // Fila (E4): null = ainda não carregou. { fila_ativa, online, pausado, na_vez, posicao, total_fila }
   const [fila, setFila] = useState(null)
@@ -1806,17 +1805,7 @@ export default function PainelEntregador() {
                 )
                 return (
                   <>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {PERIODOS_HIST.map(([val, lab]) => (
-                        <button key={val} type="button" onClick={() => setPeriodoHist(val)}
-                          style={{ fontSize: 12, fontWeight: 700, padding: '5px 14px', borderRadius: 20, cursor: 'pointer',
-                            border: `1px solid ${periodoHist === val ? 'var(--primary, #a78bfa)' : 'var(--border, #2a2a3a)'}`,
-                            background: periodoHist === val ? 'var(--primary, #a78bfa)' : 'transparent',
-                            color: periodoHist === val ? '#fff' : 'var(--text-muted)' }}>
-                          {lab}
-                        </button>
-                      ))}
-                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Ganhos de hoje — zera todo dia</div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <div style={{ flex: 1, textAlign: 'center', background: 'var(--surface,#16161f)', border: '1px solid var(--border,#2a2a3a)', borderRadius: 12, padding: '10px 4px' }}>
                         <div style={{ fontSize: 17, fontWeight: 800, color: '#f59e0b' }}>{fmt(soma(pend))}</div>
