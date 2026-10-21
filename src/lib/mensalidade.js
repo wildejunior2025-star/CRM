@@ -4,8 +4,9 @@
 //   - no dia do vencimento: só um aviso pro administrador
 //   - o dia do vencimento não conta; contam os N dias seguintes EM QUE A LOJA
 //     ABRE (padrão 2) — folga, feriado e dia fechado na mão não entram
-//   - no dia de funcionamento seguinte, a partir do horário de abertura: pop-up
-//     fixo pro administrador e funcionário sem acesso, até pagar
+//   - no dia de funcionamento seguinte: pop-up fixo pro administrador desde a
+//     meia-noite, e funcionário sem acesso só a partir do horário de abertura
+//     (ajuste de 21/10/2026 — ver a conta lá embaixo)
 //   Ex.: Saidera abre de quarta em diante e vence na segunda → carência quarta
 //   e quinta → trava na abertura de sexta.
 //
@@ -42,7 +43,10 @@ export function aberturaDoDia(ymd, loja) {
  * @param loja      { grade, excecoes, fechaFeriado } (mesmo formato de feriados.js)
  * @param agora     Date (pra teste)
  * @returns {{ fase: 'sem_cobranca'|'em_dia'|'vence_hoje'|'carencia'|'prazo'|'liberado'|'bloqueio',
- *             vencimento?: string, diaBloqueio?: string, travaAgora: boolean }}
+ *             vencimento?: string, diaBloqueio?: string,
+ *             travaAgora: boolean,    // pop-up do DONO — vale da meia-noite
+ *             travaEquipe?: boolean   // "acesso suspenso" do funcionário — só da abertura
+ *           }}
  */
 export function faseDaMensalidade(situacao, loja, agora = new Date()) {
   if (!situacao?.ativa) return { fase: 'sem_cobranca', travaAgora: false }
@@ -65,12 +69,32 @@ export function faseDaMensalidade(situacao, loja, agora = new Date()) {
   if (hoje === venc) return { ...base, fase: 'vence_hoje', travaAgora: false }
   if (hoje < diaBloqueio) return { ...base, fase: 'carencia', travaAgora: false }
 
-  // Chegou o dia: trava a partir do horário de abertura, nunca no meio do
-  // expediente de ontem (bar que vira a madrugada ainda está no dia anterior).
-  if (hoje > diaBloqueio) return { ...base, fase: 'bloqueio', travaAgora: true }
-  const abre = aberturaDoDia(hoje, loja)
+  // Chegou o dia de travar. DONO e EQUIPE travam em horas diferentes
+  // (decisão do Wilde, 21/10/2026):
+  //
+  //   dono   → à meia-noite. Ele leva um pop-up com o PIX, e nada mais; a loja
+  //            segue vendendo. Travar cedo é pressão em cima de quem paga, na
+  //            hora em que ele está fechando o dia e olhando o celular.
+  //   equipe → só na abertura do dia. O garçom não leva pop-up, leva tela cheia
+  //            de "acesso suspenso": ele fica SEM o sistema. Fazer isso à
+  //            meia-noite pararia o salão cheio de quem vira a madrugada
+  //            (Saidera), por uma conta que não é dele.
+  //
+  if (hoje > diaBloqueio) return { ...base, fase: 'bloqueio', travaAgora: true, travaEquipe: true }
   const hm = agora.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit' })
-  return { ...base, fase: 'bloqueio', travaAgora: !abre || hm >= abre }
+  return { ...base, fase: 'bloqueio', travaAgora: true, travaEquipe: hm >= horaDeTravarEquipe(hoje, loja) }
+}
+
+// A que horas o funcionário perde o acesso no dia que trava.
+//
+// Normalmente é a abertura da loja. Quando não há horário cadastrado — caso da
+// Saidera em 21/10/2026 — o certo NÃO é travar à meia-noite: pra um bar que
+// vira a madrugada, meia-noite ainda é a noite de ontem, e o salão está cheio.
+// 06:00 é o corte que esse tipo de loja entende como "amanheceu, é outro dia",
+// o mesmo raciocínio do horário que vira a madrugada no resto do sistema.
+const HORA_PADRAO_SEM_GRADE = '06:00'
+function horaDeTravarEquipe(ymd, loja) {
+  return aberturaDoDia(ymd, loja) ?? HORA_PADRAO_SEM_GRADE
 }
 
 /** Quantos dias de funcionamento faltam até travar (contando hoje, se abre). */

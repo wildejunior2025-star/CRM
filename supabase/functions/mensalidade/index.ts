@@ -151,7 +151,12 @@ async function gerarPixLoja(sb: any, empresaId: string, o: { email?: string | nu
   if (aberto && Number(aberto.valor) === valor && (aberto.cobranca_ids ?? []).length === alvo.length) return { status: 200, body: { ok: true, ...aberto } }
 
   const { data: emp } = await sb.from("empresas").select("nome").eq("id", empresaId).single()
-  const expira = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+  // Validade de 24h, não de 1h (21/10/2026). O Zebu avisou que "a chave não
+  // estava dando certo": o código estava íntegro e a página no ar — o que
+  // morria era o prazo. Quem recebe a cobrança está no meio do expediente,
+  // abre o link, deixa pra depois e volta meia hora mais tarde num código
+  // morto. Uma hora só faz sentido pra quem paga olhando a tela.
+  const expira = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
   const descricao = `FWC Inter — ${emp?.nome ?? "Loja"} — ${alvo.map((c: any) => c.referencia).join(", ")}`.slice(0, 250)
   const r = await mp("/v1/payments", "POST", {
     transaction_amount: valor,

@@ -66,12 +66,13 @@ export default function MensalidadeGate() {
     if (!situacao?.ativa || publica) return
     const cobranca = situacao.abertas?.find(c => c.vencimento === estado.vencimento)?.id ?? null
     let tipo = null
-    if (estado.travaAgora) tipo = admin ? 'popup' : 'bloqueio_funcionario'
+    if (admin && estado.travaAgora) tipo = 'popup'
+    else if (!admin && estado.travaEquipe) tipo = 'bloqueio_funcionario'
     else if (admin && estado.fase === 'vence_hoje') tipo = 'faixa_vence_hoje'
     else if (admin && (estado.fase === 'carencia' || estado.fase === 'prazo')) tipo = 'faixa_carencia'
     // O .then() é o que dispara: sem ele o supabase-js monta a chamada e não envia.
     if (tipo) supabase.rpc('mensalidade_registrar_aviso', { p_tipo: tipo, p_cobranca: cobranca, p_detalhe: `fase ${estado.fase}; trava ${estado.diaBloqueio ?? '-'}` }).then(() => {})
-  }, [situacao, estado.fase, estado.travaAgora, estado.vencimento, estado.diaBloqueio, admin, publica])
+  }, [situacao, estado.fase, estado.travaAgora, estado.travaEquipe, estado.vencimento, estado.diaBloqueio, admin, publica])
 
   if (!participa || publica || !situacao?.ativa) return null
 
@@ -95,8 +96,11 @@ export default function MensalidadeGate() {
   }
 
   // ── Funcionário: sem acesso quando trava ──────────────────────────────────
+  // O funcionário só perde o acesso a partir da ABERTURA do dia que trava —
+  // nunca no meio de um expediente que virou a madrugada. A pressão fica com
+  // quem paga (o dono, que trava desde a meia-noite), não com o garçom.
   if (!admin) {
-    if (!estado.travaAgora) return null
+    if (!estado.travaEquipe) return null
     return (
       <Tela>
         <div style={{ fontSize: 48, textAlign: 'center' }}>🔒</div>
@@ -116,7 +120,13 @@ export default function MensalidadeGate() {
       <Tela>
         <div style={{ fontSize: 21, fontWeight: 900 }}>⚠️ Mensalidade em atraso</div>
         <div style={{ fontSize: 13.5, color: 'var(--text-muted)', margin: '4px 0 14px', lineHeight: 1.45 }}>
-          O acesso fica bloqueado até o pagamento. Os pedidos continuam chegando, mas os funcionários estão sem acesso.
+          {/* Antes dizia sempre "os funcionários estão sem acesso". Desde 21/10 o
+              dono trava à meia-noite e a equipe só na abertura, então às vezes
+              ainda dá tempo de pagar sem ninguém parar — e é exatamente isso
+              que faz ele pagar agora. */}
+          {estado.travaEquipe
+            ? 'O acesso fica bloqueado até o pagamento. Os pedidos continuam chegando, mas a equipe está sem acesso ao sistema.'
+            : 'Os pedidos continuam chegando normalmente. Se não for pago até a loja abrir, a equipe fica sem acesso ao sistema.'}
         </div>
         <MensalidadePagamento situacao={situacao} empresaId={empresa?.id} onPago={carregar} />
         {/* Sem "Já paguei": o Wilde tirou (13/09) — o PIX libera sozinho, e o botão

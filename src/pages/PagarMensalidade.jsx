@@ -8,6 +8,18 @@ import { useParams } from 'react-router-dom'
 const fmt = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const dataBR = ymd => ymd ? ymd.split('-').reverse().join('/') : ''
 
+// Até quando o código PIX vale, no fuso da loja. "às 14:30 de hoje" é o que a
+// pessoa precisa saber; o dia só aparece quando não for hoje.
+function valeAte(iso) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const opc = { timeZone: 'America/Fortaleza' }
+  const hora = d.toLocaleTimeString('pt-BR', { ...opc, hour: '2-digit', minute: '2-digit' })
+  const dia = d.toLocaleDateString('pt-BR', { ...opc, day: '2-digit', month: '2-digit' })
+  const hojeAqui = new Date().toLocaleDateString('pt-BR', { ...opc, day: '2-digit', month: '2-digit' })
+  return dia === hojeAqui ? `${hora} de hoje` : `${hora} de ${dia}`
+}
+
 async function chamar(action, token, extra = {}) {
   const key = import.meta.env.VITE_SUPABASE_ANON_KEY
   try {
@@ -119,6 +131,13 @@ export default function PagarMensalidade() {
                       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.5 }}>
                         Abra o app do seu banco, escolha PIX → Copia e Cola (ou leia o QR). Esta tela confirma sozinha quando o pagamento cair. ⏳
                       </div>
+                      {/* Dizer até quando vale: o código tem prazo, e quem não
+                          sabia disso achava que a chave estava quebrada. */}
+                      {pix.expira_em && (
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+                          Este código vale até <strong>{valeAte(pix.expira_em)}</strong>. Depois é só abrir este link de novo.
+                        </div>
+                      )}
                     </div>
                   )}
                 </>
