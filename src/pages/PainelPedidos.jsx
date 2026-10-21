@@ -9159,7 +9159,7 @@ export default function PainelPedidos() {
       formaPagamento: '', pagamentos: [], empresa, preConta: true,
     }
     if (await viaBluetooth('conta', dados)) return
-    imprimirHtml(montarContaPresencialHtml(dados), empresa?.nome, { origem: 'mesa', soApp: semJanelaDoNavegador() })
+    imprimirHtml(montarContaPresencialHtml(dados), empresa?.nome, { origem: 'mesa', soApp: semJanelaDoNavegador(), soFrente: true })
   }
 
   // Recebe os DADOS da conta (não o HTML pronto): a Bluetooth monta em ESC/POS,
@@ -9167,7 +9167,7 @@ export default function PainelPedidos() {
   async function imprimirContaSeMesa(dados, titulo) {
     if (fwcFiltros?.mesa === false) return
     if (await viaBluetooth('conta', dados)) return
-    imprimirHtml(montarContaPresencialHtml(dados), titulo, { origem: 'mesa', soApp: semJanelaDoNavegador() }) // o app também filtra por origem
+    imprimirHtml(montarContaPresencialHtml(dados), titulo, { origem: 'mesa', soApp: semJanelaDoNavegador(), soFrente: true }) // o app também filtra por origem
   }
 
   // Imprime a CONTA da mesa na loja (chamado quando o garçom fecha e a mesa entra em

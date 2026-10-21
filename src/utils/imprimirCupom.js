@@ -268,6 +268,17 @@ export async function imprimirHtml(html, titulo, opts = {}) {
   // O `titulo` sai grande/centralizado no topo (o app faz isso). Se o corpo já tem o
   // nome da loja (titulo-loja), tira dele pra não sair duas vezes na térmica.
   if (titulo) htmlParaApp = htmlParaApp.replace(/<div[^>]*class="[^"]*titulo-loja[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '')
+  // opts.soFrente=true → papel do caixa (pré-conta, conta, QR do Pix). Se este PC
+  // está marcado como COZINHA, não imprime: com os dois PCs de portas abertas no
+  // Painel, o carimbo do garçom chegava nos dois e a pré-conta saía também na
+  // cozinha (Mickey Burguer, 21/10/2026). Devolve false sem cair no navegador.
+  if (opts.soFrente) {
+    try {
+      const r = await fwcFetch('/api/status', { timeout: 2000 })
+      const st = r.ok ? await r.json().catch(() => ({})) : {}
+      if (st && st.setor === 'cozinha') return false
+    } catch { /* sem app aqui: segue o fluxo normal */ }
+  }
   // opts.origem (ex.: 'mesa') → o app respeita o filtro por origem deste PC.
   // opts.setor='cozinha' → sai na impressora da COZINHA. Sem isso vai pra da
   // FRENTE quando a loja tem duas: conta, pré-conta e QR do Pix são do caixa.
