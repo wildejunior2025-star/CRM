@@ -9,7 +9,9 @@
 //
 // Ações (POST { action }):
 //   com login do ADMIN da loja: pix · status · cartao_chave · assinar · cancelar_cartao
-//   sem login: cron (diário) · webhook do Mercado Pago (?type=payment&data.id=...)
+//   sem login: cron (diário 7h) · cron_link (link 8h) · cron_vespera (último
+//              aviso às 22h da véspera do bloqueio) · webhook do Mercado Pago
+//              (?type=payment&data.id=...)
 // As sem login não confiam no corpo: tudo é conferido de novo na API do MP.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { diaDoBloqueio, somaDiasYmd } from "../_shared/mensalidadeFase.ts"
@@ -243,6 +245,82 @@ async function cronLinkWhatsApp(sb: any) {
   return resumo
 }
 
+// ── Último aviso: 22h da VÉSPERA do dia que trava ───────────────────────────
+// POR QUE EXISTE (21/10/2026)
+// O Zebu ia travar no dia 22 sem ter recebido nada no dia 21. Os avisos que
+// existiam eram: o link no dia do vencimento (8h) e o "está em atraso" no dia
+// seguinte (7h) — os dois longe do dia que trava, e o do bloqueio chega no
+// próprio dia, quando a tela JÁ travou e não serve mais de aviso, só de
+// explicação.
+//
+// Este é o aviso que faltava: na noite anterior, com hora, com o valor e com o
+// link pra pagar na hora. É a última chance de resolver antes de a loja abrir
+// travada no dia seguinte — e tira da FWC a fama de ter travado sem avisar.
+//
+// Vai pelo número da FWC na Evolution (texto livre com link). A Cloud API, fora
+// da janela de 24h, só entrega template aprovado, e template não leva link
+// clicável com token.
+async function cronVespera(sb: any) {
+  const hoje = hojeBR()
+  const amanha = somaDiasYmd(hoje, 1)
+  const { data: cfgs } = await sb.from("mensalidade_config")
+    .select("empresa_id, link_token, zap_telefone, carencia_dias, prazo_ate, empresas(nome, telefone_contato, horarios_funcionamento, feriados_fecha)")
+    .eq("ativa", true)
+
+  const resumo: unknown[] = []
+  for (const c of cfgs ?? []) {
+    // Confere o pagamento ANTES de cobrar: ninguém merece aviso de bloqueio
+    // tendo pago às 21h.
+    await conferirPendentes(sb, c.empresa_id)
+    await conferirAssinatura(sb, c.empresa_id)
+
+    const { data: vencida } = await sb.from("mensalidade_cobrancas")
+      .select("id, vencimento, referencia, valor").eq("empresa_id", c.empresa_id).eq("status", "aberta")
+      .lte("vencimento", hoje).order("vencimento").limit(1).maybeSingle()
+    if (!vencida) continue
+    if (c.prazo_ate && hoje <= c.prazo_ate) continue
+
+    const { data: exc } = await sb.from("dias_excecao").select("data, aberto, periodos")
+      .eq("empresa_id", c.empresa_id).gte("data", vencida.vencimento).lte("data", somaDiasYmd(hoje, 30))
+    const excecoes = Object.fromEntries((exc ?? []).map((r: any) => [r.data, r]))
+    let bloqueio = diaDoBloqueio(vencida.vencimento, Number(c.carencia_dias ?? 2), c.empresas ?? {}, excecoes)
+    if (c.prazo_ate && c.prazo_ate >= bloqueio) bloqueio = diaDoBloqueio(c.prazo_ate, 0, c.empresas ?? {}, excecoes)
+
+    // Só quem trava AMANHÃ. Nos outros dias esta rodada não faz nada.
+    if (bloqueio !== amanha) continue
+
+    const { data: jaFoi } = await sb.from("mensalidade_avisos").select("id")
+      .eq("empresa_id", c.empresa_id).eq("cobranca_id", vencida.id).eq("tipo", "whatsapp_vespera").limit(1).maybeSingle()
+    if (jaFoi) continue
+
+    const telefone = c.zap_telefone || c.empresas?.telefone_contato
+    if (!telefone) continue
+
+    const { data: abertas } = await sb.from("mensalidade_cobrancas")
+      .select("referencia, valor").eq("empresa_id", c.empresa_id).eq("status", "aberta").lte("vencimento", hoje)
+    const total = (abertas ?? []).reduce((s: number, x: any) => s + Number(x.valor), 0)
+
+    const texto =
+      `⚠️ *Atenção, ${c.empresas?.nome ?? "tudo bem"}!*\n\n` +
+      `A mensalidade do sistema está em atraso e *amanhã (${dataBr(amanha)}) o sistema vai abrir travado*.\n\n` +
+      `Em aberto: ${(abertas ?? []).map((x: any) => `${x.referencia} (${valorBr(x.valor)})`).join(", ")}\n` +
+      `Total: *${valorBr(total)}*\n\n` +
+      `Dá pra resolver agora, em um minuto, pelo PIX deste link:\n${APP_URL}/pagar/${c.link_token}\n\n` +
+      `Assim que o pagamento cair, libera sozinho. Qualquer coisa é só chamar aqui.`
+
+    const envio: any = await enviarEvolution(sb, telefone, texto)
+    await sb.from("mensalidade_avisos").insert({
+      empresa_id: c.empresa_id, cobranca_id: vencida.id,
+      tipo: envio.erro ? "whatsapp_vespera_falha" : "whatsapp_vespera",
+      quem: "WhatsApp da FWC (véspera 22h)",
+      detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Último aviso pro ${telefone} (${valorBr(total)}, trava ${dataBr(amanha)})`,
+    }).then(() => {}, () => {})
+    resumo.push({ loja: c.empresas?.nome, trava: amanha, erro: envio.erro })
+    await new Promise(r => setTimeout(r, 4000))
+  }
+  return resumo
+}
+
 // ── Cron diário ──────────────────────────────────────────────────────────────
 async function cronDiario(sb: any) {
   await sb.rpc("mensalidade_gerar_todas")
@@ -343,6 +421,7 @@ Deno.serve(async (req) => {
     const action = body?.action
     if (action === "cron") return json({ ok: true, avisos: await cronDiario(sb) })
     if (action === "cron_link") return json({ ok: true, envios: await cronLinkWhatsApp(sb) })
+    if (action === "cron_vespera") return json({ ok: true, envios: await cronVespera(sb) })
 
     // ── Página pública do link de pagamento (sem login; o token é a chave) ───
     if (action === "link_info" || action === "link_pix" || action === "link_status") {
