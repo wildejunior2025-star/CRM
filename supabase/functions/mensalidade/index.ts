@@ -428,6 +428,65 @@ Deno.serve(async (req) => {
     if (action === "cron_link") return json({ ok: true, envios: await cronLinkWhatsApp(sb) })
     if (action === "cron_vespera") return json({ ok: true, envios: await cronVespera(sb) })
 
+    // ── Reenviar o link de pagamento pra UMA loja, com um recado opcional ────
+    // Nasceu em 21/10/2026: o Zebu respondeu a cobrança dizendo que o PIX não
+    // funcionava (era o prazo de 1h, já corrigido) e não havia como responder
+    // pelo número da FWC sem abrir a tela do Super ADM.
+    //
+    // Exige a chave de SERVICE ROLE no Authorization. Sem essa trava isto seria
+    // um relé aberto: qualquer um mandaria mensagem no WhatsApp da FWC pro
+    // telefone de uma loja, bastando ter o token do link (que anda por aí, em
+    // conversa de WhatsApp).
+    if (action === "enviar_link") {
+      // Comparar com SUPABASE_KEY não serve: duas chaves de service role podem
+      // ser válidas e diferentes (formato antigo JWT x novo sb_secret_). E ler
+      // uma tabela com RLS também não serve — RLS FILTRA linhas, não dá erro,
+      // então o anon passaria com uma lista vazia.
+      //
+      // A API de admin do auth é o teste de verdade: ela recusa qualquer chave
+      // que não seja service role, com erro.
+      const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim()
+      if (!bearer) return json({ error: "Não autorizado" }, 401)
+      const comAChave = createClient(SUPABASE_URL, bearer)
+      const { error: semPoder } = await comAChave.auth.admin.listUsers({ page: 1, perPage: 1 })
+      if (semPoder) return json({ error: "Não autorizado" }, 401)
+
+      const loja: any = await lojaDoLink(sb, String(body?.token ?? ""))
+      if (!loja) return json({ error: "Link não encontrado." }, 404)
+
+      const { data: cfg } = await sb.from("mensalidade_config")
+        .select("zap_telefone, link_token, empresas(nome, telefone_contato)").eq("empresa_id", loja.empresa_id).maybeSingle()
+      const telefone = body?.telefone || cfg?.zap_telefone || (cfg?.empresas as any)?.telefone_contato
+      if (!telefone) return json({ error: "Essa loja não tem telefone cadastrado." }, 400)
+
+      const hoje = hojeBR()
+      const { data: abertas } = await sb.from("mensalidade_cobrancas")
+        .select("referencia, valor, vencimento").eq("empresa_id", loja.empresa_id).eq("status", "aberta")
+        .lte("vencimento", hoje).order("vencimento")
+      if (!abertas?.length) return json({ error: "Essa loja não tem nada em aberto." }, 400)
+
+      const total = abertas.reduce((s: number, x: any) => s + Number(x.valor), 0)
+      const recado = String(body?.obs ?? "").trim()
+      const texto =
+        (recado ? `${recado}\n\n` : `Olá! Aqui é a FWC Inter. 👋\n\n`) +
+        `Em aberto: ${abertas.map((x: any) => `${x.referencia} (${valorBr(x.valor)})`).join(", ")}\n` +
+        `Total: *${valorBr(total)}*\n\n` +
+        `Link pra pagar:\n${APP_URL}/pagar/${cfg?.link_token ?? body.token}\n\n` +
+        `No app do banco escolha *PIX → Copia e Cola* e cole o código (não é pra digitar chave). ` +
+        `Assim que o pagamento cair, libera sozinho.`
+
+      const envio: any = await enviarEvolution(sb, telefone, texto)
+      await sb.from("mensalidade_avisos").insert({
+        empresa_id: loja.empresa_id, cobranca_id: null,
+        tipo: envio.erro ? "whatsapp_manual_falha" : "whatsapp_manual",
+        quem: "WhatsApp da FWC (reenvio manual)",
+        detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Link reenviado pro ${telefone} (${valorBr(total)})`,
+      }).then(() => {}, () => {})
+
+      if (envio.erro) return json({ error: envio.erro }, 502)
+      return json({ ok: true, loja: (cfg?.empresas as any)?.nome, para: envio.telefone, total, texto })
+    }
+
     // ── Página pública do link de pagamento (sem login; o token é a chave) ───
     if (action === "link_info" || action === "link_pix" || action === "link_status") {
       const loja = await lojaDoLink(sb, String(body?.token ?? ""))
