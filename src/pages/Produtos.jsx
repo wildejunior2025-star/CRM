@@ -5,6 +5,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useConfirmar } from '../hooks/useConfirmar'
 import { useAuth } from '../hooks/useAuth'
 import { useIfoodAtivo } from '../hooks/useIfoodAtivo'
+import PrecoEditavel from '../components/PrecoEditavel'
 import { useNavigate } from 'react-router-dom'
 import '../components/Page.css'
 
@@ -1740,7 +1741,14 @@ export default function Produtos() {
                           R$ {Number(p.preco_promocional).toFixed(2)}
                         </strong>
                       </>
-                    ) : `R$ ${Number(p.preco_venda).toFixed(2)}`}
+                    ) : (
+                      <PrecoEditavel
+                        id={p.id}
+                        valor={p.preco_venda}
+                        onSalvo={(novo) => setProdutos(prev =>
+                          prev.map(x => x.id === p.id ? { ...x, preco_venda: novo } : x))}
+                      />
+                    )}
                   </td>
                   {MOSTRAR_PRECO_APP && <td className="col-extra">R$ {Number(p.preco_app || 0).toFixed(2)}</td>}
                   {usaEstoque && <td className="col-extra">{p.estoque_minimo}</td>}

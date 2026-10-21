@@ -6,6 +6,7 @@ import { adicionalComplementos } from '../lib/complementos'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto, temValorDigitado, rotuloValorEntregador } from '../lib/descontoEntrega'
 import { tocarPedidoNovo } from '../lib/somChamado'
 import BaixaInsumos from '../components/BaixaInsumos'
+import PrecoEditavel from '../components/PrecoEditavel'
 import ModalTaxaMotoboy from '../components/ModalTaxaMotoboy'
 import { infoRota, textoKm } from '../lib/rotaEntrega'
 import { precoPorQuantidade, faixaAplicada, menorFaixa, mapaFaixasCategoria, comFaixaDaCategoria, somaPorCategoria } from '../lib/precoQuantidade'
@@ -10978,7 +10979,14 @@ export default function PainelPedidos() {
                               {prod.nome}
                             </div>
                             <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                              {fmt(prod.preco_venda)}{prod.categoria ? ` · ${prod.categoria}` : ''}
+                              <PrecoEditavel
+                                id={prod.id}
+                                valor={prod.preco_venda}
+                                podeEditar={podeFinanceiro}
+                                onSalvo={(novo) => setCatalogo(prev =>
+                                  prev.map(x => x.id === prod.id ? { ...x, preco_venda: novo } : x))}
+                              />
+                              {prod.categoria ? ` · ${prod.categoria}` : ''}
                               {pausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
                             </div>
                           </div>
