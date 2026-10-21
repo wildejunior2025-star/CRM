@@ -2998,7 +2998,18 @@ serve(async (req) => {
     const msg = payload.data
     const coordsMsg = coordsDaMensagem(msg)
     if (!msg) return new Response("ok", { headers: corsHeaders })
-    if (msg.key?.remoteJid?.endsWith("@g.us")) return new Response("ok", { headers: corsHeaders })
+    if (msg.key?.remoteJid?.endsWith("@g.us")) {
+      // Grupo nunca é atendimento. Só o grupo de ENTRADA DE ESTOQUE que a loja ativou
+      // faz alguma coisa, e quem decide isso é a função estoque-whatsapp.
+      const repasse = fetch(`${SUPABASE_URL}/functions/v1/estoque-whatsapp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}` },
+        body: JSON.stringify(payload),
+      }).catch((e) => console.error("[grupo] repasse estoque:", e?.message))
+      // @ts-ignore EdgeRuntime existe no Supabase Edge
+      if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(repasse); else await repasse
+      return new Response("ok", { headers: corsHeaders })
+    }
 
     const instanceName: string = payload.instance ?? ""
     if (!instanceName) return new Response("ok", { headers: corsHeaders })
