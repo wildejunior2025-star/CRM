@@ -566,23 +566,58 @@ Deno.serve(async (req) => {
     const token = auth.replace(/^Bearer\s+/i, "").trim()
     if (!token) return json({ erro: "Faca login para usar o assistente." }, 401)
 
-    // A chave ANON + o token do usuario mantem a RLS ligada: a loja so alcanca
-    // a propria loja, mesmo se algo aqui estiver errado.
-    const sb = createClient(SUPABASE_URL, ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false },
-    })
+    const body = await req.json().catch(() => ({}))
+    const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
 
-    const { data: { user }, error: authErr } = await sb.auth.getUser(token)
-    if (authErr || !user) return json({ erro: "Sessao expirada. Entre de novo." }, 401)
-
-    const { data: perfil } = await sb.from("profiles")
-      .select("empresa_id, perfil, nome").eq("id", user.id).maybeSingle()
-    if (!perfil?.empresa_id) return json({ erro: "Nao achei sua loja." }, 400)
-    // Numero de caixa e lucro e assunto de dono. Vendedor, garcom e cozinheiro
-    // usam o sistema no balcao, muitas vezes com o celular na mao de outra pessoa.
-    if (!["admin", "super_admin"].includes(perfil.perfil)) {
-      return json({ erro: "O assistente com os numeros da loja e so para o administrador." }, 403)
+    // MODO WHATSAPP: quem chama é a função estoque-whatsapp, com a chave de serviço, em
+    // nome de uma loja. Não existe token de usuário, então a gente CRIA um de verdade
+    // (link mágico do admin da loja, trocado na hora, sem mandar e-mail). Assim as
+    // consultas seguem sob a RLS daquela loja — nunca roda com service role.
+    let sb: any, user: { id: string }, perfil: { empresa_id: string; perfil: string }
+    // Só vale com verify_jwt LIGADO nesta função (o gateway já conferiu a assinatura): o papel vem do próprio JWT.
+    let papelDoToken = ""
+    try { papelDoToken = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).role ?? "" } catch { /* token de usuário comum */ }
+    const canal: string = papelDoToken === "service_role" && typeof body?.empresa_id === "string" ? "whatsapp" : "portal"
+    if (canal === "whatsapp") {
+      const { data: adm } = await admin.from("profiles").select("id, empresa_id, perfil")
+        .eq("empresa_id", body.empresa_id).eq("perfil", "admin").limit(1).maybeSingle()
+      if (!adm) return json({ erro: "A loja nao tem um administrador cadastrado." }, 400)
+      const email = (await admin.auth.admin.getUserById(adm.id)).data.user?.email
+      if (!email) return json({ erro: "O administrador da loja nao tem e-mail." }, 400)
+      const { data: lk, error: lkErr } = await admin.auth.admin.generateLink({ type: "magiclink", email })
+      const anon = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false } })
+      const { data: ses, error: sesErr } = lkErr || !lk?.properties?.hashed_token
+        ? { data: null, error: lkErr ?? new Error("sem token") }
+        : await anon.auth.verifyOtp({ token_hash: lk.properties.hashed_token, type: "magiclink" })
+      if (sesErr || !ses?.session?.access_token) {
+        console.error("[assistente-loja] sessao whatsapp", sesErr?.message)
+        return json({ erro: "Nao consegui abrir o acesso da loja." }, 500)
+      }
+      sb = createClient(SUPABASE_URL, ANON_KEY, {
+        global: { headers: { Authorization: `Bearer ${ses.session.access_token}` } },
+        auth: { persistSession: false },
+      })
+      user = { id: adm.id }
+      perfil = { empresa_id: adm.empresa_id, perfil: adm.perfil }
+    } else {
+      // A chave ANON + o token do usuario mantem a RLS ligada: a loja so alcanca
+      // a propria loja, mesmo se algo aqui estiver errado.
+      sb = createClient(SUPABASE_URL, ANON_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { persistSession: false },
+      })
+      const { data: { user: u }, error: authErr } = await sb.auth.getUser(token)
+      if (authErr || !u) return json({ erro: "Sessao expirada. Entre de novo." }, 401)
+      user = u
+      const { data: pf } = await sb.from("profiles")
+        .select("empresa_id, perfil, nome").eq("id", u.id).maybeSingle()
+      if (!pf?.empresa_id) return json({ erro: "Nao achei sua loja." }, 400)
+      // Numero de caixa e lucro e assunto de dono. Vendedor, garcom e cozinheiro
+      // usam o sistema no balcao, muitas vezes com o celular na mao de outra pessoa.
+      if (!["admin", "super_admin"].includes(pf.perfil)) {
+        return json({ erro: "O assistente com os numeros da loja e so para o administrador." }, 403)
+      }
+      perfil = pf
     }
     if (passouDoLimite(user.id)) {
       return json({ erro: "Muitas perguntas seguidas. Aguarde alguns minutos." }, 429)
@@ -590,7 +625,6 @@ Deno.serve(async (req) => {
 
     // Cliente com service role: le a configuracao de preco, o saldo da loja e
     // grava a conversa. Nenhuma consulta de DADO da loja passa por ele.
-    const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
     const carteira = await verCarteira(admin, perfil.empresa_id)
     if (carteira.disponivel <= 0) {
       return json({
@@ -601,7 +635,6 @@ Deno.serve(async (req) => {
       }, 402)
     }
 
-    const body = await req.json().catch(() => ({}))
     const pergunta = String(body?.pergunta ?? "").trim().slice(0, MAX_PERGUNTA)
     if (!pergunta) return json({ erro: "Escreva sua pergunta." }, 400)
 
@@ -664,7 +697,10 @@ ${catalogo}`
     const systemDoDia = `HOJE E ${hoje} (${diaSemana}), horario de Brasilia. \
 "Ontem" e ${somaDias(hoje, -1)}. Este mes comecou em ${hoje.slice(0, 8)}01. \
 Converta o que o dono falar ("hoje", "essa semana", "mes passado", "sabado") \
-para datas AAAA-MM-DD antes de consultar.`
+para datas AAAA-MM-DD antes de consultar.${canal === "whatsapp" ? `
+CANAL: WHATSAPP, no grupo da loja. Responda curto, como mensagem de zap: sem tabela, sem titulo, \
+negrito so com *asteriscos*. Nao cite videos. Se o dono quiser dar ENTRADA de estoque, diga que e so \
+escrever ou falar o que comprou (ou mandar a foto/PDF da nota) aqui no grupo, que o robo lanca.` : ""}`
 
     const system = [
       { type: "text", text: systemEstavel, cache_control: { type: "ephemeral" } },
@@ -796,6 +832,7 @@ para datas AAAA-MM-DD antes de consultar.`
         custo_brl: custoBrl,
         pago_com_saldo: Number(doSaldo.toFixed(4)),
         modelo: MODELO,
+        canal: canal === "whatsapp" ? "whatsapp_pergunta" : "portal",
       })
       if (insErro) console.error("[assistente-loja] historico", insErro.message)
     } catch (e) {
@@ -812,6 +849,7 @@ para datas AAAA-MM-DD antes de consultar.`
     }
     return json({
       resposta: texto,
+      custo_brl: custoBrl,
       videos: sugeridos,
       carteira: resumoCarteira({ ...depois, disponivel: depois.franquiaRestante + depois.saldo }),
     })

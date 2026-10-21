@@ -186,7 +186,7 @@ serve(async (req) => {
     const aviso = (truncado || stop === "max_tokens")
       ? "A nota é grande e pode ter ficado item de fora. Confira a lista contra o papel."
       : null
-    return json({ ok: true, itens, nao_encontrados, aviso })
+    return json({ ok: true, itens, nao_encontrados, aviso, uso: { entrada: Number(data?.usage?.input_tokens || 0), saida: Number(data?.usage?.output_tokens || 0) } })
   } catch (e) {
     console.error("ler-nota-estoque:", e)
     return json({ ok: false, error: String((e as Error)?.message ?? e) }, 500)
