@@ -764,10 +764,19 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
 // Uma linha por item da sacola, com cada complemento embaixo dele, um por
 // linha. Amontoados entre parênteses (era assim), 10 sabores de picolé viravam
 // um parágrafo embolado onde nem o cliente nem a cozinha achavam o que era o quê.
+// Recado do atendente pra UM item ("sem ovo e sem salada"). Vai junto dos
+// complementos, como linha de preço zero: assim sai igual no cupom, na cozinha
+// e no painel sem cada um precisar aprender um campo novo.
+function comNota(i) {
+  const base = Array.isArray(i?.complementos) ? i.complementos : []
+  const nota = String(i?.obs ?? '').trim()
+  return nota ? [...base, { nome: `📝 ${nota}`, qtd: 1, grupo: 'Observação', preco: 0 }] : base
+}
+
 function linhasDaSacola(itens) {
   return (itens ?? []).map(i => {
     const total = (Number(i.preco) * Number(i.qtd)).toFixed(2).replace('.', ',')
-    const comps = (i.complementos ?? [])
+    const comps = comNota(i)
       .map(c => `\n   ↳ ${(c.qtd ?? 1) > 1 ? `${c.qtd}x ` : ''}${c.nome}`)
       .join('')
     return `• ${i.nome} x${i.qtd} — R$ ${total}${comps}`
@@ -1895,7 +1904,7 @@ ${url}
         : (prev[sig]?.qtd ?? 0) + 1
       const dados = dadosDePreco(produto, adicionalUnit)
       return { ...prev, [sig]: {
-        id: sig, produto_id: produto.id, nome: produto.nome, qtd, ...dados,
+        id: sig, produto_id: produto.id, nome: produto.nome, qtd, obs: prev[sig]?.obs, ...dados,
         // Fora do atacado a linha pode nascer com qtd maior que a da montagem
         // (clicou de novo no mesmo combo): o preço é o da quantidade final.
         preco: precoDaLinha({ ...dados, preco: precoUnit }, qtd),
@@ -1939,6 +1948,10 @@ ${url}
       else novo[id] = { ...cur, qtd: cur.qtd - 1, preco: precoDaLinha(cur, cur.qtd - 1) }
       return novo
     })
+  }
+  // Recado só pra UMA linha da venda ("sem ovo, sem salada").
+  function obsItem(id, texto) {
+    setCart(prev => (prev[id] ? { ...prev, [id]: { ...prev[id], obs: texto } } : prev))
   }
   function maisItem(id) {
     setCart(prev => {
@@ -2153,7 +2166,7 @@ ${url}
       itens: itens.map(i => ({
         produto_id: i.produto_id ?? i.id, nome: i.nome, quantidade: i.qtd,
         preco_unitario: i.preco, subtotal: i.preco * i.qtd,
-        complementos: i.complementos ?? [],
+        complementos: comNota(i),
       })),
       subtotal,
       taxa_entrega: taxaNum,
@@ -2520,6 +2533,10 @@ ${url}
                           <span key={j}> · {Number(c.qtd ?? 1)}× {c.nome}</span>
                         ))}
                       </div>
+                      <input value={i.obs ?? ''} onChange={e => obsItem(i.id, e.target.value)}
+                        placeholder="📝 Observação (ex: sem ovo, sem salada)"
+                        style={{ width: '100%', marginTop: 4, padding: '6px 8px', fontSize: 12.5, boxSizing: 'border-box',
+                          borderRadius: 7, border: '1px solid var(--border,#2a2a3a)', background: 'var(--bg, transparent)', color: 'var(--text)' }} />
                     </div>
 
                     <span className="pp-venda-item-total">{fmt(i.preco * i.qtd)}</span>
@@ -5409,7 +5426,7 @@ function CadastroRapidoNoChat({ empresaId, telefone, onNomeDoCliente }) {
   )
 }
 
-function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, onPausarRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onUsarEndereco, onNomeDoCliente, cadastroVersao, pinChat, enderecoRobo, onEnviarCategoria, enviandoCategoria, roboLigado }) {
+function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, onPausarRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onObsSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onUsarEndereco, onNomeDoCliente, cadastroVersao, pinChat, enderecoRobo, onEnviarCategoria, enviandoCategoria, roboLigado }) {
   const g = useTelaGrande()
   const fimRef = useRef(null)
   // No celular a sacola + o "fechar pedido" abriam empilhados embaixo da
@@ -5661,6 +5678,7 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
                 onQtdDireta={onQtdDiretaSacola}
                 onRemover={idx => onQtdSacola(idx, -999)}
                 onEditar={onEditarSacola}
+                onObs={onObsSacola}
                 // Mandou a lista pro cliente: a gaveta sai da frente sozinha,
                 // porque o passo seguinte é ler o que ele responde.
                 onEnviar={() => Promise.resolve(onEnviarSacola?.()).then(() => setSacolaAberta(false))}
@@ -5981,7 +5999,7 @@ function precoSacola(item, qtd) {
 // atendente acha o produto (ou digita um que não está cadastrado), monta, e um
 // botão só manda a lista pro cliente E entrega o carrinho pro robô terminar
 // endereço e pagamento. A parte chata fica com a gente; a fácil, com o robô.
-function SacolaNoChat({ itens, onQtd, onQtdDireta, onRemover, onEditar, onEnviar, enviando, roboLigado = false }) {
+function SacolaNoChat({ itens, onQtd, onQtdDireta, onRemover, onEditar, onObs, onEnviar, enviando, roboLigado = false }) {
   const g = useTelaGrande()
   const total = itens.reduce((s, i) => s + Number(i.preco) * Number(i.qtd), 0)
 
@@ -6030,6 +6048,17 @@ function SacolaNoChat({ itens, onQtd, onQtdDireta, onRemover, onEditar, onEnviar
                   ? <span style={{ color: '#22c55e', fontWeight: 700 }}> · {menorFaixa(i.faixas_preco).qtd_min}+ sai a R$ {Number(menorFaixa(i.faixas_preco).preco).toFixed(2).replace('.', ',')}</span>
                   : null}
             </div>
+            {/* Recado só pra este item ("sem ovo, sem salada"): sai no cupom e
+                na cozinha logo abaixo do nome. */}
+            {onObs && (
+              <input value={i.obs ?? ''} onChange={e => onObs(idx, e.target.value)}
+                placeholder="📝 Observação (ex: sem ovo, sem salada)"
+                style={{
+                  width: '100%', marginTop: 4, padding: g ? '8px 10px' : '5px 8px', fontSize: g ? 14 : 11.5,
+                  boxSizing: 'border-box', borderRadius: 7, border: '1px solid var(--border, #2a2a3a)',
+                  background: 'var(--bg, transparent)', color: 'var(--text)',
+                }} />
+            )}
           </div>
           <button type="button" onClick={() => onQtd(idx, -1)} style={btnQtd(g)}>−</button>
           {/* Digitar a quantidade, igual à tela de Vender: no atacado ninguém
@@ -7757,7 +7786,7 @@ export default function PainelPedidos() {
       // só errou o sabor não pode perder as 10 unidades já combinadas.
       if (idxEdit != null && prev[idxEdit]) {
         const copia = [...prev]
-        copia[idxEdit] = montarLinha(atacado ? Number(qtdItem || 1) : (Number(prev[idxEdit].qtd) || 1))
+        copia[idxEdit] = { ...montarLinha(atacado ? Number(qtdItem || 1) : (Number(prev[idxEdit].qtd) || 1)), obs: prev[idxEdit].obs }
         return copia
       }
       const i = prev.findIndex(x => x.sig === sig)
@@ -7838,6 +7867,7 @@ export default function PainelPedidos() {
   }
   const mudarQtdSacola   = (idx, delta) => ajustarQtdSacola(idx, q => q + delta)
   const definirQtdSacola = (idx, n)     => ajustarQtdSacola(idx, () => n)
+  const mudarObsSacola   = (idx, texto) => setSacolaChat(prev => prev.map((it, i) => (i === idx ? { ...it, obs: texto } : it)))
 
   /**
    * Fecha o pedido pela própria conversa — sem passar pela tela de Vender.
@@ -7930,7 +7960,7 @@ export default function PainelPedidos() {
         produto_id: i.produto_id ?? null, nome: i.nome, quantidade: i.qtd,
         preco_unitario: Number(i.preco), subtotal: Number(i.preco) * Number(i.qtd),
         // O que foi montado vai junto: é o que a cozinha lê no cupom.
-        complementos: Array.isArray(i.complementos) ? i.complementos : [],
+        complementos: comNota(i),
       })),
       subtotal: d.subtotal,
       taxa_entrega: d.tipo === 'entrega' ? d.taxa : 0,
@@ -8060,7 +8090,7 @@ export default function PainelPedidos() {
           produto_id: i.produto_id, nome: i.nome, qtd: i.qtd, preco: Number(i.preco),
           // Mesmo formato do `atualizar_carrinho` do robô: sem isto ele fecharia
           // a quentinha sem saber o que ia dentro.
-          complementos: (i.complementos ?? []).map(c => ({ nome: c.nome, qtd: c.qtd ?? 1 })),
+          complementos: comNota(i).map(c => ({ nome: c.nome, qtd: c.qtd ?? 1 })),
         })),
         updated_at: new Date().toISOString(),
       }, { onConflict: 'empresa_id,phone' })
@@ -10658,6 +10688,7 @@ export default function PainelPedidos() {
                 salvandoPedido={salvandoPedidoChat}
                 onAvulsoSacola={item => setSacolaChat(prev => [...prev, item])}
                 onEditarSacola={editarItemDaSacola}
+                onObsSacola={mudarObsSacola}
                 onEnviarSacola={enviarSacolaDoChat}
                 enviandoSacola={enviandoSacola}
                 onAbrirSacola={() => setSacolaLateral(true)}
@@ -11785,6 +11816,7 @@ export default function PainelPedidos() {
                 onQtdDireta={definirQtdSacola}
                 onRemover={idx => mudarQtdSacola(idx, -999)}
                 onEditar={editarItemDaSacola}
+                onObs={mudarObsSacola}
                 onEnviar={enviarSacolaDoChat}
                 enviando={enviandoSacola}
               />
