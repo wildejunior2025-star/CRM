@@ -454,7 +454,7 @@ export default function PresencialSalao() {
       // primeiros 500 nomes em ordem alfabetica e o resto sumia da tela.
       // `faixas_preco` e `preco_promocional` vem junto desde 15/10/2026: sem eles a
       // mesa cobrava o preco cheio mesmo com atacado ou promocao cadastrados (mig 0326).
-      fetchAll(() => supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria, codigo_barras, faixas_preco, preco_promocional').eq('empresa_id', empresaId).order('nome')),
+      fetchAll(() => supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria, codigo_barras, faixas_preco, preco_promocional, ordem').eq('empresa_id', empresaId).order('ordem', { ascending: true, nullsFirst: false }).order('nome').order('produto_id')),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
       // `setor` vem junto: é ele que diz qual categoria NÃO sai no papel — e
       // essas o garçom pega ele mesmo, sem esperar cozinha nenhuma (mig 0185).
