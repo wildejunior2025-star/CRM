@@ -1779,8 +1779,8 @@ export default function PainelEntregador() {
                   for (const x of partesCobranca(p)) if (x.tipo !== 'conta') acc[x.tipo] = (acc[x.tipo] || 0) + Number(x.valor || 0)
                   return acc
                 }, {})
-                // Maquininha cai direto na conta do dono: não é dinheiro na mão dele, só informativo.
-                const totalNaMao = (naMao.dinheiro || 0) + (naMao.pix || 0)
+                // Só o dinheiro em espécie entra na conta; maquininha e PIX aparecem só pra ele conferir.
+                const totalNaMao = naMao.dinheiro || 0
                 const aPagarMim = soma(pend)
                 const saldoConta = totalNaMao - aPagarMim
                 const dataDe = p => new Date(p.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
@@ -1829,7 +1829,7 @@ export default function PainelEntregador() {
 
                     <div style={{ background: 'var(--surface,#16161f)', border: '1px solid var(--border,#2a2a3a)', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14 }}>
                       <div style={{ fontWeight: 800, color: 'var(--text)', marginBottom: 2 }}>Prestação de contas</div>
-                      {[['dinheiro', '💵 Dinheiro em espécie'], ['cartao', '💳 Maquininha (cai direto pro dono)'], ['pix', '📱 PIX não confirmado']].map(([k, lab]) => (
+                      {[['dinheiro', '💵 Dinheiro em espécie'], ['cartao', '💳 Maquininha (só pra conferir)'], ['pix', '📱 PIX não confirmado']].map(([k, lab]) => (
                         (k !== 'pix' || naMao.pix > 0) && (
                           <div key={k} style={{ display: 'flex', justifyContent: 'space-between' }}>
                             <span style={{ color: 'var(--text-muted)' }}>{lab}</span>
