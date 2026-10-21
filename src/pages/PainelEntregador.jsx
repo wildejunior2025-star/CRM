@@ -5,6 +5,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { separarItem } from '../lib/itensPedido'
 import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma, textoPagamento } from '../lib/pagamentoPartes'
+import ModalTaxaMotoboy from '../components/ModalTaxaMotoboy'
 import { partesCobranca } from '../lib/cobrancaEntregador'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto, temValorDigitado, rotuloValorEntregador } from '../lib/descontoEntrega'
 
@@ -1030,6 +1031,7 @@ export default function PainelEntregador() {
   const [historico, setHistorico] = useState([])
   const [histLoading, setHistLoading] = useState(false)
   const [detalheHist, setDetalheHist] = useState(null) // corrida aberta (toque no cartão do histórico)
+  const [taxaEditando, setTaxaEditando] = useState(null) // corrida do histórico com a taxa sendo editada
   const periodoHist = 'hoje' // o motoqueiro só vê o ganho do dia; zera todo dia
   const [, setTick] = useState(0) // atualiza "há X min" / atraso a cada 30s
   // Fila (E4): null = ainda não carregou. { fila_ativa, online, pausado, na_vez, posicao, total_fila }
@@ -1766,6 +1768,13 @@ export default function PainelEntregador() {
             </div>
           ) : (
             <>
+              {taxaEditando && (
+                <ModalTaxaMotoboy
+                  pedido={taxaEditando}
+                  onFechar={() => setTaxaEditando(null)}
+                  onSalvo={patch => setHistorico(prev => prev.map(x => (x.id === taxaEditando.id ? { ...x, ...patch } : x)))}
+                />
+              )}
               {(() => {
                 const base = historico.filter(p => dentroDoPeriodo(p.created_at, periodoHist))
                 const pend = base.filter(p => !p.entregador_pago)
@@ -1797,6 +1806,11 @@ export default function PainelEntregador() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontWeight: 800, color: 'var(--text)' }}>#{p.numero_pedido ?? p.id.slice(-4).toUpperCase()}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {empresa?.entregador_digita_valor && !p.entregador_pago && (
+                          <button type="button" title="Editar a taxa desta corrida"
+                            onClick={e => { e.stopPropagation(); setTaxaEditando(p) }}
+                            style={{ fontSize: 13, padding: '3px 8px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border, #2a2a3a)', background: 'transparent' }}>✏️</button>
+                        )}
                         <strong style={{ color: '#16a34a' }}
                           title={temValorDigitado(p) ? (p.valor_entregador_origem === 'calculado' ? 'Taxa calculada pelo sistema' : 'Taxa que você editou') :descontoDoPedido(descontos, p) > 0 ? `Taxa ${fmt(p.taxa_entrega)} − ${rotuloDoDesconto(p)} ${fmt(descontoDoPedido(descontos, p))}` : 'Taxa de entrega'}>{fmt(ganho(p))}</strong>
                         {p.entregador_pago
