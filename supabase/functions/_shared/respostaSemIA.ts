@@ -29,7 +29,7 @@ type Espelhar = (texto: string) => Promise<unknown>
 
 const NL = String.fromCharCode(10)
 const FUSO = "America/Fortaleza"
-const HORAS_PAUSA_HUMANA = 12
+const HORAS_PAUSA_HUMANA = 1
 
 // Frase-marca da pergunta do atendente. É por ela que a mensagem seguinte do
 // cliente é lida como "sim, chama" ou "não precisa" — sem guardar estado.
