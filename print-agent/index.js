@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 36
+const APP_VERSION = 37
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -465,16 +465,43 @@ function imprimir(pedido) {
   jaImpressos.add(pedido.id)
   imprimirCupomPedido(pedido)
 }
-// Cupom COMPLETO sempre na cozinha (impressora principal). Se houver impressora
-// de bar configurada, manda também um ticket só das bebidas pra ela.
+// Pedido de DELIVERY no papel.
+//
+// Loja com UMA impressora: o cupom completo (endereco, valores, cobrar na
+// entrega), como sempre foi.
+//
+// Loja com DUAS (dois PCs marcados cozinha/frente, ou um PC com a 2a impressora
+// em `printerBar`): a FRENTE leva o cupom completo — e dela que sai o motoboy — e
+// a COZINHA leva a mesma comanda grande de quando o garcom lanca na mesa: so o
+// que e preparado la, sem preco nem endereco.
+function comandaDeliveryBytes(pedido, itens) {
+  const retirada = (pedido.tipo_entrega || 'entrega') === 'retirada'
+  const cod = '#' + (pedido.numero_pedido ?? String(pedido.id).slice(-4))
+  const canal = pedido.origem === 'ifood' && pedido.ifood_display_id ? 'iFood #' + pedido.ifood_display_id : (retirada ? 'RETIRADA ' : 'ENTREGA ') + cod
+  const primeiro = String(pedido.cliente_nome || '').trim().split(/\s+/)[0]
+  return montarComandaMesa({
+    nomeLoja: empresa?.nome || '', rotulo: canal + (primeiro ? ' - ' + primeiro : ''),
+    itens, rodape: empresa?.rodape_cozinha || '', obsGeral: pedido.observacoes || '',
+  })
+}
 function imprimirCupomPedido(pedido) {
-  imprimirBytes(montarCupom(pedido, empresa), 'cupom-' + pedido.id)
+  const papel = papelDoPc()
   const bar = config().printerBar
-  if (!bar) return
-  const bebidas = (Array.isArray(pedido.itens) ? pedido.itens : []).filter(it => ehBebida(it.nome))
-  if (!bebidas.length) return
-  const linhas = bebidas.map(it => (it.quantidade ?? it.qtd ?? 1) + 'x ' + (it.nome || 'Item'))
-  imprimirBytes(montarTexto(linhas, 'BEBIDAS #' + (pedido.numero_pedido ?? String(pedido.id).slice(-4))), 'bar-' + pedido.id, bar)
+  const itens = Array.isArray(pedido.itens) ? pedido.itens : []
+  // So o que a cozinha prepara; "nao imprime" nao vira papel em lugar nenhum.
+  const daCozinha = itens.filter(it => setorDe(it) === 'cozinha')
+  const cozinha = () => (daCozinha.length
+    ? imprimirBytes(comandaDeliveryBytes(pedido, daCozinha), 'cozinha-' + pedido.id)
+    : true)
+  if (papel === 'cozinha') return cozinha()
+  if (papel === 'frente') return imprimirBytes(montarCupom(pedido, empresa), 'cupom-' + pedido.id)
+  if (bar) {
+    // Um PC, duas impressoras: a principal e a da cozinha, a 2a e a da frente.
+    const a = cozinha()
+    const b = imprimirBytes(montarCupom(pedido, empresa), 'cupom-' + pedido.id, bar)
+    return a && b
+  }
+  return imprimirBytes(montarCupom(pedido, empresa), 'cupom-' + pedido.id)
 }
 // HTML (cozinha/conta de mesa) -> linhas de texto pra térmica.
 const SEP = '\x01' // marca interna: separa as 2 colunas (nome | valor) de uma linha
@@ -876,9 +903,9 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, { ok: true })
         }
         jaImpressos.delete(f.pedido.id) // permite reimprimir
-        const ok = imprimirBytes(montarCupom(f.pedido, empresa), 'cupom-' + (f.pedido.id || 're'))
-        // roteia bebidas pro bar também (se configurado)
-        try { const bar = config().printerBar; if (bar) { const bs = (Array.isArray(f.pedido.itens) ? f.pedido.itens : []).filter(it => ehBebida(it.nome)); if (bs.length) imprimirBytes(montarTexto(bs.map(it => (it.quantidade ?? it.qtd ?? 1) + 'x ' + (it.nome || 'Item')), 'BEBIDAS'), 'bar-re', bar) } } catch (e) {}
+        // Mesmo roteamento do automatico: frente leva o cupom, cozinha leva a
+        // comanda grande (quando a loja tem duas impressoras).
+        const ok = imprimirCupomPedido(f.pedido)
         return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
       }
       // Imprime um HTML (conta de mesa etc.) como texto na térmica.

@@ -278,7 +278,7 @@ function montarTexto(linhas, titulo, topo) {
 // Comanda da COZINHA (mesa) — layout completo pro cozinheiro: nome da loja, mesa (+salao),
 // data/hora com segundos, atendente, nº de pessoas, itens GRANDES com espaço entre eles,
 // e um rodapé opcional da loja. SEM preço (o preço sai depois, na conta).
-function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente = '', pessoas = 0, itens = [], rodape = '', sufixo = '', rotulo = '' }) {
+function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente = '', pessoas = 0, itens = [], rodape = '', sufixo = '', rotulo = '', obsGeral = '' }) {
   const d = new Date(), p2 = n => String(n).padStart(2, '0')
   const dataHora = p2(d.getDate()) + '/' + p2(d.getMonth() + 1) + '/' + String(d.getFullYear()).slice(2) +
     ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds())
@@ -314,6 +314,8 @@ function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente =
     parts.push(FEED(1), divisor(), FEED(2))
   })
   if (!lista.length) parts.push(linha('(sem itens)'))
+  // Recado do pedido inteiro (delivery): tambem grande, a cozinha le de longe.
+  if (obsGeral) parts.push(SIZE(0x01), BOLD(1), linha('OBS: ' + obsGeral), BOLD(0), SIZE(0), FEED(1))
   // Rodape da loja (ex.: versiculo) — centralizado; senao, nada.
   if (rodape) parts.push(ALIGN(1), linha(String(rodape)), ALIGN(0))
   // O cliente prefere SOBRAR papel a sair "miudo": com poucos itens, empurra papel
