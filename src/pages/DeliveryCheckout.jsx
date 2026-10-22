@@ -2101,7 +2101,14 @@ export default function DeliveryCheckout() {
 
     setEnviando(false)
 
-    if (error) { setErroGlobal(error.message); return }
+    if (error) {
+      // A trava do banco (mig 0367) recusou item de categoria fora do dia/horário.
+      setErroGlobal(/ITEM_FORA_DO_HORARIO/.test(error.message || '')
+        ? 'Algum item da sua sacola não está à venda agora (a promoção é de outro dia ou horário). Toque em "Editar itens da sacola", tire e finalize de novo.'
+        : error.message)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
 
     lembrarCliente()
     // Degrau 4: fechou. Quem chega aqui saiu do funil pela porta certa.
