@@ -457,6 +457,13 @@ async function situacaoAgora(sb: any, empresaId: string) {
       Number(s.estoque_minimo) > 0 && Number(s.quantidade_atual) <= Number(s.estoque_minimo))
     .map((s: any) => ({ produto: s.nome, tem: Number(s.quantidade_atual), minimo: Number(s.estoque_minimo) }))
 
+  // Insumo também tem estoque mínimo (mig 0363): entra no mesmo alerta.
+  const { data: mats } = await sb.from("materia_prima_saldo").select("nome, unidade, quantidade_atual, estoque_minimo")
+  const baixosInsumos = (mats ?? [])
+    .filter((m: any) => Number(m.estoque_minimo) > 0 && Number(m.quantidade_atual) <= Number(m.estoque_minimo))
+    .map((m: any) => ({ produto: `${m.nome} (insumo, ${m.unidade})`, tem: Number(m.quantidade_atual), minimo: Number(m.estoque_minimo) }))
+  baixos.push(...baixosInsumos)
+
   const devedores = (fiado.data ?? []).filter((f: any) => Number(f.saldo_fiado) > 0)
   const totalFiado = devedores.reduce((s: number, f: any) => s + Number(f.saldo_fiado), 0)
   const meta = Number(empRes.data?.meta_faturamento_mensal || 0)
@@ -527,10 +534,10 @@ async function consultarEstoque(sb: any, busca: string) {
   const termo = normNome(busca)
   const [prod, mat] = await Promise.all([
     todos((a, b) => sb.from("estoque_saldo").select("nome, categoria, quantidade_atual, estoque_minimo, controla_estoque").order("nome").range(a, b)),
-    todos((a, b) => sb.from("materia_prima_saldo").select("nome, unidade, custo, quantidade_atual").order("nome").range(a, b)),
+    todos((a, b) => sb.from("materia_prima_saldo").select("nome, unidade, custo, quantidade_atual, estoque_minimo").order("nome").range(a, b)),
   ])
   const p = prod.map((x: any) => ({ tipo: "produto", nome: x.nome, tem: Number(x.quantidade_atual), minimo: Number(x.estoque_minimo), controla: x.controla_estoque !== false }))
-  const m = mat.map((x: any) => ({ tipo: "insumo", nome: x.nome, unidade: x.unidade, tem: Number(x.quantidade_atual), valor_parado: brl(Number(x.quantidade_atual) * Number(x.custo || 0)) }))
+  const m = mat.map((x: any) => ({ tipo: "insumo", nome: x.nome, unidade: x.unidade, tem: Number(x.quantidade_atual), minimo: Number(x.estoque_minimo || 0), valor_parado: brl(Number(x.quantidade_atual) * Number(x.custo || 0)) }))
   if (termo) {
     const achados = [...p, ...m].filter((i: any) => normNome(i.nome).includes(termo))
     return { busca, encontrados: achados.slice(0, 30), total_encontrado: achados.length,

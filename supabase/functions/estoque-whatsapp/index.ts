@@ -12,6 +12,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { verCarteira, cobrar } from "../_shared/carteiraIa.ts"
+import { AsyncLocalStorage } from "node:async_hooks"
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? ""
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
@@ -30,8 +31,10 @@ const VALIDADE_DESFAZER_MIN = 180
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY)
 const ok = () => new Response("ok")
 
-type Item = { tipo: "produto" | "materia"; id: string; nome: string; quantidade: number; custo_unit: number | null }
-type NaoAchado = { nome: string; quantidade: number; custo_unit: number | null; unidade?: string }
+type Item = { tipo: "produto" | "materia"; id: string; nome: string; quantidade: number; custo_unit: number | null; estoque_minimo?: number | null }
+type NaoAchado = { nome: string; quantidade: number; custo_unit: number | null; unidade?: string; estoque_minimo?: number | null }
+type ProdutoNovo = { nome: string; preco_venda: number | null; preco_custo: number | null; categoria: string; quantidade_inicial: number | null; estoque_minimo: number | null }
+type MinimoSolto = { tipo: "produto" | "materia"; id: string; nome: string; minimo: number }
 
 // Haiku 4.5 (US$ por milhão de tokens) e Whisper (US$ por minuto) — pra cobrar o uso real.
 const PRECO_HAIKU = { entrada: 1, saida: 5 }
@@ -42,7 +45,12 @@ const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", curren
 const qtdTxt = (n: number) => String(Math.round(n * 1000) / 1000).replace(".", ",")
 const norm = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim()
 
+// Modo de teste (cabeçalho x-teste, só com a chave interna): as respostas voltam no HTTP em vez de ir pro WhatsApp.
+const capturaTeste = new AsyncLocalStorage<string[]>()
+
 async function enviar(instance: string, jid: string, texto: string) {
+  const captura = capturaTeste.getStore()
+  if (captura) { captura.push(texto); return }
   await fetch(`${EVOLUTION_API_URL}/message/sendText/${instance}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
@@ -112,7 +120,7 @@ async function entenderTexto(
   pendentes: Item[],
   pendNovos: NaoAchado[] = [],
   jaLancado = false,
-): Promise<{ itens: Item[]; naoAchados: NaoAchado[]; ignorar: boolean; pergunta: boolean; corrige: boolean; produtosNovos: { nome: string; preco_venda: number | null; preco_custo: number | null; categoria: string }[]; custoUsd: number } | null> {
+): Promise<{ itens: Item[]; naoAchados: NaoAchado[]; ignorar: boolean; pergunta: boolean; corrige: boolean; produtosNovos: ProdutoNovo[]; minimos: MinimoSolto[]; custoUsd: number } | null> {
   const lista = [
     ...cat.produtos.map((p) => ({ tipo: "produto" as const, id: p.id, nome: p.nome, un: "" })),
     ...cat.materias.map((m) => ({ tipo: "materia" as const, id: m.id, nome: m.nome, un: m.unidade })),
@@ -129,9 +137,10 @@ async function entenderTexto(
     "",
     "Responda SOMENTE com JSON válido:",
     '{ "ignorar": boolean, "pergunta": boolean, "corrige": boolean,',
-    '  "produtos_novos": [ { "nome": string, "preco_venda": number|null, "preco_custo": number|null, "categoria": string|null } ],',
-    '  "itens": [ { "indice": number, "quantidade": number, "custo_unit": number|null, "custo_total": number|null } ],',
-    '  "nao_encontrados": [ { "nome": string, "unidade": "kg"|"g"|"L"|"ml"|"un", "quantidade": number, "custo_unit": number|null, "custo_total": number|null } ] }',
+    '  "produtos_novos": [ { "nome": string, "preco_venda": number|null, "preco_custo": number|null, "categoria": string|null, "quantidade_inicial": number|null, "estoque_minimo": number|null } ],',
+    '  "minimos": [ { "indice": number, "estoque_minimo": number } ],',
+    '  "itens": [ { "indice": number, "quantidade": number, "custo_unit": number|null, "custo_total": number|null, "estoque_minimo": number|null } ],',
+    '  "nao_encontrados": [ { "nome": string, "unidade": "kg"|"g"|"L"|"ml"|"un", "quantidade": number, "custo_unit": number|null, "custo_total": number|null, "estoque_minimo": number|null } ] }',
     "",
     "Regras:",
     "- 'ignorar' = true quando a mensagem NÃO é sobre uma compra/entrada de mercadoria (papo, pergunta, cumprimento).",
@@ -141,7 +150,11 @@ async function entenderTexto(
     "  'o que tá acabando', 'faz um diagnóstico', 'muda o preço da pizza', 'aumenta a taxa de entrega'). Cumprimento e papo = false.",
     "- 'produtos_novos' = pedido de CADASTRAR um produto de venda novo no cardápio ('cadastra o produto Coca 2L por 12 reais').",
     "  Isso NÃO é pergunta (pergunta=false). Preencha nome, preco_venda (null se não disse) e categoria se disse. Não confunda com",
-    "  insumo/matéria-prima comprada, que vai em itens/nao_encontrados.",
+    "  insumo/matéria-prima comprada, que vai em itens/nao_encontrados. 'quantidade_inicial' = quanto já tem em estoque do produto novo",
+    "  ('cadastra X por 12, tenho 20, custo 5'); 'preco_custo' = quanto pagou por unidade.",
+    "- 'estoque_minimo' = o mínimo que a pessoa disse ('mínimo 50', 'avisa quando tiver menos de 20'): vale pro item em itens,",
+    "  nao_encontrados e produtos_novos. 'minimos' = pedido SÓ de definir/mudar o mínimo de item(ns) que já existem no catálogo,",
+    "  sem compra ('pão brioche mínimo 50', 'mínimo de hambúrguer 30'): use o indice e itens/nao_encontrados vazios.",
     "- ENTRADA DE ESTOQUE tem prioridade sobre 'pergunta': qualquer pedido de criar/cadastrar matéria-prima ou insumo,",
     "  de lançar/dar entrada/adicionar/colocar quantidade no estoque ('crie matéria prima pães e lance 120 no estoque',",
     "  'coloca 50 hambúrguer no estoque', 'comecei com 30 kg de carne') é ENTRADA: devolva em itens/nao_encontrados,",
@@ -190,14 +203,14 @@ async function entenderTexto(
     const c = lista[Number(x?.indice)]
     const q = num(x?.quantidade)
     if (!c || !q) continue
-    itens.push({ tipo: c.tipo, id: c.id, nome: c.nome, quantidade: Math.round(q * 1000) / 1000, custo_unit: unit(x, q) })
+    itens.push({ tipo: c.tipo, id: c.id, nome: c.nome, quantidade: Math.round(q * 1000) / 1000, custo_unit: unit(x, q), estoque_minimo: num(x?.estoque_minimo) })
   }
   const naoAchados: NaoAchado[] = []
   for (const x of parsed.nao_encontrados ?? []) {
     const q = num(x?.quantidade) ?? 1
     const nome = String(x?.nome ?? "").trim().slice(0, 80)
     const un = ["kg", "g", "L", "ml", "un"].includes(String(x?.unidade)) ? String(x.unidade) : "un"
-    if (nome) naoAchados.push({ nome, quantidade: q, custo_unit: unit(x, q), unidade: un })
+    if (nome) naoAchados.push({ nome, quantidade: q, custo_unit: unit(x, q), unidade: un, estoque_minimo: num(x?.estoque_minimo) })
   }
   return {
     itens, naoAchados, custoUsd,
@@ -208,8 +221,14 @@ async function entenderTexto(
       .map((x: any) => ({
         nome: String(x?.nome ?? "").trim().slice(0, 80),
         preco_venda: num(x?.preco_venda), preco_custo: num(x?.preco_custo),
+        quantidade_inicial: num(x?.quantidade_inicial), estoque_minimo: num(x?.estoque_minimo),
         categoria: String(x?.categoria ?? "").trim().slice(0, 40),
       })).filter((x: any) => x.nome),
+    minimos: (Array.isArray(parsed.minimos) ? parsed.minimos : []).flatMap((x: any) => {
+      const c = lista[Number(x?.indice)]
+      const m = Number(x?.estoque_minimo)
+      return c && Number.isFinite(m) && m >= 0 ? [{ tipo: c.tipo, id: c.id, nome: c.nome, minimo: m }] : []
+    }),
   }
 }
 
@@ -237,7 +256,7 @@ async function lerNota(base64: string, mimetype: string, cat: Awaited<ReturnType
 function resumo(itens: Item[], naoAchados: NaoAchado[], corrige = false): string {
   let total = 0, temPreco = false
   const linhas = itens.map((i) => {
-    let s = `• ${i.nome} × ${qtdTxt(i.quantidade)}`
+    let s = `• ${i.nome} × ${qtdTxt(i.quantidade)}${i.estoque_minimo != null ? ` (mínimo ${qtdTxt(i.estoque_minimo)})` : ""}`
     if (i.custo_unit) { const v = i.custo_unit * i.quantidade; total += v; temPreco = true; s += ` — ${brl(i.custo_unit)} un (${brl(v)})` }
     return s
   })
@@ -245,7 +264,7 @@ function resumo(itens: Item[], naoAchados: NaoAchado[], corrige = false): string
   if (linhas.length) partes.push(`${corrige ? "Corrigindo o último lançamento — vai ficar assim:" : "Entendi esta compra:"}\n${linhas.join("\n")}`)
   if (temPreco) partes.push(`Total: ${brl(total)}`)
   if (naoAchados.length) {
-    partes.push(`🆕 Não existem no cadastro — vou CRIAR como insumo:\n${naoAchados.map((n) => `• ${n.nome} × ${qtdTxt(n.quantidade)} ${n.unidade ?? "un"}${n.custo_unit ? ` — ${brl(n.custo_unit)}` : ""}`).join("\n")}`)
+    partes.push(`🆕 Não existem no cadastro — vou CRIAR como insumo:\n${naoAchados.map((n) => `• ${n.nome} × ${qtdTxt(n.quantidade)} ${n.unidade ?? "un"}${n.estoque_minimo != null ? ` (mínimo ${qtdTxt(n.estoque_minimo)})` : ""}${n.custo_unit ? ` — ${brl(n.custo_unit)}` : ""}`).join("\n")}`)
   }
   const semPreco = [...itens, ...naoAchados].filter((x) => x.custo_unit == null).map((x) => x.nome)
   if (semPreco.length) {
@@ -257,7 +276,17 @@ function resumo(itens: Item[], naoAchados: NaoAchado[], corrige = false): string
   return partes.join("\n\n")
 }
 
+// Loja com o controle de estoque DESLIGADO: um gatilho do banco descarta os lançamentos de produto em silêncio.
+// Sem este aviso o robô diria "lancei" sem ter lançado nada.
+const ERRO_ESTOQUE_OFF = "estoque_desligado"
+async function exigirEstoqueLigado(empresaId: string) {
+  const { data } = await sb.from("empresas").select("estoque_ativo").eq("id", empresaId).maybeSingle()
+  if (data?.estoque_ativo === false) throw new Error(ERRO_ESTOQUE_OFF)
+}
+const AVISO_ESTOQUE_OFF = "⚠️ O controle de estoque está *desligado* nesta loja, então não lancei nada de produto. Ligue no Portal (Estoque) e me mande de novo."
+
 async function lancar(empresaId: string, pend: any): Promise<string> {
+  if ((pend.itens ?? []).some((i: any) => i.tipo === "produto")) await exigirEstoqueLigado(empresaId)
   const itens: Item[] = [...(pend.itens ?? [])]
   // Item que não existe no cadastro é CRIADO como insumo (matéria-prima). Produto de venda
   // não é criado daqui: nasceria sem preço e apareceria zerado na loja online.
@@ -268,12 +297,12 @@ async function lancar(empresaId: string, pend: any): Promise<string> {
     let id = ja?.id as string | undefined
     if (!id) {
       const { data: nova, error } = await sb.from("materias_primas")
-        .insert({ empresa_id: empresaId, nome: n.nome, unidade: n.unidade || "un", custo: n.custo_unit ?? 0 })
+        .insert({ empresa_id: empresaId, nome: n.nome, unidade: n.unidade || "un", custo: n.custo_unit ?? 0, estoque_minimo: n.estoque_minimo ?? 0 })
         .select("id").single()
       if (error) throw error
       id = nova.id; criados.push(n.nome)
     }
-    itens.push({ tipo: "materia", id: id!, nome: n.nome, quantidade: n.quantidade, custo_unit: n.custo_unit })
+    itens.push({ tipo: "materia", id: id!, nome: n.nome, quantidade: n.quantidade, custo_unit: n.custo_unit, estoque_minimo: n.estoque_minimo })
   }
   const prod = itens.filter((i) => i.tipo === "produto")
   const mat = itens.filter((i) => i.tipo === "materia")
@@ -301,9 +330,14 @@ async function lancar(empresaId: string, pend: any): Promise<string> {
   }
   // Igual à tela: quem acabou de pagar sabe o preço de hoje, então atualiza o custo do cadastro.
   for (const i of itens) {
-    if (!i.custo_unit) continue
-    if (i.tipo === "produto") await sb.from("produtos").update({ preco_custo: i.custo_unit }).eq("id", i.id)
-    else await sb.from("materias_primas").update({ custo: i.custo_unit }).eq("id", i.id)
+    if (i.custo_unit) {
+      if (i.tipo === "produto") await sb.from("produtos").update({ preco_custo: i.custo_unit }).eq("id", i.id)
+      else await sb.from("materias_primas").update({ custo: i.custo_unit }).eq("id", i.id)
+    }
+    // Estoque mínimo dito na mesma mensagem ("mínimo 50") vale pro item.
+    if (i.estoque_minimo != null) {
+      await sb.from(i.tipo === "produto" ? "produtos" : "materias_primas").update({ estoque_minimo: i.estoque_minimo }).eq("id", i.id).eq("empresa_id", empresaId)
+    }
   }
   await sb.from("estoque_whatsapp").update({
     status: "lancado", lancado_em: new Date().toISOString(), mov_produtos: idsP, mov_materias: idsM,
@@ -318,13 +352,34 @@ async function executarAcao(empresaId: string, a: any): Promise<string> {
   let antes: Record<string, unknown> = {}
   let ok_ = ""
   if (a.tipo === "cadastrar_produto") {
+    if (Number(p.quantidade_inicial) > 0) await exigirEstoqueLigado(empresaId)
     const { data, error } = await sb.from("produtos").insert({
       empresa_id: empresaId, nome: p.nome, categoria: p.categoria || "outros",
-      preco_venda: p.preco_venda, preco_custo: p.preco_custo ?? 0,
+      preco_venda: p.preco_venda, preco_custo: p.preco_custo ?? 0, estoque_minimo: p.estoque_minimo ?? 0,
     }).select("id").single()
     if (error) throw error
     antes = { produto_id: data.id }
-    ok_ = `✅ Produto *${p.nome}* cadastrado por ${brl(Number(p.preco_venda))}. Falta só a foto — coloque pelo Portal em Catálogo.`
+    // Estoque inicial: entra como ENTRADA (a regra da loja é "entrada só soma", nunca ajuste que esconde furo).
+    if (Number(p.quantidade_inicial) > 0) {
+      const { data: mov, error: eMov } = await sb.from("estoque_movimentos").insert({
+        empresa_id: empresaId, produto_id: data.id, tipo: "entrada", quantidade: p.quantidade_inicial, motivo: "compra",
+        observacao: "Estoque inicial (cadastro pelo WhatsApp)", custo_unit: p.preco_custo || null,
+        valor_total: p.preco_custo ? Math.round(p.preco_custo * p.quantidade_inicial * 100) / 100 : null,
+      }).select("id").single()
+      if (eMov) { await sb.from("produtos").delete().eq("id", data.id); throw eMov }
+      antes = { produto_id: data.id, mov_id: mov.id }
+    }
+    ok_ = `✅ Produto *${p.nome}* cadastrado por ${brl(Number(p.preco_venda))}${Number(p.quantidade_inicial) > 0 ? `, com ${qtdTxt(Number(p.quantidade_inicial))} em estoque` : ""}${p.estoque_minimo ? ` e mínimo ${qtdTxt(Number(p.estoque_minimo))}` : ""}. Falta só a foto — coloque pelo Portal em Catálogo.`
+  } else if (a.tipo === "definir_minimo") {
+    const antesItens: any[] = []
+    for (const it of (p.itens ?? [])) {
+      const tab = it.tipo === "produto" ? "produtos" : "materias_primas"
+      const { error } = await sb.from(tab).update({ estoque_minimo: it.para }).eq("id", it.id).eq("empresa_id", empresaId)
+      if (error) throw error
+      antesItens.push({ tab, id: it.id, de: it.de })
+    }
+    antes = { itens: antesItens }
+    ok_ = `✅ Estoque mínimo definido: ${(p.itens ?? []).map((it: any) => `${it.nome} = ${qtdTxt(Number(it.para))}`).join(", ")}. Agora eu aviso quando chegar nesse número.`
   } else if (a.tipo === "mudar_preco") {
     const { error } = await sb.from("produtos").update({ preco_venda: p.para }).eq("id", p.produto_id).eq("empresa_id", empresaId)
     if (error) throw error
@@ -354,7 +409,10 @@ Se foi engano, responda *DESFAZER*.`
 
 async function desfazerAcao(empresaId: string, a: any): Promise<string> {
   const x = a.antes ?? {}
-  if (a.tipo === "cadastrar_produto") {
+  if (a.tipo === "definir_minimo") {
+    for (const it of (x.itens ?? [])) await sb.from(it.tab).update({ estoque_minimo: it.de }).eq("id", it.id).eq("empresa_id", empresaId)
+  } else if (a.tipo === "cadastrar_produto") {
+    if (x.mov_id) await sb.from("estoque_movimentos").delete().eq("id", x.mov_id)
     const { error } = await sb.from("produtos").delete().eq("id", x.produto_id).eq("empresa_id", empresaId)
     if (error) await sb.from("produtos").update({ ativo: false, arquivado_em: new Date().toISOString() }).eq("id", x.produto_id)
   } else if (a.tipo === "mudar_preco") {
@@ -379,6 +437,78 @@ async function ultimasConversas(empresaId: string) {
   ])
 }
 
+// ── Comandos de estoque SEM IA (custo zero) ────────────────────────────────
+// "o que está acabando?", "lista o estoque", "estoque de bebidas", "tem pão?" são consultas fixas:
+// o robô responde direto do banco. Chamar a IA pra isso custava ~R$ 0,3 por pergunta e dava o mesmo resultado.
+type Saldo = { tipo: "produto" | "insumo"; id: string; nome: string; categoria: string; unidade: string; saldo: number; minimo: number; controla: boolean }
+
+function paginar(linhas: string[], cabecalho: string, limite = 3200): string[] {
+  const out: string[] = []
+  let atual = cabecalho
+  for (const l of linhas) {
+    if (atual.length + l.length + 1 > limite) { out.push(atual); atual = "(continua)" }
+    atual += "\n" + l
+  }
+  out.push(atual)
+  return out
+}
+const linhaSaldo = (s: Saldo) => {
+  const baixo = s.minimo > 0 && s.saldo <= s.minimo
+  return `• ${s.nome} — ${qtdTxt(s.saldo)} ${s.unidade}${s.minimo > 0 ? ` (mín ${qtdTxt(s.minimo)})` : ""}${baixo ? " ⚠️" : ""}`
+}
+
+async function comandoEstoque(t: string, empresaId: string): Promise<string[] | null> {
+  if (t.length > 90 || /\d/.test(t)) return null                       // com número é compra/lançamento, não consulta
+  const baixo = /(estoque baixo|baixo estoque|acabando|em falta|faltando|abaixo do minimo|precisa(m)? repor|o que repor|repor)/.test(t)
+  const lista = t.match(/^(lista|listar|liste|mostra|mostrar|manda|mandar|ver|me (da|passa|manda|mostra)|quero ver|como (esta|ta)|qual (e )?o)\s+(o\s+|todo\s+o\s+|todos\s+os\s+|meu\s+|meus\s+)?(estoque|produtos|insumos|materias? primas?)(\s+(de|da|do|dos|das)\s+(.+?))?\s*\??$/)
+  const estoqueDe = t.match(/^estoque(\s+(de|da|do|dos|das))?\s+(.+?)\s*\??$/)
+  const tem = t.match(/^(ainda\s+)?(tem|temos|quanto\s+(tenho|tem|temos)\s+(de|do|da)|saldo\s+(de|do|da))\s+(.+?)(\s+(no|em)\s+estoque)?\s*\??$/)
+  if (!baixo && !lista && !estoqueDe && !tem) return null
+
+  const { data, error } = await sb.rpc("estoque_bot_saldos", { p_empresa_id: empresaId })
+  if (error) { console.error("[estoque-wpp] saldos:", error.message); return ["Não consegui consultar o estoque agora. Tenta de novo em instantes."] }
+  const todos: Saldo[] = (data ?? []).map((r: any) => ({
+    tipo: r.tipo, id: r.id, nome: r.nome, categoria: r.categoria || "Sem categoria", unidade: r.unidade,
+    saldo: Number(r.saldo), minimo: Number(r.minimo || 0), controla: r.controla !== false,
+  }))
+  const controlados = todos.filter((s) => s.controla)
+
+  if (baixo && !lista && !estoqueDe && !tem) {
+    const abaixo = controlados.filter((s) => s.minimo > 0 && s.saldo <= s.minimo)
+    const zerados = controlados.filter((s) => s.minimo <= 0 && s.saldo <= 0)
+    const semMinimo = controlados.filter((s) => s.minimo <= 0).length
+    const msgs: string[] = []
+    if (abaixo.length) msgs.push(...paginar(abaixo.sort((a, b) => a.nome.localeCompare(b.nome)).map(linhaSaldo), `⚠️ *Abaixo do mínimo* (${abaixo.length}):`))
+    else msgs.push(`✅ Nada abaixo do mínimo.`)
+    if (zerados.length) msgs.push(`📉 *Zerados ou negativos, sem mínimo definido* (${zerados.length}):\n${zerados.slice(0, 25).map((s) => `• ${s.nome}`).join("\n")}${zerados.length > 25 ? `\n… e mais ${zerados.length - 25}` : ""}`)
+    if (semMinimo) msgs.push(`💡 ${semMinimo} ${semMinimo === 1 ? "item não tem" : "itens não têm"} estoque mínimo e por isso não entram no alerta. Defina com: "pão brioche mínimo 50".`)
+    return msgs
+  }
+
+  // Termo pedido (categoria, "insumos" ou nome de item).
+  let termo = norm((lista?.[9] ?? estoqueDe?.[3] ?? tem?.[6] ?? "").replace(/\?/g, ""))
+  const geral = lista && !termo && /estoque|produtos/.test(lista[6] ?? "")
+  const soInsumos = /insumo|materia/.test(lista?.[6] ?? "") || /^(insumos?|materias? primas?)$/.test(termo)
+  if (/^(estoque|todo estoque|tudo)$/.test(termo)) termo = ""
+
+  if (geral || (!termo && !soInsumos && !tem)) {
+    const cats = new Map<string, number>()
+    for (const s of controlados) cats.set(s.categoria, (cats.get(s.categoria) ?? 0) + 1)
+    if (controlados.length <= 40) return paginar(controlados.sort((a, b) => a.categoria.localeCompare(b.categoria) || a.nome.localeCompare(b.nome)).map(linhaSaldo), `📦 *Estoque* (${controlados.length} itens):`)
+    return [`📦 *Estoque*: ${controlados.filter((s) => s.tipo === "produto").length} produtos e ${controlados.filter((s) => s.tipo === "insumo").length} insumos.\n\nCategorias:\n${[...cats.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => `• ${c} (${n})`).join("\n")}\n\nPeça uma: *estoque de ${[...cats.keys()][0].toLowerCase()}* ou *estoque de insumos*. Pra ver o que está acabando: *o que está acabando?*`]
+  }
+  if (soInsumos) {
+    const ins = controlados.filter((s) => s.tipo === "insumo").sort((a, b) => a.nome.localeCompare(b.nome))
+    return ins.length ? paginar(ins.map(linhaSaldo), `🥩 *Insumos* (${ins.length}):`) : ["Nenhum insumo cadastrado ainda."]
+  }
+  const cat = controlados.filter((s) => norm(s.categoria) === termo || norm(s.categoria).startsWith(termo))
+  if (cat.length && !tem) return paginar(cat.sort((a, b) => a.nome.localeCompare(b.nome)).map(linhaSaldo), `📦 *${cat[0].categoria}* (${cat.length}):`)
+  const achados = todos.filter((s) => norm(s.nome).includes(termo))
+  if (!achados.length && tem && !lista && !estoqueDe) return null     // "tem algum problema…?" não é consulta de estoque
+  if (!achados.length) return [`Não achei "${termo}" no estoque (nem produto nem insumo). Pra cadastrar: mande o que comprou, ex.: "comprei 20 ${termo} a 5 reais".`]
+  return paginar(achados.slice(0, 40).map((s) => linhaSaldo(s) + (s.controla ? "" : " (não controla estoque)")), `🔎 *${termo}* (${achados.length}):`)
+}
+
 function textoDaMensagem(m: any): string {
   const x = m?.message ?? {}
   return String(
@@ -387,7 +517,7 @@ function textoDaMensagem(m: any): string {
   ).trim()
 }
 
-serve(async (req) => {
+async function tratar(req: Request): Promise<Response> {
   try {
     const payload = await req.json()
     if (payload.event !== "messages.upsert") return ok()
@@ -465,8 +595,15 @@ serve(async (req) => {
       return ok()
     }
 
+    // Consultas de estoque ("o que está acabando?", "lista o estoque", "tem pão?"): direto do banco, sem IA e sem cobrar.
+    const respEstoque = await comandoEstoque(t, empresaId)
+    if (respEstoque) {
+      for (const m of respEstoque) await enviar(instance, jid, m)
+      return ok()
+    }
+
     // ── Pendente / último lançamento ────────────────────────────────────────
-    const desde = new Date(Date.now() - VALIDADE_PENDENTE_MIN * 60000).toISOString()
+    const desde =new Date(Date.now() - VALIDADE_PENDENTE_MIN * 60000).toISOString()
     const { data: pend } = await sb.from("estoque_whatsapp").select("*")
       .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente").gte("created_at", desde)
       .order("created_at", { ascending: false }).limit(1).maybeSingle()
@@ -485,7 +622,7 @@ serve(async (req) => {
         try { await enviar(instance, jid, await executarAcao(empresaId, pendAcao)) }
         catch (e: any) {
           console.error("[estoque-wpp] acao:", e)
-          await enviar(instance, jid, "❌ Não consegui aplicar agora (erro no sistema). Nada foi alterado — tente de novo em instantes.")
+          await enviar(instance, jid, e?.message === ERRO_ESTOQUE_OFF ? AVISO_ESTOQUE_OFF : "❌ Não consegui aplicar agora (erro no sistema). Nada foi alterado — tente de novo em instantes.")
         }
         return ok()
       }
@@ -566,7 +703,8 @@ serve(async (req) => {
         await enviar(instance, jid, msgOk)
       } catch (e: any) {
         console.error("[estoque-wpp] lancar:", e)
-        await enviar(instance, jid, "❌ Não consegui lançar agora (erro no sistema). Nada foi gravado — tente de novo em instantes.")
+        await enviar(instance, jid, e?.message === ERRO_ESTOQUE_OFF ? AVISO_ESTOQUE_OFF
+          : "❌ Não consegui lançar agora (erro no sistema). Nada foi gravado — tente de novo em instantes.")
       }
     }
     const faltaPreco = (p: any) => [...(p.itens ?? []), ...(p.nao_achados ?? [])].filter((x: any) => x.custo_unit == null)
@@ -584,7 +722,7 @@ serve(async (req) => {
         try { await enviar(instance, jid, await executarAcao(empresaId, pendAcao)) }
         catch (e: any) {
           console.error("[estoque-wpp] acao:", e)
-          await enviar(instance, jid, "❌ Não consegui aplicar agora (erro no sistema). Nada foi alterado — tente de novo em instantes.")
+          await enviar(instance, jid, e?.message === ERRO_ESTOQUE_OFF ? AVISO_ESTOQUE_OFF : "❌ Não consegui aplicar agora (erro no sistema). Nada foi alterado — tente de novo em instantes.")
         }
         return ok()
       }
@@ -654,7 +792,7 @@ serve(async (req) => {
 
     const cat = await carregarCatalogo(empresaId)
     const base = pend ?? ultLancado     // a lista que a mensagem pode estar corrigindo
-    let resultado: { itens: Item[]; naoAchados: NaoAchado[]; ignorar?: boolean; pergunta?: boolean; corrige?: boolean; produtosNovos?: { nome: string; preco_venda: number | null; preco_custo: number | null; categoria: string }[]; aviso?: string | null; custoUsd: number } | null = null
+    let resultado: { itens: Item[]; naoAchados: NaoAchado[]; ignorar?: boolean; pergunta?: boolean; corrige?: boolean; produtosNovos?: ProdutoNovo[]; minimos?: MinimoSolto[]; aviso?: string | null; custoUsd: number } | null = null
     let origem = "texto"
     let textoFalado = ""
 
@@ -699,6 +837,22 @@ serve(async (req) => {
       return !error && resta <= 20 ? `\n\n⚠️ Restam *${resta}* créditos. Compre mais no Portal pra não ficar sem.` : ""
     }
 
+    // Só definir estoque mínimo de item que já existe ("pão brioche mínimo 50"): proposta com SIM.
+    if (resultado.minimos?.length && !resultado.itens.length && !resultado.naoAchados.length && !resultado.produtosNovos?.length) {
+      const itensMin: any[] = []
+      for (const m of resultado.minimos) {
+        const { data: atual } = await sb.from(m.tipo === "produto" ? "produtos" : "materias_primas").select("estoque_minimo").eq("id", m.id).maybeSingle()
+        itensMin.push({ tipo: m.tipo, id: m.id, nome: m.nome, de: Number(atual?.estoque_minimo ?? 0), para: m.minimo })
+      }
+      const resumoMin = `Definir estoque mínimo: ${itensMin.map((i) => `*${i.nome}* de ${qtdTxt(i.de)} para ${qtdTxt(i.para)}`).join(", ")}.`
+      await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+      await sb.from("assistente_acoes").insert({ empresa_id: empresaId, grupo_jid: jid, tipo: "definir_minimo", resumo: resumoMin, params: { itens: itensMin } })
+      const aviso = await cobrarUso(resumoMin)
+      await enviar(instance, jid, `${resumoMin}
+
+Responda *SIM* para aplicar ou *NÃO* para cancelar.${aviso}`)
+      return ok()
+    }
     // Cadastro de produto novo (só preço de venda é obrigatório). Vira uma proposta; o SIM aplica.
     if (resultado.produtosNovos?.length && !resultado.itens.length && !resultado.naoAchados.length) {
       const pn = resultado.produtosNovos[0]
@@ -712,11 +866,16 @@ serve(async (req) => {
       const { data: cats } = await sb.from("produtos").select("categoria").eq("empresa_id", empresaId).eq("ativo", true).limit(500)
       const existentes = [...new Set((cats ?? []).map((c: any) => String(c.categoria)))] as string[]
       const categoria = existentes.find((c) => norm(c) === norm(pn.categoria)) ?? (pn.categoria || "outros")
-      const resumoCad = `Cadastrar produto *${pn.nome}* por ${brl(pn.preco_venda)} na categoria ${categoria}${pn.preco_custo ? ` (custo ${brl(pn.preco_custo)})` : ""}${existentes.includes(categoria) ? "" : " — categoria nova"}.`
+      // Com estoque inicial, o custo é obrigatório (mesma regra da compra: entrada sem preço deixa o lucro às cegas).
+      if (pn.quantidade_inicial && !pn.preco_custo) {
+        await enviar(instance, jid, `Quanto você pagou em cada unidade de *${pn.nome}* (custo)? Me mande tudo de novo, ex.: "cadastra ${pn.nome} por ${brl(pn.preco_venda)}, tenho ${pn.quantidade_inicial}, custo 5".`)
+        return ok()
+      }
+      const resumoCad = `Cadastrar produto *${pn.nome}* por ${brl(pn.preco_venda)} na categoria ${categoria}${pn.preco_custo ? ` (custo ${brl(pn.preco_custo)})` : ""}${pn.quantidade_inicial ? `, com ${qtdTxt(pn.quantidade_inicial)} em estoque` : ""}${pn.estoque_minimo ? `, mínimo ${qtdTxt(pn.estoque_minimo)}` : ""}${existentes.includes(categoria) ? "" : " — categoria nova"}.`
       await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
       await sb.from("assistente_acoes").insert({
         empresa_id: empresaId, grupo_jid: jid, tipo: "cadastrar_produto", resumo: resumoCad,
-        params: { nome: pn.nome, preco_venda: pn.preco_venda, categoria, preco_custo: pn.preco_custo },
+        params: { nome: pn.nome, preco_venda: pn.preco_venda, categoria, preco_custo: pn.preco_custo, quantidade_inicial: pn.quantidade_inicial, estoque_minimo: pn.estoque_minimo },
       })
       const aviso = await cobrarUso(resumoCad)
       await enviar(instance, jid, `${resumoCad}\n\nResponda *SIM* para cadastrar ou *NÃO* para cancelar.${aviso}`)
@@ -753,4 +912,33 @@ serve(async (req) => {
     console.error("[estoque-wpp] erro:", e)
     return ok()
   }
+}
+
+// Esta função age na loja (lança estoque, muda preço…), então só aceita quem tem a chave de SERVIÇO: o webhook
+// principal repassa com ela. Sem isso qualquer um podia forjar uma mensagem de grupo. A chave é conferida chamando
+// uma função do banco que só o service_role executa (vale pra qualquer formato de chave de serviço).
+const chavesValidas = new Map<string, number>()
+async function ehChaveDeServico(token: string): Promise<boolean> {
+  if (!token) return false
+  if (token === SUPABASE_KEY) return true
+  const vistoEm = chavesValidas.get(token)
+  if (vistoEm && Date.now() - vistoEm < 10 * 60_000) return true
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/estoque_bot_saldos`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", apikey: token, Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ p_empresa_id: "00000000-0000-0000-0000-000000000000" }),
+  }).catch(() => null)
+  if (r?.ok) { chavesValidas.set(token, Date.now()); return true }
+  return false
+}
+
+serve(async (req) => {
+  const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim()
+  if (!(await ehChaveDeServico(token))) return new Response("forbidden", { status: 403 })
+  if (req.headers.get("x-teste") === "1") {
+    const captura: string[] = []
+    await capturaTeste.run(captura, () => tratar(req))
+    return new Response(JSON.stringify({ respostas: captura }), { headers: { "Content-Type": "application/json" } })
+  }
+  return tratar(req)
 })

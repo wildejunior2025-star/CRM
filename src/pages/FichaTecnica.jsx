@@ -99,7 +99,7 @@ function fichaUsa(id, alvo, itensPorFicha, vistos = new Set()) {
   return (itensPorFicha[id] || []).some(it => it.ficha_ref_id && fichaUsa(it.ficha_ref_id, alvo, itensPorFicha, vistos))
 }
 
-const emptyMateria = { nome: '', unidade: 'kg', custo: '', ativo: true, quantidade: '', pago: '' }
+const emptyMateria = { nome: '', unidade: 'kg', custo: '', ativo: true, quantidade: '', pago: '', estoque_minimo: '' }
 const linhaVazia = () => ({ materia_prima_id: '', ficha_ref_id: '', nome: '', quantidade: '', unidade: 'g', custo_unit: 0 })
 const emptyFicha = {
   nome: '', produto_id: '', complemento_opcao_id: '', rendimento: '', unid_rendimento: 'g',
@@ -414,7 +414,7 @@ export default function FichaTecnica() {
   }
   function abrirEditarMateria(m) {
     setMateriaEdit(m)
-    setMateriaForm({ nome: m.nome, unidade: m.unidade, custo: String(m.custo ?? ''), ativo: m.ativo })
+    setMateriaForm({ nome: m.nome, unidade: m.unidade, custo: String(m.custo ?? ''), ativo: m.ativo, estoque_minimo: Number(m.estoque_minimo) > 0 ? String(m.estoque_minimo) : '' })
     setShowMateria(true)
   }
   async function salvarMateria(e) {
@@ -431,6 +431,7 @@ export default function FichaTecnica() {
       unidade: materiaForm.unidade,
       custo: custoDigitado > 0 ? custoDigitado : (materiaUnit ?? 0),
       ativo: !!materiaForm.ativo,
+      estoque_minimo: Number(String(materiaForm.estoque_minimo ?? '').replace(',', '.')) || 0,
     }
     setSalvandoMateria(true)
     try {
@@ -1065,7 +1066,12 @@ export default function FichaTecnica() {
                       {!m.ativo && <span className="badge badge-neutral" style={{ marginLeft: 6 }}>inativa</span>}
                     </td>
                     <td>{brl(m.custo)} <span style={{ color: 'var(--text-muted)' }}>/ {m.unidade}</span></td>
-                    <td style={{ fontWeight: 700, color: saldo < 0 ? 'var(--danger)' : 'var(--text)' }}>{fmtQtd(saldo, m.unidade)}</td>
+                    <td style={{ fontWeight: 700, color: saldo < 0 ? 'var(--danger)' : 'var(--text)' }}>
+                      {fmtQtd(saldo, m.unidade)}
+                      {Number(m.estoque_minimo) > 0 && saldo <= Number(m.estoque_minimo) && (
+                        <span style={{ marginLeft: 6, padding: '2px 7px', borderRadius: 6, fontSize: 11.5, fontWeight: 700, background: 'rgba(220,38,38,.12)', color: 'var(--danger, #dc2626)' }} title={`Mínimo: ${fmtQtd(Number(m.estoque_minimo), m.unidade)}`}>⚠️ baixo</span>
+                      )}
+                    </td>
                     <td style={{ fontWeight: 700 }}>{brl(valor)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1347,6 +1353,12 @@ export default function FichaTecnica() {
                 {materiaUnit != null && !materiaForm.custo && (
                   <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Vai entrar com {brl(materiaUnit)}, tirado da compra abaixo.</span>
                 )}
+              </div>
+              <div className="form-field">
+                <label>Estoque mínimo ({materiaForm.unidade})</label>
+                <input inputMode="decimal" placeholder="Ex.: 10 (0 = não avisar)" value={materiaForm.estoque_minimo}
+                  onChange={e => setMateriaForm(f => ({ ...f, estoque_minimo: e.target.value }))} />
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Quando o saldo chegar nesse número, o assistente do WhatsApp avisa que está acabando.</span>
               </div>
               {/* Cadastrar e dar entrada no mesmo clique: quem acabou de chegar da
                   feira com um item novo não quer fazer as duas coisas separadas. */}
