@@ -4,7 +4,6 @@ import { calcIfoodLiquido, FORMA_ENTREGA_LABEL } from '../lib/ifoodLiquido'
 import IfoodIcon from '../components/IfoodIcon'
 import DespesasLucro from './DespesasLucro'
 import ClientesFiado from './ClientesFiado'
-import ContasPagarReceber from './ContasPagarReceber'
 import ConciliacaoIfood from '../components/ConciliacaoIfood'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
@@ -63,7 +62,7 @@ export default function Financeiro() {
   const empresaId = profile?.empresa_id
 
   // Lembra a aba escolhida (não volta pro Recebimentos ao sair e voltar da tela).
-  const [aba, setAba] = useState(() => { try { return localStorage.getItem('fin_aba') || 'recebimentos' } catch { return 'recebimentos' } })
+  const [aba, setAba] = useState(() => { try { const a = localStorage.getItem('fin_aba'); return !a || a === 'contas' ? 'recebimentos' : a } catch { return 'recebimentos' } })
   const trocarAba = (id) => { setAba(id); try { localStorage.setItem('fin_aba', id) } catch { /* ignora */ } }
   const [periodoD, setPeriodoD] = useState('mes')
   const [custIni, setCustIni]   = useState(ymd(new Date()))
@@ -412,7 +411,7 @@ export default function Financeiro() {
 
       {/* Abas do Financeiro */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
-        {[['recebimentos', '💵 Recebimentos'], ['lucro', '📊 Despesas & Lucro'], ['contas', '🗓️ Contas a pagar e receber'], ['fiado', '🧾 Fiado'],
+        {[['recebimentos', '💵 Recebimentos'], ['lucro', '📊 Despesas & Lucro'],['fiado', '🧾 Fiado'],
           // Só pra quem tem loja conectada no iFood (syncIfood null = não tem).
           ...(syncIfood ? [['ifood', '🧾 Conciliação iFood']] : [])].map(([id, lb]) => (
           <button key={id} type="button" onClick={() => trocarAba(id)}
@@ -423,9 +422,7 @@ export default function Financeiro() {
         ))}
       </div>
 
-      {aba === 'lucro' && <DespesasLucro empresaId={empresaId} />}
-
-      {aba === 'contas' && <ContasPagarReceber empresaId={empresaId} onAbrirFiado={() => trocarAba('fiado')} />}
+      {aba === 'lucro' && <DespesasLucro empresaId={empresaId} onAbrirFiado={() => trocarAba('fiado')} />}
 
       {aba === 'fiado' && <ClientesFiado empresaId={empresaId} />}
 

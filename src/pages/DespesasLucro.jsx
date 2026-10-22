@@ -5,6 +5,7 @@ import { diasAbertosNoMes, comoFicaNoDia, carregarExcecoes } from '../lib/feriad
 import { semanaDe, rotuloSemana } from '../lib/semana'
 import BuscaSelect from '../components/BuscaSelect'
 import ConsumoFuncionario from '../components/ConsumoFuncionario'
+import ContasPagarReceber from './ContasPagarReceber'
 import '../components/Page.css'
 import { recadoDeErro } from '../lib/erroRede'
 
@@ -93,7 +94,7 @@ const emptyFunc = { nome: '', cargo: '', salario_mensal: '' }
 const emptyProd = () => ({ modo: 'cadastrado', item: '', qtd_feita: '', qtd_sobrou: '', unidade: 'kg', nome: '', valor: '' })
 const emptyImprev = { tipo: 'pedido', numero: '', descricao: '', valor: '', info: null, produto_id: '', quantidade: '' }
 
-export default function DespesasLucro({ empresaId }) {
+export default function DespesasLucro({ empresaId, onAbrirFiado }) {
   const hoje = new Date()
   const hojeYMD = ymd(hoje)
 
@@ -655,7 +656,7 @@ export default function DespesasLucro({ empresaId }) {
     <div>
       {/* sub-abas */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap' }}>
-        {[['hoje', '📊 Dia a dia'], ['historico', '📜 Histórico de despesas diárias']].map(([id, lb]) => (
+        {[['hoje', '📊 Dia a dia'], ['historico', '📜 Histórico de despesas diárias'], ['contas', '🗓️ Contas a pagar e receber']].map(([id, lb]) => (
           <button key={id} type="button" onClick={() => setSub(id)}
             style={{ padding: '7px 14px', borderRadius: 999, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
               background: sub === id ? 'var(--primary)' : 'transparent', color: sub === id ? '#fff' : 'var(--text-muted)' }}>
@@ -664,8 +665,10 @@ export default function DespesasLucro({ empresaId }) {
         ))}
       </div>
 
-      {error && <div className="card error-text" style={{ marginBottom: 16 }}>{error}</div>}
-      {loading && <div className="card">Carregando…</div>}
+      {sub === 'contas' && <ContasPagarReceber empresaId={empresaId} onAbrirFiado={onAbrirFiado} />}
+
+      {sub !== 'contas' && error && <div className="card error-text" style={{ marginBottom: 16 }}>{error}</div>}
+      {sub !== 'contas' && loading && <div className="card">Carregando…</div>}
 
       {/* ═══════════════ HOJE ═══════════════ */}
       {!loading && sub === 'hoje' && (
