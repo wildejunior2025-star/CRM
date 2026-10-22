@@ -1773,9 +1773,21 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       // o número) vale mais que uma busca nova por texto — e é o mesmo ponto
       // que vai no pedido, então a taxa e o mapa do motoboy contam a mesma
       // história.
-      const coords = coordCliente ?? await geocodificarPreciso({ rua, numero, bairro, cidade, cep })
+      let coords = coordCliente ?? await geocodificarPreciso({ rua, numero, bairro, cidade, cep })
+      // Rua que o mapa não conhece (bairro novo, loteamento): em vez de não dar
+      // taxa nenhuma, mede até o CENTRO DO BAIRRO e avisa que é aproximado. O
+      // ponto do pedido continua vazio — o do bairro não serve pra o motoboy.
+      let aproximado = false
+      if (!coords && bairro.trim()) {
+        try {
+          const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent([bairro, cidade, 'Brasil'].filter(Boolean).join(', '))}&format=json&limit=1`,
+            { headers: { 'User-Agent': 'CRM-FWC/1.0' } })
+          const d = await r.json()
+          if (d?.[0]) { coords = { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }; aproximado = true }
+        } catch { /* sem rede: cai no erro de baixo */ }
+      }
       if (!coords) { setCalcTaxa({ loading: false, msg: { tipo: 'erro', txt: 'Não achei esse endereço no mapa. Digite a taxa manual.' } }); return }
-      if (!coordCliente) setCoordCliente(coords)
+      if (!coordCliente && !aproximado) setCoordCliente(coords)
       const dist = haversineKm(coords.lat, coords.lng, Number(emp.latitude), Number(emp.longitude))
       const faixas = Array.isArray(emp.taxas_entrega_km) ? emp.taxas_entrega_km : []
       let valor
@@ -1791,8 +1803,10 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       setCalcTaxa({
         loading: false,
         msg: {
-          tipo: foraRaio ? 'aviso' : 'ok',
-          txt: `${dist.toFixed(1)} km → taxa ${fmt(valor)}` + (foraRaio ? ` · ⚠️ fora do raio de ${emp.raio_entrega_km} km` : ''),
+          tipo: foraRaio || aproximado ? 'aviso' : 'ok',
+          txt: `${dist.toFixed(1)} km → taxa ${fmt(valor)}`
+            + (aproximado ? ' · ⚠️ aproximado pelo centro do bairro (a rua não está no mapa) — confira' : '')
+            + (foraRaio ? ` · ⚠️ fora do raio de ${emp.raio_entrega_km} km` : ''),
         },
       })
     } catch {
