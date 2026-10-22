@@ -203,6 +203,7 @@ async function rodarTool(sb: any, empresaId: string, nome: string, arg: any) {
   if (nome === "top_produtos")     return await topProdutos(sb, ini, fim, de, ate, limite)
   if (nome === "top_clientes")     return await topClientes(sb, ini, fim, de, ate, limite)
   if (nome === "situacao_agora")   return await situacaoAgora(sb, empresaId)
+  if (nome === "consultar_estoque")   return await consultarEstoque(sb, String(arg?.busca ?? ""))
   if (nome === "analisar_cardapio")   return await analisarCardapio(sb)
   if (nome === "analisar_financeiro") return await analisarFinanceiro(sb, empresaId)
   if (nome === "ver_entrega")         return await verEntrega(sb, empresaId)
@@ -507,6 +508,43 @@ TOOLS.push(
     input_schema: SEM_ARGS, strict: true,
   },
 )
+
+TOOLS.push({
+  name: "consultar_estoque",
+  description:
+    "Quanto tem em estoque de cada item, PRODUTOS do catalogo e INSUMOS (materia-prima). Sem busca, traz o " +
+    "resumo e os itens com menos saldo; com busca, traz os itens cujo nome contem o texto. Use para 'tem pao " +
+    "cadastrado?', 'quanto tenho de hamburguer', 'o que ta zerado', 'valor parado em estoque'.",
+  input_schema: {
+    type: "object",
+    properties: { busca: { type: "string", description: "Parte do nome do item; vazio para o resumo geral." } },
+    required: ["busca"], additionalProperties: false,
+  },
+  strict: true,
+})
+
+async function consultarEstoque(sb: any, busca: string) {
+  const termo = normNome(busca)
+  const [prod, mat] = await Promise.all([
+    todos((a, b) => sb.from("estoque_saldo").select("nome, categoria, quantidade_atual, estoque_minimo, controla_estoque").order("nome").range(a, b)),
+    todos((a, b) => sb.from("materia_prima_saldo").select("nome, unidade, custo, quantidade_atual").order("nome").range(a, b)),
+  ])
+  const p = prod.map((x: any) => ({ tipo: "produto", nome: x.nome, tem: Number(x.quantidade_atual), minimo: Number(x.estoque_minimo), controla: x.controla_estoque !== false }))
+  const m = mat.map((x: any) => ({ tipo: "insumo", nome: x.nome, unidade: x.unidade, tem: Number(x.quantidade_atual), valor_parado: brl(Number(x.quantidade_atual) * Number(x.custo || 0)) }))
+  if (termo) {
+    const achados = [...p, ...m].filter((i: any) => normNome(i.nome).includes(termo))
+    return { busca, encontrados: achados.slice(0, 30), total_encontrado: achados.length,
+             nota: achados.length ? undefined : "Nenhum produto nem insumo tem esse nome no cadastro." }
+  }
+  const comEstoque = p.filter((i: any) => i.controla)
+  return {
+    produtos_cadastrados: p.length, insumos_cadastrados: m.length,
+    produtos_zerados_ou_negativos: comEstoque.filter((i: any) => i.tem <= 0).length,
+    menores_saldos_produtos: [...comEstoque].sort((a: any, b: any) => a.tem - b.tem).slice(0, 12),
+    menores_saldos_insumos: [...m].sort((a: any, b: any) => a.tem - b.tem).slice(0, 12),
+    valor_parado_em_insumos: brl(m.reduce((s: number, i: any) => s + Number(i.valor_parado.replace(/[^0-9.]/g, "") || 0), 0)),
+  }
+}
 
 // Propostas de escrita — SÓ no WhatsApp. Gravam um pedido pendente; quem aplica é o SIM do dono.
 const TOOL_PROPOR_ACAO = {
