@@ -1172,7 +1172,9 @@ async function geocodificarPreciso({ rua, numero, bairro, cidade, estado, cep } 
   // cadastro velho) levava o ponto pra OUTRA rua São José e a taxa saía por
   // 2,6 km numa casa a 250 m da loja (Mickey Burguer, 21/10/2026). O bairro
   // escolhe a rua certa; o CEP fica de reserva.
-  if (bairro && String(bairro).trim() && rua && numero) {
+  // Sem o número também vale (o botão "Calcular pela distância" serve pra
+  // isso): o mapa devolve a rua, o suficiente pra faixa de km.
+  if (bairro && String(bairro).trim() && rua) {
     const comBairro = [rua, numero, bairro, cidade, estado].filter(v => v && String(v).trim()).join(', ')
     const c = await pega(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(comBairro + ', Brasil')}&format=json&limit=1`)
     if (c) return c
@@ -1836,6 +1838,10 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
     }, 900)
     return () => { vivo = false; clearTimeout(t) }
   }, [rua, numero, bairro, cidade, cep, tipo])
+
+  // Mexeu no endereço: o "2,6 km → taxa R$ 8,00" de antes era de OUTRO
+  // endereço e não pode ficar na tela parecendo o cálculo deste.
+  useEffect(() => { setCalcTaxa(c => (c.msg ? { loading: false, msg: null } : c)) }, [rua, numero, bairro, cidade, cep])
 
   // Endereço mudou de verdade? O pino do cliente era do endereço ANTIGO.
   useEffect(() => {
