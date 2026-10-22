@@ -134,8 +134,9 @@ async function entenderTexto(
     "Regras:",
     "- 'ignorar' = true quando a mensagem NÃO é sobre uma compra/entrada de mercadoria (papo, pergunta, cumprimento).",
     "  Nesse caso devolva itens e nao_encontrados vazios.",
-    "- 'pergunta' = true quando (e só quando) a pessoa PEDE uma informação ou ajuda sobre a loja ou o sistema",
-    "  (ex.: 'quanto vendi hoje', 'o que tá acabando', 'como cadastro um produto'). Cumprimento e papo = false.",
+    "- 'pergunta' = true quando (e só quando) a pessoa PEDE uma informação, análise ou ajuda sobre a loja ou o sistema,",
+    "  ou pede pro robô FAZER algo na loja (ex.: 'quanto vendi hoje', 'o que tá acabando', 'faz um diagnóstico',",
+    "  'cadastra o produto X a 12 reais', 'muda o preço da pizza', 'aumenta a taxa de entrega'). Cumprimento e papo = false.",
     "- Cada item comprado: ache a linha do CATÁLOGO que corresponde (apelido e nome abreviado valem) e use o INDICE.",
     "  Nada razoável no catálogo → 'nao_encontrados', com o nome por extenso em minúsculo e a 'unidade'",
     "  (kg, g, L, ml ou un) — esse item vai ser CADASTRADO com esse nome.",
@@ -282,6 +283,62 @@ async function lancar(empresaId: string, pend: any): Promise<string> {
   return `✅ Lancei ${itens.length} ${itens.length === 1 ? "item" : "itens"} no estoque.${novos}\nSe foi engano, responda *DESFAZER*.`
 }
 
+// Aplica uma proposta do assistente (depois do SIM). Guarda em `antes` o que precisa pro DESFAZER.
+async function executarAcao(empresaId: string, a: any): Promise<string> {
+  const p = a.params ?? {}
+  let antes: Record<string, unknown> = {}
+  let ok_ = ""
+  if (a.tipo === "cadastrar_produto") {
+    const { data, error } = await sb.from("produtos").insert({
+      empresa_id: empresaId, nome: p.nome, categoria: p.categoria || "outros",
+      preco_venda: p.preco_venda, preco_custo: p.preco_custo ?? 0,
+    }).select("id").single()
+    if (error) throw error
+    antes = { produto_id: data.id }
+    ok_ = `✅ Produto *${p.nome}* cadastrado por ${brl(Number(p.preco_venda))}. Falta só a foto — coloque pelo Portal em Catálogo.`
+  } else if (a.tipo === "mudar_preco") {
+    const { error } = await sb.from("produtos").update({ preco_venda: p.para }).eq("id", p.produto_id).eq("empresa_id", empresaId)
+    if (error) throw error
+    antes = { produto_id: p.produto_id, preco_venda: p.de }
+    ok_ = `✅ Preço de *${p.nome}* agora é ${brl(Number(p.para))}.`
+  } else if (a.tipo === "taxa_entrega_fixa" || a.tipo === "pedido_minimo") {
+    const campo = a.tipo === "taxa_entrega_fixa" ? "taxa_entrega" : "pedido_minimo"
+    const { error } = await sb.from("empresas").update({ [campo]: p.para }).eq("id", empresaId)
+    if (error) throw error
+    antes = { campo, valor: p.de }
+    ok_ = a.tipo === "taxa_entrega_fixa" ? `✅ Taxa de entrega fixa agora é ${brl(Number(p.para))}.` : `✅ Pedido mínimo agora é ${brl(Number(p.para))}.`
+  } else if (a.tipo === "ajustar_tabela_km") {
+    const { data: e } = await sb.from("empresas").select("taxas_entrega_km").eq("id", empresaId).maybeSingle()
+    const tab: any[] = Array.isArray(e?.taxas_entrega_km) ? e!.taxas_entrega_km : []
+    const nova = tab.map((f) => Number(f.taxa) > 0 ? { ...f, taxa: Math.max(0, Math.round((Number(f.taxa) + Number(p.delta)) * 100) / 100) } : f)
+    const { error } = await sb.from("empresas").update({ taxas_entrega_km: nova }).eq("id", empresaId)
+    if (error) throw error
+    antes = { tabela: tab }
+    ok_ = `✅ Tabela de entrega por km ajustada em ${brl(Number(p.delta))} (${tab.length} faixas).`
+  } else {
+    throw new Error("tipo desconhecido")
+  }
+  await sb.from("assistente_acoes").update({ status: "executada", antes, executada_em: new Date().toISOString() }).eq("id", a.id)
+  return `${ok_}
+Se foi engano, responda *DESFAZER*.`
+}
+
+async function desfazerAcao(empresaId: string, a: any): Promise<string> {
+  const x = a.antes ?? {}
+  if (a.tipo === "cadastrar_produto") {
+    const { error } = await sb.from("produtos").delete().eq("id", x.produto_id).eq("empresa_id", empresaId)
+    if (error) await sb.from("produtos").update({ ativo: false, arquivado_em: new Date().toISOString() }).eq("id", x.produto_id)
+  } else if (a.tipo === "mudar_preco") {
+    await sb.from("produtos").update({ preco_venda: x.preco_venda }).eq("id", x.produto_id).eq("empresa_id", empresaId)
+  } else if (a.tipo === "taxa_entrega_fixa" || a.tipo === "pedido_minimo") {
+    await sb.from("empresas").update({ [x.campo]: x.valor }).eq("id", empresaId)
+  } else if (a.tipo === "ajustar_tabela_km") {
+    await sb.from("empresas").update({ taxas_entrega_km: x.tabela }).eq("id", empresaId)
+  }
+  await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("id", a.id)
+  return `↩️ Desfeito: ${a.resumo}`
+}
+
 // Últimas trocas do assistente no zap (30 min), pra a pergunta seguinte ter contexto ("e ontem?").
 async function ultimasConversas(empresaId: string) {
   const desde = new Date(Date.now() - 30 * 60000).toISOString()
@@ -350,7 +407,21 @@ serve(async (req) => {
       .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente").gte("created_at", desde)
       .order("created_at", { ascending: false }).limit(1).maybeSingle()
 
-    if (/^(sim|s|ok|pode|pode lancar|lanca|lancar|confirmo|confirmar|isso|isso mesmo|certo)\W*$/.test(t)) {
+    const { data: pendAcao } = await sb.from("assistente_acoes").select("*")
+      .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente").gte("created_at", desde)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle()
+    // O que o dono confirma é sempre a coisa mais RECENTE que o robô mostrou.
+    const acaoMaisNova = !!pendAcao && (!pend || pendAcao.created_at > pend.created_at)
+
+    if (/^(sim|s|ok|pode|pode lancar|lanca|lancar|confirmo|confirmar|isso|isso mesmo|certo|pode fazer|faz|aplicar|aplica)\W*$/.test(t)) {
+      if (acaoMaisNova) {
+        try { await enviar(instance, jid, await executarAcao(empresaId, pendAcao)) }
+        catch (e: any) {
+          console.error("[estoque-wpp] acao:", e)
+          await enviar(instance, jid, "❌ Não consegui aplicar agora (erro no sistema). Nada foi alterado — tente de novo em instantes.")
+        }
+        return ok()
+      }
       if (!pend) return ok()
       if (!(pend.itens ?? []).length && !(pend.nao_achados ?? []).length) {
         await enviar(instance, jid, "Não tem nenhum item reconhecido pra lançar. Mande de novo o que comprou.")
@@ -365,6 +436,11 @@ serve(async (req) => {
       return ok()
     }
     if (/^(nao|n|cancela|cancelar|cancelado|deixa|esquece)\W*$/.test(t)) {
+      if (acaoMaisNova) {
+        await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("id", pendAcao.id)
+        await enviar(instance, jid, "Cancelado. Nada foi alterado.")
+        return ok()
+      }
       if (!pend) return ok()
       await sb.from("estoque_whatsapp").update({ status: "cancelado" }).eq("id", pend.id)
       await enviar(instance, jid, "Cancelado. Nada foi lançado.")
@@ -375,7 +451,14 @@ serve(async (req) => {
       const { data: ult } = await sb.from("estoque_whatsapp").select("*")
         .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "lancado").gte("lancado_em", lim)
         .order("lancado_em", { ascending: false }).limit(1).maybeSingle()
-      if (!ult) { await enviar(instance, jid, "Não achei lançamento recente pra desfazer (só dá até 3 horas depois)."); return ok() }
+      const { data: ultAcao } = await sb.from("assistente_acoes").select("*")
+        .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "executada").gte("executada_em", lim)
+        .order("executada_em", { ascending: false }).limit(1).maybeSingle()
+      if (ultAcao && (!ult || ultAcao.executada_em > ult.lancado_em)) {
+        await enviar(instance, jid, await desfazerAcao(empresaId, ultAcao))
+        return ok()
+      }
+      if (!ult) { await enviar(instance, jid, "Não achei nada recente pra desfazer (só dá até 3 horas depois)."); return ok() }
       if (ult.mov_produtos?.length) await sb.from("estoque_movimentos").delete().in("id", ult.mov_produtos)
       if (ult.mov_materias?.length) await sb.from("materia_prima_movimentos").delete().in("id", ult.mov_materias)
       await sb.from("estoque_whatsapp").update({ status: "cancelado" }).eq("id", ult.id)
@@ -445,7 +528,7 @@ serve(async (req) => {
       const r = await fetch(`${SUPABASE_URL}/functions/v1/assistente-loja`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY },
-        body: JSON.stringify({ empresa_id: empresaId, pergunta: textoFalado || texto, historico: await ultimasConversas(empresaId) }),
+        body: JSON.stringify({ empresa_id: empresaId, pergunta: textoFalado || texto, grupo_jid: jid, historico: await ultimasConversas(empresaId) }),
       })
       const d = await r.json().catch(() => null)
       await enviar(instance, jid, d?.resposta || d?.erro || "Não consegui responder agora. Tenta de novo em instantes.")

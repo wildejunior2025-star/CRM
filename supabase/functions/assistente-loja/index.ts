@@ -107,7 +107,7 @@ const CANAL: Record<string, string> = {
 const canalDoPedido = (origem: string) => CANAL[origem] ?? "Balcao"
 
 // ── as consultas que a IA pode pedir ────────────────────────────────────────
-const TOOLS = [
+const TOOLS: any[] = [
   {
     name: "consultar_vendas",
     description:
@@ -203,6 +203,9 @@ async function rodarTool(sb: any, empresaId: string, nome: string, arg: any) {
   if (nome === "top_produtos")     return await topProdutos(sb, ini, fim, de, ate, limite)
   if (nome === "top_clientes")     return await topClientes(sb, ini, fim, de, ate, limite)
   if (nome === "situacao_agora")   return await situacaoAgora(sb, empresaId)
+  if (nome === "analisar_cardapio")   return await analisarCardapio(sb)
+  if (nome === "analisar_financeiro") return await analisarFinanceiro(sb, empresaId)
+  if (nome === "ver_entrega")         return await verEntrega(sb, empresaId)
   return { erro: "Consulta desconhecida." }
 }
 
@@ -476,6 +479,231 @@ async function situacaoAgora(sb: any, empresaId: string) {
   }
 }
 
+// ── análise: cardápio, financeiro, entrega (só leitura) ─────────────────────
+const SEM_ARGS = { type: "object", properties: {}, required: [], additionalProperties: false }
+TOOLS.push(
+  {
+    name: "analisar_cardapio",
+    description:
+      "Raio-X do cardapio dos ultimos 30 dias: produtos sem foto, sem descricao, com preco zerado, sem custo " +
+      "(lucro as cegas), margem baixa, duplicados, sem nenhuma venda e o que mais vende. Use para 'analisa meu " +
+      "cardapio', 'o que ta errado nos meus produtos', 'o que tirar do cardapio', e dentro de um diagnostico.",
+    input_schema: SEM_ARGS, strict: true,
+  },
+  {
+    name: "analisar_financeiro",
+    description:
+      "Financeiro dos ultimos 30 dias contra os 30 anteriores: faturamento, ticket medio, canais, formas de " +
+      "pagamento, lucro dos dias fechados, taxas da maquininha e fiado. Use para 'como ta meu financeiro', " +
+      "'to ganhando ou perdendo', 'meu faturamento caiu?', e dentro de um diagnostico.",
+    input_schema: SEM_ARGS, strict: true,
+  },
+  {
+    name: "ver_entrega",
+    description:
+      "Taxa de entrega: configuracao atual (taxa fixa, tabela por km, bairros, pedido minimo, tempos) e o que " +
+      "aconteceu nos ultimos 30 dias — quanto foi cobrado do cliente, quanto foi pago ao entregador e o saldo, por " +
+      "bairro. Use para 'minha taxa de entrega ta boa', 'to perdendo dinheiro na entrega', e dentro de um diagnostico.",
+    input_schema: SEM_ARGS, strict: true,
+  },
+)
+
+// Propostas de escrita — SÓ no WhatsApp. Gravam um pedido pendente; quem aplica é o SIM do dono.
+const TOOL_PROPOR_ACAO = {
+  name: "propor_acao",
+  description:
+    "Prepara uma MUDANCA na loja para o dono confirmar com SIM. Voce NAO executa nada: so propoe. Tipos: " +
+    "cadastrar_produto (nome, preco_venda, categoria opcional, preco_custo opcional), mudar_preco (produto, preco_venda), " +
+    "taxa_entrega_fixa (valor), pedido_minimo (valor), ajustar_tabela_km (valor = quanto somar, negativo reduz, em todas " +
+    "as faixas de km que cobram taxa). Depois de chamar, mostre o resumo ao dono e diga que ele confirma com *SIM* " +
+    "(ou *NAO* para cancelar). So proponha quando o dono PEDIR a mudanca.",
+  input_schema: {
+    type: "object",
+    properties: {
+      tipo: { type: "string", enum: ["cadastrar_produto", "mudar_preco", "taxa_entrega_fixa", "pedido_minimo", "ajustar_tabela_km"] },
+      nome: { type: "string", description: "cadastrar_produto: nome do produto novo." },
+      produto: { type: "string", description: "mudar_preco: nome (ou parte) do produto existente." },
+      preco_venda: { type: "number", description: "Preco de venda em reais." },
+      preco_custo: { type: "number", description: "Custo em reais, se o dono disse." },
+      categoria: { type: "string", description: "Categoria do produto novo, se o dono disse." },
+      valor: { type: "number", description: "Valor em reais (taxa, pedido minimo ou ajuste)." },
+    },
+    required: ["tipo"],
+  },
+}
+
+const normNome = (t: string) => String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim()
+const reais = (v: number) => "R$ " + Number(v).toFixed(2).replace(".", ",")
+const pct = (v: number) => Math.round(v * 10) / 10
+
+async function analisarCardapio(sb: any) {
+  const hoje = hojeBRT(), ini = somaDias(hoje, -29)
+  const [produtos, vendidos] = await Promise.all([
+    todos((a, b) => sb.from("produtos")
+      .select("id, nome, categoria, preco_custo, preco_venda, foto_url, descricao")
+      .eq("ativo", true).is("arquivado_em", null).order("id").range(a, b)),
+    topProdutos(sb, ini, hoje, iniISO(ini), fimISO(hoje), 20_000),
+  ])
+  const vendeu = new Set(vendidos.produtos.map((p: any) => normNome(p.produto)))
+  const nomes = (l: any[], n = 15) => l.slice(0, n).map((p: any) => p.nome)
+
+  const semFoto = produtos.filter((p: any) => !p.foto_url)
+  const semDesc = produtos.filter((p: any) => !String(p.descricao ?? "").trim())
+  const precoZero = produtos.filter((p: any) => !(Number(p.preco_venda) > 0))
+  const semCusto = produtos.filter((p: any) => !(Number(p.preco_custo) > 0) && Number(p.preco_venda) > 0)
+  const margens = produtos
+    .filter((p: any) => Number(p.preco_custo) > 0 && Number(p.preco_venda) > 0)
+    .map((p: any) => ({ nome: p.nome, margem_pct: pct((1 - Number(p.preco_custo) / Number(p.preco_venda)) * 100) }))
+    .sort((a: any, b: any) => a.margem_pct - b.margem_pct)
+  const porNome: Record<string, number> = {}
+  for (const p of produtos) { const k = normNome(p.nome); porNome[k] = (porNome[k] ?? 0) + 1 }
+  const porCat: Record<string, number> = {}
+  for (const p of produtos) porCat[p.categoria || "sem categoria"] = (porCat[p.categoria || "sem categoria"] ?? 0) + 1
+  const semVenda = produtos.filter((p: any) => !vendeu.has(normNome(p.nome)))
+
+  return {
+    periodo_vendas: { de: ini, ate: hoje },
+    produtos_ativos: produtos.length,
+    categorias: Object.entries(porCat).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([c, n]) => ({ categoria: c, produtos: n })),
+    sem_foto: { quantidade: semFoto.length, exemplos: nomes(semFoto) },
+    sem_descricao: { quantidade: semDesc.length },
+    preco_de_venda_zerado: { quantidade: precoZero.length, exemplos: nomes(precoZero) },
+    sem_custo_cadastrado: { quantidade: semCusto.length, exemplos: nomes(semCusto, 10), efeito: "sem custo o lucro desse produto nao e calculado" },
+    margem_mais_baixa: margens.slice(0, 10),
+    margem_media_pct: margens.length ? pct(margens.reduce((s: number, m: any) => s + m.margem_pct, 0) / margens.length) : null,
+    nomes_duplicados: Object.entries(porNome).filter(([, n]) => n > 1).map(([k, n]) => ({ nome: k, vezes: n })).slice(0, 15),
+    sem_nenhuma_venda_30d: { quantidade: semVenda.length, exemplos: nomes(semVenda, 20) },
+    mais_vendidos_30d: vendidos.produtos.slice(0, 8),
+  }
+}
+
+async function analisarFinanceiro(sb: any, empresaId: string) {
+  const hoje = hojeBRT(), ini = somaDias(hoje, -29), iniAnt = somaDias(hoje, -59), fimAnt = somaDias(hoje, -30)
+  const [atual, anterior, lucro, emp, fiado] = await Promise.all([
+    consultarVendas(sb, ini, hoje, iniISO(ini), fimISO(hoje)),
+    consultarVendas(sb, iniAnt, fimAnt, iniISO(iniAnt), fimISO(fimAnt)),
+    consultarLucro(sb, empresaId, ini, hoje, iniISO(ini), fimISO(hoje)),
+    sb.from("empresas").select("taxa_cartao_pct, taxa_credito_pct, taxa_debito_pct, meta_faturamento_mensal").eq("id", empresaId).maybeSingle(),
+    sb.from("clientes_saldo_fiado").select("saldo_fiado"),
+  ])
+  const { por_dia: _a, ...a } = atual as any
+  const { por_dia: _b, ...b } = anterior as any
+  const fa = Number(a.faturamento), fb = Number(b.faturamento)
+  const devedores = (fiado.data ?? []).filter((f: any) => Number(f.saldo_fiado) > 0)
+  return {
+    ultimos_30_dias: { de: ini, ate: hoje, ...a },
+    trinta_dias_anteriores: { de: iniAnt, ate: fimAnt, faturamento: b.faturamento, pedidos: b.pedidos, ticket_medio: b.ticket_medio },
+    variacao_faturamento_pct: fb > 0 ? pct(((fa - fb) / fb) * 100) : null,
+    lucro_dos_dias_fechados: lucro.totais_dos_dias_fechados,
+    dias_fechados: (lucro.dias_fechados as any[]).length,
+    dias_nao_fechados: (lucro.dias_nao_fechados as any[]).length,
+    taxas_maquininha_pct: { cartao: emp.data?.taxa_cartao_pct, credito: emp.data?.taxa_credito_pct, debito: emp.data?.taxa_debito_pct },
+    meta_mensal: Number(emp.data?.meta_faturamento_mensal || 0) > 0 ? brl(Number(emp.data.meta_faturamento_mensal)) : "nao definida",
+    fiado_em_aberto: brl(devedores.reduce((s: number, f: any) => s + Number(f.saldo_fiado), 0)),
+    clientes_devendo: devedores.length,
+  }
+}
+
+async function verEntrega(sb: any, empresaId: string) {
+  const hoje = hojeBRT(), ini = somaDias(hoje, -29)
+  const [empRes, pedidos] = await Promise.all([
+    sb.from("empresas").select("aceita_entrega, aceita_retirada, taxa_entrega, pedido_minimo, raio_entrega_km, tempo_entrega_min, tempo_entrega_max, taxas_entrega_km, taxas_entrega_bairro")
+      .eq("id", empresaId).maybeSingle(),
+    todos((a, b) => sb.from("pedidos_delivery")
+      .select("tipo_entrega, taxa_entrega, valor_entregador, endereco_bairro, status, total")
+      .gte("created_at", iniISO(ini)).lt("created_at", fimISO(hoje)).order("created_at").range(a, b)),
+  ])
+  const e = empRes.data ?? {}
+  const validos = pedidos.filter((p: any) => pedidoVale(p.status))
+  const porTipo: Record<string, number> = {}
+  for (const p of validos) porTipo[p.tipo_entrega || "nao informado"] = (porTipo[p.tipo_entrega || "nao informado"] ?? 0) + 1
+  const comTaxa = validos.filter((p: any) => Number(p.taxa_entrega) > 0 || Number(p.valor_entregador) > 0)
+  const cobrado = comTaxa.reduce((s: number, p: any) => s + Number(p.taxa_entrega || 0), 0)
+  const pago = comTaxa.reduce((s: number, p: any) => s + Number(p.valor_entregador || 0), 0)
+  const bairros: Record<string, { n: number; cobrado: number; pago: number }> = {}
+  for (const p of comTaxa) {
+    const k = String(p.endereco_bairro || "sem bairro").trim()
+    bairros[k] ??= { n: 0, cobrado: 0, pago: 0 }
+    bairros[k].n++; bairros[k].cobrado += Number(p.taxa_entrega || 0); bairros[k].pago += Number(p.valor_entregador || 0)
+  }
+  const tabelaKm = Array.isArray(e.taxas_entrega_km) ? e.taxas_entrega_km : []
+  return {
+    configuracao: {
+      entrega_ligada: e.aceita_entrega !== false, retirada_ligada: e.aceita_retirada !== false,
+      taxa_fixa: brl(Number(e.taxa_entrega || 0)), pedido_minimo: brl(Number(e.pedido_minimo || 0)),
+      raio_km: e.raio_entrega_km, tempo_min: `${e.tempo_entrega_min}-${e.tempo_entrega_max} min`,
+      tabela_por_km: tabelaKm.length ? tabelaKm.map((f: any) => ({ ate_km: f.km, taxa: brl(Number(f.taxa)) })) : "nao usa",
+      taxas_por_bairro: Array.isArray(e.taxas_entrega_bairro) && e.taxas_entrega_bairro.length ? e.taxas_entrega_bairro : "nao usa",
+    },
+    ultimos_30_dias: {
+      pedidos: validos.length, por_tipo: porTipo,
+      entregas_com_taxa_ou_entregador: comTaxa.length,
+      taxa_cobrada_dos_clientes: brl(cobrado), pago_aos_entregadores: brl(pago),
+      saldo_da_entrega: brl(cobrado - pago),
+      taxa_media_cobrada: brl(comTaxa.length ? cobrado / comTaxa.length : 0),
+      custo_medio_entregador: brl(comTaxa.length ? pago / comTaxa.length : 0),
+      bairros_que_mais_pedem: Object.entries(bairros).sort((a, b) => b[1].n - a[1].n).slice(0, 8)
+        .map(([k, v]) => ({ bairro: k, entregas: v.n, taxa_media: brl(v.cobrado / v.n), entregador_medio: brl(v.pago / v.n) })),
+    },
+    nota: "Se pago_aos_entregadores for 0, a loja provavelmente nao registra o valor do entregador nos pedidos — o saldo nao e confiavel.",
+  }
+}
+
+// Registra a PROPOSTA (nada muda na loja ainda). O SIM do dono, no grupo, é quem aplica.
+async function proporAcao(sb: any, admin: any, empresaId: string, grupoJid: string, a: any) {
+  const tipo = String(a?.tipo ?? "")
+  let params: Record<string, unknown> = {}
+  let resumo = ""
+  if (tipo === "cadastrar_produto") {
+    const nome = String(a?.nome ?? "").trim().slice(0, 80), preco = Number(a?.preco_venda)
+    if (!nome || !(preco > 0)) return { erro: "Preciso do nome e do preco de venda do produto novo." }
+    const { data: ja } = await sb.from("produtos").select("id, nome").eq("ativo", true).is("arquivado_em", null).ilike("nome", nome.replace(/[%_]/g, "")).limit(1)
+    if (ja?.length) return { erro: `Ja existe um produto chamado "${ja[0].nome}". Quer mudar o preco dele?` }
+    const { data: cats } = await sb.from("produtos").select("categoria").eq("ativo", true).limit(500)
+    const existentes = [...new Set((cats ?? []).map((c: any) => String(c.categoria)))] as string[]
+    const pedida = String(a?.categoria ?? "").trim()
+    const categoria = existentes.find((c) => normNome(c) === normNome(pedida)) ?? (pedida || "outros")
+    const custo = Number(a?.preco_custo) > 0 ? Number(a.preco_custo) : null
+    params = { nome, preco_venda: preco, categoria, preco_custo: custo }
+    resumo = `Cadastrar produto *${nome}* por ${reais(preco)} na categoria ${categoria}${custo ? ` (custo ${reais(custo)})` : ""}${existentes.includes(categoria) ? "" : " — categoria nova"}.`
+  } else if (tipo === "mudar_preco") {
+    const busca = String(a?.produto ?? "").trim(), preco = Number(a?.preco_venda)
+    if (!busca || !(preco > 0)) return { erro: "Preciso do nome do produto e do preco novo." }
+    const { data: achados } = await sb.from("produtos").select("id, nome, preco_venda")
+      .eq("ativo", true).is("arquivado_em", null).ilike("nome", `%${busca.replace(/[%_]/g, "")}%`).limit(8)
+    const exato = (achados ?? []).filter((p: any) => normNome(p.nome) === normNome(busca))
+    const alvo = exato.length === 1 ? exato[0] : (achados?.length === 1 ? achados[0] : null)
+    if (!achados?.length) return { erro: `Nao achei produto parecido com "${busca}".` }
+    if (!alvo) return { erro: `Achei mais de um: ${achados.map((p: any) => p.nome).join(", ")}. Pergunte qual deles.` }
+    params = { produto_id: alvo.id, nome: alvo.nome, de: Number(alvo.preco_venda), para: preco }
+    resumo = `Mudar o preço de *${alvo.nome}* de ${reais(Number(alvo.preco_venda))} para ${reais(preco)}.`
+  } else if (tipo === "taxa_entrega_fixa" || tipo === "pedido_minimo") {
+    const v = Number(a?.valor)
+    if (!(v >= 0) || a?.valor == null) return { erro: "Preciso do valor em reais." }
+    const campo = tipo === "taxa_entrega_fixa" ? "taxa_entrega" : "pedido_minimo"
+    const { data: e } = await sb.from("empresas").select(campo).eq("id", empresaId).maybeSingle()
+    params = { de: Number(e?.[campo] ?? 0), para: v }
+    resumo = tipo === "taxa_entrega_fixa"
+      ? `Mudar a taxa de entrega fixa de ${reais(Number(e?.[campo] ?? 0))} para ${reais(v)}.`
+      : `Mudar o pedido mínimo de ${reais(Number(e?.[campo] ?? 0))} para ${reais(v)}.`
+  } else if (tipo === "ajustar_tabela_km") {
+    const v = Number(a?.valor)
+    if (!Number.isFinite(v) || v === 0) return { erro: "Preciso de quanto somar (ou tirar) em reais." }
+    const { data: e } = await sb.from("empresas").select("taxas_entrega_km").eq("id", empresaId).maybeSingle()
+    const tab = Array.isArray(e?.taxas_entrega_km) ? e.taxas_entrega_km : []
+    if (!tab.length) return { erro: "Esta loja nao usa tabela de taxa por km." }
+    params = { delta: v }
+    resumo = `${v > 0 ? "Aumentar" : "Reduzir"} ${reais(Math.abs(v))} em todas as faixas de km que cobram taxa (de ${tab.length} faixas; as gratis continuam gratis).`
+  } else {
+    return { erro: "Tipo de acao desconhecido." }
+  }
+  await admin.from("assistente_acoes").update({ status: "cancelada" })
+    .eq("empresa_id", empresaId).eq("grupo_jid", grupoJid).eq("status", "pendente")
+  const { error } = await admin.from("assistente_acoes").insert({ empresa_id: empresaId, grupo_jid: grupoJid, tipo, params, resumo })
+  if (error) return { erro: "Nao consegui preparar a mudanca agora." }
+  return { ok: true, resumo, proximo_passo: "Mostre este resumo ao dono e peca que responda SIM para aplicar ou NAO para cancelar. Nada mudou ainda." }
+}
+
 // ── carteira: franquia do mes + saldo comprado ──────────────────────────────
 // A loja tem uma franquia mensal (R$ 5,00 por padrao) que renova todo dia 1.
 // Gastou tudo, comeca a sair do saldo que ela comprou. Sem saldo, o assistente
@@ -677,6 +905,11 @@ clareza, entregue o faturamento do dia e explique como fechar.
 - Valores em reais no formato brasileiro: R$ 1.234,56.
 - Pode chamar mais de uma ferramenta quando a pergunta pedir (ex.: comparar duas semanas).
 
+DIAGNOSTICO E ANALISES
+- Quando o dono pedir diagnostico, 'o que melhorar', analise do cardapio, do financeiro ou da entrega, chame as \nferramentas analisar_cardapio, analisar_financeiro, ver_entrega e situacao_agora (pode ser todas de uma vez) e \nresponda com 3 a 5 PRIORIDADES, da que mais move dinheiro pra menos. Cada uma: o numero que prova o problema, \no que fazer, e quanto isso pode render ou poupar SO se der pra calcular com os numeros que voce tem. Sem rodeio, \nsem elogio vazio. Se faltar dado (ex.: produto sem custo, dias sem fechar), diga que isso e a prioridade 1, porque \nsem isso nao ha como medir lucro.
+- Nesses casos pode passar de 5 frases (ate umas 14 linhas).
+- Voce NUNCA executa mudanca. Quando existir a ferramenta propor_acao, ela so PREPARA e o dono confirma com SIM. \nNunca diga que ja mudou algo.
+
 COMO RESPONDER
 - Portugues do Brasil, direto, curto. Ate 5 frases, ou uma lista curta quando \
 forem varios numeros ou um passo a passo.
@@ -731,7 +964,7 @@ escrever ou falar o que comprou (ou mandar a foto/PDF da nota) aqui no grupo, qu
           // Alto so deixaria o dono esperando na frente do cliente e sairia caro.
           output_config: { effort: "low" },
           system,
-          tools: TOOLS,
+          tools: canal === "whatsapp" && typeof body?.grupo_jid === "string" ? [...TOOLS, TOOL_PROPOR_ACAO] : TOOLS,
           messages: mensagens,
         }),
       })
@@ -755,7 +988,9 @@ escrever ou falar o que comprou (ou mandar a foto/PDF da nota) aqui no grupo, qu
       for (const c of chamadas) if (!consultasFeitas.includes(c.name)) consultasFeitas.push(c.name)
       const resultados = await Promise.all(chamadas.map(async (c: any) => {
         try {
-          const dados = await rodarTool(sb, perfil.empresa_id, c.name, c.input ?? {})
+          const dados = c.name === "propor_acao" && canal === "whatsapp" && typeof body?.grupo_jid === "string"
+            ? await proporAcao(sb, admin, perfil.empresa_id, body.grupo_jid, c.input ?? {})
+            : await rodarTool(sb, perfil.empresa_id, c.name, c.input ?? {})
           return { type: "tool_result", tool_use_id: c.id, content: JSON.stringify(dados) }
         } catch (e) {
           console.error("[assistente-loja] tool", c.name, e)
