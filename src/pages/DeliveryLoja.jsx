@@ -593,6 +593,18 @@ export default function DeliveryLoja() {
   // Chegou pelo link do robô com o produto na URL: abre nele assim que o
   // cardápio termina de carregar. Uma vez só — se o cliente fechar a tela, não
   // insiste (mig 0312).
+  // Veio do checkout pelo "Editar itens": abre a sacola direto, pra mexer no que
+  // já montou sem procurar o ícone do carrinho.
+  useEffect(() => {
+    if (loading) return
+    let abrir = false
+    try {
+      abrir = sessionStorage.getItem('dloja-abrir-sacola') === '1'
+      sessionStorage.removeItem('dloja-abrir-sacola')
+    } catch { /* sem sessionStorage: o cliente abre a sacola na mão */ }
+    if (abrir) setDrawerOpen(true)
+  }, [loading])
+
   useEffect(() => {
     if (!drawerOpen) return
     function onKey(e) {
@@ -1541,6 +1553,15 @@ export default function DeliveryLoja() {
                       <span style={{ fontSize: 12, color: 'var(--dl-text-muted)', lineHeight: 1.4, display: 'block', marginTop: 2 }}>
                         {item.complementos.map(c => `${Number(c.qtd ?? 1)}× ${c.nome}`).join(', ')}
                       </span>
+                    )}
+                    {/* Esqueceu a linguiça? Reabre a montagem já marcada e o que ele
+                        confirmar SUBSTITUI esta linha — sem limpar a sacola e
+                        montar tudo de novo. (O atacado tem o "Trocar sabores" ao lado.) */}
+                    {item.complementos?.length > 0 && !qtdTravada(item) && (
+                      <button type="button" className="dloja-item-trocar" style={{ marginTop: 6 }}
+                        onClick={() => trocarMontagem(item)}>
+                        ✏️ Editar o que escolhi
+                      </button>
                     )}
                     <span className="dloja-drawer-item-preco">R$ {fmt(item.preco)} cada</span>
                   </div>

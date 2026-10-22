@@ -2849,6 +2849,15 @@ export default function DeliveryCheckout() {
                     </div>
                   ))}
                 </div>
+                {/* Esqueceu de pôr algo (uma linguiça)? Volta pra sacola com ela já
+                    aberta; o que montou fica guardado, só edita. */}
+                <button type="button" className="dco-btn-voltar" style={{ width: '100%', margin: '4px 0 12px', padding: '9px 12px', fontSize: 13.5 }}
+                  onClick={() => {
+                    try { sessionStorage.setItem('dloja-abrir-sacola', '1') } catch { /* ignora */ }
+                    navigate(-1)
+                  }}>
+                  ✏️ Editar itens da sacola
+                </button>
                 {saldoCashback > 0 && (
                   <button
                     type="button"
