@@ -142,7 +142,8 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
         .eq('empresa_id', empresaId)
         .or(`status.eq.aberta,vencimento.gte.${corte}`)
         .order('vencimento').order('created_at').order('id'))
-      setContas(dados)
+      if (dados.error) throw dados.error
+      setContas(dados.data || [])
       const f = await supabase.from('clientes_saldo_fiado').select('saldo_fiado')
       const devedores = (f.data || []).filter((x) => Number(x.saldo_fiado) > 0)
       setFiado({ total: devedores.reduce((s, x) => s + Number(x.saldo_fiado), 0), clientes: devedores.length })
