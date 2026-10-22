@@ -384,9 +384,28 @@ serve(async (req) => {
     const empresaId: string = cfg.empresa_id
     const t = norm(texto)
 
-    // ── Ligar / desligar. Só quem fala pelo número da loja (fromMe) decide. ──
+    // ── Ligar / desligar. Quem ativa passa a consultar o financeiro da loja pelo grupo, então só ──
+    // o número da loja (fromMe) ou um telefone DA loja (admin, contato, super admin) pode.
+    const autorizado = async (): Promise<boolean> => {
+      if (msg.key?.fromMe) return true
+      const fim8 = (v: unknown) => String(v ?? "").split("@")[0].replace(/\D/g, "").slice(-8)
+      const quem = [msg.key?.participant, msg.key?.participantAlt, msg.participant].map(fim8).filter((x) => x.length === 8)
+      if (!quem.length) return false
+      const [c, e, p, g] = await Promise.all([
+        sb.from("whatsapp_config").select("admin_phone, connected_phone").eq("empresa_id", empresaId).eq("instance_name", instance).maybeSingle(),
+        sb.from("empresas").select("telefone_contato").eq("id", empresaId).maybeSingle(),
+        sb.from("profiles").select("telefone").eq("empresa_id", empresaId).in("perfil", ["admin", "super_admin"]),
+        sb.from("config_global").select("valor").eq("chave", "super_admin_phone").maybeSingle(),
+      ])
+      const lojistas = new Set([c.data?.admin_phone, c.data?.connected_phone, e.data?.telefone_contato, g.data?.valor,
+        ...(p.data ?? []).map((x: any) => x.telefone)].map(fim8).filter((x) => x.length === 8))
+      return quem.some((q) => lojistas.has(q))
+    }
     if (/^(#|\/)?\s*(ativar|ligar)\s+(o\s+)?(estoque|entrada)/.test(t)) {
-      if (!msg.key?.fromMe) return ok()
+      if (!(await autorizado())) {
+        console.log("[estoque-wpp] ativar negado: numero nao autorizado", msg.key?.participant, msg.key?.participantAlt)
+        return ok()
+      }
       await sb.from("whatsapp_config").update({ estoque_grupo_jid: jid }).eq("empresa_id", empresaId).eq("instance_name", instance)
       await enviar(instance, jid,
         "Pronto, este grupo agora lança *entrada de estoque*.\n\nEscreva ou fale o que comprou (ex.: \"comprei 50 pães e 30 hambúrgueres\") ou mande a foto/PDF da nota. Eu mostro a lista e você responde *SIM* pra lançar.\n\nPra desligar: \"desativar estoque\".")
@@ -395,7 +414,7 @@ serve(async (req) => {
     if (cfg.estoque_grupo_jid !== jid) return ok()         // outro grupo: nem responde
 
     if (/^(#|\/)?\s*(desativar|desligar)\s+(o\s+)?(estoque|entrada)/.test(t)) {
-      if (!msg.key?.fromMe) return ok()
+      if (!(await autorizado())) return ok()
       await sb.from("whatsapp_config").update({ estoque_grupo_jid: null }).eq("empresa_id", empresaId).eq("instance_name", instance)
       await enviar(instance, jid, "Desligado. Este grupo não lança mais estoque.")
       return ok()
