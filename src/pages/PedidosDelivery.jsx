@@ -9,9 +9,13 @@ import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { ehDividido, textoPagamento } from '../lib/pagamentoPartes'
 import { IFOOD_COMISSAO_PCT, IFOOD_TRANSACAO_PCT, lojaEntregou } from '../lib/ifoodLiquido'
 
-function calcLiquidoPorPedido(pedido, taxaPlataforma) {
+function calcLiquidoPorPedido(pedido, taxaPlataforma, ifoodSaldos = {}) {
   const total = Number(pedido.total || 0)
   if (pedido.origem === 'ifood') {
+    // Saldo real da API financeira do iFood (disponível após sincronização do dia anterior)
+    const saldoReal = ifoodSaldos[pedido.ifood_order_id]
+    if (saldoReal != null) return Number(saldoReal)
+    // Fallback: fórmula calibrada (~99% de precisão) para pedidos sem saldo ainda
     const itens  = Number(pedido.subtotal || 0)
     const te     = Number(pedido.taxa_entrega || 0)
     const iv     = pedido.ifood_valores || {}
@@ -709,9 +713,9 @@ function IconeLista() {
 }
 
 // ─── Tabela de pedidos ───
-function TabelaPedidos({ pedidos, taxaPlataforma, onRowClick, agruparPorDia = false, totaisPorDia = {}, entregadores = {} }) {
+function TabelaPedidos({ pedidos, taxaPlataforma, ifoodSaldos = {}, onRowClick, agruparPorDia = false, totaisPorDia = {}, entregadores = {} }) {
   const totalBruto = pedidos.reduce((acc, p) => acc + Number(p.total || 0), 0)
-  const totalLiquido = pedidos.reduce((acc, p) => acc + calcLiquidoPorPedido(p, taxaPlataforma), 0)
+  const totalLiquido = pedidos.reduce((acc, p) => acc + calcLiquidoPorPedido(p, taxaPlataforma, ifoodSaldos), 0)
 
   if (pedidos.length === 0) return null
 
@@ -742,7 +746,7 @@ function TabelaPedidos({ pedidos, taxaPlataforma, onRowClick, agruparPorDia = fa
               const dt = new Date(pedido.created_at)
               const data = dt.toLocaleDateString('pt-BR')
               const hora = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-              const liquido = calcLiquidoPorPedido(pedido, taxaPlataforma)
+              const liquido = calcLiquidoPorPedido(pedido, taxaPlataforma, ifoodSaldos)
               // Cabeçalho do dia (só na aba Concluídos): total daquele dia + separação
               if (agruparPorDia && data !== ultimoDia) {
                 ultimoDia = data
@@ -828,6 +832,7 @@ export default function PedidosDelivery() {
   // { id do entregador: nome } - so pra escrever o nome na lista. Os pedidos ja
   // trazem `entregador_id`; o que faltava era o nome.
   const [entregadores, setEntregadores] = useState({})
+  const [ifoodSaldos, setIfoodSaldos] = useState({})
   const [filtroOrigem, setFiltroOrigem] = useState('todos')
   const [busca, setBusca] = useState('')
 
@@ -954,15 +959,30 @@ export default function PedidosDelivery() {
       return q
     }
 
+    let pedidosCarregados = []
     if (dataInicio || dataFim) {
       // fetchAll pagina de 1000 em 1000 — sem ele o mês fecharia em 1000 e os
       // totais sairiam menores que o real.
       const { data } = await fetchAll(base)
-      setPedidos(data || [])
+      pedidosCarregados = data || []
     } else {
       const { data } = await base().limit(100)
-      setPedidos(data || [])
+      pedidosCarregados = data || []
     }
+    setPedidos(pedidosCarregados)
+
+    // Busca saldos reais da API financeira do iFood para os pedidos carregados
+    const oids = pedidosCarregados
+      .filter(p => p.origem === 'ifood' && p.ifood_order_id)
+      .map(p => p.ifood_order_id)
+    if (oids.length > 0) {
+      const { data: sv } = await supabase.from('ifood_vendas')
+        .select('venda_id, saldo')
+        .eq('empresa_id', empresa.id)
+        .in('venda_id', oids)
+      if (sv) setIfoodSaldos(Object.fromEntries(sv.map(r => [r.venda_id, r.saldo])))
+    }
+
     setCarregando(false)
   }, [empresa, dataInicio, dataFim])
 
@@ -1175,7 +1195,7 @@ export default function PedidosDelivery() {
       const t = (totaisPorDia[d] ??= { count: 0, bruto: 0, liquido: 0 })
       t.count++
       t.bruto += Number(p.total || 0)
-      t.liquido += calcLiquidoPorPedido(p, taxaPlataforma)
+      t.liquido += calcLiquidoPorPedido(p, taxaPlataforma, ifoodSaldos)
     }
   }
 
@@ -1361,7 +1381,7 @@ export default function PedidosDelivery() {
       ) : pedidosFiltrados.length === 0 ? (
         <EmptyState aba={abaAtiva} foraDoPeriodo={foraDoPeriodo} onVerHistorico={() => { setDataInicio(''); setDataFim('') }} />
       ) : viewMode === 'tabela' ? (
-        <TabelaPedidos pedidos={pedidosPagina} taxaPlataforma={taxaPlataforma} onRowClick={setPedidoDetalhe} agruparPorDia={abaAtiva === 'concluidos'} totaisPorDia={totaisPorDia} entregadores={entregadores} />
+        <TabelaPedidos pedidos={pedidosPagina} taxaPlataforma={taxaPlataforma} ifoodSaldos={ifoodSaldos} onRowClick={setPedidoDetalhe} agruparPorDia={abaAtiva === 'concluidos'} totaisPorDia={totaisPorDia} entregadores={entregadores} />
       ) : (
         <div className="pd-grid">
           {pedidosPagina.map(pedido => (
