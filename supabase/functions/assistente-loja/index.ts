@@ -895,6 +895,18 @@ Deno.serve(async (req) => {
       }
       perfil = pf
     }
+    // COMANDO FIXO (WhatsApp): o robô já sabe qual consulta quer ("vendas ontem"), então roda a consulta e devolve os
+    // números crus — sem IA e sem cobrar. Só as consultas de leitura da lista abaixo.
+    if (canal === "whatsapp" && body?.comando?.tool) {
+      const permitidas = ["consultar_vendas", "consultar_lucro", "top_produtos", "top_clientes", "situacao_agora", "ver_entrega", "analisar_cardapio", "analisar_financeiro"]
+      if (!permitidas.includes(String(body.comando.tool))) return json({ erro: "Comando desconhecido." }, 400)
+      try {
+        return json({ dados: await rodarTool(sb, perfil.empresa_id, String(body.comando.tool), body.comando.args ?? {}) })
+      } catch (e) {
+        console.error("[assistente-loja] comando", e)
+        return json({ erro: "Nao consegui consultar isso agora." }, 500)
+      }
+    }
     if (passouDoLimite(user.id)) {
       return json({ erro: "Muitas perguntas seguidas. Aguarde alguns minutos." }, 429)
     }

@@ -593,6 +593,154 @@ async function comandoEstoque(t: string, empresaId: string): Promise<string[] | 
   return paginar(achados.slice(0, 40).map((s) => linhaSaldo(s) + (s.controla ? "" : " (não controla estoque)")), `🔎 *${termo}* (${achados.length}):`)
 }
 
+// ── Ajuda e comandos fixos do Analista (SEM IA, custo zero) ─────────────────
+const AJUDA_ASSISTENTE = `🤖 *Assistente — o que eu faço aqui*
+
+📥 *Entrada*: "comprei 20 kg de queijo a 30" · "bonificação 5 queijo" · "devolução 2 coca" · ou mande a foto/PDF da nota, ou fale em áudio
+📤 *Saída*: "perda 3 queijo" · "venceu 2 pão" · "consumo 1 hambúrguer" · "brinde 1 coca"
+🔢 *Contagem*: "contei 18 queijo" (eu ajusto a diferença)
+🆕 *Cadastro*: "cadastra Coca 2L por 12, tenho 20, custo 5, mínimo 6"
+⚠️ *Mínimo*: "pão mínimo 50"
+
+🔎 *Consultas (grátis)*: "o que está acabando?" · "lista o estoque" · "estoque de bebidas" · "estoque de insumos" · "tem pão?"
+
+Antes de lançar eu mostro e espero *SIM*. *DESFAZER* tira o último lançamento (até 3 h).
+💳 Cada mensagem gasta 1 crédito (nota/foto = 3). Consultas e ajuda são grátis.`
+
+const AJUDA_ANALISTA = `📊 *Analista — o que eu faço aqui*
+
+*Comandos grátis* (resposta na hora):
+• "vendas hoje" · "vendas ontem" · "vendas semana" · "vendas mês" · "vendas mês passado" · "vendas 15/10" · "vendas 01/10 a 15/10"
+• "lucro mês" · "mais vendidos mês" · "melhores clientes" · "situação" · "fiado" · "entrega"
+• "o que está acabando?" · "lista o estoque" · "tem pão?"
+
+*Pergunta livre ou diagnóstico*: escreva normal ("faz um diagnóstico", "analisa meu cardápio", "meu faturamento caiu?"). Gasta saldo da IA (cerca de R$ 0,30 a 0,50).
+
+*Mudanças (eu mostro e espero SIM)*: "muda o preço da pizza pra 55" · "taxa de entrega 6 reais" · "pedido mínimo 20"
+
+Dica: use os comandos grátis sempre que der. A IA fica pro que precisa de raciocínio.`
+
+const hojeBRT = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10)
+const somaDiasBRT = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10) }
+const ddmm = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`
+const valor = (v: unknown) => (typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v) ? brl(Number(v)) : String(v ?? "—"))
+const FILLER = new Set(["de", "do", "da", "dos", "das", "no", "na", "em", "o", "a", "os", "as", "e", "pra", "para", "ate", "ao", "meu", "minha", "meus", "minhas", "dia", "loja",
+  "total", "geral", "quanto", "qual", "foi", "fui", "ultimos", "ultimas", "dias", "esta", "essa", "este", "esse", "passado", "anterior", "mes", "semana", "hoje", "ontem", "anteontem",
+  "mais", "vendidos", "vendido", "produtos", "produto", "clientes", "cliente", "melhores", "top", "vendi", "vendas", "venda", "lucro", "lucrei", "faturamento", "faturei", "fiz", "ate"])
+
+// Lê o período dito ("hoje", "ontem", "semana", "mês passado", "15/10", "01/10 a 15/10"). null = tem palavra que eu não entendo → IA.
+function lerPeriodo(rest: string): { ini: string; fim: string; rotulo: string } | null {
+  const hoje = hojeBRT()
+  const ano = Number(hoje.slice(0, 4))
+  const data = (d: string, m: string, a?: string) => `${a ? (a.length === 2 ? "20" + a : a) : ano}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`
+  let ini = hoje, fim = hoje, rotulo = `hoje (${ddmm(hoje)})`
+  let resto = rest
+  const rg = rest.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s*(?:a|ate|ao|-)\s*(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/)
+  const un = rest.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/)
+  if (rg) { ini = data(rg[1], rg[2], rg[3]); fim = data(rg[4], rg[5], rg[6]); rotulo = `${ddmm(ini)} a ${ddmm(fim)}`; resto = resto.replace(rg[0], " ") }
+  else if (un) { ini = fim = data(un[1], un[2], un[3]); rotulo = ddmm(ini); resto = resto.replace(un[0], " ") }
+  else if (/\bmes (passado|anterior)\b/.test(rest)) {
+    const p = somaDiasBRT(hoje.slice(0, 8) + "01", -1)
+    ini = p.slice(0, 8) + "01"; fim = p; rotulo = "mês passado"; resto = resto.replace(/\bmes (passado|anterior)\b/, " ")
+  }
+  else if (/\bmes\b/.test(rest)) { ini = hoje.slice(0, 8) + "01"; fim = hoje; rotulo = `mês (${ddmm(ini)} a ${ddmm(fim)})`; resto = resto.replace(/\b(este |esse |no |do )?mes\b/, " ") }
+  else if (/\bsemana\b/.test(rest)) { ini = somaDiasBRT(hoje, -6); fim = hoje; rotulo = `últimos 7 dias (${ddmm(ini)} a ${ddmm(fim)})`; resto = resto.replace(/\bsemana\b/, " ") }
+  else if (/\banteontem\b/.test(rest)) { ini = fim = somaDiasBRT(hoje, -2); rotulo = `anteontem (${ddmm(ini)})`; resto = resto.replace(/\banteontem\b/, " ") }
+  else if (/\bontem\b/.test(rest)) { ini = fim = somaDiasBRT(hoje, -1); rotulo = `ontem (${ddmm(ini)})`; resto = resto.replace(/\bontem\b/, " ") }
+  else resto = resto.replace(/\bhoje\b/, " ")
+  if (fim < ini) return null
+  // Sobrou palavra que não é de período ("ifood", "comparado", "por que"…)? Então não é comando: vai pra IA.
+  const sobras = resto.split(/[^a-z0-9]+/).filter((w) => w && !/^\d+$/.test(w) && !FILLER.has(w))
+  return sobras.length ? null : { ini, fim, rotulo }
+}
+
+async function chamarComando(empresaId: string, tool: string, args: Record<string, unknown>) {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/assistente-loja`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY },
+    body: JSON.stringify({ empresa_id: empresaId, comando: { tool, args } }),
+  })
+  const d = await r.json().catch(() => null)
+  return d?.dados ?? null
+}
+
+async function comandoAnalista(t: string, empresaId: string): Promise<string[] | null> {
+  const limpo = t.replace(/[?!.,]+$/g, "").trim()
+  if (limpo.length > 70) return null
+  const erro = ["Não consegui consultar isso agora. Tenta de novo em instantes."]
+  let m: RegExpMatchArray | null
+
+  if ((m = limpo.match(/^(quanto\s+)?(vendas?|vendi|faturamento|faturei|fiz de venda)\b(.*)$/))) {
+    const per = lerPeriodo(m[3]); if (!per) return null
+    const d = await chamarComando(empresaId, "consultar_vendas", { data_inicio: per.ini, data_fim: per.fim })
+    if (!d) return erro
+    const lista = (l: any[]) => (l ?? []).map((x: any) => `• ${x.nome}: ${valor(x.valor)}`).join("\n")
+    const partes = [`💰 *Vendas — ${per.rotulo}*\nFaturamento: *${valor(d.faturamento)}* · Pedidos: ${d.pedidos} · Ticket médio: ${valor(d.ticket_medio)}`]
+    if (d.por_canal?.length) partes.push(`*Por canal*\n${lista(d.por_canal)}`)
+    if (d.por_forma_pagamento?.length) partes.push(`*Por forma de pagamento*\n${lista(d.por_forma_pagamento)}`)
+    if (d.recebido_de_fiado?.length) partes.push(`*Recebido de fiado antigo* (não é venda do período)\n${lista(d.recebido_de_fiado)}`)
+    if (Array.isArray(d.por_dia) && d.por_dia.length > 1 && d.por_dia.length <= 15)
+      partes.push(`*Dia a dia*\n${d.por_dia.map((x: any) => `• ${ddmm(x.dia)}: ${valor(x.total)} (${x.pedidos})`).join("\n")}`)
+    return [partes.join("\n\n")]
+  }
+  if ((m = limpo.match(/^(quanto\s+)?(lucro|lucrei)\b(.*)$/))) {
+    const per = lerPeriodo(m[3]); if (!per) return null
+    const d = await chamarComando(empresaId, "consultar_lucro", { data_inicio: per.ini, data_fim: per.fim })
+    if (!d) return erro
+    const tot = d.totais_dos_dias_fechados ?? {}
+    const naoFech = (d.dias_nao_fechados ?? []).length
+    let txt = `📈 *Lucro — ${per.rotulo}*\n`
+    txt += (d.dias_fechados ?? []).length
+      ? `Dias fechados: ${(d.dias_fechados ?? []).length}\nReceita: ${valor(tot.receita)} · Custos: ${valor(tot.custos)}\n*Lucro: ${valor(tot.lucro)}*`
+      : "Nenhum dia fechado nesse período, então não há lucro calculado."
+    if (naoFech) txt += `\n\n⚠️ ${naoFech} ${naoFech === 1 ? "dia ainda não foi fechado" : "dias ainda não foram fechados"} (faturamento deles: ${valor(d.faturamento_dos_dias_nao_fechados)}). Feche em Financeiro > Despesas & Lucro pra o lucro aparecer.`
+    return [txt]
+  }
+  if ((m = limpo.match(/^(mais vendidos?|produtos? mais vendidos?|top produtos|campeoes|carro chefe)\b(.*)$/))) {
+    const per = lerPeriodo(m[2]); if (!per) return null
+    const d = await chamarComando(empresaId, "top_produtos", { data_inicio: per.ini, data_fim: per.fim, limite: 10 })
+    if (!d) return erro
+    const l = d.produtos ?? []
+    return [l.length ? `🏆 *Mais vendidos — ${per.rotulo}*\n${l.map((x: any, i: number) => `${i + 1}. ${x.produto} — ${valor(x.valor_vendido)} (${x.quantidade} un)`).join("\n")}` : `Nenhuma venda em ${per.rotulo}.`]
+  }
+  if ((m = limpo.match(/^(melhores clientes|top clientes|quem mais compra|clientes que mais compram)\b(.*)$/))) {
+    const per = lerPeriodo(m[2]); if (!per) return null
+    const d = await chamarComando(empresaId, "top_clientes", { data_inicio: per.ini, data_fim: per.fim, limite: 10 })
+    if (!d) return erro
+    const l = d.clientes ?? []
+    return [l.length ? `⭐ *Melhores clientes — ${per.rotulo}*\n${l.map((x: any, i: number) => `${i + 1}. ${x.cliente} — ${valor(x.gastou)} (${x.pedidos} pedidos)`).join("\n")}` : `Nenhum cliente identificado em ${per.rotulo}.`]
+  }
+  if (/^(situacao|como esta a loja|como ta a loja|como estamos|resumo|painel|fiado|quanto tenho de fiado|quem deve)$/.test(limpo)) {
+    const d = await chamarComando(empresaId, "situacao_agora", {})
+    if (!d) return erro
+    const st = Object.entries(d.pedidos_de_hoje?.por_status ?? {}).map(([k, v]) => `${k}: ${v}`).join(" · ")
+    const baixos = (d.estoque_baixo?.itens ?? []).map((i: any) => `• ${i.produto} — ${qtdTxt(i.tem)} (mín ${qtdTxt(i.minimo)})`).join("\n")
+    if (/fiado|deve/.test(limpo)) return [`🧾 *Fiado*\nEm aberto: *${valor(d.fiado?.total_em_aberto)}* · ${d.fiado?.clientes_devendo ?? 0} clientes devendo`]
+    return [[
+      `🏪 *Situação agora (${d.hoje ? ddmm(d.hoje) : ""})*`,
+      `Pedidos de hoje: ${d.pedidos_de_hoje?.total ?? 0}${st ? ` (${st})` : ""}`,
+      `Faturamento do mês: *${valor(d.faturamento_do_mes)}* · Meta: ${valor(d.meta_do_mes)}${d.falta_para_a_meta != null ? ` (faltam ${valor(d.falta_para_a_meta)})` : ""}`,
+      `Fiado em aberto: ${valor(d.fiado?.total_em_aberto)} (${d.fiado?.clientes_devendo ?? 0} clientes)`,
+      d.estoque_baixo?.quantidade ? `⚠️ Estoque baixo (${d.estoque_baixo.quantidade}):\n${baixos}` : "✅ Nada abaixo do estoque mínimo.",
+    ].join("\n")]
+  }
+  if (/^(entrega|entregas|taxa de entrega|minha taxa de entrega|como esta minha entrega)$/.test(limpo)) {
+    const d = await chamarComando(empresaId, "ver_entrega", {})
+    if (!d) return erro
+    const c = d.configuracao ?? {}, u = d.ultimos_30_dias ?? {}
+    const bairros = (u.bairros_que_mais_pedem ?? []).slice(0, 5).map((b: any) => `• ${b.bairro}: ${b.entregas} entregas, taxa média ${valor(b.taxa_media)}, entregador ${valor(b.entregador_medio)}`).join("\n")
+    return [[
+      `🛵 *Entrega*`,
+      `Taxa fixa: ${valor(c.taxa_fixa)} · Pedido mínimo: ${valor(c.pedido_minimo)} · Raio: ${c.raio_km ?? "—"} km · Tempo: ${c.tempo_min ?? "—"}`,
+      `*Últimos 30 dias*: ${u.pedidos ?? 0} pedidos, ${u.entregas_com_taxa_ou_entregador ?? 0} com entrega`,
+      `Cobrado dos clientes: ${valor(u.taxa_cobrada_dos_clientes)} · Pago aos entregadores: ${valor(u.pago_aos_entregadores)}`,
+      `*Saldo da entrega: ${valor(u.saldo_da_entrega)}*`,
+      bairros ? `\nBairros que mais pedem:\n${bairros}` : "",
+    ].filter(Boolean).join("\n")]
+  }
+  return null
+}
+
 function textoDaMensagem(m: any): string {
   const x = m?.message ?? {}
   return String(
@@ -679,11 +827,24 @@ async function tratar(req: Request): Promise<Response> {
       return ok()
     }
 
+    // "ajuda": mostra as frases certas de cada robô (grátis). A loja falando "certinho" é o que mantém o custo em zero.
+    if (/^(ajuda|comandos|menu|help|\?|o que voce faz|como uso)\W*$/.test(t)) {
+      await enviar(instance, jid, modo === "analista" ? AJUDA_ANALISTA : AJUDA_ASSISTENTE)
+      return ok()
+    }
     // Consultas de estoque ("o que está acabando?", "lista o estoque", "tem pão?"): direto do banco, sem IA e sem cobrar.
     const respEstoque = await comandoEstoque(t, empresaId)
     if (respEstoque) {
       for (const m of respEstoque) await enviar(instance, jid, m)
       return ok()
+    }
+    // Relatórios fixos do Analista ("vendas ontem", "lucro mês", "mais vendidos"…): números prontos, sem IA e sem cobrar.
+    if (modo === "analista") {
+      const respAnalista = await comandoAnalista(t, empresaId)
+      if (respAnalista) {
+        for (const m of respAnalista) await enviar(instance, jid, m)
+        return ok()
+      }
     }
 
     // ── Pendente / último lançamento ────────────────────────────────────────
