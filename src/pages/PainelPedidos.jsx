@@ -1778,6 +1778,19 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       // taxa nenhuma, mede até o CENTRO DO BAIRRO e avisa que é aproximado. O
       // ponto do pedido continua vazio — o do bairro não serve pra o motoboy.
       let aproximado = false
+      let origemAprox = 'bairro'
+      // A lista de ruas vem do cadastro de CEP, que conhece rua que o mapa não
+      // tem — e ele também guarda o ponto da rua. Esse ponto é bem melhor que o
+      // centro do bairro (a Rua Babaçulândia dá 250 m da loja, o centro 450 m).
+      const cepLimpo = cep.replace(/\D/g, '')
+      if (!coords && cepLimpo.length === 8) {
+        try {
+          const r = await fetch(`https://cep.awesomeapi.com.br/json/${cepLimpo}`)
+          const d = await r.json()
+          const lat = parseFloat(d?.lat), lng = parseFloat(d?.lng)
+          if (Number.isFinite(lat) && Number.isFinite(lng)) { coords = { lat, lng }; aproximado = true; origemAprox = 'cep' }
+        } catch { /* cai no centro do bairro */ }
+      }
       if (!coords && bairro.trim()) {
         try {
           const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent([bairro, cidade, 'Brasil'].filter(Boolean).join(', '))}&format=json&limit=1`,
@@ -1805,7 +1818,9 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         msg: {
           tipo: foraRaio || aproximado ? 'aviso' : 'ok',
           txt: `${dist.toFixed(1)} km → taxa ${fmt(valor)}`
-            + (aproximado ? ' · ⚠️ aproximado pelo centro do bairro (a rua não está no mapa) — confira' : '')
+            + (aproximado ? (origemAprox === 'cep'
+              ? ' · ⚠️ aproximado pelo CEP (o mapa não tem esta rua) — confira'
+              : ' · ⚠️ aproximado pelo centro do bairro (a rua não está no mapa) — confira') : '')
             + (foraRaio ? ` · ⚠️ fora do raio de ${emp.raio_entrega_km} km` : ''),
         },
       })
