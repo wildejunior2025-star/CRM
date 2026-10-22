@@ -111,7 +111,8 @@ async function entenderTexto(
   cat: { produtos: { id: string; nome: string }[]; materias: { id: string; nome: string; unidade: string }[] },
   pendentes: Item[],
   pendNovos: NaoAchado[] = [],
-): Promise<{ itens: Item[]; naoAchados: NaoAchado[]; ignorar: boolean; pergunta: boolean; custoUsd: number } | null> {
+  jaLancado = false,
+): Promise<{ itens: Item[]; naoAchados: NaoAchado[]; ignorar: boolean; pergunta: boolean; corrige: boolean; custoUsd: number } | null> {
   const lista = [
     ...cat.produtos.map((p) => ({ tipo: "produto" as const, id: p.id, nome: p.nome, un: "" })),
     ...cat.materias.map((m) => ({ tipo: "materia" as const, id: m.id, nome: m.nome, un: m.unidade })),
@@ -127,7 +128,7 @@ async function entenderTexto(
     "(escrevendo ou falando) e você devolve os itens pra dar ENTRADA no estoque.",
     "",
     "Responda SOMENTE com JSON válido:",
-    '{ "ignorar": boolean, "pergunta": boolean,',
+    '{ "ignorar": boolean, "pergunta": boolean, "corrige": boolean,',
     '  "itens": [ { "indice": number, "quantidade": number, "custo_unit": number|null, "custo_total": number|null } ],',
     '  "nao_encontrados": [ { "nome": string, "unidade": "kg"|"g"|"L"|"ml"|"un", "quantidade": number, "custo_unit": number|null, "custo_total": number|null } ] }',
     "",
@@ -142,6 +143,9 @@ async function entenderTexto(
     "  'coloca 50 hambúrguer no estoque', 'comecei com 30 kg de carne') é ENTRADA: devolva em itens/nao_encontrados,",
     "  mesmo sem preço (custo null), e pergunta=false. Quando o item não está no catálogo, vai em nao_encontrados",
     "  (será criado como insumo). Só use pergunta=true se o pedido NÃO envolver colocar quantidade no estoque.",
+    "- Mensagem que só informa o PREÇO de item(ns) da lista ('pão brioche 1,30', 'falta o preço, 1.3 a unidade') preenche o",
+    "  custo_unit desse item (se a lista tem um item só, vale pra ele) e mantém o resto igual. Preço dito sem 'cada'/'a unidade'",
+    "  em mensagem de preço isolado é por unidade.",
     "- Cada item comprado: ache a linha do CATÁLOGO que corresponde (apelido e nome abreviado valem) e use o INDICE.",
     "  Nada razoável no catálogo → 'nao_encontrados', com o nome por extenso em minúsculo e a 'unidade'",
     "  (kg, g, L, ml ou un) — esse item vai ser CADASTRADO com esse nome.",
@@ -151,7 +155,9 @@ async function entenderTexto(
     "  ('25 reais de pão'), é custo_total. Não souber, ambos null. Nunca invente preço.",
     "- Só inclua o que foi dito. Não invente item.",
     (pendentes.length || pendNovos.length)
-      ? "- JÁ EXISTE UMA LISTA ESPERANDO CONFIRMAÇÃO (abaixo). A mensagem é uma CORREÇÃO ou ACRÉSCIMO a ela: devolva a lista COMPLETA e atualizada\n  (itens que ela já tinha + mudanças). Se a mensagem não tem nada a ver com a lista, ignorar=true."
+      ? (jaLancado
+        ? "- A LISTA ABAIXO JÁ FOI LANÇADA no estoque há pouco. Se a mensagem CORRIGE ou COMPLETA esses mesmos itens (ex.: 'faltou o preço', 'eram 40 e não 50', 'o pão custa 1,30'), corrige=true e devolva a lista COMPLETA já corrigida. Se for uma compra NOVA e diferente, corrige=false e devolva SÓ os itens novos. Papo sem relação: ignorar=true."
+        : "- JÁ EXISTE UMA LISTA ESPERANDO CONFIRMAÇÃO (abaixo). A mensagem é uma CORREÇÃO ou ACRÉSCIMO a ela: devolva a lista COMPLETA e atualizada\n  (itens que ela já tinha + mudanças). Se a mensagem não tem nada a ver com a lista, ignorar=true.")
       : "",
     "",
     "CATÁLOGO (indice<TAB>[TIPO] nome):",
@@ -193,6 +199,7 @@ async function entenderTexto(
     itens, naoAchados, custoUsd,
     ignorar: parsed.ignorar === true && !itens.length && !naoAchados.length,
     pergunta: parsed.pergunta === true,
+    corrige: parsed.corrige === true,
   }
 }
 
@@ -217,19 +224,26 @@ async function lerNota(base64: string, mimetype: string, cat: Awaited<ReturnType
   return { itens, naoAchados, aviso: d.aviso as string | null, custoUsd: usd({ entrada: d.uso?.entrada ?? 0, saida: d.uso?.saida ?? 0 }) }
 }
 
-function resumo(itens: Item[], naoAchados: NaoAchado[]): string {
+function resumo(itens: Item[], naoAchados: NaoAchado[], corrige = false): string {
   let total = 0, temPreco = false
   const linhas = itens.map((i) => {
     let s = `• ${i.nome} × ${qtdTxt(i.quantidade)}`
     if (i.custo_unit) { const v = i.custo_unit * i.quantidade; total += v; temPreco = true; s += ` — ${brl(i.custo_unit)} un (${brl(v)})` }
     return s
   })
-  const partes = [`Entendi esta compra:\n${linhas.join("\n")}`]
+  const partes: string[] = []
+  if (linhas.length) partes.push(`${corrige ? "Corrigindo o último lançamento — vai ficar assim:" : "Entendi esta compra:"}\n${linhas.join("\n")}`)
   if (temPreco) partes.push(`Total: ${brl(total)}`)
   if (naoAchados.length) {
     partes.push(`🆕 Não existem no cadastro — vou CRIAR como insumo:\n${naoAchados.map((n) => `• ${n.nome} × ${qtdTxt(n.quantidade)} ${n.unidade ?? "un"}${n.custo_unit ? ` — ${brl(n.custo_unit)}` : ""}`).join("\n")}`)
   }
-  partes.push("Responda *SIM* para lançar, *NÃO* para cancelar, ou escreva a correção (ex.: \"o pão foram 40\").")
+  const semPreco = [...itens, ...naoAchados].filter((x) => x.custo_unit == null).map((x) => x.nome)
+  if (semPreco.length) {
+    // Entrada sem preço deixa o custo e o lucro às cegas: só lança com o preço (ou com um "sem preço" explícito).
+    partes.push(`❓ *Falta o preço (por unidade)* de: ${semPreco.join(", ")}.\nMe diga o valor, ex.: "${semPreco[0]} 1,30". Só lanço com o preço.\n(Se não souber, responda *SEM PREÇO*. Ou *NÃO* para cancelar.)`)
+  } else {
+    partes.push(`${corrige ? "Responda *SIM* para trocar o lançamento anterior por este" : "Responda *SIM* para lançar"}, *NÃO* para cancelar, ou escreva a correção (ex.: "o pão foram 40").`)
+  }
   return partes.join("\n\n")
 }
 
@@ -254,7 +268,7 @@ async function lancar(empresaId: string, pend: any): Promise<string> {
   const prod = itens.filter((i) => i.tipo === "produto")
   const mat = itens.filter((i) => i.tipo === "materia")
   const linha = (i: Item) => ({
-    tipo: "entrada", quantidade: i.quantidade, custo_unit: i.custo_unit,
+    tipo: "entrada", quantidade: i.quantidade, custo_unit: i.custo_unit || null,   // 0 = "sem preço" confirmado
     valor_total: i.custo_unit ? Math.round(i.custo_unit * i.quantidade * 100) / 100 : null,
   })
   let idsP: string[] = [], idsM: string[] = []
@@ -437,6 +451,41 @@ serve(async (req) => {
     // O que o dono confirma é sempre a coisa mais RECENTE que o robô mostrou.
     const acaoMaisNova = !!pendAcao && (!pend || pendAcao.created_at > pend.created_at)
 
+    // Último lançamento (30 min): "faltou o preço" depois do SIM vira uma correção desse lançamento.
+    const { data: ultLancado } = pend ? { data: null } : await sb.from("estoque_whatsapp").select("*")
+      .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "lancado")
+      .gte("lancado_em", new Date(Date.now() - 30 * 60000).toISOString())
+      .order("lancado_em", { ascending: false }).limit(1).maybeSingle()
+
+    const reverter = async (ult: any) => {
+      if (ult.mov_produtos?.length) await sb.from("estoque_movimentos").delete().in("id", ult.mov_produtos)
+      if (ult.mov_materias?.length) await sb.from("materia_prima_movimentos").delete().in("id", ult.mov_materias)
+      await sb.from("estoque_whatsapp").update({ status: "cancelado" }).eq("id", ult.id)
+    }
+    // Lança a lista pendente; se ela corrige um lançamento anterior, troca um pelo outro.
+    const confirmar = async (p: any) => {
+      try {
+        const msgOk = await lancar(empresaId, p)
+        if (p.substitui_id) {
+          const { data: velho } = await sb.from("estoque_whatsapp").select("*").eq("id", p.substitui_id).maybeSingle()
+          if (velho && velho.status === "lancado") await reverter(velho)
+        }
+        await enviar(instance, jid, msgOk)
+      } catch (e: any) {
+        console.error("[estoque-wpp] lancar:", e)
+        await enviar(instance, jid, "❌ Não consegui lançar agora (erro no sistema). Nada foi gravado — tente de novo em instantes.")
+      }
+    }
+    const faltaPreco = (p: any) => [...(p.itens ?? []), ...(p.nao_achados ?? [])].filter((x: any) => x.custo_unit == null)
+
+    if (pend && /^(sem (o )?(preco|valor|custo)|nao sei( o preco| o valor)?|(lanca|lancar|pode lancar) sem (preco|valor|custo))\W*$/.test(t)) {
+      const zera = (l: any[]) => (l ?? []).map((x: any) => ({ ...x, custo_unit: x.custo_unit ?? 0 }))
+      pend.itens = zera(pend.itens); pend.nao_achados = zera(pend.nao_achados)
+      await sb.from("estoque_whatsapp").update({ itens: pend.itens, nao_achados: pend.nao_achados }).eq("id", pend.id)
+      await confirmar(pend)
+      return ok()
+    }
+
     if (/^(sim|s|ok|pode|pode lancar|lanca|lancar|confirmo|confirmar|isso|isso mesmo|certo|pode fazer|faz|aplicar|aplica)\W*$/.test(t)) {
       if (acaoMaisNova) {
         try { await enviar(instance, jid, await executarAcao(empresaId, pendAcao)) }
@@ -452,11 +501,12 @@ serve(async (req) => {
         await sb.from("estoque_whatsapp").update({ status: "cancelado" }).eq("id", pend.id)
         return ok()
       }
-      try { await enviar(instance, jid, await lancar(empresaId, pend)) }
-      catch (e: any) {
-        console.error("[estoque-wpp] lancar:", e)
-        await enviar(instance, jid, "❌ Não consegui lançar agora (erro no sistema). Nada foi gravado — tente de novo em instantes.")
+      const sem = faltaPreco(pend)
+      if (sem.length) {
+        await enviar(instance, jid, `❓ Ainda falta o preço (por unidade) de: ${sem.map((x: any) => x.nome).join(", ")}.\nMe diga o valor, ex.: "${sem[0].nome} 1,30". Ou responda *SEM PREÇO* para lançar assim mesmo.`)
+        return ok()
       }
+      await confirmar(pend)
       return ok()
     }
     if (/^(nao|n|cancela|cancelar|cancelado|deixa|esquece)\W*$/.test(t)) {
@@ -483,9 +533,7 @@ serve(async (req) => {
         return ok()
       }
       if (!ult) { await enviar(instance, jid, "Não achei nada recente pra desfazer (só dá até 3 horas depois)."); return ok() }
-      if (ult.mov_produtos?.length) await sb.from("estoque_movimentos").delete().in("id", ult.mov_produtos)
-      if (ult.mov_materias?.length) await sb.from("materia_prima_movimentos").delete().in("id", ult.mov_materias)
-      await sb.from("estoque_whatsapp").update({ status: "cancelado" }).eq("id", ult.id)
+      await reverter(ult)
       await enviar(instance, jid, `↩️ Desfeito. Tirei as entradas do estoque (os insumos novos continuam cadastrados).\n(O custo que atualizei no cadastro não volta sozinho — confira se precisar.)`)
       return ok()
     }
@@ -510,7 +558,8 @@ serve(async (req) => {
     const donoId: string | undefined = adm?.id
 
     const cat = await carregarCatalogo(empresaId)
-    let resultado: { itens: Item[]; naoAchados: NaoAchado[]; ignorar?: boolean; pergunta?: boolean; aviso?: string | null; custoUsd: number } | null = null
+    const base = pend ?? ultLancado     // a lista que a mensagem pode estar corrigindo
+    let resultado: { itens: Item[]; naoAchados: NaoAchado[]; ignorar?: boolean; pergunta?: boolean; corrige?: boolean; aviso?: string | null; custoUsd: number } | null = null
     let origem = "texto"
     let textoFalado = ""
 
@@ -527,11 +576,11 @@ serve(async (req) => {
       const midia = await baixarMidia(instance, msg)
       const falado = midia ? await transcrever(midia.base64, midia.mimetype) : null
       if (!falado) { await enviar(instance, jid, "Não consegui ouvir o áudio. Escreve ou manda de novo?"); return ok() }
-      resultado = await entenderTexto(falado, cat, pend?.itens ?? [], pend?.nao_achados ?? [])
+      resultado = await entenderTexto(falado, cat, base?.itens ?? [], base?.nao_achados ?? [], !pend && !!ultLancado)
       if (resultado) resultado.custoUsd += ((msg.message?.audioMessage?.seconds ?? 30) / 60) * PRECO_WHISPER_MIN
       textoFalado = falado
     } else if (texto) {
-      resultado = await entenderTexto(texto, cat, pend?.itens ?? [], pend?.nao_achados ?? [])
+      resultado = await entenderTexto(texto, cat, base?.itens ?? [], base?.nao_achados ?? [], !pend && !!ultLancado)
     } else {
       return ok()
     }
@@ -567,12 +616,14 @@ serve(async (req) => {
 
     // Lista nova substitui a que estava esperando.
     if (pend) await sb.from("estoque_whatsapp").update({ status: "cancelado" }).eq("id", pend.id)
+    // Corrige um lançamento já feito? A lista nova guarda qual substitui (o SIM troca um pelo outro).
+    const substitui = pend?.substitui_id ?? (resultado.corrige && ultLancado ? ultLancado.id : null)
     await sb.from("estoque_whatsapp").insert({
       empresa_id: empresaId, grupo_jid: jid, status: "pendente", origem,
-      itens: resultado.itens, nao_achados: resultado.naoAchados,
+      itens: resultado.itens, nao_achados: resultado.naoAchados, substitui_id: substitui,
     })
     const aviso = resultado.aviso ? `\n\n⚠️ ${resultado.aviso}` : ""
-    const textoResumo = resumo(resultado.itens, resultado.naoAchados) + aviso
+    const textoResumo = resumo(resultado.itens, resultado.naoAchados, !!substitui) + aviso
     await cobrarUso(textoResumo)
     await enviar(instance, jid, textoResumo)
     return ok()
