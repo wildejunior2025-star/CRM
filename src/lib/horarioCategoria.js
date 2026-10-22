@@ -49,6 +49,36 @@ export function categoriaAbertaAgora(cat) {
   return a <= b ? (n >= a && n < b) : (n >= a || n < b)
 }
 
+/**
+ * Quais itens da sacola são de categoria que NÃO vende agora?
+ *
+ * A Loja Online só escondia a categoria fechada; o que já estava na sacola
+ * ficava lá. Foi assim que o pedido #1497 da CDBom saiu na quinta com o Gelo
+ * da "Promoção de Quarta": a sacola era de quarta e ninguém conferiu de novo na
+ * hora de fechar. Devolve os nomes (vazio = pode seguir). Sem rede, deixa
+ * passar: não vale travar a venda por causa dessa conferência.
+ */
+export async function itensForaDoHorario(supabase, empresaId, itens) {
+  const ids = [...new Set((itens ?? []).map(i => i.id ?? i.produto_id).filter(Boolean))]
+  if (!ids.length) return []
+  try {
+    const [{ data: prods }, { data: cats }] = await Promise.all([
+      supabase.from('produtos').select('id, categoria').in('id', ids),
+      supabase.from('categorias').select('nome, hora_inicio, hora_fim, dias_semana').eq('empresa_id', empresaId),
+    ])
+    const porNome = porNomeDeCategoria(cats)
+    const categoriaDe = new Map((prods ?? []).map(p => [String(p.id), p.categoria]))
+    return itens
+      .filter(i => {
+        const c = categoriaDe.get(String(i.id ?? i.produto_id))
+        return c && !categoriaAbertaAgora(porNome[c])
+      })
+      .map(i => i.nome)
+  } catch {
+    return []
+  }
+}
+
 /** Monta { nomeDaCategoria: cat } pra quem já carregou a lista de categorias. */
 export function porNomeDeCategoria(cats) {
   const mapa = {}

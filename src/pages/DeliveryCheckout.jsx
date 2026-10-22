@@ -8,6 +8,7 @@ import { iniciarCheckout } from '../lib/tracking'
 import { marcarEtapa, anotarContato } from '../lib/funil'
 import { formasAtivas, repassePct } from '../lib/constants'
 import { precoPorQuantidade } from '../lib/precoQuantidade'
+import { itensForaDoHorario } from '../lib/horarioCategoria'
 import { carregarExcecoes, abertaAgora } from '../lib/feriados'
 import { diasParaAgendar, paraISO, rotuloAgendado } from '../lib/agendamento'
 import 'leaflet/dist/leaflet.css'
@@ -1905,6 +1906,16 @@ export default function DeliveryCheckout() {
       setErroGlobal(configNaoCarregou
         ? 'Ainda estou calculando a taxa de entrega. Aguarde um instante ou recarregue a página.'
         : 'Marque seu endereço no mapa pra eu calcular a taxa de entrega.')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+
+    // Item de categoria que só vende em certo dia/horário (ex.: "Promoção de
+    // Quarta"): a sacola pode ter vindo de ontem. Conferido de novo na hora de
+    // gravar, com o dia de hoje (pedido #1497 da CDBom).
+    const foraDoHorario = await itensForaDoHorario(supabase, empresaId, itens)
+    if (foraDoHorario.length) {
+      setErroGlobal(`Estes itens não estão à venda agora (a promoção é de outro dia ou horário): ${[...new Set(foraDoHorario)].join(', ')}. Toque em "Editar itens da sacola", tire eles e finalize de novo.`)
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }

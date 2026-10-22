@@ -482,6 +482,14 @@ export default function DeliveryLoja() {
         for (const [chave, item] of Object.entries(savedCart)) {
           const prod = produtosFinal.find(x => x.id === item.id)
           if (!prod) { tirados.push(item.nome); continue }   // produto saiu do cardápio
+          // Categoria que só vende em certo dia/horário (ex.: "Promoção de Quarta"):
+          // a sacola de ontem não vale hoje. Foi assim que o pedido #1497 da CDBom
+          // saiu na quinta com o preço da quarta.
+          if (prod.categoria && !categoriaAbertaAgora({
+            dias_semana: diasMap[prod.categoria],
+            hora_inicio: horarioMap[prod.categoria]?.inicio,
+            hora_fim: horarioMap[prod.categoria]?.fim,
+          })) { tirados.push(`${item.nome} (fora do dia ou horário)`); continue }
 
           const comps = Array.isArray(item.complementos) ? item.complementos : []
           // Item simples: entra com o preço de hoje, não com o de quando foi
@@ -593,6 +601,30 @@ export default function DeliveryLoja() {
   // Chegou pelo link do robô com o produto na URL: abre nele assim que o
   // cardápio termina de carregar. Uma vez só — se o cliente fechar a tela, não
   // insiste (mig 0312).
+  // Sacola aberta de um dia pro outro (ou a promoção acabou de fechar): tira o que é de
+  // categoria fora do dia/horário e avisa, a cada minuto. Em "alterar pedido" não mexe,
+  // porque aquela sacola vem de um pedido que já foi aceito.
+  useEffect(() => {
+    if (pedidoAlterando || !produtos.length) return
+    const fechada = nome => nome && !categoriaAbertaAgora({
+      dias_semana: catDias[nome], hora_inicio: catHorario[nome]?.inicio, hora_fim: catHorario[nome]?.fim,
+    })
+    const categoriaDe = id => produtos.find(p => String(p.id) === String(id))?.categoria
+    const conferir = () => {
+      setCarrinho(prev => {
+        const saem = Object.entries(prev).filter(([, it]) => fechada(categoriaDe(it.id)))
+        if (!saem.length) return prev
+        const novo = { ...prev }
+        for (const [k] of saem) delete novo[k]
+        setSacolaAjustada([...new Set(saem.map(([, it]) => `${it.nome} (fora do dia ou horário)`))])
+        return novo
+      })
+    }
+    conferir()
+    const t = setInterval(conferir, 60000)
+    return () => clearInterval(t)
+  }, [produtos, catDias, catHorario, pedidoAlterando])
+
   // Veio do checkout pelo "Editar itens": abre a sacola direto, pra mexer no que
   // já montou sem procurar o ícone do carrinho.
   useEffect(() => {
