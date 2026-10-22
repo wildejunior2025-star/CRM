@@ -245,3 +245,13 @@ p.cpr-previa { margin: 12px 0 0; }
   .cpr-card, .cpr-seg-btn, .cpr-chip, .cpr-linha, .cpr-tipo-btn { transition: none; }
   .cpr-card:hover { transform: none; }
 }
+
+/* ── Campo com lista (fornecedor/cliente/categoria) ── */
+.cpr-combo { position: relative; }
+.cpr-combo-lista { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px; list-style: none;
+  max-height: 220px; overflow-y: auto; background: var(--card, var(--bg)); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .16); }
+.cpr-combo-lista li { padding: 9px 12px; border-radius: 8px; font-size: 14px; cursor: pointer; color: var(--text); }
+.cpr-combo-lista li:hover, .cpr-combo-lista li.ativo { background: var(--primary-light, rgba(124, 58, 237, .1)); }
+.cpr-combo-lista li.criar { color: var(--primary); font-weight: 700; border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; margin-top: 2px; }
+.cpr-combo-lista li.criar:only-child { border-top: 0; margin-top: 0; }

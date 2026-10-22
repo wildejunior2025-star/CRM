@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { recadoDeErro } from '../lib/erroRede'
 import { useConfirmar } from '../hooks/useConfirmar'
@@ -124,6 +124,7 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
   const [baixaDe, setBaixaDe] = useState(null)   // conta sendo paga/recebida
   const [historicoDe, setHistoricoDe] = useState(null)
   const [menuAberto, setMenuAberto] = useState(null)
+  const [clientes, setClientes] = useState([])   // nomes dos clientes cadastrados (sugestão em "a receber")
 
   const hoje = ymd(new Date())
 
@@ -155,6 +156,12 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
   }, [empresaId])
 
   useEffect(() => { carregar() }, [carregar])
+  useEffect(() => {
+    if (!form || clientes.length) return
+    fetchAll(() => supabase.from('clientes').select('nome').order('nome').order('id'))
+      .then((r) => setClientes([...new Set((r.data || []).map((c) => (c.nome || '').trim()).filter(Boolean))]))
+      .catch(() => {})
+  }, [!!form]) // eslint-disable-line react-hooks/exhaustive-deps
   // Fecha o menu "⋯" ao clicar fora.
   useEffect(() => {
     if (!menuAberto) return
@@ -442,7 +449,7 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
       )}
 
       {form && (
-        <FormConta form={form} setForm={setForm} sugestoes={sugestoes} hoje={hoje}
+        <FormConta form={form} setForm={setForm} sugestoes={sugestoes} clientes={clientes} hoje={hoje}
           onFechar={() => setForm(null)}
           onSalvo={(texto) => { setForm(null); avisar('ok', texto); carregar() }}
           onErro={(e, oQue) => avisar('erro', recadoDeErro(e, oQue))}
@@ -564,8 +571,53 @@ function Grafico({ barras }) {
   )
 }
 
+// Campo com lista bonita (no lugar do datalist do navegador): filtra enquanto digita
+// e oferece "Criar ..." quando o texto digitado ainda não existe na lista.
+function Combo({ id, valor, onChange, opcoes, placeholder, rotuloCriar, maxLength }) {
+  const [aberto, setAberto] = useState(false)
+  const [ativo, setAtivo] = useState(-1)
+  const caixa = useRef(null)
+  useEffect(() => {
+    if (!aberto) return
+    const fora = (e) => { if (caixa.current && !caixa.current.contains(e.target)) setAberto(false) }
+    document.addEventListener('mousedown', fora)
+    return () => document.removeEventListener('mousedown', fora)
+  }, [aberto])
+  const norm = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+  const q = norm(valor)
+  const filtradas = opcoes.filter((o) => !q || norm(o).includes(q)).slice(0, 40)
+  const novo = valor.trim()
+  const podeCriar = !!rotuloCriar && novo && !opcoes.some((o) => norm(o) === q)
+  const itens = [...filtradas.map((o) => ({ v: o })), ...(podeCriar ? [{ v: novo, criar: true }] : [])]
+  const escolher = (v) => { onChange(v); setAberto(false); setAtivo(-1) }
+  const tecla = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setAberto(true); setAtivo((a) => Math.min(a + 1, itens.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setAtivo((a) => Math.max(a - 1, 0)) }
+    else if (e.key === 'Enter' && aberto && ativo >= 0 && itens[ativo]) { e.preventDefault(); escolher(itens[ativo].v) }
+    else if (e.key === 'Escape' && aberto) { e.stopPropagation(); setAberto(false) }
+  }
+  return (
+    <div className="cpr-combo" ref={caixa}>
+      <input id={id} autoComplete="off" placeholder={placeholder} value={valor} maxLength={maxLength}
+        onChange={(e) => { onChange(e.target.value); setAberto(true); setAtivo(-1) }}
+        onFocus={() => setAberto(true)} onKeyDown={tecla} />
+      {aberto && itens.length > 0 && (
+        <ul className="cpr-combo-lista" role="listbox">
+          {itens.map((it, i) => (
+            <li key={(it.criar ? '+' : '') + it.v} role="option" aria-selected={i === ativo}
+              className={`${i === ativo ? 'ativo' : ''} ${it.criar ? 'criar' : ''}`}
+              onMouseDown={(e) => { e.preventDefault(); escolher(it.v) }}>
+              {it.criar ? `＋ ${rotuloCriar} "${it.v}"` : it.v}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 // ───────────────────────── Modal: nova / editar conta ─────────────────────────
-function FormConta({ form, setForm, sugestoes, hoje, onFechar, onSalvo, onErro, empresaId }) {
+function FormConta({ form, setForm, sugestoes, clientes, hoje, onFechar, onSalvo, onErro, empresaId }) {
   const [salvando, setSalvando] = useState(false)
   const [erroCampo, setErroCampo] = useState(null)
   const editando = !!form.id
@@ -651,13 +703,17 @@ function FormConta({ form, setForm, sugestoes, hoje, onFechar, onSalvo, onErro, 
           </div>
           <div className="form-field">
             <label htmlFor="cpr-pessoa">{pagar ? 'Fornecedor / pago a' : 'Cliente / quem vai pagar'}</label>
-            <input id="cpr-pessoa" list="cpr-pessoas" placeholder="Opcional" value={form.pessoa} onChange={(e) => set('pessoa', e.target.value)} maxLength={80} />
-            <datalist id="cpr-pessoas">{[...sugestoes.pessoas[form.tipo]].sort().map((p) => <option key={p} value={p} />)}</datalist>
+            <Combo id="cpr-pessoa" valor={form.pessoa} onChange={(v) => set('pessoa', v)} maxLength={80}
+              placeholder={pagar ? 'Escolha ou digite o fornecedor' : 'Escolha um cliente ou digite'}
+              rotuloCriar={pagar ? 'Novo fornecedor' : 'Usar'}
+              opcoes={pagar ? [...sugestoes.pessoas.pagar].sort((a, b) => a.localeCompare(b, 'pt-BR'))
+                : [...new Set([...sugestoes.pessoas.receber, ...clientes])].sort((a, b) => a.localeCompare(b, 'pt-BR'))} />
           </div>
           <div className="form-field">
             <label htmlFor="cpr-cat">Categoria</label>
-            <input id="cpr-cat" list="cpr-cats" placeholder="Escolha ou escreva" value={form.categoria} onChange={(e) => set('categoria', e.target.value)} maxLength={40} />
-            <datalist id="cpr-cats">{[...sugestoes.cats[form.tipo]].map((c) => <option key={c} value={c} />)}</datalist>
+            <Combo id="cpr-cat" valor={form.categoria} onChange={(v) => set('categoria', v)} maxLength={40}
+              placeholder="Escolha ou crie uma categoria" rotuloCriar="Criar categoria"
+              opcoes={[...sugestoes.cats[form.tipo]]} />
           </div>
           <div className="form-field">
             <label htmlFor="cpr-valor">{parcelado ? 'Valor total (R$)' : 'Valor (R$)'}</label>
