@@ -403,6 +403,11 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, taxaBairro, bairro
   const origemGps = useRef(false)
   const marcarMexeu = (porGps = false) => { interagiu.current = true; origemGps.current = porGps; setMexeu(true) }
   const jaPediuLocal = useRef(false)
+  // Valores de AGORA pra o retorno do GPS (ele chega depois, com a closure velha).
+  const initialRef = useRef(initial)
+  const enderecoRef = useRef(endereco)
+  initialRef.current = initial
+  enderecoRef.current = endereco
   // Conta o tempo só no modo forçado, pra liberar a saída de emergência.
   const [demorou, setDemorou] = useState(false)
   useEffect(() => {
@@ -564,6 +569,14 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, taxaBairro, bairro
     setLocLoading(true)
     navigator.geolocation.getCurrentPosition(
       pos => {
+        // GPS automatico nunca passa por cima do endereco que a pessoa digitou. Com
+        // a localizacao ja liberada ele responde na hora e GANHAVA da rua digitada,
+        // ainda travando o pino como "marcado a mao": quem digitava uma rua longe
+        // de onde estava via o pino cair em cima de si (teste de 22/10/2026).
+        if (auto && (initialRef.current || String(enderecoRef.current?.rua ?? '').trim())) {
+          setLocLoading(false)
+          return
+        }
         marcarMexeu(auto)
         const c = { lat: pos.coords.latitude, lng: pos.coords.longitude }
         setCoord(c); setLocLoading(false); setDefinido(true)
@@ -588,6 +601,9 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, taxaBairro, bairro
     if (!embutido || !autoLocalizar || initial || jaPediuLocal.current) return
     if (typeof window === 'undefined' || !navigator.geolocation) return
     if (!window.matchMedia?.('(pointer: coarse)')?.matches) return
+    // Ja digitou a rua? Entao o ponto vem DELA. O botao "usar minha localizacao"
+    // continua ali pra quem quiser.
+    if (String(endereco?.rua ?? '').trim()) return
     jaPediuLocal.current = true
     usarMinhaLocalizacao(true)
   }, [embutido, autoLocalizar, initial]) // eslint-disable-line react-hooks/exhaustive-deps
