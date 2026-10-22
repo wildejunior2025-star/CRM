@@ -50,8 +50,8 @@ function ItemSearch({ items, value, onChange, placeholder = 'Buscar...' }) {
 }
 
 const MOTIVOS_PADRAO = {
-  entrada: ['compra', 'devolucao', 'ajuste_inventario'],
-  saida: ['venda', 'perda', 'ajuste_inventario'],
+  entrada: ['compra', 'devolucao', 'bonificacao', 'ajuste_inventario'],
+  saida: ['venda', 'perda', 'vencimento', 'consumo', 'brinde', 'ajuste_inventario'],
   // "Ajuste" não tinha motivo nenhum: a lista só ia até saída, então o campo
   // abria vazio. Aqui o motivo responde "por que a contagem não bateu".
   ajuste: ['ajuste_inventario', 'quebra', 'perda', 'erro_de_lancamento', 'sobra'],

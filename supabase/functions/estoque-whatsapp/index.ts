@@ -31,8 +31,22 @@ const VALIDADE_DESFAZER_MIN = 180
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY)
 const ok = () => new Response("ok")
 
-type Item = { tipo: "produto" | "materia"; id: string; nome: string; quantidade: number; custo_unit: number | null; estoque_minimo?: number | null }
-type NaoAchado = { nome: string; quantidade: number; custo_unit: number | null; unidade?: string; estoque_minimo?: number | null }
+type Item = { tipo: "produto" | "materia"; id: string; nome: string; quantidade: number; custo_unit: number | null; estoque_minimo?: number | null; mov?: Mov; motivo?: string }
+type Mov = "entrada" | "saida" | "ajuste"
+type NaoAchado = { nome: string; quantidade: number; custo_unit: number | null; unidade?: string; estoque_minimo?: number | null; mov?: Mov }
+// Motivos (mesmos do Portal > Estoque). Perda e vencimento viram prejuízo (imprevisto) no financeiro.
+const MOTIVOS: Record<Mov, string[]> = {
+  entrada: ["compra", "devolucao", "bonificacao"],
+  saida: ["perda", "vencimento", "consumo", "brinde"],
+  ajuste: ["ajuste_inventario"],
+}
+const ROTULO: Record<string, string> = {
+  compra: "compra", devolucao: "devolução", bonificacao: "bonificação", perda: "perda", vencimento: "vencimento",
+  consumo: "consumo", brinde: "brinde", ajuste_inventario: "contagem",
+}
+const GERA_PREJUIZO = new Set(["perda", "vencimento"])
+// Só COMPRA exige preço: bonificação é de graça, devolução e saída valem pelo custo já cadastrado.
+const precisaPreco = (x: { mov?: Mov; motivo?: string }) => (x.mov ?? "entrada") === "entrada" && (x.motivo ?? "compra") === "compra"
 type ProdutoNovo = { nome: string; preco_venda: number | null; preco_custo: number | null; categoria: string; quantidade_inicial: number | null; estoque_minimo: number | null }
 type MinimoSolto = { tipo: "produto" | "materia"; id: string; nome: string; minimo: number }
 
@@ -139,8 +153,8 @@ async function entenderTexto(
     '{ "ignorar": boolean, "pergunta": boolean, "corrige": boolean,',
     '  "produtos_novos": [ { "nome": string, "preco_venda": number|null, "preco_custo": number|null, "categoria": string|null, "quantidade_inicial": number|null, "estoque_minimo": number|null } ],',
     '  "minimos": [ { "indice": number, "estoque_minimo": number } ],',
-    '  "itens": [ { "indice": number, "quantidade": number, "custo_unit": number|null, "custo_total": number|null, "estoque_minimo": number|null } ],',
-    '  "nao_encontrados": [ { "nome": string, "unidade": "kg"|"g"|"L"|"ml"|"un", "quantidade": number, "custo_unit": number|null, "custo_total": number|null, "estoque_minimo": number|null } ] }',
+    '  "itens": [ { "indice": number, "quantidade": number, "custo_unit": number|null, "custo_total": number|null, "estoque_minimo": number|null, "movimento": "entrada"|"saida"|"ajuste", "motivo": string } ],',
+    '  "nao_encontrados": [ { "nome": string, "unidade": "kg"|"g"|"L"|"ml"|"un", "quantidade": number, "custo_unit": number|null, "custo_total": number|null, "estoque_minimo": number|null, "movimento": "entrada"|"saida"|"ajuste" } ] }',
     "",
     "Regras:",
     "- 'ignorar' = true quando a mensagem NÃO é sobre uma compra/entrada de mercadoria (papo, pergunta, cumprimento).",
@@ -160,6 +174,12 @@ async function entenderTexto(
     "  'coloca 50 hambúrguer no estoque', 'comecei com 30 kg de carne') é ENTRADA: devolva em itens/nao_encontrados,",
     "  mesmo sem preço (custo null), e pergunta=false. Quando o item não está no catálogo, vai em nao_encontrados",
     "  (será criado como insumo). Só use pergunta=true se o pedido NÃO envolver colocar quantidade no estoque.",
+    "- TIPO de cada item em 'movimento': 'entrada' (padrão: comprei, chegou), 'saida' (tirou do estoque sem vender: perdeu, estragou,",
+    "  quebrou, venceu, consumo da casa/funcionário, brinde/amostra/cortesia) ou 'ajuste' (CONTAGEM: a pessoa diz quanto TEM agora,",
+    "  ex.: 'contei 12 pães', 'o pão está com 80'; em ajuste 'quantidade' = o que tem AGORA, não a diferença).",
+    "  'motivo': entrada → compra | devolucao (cliente devolveu) | bonificacao (ganhou do fornecedor); saida → perda (estragou/quebrou/",
+    "  caiu) | vencimento (venceu) | consumo | brinde; ajuste → ajuste_inventario. Sem dizer, é entrada/compra.",
+    "  Saída e ajuste só valem pra item que JÁ está no catálogo (se não estiver, vai em nao_encontrados com o mesmo movimento).",
     "- Mensagem que só informa o PREÇO de item(ns) da lista ('pão brioche 1,30', 'falta o preço, 1.3 a unidade') preenche o",
     "  custo_unit desse item (se a lista tem um item só, vale pra ele) e mantém o resto igual. Preço dito sem 'cada'/'a unidade'",
     "  em mensagem de preço isolado é por unidade.",
@@ -173,7 +193,7 @@ async function entenderTexto(
     "- Só inclua o que foi dito. Não invente item.",
     (pendentes.length || pendNovos.length)
       ? (jaLancado
-        ? "- A LISTA ABAIXO JÁ FOI LANÇADA no estoque há pouco. Se a mensagem CORRIGE ou COMPLETA esses mesmos itens (ex.: 'faltou o preço', 'eram 40 e não 50', 'o pão custa 1,30'), corrige=true e devolva a lista COMPLETA já corrigida. Se for uma compra NOVA e diferente, corrige=false e devolva SÓ os itens novos. Papo sem relação: ignorar=true."
+        ? "- A LISTA ABAIXO JÁ FOI LANÇADA no estoque há pouco. Se a mensagem CORRIGE ou COMPLETA esses mesmos itens (ex.: 'faltou o preço', 'eram 40 e não 50', 'o pão custa 1,30'), corrige=true e devolva a lista COMPLETA já corrigida. Só é correção se mexer em quantidade, preço ou nome da MESMA compra. Saída (perda, vencimento, consumo, brinde), contagem, bonificação, devolução ou item/compra diferente NUNCA é correção: corrige=false e devolva SÓ o movimento novo. Papo sem relação: ignorar=true."
         : "- JÁ EXISTE UMA LISTA ESPERANDO CONFIRMAÇÃO (abaixo). A mensagem é uma CORREÇÃO ou ACRÉSCIMO a ela: devolva a lista COMPLETA e atualizada\n  (itens que ela já tinha + mudanças). Se a mensagem não tem nada a ver com a lista, ignorar=true.")
       : "",
     "",
@@ -203,14 +223,21 @@ async function entenderTexto(
     const c = lista[Number(x?.indice)]
     const q = num(x?.quantidade)
     if (!c || !q) continue
-    itens.push({ tipo: c.tipo, id: c.id, nome: c.nome, quantidade: Math.round(q * 1000) / 1000, custo_unit: unit(x, q), estoque_minimo: num(x?.estoque_minimo) })
+    const mov: Mov = ["entrada", "saida", "ajuste"].includes(String(x?.movimento)) ? x.movimento : "entrada"
+    const motivo = MOTIVOS[mov].includes(String(x?.motivo)) ? String(x.motivo) : MOTIVOS[mov][0]
+    itens.push({
+      tipo: c.tipo, id: c.id, nome: c.nome, quantidade: Math.round(q * 1000) / 1000,
+      custo_unit: motivo === "bonificacao" ? 0 : unit(x, q),             // 0 = "sem preço" confirmado (é de graça)
+      estoque_minimo: num(x?.estoque_minimo), mov, motivo,
+    })
   }
   const naoAchados: NaoAchado[] = []
   for (const x of parsed.nao_encontrados ?? []) {
     const q = num(x?.quantidade) ?? 1
     const nome = String(x?.nome ?? "").trim().slice(0, 80)
     const un = ["kg", "g", "L", "ml", "un"].includes(String(x?.unidade)) ? String(x.unidade) : "un"
-    if (nome) naoAchados.push({ nome, quantidade: q, custo_unit: unit(x, q), unidade: un, estoque_minimo: num(x?.estoque_minimo) })
+    const movN: Mov = ["entrada", "saida", "ajuste"].includes(String(x?.movimento)) ? x.movimento : "entrada"
+    if (nome) naoAchados.push({ nome, quantidade: q, custo_unit: unit(x, q), unidade: un, estoque_minimo: num(x?.estoque_minimo), mov: movN })
   }
   return {
     itens, naoAchados, custoUsd,
@@ -253,20 +280,36 @@ async function lerNota(base64: string, mimetype: string, cat: Awaited<ReturnType
   return { itens, naoAchados, aviso: d.aviso as string | null, custoUsd: usd({ entrada: d.uso?.entrada ?? 0, saida: d.uso?.saida ?? 0 }) }
 }
 
-function resumo(itens: Item[], naoAchados: NaoAchado[], corrige = false): string {
-  let total = 0, temPreco = false
+function resumo(itens: Item[], naoAchados: NaoAchado[], corrige = false, info: Map<string, { saldo: number; custo: number }> = new Map()): string {
+  let total = 0, temPreco = false, prejuizo = 0
   const linhas = itens.map((i) => {
-    let s = `• ${i.nome} × ${qtdTxt(i.quantidade)}${i.estoque_minimo != null ? ` (mínimo ${qtdTxt(i.estoque_minimo)})` : ""}`
+    const mov = i.mov ?? "entrada", motivo = i.motivo ?? "compra", inf = info.get(i.id)
+    if (mov === "ajuste") {
+      const delta = i.quantidade - (inf?.saldo ?? 0)
+      return `• ${i.nome} — contagem: o sistema tem ${qtdTxt(inf?.saldo ?? 0)}, vai ficar ${qtdTxt(i.quantidade)} (${delta >= 0 ? "+" : ""}${qtdTxt(delta)})`
+    }
+    if (mov === "saida") {
+      const v = (inf?.custo ?? 0) * i.quantidade
+      const gera = GERA_PREJUIZO.has(motivo)
+      if (gera) prejuizo += v
+      return `• ${i.nome} × ${qtdTxt(i.quantidade)} — saída por *${ROTULO[motivo] ?? motivo}*${gera && v > 0 ? ` (≈ ${brl(v)} de prejuízo)` : ""}${inf && inf.saldo < i.quantidade ? ` ⚠️ só tem ${qtdTxt(inf.saldo)}` : ""}`
+    }
+    let s = `• ${i.nome} × ${qtdTxt(i.quantidade)}${motivo !== "compra" ? ` (${ROTULO[motivo] ?? motivo})` : ""}${i.estoque_minimo != null ? ` (mínimo ${qtdTxt(i.estoque_minimo)})` : ""}`
     if (i.custo_unit) { const v = i.custo_unit * i.quantidade; total += v; temPreco = true; s += ` — ${brl(i.custo_unit)} un (${brl(v)})` }
     return s
   })
+  const so = (m: Mov) => itens.length > 0 && itens.every((i) => (i.mov ?? "entrada") === m)
+  const titulo = so("saida") ? "Entendi esta saída de estoque:" : so("ajuste") ? "Entendi esta contagem:"
+    : itens.some((i) => (i.mov ?? "entrada") !== "entrada") ? "Entendi este lançamento:"
+    : itens.every((i) => (i.motivo ?? "compra") === "compra") ? "Entendi esta compra:" : "Entendi esta entrada:"
   const partes: string[] = []
-  if (linhas.length) partes.push(`${corrige ? "Corrigindo o último lançamento — vai ficar assim:" : "Entendi esta compra:"}\n${linhas.join("\n")}`)
+  if (linhas.length) partes.push(`${corrige ? "Corrigindo o último lançamento — vai ficar assim:" : titulo}\n${linhas.join("\n")}`)
+  if (prejuizo > 0) partes.push(`💸 Vai entrar no financeiro como prejuízo: ${brl(prejuizo)}.`)
   if (temPreco) partes.push(`Total: ${brl(total)}`)
   if (naoAchados.length) {
     partes.push(`🆕 Não existem no cadastro — vou CRIAR como insumo:\n${naoAchados.map((n) => `• ${n.nome} × ${qtdTxt(n.quantidade)} ${n.unidade ?? "un"}${n.estoque_minimo != null ? ` (mínimo ${qtdTxt(n.estoque_minimo)})` : ""}${n.custo_unit ? ` — ${brl(n.custo_unit)}` : ""}`).join("\n")}`)
   }
-  const semPreco = [...itens, ...naoAchados].filter((x) => x.custo_unit == null).map((x) => x.nome)
+  const semPreco = [...itens, ...naoAchados].filter((x) => precisaPreco(x) && x.custo_unit == null).map((x) => x.nome)
   if (semPreco.length) {
     // Entrada sem preço deixa o custo e o lucro às cegas: só lança com o preço (ou com um "sem preço" explícito).
     partes.push(`❓ *Falta o preço (por unidade)* de: ${semPreco.join(", ")}.\nMe diga o valor, ex.: "${semPreco[0]} 1,30". Só lanço com o preço.\n(Se não souber, responda *SEM PREÇO*. Ou *NÃO* para cancelar.)`)
@@ -304,33 +347,55 @@ async function lancar(empresaId: string, pend: any): Promise<string> {
     }
     itens.push({ tipo: "materia", id: id!, nome: n.nome, quantidade: n.quantidade, custo_unit: n.custo_unit, estoque_minimo: n.estoque_minimo })
   }
-  const prod = itens.filter((i) => i.tipo === "produto")
-  const mat = itens.filter((i) => i.tipo === "materia")
-  const linha = (i: Item) => ({
-    tipo: "entrada", quantidade: i.quantidade, custo_unit: i.custo_unit || null,   // 0 = "sem preço" confirmado
-    valor_total: i.custo_unit ? Math.round(i.custo_unit * i.quantidade * 100) / 100 : null,
-  })
-  let idsP: string[] = [], idsM: string[] = []
-  if (prod.length) {
-    const { data, error } = await sb.from("estoque_movimentos").insert(prod.map((i) => ({
-      empresa_id: empresaId, produto_id: i.id, motivo: "compra", observacao: "Entrada pelo WhatsApp", ...linha(i),
-    }))).select("id")
+  const movDe = (i: Item): Mov => i.mov ?? "entrada"
+  const motivoDe = (i: Item) => i.motivo ?? MOTIVOS[movDe(i)][0]
+  // Saída e contagem precisam do saldo atual e do custo cadastrado (pra valorizar a perda e calcular a diferença).
+  const infoId = await infoDosItens(empresaId, itens.filter((i) => movDe(i) !== "entrada").map((i) => i.id))
+  const ignorados: string[] = []
+  type Lin = { i: Item; row: Record<string, unknown>; motivo: string; valor: number }
+  const linP: Lin[] = [], linM: Lin[] = []
+  for (const i of itens) {
+    const mov = movDe(i), motivo = motivoDe(i), inf = infoId.get(i.id)
+    let quantidade = i.quantidade, custo = i.custo_unit || null
+    if (mov === "saida") custo = inf?.custo || null
+    if (mov === "ajuste") {
+      quantidade = Math.round((i.quantidade - (inf?.saldo ?? 0)) * 1000) / 1000
+      if (quantidade === 0) { ignorados.push(i.nome); continue }       // contagem já bate
+      custo = inf?.custo || null
+    }
+    const valor = custo ? Math.round(custo * Math.abs(quantidade) * 100) / 100 : 0
+    const base = { tipo: mov, quantidade, custo_unit: custo, valor_total: custo ? valor : null }
+    if (i.tipo === "produto") linP.push({ i, motivo, valor, row: { empresa_id: empresaId, produto_id: i.id, motivo, observacao: `${ROTULO[motivo] ?? motivo} pelo WhatsApp`, ...base } })
+    else linM.push({ i, motivo, valor, row: { empresa_id: empresaId, materia_prima_id: i.id, observacao: `${ROTULO[motivo] ?? motivo} pelo WhatsApp`, ...base } })
+  }
+  let idsP: string[] = [], idsM: string[] = [], idsImp: string[] = []
+  if (linP.length) {
+    const { data, error } = await sb.from("estoque_movimentos").insert(linP.map((l) => l.row)).select("id")
     if (error) throw error
     idsP = (data ?? []).map((x: any) => x.id)
   }
-  if (mat.length) {
-    const { data, error } = await sb.from("materia_prima_movimentos").insert(mat.map((i) => ({
-      empresa_id: empresaId, materia_prima_id: i.id, observacao: "Entrada pelo WhatsApp", ...linha(i),
-    }))).select("id")
+  if (linM.length) {
+    const { data, error } = await sb.from("materia_prima_movimentos").insert(linM.map((l) => l.row)).select("id")
     if (error) {
       if (idsP.length) await sb.from("estoque_movimentos").delete().in("id", idsP)   // não deixa lançar metade
       throw error
     }
     idsM = (data ?? []).map((x: any) => x.id)
   }
-  // Igual à tela: quem acabou de pagar sabe o preço de hoje, então atualiza o custo do cadastro.
+  // Perda e vencimento são prejuízo: entram em "imprevistos" do financeiro, como o "Produto perdido" do Portal.
+  let prejuizo = 0
+  const hoje = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10)
+  const imps: Record<string, unknown>[] = []
+  linP.forEach((l, k) => { if (GERA_PREJUIZO.has(l.motivo) && l.valor > 0) { prejuizo += l.valor; imps.push({ empresa_id: empresaId, data: hoje, descricao: `${ROTULO[l.motivo]} (WhatsApp): ${l.i.nome} × ${qtdTxt(l.i.quantidade)}`, valor: l.valor, produto_id: l.i.id, quantidade: l.i.quantidade, estoque_movimento_id: idsP[k], registrado_por_nome: "WhatsApp" }) } })
+  linM.forEach((l, k) => { if (GERA_PREJUIZO.has(l.motivo) && l.valor > 0) { prejuizo += l.valor; imps.push({ empresa_id: empresaId, data: hoje, descricao: `${ROTULO[l.motivo]} (WhatsApp): ${l.i.nome} × ${qtdTxt(l.i.quantidade)}`, valor: l.valor, materia_prima_id: l.i.id, quantidade: l.i.quantidade, mp_movimento_id: idsM[k], registrado_por_nome: "WhatsApp" }) } })
+  if (imps.length) {
+    const { data, error } = await sb.from("custos_imprevistos").insert(imps).select("id")
+    if (error) console.error("[estoque-wpp] imprevisto:", error.message)
+    else idsImp = (data ?? []).map((x: any) => x.id)
+  }
+  // Igual à tela: quem acabou de pagar sabe o preço de hoje, então atualiza o custo do cadastro (só em COMPRA).
   for (const i of itens) {
-    if (i.custo_unit) {
+    if (i.custo_unit && movDe(i) === "entrada" && motivoDe(i) === "compra") {
       if (i.tipo === "produto") await sb.from("produtos").update({ preco_custo: i.custo_unit }).eq("id", i.id)
       else await sb.from("materias_primas").update({ custo: i.custo_unit }).eq("id", i.id)
     }
@@ -340,10 +405,29 @@ async function lancar(empresaId: string, pend: any): Promise<string> {
     }
   }
   await sb.from("estoque_whatsapp").update({
-    status: "lancado", lancado_em: new Date().toISOString(), mov_produtos: idsP, mov_materias: idsM,
+    status: "lancado", lancado_em: new Date().toISOString(), mov_produtos: idsP, mov_materias: idsM, imprevistos: idsImp,
   }).eq("id", pend.id)
+  const feitos = linP.length + linM.length
   const novos = criados.length ? `\n🆕 Cadastrei como insumo: ${criados.join(", ")}.` : ""
-  return `✅ Lancei ${itens.length} ${itens.length === 1 ? "item" : "itens"} no estoque.${novos}\nSe foi engano, responda *DESFAZER*.`
+  const prej = prejuizo > 0 ? `\n💸 Lançado como prejuízo no financeiro: ${brl(prejuizo)}.` : ""
+  const ja = ignorados.length ? `\nℹ️ Já estava certo (sem ajuste): ${ignorados.join(", ")}.` : ""
+  return `✅ Lancei ${feitos} ${feitos === 1 ? "movimento" : "movimentos"} no estoque.${novos}${prej}${ja}\nSe foi engano, responda *DESFAZER*.`
+}
+
+// Saldo atual e custo cadastrado dos itens (pra valorizar perda e calcular contagem).
+async function infoDosItens(empresaId: string, ids: string[]): Promise<Map<string, { saldo: number; custo: number }>> {
+  const out = new Map<string, { saldo: number; custo: number }>()
+  if (!ids.length) return out
+  const [saldos, prods, mats] = await Promise.all([
+    sb.rpc("estoque_bot_saldos", { p_empresa_id: empresaId }),
+    sb.from("produtos").select("id, preco_custo").in("id", ids),
+    sb.from("materias_primas").select("id, custo").in("id", ids),
+  ])
+  const custos = new Map<string, number>()
+  for (const p of prods.data ?? []) custos.set(p.id, Number(p.preco_custo || 0))
+  for (const m of mats.data ?? []) custos.set(m.id, Number(m.custo || 0))
+  for (const r of saldos.data ?? []) if (ids.includes(r.id)) out.set(r.id, { saldo: Number(r.saldo), custo: custos.get(r.id) ?? 0 })
+  return out
 }
 
 // Aplica uma proposta do assistente (depois do SIM). Guarda em `antes` o que precisa pro DESFAZER.
@@ -688,6 +772,7 @@ async function tratar(req: Request): Promise<Response> {
       .order("lancado_em", { ascending: false }).limit(1).maybeSingle()
 
     const reverter = async (ult: any) => {
+      if (ult.imprevistos?.length) await sb.from("custos_imprevistos").delete().in("id", ult.imprevistos)
       if (ult.mov_produtos?.length) await sb.from("estoque_movimentos").delete().in("id", ult.mov_produtos)
       if (ult.mov_materias?.length) await sb.from("materia_prima_movimentos").delete().in("id", ult.mov_materias)
       await sb.from("estoque_whatsapp").update({ status: "cancelado" }).eq("id", ult.id)
@@ -707,7 +792,7 @@ async function tratar(req: Request): Promise<Response> {
           : "❌ Não consegui lançar agora (erro no sistema). Nada foi gravado — tente de novo em instantes.")
       }
     }
-    const faltaPreco = (p: any) => [...(p.itens ?? []), ...(p.nao_achados ?? [])].filter((x: any) => x.custo_unit == null)
+    const faltaPreco = (p: any) => [...(p.itens ?? []), ...(p.nao_achados ?? [])].filter((x: any) => precisaPreco(x) && x.custo_unit == null)
 
     if (pend && /^(sem (o )?(preco|valor|custo)|nao sei( o preco| o valor)?|(lanca|lancar|pode lancar) sem (preco|valor|custo))\W*$/.test(t)) {
       const zera = (l: any[]) => (l ?? []).map((x: any) => ({ ...x, custo_unit: x.custo_unit ?? 0 }))
@@ -765,7 +850,7 @@ async function tratar(req: Request): Promise<Response> {
       }
       if (!ult) { await enviar(instance, jid, "Não achei nada recente pra desfazer (só dá até 3 horas depois)."); return ok() }
       await reverter(ult)
-      await enviar(instance, jid, `↩️ Desfeito. Tirei as entradas do estoque (os insumos novos continuam cadastrados).\n(O custo que atualizei no cadastro não volta sozinho — confira se precisar.)`)
+      await enviar(instance, jid, `↩️ Desfeito. Tirei o último lançamento do estoque (os insumos novos continuam cadastrados; prejuízo lançado no financeiro também foi apagado).\n(O custo que atualizei no cadastro não volta sozinho — confira se precisar.)`)
       return ok()
     }
 
@@ -895,16 +980,33 @@ Responda *SIM* para aplicar ou *NÃO* para cancelar.${aviso}`)
       return ok()
     }
 
+    // Saída e contagem só valem pra item que JÁ existe: o que não achou não vira insumo novo.
+    const naoExiste = resultado.naoAchados.filter((n) => (n.mov ?? "entrada") !== "entrada")
+    if (naoExiste.length) {
+      resultado.naoAchados = resultado.naoAchados.filter((n) => (n.mov ?? "entrada") === "entrada")
+      if (!resultado.itens.length && !resultado.naoAchados.length) {
+        await enviar(instance, jid, `Não achei no estoque: ${naoExiste.map((n) => n.nome).join(", ")}. Pra dar saída ou contagem o item precisa existir. Se chegou agora, mande a compra primeiro (ex.: "comprei 10 ${naoExiste[0].nome} a 5 reais").`)
+        return ok()
+      }
+    }
+    const infoResumo = await infoDosItens(empresaId, resultado.itens.filter((i) => (i.mov ?? "entrada") !== "entrada").map((i) => i.id))
+
     // Lista nova substitui a que estava esperando.
     if (pend) await sb.from("estoque_whatsapp").update({ status: "cancelado" }).eq("id", pend.id)
     // Corrige um lançamento já feito? A lista nova guarda qual substitui (o SIM troca um pelo outro).
-    const substitui = pend?.substitui_id ?? (resultado.corrige && ultLancado ? ultLancado.id : null)
+    // Corrigir lançamento só vale pra COMPRA (faltou preço, quantidade errada). Saída, contagem e bonificação são movimentos
+    // novos: substituir um deles desfazia a perda sem querer, e a contagem era calculada com o saldo antigo.
+    const soCompra = (l: { mov?: Mov; motivo?: string }[]) => l.every((x) => (x.mov ?? "entrada") === "entrada" && (x.motivo ?? "compra") === "compra")
+    const podeCorrigir = !!ultLancado && soCompra(resultado.itens) && soCompra(resultado.naoAchados) &&
+      soCompra(ultLancado.itens ?? []) && soCompra(ultLancado.nao_achados ?? [])
+    const substitui = pend?.substitui_id ?? (resultado.corrige && podeCorrigir ? ultLancado!.id : null)
     await sb.from("estoque_whatsapp").insert({
       empresa_id: empresaId, grupo_jid: jid, status: "pendente", origem,
       itens: resultado.itens, nao_achados: resultado.naoAchados, substitui_id: substitui,
     })
     const aviso = resultado.aviso ? `\n\n⚠️ ${resultado.aviso}` : ""
-    const textoResumo = resumo(resultado.itens, resultado.naoAchados, !!substitui) + aviso
+    const textoResumo = resumo(resultado.itens, resultado.naoAchados, !!substitui, infoResumo) + aviso +
+      (naoExiste.length ? `\n\n⚠️ Não achei pra dar saída/contagem (ignorei): ${naoExiste.map((n) => n.nome).join(", ")}.` : "")
     const avisoCred = await cobrarUso(textoResumo)
     await enviar(instance, jid, textoResumo + avisoCred)
     return ok()
