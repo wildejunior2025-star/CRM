@@ -25,6 +25,46 @@ const json = (o: unknown, status = 200) =>
 const norm = (s: unknown) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
   .toLowerCase().replace(/\s+/g, ' ').trim()
 
+const LIMITE_DIA_TOTAL = 330
+const EVOLUTION_API_URL = (Deno.env.get('EVOLUTION_API_URL') ?? '').replace(/\/$/, '')
+const EVOLUTION_API_KEY = Deno.env.get('EVOLUTION_API_KEY') ?? ''
+
+// deno-lint-ignore no-explicit-any
+async function avisarSePassou(supabase: any, hoje: string) {
+  const { data: linhas } = await supabase.from('geocode_uso')
+    .select('empresa_id, consultas').eq('dia', hoje)
+  // deno-lint-ignore no-explicit-any
+  const lista = (linhas ?? []) as any[]
+  const total = lista.reduce((s, l) => s + (l.consultas ?? 0), 0)
+  if (total < LIMITE_DIA_TOTAL) return
+
+  // Primeira vez do dia que passa: a chave (dia) impede mandar de novo.
+  const { data: novo } = await supabase.from('geocode_alerta')
+    .upsert({ dia: hoje, total }, { onConflict: 'dia', ignoreDuplicates: true }).select('dia')
+  if (!novo?.length) return
+
+  const { data: dest } = await supabase.from('config_global').select('valor').eq('chave', 'aviso_fwc_destino').maybeSingle()
+  const numero = String(dest?.valor ?? '').replace(/\D/g, '')
+  const { data: cfgInst } = await supabase.from('config_global').select('valor').eq('chave', 'admin_sender_instance').maybeSingle()
+  const instancia = String(cfgInst?.valor ?? '').trim() || 'crmadmin'
+  if (!numero || !EVOLUTION_API_URL || !EVOLUTION_API_KEY) {
+    console.warn('[geocode-google] passou de', LIMITE_DIA_TOTAL, 'mas sem como avisar. Total:', total)
+    return
+  }
+  const top = lista.sort((a, b) => (b.consultas ?? 0) - (a.consultas ?? 0)).slice(0, 5)
+  const { data: nomes } = await supabase.from('empresas').select('id, nome').in('id', top.map((l) => l.empresa_id))
+  // deno-lint-ignore no-explicit-any
+  const nomeDe = new Map(((nomes ?? []) as any[]).map((e) => [e.id, e.nome]))
+  const porLoja = top.map((l) => `• ${nomeDe.get(l.empresa_id) ?? '?'}: ${l.consultas}`).join('\n')
+  const texto = `⚠️ *Google Maps — consumo alto hoje*\n\nJá foram *${total} consultas pagas* hoje (limite de aviso: ${LIMITE_DIA_TOTAL}).\n\n${porLoja}\n\nA cota grátis do Google é por mês (cerca de 330 por dia). Vale olhar se alguma loja está em laço ou se o movimento cresceu.`
+  const r = await fetch(`${EVOLUTION_API_URL}/message/sendText/${instancia}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY },
+    body: JSON.stringify({ number: numero, text: texto }),
+  })
+  if (!r.ok) console.error('[geocode-google] Evolution recusou:', (await r.text()).slice(0, 200))
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
   try {
@@ -62,6 +102,11 @@ Deno.serve(async (req) => {
     await supabase.from('geocode_uso').upsert(
       { empresa_id: empresaId, dia: hoje, consultas: (uso?.consultas ?? 0) + 1 },
       { onConflict: 'empresa_id,dia' })
+
+    // Aviso no WhatsApp do dono da FWC se, somando TODAS as lojas, o dia passar do
+    // limite (a cota grátis do Google é por mês, ~330/dia). Só fala quando passa,
+    // e uma vez por dia; abaixo disso não manda nada.
+    await avisarSePassou(supabase, hoje).catch((e) => console.error('[geocode-google] aviso falhou:', e))
 
     const endereco = partes.join(', ')
     const url = 'https://maps.googleapis.com/maps/api/geocode/json?' + new URLSearchParams({
