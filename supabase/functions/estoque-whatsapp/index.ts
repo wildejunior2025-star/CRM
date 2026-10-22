@@ -13,6 +13,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { verCarteira, cobrar } from "../_shared/carteiraIa.ts"
 import { AsyncLocalStorage } from "node:async_hooks"
+import { lerComandoConta } from "../_shared/contasParse.ts"
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? ""
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
@@ -456,6 +457,43 @@ async function executarAcao(empresaId: string, a: any): Promise<string> {
       antes = { produto_id: data.id, mov_id: mov.id }
     }
     ok_ = `✅ Produto *${p.nome}* cadastrado por ${brl(Number(p.preco_venda))}${Number(p.quantidade_inicial) > 0 ? `, com ${qtdTxt(Number(p.quantidade_inicial))} em estoque` : ""}${p.estoque_minimo ? ` e mínimo ${qtdTxt(Number(p.estoque_minimo))}` : ""}. Falta só a foto — coloque pelo Portal em Catálogo.`
+  } else if (a.tipo === "conta_criar") {
+    const { data: c, error } = await sb.from("contas_financeiras").insert({
+      empresa_id: empresaId, tipo: p.tipo, descricao: p.descricao, pessoa: p.pessoa ?? null, categoria: p.categoria ?? null,
+      valor: p.valor, vencimento: p.vencimento, recorrencia: p.recorrencia ?? "nenhuma", origem: "whatsapp",
+    }).select("id").single()
+    if (error) throw error
+    antes = { conta_id: c.id }
+    if (p.quitada) {
+      const { error: eb } = await sb.from("contas_baixas").insert({
+        empresa_id: empresaId, conta_id: c.id, valor: p.valor, data: hojeBRT(), forma: p.forma ?? null, origem: "whatsapp",
+      })
+      if (eb) { await sb.from("contas_financeiras").delete().eq("id", c.id); throw eb }
+    }
+    const aPagar = p.tipo === "pagar"
+    ok_ = p.quitada
+      ? `✅ Registrado: *${p.descricao}* ${brl(Number(p.valor))} — ${aPagar ? "paga" : "recebida"} hoje.`
+      : `✅ Conta ${aPagar ? "a pagar" : "a receber"} criada: *${p.descricao}* ${brl(Number(p.valor))}, vence ${ddmmBR(p.vencimento)}${p.recorrencia ? ` (repete ${p.recorrencia === "mensal" ? "todo mês" : p.recorrencia})` : ""}.`
+  } else if (a.tipo === "conta_baixar") {
+    const { data: conta } = await sb.from("contas_financeiras").select("*").eq("id", p.conta_id).eq("empresa_id", empresaId).maybeSingle()
+    if (!conta || conta.status !== "aberta") throw new Error("A conta não está mais em aberto.")
+    const restante = Math.round((Number(conta.valor) - Number(conta.valor_pago || 0)) * 100) / 100
+    if (Number(p.valor) > restante + 0.004) throw new Error(`Só faltam ${brl(restante)} nessa conta.`)
+    const inicio = new Date().toISOString()
+    const { data: b, error } = await sb.from("contas_baixas").insert({
+      empresa_id: empresaId, conta_id: conta.id, valor: p.valor, data: hojeBRT(), forma: p.forma ?? null, origem: "whatsapp",
+    }).select("id").single()
+    if (error) throw error
+    antes = { baixa_id: b.id, conta_id: conta.id }
+    let proxima = false
+    if (conta.recorrencia !== "nenhuma" && conta.grupo_id) {
+      // A repetição nasce por gatilho no banco; guarda qual foi pra o DESFAZER apagar junto.
+      const { data: prox } = await sb.from("contas_financeiras").select("id").eq("grupo_id", conta.grupo_id)
+        .gt("vencimento", conta.vencimento).gte("created_at", inicio).order("vencimento").limit(1).maybeSingle()
+      if (prox) { antes = { ...antes, proxima_id: prox.id }; proxima = true }
+    }
+    const falta = Math.round((restante - Number(p.valor)) * 100) / 100
+    ok_ = `✅ ${conta.tipo === "pagar" ? "Pago" : "Recebido"}: *${conta.descricao}* ${brl(Number(p.valor))}${falta > 0.004 ? ` (parcial — ainda falta ${brl(falta)})` : ""}.${proxima ? " A próxima já foi criada." : ""}`
   } else if (a.tipo === "definir_minimo") {
     const antesItens: any[] = []
     for (const it of (p.itens ?? [])) {
@@ -495,7 +533,12 @@ Se foi engano, responda *DESFAZER*.`
 
 async function desfazerAcao(empresaId: string, a: any): Promise<string> {
   const x = a.antes ?? {}
-  if (a.tipo === "definir_minimo") {
+  if (a.tipo === "conta_criar") {
+    await sb.from("contas_financeiras").delete().eq("id", x.conta_id).eq("empresa_id", empresaId)       // as baixas vão junto
+  } else if (a.tipo === "conta_baixar") {
+    await sb.from("contas_baixas").delete().eq("id", x.baixa_id).eq("empresa_id", empresaId)            // o gatilho reabre a conta
+    if (x.proxima_id) await sb.from("contas_financeiras").delete().eq("id", x.proxima_id).eq("empresa_id", empresaId).eq("valor_pago", 0)
+  } else if (a.tipo === "definir_minimo") {
     for (const it of (x.itens ?? [])) await sb.from(it.tab).update({ estoque_minimo: it.de }).eq("id", it.id).eq("empresa_id", empresaId)
   } else if (a.tipo === "cadastrar_produto") {
     if (x.mov_id) await sb.from("estoque_movimentos").delete().eq("id", x.mov_id)
@@ -603,6 +646,7 @@ const AJUDA_ASSISTENTE = `🤖 *Assistente — o que eu faço aqui*
 🔢 *Contagem*: "contei 18 queijo" (eu ajusto a diferença)
 🆕 *Cadastro*: "cadastra Coca 2L por 12, tenho 20, custo 5, mínimo 6"
 ⚠️ *Mínimo*: "pão mínimo 50"
+🧾 *Contas*: "paguei 80 de gás" · "recebi 200 do João" · "a pagar luz 350 dia 28" · "a receber João 200 dia 30" · "a pagar internet 119,90 todo mês dia 15"
 
 🔎 *Consultas*: "o que está acabando?" · "lista o estoque" · "estoque de bebidas" · "estoque de insumos" · "tem pão?"
 
@@ -615,6 +659,8 @@ const AJUDA_ANALISTA = `📊 *Analista — o que eu faço aqui*
 • "vendas hoje" · "vendas ontem" · "vendas semana" · "vendas mês" · "vendas mês passado" · "vendas 15/10" · "vendas 01/10 a 15/10"
 • "lucro mês" · "mais vendidos mês" · "melhores clientes" · "situação" · "fiado" · "entrega"
 • "o que está acabando?" · "lista o estoque" · "tem pão?"
+• *Contas*: "contas" · "contas a pagar" · "contas a receber" · "vence hoje" · "contas atrasadas" · "contas da semana"
+• *Lançar conta*: "paguei 80 de gás" · "recebi 200 do João" · "a pagar luz 350 dia 28" · "a receber João 200 dia 30"
 
 *Mudanças (eu mostro e espero SIM)*:
 • "muda o preço da pizza pra 55"
@@ -792,6 +838,110 @@ async function propostaFixa(t: string, empresaId: string, jid: string): Promise<
   return `${resumoTxt}\n\nResponda *SIM* para aplicar ou *NÃO* para cancelar.`
 }
 
+// ── Contas a pagar e a receber pelo WhatsApp (frases fixas, sem IA) ─────────
+const ddmmBR = (s: string) => `${s.slice(8, 10)}/${s.slice(5, 7)}`
+const diasEntreYmd = (a: string, b: string) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86_400_000)
+const restanteConta = (c: any) => Math.round((Number(c.valor) - Number(c.valor_pago || 0)) * 100) / 100
+const ROTULO_FORMA: Record<string, string> = { pix: "PIX", dinheiro: "dinheiro", credito: "cartão", debito: "débito", boleto: "boleto", transferencia: "transferência", cheque: "cheque" }
+
+function linhaConta(c: any, hoje: string): string {
+  const d = diasEntreYmd(hoje, c.vencimento)
+  const quando = d < 0 ? `⚠️ venceu há ${-d} ${-d === 1 ? "dia" : "dias"}` : d === 0 ? "vence hoje" : d === 1 ? "vence amanhã" : `em ${d} dias`
+  const parcial = Number(c.valor_pago) > 0 ? ` (já ${c.tipo === "pagar" ? "pago" : "recebido"} ${brl(Number(c.valor_pago))})` : ""
+  return `• ${ddmmBR(c.vencimento)} ${c.descricao}${c.pessoa ? ` (${c.pessoa})` : ""} — ${brl(restanteConta(c))}${parcial} · ${quando}`
+}
+
+async function contasAbertas(empresaId: string, tipo?: "pagar" | "receber") {
+  let q = sb.from("contas_financeiras").select("*").eq("empresa_id", empresaId).eq("status", "aberta").order("vencimento").order("created_at").limit(500)
+  if (tipo) q = q.eq("tipo", tipo)
+  const { data } = await q
+  return data ?? []
+}
+
+async function comandoContas(t: string, empresaId: string, jid: string, modo: "assistente" | "analista", original = ""): Promise<{ texto: string; cobrar: boolean } | null> {
+  const hoje = hojeBRT()
+  const limpo = t.replace(/[?!.]+$/g, "").trim()
+
+  // ── Consultas (só no Analista: é número financeiro, não é pra equipe) ──
+  if (modo === "analista") {
+    const soma = (l: any[]) => l.reduce((x, c) => x + restanteConta(c), 0)
+    const lista = (titulo: string, l: any[], vazio: string) => {
+      if (!l.length) return { texto: vazio, cobrar: true }
+      const linhas = l.slice(0, 20).map((c) => linhaConta(c, hoje))
+      return { texto: `${titulo} (${l.length}) — total *${brl(soma(l))}*\n${linhas.join("\n")}${l.length > 20 ? `\n… e mais ${l.length - 20}` : ""}`, cobrar: true }
+    }
+    if (/^(contas|minhas contas|resumo das contas|resumo de contas)$/.test(limpo)) {
+      const ab = await contasAbertas(empresaId)
+      const pagar = ab.filter((c) => c.tipo === "pagar"), receber = ab.filter((c) => c.tipo === "receber")
+      const venc = (l: any[]) => l.filter((c) => c.vencimento < hoje)
+      const em7 = (l: any[]) => l.filter((c) => c.vencimento >= hoje && c.vencimento <= somaDiasBR(hoje, 7))
+      return { cobrar: true, texto: [
+        "🗓️ *Contas*",
+        `A pagar em aberto: *${brl(soma(pagar))}* (${pagar.length})${venc(pagar).length ? ` · ⚠️ atrasadas: ${brl(soma(venc(pagar)))} (${venc(pagar).length})` : ""}`,
+        `A receber em aberto: *${brl(soma(receber))}* (${receber.length})${venc(receber).length ? ` · atrasadas: ${brl(soma(venc(receber)))} (${venc(receber).length})` : ""}`,
+        `Próximos 7 dias: sai ${brl(soma(em7(pagar)))} · entra ${brl(soma(em7(receber)))}`,
+        `\nVeja: "contas a pagar" · "contas a receber" · "vence hoje" · "contas atrasadas" · "contas da semana"`,
+      ].join("\n") }
+    }
+    if (/^(contas? a pagar|a pagar|contas pra pagar|o que (tenho|falta) (pra|para) pagar)$/.test(limpo))
+      return lista("💸 *A pagar*", await contasAbertas(empresaId, "pagar"), "Nada a pagar em aberto. 🎉")
+    if (/^(contas? a receber|a receber|o que (tenho|falta) (pra|para) receber)$/.test(limpo))
+      return lista("💰 *A receber*", await contasAbertas(empresaId, "receber"), "Nada a receber em aberto.")
+    if (/^(contas? (vencidas|atrasadas)|vencidas|atrasadas|o que (esta|ta) atrasado)$/.test(limpo))
+      return lista("⚠️ *Contas atrasadas*", (await contasAbertas(empresaId)).filter((c) => c.vencimento < hoje), "Nenhuma conta atrasada. 👏")
+    if (/^(vence hoje|contas? (de )?hoje|o que vence hoje)$/.test(limpo))
+      return lista("📅 *Vencem hoje*", (await contasAbertas(empresaId)).filter((c) => c.vencimento === hoje), "Nada vence hoje.")
+    if (/^(contas? (da )?semana|vence (essa|esta) semana|o que vence (essa|esta) semana|proximos 7 dias)$/.test(limpo))
+      return lista("📅 *Próximos 7 dias*", (await contasAbertas(empresaId)).filter((c) => c.vencimento >= hoje && c.vencimento <= somaDiasBR(hoje, 7)), "Nada vence nos próximos 7 dias.")
+  }
+
+  // ── Registrar: "paguei 80 de gás", "a pagar luz 350 dia 28", "recebi 200 do João", "a receber João 200 dia 30" ──
+  const cmd = lerComandoConta(limpo, hoje, original)
+  if (!cmd) return null
+  const tipo: "pagar" | "receber" = cmd.acao === "pagar" || cmd.acao === "paguei" ? "pagar" : "receber"
+  const jaAconteceu = cmd.acao === "paguei" || cmd.acao === "recebi"
+  const formaTxt = cmd.forma ? ` (${ROTULO_FORMA[cmd.forma] ?? cmd.forma})` : ""
+
+  if (!jaAconteceu && !cmd.vencimento) {
+    return { cobrar: false, texto: `Quando vence? Escreva de novo com a data, ex.: "${tipo === "pagar" ? "a pagar" : "a receber"} ${cmd.descricao.toLowerCase()} ${String(cmd.valor).replace(".", ",")} dia 28" (ou "amanhã", "05/11").` }
+  }
+
+  let params: Record<string, unknown>, tipoAcao: string, resumoTxt: string
+  if (jaAconteceu) {
+    // Já pagou/recebeu: acha a conta em aberto parecida pra dar baixa; se não tem, registra uma já quitada.
+    const palavras = norm(`${cmd.descricao} ${cmd.pessoa ?? ""}`).split(/\s+/).filter((w) => w.length >= 3 && !["pagamento", "recebimento"].includes(w))
+    const abertas = await contasAbertas(empresaId, tipo)
+    const parecidas = abertas.filter((c) => palavras.some((w) => norm(`${c.descricao} ${c.pessoa ?? ""}`).includes(w)))
+    const exatas = parecidas.filter((c) => Math.abs(restanteConta(c) - cmd.valor) < 0.01)
+    let alvo: any = null
+    if (exatas.length >= 1) alvo = [...exatas].sort((a, b) => a.vencimento.localeCompare(b.vencimento))[0]
+    else if (parecidas.length === 1 && cmd.valor <= restanteConta(parecidas[0]) + 0.004) alvo = parecidas[0]
+    else if (parecidas.length > 1) {
+      return { cobrar: false, texto: `Achei mais de uma conta parecida:\n${parecidas.slice(0, 6).map((c) => linhaConta(c, hoje)).join("\n")}\n\nEscreva o nome inteiro, ex.: "${cmd.acao} ${String(cmd.valor).replace(".", ",")} ${parecidas[0].descricao.toLowerCase()}".` }
+    }
+    if (alvo) {
+      const falta = Math.round((restanteConta(alvo) - cmd.valor) * 100) / 100
+      tipoAcao = "conta_baixar"
+      params = { conta_id: alvo.id, descricao: alvo.descricao, valor: cmd.valor, forma: cmd.forma }
+      resumoTxt = `Dar baixa em *${alvo.descricao}*${alvo.pessoa ? ` (${alvo.pessoa})` : ""}: ${tipo === "pagar" ? "pagar" : "receber"} *${brl(cmd.valor)}* hoje${formaTxt}.${falta > 0.004 ? `\nFica faltando ${brl(falta)} (baixa parcial).` : ""}`
+    } else {
+      tipoAcao = "conta_criar"
+      params = { tipo, descricao: cmd.descricao, pessoa: cmd.pessoa, categoria: cmd.categoria, valor: cmd.valor, vencimento: hoje, quitada: true, forma: cmd.forma, recorrencia: null }
+      resumoTxt = `Registrar ${tipo === "pagar" ? "pagamento" : "recebimento"} já feito: *${cmd.descricao}*${cmd.pessoa ? ` (${cmd.pessoa})` : ""} — *${brl(cmd.valor)}* hoje${formaTxt}${cmd.categoria ? ` · categoria ${cmd.categoria}` : ""}.\n(Não achei conta em aberto parecida.)`
+    }
+  } else {
+    tipoAcao = "conta_criar"
+    params = { tipo, descricao: cmd.descricao, pessoa: cmd.pessoa, categoria: cmd.categoria, valor: cmd.valor, vencimento: cmd.vencimento, quitada: false, forma: null, recorrencia: cmd.recorrencia }
+    resumoTxt = `Lançar conta *${tipo === "pagar" ? "A PAGAR" : "A RECEBER"}*: *${cmd.descricao}*${cmd.pessoa ? ` (${cmd.pessoa})` : ""} — *${brl(cmd.valor)}*, vence ${ddmmBR(cmd.vencimento!)}${cmd.recorrencia ? ` e repete ${cmd.recorrencia === "mensal" ? "todo mês" : cmd.recorrencia}` : ""}${cmd.categoria ? ` · categoria ${cmd.categoria}` : ""}.`
+  }
+
+  await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+  const { error } = await sb.from("assistente_acoes").insert({ empresa_id: empresaId, grupo_jid: jid, tipo: tipoAcao, params, resumo: resumoTxt })
+  if (error) { console.error("[estoque-wpp] conta:", error.message); return { cobrar: false, texto: "Não consegui preparar agora. Tenta de novo em instantes." } }
+  return { cobrar: true, texto: `${resumoTxt}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.` }
+}
+const somaDiasBR = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10) }
+
 function textoDaMensagem(m: any): string {
   const x = m?.message ?? {}
   return String(
@@ -910,6 +1060,13 @@ async function tratar(req: Request): Promise<Response> {
       await responderComCredito(respEstoque, "consulta de estoque")
       return ok()
     }
+    // Contas a pagar/receber ("paguei 80 de gás", "a pagar luz 350 dia 28", "contas atrasadas").
+    const rContas = await comandoContas(t.replace(/[?!.]+$/g, ""), empresaId, jid, modo, texto)
+    if (rContas) {
+      if (rContas.cobrar) await responderComCredito([rContas.texto], "contas")
+      else await enviar(instance, jid, rContas.texto)
+      return ok()
+    }
     // Relatórios fixos do Analista ("vendas ontem", "lucro mês", "mais vendidos"…): números prontos, sem IA e sem cobrar.
     if (modo === "analista") {
       const respAnalista = await comandoAnalista(t, empresaId)
@@ -981,6 +1138,8 @@ async function tratar(req: Request): Promise<Response> {
       if (porAudio) {
         const rc = (await comandoEstoque(tp, empresaId)) ?? (await comandoAnalista(tp, empresaId))
         if (rc) { await responderComCredito(rc, "áudio"); return ok() }
+        const rcc = await comandoContas(tp, empresaId, jid, "analista", pergunta)
+        if (rcc) { if (rcc.cobrar) await responderComCredito([rcc.texto], "áudio"); else await enviar(instance, jid, rcc.texto); return ok() }
       }
       const fixa = await propostaFixa(tp, empresaId, jid)
       if (fixa) {
@@ -1147,6 +1306,8 @@ async function tratar(req: Request): Promise<Response> {
       if (!falado) { await enviar(instance, jid, "Não consegui ouvir o áudio. Escreve ou manda de novo?"); return ok() }
       const rcA = await comandoEstoque(norm(falado).replace(/[?!.,]+$/g, "").trim(), empresaId)
       if (rcA) { await responderComCredito(rcA, "áudio"); return ok() }
+      const rcC = await comandoContas(norm(falado).replace(/[?!.,]+$/g, "").trim(), empresaId, jid, "assistente", falado)
+      if (rcC) { if (rcC.cobrar) await responderComCredito([rcC.texto], "áudio"); else await enviar(instance, jid, rcC.texto); return ok() }
       resultado = await entenderTexto(falado, cat, base?.itens ?? [], base?.nao_achados ?? [], !pend && !!ultLancado)
       if (resultado) resultado.custoUsd += ((msg.message?.audioMessage?.seconds ?? 30) / 60) * PRECO_WHISPER_MIN
       textoFalado = falado
