@@ -25,6 +25,8 @@ const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? ""
 // o que ele manda volta pelo webhook como mensagem "fromMe" — sem a marca ele
 // responderia a si mesmo pra sempre.
 const MARCA = "🤖 *FWC Assistente*"
+// A conversa livre com IA (Analista com raciocínio) vai ser um robô SEPARADO e mais caro, em outro grupo. Por ora só comandos fixos.
+const ANALISTA_IA_LIGADA = false
 const VALIDADE_PENDENTE_MIN = 60
 const VALIDADE_DESFAZER_MIN = 180
 
@@ -602,23 +604,25 @@ const AJUDA_ASSISTENTE = `🤖 *Assistente — o que eu faço aqui*
 🆕 *Cadastro*: "cadastra Coca 2L por 12, tenho 20, custo 5, mínimo 6"
 ⚠️ *Mínimo*: "pão mínimo 50"
 
-🔎 *Consultas (grátis)*: "o que está acabando?" · "lista o estoque" · "estoque de bebidas" · "estoque de insumos" · "tem pão?"
+🔎 *Consultas*: "o que está acabando?" · "lista o estoque" · "estoque de bebidas" · "estoque de insumos" · "tem pão?"
 
-Antes de lançar eu mostro e espero *SIM*. *DESFAZER* tira o último lançamento (até 3 h).
-💳 Cada mensagem gasta 1 crédito (nota/foto = 3). Consultas e ajuda são grátis.`
+💳 *Cada comando gasta 1 crédito* (nota ou foto = 3). *SIM, NÃO, DESFAZER e ajuda são grátis.*
+Antes de lançar eu mostro e espero *SIM*. *DESFAZER* tira o último lançamento (até 3 h).`
 
 const AJUDA_ANALISTA = `📊 *Analista — o que eu faço aqui*
 
-*Comandos grátis* (resposta na hora):
+*Relatórios*:
 • "vendas hoje" · "vendas ontem" · "vendas semana" · "vendas mês" · "vendas mês passado" · "vendas 15/10" · "vendas 01/10 a 15/10"
 • "lucro mês" · "mais vendidos mês" · "melhores clientes" · "situação" · "fiado" · "entrega"
 • "o que está acabando?" · "lista o estoque" · "tem pão?"
 
-*Pergunta livre ou diagnóstico*: escreva normal ("faz um diagnóstico", "analisa meu cardápio", "meu faturamento caiu?"). Gasta saldo da IA (cerca de R$ 0,30 a 0,50).
+*Mudanças (eu mostro e espero SIM)*:
+• "muda o preço da pizza pra 55"
+• "taxa de entrega 6 reais" · "pedido mínimo 20"
+• "aumenta a tabela de entrega em 1" · "reduz a tabela de entrega em 1"
 
-*Mudanças (eu mostro e espero SIM)*: "muda o preço da pizza pra 55" · "taxa de entrega 6 reais" · "pedido mínimo 20"
-
-Dica: use os comandos grátis sempre que der. A IA fica pro que precisa de raciocínio.`
+💳 *Cada comando gasta 1 crédito. SIM, NÃO, DESFAZER e ajuda são grátis.*
+Fale "certinho" do jeito dos exemplos que eu respondo na hora. Dá pra mandar por áudio também.`
 
 const hojeBRT = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10)
 const somaDiasBRT = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10) }
@@ -741,6 +745,53 @@ async function comandoAnalista(t: string, empresaId: string): Promise<string[] |
   return null
 }
 
+// Mudanças por frase fixa (sem IA): vira uma proposta; o SIM aplica. Mesmas regras do propor_acao do assistente.
+async function propostaFixa(t: string, empresaId: string, jid: string): Promise<{ texto: string; cobrar: boolean } | null> {
+  if (t.length > 90) return null
+  const R = "(?:r\\$\\s*)?(\\d+(?:[.,]\\d{1,2})?)\\s*(?:reais|real)?"
+  const num = (v: string) => Number(v.replace(",", "."))
+  const VERBO = "(?:muda|mudar|altera|alterar|troca|trocar|coloca|colocar|atualiza|atualizar|deixa|deixar)"
+  let m: RegExpMatchArray | null
+  let tipo = "", params: Record<string, unknown> = {}, resumoTxt = ""
+
+  if ((m = t.match(new RegExp(`^${VERBO}\\s+(?:o\\s+)?preco\\s+(?:d[aeo]s?\\s+)?(.+?)\\s+(?:pra|para|por|em|=)\\s+${R}$`)))
+    || (m = t.match(new RegExp(`^preco\\s+(?:d[aeo]s?\\s+)?(.+?)\\s+(?:pra|para|por|em|=)?\\s*${R}$`)))) {
+    const busca = m[1].trim(), preco = num(m[2])
+    if (!(preco > 0)) return null
+    const { data: achados } = await sb.from("produtos").select("id, nome, preco_venda").eq("empresa_id", empresaId).eq("ativo", true).is("arquivado_em", null)
+      .ilike("nome", `%${busca.replace(/[%_]/g, "")}%`).limit(8)
+    if (!achados?.length) return { cobrar: false, texto: `Não achei produto parecido com "${busca}". Confira o nome (ou escreva *lista o estoque*).` }
+    const exato = achados.filter((p: any) => norm(p.nome) === norm(busca))
+    const alvo = exato.length === 1 ? exato[0] : achados.length === 1 ? achados[0] : null
+    if (!alvo) return { cobrar: false, texto: `Achei mais de um: ${achados.map((p: any) => p.nome).join(", ")}. Escreva o nome completo.` }
+    tipo = "mudar_preco"
+    params = { produto_id: alvo.id, nome: alvo.nome, de: Number(alvo.preco_venda), para: preco }
+    resumoTxt = `Mudar o preço de *${alvo.nome}* de ${brl(Number(alvo.preco_venda))} para ${brl(preco)}.`
+  } else if ((m = t.match(new RegExp(`^(?:${VERBO}\\s+)?(?:a\\s+)?taxa(?:\\s+de\\s+entrega)?(?:\\s+fixa)?(?:\\s+(?:pra|para|em|=))?\\s+${R}$`)))) {
+    const { data: e } = await sb.from("empresas").select("taxa_entrega").eq("id", empresaId).maybeSingle()
+    tipo = "taxa_entrega_fixa"; params = { de: Number(e?.taxa_entrega ?? 0), para: num(m[1]) }
+    resumoTxt = `Mudar a taxa de entrega fixa de ${brl(Number(e?.taxa_entrega ?? 0))} para ${brl(num(m[1]))}.`
+  } else if ((m = t.match(new RegExp(`^(?:${VERBO}\\s+)?(?:o\\s+)?pedido\\s+minimo(?:\\s+(?:pra|para|em|=))?\\s+${R}$`)))) {
+    const { data: e } = await sb.from("empresas").select("pedido_minimo").eq("id", empresaId).maybeSingle()
+    tipo = "pedido_minimo"; params = { de: Number(e?.pedido_minimo ?? 0), para: num(m[1]) }
+    resumoTxt = `Mudar o pedido mínimo de ${brl(Number(e?.pedido_minimo ?? 0))} para ${brl(num(m[1]))}.`
+  } else if ((m = t.match(new RegExp(`^(aumenta|aumentar|sobe|subir|reduz|reduzir|diminui|diminuir|baixa|baixar)\\s+(?:a\\s+)?(?:tabela|taxas?)(?:\\s+de\\s+entrega)?(?:\\s+por\\s+km|\\s+km)?\\s+(?:em|de|por)?\\s*${R}$`)))) {
+    const { data: e } = await sb.from("empresas").select("taxas_entrega_km").eq("id", empresaId).maybeSingle()
+    const tab = Array.isArray(e?.taxas_entrega_km) ? e!.taxas_entrega_km : []
+    if (!tab.length) return { cobrar: false, texto: "Esta loja não usa tabela de taxa por km." }
+    const delta = /^(reduz|reduzir|diminui|diminuir|baixa|baixar)/.test(m[1]) ? -num(m[2]) : num(m[2])
+    if (!delta) return null
+    tipo = "ajustar_tabela_km"; params = { delta }
+    resumoTxt = `${delta > 0 ? "Aumentar" : "Reduzir"} ${brl(Math.abs(delta))} em todas as faixas de km que cobram taxa (${tab.length} faixas; as grátis continuam grátis).`
+  } else {
+    return null
+  }
+  await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+  const { error } = await sb.from("assistente_acoes").insert({ empresa_id: empresaId, grupo_jid: jid, tipo, params, resumo: resumoTxt })
+  if (error) { console.error("[estoque-wpp] proposta:", error.message); return { cobrar: false, texto: "Não consegui preparar a mudança agora. Tenta de novo em instantes." } }
+  return `${resumoTxt}\n\nResponda *SIM* para aplicar ou *NÃO* para cancelar.`
+}
+
 function textoDaMensagem(m: any): string {
   const x = m?.message ?? {}
   return String(
@@ -827,6 +878,27 @@ async function tratar(req: Request): Promise<Response> {
       return ok()
     }
 
+    // Cada COMANDO gasta 1 crédito (R$ 0,07); SIM/NÃO/DESFAZER e "ajuda" são grátis. A resposta fixa não custa nada pra gente.
+    const responderComCredito = async (msgs: string[], rotulo: string) => {
+      const { data: emp } = await sb.from("empresas").select("whatsapp_creditos").eq("id", empresaId).maybeSingle()
+      const saldo = Number(emp?.whatsapp_creditos ?? 0)
+      if (saldo < 1) {
+        await enviar(instance, jid, "Acabaram os créditos desta loja. Compre créditos no Portal > Automação > WhatsApp pra eu voltar a responder por aqui. (*ajuda*, *SIM*, *NÃO* e *DESFAZER* continuam grátis.)")
+        return
+      }
+      const { data: saldoDepois, error } = await sb.rpc("descontar_creditos_whatsapp", { p_empresa_id: empresaId, p_qtd: 1, p_descricao: `Comando no grupo (${rotulo})` })
+      if (error) console.error("[estoque-wpp] credito do comando:", error.message)
+      const out = [...msgs]
+      const resta = Number(saldoDepois)
+      if (!error && resta <= 20) out[out.length - 1] += `\n\n⚠️ Restam *${resta}* créditos. Compre mais no Portal pra não ficar sem.`
+      for (const m of out) await enviar(instance, jid, m)
+      const { data: adm } = await sb.from("profiles").select("id").eq("empresa_id", empresaId).eq("perfil", "admin").limit(1).maybeSingle()
+      if (adm?.id) await sb.from("assistente_conversas").insert({
+        empresa_id: empresaId, user_id: adm.id, canal: "whatsapp_comando", modelo: "comando-fixo", pergunta: `[${rotulo}] ${texto.slice(0, 200)}`,
+        resposta: msgs.join("\n").slice(0, 2000), custo_usd: 0, custo_brl: 0, creditos_cobrados: 1,
+      })
+    }
+
     // "ajuda": mostra as frases certas de cada robô (grátis). A loja falando "certinho" é o que mantém o custo em zero.
     if (/^(ajuda|comandos|menu|help|\?|o que voce faz|como uso)\W*$/.test(t)) {
       await enviar(instance, jid, modo === "analista" ? AJUDA_ANALISTA : AJUDA_ASSISTENTE)
@@ -835,14 +907,14 @@ async function tratar(req: Request): Promise<Response> {
     // Consultas de estoque ("o que está acabando?", "lista o estoque", "tem pão?"): direto do banco, sem IA e sem cobrar.
     const respEstoque = await comandoEstoque(t, empresaId)
     if (respEstoque) {
-      for (const m of respEstoque) await enviar(instance, jid, m)
+      await responderComCredito(respEstoque, "consulta de estoque")
       return ok()
     }
     // Relatórios fixos do Analista ("vendas ontem", "lucro mês", "mais vendidos"…): números prontos, sem IA e sem cobrar.
     if (modo === "analista") {
       const respAnalista = await comandoAnalista(t, empresaId)
       if (respAnalista) {
-        for (const m of respAnalista) await enviar(instance, jid, m)
+        await responderComCredito(respAnalista, "relatório")
         return ok()
       }
     }
@@ -892,7 +964,9 @@ async function tratar(req: Request): Promise<Response> {
       }
       let pergunta = texto
       let whisperUsd = 0
+      let porAudio = false
       if (tipoMsgA === "audioMessage") {
+        porAudio = true
         const midia = await baixarMidia(instance, msg)
         const falado = midia ? await transcrever(midia.base64, midia.mimetype) : null
         if (!falado) { await enviar(instance, jid, "Não consegui ouvir o áudio. Escreve ou manda de novo?"); return ok() }
@@ -900,8 +974,24 @@ async function tratar(req: Request): Promise<Response> {
         whisperUsd = ((msg.message?.audioMessage?.seconds ?? 30) / 60) * PRECO_WHISPER_MIN
       }
       // Papo solto ("valeu", "bom dia") não vale uma chamada cara à IA.
-      const tp = norm(pergunta)
+      const tp = norm(pergunta).replace(/[?!.,]+$/g, "").trim()
       if (tp.length < 5 || /^(oi+|ola|bom dia|boa tarde|boa noite|valeu|obrigad[oa]|blz|beleza|tmj|show|top|ok|kk+|rs+)\W*$/.test(tp)) return ok()
+
+      // Texto já passou pelos comandos lá em cima; o ÁUDIO só virou texto agora, então roda os mesmos aqui.
+      if (porAudio) {
+        const rc = (await comandoEstoque(tp, empresaId)) ?? (await comandoAnalista(tp, empresaId))
+        if (rc) { await responderComCredito(rc, "áudio"); return ok() }
+      }
+      const fixa = await propostaFixa(tp, empresaId, jid)
+      if (fixa) {
+        if (fixa.cobrar) await responderComCredito([fixa.texto], "mudança")
+        else await enviar(instance, jid, fixa.texto)        // não preparou nada: não cobra
+        return ok()
+      }
+      if (!ANALISTA_IA_LIGADA) {
+        await enviar(instance, jid, "Não entendi 🤔 Escreva *ajuda* pra ver as frases que eu conheço (é grátis). Fale do jeito dos exemplos que eu respondo na hora.")
+        return ok()
+      }
 
       const carteira = await verCarteira(sb, empresaId)
       if (carteira.disponivel <= 0) {
@@ -1055,6 +1145,8 @@ async function tratar(req: Request): Promise<Response> {
       const midia = await baixarMidia(instance, msg)
       const falado = midia ? await transcrever(midia.base64, midia.mimetype) : null
       if (!falado) { await enviar(instance, jid, "Não consegui ouvir o áudio. Escreve ou manda de novo?"); return ok() }
+      const rcA = await comandoEstoque(norm(falado).replace(/[?!.,]+$/g, "").trim(), empresaId)
+      if (rcA) { await responderComCredito(rcA, "áudio"); return ok() }
       resultado = await entenderTexto(falado, cat, base?.itens ?? [], base?.nao_achados ?? [], !pend && !!ultLancado)
       if (resultado) resultado.custoUsd += ((msg.message?.audioMessage?.seconds ?? 30) / 60) * PRECO_WHISPER_MIN
       textoFalado = falado
