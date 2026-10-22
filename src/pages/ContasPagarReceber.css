@@ -255,3 +255,4 @@ p.cpr-previa { margin: 12px 0 0; }
 .cpr-combo-lista li:hover, .cpr-combo-lista li.ativo { background: var(--primary-light, rgba(124, 58, 237, .1)); }
 .cpr-combo-lista li.criar { color: var(--primary); font-weight: 700; border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; margin-top: 2px; }
 .cpr-combo-lista li.criar:only-child { border-top: 0; margin-top: 0; }
+.cpr-combo input { width: 100%; box-sizing: border-box; }
