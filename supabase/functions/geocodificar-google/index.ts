@@ -79,10 +79,17 @@ Deno.serve(async (req) => {
     if (typeof lat !== 'number' || typeof lng !== 'number') return json({ ok: false, erro: 'sem_ponto' })
     const precisao = String(res.geometry?.location_type ?? '')
 
+    // O Google ignora o bairro quando a rua se repete na cidade (Rua São José dá
+    // o MESMO ponto em 3 bairros). Só dá o bairro como confirmado se ele aparece
+    // no endereço devolvido; senão o gestor trata como aproximado.
+    const bairro = norm(b.bairro)
+    const textos = [res.formatted_address, ...(res.address_components ?? []).map((c: { long_name?: string }) => c.long_name)]
+    const bairroConfere = !bairro || textos.some(t => norm(t).includes(bairro))
+
     await supabase.from('geocode_cache').upsert(
-      { chave, lat, lng, precisao, formatado: res.formatted_address ?? null, created_at: new Date().toISOString() },
+      { chave, lat, lng, precisao: bairroConfere ? precisao : 'BAIRRO_NAO_CONFERE', formatado: res.formatted_address ?? null, created_at: new Date().toISOString() },
       { onConflict: 'chave' })
-    return json({ ok: true, lat, lng, precisao, formatado: res.formatted_address ?? null })
+    return json({ ok: true, lat, lng, precisao: bairroConfere ? precisao : 'BAIRRO_NAO_CONFERE', formatado: res.formatted_address ?? null })
   } catch (e) {
     console.error('[geocode-google] erro:', e)
     return json({ ok: false, erro: 'erro_interno' }, 500)

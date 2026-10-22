@@ -1840,7 +1840,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
           txt: `${dist.toFixed(1)} km → taxa ${fmt(valor)}`
             + (doGoogle && !aproximado ? ' · 📍 achado pelo Google' : '')
             + (aproximado ? (origemAprox === 'google'
-              ? ' · ⚠️ aproximado pelo Google (meio da rua) — confira'
+              ? ' · ⚠️ aproximado pelo Google (não confirmou o bairro / meio da rua) — confira'
               : origemAprox === 'cep'
                 ? ' · ⚠️ aproximado pelo CEP (o mapa não tem esta rua) — confira'
                 : ' · ⚠️ aproximado pelo centro do bairro (a rua não está no mapa) — confira') : '')
