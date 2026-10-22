@@ -7,6 +7,25 @@ import './PedidosDelivery.css'
 import { imprimirCupom } from '../utils/imprimirCupom'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { ehDividido, textoPagamento } from '../lib/pagamentoPartes'
+import { IFOOD_COMISSAO_PCT, IFOOD_TRANSACAO_PCT, lojaEntregou } from '../lib/ifoodLiquido'
+
+function calcLiquidoPorPedido(pedido, taxaPlataforma) {
+  const total = Number(pedido.total || 0)
+  if (pedido.origem === 'ifood') {
+    const itens  = Number(pedido.subtotal || 0)
+    const te     = Number(pedido.taxa_entrega || 0)
+    const iv     = pedido.ifood_valores || {}
+    const il     = Number(iv.incentivo_loja || 0)
+    const online = !!iv.pago_online
+    const daLoja = lojaEntregou(iv, true)
+    const com    = IFOOD_COMISSAO_PCT * itens
+    const trans  = online ? IFOOD_TRANSACAO_PCT * total : 0
+    return online
+      ? itens + (daLoja ? te : 0) - il - com - trans
+      : total - com
+  }
+  return total * (1 - (taxaPlataforma ?? 5) / 100)
+}
 
 const TIMER_LIMITE_MS = 7 * 60 * 1000 // 7 minutos
 const SUPABASE_URL = 'https://ycytrsqdvrviihkqfvno.supabase.co'
@@ -692,7 +711,7 @@ function IconeLista() {
 // ─── Tabela de pedidos ───
 function TabelaPedidos({ pedidos, taxaPlataforma, onRowClick, agruparPorDia = false, totaisPorDia = {}, entregadores = {} }) {
   const totalBruto = pedidos.reduce((acc, p) => acc + Number(p.total || 0), 0)
-  const totalLiquido = pedidos.reduce((acc, p) => acc + Number(p.total || 0) * (1 - (taxaPlataforma ?? 5) / 100), 0)
+  const totalLiquido = pedidos.reduce((acc, p) => acc + calcLiquidoPorPedido(p, taxaPlataforma), 0)
 
   if (pedidos.length === 0) return null
 
@@ -723,7 +742,7 @@ function TabelaPedidos({ pedidos, taxaPlataforma, onRowClick, agruparPorDia = fa
               const dt = new Date(pedido.created_at)
               const data = dt.toLocaleDateString('pt-BR')
               const hora = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-              const liquido = Number(pedido.total || 0) * (1 - (taxaPlataforma ?? 5) / 100)
+              const liquido = calcLiquidoPorPedido(pedido, taxaPlataforma)
               // Cabeçalho do dia (só na aba Concluídos): total daquele dia + separação
               if (agruparPorDia && data !== ultimoDia) {
                 ultimoDia = data
@@ -1156,7 +1175,7 @@ export default function PedidosDelivery() {
       const t = (totaisPorDia[d] ??= { count: 0, bruto: 0, liquido: 0 })
       t.count++
       t.bruto += Number(p.total || 0)
-      t.liquido += Number(p.total || 0) * (1 - (taxaPlataforma ?? 5) / 100)
+      t.liquido += calcLiquidoPorPedido(p, taxaPlataforma)
     }
   }
 
