@@ -112,7 +112,7 @@ async function entenderTexto(
   pendentes: Item[],
   pendNovos: NaoAchado[] = [],
   jaLancado = false,
-): Promise<{ itens: Item[]; naoAchados: NaoAchado[]; ignorar: boolean; pergunta: boolean; corrige: boolean; custoUsd: number } | null> {
+): Promise<{ itens: Item[]; naoAchados: NaoAchado[]; ignorar: boolean; pergunta: boolean; corrige: boolean; produtosNovos: { nome: string; preco_venda: number | null; preco_custo: number | null; categoria: string }[]; custoUsd: number } | null> {
   const lista = [
     ...cat.produtos.map((p) => ({ tipo: "produto" as const, id: p.id, nome: p.nome, un: "" })),
     ...cat.materias.map((m) => ({ tipo: "materia" as const, id: m.id, nome: m.nome, un: m.unidade })),
@@ -129,6 +129,7 @@ async function entenderTexto(
     "",
     "Responda SOMENTE com JSON válido:",
     '{ "ignorar": boolean, "pergunta": boolean, "corrige": boolean,',
+    '  "produtos_novos": [ { "nome": string, "preco_venda": number|null, "preco_custo": number|null, "categoria": string|null } ],',
     '  "itens": [ { "indice": number, "quantidade": number, "custo_unit": number|null, "custo_total": number|null } ],',
     '  "nao_encontrados": [ { "nome": string, "unidade": "kg"|"g"|"L"|"ml"|"un", "quantidade": number, "custo_unit": number|null, "custo_total": number|null } ] }',
     "",
@@ -136,8 +137,11 @@ async function entenderTexto(
     "- 'ignorar' = true quando a mensagem NÃO é sobre uma compra/entrada de mercadoria (papo, pergunta, cumprimento).",
     "  Nesse caso devolva itens e nao_encontrados vazios.",
     "- 'pergunta' = true quando (e só quando) a pessoa PEDE uma informação, análise ou ajuda sobre a loja ou o sistema,",
-    "  ou pede pro robô FAZER algo na loja (ex.: 'quanto vendi hoje', 'o que tá acabando', 'faz um diagnóstico',",
-    "  'cadastra o produto X a 12 reais', 'muda o preço da pizza', 'aumenta a taxa de entrega'). Cumprimento e papo = false.",
+    "  ou pede pro robô FAZER algo na loja que NÃO seja estoque nem cadastro de produto novo (ex.: 'quanto vendi hoje',",
+    "  'o que tá acabando', 'faz um diagnóstico', 'muda o preço da pizza', 'aumenta a taxa de entrega'). Cumprimento e papo = false.",
+    "- 'produtos_novos' = pedido de CADASTRAR um produto de venda novo no cardápio ('cadastra o produto Coca 2L por 12 reais').",
+    "  Isso NÃO é pergunta (pergunta=false). Preencha nome, preco_venda (null se não disse) e categoria se disse. Não confunda com",
+    "  insumo/matéria-prima comprada, que vai em itens/nao_encontrados.",
     "- ENTRADA DE ESTOQUE tem prioridade sobre 'pergunta': qualquer pedido de criar/cadastrar matéria-prima ou insumo,",
     "  de lançar/dar entrada/adicionar/colocar quantidade no estoque ('crie matéria prima pães e lance 120 no estoque',",
     "  'coloca 50 hambúrguer no estoque', 'comecei com 30 kg de carne') é ENTRADA: devolva em itens/nao_encontrados,",
@@ -200,6 +204,12 @@ async function entenderTexto(
     ignorar: parsed.ignorar === true && !itens.length && !naoAchados.length,
     pergunta: parsed.pergunta === true,
     corrige: parsed.corrige === true,
+    produtosNovos: (Array.isArray(parsed.produtos_novos) ? parsed.produtos_novos : [])
+      .map((x: any) => ({
+        nome: String(x?.nome ?? "").trim().slice(0, 80),
+        preco_venda: num(x?.preco_venda), preco_custo: num(x?.preco_custo),
+        categoria: String(x?.categoria ?? "").trim().slice(0, 40),
+      })).filter((x: any) => x.nome),
   }
 }
 
@@ -362,7 +372,7 @@ async function desfazerAcao(empresaId: string, a: any): Promise<string> {
 async function ultimasConversas(empresaId: string) {
   const desde = new Date(Date.now() - 30 * 60000).toISOString()
   const { data } = await sb.from("assistente_conversas").select("pergunta, resposta")
-    .eq("empresa_id", empresaId).eq("canal", "whatsapp_pergunta").gte("created_at", desde)
+    .eq("empresa_id", empresaId).eq("canal", "whatsapp_pergunta").neq("resposta", "(transcrição)").gte("created_at", desde)
     .order("created_at", { ascending: false }).limit(3)
   return (data ?? []).reverse().flatMap((r: any) => [
     { role: "user", content: r.pergunta }, { role: "assistant", content: r.resposta },
@@ -398,7 +408,7 @@ serve(async (req) => {
     if (texto.startsWith(MARCA)) return ok()      // eco do próprio robô
 
     const { data: cfg } = await sb.from("whatsapp_config")
-      .select("empresa_id, estoque_grupo_jid").eq("instance_name", instance).eq("ativo", true).maybeSingle()
+      .select("empresa_id, estoque_grupo_jid, analista_grupo_jid").eq("instance_name", instance).eq("ativo", true).maybeSingle()
     if (!cfg?.empresa_id) return ok()
     const empresaId: string = cfg.empresa_id
     const t = norm(texto)
@@ -420,22 +430,38 @@ serve(async (req) => {
         ...(p.data ?? []).map((x: any) => x.telefone)].map(fim8).filter((x) => x.length === 8))
       return quem.some((q) => lojistas.has(q))
     }
-    if (/^(#|\/)?\s*(ativar|ligar)\s+(o\s+)?(estoque|entrada)/.test(t)) {
+    // Dois robôs, um grupo pra cada: "ativar assistente" (estoque e cadastros, gasta créditos) e
+    // "ativar analista" (perguntas e decisões do dono, gasta o saldo da IA). "estoque" segue valendo.
+    const reAssist = "(assistente|estoque|entrada)"
+    const alvo = (verbo: string): "assistente" | "analista" | null =>
+      new RegExp(`^(#|\\/)?\\s*${verbo}\\s+(o\\s+)?${reAssist}`).test(t) ? "assistente"
+        : new RegExp(`^(#|\\/)?\\s*${verbo}\\s+(o\\s+)?analista`).test(t) ? "analista" : null
+    const ligar = alvo("(ativar|ligar)")
+    if (ligar) {
       if (!(await autorizado())) {
         console.log("[estoque-wpp] ativar negado: numero nao autorizado", msg.key?.participant, msg.key?.participantAlt)
         return ok()
       }
-      await sb.from("whatsapp_config").update({ estoque_grupo_jid: jid }).eq("empresa_id", empresaId).eq("instance_name", instance)
-      await enviar(instance, jid,
-        "Pronto, este grupo agora lança *entrada de estoque*.\n\nEscreva ou fale o que comprou (ex.: \"comprei 50 pães e 30 hambúrgueres\") ou mande a foto/PDF da nota. Eu mostro a lista e você responde *SIM* pra lançar.\n\nPra desligar: \"desativar estoque\".")
+      // Um grupo é de UM robô só: ligar um desliga o outro neste mesmo grupo.
+      const upd: Record<string, string | null> = ligar === "assistente"
+        ? { estoque_grupo_jid: jid, ...(cfg.analista_grupo_jid === jid ? { analista_grupo_jid: null } : {}) }
+        : { analista_grupo_jid: jid, ...(cfg.estoque_grupo_jid === jid ? { estoque_grupo_jid: null } : {}) }
+      await sb.from("whatsapp_config").update(upd).eq("empresa_id", empresaId).eq("instance_name", instance)
+      await enviar(instance, jid, ligar === "assistente"
+        ? "Pronto, este grupo agora é o *Assistente*: eu lanço *entrada de estoque* e cadastro produto.\n\nEscreva ou fale o que comprou (ex.: \"comprei 50 pães a 1,30\") ou mande a foto/PDF da nota. Eu mostro a lista e você responde *SIM* pra lançar.\n\nPra desligar: \"desativar assistente\"."
+        : "Pronto, este grupo agora é o *Analista*: pergunte sobre vendas, lucro, cardápio, entrega, peça um diagnóstico ou mude preço e taxa (com *SIM* antes).\n\nExemplos: \"quanto vendi hoje?\", \"faz um diagnóstico da loja\", \"muda o preço da pizza pra 55\".\n\nPra desligar: \"desativar analista\".")
       return ok()
     }
-    if (cfg.estoque_grupo_jid !== jid) return ok()         // outro grupo: nem responde
+    const modo: "assistente" | "analista" | null =
+      jid === cfg.estoque_grupo_jid ? "assistente" : jid === cfg.analista_grupo_jid ? "analista" : null
+    if (!modo) return ok()                                  // outro grupo: nem responde
 
-    if (/^(#|\/)?\s*(desativar|desligar)\s+(o\s+)?(estoque|entrada)/.test(t)) {
+    const desligar = alvo("(desativar|desligar)")
+    if (desligar) {
       if (!(await autorizado())) return ok()
-      await sb.from("whatsapp_config").update({ estoque_grupo_jid: null }).eq("empresa_id", empresaId).eq("instance_name", instance)
-      await enviar(instance, jid, "Desligado. Este grupo não lança mais estoque.")
+      await sb.from("whatsapp_config").update(desligar === "assistente" ? { estoque_grupo_jid: null } : { analista_grupo_jid: null })
+        .eq("empresa_id", empresaId).eq("instance_name", instance)
+      await enviar(instance, jid, `Desligado. Este grupo não é mais o ${desligar === "assistente" ? "Assistente" : "Analista"}.`)
       return ok()
     }
 
@@ -451,6 +477,73 @@ serve(async (req) => {
     // O que o dono confirma é sempre a coisa mais RECENTE que o robô mostrou.
     const acaoMaisNova = !!pendAcao && (!pend || pendAcao.created_at > pend.created_at)
 
+    // ═══ ROBÔ ANALISTA ═══ perguntas, diagnóstico e decisões do dono. Gasta o SALDO DA IA (em reais).
+    if (modo === "analista") {
+      const lim = new Date(Date.now() - VALIDADE_DESFAZER_MIN * 60000).toISOString()
+      if (/^(sim|s|ok|pode|pode fazer|faz|aplicar|aplica|confirmo|confirmar|isso|certo)\W*$/.test(t)) {
+        if (!acaoMaisNova) return ok()
+        try { await enviar(instance, jid, await executarAcao(empresaId, pendAcao)) }
+        catch (e: any) {
+          console.error("[estoque-wpp] acao:", e)
+          await enviar(instance, jid, "❌ Não consegui aplicar agora (erro no sistema). Nada foi alterado — tente de novo em instantes.")
+        }
+        return ok()
+      }
+      if (/^(nao|n|cancela|cancelar|deixa|esquece)\W*$/.test(t)) {
+        if (!acaoMaisNova) return ok()
+        await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("id", pendAcao.id)
+        await enviar(instance, jid, "Cancelado. Nada foi alterado.")
+        return ok()
+      }
+      if (/^desfaz(er)?\W*$/.test(t)) {
+        const { data: ultAcao } = await sb.from("assistente_acoes").select("*")
+          .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "executada").gte("executada_em", lim)
+          .order("executada_em", { ascending: false }).limit(1).maybeSingle()
+        await enviar(instance, jid, ultAcao ? await desfazerAcao(empresaId, ultAcao) : "Não achei nada recente pra desfazer (só dá até 3 horas depois).")
+        return ok()
+      }
+
+      const tipoMsgA: string = msg.messageType ?? ""
+      if (tipoMsgA === "imageMessage" || tipoMsgA === "documentMessage" || tipoMsgA === "documentWithCaptionMessage") {
+        await enviar(instance, jid, "Nota e foto de compra são no grupo do *Assistente* (lá eu lanço no estoque). Aqui eu respondo perguntas e análises.")
+        return ok()
+      }
+      let pergunta = texto
+      let whisperUsd = 0
+      if (tipoMsgA === "audioMessage") {
+        const midia = await baixarMidia(instance, msg)
+        const falado = midia ? await transcrever(midia.base64, midia.mimetype) : null
+        if (!falado) { await enviar(instance, jid, "Não consegui ouvir o áudio. Escreve ou manda de novo?"); return ok() }
+        pergunta = falado
+        whisperUsd = ((msg.message?.audioMessage?.seconds ?? 30) / 60) * PRECO_WHISPER_MIN
+      }
+      // Papo solto ("valeu", "bom dia") não vale uma chamada cara à IA.
+      const tp = norm(pergunta)
+      if (tp.length < 5 || /^(oi+|ola|bom dia|boa tarde|boa noite|valeu|obrigad[oa]|blz|beleza|tmj|show|top|ok|kk+|rs+)\W*$/.test(tp)) return ok()
+
+      const carteira = await verCarteira(sb, empresaId)
+      if (carteira.disponivel <= 0) {
+        await enviar(instance, jid, "Acabou o saldo da IA desta loja (franquia do ciclo + saldo comprado). Compre saldo no Portal > Automação > Assistente IA pra eu voltar a responder.")
+        return ok()
+      }
+      const r = await fetch(`${SUPABASE_URL}/functions/v1/assistente-loja`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY },
+        body: JSON.stringify({ empresa_id: empresaId, pergunta, grupo_jid: jid, historico: await ultimasConversas(empresaId) }),
+      })
+      const d = await r.json().catch(() => null)
+      await enviar(instance, jid, d?.resposta || d?.erro || "Não consegui responder agora. Tenta de novo em instantes.")
+      if (whisperUsd > 0) {
+        const { data: adm } = await sb.from("profiles").select("id").eq("empresa_id", empresaId).eq("perfil", "admin").limit(1).maybeSingle()
+        if (adm?.id) await cobrar(sb, carteira, {
+          empresaId, userId: adm.id, custoUsd: whisperUsd, descricao: "Áudio no grupo do analista", pergunta: "[áudio] " + pergunta.slice(0, 200),
+          resposta: "(transcrição)", modelo: "whisper-1", canal: "whatsapp_pergunta",
+        })
+      }
+      return ok()
+    }
+
+    // ═══ ROBÔ ASSISTENTE ═══ estoque e cadastros. Gasta CRÉDITOS (empresas.whatsapp_creditos).
     // Último lançamento (30 min): "faltou o preço" depois do SIM vira uma correção desse lançamento.
     const { data: ultLancado } = pend ? { data: null } : await sb.from("estoque_whatsapp").select("*")
       .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "lancado")
@@ -546,11 +639,13 @@ serve(async (req) => {
     const ehPdf = !!doc && String(doc.mimetype ?? "").includes("pdf")
     const ehAudio = tipoMsg === "audioMessage"
 
-    // Carteira: toda leitura de nota/áudio/texto gasta IA. Sem saldo, o grupo para.
-    const carteira = await verCarteira(sb, empresaId)
-    if (carteira.disponivel <= 0) {
+    // Créditos: o Assistente gasta CRÉDITOS (1 por texto/áudio/cadastro, 3 por nota). Sem crédito, o grupo para.
+    const creditosDoUso = ehImagem || ehPdf ? 3 : 1
+    const { data: empCred } = await sb.from("empresas").select("whatsapp_creditos").eq("id", empresaId).maybeSingle()
+    const saldoCred = Number(empCred?.whatsapp_creditos ?? 0)
+    if (saldoCred < creditosDoUso) {
       if (ehImagem || ehPdf || ehAudio || /\d/.test(texto)) {
-        await enviar(instance, jid, "Acabou o saldo da IA desta loja (franquia do ciclo + saldo comprado). Compre saldo no Portal > Automação > Assistente IA pra eu voltar a lançar e responder por aqui.")
+        await enviar(instance, jid, `Acabaram os créditos desta loja (${saldoCred} restantes; esta ação gasta ${creditosDoUso}). Compre créditos no Portal > Automação > WhatsApp pra eu voltar a lançar por aqui.`)
       }
       return ok()
     }
@@ -559,7 +654,7 @@ serve(async (req) => {
 
     const cat = await carregarCatalogo(empresaId)
     const base = pend ?? ultLancado     // a lista que a mensagem pode estar corrigindo
-    let resultado: { itens: Item[]; naoAchados: NaoAchado[]; ignorar?: boolean; pergunta?: boolean; corrige?: boolean; aviso?: string | null; custoUsd: number } | null = null
+    let resultado: { itens: Item[]; naoAchados: NaoAchado[]; ignorar?: boolean; pergunta?: boolean; corrige?: boolean; produtosNovos?: { nome: string; preco_venda: number | null; preco_custo: number | null; categoria: string }[]; aviso?: string | null; custoUsd: number } | null = null
     let origem = "texto"
     let textoFalado = ""
 
@@ -586,25 +681,52 @@ serve(async (req) => {
     }
 
     if (!resultado) { await enviar(instance, jid, "Tive um problema pra entender agora. Tenta de novo em instantes."); return ok() }
-    const cobrarUso = async (resposta: string) => {
-      if (!donoId) return
-      await cobrar(sb, carteira, {
-        empresaId, userId: donoId, custoUsd: resultado!.custoUsd, descricao: `Estoque pelo WhatsApp (${origem})`,
-        pergunta: `[estoque/${origem}] ${(textoFalado || texto).slice(0, 200)}`, resposta,
-        modelo: "claude-haiku-4-5", canal: "whatsapp_estoque",
+    // Cobra os créditos e guarda o custo REAL no histórico (o Super Admin vê quanto cada uso custou de verdade).
+    const cobrarUso = async (resposta: string): Promise<string> => {
+      const { data: saldoDepois, error } = await sb.rpc("descontar_creditos_whatsapp", {
+        p_empresa_id: empresaId, p_qtd: creditosDoUso, p_descricao: `Assistente do grupo (${origem})`,
       })
+      if (error) console.error("[estoque-wpp] creditos:", error.message)
+      if (donoId) {
+        const { error: e2 } = await sb.from("assistente_conversas").insert({
+          empresa_id: empresaId, user_id: donoId, canal: "whatsapp_estoque", modelo: "claude-haiku-4-5",
+          pergunta: `[estoque/${origem}] ${(textoFalado || texto).slice(0, 200)}`, resposta: resposta.slice(0, 2000),
+          custo_usd: Number(resultado!.custoUsd.toFixed(6)), custo_brl: 0, creditos_cobrados: creditosDoUso,
+        })
+        if (e2) console.error("[estoque-wpp] historico:", e2.message)
+      }
+      const resta = Number(saldoDepois)
+      return !error && resta <= 20 ? `\n\n⚠️ Restam *${resta}* créditos. Compre mais no Portal pra não ficar sem.` : ""
     }
 
-    // Não é compra. Se for PERGUNTA sobre a loja, o assistente completo responde (gasta da mesma carteira).
-    if (!resultado.itens.length && !resultado.naoAchados.length && resultado.pergunta) {
-      await cobrarUso("(encaminhado ao assistente)")
-      const r = await fetch(`${SUPABASE_URL}/functions/v1/assistente-loja`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY },
-        body: JSON.stringify({ empresa_id: empresaId, pergunta: textoFalado || texto, grupo_jid: jid, historico: await ultimasConversas(empresaId) }),
+    // Cadastro de produto novo (só preço de venda é obrigatório). Vira uma proposta; o SIM aplica.
+    if (resultado.produtosNovos?.length && !resultado.itens.length && !resultado.naoAchados.length) {
+      const pn = resultado.produtosNovos[0]
+      if (!pn.preco_venda) {
+        await enviar(instance, jid, `Qual o preço de venda de *${pn.nome}*? Me mande tudo de novo, ex.: "cadastra ${pn.nome} por 12 reais".`)
+        return ok()
+      }
+      const { data: ja } = await sb.from("produtos").select("nome").eq("empresa_id", empresaId).eq("ativo", true).is("arquivado_em", null)
+        .ilike("nome", pn.nome.replace(/[%_]/g, "")).limit(1)
+      if (ja?.length) { await enviar(instance, jid, `Já existe um produto chamado "${ja[0].nome}". Quem muda preço é o grupo do *Analista*.`); return ok() }
+      const { data: cats } = await sb.from("produtos").select("categoria").eq("empresa_id", empresaId).eq("ativo", true).limit(500)
+      const existentes = [...new Set((cats ?? []).map((c: any) => String(c.categoria)))] as string[]
+      const categoria = existentes.find((c) => norm(c) === norm(pn.categoria)) ?? (pn.categoria || "outros")
+      const resumoCad = `Cadastrar produto *${pn.nome}* por ${brl(pn.preco_venda)} na categoria ${categoria}${pn.preco_custo ? ` (custo ${brl(pn.preco_custo)})` : ""}${existentes.includes(categoria) ? "" : " — categoria nova"}.`
+      await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+      await sb.from("assistente_acoes").insert({
+        empresa_id: empresaId, grupo_jid: jid, tipo: "cadastrar_produto", resumo: resumoCad,
+        params: { nome: pn.nome, preco_venda: pn.preco_venda, categoria, preco_custo: pn.preco_custo },
       })
-      const d = await r.json().catch(() => null)
-      await enviar(instance, jid, d?.resposta || d?.erro || "Não consegui responder agora. Tenta de novo em instantes.")
+      const aviso = await cobrarUso(resumoCad)
+      await enviar(instance, jid, `${resumoCad}\n\nResponda *SIM* para cadastrar ou *NÃO* para cancelar.${aviso}`)
+      return ok()
+    }
+    // Pergunta ou decisão do dono: não é aqui. Não cobra nada.
+    if (!resultado.itens.length && !resultado.naoAchados.length && resultado.pergunta) {
+      await enviar(instance, jid, cfg.analista_grupo_jid
+        ? "Isso é pergunta ou decisão pro grupo do *Analista*. Aqui eu cuido de estoque e cadastro de produto."
+        : "Isso é pergunta ou decisão pro robô *Analista*. Crie outro grupo com o número da loja e escreva *ativar analista*. Aqui eu cuido de estoque e cadastro de produto.")
       return ok()
     }
     if (resultado.ignorar) return ok()                      // papo do grupo, não é compra
@@ -624,8 +746,8 @@ serve(async (req) => {
     })
     const aviso = resultado.aviso ? `\n\n⚠️ ${resultado.aviso}` : ""
     const textoResumo = resumo(resultado.itens, resultado.naoAchados, !!substitui) + aviso
-    await cobrarUso(textoResumo)
-    await enviar(instance, jid, textoResumo)
+    const avisoCred = await cobrarUso(textoResumo)
+    await enviar(instance, jid, textoResumo + avisoCred)
     return ok()
   } catch (e) {
     console.error("[estoque-wpp] erro:", e)

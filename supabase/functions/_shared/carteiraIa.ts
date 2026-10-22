@@ -39,7 +39,8 @@ export async function verCarteira(admin: any, empresaId: string): Promise<Cartei
     admin.from("empresas").select("ia_saldo_centavos, ia_franquia_centavos, vencimento").eq("id", empresaId).maybeSingle(),
   ])
   const mes = await admin.from("assistente_conversas").select("custo_brl")
-    .eq("empresa_id", empresaId).gte("created_at", iniISO(inicioDoCiclo(emp.data?.vencimento)))
+    .eq("empresa_id", empresaId).in("canal", ["portal", "whatsapp_pergunta"])   // o robô assistente gasta CRÉDITOS, não a franquia
+    .gte("created_at", iniISO(inicioDoCiclo(emp.data?.vencimento)))
   const conf: Record<string, string> = {}
   for (const c of (cfg.data ?? [])) conf[c.chave] = c.valor
   // Configuração apagada tem que sair CARA, não de graça.

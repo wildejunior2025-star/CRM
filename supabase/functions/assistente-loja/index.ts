@@ -974,7 +974,7 @@ Converta o que o dono falar ("hoje", "essa semana", "mes passado", "sabado") \
 para datas AAAA-MM-DD antes de consultar.${canal === "whatsapp" ? `
 CANAL: WHATSAPP, no grupo da loja. Responda curto, como mensagem de zap: sem tabela, sem titulo, \
 negrito so com *asteriscos*. Nao cite videos. Se o dono quiser dar ENTRADA de estoque, diga que e so \
-escrever ou falar o que comprou (ou mandar a foto/PDF da nota) aqui no grupo, que o robo lanca.` : ""}`
+escrever ou falar o que comprou (ou mandar a foto/PDF da nota) no grupo do ASSISTENTE (outro grupo, o de estoque); aqui voce so analisa e propoe mudancas de preco e taxa.` : ""}`
 
     const system = [
       { type: "text", text: systemEstavel, cache_control: { type: "ephemeral" } },
