@@ -1,0 +1,247 @@
+/* Contas a pagar e a receber (Financeiro). Usa os tokens do tema (claro/escuro) de index.css. */
+
+.cpr {
+  --cpr-pagar: #dc2626;       /* botão sólido: branco por cima passa de 4,5:1 nos dois temas */
+  --cpr-receber: #15803d;
+  --cpr-raio: 14px;
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Topo ── */
+.cpr-topo {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 12px 16px; flex-wrap: wrap; margin-bottom: 18px;
+}
+.cpr-titulo { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.01em; }
+.cpr-sub { margin: 4px 0 0; color: var(--text-muted); font-size: 14px; }
+.cpr-topo-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.cpr-btn-pagar, .cpr-btn-receber { color: #fff; }
+.cpr-btn-pagar { background: var(--cpr-pagar); }
+.cpr-btn-receber { background: var(--cpr-receber); }
+.cpr-btn-pagar:hover:not(:disabled) { background: #b91c1c; }
+.cpr-btn-receber:hover:not(:disabled) { background: #166534; }
+
+.cpr-aviso {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; font-size: 14px; font-weight: 600;
+}
+.cpr-aviso-ok { background: var(--success-bg); color: var(--success); border: 1px solid color-mix(in srgb, var(--success) 35%, transparent); }
+.cpr-aviso-erro { background: var(--danger-bg); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); }
+
+.cpr-skel { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+
+/* ── Cards de resumo ── */
+.cpr-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.cpr-card {
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  padding: 16px 18px; border-radius: var(--cpr-raio);
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+  font: inherit; cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease, background-color 160ms ease;
+}
+.cpr-card:hover { transform: translateY(-1px); border-color: var(--primary); box-shadow: var(--shadow-md); }
+.cpr-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.cpr-card-estatico { cursor: default; }
+.cpr-card-estatico:hover { transform: none; border-color: var(--border); box-shadow: var(--shadow-sm); }
+.cpr-card-perigo { border-left: 4px solid var(--danger); }
+.cpr-card-perigo.cpr-card-ok { border-left-color: var(--success); }
+.cpr-card-rotulo { font-size: 12.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+.cpr-card-valor { font-size: 24px; font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; }
+.cpr-card-nota { font-size: 12.5px; color: var(--text-muted); }
+
+.cpr-pos { color: var(--success); }
+.cpr-neg { color: var(--danger); }
+
+.cpr-fiado {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 14px; border-radius: 12px; font-size: 14px;
+  background: var(--warning-bg); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+}
+
+/* ── Gráfico ── */
+.cpr-grafico { margin-bottom: 18px; padding: 16px 18px 8px; }
+.cpr-grafico-topo { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cpr-grafico h3 { margin: 0; font-size: 15px; font-weight: 800; }
+.cpr-legenda { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); }
+.cpr-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.cpr-dot-receber { background: var(--success); }
+.cpr-dot-pagar { background: var(--danger); margin-left: 8px; }
+.cpr-svg { width: 100%; height: auto; display: block; }
+.cpr-barra-receber { fill: var(--success); }
+.cpr-barra-pagar { fill: var(--danger); }
+.cpr-grade { stroke: var(--border); stroke-dasharray: 3 4; }
+.cpr-eixo { stroke: var(--border); }
+.cpr-barra-valor { fill: var(--text); font-size: 11px; font-weight: 700; }
+.cpr-eixo-rotulo { fill: var(--text-muted); font-size: 11.5px; }
+.cpr-eixo-atrasadas { fill: var(--danger); font-weight: 700; }
+.cpr-grafico-vazio { color: var(--text-muted); text-align: center; padding: 18px 0 14px; margin: 0; font-size: 14px; }
+
+/* ── Filtros ── */
+.cpr-filtros { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.cpr-seg {
+  display: inline-flex; align-self: flex-start; padding: 3px; gap: 2px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--border);
+}
+.cpr-seg-btn {
+  border: none; background: transparent; color: var(--text-muted); font: inherit; font-weight: 700; font-size: 13.5px;
+  padding: 7px 16px; border-radius: 9px; cursor: pointer; transition: background-color 120ms ease, color 120ms ease;
+}
+.cpr-seg-btn:hover { color: var(--text); }
+.cpr-seg-btn.ativo { background: var(--primary); color: var(--primary-contrast); }
+.cpr-seg-btn.ativo.cpr-seg-pagar { background: var(--cpr-pagar); color: #fff; }
+.cpr-seg-btn.ativo.cpr-seg-receber { background: var(--cpr-receber); color: #fff; }
+.cpr-seg-btn:focus-visible, .cpr-chip:focus-visible, .cpr-tipo-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.cpr-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.cpr-chip {
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; font-weight: 600;
+  padding: 5px 13px; border-radius: 999px; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease;
+}
+.cpr-chip:hover { border-color: var(--primary); }
+.cpr-chip.ativo { background: var(--primary-bg); color: var(--primary); border-color: var(--primary); }
+
+.cpr-filtros-linha { display: flex; gap: 8px; flex-wrap: wrap; }
+.cpr-filtros-linha input, .cpr-filtros-linha select {
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px;
+}
+.cpr-busca { flex: 1 1 240px; min-width: 0; }
+.cpr-filtros-linha input:focus, .cpr-filtros-linha select:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 3px var(--primary-ring); }
+
+/* ── Lista ── */
+.cpr-grupo { margin-bottom: 18px; }
+.cpr-grupo-topo { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 0 2px 8px; }
+.cpr-grupo-topo h3 { margin: 0; font-size: 14px; font-weight: 800; }
+.cpr-grupo-n {
+  display: inline-block; margin-left: 4px; padding: 0 7px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  background: var(--bg); color: var(--text-muted); border: 1px solid var(--border);
+}
+.cpr-atrasada { color: var(--danger); }
+.cpr-grupo-soma { display: inline-flex; gap: 12px; font-size: 13.5px; font-weight: 800; }
+
+.cpr-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cpr-linha {
+  position: relative;
+  display: grid; grid-template-columns: 38px minmax(0, 1fr) auto auto; align-items: center; gap: 4px 14px;
+  padding: 12px 14px 12px 16px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+  transition: border-color 140ms ease, background-color 160ms ease;
+}
+.cpr-linha::before {
+  content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 4px; border-radius: 0 4px 4px 0;
+  background: var(--danger);
+}
+.cpr-linha-receber::before { background: var(--success); }
+.cpr-linha:hover { border-color: color-mix(in srgb, var(--primary) 55%, var(--border)); }
+.cpr-sit-vencida { background: color-mix(in srgb, var(--danger-bg) 55%, var(--surface)); }
+.cpr-sit-paga { opacity: .8; }
+.cpr-sit-paga::before { background: var(--border); }
+
+.cpr-icone {
+  width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 17px; background: var(--danger-bg); color: var(--danger);
+}
+.cpr-linha-receber .cpr-icone { background: var(--success-bg); color: var(--success); }
+
+.cpr-linha-info { min-width: 0; }
+.cpr-linha-titulo { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.cpr-linha-titulo strong { font-size: 15px; overflow-wrap: anywhere; }
+.cpr-tag {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700;
+  background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); white-space: nowrap;
+}
+.cpr-tag-parcela { color: var(--primary); background: var(--primary-bg); border-color: transparent; }
+.cpr-tag-rep { color: var(--primary); border-color: color-mix(in srgb, var(--primary) 40%, transparent); background: transparent; }
+.cpr-linha-sub { margin-top: 2px; font-size: 13px; color: var(--text-muted); overflow-wrap: anywhere; }
+.cpr-linha-sub strong { color: var(--text); font-weight: 600; }
+.cpr-quando-vencida { color: var(--danger); font-weight: 700; }
+.cpr-quando-hoje { color: var(--warning); font-weight: 700; }
+.cpr-obs { max-width: 100%; }
+
+.cpr-linha-valor { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; }
+.cpr-valor { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; }
+.cpr-riscado { text-decoration: line-through; text-decoration-thickness: 1px; }
+.cpr-parcial { font-size: 12px; color: var(--text-muted); }
+
+.cpr-linha-acoes { display: flex; align-items: center; gap: 6px; }
+.cpr-menu-wrap { position: relative; }
+.cpr-menu-btn { padding: 6px 11px; font-size: 16px; line-height: 1; }
+.cpr-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 210px;
+  display: flex; flex-direction: column; padding: 6px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-md);
+}
+.cpr-menu button {
+  border: none; background: transparent; color: var(--text); font: inherit; font-size: 14px; text-align: left;
+  padding: 9px 12px; border-radius: 8px; cursor: pointer;
+}
+.cpr-menu button:hover, .cpr-menu button:focus-visible { background: var(--surface-hover); outline: none; }
+.cpr-menu-perigo { color: var(--danger) !important; }
+
+/* ── Vazio ── */
+.cpr-vazio { text-align: center; padding: 36px 20px; }
+.cpr-vazio h3 { margin: 6px 0; font-size: 18px; }
+.cpr-vazio p { margin: 6px auto; max-width: 460px; color: var(--text-muted); font-size: 14.5px; }
+.cpr-vazio-icone { font-size: 40px; line-height: 1; }
+.cpr-vazio-acoes { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 16px 0 8px; }
+.cpr-vazio-pequeno { padding: 24px 16px; }
+.cpr-dica { font-size: 13px !important; }
+
+.cpr-rodape { margin: 20px 2px 4px; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+
+/* ── Modais ── */
+.cpr-modal { max-width: 580px; }
+.cpr-tipo-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+.cpr-tipo-btn {
+  padding: 10px 12px; border-radius: 10px; border: 2px solid var(--border); background: var(--surface); color: var(--text);
+  font: inherit; font-weight: 800; cursor: pointer; transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+.cpr-tipo-btn:disabled { cursor: default; opacity: .55; }
+.cpr-tipo-pagar.ativo { border-color: var(--cpr-pagar); background: var(--danger-bg); color: var(--danger); }
+.cpr-tipo-receber.ativo { border-color: var(--cpr-receber); background: var(--success-bg); color: var(--success); }
+.cpr-previa {
+  padding: 9px 12px; border-radius: 10px; font-size: 13.5px; color: var(--text);
+  background: var(--primary-bg); border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+}
+p.cpr-previa { margin: 12px 0 0; }
+.cpr-full { grid-column: 1 / -1; }
+.cpr-ja { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.cpr-ja select { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+.cpr-check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; color: var(--text); font-size: 14.5px; }
+.cpr-check input { width: 18px; height: 18px; margin: 0; padding: 0; accent-color: var(--primary); }
+
+.cpr-resumo-baixa {
+  display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin-bottom: 16px; border-radius: 12px;
+  border: 1px solid var(--border); border-left: 4px solid var(--danger); background: var(--bg);
+}
+.cpr-resumo-receber { border-left-color: var(--success); }
+.cpr-resumo-baixa span { font-size: 13px; color: var(--text-muted); }
+.cpr-resumo-valor { font-size: 22px !important; font-weight: 800; color: var(--text) !important; }
+
+.cpr-baixas { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cpr-baixas li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-size: 14px; }
+.cpr-baixas em { color: var(--text-muted); }
+
+/* ── Celular ── */
+@media (max-width: 900px) {
+  .cpr-cards, .cpr-skel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .cpr-cards, .cpr-skel { grid-template-columns: 1fr; }
+  .cpr-card-valor { font-size: 22px; }
+  .cpr-topo-acoes { width: 100%; }
+  .cpr-topo-acoes .btn { flex: 1; }
+  .cpr-seg { align-self: stretch; }
+  .cpr-seg-btn { flex: 1; padding: 8px 6px; }
+  .cpr-linha { grid-template-columns: 34px minmax(0, 1fr); padding-right: 12px; }
+  .cpr-linha-valor { grid-column: 2; flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 8px; flex-wrap: wrap; text-align: left; }
+  .cpr-linha-acoes { grid-column: 1 / -1; justify-content: flex-end; }
+  .cpr-modal { padding: 20px 16px; }
+  .cpr-modal .form-grid { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cpr-card, .cpr-seg-btn, .cpr-chip, .cpr-linha, .cpr-tipo-btn { transition: none; }
+  .cpr-card:hover { transform: none; }
+}

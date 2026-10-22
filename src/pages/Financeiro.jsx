@@ -4,6 +4,7 @@ import { calcIfoodLiquido, FORMA_ENTREGA_LABEL } from '../lib/ifoodLiquido'
 import IfoodIcon from '../components/IfoodIcon'
 import DespesasLucro from './DespesasLucro'
 import ClientesFiado from './ClientesFiado'
+import ContasPagarReceber from './ContasPagarReceber'
 import ConciliacaoIfood from '../components/ConciliacaoIfood'
 import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
@@ -411,7 +412,7 @@ export default function Financeiro() {
 
       {/* Abas do Financeiro */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
-        {[['recebimentos', '💵 Recebimentos'], ['lucro', '📊 Despesas & Lucro'], ['fiado', '🧾 Fiado'],
+        {[['recebimentos', '💵 Recebimentos'], ['lucro', '📊 Despesas & Lucro'], ['contas', '🗓️ Contas a pagar e receber'], ['fiado', '🧾 Fiado'],
           // Só pra quem tem loja conectada no iFood (syncIfood null = não tem).
           ...(syncIfood ? [['ifood', '🧾 Conciliação iFood']] : [])].map(([id, lb]) => (
           <button key={id} type="button" onClick={() => trocarAba(id)}
@@ -423,6 +424,8 @@ export default function Financeiro() {
       </div>
 
       {aba === 'lucro' && <DespesasLucro empresaId={empresaId} />}
+
+      {aba === 'contas' && <ContasPagarReceber empresaId={empresaId} onAbrirFiado={() => trocarAba('fiado')} />}
 
       {aba === 'fiado' && <ClientesFiado empresaId={empresaId} />}
 
