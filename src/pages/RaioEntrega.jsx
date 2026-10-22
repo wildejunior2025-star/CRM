@@ -36,6 +36,9 @@ export default function RaioEntrega() {
   const circleRef = useRef(null)
   const ringsRef  = useRef([])
   const markerRef = useRef(null)
+  const raioVal   = useRef(10)    // espelho do estado, pra funções do mapa lerem o valor de agora
+  const taxasVal  = useRef([])
+  const anelTimer = useRef(null)
 
   // Dados
   const [empresaId, setEmpresaId] = useState(null)
@@ -67,6 +70,8 @@ export default function RaioEntrega() {
   const [raio, setRaio] = useState(10)
   const [sugestoesBairro, setSugestoesBairro] = useState([]) // bairros dentro do raio (OpenStreetMap)
   const raioSyncTimer = useRef(null) // debounce pra faixas acompanharem o raio
+  raioVal.current = raio
+  taxasVal.current = taxasKm
 
   // Puxa os bairros das cidades DENTRO do raio de entrega (via OpenStreetMap/Overpass).
   // Genérico: funciona pra qualquer cidade — sem cadastrar lista fixa. Debounce pra
@@ -366,19 +371,14 @@ export default function RaioEntrega() {
         maxZoom: 18,
       }).addTo(map)
 
+      // Contorno do raio total (vermelho). O preenchimento agora vem das faixas de 500 m.
       circleRef.current = L.circle([latitude, longitude], {
         radius: raio * 1000,
-        color: '#ef4444', weight: 2.5,
-        fillColor: '#ef4444', fillOpacity: 0.15,
+        color: '#ef4444', weight: 3,
+        fillOpacity: 0, interactive: false,
       }).addTo(map)
 
-      ringsRef.current = [0.25, 0.5, 0.75].map(f =>
-        L.circle([latitude, longitude], {
-          radius: raio * 1000 * f,
-          color: '#888', weight: 1,
-          dashArray: '6 10', fillOpacity: 0, interactive: false,
-        }).addTo(map)
-      )
+      desenharAneis(latitude, longitude)
 
       const icon = L.divIcon({
         html: `<div style="width:44px;height:44px;background:#2563eb;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 10px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:22px;">🏪</div>`,
@@ -390,7 +390,22 @@ export default function RaioEntrega() {
       markerRef.current.on('drag', (e) => {
         const { lat, lng } = e.target.getLatLng()
         circleRef.current?.setLatLng([lat, lng])
-        ringsRef.current.forEach(r => r.setLatLng([lat, lng]))
+        // Faixas são polígonos: refaz de leve enquanto arrasta (a cada ~80 ms).
+        if (!anelTimer.current) {
+          anelTimer.current = setTimeout(() => { anelTimer.current = null; desenharAneis(lat, lng) }, 80)
+        }
+      })
+
+      // Clicou no mapa: diz a quantos km da loja é aquele ponto e em que faixa cai.
+      // É pra conferir uma entrega: clica no endereço e vê se o raio e a taxa batem.
+      map.on('click', (e) => {
+        const ponto = markerRef.current?.getLatLng()
+        if (!ponto) return
+        const km = map.distance(ponto, e.latlng) / 1000
+        L.popup({ closeButton: false })
+          .setLatLng(e.latlng)
+          .setContent(textoDoPonto(km))
+          .openOn(map)
       })
 
       // Soltar: salva nova posição no estado (sem recriar o mapa)
@@ -411,9 +426,89 @@ export default function RaioEntrega() {
     if (!mapObjRef.current || !latitude) return
     const raioM = raio * 1000
     circleRef.current?.setRadius(raioM)
-    ringsRef.current.forEach((r, i) => r.setRadius(raioM * [0.25, 0.5, 0.75][i]))
+    const ponto = markerRef.current?.getLatLng()
+    desenharAneis(ponto?.lat ?? latitude, ponto?.lng ?? longitude)
     mapObjRef.current.setZoom(zoomParaRaio(raio))
   }, [raio, latitude])
+
+  // Mudou a tabela de taxas: as etiquetas das faixas mostram o valor novo.
+  useEffect(() => {
+    if (!mapObjRef.current || !latitude) return
+    const ponto = markerRef.current?.getLatLng()
+    desenharAneis(ponto?.lat ?? latitude, ponto?.lng ?? longitude)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taxasKm])
+
+  // ── Faixas de 500 m, cada uma de uma cor ──────────────────────
+  // Serve pra conferir as entregas: a cor diz em que "anel" o endereço caiu.
+  // Polígonos com buraco no meio (não círculos empilhados), senão o centro
+  // ficaria escuro e as cores se misturariam.
+  function pontosDoCirculo(lat, lng, rM, n = 72) {
+    const pts = []
+    const kLng = 111320 * Math.cos(lat * Math.PI / 180)
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * 2 * Math.PI
+      pts.push([lat + (rM * Math.cos(a)) / 111320, lng + (rM * Math.sin(a)) / kLng])
+    }
+    return pts
+  }
+  function taxaAteKm(km) {
+    const faixas = [...(taxasVal.current || [])]
+      .map(f => ({ km: Number(f.km), taxa: Number(f.taxa) }))
+      .filter(f => Number.isFinite(f.km) && Number.isFinite(f.taxa))
+      .sort((a, b) => a.km - b.km)
+    return faixas.find(f => km <= f.km + 1e-9) ?? null
+  }
+  const kmTxt = km => (km % 1 === 0 ? String(km) : km.toFixed(1).replace('.', ',')) + ' km'
+  function textoDoPonto(km) {
+    const r = raioVal.current
+    const f = taxaAteKm(km)
+    const dist = `<b>${km.toFixed(2).replace('.', ',')} km</b> da loja`
+    if (km > r) return `${dist}<br><span style="color:#dc2626">Fora do raio de ${kmTxt(r)}</span>`
+    const faixa = Math.ceil(km / 0.5 - 1e-9) * 0.5
+    return `${dist}<br>Anel de ${kmTxt(Math.max(0, faixa - 0.5))} a ${kmTxt(faixa)}`
+      + (f ? `<br>Taxa: <b>R$ ${f.taxa.toFixed(2).replace('.', ',')}</b> (faixa até ${kmTxt(f.km)})` : '')
+  }
+  function desenharAneis(lat, lng) {
+    const map = mapObjRef.current
+    if (!map || !L) return
+    ringsRef.current.forEach(l => map.removeLayer(l))
+    ringsRef.current = []
+    const raioM = raioVal.current * 1000
+    const passo = 500
+    const total = Math.ceil(raioM / passo)
+    // Poucas etiquetas quando o raio é grande, pra não encher o mapa de texto.
+    const cada = raioVal.current <= 6 ? 1 : raioVal.current <= 12 ? 2 : 4
+    for (let i = 1; i <= total; i++) {
+      const rIn = (i - 1) * passo
+      const rOut = Math.min(i * passo, raioM)
+      if (rOut <= rIn) break
+      const cor = `hsl(${(i * 47) % 360}, 72%, 46%)`
+      const aneis = [pontosDoCirculo(lat, lng, rOut)]
+      if (rIn > 0) aneis.push(pontosDoCirculo(lat, lng, rIn).reverse())
+      const f = taxaAteKm(rOut / 1000)
+      const poly = L.polygon(aneis, {
+        color: cor, weight: 1.5, fillColor: cor, fillOpacity: 0.3,
+      }).bindTooltip(
+        `${kmTxt(rIn / 1000)} a ${kmTxt(rOut / 1000)}` + (f ? ` · R$ ${f.taxa.toFixed(2).replace('.', ',')}` : ''),
+        { sticky: true })
+      poly.addTo(map)
+      ringsRef.current.push(poly)
+      if (i % cada === 0 || i === total) {
+        const rot = L.marker([lat + rOut / 111320, lng], {
+          interactive: false, keyboard: false,
+          icon: L.divIcon({
+            className: '',
+            html: `<span style="display:inline-block;transform:translate(-50%,-50%);background:#fff;color:${cor};border:1.5px solid ${cor};border-radius:10px;padding:0 5px;font:700 11px/16px system-ui,sans-serif;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.3)">${kmTxt(rOut / 1000)}${f ? ' · R$ ' + f.taxa : ''}</span>`,
+            iconSize: [0, 0],
+          }),
+        }).addTo(map)
+        ringsRef.current.push(rot)
+      }
+    }
+    // O pino da loja fica por cima das faixas.
+    markerRef.current?.setZIndexOffset(1000)
+  }
 
   function zoomParaRaio(km) {
     if (km <= 2) return 14; if (km <= 5) return 13
@@ -472,7 +567,7 @@ export default function RaioEntrega() {
         // Mapa já existe: move pino e círculos sem recriar
         markerRef.current.setLatLng([lat, lng])
         circleRef.current?.setLatLng([lat, lng])
-        ringsRef.current.forEach(r => r.setLatLng([lat, lng]))
+        desenharAneis(lat, lng)
         mapObjRef.current.setView([lat, lng], zoomParaRaio(raio))
       }
 
