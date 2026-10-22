@@ -805,7 +805,10 @@ Deno.serve(async (req) => {
     // Só vale com verify_jwt LIGADO nesta função (o gateway já conferiu a assinatura): o papel vem do próprio JWT.
     let papelDoToken = ""
     try { papelDoToken = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).role ?? "" } catch { /* token de usuário comum */ }
-    const canal: string = papelDoToken === "service_role" && typeof body?.empresa_id === "string" ? "whatsapp" : "portal"
+    // A chave de serviço pode ser um JWT (papel service_role) ou a chave nova sb_secret_… (não é JWT):
+    // por isso vale também a igualdade exata com a chave do ambiente.
+    const ehServico = (SERVICE_KEY !== "" && token === SERVICE_KEY) || papelDoToken === "service_role"
+    const canal: string = ehServico && typeof body?.empresa_id === "string" ? "whatsapp" : "portal"
     if (canal === "whatsapp") {
       const { data: adm } = await admin.from("profiles").select("id, empresa_id, perfil")
         .eq("empresa_id", body.empresa_id).eq("perfil", "admin").limit(1).maybeSingle()
