@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 37
+const APP_VERSION = 38
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -480,7 +480,7 @@ function comandaDeliveryBytes(pedido, itens) {
   const canal = pedido.origem === 'ifood' && pedido.ifood_display_id ? 'iFood #' + pedido.ifood_display_id : (retirada ? 'RETIRADA ' : 'ENTREGA ') + cod
   const primeiro = String(pedido.cliente_nome || '').trim().split(/\s+/)[0]
   return montarComandaMesa({
-    nomeLoja: empresa?.nome || '', rotulo: canal + (primeiro ? ' - ' + primeiro : ''),
+    nomeLoja: empresa?.nome || '', rotulo: canal + (primeiro ? '\n' + primeiro : ''),
     itens, rodape: empresa?.rodape_cozinha || '', obsGeral: pedido.observacoes || '',
   })
 }

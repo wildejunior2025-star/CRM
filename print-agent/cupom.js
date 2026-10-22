@@ -288,8 +288,18 @@ function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente =
   // Comanda de balcao leva o NOME do cliente, nao o numero da mesa. O Braseiro
   // nem usa numero de mesa: abre comanda com o nome, e a cozinha recebia
   // "Mesa: 7" sem saber de quem era o hamburguer (11/10/2026).
-  const mesaTxt = '~ ' + (rotulo || ('Mesa: ' + numero)) + (area ? ' (' + area + ')' : '') + (sufixo || '') + ' ~'
-  parts.push(ALIGN(1), BOLD(1), linha(mesaTxt), BOLD(0), ALIGN(0))
+  //
+  // O cabecalho saia pequeno ("~ Mesa: 7 ~") e o garcom lia de longe. Agora cada
+  // pedaco sai em linha propria e GRANDE: a mesa/entrega, depois o nome. Na
+  // largura dobrada cabem ~21 letras; texto maior cai pra so-altura-dobrada
+  // (42 letras) pra nao quebrar no meio da palavra.
+  const mesaTxt = (rotulo || ('Mesa: ' + numero)) + (area ? ' (' + area + ')' : '') + (sufixo || '')
+  const tamanhoDoTitulo = s => (s.length <= 21 ? SIZE(0x11) : s.length <= 42 ? SIZE(0x01) : SIZE(0))
+  parts.push(ALIGN(1), BOLD(1))
+  for (const ln of String(mesaTxt).split(/\n| - /).map(s => s.trim()).filter(Boolean)) {
+    parts.push(tamanhoDoTitulo(ln), linha(ln), SIZE(0))
+  }
+  parts.push(BOLD(0), ALIGN(0))
   parts.push(linha(dataHora))
   if (atendente) parts.push(linha('Atendente: ' + atendente))
   if (Number(pessoas) > 0) parts.push(linha('Pessoas: ' + pessoas))
