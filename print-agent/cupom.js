@@ -316,7 +316,10 @@ function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente =
     parts.push(SIZE(0x11), BOLD(1), linha(q + ' ' + (nomeIt || 'Item')), BOLD(0), SIZE(0))
     for (const c of compsIt) {
       if (!c || !c.nome) continue
-      parts.push(SIZE(0x01), BOLD(1), linha('  ' + (c.qtdTotal ?? 1) + ' ' + c.nome), BOLD(0), SIZE(0))
+      // Letra de tamanho normal em negrito: a "altura dobrada" sem largura saia
+      // alta e espremida e atrapalhava a leitura (Mickey Burguer, 22/10/2026).
+      // O espaco entre as linhas e o que da respiro.
+      parts.push(BOLD(1), linha('   ' + (c.qtdTotal ?? 1) + ' ' + c.nome), BOLD(0), FEED(1))
     }
     // Observação também GRANDE (fonte alta + negrito), pra cozinha ler fácil.
     if (it.observacao) parts.push(SIZE(0x01), BOLD(1), linha('obs: ' + it.observacao), BOLD(0), SIZE(0))
