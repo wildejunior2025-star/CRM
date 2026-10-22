@@ -2146,7 +2146,11 @@ ${url}
   }
 
   // Aplica o preço especial do cliente (se houver) antes de mostrar/adicionar — só afeta este cliente.
-  const produtosComPreco = produtos.map(p => (precoEspMap[p.id] != null ? { ...p, preco_venda: precoEspMap[p.id] } : p))
+  // Produto desligado (ativo = false) não aparece pra vender: é o jeito de
+  // esconder do balcão sem mexer no iFood quando a categoria é "pausa só aqui".
+  const produtosComPreco = produtos
+    .filter(p => p.ativo !== false)
+    .map(p => (precoEspMap[p.id] != null ? { ...p, preco_venda: precoEspMap[p.id] } : p))
   // Busca ignorando acento: quem digita rápido escreve "camarao", e o produto
   // está cadastrado como "Camarão".
   const buscaNorm = semAcento(busca)
