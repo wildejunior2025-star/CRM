@@ -297,6 +297,15 @@ function soDigitos(tel) {
   return String(tel || '').replace(/\D/g, '')
 }
 
+// O wa.me exige o código do país. O telefone do cliente vem como o digitaram
+// ("84999120349"), e sem o 55 o WhatsApp lia "+84" (Vietnã) e dizia que o número
+// não estava no WhatsApp: o motoqueiro não conseguia chamar o cliente.
+function digitosWhatsapp(tel) {
+  const d = soDigitos(tel)
+  if (!d) return ''
+  return d.length <= 11 || !d.startsWith('55') ? '55' + d : d
+}
+
 // Diz pro motoqueiro se ele PRECISA cobrar ou se já está pago.
 // Pré-pago (verde): "online" (pago no app do iFood) e PIX confirmado.
 // Cobrar na entrega (laranja): dinheiro, cartão/crédito/débito (maquininha), vale
@@ -738,7 +747,7 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
           <div style={{ display: 'flex', gap: 8, marginBottom: isIfood && ifoodId ? 6 : 12 }}>
             {tel && <a href={telHref} style={btnLink('#0891b2')}>📞 {isIfood ? 'Ligar (iFood)' : 'Ligar'}</a>}
             {/* WhatsApp só pros pedidos que NÃO são do iFood (iFood não tem zap do cliente) */}
-            {tel && !isIfood && <a href={`https://wa.me/${tel}`} target="_blank" rel="noopener noreferrer" style={btnLink('#25d366')}>💬 Zap</a>}
+            {tel && !isIfood && <a href={`https://wa.me/${digitosWhatsapp(tel)}`} target="_blank" rel="noopener noreferrer" style={btnLink('#25d366')}>💬 Zap</a>}
           </div>
           {isIfood && ifoodId && (
             <div style={{
