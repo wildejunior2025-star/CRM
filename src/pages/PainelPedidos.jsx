@@ -1779,10 +1779,30 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       // ponto do pedido continua vazio — o do bairro não serve pra o motoboy.
       let aproximado = false
       let origemAprox = 'bairro'
+      let doGoogle = false
       // A lista de ruas vem do cadastro de CEP, que conhece rua que o mapa não
       // tem — e ele também guarda o ponto da rua. Esse ponto é bem melhor que o
       // centro do bairro (a Rua Babaçulândia dá 250 m da loja, o centro 450 m).
       const cepLimpo = cep.replace(/\D/g, '')
+      // Google: só entra quando o mapa grátis não achou, e só se a chave estiver
+      // configurada no servidor (sem ela a função responde "sem_chave" e segue).
+      if (!coords && rua.trim()) {
+        try {
+          const { data: g } = await supabase.functions.invoke('geocodificar-google', {
+            body: { rua, numero, bairro, cidade, estado: empresa?.estado ?? '' },
+          })
+          if (g?.ok && Number.isFinite(g.lat) && Number.isFinite(g.lng)) {
+            coords = { lat: g.lat, lng: g.lng }
+            // O ponto do Google serve pra TAXA. Não vira o ponto do pedido: os
+            // termos dele limitam o uso fora do mapa do próprio Google, e o ponto
+            // do pedido é o que o cliente confirma no nosso mapa.
+            doGoogle = true
+            // Só a casa exata (ou interpolada entre dois números) vale como ponto
+            // de verdade; o resto é aproximado e o aviso fica na tela.
+            if (g.precisao !== 'ROOFTOP' && g.precisao !== 'RANGE_INTERPOLATED') { aproximado = true; origemAprox = 'google' }
+          }
+        } catch { /* sem a função: segue pro CEP */ }
+      }
       if (!coords && cepLimpo.length === 8) {
         try {
           const r = await fetch(`https://cep.awesomeapi.com.br/json/${cepLimpo}`)
@@ -1800,7 +1820,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         } catch { /* sem rede: cai no erro de baixo */ }
       }
       if (!coords) { setCalcTaxa({ loading: false, msg: { tipo: 'erro', txt: 'Não achei esse endereço no mapa. Digite a taxa manual.' } }); return }
-      if (!coordCliente && !aproximado) setCoordCliente(coords)
+      if (!coordCliente && !aproximado && !doGoogle) setCoordCliente(coords)
       const dist = haversineKm(coords.lat, coords.lng, Number(emp.latitude), Number(emp.longitude))
       const faixas = Array.isArray(emp.taxas_entrega_km) ? emp.taxas_entrega_km : []
       let valor
@@ -1818,9 +1838,12 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
         msg: {
           tipo: foraRaio || aproximado ? 'aviso' : 'ok',
           txt: `${dist.toFixed(1)} km → taxa ${fmt(valor)}`
-            + (aproximado ? (origemAprox === 'cep'
-              ? ' · ⚠️ aproximado pelo CEP (o mapa não tem esta rua) — confira'
-              : ' · ⚠️ aproximado pelo centro do bairro (a rua não está no mapa) — confira') : '')
+            + (doGoogle && !aproximado ? ' · 📍 achado pelo Google' : '')
+            + (aproximado ? (origemAprox === 'google'
+              ? ' · ⚠️ aproximado pelo Google (meio da rua) — confira'
+              : origemAprox === 'cep'
+                ? ' · ⚠️ aproximado pelo CEP (o mapa não tem esta rua) — confira'
+                : ' · ⚠️ aproximado pelo centro do bairro (a rua não está no mapa) — confira') : '')
             + (foraRaio ? ` · ⚠️ fora do raio de ${emp.raio_entrega_km} km` : ''),
         },
       })
