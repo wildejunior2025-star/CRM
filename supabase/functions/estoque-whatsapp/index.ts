@@ -976,23 +976,23 @@ async function tratar(req: Request): Promise<Response> {
     const empresaId: string = cfg.empresa_id
     const t = norm(texto)
 
-    // ── Ligar / desligar. Quem ativa passa a consultar o financeiro da loja pelo grupo, então só ──
-    // o número da loja (fromMe) ou um telefone DA loja (admin, contato, super admin) pode.
-    const autorizado = async (): Promise<boolean> => {
-      if (msg.key?.fromMe) return true
-      const fim8 = (v: unknown) => String(v ?? "").split("@")[0].replace(/\D/g, "").slice(-8)
-      const quem = [msg.key?.participant, msg.key?.participantAlt, msg.participant].map(fim8).filter((x) => x.length === 8)
-      if (!quem.length) return false
-      const [c, e, p, g] = await Promise.all([
-        sb.from("whatsapp_config").select("admin_phone, connected_phone").eq("empresa_id", empresaId).eq("instance_name", instance).maybeSingle(),
-        sb.from("empresas").select("telefone_contato").eq("id", empresaId).maybeSingle(),
-        sb.from("profiles").select("telefone").eq("empresa_id", empresaId).in("perfil", ["admin", "super_admin"]),
-        sb.from("config_global").select("valor").eq("chave", "super_admin_phone").maybeSingle(),
-      ])
-      const lojistas = new Set([c.data?.admin_phone, c.data?.connected_phone, e.data?.telefone_contato, g.data?.valor,
-        ...(p.data ?? []).map((x: any) => x.telefone)].map(fim8).filter((x) => x.length === 8))
-      return quem.some((q) => lojistas.has(q))
-    }
+    // ── Ligar / desligar: quem está no grupo pode ───────────────────────────
+    //
+    // Antes só ligava quem tivesse telefone cadastrado como da loja (admin,
+    // contato, super admin) ou a própria loja (fromMe). A ideia era proteger o
+    // financeiro, já que o grupo do Analista responde venda e lucro.
+    //
+    // Só que a trava protegia pouco e atrapalhava muito:
+    //
+    // - Ela valia só pra LIGAR. Depois de ligado, qualquer um do grupo já
+    //   lançava estoque e perguntava o que quisesse. Meia tranca não é tranca.
+    // - Quem está no grupo foi o DONO que colocou. A porta é a entrada no
+    //   grupo, não o número de quem digita — e essa porta já é dele.
+    // - Negava em SILÊNCIO. O dono do Agv escrevia "ativar assistente" do
+    //   celular dele, não acontecia nada, e parecia robô quebrado (23/10/2026).
+    //   Erro que não fala é pior do que permissão larga.
+    // - Obrigava a cadastrar o telefone de cada dono antes de ele usar o robô,
+    //   ou seja: ninguém ativava sem a gente.
     // Dois robôs, um grupo pra cada: "ativar assistente" (estoque e cadastros, gasta créditos) e
     // "ativar analista" (perguntas e decisões do dono, gasta o saldo da IA). "estoque" segue valendo.
     const reAssist = "(assistente|estoque|entrada)"
@@ -1001,10 +1001,6 @@ async function tratar(req: Request): Promise<Response> {
         : new RegExp(`^(#|\\/)?\\s*${verbo}\\s+(o\\s+)?analista`).test(t) ? "analista" : null
     const ligar = alvo("(ativar|ligar)")
     if (ligar) {
-      if (!(await autorizado())) {
-        console.log("[estoque-wpp] ativar negado: numero nao autorizado", msg.key?.participant, msg.key?.participantAlt)
-        return ok()
-      }
       // Um grupo é de UM robô só: ligar um desliga o outro neste mesmo grupo.
       const upd: Record<string, string | null> = ligar === "assistente"
         ? { estoque_grupo_jid: jid, ...(cfg.analista_grupo_jid === jid ? { analista_grupo_jid: null } : {}) }
@@ -1021,7 +1017,6 @@ async function tratar(req: Request): Promise<Response> {
 
     const desligar = alvo("(desativar|desligar)")
     if (desligar) {
-      if (!(await autorizado())) return ok()
       await sb.from("whatsapp_config").update(desligar === "assistente" ? { estoque_grupo_jid: null } : { analista_grupo_jid: null })
         .eq("empresa_id", empresaId).eq("instance_name", instance)
       await enviar(instance, jid, `Desligado. Este grupo não é mais o ${desligar === "assistente" ? "Assistente" : "Analista"}.`)
