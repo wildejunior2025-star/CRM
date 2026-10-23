@@ -52,6 +52,16 @@ serve(async (req) => {
     // `?seco=1` mostra o que sairia sem mandar nada e SEM marcar como avisado —
     // pra conferir o texto antes de soltar numa loja de verdade.
     const seco = new URL(req.url).searchParams.get("seco") === "1"
+
+    // O gatilho do banco (mig 0371) manda `esperar`. É nessa espera que o lote
+    // do fornecedor se junta: a pessoa lança 10 itens em 40 segundos e sai UMA
+    // mensagem. Dormir não gasta CPU, só relógio.
+    //
+    // A chamada da rede de segurança (o cron de 30 min) vem sem `esperar` e
+    // processa na hora: ali o lote já acabou faz tempo.
+    const corpo = await req.json().catch(() => ({}))
+    const esperar = Math.min(Math.max(Number(corpo?.esperar ?? 0) || 0, 0), 90)
+    if (esperar && !seco) await new Promise((r) => setTimeout(r, esperar * 1000))
     if (seco) {
       const { data, error } = await sb.rpc("estoque_entrada_avisos_previa")
       if (error) return json({ ok: false, erro: error.message }, 500)
