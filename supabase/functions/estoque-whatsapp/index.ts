@@ -1358,6 +1358,19 @@ async function tratar(req: Request): Promise<Response> {
       return ok()
     }
 
+    // A palavra que destrava a nota repetida. Só serve pra isso: escrever
+    // REPETIR sem nada esperando não faz nada, e numa lista normal não aparece.
+    if (/^repetir\W*$/.test(t)) {
+      if (!pend) { await enviar(instance, jid, await nadaPraConfirmar(empresaId, jid)); return ok() }
+      if (!pend.nota?.repetida_de) {
+        await enviar(instance, jid, "Essa lista não é repetida — responda *SIM* pra lançar.")
+        return ok()
+      }
+      pend.nota = { ...pend.nota, repetida_de: null }
+      await sb.from("estoque_whatsapp").update({ nota: pend.nota }).eq("id", pend.id)
+      await confirmar(pend)
+      return ok()
+    }
     if (/^(sim|s|ok|pode|pode lancar|lanca|lancar|confirmo|confirmar|isso|isso mesmo|certo|pode fazer|faz|aplicar|aplica)\W*$/.test(t)) {
       if (acaoMaisNova) {
         try { await enviar(instance, jid, await executarAcao(empresaId, pendAcao)) }
@@ -1368,6 +1381,24 @@ async function tratar(req: Request): Promise<Response> {
         return ok()
       }
       if (!pend) { await enviar(instance, jid, await nadaPraConfirmar(empresaId, jid)); return ok() }
+
+      // NOTA REPETIDA: SIM NÃO BASTA (23/10/2026)
+      //
+      // O aviso de "essa nota parece repetida" já estava no ar quando a nota do
+      // Agv Grill entrou em dobro — estoque e despesa, R$ 245,60 duas vezes.
+      // Quem acha que a primeira não pegou responde SIM no automático, sem ler
+      // o aviso. Pedir OUTRA palavra obriga a parar e decidir.
+      if (pend.nota?.repetida_de) {
+        const hora = new Date(pend.nota.repetida_de).toLocaleTimeString("pt-BR", {
+          timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit",
+        })
+        await enviar(instance, jid,
+          `🚨 Não lancei: *essa nota já entrou hoje às ${hora}* (${pend.nota.fornecedor} — ${brl(pend.nota.valor_total)}).\n\n` +
+          `Confira no Portal: *Financeiro › Contas a pagar e receber*, filtro *Quitadas*.\n\n` +
+          `Se ela chegou DUAS vezes de verdade e você quer lançar em dobro, responda *REPETIR*. Senão, responda *NÃO*.`)
+        return ok()
+      }
+
       // COMPROVANTE DE PIX NÃO TEM ITEM — E ISSO É NORMAL (23/10/2026)
       //
       // A instrução que o robô recebe já diz: "Comprovante de pagamento SEM
@@ -1576,7 +1607,9 @@ Responda *SIM* para aplicar ou *NÃO* para cancelar.${aviso}`)
       itens: resultado.itens, nao_achados: resultado.naoAchados, substitui_id: substitui,
       // Correção de um lançamento anterior não repete a despesa: a nota é a
       // mesma, e lançar de novo dobraria a saída no financeiro.
-      nota: substitui ? null : resultado.nota,
+      // `repetida_de` viaja junto pra o SIM saber que esta aqui precisa de uma
+      // confirmação mais forte (não dá pra confiar só no aviso da mensagem).
+      nota: substitui ? null : (repetidaDe ? { ...resultado.nota, repetida_de: repetidaDe } : resultado.nota),
     })
     const aviso = resultado.aviso ? `\n\n⚠️ ${resultado.aviso}` : ""
     const nota = substitui ? null : resultado.nota
@@ -1593,6 +1626,7 @@ Responda *SIM* para aplicar ou *NÃO* para cancelar.${aviso}`)
     // sabe o que está fazendo responde SIM do mesmo jeito. Só não deixa passar
     // sem o lojista ver.
     let avisoRepetida = ""
+    let repetidaDe: string | null = null
     if (nota?.fornecedor && Number(nota?.valor_total) > 0) {
       const { data: iguais } = await sb.from("estoque_whatsapp")
         .select("lancado_em, nota")
@@ -1604,7 +1638,14 @@ Responda *SIM* para aplicar ou *NÃO* para cancelar.${aviso}`)
         Number(x.nota?.valor_total) === Number(nota.valor_total) &&
         String(x.nota?.data ?? "") === String(nota.data ?? ""))
       if (igual) {
-        avisoRepetida = `\n\n🚨 *Atenção: essa nota parece repetida.*\nJá lancei uma de *${nota.fornecedor}* no valor de ${brl(nota.valor_total)} em ${ddmmBR(String(igual.lancado_em).slice(0, 10))}.\nSe responder SIM, vai entrar *de novo* (estoque e despesa em dobro). Se foi engano, responda *NÃO*.`
+        repetidaDe = String(igual.lancado_em)
+        const hora = new Date(igual.lancado_em as string).toLocaleTimeString("pt-BR", {
+          timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit",
+        })
+        // SIM não serve aqui. Um aviso já esteve no ar e a nota do Agv Grill
+        // duplicou assim mesmo: quem acha que "não entrou" responde SIM no
+        // automático, sem ler. Exigir outra palavra obriga a parar e decidir.
+        avisoRepetida = `\n\n🚨 *ESSA NOTA JÁ ENTROU.*\n*${nota.fornecedor}* — ${brl(nota.valor_total)}, lançada hoje às ${hora}.\n\nSe você mandou de novo achando que não tinha entrado: *ela entrou*, pode conferir no Portal (Financeiro › Contas, filtro *Quitadas*).\nSIM aqui *não vai funcionar*. Só lanço em dobro se você responder *REPETIR*.`
       }
     }
 
