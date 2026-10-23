@@ -774,6 +774,11 @@ export default function DeliveryCheckout() {
   const [lojaEndereco, setLojaEndereco] = useState(null)
   const [errors, setErrors]     = useState({})
   const [enviando, setEnviando] = useState(false)
+  // Trava síncrona do envio. O `enviando` só liga depois de uma consulta
+  // (itensForaDoHorario), e o navegador do Instagram chegou a disparar o submit
+  // duas vezes no mesmo toque: os dois passavam e o pedido entrava em dobro
+  // (Zebu #14/#15, 23/10, 3 ms de diferença).
+  const enviandoRef = useRef(false)
   // Pagar com duas formas (mig 0274): a 1ª é form.pagamento, a 2ª fica com o resto.
   const [dividir, setDividir] = useState(false)
   const [forma2, setForma2]   = useState('')
@@ -1846,6 +1851,16 @@ export default function DeliveryCheckout() {
 
   async function handleSubmit(e) {
     e.preventDefault()
+    if (enviandoRef.current) return
+    enviandoRef.current = true
+    try {
+      await enviarPedido()
+    } finally {
+      enviandoRef.current = false
+    }
+  }
+
+  async function enviarPedido() {
     setErroGlobal(null)
 
     const errs = validate()
