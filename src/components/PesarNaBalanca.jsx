@@ -159,9 +159,14 @@ export default function PesarNaBalanca({
         setLancando(false); setErro('Não consegui abrir a mesa: ' + errAbrir.message); return
       }
       await supabase.from('mesas').update({ status: 'ocupada' }).eq('id', mesa.id)
-      const { data: nova } = await supabase.from('comandas')
-        .select('id').eq('empresa_id', empresaId).eq('mesa_id', mesa.id).is('fechada_em', null)
+      // 'aberta' e o vocabulario que o resto do sistema usa pra comanda viva
+      // (a coluna de fechamento chama fechada_at, nao fechada_em - escrevi o
+      // nome errado e a consulta voltava vazia, dando "nao achei a comanda
+      // dessa mesa" com a mesa aberta na frente, no teste do Agv 23/10/2026).
+      const { data: nova, error: errLer } = await supabase.from('comandas')
+        .select('id').eq('empresa_id', empresaId).eq('mesa_id', mesa.id).eq('status', 'aberta')
         .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      if (errLer) { setLancando(false); setErro('Nao consegui ler a comanda: ' + errLer.message); return }
       comandaId = nova?.id ?? null
     }
     if (!comandaId) { setLancando(false); setErro('Não achei a comanda dessa mesa.'); return }
