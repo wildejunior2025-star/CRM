@@ -220,7 +220,14 @@ export default function PresencialSalao() {
   // Categoria com horário (Happy Hour) some da tela do atendente quando a
   // janela fecha. Ele não fecha essa tela o turno inteiro: sem o relógio aqui,
   // às 21h ele ainda lançaria o item pelo preço da promoção.
-  const produtos = useProdutosNoHorario(produtosTodos, catInfo)
+  const noHorario = useProdutosNoHorario(produtosTodos, catInfo)
+  // PRODUTO DE QUILO NAO ENTRA NO CARDAPIO DA MESA.
+  //
+  // Ele e vendido pelo botao da balanca, onde a quantidade e o PESO. Deixado na
+  // lista normal, um toque lanca "1 x R$ 54,99" - o garcom nao erra por
+  // desatencao, erra porque o botao estava la e parecia certo. O lugar de nao
+  // deixar isso acontecer e aqui, e nao num aviso que ninguem le.
+  const produtos = useMemo(() => noHorario.filter(p => !p.vendido_por_peso), [noHorario])
   const [garcons, setGarcons] = useState({})   // { profile_id: nome }
   const [loading, setLoading] = useState(true)
 
@@ -469,7 +476,7 @@ export default function PresencialSalao() {
       // primeiros 500 nomes em ordem alfabetica e o resto sumia da tela.
       // `faixas_preco` e `preco_promocional` vem junto desde 15/10/2026: sem eles a
       // mesa cobrava o preco cheio mesmo com atacado ou promocao cadastrados (mig 0326).
-      fetchAll(() => supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria, codigo_barras, faixas_preco, preco_promocional, ordem').eq('empresa_id', empresaId).order('ordem', { ascending: true, nullsFirst: false }).order('nome').order('produto_id')),
+      fetchAll(() => supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria, codigo_barras, faixas_preco, preco_promocional, ordem, vendido_por_peso').eq('empresa_id', empresaId).order('ordem', { ascending: true, nullsFirst: false }).order('nome').order('produto_id')),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
       // `setor` vem junto: é ele que diz qual categoria NÃO sai no papel — e
       // essas o garçom pega ele mesmo, sem esperar cozinha nenhuma (mig 0185).
