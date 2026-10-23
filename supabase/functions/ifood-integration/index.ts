@@ -1768,27 +1768,48 @@ async function runVerifyDeliveryCode(sb: any, pedidoId: string, codigo: string) 
 // DETECTAR MERCHANT — descobre sozinho o ID da loja no iFood
 // ─────────────────────────────────────────────────────────────────────
 // O lojista autoriza o app CRM FWC no Portal do Parceiro dele e pronto: não
-// precisa caçar nem colar o "Merchant ID". O iFood devolve as lojas que
-// autorizaram o app dentro do próprio token (claim merchant_scope, no formato
-// "<merchant>:order" / "<merchant>:events"), então a gente lê de lá.
+// precisa caçar nem colar o "Merchant ID" — a gente pergunta ao iFood quais
+// lojas autorizaram o app e liga sozinho.
 //
-// Sobra o problema de saber QUAL das lojas autorizadas é esta empresa — o
-// módulo Merchant (que traria nome/CNPJ) ainda não está liberado pro nosso app.
-// Resolvemos por eliminação: tira as que já estão em outra empresa do CRM. Se
-// sobrar exatamente uma, liga sozinho. Se sobrar mais de uma (alguém autorizou
-// e nunca conectou), devolve a lista pro lojista escolher em vez de chutar.
-function merchantsDoToken(token: string): string[] {
-  const parte = token.split(".")[1]
-  if (!parte) return []
-  const b64 = parte.replace(/-/g, "+").replace(/_/g, "/")
-  const claims = JSON.parse(atob(b64 + "=".repeat((4 - b64.length % 4) % 4)))
-  const escopo = claims?.merchant_scope
-  const lista: string[] = Array.isArray(escopo)
-    ? escopo
-    : (escopo && typeof escopo === "object" ? Object.keys(escopo) : [])
-  const ids = lista.map((s) => String(s).split(":")[0]).filter(Boolean)
-  return [...new Set(ids)]
+// A 1ª versão tentava ler isso de dentro do token, numa claim "merchant_scope".
+// Essa claim NÃO EXISTE: o token traz "merchant_scoped: true", que é um
+// booleano dizendo que o token vale por loja, e não uma lista de lojas. Ou
+// seja, a detecção nunca funcionou de verdade — devolvia "nenhuma loja
+// autorizou" mesmo com loja autorizada, e as 5 que estão ligadas hoje foram
+// todas coladas na mão. Quem sabe a lista é o iFood, então é a ele que se
+// pergunta.
+//
+// Se o módulo Merchant estiver fechado pro nosso app (401/403), não dá pra
+// insistir: aí a função devolve manual=true e a tela pede o código na mão.
+type LojaIfood = { id: string; nome: string }
+
+async function listarMerchants(token: string): Promise<{ lojas?: LojaIfood[]; erro?: string }> {
+  const res = await fetch(`${IFOOD}/merchant/v1.0/merchants?page=1&size=100`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  // 403 = o módulo Merchant não está liberado pro nosso app no Portal do
+  // Desenvolvedor (aba Permissões). 401 = o token não serve pra esse módulo.
+  // Os dois dão no mesmo pro lojista: não dá pra listar, pede o código na mão.
+  if (res.status === 401 || res.status === 403) {
+    return { erro: `fechado:${res.status}` }
+  }
+  if (!res.ok) return { erro: `O iFood respondeu ${res.status}` }
+
+  const corpo = await res.json().catch(() => null)
+  const lista = Array.isArray(corpo) ? corpo : (corpo?.content ?? corpo?.merchants ?? [])
+  if (!Array.isArray(lista)) return { erro: "Resposta do iFood veio em formato inesperado" }
+
+  return {
+    lojas: lista
+      .map((m: any) => ({
+        id: String(m?.id ?? m?.merchantId ?? "").trim(),
+        nome: String(m?.name ?? m?.corporateName ?? "").trim(),
+      }))
+      .filter((m: LojaIfood) => m.id),
+  }
 }
+
+const EH_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 async function runDetectarMerchant(sb: any, empresaId: string, merchantEscolhido?: string, apelido?: string) {
   if (!empresaId) return { ok: false, error: "empresa_id obrigatório" }
@@ -1814,40 +1835,57 @@ async function runDetectarMerchant(sb: any, empresaId: string, merchantEscolhido
   }
   const token: string = (await res.json()).accessToken
 
-  const autorizados = merchantsDoToken(token)
-  if (!autorizados.length) {
-    return {
-      ok: false,
-      error: "Nenhuma loja autorizou o CRM FWC ainda. Autorize o app no Portal do Parceiro do iFood e tente de novo.",
-    }
-  }
-
-  // Merchants já vinculados no CRM. Agora tira também os desta empresa: como
-  // ela pode ter várias lojas, conectar a segunda não pode reoferecer a primeira.
+  // Quem já está ligado no CRM. Tira também as desta empresa: ela pode ter
+  // várias lojas, e conectar a segunda não pode reoferecer a primeira.
   const { data: usados } = await sb
     .from("ifood_config").select("empresa_id, merchant_id").not("merchant_id", "is", null)
-  const jaLigados = new Set((usados ?? []).map((u: any) => u.merchant_id))
+  const donoDe = new Map<string, string>((usados ?? []).map((u: any) => [u.merchant_id, u.empresa_id]))
   const jaMinhas = (usados ?? []).filter((u: any) => u.empresa_id === empresaId).length
-  const livres = autorizados.filter((m) => !jaLigados.has(m))
 
   let merchantId: string | null = null
+  let nomeNoIfood = ""
+
   if (merchantEscolhido) {
-    if (!livres.includes(merchantEscolhido)) {
-      return { ok: false, error: "Essa loja não está mais disponível. Atualize a página e tente de novo." }
+    // Veio escolhido na lista OU digitado na mão pelo lojista. Nos dois casos o
+    // que importa é: tem cara de código de loja e não é de outro cliente nosso.
+    merchantId = String(merchantEscolhido).trim().toLowerCase()
+    if (!EH_UUID.test(merchantId)) {
+      return { ok: false, error: "Esse código não parece o da loja. Ele tem 36 caracteres, no formato 1a2b3c4d-....", manual: true }
     }
-    merchantId = merchantEscolhido
-  } else if (livres.length === 1) {
-    merchantId = livres[0]
-  } else if (livres.length === 0) {
-    return {
-      ok: false,
-      error: jaMinhas > 0
-        ? "Todas as lojas que autorizaram o CRM FWC já estão conectadas aqui. Se falta alguma, autorize o app no iFood pela outra loja."
-        : "As lojas autorizadas já estão ligadas a outras contas do CRM. Autorize o app no iFood com a loja certa.",
+    const dono = donoDe.get(merchantId)
+    if (dono === empresaId) {
+      return { ok: false, error: "Essa loja já está conectada aqui." }
+    }
+    if (dono) {
+      return { ok: false, error: "Esse código já está em uso por outra conta do CRM. Confira se copiou o da loja certa." }
     }
   } else {
-    // Mais de uma candidata: quem escolhe é o lojista.
-    return { ok: false, escolher: true, opcoes: livres }
+    const { lojas, erro } = await listarMerchants(token)
+    if (erro || !lojas) {
+      return {
+        ok: false,
+        manual: true,
+        error: "O iFood não deixou eu listar suas lojas por aqui" +
+          (erro?.startsWith("fechado:") ? ` (${erro.split(":")[1]})` : erro ? ` — ${erro}` : "") +
+          ". Pegue o código da loja no Portal do Parceiro e cole abaixo.",
+      }
+    }
+    const livres = lojas.filter((l) => !donoDe.has(l.id))
+    if (livres.length === 1) {
+      merchantId = livres[0].id
+      nomeNoIfood = livres[0].nome
+    } else if (livres.length === 0) {
+      return {
+        ok: false,
+        manual: true,
+        error: jaMinhas > 0
+          ? "Todas as lojas que autorizaram o CRM FWC já estão conectadas aqui. Se falta alguma, autorize o app no iFood pela outra loja."
+          : "Nenhuma loja autorizou o CRM FWC ainda. Autorize o app no Portal do Parceiro do iFood e tente de novo.",
+      }
+    } else {
+      // Mais de uma candidata: quem escolhe é o lojista.
+      return { ok: false, escolher: true, opcoes: livres }
+    }
   }
 
   // Cada loja é uma LINHA. Se a empresa tem uma linha meia-boca (salva no
@@ -1865,7 +1903,10 @@ async function runDetectarMerchant(sb: any, empresaId: string, merchantEscolhido
     token_expira_em: null,
     ultimo_erro: null,
   }
-  if (apelido) patch.apelido = String(apelido).slice(0, 60)
+  // Com duas lojas na mesma empresa, a linha sem apelido vira um UUID solto na
+  // tela. O nome que o iFood já devolveu serve de apelido até alguém trocar.
+  const nome = String(apelido ?? "").trim() || nomeNoIfood
+  if (nome) patch.apelido = nome.slice(0, 60)
 
   const { error } = vazia
     ? await sb.from("ifood_config").update(patch).eq("id", vazia.id)

@@ -80,6 +80,10 @@ export default function MinhaLoja({ secao = 'loja' }) {
   const [ifoodTestando, setIfoodTestando] = useState(null) // id da loja testando
   const [ifoodDetectando, setIfoodDetectando] = useState(false)
   const [ifoodOpcoes, setIfoodOpcoes] = useState(null) // lojas autorizadas quando há mais de uma
+  // Quando o iFood não deixa listar as lojas, o jeito é o lojista colar o
+  // código. Não é bonito, mas é melhor do que depender da gente pra ligar.
+  const [ifoodManual, setIfoodManual] = useState(false)
+  const [ifoodCodigo, setIfoodCodigo] = useState('')
   const [ifoodMsg, setIfoodMsg] = useState(null) // { tipo: 'ok'|'erro', texto }
   const [ifoodAjuda, setIfoodAjuda] = useState(false) // popup "onde encontro o Merchant ID"
 
@@ -295,11 +299,14 @@ export default function MinhaLoja({ secao = 'loja' }) {
       const data = await res.json()
       if (data.ok) {
         await carregarIfood(empresa.id)
+        setIfoodCodigo('')
+        setIfoodManual(false)
         setIfoodMsg({ tipo: 'ok', texto: 'Loja conectada! Os pedidos dela já vão cair no painel junto com os das outras.' })
       } else if (data.escolher) {
         setIfoodOpcoes(data.opcoes ?? [])
         setIfoodMsg({ tipo: 'erro', texto: 'Achei mais de uma loja autorizada. Escolha qual é a sua abaixo.' })
       } else {
+        if (data.manual) setIfoodManual(true)
         setIfoodMsg({ tipo: 'erro', texto: data.error ?? 'Não consegui achar sua loja.' })
       }
     } catch (err) {
@@ -1572,23 +1579,65 @@ export default function MinhaLoja({ secao = 'loja' }) {
               <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 700 }}>
                 Qual dessas é a loja que você quer conectar?
               </p>
-              {ifoodOpcoes.map(id => (
+              {ifoodOpcoes.map(o => (
                 <button
-                  key={id}
+                  key={o.id ?? o}
                   type="button"
-                  onClick={() => handleDetectarLoja(id)}
+                  onClick={() => handleDetectarLoja(o.id ?? o)}
                   style={{
                     display: 'block', width: '100%', textAlign: 'left', marginBottom: 6,
                     padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
                     border: '1px solid var(--border)', background: 'var(--input-bg, transparent)',
-                    color: 'var(--text)', fontSize: 13, fontFamily: 'monospace',
+                    color: 'var(--text)', fontSize: 13,
                   }}
                 >
-                  {id}
+                  {o.nome
+                    ? <><strong>{o.nome}</strong><br /><span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)' }}>{o.id}</span></>
+                    : <span style={{ fontFamily: 'monospace' }}>{o.id ?? o}</span>}
                 </button>
               ))}
               <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
                 Na dúvida, chame a FWC que a gente identifica pra você.
+              </p>
+            </div>
+          )}
+
+          {/* Plano B: o iFood só libera a lista de lojas pra quem tem o módulo
+              Merchant liberado. Enquanto não libera, o lojista cola o código —
+              é um campo feio, mas é o que faz ele não depender da gente. */}
+          {ifoodManual && (
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+              <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 700 }}>
+                Cole aqui o código da loja no iFood
+              </p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <input
+                  value={ifoodCodigo}
+                  onChange={e => setIfoodCodigo(e.target.value)}
+                  placeholder="1a2b3c4d-5e6f-7890-abcd-ef1234567890"
+                  spellCheck={false}
+                  style={{
+                    flex: '1 1 320px', minWidth: 0, padding: '9px 12px', borderRadius: 8,
+                    border: '1px solid var(--border)', background: 'var(--input-bg, transparent)',
+                    color: 'var(--text)', fontSize: 13, fontFamily: 'monospace',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleDetectarLoja(ifoodCodigo.trim())}
+                  disabled={ifoodDetectando || ifoodCodigo.trim().length < 36}
+                  style={{
+                    padding: '9px 18px', borderRadius: 8, border: 'none',
+                    background: '#ea1d2c', color: '#fff', fontWeight: 700, fontSize: 13,
+                    cursor: 'pointer', opacity: (ifoodDetectando || ifoodCodigo.trim().length < 36) ? 0.5 : 1,
+                  }}
+                >
+                  Conectar
+                </button>
+              </div>
+              <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                No Portal do Parceiro do iFood, em <strong>Ajustes → Dados da loja</strong>. O código
+                tem 36 caracteres com tracinhos. Cada loja tem o seu.
               </p>
             </div>
           )}
