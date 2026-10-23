@@ -1554,7 +1554,7 @@ async function runConferirIfood(sb: any, empresaId?: string, horas = 3) {
   const limite = new Date(Date.now() - horas * 3600 * 1000).toISOString()
 
   let q = sb.from("pedidos_delivery")
-    .select("id, empresa_id, ifood_display_id, status, total, created_at")
+    .select("id, empresa_id, ifood_merchant_id, ifood_display_id, status, total, created_at")
     .eq("origem", "ifood")
     .not("status", "in", "(entregue,cancelado)")
     .lt("created_at", limite)
@@ -1565,11 +1565,19 @@ async function runConferirIfood(sb: any, empresaId?: string, horas = 3) {
 
   const corrigidos: unknown[] = []
   for (const p of abertos) {
-    const { data: v } = await sb.from("ifood_vendas")
+    // O número curto é da LOJA, não da empresa. Com duas lojas no mesmo gestor
+    // (Agv Grill, 23/10) elas numeram cada uma por si, e um #7216 de uma bate
+    // com o #7216 da outra: sem filtrar o merchant, a conferência podia marcar
+    // como cancelado um pedido que foi cancelado na loja vizinha. Pedido
+    // antigo, de antes da coluna, não tem merchant — esse segue como era.
+    let qv = sb.from("ifood_vendas")
       .select("status")
       .eq("empresa_id", p.empresa_id)
       .eq("numero_curto", p.ifood_display_id)
-      .maybeSingle()
+    if (p.ifood_merchant_id) qv = qv.eq("merchant_id", p.ifood_merchant_id)
+    const { data: vendas } = await qv.limit(2)
+    // Dois casamentos = ambíguo. Melhor não mexer do que mexer no errado.
+    const v = (vendas ?? []).length === 1 ? vendas[0] : null
     const real = String(v?.status ?? "").toUpperCase()
     if (!real) continue
 
