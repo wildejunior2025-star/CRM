@@ -13,7 +13,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { verCarteira, cobrar } from "../_shared/carteiraIa.ts"
 import { AsyncLocalStorage } from "node:async_hooks"
-import { lerComandoConta } from "../_shared/contasParse.ts"
+import { lerComandoConta, extrairData, somaDiasYmd } from "../_shared/contasParse.ts"
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? ""
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
@@ -697,14 +697,19 @@ async function executarAcao(empresaId: string, a: any): Promise<string> {
     if (error) throw error
     antes = { conta_id: c.id }
     if (p.quitada) {
+      // A baixa é do dia em que o dinheiro SAIU, não de hoje. Estava fixo em
+      // hoje: quem lançava o gasto de ontem via a conta certa, mas o dia errado
+      // — e o total de "pago hoje" ficava inflado com a despesa da véspera.
+      const diaPago = /^\d{4}-\d{2}-\d{2}$/.test(String(p.vencimento)) ? String(p.vencimento) : hojeBRT()
       const { error: eb } = await sb.from("contas_baixas").insert({
-        empresa_id: empresaId, conta_id: c.id, valor: p.valor, data: hojeBRT(), forma: p.forma ?? null, origem: "whatsapp",
+        empresa_id: empresaId, conta_id: c.id, valor: p.valor, data: diaPago, forma: p.forma ?? null, origem: "whatsapp",
       })
       if (eb) { await sb.from("contas_financeiras").delete().eq("id", c.id); throw eb }
     }
     const aPagar = p.tipo === "pagar"
+    const quando = String(p.vencimento) === hojeBRT() ? "hoje" : `em ${ddmmBR(String(p.vencimento))}`
     ok_ = p.quitada
-      ? `✅ Registrado: *${p.descricao}* ${brl(Number(p.valor))} — ${aPagar ? "paga" : "recebida"} hoje.`
+      ? `✅ Registrado: *${p.descricao}* ${brl(Number(p.valor))} — ${aPagar ? "paga" : "recebida"} ${quando}.`
       : `✅ Conta ${aPagar ? "a pagar" : "a receber"} criada: *${p.descricao}* ${brl(Number(p.valor))}, vence ${ddmmBR(p.vencimento)}${p.recorrencia ? ` (repete ${p.recorrencia === "mensal" ? "todo mês" : p.recorrencia})` : ""}.`
   } else if (a.tipo === "conta_baixar") {
     const { data: conta } = await sb.from("contas_financeiras").select("*").eq("id", p.conta_id).eq("empresa_id", empresaId).maybeSingle()
@@ -1093,6 +1098,75 @@ async function contasAbertas(empresaId: string, tipo?: "pagar" | "receber") {
   return data ?? []
 }
 
+// Palavras que dizem "isso é estoque, não é dinheiro". Com o estoque em pausa
+// elas não viram lançamento nenhum, mas também não podem virar despesa: "pão
+// mínimo 50" não é uma compra de R$ 50.
+const FALA_DE_ESTOQUE = /\b(minimo|minima|contei|contagem|perda|perdi|venceu|vencido|vencida|estragou|estragado|consumo|brinde|bonificacao|devolucao|cadastra|cadastrar|estoque|sobrou|sobra)\b/
+
+// Um gasto escrito do jeito que a pessoa fala: "Compra de verduras 20,00".
+// Exige UM valor só na frase: com dois números ("50 pães a 2,00") não dá pra
+// saber qual é o total, e chutar aqui vira despesa errada no financeiro.
+function lerGastoSolto(textoNorm: string, original: string): { descricao: string; valor: number } | null {
+  if (!textoNorm || FALA_DE_ESTOQUE.test(textoNorm)) return null
+  // Frase que COMEÇA com verbo de conta é assunto do `lerComandoConta`. Se ele
+  // devolveu null, é porque faltou alguma coisa nela — e aí o certo é ele
+  // explicar o que falta, não eu inventar uma despesa. Sem esta linha,
+  // "a pagar dia 30" virava uma despesa chamada "A pagar dia" de R$ 30,00.
+  if (/^(a\s+pagar|a\s+receber|paguei|pagamos|pago|recebi|recebemos|pagar|receber|vou\s+pagar|vou\s+receber)\b/.test(textoNorm)) return null
+  const achados = [...textoNorm.matchAll(/(?:r\$\s*)?(\d{1,3}(?:\.\d{3})+,\d{2}|\d+,\d{1,2}|\d+\.\d{2}|\d+)/g)]
+  if (achados.length !== 1) return null
+  const cru = achados[0][1]
+  const valor = Number(cru.includes(",") ? cru.replace(/\./g, "").replace(",", ".") : cru)
+  if (!Number.isFinite(valor) || valor <= 0 || valor > 1_000_000) return null
+
+  // A descrição sai do texto ORIGINAL (com acento e maiúscula), sem o valor.
+  const semValor = (original || textoNorm)
+    .replace(/r\$\s*/gi, " ")
+    .replace(new RegExp(cru.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), " ")
+    .replace(/\b(reais|real|conto|pila)\b/gi, " ")
+    .replace(/\s+/g, " ").trim().replace(/^[-–—:,.]+|[-–—:,.]+$/g, "").trim()
+  const letras = semValor.replace(/[^a-zA-ZÀ-ÿ]/g, "")
+  if (letras.length < 3) return null      // só número não diz o que foi
+  return { descricao: semValor.charAt(0).toUpperCase() + semValor.slice(1), valor }
+}
+
+// A resposta curta que fecha o rascunho: diz SE já pagou e QUANDO.
+// Devolve os params prontos, ou null quando não deu pra entender (aí o robô
+// pergunta de novo em vez de registrar com data chutada).
+function completarRascunho(t: string, params: any, hoje: string): { params?: any; cancelar?: boolean } {
+  if (/^(nao|n|cancela|cancelar|deixa|esquece)\W*$/.test(t)) return { cancelar: true }
+
+  // "ontem" e "anteontem" não existem no `extrairData`: ele nasceu pra
+  // VENCIMENTO, que é sempre pra frente. Despesa paga é o contrário — o mais
+  // comum é a pessoa lançar o gasto de ontem.
+  const diasAtras = /\banteontem\b/.test(t) ? 2 : /\bontem\b/.test(t) ? 1 : 0
+  const { data: dataLida, resto } = extrairData(t, hoje)
+  const data = diasAtras ? somaDiasYmd(hoje, -diasAtras) : dataLida
+  const aPagar = /\b(a pagar|vou pagar|ainda nao paguei|nao paguei|pagar depois|vence|vencimento|prazo|boleto)\b/.test(t)
+  const jaPagou = /\b(paguei|pago|pagamos|quitei|ja foi|foi pago)\b/.test(t)
+
+  // "a pagar" sem data não dá: conta a pagar sem vencimento nasce invisível.
+  if (aPagar && !data) return {}
+  if (aPagar) {
+    return { params: { ...params, rascunho: false, quitada: false, vencimento: data, forma: null, recorrencia: null } }
+  }
+  // Já pagou: a data é a do pagamento. "paguei" sozinho = hoje.
+  if (jaPagou || data) {
+    return { params: { ...params, rascunho: false, quitada: true, vencimento: data ?? hoje, forma: formaDoTexto(resto || t), recorrencia: null } }
+  }
+  return {}
+}
+
+const formaDoTexto = (t: string): string | null => {
+  if (/\bpix\b/.test(t)) return "pix"
+  if (/\b(dinheiro|especie)\b/.test(t)) return "dinheiro"
+  if (/\b(credito|cartao de credito)\b/.test(t)) return "credito"
+  if (/\b(debito|cartao de debito)\b/.test(t)) return "debito"
+  if (/\bboleto\b/.test(t)) return "boleto"
+  if (/\b(transferencia|ted|doc)\b/.test(t)) return "transferencia"
+  return null
+}
+
 async function comandoContas(t: string, empresaId: string, jid: string, modo: "assistente" | "analista", original = ""): Promise<{ texto: string; cobrar: boolean } | null> {
   const hoje = hojeBRT()
   const limpo = t.replace(/[?!.]+$/g, "").trim()
@@ -1128,6 +1202,36 @@ async function comandoContas(t: string, empresaId: string, jid: string, modo: "a
       return lista("📅 *Vencem hoje*", (await contasAbertas(empresaId)).filter((c) => c.vencimento === hoje), "Nada vence hoje.")
     if (/^(contas? (da )?semana|vence (essa|esta) semana|o que vence (essa|esta) semana|proximos 7 dias)$/.test(limpo))
       return lista("📅 *Próximos 7 dias*", (await contasAbertas(empresaId)).filter((c) => c.vencimento >= hoje && c.vencimento <= somaDiasBR(hoje, 7)), "Nada vence nos próximos 7 dias.")
+  }
+
+  // ── Gasto escrito solto: "Compra de verduras 20,00", "gás 80" ───────────
+  //
+  // Sem verbo na frente, `lerComandoConta` devolve null e a frase caía no
+  // caminho do estoque — o dono do Agv Grill escreveu "Compra de verduras
+  // 20,00" e levou "lançar estoque está pausado". É despesa, não estoque.
+  //
+  // Aqui NÃO registra: monta o rascunho e PERGUNTA o que falta. Despesa sem
+  // data e sem saber se já foi paga entra torta no financeiro, e conta torta é
+  // pior que conta faltando — ninguém confere o que parece certo.
+  const solto = lerGastoSolto(limpo, original)
+  if (solto) {
+    await sb.from("assistente_acoes").update({ status: "cancelada" })
+      .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+    const { error } = await sb.from("assistente_acoes").insert({
+      empresa_id: empresaId, grupo_jid: jid, tipo: "conta_criar",
+      params: { rascunho: true, tipo: "pagar", descricao: solto.descricao, valor: solto.valor },
+      resumo: `Rascunho: ${solto.descricao} — ${brl(solto.valor)}`,
+    })
+    if (error) { console.error("[estoque-wpp] rascunho:", error.message); return null }
+    return {
+      cobrar: true,
+      texto: `📝 *${solto.descricao}* — *${brl(solto.valor)}*\n\n` +
+        `Falta saber *quando*. Me responde uma dessas:\n` +
+        `• *paguei hoje*\n` +
+        `• *paguei dia 20* (ou "ontem", "20/10")\n` +
+        `• *a pagar dia 30* — se ainda não pagou\n\n` +
+        `Ou *NÃO* pra cancelar.`,
+    }
   }
 
   // ── Registrar: "paguei 80 de gás", "a pagar luz 350 dia 28", "recebi 200 do João", "a receber João 200 dia 30" ──
@@ -1284,6 +1388,48 @@ async function tratar(req: Request): Promise<Response> {
       await enviar(instance, jid, modo === "analista" ? AJUDA_ANALISTA : AJUDA_ASSISTENTE)
       return ok()
     }
+    // ── Pendente / último lançamento ────────────────────────────────────────
+    const desde =new Date(Date.now() - VALIDADE_PENDENTE_MIN * 60000).toISOString()
+    const { data: pend } = await sb.from("estoque_whatsapp").select("*")
+      .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente").gte("created_at", desde)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle()
+
+    const { data: pendAcao } = await sb.from("assistente_acoes").select("*")
+      .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente").gte("created_at", desde)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle()
+    // O que o dono confirma é sempre a coisa mais RECENTE que o robô mostrou.
+    const acaoMaisNova = !!pendAcao && (!pend || pendAcao.created_at > pend.created_at)
+
+    // ── Resposta ao rascunho de despesa ("paguei hoje", "a pagar dia 30") ──
+    // O rascunho guarda o que a frase já tinha (descrição e valor) e espera só
+    // o que faltava. Completar aqui evita obrigar a pessoa a escrever a frase
+    // inteira de novo, que é o que faz ela desistir e deixar de lançar.
+    if (pendAcao?.tipo === "conta_criar" && pendAcao?.params?.rascunho) {
+      const r = completarRascunho(t, pendAcao.params, hojeBRT())
+      if (r.cancelar) {
+        await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("id", pendAcao.id)
+        await enviar(instance, jid, "Cancelado. Não registrei nada.")
+        return ok()
+      }
+      if (r.params) {
+        await sb.from("assistente_acoes").update({ params: r.params }).eq("id", pendAcao.id)
+        try {
+          await enviar(instance, jid, await executarAcao(empresaId, { ...pendAcao, params: r.params }))
+        } catch (e: any) {
+          console.error("[estoque-wpp] rascunho:", e)
+          await enviar(instance, jid, "❌ Não consegui registrar agora. Nada foi alterado — tente de novo.")
+        }
+        return ok()
+      }
+      // Não entendi a resposta: repete a pergunta em vez de registrar torto.
+      await enviar(instance, jid,
+        `Ainda falta a data de *${pendAcao.params.descricao}* (${brl(Number(pendAcao.params.valor))}).\n\n` +
+        `• *paguei hoje*\n• *paguei dia 20*\n• *a pagar dia 30*\n• ou *NÃO* pra cancelar`)
+      return ok()
+    }
+
+
+
     // Consultas de estoque ("o que está acabando?", "lista o estoque", "tem pão?"): direto do banco, sem IA e sem cobrar.
     const respEstoque = await comandoEstoque(t, empresaId)
     if (respEstoque) {
@@ -1305,18 +1451,6 @@ async function tratar(req: Request): Promise<Response> {
         return ok()
       }
     }
-
-    // ── Pendente / último lançamento ────────────────────────────────────────
-    const desde =new Date(Date.now() - VALIDADE_PENDENTE_MIN * 60000).toISOString()
-    const { data: pend } = await sb.from("estoque_whatsapp").select("*")
-      .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente").gte("created_at", desde)
-      .order("created_at", { ascending: false }).limit(1).maybeSingle()
-
-    const { data: pendAcao } = await sb.from("assistente_acoes").select("*")
-      .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente").gte("created_at", desde)
-      .order("created_at", { ascending: false }).limit(1).maybeSingle()
-    // O que o dono confirma é sempre a coisa mais RECENTE que o robô mostrou.
-    const acaoMaisNova = !!pendAcao && (!pend || pendAcao.created_at > pend.created_at)
 
     // ═══ ROBÔ ANALISTA ═══ perguntas, diagnóstico e decisões do dono. Gasta o SALDO DA IA (em reais).
     if (modo === "analista") {

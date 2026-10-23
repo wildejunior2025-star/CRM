@@ -200,6 +200,27 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
       receber7: soma(ate(receber, 7)), receber7N: ate(receber, 7).length,
       entra30, sai30, saldo30: entra30 - sai30,
       totalPagar: soma(pagar), totalReceber: soma(receber),
+      // O QUE JÁ SAIU E JÁ ENTROU (23/10/2026)
+      //
+      // Os cartões só falavam do futuro — vencidas, a pagar, a receber,
+      // previsto. Quem acabou de registrar três despesas pagas não via nada
+      // mudar no topo e concluía que não tinha entrado. A tela promete "o que
+      // JÁ FOI PAGO" no subtítulo; faltava justamente esse número.
+      //
+      // Soma pela data da BAIXA (pago_em), não pelo vencimento: o que importa
+      // aqui é o dia em que o dinheiro se mexeu.
+      ...(() => {
+        const baixado = (c) => Number(c.valor_pago || 0)
+        const noMes = (c) => String(c.pago_em || c.vencimento || '').slice(0, 7) === hoje.slice(0, 7)
+        const pagasMes = contas.filter((c) => c.tipo === 'pagar' && baixado(c) > 0 && noMes(c))
+        const recebidasMes = contas.filter((c) => c.tipo === 'receber' && baixado(c) > 0 && noMes(c))
+        const hojeP = contas.filter((c) => c.tipo === 'pagar' && baixado(c) > 0 && c.pago_em === hoje)
+        return {
+          pagoMes: pagasMes.reduce((s, c) => s + baixado(c), 0), pagoMesN: pagasMes.length,
+          pagoHoje: hojeP.reduce((s, c) => s + baixado(c), 0), pagoHojeN: hojeP.length,
+          recebidoMes: recebidasMes.reduce((s, c) => s + baixado(c), 0), recebidoMesN: recebidasMes.length,
+        }
+      })(),
     }
   }, [contas, hoje])
 
@@ -375,6 +396,18 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
               <span className="cpr-card-rotulo">A receber em 7 dias</span>
               <span className="cpr-card-valor cpr-pos">{brl(resumo.receber7)}</span>
               <span className="cpr-card-nota">{resumo.receber7N} {resumo.receber7N === 1 ? 'conta' : 'contas'}{resumo.vencReceberN ? ` · ${brl(resumo.vencReceber)} atrasado` : ''}</span>
+            </button>
+            {/* O que JÁ saiu. Os outros cartões falam só do futuro, e quem
+                acabou de registrar uma despesa paga não via nada mudar aqui —
+                parecia que não tinha entrado. Clicar abre as quitadas. */}
+            <button type="button" className="cpr-card" onClick={() => { mudarTipo('pagar'); mudarSituacao('pagas'); mudarPeriodo('mes') }}>
+              <span className="cpr-card-rotulo">Pago neste mês</span>
+              <span className="cpr-card-valor cpr-neg">{brl(resumo.pagoMes)}</span>
+              <span className="cpr-card-nota">
+                {resumo.pagoMesN} {resumo.pagoMesN === 1 ? 'conta quitada' : 'contas quitadas'}
+                {resumo.pagoHojeN ? ` · ${brl(resumo.pagoHoje)} hoje` : ''}
+                {resumo.recebidoMes > 0 ? ` · recebido ${brl(resumo.recebidoMes)}` : ''}
+              </span>
             </button>
             <div className="cpr-card cpr-card-estatico">
               <span className="cpr-card-rotulo">Previsto em 30 dias</span>
