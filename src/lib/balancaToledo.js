@@ -35,6 +35,7 @@ const STX = 0x02
 const ETX = 0x03
 const SOH = 0x01
 const ACK = 0x06
+const CR = 0x0d
 const NACK = 0x21
 
 export const serialSuportado = () => typeof navigator !== 'undefined' && 'serial' in navigator
@@ -43,6 +44,9 @@ let porta = null
 let leitor = null
 let buffer = []            // bytes recebidos que ainda não viraram resposta
 let esperando = null       // { resolve, reject, timer, querACK }
+// Cada abertura de porta ganha um número. O laço de leitura carrega o número
+// com que nasceu e morre assim que ele fica velho — ver lerSempre().
+let geracao = 0
 
 // A velocidade vem do parâmetro C15 da balança: 2400, 4800 ou 9600. Não dá
 // pra adivinhar — quem configurou a balança sabe, e a tela guarda a escolha.
@@ -60,16 +64,17 @@ export async function escolherPorta() {
 
 export async function abrir(p, baudRate = 9600) {
   if (porta === p && p.readable) return p
-  if (porta && porta !== p) await fechar()
+  if (porta) await fechar()
   // 8 bits, sem paridade, 1 stop bit: é o que o manual define pros protocolos
   // de peso (e o padrão de fábrica da balança).
   await p.open({ baudRate, dataBits: 8, stopBits: 1, parity: 'none' })
   porta = p
-  lerSempre()
+  lerSempre(++geracao)
   return p
 }
 
 export async function fechar() {
+  geracao++                                   // aposenta o laço que está lendo
   try { await leitor?.cancel() } catch { /* já cancelado */ }
   leitor = null
   try { await porta?.close() } catch { /* já fechada */ }
@@ -100,23 +105,30 @@ export async function trocarVelocidade(baudRate) {
   return p
 }
 
-// Lê a porta pra sempre, num laço só. Não dá pra abrir um leitor por pergunta:
-// a Web Serial trava o `readable` enquanto um leitor existe, e o segundo
-// `getReader()` estouraria. Então o laço acumula bytes e quem perguntou é
-// avisado quando o quadro fecha.
-async function lerSempre() {
-  while (porta?.readable) {
-    leitor = porta.readable.getReader()
-    try {
-      for (;;) {
-        const { value, done } = await leitor.read()
-        if (done) break
-        if (value) { for (const b of value) buffer.push(b); tentarResponder() }
-      }
-    } catch { /* porta caiu: sai e deixa o laço de fora decidir */ }
-    finally { try { leitor.releaseLock() } catch { /* ok */ } }
-    if (!porta) break
-  }
+// Lê a porta até ela fechar. UM leitor por abertura, e só um.
+//
+// A primeira versão tinha um `while` por fora que pegava o leitor de novo a
+// cada volta. Parecia robusto e era uma armadilha: ao varrer as velocidades a
+// porta é fechada e reaberta três vezes, os laços velhos não morriam, e dois
+// laços na mesma porta fazem o segundo getReader() estourar — caía no catch,
+// voltava pro while e tentava outra vez, num giro sem pausa que comeu a aba
+// inteira ("Página sem resposta", Agv 23/10/2026).
+//
+// Sem while não há giro: se a porta fechar, quem reabre é `abrir()`, e cada
+// laço morre quando a geração dele envelhece.
+async function lerSempre(minhaGeracao) {
+  let r
+  try { r = porta?.readable?.getReader() } catch { return }
+  if (!r) return
+  leitor = r
+  try {
+    for (;;) {
+      const { value, done } = await r.read()
+      if (done || minhaGeracao !== geracao) break
+      if (value) { for (const b of value) buffer.push(b); tentarResponder() }
+    }
+  } catch { /* porta caiu no meio da leitura */ }
+  finally { try { r.releaseLock() } catch { /* ok */ } }
 }
 
 // Vê se o que chegou já é uma resposta inteira.
@@ -134,7 +146,13 @@ function tentarResponder() {
 
   const ini = buffer.indexOf(STX)
   if (ini < 0) { if (buffer.length > 64) buffer = []; return }
-  const fim = buffer.indexOf(ETX, ini + 1)
+  // ETX fecha o quadro no Prt1/Prt3/Prt5. O Prt2 fecha com CR e manda o peso
+  // com o ponto decimal dentro — e só fala quando apertam "Imprimir" ou com a
+  // transmissão contínua ligada (C16). Aceitar os dois terminadores é o que
+  // faz o mesmo código servir em qualquer C14 que a loja tenha deixado lá.
+  const fETX = buffer.indexOf(ETX, ini + 1)
+  const fCR = buffer.indexOf(CR, ini + 1)
+  const fim = fETX < 0 ? fCR : fCR < 0 ? fETX : Math.min(fETX, fCR)
   if (fim < 0) return
 
   const corpo = buffer.slice(ini + 1, fim).map((b) => String.fromCharCode(b)).join('')
@@ -156,6 +174,13 @@ export function interpretarPeso(corpo) {
   if (/^I+$/.test(s)) return { ok: false, estado: 'instavel', erro: 'Peso ainda balançando.' }
   if (/^N+$/.test(s)) return { ok: false, estado: 'negativo', erro: 'Peso negativo — zere a balança.' }
   if (/^S+$/.test(s)) return { ok: false, estado: 'sobrecarga', erro: 'Peso acima do limite da balança.' }
+  // Prt2 manda o peso JÁ com o ponto decimal (e o sinal): "14.385", "-1.200".
+  if (/^-?\d{1,3}[.,]\d{1,3}$/.test(s)) {
+    const v = Number(s.replace(',', '.'))
+    return v < 0
+      ? { ok: false, estado: 'negativo', erro: 'Peso negativo — zere a balança.' }
+      : { ok: true, estado: 'estavel', kg: v }
+  }
   if (!/^\d{5,6}$/.test(s)) return { ok: false, estado: 'ruido', erro: `Resposta que não entendi: "${s}".` }
   // 5 dígitos = 2 inteiros + 3 decimais. Algumas versões mandam 6; o peso
   // continua com 3 casas no fim, então dividir por mil vale nos dois casos.
@@ -205,6 +230,16 @@ export async function pesarEstavel({ tentativas = 12, intervalo = 300 } = {}) {
   }
   if (ultimo?.ok && ultimo.kg === 0) return { ok: false, estado: 'zero', erro: 'A balança está zerada — coloque o prato.' }
   return ultimo ?? { ok: false, erro: 'Não consegui ler a balança.' }
+}
+
+// ESCUTAR em vez de perguntar.
+//
+// No Prt2 a balança não responde a ENQ nenhum: ela fala sozinha quando alguém
+// aperta "Imprimir" (ou o tempo todo, se a transmissão contínua estiver
+// ligada no C16). Então, quando perguntar não dá em nada, resta ouvir.
+export function escutarPeso(ms = 20000) {
+  buffer = []
+  return aguardar({ ms })
 }
 
 // Manda o preço do quilo pro visor da balança (só Prt5). 6 caracteres: 4 da

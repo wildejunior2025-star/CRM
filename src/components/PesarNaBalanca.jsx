@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import {
   serialSuportado, portaLembrada, escolherPorta, abrir, portaAberta, fechar,
-  pesarEstavel, pedirPeso, enviarPrecoKg, trocarVelocidade, infoPorta, VELOCIDADES,
+  pesarEstavel, pedirPeso, escutarPeso, enviarPrecoKg, trocarVelocidade, infoPorta, VELOCIDADES,
 } from '../lib/balancaToledo'
 
 // ============================================================================
@@ -107,10 +107,17 @@ export default function PesarNaBalanca({
       const achou = await descobrirVelocidade()
       r = achou ? await pesarEstavel() : r
     }
+    // Ainda mudo depois de varrer tudo? Pode ser uma balança no Prt2, que não
+    // responde a pergunta nenhuma — ela só fala quando apertam "Imprimir".
+    // Então para de perguntar e passa a ouvir.
+    if (r.estado === 'sem_resposta') {
+      setErro('Ela não responde a comando. Aperte “Imprimir” no teclado da balança — estou ouvindo.')
+      r = await escutarPeso(25000)
+    }
     setPesando(false)
     if (!r.ok) {
       setErro(r.estado === 'sem_resposta'
-        ? 'A balança não respondeu em nenhuma velocidade. Confira se o cabo está neste computador e se a porta escolhida é a dela (botão “Trocar balança”).'
+        ? 'A balança não falou de jeito nenhum. Confira se o cabo está neste computador e se a porta escolhida é a dela (botão “Trocar balança”).'
         : r.erro)
       return
     }
