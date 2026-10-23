@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 39
+const APP_VERSION = 40
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -550,11 +550,34 @@ function marcarImpresso(id) {
   }
   try { fs.writeFileSync(IMPRESSOS_FILE, JSON.stringify([...pedidosImpressos])) } catch (e) {}
 }
-function imprimirPedido(p) {
+async function imprimirPedido(p, jaReservado) {
   if (!p || pedidosImpressos.has(p.id)) return
   if (!origemLigada(p.origem)) { log('  (' + (p.origem || '?') + ' DESLIGADO nesta impressora — nao imprimiu #' + (p.numero_pedido ?? p.id) + ')'); return }
   log('NOVO PEDIDO #' + (p.numero_pedido ?? p.id) + ' - ' + (p.cliente_nome || '') + ' (' + (p.origem || '') + ')')
   if (config().pausado) { log('  (impressao automatica PAUSADA — nao imprimiu)'); return }
+
+  // A VEZ E DO PEDIDO, NAO DO APARELHO (23/10/2026)
+  // O dedupe daqui e um arquivo DESTA maquina, e o gestor no navegador so se
+  // cala quando acha o app NESTE PC. Loja com dois aparelhos tirava dois cupons
+  // do mesmo pedido (Agv Grill). Quem desempata agora e o banco: o primeiro que
+  // reserva imprime, o resto se cala. Sem resposta (internet oscilando), imprime
+  // assim mesmo — cupom repetido incomoda, cupom que nao sai perde pedido.
+  //
+  // `jaReservado` = o pedido chegou pelo /api/imprimir do gestor deste PC, que
+  // JA pegou a vez antes de mandar pra ca. Pedir de novo levaria "nao" e o
+  // cupom nao sairia em lugar nenhum.
+  try {
+    const { data: minhaVez, error } = jaReservado
+      ? { data: true, error: null }
+      : await supabase
+        .rpc('reservar_impressao', { p_pedido: p.id, p_quem: (os.hostname() || 'app').slice(0, 60) })
+    if (!error && minhaVez === false) {
+      log('  (outro aparelho ja imprimiu #' + (p.numero_pedido ?? p.id) + ')')
+      marcarImpresso(p.id)   // nao tentar de novo a cada update
+      return
+    }
+  } catch (e) { /* sem resposta — segue e imprime */ }
+
   marcarImpresso(p.id)
   imprimir(p)
 }
@@ -907,7 +930,7 @@ const server = http.createServer(async (req, res) => {
         // forca a impressao como sempre.
         if (f.auto) {
           if (pedidosImpressos.has(f.pedido.id)) return sendJson(res, { ok: true, jaImpresso: true })
-          imprimirPedido(f.pedido)
+          imprimirPedido(f.pedido, true)   // o gestor deste PC ja pegou a vez
           return sendJson(res, { ok: true })
         }
         jaImpressos.delete(f.pedido.id) // permite reimprimir

@@ -7139,6 +7139,28 @@ export default function PainelPedidos() {
   // sem precisar do botão 📱🖨️, e sem abrir o diálogo do navegador. Se não houver
   // Bluetooth (ex.: no PC), cai no caminho normal (app FWC → navegador).
   // Silencioso: no automático não mostra alerta se falhar (não atrapalha o painel).
+  // A VEZ DE IMPRIMIR É DO PEDIDO, NÃO DO APARELHO (23/10/2026)
+  //
+  // A trava de "já imprimi" sempre foi local: o app Impressora FWC guarda num
+  // arquivo da máquina dele, e aqui o navegador só se cala quando acha o app
+  // NESTE computador. Loja com dois aparelhos (Agv Grill) tirava dois cupons do
+  // mesmo pedido — cada um achava que era o único. Quem desempata agora é o
+  // banco: o primeiro que reserva imprime.
+  //
+  // Pedir a vez SÓ na hora de imprimir de verdade. Se eu pedisse no começo da
+  // função, o celular sem térmica (que desiste logo abaixo) levaria a vez embora
+  // e o PC da loja não imprimiria nada.
+  //
+  // Falhou a chamada (internet oscilando)? Imprime assim mesmo: cupom repetido
+  // incomoda, cupom que não sai perde pedido.
+  async function minhaVezDeImprimir(pedido) {
+    try {
+      const { data, error } = await supabase
+        .rpc('reservar_impressao', { p_pedido: pedido.id, p_quem: 'navegador' })
+      return error ? true : data !== false
+    } catch { return true }
+  }
+
   async function autoImprimirPedido(pedido) {
     try {
       const mod = await import('../utils/imprimirBluetooth')
@@ -7146,6 +7168,7 @@ export default function PainelPedidos() {
         // Origem desligada NESTA impressora: não imprime aqui — e também não
         // cai no caminho de baixo, senão o "desligado" não desligaria nada.
         if (!mod.imprimeOrigem(pedido.origem)) return
+        if (!await minhaVezDeImprimir(pedido)) return
         await mod.imprimirPedidoCelular(pedido, empresa)
         return
       }
@@ -7153,6 +7176,7 @@ export default function PainelPedidos() {
     // Celular sem a térmica: a janela do Android por cima do Painel a cada
     // pedido novo atrapalha mais do que ajuda (ver semJanelaDoNavegador).
     if (semJanelaDoNavegador()) return
+    if (!await minhaVezDeImprimir(pedido)) return
     imprimirCupom(pedido, empresa, { auto: true })
   }
 
