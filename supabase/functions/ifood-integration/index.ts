@@ -97,6 +97,7 @@ Deno.serve(async (req) => {
     if (acao === "catalogo_itens") return json(await runCatalogoItensCompletos(sb, body?.empresa_id))
     if (acao === "catalogo_pausar_complemento") return json(await runPausarComplemento(sb, body?.empresa_id, body?.option_id, body?.pausar))
     if (acao === "detectar_merchant") return json(await runDetectarMerchant(sb, body?.empresa_id, body?.merchant_id, body?.apelido))
+    if (acao === "cardapio_sync") return json(await runCardapioSync(sb, body?.empresa_id))
     // Conciliação iFood — módulo Financial (migs 0260/0261). Sem empresa_id = todas as lojas (cron).
     if (acao === "financeiro_sync") return json(await runFinanceiroSync(req, sb, getTokenFinanceiro, { empresaId: body?.empresa_id, dias: body?.dias }))
     if (acao === "conciliacao_mensal") return json(await runConciliacaoMensal(req, sb, getTokenFinanceiro, body?.empresa_id, body?.competencia))
@@ -404,7 +405,8 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
   // Itens -> formato usado pelo painel/cupom. Os complementos/adicionais ficam
   // numa lista separada (não mais colados no nome) pra exibir cada um em sua
   // linha, igual o iFood mostra.
-  const itens = (o.items ?? []).map((it: any) => {
+  const brutos = (o.items ?? []) as any[]
+  const itens = brutos.map((it: any) => {
     const complementos = (it.options ?? [])
       .map((op: any) => ({ nome: op.name, qtd: Number(op.quantity ?? 1) }))
       .filter((c: any) => c.nome)
@@ -418,6 +420,41 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
       complementos,
     }
   })
+
+  // DE QUE SETOR É CADA ITEM (23/10/2026)
+  //
+  // O app da impressora descobre o setor pelo NOME do item, comparando com os
+  // nossos produtos — serve na mesa, onde tudo é lançado do nosso catálogo. No
+  // iFood o cardápio mora lá e é escrito como o lojista quiser: "Filé à
+  // parmegiana de frango" numa loja, "File parmegiana de frango" na outra. O
+  // que não casa caía em "salão", ou seja, NÃO SAÍA na comanda da cozinha —
+  // calado, sem erro em lugar nenhum.
+  //
+  // Agora quem decide é o banco, em três degraus (produto -> categoria
+  // vinculada -> cozinha). O app já respeita o `setor` gravado no item antes de
+  // tentar adivinhar pelo nome, então isto vale sem atualizar app nenhum.
+  try {
+    const { data: resolvido } = await sb.rpc("resolver_setor_ifood", {
+      p_empresa: cfg.empresa_id,
+      p_merchant: cfg.merchant_id,
+      p_itens: brutos.map((it: any) => ({ nome: it.name ?? "", id: it.id ?? "" })),
+    })
+    if (Array.isArray(resolvido) && resolvido.length === itens.length) {
+      itens.forEach((item: any, i: number) => {
+        const r = resolvido[i] ?? {}
+        item.setor = r.setor ?? "cozinha"
+        if (r.fonte === "desconhecido") {
+          // A marca vai na observação porque ela sai GRANDE e em negrito na
+          // comanda da cozinha. Assim o item desconhecido não é um palpite
+          // ("isso é meu?"): está escrito que o sistema não o conhece, e isso
+          // vira recado pra arrumar o cadastro.
+          item.sem_cadastro = true
+          item.observacao = [item.observacao, "** PRODUTO NAO CADASTRADO - CONFERIR **"]
+            .filter(Boolean).join(" · ")
+        }
+      })
+    }
+  } catch { /* sem resposta: segue sem carimbo e o app decide pelo nome, como antes */ }
 
   // Observação da ENTREGA. O iFood não manda nada em `observations` na raiz do
   // pedido (era o que a gente lia — por isso chegava sempre vazio). O recado do
@@ -1767,6 +1804,85 @@ async function runVerifyDeliveryCode(sb: any, pedidoId: string, codigo: string) 
       .eq("id", pedidoId)
   }
   return { ok: true, valid }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// CÓPIA DO CARDÁPIO — pra saber em que categoria cada item mora
+// ─────────────────────────────────────────────────────────────────────
+// O PEDIDO NÃO DIZ A CATEGORIA DO ITEM. Ele manda nome, código e um id; o
+// campo `category` do pedido vale "FOOD", que é o tipo do pedido e não a
+// categoria do cardápio. Então a categoria tem que vir de uma cópia, e é isto
+// que mantém a cópia em dia.
+//
+// A chave é o `itemContextId`, que é o MESMO id que chega no item do pedido —
+// e NÃO o `items[].id` do catálogo, que é outro número (esse é o que está
+// gravado em produtos.ifood_item_id). Confundir os dois dá uma tabela que
+// nunca casa com pedido nenhum.
+//
+// Roda em TODAS as lojas da empresa, não só na principal: é justamente a loja
+// secundária que escreve os nomes diferente e precisa do vínculo.
+async function runCardapioSync(sb: any, empresaId?: string) {
+  let q = sb.from("ifood_config").select("*").eq("ativo", true).not("merchant_id", "is", null)
+  if (empresaId) q = q.eq("empresa_id", empresaId)
+  const { data: lojas, error } = await q
+  if (error) return { ok: false, error: error.message }
+
+  const saida: unknown[] = []
+  for (const cfg of (lojas ?? [])) {
+    try {
+      const token = await getToken(sb, cfg as Config)
+      const auth = { "Authorization": `Bearer ${token}` }
+      const mid = cfg.merchant_id
+
+      const catRes = await fetch(`${IFOOD}/catalog/v2.0/merchants/${mid}/catalogs`, { headers: auth })
+      if (!catRes.ok) { saida.push({ merchant: mid, erro: `catalogs ${catRes.status}` }); continue }
+      let catalogs: any = await catRes.json()
+      if (!Array.isArray(catalogs)) catalogs = catalogs ? [catalogs] : []
+
+      const linhas: Record<string, unknown>[] = []
+      const agora = new Date().toISOString()
+      for (const cat of catalogs) {
+        const catalogId = cat?.catalogId ?? cat?.id
+        if (!catalogId) continue
+        const cRes = await fetch(
+          `${IFOOD}/catalog/v2.0/merchants/${mid}/catalogs/${catalogId}/categories?includeItems=true`,
+          { headers: auth },
+        )
+        if (!cRes.ok) continue
+        const cats = await cRes.json()
+        for (const c of (Array.isArray(cats) ? cats : [])) {
+          for (const it of (c.items ?? [])) {
+            for (const m of (it.contextModifiers ?? [])) {
+              if (!m?.itemContextId) continue
+              linhas.push({
+                merchant_id: mid,
+                item_id: String(m.itemContextId),
+                empresa_id: cfg.empresa_id,
+                nome: it.name ?? "",
+                categoria_id: String(c.id ?? ""),
+                categoria_nome: c.name ?? "",
+                atualizado_em: agora,
+              })
+            }
+          }
+        }
+      }
+
+      if (linhas.length) {
+        const { error: e2 } = await sb.from("ifood_cardapio_item")
+          .upsert(linhas, { onConflict: "merchant_id,item_id" })
+        if (e2) { saida.push({ merchant: mid, erro: e2.message }); continue }
+        // Item que sumiu do cardápio de lá sai daqui também, senão um id velho
+        // continuaria respondendo por uma categoria que não existe mais.
+        await sb.from("ifood_cardapio_item")
+          .delete().eq("merchant_id", mid).lt("atualizado_em", agora)
+      }
+      saida.push({ merchant: mid, apelido: cfg.apelido ?? null, itens: linhas.length })
+    } catch (e) {
+      saida.push({ merchant: cfg.merchant_id, erro: String((e as any)?.message ?? e).slice(0, 120) })
+    }
+  }
+  return { ok: true, lojas: saida }
 }
 
 // ─────────────────────────────────────────────────────────────────────

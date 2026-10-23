@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useConfirmar } from '../hooks/useConfirmar'
 import IfoodCatalogoManager from '../components/IfoodCatalogoManager'
 import IfoodEnviarDaLoja from '../components/IfoodEnviarDaLoja'
+import IfoodSetorCategorias from '../components/IfoodSetorCategorias'
 import '../components/Page.css'
 
 // ============================================================================
@@ -230,6 +231,12 @@ export default function CardapioIfood() {
       <div className="card" style={{ padding: 18 }}>
         <IfoodEnviarDaLoja empresaId={empresa?.id} onPronto={() => setRecarregar(n => n + 1)} />
         <IfoodCatalogoManager key={recarregar} empresaId={empresa?.id} merchantOk={!!cfg.merchant_id} autoCarregar />
+        {/* Roteamento da impressão. Fica aqui embaixo e não numa página nova
+            porque é a mesma pergunta que o lojista veio fazer ("o que acontece
+            com o que vem do iFood?"), só que do lado do papel. E vale pras
+            DUAS lojas, diferente do resto desta tela, que trabalha só na
+            principal. */}
+        <IfoodSetorCategorias empresaId={empresa?.id} />
       </div>
     </div>
   )
