@@ -6957,6 +6957,10 @@ export default function PainelPedidos() {
   const [fwcVersao, setFwcVersao] = useState(0)        // versão do app (>=11 tem filtro por origem)
   const [fwcFiltros, setFwcFiltros] = useState(null)   // o que ESTE PC imprime (null = tudo)
   const fwcImprimeRef = useRef(false)
+  const fwcEmpurrouEm = useRef(0)
+  // O ping roda de um efeito que nasce uma vez: ele le a loja/perfil de AGORA por aqui.
+  const fwcCtx = useRef({})
+  fwcCtx.current = { empresaId: empresa?.id ?? null, perfil: profile?.perfil ?? null }
   useEffect(() => {
     let vivo = true
     const ping = async () => {
@@ -6968,6 +6972,35 @@ export default function PainelPedidos() {
         pausado = !!(j && j.pausado)
         versao = Number(j?.versao || 0)
         filtros = j?.filtros ?? null
+        // SESSAO DO APP, RENOVADA POR AQUI.
+        //
+        // O app entra na conta com a sessao EMPRESTADA deste navegador (mesmo
+        // refresh token). Cada um renova o seu pedaco por conta propria, e o
+        // Supabase invalida a copia que ficou velha: cerca de 1 h depois, o app
+        // perdia a sessao calado. Ele seguia "conectado" no painel mas parava de
+        // ler a cozinha e de reportar saude, enquanto a conta e a pre-conta
+        // (empurradas pelo gestor) continuavam saindo. Foi o que parou o Mickey
+        // as 20:06 de 22/10/2026, e o Braseiro em 12/10.
+        //
+        // Aqui o gestor entrega a sessao FRESCA a cada 20 min (e na hora, se o app
+        // estiver sem login). So na loja certa: quem navega em outra loja
+        // (super admin) nao pode trocar a conta do app do PC.
+        const lojaDoApp = j?.empresaId || null
+        const minha = fwcCtx.current.empresaId
+        const ehMinhaLoja = !!minha && fwcCtx.current.perfil !== 'super_admin'
+          && (lojaDoApp ? lojaDoApp === minha : !j?.logado)
+        const velha = Date.now() - fwcEmpurrouEm.current > 20 * 60 * 1000
+        if (j && ehMinhaLoja && (velha || !j.logado)) {
+          const { data: sdata } = await supabase.auth.getSession()
+          const s = sdata?.session
+          if (s?.access_token && s?.refresh_token) {
+            fwcEmpurrouEm.current = Date.now()
+            fwcFetch('/api/adotar-sessao', {
+              timeout: 8000, method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ access_token: s.access_token, refresh_token: s.refresh_token, empresa_id: minha }),
+            }).catch(() => { fwcEmpurrouEm.current = 0 })
+          }
+        }
       } catch (e) { on = false }
       if (vivo) { setFwcAppImprime(on); fwcImprimeRef.current = on; setFwcPausado(pausado); setFwcVersao(versao); setFwcFiltros(filtros) }
     }
