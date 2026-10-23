@@ -227,6 +227,24 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
   // Barras: atrasadas + 4 janelas de 7 dias (hoje..+27) + o resto até +30.
   const barras = useMemo(() => {
     const abertas = contas.filter((c) => c.status === 'aberta')
+    // A PRIMEIRA BARRA É O QUE JÁ SAIU (23/10/2026)
+    //
+    // O gráfico só olhava pra frente, e o dono que acabou de lançar três
+    // despesas pagas não via nada mudar nele. Com a barra do que já foi pago
+    // na esquerda, o desenho conta a história inteira na ordem em que ela
+    // acontece: o que já saiu · o que está atrasado · o que vem.
+    //
+    // Cor própria (cinza), porque é dinheiro que NÃO está mais em jogo —
+    // misturar com o vermelho do "a pagar" faria parecer dívida.
+    const pagoNoMes = contas
+      .filter((c) => c.tipo === 'pagar' && Number(c.valor_pago || 0) > 0
+        && String(c.pago_em || c.vencimento || '').slice(0, 7) === hoje.slice(0, 7))
+      .reduce((s, c) => s + Number(c.valor_pago || 0), 0)
+    const recebidoNoMes = contas
+      .filter((c) => c.tipo === 'receber' && Number(c.valor_pago || 0) > 0
+        && String(c.pago_em || c.vencimento || '').slice(0, 7) === hoje.slice(0, 7))
+      .reduce((s, c) => s + Number(c.valor_pago || 0), 0)
+
     const faixas = [
       { rotulo: 'Atrasadas', curto: 'Atras.', ini: '0000-01-01', fim: somaDias(hoje, -1) },
       { rotulo: 'Esta semana', curto: 'Semana', ini: hoje, fim: somaDias(hoje, 6) },
@@ -234,7 +252,7 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
       { rotulo: `${ddmm(somaDias(hoje, 14))}–${ddmm(somaDias(hoje, 20))}`, curto: ddmm(somaDias(hoje, 14)), ini: somaDias(hoje, 14), fim: somaDias(hoje, 20) },
       { rotulo: `${ddmm(somaDias(hoje, 21))}–${ddmm(somaDias(hoje, 30))}`, curto: ddmm(somaDias(hoje, 21)), ini: somaDias(hoje, 21), fim: somaDias(hoje, 30) },
     ]
-    return faixas.map((f) => {
+    const futuras = faixas.map((f) => {
       const dentro = abertas.filter((c) => c.vencimento >= f.ini && c.vencimento <= f.fim)
       return {
         rotulo: f.rotulo,
@@ -243,6 +261,10 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
         receber: dentro.filter((c) => c.tipo === 'receber').reduce((s, c) => s + restanteDe(c), 0),
       }
     })
+    return [
+      { rotulo: 'Já pago', rotuloCurto: 'Pago', pagar: 0, receber: 0, pago: pagoNoMes, recebido: recebidoNoMes },
+      ...futuras,
+    ]
   }, [contas, hoje])
 
   // Sugestões de pessoa/categoria a partir do que a loja já usou.
@@ -607,8 +629,8 @@ function Grafico({ barras }) {
     window.addEventListener('resize', f)
     return () => window.removeEventListener('resize', f)
   }, [])
-  const maximo = Math.max(1, ...barras.flatMap((b) => [b.pagar, b.receber]))
-  const tudoZero = barras.every((b) => b.pagar === 0 && b.receber === 0)
+  const maximo = Math.max(1, ...barras.flatMap((b) => [b.pagar, b.receber, b.pago || 0, b.recebido || 0]))
+  const tudoZero = barras.every((b) => b.pagar === 0 && b.receber === 0 && !b.pago && !b.recebido)
   const L = estreito ? 340 : 960, A = estreito ? 200 : 210, topo = 24, base = A - 34, alturaUtil = base - topo
   const larguraGrupo = (L - 40) / barras.length
   const w = Math.min(estreito ? 22 : 44, larguraGrupo / 2.6)
@@ -617,7 +639,10 @@ function Grafico({ barras }) {
     <div className="card cpr-grafico">
       <div className="cpr-grafico-topo">
         <h3>Próximos 30 dias</h3>
-        <span className="cpr-legenda"><i className="cpr-dot cpr-dot-receber" /> Entra <i className="cpr-dot cpr-dot-pagar" /> Sai</span>
+        <span className="cpr-legenda">
+          <i className="cpr-dot cpr-dot-receber" /> Entra <i className="cpr-dot cpr-dot-pagar" /> Sai
+          <i className="cpr-dot cpr-dot-feita" /> Já feito
+        </span>
       </div>
       {tudoZero ? (
         <p className="cpr-grafico-vazio">Nada em aberto pros próximos 30 dias.</p>
@@ -629,16 +654,23 @@ function Grafico({ barras }) {
           <line x1="20" x2={L - 20} y1={base} y2={base} className="cpr-eixo" />
           {barras.map((b, i) => {
             const cx = 20 + larguraGrupo * i + larguraGrupo / 2
+            // A barra do "Já pago" usa os mesmos lugares, com cor de coisa
+            // encerrada: à esquerda o que já entrou, à direita o que já saiu.
+            const ehPago = b.pago != null
+            const esq = ehPago ? (b.recebido || 0) : b.receber
+            const dir = ehPago ? (b.pago || 0) : b.pagar
             return (
               <g key={b.rotulo}>
-                <rect x={cx - w - 2} y={y(b.receber)} width={w} height={Math.max(0, base - y(b.receber))} rx="5" className="cpr-barra-receber">
-                  <title>{`${b.rotulo}: entra ${brl(b.receber)}`}</title>
+                <rect x={cx - w - 2} y={y(esq)} width={w} height={Math.max(0, base - y(esq))} rx="5"
+                  className={ehPago ? 'cpr-barra-feita' : 'cpr-barra-receber'}>
+                  <title>{`${b.rotulo}: ${ehPago ? 'já entrou' : 'entra'} ${brl(esq)}`}</title>
                 </rect>
-                <rect x={cx + 2} y={y(b.pagar)} width={w} height={Math.max(0, base - y(b.pagar))} rx="5" className="cpr-barra-pagar">
-                  <title>{`${b.rotulo}: sai ${brl(b.pagar)}`}</title>
+                <rect x={cx + 2} y={y(dir)} width={w} height={Math.max(0, base - y(dir))} rx="5"
+                  className={ehPago ? 'cpr-barra-feita' : 'cpr-barra-pagar'}>
+                  <title>{`${b.rotulo}: ${ehPago ? 'já saiu' : 'sai'} ${brl(dir)}`}</title>
                 </rect>
-                {b.receber > 0 && <text x={cx - w / 2 - 2} y={y(b.receber) - 5} className="cpr-barra-valor" textAnchor="middle">{curto(b.receber)}</text>}
-                {b.pagar > 0 && <text x={cx + w / 2 + 2} y={y(b.pagar) - 5} className="cpr-barra-valor" textAnchor="middle">{curto(b.pagar)}</text>}
+                {esq > 0 && <text x={cx - w / 2 - 2} y={y(esq) - 5} className="cpr-barra-valor" textAnchor="middle">{curto(esq)}</text>}
+                {dir > 0 && <text x={cx + w / 2 + 2} y={y(dir) - 5} className="cpr-barra-valor" textAnchor="middle">{curto(dir)}</text>}
                 <text x={cx} y={A - 12} className={`cpr-eixo-rotulo ${i === 0 ? 'cpr-eixo-atrasadas' : ''}`} textAnchor="middle">{estreito ? b.rotuloCurto : b.rotulo}</text>
               </g>
             )

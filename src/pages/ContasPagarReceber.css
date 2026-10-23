@@ -33,7 +33,10 @@
 .cpr-skel { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 
 /* ── Cards de resumo ── */
-.cpr-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+/* Cinco cartoes agora (entrou o "Pago neste mes"). Com 4 colunas o quinto
+   ficava sozinho numa linha, parecendo sobra. */
+.cpr-cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+@media (max-width: 1400px) { .cpr-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .cpr-card {
   display: flex; flex-direction: column; gap: 4px; text-align: left;
   padding: 16px 18px; border-radius: var(--cpr-raio);
@@ -69,9 +72,13 @@
 .cpr-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
 .cpr-dot-receber { background: var(--success); }
 .cpr-dot-pagar { background: var(--danger); margin-left: 8px; }
+.cpr-dot-feita { background: var(--text-muted); opacity: .55; margin-left: 8px; }
 .cpr-svg { width: 100%; height: auto; display: block; }
 .cpr-barra-receber { fill: var(--success); }
 .cpr-barra-pagar { fill: var(--danger); }
+/* O que ja aconteceu: cinza, sem peso. Nao e divida nem promessa — e so
+   historia, e misturar com o vermelho do "a pagar" faria parecer cobranca. */
+.cpr-barra-feita { fill: var(--text-muted); opacity: .55; }
 .cpr-grade { stroke: var(--border); stroke-dasharray: 3 4; }
 .cpr-eixo { stroke: var(--border); }
 .cpr-barra-valor { fill: var(--text); font-size: 11px; font-weight: 700; }
