@@ -243,6 +243,16 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
     })
   }, [contas, tipoFiltro, situacaoFiltro, periodo, categoriaFiltro, busca, hoje])
 
+  // O que o filtro está deixando de fora, pra tela poder avisar em vez de
+  // simplesmente não mostrar. `contas` já vem recortada pelo carregamento
+  // (quitadas só dos últimos 180 dias), então isto é o escondido de verdade.
+  const escondidas = contas.length - filtradas.length
+  const temPagaEscondida = useMemo(() => {
+    if (escondidas <= 0) return false
+    const vistas = new Set(filtradas.map((c) => c.id))
+    return contas.some((c) => !vistas.has(c.id) && situacaoDe(c, hoje) === 'paga')
+  }, [contas, filtradas, escondidas, hoje])
+
   const grupos = useMemo(() => {
     const mapa = new Map()
     for (const c of filtradas) {
@@ -410,6 +420,28 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
                   </select>
                 </div>
               </div>
+
+              {/* QUANTAS O FILTRO ESTÁ ESCONDENDO (23/10/2026)
+                  O Wilde registrou uma despesa pelo WhatsApp, abriu esta tela e
+                  não achou — duas vezes no mesmo dia. Ela estava PAGA, e o
+                  filtro nasce em "Em aberto". A tela promete no subtítulo "o que
+                  já foi pago", mas abre escondendo justamente isso. Enquanto o
+                  padrão continua "Em aberto" (é o que importa no dia a dia),
+                  esta linha conta o que ficou de fora e abre num toque. */}
+              {escondidas > 0 && (
+                <div className="cpr-escondidas">
+                  <span>
+                    {escondidas === 1
+                      ? '1 conta não aparece com esses filtros'
+                      : `${escondidas} contas não aparecem com esses filtros`}
+                    {temPagaEscondida ? ' (as já pagas ficam em “Quitadas”)' : ''}
+                  </span>
+                  <button type="button" className="btn btn-secondary btn-sm"
+                    onClick={() => { mudarTipo('todas'); mudarSituacao('todas'); mudarPeriodo('tudo'); setBusca(''); setCategoriaFiltro('') }}>
+                    Ver todas
+                  </button>
+                </div>
+              )}
 
               {/* ── Lista ── */}
               {grupos.length === 0 ? (

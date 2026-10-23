@@ -187,6 +187,23 @@
 .cpr-vazio-icone { font-size: 40px; line-height: 1; }
 .cpr-vazio-acoes { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 16px 0 8px; }
 .cpr-vazio-pequeno { padding: 24px 16px; }
+
+/* Aviso de que o filtro está escondendo contas. Discreto (não é erro), mas na
+   frente da lista: é lá que a pessoa procura o que acabou de lançar. */
+.cpr-escondidas {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: rgba(245, 158, 11, .07);
+  font-size: 13px;
+  color: var(--text-muted);
+}
 .cpr-dica { font-size: 13px !important; }
 
 .cpr-rodape { margin: 20px 2px 4px; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
