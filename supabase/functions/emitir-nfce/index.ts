@@ -26,9 +26,23 @@ const FOCUS_HOST = {
   producao: "https://api.focusnfe.com.br",
 }
 
-function tokenDoAmbiente(ambiente: string): string | null {
-  const key = ambiente === "producao" ? "FOCUS_NFE_TOKEN_PRODUCAO" : "FOCUS_NFE_TOKEN_HOMOLOGACAO"
-  return Deno.env.get(key) ?? null
+// Cadastro de lojas (API de revenda): só existe no host de PRODUÇÃO e usa o
+// token principal da conta FWC. Vale pros dois ambientes da loja.
+const FOCUS_REVENDA = "https://api.focusnfe.com.br"
+
+function tokenPrincipal(): string | null {
+  return Deno.env.get("FOCUS_NFE_TOKEN_PRODUCAO") ?? null
+}
+
+// Emissão/consulta usa o token da PRÓPRIA loja (o Focus devolve um de
+// homologação e um de produção por CNPJ). Buscamos na hora, sem guardar no banco.
+async function tokenDaLoja(cnpj: string, ambiente: string): Promise<string | null> {
+  const principal = tokenPrincipal()
+  if (!principal) return null
+  const r = await fetch(`${FOCUS_REVENDA}/v2/empresas/${cnpj}`, { headers: { "Authorization": authHeader(principal) } })
+  if (!r.ok) return null
+  const d = await r.json().catch(() => ({}))
+  return (ambiente === "producao" ? d?.token_producao : d?.token_homologacao) ?? null
 }
 
 // Basic auth do Focus: token como usuário, senha vazia
@@ -64,7 +78,7 @@ Deno.serve(async (req) => {
   const acao = body?.acao ?? ""
 
   try {
-    if (acao === "registrar_empresa") return json(await registrarEmpresa(sb, body?.empresa_id, body?.senha_certificado))
+    if (acao === "registrar_empresa") return json(await registrarEmpresa(sb, body?.empresa_id, body?.senha_certificado, body?.dry_run === true))
     if (acao === "emitir")            return json(await emitir(sb, body?.pedido_id, body?.cpf))
     if (acao === "consultar")         return json(await consultar(sb, body?.nota_id, body?.ref))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
@@ -76,7 +90,7 @@ Deno.serve(async (req) => {
 // ─────────────────────────────────────────────────────────────────────
 // REGISTRAR EMPRESA — sobe o A1 + CSC pro Focus (loja pronta pra emitir)
 // ─────────────────────────────────────────────────────────────────────
-async function registrarEmpresa(sb: any, empresaId: string, senhaCert: string) {
+async function registrarEmpresa(sb: any, empresaId: string, senhaCert: string, dryRun = false) {
   if (!empresaId) return { ok: false, error: "empresa_id obrigatório" }
   if (!senhaCert) return { ok: false, error: "Informe a senha do certificado" }
 
@@ -90,8 +104,8 @@ async function registrarEmpresa(sb: any, empresaId: string, senhaCert: string) {
   if (cnpj.length !== 14) return { ok: false, error: "CNPJ da loja inválido (confira na aba Conta)" }
 
   const ambiente = fis.ambiente === "producao" ? "producao" : "homologacao"
-  const token = tokenDoAmbiente(ambiente)
-  if (!token) return { ok: false, error: `Token do Focus (${ambiente}) não configurado na plataforma` }
+  const token = tokenPrincipal()
+  if (!token) return { ok: false, error: "Token principal do Focus não configurado na plataforma" }
 
   // Lê o .pfx do bucket privado e converte pra base64
   const dl = await sb.storage.from("certificados-fiscais").download(fis.certificado_ref)
@@ -123,9 +137,10 @@ async function registrarEmpresa(sb: any, empresaId: string, senhaCert: string) {
     [idTokenKey]: fis.csc_id || undefined,
   }
 
-  const base = `${FOCUS_HOST[ambiente]}/v2/empresas`
+  const base = `${FOCUS_REVENDA}/v2/empresas`
+  const dry = dryRun ? "?dry_run=1" : ""
   // Tenta criar; se já existe (CNPJ duplicado), atualiza via PUT.
-  let res = await fetch(base, {
+  let res = await fetch(base + dry, {
     method: "POST",
     headers: { "Authorization": authHeader(token), "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -135,7 +150,7 @@ async function registrarEmpresa(sb: any, empresaId: string, senhaCert: string) {
   if (!res.ok) {
     // Já cadastrada -> atualiza
     if (res.status === 422 || /existe|cadastrad/i.test(txt)) {
-      res = await fetch(`${base}/${cnpj}`, {
+      res = await fetch(`${base}/${cnpj}${dry}`, {
         method: "PUT",
         headers: { "Authorization": authHeader(token), "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -186,8 +201,8 @@ async function emitir(sb: any, pedidoId: string, cpf?: string) {
 
   const cnpj = soDigitos(emp?.cnpj)
   const ambiente = fis.ambiente === "producao" ? "producao" : "homologacao"
-  const token = tokenDoAmbiente(ambiente)
-  if (!token) return { ok: false, error: `Token do Focus (${ambiente}) não configurado na plataforma` }
+  const token = await tokenDaLoja(cnpj, ambiente)
+  if (!token) return { ok: false, error: `Não consegui o token do Focus desta loja (${ambiente}). Registre a loja de novo em Minha Loja → Nota Fiscal` }
 
   const ncm = fis.ncm_padrao || "21069090"
   const cfop = fis.cfop_padrao || "5102"
@@ -280,8 +295,9 @@ async function consultar(sb: any, notaId?: string, refIn?: string) {
   }
   if (!ref) return { ok: false, error: "informe nota_id ou ref" }
   const ambiente = nota?.ambiente === "producao" ? "producao" : "homologacao"
-  const token = tokenDoAmbiente(ambiente)
-  if (!token) return { ok: false, error: `Token do Focus (${ambiente}) não configurado` }
+  const { data: empNota } = await sb.from("empresas").select("cnpj").eq("id", nota?.empresa_id).maybeSingle()
+  const token = await tokenDaLoja(soDigitos(empNota?.cnpj), ambiente)
+  if (!token) return { ok: false, error: `Não consegui o token do Focus desta loja (${ambiente})` }
 
   const res = await fetch(`${FOCUS_HOST[ambiente]}/v2/nfce/${encodeURIComponent(ref)}`, {
     headers: { "Authorization": authHeader(token) },
