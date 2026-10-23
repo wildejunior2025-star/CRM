@@ -617,7 +617,10 @@ async function imprimirComandaMesa(cid, itens) {
   // Este PC so cuida de um setor? Entao o resto nao e problema dele.
   const papel = papelDoPc()
   if (papel !== 'tudo') {
+    const antes = paraPapel
     paraPapel = paraPapel.filter(it => (setorDe(it) === 'cozinha' ? 'cozinha' : 'frente') === papel)
+    // Registro pra achar o "Só cozinha não imprime nada" (Mickey, 22/10/2026).
+    if (!paraPapel.length && antes.length) log('  (papel deste PC = ' + papel + ' — descartou ' + antes.length + ' item(ns): ' + antes.map(it => (it.nome || '?') + ' [setor=' + (it.setor ?? 'vazio') + ' -> ' + setorDe(it) + ']').join('; ') + ')')
   }
   if (!paraPapel.length) return
   if (bar) {
@@ -974,7 +977,10 @@ const server = http.createServer(async (req, res) => {
         if (papel !== 'tudo') {
           paraPapel = paraPapel.filter(it => (setorDe(it) === 'cozinha' ? 'cozinha' : 'frente') === papel)
         }
-        if (!paraPapel.length) return sendJson(res, { ok: true, filtrado: true })
+        if (!paraPapel.length) {
+          log('  (papel deste PC = ' + papel + ' — comanda empurrada nao imprimiu nada. Itens: ' + itens.map(it => (it.nome || '?') + ' [setor=' + (it.setor ?? 'vazio') + ' -> ' + setorDe(it) + ']').join('; ') + ')')
+          return sendJson(res, { ok: true, filtrado: true })
+        }
         if (bar) {
           const comida = paraPapel.filter(it => setorDe(it) === 'cozinha')
           const bebida = paraPapel.filter(it => setorDe(it) !== 'cozinha')
