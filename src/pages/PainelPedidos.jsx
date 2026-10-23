@@ -8815,6 +8815,14 @@ export default function PainelPedidos() {
     const motivo = baixaMotivo.trim()
     if (!Number.isFinite(qtd) || qtd <= 0) { setErroBaixa('Diga quantos se perderam.'); return }
     if (!motivo) { setErroBaixa('Descreva o que aconteceu.'); return }
+    // Motivo só com número é quantidade digitada na caixa errada — foi o que
+    // aconteceu no Lá em Casa (23/10), duas vezes, com motivo "5" e "7".
+    // Deixar passar grava uma baixa errada E inventa um motivo que ninguém
+    // escreveu, bem no registro que existe pra ser conferido depois.
+    if (/^[\d\s.,]+$/.test(motivo)) {
+      setErroBaixa('Escreva o que aconteceu, não a quantidade (a quantidade é na caixinha de cima).')
+      return
+    }
     setSalvandoBaixa(true)
     setErroBaixa(null)
     try {
@@ -11319,10 +11327,18 @@ export default function PainelPedidos() {
                           }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                               <span style={{ fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }}>Perdeu quantos?</span>
+                              {/* O foco vem PRA CÁ, não pro motivo. Estava no motivo
+                                  e o número que a pessoa digitava caía lá: duas baixas
+                                  do Lá em Casa (23/10) saíram com quantidade 1 e motivo
+                                  "5" e "7". O select() deixa o "1" marcado, então o
+                                  primeiro dígito substitui em vez de virar "17". */}
                               <input
                                 type="number" inputMode="decimal" min="0" step="any"
+                                autoFocus
+                                onFocus={e => e.target.select()}
                                 value={baixaQtd}
                                 onChange={e => setBaixaQtd(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') lancarBaixaDesperdicio(prod) }}
                                 style={{
                                   width: 70, padding: '6px 8px', borderRadius: 8, fontSize: 13,
                                   border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)', color: 'var(--text)',
@@ -11335,7 +11351,6 @@ export default function PainelPedidos() {
                             </div>
                             <input
                               type="text"
-                              autoFocus
                               value={baixaMotivo}
                               onChange={e => setBaixaMotivo(e.target.value)}
                               onKeyDown={e => { if (e.key === 'Enter') lancarBaixaDesperdicio(prod) }}
