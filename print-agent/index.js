@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 40
+const APP_VERSION = 41
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -570,7 +570,13 @@ async function imprimirPedido(p, jaReservado) {
     const { data: minhaVez, error } = jaReservado
       ? { data: true, error: null }
       : await supabase
-        .rpc('reservar_impressao', { p_pedido: p.id, p_quem: (os.hostname() || 'app').slice(0, 60) })
+        .rpc('reservar_impressao', {
+          p_pedido: p.id,
+          p_quem: (os.hostname() || 'app').slice(0, 60),
+          // A vez e por PAPEL: loja com PC na cozinha e PC na frente tira dois
+          // papeis diferentes do mesmo pedido, e os dois tem que sair.
+          p_papel: papelDoPc(),
+        })
     if (!error && minhaVez === false) {
       log('  (outro aparelho ja imprimiu #' + (p.numero_pedido ?? p.id) + ')')
       marcarImpresso(p.id)   // nao tentar de novo a cada update
