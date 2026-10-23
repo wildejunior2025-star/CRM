@@ -64,6 +64,7 @@ const NOTIF_DEFAULTS = {
   notif_fiado_compra: false,
   notif_fiado_pago: false,
   notif_estoque: false,
+  notif_entrada_estoque: false,
   admin_phone:   '',
   msg_pedido:    DEFAULT_MSG_PEDIDO,
   msg_fiado:     DEFAULT_MSG_FIADO,
@@ -182,6 +183,7 @@ export default function WhatsAppConfig() {
         notif_fiado_compra: data.notif_fiado_compra ?? false,
         notif_fiado_pago: data.notif_fiado_pago ?? false,
         notif_estoque: data.notif_estoque ?? false,
+        notif_entrada_estoque: data.notif_entrada_estoque ?? false,
         admin_phone:   data.admin_phone   ?? '',
         msg_pedido:    data.msg_pedido    ?? DEFAULT_MSG_PEDIDO,
         msg_fiado:     data.msg_fiado     ?? DEFAULT_MSG_FIADO,
@@ -1411,6 +1413,24 @@ export default function WhatsAppConfig() {
                 <div className="wa-checkbox-text">
                   <span>Alerta de estoque baixo no WhatsApp</span>
                   <small>Envia mensagem no seu número quando produto precisar de reposição.</small>
+                </div>
+              </label>
+
+              {/* Controle de quem lança a entrada: o dono vê na rua, sem abrir
+                  o histórico, e confere com a nota do fornecedor na hora. */}
+              <label className="wa-checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={form.notif_entrada_estoque}
+                  onChange={(e) => setField('notif_entrada_estoque', e.target.checked)}
+                />
+                <div className="wa-checkbox-text">
+                  <span>Avisar quando alguém der ENTRADA no estoque</span>
+                  <small>
+                    Mensagem no seu número a cada entrada, com o nome de quem lançou, a
+                    quantidade e quanto ficou. Vale pro catálogo e pra ficha técnica.
+                    Quando a pessoa lança vários itens seguidos, vem tudo numa mensagem só.
+                  </small>
                 </div>
               </label>
 
