@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import {
-  serialSuportado, portaLembrada, escolherPorta, abrir, portaAberta,
-  pesarEstavel, enviarPrecoKg, VELOCIDADES,
+  serialSuportado, portaLembrada, escolherPorta, abrir, portaAberta, fechar,
+  pesarEstavel, pedirPeso, enviarPrecoKg, trocarVelocidade, infoPorta, VELOCIDADES,
 } from '../lib/balancaToledo'
 
 // ============================================================================
@@ -73,6 +73,26 @@ export default function PesarNaBalanca({
     }
   }
 
+  // A VELOCIDADE A GENTE DESCOBRE, NÃO PERGUNTA (23/10/2026)
+  //
+  // A balança só responde na velocidade em que foi programada (parâmetro C15:
+  // 2400, 4800 ou 9600). Na primeira versão eu punha um seletor e mandava o
+  // lojista descobrir no teclado da balança — e a tela parou exatamente aí,
+  // com “não respondeu, confira o C15”, que não ajuda ninguém no meio do
+  // almoço. São três opções: testar as três leva menos tempo do que ler o
+  // manual, e a que funcionou fica guardada.
+  async function descobrirVelocidade() {
+    for (const v of [baud, ...VELOCIDADES.filter(x => x !== baud)]) {
+      try { await trocarVelocidade(v) } catch { continue }
+      const r = await pedirPeso()
+      if (r.estado !== 'sem_resposta' && r.estado !== 'ruido') {
+        if (v !== baud) { setBaud(v); localStorage.setItem('balanca_baud', String(v)) }
+        return v
+      }
+    }
+    return null
+  }
+
   async function pesar() {
     if (!produto) { setErro('Escolha o produto primeiro.'); return }
     setErro(null); setOk(null); setPesando(true)
@@ -81,11 +101,38 @@ export default function PesarNaBalanca({
     // Nos outros protocolos a balança ignora, e tudo bem — por isso o erro
     // daqui não interrompe a pesagem.
     try { await enviarPrecoKg(produto.preco_venda) } catch { /* protocolo sem preço */ }
-    const r = await pesarEstavel()
+    let r = await pesarEstavel()
+    if (r.estado === 'sem_resposta') {
+      setErro('Procurando a velocidade da balança…')
+      const achou = await descobrirVelocidade()
+      r = achou ? await pesarEstavel() : r
+    }
     setPesando(false)
-    if (!r.ok) { setErro(r.erro); return }
+    if (!r.ok) {
+      setErro(r.estado === 'sem_resposta'
+        ? 'A balança não respondeu em nenhuma velocidade. Confira se o cabo está neste computador e se a porta escolhida é a dela (botão “Trocar balança”).'
+        : r.erro)
+      return
+    }
+    setErro(null)
     setPeso({ kg: r.kg, total: Math.round(r.kg * Number(produto.preco_venda) * 100) / 100 })
     setTimeout(() => buscaMesa.current?.focus(), 50)
+  }
+
+  // Porta errada é tão provável quanto velocidade errada: este computador pode
+  // ter outro aparelho serial autorizado antes (a catraca da academia roda no
+  // mesmo endereço), e a Web Serial entrega a primeira da lista sem dizer qual é.
+  async function trocarBalanca() {
+    setErro(null); setPeso(null)
+    try {
+      await fechar()
+      const p = await escolherPorta()
+      await abrir(p, baud)
+      setConectada(true)
+    } catch (e) {
+      setConectada(false)
+      setErro(e?.name === 'NotFoundError' ? 'Nenhuma porta escolhida.' : String(e?.message ?? e))
+    }
   }
 
   async function lancar(mesa) {
@@ -176,6 +223,21 @@ export default function PesarNaBalanca({
               </select>
             </label>
           </div>
+        </div>
+      )}
+
+      {/* Qual porta e qual velocidade estao em uso. Sem isto, balanca muda nao
+          tinha conserto pela tela: o Chrome entrega a primeira porta
+          autorizada e o atendente nao tinha como dizer "essa nao e a minha". */}
+      {conectada && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
+          <span>Balança: <strong>{infoPorta()}</strong> · {baud} bauds</span>
+          <button type="button" onClick={trocarBalanca}
+            style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer',
+              color: 'var(--primary, #7c3aed)', fontWeight: 700, fontSize: 12 }}>
+            Trocar balança
+          </button>
         </div>
       )}
 

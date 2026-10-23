@@ -79,6 +79,27 @@ export async function fechar() {
 
 export const portaAberta = () => porta
 
+// Qual porta esta aberta, pra tela poder mostrar e o lojista conferir se e a
+// balanca mesmo. A Web Serial nao da o nome do aparelho, so os numeros do
+// fabricante: o conversor das Toledo costuma ser Prolific (067B:2303).
+export function infoPorta() {
+  try {
+    const i = porta?.getInfo?.() ?? {}
+    const hex = (n) => (n == null ? '?' : n.toString(16).toUpperCase().padStart(4, '0'))
+    return (i.usbVendorId == null && i.usbProductId == null) ? 'porta serial' : `USB ${hex(i.usbVendorId)}:${hex(i.usbProductId)}`
+  } catch { return 'porta serial' }
+}
+
+// Fecha e reabre a MESMA porta noutra velocidade. E o que permite varrer as
+// tres velocidades sem obrigar ninguem a escolher a porta de novo.
+export async function trocarVelocidade(baudRate) {
+  const p = porta
+  if (!p) return null
+  await fechar()
+  await abrir(p, baudRate)
+  return p
+}
+
 // Lê a porta pra sempre, num laço só. Não dá pra abrir um leitor por pergunta:
 // a Web Serial trava o `readable` enquanto um leitor existe, e o segundo
 // `getReader()` estouraria. Então o laço acumula bytes e quem perguntou é
