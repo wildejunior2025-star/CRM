@@ -1554,7 +1554,35 @@ Responda *SIM* para aplicar ou *NÃO* para cancelar.${aviso}`)
     })
     const aviso = resultado.aviso ? `\n\n⚠️ ${resultado.aviso}` : ""
     const nota = substitui ? null : resultado.nota
-    const textoResumo = resumo(resultado.itens, resultado.naoAchados, !!substitui, infoResumo, nota) + aviso +
+
+    // ESSA NOTA JÁ ENTROU? (23/10/2026)
+    //
+    // O Agv Grill mandou o mesmo comprovante duas vezes — achou que a primeira
+    // não tinha pego (estava só esperando o SIM). Um SIM na segunda dobraria
+    // tudo: estoque e despesa. Mandar a nota de novo é erro fácil de cometer e
+    // caro de descobrir, porque some no meio do estoque.
+    //
+    // Mesmo fornecedor + mesmo total + mesma data já é a mesma nota na prática.
+    // O aviso NÃO bloqueia: duas compras iguais no mesmo dia existem, e quem
+    // sabe o que está fazendo responde SIM do mesmo jeito. Só não deixa passar
+    // sem o lojista ver.
+    let avisoRepetida = ""
+    if (nota?.fornecedor && Number(nota?.valor_total) > 0) {
+      const { data: iguais } = await sb.from("estoque_whatsapp")
+        .select("lancado_em, nota")
+        .eq("empresa_id", empresaId).eq("status", "lancado")
+        .gte("lancado_em", new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString())
+        .order("lancado_em", { ascending: false }).limit(40)
+      const igual = (iguais ?? []).find((x: any) =>
+        String(x.nota?.fornecedor ?? "") === String(nota.fornecedor) &&
+        Number(x.nota?.valor_total) === Number(nota.valor_total) &&
+        String(x.nota?.data ?? "") === String(nota.data ?? ""))
+      if (igual) {
+        avisoRepetida = `\n\n🚨 *Atenção: essa nota parece repetida.*\nJá lancei uma de *${nota.fornecedor}* no valor de ${brl(nota.valor_total)} em ${ddmmBR(String(igual.lancado_em).slice(0, 10))}.\nSe responder SIM, vai entrar *de novo* (estoque e despesa em dobro). Se foi engano, responda *NÃO*.`
+      }
+    }
+
+    const textoResumo = resumo(resultado.itens, resultado.naoAchados, !!substitui, infoResumo, nota) + aviso + avisoRepetida +
       (naoExiste.length ? `\n\n⚠️ Não achei pra dar saída/contagem (ignorei): ${naoExiste.map((n) => n.nome).join(", ")}.` : "")
     const avisoCred = await cobrarUso(textoResumo)
     await enviar(instance, jid, textoResumo + avisoCred)
