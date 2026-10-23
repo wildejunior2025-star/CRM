@@ -24,7 +24,11 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 41
+const APP_VERSION = 42
+
+// Status em que o pedido AINDA NAO ANDOU e, por isso, vira papel. Depois de
+// 'pronto' ou 'saiu_entrega' o cupom so sai se alguem apertar reimprimir.
+const STATUS_VIRA_PAPEL = new Set(['aguardando', 'confirmado'])
 const FWC_EXE_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/ImpressoraFWC.exe'
 const FWC_VERSION_URL = SUPABASE_URL + '/storage/v1/object/public/downloads/impressora-version.json'
 
@@ -695,7 +699,9 @@ async function verificarPendentes() {
     const { data: peds } = await supabase.from('pedidos_delivery').select('*')
       .eq('empresa_id', empresaId).gte('created_at', since)
     for (const p of (peds || [])) {
-      if (p.status === 'aguardando_pagamento' || p.status === 'entregue' || p.status === 'cancelado') continue
+      // Mesma regra do tempo real: pedido que ja andou (pronto, saiu pra
+      // entrega) nao vira papel, mesmo que este PC nunca o tenha impresso.
+      if (!STATUS_VIRA_PAPEL.has(p.status)) continue
       if (!pedidosImpressos.has(p.id)) imprimirPedido(p)
     }
   } catch (e) { /* silencioso — proxima rodada tenta de novo */ }
@@ -740,8 +746,19 @@ async function iniciarEscuta() {
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pedidos_delivery', filter: 'empresa_id=eq.' + empresaId },
       payload => {
         const p = payload.new
-        if (p.status === 'aguardando_pagamento') return
-        if (p.status === 'entregue' || p.status === 'cancelado') return
+        // SÓ PEDIDO NOVO VIRA PAPEL (23/10/2026)
+        //
+        // Antes bastava "nao estar finalizado". No Agv, as 12:08, o balcao
+        // despachou tres pedidos do iFood que tinham chegado entre 10:43 e
+        // 11:09 — e os tres saíram na impressora na hora, como se fossem
+        // pedidos novos. O dedupe nao segurou porque quem tinha impresso
+        // aqueles era o navegador do OUTRO computador; para este app eles
+        // eram ineditos.
+        //
+        // Com a termica na cozinha isso e pior do que papel perdido: a
+        // cozinha refaz prato que ja saiu pra entrega e ninguem fica sabendo.
+        // Entao so vira papel o pedido que ainda nao andou.
+        if (!STATUS_VIRA_PAPEL.has(p.status)) return
         imprimirPedido(p)
       })
     // Pedido de MESA (comanda) — cada item novo vira cupom de cozinha (juntando o envio).
