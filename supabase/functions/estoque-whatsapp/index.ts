@@ -37,6 +37,17 @@ const ok = () => new Response("ok")
 type Item = { tipo: "produto" | "materia"; id: string; nome: string; quantidade: number; custo_unit: number | null; estoque_minimo?: number | null; mov?: Mov; motivo?: string }
 type Mov = "entrada" | "saida" | "ajuste"
 type NaoAchado = { nome: string; quantidade: number; custo_unit: number | null; unidade?: string; estoque_minimo?: number | null; mov?: Mov }
+// O que o robô leu do documento (nota, cupom ou comprovante). Só nasce de
+// FOTO/PDF: compra falada não tem fornecedor nem total confiável, e despesa
+// errada no financeiro da loja é pior do que despesa faltando.
+type NotaLida = {
+  fornecedor: string
+  documento: string | null
+  valor_total: number
+  data: string | null
+  pago: boolean | null        // null = o documento não deixou claro
+  forma: string | null
+} | null
 // Motivos (mesmos do Portal > Estoque). Perda e vencimento viram prejuízo (imprevisto) no financeiro.
 const MOTIVOS: Record<Mov, string[]> = {
   entrada: ["compra", "devolucao", "bonificacao"],
@@ -137,7 +148,7 @@ async function entenderTexto(
   pendentes: Item[],
   pendNovos: NaoAchado[] = [],
   jaLancado = false,
-): Promise<{ itens: Item[]; naoAchados: NaoAchado[]; ignorar: boolean; pergunta: boolean; corrige: boolean; produtosNovos: ProdutoNovo[]; minimos: MinimoSolto[]; custoUsd: number } | null> {
+): Promise<{ itens: Item[]; naoAchados: NaoAchado[]; ignorar: boolean; pergunta: boolean; corrige: boolean; produtosNovos: ProdutoNovo[]; minimos: MinimoSolto[]; custoUsd: number; nota: NotaLida } | null> {
   const lista = [
     ...cat.produtos.map((p) => ({ tipo: "produto" as const, id: p.id, nome: p.nome, un: "" })),
     ...cat.materias.map((m) => ({ tipo: "materia" as const, id: m.id, nome: m.nome, un: m.unidade })),
@@ -157,7 +168,8 @@ async function entenderTexto(
     '  "produtos_novos": [ { "nome": string, "preco_venda": number|null, "preco_custo": number|null, "categoria": string|null, "quantidade_inicial": number|null, "estoque_minimo": number|null } ],',
     '  "minimos": [ { "indice": number, "estoque_minimo": number } ],',
     '  "itens": [ { "indice": number, "quantidade": number, "custo_unit": number|null, "custo_total": number|null, "estoque_minimo": number|null, "movimento": "entrada"|"saida"|"ajuste", "motivo": string } ],',
-    '  "nao_encontrados": [ { "nome": string, "unidade": "kg"|"g"|"L"|"ml"|"un", "quantidade": number, "custo_unit": number|null, "custo_total": number|null, "estoque_minimo": number|null, "movimento": "entrada"|"saida"|"ajuste" } ] }',
+    '  "nao_encontrados": [ { "nome": string, "unidade": "kg"|"g"|"L"|"ml"|"un", "quantidade": number, "custo_unit": number|null, "custo_total": number|null, "estoque_minimo": number|null, "movimento": "entrada"|"saida"|"ajuste" } ],',
+    '  "nota": { "fornecedor": string|null, "documento": string|null, "valor_total": number|null, "data": "AAAA-MM-DD"|null, "pago": boolean|null, "forma": string|null } | null }',
     "",
     "Regras:",
     "- 'ignorar' = true quando a mensagem NÃO é sobre uma compra/entrada de mercadoria (papo, pergunta, cumprimento).",
@@ -194,6 +206,16 @@ async function entenderTexto(
     "- Preço: se disse o preço de CADA UNIDADE ('a 0,50 cada'), é custo_unit. Se disse o valor da compra daquele item",
     "  ('25 reais de pão'), é custo_total. Não souber, ambos null. Nunca invente preço.",
     "- Só inclua o que foi dito. Não invente item.",
+    // A compra é estoque E dinheiro saindo. Só NOTA/CUPOM/COMPROVANTE preenche
+    // isso: mensagem falada ("comprei 50 pães") não tem fornecedor nem total
+    // confiável, e chutar criaria despesa errada no financeiro da loja.
+    "- 'nota': preencha SÓ quando a mensagem for uma NOTA, CUPOM FISCAL ou COMPROVANTE (foto ou PDF). Em texto ou áudio, nota = null.",
+    "  'fornecedor' = a razão social de quem VENDEU (quem emitiu o documento), não a loja que comprou. 'documento' = o CNPJ do emitente.",
+    "  'valor_total' = o total do documento (em cupom fiscal é 'VALOR TOTAL' / 'VALOR A PAGAR'), não a soma que você calcular.",
+    "  'data' = a data de emissão. 'pago' = true quando o documento mostra que já foi pago (ex.: 'VALOR PAGO', 'FORMA PAGAMENTO',",
+    "  comprovante de PIX/cartão); false quando é a prazo/boleto/duplicata; null se não dá pra saber.",
+    "  'forma' = dinheiro | pix | credito | debito | boleto | transferencia, se o documento disser.",
+    "- Comprovante de pagamento SEM itens (PIX, maquininha) é válido: devolva itens e nao_encontrados vazios, ignorar=false e a 'nota' preenchida.",
     (pendentes.length || pendNovos.length)
       ? (jaLancado
         ? "- A LISTA ABAIXO JÁ FOI LANÇADA no estoque há pouco. Se a mensagem CORRIGE ou COMPLETA esses mesmos itens (ex.: 'faltou o preço', 'eram 40 e não 50', 'o pão custa 1,30'), corrige=true e devolva a lista COMPLETA já corrigida. Só é correção se mexer em quantidade, preço ou nome da MESMA compra. Saída (perda, vencimento, consumo, brinde), contagem, bonificação, devolução ou item/compra diferente NUNCA é correção: corrige=false e devolva SÓ o movimento novo. Papo sem relação: ignorar=true."
@@ -242,9 +264,27 @@ async function entenderTexto(
     const movN: Mov = ["entrada", "saida", "ajuste"].includes(String(x?.movimento)) ? x.movimento : "entrada"
     if (nome) naoAchados.push({ nome, quantidade: q, custo_unit: unit(x, q), unidade: un, estoque_minimo: num(x?.estoque_minimo), mov: movN })
   }
+  // Dados do documento. Só vale com fornecedor E total: sem os dois não dá pra
+  // montar uma despesa honesta, e meia despesa no financeiro é pior que nenhuma.
+  const n = parsed.nota
+  const totalNota = num(n?.valor_total)
+  const fornecedor = String(n?.fornecedor ?? "").trim().slice(0, 120)
+  const nota = (totalNota && fornecedor)
+    ? {
+      fornecedor,
+      documento: String(n?.documento ?? "").replace(/\D/g, "").slice(0, 14) || null,
+      valor_total: totalNota,
+      data: /^\d{4}-\d{2}-\d{2}$/.test(String(n?.data)) ? String(n.data) : null,
+      pago: typeof n?.pago === "boolean" ? n.pago : null,
+      forma: ["dinheiro", "pix", "credito", "debito", "boleto", "transferencia"].includes(String(n?.forma))
+        ? String(n.forma) : null,
+    }
+    : null
+
   return {
-    itens, naoAchados, custoUsd,
-    ignorar: parsed.ignorar === true && !itens.length && !naoAchados.length,
+    itens, naoAchados, custoUsd, nota,
+    // Comprovante sem item nenhum ainda é coisa pra fazer: vira só a despesa.
+    ignorar: parsed.ignorar === true && !itens.length && !naoAchados.length && !nota,
     pergunta: parsed.pergunta === true,
     corrige: parsed.corrige === true,
     produtosNovos: (Array.isArray(parsed.produtos_novos) ? parsed.produtos_novos : [])
@@ -280,10 +320,29 @@ async function lerNota(base64: string, mimetype: string, cat: Awaited<ReturnType
   const naoAchados: NaoAchado[] = (d.nao_encontrados ?? []).map((n: any) => ({
     nome: n.nome, quantidade: Number(n.quantidade) || 1, custo_unit: n.custo_unit ?? null, unidade: n.unidade || "un",
   }))
-  return { itens, naoAchados, aviso: d.aviso as string | null, custoUsd: usd({ entrada: d.uso?.entrada ?? 0, saida: d.uso?.saida ?? 0 }) }
+  // Fornecedor, total e forma de pagamento vêm da mesma leitura: quem está
+  // olhando a nota já tem isso na frente, e uma segunda chamada à IA só pra
+  // perguntar "de quem é essa nota?" seria pagar duas vezes pelo mesmo papel.
+  return {
+    itens, naoAchados, nota: (d.nota ?? null) as NotaLida,
+    aviso: d.aviso as string | null,
+    custoUsd: usd({ entrada: d.uso?.entrada ?? 0, saida: d.uso?.saida ?? 0 }),
+  }
 }
 
-function resumo(itens: Item[], naoAchados: NaoAchado[], corrige = false, info: Map<string, { saldo: number; custo: number }> = new Map()): string {
+// Como a despesa aparece na confirmação, antes do SIM. O lojista precisa ver o
+// que vai sair do caixa dele ANTES de confirmar, não descobrir depois.
+function linhaDespesa(nota: any, temItens: boolean): string | null {
+  if (!nota) return null
+  const quando = nota.data ? ddmmBR(nota.data) : "hoje"
+  const comoPagou = nota.forma ? ` (${ROTULO_FORMA[nota.forma] ?? nota.forma})` : ""
+  // Comprovante sem itens: a despesa é a mensagem inteira, não um "e também".
+  const abre = temItens ? "💸 E no financeiro," : "💸 Entendi este comprovante —"
+  return nota.pago === false
+    ? `${abre} conta *A PAGAR*: *${nota.fornecedor}* — ${brl(nota.valor_total)}, vence ${quando}.`
+    : `${abre} despesa *já paga*: *${nota.fornecedor}* — ${brl(nota.valor_total)} em ${quando}${comoPagou}.`
+}
+function resumo(itens: Item[], naoAchados: NaoAchado[], corrige = false, info: Map<string, { saldo: number; custo: number }> = new Map(), nota: any = null): string {
   let total = 0, temPreco = false, prejuizo = 0
   const linhas = itens.map((i) => {
     const mov = i.mov ?? "entrada", motivo = i.motivo ?? "compra", inf = info.get(i.id)
@@ -309,6 +368,8 @@ function resumo(itens: Item[], naoAchados: NaoAchado[], corrige = false, info: M
   if (linhas.length) partes.push(`${corrige ? "Corrigindo o último lançamento — vai ficar assim:" : titulo}\n${linhas.join("\n")}`)
   if (prejuizo > 0) partes.push(`💸 Vai entrar no financeiro como prejuízo: ${brl(prejuizo)}.`)
   if (temPreco) partes.push(`Total: ${brl(total)}`)
+  const despesa = linhaDespesa(nota, linhas.length > 0 || naoAchados.length > 0)
+  if (despesa) partes.push(despesa)
   if (naoAchados.length) {
     partes.push(`🆕 Não existem no cadastro — vou CRIAR como insumo:\n${naoAchados.map((n) => `• ${n.nome} × ${qtdTxt(n.quantidade)} ${n.unidade ?? "un"}${n.estoque_minimo != null ? ` (mínimo ${qtdTxt(n.estoque_minimo)})` : ""}${n.custo_unit ? ` — ${brl(n.custo_unit)}` : ""}`).join("\n")}`)
   }
@@ -387,6 +448,7 @@ async function lancar(empresaId: string, pend: any): Promise<string> {
   }
   // Perda e vencimento são prejuízo: entram em "imprevistos" do financeiro, como o "Produto perdido" do Portal.
   let prejuizo = 0
+  let contaId: string | null = null
   const hoje = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10)
   const imps: Record<string, unknown>[] = []
   linP.forEach((l, k) => { if (GERA_PREJUIZO.has(l.motivo) && l.valor > 0) { prejuizo += l.valor; imps.push({ empresa_id: empresaId, data: hoje, descricao: `${ROTULO[l.motivo]} (WhatsApp): ${l.i.nome} × ${qtdTxt(l.i.quantidade)}`, valor: l.valor, produto_id: l.i.id, quantidade: l.i.quantidade, estoque_movimento_id: idsP[k], registrado_por_nome: "WhatsApp" }) } })
@@ -407,14 +469,62 @@ async function lancar(empresaId: string, pend: any): Promise<string> {
       await sb.from(i.tipo === "produto" ? "produtos" : "materias_primas").update({ estoque_minimo: i.estoque_minimo }).eq("id", i.id).eq("empresa_id", empresaId)
     }
   }
+  // A COMPRA TAMBÉM É DINHEIRO SAINDO (23/10/2026)
+  //
+  // Até aqui a nota virava só movimento de estoque, e a loja comprava R$ 245,60
+  // de carne sem que isso aparecesse no financeiro — lucro do dia inflado.
+  //
+  // Só nota/cupom/comprovante gera despesa (é de lá que vêm fornecedor e total
+  // conferíveis). Compra falada não gera: "comprei 50 pães" não tem fornecedor
+  // nem total confiável, e despesa errada é pior do que despesa faltando.
+  //
+  // Pago ou a prazo não é chute: o documento diz. O cupom fiscal traz "VALOR
+  // PAGO" e a forma; nota a prazo não traz.
+  let despesa = ""
+  if (pend.nota?.fornecedor && Number(pend.nota?.valor_total) > 0) {
+    const n = pend.nota
+    const quando = /^\d{4}-\d{2}-\d{2}$/.test(String(n.data)) ? String(n.data) : hoje
+    const quitada = n.pago !== false      // null (não deu pra ler) conta como paga
+    try {
+      const { data: c, error } = await sb.from("contas_financeiras").insert({
+        empresa_id: empresaId, tipo: "pagar",
+        descricao: `Compra — ${n.fornecedor}`,
+        pessoa: n.fornecedor, categoria: "Fornecedores",
+        valor: n.valor_total, vencimento: quando, recorrencia: "nenhuma", origem: "whatsapp",
+      }).select("id").single()
+      if (error) throw error
+      contaId = c.id
+      if (quitada) {
+        const { error: eb } = await sb.from("contas_baixas").insert({
+          empresa_id: empresaId, conta_id: c.id, valor: n.valor_total,
+          data: quando, forma: n.forma ?? null, origem: "whatsapp",
+        })
+        if (eb) throw eb
+      }
+      despesa = quitada
+        ? `\n💸 Despesa lançada: *${n.fornecedor}* ${brl(n.valor_total)} — paga em ${ddmmBR(quando)}.`
+        : `\n💸 Conta a pagar: *${n.fornecedor}* ${brl(n.valor_total)}, vence ${ddmmBR(quando)}.`
+    } catch (e) {
+      // Estoque já entrou e está certo. Não dá pra desfazer tudo por causa da
+      // despesa, mas também não dá pra ficar calado: o lojista precisa saber
+      // que o financeiro ficou sem ela.
+      console.error("[estoque-wpp] despesa da nota:", e)
+      despesa = `\n⚠️ O estoque entrou, mas NÃO consegui lançar a despesa de ${brl(n.valor_total)} (${n.fornecedor}). Lance pelo Portal em Financeiro.`
+    }
+  }
+
   await sb.from("estoque_whatsapp").update({
-    status: "lancado", lancado_em: new Date().toISOString(), mov_produtos: idsP, mov_materias: idsM, imprevistos: idsImp,
+    status: "lancado", lancado_em: new Date().toISOString(), mov_produtos: idsP, mov_materias: idsM,
+    imprevistos: idsImp, conta_id: contaId,
   }).eq("id", pend.id)
   const feitos = linP.length + linM.length
   const novos = criados.length ? `\n🆕 Cadastrei como insumo: ${criados.join(", ")}.` : ""
   const prej = prejuizo > 0 ? `\n💸 Lançado como prejuízo no financeiro: ${brl(prejuizo)}.` : ""
   const ja = ignorados.length ? `\nℹ️ Já estava certo (sem ajuste): ${ignorados.join(", ")}.` : ""
-  return `✅ Lancei ${feitos} ${feitos === 1 ? "movimento" : "movimentos"} no estoque.${novos}${prej}${ja}\nSe foi engano, responda *DESFAZER*.`
+  const cabeca = feitos
+    ? `✅ Lancei ${feitos} ${feitos === 1 ? "movimento" : "movimentos"} no estoque.`
+    : "✅ Registrado."
+  return `${cabeca}${novos}${prej}${ja}${despesa}\nSe foi engano, responda *DESFAZER*.`
 }
 
 // Saldo atual e custo cadastrado dos itens (pra valorizar perda e calcular contagem).
@@ -1180,6 +1290,13 @@ async function tratar(req: Request): Promise<Response> {
       if (ult.imprevistos?.length) await sb.from("custos_imprevistos").delete().in("id", ult.imprevistos)
       if (ult.mov_produtos?.length) await sb.from("estoque_movimentos").delete().in("id", ult.mov_produtos)
       if (ult.mov_materias?.length) await sb.from("materia_prima_movimentos").delete().in("id", ult.mov_materias)
+      // A despesa da nota vai junto: desfazer o estoque e deixar a conta de pé
+      // deixaria o financeiro com uma compra que não existe mais. As baixas
+      // saem primeiro porque apontam pra conta.
+      if (ult.conta_id) {
+        await sb.from("contas_baixas").delete().eq("conta_id", ult.conta_id).eq("empresa_id", empresaId)
+        await sb.from("contas_financeiras").delete().eq("id", ult.conta_id).eq("empresa_id", empresaId)
+      }
       await sb.from("estoque_whatsapp").update({ status: "cancelado" }).eq("id", ult.id)
     }
     // Lança a lista pendente; se ela corrige um lançamento anterior, troca um pelo outro.
@@ -1282,7 +1399,7 @@ async function tratar(req: Request): Promise<Response> {
 
     const cat = await carregarCatalogo(empresaId)
     const base = pend ?? ultLancado     // a lista que a mensagem pode estar corrigindo
-    let resultado: { itens: Item[]; naoAchados: NaoAchado[]; ignorar?: boolean; pergunta?: boolean; corrige?: boolean; produtosNovos?: ProdutoNovo[]; minimos?: MinimoSolto[]; aviso?: string | null; custoUsd: number } | null = null
+    let resultado: { itens: Item[]; naoAchados: NaoAchado[]; ignorar?: boolean; pergunta?: boolean; corrige?: boolean; produtosNovos?: ProdutoNovo[]; minimos?: MinimoSolto[]; aviso?: string | null; custoUsd: number; nota?: NotaLida } | null = null
     let origem = "texto"
     let textoFalado = ""
 
@@ -1383,11 +1500,13 @@ Responda *SIM* para aplicar ou *NÃO* para cancelar.${aviso}`)
       return ok()
     }
     if (resultado.ignorar) return ok()                      // papo do grupo, não é compra
-    if (!resultado.itens.length && !resultado.naoAchados.length) {
+    if (!resultado.itens.length && !resultado.naoAchados.length && !resultado.nota) {
       if (origem === "texto") return ok()
       await enviar(instance, jid, "Não achei nenhum item nessa " + (origem === "audio" ? "fala" : "nota") + ".")
       return ok()
     }
+    // Comprovante de PIX ou de maquininha não tem item nenhum, e mesmo assim é
+    // dinheiro que saiu: segue adiante e vira só a despesa.
 
     // Saída e contagem só valem pra item que JÁ existe: o que não achou não vira insumo novo.
     const naoExiste = resultado.naoAchados.filter((n) => (n.mov ?? "entrada") !== "entrada")
@@ -1412,9 +1531,13 @@ Responda *SIM* para aplicar ou *NÃO* para cancelar.${aviso}`)
     await sb.from("estoque_whatsapp").insert({
       empresa_id: empresaId, grupo_jid: jid, status: "pendente", origem,
       itens: resultado.itens, nao_achados: resultado.naoAchados, substitui_id: substitui,
+      // Correção de um lançamento anterior não repete a despesa: a nota é a
+      // mesma, e lançar de novo dobraria a saída no financeiro.
+      nota: substitui ? null : resultado.nota,
     })
     const aviso = resultado.aviso ? `\n\n⚠️ ${resultado.aviso}` : ""
-    const textoResumo = resumo(resultado.itens, resultado.naoAchados, !!substitui, infoResumo) + aviso +
+    const nota = substitui ? null : resultado.nota
+    const textoResumo = resumo(resultado.itens, resultado.naoAchados, !!substitui, infoResumo, nota) + aviso +
       (naoExiste.length ? `\n\n⚠️ Não achei pra dar saída/contagem (ignorei): ${naoExiste.map((n) => n.nome).join(", ")}.` : "")
     const avisoCred = await cobrarUso(textoResumo)
     await enviar(instance, jid, textoResumo + avisoCred)
