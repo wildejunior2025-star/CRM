@@ -1425,11 +1425,13 @@ export default function WhatsAppConfig() {
                   onChange={(e) => setField('notif_entrada_estoque', e.target.checked)}
                 />
                 <div className="wa-checkbox-text">
-                  <span>Avisar quando alguém der ENTRADA no estoque</span>
+                  <span>Avisar quando mexerem no estoque (entrada e baixa)</span>
                   <small>
-                    Mensagem no seu número a cada entrada, com o nome de quem lançou, a
-                    quantidade e quanto ficou. Vale pro catálogo e pra ficha técnica.
-                    Quando a pessoa lança vários itens seguidos, vem tudo numa mensagem só.
+                    Mensagem no seu número com o nome de quem lançou, a quantidade e
+                    quanto tem agora. Na baixa vem também o motivo e o prejuízo.
+                    Venda não entra — só entrada e baixa feitas na mão. Vale pro catálogo
+                    e pra ficha técnica, e quando a pessoa lança vários itens seguidos
+                    vem tudo numa mensagem só.
                   </small>
                 </div>
               </label>
