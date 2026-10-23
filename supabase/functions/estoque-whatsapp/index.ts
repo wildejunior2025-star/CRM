@@ -336,11 +336,19 @@ function linhaDespesa(nota: any, temItens: boolean): string | null {
   if (!nota) return null
   const quando = nota.data ? ddmmBR(nota.data) : "hoje"
   const comoPagou = nota.forma ? ` (${ROTULO_FORMA[nota.forma] ?? nota.forma})` : ""
+  // VERBO NO FUTURO, SEMPRE (23/10/2026)
+  //
+  // Dizia "despesa *já paga*: VHB — R$ 245,60". O "já paga" falava do
+  // PAGAMENTO, mas o lojista do Agv Grill leu como "já lancei" — achou que
+  // estava pronto, não respondeu SIM, e a nota ficou pendente até vencer.
+  // Esta linha aparece ANTES do SIM: tem que soar como promessa, não como
+  // recibo. Quem anuncia o que já foi feito é a mensagem depois do SIM.
+  //
   // Comprovante sem itens: a despesa é a mensagem inteira, não um "e também".
-  const abre = temItens ? "💸 E no financeiro," : "💸 Entendi este comprovante —"
+  const abre = temItens ? "💸 E no financeiro, *vou lançar*" : "💸 Entendi este comprovante. *Vou lançar*"
   return nota.pago === false
-    ? `${abre} conta *A PAGAR*: *${nota.fornecedor}* — ${brl(nota.valor_total)}, vence ${quando}.`
-    : `${abre} despesa *já paga*: *${nota.fornecedor}* — ${brl(nota.valor_total)} em ${quando}${comoPagou}.`
+    ? `${abre} uma conta *A PAGAR*: *${nota.fornecedor}* — ${brl(nota.valor_total)}, vence ${quando}.`
+    : `${abre} uma despesa (já paga por você): *${nota.fornecedor}* — ${brl(nota.valor_total)} em ${quando}${comoPagou}.`
 }
 function resumo(itens: Item[], naoAchados: NaoAchado[], corrige = false, info: Map<string, { saldo: number; custo: number }> = new Map(), nota: any = null): string {
   let total = 0, temPreco = false, prejuizo = 0
@@ -1334,7 +1342,16 @@ async function tratar(req: Request): Promise<Response> {
         return ok()
       }
       if (!pend) return ok()
-      if (!(pend.itens ?? []).length && !(pend.nao_achados ?? []).length) {
+      // COMPROVANTE DE PIX NÃO TEM ITEM — E ISSO É NORMAL (23/10/2026)
+      //
+      // A instrução que o robô recebe já diz: "Comprovante de pagamento SEM
+      // itens (PIX, maquininha) é válido". Ele lia o comprovante do Agv Grill
+      // certinho (VHB Frios, R$ 245,60, pago em PIX), mostrava a despesa e
+      // pedia o SIM — e aqui o SIM jogava tudo no lixo por "não tem item",
+      // sem nem olhar a nota. A despesa nunca chegava no financeiro.
+      const temDespesa = !!String(pend.nota?.fornecedor ?? "").trim()
+        && Number(pend.nota?.valor_total) > 0
+      if (!temDespesa && !(pend.itens ?? []).length && !(pend.nao_achados ?? []).length) {
         await enviar(instance, jid, "Não tem nenhum item reconhecido pra lançar. Mande de novo o que comprou.")
         await sb.from("estoque_whatsapp").update({ status: "cancelado" }).eq("id", pend.id)
         return ok()
