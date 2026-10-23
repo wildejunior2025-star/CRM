@@ -42,8 +42,25 @@ const emptyForm = {
 // sair em grupos de três, que é como o próprio RustDesk mostra — assim dá pra
 // conferir de bate-pronto com o que está na tela do PC da loja.
 function agrupaId(id) {
-  return String(id ?? '').replace(/\D/g, '').replace(/(\d{3})(?=\d)/g, '$1 ')
+  // Grupos de três contados do fim: 9 dígitos "373 097 079", 10 dígitos "1 964 378 047".
+  return String(id ?? '').replace(/\D/g, '').replace(/\B(?=(\d{3})+$)/g, ' ')
 }
+
+// A loja pode ter mais de um PC com RustDesk (ex.: cozinha e frente). Guarda no
+// mesmo campo, "Cozinha=334701933;Frente=1964378047". Um ID puro, sem nome (o
+// formato antigo), continua valendo.
+function lerRustdesk(texto) {
+  return String(texto ?? '').split(/[;\n]/).map(s => s.trim()).filter(Boolean).map(s => {
+    const [rot, resto] = s.includes('=') ? [s.slice(0, s.indexOf('=')), s.slice(s.indexOf('=') + 1)] : [null, s]
+    // linha digitada na tela: "Frente: 1 964 378 047" ou "Frente 1964378047"
+    const m = rot === null ? resto.match(/^(.*?)[\s:=-]*((?:\d\s*){6,})$/) : null
+    const rotulo = (m ? m[1] : rot ?? '').trim()
+    const id = (m ? m[2] : resto).replace(/\D/g, '')
+    return { rotulo, id }
+  }).filter(x => x.id)
+}
+const gravarRustdesk = (texto) => lerRustdesk(texto).map(x => (x.rotulo ? `${x.rotulo}=${x.id}` : x.id)).join(';') || null
+const mostrarRustdesk = (valor) => lerRustdesk(valor).map(x => (x.rotulo ? `${x.rotulo}: ${agrupaId(x.id)}` : agrupaId(x.id))).join('\n')
 
 // Logo da loja no cartão (a mesma da Loja Online). Sem logo, ou com o link
 // quebrado, vira a inicial do nome na cor da loja.
@@ -134,8 +151,7 @@ export default function SuperAdminEmpresas() {
   // seguro e em alguns WebViews, então tem o caminho antigo como reserva —
   // esse botão é usado no celular, no meio de um problema, e não pode falhar
   // calado.
-  async function copiarRustdesk(emp) {
-    const id = String(emp.rustdesk_id ?? '').replace(/\D/g, '')
+  async function copiarRustdesk(emp, id) {
     if (!id) return
     try {
       await navigator.clipboard.writeText(id)
@@ -149,8 +165,9 @@ export default function SuperAdminEmpresas() {
       try { document.execCommand('copy') } catch { /* sem clipboard: o número está na tela */ }
       document.body.removeChild(campo)
     }
-    setCopiouRd(emp.id)
-    setTimeout(() => setCopiouRd(atual => (atual === emp.id ? null : atual)), 1800)
+    const chave = `${emp.id}:${id}`
+    setCopiouRd(chave)
+    setTimeout(() => setCopiouRd(atual => (atual === chave ? null : atual)), 1800)
   }
 
   async function cobrarEmpresa(emp) {
@@ -273,7 +290,7 @@ export default function SuperAdminEmpresas() {
       cor_primaria: empresa.cor_primaria ?? '#863bff',
       logo_url: empresa.logo_url ?? '',
       dominio_personalizado: empresa.dominio_personalizado ?? '',
-      rustdesk_id: empresa.rustdesk_id ?? '',
+      rustdesk_id: mostrarRustdesk(empresa.rustdesk_id),
       vencimento: empresa.vencimento ?? '',
       observacoes: empresa.observacoes ?? '',
     })
@@ -301,7 +318,7 @@ export default function SuperAdminEmpresas() {
       dominio_personalizado: form.dominio_personalizado || null,
       // O RustDesk mostra o ID em grupos de tres ("373 097 079"), mas so aceita
       // os digitos na hora de conectar. Guarda limpo e a tela reagrupa.
-      rustdesk_id: form.rustdesk_id.replace(/\D/g, '') || null,
+      rustdesk_id: gravarRustdesk(form.rustdesk_id),
       vencimento: form.vencimento || null,
       observacoes: form.observacoes || null,
     }
@@ -604,14 +621,14 @@ export default function SuperAdminEmpresas() {
                   )}
                 </div>
 
-                {emp.rustdesk_id && (
-                  <button type="button" className="emp-remoto" onClick={() => copiarRustdesk(emp)}
+                {lerRustdesk(emp.rustdesk_id).map(rd => (
+                  <button key={rd.id} type="button" className="emp-remoto" onClick={() => copiarRustdesk(emp, rd.id)}
                     title="Copiar o ID pra colar no RustDesk">
-                    <span className="emp-remoto-rotulo">Acesso remoto</span>
-                    <strong>{agrupaId(emp.rustdesk_id)}</strong>
-                    <span className="emp-remoto-copiar">{copiouRd === emp.id ? 'copiado ✓' : 'copiar'}</span>
+                    <span className="emp-remoto-rotulo">{rd.rotulo ? `Acesso remoto · ${rd.rotulo}` : 'Acesso remoto'}</span>
+                    <strong>{agrupaId(rd.id)}</strong>
+                    <span className="emp-remoto-copiar">{copiouRd === `${emp.id}:${rd.id}` ? 'copiado ✓' : 'copiar'}</span>
                   </button>
-                )}
+                ))}
 
                 <div className="emp-acoes">
                   <button className="btn btn-primary emp-acessar" disabled={savingId === emp.id} onClick={() => acessarEmpresa(emp)}>
@@ -738,16 +755,17 @@ export default function SuperAdminEmpresas() {
 
                 <div className="form-field full">
                   <label>Acesso remoto · ID do RustDesk</label>
-                  <input
+                  <textarea
                     name="rustdesk_id"
                     value={form.rustdesk_id}
                     onChange={handleChange}
-                    inputMode="numeric"
-                    placeholder="373 097 079"
+                    rows={2}
+                    placeholder={'Cozinha: 373 097 079\nFrente: 1 964 378 047'}
                   />
                   <small style={{ color: 'var(--text-muted)' }}>
-                    O número que aparece no RustDesk do PC da loja. Fica no cartão
-                    dela com botão de copiar.
+                    O número que aparece no RustDesk do PC da loja. Um PC por linha,
+                    com o nome na frente (Cozinha, Frente...). Cada um vira um botão
+                    de copiar no cartão da loja.
                   </small>
                 </div>
 
