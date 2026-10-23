@@ -535,6 +535,32 @@ async function lancar(empresaId: string, pend: any): Promise<string> {
   return `${cabeca}${novos}${prej}${ja}${despesa}\nSe foi engano, responda *DESFAZER*.`
 }
 
+// SIM OU NÃO SEM NADA ESPERANDO (23/10/2026)
+//
+// Antes o robô ficava CALADO. O dono do Agv Grill respondeu SIM depois da
+// pendência já ter sido resolvida e não recebeu nada de volta — e não tinha
+// como saber se tinha lançado, se tinha duplicado, ou se o robô morreu.
+// Silêncio é o pior erro deste robô: já parecia quebrado quando negava em
+// silêncio quem não podia ativar.
+//
+// Quando existe um lançamento recente, dizer QUAL foi mata a dúvida de uma vez.
+// SIM e NÃO são grátis, então responder não custa nada pra ninguém.
+async function nadaPraConfirmar(empresaId: string, jid: string): Promise<string> {
+  const { data: ult } = await sb.from("estoque_whatsapp").select("nota, lancado_em")
+    .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "lancado")
+    .gte("lancado_em", new Date(Date.now() - 6 * 3600 * 1000).toISOString())
+    .order("lancado_em", { ascending: false }).limit(1).maybeSingle()
+  if (!ult) return "Não tem nada esperando confirmação agora. Mande a compra ou a foto da nota que eu preparo a lista."
+  const n: any = ult.nota
+  const hora = new Date(ult.lancado_em as string).toLocaleTimeString("pt-BR", {
+    timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit",
+  })
+  const qual = n?.fornecedor && Number(n?.valor_total) > 0
+    ? ` O último foi *${n.fornecedor}* — ${brl(n.valor_total)}, lançado às ${hora}.`
+    : ` O último lançamento foi às ${hora}.`
+  return `Não tem nada esperando confirmação agora.${qual}\nNada foi lançado em dobro. Se quiser desfazer, responda *DESFAZER*.`
+}
+
 // Saldo atual e custo cadastrado dos itens (pra valorizar perda e calcular contagem).
 async function infoDosItens(empresaId: string, ids: string[]): Promise<Map<string, { saldo: number; custo: number }>> {
   const out = new Map<string, { saldo: number; custo: number }>()
@@ -1341,7 +1367,7 @@ async function tratar(req: Request): Promise<Response> {
         }
         return ok()
       }
-      if (!pend) return ok()
+      if (!pend) { await enviar(instance, jid, await nadaPraConfirmar(empresaId, jid)); return ok() }
       // COMPROVANTE DE PIX NÃO TEM ITEM — E ISSO É NORMAL (23/10/2026)
       //
       // A instrução que o robô recebe já diz: "Comprovante de pagamento SEM
@@ -1370,7 +1396,7 @@ async function tratar(req: Request): Promise<Response> {
         await enviar(instance, jid, "Cancelado. Nada foi alterado.")
         return ok()
       }
-      if (!pend) return ok()
+      if (!pend) { await enviar(instance, jid, await nadaPraConfirmar(empresaId, jid)); return ok() }
       await sb.from("estoque_whatsapp").update({ status: "cancelado" }).eq("id", pend.id)
       await enviar(instance, jid, "Cancelado. Nada foi lançado.")
       return ok()
