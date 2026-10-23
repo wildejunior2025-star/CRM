@@ -150,6 +150,7 @@ const emptyForm = {
   custo_pct_venda: '',
   codigo_barras: '',
   preco_venda: 0,
+  vendido_por_peso: false,
   preco_promocional: '',
   destaque: false,
   preco_app: 0,
@@ -1046,6 +1047,7 @@ export default function Produtos() {
       custo_pct_venda: produto.custo_pct_venda ?? '',
       codigo_barras: produto.codigo_barras ?? '',
       preco_venda: produto.preco_venda ?? 0,
+      vendido_por_peso: !!produto.vendido_por_peso,
       preco_promocional: produto.preco_promocional ?? '',
       destaque: !!produto.destaque,
       preco_app: produto.preco_app ?? 0,
@@ -1266,6 +1268,7 @@ export default function Produtos() {
         ? Math.max(0, Math.min(100, Number(form.custo_pct_venda) || 0))
         : null,
       preco_venda: Number(form.preco_venda) || 0,
+      vendido_por_peso: !!form.vendido_por_peso,
       // Vazio, zero ou maior/igual ao preço = SEM promoção. Guardar um valor que
       // não é menor riscaria o preço e mostraria outro igual do lado (e o banco
       // recusa, mig 0202).
@@ -2138,6 +2141,22 @@ export default function Produtos() {
                     </span>
                   </label>
                   <CampoDinheiro name="preco_venda" value={form.preco_venda} onChange={handleChange} />
+                  {/* VENDIDO POR QUILO (23/10/2026, Agv Grill)
+                      Almoço no peso: o preço cadastrado passa a ser o do QUILO e a
+                      quantidade da linha vira o peso que a balança mandou. Mora
+                      colado no preço de propósito — é o preço que muda de
+                      significado, e marcar isso longe dele seria pegadinha. */}
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8,
+                    cursor: 'pointer', fontSize: 13 }}>
+                    <input type="checkbox" name="vendido_por_peso" checked={!!form.vendido_por_peso}
+                      onChange={handleChange} style={{ width: 16, height: 16, cursor: 'pointer' }} />
+                    <span>
+                      <strong>Vendido por quilo</strong>{' '}
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        (o preço acima passa a ser por <strong>kg</strong>, e o peso vem da balança)
+                      </span>
+                    </span>
+                  </label>
                 </div>
 
                 <div className="form-field">

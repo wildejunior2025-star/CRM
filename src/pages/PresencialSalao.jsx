@@ -16,6 +16,7 @@ import { clienteComMesmoNome } from '../lib/clientes'
 import ClientePicker from '../components/ClientePicker'
 import ClientesFiado from './ClientesFiado'
 import ConsumoFuncionario from '../components/ConsumoFuncionario'
+import PesarNaBalanca from '../components/PesarNaBalanca'
 import { imprimirHtml, montarContaPresencialHtml, montarPixQrHtml, aparelhoMovel } from '../utils/imprimirCupom'
 import '../components/Page.css'
 import './PresencialSalao.css'
@@ -209,6 +210,11 @@ export default function PresencialSalao() {
   // pro cliente que pede em pé no balcão. Número zera todo dia. Ligado por loja.
   const [comandaBalcaoAtiva, setComandaBalcaoAtiva] = useState(false)
   const [abrindoComanda, setAbrindoComanda] = useState(false)
+  // Balanca: a tela de pesar e separada do lancamento da mesa (ver
+  // PesarNaBalanca.jsx). O botao so aparece em loja que tem produto marcado
+  // como vendido por quilo — nas outras seria um botao a mais atrapalhando.
+  const [balancaAberta, setBalancaAberta] = useState(false)
+  const [vendePorPeso, setVendePorPeso] = useState(false)
   const [produtosTodos, setProdutosTodos] = useState([])
   const [catInfo, setCatInfo] = useState({})  // { categoria: {hora_inicio, hora_fim, dias_semana} }
   // Categoria com horário (Happy Hour) some da tela do atendente quando a
@@ -406,6 +412,15 @@ export default function PresencialSalao() {
     for (const a of (data ?? [])) (m[a.comanda_id] ??= []).push(a)
     setAdiantamentos(m)
   }, [])
+
+  // Uma consulta so, na abertura: existe algum produto por quilo? E so isso
+  // que decide se o botao da balanca aparece.
+  useEffect(() => {
+    if (!empresaId) return
+    supabase.from('produtos').select('id')
+      .eq('empresa_id', empresaId).eq('vendido_por_peso', true).eq('ativo', true).limit(1)
+      .then(({ data }) => setVendePorPeso((data ?? []).length > 0))
+  }, [empresaId])
 
   const loadMesas = useCallback(async () => {
     if (!empresaId) return
@@ -2906,6 +2921,20 @@ export default function PresencialSalao() {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))', gap: 7 }}>
+          {/* Balança: pesa primeiro, escolhe a mesa depois — o cliente chega com o
+              prato quente na mão e perguntar a mesa antes trava a fila. */}
+          {vendePorPeso && (
+            <div role="button" tabIndex={0} onClick={() => setBalancaAberta(true)}
+              onKeyDown={ev => { if (ev.key === 'Enter') setBalancaAberta(true) }}
+              style={{
+                borderRadius: 9, padding: '7px 8px', cursor: 'pointer', textAlign: 'center',
+                border: '1.5px dashed #16a34a', background: 'rgba(22,163,74,.08)',
+                color: '#16a34a', display: 'flex', flexDirection: 'column', justifyContent: 'center',
+              }}>
+              <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>⚖️</div>
+              <div style={{ fontSize: 10.5, fontWeight: 800, marginTop: 3 }}>No peso</div>
+            </div>
+          )}
           {/* Comandas de balcão: nascem no botão, vêm antes das mesas e somem ao fechar. */}
           {comandaBalcaoAtiva && (
             <div role="button" tabIndex={0} onClick={criarComandaBalcao}
@@ -4681,6 +4710,19 @@ export default function PresencialSalao() {
         </div>
       )}
       {avisoConfirmar}
+
+      {balancaAberta && (
+        <PesarNaBalanca
+          empresaId={empresaId}
+          mesas={mesas}
+          comandaPorMesa={comandaPorMesa}
+          userId={user?.id}
+          exigeCaixa={exigeCaixa}
+          caixaAberto={caixaAberto}
+          onFechar={() => setBalancaAberta(false)}
+          onLancou={loadMesas}
+        />
+      )}
 
       {avisoPix && (
         <AvisoPix
