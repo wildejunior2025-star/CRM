@@ -193,7 +193,9 @@
 .cpr-escondidas {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* Colado no texto, e não jogado na outra ponta: no monitor largo o botão
+     ficava a meio metro do aviso e parecia de outra coisa. */
+  justify-content: flex-start;
   gap: 12px;
   flex-wrap: wrap;
   margin: 0 0 10px;
