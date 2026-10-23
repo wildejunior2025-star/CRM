@@ -432,10 +432,15 @@ function imprimirBytes(bytes, nome, printerOverride) {
   const tmp = path.join(os.tmpdir(), 'fwc-' + (nome || 'doc') + '.bin')
   try { fs.writeFileSync(tmp, bytes) } catch (e) { log('  -> ERRO gravar tmp: ' + e.message); return false }
 
+  // TODOS os envios têm LIMITE DE TEMPO. Eram spawnSync sem limite: impressora
+  // de rede que trava (O Braseiro 20/10, Mickey 22/10) segurava o app inteiro
+  // esperando: sem imprimir, sem reportar saúde, sem avisar. Só voltava depois
+  // de desligar e ligar a impressora. Agora o envio desiste em 25 s e o app
+  // segue vivo, pra o alerta de impressora travada conseguir avisar.
   // Método 1: WritePrinter via PowerShell/C# (funciona na maioria dos PCs).
   let ok = false
   try {
-    const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', PS1_FILE, '-Printer', printer, '-File', tmp], { encoding: 'utf8', windowsHide: true })
+    const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', PS1_FILE, '-Printer', printer, '-File', tmp], { encoding: 'utf8', windowsHide: true, timeout: 25000 })
     const out = ((r.stdout || '') + (r.stderr || '')).replace(/\s+/g, ' ').trim()
     ok = /(^|\W)OK(\W|$)/.test(r.stdout || '') && !/erro|error|falha|80070002/i.test(out)
     log('  -> metodo1 ' + (nome || '') + ': ' + (ok ? 'OK' : 'FALHOU') + ' [' + out.slice(0, 110) + ']')
@@ -446,8 +451,8 @@ function imprimirBytes(bytes, nome, printerOverride) {
   if (!ok) {
     try {
       const share = 'FWC' + String(printer).replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase()
-      spawnSync('rundll32', ['printui.dll,PrintUIEntry', '/Xs', '/n', printer, 'attributes', '+shared', 'sharename', share], { windowsHide: true })
-      const r2 = spawnSync('cmd', ['/c', 'copy', '/b', tmp, '\\\\localhost\\' + share], { encoding: 'utf8', windowsHide: true })
+      spawnSync('rundll32', ['printui.dll,PrintUIEntry', '/Xs', '/n', printer, 'attributes', '+shared', 'sharename', share], { windowsHide: true, timeout: 15000 })
+      const r2 = spawnSync('cmd', ['/c', 'copy', '/b', tmp, '\\\\localhost\\' + share], { encoding: 'utf8', windowsHide: true, timeout: 25000 })
       const out2 = ((r2.stdout || '') + (r2.stderr || '')).replace(/\s+/g, ' ').trim()
       ok = r2.status === 0 && !/0 arquivo|0 file/i.test(out2)
       log('  -> metodo2 (cmd/share) ' + (nome || '') + ': ' + (ok ? 'OK' : 'FALHOU') + ' [' + out2.slice(0, 110) + ']')
