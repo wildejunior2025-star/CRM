@@ -132,13 +132,18 @@ begin
   ),
   -- So loja com o aviso ligado, com numero e com WhatsApp conectado.
   validas as (
-    select pe.*, wc.admin_phone, wc.instance_name, e.nome as loja
+    select pe.*, wc.admin_phone, e.nome as loja,
+           -- Loja sem zap proprio conectado cai no numero da FWC, que o dono
+           -- ja tem salvo como suporte. Quando ela conectar, volta a sair
+           -- pelo numero dela sozinho, sem mexer em nada aqui.
+           coalesce(nullif(trim(wc.instance_name), ''),
+                    (select valor from config_global where chave = 'admin_sender_instance'),
+                    'crmadmin') as instance_name
       from pendentes pe
       join whatsapp_config wc on wc.empresa_id = pe.empresa_id
       join empresas e on e.id = pe.empresa_id
      where wc.notif_entrada_estoque
        and coalesce(trim(wc.admin_phone), '') <> ''
-       and coalesce(trim(wc.instance_name), '') <> ''
   ),
   -- Uma mensagem por pessoa: o lote inteiro que ela acabou de lancar.
   agrupado as (
@@ -177,16 +182,14 @@ begin
      and m.created_at > now() - interval '2 days'
      and exists (select 1 from whatsapp_config wc
                   where wc.empresa_id = m.empresa_id and wc.notif_entrada_estoque
-                    and coalesce(trim(wc.admin_phone), '') <> ''
-                    and coalesce(trim(wc.instance_name), '') <> '');
+                    and coalesce(trim(wc.admin_phone), '') <> '');
 
   update materia_prima_movimentos m set avisado_em = now()
    where m.tipo = 'entrada' and m.avisado_em is null
      and m.created_at > now() - interval '2 days'
      and exists (select 1 from whatsapp_config wc
                   where wc.empresa_id = m.empresa_id and wc.notif_entrada_estoque
-                    and coalesce(trim(wc.admin_phone), '') <> ''
-                    and coalesce(trim(wc.instance_name), '') <> '');
+                    and coalesce(trim(wc.admin_phone), '') <> '');
 
   return v_saida;
 end;
@@ -228,13 +231,18 @@ as $previa$
        and m.created_at > now() - interval '2 days'
   ),
   validas as (
-    select pe.*, wc.admin_phone, wc.instance_name, e.nome as loja
+    select pe.*, wc.admin_phone, e.nome as loja,
+           -- Loja sem zap proprio conectado cai no numero da FWC, que o dono
+           -- ja tem salvo como suporte. Quando ela conectar, volta a sair
+           -- pelo numero dela sozinho, sem mexer em nada aqui.
+           coalesce(nullif(trim(wc.instance_name), ''),
+                    (select valor from config_global where chave = 'admin_sender_instance'),
+                    'crmadmin') as instance_name
       from pendentes pe
       join whatsapp_config wc on wc.empresa_id = pe.empresa_id
       join empresas e on e.id = pe.empresa_id
      where wc.notif_entrada_estoque
        and coalesce(trim(wc.admin_phone), '') <> ''
-       and coalesce(trim(wc.instance_name), '') <> ''
   ),
   agrupado as (
     select v.empresa_id, v.created_by, v.admin_phone, v.instance_name, v.loja,
