@@ -43,11 +43,27 @@ type NaoAchado = { nome: string; quantidade: number; custo_unit: number | null; 
 type NotaLida = {
   fornecedor: string
   documento: string | null
+  numero?: string | null      // número da NF-e, quando aparece
   valor_total: number
-  data: string | null
+  data: string | null         // emissão
+  vencimento?: string | null  // quando é a prazo (boleto, duplicata, fatura)
   pago: boolean | null        // null = o documento não deixou claro
   forma: string | null
 } | null
+
+// ESTOQUE PELO ROBÔ: EM PAUSA (23/10/2026)
+//
+// Decisão do Wilde. A entrada de estoque pelo gestor já avisa o dono no
+// WhatsApp (mig 0370-0374) — quem lança vê a tela, e o dono recebe o resumo
+// com quem foi, quanto entrou e quanto ficou. O robô fazendo a mesma coisa por
+// foto só acrescenta o erro de leitura da IA: ela chuta a quantidade e o
+// casamento do item, e quando erra ninguém percebe até a contagem.
+//
+// O que ela NÃO chuta é o total do documento e o fornecedor — por isso o lado
+// financeiro fica, e é só ele que fica.
+//
+// Ligar de novo é trocar pra true: o código do estoque continua inteiro aqui.
+const ESTOQUE_PELO_ROBO = false
 // Motivos (mesmos do Portal > Estoque). Perda e vencimento viram prejuízo (imprevisto) no financeiro.
 const MOTIVOS: Record<Mov, string[]> = {
   entrada: ["compra", "devolucao", "bonificacao"],
@@ -535,6 +551,78 @@ async function lancar(empresaId: string, pend: any): Promise<string> {
   return `${cabeca}${novos}${prej}${ja}${despesa}\nSe foi engano, responda *DESFAZER*.`
 }
 
+// NOTA → CONTA NO FINANCEIRO, NA HORA (23/10/2026)
+//
+// Enquanto o estoque pelo robô está em pausa, a nota vira SÓ dinheiro. E vira
+// na hora, sem pedir SIM: o fornecedor e o total saem impressos do documento,
+// não são chute da IA, e a espera pelo SIM foi justamente o que fez a loja
+// achar que não tinha salvo e mandar a mesma nota de novo (duplicou).
+//
+// Paga ou a prazo não é chute: o documento diz. Cupom e comprovante trazem
+// "VALOR PAGO"/forma; nota a prazo traz boleto, duplicata ou fatura — e dessa
+// a gente tira o VENCIMENTO, senão a conta nasce invisível pro alerta.
+async function contaDaNota(empresaId: string, jid: string, nota: NonNullable<NotaLida>, origem: string): Promise<string> {
+  const hoje = hojeBRT()
+  const emissao = /^\d{4}-\d{2}-\d{2}$/.test(String(nota.data)) ? String(nota.data) : hoje
+  const quitada = nota.pago !== false            // null (não deu pra ler) conta como paga
+  const vence = quitada ? emissao
+    : (/^\d{4}-\d{2}-\d{2}$/.test(String(nota.vencimento)) ? String(nota.vencimento) : emissao)
+
+  // Já entrou? Mesmo fornecedor, total e data é a mesma nota na prática.
+  const { data: iguais } = await sb.from("contas_financeiras")
+    .select("id, created_at, valor_pago")
+    .eq("empresa_id", empresaId).eq("pessoa", nota.fornecedor).eq("valor", nota.valor_total)
+    .eq("vencimento", vence).limit(1)
+  if (iguais?.length) {
+    const hora = new Date(iguais[0].created_at).toLocaleTimeString("pt-BR", {
+      timeZone: "America/Fortaleza", hour: "2-digit", minute: "2-digit",
+    })
+    return `🚨 *Essa nota já está registrada.*\n*${nota.fornecedor}* — ${brl(nota.valor_total)}, lançada hoje às ${hora}.\n\nConfira no Portal: *Financeiro › Contas a pagar e receber*.\nNão lancei de novo pra não duplicar.`
+  }
+
+  const numero = nota.numero ? ` (NF ${nota.numero})` : ""
+  const { data: c, error } = await sb.from("contas_financeiras").insert({
+    empresa_id: empresaId, tipo: "pagar",
+    descricao: `Compra — ${nota.fornecedor}${numero}`,
+    pessoa: nota.fornecedor, categoria: "Fornecedores",
+    valor: nota.valor_total, vencimento: vence, recorrencia: "nenhuma", origem: "whatsapp",
+  }).select("id").single()
+  if (error) {
+    console.error("[estoque-wpp] conta da nota:", error)
+    return `❌ Não consegui registrar a despesa de ${brl(nota.valor_total)} (${nota.fornecedor}). Tente de novo, ou lance pelo Portal em Financeiro.`
+  }
+
+  if (quitada) {
+    const { error: eb } = await sb.from("contas_baixas").insert({
+      empresa_id: empresaId, conta_id: c.id, valor: nota.valor_total,
+      data: emissao, forma: nota.forma ?? null, origem: "whatsapp",
+    })
+    if (eb) console.error("[estoque-wpp] baixa da nota:", eb)
+  }
+
+  // Guarda pro DESFAZER: é a mesma trilha que o lançamento de estoque usava.
+  await sb.from("estoque_whatsapp").insert({
+    empresa_id: empresaId, grupo_jid: jid, status: "lancado", origem,
+    itens: [], nao_achados: [], nota, conta_id: c.id, lancado_em: new Date().toISOString(),
+  }).then(() => {}, () => {})
+
+  const forma = nota.forma ? ` (${ROTULO_FORMA[nota.forma] ?? nota.forma})` : ""
+  return quitada
+    ? `🟢 *Despesa registrada*\n\n` +
+      `🏪 Fornecedor: *${nota.fornecedor}*\n` +
+      `💸 Valor: *${brl(nota.valor_total)}*\n` +
+      `📆 Pago em: ${ddmmBR(emissao)}${forma}\n` +
+      `📊 Categoria: Fornecedores${nota.numero ? `\n🧾 Nota: ${nota.numero}` : ""}\n\n` +
+      `Se foi engano, responda *DESFAZER*.`
+    : `🟠 *Conta a pagar registrada*\n\n` +
+      `🏪 Fornecedor: *${nota.fornecedor}*\n` +
+      `💸 Valor: *${brl(nota.valor_total)}*\n` +
+      `📆 Vence em: *${ddmmBR(vence)}*\n` +
+      `📊 Categoria: Fornecedores${nota.numero ? `\n🧾 Nota: ${nota.numero}` : ""}\n\n` +
+      `Quando pagar, me diga *"paguei ${nota.fornecedor.split(/\s+/)[0]}"* que eu dou baixa.\n` +
+      `Se foi engano, responda *DESFAZER*.`
+}
+
 // SIM OU NÃO SEM NADA ESPERANDO (23/10/2026)
 //
 // Antes o robô ficava CALADO. O dono do Agv Grill respondeu SIM depois da
@@ -783,19 +871,22 @@ async function comandoEstoque(t: string, empresaId: string): Promise<string[] | 
 }
 
 // ── Ajuda e comandos fixos do Analista (SEM IA, custo zero) ─────────────────
-const AJUDA_ASSISTENTE = `🤖 *Assistente — o que eu faço aqui*
+const AJUDA_ASSISTENTE = `🤖 *Assistente — o dinheiro da loja*
 
-📥 *Entrada*: "comprei 20 kg de queijo a 30" · "bonificação 5 queijo" · "devolução 2 coca" · ou mande a foto/PDF da nota, ou fale em áudio
-📤 *Saída*: "perda 3 queijo" · "venceu 2 pão" · "consumo 1 hambúrguer" · "brinde 1 coca"
-🔢 *Contagem*: "contei 18 queijo" (eu ajusto a diferença)
-🆕 *Cadastro*: "cadastra Coca 2L por 12, tenho 20, custo 5, mínimo 6"
-⚠️ *Mínimo*: "pão mínimo 50"
-🧾 *Contas*: "paguei 80 de gás" · "recebi 200 do João" · "a pagar luz 350 dia 28" · "a receber João 200 dia 30" · "a pagar internet 119,90 todo mês dia 15"
+🧾 *Foto ou PDF da nota*: eu registro a despesa na hora. Se for a prazo (boleto, duplicata), vira *conta a pagar* com o vencimento certo.
 
-🔎 *Consultas*: "o que está acabando?" · "lista o estoque" · "estoque de bebidas" · "estoque de insumos" · "tem pão?"
+💸 *Já paguei*: "paguei 80 de gás" · "paguei 505,60 pra TMC"
+📅 *Vou pagar*: "a pagar luz 350 dia 28" · "a pagar internet 119,90 todo mês dia 15"
+💰 *Recebi*: "recebi 200 do João"
+📆 *Vou receber*: "a receber João 200 dia 30"
+✅ *Dar baixa*: "paguei a TMC" (acho a conta em aberto parecida)
 
-💳 *Cada comando gasta 1 crédito* (nota ou foto = 3). *SIM, NÃO, DESFAZER e ajuda são grátis.*
-Antes de lançar eu mostro e espero *SIM*. *DESFAZER* tira o último lançamento (até 3 h).`
+🔎 *Consultas* (grátis): "o que está acabando?" · "lista o estoque" · "tem pão?"
+
+📦 *Estoque está pausado por aqui* — lance pelo sistema, em *Catálogo* → *Entrada* / *Baixa*. O dono recebe o aviso no WhatsApp na hora.
+
+💳 *Cada comando gasta 1 crédito* (foto/PDF = 3). *SIM, NÃO, DESFAZER e ajuda são grátis.*
+*DESFAZER* tira o último lançamento (até 3 h).`
 
 const AJUDA_ANALISTA = `📊 *Analista — o que eu faço aqui*
 
@@ -1520,6 +1611,38 @@ async function tratar(req: Request): Promise<Response> {
       }
       const resta = Number(saldoDepois)
       return !error && resta <= 20 ? `\n\n⚠️ Restam *${resta}* créditos. Compre mais no Portal pra não ficar sem.` : ""
+    }
+
+    // ═══ ESTOQUE EM PAUSA: A NOTA VIRA SÓ DINHEIRO (23/10/2026) ═══
+    // Foto/PDF: registra a despesa na hora. Fornecedor e total vêm impressos
+    // no documento — não são chute da IA — então não há o que confirmar, e foi
+    // a espera pelo SIM que fez a loja mandar a mesma nota duas vezes.
+    if (!ESTOQUE_PELO_ROBO && (origem === "foto" || origem === "pdf")) {
+      const n = resultado.nota
+      if (!n?.fornecedor || !(Number(n.valor_total) > 0)) {
+        const avisoC = await cobrarUso("(não achei fornecedor e total)")
+        await enviar(instance, jid,
+          "Li o documento, mas não achei o *fornecedor* e o *valor total* juntos — sem os dois eu não registro, pra não entrar despesa errada.\n\n" +
+          "Manda uma foto mais nítida, ou me escreve: *\"paguei 505,60 pra TMC\"* (ou *\"a pagar TMC 505,60 dia 30\"*)." + avisoC)
+        return ok()
+      }
+      const cartao = await contaDaNota(empresaId, jid, n, origem)
+      const avisoC = await cobrarUso(cartao)
+      await enviar(instance, jid, cartao + avisoC)
+      return ok()
+    }
+    // Texto/áudio de estoque: o lugar disso agora é o sistema, que já avisa o
+    // dono no WhatsApp a cada entrada e baixa. Não cobra crédito: não preparou
+    // nada, e cobrar por "não faço mais isso" seria roubo.
+    if (!ESTOQUE_PELO_ROBO && (resultado.itens.length || resultado.naoAchados.length
+        || resultado.produtosNovos?.length || resultado.minimos?.length)) {
+      await enviar(instance, jid,
+        "📦 Lançar estoque por aqui está *pausado*.\n\n" +
+        "Faça pelo sistema: *Catálogo* → botão *Entrada* ou *Baixa* no item. " +
+        "O dono recebe um aviso no WhatsApp na hora, com quem lançou, a quantidade e quanto ficou.\n\n" +
+        "Aqui comigo o que vale agora é *dinheiro*: me manda a *foto da nota* ou escreve " +
+        "*\"paguei 80 de gás\"*, *\"a pagar luz 350 dia 28\"*, *\"recebi 200 do João\"*.")
+      return ok()
     }
 
     // Só definir estoque mínimo de item que já existe ("pão brioche mínimo 50"): proposta com SIM.

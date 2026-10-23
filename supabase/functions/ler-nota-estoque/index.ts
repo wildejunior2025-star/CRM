@@ -63,7 +63,7 @@ serve(async (req) => {
       "{",
       '  "itens": [ { "indice": number, "descricao": string, "quantidade": number, "custo_unit": number | null, "total_linha": number | null } ],',
       '  "nao_encontrados": [ { "nome": string, "descricao": string, "quantidade": number, "custo_unit": number | null, "total_linha": number | null, "unidade": "kg"|"g"|"L"|"ml"|"un" } ],',
-      '  "nota": { "fornecedor": string|null, "documento": string|null, "valor_total": number|null, "data": "AAAA-MM-DD"|null, "pago": boolean|null, "forma": "dinheiro"|"pix"|"credito"|"debito"|"boleto"|"transferencia"|null }',
+      '  "nota": { "fornecedor": string|null, "documento": string|null, "numero": string|null, "valor_total": number|null, "data": "AAAA-MM-DD"|null, "vencimento": "AAAA-MM-DD"|null, "pago": boolean|null, "forma": "dinheiro"|"pix"|"credito"|"debito"|"boleto"|"transferencia"|null }',
       "}",
       "",
       "Regras:",
@@ -103,6 +103,12 @@ serve(async (req) => {
       "  'pago' = true quando o documento mostra pagamento feito ('VALOR PAGO', 'FORMA PAGAMENTO', comprovante de",
       "  PIX/cartao); false quando e a prazo (boleto, duplicata, 'a pagar'); null se nao der pra saber.",
       "  'forma' = como foi pago, se disser. Nao souber um campo: null. Nunca invente.",
+      // Nota a prazo vira CONTA A PAGAR, e conta a pagar sem vencimento nao
+      // serve pra nada: nao entra no "vence em 7 dias" nem no alerta de atraso.
+      "  'vencimento' = a data em que a loja PRECISA PAGAR, quando a nota e a prazo. Procure em FATURA,",
+      "  DUPLICATA, VENCIMENTO, 'VENC', ou no bloco de cobranca ('PRAZO PAGTO: 07 DIAS' conta a partir da",
+      "  emissao). Varias parcelas: use a data da PRIMEIRA. Nota ja paga ou sem data: null.",
+      "  'numero' = o numero da nota fiscal (o 'No.' da NF-e), se aparecer.",
       "- 'descricao' = o texto da linha COMO ESTÁ NA NOTA, abreviação e tudo (ex.: 'B MAIZN ESTRL 307G').",
       "  É o que a loja vê pra conferir se você casou com o item certo. Vale pra TODO item de 'itens'.",
       "",
@@ -241,6 +247,10 @@ serve(async (req) => {
         documento: String(n?.documento ?? "").replace(/\D/g, "").slice(0, 14) || null,
         valor_total: totalNota,
         data: /^\d{4}-\d{2}-\d{2}$/.test(String(n?.data)) ? String(n.data) : null,
+        // Nota a prazo vira conta a pagar, e conta sem vencimento não aparece
+        // no "vence em 7 dias" nem no alerta de atraso — nasce invisível.
+        vencimento: /^\d{4}-\d{2}-\d{2}$/.test(String(n?.vencimento)) ? String(n.vencimento) : null,
+        numero: String(n?.numero ?? "").trim().slice(0, 30) || null,
         pago: typeof n?.pago === "boolean" ? n.pago : null,
         forma: ["dinheiro", "pix", "credito", "debito", "boleto", "transferencia"].includes(String(n?.forma))
           ? String(n.forma) : null,
