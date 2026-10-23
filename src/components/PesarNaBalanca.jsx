@@ -43,18 +43,44 @@ export default function PesarNaBalanca({
   const buscaMesa = useRef(null)
   const [filtroMesa, setFiltroMesa] = useState('')
 
+  // OS DE PREÇO FIXO MORAM NO MESMO BOTÃO (23/10/2026)
+  //
+  // No sistema que o Agv usava, os cinco pratos do self-service ficavam juntos
+  // na mesma tela: três por quilo e dois de preço fechado. O atendente aprendeu
+  // esse lugar. Separar “o que pesa” de “o que não pesa” em duas telas seria
+  // organizar pela nossa lógica e desarrumar a dele.
+  //
+  // Quais são os de preço fixo que entram aqui? Os que moram na MESMA CATEGORIA
+  // de algum produto por quilo. É automático e não pede marcação nova: quem
+  // monta o cardápio já põe o combo de self-service junto do self-service.
   useEffect(() => {
     if (!empresaId) return
     supabase.from('produtos')
-      .select('id, nome, preco_venda')
-      .eq('empresa_id', empresaId).eq('vendido_por_peso', true).eq('ativo', true)
-      .order('nome')
+      .select('id, nome, preco_venda, categoria, vendido_por_peso')
+      .eq('empresa_id', empresaId).eq('ativo', true)
+      .order('preco_venda', { ascending: false })
       .then(({ data }) => {
-        const lista = data ?? []
+        const todos = data ?? []
+        const cats = new Set(todos.filter(p => p.vendido_por_peso).map(p => p.categoria))
+        const lista = todos.filter(p => cats.has(p.categoria))
         setProdutos(lista)
-        if (lista.length === 1) setProduto(lista[0])   // loja com um prato só não escolhe nada
+        // Loja com um prato só, e por quilo: nem pergunta, abre direto no pesar.
+        if (lista.length === 1 && lista[0].vendido_por_peso) setProduto(lista[0])
       })
   }, [empresaId])
+
+  const porQuilo = produtos.filter(p => p.vendido_por_peso)
+  const precoFixo = produtos.filter(p => !p.vendido_por_peso)
+
+  // Escolher o prato. O de preço fechado já “vale” na hora: não tem o que pesar,
+  // então pula direto pra mesa — um toque a menos numa fila de almoço.
+  function escolher(p) {
+    setProduto(p)
+    setErro(null); setOk(null)
+    if (p.vendido_por_peso) { setPeso(null); return }
+    setPeso({ kg: null, total: Number(p.preco_venda) })
+    setTimeout(() => buscaMesa.current?.focus(), 50)
+  }
 
   // Porta já autorizada antes: reconecta sozinha, sem pedir nada.
   useEffect(() => {
@@ -176,17 +202,25 @@ export default function PesarNaBalanca({
     // Nasce ENTREGUE porque o prato já está na mão do cliente — não existe
     // cozinha pra esperar, e um item "preparando" pendurado faria a comanda
     // pedir um "marcar pronto" que ninguém vai apertar.
+    // Por quilo: a quantidade é o PESO e o preço é o do quilo. Preço fechado:
+    // uma unidade pelo preço dele, igual a qualquer item da mesa.
+    const porPeso = peso.kg != null
     const { error } = await supabase.from('comanda_itens').insert({
       empresa_id: empresaId, comanda_id: comandaId, produto_id: produto.id,
-      nome: produto.nome, preco_unitario: produto.preco_venda, quantidade: peso.kg,
+      nome: produto.nome, preco_unitario: produto.preco_venda,
+      quantidade: porPeso ? peso.kg : 1,
       status: 'entregue', lancado_por: userId ?? null,
-      observacao: `${kg(peso.kg)} kg × ${brl(produto.preco_venda)}/kg`,
+      observacao: porPeso ? `${kg(peso.kg)} kg × ${brl(produto.preco_venda)}/kg` : null,
     })
     setLancando(false)
     if (error) { setErro('Não consegui lançar: ' + error.message); return }
 
-    setOk(`Mesa ${mesa.numero}: ${kg(peso.kg)} kg — ${brl(peso.total)}`)
+    setOk(peso.kg != null
+      ? `Mesa ${mesa.numero}: ${kg(peso.kg)} kg — ${brl(peso.total)}`
+      : `Mesa ${mesa.numero}: ${produto.nome} — ${brl(peso.total)}`)
     setPeso(null)
+    // Preço fechado volta pra escolha: o próximo da fila pode querer outro.
+    if (peso.kg == null) setProduto(null)
     setFiltroMesa('')
     onLancou?.()
   }
@@ -253,33 +287,56 @@ export default function PesarNaBalanca({
         </div>
       )}
 
-      {/* 1. Qual prato — some quando a loja só tem um */}
+      {/* 1. Qual prato. Os dois grupos juntos, como na tela que ele ja usava. */}
       {produtos.length !== 1 && (
         <div style={{ marginBottom: 16 }}>
-          <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700 }}>Produto vendido por quilo</p>
-          {produtos.length === 0 ? (
+          {produtos.length === 0 && (
             <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
               Nenhum produto marcado como “vendido por quilo”. Marque em Catálogo → Produtos.
             </p>
-          ) : (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {produtos.map(p => (
-                <button key={p.id} type="button" onClick={() => { setProduto(p); setPeso(null) }}
-                  style={{
-                    ...botao(produto?.id === p.id ? '#16a34a' : 'transparent'),
-                    color: produto?.id === p.id ? '#fff' : 'var(--text)',
-                    border: '1.5px solid ' + (produto?.id === p.id ? '#16a34a' : 'var(--border)'),
-                  }}>
-                  {p.nome} — {brl(p.preco_venda)}/kg
-                </button>
-              ))}
-            </div>
+          )}
+
+          {porQuilo.length > 0 && (
+            <>
+              <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700 }}>Vendido por quilo</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+                {porQuilo.map(p => (
+                  <button key={p.id} type="button" onClick={() => escolher(p)}
+                    style={{
+                      ...botao(produto?.id === p.id ? '#16a34a' : 'transparent'),
+                      color: produto?.id === p.id ? '#fff' : 'var(--text)',
+                      border: '1.5px solid ' + (produto?.id === p.id ? '#16a34a' : 'var(--border)'),
+                    }}>
+                    {p.nome} — {brl(p.preco_venda)}/kg
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Preço fechado: um toque e já vai pra mesa, sem passar pela balança. */}
+          {precoFixo.length > 0 && (
+            <>
+              <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700 }}>Preço fechado — não pesa</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {precoFixo.map(p => (
+                  <button key={p.id} type="button" onClick={() => escolher(p)}
+                    style={{
+                      ...botao(produto?.id === p.id ? '#2563eb' : 'transparent'),
+                      color: produto?.id === p.id ? '#fff' : 'var(--text)',
+                      border: '1.5px solid ' + (produto?.id === p.id ? '#2563eb' : 'var(--border)'),
+                    }}>
+                    {p.nome} — {brl(p.preco_venda)}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}
 
-      {/* 2. Pesar */}
-      {!peso && (
+      {/* 2. Pesar — só pra quem é vendido por quilo */}
+      {!peso && produto?.vendido_por_peso !== false && (
         <div style={{ textAlign: 'center', padding: '18px 0' }}>
           <button type="button" onClick={pesar} disabled={!conectada || !produto || pesando}
             style={{ ...botao('#16a34a'), fontSize: 20, padding: '18px 36px',
@@ -296,14 +353,16 @@ export default function PesarNaBalanca({
       {peso && (
         <div>
           <div style={{ textAlign: 'center', padding: '12px 0 16px' }}>
-            <div style={{ fontSize: 40, fontWeight: 800, lineHeight: 1.1 }}>{kg(peso.kg)} kg</div>
-            <div style={{ fontSize: 30, fontWeight: 800, color: '#16a34a' }}>{brl(peso.total)}</div>
+            {peso.kg != null && (
+              <div style={{ fontSize: 40, fontWeight: 800, lineHeight: 1.1 }}>{kg(peso.kg)} kg</div>
+            )}
+            <div style={{ fontSize: peso.kg != null ? 30 : 40, fontWeight: 800, color: '#16a34a' }}>{brl(peso.total)}</div>
             <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
-              {produto?.nome} · {brl(produto?.preco_venda)}/kg
+              {produto?.nome}{peso.kg != null ? ` · ${brl(produto?.preco_venda)}/kg` : ' · preço fechado'}
             </div>
-            <button type="button" onClick={() => { setPeso(null); setErro(null) }}
+            <button type="button" onClick={() => { setPeso(null); setErro(null); if (peso.kg == null) setProduto(null) }}
               style={{ ...botao('transparent'), border: '1px solid var(--border)', color: 'var(--text)', marginTop: 10 }}>
-              Pesar de novo
+              {peso.kg != null ? 'Pesar de novo' : 'Trocar o prato'}
             </button>
           </div>
 
